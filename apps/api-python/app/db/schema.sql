@@ -876,4 +876,4 @@ CREATE INDEX IF NOT EXISTS `LibraryConsumptionState_workId_idx` ON `LibraryConsu
 CREATE UNIQUE INDEX IF NOT EXISTS `LibraryConsumptionState_user_work_media_key` ON `LibraryConsumptionState`(`userId`, `workId`, `mediaKind`);
 CREATE UNIQUE INDEX IF NOT EXISTS `WorkDetailPreference_user_work_key` ON `WorkDetailPreference`(`userId`, `workId`);
 
-PRAGMA user_version = 10;
+PRAGMA user_version = 11;

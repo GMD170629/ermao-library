@@ -17,7 +17,7 @@
 pnpm fnos:build
 ```
 
-产物生成在 `dist/fnos/`。版本默认读取根目录 `package.json`，包内镜像同步使用 `gamersgu/shuku-starship-web:<应用版本>`，例如版本 `0.1.25` 会引用 `gamersgu/shuku-starship-web:0.1.25`。构建脚本会检查版本化镜像引用、回调脚本语法、模板占位符、应用用户权限、共享数据目录、`/monitor` 挂载、独立端口入口、端口向导与范围校验、SQLite 持久化挂载和桌面图标资源。
+产物生成在 `dist/fnos/`。版本默认读取根目录 `package.json`，包内镜像同步使用 `gamersgu/shuku-starship-web:<应用版本>`，例如版本 `0.2.0` 会引用 `gamersgu/shuku-starship-web:0.2.0`。构建脚本会检查版本化镜像引用、回调脚本语法、模板占位符、应用用户权限、共享数据目录、`/monitor` 挂载、独立端口入口、端口向导与范围校验、SQLite 持久化挂载和桌面图标资源。
 
 GitHub Actions 会先构建并推送同版本的 Docker 镜像，再生成引用该镜像的 `.fpk`。正式发布版本时，同一次构建还会同步更新 `prod` 和 `latest` 镜像标签。Actions 页面中的 Artifact 会被 GitHub 固定包装成 ZIP，解压后是 `.fpk`。推送 `v*.*.*` 标签，或手动运行工作流并启用 `publish_release`，会把原始 `.fpk` 上传到 GitHub Releases，供 fnOS 直接下载和安装。
 

@@ -45,10 +45,14 @@ def _has_column(db: Session, table: str, column: str) -> bool:
     return _has_table(db, table) and any(item.get("name") == column for item in inspect(db.connection()).get_columns(table))
 
 
-def _lookup_task_exists(db: Session, task_id: str) -> bool:
+def _lookup_task_is_active(db: Session, task_id: str) -> bool:
     if not _has_table(db, "MetadataLookupTask"):
         return False
-    return _row(db, "SELECT `id` FROM `MetadataLookupTask` WHERE `id` = :id", {"id": task_id}) is not None
+    return _row(
+        db,
+        "SELECT `id` FROM `MetadataLookupTask` WHERE `id` = :id AND `status` IN ('PENDING', 'RUNNING')",
+        {"id": task_id},
+    ) is not None
 
 
 def _overwrite_title_author_enabled(db: Session) -> bool:
@@ -62,7 +66,13 @@ def _update_task(db: Session, task_id: str, **values: Any) -> None:
     values["updatedAt"] = _now()
     params = {**values, "task_id": task_id}
     assignments = ", ".join(f"`{key}` = :{key}" for key in values)
-    db.execute(text(f"UPDATE `MetadataLookupTask` SET {assignments} WHERE `id` = :task_id"), params)
+    db.execute(
+        text(
+            f"UPDATE `MetadataLookupTask` SET {assignments} "
+            "WHERE `id` = :task_id AND `status` != 'CANCELLED'"
+        ),
+        params,
+    )
 
 
 def recover_stale_metadata_lookup_tasks(db: Session) -> int:
@@ -411,7 +421,8 @@ def _mark_organize_lookup_unresolved(db: Session, task: dict[str, Any], message:
         db.execute(
             text(
                 "UPDATE `OrganizeJob` SET `status` = :status, `summary` = :summary, "
-                f"`errorSummary` = :error, `updatedAt` = :now{finished_assignment} WHERE `id` = :id"
+                f"`errorSummary` = :error, `updatedAt` = :now{finished_assignment} "
+                "WHERE `id` = :id AND `status` != 'CANCELLED'"
             ),
             {
                 "status": "FAILED",
@@ -513,7 +524,7 @@ def process_metadata_lookup_task(db: Session, settings: Settings, task: dict[str
         if not candidate:
             _finish_provider_execution(db, execution_id, status="NO_MATCH", result=result)
             continue
-        if not _lookup_task_exists(db, str(task["id"])):
+        if not _lookup_task_is_active(db, str(task["id"])):
             return "CANCELLED"
         try:
             applied = _apply_candidate(db, settings, task, provider, candidate)
@@ -538,17 +549,17 @@ def process_metadata_lookup_task(db: Session, settings: Settings, task: dict[str
             errors.append(f"{provider} apply: {exc}")
 
     if enabled_providers == 0 and not errors:
-        if not _lookup_task_exists(db, str(task["id"])):
+        if not _lookup_task_is_active(db, str(task["id"])):
             return "CANCELLED"
         _finish_without_match(db, task, "NO_PROVIDER", inspected, "所有适用的元数据插件均未启用")
         return "NO_PROVIDER"
     if errors:
-        if not _lookup_task_exists(db, str(task["id"])):
+        if not _lookup_task_is_active(db, str(task["id"])):
             return "CANCELLED"
         _schedule_retry(db, task, "；".join(errors), inspected)
         refreshed = _row(db, "SELECT `status` FROM `MetadataLookupTask` WHERE `id` = :id", {"id": task["id"]})
         return str((refreshed or {}).get("status") or "FAILED")
-    if not _lookup_task_exists(db, str(task["id"])):
+    if not _lookup_task_is_active(db, str(task["id"])):
         return "CANCELLED"
     _finish_without_match(db, task, "NO_MATCH", inspected, "未找到可唯一确定的标题精确候选")
     return "NO_MATCH"

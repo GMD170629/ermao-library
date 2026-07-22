@@ -235,6 +235,25 @@ def test_lookup_returns_no_provider_when_all_sources_are_disabled(db_session, te
     assert db_session.execute(text("SELECT status FROM OrganizeJob WHERE id = 'job-lookup'")).scalar() == "FAILED"
 
 
+def test_cancelled_lookup_and_parent_cannot_be_reopened_by_stale_worker(db_session, test_settings):
+    create_worker_tables(db_session)
+    stale_task = _insert_lookup_fixture(db_session)
+    db_session.execute(
+        text("UPDATE MetadataLookupTask SET status = 'CANCELLED', finishedAt = 'now' WHERE id = 'lookup-1'")
+    )
+    db_session.execute(
+        text("UPDATE OrganizeJob SET status = 'CANCELLED', summary = '已取消' WHERE id = 'job-lookup'")
+    )
+    db_session.commit()
+
+    assert process_metadata_lookup_task(db_session, test_settings, stale_task) == "CANCELLED"
+    assert db_session.execute(text("SELECT status FROM MetadataLookupTask WHERE id = 'lookup-1'")).scalar() == "CANCELLED"
+    job = db_session.execute(
+        text("SELECT status, summary FROM OrganizeJob WHERE id = 'job-lookup'")
+    ).mappings().one()
+    assert dict(job) == {"status": "CANCELLED", "summary": "已取消"}
+
+
 def test_lookup_uses_three_retry_delays_then_fails(db_session, test_settings, monkeypatch):
     create_worker_tables(db_session)
     task = _insert_lookup_fixture(db_session)

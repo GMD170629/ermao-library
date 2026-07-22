@@ -17,7 +17,7 @@ from app.services.book_identity import UNKNOWN_AUTHOR, identity_merge_key, norma
 
 LOGGER = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 10
+CURRENT_SCHEMA_VERSION = 11
 DEFAULT_SYSTEM_NAME = "二毛图书"
 LEGACY_DEFAULT_SYSTEM_NAMES = {"书库星舰", "书栖"}
 IDENTITY_MIGRATION_SETTING = "migration.libraryIdentityVersion"
@@ -466,7 +466,7 @@ def _migrate_schema_v10(connection: sqlite3.Connection) -> None:
                 `finishedAt` = COALESCE(`finishedAt`, CURRENT_TIMESTAMP),
                 `updatedAt` = CURRENT_TIMESTAMP
             WHERE `organizeJobId` IN (SELECT `id` FROM `_OrganizeUnresolvedDuplicates`)
-              AND `status` IN ('PENDING', 'RUNNING')
+              AND `status` != 'CANCELLED'
             """
         )
     connection.execute(
@@ -488,6 +488,24 @@ def _migrate_schema_v10(connection: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_schema_v11(connection: sqlite3.Connection) -> None:
+    """Keep lookup tasks terminal when v10 cancelled their duplicate parent job."""
+    if not _table_exists(connection, "OrganizeJob") or not _table_exists(connection, "MetadataLookupTask"):
+        return
+    connection.execute(
+        """
+        UPDATE `MetadataLookupTask`
+        SET `status` = 'CANCELLED', `nextAttemptAt` = NULL,
+            `finishedAt` = COALESCE(`finishedAt`, CURRENT_TIMESTAMP),
+            `updatedAt` = CURRENT_TIMESTAMP
+        WHERE `organizeJobId` IN (
+            SELECT `id` FROM `OrganizeJob` WHERE `status` = 'CANCELLED'
+        )
+          AND `status` != 'CANCELLED'
+        """
+    )
+
+
 SchemaMigration = Callable[[sqlite3.Connection], None]
 SCHEMA_MIGRATIONS: dict[int, SchemaMigration] = {
     1: _migrate_schema_v1,
@@ -500,6 +518,7 @@ SCHEMA_MIGRATIONS: dict[int, SchemaMigration] = {
     8: _migrate_schema_v8,
     9: _migrate_schema_v9,
     10: _migrate_schema_v10,
+    11: _migrate_schema_v11,
 }
 
 REQUIRED_COLUMNS_BY_VERSION: dict[int, dict[str, set[str]]] = {
@@ -540,6 +559,7 @@ REQUIRED_COLUMNS_BY_VERSION: dict[int, dict[str, set[str]]] = {
         "LibraryOperation": {"action", "status", "payloadJson", "inverseJson", "expiresAt", "undoneAt"},
     },
     10: {},
+    11: {},
 }
 
 
@@ -855,6 +875,23 @@ def reconcile_metadata_lookup_organize_statuses(db: Session) -> None:
     if not required_tables.issubset(table_names):
         return
 
+    # A cancelled organize job is terminal. v10 cancelled older duplicate jobs,
+    # but its first implementation only cancelled active lookup tasks. A
+    # historical NO_PROVIDER/NO_MATCH/FAILED task could therefore reopen its
+    # parent below and collide with the newer unresolved-job unique index.
+    # Repair already-migrated databases before reading lookup state.
+    now = datetime.now()
+    db.execute(
+        text(
+            "UPDATE `MetadataLookupTask` SET `status` = 'CANCELLED', `nextAttemptAt` = NULL, "
+            "`finishedAt` = COALESCE(`finishedAt`, :now), `updatedAt` = :now "
+            "WHERE `organizeJobId` IN ("
+            "SELECT `id` FROM `OrganizeJob` WHERE `status` = 'CANCELLED'"
+            ") AND `status` != 'CANCELLED'"
+        ),
+        {"now": now},
+    )
+
     tasks = [
         dict(item)
         for item in db.execute(
@@ -871,7 +908,6 @@ def reconcile_metadata_lookup_organize_statuses(db: Session) -> None:
     for task in tasks:
         tasks_by_work.setdefault(str(task["workId"]), []).append(task)
 
-    now = datetime.now()
     work_states: dict[str, str] = {}
     for work_id, work_tasks in tasks_by_work.items():
         work = db.execute(
@@ -937,7 +973,8 @@ def reconcile_metadata_lookup_organize_statuses(db: Session) -> None:
         db.execute(
             text(
                 "UPDATE `OrganizeJob` SET `status` = :status, `summary` = :summary, "
-                "`errorSummary` = :error, `updatedAt` = :now WHERE `id` = :id"
+                "`errorSummary` = :error, `updatedAt` = :now WHERE `id` = :id "
+                "AND (`status` != 'CANCELLED' OR :status = 'CANCELLED')"
             ),
             {"status": job_status, "summary": summary, "error": error_summary, "now": now, "id": job_id},
         )
