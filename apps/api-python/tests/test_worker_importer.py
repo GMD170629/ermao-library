@@ -364,7 +364,8 @@ def test_path_security_accepts_monitor_root_child(test_settings):
 
 
 def test_normalize_configured_path_uses_workspace_root():
-    assert normalize_configured_path("books").endswith("/shuku-starship/books")
+    workspace_root = Path(__file__).resolve().parents[3]
+    assert normalize_configured_path("books") == str((workspace_root / "books").resolve())
 
 
 
