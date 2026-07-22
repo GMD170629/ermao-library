@@ -1,0 +1,40 @@
+name: Validate fnOS application package
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/fnos/**'
+      - 'apps/web/app/**'
+      - 'apps/web/components/**'
+      - 'apps/web/features/**'
+      - 'apps/web/lib/**'
+      - 'apps/web/public/icons/**'
+      - 'apps/web/public/manifest.webmanifest'
+      - 'apps/web/public/sw.js'
+      - 'apps/web/Dockerfile.prod'
+      - 'apps/web/next.config.js'
+      - 'apps/api-python/app/core/**'
+      - 'apps/api-python/app/db/**'
+      - 'scripts/build-fnos-package.sh'
+      - 'scripts/start-unified-app.sh'
+      - 'docker-compose.yml'
+      - 'docker-compose.prod.yml'
+      - 'package.json'
+      - '.github/workflows/fnos-package.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate fnOS package templates
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate fnOS package templates
+        env:
+          FNOS_VALIDATE_ONLY: 'true'
+        run: scripts/build-fnos-package.sh

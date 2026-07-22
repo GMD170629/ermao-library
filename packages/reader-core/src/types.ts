@@ -1,0 +1,131 @@
+export const READER_SCHEMA_VERSION = 3 as const;
+
+export type ReaderKind = 'epub' | 'comic' | 'pdf';
+export type ReaderTheme = 'day' | 'warm' | 'night' | 'black';
+export type ReaderFontFamily = 'pingfang' | 'heiti' | 'songti' | 'yahei' | 'kaiti';
+export type ReaderLifecycle = 'bootstrapping' | 'loading' | 'ready' | 'error' | 'disposed';
+export type ReaderOperationKind = 'bootstrap' | 'navigation' | 'render' | 'preferences' | 'pagination';
+
+export type EpubLocation = {
+  kind: 'epub';
+  cfi?: string;
+  href?: string;
+  spineIndex?: number;
+  progression?: number;
+};
+
+export type ComicLocation = {
+  kind: 'comic';
+  volumeId: string;
+  pageIndex: number;
+};
+
+export type PdfLocation = {
+  kind: 'pdf';
+  pageNumber: number;
+};
+
+export type ReaderLocation = EpubLocation | ComicLocation | PdfLocation;
+
+export type ReaderPreferences = {
+  schemaVersion: typeof READER_SCHEMA_VERSION;
+  appearance: {
+    theme: ReaderTheme;
+  };
+  epub: {
+    fontSize: number;
+    lineHeight: number;
+    pageWidth: number;
+    fontFamily: ReaderFontFamily;
+    spreadMode: 'single' | 'double';
+    pageTurnAnimation: 'slide' | 'off';
+    flow: 'paginated' | 'scrolled';
+  };
+  comic: {
+    direction: 'ltr' | 'rtl';
+    mode: 'single' | 'double';
+    pageTurnAnimation: 'slide' | 'off';
+    imageFit: 'width' | 'height' | 'contain' | 'original';
+    imageVariant: 'original' | 'data-saver';
+    zoom: number;
+  };
+  pdf: {
+    zoom: number;
+    fit: 'width' | 'page';
+  };
+};
+
+export type ReaderSource = {
+  editionId: string;
+  workId: string;
+  kind: ReaderKind;
+  contentUrl: string;
+  contentFingerprint: string;
+  volumeId?: string | null;
+  totalPages?: number | null;
+};
+
+export type OperationToken = {
+  sessionId: string;
+  kind: ReaderOperationKind;
+  sequence: number;
+};
+
+export type ReaderCapabilities = {
+  readingDirection: 'ltr' | 'rtl';
+  canGoNext: boolean;
+  canGoPrevious: boolean;
+  canJumpToProgress: boolean;
+  canJumpToHref: boolean;
+  canJumpToIndex: boolean;
+  canZoom: boolean;
+  canSelectText: boolean;
+  supportsPagination: boolean;
+  supportsScrolling: boolean;
+  supportsSpreads: boolean;
+};
+
+export type ReaderCommand =
+  | { type: 'next' }
+  | { type: 'previous' }
+  | { type: 'first' }
+  | { type: 'last' }
+  | { type: 'go-to-progress'; progression: number }
+  | { type: 'go-to-href'; href: string }
+  | { type: 'go-to-index'; index: number }
+  | { type: 'go-to-location'; location: ReaderLocation }
+  | { type: 'set-zoom'; zoom: number }
+  | { type: 'set-fit'; fit: 'width' | 'page' }
+  | { type: 'retry' }
+  | { type: 'cancel' };
+
+export type ReaderCommandAck = {
+  operation: OperationToken;
+  accepted: boolean;
+  location?: ReaderLocation;
+  reason?: string;
+};
+
+export type ReaderError = {
+  code: string;
+  message: string;
+  recoverable: boolean;
+};
+
+type ReaderAdapterEventBase = {
+  sessionId: string;
+  operation: OperationToken;
+  occurredAt: number;
+};
+
+export type ReaderAdapterEvent =
+  | (ReaderAdapterEventBase & { type: 'ready'; capabilities: ReaderCapabilities; location: ReaderLocation | null })
+  | (ReaderAdapterEventBase & { type: 'capabilities-changed'; capabilities: ReaderCapabilities })
+  | (ReaderAdapterEventBase & { type: 'metadata-changed'; totalPages: number | null })
+  | (ReaderAdapterEventBase & { type: 'location-changed'; location: ReaderLocation; percent: number })
+  | (ReaderAdapterEventBase & { type: 'phase-changed'; phase: 'loading-content' | 'loading-font' | 'generating-pagination' | 'rendering' | null })
+  | (ReaderAdapterEventBase & { type: 'pagination-progress'; completed: number; total: number; percent: number })
+  | (ReaderAdapterEventBase & { type: 'activity' })
+  | (ReaderAdapterEventBase & { type: 'external-link'; href: string })
+  | (ReaderAdapterEventBase & { type: 'password-required'; reason: 'need-password' | 'incorrect-password' })
+  | (ReaderAdapterEventBase & { type: 'error'; error: ReaderError });

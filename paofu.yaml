@@ -1,0 +1,995 @@
+mode: rule
+mixed-port: 7897
+allow-lan: false
+log-level: info
+ipv6: true
+external-controller: ''
+secret: set-your-secret
+unified-delay: true
+tun:
+  enable: true
+  stack: mixed
+  auto-route: true
+  strict-route: false
+  auto-detect-interface: true
+  dns-hijack:
+  - any:53
+external-controller-cors:
+  allow-private-network: true
+  allow-origins:
+  - '*'
+profile:
+  store-selected: true
+geo-update-interval: 24
+geox-url:
+  geoip: https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat
+  geosite: https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat
+  mmdb: https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb
+  asn: https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/GeoLite2-ASN.mmdb
+geo-auto-update: true
+external-controller-unix: /tmp/verge/verge-mihomo.sock
+sniffer:
+  enable: true
+  parse-pure-ip: true
+  override-destination: false
+  sniff:
+    HTTP:
+      ports:
+      - 80
+      - 8080-8880
+      override-destination: true
+    TLS:
+      ports:
+      - 443
+      - 8443
+    QUIC:
+      ports:
+      - 443
+      - 8443
+  force-domain:
+  - +.netflix.com
+  - +.nflxvideo.net
+  skip-domain:
+  - Mijia Cloud
+  - dlg.io.mi.com
+  - +.push.apple.com
+  - +.apple.com
+tcp-concurrent: true
+geodata-mode: false
+global-client-fingerprint: chrome
+dns:
+  enable: true
+  ipv6: true
+  listen: 0.0.0.0:1053
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+  - '*.lan'
+  - '*.local'
+  - +.msftconnecttest.com
+  - +.msftncsi.com
+  - localhost.ptlogin2.qq.com
+  - localhost.work.weixin.qq.com
+  - time.*.com
+  - time.*.gov
+  - time.*.edu.cn
+  - time.*.apple.com
+  - pool.ntp.org
+  - +.ntp.org
+  - stun.*.*
+  - stun.*.*.*
+  default-nameserver:
+  - 223.5.5.5
+  - 119.29.29.29
+  nameserver:
+  - https://dns.alidns.com/dns-query
+  - https://doh.pub/dns-query
+  fallback:
+  - https://1.1.1.1/dns-query
+  - https://dns.google/dns-query
+  fallback-filter:
+    geoip: true
+    geoip-code: CN
+    ipcidr:
+    - 240.0.0.0/4
+    - 0.0.0.0/32
+  proxy-server-nameserver:
+  - https://dns.alidns.com/dns-query
+  - https://doh.pub/dns-query
+  use-system-hosts: false
+proxies:
+- name: 台湾 01
+  type: anytls
+  server: s1.kuyno.ps1ksydn.com
+  port: 37231
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 台湾 02
+  type: anytls
+  server: s1.kuyno.ps1ksydn.com
+  port: 37232
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 台湾 03
+  type: anytls
+  server: s1.kuyno.ps1ksydn.com
+  port: 37233
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 台湾 04
+  type: anytls
+  server: s1.kuyno.ps1ksydn.com
+  port: 37234
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 台湾 05
+  type: anytls
+  server: s1.kuyno.ps1ksydn.com
+  port: 37235
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 德国 01
+  type: anytls
+  server: api-eu-west2-a.treeslinks.com
+  port: 37291
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 德国 02
+  type: anytls
+  server: api-eu-west2-a.treeslinks.com
+  port: 37292
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 德国 03
+  type: anytls
+  server: api-eu-west2-a.treeslinks.com
+  port: 37293
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 新加坡 01
+  type: anytls
+  server: api-sg-10.treeslinks.com
+  port: 37281
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 新加坡 02
+  type: anytls
+  server: api-sg-10.treeslinks.com
+  port: 37282
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 新加坡 03
+  type: anytls
+  server: api-sg-10.treeslinks.com
+  port: 37283
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 新加坡 04
+  type: anytls
+  server: api-sg-10.treeslinks.com
+  port: 37284
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 新加坡 05
+  type: anytls
+  server: api-sg-10.treeslinks.com
+  port: 37285
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 日本 01
+  type: anytls
+  server: api-jp-01.treeslinks.com
+  port: 37271
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 日本 02
+  type: anytls
+  server: api-jp-01.treeslinks.com
+  port: 37272
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 日本 03
+  type: anytls
+  server: api-jp-01.treeslinks.com
+  port: 37273
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 日本 04
+  type: anytls
+  server: api-jp-01.treeslinks.com
+  port: 37274
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 日本 05
+  type: anytls
+  server: api-jp-01.treeslinks.com
+  port: 37275
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 美国 01
+  type: anytls
+  server: api-us-west3-d.treeslinks.com
+  port: 37261
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 美国 02
+  type: anytls
+  server: api-us-west3-d.treeslinks.com
+  port: 37262
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 美国 03
+  type: anytls
+  server: api-us-west3-d.treeslinks.com
+  port: 37263
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 美国 04
+  type: anytls
+  server: api-us-west3-d.treeslinks.com
+  port: 37264
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 美国 05
+  type: anytls
+  server: api-us-west3-d.treeslinks.com
+  port: 37265
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 美国 06 (家宽)
+  type: anytls
+  server: api-us-west3-d.treeslinks.com
+  port: 37266
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 香港 01
+  type: anytls
+  server: s1.kuyno.ps1ksydn.com
+  port: 37211
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 香港 02
+  type: anytls
+  server: s1.kuyno.ps1ksydn.com
+  port: 37212
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 香港 03
+  type: anytls
+  server: s1.kuyno.ps1ksydn.com
+  port: 37213
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 香港 04
+  type: anytls
+  server: s1.kuyno.ps1ksydn.com
+  port: 37214
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 香港 05
+  type: anytls
+  server: s1.kuyno.ps1ksydn.com
+  port: 37215
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 香港 06
+  type: anytls
+  server: s1.kuyno.ps1ksydn.com
+  port: 37216
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 香港 07
+  type: anytls
+  server: s1.kuyno.ps1ksydn.com
+  port: 37217
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 香港 08
+  type: anytls
+  server: s1.kuyno.ps1ksydn.com
+  port: 37218
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 香港 09
+  type: anytls
+  server: s1.kuyno.ps1ksydn.com
+  port: 37219
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+- name: 香港 10
+  type: anytls
+  server: s1.kuyno.ps1ksydn.com
+  port: 37220
+  password: f71cdcb9-9a86-387b-a9d9-03a3d733c6f9
+  client-fingerprint: chrome
+  udp: true
+  idle-session-check-interval: 30
+  idle-session-timeout: 30
+  min-idle-session: 5
+  sni: storage.bunnycdn.com
+  skip-cert-verify: true
+proxy-groups:
+- name: 🚀 节点选择
+  type: select
+  proxies:
+  - ♻️ 自动选择
+  - 🇭🇰 香港自动适配
+  - 🇯🇵 日本自动适配
+  - 🇺🇸 美国自动适配
+  - 🇹🇼 台湾自动适配
+  - 🇸🇬 新加坡自动适配
+  - 🇩🇪 德国自动适配
+  - 台湾 01
+  - 台湾 02
+  - 台湾 03
+  - 台湾 04
+  - 台湾 05
+  - 德国 01
+  - 德国 02
+  - 德国 03
+  - 新加坡 01
+  - 新加坡 02
+  - 新加坡 03
+  - 新加坡 04
+  - 新加坡 05
+  - 日本 01
+  - 日本 02
+  - 日本 03
+  - 日本 04
+  - 日本 05
+  - 美国 01
+  - 美国 02
+  - 美国 03
+  - 美国 04
+  - 美国 05
+  - 美国 06 (家宽)
+  - 香港 01
+  - 香港 02
+  - 香港 03
+  - 香港 04
+  - 香港 05
+  - 香港 06
+  - 香港 07
+  - 香港 08
+  - 香港 09
+  - 香港 10
+- name: 🤖 AI工具
+  type: select
+  proxies:
+  - 🤖 AI自动适配
+  - 🚀 节点选择
+  - 🇺🇸 美国自动适配
+  - 🇩🇪 德国自动适配
+  - 🇯🇵 日本自动适配
+  - 🇸🇬 新加坡自动适配
+  - 🇭🇰 香港自动适配
+  - 🇹🇼 台湾自动适配
+- name: 📹 YouTube
+  type: select
+  proxies:
+  - 🚀 节点选择
+  - 🇭🇰 香港自动适配
+  - 🇯🇵 日本自动适配
+  - 🇺🇸 美国自动适配
+  - 🇹🇼 台湾自动适配
+  - 🇸🇬 新加坡自动适配
+  - 🇩🇪 德国自动适配
+- name: 🎥 Netflix
+  type: select
+  proxies:
+  - 🎥 Netflix自动适配
+  - 🚀 节点选择
+  - 🇭🇰 香港自动适配
+  - 🇩🇪 德国自动适配
+  - 🇺🇸 美国自动适配
+  - 🇯🇵 日本自动适配
+  - 🇸🇬 新加坡自动适配
+  - 🇹🇼 台湾自动适配
+- name: 🎬 国外媒体
+  type: select
+  proxies:
+  - 🚀 节点选择
+  - 🇭🇰 香港自动适配
+  - 🇯🇵 日本自动适配
+  - 🇺🇸 美国自动适配
+  - 🇹🇼 台湾自动适配
+  - 🇸🇬 新加坡自动适配
+  - 🇩🇪 德国自动适配
+- name: 📺 国内媒体
+  type: select
+  proxies:
+  - DIRECT
+- name: 📲 Telegram
+  type: select
+  proxies:
+  - 🚀 节点选择
+  - 🇸🇬 新加坡自动适配
+  - 🇭🇰 香港自动适配
+  - 🇯🇵 日本自动适配
+  - 🇺🇸 美国自动适配
+  - 🇹🇼 台湾自动适配
+  - 🇩🇪 德国自动适配
+- name: 🍎 苹果服务
+  type: select
+  proxies:
+  - DIRECT
+  - 🚀 节点选择
+  - 🇺🇸 美国自动适配
+  - 🇭🇰 香港自动适配
+  - 🇯🇵 日本自动适配
+  - 🇹🇼 台湾自动适配
+  - 🇸🇬 新加坡自动适配
+  - 🇩🇪 德国自动适配
+- name: Ⓜ️ 微软服务
+  type: select
+  proxies:
+  - DIRECT
+  - 🚀 节点选择
+  - 🇺🇸 美国自动适配
+  - 🇭🇰 香港自动适配
+  - 🇯🇵 日本自动适配
+  - 🇹🇼 台湾自动适配
+  - 🇸🇬 新加坡自动适配
+  - 🇩🇪 德国自动适配
+- name: 🎮 游戏平台
+  type: select
+  proxies:
+  - DIRECT
+  - 🚀 节点选择
+  - 🇺🇸 美国自动适配
+  - 🇯🇵 日本自动适配
+  - 🇩🇪 德国自动适配
+  - 🇭🇰 香港自动适配
+  - 🇹🇼 台湾自动适配
+  - 🇸🇬 新加坡自动适配
+- name: 🎯 全球直连
+  type: select
+  proxies:
+  - DIRECT
+- name: 🛑 广告拦截
+  type: select
+  proxies:
+  - REJECT
+  - DIRECT
+- name: 🐟 漏网之鱼
+  type: select
+  proxies:
+  - 🚀 节点选择
+  - DIRECT
+  - 🇭🇰 香港自动适配
+  - 🇯🇵 日本自动适配
+  - 🇺🇸 美国自动适配
+  - 🇩🇪 德国自动适配
+  - 🇹🇼 台湾自动适配
+  - 🇸🇬 新加坡自动适配
+- name: 🇭🇰 香港自动适配
+  type: url-test
+  proxies:
+  - 香港 01
+  - 香港 02
+  - 香港 03
+  - 香港 04
+  - 香港 05
+  - 香港 06
+  - 香港 07
+  - 香港 08
+  - 香港 09
+  - 香港 10
+  url: http://www.gstatic.com/generate_204
+  interval: 300
+  hidden: true
+- name: 🇯🇵 日本自动适配
+  type: url-test
+  proxies:
+  - 日本 01
+  - 日本 02
+  - 日本 03
+  - 日本 04
+  - 日本 05
+  url: http://www.gstatic.com/generate_204
+  interval: 300
+  hidden: true
+- name: 🇺🇸 美国自动适配
+  type: url-test
+  proxies:
+  - 美国 01
+  - 美国 02
+  - 美国 03
+  - 美国 04
+  - 美国 05
+  - 美国 06 (家宽)
+  url: http://www.gstatic.com/generate_204
+  interval: 300
+  hidden: true
+- name: 🇹🇼 台湾自动适配
+  type: url-test
+  proxies:
+  - 台湾 01
+  - 台湾 02
+  - 台湾 03
+  - 台湾 04
+  - 台湾 05
+  url: http://www.gstatic.com/generate_204
+  interval: 300
+  hidden: true
+- name: 🇸🇬 新加坡自动适配
+  type: url-test
+  proxies:
+  - 新加坡 01
+  - 新加坡 02
+  - 新加坡 03
+  - 新加坡 04
+  - 新加坡 05
+  url: http://www.gstatic.com/generate_204
+  interval: 300
+  hidden: true
+- name: 🇩🇪 德国自动适配
+  type: url-test
+  proxies:
+  - 德国 01
+  - 德国 02
+  - 德国 03
+  url: http://www.gstatic.com/generate_204
+  interval: 300
+  hidden: true
+- name: 🤖 AI自动适配
+  type: fallback
+  proxies:
+  - 🇺🇸 美国自动适配
+  - 🇩🇪 德国自动适配
+  - 🇯🇵 日本自动适配
+  - 🇸🇬 新加坡自动适配
+  url: http://www.gstatic.com/generate_204
+  interval: 180
+  hidden: true
+- name: 🎥 Netflix自动适配
+  type: fallback
+  proxies:
+  - 🇭🇰 香港自动适配
+  - 🇩🇪 德国自动适配
+  - 🇺🇸 美国自动适配
+  url: http://www.gstatic.com/generate_204
+  interval: 180
+  hidden: true
+- name: ♻️ 自动选择
+  type: url-test
+  proxies:
+  - 台湾 01
+  - 台湾 02
+  - 台湾 03
+  - 台湾 04
+  - 台湾 05
+  - 德国 01
+  - 德国 02
+  - 德国 03
+  - 新加坡 01
+  - 新加坡 02
+  - 新加坡 03
+  - 新加坡 04
+  - 新加坡 05
+  - 日本 01
+  - 日本 02
+  - 日本 03
+  - 日本 04
+  - 日本 05
+  - 美国 01
+  - 美国 02
+  - 美国 03
+  - 美国 04
+  - 美国 05
+  - 美国 06 (家宽)
+  - 香港 01
+  - 香港 02
+  - 香港 03
+  - 香港 04
+  - 香港 05
+  - 香港 06
+  - 香港 07
+  - 香港 08
+  - 香港 09
+  - 香港 10
+  url: http://www.gstatic.com/generate_204
+  interval: 300
+  hidden: true
+rule-providers:
+  reject:
+    type: http
+    behavior: domain
+    url: https://fastly.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/reject.txt
+    path: ./ruleset/reject.yaml
+    interval: 86400
+  icloud:
+    type: http
+    behavior: domain
+    url: https://fastly.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/icloud.txt
+    path: ./ruleset/icloud.yaml
+    interval: 86400
+  apple:
+    type: http
+    behavior: domain
+    url: https://fastly.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/apple.txt
+    path: ./ruleset/apple.yaml
+    interval: 86400
+  google:
+    type: http
+    behavior: domain
+    url: https://fastly.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/google.txt
+    path: ./ruleset/google.yaml
+    interval: 86400
+  proxy:
+    type: http
+    behavior: domain
+    url: https://fastly.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/proxy.txt
+    path: ./ruleset/proxy.yaml
+    interval: 86400
+  direct:
+    type: http
+    behavior: domain
+    url: https://fastly.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/direct.txt
+    path: ./ruleset/direct.yaml
+    interval: 86400
+  private:
+    type: http
+    behavior: domain
+    url: https://fastly.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/private.txt
+    path: ./ruleset/private.yaml
+    interval: 86400
+  gfw:
+    type: http
+    behavior: domain
+    url: https://fastly.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/gfw.txt
+    path: ./ruleset/gfw.yaml
+    interval: 86400
+  tld-not-cn:
+    type: http
+    behavior: domain
+    url: https://fastly.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/tld-not-cn.txt
+    path: ./ruleset/tld-not-cn.yaml
+    interval: 86400
+  telegramcidr:
+    type: http
+    behavior: ipcidr
+    url: https://fastly.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/telegramcidr.txt
+    path: ./ruleset/telegramcidr.yaml
+    interval: 86400
+  cncidr:
+    type: http
+    behavior: ipcidr
+    url: https://fastly.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/cncidr.txt
+    path: ./ruleset/cncidr.yaml
+    interval: 86400
+  lancidr:
+    type: http
+    behavior: ipcidr
+    url: https://fastly.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/lancidr.txt
+    path: ./ruleset/lancidr.yaml
+    interval: 86400
+  applications:
+    type: http
+    behavior: classical
+    url: https://fastly.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/applications.txt
+    path: ./ruleset/applications.yaml
+    interval: 86400
+  ai:
+    type: http
+    behavior: domain
+    url: https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/category-ai-!cn.yaml
+    path: ./ruleset/ai.yaml
+    interval: 86400
+  netflix:
+    type: http
+    behavior: classical
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Netflix/Netflix.yaml
+    path: ./ruleset/netflix.yaml
+    interval: 86400
+  youtube:
+    type: http
+    behavior: classical
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/YouTube/YouTube.yaml
+    path: ./ruleset/youtube.yaml
+    interval: 86400
+  microsoft:
+    type: http
+    behavior: classical
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Microsoft/Microsoft.yaml
+    path: ./ruleset/microsoft.yaml
+    interval: 86400
+  games:
+    type: http
+    behavior: classical
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Game/Game.yaml
+    path: ./ruleset/games.yaml
+    interval: 86400
+  globalmedia:
+    type: http
+    behavior: classical
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/GlobalMedia/GlobalMedia.yaml
+    path: ./ruleset/globalmedia.yaml
+    interval: 86400
+  telegram:
+    type: http
+    behavior: classical
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Telegram/Telegram.yaml
+    path: ./ruleset/telegram.yaml
+    interval: 86400
+  chinamedia:
+    type: http
+    behavior: classical
+    url: https://fastly.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/ChinaMedia/ChinaMedia.yaml
+    path: ./ruleset/chinamedia.yaml
+    interval: 86400
+rules:
+- RULE-SET,reject,🛑 广告拦截
+- DOMAIN-KEYWORD,paofu,🚀 节点选择
+- RULE-SET,applications,🎯 全球直连
+- RULE-SET,private,🎯 全球直连
+- RULE-SET,lancidr,🎯 全球直连,no-resolve
+- RULE-SET,ai,🤖 AI工具
+- DOMAIN-SUFFIX,openai.com,🤖 AI工具
+- DOMAIN-SUFFIX,anthropic.com,🤖 AI工具
+- DOMAIN-SUFFIX,claude.ai,🤖 AI工具
+- DOMAIN-SUFFIX,chatgpt.com,🤖 AI工具
+- DOMAIN-SUFFIX,oaistatic.com,🤖 AI工具
+- DOMAIN-SUFFIX,oaiusercontent.com,🤖 AI工具
+- DOMAIN-SUFFIX,openaiapi-site.azureedge.net,🤖 AI工具
+- DOMAIN-SUFFIX,auth0.openai.com,🤖 AI工具
+- DOMAIN-SUFFIX,gemini.google.com,🤖 AI工具
+- DOMAIN-SUFFIX,bard.google.com,🤖 AI工具
+- DOMAIN-SUFFIX,ai.google.dev,🤖 AI工具
+- DOMAIN-SUFFIX,generativelanguage.googleapis.com,🤖 AI工具
+- DOMAIN-SUFFIX,perplexity.ai,🤖 AI工具
+- DOMAIN-SUFFIX,grok.com,🤖 AI工具
+- DOMAIN-SUFFIX,x.ai,🤖 AI工具
+- RULE-SET,telegram,📲 Telegram
+- RULE-SET,telegramcidr,📲 Telegram,no-resolve
+- DOMAIN-SUFFIX,t.me,📲 Telegram
+- DOMAIN-SUFFIX,telegram.org,📲 Telegram
+- DOMAIN-SUFFIX,telegra.ph,📲 Telegram
+- RULE-SET,youtube,📹 YouTube
+- DOMAIN-KEYWORD,youtube,📹 YouTube
+- DOMAIN-SUFFIX,youtu.be,📹 YouTube
+- DOMAIN-SUFFIX,googlevideo.com,📹 YouTube
+- DOMAIN-SUFFIX,ytimg.com,📹 YouTube
+- RULE-SET,netflix,🎥 Netflix
+- DOMAIN-SUFFIX,netflix.com,🎥 Netflix
+- DOMAIN-SUFFIX,netflix.net,🎥 Netflix
+- DOMAIN-SUFFIX,nflxext.com,🎥 Netflix
+- DOMAIN-SUFFIX,nflximg.com,🎥 Netflix
+- DOMAIN-SUFFIX,nflximg.net,🎥 Netflix
+- DOMAIN-SUFFIX,nflxso.net,🎥 Netflix
+- DOMAIN-SUFFIX,nflxvideo.net,🎥 Netflix
+- RULE-SET,games,🎮 游戏平台
+- RULE-SET,microsoft,Ⓜ️ 微软服务
+- RULE-SET,apple,🍎 苹果服务
+- RULE-SET,icloud,🍎 苹果服务
+- RULE-SET,globalmedia,🎬 国外媒体
+- DOMAIN-SUFFIX,disneyplus.com,🎬 国外媒体
+- DOMAIN-SUFFIX,hbo.com,🎬 国外媒体
+- DOMAIN-SUFFIX,primevideo.com,🎬 国外媒体
+- DOMAIN-SUFFIX,spotify.com,🎬 国外媒体
+- DOMAIN-SUFFIX,tiktok.com,🎬 国外媒体
+- DOMAIN-SUFFIX,twitch.tv,🎬 国外媒体
+- DOMAIN-SUFFIX,discord.com,🎬 国外媒体
+- DOMAIN-SUFFIX,x.com,🎬 国外媒体
+- DOMAIN-SUFFIX,reddit.com,🎬 国外媒体
+- RULE-SET,chinamedia,📺 国内媒体
+- DOMAIN-SUFFIX,bilibili.com,📺 国内媒体
+- DOMAIN-SUFFIX,iqiyi.com,📺 国内媒体
+- DOMAIN-SUFFIX,youku.com,📺 国内媒体
+- DOMAIN-SUFFIX,qq.com,📺 国内媒体
+- DOMAIN-SUFFIX,mgtv.com,📺 国内媒体
+- RULE-SET,google,🚀 节点选择
+- RULE-SET,gfw,🚀 节点选择
+- RULE-SET,tld-not-cn,🚀 节点选择
+- RULE-SET,proxy,🚀 节点选择
+- RULE-SET,direct,🎯 全球直连
+- RULE-SET,cncidr,🎯 全球直连,no-resolve
+- IP-CIDR,127.0.0.0/8,🎯 全球直连
+- IP-CIDR,172.16.0.0/12,🎯 全球直连
+- IP-CIDR,192.168.0.0/16,🎯 全球直连
+- IP-CIDR,10.0.0.0/8,🎯 全球直连
+- IP-CIDR,17.0.0.0/8,🍎 苹果服务
+- IP-CIDR,100.64.0.0/10,🎯 全球直连
+- IP-CIDR,224.0.0.0/4,🎯 全球直连
+- IP-CIDR6,fe80::/10,🎯 全球直连
+- GEOIP,LAN,🎯 全球直连,no-resolve
+- GEOIP,CN,🎯 全球直连,no-resolve
+- MATCH,🐟 漏网之鱼

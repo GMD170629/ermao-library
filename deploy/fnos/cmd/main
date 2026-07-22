@@ -1,0 +1,31 @@
+#!/bin/bash
+set -eu
+
+is_running() {
+  container_id="$(
+    docker ps \
+      --filter "label=com.docker.compose.project=shuku-starship" \
+      --filter "label=com.docker.compose.service=web" \
+      --filter "status=running" \
+      --quiet 2>/dev/null | head -n 1 || true
+  )"
+
+  [ -n "$container_id" ]
+}
+
+case "${1:-}" in
+  start|stop)
+    # Docker 项目的生命周期由 fnOS 根据 config/resource 统一管理。
+    exit 0
+    ;;
+  status)
+    if is_running; then
+      exit 0
+    fi
+    exit 3
+    ;;
+  *)
+    echo "不支持的应用操作：${1:-空}" > "${TRIM_TEMP_LOGFILE:-/dev/stderr}"
+    exit 1
+    ;;
+esac

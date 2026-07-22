@@ -1,0 +1,15 @@
+appname=shuku-starship
+version=__APP_VERSION__
+display_name=二毛图书
+desc=二毛图书是一款自托管私人阅读与书库管理应用，支持 EPUB、漫画、PDF、文本读物和有声书的导入、整理、检索与沉浸阅读。可将单个 M4B、M4A、MP3 或多分轨音频合并为有声书，提供章节与轨道切换、倍速、音量、睡眠定时、跨页面连续播放和独立进度同步，适合在家庭 NAS 上集中管理个人藏书并跨设备阅读或收听。B站使用视频：https://www.bilibili.com/video/BV1r2KA6FEfL/　QQ交流群：154560969
+source=thirdparty
+platform=x86
+maintainer=六面体
+maintainer_url=https://github.com/GMD170629/shuku-starship
+distributor=六面体
+distributor_url=https://github.com/GMD170629/shuku-starship
+changelog=修复 fnOS 安装后的容器运行状态检测和持久化目录初始化，并补充有声书功能、使用视频与 QQ 交流群说明。
+desktop_uidir=ui
+desktop_applaunchname=shuku-starship.main
+ctl_stop=true
+disable_authorization_path=true

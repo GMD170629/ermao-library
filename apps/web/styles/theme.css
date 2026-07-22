@@ -1,0 +1,21 @@
+:root {
+  --shuku-bg: #fbfaf8;
+  --shuku-sidebar: #f3f1ee;
+  --shuku-panel: #fffdfa;
+  --shuku-panel-strong: #ffffff;
+  --shuku-text: #17191d;
+  --shuku-muted: #77736f;
+  --shuku-line: #e6e1db;
+  --shuku-line-strong: #d8d1c9;
+  --shuku-accent: #ff4f2a;
+  --shuku-accent-hover: #e94320;
+  --shuku-accent-soft: #fce6df;
+  --shuku-accent-softer: #fff3ee;
+  --shuku-focus: rgb(255 155 126 / 42%);
+  --shuku-success: #3f9c59;
+  --shuku-warning: #c67b12;
+  --shuku-radius-sm: 10px;
+  --shuku-radius-md: 14px;
+  --shuku-radius-lg: 20px;
+  --shuku-shadow-cover: 0 8px 20px rgb(59 45 36 / 14%);
+}

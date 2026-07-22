@@ -1,0 +1,115 @@
+from __future__ import annotations
+
+import threading
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
+
+from app.core.config import Settings
+from app.services.download_executor import execute_download_task, has_table
+from app.worker.importer import is_supported_import_file
+from app.worker.persistent_import_queue import enqueue_import_task
+
+
+class DownloadQueueWorker:
+    def __init__(self, db_factory: Callable[[], Session], settings: Settings) -> None:
+        self.db_factory = db_factory
+        self.settings = settings
+        self._stop_event = threading.Event()
+        self._process_lock = threading.Lock()
+        self._thread = threading.Thread(target=self._run, name="shuku-download-queue", daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self._thread.join(timeout=10)
+
+    def process_once(self) -> bool:
+        if not self._process_lock.acquire(blocking=False):
+            return False
+        try:
+            with self.db_factory() as db:
+                return process_next_download_task(db, self.settings)
+        except Exception as exc:
+            print(f"[download-queue] task processing failed: {exc}", flush=True)
+            return False
+        finally:
+            self._process_lock.release()
+
+    def _run(self) -> None:
+        while not self._stop_event.is_set():
+            processed = self.process_once()
+            if processed:
+                continue
+            self._stop_event.wait(self.settings.download_queue_interval_seconds)
+
+
+def next_queued_task(db: Session) -> dict[str, Any] | None:
+    try:
+        if not has_table(db, "DownloadTask"):
+            return None
+        row = db.execute(
+            text("SELECT * FROM `DownloadTask` WHERE `status` = 'queued' ORDER BY `createdAt` ASC LIMIT 1")
+        ).mappings().first()
+        return dict(row) if row else None
+    except SQLAlchemyError as exc:
+        print(f"[download-queue] download task table unavailable, retrying later: {exc}", flush=True)
+        return None
+
+
+def process_next_download_task(db: Session, settings: Settings) -> bool:
+    task = next_queued_task(db)
+    if not task:
+        return False
+    result = execute_download_task(db, settings, str(task["id"]))
+    if result.task.get("status") == "downloaded":
+        downloaded_path = Path(str(result.task.get("filePath") or "")).expanduser()
+        if downloaded_path.is_file() and is_supported_import_file(downloaded_path):
+            try:
+                import_task, _created = enqueue_import_task(
+                    db,
+                    downloaded_path,
+                    origin="DOWNLOAD",
+                    original_name=downloaded_path.name,
+                    monitor_folder_id=_monitor_folder_id(db, downloaded_path),
+                    message="下载完成，等待后台导入",
+                )
+                db.execute(
+                    text("UPDATE `DownloadTask` SET `status` = 'importing', `updatedAt` = CURRENT_TIMESTAMP WHERE `id` = :task_id"),
+                    {"task_id": task["id"]},
+                )
+                db.commit()
+                print(f"[download-queue] downloaded {task['id']} and queued import {import_task.get('id')}", flush=True)
+            except Exception as exc:
+                db.rollback()
+                print(f"[download-queue] downloaded {task['id']} but import enqueue failed: {exc}", flush=True)
+    return True
+
+
+def _monitor_folder_id(db: Session, path: Path) -> str | None:
+    if not has_table(db, "MonitorFolder"):
+        return None
+    resolved = path.resolve()
+    matches: list[tuple[int, str]] = []
+    for folder in db.execute(text("SELECT `id`, `rootPath` FROM `MonitorFolder` WHERE `enabled` = 1")).mappings():
+        try:
+            root = Path(str(folder["rootPath"])).expanduser().resolve()
+        except OSError:
+            continue
+        if resolved == root or root in resolved.parents:
+            matches.append((len(root.parts), str(folder["id"])))
+    return max(matches, default=(0, None))[1]
+
+
+def start_download_queue_worker(db_factory: Callable[[], Session], settings: Settings) -> DownloadQueueWorker | None:
+    if not settings.download_queue_enabled:
+        return None
+    worker = DownloadQueueWorker(db_factory, settings)
+    worker.start()
+    return worker

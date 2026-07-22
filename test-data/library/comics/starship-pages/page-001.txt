@@ -1,0 +1,1 @@
+This directory intentionally includes generated PNG pages for comic-reader testing.

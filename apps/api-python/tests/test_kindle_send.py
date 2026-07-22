@@ -1,0 +1,239 @@
+from __future__ import annotations
+
+import smtplib
+from pathlib import Path
+
+from sqlalchemy import text
+
+from app.core.auth import hash_password
+from app.db.bootstrap import apply_schema
+from app.models.auth import User
+from app.services import email_settings, kindle_queue
+from app.services.kindle_queue import process_next_kindle_send_task, recover_interrupted_tasks
+
+
+def _login(client, db_session) -> None:
+    user = User(email="kindle-admin@example.com", name="管理员", password_hash=hash_password("starshipnas"), role="admin")
+    db_session.add(user)
+    db_session.commit()
+    response = client.post("/api/auth/login", json={"email": user.email, "password": "starshipnas"})
+    assert response.status_code == 200
+
+
+def _prepare(client, db_session, test_settings, *, max_attachment_mb: float | None = None) -> Path:
+    apply_schema(db_session.get_bind())
+    _login(client, db_session)
+    smtp = {
+        "host": "smtp.example.com",
+        "port": 587,
+        "security": "starttls",
+        "username": "sender@example.com",
+        "password": "smtp-secret",
+        "fromEmail": "sender@example.com",
+        "fromName": "二毛图书",
+        "maxAttachmentMb": max_attachment_mb,
+    }
+    saved = client.put("/api/email-settings", json={"smtp": smtp, "kindle": {"email": "reader_123@kindle.com"}})
+    assert saved.status_code == 200
+    path = test_settings.resolved_storage_root / "books" / "work-kindle" / "edition-kindle" / "book.epub"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"epub fixture")
+    db_session.execute(
+        text(
+            "INSERT INTO `LibraryWork` (`id`, `title`, `normalizedTitle`, `author`, `normalizedAuthor`, `workType`, `tags`, `primaryEditionId`, `updatedAt`) "
+            "VALUES ('work-kindle', 'Kindle Test Book', 'kindle test book', 'Author', 'author', 'EPUB', '[]', 'edition-kindle', CURRENT_TIMESTAMP)"
+        )
+    )
+    db_session.execute(
+        text(
+            "INSERT INTO `LibraryEdition` (`id`, `workId`, `format`, `versionName`, `versionKey`, `primary`, `sizeBytes`, `updatedAt`) "
+            "VALUES ('edition-kindle', 'work-kindle', 'EPUB', 'EPUB 主版本', 'epub-main', 1, :size, CURRENT_TIMESTAMP)"
+        ),
+        {"size": path.stat().st_size},
+    )
+    db_session.execute(
+        text(
+            "INSERT INTO `LibraryFile` (`id`, `editionId`, `path`, `kind`, `mimeType`, `sizeBytes`, `sortOrder`, `updatedAt`) "
+            "VALUES ('file-kindle', 'edition-kindle', :path, 'EPUB', 'application/epub+zip', :size, 0, CURRENT_TIMESTAMP)"
+        ),
+        {"path": str(path.relative_to(test_settings.resolved_storage_root)), "size": path.stat().st_size},
+    )
+    db_session.commit()
+    return path
+
+
+def _enqueue(client):
+    response = client.post("/api/kindle-send-tasks", json={"workId": "work-kindle", "fileId": "file-kindle"})
+    assert response.status_code == 201
+    return response.json()["data"]["task"]
+
+
+class FakeSmtp:
+    def __init__(self, *, send_error: BaseException | None = None) -> None:
+        self.send_error = send_error
+        self.messages = []
+        self.noop_called = False
+
+    def noop(self):
+        self.noop_called = True
+        return 250, b"ok"
+
+    def send_message(self, message):
+        if self.send_error:
+            raise self.send_error
+        self.messages.append(message)
+        return {}
+
+    def quit(self):
+        return 221, b"bye"
+
+    def close(self):
+        return None
+
+
+def test_email_settings_mask_password_test_connection_and_clear(client, db_session, monkeypatch):
+    apply_schema(db_session.get_bind())
+    _login(client, db_session)
+    saved = client.put(
+        "/api/email-settings",
+        json={
+            "smtp": {
+                "host": "smtp.example.com",
+                "port": 465,
+                "security": "ssl",
+                "username": "sender@example.com",
+                "password": "smtp-secret",
+                "fromEmail": "sender@example.com",
+                "fromName": "二毛图书",
+            },
+            "kindle": {"email": "reader_123@kindle.com"},
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["data"]["smtp"]["passwordConfigured"] is True
+    assert "smtp-secret" not in saved.text
+
+    fake = FakeSmtp()
+    monkeypatch.setattr(email_settings, "open_smtp_connection", lambda _config, timeout=30: fake)
+    tested = client.post("/api/email-settings/smtp-test", json={})
+    assert tested.status_code == 200
+    assert fake.noop_called is True
+
+    loaded = client.get("/api/email-settings")
+    assert loaded.json()["data"]["kindle"]["email"] == "reader_123@kindle.com"
+    assert "smtp-secret" not in loaded.text
+    cleared = client.put("/api/email-settings", json={"clearSmtpPassword": True})
+    assert cleared.json()["data"]["smtp"]["passwordConfigured"] is False
+    assert db_session.execute(text("SELECT COUNT(*) FROM `SystemSetting` WHERE `key` = 'email.smtp.password'")).scalar() == 0
+    events = "\n".join(str(row[0]) for row in db_session.execute(text("SELECT `metadata` FROM `SystemEvent`")))
+    assert "smtp-secret" not in events
+
+
+def test_enqueue_deduplicates_and_rejects_unsupported_files(client, db_session, test_settings):
+    _prepare(client, db_session, test_settings)
+    created = _enqueue(client)
+    assert created["status"] == "queued"
+    assert created["recipientEmail"] == "reader_123@kindle.com"
+    duplicate = client.post("/api/kindle-send-tasks", json={"workId": "work-kindle", "fileId": "file-kindle"})
+    assert duplicate.status_code == 200
+    assert duplicate.json()["data"]["alreadyQueued"] is True
+    assert db_session.execute(text("SELECT COUNT(*) FROM `KindleSendTask`")).scalar() == 1
+
+    comic_path = test_settings.resolved_storage_root / "books" / "work-kindle" / "edition-kindle" / "comic.cbz"
+    comic_path.write_bytes(b"comic")
+    db_session.execute(
+        text(
+            "INSERT INTO `LibraryFile` (`id`, `editionId`, `path`, `kind`, `mimeType`, `sizeBytes`, `sortOrder`, `updatedAt`) "
+            "VALUES ('file-comic', 'edition-kindle', :path, 'COMIC', 'application/zip', 5, 1, CURRENT_TIMESTAMP)"
+        ),
+        {"path": str(comic_path.relative_to(test_settings.resolved_storage_root))},
+    )
+    db_session.commit()
+    unsupported = client.post("/api/kindle-send-tasks", json={"workId": "work-kindle", "fileId": "file-comic"})
+    assert unsupported.status_code == 400
+    assert "EPUB 和 PDF" in unsupported.json()["error"]["message"]
+
+
+def test_enqueue_rejects_attachment_above_configured_limit(client, db_session, test_settings):
+    path = _prepare(client, db_session, test_settings, max_attachment_mb=1)
+    path.write_bytes(b"x" * (1024 * 1024 + 1))
+    db_session.execute(
+        text("UPDATE `LibraryFile` SET `sizeBytes` = :size WHERE `id` = 'file-kindle'"),
+        {"size": path.stat().st_size},
+    )
+    db_session.commit()
+    rejected = client.post("/api/kindle-send-tasks", json={"workId": "work-kindle", "fileId": "file-kindle"})
+    assert rejected.status_code == 400
+    assert "1 MB" in rejected.json()["error"]["message"]
+
+
+def test_worker_submits_mime_message_and_logs_masked_recipient(client, db_session, test_settings, monkeypatch):
+    _prepare(client, db_session, test_settings)
+    task = _enqueue(client)
+    fake = FakeSmtp()
+    monkeypatch.setattr(kindle_queue, "open_smtp_connection", lambda _config: fake)
+    assert process_next_kindle_send_task(db_session, test_settings) is True
+    stored = db_session.execute(text("SELECT * FROM `KindleSendTask` WHERE `id` = :id"), {"id": task["id"]}).mappings().one()
+    assert stored["status"] == "sent"
+    assert stored["attemptCount"] == 1
+    assert stored["messageId"]
+    assert len(fake.messages) == 1
+    message = fake.messages[0]
+    assert message["To"] == "reader_123@kindle.com"
+    assert message["Subject"] == "Kindle Test Book"
+    assert message.get_content_maintype() == "multipart"
+    assert message.get_payload()[-1].get_filename() == "book.epub"
+    events = "\n".join(str(row[0]) for row in db_session.execute(text("SELECT `metadata` FROM `SystemEvent` WHERE `source` = 'kindle'")))
+    assert "reader_123@kindle.com" not in events
+    assert "r***3@kindle.com" in events
+
+
+def test_worker_does_not_retry_permanent_authentication_failure(client, db_session, test_settings, monkeypatch):
+    _prepare(client, db_session, test_settings)
+    task = _enqueue(client)
+    failing = FakeSmtp(send_error=smtplib.SMTPAuthenticationError(535, b"bad credentials"))
+    monkeypatch.setattr(kindle_queue, "open_smtp_connection", lambda _config: failing)
+    assert process_next_kindle_send_task(db_session, test_settings) is True
+    stored = db_session.execute(
+        text("SELECT `status`, `attemptCount`, `nextAttemptAt` FROM `KindleSendTask` WHERE `id` = :id"),
+        {"id": task["id"]},
+    ).mappings().one()
+    assert stored["status"] == "failed"
+    assert stored["attemptCount"] == 1
+    assert stored["nextAttemptAt"] is None
+
+
+def test_worker_retries_transient_failure_and_recovers_interrupted_send(client, db_session, test_settings, monkeypatch):
+    _prepare(client, db_session, test_settings)
+    task = _enqueue(client)
+    failing = FakeSmtp(send_error=smtplib.SMTPServerDisconnected("temporary outage"))
+    monkeypatch.setattr(kindle_queue, "open_smtp_connection", lambda _config: failing)
+    assert process_next_kindle_send_task(db_session, test_settings) is True
+    stored = db_session.execute(text("SELECT `status`, `attemptCount`, `nextAttemptAt`, `errorMessage` FROM `KindleSendTask` WHERE `id` = :id"), {"id": task["id"]}).mappings().one()
+    assert stored["status"] == "queued"
+    assert stored["attemptCount"] == 1
+    assert stored["nextAttemptAt"] is not None
+    assert "temporary outage" in stored["errorMessage"]
+
+    for expected_attempt in (2, 3):
+        db_session.execute(text("UPDATE `KindleSendTask` SET `nextAttemptAt` = NULL WHERE `id` = :id"), {"id": task["id"]})
+        db_session.commit()
+        assert process_next_kindle_send_task(db_session, test_settings) is True
+        stored = db_session.execute(text("SELECT `status`, `attemptCount` FROM `KindleSendTask` WHERE `id` = :id"), {"id": task["id"]}).mappings().one()
+        assert stored["attemptCount"] == expected_attempt
+    assert stored["status"] == "failed"
+
+    db_session.execute(text("UPDATE `KindleSendTask` SET `status` = 'sending' WHERE `id` = :id"), {"id": task["id"]})
+    db_session.commit()
+    assert recover_interrupted_tasks(db_session) == 1
+    recovered = db_session.execute(text("SELECT `status`, `errorMessage` FROM `KindleSendTask` WHERE `id` = :id"), {"id": task["id"]}).mappings().one()
+    assert recovered["status"] == "unknown"
+    assert "结果未知" in recovered["errorMessage"]
+
+    retried = client.post(f"/api/kindle-send-tasks/{task['id']}/retry")
+    assert retried.status_code == 200
+    cancelled = client.post(f"/api/kindle-send-tasks/{task['id']}/cancel")
+    assert cancelled.status_code == 200
+    deleted = client.delete(f"/api/kindle-send-tasks/{task['id']}")
+    assert deleted.status_code == 200
+    assert db_session.execute(text("SELECT COUNT(*) FROM `KindleSendTask` WHERE `id` = :id"), {"id": task["id"]}).scalar() == 0

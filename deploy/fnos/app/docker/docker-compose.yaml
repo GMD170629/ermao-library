@@ -1,0 +1,25 @@
+services:
+  web:
+    image: __IMAGE_REFERENCE__
+    platform: linux/amd64
+    restart: unless-stopped
+    user: "${TRIM_UID}:${TRIM_GID}"
+    environment:
+      STORAGE_ROOT: /app/storage
+      MONITOR_ROOT: /monitor
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      COOKIE_PATH: /
+      SECURE_COOKIES: "false"
+    ports:
+      - "${wizard_port:?Web 访问端口未配置}:3000"
+    volumes:
+      - "${TRIM_PKGVAR}/storage:/app/storage"
+      - "${TRIM_DATA_SHARE_PATHS}:/monitor"
+    command: ["./scripts/start-unified-app.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 90s

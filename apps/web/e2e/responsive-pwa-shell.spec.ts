@@ -1,0 +1,300 @@
+import { expect, test, type Page } from '@playwright/test';
+
+async function mockWebAppApi(page: Page) {
+  await page.route('**/api/**', async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname.endsWith('/api/auth/me')) {
+      await route.fulfill({
+        json: { ok: true, data: { user: { id: 'web-user', email: 'web@example.com', name: 'Web', role: 'admin' } } }
+      });
+      return;
+    }
+    if (pathname.endsWith('/api/dashboard/continue-reading')) {
+      await route.fulfill({ json: { ok: true, data: { item: null } } });
+      return;
+    }
+    if (pathname.endsWith('/api/dashboard/recent-books') || pathname.endsWith('/api/works')) {
+      await route.fulfill({ json: { ok: true, data: { books: [], total: 0 } } });
+      return;
+    }
+    if (pathname.endsWith('/api/shelves')) {
+      await route.fulfill({ json: { ok: true, data: { shelves: [{ id: 'to-read', name: '待读' }] } } });
+      return;
+    }
+    await route.fulfill({ json: { ok: true, data: {} } });
+  });
+}
+
+test.beforeEach(async ({ context, page }) => {
+  await context.addCookies([{ name: 'shuku_session', value: 'web-session', domain: '127.0.0.1', path: '/' }]);
+  await mockWebAppApi(page);
+});
+
+test('PWA launch parameters keep the responsive web shell on mobile widths', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/?source=pwa');
+
+  await expect(page).toHaveURL(/\/?\?source=pwa$/);
+  await expect(page.getByRole('heading', { name: '主页' })).toBeVisible();
+  await expect(page.locator('html')).not.toHaveClass(/pwa-native/);
+  await expect(page.getByRole('link', { name: '未读', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: '已读', exact: true })).toHaveCount(0);
+});
+
+test('mobile PWA shell and drawer consume safe-area insets without reserving bottom-nav space', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/?source=pwa');
+
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty('--shuku-safe-area-top', '47px');
+    document.documentElement.style.setProperty('--shuku-safe-area-right', '13px');
+    document.documentElement.style.setProperty('--shuku-safe-area-bottom', '34px');
+    document.documentElement.style.setProperty('--shuku-safe-area-left', '11px');
+  });
+
+  const content = page.getByTestId('app-shell-content');
+  const main = page.getByTestId('app-shell-main');
+  await page.getByRole('button', { name: '打开导航菜单' }).click();
+  const navigation = page.getByTestId('mobile-navigation');
+
+  await expect(page.locator('meta[name="viewport"]')).toHaveAttribute('content', /viewport-fit=cover/);
+  await expect(content).toHaveCSS('padding-top', '75px');
+  await expect(content).toHaveCSS('padding-right', '33px');
+  await expect(content).toHaveCSS('padding-left', '31px');
+  await expect(navigation).toHaveCSS('padding-top', '63px');
+  await expect(navigation).toHaveCSS('padding-bottom', '56px');
+  await expect(main).toHaveCSS('padding-bottom', '76px');
+  await expect(page.locator('.shuku-mobile-shell-nav')).toHaveCount(0);
+});
+
+test('mobile drawer supports focus, escape, browser back, and route navigation', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+
+  const trigger = page.getByRole('button', { name: '打开导航菜单' });
+  const drawer = page.getByTestId('mobile-navigation');
+
+  await expect(trigger).toBeVisible();
+  await expect(drawer).toBeHidden();
+  await trigger.click();
+
+  await expect(drawer).toBeVisible();
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('body')).toHaveCSS('overflow', 'hidden');
+  await expect(drawer.getByRole('link', { name: '首页', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(drawer.getByRole('link', { name: '待读', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '关闭导航菜单' }).last()).toBeFocused();
+
+  await page.keyboard.press('Escape');
+  await expect(drawer).toBeHidden();
+  await expect(trigger).toBeFocused();
+
+  await page.keyboard.press('Control+k');
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByRole('textbox', { name: '搜索图书' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(drawer).toBeHidden();
+
+  await trigger.click();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(drawer).toBeHidden();
+
+  await trigger.click();
+  await drawer.getByRole('link', { name: '全部', exact: true }).click();
+  await expect(page).toHaveURL(/\/library$/);
+  await expect(drawer).toBeHidden();
+});
+
+test('desktop library navigation keeps only All and Reading', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+
+  const sidebar = page.locator('aside');
+  await expect(sidebar.getByRole('link', { name: '全部', exact: true })).toBeVisible();
+  await expect(sidebar.getByRole('link', { name: '进行中', exact: true })).toBeVisible();
+  await expect(sidebar.getByRole('link', { name: '未读', exact: true })).toHaveCount(0);
+  await expect(sidebar.getByRole('link', { name: '已读', exact: true })).toHaveCount(0);
+});
+
+test('wide shelf details use the same five-column book density as the home page', async ({ page }) => {
+  const books = Array.from({ length: 7 }, (_, index) => ({
+    id: `shelf-work-${index + 1}`,
+    title: `书架读物 ${index + 1}`,
+    author: '测试作者',
+    type: 'ebook',
+    format: 'EPUB',
+    formatValue: 'EPUB',
+    status: '未读',
+    statusValue: 'UNREAD',
+    progress: 0,
+    tags: [],
+    coverUrl: '',
+    gradient: 'from-orange-100 to-stone-200'
+  }));
+
+  await page.route('**/api/shelves/wide-shelf', async (route) => {
+    await route.fulfill({
+      json: {
+        ok: true,
+        data: {
+          shelf: {
+            id: 'wide-shelf',
+            name: '宽屏书架',
+            description: '验证书架详情布局',
+            bookCount: books.length,
+            bookIds: books.map((book) => book.id),
+            books,
+            createdAt: '2026-07-17T08:30:00.000Z',
+            updatedAt: '2026-07-17T08:30:00.000Z'
+          }
+        }
+      }
+    });
+  });
+
+  await page.setViewportSize({ width: 2048, height: 1152 });
+  await page.goto('/shelves?shelf=wide-shelf');
+
+  const grid = page.getByTestId('shelf-book-grid');
+  await expect(grid).toBeVisible();
+  const layout = await grid.evaluate((element) => {
+    const bounds = element.parentElement?.parentElement?.getBoundingClientRect();
+    const covers = Array.from(element.querySelectorAll<HTMLElement>('[data-book-cover="true"]'));
+    const styles = getComputedStyle(element);
+    return {
+      contentWidth: bounds?.width ?? 0,
+      coverWidths: covers.map((cover) => cover.getBoundingClientRect().width),
+      columnCount: styles.gridTemplateColumns.split(' ').filter(Boolean).length,
+      overflowX: styles.overflowX,
+      firstRowTop: covers[0]?.getBoundingClientRect().top,
+      sixthTop: covers[5]?.getBoundingClientRect().top
+    };
+  });
+
+  expect(layout.contentWidth).toBeLessThanOrEqual(1280);
+  expect(layout.columnCount).toBe(5);
+  expect(layout.overflowX).toBe('visible');
+  expect(Math.min(...layout.coverWidths)).toBeGreaterThan(220);
+  expect(Math.max(...layout.coverWidths)).toBeLessThanOrEqual(240);
+  expect(layout.sixthTop).toBeGreaterThan(layout.firstRowTop ?? 0);
+});
+
+test('legacy mobile URLs redirect authenticated users to the shared web home', async ({ page }) => {
+  await page.goto('/mobile');
+
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole('heading', { name: '主页' })).toBeVisible();
+});
+
+test('mobile page actions keep labels horizontal and move below long headings', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/import-tasks');
+
+  const title = page.getByRole('heading', { name: '导入任务' });
+  const action = page.getByRole('button', { name: '强制重新识别' });
+  await expect(title).toBeVisible();
+  await expect(action).toBeVisible();
+
+  const layout = await page.evaluate(() => {
+    const heading = document.querySelector('h1');
+    const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent?.includes('强制重新识别'));
+    if (!heading || !button) return null;
+    const headingBounds = heading.getBoundingClientRect();
+    const buttonBounds = button.getBoundingClientRect();
+    return {
+      actionTop: buttonBounds.top,
+      actionHeight: buttonBounds.height,
+      headingBottom: headingBounds.bottom,
+      whiteSpace: getComputedStyle(button).whiteSpace
+    };
+  });
+
+  expect(layout).not.toBeNull();
+  expect(layout?.actionTop).toBeGreaterThan(layout?.headingBottom ?? 0);
+  expect(layout?.actionHeight).toBeLessThanOrEqual(48);
+  expect(layout?.whiteSpace).toBe('nowrap');
+});
+
+test('mobile data-heavy views use cards instead of compressed desktop tables', async ({ page }) => {
+  const mobileBook = {
+    id: 'mobile-work',
+    workId: 'mobile-work',
+    editionId: 'mobile-edition',
+    title: '用于验证移动端卡片布局的超长读物标题',
+    author: '未知作者',
+    type: 'ebook',
+    format: 'EPUB',
+    formatValue: 'EPUB',
+    status: '在读',
+    statusValue: 'READING',
+    progress: 42,
+    lastRead: '今天',
+    lastReadAt: '2026-07-17T08:30:00.000Z',
+    tags: ['移动端'],
+    coverUrl: '',
+    coverStatus: 'MISSING',
+    gradient: 'from-orange-100 to-stone-200',
+    seriesName: null,
+    seriesIndex: null,
+    publishedYear: null,
+    desc: '',
+    path: '/books/mobile.epub',
+    importedAt: '2026-07-17T08:30:00.000Z',
+    metadataQuality: 20
+  };
+
+  await page.route('**/api/works?**', async (route) => {
+    await route.fulfill({ json: { ok: true, data: { books: [mobileBook], total: 1, page: 1, pageSize: 24, totalPages: 1 } } });
+  });
+  await page.route('**/api/organize/jobs?**', async (route) => {
+    await route.fulfill({
+      json: {
+        ok: true,
+        data: {
+          jobs: [{
+            id: 'mobile-job',
+            status: 'REVIEWING',
+            issueCodes: ['MISSING_AUTHOR'],
+            summary: '等待补充作者信息',
+            updatedAt: '2026-07-17T08:30:00.000Z',
+            book: mobileBook,
+            suggestions: [],
+            duplicates: []
+          }],
+          books: [mobileBook],
+          total: 1
+        }
+      }
+    });
+  });
+  await page.route('**/api/management/events?**', async (route) => {
+    await route.fulfill({
+      json: {
+        ok: true,
+        data: {
+          events: [{ id: 'mobile-event', level: 'warning', source: 'import', actorType: 'system', action: 'import.failed', message: '用于验证长日志摘要在手机上自然换行', metadata: {}, createdAt: '2026-07-17T08:30:00.000Z' }],
+          total: 1,
+          totalPages: 1,
+          storage: { sizeBytes: 0, maxBytes: 1024 },
+          facets: { sources: [], levels: [] }
+        }
+      }
+    });
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  await page.goto('/library');
+  await page.getByRole('button', { name: '列表' }).click();
+  await expect(page.getByTestId('book-list-mobile-card')).toBeVisible();
+  await expect(page.getByTestId('book-list-desktop-table')).toBeHidden();
+
+  await page.goto('/organize');
+  await expect(page.getByTestId('organize-job-mobile-card')).toBeVisible();
+  await expect(page.getByTestId('organize-job-desktop-table')).toBeHidden();
+
+  await page.goto('/management/logs');
+  await expect(page.getByTestId('system-event-mobile-card')).toBeVisible();
+  await expect(page.getByTestId('system-event-desktop-table')).toBeHidden();
+});

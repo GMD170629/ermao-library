@@ -1,0 +1,337 @@
+'use client';
+
+import { ChevronDown, ChevronLeft, ChevronRight, Download, RefreshCw, Search, Trash2 } from 'lucide-react';
+import Link from 'next/link';
+import { useCallback, useEffect, useState } from 'react';
+import { Badge, type BadgeTone } from '../../components/ui/badge';
+import { Button } from '../../components/ui/button';
+import { useToast } from '../../components/ui/feedback';
+import { PageTitle } from '../../components/ui/page-title';
+import { ManagementNav } from './management-nav';
+
+type SystemEvent = {
+  id: string;
+  level: string;
+  source: string;
+  actorType: string;
+  action: string;
+  targetType?: string | null;
+  targetId?: string | null;
+  message: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+};
+
+type EventsData = {
+  events: SystemEvent[];
+  total: number;
+  totalPages?: number;
+  storage: { sizeBytes: number; maxBytes: number };
+  facets: { sources: Array<{ source: string; count: number }>; levels: Array<{ level: string; count: number }> };
+};
+
+type EventsPayload = {
+  ok: boolean;
+  data?: EventsData;
+  error?: { message: string };
+};
+
+function tone(level: string): BadgeTone {
+  if (level === 'error') return 'red';
+  if (level === 'warning' || level === 'warn') return 'amber';
+  return 'slate';
+}
+
+function levelLabel(level: string) {
+  return { info: '信息', warning: '警告', warn: '警告', error: '错误' }[level] ?? level;
+}
+
+function sourceLabel(source: string) {
+  return { import: '导入', download: '下载', folder: '监控文件夹', kindle: 'Kindle', library: '书库', system: '系统' }[source] ?? source;
+}
+
+function targetHref(event: SystemEvent) {
+  if (event.targetType === 'work' && event.targetId) return `/works/${event.targetId}`;
+  if (event.targetType === 'kindleSendTask') return '/settings/email?tab=queue';
+  if (event.targetType === 'importTask') return '/settings/library';
+  if (event.targetType === 'monitorFolder') return '/settings/library';
+  return '';
+}
+
+function redactString(value: string) {
+  return value
+    .replace(/\/(?:Users|home|var|Volumes|volume\d+|mnt|srv|opt)\/[^\s"',}\]]+/gi, '[本地路径]')
+    .replace(/[A-Z]:\\[^\s"',}\]]+/gi, '[本地路径]');
+}
+
+function sanitizeValue(value: unknown): unknown {
+  if (typeof value === 'string') return redactString(value);
+  if (Array.isArray(value)) return value.map(sanitizeValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, sanitizeValue(item)]));
+  }
+  return value;
+}
+
+function csvCell(value: unknown) {
+  return `"${String(value ?? '').replaceAll('"', '""')}"`;
+}
+
+function localDateBoundary(value: string, nextDay = false) {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day + (nextDay ? 1 : 0), 0, 0, 0, 0).toISOString();
+}
+
+export function ManagementLogsPage({ embedded = false }: { embedded?: boolean }) {
+  const [events, setEvents] = useState<SystemEvent[]>([]);
+  const [source, setSource] = useState('');
+  const [level, setLevel] = useState('');
+  const [search, setSearch] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [expandedEventId, setExpandedEventId] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState('');
+  const toast = useToast();
+
+  const buildParams = useCallback((targetPage: number, pageSize = 40) => {
+    const params = new URLSearchParams({ page: String(targetPage), pageSize: String(pageSize) });
+    if (source) params.set('source', source);
+    if (level) params.set('level', level);
+    if (appliedSearch) params.set('search', appliedSearch);
+    if (dateFrom) params.set('dateFrom', localDateBoundary(dateFrom));
+    if (dateTo) params.set('dateTo', localDateBoundary(dateTo, true));
+    return params;
+  }, [appliedSearch, dateFrom, dateTo, level, source]);
+
+  const load = useCallback(async () => {
+    if (dateFrom && dateTo && dateFrom > dateTo) {
+      setError('开始日期不能晚于结束日期');
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/management/events?${buildParams(page).toString()}`);
+      const payload = (await response.json()) as EventsPayload;
+      if (!payload.ok) throw new Error(payload.error?.message ?? '读取日志失败');
+      setEvents(payload.data?.events ?? []);
+      setTotal(payload.data?.total ?? 0);
+      setTotalPages(Math.max(1, Number(payload.data?.totalPages ?? 1)));
+      setError('');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '读取日志失败');
+    } finally {
+      setLoading(false);
+    }
+  }, [buildParams, dateFrom, dateTo, page]);
+
+  async function clearLogs() {
+    if (!window.confirm('清理信息和警告日志？错误与关键审计事件会保留。')) return;
+    const response = await fetch('/api/management/events', { method: 'DELETE' });
+    const payload = await response.json().catch(() => null) as { ok?: boolean; data?: { deleted: number }; error?: { message: string } } | null;
+    if (!payload?.ok) {
+      toast.error('清理日志失败', payload?.error?.message ?? '请稍后重试');
+      return;
+    }
+    toast.success(`已清理 ${payload.data?.deleted ?? 0} 条日志`);
+    if (page === 1) await load();
+    else setPage(1);
+  }
+
+  function applySearch() {
+    const nextSearch = search.trim();
+    if (nextSearch === appliedSearch && page === 1) {
+      void load();
+      return;
+    }
+    setAppliedSearch(nextSearch);
+    setPage(1);
+  }
+
+  async function exportLogs() {
+    setExporting(true);
+    try {
+      const exported: SystemEvent[] = [];
+      let exportPage = 1;
+      let exportPages = 1;
+      do {
+        const response = await fetch(`/api/management/events?${buildParams(exportPage, 100).toString()}`);
+        const payload = (await response.json()) as EventsPayload;
+        if (!payload.ok) throw new Error(payload.error?.message ?? '导出日志失败');
+        exported.push(...(payload.data?.events ?? []));
+        exportPages = Math.max(1, Number(payload.data?.totalPages ?? 1));
+        exportPage += 1;
+      } while (exportPage <= exportPages);
+
+      const rows = [
+        ['时间', '级别', '来源', '摘要', '动作', '关联类型'].map(csvCell).join(','),
+        ...exported.map((event) => [
+          new Date(event.createdAt).toLocaleString(),
+          levelLabel(event.level),
+          sourceLabel(event.source),
+          redactString(event.message),
+          event.action,
+          event.targetType ?? ''
+        ].map(csvCell).join(','))
+      ];
+      const blob = new Blob([`\uFEFF${rows.join('\n')}`], { type: 'text/csv;charset=utf-8' });
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = href;
+      link.download = `shuku-system-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(href);
+      toast.success(`已导出 ${exported.length} 条日志`);
+    } catch (reason) {
+      toast.error('导出日志失败', reason instanceof Error ? reason.message : '请稍后重试');
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <div className={embedded ? 'space-y-4' : 'space-y-6'}>
+      {!embedded ? <PageTitle title="系统日志" desc="按级别、来源、日期和关键字查看系统事件。" action={<Button variant="secondary" icon={RefreshCw} loading={loading} loadingText="刷新中" onClick={() => void load()}>刷新</Button>} /> : null}
+      {!embedded ? <ManagementNav /> : null}
+
+      <section className="rounded-[22px] border border-[#DEDAD4] bg-white p-4" aria-label="日志筛选">
+        <div className="flex flex-wrap gap-2">
+          {['', 'info', 'warning', 'error'].map((item) => (
+            <button key={item || 'all-level'} type="button" onClick={() => { setLevel(item); setPage(1); }} className={`min-h-9 rounded-xl border px-3 text-sm ${level === item ? 'border-[#F4B7A8] bg-[#FCE5DE] text-[#ED4D2D]' : 'border-[#DEDAD4] text-[#625D57] hover:bg-[#F6F3F0]'}`}>{item ? levelLabel(item) : '全部级别'}</button>
+          ))}
+          <span className="mx-1 hidden h-9 w-px bg-[#DEDAD4] sm:block" />
+          {['', 'import', 'download', 'folder', 'library', 'system'].map((item) => (
+            <button key={item || 'all-source'} type="button" onClick={() => { setSource(item); setPage(1); }} className={`min-h-9 rounded-xl border px-3 text-sm ${source === item ? 'border-[#F4B7A8] bg-[#FCE5DE] text-[#ED4D2D]' : 'border-[#DEDAD4] text-[#625D57] hover:bg-[#F6F3F0]'}`}>{item ? sourceLabel(item) : '全部来源'}</button>
+          ))}
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-[150px_150px_minmax(0,1fr)] lg:items-end">
+          <label className="text-xs text-[#716B64]">
+            开始日期
+            <input type="date" value={dateFrom} onChange={(event) => { setDateFrom(event.target.value); setPage(1); }} className="mt-1 h-10 w-full rounded-xl border border-[#DEDAD4] bg-white px-3 text-sm text-[#2A2825] outline-none focus:border-[#F0A28F] focus:ring-2 focus:ring-[#FAD9D0]" />
+          </label>
+          <label className="text-xs text-[#716B64]">
+            结束日期
+            <input type="date" value={dateTo} onChange={(event) => { setDateTo(event.target.value); setPage(1); }} className="mt-1 h-10 w-full rounded-xl border border-[#DEDAD4] bg-white px-3 text-sm text-[#2A2825] outline-none focus:border-[#F0A28F] focus:ring-2 focus:ring-[#FAD9D0]" />
+          </label>
+          <label className="text-xs text-[#716B64]">
+            关键字
+            <span className="mt-1 flex h-10 items-center gap-2 rounded-xl border border-[#DEDAD4] px-3 focus-within:border-[#F0A28F] focus-within:ring-2 focus-within:ring-[#FAD9D0]">
+              <Search size={15} className="text-[#958F88]" />
+              <input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') applySearch(); }} className="min-w-0 flex-1 bg-transparent text-sm text-[#2A2825] outline-none" placeholder="搜索摘要、动作或关联对象" />
+            </span>
+          </label>
+          <div className="flex flex-wrap justify-end gap-2 lg:col-span-3">
+            <Button variant="secondary" icon={Search} className="whitespace-nowrap" onClick={applySearch}>搜索</Button>
+            <Button variant="secondary" icon={RefreshCw} loading={loading} loadingText="刷新中" className="whitespace-nowrap" onClick={() => void load()}>刷新</Button>
+            <Button variant="secondary" icon={Download} loading={exporting} loadingText="导出中" className="whitespace-nowrap" onClick={() => void exportLogs()}>导出</Button>
+            <Button variant="ghost" icon={Trash2} className="whitespace-nowrap" onClick={() => void clearLogs()}>清理</Button>
+          </div>
+        </div>
+      </section>
+
+      {error ? <div className="rounded-2xl border border-red-100 bg-red-50 p-4 text-sm text-red-700">{error}</div> : null}
+
+      <div className="space-y-3 md:hidden">
+        {!loading && events.length === 0 ? <div className="rounded-[22px] border border-[#DEDAD4] bg-white px-5 py-10 text-center text-sm text-[#817B75]">当前筛选条件下暂无日志。</div> : null}
+        {events.map((event) => {
+          const href = targetHref(event);
+          const expanded = expandedEventId === event.id;
+          const safeMetadata = sanitizeValue(event.metadata);
+          return (
+            <article key={event.id} data-testid="system-event-mobile-card" className="rounded-[22px] border border-[#DEDAD4] bg-white p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone={tone(event.level)}>{levelLabel(event.level)}</Badge>
+                <Badge tone="slate">{sourceLabel(event.source)}</Badge>
+                <time className="text-xs tabular-nums text-[#77716A]">{new Date(event.createdAt).toLocaleString()}</time>
+              </div>
+              <p className="mt-3 break-words text-sm font-medium leading-6 text-[#2A2825]">{redactString(event.message)}</p>
+              {expanded ? (
+                <div className="mt-3 rounded-xl bg-[#F7F4F1] p-3 text-xs leading-5 text-[#68625C]">
+                  <div><span className="text-[#969089]">动作：</span>{event.action || '—'}</div>
+                  <div><span className="text-[#969089]">执行者：</span>{event.actorType || 'system'}</div>
+                  {event.targetType ? <div><span className="text-[#969089]">关联：</span>{event.targetType}{event.targetId ? ` · ${event.targetId}` : ''}</div> : null}
+                  {Object.keys(event.metadata ?? {}).length > 0 ? <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-white p-2 text-[11px] text-[#716B64]">{JSON.stringify(safeMetadata, null, 2)}</pre> : null}
+                  {href ? <Link href={href} className="mt-2 inline-flex font-medium text-[#ED4D2D] hover:text-[#C83B23]">打开关联对象</Link> : null}
+                </div>
+              ) : null}
+              <button type="button" onClick={() => setExpandedEventId(expanded ? '' : event.id)} aria-expanded={expanded} className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-[#DEDAD4] text-sm font-medium text-[#625D57] transition hover:bg-[#F6F3F0]">
+                {expanded ? '收起详情' : '查看详情'}
+                <ChevronDown size={16} className={expanded ? 'rotate-180 transition' : 'transition'} />
+              </button>
+            </article>
+          );
+        })}
+      </div>
+
+      <div data-testid="system-event-desktop-table" className="hidden overflow-hidden rounded-[22px] border border-[#DEDAD4] bg-white md:block">
+        <table className="w-full table-fixed text-left text-sm">
+          <thead className="border-b border-[#E7E2DD] bg-[#F8F6F3] text-xs font-medium text-[#77716A]">
+            <tr>
+              <th className="w-[170px] px-4 py-3">时间</th>
+              <th className="w-[92px] px-3 py-3">级别</th>
+              <th className="w-[120px] px-3 py-3">来源</th>
+              <th className="px-3 py-3">摘要</th>
+              <th className="w-[70px] px-3 py-3 text-right">详情</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#EEEAE6]">
+            {!loading && events.length === 0 ? (
+              <tr><td colSpan={5} className="px-5 py-12 text-center text-sm text-[#817B75]">当前筛选条件下暂无日志。</td></tr>
+            ) : null}
+            {events.map((event) => {
+              const href = targetHref(event);
+              const expanded = expandedEventId === event.id;
+              const safeMetadata = sanitizeValue(event.metadata);
+              return (
+                <tr key={event.id} className="group align-top hover:bg-[#FCFAF8]">
+                  <td className="px-4 py-3.5 tabular-nums text-[#716B64]">{new Date(event.createdAt).toLocaleString()}</td>
+                  <td className="px-3 py-3"><Badge tone={tone(event.level)}>{levelLabel(event.level)}</Badge></td>
+                  <td className="px-3 py-3 text-[#5F5A54]">{sourceLabel(event.source)}</td>
+                  <td className="px-3 py-3.5">
+                    <div className="break-words font-medium leading-6 text-[#2A2825]">{redactString(event.message)}</div>
+                    {expanded ? (
+                      <div className="mt-3 rounded-xl bg-[#F7F4F1] p-3 text-xs leading-5 text-[#68625C]">
+                        <div><span className="text-[#969089]">动作：</span>{event.action || '—'}</div>
+                        <div><span className="text-[#969089]">执行者：</span>{event.actorType || 'system'}</div>
+                        {event.targetType ? <div><span className="text-[#969089]">关联：</span>{event.targetType}{event.targetId ? ` · ${event.targetId}` : ''}</div> : null}
+                        {Object.keys(event.metadata ?? {}).length > 0 ? <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-white p-2 text-[11px] text-[#716B64]">{JSON.stringify(safeMetadata, null, 2)}</pre> : null}
+                        {href ? <Link href={href} className="mt-2 inline-flex font-medium text-[#ED4D2D] hover:text-[#C83B23]">打开关联对象</Link> : null}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    <button type="button" onClick={() => setExpandedEventId(expanded ? '' : event.id)} aria-expanded={expanded} aria-label={expanded ? '收起日志详情' : '展开日志详情'} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[#77716A] transition hover:bg-[#F2EEEA] hover:text-[#ED4D2D]">
+                      <ChevronDown size={16} className={expanded ? 'rotate-180 transition' : 'transition'} />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <footer className="flex flex-wrap items-center justify-between gap-3 text-sm text-[#77716A]">
+        <span>共 {total} 条记录</span>
+        {totalPages > 1 ? (
+          <div className="flex items-center gap-2">
+            <button type="button" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white disabled:opacity-40" aria-label="上一页"><ChevronLeft size={16} /></button>
+            <span className="min-w-14 text-center text-[#4F4A45]">{page} / {totalPages}</span>
+            <button type="button" disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white disabled:opacity-40" aria-label="下一页"><ChevronRight size={16} /></button>
+          </div>
+        ) : null}
+      </footer>
+    </div>
+  );
+}

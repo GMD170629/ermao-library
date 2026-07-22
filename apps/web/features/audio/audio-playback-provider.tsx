@@ -1,0 +1,979 @@
+'use client';
+
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { UNAUTHORIZED_EVENT } from '../../lib/auth-session';
+import { activateReaderV2User, getReaderV2Runtime, type AudioProgressLocation } from '../../lib/reader-v2';
+import { withBasePath } from '../../lib/base-path';
+import { BEFORE_PWA_UPDATE_EVENT, type BeforePwaUpdateDetail } from '../../lib/pwa/update-coordination';
+import { fetchAudioBootstrap } from './api';
+import {
+  absolutePositionForTrack,
+  audioLocation,
+  audioProgressPercent,
+  beginAudioEditionSwitch,
+  chapterAt,
+  clamp,
+  failAudioEditionSwitch,
+  mergeAudioLoadIntent,
+  nextAudioTrackForMetadataPreload,
+  normalizeResumeTarget,
+  pendingSeekAfterAssignment,
+  targetForAbsolutePosition,
+  unsupportedAudioMimeType,
+  type AudioLoadIntent
+} from './audio-model';
+import type {
+  AudioBootstrap,
+  AudioChapter,
+  AudioLaunchSummary,
+  AudioPlaybackContextValue,
+  AudioPlaybackState,
+  AudioTrack,
+  LoadAudioEditionOptions
+} from './types';
+
+const PLAYBACK_CHANNEL = 'shuku-audio-playback';
+const PLAYBACK_CLAIM_KEY = 'shuku:audio:playback-claim';
+const AUDIO_PREFERENCES_KEY = 'shuku:audio:preferences:v1';
+const PROGRESS_INTERVAL_MS = 15_000;
+
+type StoredAudioPreferences = { playbackRate?: number; volume?: number };
+type PendingAudioEditionLoad = AudioLoadIntent & {
+  editionId: string;
+  summary: AudioLaunchSummary | null;
+  promise: Promise<void>;
+};
+type FailedAudioEditionLoad = Omit<PendingAudioEditionLoad, 'autoplay' | 'promise'>;
+
+const initialState: AudioPlaybackState = {
+  lifecycle: 'idle',
+  bootstrap: null,
+  editionId: null,
+  pendingEditionId: null,
+  pendingSummary: null,
+  loadError: null,
+  workId: null,
+  trackIndex: -1,
+  track: null,
+  chapter: null,
+  positionMs: 0,
+  durationMs: 0,
+  absolutePositionMs: 0,
+  totalDurationMs: 0,
+  playbackRate: 1,
+  skipBackwardSeconds: 15,
+  skipForwardSeconds: 30,
+  volume: 1,
+  sleepTimerEndsAt: null,
+  sleepTimerMode: null,
+  error: null
+};
+
+const AudioPlaybackContext = createContext<AudioPlaybackContextValue | null>(null);
+
+function preferenceStorageKey(userId?: string, workId?: string) {
+  return userId && workId
+    ? `${AUDIO_PREFERENCES_KEY}:${encodeURIComponent(userId)}:${encodeURIComponent(workId)}`
+    : AUDIO_PREFERENCES_KEY;
+}
+
+function readStoredPreferences(userId?: string, workId?: string): StoredAudioPreferences {
+  if (typeof window === 'undefined') return {};
+  try {
+    const scoped = window.localStorage.getItem(preferenceStorageKey(userId, workId));
+    const legacy = userId && workId ? window.localStorage.getItem(AUDIO_PREFERENCES_KEY) : null;
+    const value = JSON.parse(scoped ?? legacy ?? '{}') as StoredAudioPreferences;
+    return value && typeof value === 'object' ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredPreferences(preferences: StoredAudioPreferences, userId?: string, workId?: string) {
+  try {
+    window.localStorage.setItem(preferenceStorageKey(userId, workId), JSON.stringify(preferences));
+  } catch {
+    // Playback remains functional when storage is unavailable (for example,
+    // strict private-browsing modes).
+  }
+}
+
+function tabId() {
+  const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `audio_${suffix}`;
+}
+
+function mediaErrorMessage(audio: HTMLAudioElement, track: AudioTrack | null) {
+  const format = track?.mimeType || '未知格式';
+  switch (audio.error?.code) {
+    case MediaError.MEDIA_ERR_ABORTED:
+      return '音频加载已取消，可以重试播放';
+    case MediaError.MEDIA_ERR_NETWORK:
+      return '音频传输中断，请检查网络或文件服务后重试';
+    case MediaError.MEDIA_ERR_DECODE:
+      return `浏览器无法解码这个音频（${format}），文件可能损坏或编码不受支持`;
+    case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+      return `当前浏览器不支持这个音频来源或编码（${format}）`;
+    default:
+      return '音频暂时无法播放，请稍后重试';
+  }
+}
+
+export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
+  const [state, setState] = useState<AudioPlaybackState>(initialState);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const stateRef = useRef(state);
+  const bootstrapRef = useRef<AudioBootstrap | null>(null);
+  const trackIndexRef = useRef(-1);
+  const loadAbortRef = useRef<AbortController | null>(null);
+  const loadSequenceRef = useRef(0);
+  const pendingLoadRef = useRef<PendingAudioEditionLoad | null>(null);
+  const failedLoadRef = useRef<FailedAudioEditionLoad | null>(null);
+  const nextTrackPreloadAbortRef = useRef<AbortController | null>(null);
+  const pendingSeekRef = useRef<number | null>(null);
+  const pendingAutoplayRef = useRef(false);
+  const suppressedPauseEventsRef = useRef(0);
+  const lastProgressEnqueueRef = useRef(0);
+  const mediaPositionUpdateRef = useRef(0);
+  const playbackChannelRef = useRef<BroadcastChannel | null>(null);
+  const thisTabIdRef = useRef('');
+  if (!thisTabIdRef.current) thisTabIdRef.current = tabId();
+  const sleepTargetChapterRef = useRef<string | null>(null);
+  const runtime = getReaderV2Runtime();
+
+  const updateState = useCallback((patch: Partial<AudioPlaybackState> | ((current: AudioPlaybackState) => Partial<AudioPlaybackState>)) => {
+    setState((current) => {
+      const next = { ...current, ...(typeof patch === 'function' ? patch(current) : patch) };
+      stateRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const claimPlayback = useCallback(() => {
+    const message = { type: 'claim-playback', tabId: thisTabIdRef.current, claimedAt: Date.now() };
+    playbackChannelRef.current?.postMessage(message);
+    try {
+      window.localStorage.setItem(PLAYBACK_CLAIM_KEY, JSON.stringify(message));
+    } catch {
+      // BroadcastChannel is the primary path; storage is only the fallback.
+    }
+  }, []);
+
+  const persistProgress = useCallback((completed = false, flush = false) => {
+    const bootstrap = bootstrapRef.current;
+    const audio = audioRef.current;
+    const trackIndex = trackIndexRef.current;
+    const track = bootstrap?.tracks[trackIndex];
+    if (!bootstrap || !track || !bootstrap.userId || !bootstrap.contentFingerprint) return Promise.resolve();
+    const positionMs = completed
+      ? Math.max(0, track.durationMs)
+      : clamp((audio?.currentTime ?? stateRef.current.positionMs / 1000) * 1000, 0, Math.max(track.durationMs, 0));
+    const chapter = chapterAt(bootstrap.chapters, track.fileId, positionMs);
+    const absolutePositionMs = completed
+      ? bootstrap.totalDurationMs
+      : absolutePositionForTrack(bootstrap.tracks, trackIndex, positionMs);
+    const location = audioLocation(track, chapter, positionMs, bootstrap.volumeId);
+    const domainLocation: AudioProgressLocation = { kind: 'audio', ...location };
+    lastProgressEnqueueRef.current = Date.now();
+    return runtime.progress.enqueue({
+      userId: bootstrap.userId,
+      workId: bootstrap.edition.workId,
+      editionId: bootstrap.edition.id,
+      volumeId: bootstrap.volumeId,
+      contentFingerprint: bootstrap.contentFingerprint,
+      location: domainLocation,
+      percent: audioProgressPercent(absolutePositionMs, bootstrap.totalDurationMs, completed)
+    }).then(() => flush ? runtime.progress.flushNow() : undefined).catch(() => undefined);
+  }, [runtime.progress]);
+
+  const playCurrentAudio = useCallback(async () => {
+    const audio = audioRef.current;
+    if (!audio || !bootstrapRef.current || trackIndexRef.current < 0) return;
+    claimPlayback();
+    try {
+      await audio.play();
+      updateState({ lifecycle: 'playing', error: null });
+    } catch (reason) {
+      const blocked = reason instanceof DOMException && reason.name === 'NotAllowedError';
+      updateState({
+        lifecycle: 'paused',
+        error: blocked ? '浏览器阻止了自动播放，请点按播放按钮继续' : (reason instanceof Error ? reason.message : '无法开始播放')
+      });
+    }
+  }, [claimPlayback, updateState]);
+
+  const attemptPendingSeek = useCallback((audio: HTMLAudioElement) => {
+    const pendingPositionMs = pendingSeekRef.current;
+    if (pendingPositionMs === null) return;
+    let assignmentSucceeded = false;
+    try {
+      audio.currentTime = pendingPositionMs / 1000;
+      assignmentSucceeded = true;
+    } catch {
+      // Keep the target for canplay. Safari can transiently reject a seek
+      // during a metadata transition even after loadedmetadata.
+    }
+    pendingSeekRef.current = pendingSeekAfterAssignment(
+      pendingPositionMs,
+      audio.currentTime * 1000,
+      assignmentSucceeded
+    );
+  }, []);
+
+  const configureTrack = useCallback((trackIndex: number, positionMs: number, autoplay: boolean) => {
+    const bootstrap = bootstrapRef.current;
+    const audio = audioRef.current;
+    if (!bootstrap || !audio || bootstrap.tracks.length === 0) return;
+    const index = Math.max(0, Math.min(bootstrap.tracks.length - 1, trackIndex));
+    const track = bootstrap.tracks[index];
+    const nextPosition = clamp(positionMs, 0, Math.max(0, track.durationMs));
+    const unsupportedMime = unsupportedAudioMimeType(track.mimeType, (mime) => audio.canPlayType(mime));
+    if (unsupportedMime) {
+      if (!audio.paused) suppressedPauseEventsRef.current += 1;
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+      trackIndexRef.current = index;
+      pendingSeekRef.current = null;
+      pendingAutoplayRef.current = false;
+      const chapter = chapterAt(bootstrap.chapters, track.fileId, nextPosition);
+      updateState({
+        lifecycle: 'error',
+        trackIndex: index,
+        track,
+        chapter,
+        positionMs: nextPosition,
+        durationMs: track.durationMs,
+        absolutePositionMs: absolutePositionForTrack(bootstrap.tracks, index, nextPosition),
+        error: `当前浏览器不支持这个音频格式（${unsupportedMime}）`
+      });
+      return;
+    }
+    if (!audio.paused) suppressedPauseEventsRef.current += 1;
+    audio.pause();
+    trackIndexRef.current = index;
+    pendingSeekRef.current = nextPosition;
+    pendingAutoplayRef.current = autoplay;
+    audio.playbackRate = stateRef.current.playbackRate;
+    audio.volume = stateRef.current.volume;
+    audio.src = track.url;
+    audio.load();
+    const chapter = chapterAt(bootstrap.chapters, track.fileId, nextPosition);
+    updateState({
+      lifecycle: 'loading',
+      trackIndex: index,
+      track,
+      chapter,
+      positionMs: nextPosition,
+      durationMs: track.durationMs,
+      absolutePositionMs: absolutePositionForTrack(bootstrap.tracks, index, nextPosition),
+      error: null
+    });
+    if (autoplay) {
+      // Calling play() in the same stack as a chapter/track click preserves
+      // transient user activation even while the new source is buffering.
+      // The returned promise remains the authoritative success/error signal.
+      pendingAutoplayRef.current = false;
+      void playCurrentAudio();
+    }
+  }, [playCurrentAudio, updateState]);
+
+  const loadEdition = useCallback((editionId: string, options: LoadAudioEditionOptions = {}): Promise<void> => {
+    const normalizedEditionId = editionId.trim();
+    if (!normalizedEditionId) return Promise.resolve();
+
+    const pendingLoad = pendingLoadRef.current;
+    if (!options.force && pendingLoad?.editionId === normalizedEditionId) {
+      const merged = mergeAudioLoadIntent(pendingLoad, {
+        autoplay: options.autoplay,
+        chapterId: options.chapterId ?? undefined
+      });
+      pendingLoad.autoplay = merged.autoplay;
+      pendingLoad.chapterId = merged.chapterId;
+      if (options.summary) {
+        pendingLoad.summary = options.summary;
+        updateState({ pendingSummary: options.summary });
+      }
+      return pendingLoad.promise;
+    }
+
+    if (!options.force && bootstrapRef.current?.edition.id === normalizedEditionId) {
+      if (pendingLoadRef.current || stateRef.current.pendingEditionId) {
+        loadSequenceRef.current += 1;
+        loadAbortRef.current?.abort();
+        loadAbortRef.current = null;
+        pendingLoadRef.current = null;
+      }
+      failedLoadRef.current = null;
+      const requestedChapter = options.chapterId
+        ? bootstrapRef.current.chapters.find((chapter) => chapter.id === options.chapterId)
+        : null;
+      if (requestedChapter) {
+        const trackIndex = bootstrapRef.current.tracks.findIndex((track) => track.fileId === requestedChapter.fileId);
+        if (trackIndex >= 0) {
+          void persistProgress(false, true);
+          configureTrack(trackIndex, requestedChapter.startMs, Boolean(options.autoplay) || audioRef.current?.paused === false);
+          return Promise.resolve();
+        }
+      }
+      updateState({
+        pendingEditionId: null,
+        pendingSummary: null,
+        loadError: null,
+        lifecycle: audioRef.current?.paused === false ? 'playing' : 'paused'
+      });
+      return options.autoplay ? playCurrentAudio() : Promise.resolve();
+    }
+
+    const requestId = loadSequenceRef.current + 1;
+    loadSequenceRef.current = requestId;
+    failedLoadRef.current = null;
+    loadAbortRef.current?.abort();
+    const controller = new AbortController();
+    loadAbortRef.current = controller;
+    const request: PendingAudioEditionLoad = {
+      editionId: normalizedEditionId,
+      autoplay: Boolean(options.autoplay),
+      chapterId: options.chapterId?.trim() || null,
+      summary: options.summary ?? null,
+      promise: Promise.resolve()
+    };
+    const operation = (async () => {
+      const previousState = stateRef.current;
+      const previousBootstrap = bootstrapRef.current;
+      const previousTrackIndex = trackIndexRef.current;
+      const previousWasPlaying = Boolean(audioRef.current && !audioRef.current.paused);
+      if (previousWasPlaying && audioRef.current) {
+        suppressedPauseEventsRef.current += 1;
+        audioRef.current.pause();
+      }
+      updateState(beginAudioEditionSwitch(previousState, normalizedEditionId, request.summary));
+      if (previousBootstrap) await persistProgress(false, true);
+      if (controller.signal.aborted || requestId !== loadSequenceRef.current) return;
+      try {
+        const bootstrap = await fetchAudioBootstrap(normalizedEditionId, controller.signal);
+        if (controller.signal.aborted || requestId !== loadSequenceRef.current) return;
+        loadAbortRef.current = null;
+        failedLoadRef.current = null;
+        bootstrapRef.current = bootstrap;
+        activateReaderV2User(bootstrap.userId);
+        const preferences = readStoredPreferences(bootstrap.userId, bootstrap.edition.workId);
+        const playbackRate = clamp(preferences.playbackRate ?? bootstrap.preferences.playbackRate, 0.75, 3);
+        const volume = clamp(preferences.volume ?? bootstrap.preferences.volume, 0, 1);
+        const requestedChapter = request.chapterId
+          ? bootstrap.chapters.find((chapter) => chapter.id === request.chapterId)
+          : null;
+        const requestedTrackIndex = requestedChapter
+          ? bootstrap.tracks.findIndex((track) => track.fileId === requestedChapter.fileId)
+          : -1;
+        const resume = requestedChapter && requestedTrackIndex >= 0
+          ? { trackIndex: requestedTrackIndex, positionMs: requestedChapter.startMs }
+          : normalizeResumeTarget(bootstrap);
+        updateState({
+          bootstrap,
+          editionId: bootstrap.edition.id,
+          pendingEditionId: null,
+          pendingSummary: null,
+          loadError: null,
+          workId: bootstrap.edition.workId,
+          totalDurationMs: bootstrap.totalDurationMs,
+          playbackRate,
+          skipBackwardSeconds: bootstrap.preferences.skipBackwardSeconds,
+          skipForwardSeconds: bootstrap.preferences.skipForwardSeconds,
+          volume,
+          sleepTimerEndsAt: null,
+          sleepTimerMode: null,
+          error: null
+        });
+        sleepTargetChapterRef.current = null;
+        configureTrack(resume.trackIndex, resume.positionMs, request.autoplay);
+      } catch (reason) {
+        if (controller.signal.aborted || requestId !== loadSequenceRef.current) return;
+        loadAbortRef.current = null;
+        const message = reason instanceof Error ? reason.message : '有声书播放器启动失败';
+        bootstrapRef.current = previousBootstrap;
+        trackIndexRef.current = previousTrackIndex;
+        failedLoadRef.current = {
+          editionId: normalizedEditionId,
+          chapterId: request.chapterId,
+          summary: request.summary
+        };
+        updateState(failAudioEditionSwitch(previousState, normalizedEditionId, message, request.summary));
+      }
+    })();
+    request.promise = operation.finally(() => {
+      if (pendingLoadRef.current === request) pendingLoadRef.current = null;
+    });
+    pendingLoadRef.current = request;
+    return request.promise;
+  }, [configureTrack, persistProgress, playCurrentAudio, updateState]);
+
+  const pause = useCallback(() => {
+    audioRef.current?.pause();
+    updateState((current) => current.bootstrap ? { lifecycle: 'paused' } : {});
+  }, [updateState]);
+
+  const play = useCallback(async () => {
+    if (stateRef.current.lifecycle === 'error' && stateRef.current.editionId) {
+      await loadEdition(stateRef.current.editionId, { autoplay: true, force: true });
+      return;
+    }
+    await playCurrentAudio();
+  }, [loadEdition, playCurrentAudio]);
+
+  const toggle = useCallback(async () => {
+    if (audioRef.current && !audioRef.current.paused) pause();
+    else await play();
+  }, [pause, play]);
+
+  const seekTo = useCallback((positionMs: number) => {
+    const audio = audioRef.current;
+    const track = bootstrapRef.current?.tracks[trackIndexRef.current];
+    if (!audio || !track) return;
+    const target = clamp(positionMs, 0, Math.max(track.durationMs, 0));
+    pendingSeekRef.current = null;
+    try {
+      audio.currentTime = target / 1000;
+    } catch {
+      pendingSeekRef.current = target;
+    }
+    const bootstrap = bootstrapRef.current;
+    const chapter = bootstrap ? chapterAt(bootstrap.chapters, track.fileId, target) : null;
+    updateState({
+      positionMs: target,
+      chapter,
+      absolutePositionMs: bootstrap ? absolutePositionForTrack(bootstrap.tracks, trackIndexRef.current, target) : target
+    });
+  }, [updateState]);
+
+  const seekToAbsolute = useCallback((positionMs: number) => {
+    const bootstrap = bootstrapRef.current;
+    if (!bootstrap) return;
+    const target = targetForAbsolutePosition(bootstrap.tracks, positionMs);
+    if (target.trackIndex < 0) return;
+    if (target.trackIndex === trackIndexRef.current) seekTo(target.positionMs);
+    else {
+      void persistProgress(false, true);
+      configureTrack(target.trackIndex, target.positionMs, !audioRef.current?.paused);
+    }
+  }, [configureTrack, persistProgress, seekTo]);
+
+  const seekBy = useCallback((seconds: number) => {
+    seekToAbsolute(stateRef.current.absolutePositionMs + seconds * 1000);
+  }, [seekToAbsolute]);
+
+  const selectTrack = useCallback((trackIndex: number, autoplay = false) => {
+    void persistProgress(false, true);
+    configureTrack(trackIndex, 0, autoplay || !audioRef.current?.paused);
+  }, [configureTrack, persistProgress]);
+
+  const selectChapter = useCallback((chapterId: string, autoplay = false) => {
+    const bootstrap = bootstrapRef.current;
+    const chapter = bootstrap?.chapters.find((item) => item.id === chapterId);
+    if (!bootstrap || !chapter) return;
+    const trackIndex = bootstrap.tracks.findIndex((track) => track.fileId === chapter.fileId);
+    if (trackIndex < 0) return;
+    void persistProgress(false, true);
+    if (trackIndex === trackIndexRef.current) {
+      seekTo(chapter.startMs);
+      if (autoplay) void playCurrentAudio();
+    } else {
+      configureTrack(trackIndex, chapter.startMs, autoplay || !audioRef.current?.paused);
+    }
+  }, [configureTrack, persistProgress, playCurrentAudio, seekTo]);
+
+  const previousChapter = useCallback(() => {
+    const bootstrap = bootstrapRef.current;
+    const currentTrack = bootstrap?.tracks[trackIndexRef.current];
+    if (!bootstrap || !currentTrack) return;
+    const position = (audioRef.current?.currentTime ?? 0) * 1000;
+    const current = chapterAt(bootstrap.chapters, currentTrack.fileId, position);
+    const currentIndex = current ? bootstrap.chapters.findIndex((chapter) => chapter.id === current.id) : -1;
+    if (current && position - current.startMs > 3_000) {
+      seekTo(current.startMs);
+      return;
+    }
+    if (currentIndex > 0) selectChapter(bootstrap.chapters[currentIndex - 1].id);
+    else if (trackIndexRef.current > 0) selectTrack(trackIndexRef.current - 1);
+    else seekTo(0);
+  }, [seekTo, selectChapter, selectTrack]);
+
+  const nextChapter = useCallback(() => {
+    const bootstrap = bootstrapRef.current;
+    const currentTrack = bootstrap?.tracks[trackIndexRef.current];
+    if (!bootstrap || !currentTrack) return;
+    const current = chapterAt(bootstrap.chapters, currentTrack.fileId, (audioRef.current?.currentTime ?? 0) * 1000);
+    const currentIndex = current ? bootstrap.chapters.findIndex((chapter) => chapter.id === current.id) : -1;
+    if (currentIndex >= 0 && currentIndex < bootstrap.chapters.length - 1) selectChapter(bootstrap.chapters[currentIndex + 1].id);
+    else if (trackIndexRef.current < bootstrap.tracks.length - 1) selectTrack(trackIndexRef.current + 1);
+  }, [selectChapter, selectTrack]);
+
+  const setPlaybackRate = useCallback((rate: number) => {
+    const normalized = clamp(rate, 0.75, 3);
+    if (audioRef.current) audioRef.current.playbackRate = normalized;
+    updateState({ playbackRate: normalized });
+    const bootstrap = bootstrapRef.current;
+    writeStoredPreferences({ playbackRate: normalized, volume: stateRef.current.volume }, bootstrap?.userId, bootstrap?.edition.workId);
+    void persistProgress();
+  }, [persistProgress, updateState]);
+
+  const setVolume = useCallback((volume: number) => {
+    const normalized = clamp(volume, 0, 1);
+    if (audioRef.current) audioRef.current.volume = normalized;
+    updateState({ volume: normalized });
+    const bootstrap = bootstrapRef.current;
+    writeStoredPreferences({ playbackRate: stateRef.current.playbackRate, volume: normalized }, bootstrap?.userId, bootstrap?.edition.workId);
+  }, [updateState]);
+
+  const setSleepTimer = useCallback((value: number | 'chapter' | null) => {
+    if (value === 'chapter') {
+      const current = stateRef.current.chapter;
+      sleepTargetChapterRef.current = current?.id ?? `track:${stateRef.current.track?.fileId ?? ''}`;
+      updateState({ sleepTimerMode: 'chapter', sleepTimerEndsAt: null });
+      return;
+    }
+    sleepTargetChapterRef.current = null;
+    if (typeof value === 'number' && value > 0) {
+      updateState({ sleepTimerMode: 'timer', sleepTimerEndsAt: Date.now() + value * 60_000 });
+    } else {
+      updateState({ sleepTimerMode: null, sleepTimerEndsAt: null });
+    }
+  }, [updateState]);
+
+  const resetPlayback = useCallback((saveProgress: boolean) => {
+    if (saveProgress) void persistProgress(false, true);
+    loadSequenceRef.current += 1;
+    loadAbortRef.current?.abort();
+    loadAbortRef.current = null;
+    pendingLoadRef.current = null;
+    failedLoadRef.current = null;
+    nextTrackPreloadAbortRef.current?.abort();
+    nextTrackPreloadAbortRef.current = null;
+    const audio = audioRef.current;
+    if (audio) {
+      if (!audio.paused) suppressedPauseEventsRef.current += 1;
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+    }
+    bootstrapRef.current = null;
+    trackIndexRef.current = -1;
+    pendingSeekRef.current = null;
+    pendingAutoplayRef.current = false;
+    sleepTargetChapterRef.current = null;
+    const preferences = readStoredPreferences();
+    updateState({
+      ...initialState,
+      playbackRate: clamp(preferences.playbackRate ?? 1, 0.75, 3),
+      volume: clamp(preferences.volume ?? 1, 0, 1)
+    });
+  }, [persistProgress, updateState]);
+
+  const close = useCallback(() => resetPlayback(true), [resetPlayback]);
+
+  const retry = useCallback(async () => {
+    const failedLoad = failedLoadRef.current;
+    const editionId = failedLoad?.editionId ?? stateRef.current.pendingEditionId ?? stateRef.current.editionId;
+    if (editionId) await loadEdition(editionId, {
+      force: true,
+      autoplay: true,
+      chapterId: failedLoad?.chapterId ?? undefined,
+      summary: failedLoad?.summary ?? stateRef.current.pendingSummary ?? undefined
+    });
+  }, [loadEdition]);
+
+  const cancelEditionSwitch = useCallback(() => {
+    if (!bootstrapRef.current) return;
+    loadSequenceRef.current += 1;
+    loadAbortRef.current?.abort();
+    loadAbortRef.current = null;
+    pendingLoadRef.current = null;
+    failedLoadRef.current = null;
+    updateState({
+      pendingEditionId: null,
+      pendingSummary: null,
+      loadError: null,
+      lifecycle: 'paused'
+    });
+  }, [updateState]);
+
+  useEffect(() => {
+    const preferences = readStoredPreferences();
+    const playbackRate = clamp(preferences.playbackRate ?? 1, 0.75, 3);
+    const volume = clamp(preferences.volume ?? 1, 0, 1);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = playbackRate;
+      audioRef.current.volume = volume;
+    }
+    updateState({ playbackRate, volume });
+  }, [updateState]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return undefined;
+
+    const handleLoadedMetadata = () => {
+      let bootstrap = bootstrapRef.current;
+      let track = bootstrap?.tracks[trackIndexRef.current];
+      if (!bootstrap || !track) return;
+      const browserDurationMs = Number.isFinite(audio.duration) ? audio.duration * 1000 : 0;
+      if (track.durationMs <= 0 && browserDurationMs > 0) {
+        const tracks = bootstrap.tracks.map((item, index) => index === trackIndexRef.current ? { ...item, durationMs: browserDurationMs } : item);
+        const totalDurationMs = tracks.reduce((sum, item) => sum + Math.max(0, item.durationMs), 0);
+        bootstrap = { ...bootstrap, tracks, totalDurationMs };
+        track = tracks[trackIndexRef.current];
+        bootstrapRef.current = bootstrap;
+        updateState({ bootstrap, track, totalDurationMs });
+      }
+      const durationMs = browserDurationMs > 0 ? browserDurationMs : track.durationMs;
+      const positionMs = clamp(pendingSeekRef.current ?? audio.currentTime * 1000, 0, Math.max(durationMs, 0));
+      attemptPendingSeek(audio);
+      const chapter = chapterAt(bootstrap.chapters, track.fileId, positionMs);
+      updateState({
+        lifecycle: audio.paused ? 'paused' : 'playing',
+        durationMs,
+        positionMs,
+        chapter,
+        absolutePositionMs: absolutePositionForTrack(bootstrap.tracks, trackIndexRef.current, positionMs),
+        error: null
+      });
+      if (pendingAutoplayRef.current) {
+        pendingAutoplayRef.current = false;
+        void playCurrentAudio();
+      }
+    };
+
+    const handleCanPlay = () => {
+      attemptPendingSeek(audio);
+      updateState((current) => current.lifecycle === 'loading' ? { lifecycle: audio.paused ? 'paused' : 'playing' } : {});
+    };
+
+    const handlePlay = () => {
+      claimPlayback();
+      updateState({ lifecycle: 'playing', error: null });
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+    };
+
+    const handlePause = () => {
+      if (suppressedPauseEventsRef.current > 0) {
+        suppressedPauseEventsRef.current -= 1;
+        return;
+      }
+      if (bootstrapRef.current && !audio.ended) updateState({ lifecycle: 'paused' });
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+      void persistProgress(false, true);
+    };
+
+    const handleTimeUpdate = () => {
+      const bootstrap = bootstrapRef.current;
+      const track = bootstrap?.tracks[trackIndexRef.current];
+      if (!bootstrap || !track) return;
+      const positionMs = clamp(audio.currentTime * 1000, 0, Math.max(stateRef.current.durationMs || track.durationMs, 0));
+      const chapter = chapterAt(bootstrap.chapters, track.fileId, positionMs);
+      const absolutePositionMs = absolutePositionForTrack(bootstrap.tracks, trackIndexRef.current, positionMs);
+      updateState({ positionMs, chapter, absolutePositionMs });
+
+      if (stateRef.current.sleepTimerMode === 'chapter') {
+        const target = sleepTargetChapterRef.current;
+        const targetChapter = target && !target.startsWith('track:') ? bootstrap.chapters.find((item) => item.id === target) : null;
+        const reachedChapterEnd = targetChapter?.fileId === track.fileId && positionMs >= Math.max(targetChapter.startMs, targetChapter.endMs - 300);
+        const reachedTrackEnd = target === `track:${track.fileId}` && positionMs >= Math.max(0, stateRef.current.durationMs - 300);
+        if (reachedChapterEnd || reachedTrackEnd) {
+          audio.pause();
+          sleepTargetChapterRef.current = null;
+          updateState({ sleepTimerMode: null, sleepTimerEndsAt: null, lifecycle: 'paused' });
+        }
+      }
+
+      if (Date.now() - lastProgressEnqueueRef.current >= PROGRESS_INTERVAL_MS) void persistProgress();
+
+      if ('mediaSession' in navigator && Date.now() - mediaPositionUpdateRef.current >= 1_000) {
+        mediaPositionUpdateRef.current = Date.now();
+        const durationSeconds = bootstrap.totalDurationMs / 1000;
+        if (durationSeconds > 0 && Number.isFinite(durationSeconds)) {
+          try {
+            navigator.mediaSession.setPositionState({
+              duration: durationSeconds,
+              playbackRate: audio.playbackRate,
+              position: clamp(absolutePositionMs / 1000, 0, durationSeconds)
+            });
+          } catch {
+            // Media Session support is partial in older Safari/Chromium builds.
+          }
+        }
+      }
+    };
+
+    const handleSeeked = () => {
+      pendingSeekRef.current = pendingSeekAfterAssignment(
+        pendingSeekRef.current,
+        audio.currentTime * 1000,
+        true
+      );
+      void persistProgress(false, true);
+    };
+    const handleRateChange = () => updateState({ playbackRate: audio.playbackRate });
+    const handleVolumeChange = () => updateState({ volume: audio.volume });
+    const handleError = () => {
+      if (!bootstrapRef.current) return;
+      updateState({ lifecycle: 'error', error: mediaErrorMessage(audio, stateRef.current.track) });
+    };
+    const handleEnded = () => {
+      const bootstrap = bootstrapRef.current;
+      if (!bootstrap) return;
+      if (stateRef.current.sleepTimerMode === 'chapter') {
+        sleepTargetChapterRef.current = null;
+        updateState({ sleepTimerMode: null, sleepTimerEndsAt: null, lifecycle: 'paused' });
+        void persistProgress(false, true);
+        return;
+      }
+      if (trackIndexRef.current < bootstrap.tracks.length - 1) {
+        void persistProgress(false, true);
+        configureTrack(trackIndexRef.current + 1, 0, true);
+      } else {
+        const lastTrack = bootstrap.tracks[bootstrap.tracks.length - 1];
+        updateState({
+          lifecycle: 'paused',
+          positionMs: lastTrack.durationMs,
+          durationMs: lastTrack.durationMs,
+          absolutePositionMs: bootstrap.totalDurationMs
+        });
+        void persistProgress(true, true);
+      }
+    };
+
+    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+    audio.addEventListener('canplay', handleCanPlay);
+    audio.addEventListener('play', handlePlay);
+    audio.addEventListener('pause', handlePause);
+    audio.addEventListener('timeupdate', handleTimeUpdate);
+    audio.addEventListener('seeked', handleSeeked);
+    audio.addEventListener('ratechange', handleRateChange);
+    audio.addEventListener('volumechange', handleVolumeChange);
+    audio.addEventListener('error', handleError);
+    audio.addEventListener('ended', handleEnded);
+    return () => {
+      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.removeEventListener('canplay', handleCanPlay);
+      audio.removeEventListener('play', handlePlay);
+      audio.removeEventListener('pause', handlePause);
+      audio.removeEventListener('timeupdate', handleTimeUpdate);
+      audio.removeEventListener('seeked', handleSeeked);
+      audio.removeEventListener('ratechange', handleRateChange);
+      audio.removeEventListener('volumechange', handleVolumeChange);
+      audio.removeEventListener('error', handleError);
+      audio.removeEventListener('ended', handleEnded);
+    };
+  }, [attemptPendingSeek, claimPlayback, configureTrack, persistProgress, playCurrentAudio, updateState]);
+
+  useEffect(() => {
+    nextTrackPreloadAbortRef.current?.abort();
+    nextTrackPreloadAbortRef.current = null;
+    const bootstrap = bootstrapRef.current;
+    const audio = audioRef.current;
+    const nextTrack = bootstrap ? nextAudioTrackForMetadataPreload(bootstrap.tracks, state.trackIndex) : null;
+    if (!nextTrack || !audio || unsupportedAudioMimeType(nextTrack.mimeType, (mime) => audio.canPlayType(mime))) return undefined;
+    const controller = new AbortController();
+    nextTrackPreloadAbortRef.current = controller;
+    // A HEAD request primes authenticated file metadata without downloading
+    // the next (potentially multi-gigabyte) audio payload or creating a second
+    // media element.
+    void fetch(nextTrack.url, {
+      method: 'HEAD',
+      credentials: 'same-origin',
+      signal: controller.signal
+    }).catch(() => undefined);
+    return () => {
+      controller.abort();
+      if (nextTrackPreloadAbortRef.current === controller) nextTrackPreloadAbortRef.current = null;
+    };
+  }, [state.bootstrap?.edition.id, state.trackIndex]);
+
+  useEffect(() => {
+    if (state.sleepTimerMode !== 'timer' || !state.sleepTimerEndsAt) return undefined;
+    const delay = Math.max(0, state.sleepTimerEndsAt - Date.now());
+    const timer = window.setTimeout(() => {
+      audioRef.current?.pause();
+      updateState({ sleepTimerMode: null, sleepTimerEndsAt: null, lifecycle: 'paused' });
+    }, Math.min(delay, 2_147_000_000));
+    return () => window.clearTimeout(timer);
+  }, [state.sleepTimerEndsAt, state.sleepTimerMode, updateState]);
+
+  useEffect(() => {
+    const receiveClaim = (message: unknown) => {
+      const value = message && typeof message === 'object' ? message as { type?: string; tabId?: string } : {};
+      if (value.type !== 'claim-playback' || !value.tabId || value.tabId === thisTabIdRef.current) return;
+      const audio = audioRef.current;
+      if (audio && !audio.paused) {
+        audio.pause();
+        void persistProgress(false, true);
+      }
+    };
+    const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(PLAYBACK_CHANNEL) : null;
+    playbackChannelRef.current = channel;
+    const onMessage = (event: MessageEvent) => receiveClaim(event.data);
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== PLAYBACK_CLAIM_KEY || !event.newValue) return;
+      try { receiveClaim(JSON.parse(event.newValue)); } catch { /* ignore malformed legacy values */ }
+    };
+    channel?.addEventListener('message', onMessage);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      channel?.removeEventListener('message', onMessage);
+      channel?.close();
+      if (playbackChannelRef.current === channel) playbackChannelRef.current = null;
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [persistProgress]);
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') void persistProgress(false, true);
+    };
+    const handlePageHide = () => void persistProgress(false, true);
+    const handleUnauthorized = () => {
+      resetPlayback(false);
+    };
+    const handlePrivateDataClearing = () => {
+      try {
+        const keys: string[] = [];
+        for (let index = 0; index < window.localStorage.length; index += 1) {
+          const key = window.localStorage.key(index);
+          if (key === AUDIO_PREFERENCES_KEY || key?.startsWith(`${AUDIO_PREFERENCES_KEY}:`)) keys.push(key);
+        }
+        keys.forEach((key) => window.localStorage.removeItem(key));
+        window.localStorage.removeItem(PLAYBACK_CLAIM_KEY);
+      } catch {
+        // Storage may be unavailable while signing out in private mode.
+      }
+      resetPlayback(false);
+    };
+    const handleBeforePwaUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<BeforePwaUpdateDetail>).detail;
+      if (!detail?.waitUntil) return;
+      detail.waitUntil((async () => {
+        const audio = audioRef.current;
+        if (pendingLoadRef.current) pendingLoadRef.current.autoplay = false;
+        pendingAutoplayRef.current = false;
+        if (audio && !audio.paused) {
+          suppressedPauseEventsRef.current += 1;
+          audio.pause();
+        }
+        updateState((current) => current.bootstrap ? { lifecycle: 'paused' } : {});
+        await persistProgress(false, true);
+      })());
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
+    window.addEventListener('shuku:private-data-clearing', handlePrivateDataClearing);
+    window.addEventListener(BEFORE_PWA_UPDATE_EVENT, handleBeforePwaUpdate);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
+      window.removeEventListener('shuku:private-data-clearing', handlePrivateDataClearing);
+      window.removeEventListener(BEFORE_PWA_UPDATE_EVENT, handleBeforePwaUpdate);
+    };
+  }, [persistProgress, resetPlayback, updateState]);
+
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return undefined;
+    const mediaSession = navigator.mediaSession;
+    const handlers: Array<[MediaSessionAction, MediaSessionActionHandler | null]> = [
+      ['play', () => { void play(); }],
+      ['pause', pause],
+      ['stop', pause],
+      ['seekbackward', (details) => seekBy(-(details.seekOffset ?? stateRef.current.skipBackwardSeconds))],
+      ['seekforward', (details) => seekBy(details.seekOffset ?? stateRef.current.skipForwardSeconds)],
+      ['seekto', (details) => {
+        if (typeof details.seekTime === 'number') seekToAbsolute(details.seekTime * 1000);
+      }],
+      ['previoustrack', previousChapter],
+      ['nexttrack', nextChapter]
+    ];
+    handlers.forEach(([action, handler]) => {
+      try { mediaSession.setActionHandler(action, handler); } catch { /* optional action */ }
+    });
+    return () => handlers.forEach(([action]) => {
+      try { mediaSession.setActionHandler(action, null); } catch { /* optional action */ }
+    });
+  }, [nextChapter, pause, play, previousChapter, seekBy, seekToAbsolute]);
+
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    const bootstrap = state.bootstrap;
+    if (!bootstrap || !state.track) {
+      navigator.mediaSession.metadata = null;
+      return;
+    }
+    const cover = bootstrap.book.coverUrl
+      ? withBasePath(bootstrap.book.coverUrl)
+      : withBasePath(`/api/works/${encodeURIComponent(bootstrap.book.id)}/cover?size=large`);
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: state.chapter?.title ?? state.track.title,
+        artist: bootstrap.edition.narrator ?? bootstrap.book.author ?? '',
+        album: bootstrap.book.title,
+        artwork: [{ src: cover }]
+      });
+    } catch {
+      // Metadata is enhancement-only; native audio remains fully usable.
+    }
+  }, [state.bootstrap, state.chapter?.id, state.track]);
+
+  const value = useMemo<AudioPlaybackContextValue>(() => ({
+    ...state,
+    loadEdition,
+    retry,
+    cancelEditionSwitch,
+    play,
+    pause,
+    toggle,
+    close,
+    seekBy,
+    seekTo,
+    seekToAbsolute,
+    previousChapter,
+    nextChapter,
+    selectChapter,
+    selectTrack,
+    setPlaybackRate,
+    setVolume,
+    setSleepTimer
+  }), [
+    cancelEditionSwitch,
+    close,
+    loadEdition,
+    nextChapter,
+    pause,
+    play,
+    previousChapter,
+    retry,
+    seekBy,
+    seekTo,
+    seekToAbsolute,
+    selectChapter,
+    selectTrack,
+    setPlaybackRate,
+    setSleepTimer,
+    setVolume,
+    state,
+    toggle
+  ]);
+
+  return (
+    <AudioPlaybackContext.Provider value={value}>
+      {children}
+      <audio ref={audioRef} preload="metadata" className="hidden" aria-hidden="true" />
+    </AudioPlaybackContext.Provider>
+  );
+}
+
+export function useAudioPlayback() {
+  const value = useContext(AudioPlaybackContext);
+  if (!value) throw new Error('useAudioPlayback 必须在 AudioPlaybackProvider 内使用');
+  return value;
+}

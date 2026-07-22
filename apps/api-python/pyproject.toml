@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shuku-starship-api-python"
+version = "0.1.22"
+description = "Python FastAPI backend for 二毛图书"
+requires-python = "==3.11.*"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.30.0",
+  "sqlalchemy>=2.0.30",
+  "pydantic>=2.8.0",
+  "pydantic-settings>=2.4.0",
+  "email-validator>=2.2.0",
+  "aiofiles>=24.1.0",
+  "Pillow>=10.4.0",
+  "ebooklib>=0.18",
+  "lxml>=5.2.0",
+  "mutagen>=1.47.0",
+  "pypdfium2>=4.30.0",
+  "watchdog>=4.0.0",
+  "python-multipart>=0.0.20"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+  "httpx>=0.27.0"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.setuptools.package-data]
+"app.db" = ["schema.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "--capture=tee-sys"

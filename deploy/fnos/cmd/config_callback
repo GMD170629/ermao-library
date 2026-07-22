@@ -1,0 +1,7 @@
+#!/bin/bash
+set -eu
+
+bash "$TRIM_APPDEST/docker/prepare-storage.sh"
+bash "$TRIM_APPDEST/docker/validate-port.sh"
+
+exit 0

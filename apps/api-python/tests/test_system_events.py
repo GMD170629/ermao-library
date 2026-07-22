@@ -1,0 +1,45 @@
+import json
+
+from sqlalchemy import text
+
+from app.services.system_events import prune_system_events, record_system_event
+
+
+def test_record_system_event_normalizes_level_and_serializes_metadata(db_session):
+    event_id = record_system_event(
+        db_session,
+        source="import",
+        action="scan.completed",
+        level="warn",
+        message="扫描完成",
+        metadata={"filesScanned": 3, "path": "/books"},
+        commit=True,
+    )
+
+    event = db_session.execute(text("SELECT * FROM SystemEvent WHERE id = :id"), {"id": event_id}).mappings().one()
+    assert event["level"] == "warning"
+    assert event["source"] == "import"
+    assert json.loads(event["metadata"]) == {"filesScanned": 3, "path": "/books"}
+
+
+def test_prune_system_events_discards_info_before_protected_error_events(db_session):
+    for index in range(3):
+        record_system_event(
+            db_session,
+            source="import",
+            action=f"scan.file.detected.{index}",
+            message="普通扫描事件" + ("x" * 300),
+        )
+    protected_id = record_system_event(
+        db_session,
+        source="library",
+        action="deleted",
+        level="error",
+        message="关键删除审计事件",
+    )
+
+    result = prune_system_events(db_session, max_bytes=250, commit=True)
+
+    assert result["deleted"] == 3
+    assert db_session.execute(text("SELECT COUNT(*) FROM SystemEvent WHERE level = 'info'")).scalar() == 0
+    assert db_session.execute(text("SELECT COUNT(*) FROM SystemEvent WHERE id = :id"), {"id": protected_id}).scalar() == 1

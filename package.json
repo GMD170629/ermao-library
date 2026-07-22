@@ -1,0 +1,33 @@
+{
+  "name": "shuku-starship",
+  "private": true,
+  "version": "0.1.25",
+  "packageManager": "pnpm@9.12.2",
+  "engines": {
+    "node": "20.20.2",
+    "pnpm": "9.12.2"
+  },
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "dev:ios": "WEB_HOST=0.0.0.0 scripts/dev-test.sh",
+    "build": "turbo run build",
+    "pwa:ios": "pnpm --filter @shuku/web build && WEB_MODE=start WEB_HOST=0.0.0.0 scripts/dev-test.sh",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "dev:test": "scripts/dev-test.sh",
+    "acceptance": "node scripts/acceptance-check.mjs",
+    "acceptance:runtime": "node scripts/e2e-flow-check.mjs",
+    "smoke:python-api": "node scripts/python-api-runtime-smoke.mjs",
+    "smoke:python-worker": "node scripts/python-worker-runtime-smoke.mjs",
+    "smoke:python-worker-import": "cd apps/api-python && uv run --extra dev python ../../scripts/python_worker_import_smoke.py",
+    "smoke:python-sample": "cd apps/api-python && uv run --extra dev python ../../scripts/python_backend_sample_smoke.py",
+    "smoke:python-real-library": "cd apps/api-python && REQUIRE_REAL_LIBRARY_SAMPLE_DIR=true uv run --extra dev python ../../scripts/python_backend_sample_smoke.py",
+    "verify:python-backend": "node scripts/verify-python-backend-migration.mjs",
+    "fnos:validate": "FNOS_VALIDATE_ONLY=true scripts/build-fnos-package.sh",
+    "fnos:build": "scripts/build-fnos-package.sh",
+    "docker:publish": "scripts/publish-docker-hub.sh"
+  },
+  "devDependencies": {
+    "turbo": "^2.1.3"
+  }
+}

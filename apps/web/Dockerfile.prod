@@ -1,0 +1,51 @@
+FROM node:20.20.2-bookworm-slim AS deps
+WORKDIR /app
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/* \
+  && corepack enable
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY apps/web/package.json apps/web/package.json
+COPY packages/reader-core/package.json packages/reader-core/package.json
+RUN pnpm install --frozen-lockfile --filter @shuku/web...
+
+FROM deps AS builder
+ARG SHUKU_BASE_PATH=
+ENV NEXT_PUBLIC_BASE_PATH=$SHUKU_BASE_PATH
+COPY . .
+RUN pnpm --filter @shuku/web build
+
+FROM python:3.11.15-slim-bookworm AS runner
+WORKDIR /app
+ENV NODE_ENV=production \
+  NEXT_TELEMETRY_DISABLED=1 \
+  HOSTNAME=0.0.0.0 \
+  PORT=3000 \
+  PYTHONDONTWRITEBYTECODE=1 \
+  PYTHONUNBUFFERED=1 \
+  PATH=/opt/shuku-python/bin:$PATH
+
+COPY --from=deps /usr/local/bin/node /usr/local/bin/node
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates libmobi-tools libstdc++6 \
+  && rm -rf /var/lib/apt/lists/* \
+  && node --version \
+  && python --version
+
+COPY --from=builder /app/scripts/start-unified-app.sh ./scripts/start-unified-app.sh
+COPY --from=builder /app/apps/web/.next/standalone ./
+COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder /app/apps/web/public ./apps/web/public
+COPY --from=builder /app/apps/api-python/app ./apps/api-python/app
+COPY --from=builder /app/apps/api-python/pyproject.toml ./apps/api-python/pyproject.toml
+RUN python -m venv /opt/shuku-python \
+  && /opt/shuku-python/bin/pip install --no-cache-dir ./apps/api-python \
+  && /opt/shuku-python/bin/python -m compileall -q ./apps/api-python/app \
+  && rm -rf ./apps/api-python/build ./apps/api-python/*.egg-info \
+  && chmod +x ./scripts/start-unified-app.sh \
+  && mkdir -p /app/storage/database /app/storage/covers /app/storage/indexes /app/storage/conversions /app/storage/temp/conversions /app/storage/logs /books
+
+EXPOSE 3000
+CMD ["./scripts/start-unified-app.sh"]
