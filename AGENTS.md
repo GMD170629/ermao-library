@@ -31,3 +31,20 @@ Treat EPUB.js as an immutable third-party dependency:
 2. Never edit files under `node_modules/epubjs`, vendor modified EPUB.js source, or add a package patch that changes EPUB.js behavior.
 3. Do not attribute a reader defect to EPUB.js unless a matching upstream GitHub issue, discussion, fix commit, or release note provides concrete evidence. Without that evidence, treat the defect as an application integration, configuration, lifecycle, or API-usage problem.
 4. Fix EPUB reader behavior only through EPUB.js public APIs and this repository's own adapter, controller, presentation, and input code.
+
+## Release Version Consistency
+
+Treat a release as a coordinated application-version update, not only a GitHub tag or GitHub Release operation.
+
+For every versioned release:
+
+1. Choose one semantic version and use it consistently for the GitHub tag, release title, Docker/package artifacts, the Web application, and the backend application.
+2. Before creating the release tag, update every application-owned version source, including at least:
+   - the root `package.json` version, which is the canonical release version and is displayed by the Web “About” page;
+   - `apps/web/package.json`;
+   - `apps/api-python/pyproject.toml`;
+   - the backend runtime default in `apps/api-python/app/core/config.py`;
+   - generated lockfiles such as `pnpm-lock.yaml` and `apps/api-python/uv.lock` when their package-version metadata changes.
+3. Verify that the system Web “About” page displays the new version and that backend version responses/runtime metadata report the same version.
+4. Verify that the GitHub tag is exactly `v<version>` and matches the root `package.json` version before publishing. Do not publish when any application, page, runtime metadata, lockfile, tag, or artifact still reports the previous or a conflicting version.
+5. Include version-consistency checks in the release validation or workflow whenever practical, so a mismatched Web, backend, package, artifact, or GitHub release version fails before publication.

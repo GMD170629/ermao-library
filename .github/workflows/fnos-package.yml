@@ -69,6 +69,16 @@ jobs:
         shell: bash
         run: |
           app_version="$(node -p "require('./package.json').version")"
+          web_version="$(node -p "require('./apps/web/package.json').version")"
+          python_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' apps/api-python/pyproject.toml | head -n 1)"
+          runtime_version="$(sed -n 's/^[[:space:]]*app_version: str = "\([^"]*\)"/\1/p' apps/api-python/app/core/config.py)"
+          lock_version="$(awk '/^name = "shuku-starship-api-python"$/ { found=1; next } found && /^version = / { gsub(/"/, "", $3); print $3; exit }' apps/api-python/uv.lock)"
+          for version_source in "$web_version" "$python_version" "$runtime_version" "$lock_version"; do
+            if [[ "$version_source" != "$app_version" ]]; then
+              echo "Application versions are inconsistent: root=$app_version web=$web_version python=$python_version runtime=$runtime_version lock=$lock_version" >&2
+              exit 1
+            fi
+          done
           if [[ "${GITHUB_REF_TYPE}" == 'tag' && "${GITHUB_REF_NAME}" != "v${app_version}" ]]; then
             echo "Tag ${GITHUB_REF_NAME} does not match package version v${app_version}" >&2
             exit 1

@@ -9,6 +9,7 @@ import { Cover } from '../../components/book/cover';
 import { MobileNavigationTrigger } from '../../components/layout/mobile-navigation';
 import { Progress } from '../../components/ui/progress';
 import { useAudioPlayback } from '../audio/audio-playback-provider';
+import { UploadBookDialog } from '../library/upload-book-dialog';
 import type { WorkView } from '../../types/work';
 
 type ContinueItem = {
@@ -51,6 +52,7 @@ export function DashboardPage() {
   const [recentBooks, setRecentBooks] = useState<WorkView[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -86,7 +88,7 @@ export function DashboardPage() {
         </div>
         <button
           type="button"
-          onClick={() => router.push('/library?upload=1')}
+          onClick={() => setUploadDialogOpen(true)}
           aria-label="上传读物"
           title="上传读物"
           className="flex h-12 w-12 items-center justify-center rounded-full border border-black/[0.12] bg-white/55 text-[#252321] transition hover:border-[#EF4D2F]/40 hover:bg-[#FFF4EF] hover:text-[#EF4D2F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]"
@@ -94,6 +96,13 @@ export function DashboardPage() {
           <Plus size={25} strokeWidth={1.6} />
         </button>
       </header>
+
+      <UploadBookDialog
+        open={uploadDialogOpen}
+        onClose={() => setUploadDialogOpen(false)}
+        onImported={() => setError('')}
+        onError={setError}
+      />
 
       {error ? <div className="mt-6 rounded-xl bg-[#FFF2EC] px-4 py-3 text-sm text-[#A9462F]">{error}</div> : null}
 

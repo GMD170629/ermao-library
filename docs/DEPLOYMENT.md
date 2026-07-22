@@ -19,7 +19,7 @@ curl -fsSL https://raw.githubusercontent.com/GMD170629/ermao-library/main/docker
 
 ## 迁移与初始化
 
-SQLite 固定保存在 `STORAGE_ROOT/database/shuku.sqlite3`。Python API 启动时自动创建数据库文件、完整表结构和基础 `SystemSetting`，但不会生成默认管理员或示例书。用户首次打开 Web 页面时由项目级向导创建唯一的初始管理账户，不需要管理员环境变量。真实读物来自手动上传，或在 `/settings` 添加监控文件夹后由 Worker 实时导入。
+SQLite 固定保存在 `STORAGE_ROOT/database/shuku.sqlite3`。Python API 启动时自动创建数据库文件、完整表结构和基础 `SystemSetting`，但不会生成默认管理员或示例书。用户首次打开 Web 页面时由项目级向导创建唯一的初始管理账户并添加监控文件夹，不需要管理员环境变量。真实读物来自手动上传，或由 Worker 实时导入监控文件夹中的文件。
 
 ## 启动检查
 

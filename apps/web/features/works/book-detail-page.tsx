@@ -25,7 +25,7 @@ import {
   X
 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { Cover } from '../../components/book/cover';
 import { MobileNavigationTrigger } from '../../components/layout/mobile-navigation';
 import { Button } from '../../components/ui/button';
@@ -45,7 +45,8 @@ import {
   formatDuration,
   mediaKindForEdition,
   resolvedDetailTab,
-  selectedEditionForDetailTab
+  selectedEditionForDetailTab,
+  workDetailTabHref
 } from './work-detail-tabs';
 
 const DEFAULT_DESCRIPTION = '暂无简介，可在详情页补充元数据。';
@@ -284,6 +285,9 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const detailRequestRef = useRef<AbortController | null>(null);
   const preferenceRequestRef = useRef<AbortController | null>(null);
   const localDetailQueryRef = useRef<string | null>(null);
+  const seriesScrollerRef = useRef<HTMLDivElement>(null);
+  const seriesDragRef = useRef<{ pointerId: number; startX: number; scrollLeft: number; moved: boolean } | null>(null);
+  const suppressSeriesClickRef = useRef(false);
 
   const [book, setBook] = useState<WorkView | null>(null);
   const [error, setError] = useState('');
@@ -319,6 +323,8 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const [seriesBooks, setSeriesBooks] = useState<WorkView[]>([]);
   const [seriesTotal, setSeriesTotal] = useState(0);
   const [seriesLoading, setSeriesLoading] = useState(false);
+  const [seriesCanScrollLeft, setSeriesCanScrollLeft] = useState(false);
+  const [seriesCanScrollRight, setSeriesCanScrollRight] = useState(false);
   const [coverBust, setCoverBust] = useState(0);
   const [editionForm, setEditionForm] = useState({ versionName: '', publisher: '', publishedAt: '', language: '', isbn: '', identifier: '', narrator: '', description: '' });
   const [splitTarget, setSplitTarget] = useState<WorkView['editions'][number] | null>(null);
@@ -491,6 +497,71 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       active = false;
     };
   }, [book?.seriesName]);
+
+  const updateSeriesScrollState = useCallback(() => {
+    const scroller = seriesScrollerRef.current;
+    if (!scroller) {
+      setSeriesCanScrollLeft(false);
+      setSeriesCanScrollRight(false);
+      return;
+    }
+    setSeriesCanScrollLeft(scroller.scrollLeft > 1);
+    setSeriesCanScrollRight(scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 1);
+  }, []);
+
+  useEffect(() => {
+    const scroller = seriesScrollerRef.current;
+    if (!scroller || seriesBooks.length === 0) return;
+    const frame = window.requestAnimationFrame(() => {
+      scroller.querySelector<HTMLElement>('[data-series-current="true"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+      updateSeriesScrollState();
+    });
+    const observer = new ResizeObserver(updateSeriesScrollState);
+    observer.observe(scroller);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [bookId, seriesBooks, updateSeriesScrollState]);
+
+  function scrollSeries(direction: -1 | 1) {
+    const scroller = seriesScrollerRef.current;
+    if (!scroller) return;
+    scroller.scrollBy({ left: direction * Math.max(240, scroller.clientWidth * 0.75), behavior: 'smooth' });
+  }
+
+  function startSeriesDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.pointerType === 'touch' || event.button !== 0) return;
+    const scroller = seriesScrollerRef.current;
+    if (!scroller) return;
+    seriesDragRef.current = { pointerId: event.pointerId, startX: event.clientX, scrollLeft: scroller.scrollLeft, moved: false };
+  }
+
+  function moveSeriesDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = seriesDragRef.current;
+    const scroller = seriesScrollerRef.current;
+    if (!drag || !scroller || drag.pointerId !== event.pointerId) return;
+    const distance = event.clientX - drag.startX;
+    if (Math.abs(distance) > 4 && !drag.moved) {
+      drag.moved = true;
+      scroller.setPointerCapture(event.pointerId);
+    }
+    if (drag.moved) {
+      event.preventDefault();
+      scroller.scrollLeft = drag.scrollLeft - distance;
+    }
+  }
+
+  function finishSeriesDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = seriesDragRef.current;
+    const scroller = seriesScrollerRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    suppressSeriesClickRef.current = drag.moved;
+    seriesDragRef.current = null;
+    if (scroller?.hasPointerCapture(event.pointerId)) scroller.releasePointerCapture(event.pointerId);
+    window.setTimeout(() => { suppressSeriesClickRef.current = false; }, 0);
+    updateSeriesScrollState();
+  }
 
   useEffect(() => {
     if (!moveTargetOpen) return;
@@ -1410,17 +1481,42 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
               {book.seriesName && seriesTotal > 0 ? (
                 <div className="flex items-center gap-3">
                   <span className="text-sm text-stone-400">{seriesTotal} 本</span>
+                  <div className="flex items-center gap-1" aria-label="浏览系列图书">
+                    <button type="button" disabled={!seriesCanScrollLeft} onClick={() => scrollSeries(-1)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-stone-200 text-stone-600 transition hover:border-orange-200 hover:text-[#e84420] disabled:cursor-not-allowed disabled:opacity-35" aria-label="向左浏览系列"><ChevronLeft size={17} /></button>
+                    <button type="button" disabled={!seriesCanScrollRight} onClick={() => scrollSeries(1)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-stone-200 text-stone-600 transition hover:border-orange-200 hover:text-[#e84420] disabled:cursor-not-allowed disabled:opacity-35" aria-label="向右浏览系列"><ChevronRight size={17} /></button>
+                  </div>
                   <button type="button" onClick={() => router.push(`/library?seriesName=${encodeURIComponent(book.seriesName ?? '')}`)} className="text-sm font-medium text-[#ED4D2D] hover:text-[#C83B23]">查看全部</button>
                 </div>
               ) : null}
             </div>
             {book.seriesName && seriesLoading ? <div className="mt-4 text-sm text-stone-400">正在读取系列...</div> : null}
             {book.seriesName && !seriesLoading && seriesBooks.length > 0 ? (
-              <div className="mt-4 flex gap-6 overflow-x-auto border-y border-stone-100 py-4">
+              <div
+                ref={seriesScrollerRef}
+                className="mt-4 flex cursor-grab snap-x snap-proximity gap-6 overflow-x-auto overscroll-x-contain border-y border-stone-100 py-4 active:cursor-grabbing"
+                tabIndex={0}
+                aria-label="系列图书列表"
+                onScroll={updateSeriesScrollState}
+                onPointerDown={startSeriesDrag}
+                onPointerMove={moveSeriesDrag}
+                onPointerUp={finishSeriesDrag}
+                onPointerCancel={finishSeriesDrag}
+                onKeyDown={(event) => {
+                  if (event.key === 'ArrowLeft') { event.preventDefault(); scrollSeries(-1); }
+                  if (event.key === 'ArrowRight') { event.preventDefault(); scrollSeries(1); }
+                }}
+              >
                 {seriesBooks.map((seriesBook) => {
                   const current = seriesBook.id === book.id;
                   return (
-                    <button key={seriesBook.id} type="button" onClick={() => !current && router.push(`/works/${seriesBook.id}`)} className="group w-44 shrink-0 text-left" aria-current={current ? 'page' : undefined}>
+                    <button
+                      key={seriesBook.id}
+                      type="button"
+                      data-series-current={current ? 'true' : undefined}
+                      onClick={() => !suppressSeriesClickRef.current && !current && router.push(workDetailTabHref(seriesBook.id, 'STRUCTURE'))}
+                      className="group w-44 shrink-0 snap-start text-left"
+                      aria-current={current ? 'page' : undefined}
+                    >
                       <div className={cn('flex items-center gap-3 rounded-xl p-1.5 transition', current ? 'bg-[#fff4ef]' : 'hover:bg-stone-50')}>
                         <Cover book={seriesBook} className="aspect-[2/3] w-16 shrink-0 rounded-lg" size="small" />
                         <div className="min-w-0">

@@ -18,6 +18,7 @@ import {
   shelfPageItems,
   shelfPaginationCandidates
 } from './shelf-pagination';
+import { summarizeSmartShelfRules, type SmartShelfRules } from './smart-shelf-rules';
 
 type ShelfView = {
   id: string;
@@ -29,14 +30,7 @@ type ShelfView = {
   createdAt: string;
   updatedAt: string;
   kind?: 'STATIC' | 'SMART';
-  rules?: {
-    search?: string;
-    statuses?: string[];
-    mediaKinds?: string[];
-    tags?: string[];
-    combinator?: 'ALL' | 'ANY';
-    conditions?: Array<{ field: string; operator: string; value?: string | string[] }>;
-  };
+  rules?: SmartShelfRules;
   pinned?: boolean;
 };
 
@@ -89,7 +83,9 @@ export function ShelvesPage() {
 
   const route = useMemo(() => new URLSearchParams(currentSearch), [currentSearch]);
   const activeIsNew = activeId === 'new';
-  const editing = activeIsNew || (Boolean(activeId) && route.get('edit') === '1' && activeShelf?.kind !== 'SMART');
+  const editing = activeIsNew || (Boolean(activeId) && route.get('edit') === '1' && Boolean(activeShelf));
+  const activeIsSmart = activeShelf?.kind === 'SMART';
+  const smartRuleSummaries = useMemo(() => summarizeSmartShelfRules(activeShelf?.rules), [activeShelf?.rules]);
 
   useEffect(() => {
     void loadShelves();
@@ -116,7 +112,7 @@ export function ShelvesPage() {
   }, [route]);
 
   useEffect(() => {
-    if (!editing || !activeId || search.trim().length === 0) {
+    if (!editing || activeIsSmart || !activeId || search.trim().length === 0) {
       setSearchBooks([]);
       setSearchLoading(false);
       return;
@@ -138,7 +134,7 @@ export function ShelvesPage() {
     return () => {
       active = false;
     };
-  }, [activeId, editing, search]);
+  }, [activeId, activeIsSmart, editing, search]);
 
   const previewBooksById = useMemo(() => {
     const books = new Map<string, WorkView>();
@@ -156,7 +152,7 @@ export function ShelvesPage() {
     : activeShelf ? (
       form.name.trim() !== activeShelf.name
       || form.description.trim() !== (activeShelf.description ?? '')
-      || selectedBookIds.join('\u0000') !== initialBookIds.join('\u0000')
+      || (!activeIsSmart && selectedBookIds.join('\u0000') !== initialBookIds.join('\u0000'))
     ) : false;
 
   async function loadShelves() {
@@ -210,7 +206,7 @@ export function ShelvesPage() {
     if (hasUnsavedChanges) {
       const discard = await confirm({
         title: '放弃未保存的更改',
-        description: '书架名称、描述和图书调整都不会保留。',
+        description: activeIsSmart ? '书架名称和描述的更改不会保留。' : '书架名称、描述和图书调整都不会保留。',
         confirmLabel: '放弃更改',
         tone: 'danger'
       });
@@ -235,7 +231,11 @@ export function ShelvesPage() {
       const response = await fetch(activeIsNew ? '/api/shelves' : `/api/shelves/${activeId}`, {
         method: activeIsNew ? 'POST' : 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, description: form.description.trim(), bookIds: selectedBookIds })
+        body: JSON.stringify({
+          name,
+          description: form.description.trim(),
+          ...(!activeIsSmart ? { bookIds: selectedBookIds } : {})
+        })
       });
       const payload = await readPayload<ShelfPayload>(response, '保存书架失败');
       if (!payload.data) throw new Error('保存书架失败');
@@ -261,7 +261,9 @@ export function ShelvesPage() {
     if (!activeShelf) return;
     const approved = await confirm({
       title: '删除书架',
-      description: `删除书架“${activeShelf.name}”？书架中的图书仍会保留在书库中。`,
+      description: activeIsSmart
+        ? `删除智能书架“${activeShelf.name}”？自动收录规则会被删除，但图书仍会保留在书库中。`
+        : `删除书架“${activeShelf.name}”？书架中的图书仍会保留在书库中。`,
       confirmLabel: '删除书架',
       tone: 'danger'
     });
@@ -288,7 +290,7 @@ export function ShelvesPage() {
       <Button variant="secondary" icon={ArrowLeft} onClick={() => editing ? void leaveEditor() : router.push('/shelves', { scroll: false })}>
         {editing ? '取消' : '全部书架'}
       </Button>
-      {!editing && activeShelf?.kind !== 'SMART' && activeShelf ? <Button icon={Edit3} onClick={() => router.push(`/shelves?shelf=${encodeURIComponent(activeShelf.id)}&edit=1`, { scroll: false })}>管理书架</Button> : null}
+      {!editing && activeShelf ? <Button icon={Edit3} onClick={() => router.push(`/shelves?shelf=${encodeURIComponent(activeShelf.id)}&edit=1`, { scroll: false })}>管理书架</Button> : null}
       {editing ? <Button icon={Save} loading={saving} loadingText="保存中" disabled={detailLoading} onClick={saveShelf}>{activeIsNew ? '创建书架' : '保存更改'}</Button> : null}
     </div>
   ) : <Button icon={Plus} onClick={() => router.push('/shelves?create=1', { scroll: false })}>创建书架</Button>;
@@ -314,9 +316,9 @@ export function ShelvesPage() {
           <div className="flex flex-col gap-3 border-b border-[#EEE8E3] pb-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="flex items-center gap-2 font-semibold text-[#2A2825]"><Edit3 size={17} /> {activeIsNew ? '书架信息' : '编辑书架'}</div>
-              <div className="mt-1 text-sm text-[#7C756F]">勾选或移除图书后，点击“{activeIsNew ? '创建书架' : '保存更改'}”统一生效。</div>
+              <div className="mt-1 text-sm text-[#7C756F]">{activeIsSmart ? '可以修改基本信息并查看自动收录条件；图书由规则自动管理。' : `勾选或移除图书后，点击“${activeIsNew ? '创建书架' : '保存更改'}”统一生效。`}</div>
             </div>
-            <Badge>{selectedBookIds.length} 本图书</Badge>
+            <Badge>{activeIsSmart ? activeShelf?.bookCount ?? 0 : selectedBookIds.length} 本图书</Badge>
           </div>
 
           <div className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,1fr)_390px]">
@@ -332,7 +334,29 @@ export function ShelvesPage() {
                 </label>
               </div>
 
-              <div>
+              {activeIsSmart ? (
+                <div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-[#2A2825]">自动加入条件</div>
+                      <div className="mt-1 text-xs leading-5 text-[#8A837D]">基础条件需全部满足{activeShelf?.rules?.conditions?.length ? `，组合条件${activeShelf.rules.combinator === 'ANY' ? '满足任一条即可' : '需全部满足'}` : ''}。图书不能手动加入或移出。</div>
+                    </div>
+                    <Badge tone="amber">智能书架</Badge>
+                  </div>
+                  {smartRuleSummaries.length > 0 ? (
+                    <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+                      {smartRuleSummaries.map((rule, index) => (
+                        <div key={`${rule.label}-${index}`} className="rounded-2xl border border-[#E8E0D9] bg-[#FAF8F6] px-4 py-3">
+                          <dt className="text-xs font-medium text-[#8D857E]">{rule.label}</dt>
+                          <dd className="mt-1 text-sm font-medium text-[#403C38]">{rule.value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  ) : (
+                    <div className="mt-3 rounded-2xl border border-dashed border-[#DCD5CE] bg-[#FAF8F6] px-4 py-5 text-sm text-[#746E68]">没有额外筛选条件，将自动收录全部可见图书。</div>
+                  )}
+                </div>
+              ) : <div>
                 <div className="mb-3 flex items-center justify-between">
                   <div className="text-sm font-semibold text-[#2A2825]">书架中的图书</div>
                   <span className="text-xs text-[#8A837D]">移除只影响本书架，不会删除图书</span>
@@ -356,10 +380,10 @@ export function ShelvesPage() {
                     <div className="mt-1 text-sm text-[#918A84]">在右侧搜索图书并勾选加入。</div>
                   </div>
                 )}
-              </div>
+              </div>}
             </div>
 
-            <aside className="self-start rounded-[20px] bg-[#F6F3F0] p-4 xl:sticky xl:top-6">
+            {!activeIsSmart ? <aside className="self-start rounded-[20px] bg-[#F6F3F0] p-4 xl:sticky xl:top-6">
               <div className="text-sm font-semibold text-[#2A2825]">添加图书</div>
               <div className="mt-1 text-xs leading-5 text-[#827B75]">按书名、作者或标签搜索，勾选后随书架一起保存。</div>
               <div className="mt-3 flex h-11 items-center gap-2 rounded-xl border border-[#DED8D1] bg-white px-3 transition focus-within:border-[#ED9D86] focus-within:ring-4 focus-within:ring-[#FFE4DC]">
@@ -385,12 +409,17 @@ export function ShelvesPage() {
                   );
                 })}
               </div>
-            </aside>
+            </aside> : (
+              <aside className="self-start rounded-[20px] border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900 xl:sticky xl:top-6">
+                <div className="font-semibold">图书自动管理</div>
+                <div className="mt-1">智能书架会随图书信息和阅读状态变化自动更新，因此不提供手动添加或移除。</div>
+              </aside>
+            )}
           </div>
 
           {!activeIsNew ? (
             <div className="mt-6 flex flex-col gap-3 border-t border-[#EEE8E3] pt-5 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm text-[#817A74]">不再需要这个分类时，可以只删除书架，图书会继续保留在书库。</div>
+              <div className="text-sm text-[#817A74]">{activeIsSmart ? '删除智能书架只会删除自动收录规则，不会删除任何图书。' : '不再需要这个分类时，可以只删除书架，图书会继续保留在书库。'}</div>
               <Button variant="danger" icon={Trash2} disabled={saving} onClick={deleteShelf}>删除书架</Button>
             </div>
           ) : null}

@@ -1,6 +1,6 @@
 {
   "name": "@shuku/web",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "scripts": {
     "predev": "node scripts/prepare-pdfjs-worker.mjs",
@@ -14,7 +14,7 @@
     "pwa:ios": "pnpm build && pnpm start:ios",
     "generate:reader-api": "cd ../api-python && uv run python scripts/export_openapi.py ../web/.reader-openapi.json && cd ../web && node scripts/generate-reader-api.mjs .reader-openapi.json generated/reader-v2.ts",
     "lint": "next lint",
-    "test": "tsx --test 'lib/**/*.test.ts' 'features/**/*.test.ts'",
+    "test": "node scripts/run-tests.mjs",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit"
   },

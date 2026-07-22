@@ -19,6 +19,10 @@ export function isWorkDetailTabKey(value: unknown): value is WorkDetailTabKey {
   return typeof value === 'string' && DEFAULT_WORK_DETAIL_TAB_ORDER.includes(value as WorkDetailTabKey);
 }
 
+export function workDetailTabHref(workId: string, tab: WorkDetailTabKey): string {
+  return `/works/${encodeURIComponent(workId)}?detailTab=${tab}`;
+}
+
 /**
  * System settings are intentionally forgiving: accept a JSON string or an
  * already parsed array, discard unknown/duplicate values, then append missing

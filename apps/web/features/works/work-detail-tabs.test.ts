@@ -8,7 +8,8 @@ import {
   moveWorkDetailTab,
   normalizeWorkDetailTabOrder,
   placeWorkDetailTab,
-  resolvedDetailTab
+  resolvedDetailTab,
+  workDetailTabHref
 } from './work-detail-tabs';
 
 function legacyBook(editions: WorkView['editions']): WorkView {
@@ -24,6 +25,10 @@ test('normalizes saved order, removes unknown duplicates and restores missing ta
     normalizeWorkDetailTabOrder('["AUDIOBOOK","EBOOK","AUDIOBOOK","UNKNOWN"]'),
     ['AUDIOBOOK', 'EBOOK', 'COMIC', 'STRUCTURE']
   );
+});
+
+test('series work links keep the visitor on the content structure tab', () => {
+  assert.equal(workDetailTabHref('work/下一部', 'STRUCTURE'), '/works/work%2F%E4%B8%8B%E4%B8%80%E9%83%A8?detailTab=STRUCTURE');
 });
 
 test('legacy work hides missing media tabs and always keeps content structure', () => {
