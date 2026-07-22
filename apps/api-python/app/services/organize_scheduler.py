@@ -11,6 +11,7 @@ from typing import Any, Callable
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
+from app.core.time import to_timestamp_ms
 from app.services.metadata_provider_registry import enabled_metadata_provider_ids
 
 
@@ -231,11 +232,12 @@ def eligible_organize_works(
         since = policy.get("autoRunOnNewSince")
         if not since:
             return []
-        params["since"] = since
-        where.append("datetime(w.`createdAt`) >= datetime(:since)")
+        params["since"] = to_timestamp_ms(since)
+        where.append("CAST(w.`createdAt` AS INTEGER) >= :since")
     rows = _rows(
         db,
-        f"SELECT w.* FROM `LibraryWork` w WHERE {' AND '.join(where)} ORDER BY w.`createdAt` ASC LIMIT :limit",
+        f"SELECT w.* FROM `LibraryWork` w WHERE {' AND '.join(where)} "
+        "ORDER BY CAST(w.`createdAt` AS INTEGER) ASC, w.`id` ASC LIMIT :limit",
         params,
     )
     result: list[dict[str, Any]] = []

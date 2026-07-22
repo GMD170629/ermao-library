@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, Boolean, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.time import TimestampMilliseconds
 from app.db.base import Base
 
 
@@ -14,7 +15,7 @@ def cuid() -> str:
 
 
 def db_timestamp() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(timezone.utc)
 
 
 class MonitorFolder(Base):
@@ -29,8 +30,8 @@ class MonitorFolder(Base):
     ignore_hidden: Mapped[bool] = mapped_column("ignoreHidden", Boolean, nullable=False, default=True)
     min_file_size_bytes: Mapped[int] = mapped_column("minFileSizeBytes", Integer, nullable=False, default=10240)
     description: Mapped[str | None] = mapped_column(String(191), nullable=True)
-    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, nullable=False, default=db_timestamp, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, nullable=False, default=db_timestamp, onupdate=db_timestamp, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp)
+    updated_at: Mapped[datetime] = mapped_column("updatedAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, onupdate=db_timestamp)
 
 
 class SystemSetting(Base):
@@ -38,8 +39,8 @@ class SystemSetting(Base):
 
     key: Mapped[str] = mapped_column(String(191), primary_key=True)
     value: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, nullable=False, default=db_timestamp, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, nullable=False, default=db_timestamp, onupdate=db_timestamp, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp)
+    updated_at: Mapped[datetime] = mapped_column("updatedAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, onupdate=db_timestamp)
 
 
 class BookIdentityCache(Base):
@@ -53,8 +54,8 @@ class BookIdentityCache(Base):
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     parser_version: Mapped[int] = mapped_column("parserVersion", Integer, nullable=False)
     raw_json: Mapped[str] = mapped_column("rawJson", Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, nullable=False, default=db_timestamp, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, nullable=False, default=db_timestamp, onupdate=db_timestamp, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp)
+    updated_at: Mapped[datetime] = mapped_column("updatedAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, onupdate=db_timestamp)
 
 
 class SystemEvent(Base):
@@ -70,7 +71,7 @@ class SystemEvent(Base):
     target_id: Mapped[str | None] = mapped_column("targetId", String(191), nullable=True)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     metadata_json: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, nullable=False, default=db_timestamp, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp)
 
 
 class ReaderBookPreference(Base):
@@ -89,8 +90,8 @@ class ReaderBookPreference(Base):
     work_id: Mapped[str] = mapped_column("workId", String(191), nullable=False, index=True)
     schema_version: Mapped[int] = mapped_column("schemaVersion", Integer, nullable=False, default=3, server_default="3")
     preferences: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, nullable=False, default=db_timestamp, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, nullable=False, default=db_timestamp, onupdate=db_timestamp, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp)
+    updated_at: Mapped[datetime] = mapped_column("updatedAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, onupdate=db_timestamp)
 
 
 class ReaderProgressCursor(Base):
@@ -105,5 +106,5 @@ class ReaderProgressCursor(Base):
     client_id: Mapped[str] = mapped_column("clientId", String(191), nullable=False)
     high_water: Mapped[int] = mapped_column("highWater", BigInteger, nullable=False, default=-1)
     last_mutation_id: Mapped[str | None] = mapped_column("lastMutationId", String(191), nullable=True)
-    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, nullable=False, default=db_timestamp, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, nullable=False, default=db_timestamp, onupdate=db_timestamp, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp)
+    updated_at: Mapped[datetime] = mapped_column("updatedAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, onupdate=db_timestamp)

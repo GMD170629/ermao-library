@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.config import Settings, get_settings
+from app.core.time import timestamp_ms_to_datetime
 from app.db.session import get_db
 from app.schemas.reader_v2 import (
     AudioChapterSummary,
@@ -104,10 +105,7 @@ def _datetime(value: Any) -> datetime | None:
         return value
     if not value:
         return None
-    try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return None
+    return timestamp_ms_to_datetime(value)
 
 
 def _reader_format(value: Any) -> str | None:

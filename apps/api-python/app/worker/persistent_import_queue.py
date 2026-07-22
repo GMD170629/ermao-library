@@ -4,7 +4,6 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -12,12 +11,13 @@ from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.worker.importer import ImportOptions, ImportResult, import_managed_book
+from app.core.time import now_timestamp_ms
 from app.services.audio_metadata import collect_audio_bundle_files
+from app.worker.importer import ImportOptions, ImportResult, import_managed_book
 
 
-def _now() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def _now() -> int:
+    return now_timestamp_ms()
 
 
 def _id() -> str:
@@ -45,6 +45,7 @@ def enqueue_import_task(
     original_name: str | None = None,
     requested_title: str | None = None,
     requested_author: str | None = None,
+    work_id: str | None = None,
     monitor_folder_id: str | None = None,
     message: str = "等待后台处理",
     allow_terminal_requeue: bool = False,
@@ -53,7 +54,8 @@ def enqueue_import_task(
     existing_statuses = "'PENDING', 'PARSING'" if allow_terminal_requeue else "'PENDING', 'PARSING', 'COMPLETED', 'FAILED'"
     existing = _row(
         db,
-        f"SELECT * FROM `ImportTask` WHERE `sourcePath` = :source_path AND `status` IN ({existing_statuses}) ORDER BY `createdAt` DESC LIMIT 1",
+        f"SELECT * FROM `ImportTask` WHERE `sourcePath` = :source_path AND `status` IN ({existing_statuses}) "
+        "ORDER BY CAST(`createdAt` AS INTEGER) DESC, `id` DESC LIMIT 1",
         {"source_path": str(source)},
     )
     if existing:
@@ -64,6 +66,7 @@ def enqueue_import_task(
     values: dict[str, Any] = {
         "id": _id(),
         "monitorFolderId": monitor_folder_id,
+        "workId": work_id,
         "origin": origin,
         "status": "PENDING",
         "originalName": original_name or source.name,
@@ -120,7 +123,7 @@ def recover_stale_import_tasks(db: Session) -> int:
         text(
             "UPDATE `ImportTask` SET `status` = 'PENDING', `progress` = 0, `message` = '后台任务恢复后重新排队', "
             "`leaseOwner` = NULL, `leaseExpiresAt` = NULL, `updatedAt` = :now "
-            "WHERE `status` = 'PARSING' AND (`leaseExpiresAt` IS NULL OR `leaseExpiresAt` < :now)"
+            "WHERE `status` = 'PARSING' AND (`leaseExpiresAt` IS NULL OR CAST(`leaseExpiresAt` AS INTEGER) < :now)"
         ),
         {"now": now},
     )
@@ -132,27 +135,34 @@ def claim_next_import_task(db: Session, worker_id: str, lease_seconds: int) -> d
     if not _has_table(db, "ImportTask"):
         return None
     columns = _columns(db, "ImportTask")
-    now = datetime.now()
-    lease_expires = (now + timedelta(seconds=lease_seconds)).strftime("%Y-%m-%d %H:%M:%S")
+    now = now_timestamp_ms()
+    lease_expires = now + lease_seconds * 1000
     if {"leaseOwner", "leaseExpiresAt", "attempts"}.issubset(columns):
         result = db.execute(
             text(
                 "UPDATE `ImportTask` SET `status` = 'PARSING', `leaseOwner` = :worker_id, `leaseExpiresAt` = :lease_expires, "
                 "`attempts` = COALESCE(`attempts`, 0) + 1, `message` = '正在准备导入', `updatedAt` = :now "
-                "WHERE `id` = (SELECT `id` FROM `ImportTask` WHERE `status` = 'PENDING' ORDER BY `createdAt` ASC LIMIT 1) "
+                "WHERE `id` = (SELECT `id` FROM `ImportTask` WHERE `status` = 'PENDING' "
+                "ORDER BY CAST(`createdAt` AS INTEGER) ASC, `id` ASC LIMIT 1) "
                 "AND `status` = 'PENDING'"
             ),
-            {"worker_id": worker_id, "lease_expires": lease_expires, "now": now.strftime("%Y-%m-%d %H:%M:%S")},
+            {"worker_id": worker_id, "lease_expires": lease_expires, "now": now},
         )
         db.commit()
         if not result.rowcount:
             return None
         return _row(
             db,
-            "SELECT * FROM `ImportTask` WHERE `leaseOwner` = :worker_id AND `status` = 'PARSING' ORDER BY `updatedAt` DESC LIMIT 1",
+            "SELECT * FROM `ImportTask` WHERE `leaseOwner` = :worker_id AND `status` = 'PARSING' "
+            "ORDER BY CAST(`updatedAt` AS INTEGER) DESC, `id` DESC LIMIT 1",
             {"worker_id": worker_id},
         )
-    task = _row(db, "SELECT * FROM `ImportTask` WHERE `status` = 'PENDING' ORDER BY `createdAt` ASC LIMIT 1", {})
+    task = _row(
+        db,
+        "SELECT * FROM `ImportTask` WHERE `status` = 'PENDING' "
+        "ORDER BY CAST(`createdAt` AS INTEGER) ASC, `id` ASC LIMIT 1",
+        {},
+    )
     if not task:
         return None
     db.execute(text("UPDATE `ImportTask` SET `status` = 'PARSING' WHERE `id` = :id"), {"id": task["id"]})
@@ -186,6 +196,7 @@ def process_import_task(db: Session, settings: Settings, task: dict[str, Any]) -
             origin=str(task.get("origin") or "MANUAL"),
             monitor_folder_id=task.get("monitorFolderId"),
             import_task_id=str(task["id"]),
+            requested_work_id=task.get("workId"),
         ),
     )
     _add_work_to_shelf(db, task.get("monitorFolderId"), result.work_id)

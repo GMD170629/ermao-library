@@ -14,7 +14,9 @@ from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.core.time import now_timestamp_ms, to_timestamp_ms
 from app.services.book_identity import UNKNOWN_AUTHOR, identity_merge_key, normalize_identity_part
+from app.services.library_management import sync_work_facets
 from app.services.metadata_provider_registry import metadata_provider_registry, search_with_metadata_provider
 from app.services.organize_service import context_for_job, metadata_candidate_title_exact_match, metadata_search_candidates
 
@@ -26,6 +28,15 @@ STALE_RUNNING_MINUTES = 10
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _timestamp_sql(column: str) -> str:
+    value = f"CAST({column} AS TEXT)"
+    return (
+        f"CASE WHEN {value} GLOB '*[^0-9]*' "
+        f"THEN CAST(ROUND((julianday({column}) - 2440587.5) * 86400000) AS INTEGER) "
+        f"ELSE CAST({column} AS INTEGER) END"
+    )
 
 
 def _row(db: Session, sql: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
@@ -85,10 +96,10 @@ def recover_stale_metadata_lookup_tasks(db: Session) -> int:
             UPDATE `MetadataLookupTask`
             SET `status` = 'PENDING', `nextAttemptAt` = :now, `startedAt` = NULL,
                 `errorSummary` = '任务进程中断，已自动恢复', `updatedAt` = :now
-            WHERE `status` = 'RUNNING' AND `startedAt` < :cutoff
+            WHERE `status` = 'RUNNING' AND """ + _timestamp_sql("`startedAt`") + """ < :cutoff
             """
         ),
-        {"now": _now(), "cutoff": cutoff},
+        {"now": now_timestamp_ms(), "cutoff": to_timestamp_ms(cutoff)},
     )
     db.commit()
     return int(result.rowcount or 0)
@@ -102,10 +113,11 @@ def claim_next_metadata_lookup_task(db: Session) -> dict[str, Any] | None:
         """
         SELECT * FROM `MetadataLookupTask`
         WHERE `status` = 'PENDING'
-          AND (`nextAttemptAt` IS NULL OR datetime(`nextAttemptAt`) <= CURRENT_TIMESTAMP)
-        ORDER BY `createdAt` ASC
+          AND (`nextAttemptAt` IS NULL OR """ + _timestamp_sql("`nextAttemptAt`") + """ <= :now)
+        ORDER BY """ + _timestamp_sql("`createdAt`") + """ ASC, `id` ASC
         LIMIT 1
         """,
+        {"now": now_timestamp_ms()},
     )
     if not task:
         return None
@@ -363,6 +375,7 @@ def _apply_candidate(
         edition_patch["updatedAt"] = _now()
         assignments = ", ".join(f"`{key}` = :{key}" for key in edition_patch)
         db.execute(text(f"UPDATE `LibraryEdition` SET {assignments} WHERE `id` = :edition_id"), {**edition_patch, "edition_id": edition["id"]})
+    sync_work_facets(db, str(work["id"]), commit=False)
 
     job_id = task.get("organizeJobId")
     if job_id and _has_table(db, "OrganizeJob"):

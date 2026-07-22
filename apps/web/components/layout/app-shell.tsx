@@ -625,18 +625,19 @@ export function AppShell({ children }: { children: ReactNode }) {
           </span>
           <span className="min-w-0">
             <span className="block truncate text-[18px] font-semibold tracking-tight">{PRODUCT_NAME}</span>
-            {isSettingsMode ? <span className="mt-0.5 block text-xs text-[#8A857F]">设置</span> : null}
           </span>
         </Link>
 
         {isSettingsMode ? (
-          <Link
-            href="/"
-            className="mt-8 flex min-h-11 items-center gap-3 rounded-xl border border-black/[0.07] bg-white/45 px-3 text-[15px] font-medium text-[#4F4B46] transition hover:border-black/[0.11] hover:bg-white/75 focus:outline-none focus:ring-4 focus:ring-[#FAD9D0]"
-          >
-            <ArrowLeft size={19} strokeWidth={1.8} />
-            返回阅读
-          </Link>
+          <nav aria-label="返回主导航" className="mt-8 space-y-1">
+            <Link
+              href="/"
+              className="flex min-h-11 items-center gap-3 rounded-xl px-3 text-[15px] font-medium text-[#34312E] transition hover:bg-black/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]"
+            >
+              <ArrowLeft size={20} strokeWidth={1.75} />
+              返回阅读
+            </Link>
+          </nav>
         ) : null}
 
         {!isSettingsMode ? <form ref={searchFormRef} onSubmit={submitLibrarySearch} className="relative mt-8">
@@ -708,25 +709,28 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <div className="mt-6 min-h-0 flex-1 overflow-y-auto pr-1">
           {isSettingsMode ? (
-            <nav aria-label="设置分类" className="space-y-1">
-              {settingsItems.map(({ href, icon: Icon, label }) => {
-                const active = isSettingsItemActive(pathname, href);
-                return (
-                  <Link
-                    key={href}
-                    href={href}
-                    aria-current={active ? 'page' : undefined}
-                    className={cn(
-                      'flex min-h-11 items-center gap-3 rounded-xl px-3 text-[15px] font-medium transition focus:outline-none focus:ring-4 focus:ring-[#FAD9D0]',
-                      active ? 'bg-[#F9DED4] text-[#EF4D2F]' : 'text-[#34312E] hover:bg-black/[0.04]'
-                    )}
-                  >
-                    <Icon size={20} strokeWidth={1.8} />
-                    <span className="truncate">{label}</span>
-                  </Link>
-                );
-              })}
-            </nav>
+            <section>
+              <div className="mb-2 px-3 text-[13px] text-[#8A857F]">设置</div>
+              <nav aria-label="设置分类" className="space-y-1">
+                {settingsItems.map(({ href, icon: Icon, label }) => {
+                  const active = isSettingsItemActive(pathname, href);
+                  return (
+                    <Link
+                      key={href}
+                      href={href}
+                      aria-current={active ? 'page' : undefined}
+                      className={cn(
+                        'flex min-h-11 items-center gap-3 rounded-xl px-3 text-[15px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]',
+                        active ? 'bg-[#F9DED4] text-[#EF4D2F]' : 'text-[#34312E] hover:bg-black/[0.04]'
+                      )}
+                    >
+                      <Icon size={20} strokeWidth={1.75} />
+                      <span className="truncate">{label}</span>
+                    </Link>
+                  );
+                })}
+              </nav>
+            </section>
           ) : <><nav className="space-y-1">
             {primaryNavItems.map(({ href, icon: Icon, label }) => (
               <Link

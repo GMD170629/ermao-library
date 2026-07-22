@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.time import TimestampMilliseconds
 from app.db.base import Base
 
 
@@ -14,7 +15,7 @@ def cuid() -> str:
 
 
 def db_timestamp() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(timezone.utc)
 
 
 class User(Base):
@@ -26,8 +27,8 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column("passwordHash", String(191), nullable=False)
     avatar_path: Mapped[str | None] = mapped_column("avatarPath", String(500), nullable=True)
     role: Mapped[str] = mapped_column(String(191), nullable=False, default="admin")
-    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, nullable=False, default=db_timestamp, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, nullable=False, default=db_timestamp, onupdate=db_timestamp, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp)
+    updated_at: Mapped[datetime] = mapped_column("updatedAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, onupdate=db_timestamp)
 
     sessions: Mapped[list[Session]] = relationship("Session", back_populates="user", cascade="all, delete-orphan")
     password_reset_tokens: Mapped[list[PasswordResetToken]] = relationship(
@@ -53,9 +54,9 @@ class Session(Base):
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
     token_hash: Mapped[str] = mapped_column("tokenHash", String(191), unique=True, nullable=False)
     user_id: Mapped[str] = mapped_column("userId", String(191), ForeignKey("User.id", ondelete="CASCADE"), nullable=False)
-    expires_at: Mapped[datetime] = mapped_column("expiresAt", DateTime, nullable=False)
-    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, nullable=False, default=db_timestamp, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, nullable=False, default=db_timestamp, onupdate=db_timestamp, server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column("expiresAt", TimestampMilliseconds(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp)
+    updated_at: Mapped[datetime] = mapped_column("updatedAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, onupdate=db_timestamp)
 
     user: Mapped[User] = relationship("User", back_populates="sessions")
 
@@ -66,8 +67,8 @@ class PasswordResetToken(Base):
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
     token_hash: Mapped[str] = mapped_column("tokenHash", String(64), unique=True, nullable=False)
     user_id: Mapped[str] = mapped_column("userId", String(191), ForeignKey("User.id", ondelete="CASCADE"), nullable=False)
-    expires_at: Mapped[datetime] = mapped_column("expiresAt", DateTime, nullable=False)
-    used_at: Mapped[datetime | None] = mapped_column("usedAt", DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, nullable=False, default=db_timestamp, server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column("expiresAt", TimestampMilliseconds(), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column("usedAt", TimestampMilliseconds(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp)
 
     user: Mapped[User] = relationship("User", back_populates="password_reset_tokens")

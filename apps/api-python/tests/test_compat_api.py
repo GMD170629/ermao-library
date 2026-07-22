@@ -10,7 +10,7 @@ import zipfile
 
 from PIL import Image, ImageDraw
 import pytest
-from sqlalchemy import text
+from sqlalchemy import event, text
 
 from app.api.routes import compat
 from app.core.auth import hash_password
@@ -41,6 +41,35 @@ def _post_download_task(client, test_settings, payload):
         "/api/download-tasks",
         json={"targetPath": str(_download_inbox(test_settings)), **payload},
     )
+
+
+def test_library_filter_schema_is_read_only_and_bounded(client, db_session):
+    create_worker_tables(db_session)
+    _login(client, db_session)
+    db_session.execute(
+        text(
+            "INSERT INTO `LibraryFacet` (`id`, `kind`, `name`, `normalizedName`, `aliases`, `createdAt`, `updatedAt`) "
+            "VALUES ('facet-author', 'AUTHOR', '测试作者', '测试作者', '[]', 1, 1)"
+        )
+    )
+    db_session.commit()
+    statements: list[str] = []
+    engine = db_session.get_bind()
+
+    def capture_statement(_connection, _cursor, statement, _parameters, _context, _executemany):
+        statements.append(" ".join(statement.split()).upper())
+
+    event.listen(engine, "before_cursor_execute", capture_statement)
+    try:
+        response = client.get("/api/library/filter-schema")
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_statement)
+
+    assert response.status_code == 200
+    fields = {field["key"]: field for field in response.json()["data"]["fields"]}
+    assert {option["value"] for option in fields["author"]["options"]} == {"测试作者"}
+    assert len(statements) <= 25
+    assert not any(statement.startswith(("INSERT ", "UPDATE ", "DELETE ", "REPLACE ")) for statement in statements)
 
 
 def _managed_fixture_dir(test_settings, name: str):
@@ -726,15 +755,15 @@ def test_series_endpoint_hides_single_book_series_by_default(client, db_session)
     assert payload["ok"] is True
     assert payload["data"]["total"] == 1
     assert payload["data"]["series"] == [
-        {"name": "星舰纪元", "bookCount": 2, "latestUpdatedAt": "2026-06-11T12:00:00"},
+        {"name": "星舰纪元", "bookCount": 2, "latestUpdatedAt": "2026-06-11T04:00:00Z"},
     ]
 
     include_single = client.get("/api/series?visibility=active&limit=10&minBooks=1")
     assert include_single.status_code == 200
     assert include_single.json()["data"]["total"] == 2
     assert include_single.json()["data"]["series"] == [
-        {"name": "星舰纪元", "bookCount": 2, "latestUpdatedAt": "2026-06-11T12:00:00"},
-        {"name": "午夜档案", "bookCount": 1, "latestUpdatedAt": "2026-06-10T00:00:00"},
+            {"name": "星舰纪元", "bookCount": 2, "latestUpdatedAt": "2026-06-11T04:00:00Z"},
+            {"name": "午夜档案", "bookCount": 1, "latestUpdatedAt": "2026-06-09T16:00:00Z"},
     ]
 
 
@@ -1107,12 +1136,17 @@ def test_works_recent_read_sort_uses_latest_user_progress_across_pages(client, d
     books = payload["data"]["books"]
     assert [book["id"] for book in books] == ["work-new", "work-old", "work-unread"]
     assert books[0]["lastRead"] == "2026-06-17"
-    assert books[0]["lastReadAt"] == "2026-06-17T09:00:00"
+    assert books[0]["lastReadAt"] == "2026-06-17T01:00:00Z"
     assert books[2]["lastRead"] == "尚未阅读"
     assert books[2]["lastReadAt"] is None
 
     second_page = client.get("/api/works", params={"sort": "recent_read", "pageSize": 1, "page": 2}).json()
     assert second_page["data"]["books"][0]["id"] == "work-old"
+
+    oldest_read_first = client.get(
+        "/api/works", params={"sort": "recent_read", "sortDirection": "asc", "pageSize": 3}
+    ).json()
+    assert [book["id"] for book in oldest_read_first["data"]["books"]] == ["work-old", "work-new", "work-unread"]
 
     progress_sorted = client.get("/api/works", params={"sort": "progress", "pageSize": 3}).json()
     assert [book["id"] for book in progress_sorted["data"]["books"]] == ["work-old", "work-new", "work-unread"]
@@ -1120,6 +1154,77 @@ def test_works_recent_read_sort_uses_latest_user_progress_across_pages(client, d
 
     maximum_page = client.get("/api/works", params={"pageSize": 999}).json()
     assert maximum_page["data"]["pageSize"] == 100
+
+
+def test_works_sortable_metadata_fields_support_both_directions(client, db_session):
+    create_worker_tables(db_session)
+    work_columns = {row[1] for row in db_session.execute(text("PRAGMA table_info(LibraryWork)")).all()}
+    if "seriesName" not in work_columns:
+        db_session.execute(text("ALTER TABLE LibraryWork ADD COLUMN seriesName TEXT"))
+    if "seriesIndex" not in work_columns:
+        db_session.execute(text("ALTER TABLE LibraryWork ADD COLUMN seriesIndex REAL"))
+    edition_columns = {row[1] for row in db_session.execute(text("PRAGMA table_info(LibraryEdition)")).all()}
+    if "publisher" not in edition_columns:
+        db_session.execute(text("ALTER TABLE LibraryEdition ADD COLUMN publisher TEXT"))
+    _login(client, db_session)
+
+    fixtures = [
+        ("sort-gamma", "Gamma", "Alice", "Omega", 2, "Zeta Press"),
+        ("sort-alpha", "Alpha", "Bob", "Alpha Series", 1, "Alpha Press"),
+        ("sort-beta", "Beta", "Charlie", None, None, None),
+    ]
+    for index, (work_id, title, author, series_name, series_index, publisher) in enumerate(fixtures):
+        db_session.execute(
+            text(
+                """INSERT INTO LibraryWork (
+                    id, title, normalizedTitle, author, normalizedAuthor, workType, status, publicationStatus,
+                    trackingStatus, tags, metadataQuality, organizeStatus, coverStatus, hidden, organized,
+                    seriesName, seriesIndex, mergeKey, createdAt, updatedAt
+                ) VALUES (
+                    :id, :title, :normalized_title, :author, :normalized_author, 'EPUB', 'WANT', 'UNKNOWN',
+                    'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING', 0, 0,
+                    :series_name, :series_index, :merge_key, :created_at, :created_at
+                )"""
+            ),
+            {
+                "id": work_id,
+                "title": title,
+                "normalized_title": title.lower(),
+                "author": author,
+                "normalized_author": author.lower(),
+                "series_name": series_name,
+                "series_index": series_index,
+                "merge_key": f"epub:{work_id}",
+                "created_at": f"2026-06-{index + 10:02d}T10:00:00",
+            },
+        )
+        db_session.execute(
+            text(
+                """INSERT INTO LibraryEdition (
+                    id, workId, origin, format, publisher, importStatus, sizeBytes, "primary", hidden, createdAt, updatedAt
+                ) VALUES (
+                    :id, :work_id, 'MANUAL', 'EPUB', :publisher, 'IMPORTED', 10, 1, 0, 'now', 'now'
+                )"""
+            ),
+            {"id": f"{work_id}-edition", "work_id": work_id, "publisher": publisher},
+        )
+    db_session.commit()
+
+    def sorted_ids(sort: str, direction: str):
+        payload = client.get(
+            "/api/works", params={"sort": sort, "sortDirection": direction, "pageSize": 10}
+        ).json()
+        assert payload["ok"] is True
+        return [book["id"] for book in payload["data"]["books"]]
+
+    assert sorted_ids("title", "asc") == ["sort-alpha", "sort-beta", "sort-gamma"]
+    assert sorted_ids("title", "desc") == ["sort-gamma", "sort-beta", "sort-alpha"]
+    assert sorted_ids("author", "asc") == ["sort-gamma", "sort-alpha", "sort-beta"]
+    assert sorted_ids("author", "desc") == ["sort-beta", "sort-alpha", "sort-gamma"]
+    assert sorted_ids("publisher", "asc") == ["sort-alpha", "sort-gamma", "sort-beta"]
+    assert sorted_ids("publisher", "desc") == ["sort-gamma", "sort-alpha", "sort-beta"]
+    assert sorted_ids("series", "asc") == ["sort-alpha", "sort-gamma", "sort-beta"]
+    assert sorted_ids("series", "desc") == ["sort-gamma", "sort-alpha", "sort-beta"]
 
 
 def test_primary_edition_is_scoped_and_unique_and_can_be_split(client, db_session):
@@ -2498,6 +2603,33 @@ def test_import_tasks_are_server_paginated_with_global_summary(client, db_sessio
     assert invalid_status.status_code == 400
 
 
+def test_import_tasks_display_reverse_of_worker_timestamp_id_order(client, db_session):
+    create_worker_tables(db_session)
+    _login(client, db_session)
+    timestamp = 1784731371000
+    db_session.execute(
+        text(
+            """INSERT INTO ImportTask (
+                id, origin, status, originalName, sourcePath, progress, duplicate, createdAt, updatedAt
+            ) VALUES (
+                :id, 'WATCH', 'COMPLETED', :id, :source_path, 100, 0, :created_at, :created_at
+            )"""
+        ),
+        [
+            {"id": task_id, "source_path": f"/books/{task_id}.epub", "created_at": timestamp}
+            for task_id in ("task-c", "task-a", "task-b")
+        ],
+    )
+    db_session.commit()
+
+    response = client.get("/api/import-tasks")
+
+    assert response.status_code == 200
+    tasks = response.json()["data"]["tasks"]
+    assert [task["id"] for task in tasks] == ["task-c", "task-b", "task-a"]
+    assert {task["createdAt"] for task in tasks} == {"2026-07-22T14:42:51Z"}
+
+
 def test_monitor_folder_and_system_settings_mutations(client, db_session, test_settings):
     test_settings.resolved_monitor_root.mkdir(parents=True)
     (test_settings.resolved_monitor_root / "zeta").mkdir()
@@ -2580,6 +2712,65 @@ def test_monitor_folder_and_system_settings_mutations(client, db_session, test_s
     settings = client.put("/api/system-settings", json={"settings": {"readerTheme": "dark"}})
     assert settings.status_code == 200
     assert settings.json()["data"]["settings"]["readerTheme"] == "dark"
+
+
+def test_import_preferences_are_normalized_and_persisted(client, db_session):
+    _login(client, db_session)
+    response = client.put(
+        "/api/system-settings",
+        json={
+            "settings": {
+                "import.stabilityCheck.enabled": False,
+                "import.stabilityCheck.seconds": 999,
+                "import.autoConvertToEpub": False,
+                "import.allowedExtensions": ["EPUB", ".pdf", ".unsupported"],
+                "import.ignorePatterns": "  *.tmp  \r\n\r\n草稿*  ",
+            }
+        },
+    )
+    assert response.status_code == 200
+    saved = response.json()["data"]["settings"]
+    assert saved["import.stabilityCheck.enabled"] is False
+    assert saved["import.stabilityCheck.seconds"] == 300
+    assert saved["import.autoConvertToEpub"] is False
+    assert saved["import.allowedExtensions"] == [".epub", ".pdf"]
+    assert saved["import.ignorePatterns"] == "*.tmp\n草稿*"
+
+    loaded = client.get("/api/system-settings").json()["data"]["settings"]
+    assert loaded["import.allowedExtensions"] == [".epub", ".pdf"]
+    assert loaded["import.ignorePatterns"] == "*.tmp\n草稿*"
+
+
+def test_raw_text_detail_exposes_deferred_epub_conversion(client, db_session, test_settings, tmp_path):
+    create_worker_tables(db_session)
+    _login(client, db_session)
+    client.put("/api/system-settings", json={"settings": {"import.autoConvertToEpub": False}})
+    source = tmp_path / "详情页后置转换.txt"
+    source.write_text("第一章\n原始文本先入库。\n\n第二章\n随后转换为 EPUB。", encoding="utf-8")
+    imported = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(source_file_path=source, origin="MANUAL", original_name=source.name),
+    )
+
+    detail = client.get(f"/api/works/{imported.work_id}")
+    assert detail.status_code == 200
+    raw_edition = detail.json()["data"]["book"]["editions"][0]
+    assert raw_edition["formatValue"] == "TXT"
+    assert raw_edition["readable"] is False
+    assert raw_edition["conversionAvailable"] is True
+    assert detail.json()["data"]["activeMedia"]["primaryAction"] is None
+    ebook_list = client.get("/api/works?type=ebook")
+    assert [book["id"] for book in ebook_list.json()["data"]["books"]] == [imported.work_id]
+
+    queued = client.post(f"/api/works/{imported.work_id}/editions/{imported.edition_id}/convert")
+    assert queued.status_code == 202
+    queued_task = queued.json()["data"]["task"]
+    completed = process_import_task(db_session, test_settings, queued_task)
+
+    converted_detail = client.get(f"/api/works/{imported.work_id}").json()["data"]["book"]
+    assert [(edition["formatValue"], edition["readable"]) for edition in converted_detail["editions"]] == [("EPUB", True)]
+    assert converted_detail["primaryEditionId"] == completed.edition_id
 
 
 def test_scan_selected_directory_reuses_monitor_rules_and_known_import_paths(client, db_session, test_settings):

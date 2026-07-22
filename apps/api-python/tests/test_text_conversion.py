@@ -394,6 +394,28 @@ def test_persistent_queue_recovers_expired_lease_and_claims_once(db_session, tes
     assert claim_next_import_task(db_session, "worker-other", 900) is None
 
 
+def test_persistent_queue_claims_by_created_timestamp_then_id(db_session, tmp_path):
+    create_worker_tables(db_session)
+    timestamp = 1784731371000
+    for task_id in ("task-c", "task-a", "task-b"):
+        source = tmp_path / f"{task_id}.epub"
+        source.write_bytes(task_id.encode())
+        insert_import_task(db_session, task_id, source)
+        db_session.execute(
+            text("UPDATE ImportTask SET createdAt = :created_at, updatedAt = :created_at WHERE id = :id"),
+            {"created_at": timestamp, "id": task_id},
+        )
+        db_session.commit()
+
+    claimed_ids = []
+    for index in range(3):
+        claimed = claim_next_import_task(db_session, f"worker-{index}", 900)
+        assert claimed is not None
+        claimed_ids.append(claimed["id"])
+
+    assert claimed_ids == ["task-a", "task-b", "task-c"]
+
+
 def test_azw3_upload_is_queued_and_retry_endpoint_resets_recoverable_failure(client, db_session, test_settings, tmp_path):
     create_worker_tables(db_session)
     test_settings.resolved_monitor_root.mkdir(parents=True, exist_ok=True)

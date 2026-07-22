@@ -9,6 +9,7 @@ from app.db.sqlite import create_sqlite_engine
 from app.services.library_filters import compile_filter_rules, library_filter_schema
 from app.services.library_management import (
     backfill_library_facets,
+    count_categories,
     duplicate_groups,
     list_categories,
     merge_categories,
@@ -68,6 +69,28 @@ def test_duplicates_smart_shelf_merge_and_undo_use_persisted_v9_data(tmp_path) -
             undo_operation(db, merged["operation"]["id"], None)
             assert db.execute(text("SELECT `hidden` FROM `LibraryWork` WHERE `id` = 'work-b'")).scalar() == 0
             assert db.execute(text("SELECT `workId` FROM `LibraryEdition` WHERE `id` = 'edition-work-b'")).scalar() == "work-b"
+    finally:
+        engine.dispose()
+
+
+def test_category_listing_supports_count_search_and_stable_pagination(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            for index in range(1, 26):
+                _insert_work(db, f"work-{index:02d}", f"作品 {index:02d}", f"作者 {index:02d}", [f"标签 {index:02d}"])
+            backfill_library_facets(db)
+
+            assert count_categories(db, "AUTHOR") == 25
+            first_page = list_categories(db, "AUTHOR", limit=10, offset=0)
+            third_page = list_categories(db, "AUTHOR", limit=10, offset=20)
+            assert len(first_page) == 10
+            assert len(third_page) == 5
+            assert {item["id"] for item in first_page}.isdisjoint({item["id"] for item in third_page})
+            assert count_categories(db, "AUTHOR", "作者 02") == 1
+            assert [item["name"] for item in list_categories(db, "AUTHOR", "作者 02", limit=10)] == ["作者 02"]
     finally:
         engine.dispose()
 

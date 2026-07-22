@@ -10,6 +10,7 @@ from sqlalchemy import text
 import app.worker.importer as importer_module
 from app.services.book_identity import BookIdentity
 from app.services.default_cover import DEFAULT_COVER_ASSET_PATH
+from app.services.import_preferences import SUPPORTED_IMPORT_EXTENSIONS, load_import_preferences
 from app.worker.importer import ImportOptions, _work_merge_key, import_managed_book, parse_comic_volume_from_name, parse_epub_metadata, parse_pdf_metadata, parse_series_volume_info
 from app.worker.persistent_import_queue import process_import_task
 from app.worker.path_security import PathSecurityError, PathSecurityService, normalize_configured_path
@@ -68,6 +69,16 @@ def create_worker_tables(db):
         """CREATE TABLE OrganizeJob (
             id TEXT PRIMARY KEY, workId TEXT, editionId TEXT, importTaskId TEXT, status TEXT, issueCodes TEXT,
             summary TEXT, errorSummary TEXT, createdAt TEXT, updatedAt TEXT
+        )""",
+        """CREATE TABLE LibraryFacet (
+            id TEXT PRIMARY KEY, kind TEXT, name TEXT, normalizedName TEXT, aliases TEXT, createdAt TEXT, updatedAt TEXT,
+            UNIQUE(kind, normalizedName)
+        )""",
+        """CREATE TABLE LibraryWorkFacet (
+            facetId TEXT, workId TEXT, sortOrder INTEGER, createdAt TEXT, PRIMARY KEY(facetId, workId)
+        )""",
+        """CREATE TABLE LibraryEditionFacet (
+            facetId TEXT, editionId TEXT, createdAt TEXT, PRIMARY KEY(facetId, editionId)
         )""",
         """CREATE TABLE MetadataLookupTask (
             id TEXT PRIMARY KEY, workId TEXT, editionId TEXT, importTaskId TEXT UNIQUE, organizeJobId TEXT,
@@ -393,6 +404,8 @@ def test_import_epub_creates_library_records(db_session, test_settings, tmp_path
     assert _count(db_session, "OrganizeJob") == 0
     assert db_session.execute(text("SELECT organizeStatus FROM LibraryWork")).scalar() == "UNASSESSED"
     assert _count(db_session, "MetadataLookupTask") == 0
+    assert "epub" in {row[0] for row in db_session.execute(text("SELECT name FROM LibraryFacet"))}
+    assert _count(db_session, "LibraryWorkFacet") >= 1
 
     events = db_session.execute(text("SELECT action, targetType, targetId, metadata FROM SystemEvent ORDER BY createdAt")).mappings().all()
     assert [event["action"] for event in events] == ["import.started", "identity.regex.completed", "import.completed"]
@@ -1173,6 +1186,90 @@ def test_monitor_ignore_rules():
     assert should_ignore_file(Path("/tmp/readme.md"), folder)
     assert not should_ignore_file(Path("/tmp/readme.txt"), folder)
     assert not should_ignore_file(Path("/tmp/book.epub"), folder)
+
+
+def test_global_import_preferences_filter_extensions_conversion_and_patterns(db_session):
+    set_system_setting(db_session, "import.allowedExtensions", json.dumps([".epub", ".pdf", ".txt"]))
+    set_system_setting(db_session, "import.autoConvertToEpub", "false")
+    set_system_setting(db_session, "import.stabilityCheck.enabled", "false")
+    set_system_setting(db_session, "import.stabilityCheck.seconds", "999")
+    set_system_setting(db_session, "import.ignorePatterns", json.dumps("*.tmp\n草稿*"))
+
+    preferences = load_import_preferences(db_session)
+    assert preferences.allowed_extensions == (".epub", ".txt", ".pdf")
+    assert not preferences.auto_convert_to_epub
+    assert not preferences.stability_check_enabled
+    assert preferences.stability_check_seconds == 300
+
+    folder = MonitorFolderConfig(
+        id="1",
+        root_path="/tmp",
+        min_file_size_bytes=1,
+        global_ignore_patterns=preferences.ignore_patterns,
+        allowed_extensions=preferences.allowed_extensions,
+        auto_convert_to_epub=preferences.auto_convert_to_epub,
+    )
+    assert not should_ignore_file(Path("/tmp/book.epub"), folder)
+    assert should_ignore_file(Path("/tmp/book.cbz"), folder)
+    assert not should_ignore_file(Path("/tmp/book.txt"), folder)
+    assert should_ignore_file(Path("/tmp/草稿版本.epub"), folder)
+
+
+def test_missing_import_preferences_keep_every_supported_extension_enabled(db_session):
+    preferences = load_import_preferences(db_session)
+    assert preferences.allowed_extensions == SUPPORTED_IMPORT_EXTENSIONS
+    assert preferences.stability_check_enabled
+    assert preferences.auto_convert_to_epub
+
+
+def test_text_file_imports_raw_when_auto_conversion_is_disabled_and_can_convert_later(db_session, test_settings, tmp_path):
+    create_worker_tables(db_session)
+    set_system_setting(db_session, "import.autoConvertToEpub", "false")
+    source = tmp_path / "稍后转换.txt"
+    source.write_text("第一章\n这是一段用于验证后置转换流程的正文。\n\n第二章\n转换完成后应当可以阅读。", encoding="utf-8")
+
+    raw_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(source_file_path=source, origin="MANUAL", original_name=source.name),
+    )
+    raw_edition = db_session.execute(
+        text("SELECT format, hidden, chapterCount FROM LibraryEdition WHERE id = :id"),
+        {"id": raw_result.edition_id},
+    ).mappings().one()
+    raw_file = db_session.execute(
+        text("SELECT path, kind FROM LibraryFile WHERE editionId = :id"),
+        {"id": raw_result.edition_id},
+    ).mappings().one()
+    assert raw_edition["format"] == "TXT"
+    assert not raw_edition["hidden"]
+    assert raw_edition["chapterCount"] == 0
+    assert Path(raw_file["path"]) == source.resolve()
+    assert raw_file["kind"] == "TEXT_SOURCE"
+
+    converted_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=source,
+            origin="DEFERRED_CONVERSION",
+            original_name=source.name,
+            requested_work_id=raw_result.work_id,
+        ),
+    )
+    visible_editions = db_session.execute(
+        text("SELECT id, format, hidden FROM LibraryEdition WHERE workId = :work_id ORDER BY createdAt"),
+        {"work_id": raw_result.work_id},
+    ).mappings().all()
+    work = db_session.execute(
+        text("SELECT primaryEditionId, workType FROM LibraryWork WHERE id = :work_id"),
+        {"work_id": raw_result.work_id},
+    ).mappings().one()
+    assert converted_result.work_id == raw_result.work_id
+    assert [(row["format"], bool(row["hidden"])) for row in visible_editions] == [("TXT", True), ("EPUB", False)]
+    assert work["primaryEditionId"] == converted_result.edition_id
+    assert work["workType"] == "EPUB"
+    assert source.exists()
 
 
 def test_directory_scan_records_candidates_and_summary_in_system_log(db_session, tmp_path):

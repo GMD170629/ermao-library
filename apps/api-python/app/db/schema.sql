@@ -861,6 +861,8 @@ CREATE INDEX IF NOT EXISTS `LibraryWorkFacet_workId_idx` ON `LibraryWorkFacet`(`
 CREATE INDEX IF NOT EXISTS `LibraryEditionFacet_editionId_idx` ON `LibraryEditionFacet`(`editionId`);
 CREATE INDEX IF NOT EXISTS `LibraryOperation_action_createdAt_idx` ON `LibraryOperation`(`action`, `createdAt`);
 CREATE INDEX IF NOT EXISTS `LibraryOperation_status_expiresAt_idx` ON `LibraryOperation`(`status`, `expiresAt`);
+CREATE INDEX IF NOT EXISTS `ImportTask_createdAt_id_idx` ON `ImportTask`(`createdAt`, `id`);
+CREATE INDEX IF NOT EXISTS `LibraryWork_createdAt_id_idx` ON `LibraryWork`(`createdAt`, `id`);
 CREATE INDEX IF NOT EXISTS `LibraryReadingUnit_editionId_sortOrder_idx` ON `LibraryReadingUnit`(`editionId`, `sortOrder`);
 CREATE INDEX IF NOT EXISTS `LibraryReadingUnit_editionId_unitType_idx` ON `LibraryReadingUnit`(`editionId`, `unitType`);
 CREATE INDEX IF NOT EXISTS `LibraryReadingUnit_volumeId_sortOrder_idx` ON `LibraryReadingUnit`(`volumeId`, `sortOrder`);
@@ -876,4 +878,4 @@ CREATE INDEX IF NOT EXISTS `LibraryConsumptionState_workId_idx` ON `LibraryConsu
 CREATE UNIQUE INDEX IF NOT EXISTS `LibraryConsumptionState_user_work_media_key` ON `LibraryConsumptionState`(`userId`, `workId`, `mediaKind`);
 CREATE UNIQUE INDEX IF NOT EXISTS `WorkDetailPreference_user_work_key` ON `WorkDetailPreference`(`userId`, `workId`);
 
-PRAGMA user_version = 11;
+PRAGMA user_version = 12;

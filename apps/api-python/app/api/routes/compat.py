@@ -28,6 +28,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 from app.core.auth import get_current_user
 from app.core.config import Settings, get_settings
+from app.core.time import timestamp_ms_to_iso, to_timestamp_ms
 from app.db.session import get_db
 from app.models.auth import User
 from app.schemas.responses import fail, ok
@@ -45,7 +46,7 @@ from app.services.download_executor import (
 from app.services.health import run_system_health_checks
 from app.services.library_filters import compile_filter_rules, library_filter_schema, normalize_filter_rules
 from app.services.library_management import (
-    backfill_library_facets,
+    count_categories,
     duplicate_groups,
     list_categories,
     merge_categories,
@@ -86,6 +87,14 @@ from app.services.system_events import (
     system_event_size_bytes,
 )
 from app.services.default_cover import cover_status, ensure_default_cover, is_default_cover_path
+from app.services.import_preferences import (
+    IMPORT_PREFERENCE_KEYS,
+    extension_is_allowed,
+    load_import_preferences,
+    matches_ignore_patterns,
+    normalize_import_setting_value,
+)
+from app.services.text_conversion import CONVERTIBLE_TEXT_EXTS
 from app.worker.importer import is_supported_import_file, parse_comic_archive, parse_series_volume_info
 from app.services.audio_metadata import collect_audio_bundle_files, is_supported_audio_file
 from app.worker.persistent_import_queue import enqueue_import_task
@@ -347,9 +356,18 @@ def _copy_upload_stream(source: Any, target: Path, max_bytes: int | None = None)
 def _dt(value: Any) -> str | None:
     if value is None:
         return None
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return str(value)
+    return timestamp_ms_to_iso(value) or str(value)
+
+
+def _timestamp_sql(column: str) -> str:
+    """Read both v12 Unix milliseconds and pre-migration datetime text safely."""
+
+    value = f"CAST({column} AS TEXT)"
+    return (
+        f"CASE WHEN {value} GLOB '*[^0-9]*' "
+        f"THEN CAST(ROUND((julianday({column}) - 2440587.5) * 86400000) AS INTEGER) "
+        f"ELSE CAST({column} AS INTEGER) END"
+    )
 
 
 def _cover_url(kind: str, row_id: str, row: dict[str, Any] | None = None, **params: Any) -> str:
@@ -574,7 +592,10 @@ def _progress_chapter_label(progress: dict[str, Any] | None, volumes: list[dict[
 
 def _labels() -> dict[str, dict[str, str]]:
     return {
-        "format": {"EPUB": "EPUB", "COMIC": "漫画", "PDF": "PDF", "AUDIO": "音频"},
+        "format": {
+            "EPUB": "EPUB", "COMIC": "漫画", "PDF": "PDF", "AUDIO": "音频",
+            "MOBI": "MOBI", "AZW": "AZW", "AZW3": "AZW3", "PRC": "PRC", "FB2": "FB2", "TXT": "TXT",
+        },
         "status": {"UNREAD": "未读", "READING": "在读", "FINISHED": "已读"},
         "publication": {"UNKNOWN": "未知", "ONGOING": "连载中", "COMPLETED": "已完结", "HIATUS": "休刊", "CANCELLED": "已取消"},
         "tracking": {"NOT_TRACKING": "未追踪", "TRACKING": "追踪中", "PAUSED": "已暂停", "IGNORED": "已忽略"},
@@ -1043,12 +1064,13 @@ def _work_view(db: Session, work: dict[str, Any], user_id: str | None = None) ->
         edition_files = files_by_edition.get(edition["id"], [])
         edition_volumes = [volume_view(volume, e_progress_rows) for volume in volumes_by_edition.get(edition["id"], [])]
         raw_edition_volumes = volumes_by_edition.get(edition["id"], [])
+        edition_format = str(edition.get("format") or work.get("workType") or "").upper()
         edition_views.append(
             {
                 "id": edition["id"],
                 "workId": edition["workId"],
                 "mediaKind": _edition_media_kind(edition),
-                "formatValue": edition.get("format") or work.get("workType"),
+                "formatValue": edition_format,
                 "format": labels["format"].get(edition.get("format"), edition.get("format") or "未知"),
                 "versionName": edition.get("versionName") or "默认版本",
                 "description": edition.get("description"),
@@ -1072,6 +1094,8 @@ def _work_view(db: Session, work: dict[str, Any], user_id: str | None = None) ->
                 "lastReadAt": _dt(e_progress.get("updatedAt")) if e_progress else None,
                 "coverUrl": _cover_url("editions", edition["id"], edition, size="medium"),
                 "conversion": conversion_by_edition.get(edition["id"]),
+                "readable": edition_format in {"EPUB", "PDF", "COMIC", "AUDIO"},
+                "conversionAvailable": f".{edition_format.lower()}" in CONVERTIBLE_TEXT_EXTS,
                 "files": [file_view(file) for file in edition_files],
                 "volumes": edition_volumes,
             }
@@ -1319,7 +1343,7 @@ def _active_media_view(
         "positionLabel": _media_position_label(db, selected_tab, selected_progress),
         "durationMs": selected_edition.get("durationMs"),
         "narrator": selected_edition.get("narrator"),
-        "primaryAction": {"label": action_label, "href": action_href},
+        "primaryAction": {"label": action_label, "href": action_href} if selected_edition.get("readable") else None,
         "units": navigation.get("readingUnits", []),
         "volumes": selected_edition.get("volumes", []),
         "tracks": selected_edition.get("files", []) if selected_tab == "AUDIOBOOK" else [],
@@ -2045,7 +2069,11 @@ def dashboard_summary(request: Request, db: Session = Depends(get_db), settings:
     comic_books = _table_count(db, "LibraryWork", "`hidden` = 0 AND `workType` = 'COMIC'")
     novel_books = _table_count(db, "LibraryWork", "`hidden` = 0 AND `workType` = 'EPUB'")
     storage = _scalar(db, "SELECT COALESCE(SUM(`sizeBytes`), 0) FROM `LibraryEdition` WHERE `hidden` = 0", default=0) if _has_table(db, "LibraryEdition") else 0
-    last_import = _row(db, "SELECT `finishedAt`, `updatedAt` FROM `ImportTask` WHERE `status` = 'COMPLETED' ORDER BY `finishedAt` DESC LIMIT 1") if _has_table(db, "ImportTask") else None
+    last_import = _row(
+        db,
+        "SELECT `finishedAt`, `updatedAt` FROM `ImportTask` WHERE `status` = 'COMPLETED' "
+        f"ORDER BY {_timestamp_sql('`finishedAt`')} DESC, `id` DESC LIMIT 1",
+    ) if _has_table(db, "ImportTask") else None
     latest_progress = _row(db, "SELECT `updatedAt` FROM `LibraryReadingProgress` ORDER BY `updatedAt` DESC LIMIT 1") if _has_table(db, "LibraryReadingProgress") else None
     return ok(
         {
@@ -2102,8 +2130,15 @@ def dashboard_system_status(request: Request, db: Session = Depends(get_db), set
     health = run_system_health_checks(db, settings)
     checks = {item["name"]: item for item in health["checks"]}
     enabled = _rows(db, "SELECT * FROM `MonitorFolder` WHERE `enabled` = 1 ORDER BY `createdAt` DESC") if _has_table(db, "MonitorFolder") else []
-    current_task = _row(db, "SELECT * FROM `ImportTask` WHERE `status` IN ('PENDING', 'PARSING') ORDER BY `createdAt` DESC LIMIT 1") if _has_table(db, "ImportTask") else None
-    latest_task = _row(db, "SELECT * FROM `ImportTask` ORDER BY `createdAt` DESC LIMIT 1") if _has_table(db, "ImportTask") else None
+    current_task = _row(
+        db,
+        "SELECT * FROM `ImportTask` WHERE `status` IN ('PENDING', 'PARSING') "
+        f"ORDER BY {_timestamp_sql('`createdAt`')} ASC, `id` ASC LIMIT 1",
+    ) if _has_table(db, "ImportTask") else None
+    latest_task = _row(
+        db,
+        f"SELECT * FROM `ImportTask` ORDER BY {_timestamp_sql('`createdAt`')} DESC, `id` DESC LIMIT 1",
+    ) if _has_table(db, "ImportTask") else None
     return ok(
         {
             "database": checks.get("database", {"status": "unknown", "message": "待检测"}),
@@ -2190,14 +2225,15 @@ def list_system_events(request: Request, page: int = 1, pageSize: int = 50, leve
         where.append("(`message` LIKE :term OR `action` LIKE :term OR `targetId` LIKE :term)")
         params["term"] = f"%{search.strip()}%"
     if dateFrom:
-        where.append("DATETIME(`createdAt`) >= DATETIME(:date_from)")
-        params["date_from"] = dateFrom
+        where.append(f"{_timestamp_sql('`createdAt`')} >= :date_from")
+        params["date_from"] = to_timestamp_ms(f"{dateFrom}T00:00:00")
     if dateTo:
-        where.append("DATETIME(`createdAt`) < DATETIME(:date_to)")
-        params["date_to"] = dateTo
+        where.append(f"{_timestamp_sql('`createdAt`')} < :date_to")
+        params["date_to"] = to_timestamp_ms(f"{dateTo}T00:00:00")
     where_sql = " AND ".join(where) if where else "1 = 1"
     total = _table_count(db, "SystemEvent", where_sql, params)
-    events = _rows(db, f"SELECT * FROM `SystemEvent` WHERE {where_sql} ORDER BY `createdAt` DESC LIMIT :limit OFFSET :offset", params)
+    events = _rows(db, f"SELECT * FROM `SystemEvent` WHERE {where_sql} "
+        f"ORDER BY {_timestamp_sql('`createdAt`')} DESC, `id` DESC LIMIT :limit OFFSET :offset", params)
     sources = _rows(db, "SELECT `source`, COUNT(*) AS `count` FROM `SystemEvent` GROUP BY `source` ORDER BY `source` ASC")
     levels = _rows(db, "SELECT `level`, COUNT(*) AS `count` FROM `SystemEvent` GROUP BY `level` ORDER BY `level` ASC")
     return ok({"events": [_serialize_system_event(event) for event in events], "page": page, "pageSize": page_size, "total": total, "totalPages": max(1, (total + page_size - 1) // page_size), "storage": storage, "facets": {"sources": sources, "levels": levels}})
@@ -2326,7 +2362,7 @@ def list_series(request: Request, visibility: str = "active", limit: int = 50, m
 
 
 @router.get("/works")
-def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: str = "active", search: str | None = None, keyword: str | None = None, seriesName: str | None = None, sort: str = "updated", db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: str = "active", search: str | None = None, keyword: str | None = None, seriesName: str | None = None, sort: str = "updated", sortDirection: str | None = None, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -2352,7 +2388,7 @@ def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: 
     if type_filter.lower() == "ebook":
         where.append(
             "EXISTS (SELECT 1 FROM `LibraryEdition` media_filter WHERE media_filter.`workId` = `LibraryWork`.`id` "
-            + ("AND media_filter.`mediaKind` = 'EBOOK' " if _has_column(db, "LibraryEdition", "mediaKind") else "AND media_filter.`format` IN ('EPUB', 'PDF') ")
+            + ("AND media_filter.`mediaKind` = 'EBOOK' " if _has_column(db, "LibraryEdition", "mediaKind") else "AND media_filter.`format` IN ('EPUB', 'PDF', 'MOBI', 'AZW', 'AZW3', 'PRC', 'FB2', 'TXT') ")
             + "AND COALESCE(media_filter.`hidden`, 0) = 0)"
         )
     elif type_filter.lower() in {"audio", "audiobook"}:
@@ -2454,16 +2490,30 @@ def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: 
             where.append(filter_clause)
             params.update(filter_params)
     where_sql = " AND ".join(where) if where else "1 = 1"
+    default_direction = "DESC" if sort in {"updated", "recent_read", "recent_import", "progress"} else "ASC"
+    direction = sortDirection.upper() if sortDirection and sortDirection.lower() in {"asc", "desc"} else default_direction
+    publisher_expression = """(
+        SELECT edition_sort.`publisher`
+        FROM `LibraryEdition` edition_sort
+        WHERE edition_sort.`workId` = `LibraryWork`.`id`
+          AND COALESCE(edition_sort.`hidden`, 0) = 0
+        ORDER BY edition_sort.`primary` DESC, edition_sort.`createdAt` ASC
+        LIMIT 1
+    )"""
     order = (
-        "CASE WHEN `seriesIndex` IS NULL THEN 1 ELSE 0 END ASC, `seriesIndex` ASC, `title` ASC"
+        f"CASE WHEN `seriesIndex` IS NULL THEN 1 ELSE 0 END ASC, `seriesIndex` {direction}, `title` COLLATE NOCASE ASC"
         if sort == "series_index" and _has_column(db, "LibraryWork", "seriesIndex")
-        else "`title` ASC"
+        else f"`title` COLLATE NOCASE {direction}"
         if sort == "title"
-        else "`author` ASC"
+        else f"CASE WHEN NULLIF(TRIM(COALESCE(`author`, '')), '') IS NULL THEN 1 ELSE 0 END ASC, `author` COLLATE NOCASE {direction}, `title` COLLATE NOCASE ASC"
         if sort == "author"
-        else "`createdAt` DESC"
+        else f"CASE WHEN NULLIF(TRIM(COALESCE({publisher_expression}, '')), '') IS NULL THEN 1 ELSE 0 END ASC, {publisher_expression} COLLATE NOCASE {direction}, `title` COLLATE NOCASE ASC"
+        if sort == "publisher" and _has_table(db, "LibraryEdition") and _has_column(db, "LibraryEdition", "publisher")
+        else f"CASE WHEN NULLIF(TRIM(COALESCE(`seriesName`, '')), '') IS NULL THEN 1 ELSE 0 END ASC, `seriesName` COLLATE NOCASE {direction}, CASE WHEN `seriesIndex` IS NULL THEN 1 ELSE 0 END ASC, `seriesIndex` ASC, `title` COLLATE NOCASE ASC"
+        if sort == "series" and _has_column(db, "LibraryWork", "seriesName")
+        else f"{_timestamp_sql('`createdAt`')} {direction}, `id` {direction}"
         if sort == "recent_import"
-        else "`updatedAt` DESC"
+        else f"`updatedAt` {direction}"
     )
     total = _table_count(db, "LibraryWork", where_sql, params)
     if sort == "progress" and _has_table(db, "LibraryReadingProgress"):
@@ -2479,7 +2529,7 @@ def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: 
                 item[1].get("lastReadAt") or "",
                 _dt(item[0].get("updatedAt")) or "",
             ),
-            reverse=True,
+            reverse=direction == "DESC",
         )
         start = (page - 1) * page_size
         page_views = [view for _work, view in work_views[start:start + page_size]]
@@ -2503,7 +2553,7 @@ def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: 
             ) recent_progress ON recent_progress.`workId` = `LibraryWork`.`id`
             WHERE {where_sql}
             ORDER BY CASE WHEN recent_progress.`latestReadAt` IS NULL THEN 1 ELSE 0 END ASC,
-                     recent_progress.`latestReadAt` DESC, `LibraryWork`.`updatedAt` DESC
+                     recent_progress.`latestReadAt` {direction}, `LibraryWork`.`updatedAt` {direction}
             LIMIT :limit OFFSET :offset
             """,
             params,
@@ -3282,11 +3332,17 @@ async def import_work(request: Request, db: Session = Depends(get_db), settings:
             status_code=400,
             details={"files": unsupported},
         )
-
+    import_preferences = load_import_preferences(db)
+    disabled_extensions = [name for name in upload_file_names if not extension_is_allowed(Path(name), import_preferences)]
+    if disabled_extensions:
+        return fail("部分文件后缀已在导入偏好中关闭。", status_code=400, details={"files": disabled_extensions})
     try:
         upload_dir = _target_directory_from_path(settings, form.get("targetPath"), "上传")
     except ValueError as exc:
         return fail(str(exc), status_code=400)
+    ignored_files = [name for name in upload_file_names if matches_ignore_patterns(upload_dir / name, import_preferences.ignore_patterns)]
+    if ignored_files:
+        return fail("部分文件命中全局导入忽略规则。", status_code=400, details={"files": ignored_files})
     monitor_folder = _enabled_monitor_folder_for_path(db, upload_dir)
     auto_import = True
     tasks: list[dict[str, Any]] = []
@@ -3708,6 +3764,8 @@ async def update_system_settings(request: Request, db: Session = Depends(get_db)
             continue
         if key == "workDetail.tabOrder":
             value = _normalize_detail_tab_order(value)
+        if key in IMPORT_PREFERENCE_KEYS:
+            value = normalize_import_setting_value(key, value)
         serialized = _json_text(value)
         if key in existing:
             db.execute(text("UPDATE `SystemSetting` SET `value` = :value, `updatedAt` = :updated_at WHERE `key` = :key"), {"key": key, "value": serialized, "updated_at": now})
@@ -4708,7 +4766,8 @@ def _import_task_view(db: Session, task: dict[str, Any], log_limit: int = 20) ->
     logs = (
         _rows(
             db,
-            "SELECT * FROM `ImportLog` WHERE `importTaskId` = :task_id ORDER BY `createdAt` DESC LIMIT :limit",
+            "SELECT * FROM `ImportLog` WHERE `importTaskId` = :task_id "
+            f"ORDER BY {_timestamp_sql('`createdAt`')} DESC, `id` DESC LIMIT :limit",
             {"task_id": task.get("id"), "limit": log_limit},
         )
         if _has_table(db, "ImportLog")
@@ -5299,7 +5358,8 @@ def list_import_tasks(
     page = min(page, total_pages)
     tasks = _rows(
         db,
-        f"SELECT * FROM `ImportTask`{' WHERE ' + where if where else ''} ORDER BY `createdAt` DESC LIMIT :limit OFFSET :offset",
+        f"SELECT * FROM `ImportTask`{' WHERE ' + where if where else ''} "
+        f"ORDER BY {_timestamp_sql('`createdAt`')} DESC, `id` DESC LIMIT :limit OFFSET :offset",
         {**params, "limit": page_size, "offset": (page - 1) * page_size},
     ) if total else []
     views = [_import_task_view(db, task, log_limit=20) for task in tasks]
@@ -5632,7 +5692,12 @@ def get_import_logs(task_id: str, request: Request, db: Session = Depends(get_db
         params["level"] = level.lower()
     total = _table_count(db, "ImportLog", where, params)
     logs = (
-        _rows(db, f"SELECT * FROM `ImportLog` WHERE {where} ORDER BY `createdAt` DESC LIMIT :limit OFFSET :offset", params)
+        _rows(
+            db,
+            f"SELECT * FROM `ImportLog` WHERE {where} "
+            f"ORDER BY {_timestamp_sql('`createdAt`')} DESC, `id` DESC LIMIT :limit OFFSET :offset",
+            params,
+        )
         if _has_table(db, "ImportLog")
         else []
     )
@@ -5827,7 +5892,6 @@ def library_facets(request: Request, db: Session = Depends(get_db), settings: Se
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    backfill_library_facets(db)
     facets = {kind.lower(): list_categories(db, kind) for kind in ("AUTHOR", "TAG", "SERIES", "PUBLISHER")}
     status_rows = _rows(db, "SELECT `status` AS `value`, COUNT(*) AS `count` FROM `LibraryWork` WHERE COALESCE(`hidden`, 0) = 0 GROUP BY `status`")
     media_rows = _rows(db, "SELECT `mediaKind` AS `value`, COUNT(DISTINCT `workId`) AS `count` FROM `LibraryEdition` WHERE COALESCE(`hidden`, 0) = 0 GROUP BY `mediaKind`")
@@ -5839,7 +5903,6 @@ def library_filter_options(request: Request, db: Session = Depends(get_db), sett
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    backfill_library_facets(db)
     return ok(library_filter_schema(db))
 
 
@@ -5849,11 +5912,17 @@ def library_categories(request: Request, db: Session = Depends(get_db), settings
     if auth_error:
         return auth_error
     try:
-        backfill_library_facets(db)
-        items = list_categories(db, request.query_params.get("kind", "TAG"), request.query_params.get("search", ""))
+        kind = request.query_params.get("kind", "TAG")
+        search = request.query_params.get("search", "")
+        page = max(1, int(request.query_params.get("page", "1")))
+        page_size = min(100, max(1, int(request.query_params.get("pageSize", "20"))))
+        total = count_categories(db, kind, search)
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        page = min(page, total_pages)
+        items = list_categories(db, kind, search, limit=page_size, offset=(page - 1) * page_size)
     except ValueError as exc:
         return fail(str(exc), status_code=400)
-    return ok({"categories": items})
+    return ok({"categories": items, "page": page, "pageSize": page_size, "total": total, "totalPages": total_pages})
 
 
 @router.patch("/library/categories/{facet_id}")
@@ -6370,6 +6439,61 @@ async def update_work_edition(work_id: str, edition_id: str, request: Request, d
     sync_work_facets(db, work_id)
     work = _get_work(db, work_id)
     return ok({"edition": updated, "book": _work_view(db, work, user.id) if work else None})
+
+
+@router.post("/works/{work_id}/editions/{edition_id}/convert")
+def convert_work_edition(work_id: str, edition_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    work = _get_work(db, work_id)
+    edition = (
+        _row(
+            db,
+            "SELECT * FROM `LibraryEdition` WHERE `id` = :edition_id AND `workId` = :work_id AND COALESCE(`hidden`, 0) = 0",
+            {"edition_id": edition_id, "work_id": work_id},
+        )
+        if _has_table(db, "LibraryEdition")
+        else None
+    )
+    if not work or not edition:
+        return fail("版本不存在或不属于该作品", status_code=404)
+    source_format = str(edition.get("format") or "").strip().lower()
+    if f".{source_format}" not in CONVERTIBLE_TEXT_EXTS:
+        return fail("该版本不支持转换为 EPUB", status_code=400)
+    source_file = _row(
+        db,
+        "SELECT * FROM `LibraryFile` WHERE `editionId` = :edition_id ORDER BY `sortOrder`, `createdAt` LIMIT 1",
+        {"edition_id": edition_id},
+    ) if _has_table(db, "LibraryFile") else None
+    source_path = Path(str((source_file or {}).get("path") or "")).expanduser()
+    if not source_file or not source_path.is_file():
+        return fail("原始文件不存在，无法转换", status_code=409)
+    task, created = enqueue_import_task(
+        db,
+        source_path,
+        origin="DEFERRED_CONVERSION",
+        original_name=source_path.name,
+        requested_title=str(work.get("title") or "").strip() or None,
+        requested_author=str(work.get("author") or "").strip() or None,
+        work_id=work_id,
+        monitor_folder_id=edition.get("monitorFolderId"),
+        message="已加入 EPUB 转换队列",
+        allow_terminal_requeue=True,
+    )
+    _record_system_event(
+        db,
+        level="info",
+        source="import",
+        actor_type="admin",
+        actor_id=user.id,
+        action="conversion.queued",
+        target_type="importTask",
+        target_id=task.get("id"),
+        message=f"加入后置转换队列：{source_path.name}",
+        metadata={"workId": work_id, "editionId": edition_id, "sourceFormat": source_format.upper()},
+    )
+    return ok({"task": task, "created": created}, status_code=202)
 
 
 @router.post("/works/{work_id}/metadata/apply")

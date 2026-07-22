@@ -1,19 +1,21 @@
 'use client';
 
-import { FileClock, FolderCog, FolderTree } from 'lucide-react';
+import { FileClock, FolderCog, FolderTree, SlidersHorizontal } from 'lucide-react';
 import { useState } from 'react';
 import { ImportTasksPage } from '../../import-tasks/import-tasks-page';
 import { SettingsPage } from '../settings-page';
 import { cn } from '../../../components/ui/cn';
 import { ImportFileManager } from './import-file-manager';
 import { SettingsCenterShell } from './settings-center-shell';
+import { ImportPreferencesPanel } from './import-preferences-panel';
 
 export function LibraryImportSettingsPage() {
-  const [activeTab, setActiveTab] = useState<'history' | 'files' | 'folders'>('history');
+  const [activeTab, setActiveTab] = useState<'history' | 'files' | 'folders' | 'preferences'>('history');
   const tabs = [
     { id: 'history' as const, label: '导入记录', icon: FileClock },
     { id: 'files' as const, label: '文件管理', icon: FolderTree },
-    { id: 'folders' as const, label: '监控文件夹', icon: FolderCog }
+    { id: 'folders' as const, label: '监控文件夹', icon: FolderCog },
+    { id: 'preferences' as const, label: '偏好设置', icon: SlidersHorizontal }
   ];
 
   return (
@@ -45,6 +47,7 @@ export function LibraryImportSettingsPage() {
           {activeTab === 'history' ? <ImportTasksPage embedded /> : null}
           {activeTab === 'files' ? <ImportFileManager /> : null}
           {activeTab === 'folders' ? <SettingsPage embedded initialSection="监控文件夹" /> : null}
+          {activeTab === 'preferences' ? <ImportPreferencesPanel /> : null}
         </section>
       </div>
     </SettingsCenterShell>

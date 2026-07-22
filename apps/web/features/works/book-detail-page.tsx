@@ -149,11 +149,9 @@ const emptyReadingUnitsPage: PageMeta = {
 
 function readableEditionId(book: WorkView | null, preferredEditionId?: string | null) {
   if (!book) return null;
-  return preferredEditionId
-    ?? book.recentEditionId
-    ?? book.editionId
-    ?? book.primaryEditionId
-    ?? book.editions.find((edition) => !edition.hidden)?.id
+  const candidates = [preferredEditionId, book.recentEditionId, book.editionId, book.primaryEditionId];
+  return candidates.find((candidate) => candidate && book.editions.some((edition) => edition.id === candidate && !edition.hidden && edition.readable))
+    ?? book.editions.find((edition) => !edition.hidden && edition.readable)?.id
     ?? null;
 }
 
@@ -183,6 +181,7 @@ function readerUrlForChapter(book: WorkView, editionId: string | null, volumeId:
 }
 
 function readerUrlForEdition(edition: WorkView['editions'][number]) {
+  if (!edition.readable) return null;
   if (mediaKindForEdition(edition) === 'AUDIOBOOK') {
     return `/works/${encodeURIComponent(edition.workId)}?detailTab=AUDIOBOOK&editionId=${encodeURIComponent(edition.id)}`;
   }
@@ -207,6 +206,7 @@ function currentPositionLabel(book: WorkView) {
 }
 
 function editionUnitLabel(edition: WorkView['editions'][number]) {
+  if (!edition.readable) return '原始文件';
   if (mediaKindForEdition(edition) === 'AUDIOBOOK') {
     const duration = formatDuration(edition.durationMs);
     return [edition.trackCount ? `${edition.trackCount} 个音轨` : `${edition.chapterCount ?? 0} 章`, duration].filter(Boolean).join(' · ');
@@ -333,6 +333,13 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     tags: '',
     status: 'UNREAD'
   });
+
+  useEffect(() => {
+    document.documentElement.dataset.shukuWorkDetail = 'true';
+    return () => {
+      delete document.documentElement.dataset.shukuWorkDetail;
+    };
+  }, []);
 
   const loadBook = useCallback(() => {
     detailRequestRef.current?.abort();
@@ -661,6 +668,27 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     }
   }
 
+  async function convertEdition(edition: WorkView['editions'][number]) {
+    const busyKey = `convert:${edition.id}`;
+    setSaving(true);
+    setBusyAction(busyKey);
+    setError('');
+    try {
+      const response = await fetch(`/api/works/${bookId}/editions/${edition.id}/convert`, { method: 'POST' });
+      const payload = (await response.json()) as { ok: boolean; data?: { task?: { id: string } }; error?: { message: string } };
+      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '加入转换队列失败');
+      toast.success('已加入转换队列', '转换完成后会生成可阅读的 EPUB 版本。');
+      await loadBook();
+    } catch (reason) {
+      const nextError = reason instanceof Error ? reason.message : '加入转换队列失败';
+      setError(nextError);
+      toast.error('转换失败', nextError);
+    } finally {
+      setSaving(false);
+      setBusyAction('');
+    }
+  }
+
   async function moveVolume(volumeId: string, direction: 'up' | 'down') {
     setSaving(true);
     setBusyAction(`move:${volumeId}:${direction}`);
@@ -783,7 +811,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   }
 
   function downloadPrimaryEdition() {
-    const editionId = readableEditionId(book, activeMedia?.selectedEditionId ?? selectedEditionId);
+    const editionId = activeMedia?.selectedEditionId ?? selectedEditionId ?? book?.editionId ?? book?.primaryEditionId ?? null;
     if (editionId) window.location.href = withBasePath(`/api/editions/${editionId}/file`);
   }
 
@@ -969,6 +997,10 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
 
   function openEdition(edition: WorkView['editions'][number]) {
     const destination = readerUrlForEdition(edition);
+    if (!destination) {
+      toast.info('当前格式暂不可阅读', '请先将原始文件转换为 EPUB。');
+      return;
+    }
     if (mediaKindForEdition(edition) === 'AUDIOBOOK') startAudioEdition(edition.id);
     else router.push(destination);
   }
@@ -1018,17 +1050,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                 ) : null}
               </div>
             ) : (
-              <div className="mt-3 flex flex-wrap items-center gap-3 text-base text-stone-600">
-                <span>{book.author}</span>
-                <span className="h-4 w-px bg-stone-300" />
-                <span>{currentTab === 'STRUCTURE' ? '全部内容版本' : activeMedia?.formatLabel || selectedEdition?.format || book.format}</span>
-                {currentTab !== 'STRUCTURE' && (activeMedia?.selectedEditionName || selectedEdition?.versionName) ? (
-                  <>
-                    <span className="h-4 w-px bg-stone-300" />
-                    <span className="text-stone-500">{activeMedia?.selectedEditionName || selectedEdition?.versionName}</span>
-                  </>
-                ) : null}
-              </div>
+              <div className="mt-3 text-base text-stone-600" data-testid="work-detail-header-meta">{book.author}</div>
             )}
             <p
               className={cn('mt-5 line-clamp-3 max-w-3xl whitespace-pre-line text-sm leading-7', book.desc === DEFAULT_DESCRIPTION ? 'text-stone-400' : 'text-stone-600')}
@@ -1115,7 +1137,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                       <RefreshCw size={16} /> 重新生成封面
                     </button>
                     {currentTab !== 'AUDIOBOOK' ? (
-                      <button type="button" className={menuItemClass} disabled={!readerEditionId} onClick={() => { setActionsOpen(false); downloadPrimaryEdition(); }}>
+                      <button type="button" className={menuItemClass} disabled={!selectedEdition?.id} onClick={() => { setActionsOpen(false); downloadPrimaryEdition(); }}>
                         <Download size={16} /> 下载当前版本
                       </button>
                     ) : null}
@@ -1242,6 +1264,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                       : '打开播放器查看音轨与章节'
                     : hasChapterNavigation
                     ? readingUnitsPage.total > 0 ? `共 ${readingUnitsPage.total} 章` : '未解析章节'
+                    : !selectedEdition?.readable ? `${selectedEdition?.formatValue ?? '该'} 格式已入库，转换为 EPUB 后可阅读`
                     : hasVolumeSections ? `${volumeSections.length} 个卷册` : '打开阅读器查看内容'}
                 </p>
               </div>
@@ -1347,6 +1370,11 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                     </button>
                   ))}
                 </div>
+              ) : selectedEdition && !selectedEdition.readable ? (
+                <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
+                  <span>原始 {selectedEdition.formatValue} 文件已安全入库，当前阅读器暂不支持直接打开。</span>
+                  {selectedEdition.conversionAvailable ? <Button loading={busyAction === `convert:${selectedEdition.id}`} disabled={saving && busyAction !== `convert:${selectedEdition.id}`} onClick={() => void convertEdition(selectedEdition)} className="!rounded-xl !bg-[#ff4f26] !text-white hover:!bg-[#e84420]">转换为 EPUB</Button> : null}
+                </div>
               ) : (
                 <button type="button" disabled={!readerUrl} onClick={() => {
                   if (!readerUrl) return;
@@ -1431,10 +1459,11 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                       {edition.primary || edition.id === book.primaryEditionId ? <span className="rounded-full bg-[#fff0e9] px-2 py-0.5 text-[11px] font-medium text-[#e84420]">媒介主版本</span> : null}
                     </div>
                     <div className="mt-1 text-xs text-stone-500">{edition.size} · {editionUnitLabel(edition)} · {fileName(edition.files[0]?.path)}</div>
+                    {!edition.readable ? <div className="mt-1 text-xs text-amber-700">原始文件已入库，转换为 EPUB 后可阅读</div> : null}
                     {edition.conversion ? <div className="mt-1 text-xs text-[#B45336]">由 {edition.conversion.sourceFormat} 自动转换为 {edition.conversion.targetFormat}</div> : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Button variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => openEdition(edition)}>{mediaKindForEdition(edition) === 'AUDIOBOOK' ? '收听' : mediaKindForEdition(edition) === 'COMIC' ? '查看' : '阅读'}</Button>
+                    {edition.readable ? <Button variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => openEdition(edition)}>{mediaKindForEdition(edition) === 'AUDIOBOOK' ? '收听' : mediaKindForEdition(edition) === 'COMIC' ? '查看' : '阅读'}</Button> : edition.conversionAvailable ? <Button loading={busyAction === `convert:${edition.id}`} disabled={saving && busyAction !== `convert:${edition.id}`} variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => void convertEdition(edition)}>转换为 EPUB</Button> : <Button disabled variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5">暂不支持阅读</Button>}
                     {manageStructure ? <Button variant="ghost" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => editEdition(edition)}>编辑版本</Button> : null}
                     {manageStructure && !edition.primary && edition.id !== book.primaryEditionId ? (
                       <Button loading={busyAction === `primary:${edition.id}`} disabled={saving && busyAction !== `primary:${edition.id}`} variant="ghost" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => void postAction(`/api/works/${book.id}/editions/${edition.id}/primary`, '已设为主版本', { refreshBook: true, busyKey: `primary:${edition.id}` })}>

@@ -32,8 +32,11 @@ from app.services.audio_metadata import (
     parse_audio_metadata,
 )
 from app.services.system_events import record_system_event
+from app.services.import_preferences import extension_is_allowed, load_import_preferences, matches_ignore_patterns
+from app.services.library_management import sync_work_facets
 from app.services.text_conversion import CONVERTIBLE_TEXT_EXTS, ConversionArtifact, convert_to_epub
 from app.services.default_cover import cover_status, ensure_default_cover, is_default_cover_path
+from app.core.time import now_timestamp_ms
 
 SUPPORTED_EXTS = {".epub", ".cbz", ".zip", ".pdf", *CONVERTIBLE_TEXT_EXTS, *SUPPORTED_AUDIO_EXTS}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
@@ -56,6 +59,7 @@ class ImportOptions:
     monitor_folder_id: str | None = None
     import_task_id: str | None = None
     original_source_file_path: Path | None = None
+    requested_work_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -128,6 +132,14 @@ def import_managed_book(db: Session, settings: Settings, options: ImportOptions)
     )
     db.commit()
     try:
+        import_preferences = load_import_preferences(db)
+        preference_sources = audio_sources if audio_sources else [original_source]
+        disallowed_sources = [item for item in preference_sources if not extension_is_allowed(item, import_preferences)]
+        if disallowed_sources:
+            raise ValueError(f"文件后缀已在导入偏好中关闭：{disallowed_sources[0].suffix.lower() or disallowed_sources[0].name}")
+        ignored_sources = [item for item in preference_sources if matches_ignore_patterns(item, import_preferences.ignore_patterns)]
+        if ignored_sources:
+            raise ValueError(f"文件命中全局导入忽略规则：{ignored_sources[0].name}")
         original_stat = original_source.stat()
         if not original_source.is_file() and not audio_sources:
             raise ValueError("导入源不是受支持的文件或有声书目录")
@@ -143,7 +155,10 @@ def import_managed_book(db: Session, settings: Settings, options: ImportOptions)
                 raise ValueError(f"有声书文件总量超过上限 {settings.audiobook_max_bundle_bytes} bytes")
         converted: ConversionArtifact | None = None
         effective_options = options
-        if source_ext in CONVERTIBLE_TEXT_EXTS:
+        should_convert_text = source_ext in CONVERTIBLE_TEXT_EXTS and (
+            import_preferences.auto_convert_to_epub or options.origin == "DEFERRED_CONVERSION"
+        )
+        if should_convert_text:
             converted = convert_to_epub(db, settings, task_id, original_source)
             source = converted.output_path.resolve()
             ext = ".epub"
@@ -210,6 +225,8 @@ def import_managed_book(db: Session, settings: Settings, options: ImportOptions)
             identity = _audio_identity(db, settings, original_source, options, audio_metadata)
         else:
             identity = _existing_series_volume_identity(db, settings, effective_options) or recognize_book_identity(db, settings, original_source, options.original_name)
+        if options.requested_work_id:
+            identity = replace(identity, reused_work_id=options.requested_work_id)
         if identity.fallback_reason:
             _log_import(db, task_id, "warning", identity.fallback_reason)
         _record_identity_system_events(db, task_id, identity, original_source)
@@ -231,12 +248,15 @@ def import_managed_book(db: Session, settings: Settings, options: ImportOptions)
         _update(db, "ImportTask", task_id, task_update)
         if ext == ".epub":
             result = _import_epub(db, settings, effective_options, task_id, stat.st_size, ext, identity)
+        elif ext in CONVERTIBLE_TEXT_EXTS:
+            result = _import_unconverted_text(db, settings, effective_options, task_id, stat.st_size, ext, identity)
         elif ext == ".pdf":
             result = _import_pdf(db, settings, effective_options, task_id, stat.st_size, ext, identity)
         elif audio_metadata:
             result = _import_audio(db, settings, effective_options, task_id, identity, audio_metadata)
         else:
             result = _import_comic(db, settings, effective_options, task_id, stat.st_size, ext, identity)
+        sync_work_facets(db, result.work_id, commit=False)
         if converted and _has_table(db, "LibraryMetadata"):
             conversion_row = _row(db, "SELECT * FROM `BookConversionTask` WHERE `importTaskId` = :task_id", {"task_id": task_id}) if _has_table(db, "BookConversionTask") else None
             _insert(
@@ -263,6 +283,8 @@ def import_managed_book(db: Session, settings: Settings, options: ImportOptions)
                     "updatedAt": _now(),
                 },
             )
+            if options.origin == "DEFERRED_CONVERSION":
+                _complete_deferred_source_conversion(db, original_source, result)
         _update(
             db,
             "ImportTask",
@@ -484,6 +506,165 @@ def _import_epub(db: Session, settings: Settings, options: ImportOptions, task_i
         if cover_path:
             Path(cover_path).unlink(missing_ok=True)
         raise
+
+
+def _import_unconverted_text(
+    db: Session,
+    settings: Settings,
+    options: ImportOptions,
+    task_id: str,
+    file_size: int,
+    ext: str,
+    identity: BookIdentity,
+) -> ImportResult:
+    """Register a supported text source without fabricating readable content.
+
+    The original file becomes a normal library edition and remains downloadable,
+    but has no reading units until the user requests the existing EPUB conversion
+    pipeline from the work detail page.
+    """
+
+    source_path = options.source_file_path.resolve()
+    source_format = ext.removeprefix(".").upper()
+    merge_key = _work_merge_key("epub", identity.title, identity.author)
+    work, created = _ensure_work(
+        db,
+        {
+            "workId": identity.reused_work_id,
+            "title": identity.title,
+            "author": identity.author,
+            "description": None,
+            "workType": source_format,
+            "tags": ["ebook", source_format.lower()],
+            "mergeKey": merge_key,
+            "origin": options.origin,
+            "monitorFolderId": options.monitor_folder_id,
+        },
+    )
+    _update(db, "ImportTask", task_id, {"message": f"正在建立 {source_format} 原始文件版本"})
+    edition = _insert(
+        db,
+        "LibraryEdition",
+        {
+            "id": _id(),
+            "workId": work["id"],
+            "monitorFolderId": options.monitor_folder_id,
+            "origin": options.origin,
+            "mediaKind": "EBOOK",
+            "format": source_format,
+            "versionName": _next_edition_name(db, work["id"], f"{source_format} 原始文件", "EBOOK"),
+            "versionKey": _file_version_key(source_format.lower(), source_path),
+            "sizeBytes": file_size,
+            "chapterCount": 0,
+            "coverStatus": "PENDING",
+            "importStatus": "COMPLETED",
+            "primary": _should_be_media_primary(db, work["id"], "EBOOK"),
+            "hidden": False,
+            "createdAt": _now(),
+            "updatedAt": _now(),
+        },
+    )
+    mime_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
+    _insert(
+        db,
+        "LibraryFile",
+        {
+            "id": _id(),
+            "editionId": edition["id"],
+            "volumeId": None,
+            "path": str(source_path),
+            "filePathHash": _hash_text(str(source_path)),
+            "hashStatus": "PARTIAL_PENDING",
+            "kind": "TEXT_SOURCE",
+            "mimeType": mime_type,
+            "sizeBytes": file_size,
+            "mtimeMs": int(source_path.stat().st_mtime * 1000),
+            "sortOrder": 0,
+            "createdAt": _now(),
+            "updatedAt": _now(),
+        },
+    )
+    if _has_table(db, "LibraryMetadata"):
+        _insert(
+            db,
+            "LibraryMetadata",
+            {
+                "id": _id(),
+                "editionId": edition["id"],
+                "source": "unconverted_text",
+                "rawJson": json.dumps(
+                    {
+                        "sourceFormat": source_format,
+                        "sourcePath": str(source_path),
+                        "readable": False,
+                        "conversionAvailable": True,
+                    },
+                    ensure_ascii=False,
+                ),
+                "createdAt": _now(),
+                "updatedAt": _now(),
+            },
+        )
+        _insert_identity_metadata(db, edition["id"], identity)
+    stored_cover_path = ensure_default_cover(settings)
+    _update(
+        db,
+        "LibraryEdition",
+        edition["id"],
+        {
+            "coverPath": stored_cover_path,
+            "coverStatus": cover_status(stored_cover_path, settings),
+            "updatedAt": _now(),
+        },
+    )
+    _finalize_work_primary(db, settings, work["id"], edition["id"], stored_cover_path)
+    return ImportResult(
+        work["id"],
+        work["id"],
+        edition["id"],
+        None,
+        work["title"],
+        "ebook",
+        source_format.lower(),
+        0,
+        "completed",
+        False,
+        not created,
+        "unconverted-text-source",
+    )
+
+
+def _complete_deferred_source_conversion(db: Session, source_path: Path, result: ImportResult) -> None:
+    source_edition = _row(
+        db,
+        """
+        SELECT e.`id`
+        FROM `LibraryFile` f
+        JOIN `LibraryEdition` e ON e.`id` = f.`editionId`
+        WHERE f.`path` = :source_path
+          AND e.`workId` = :work_id
+          AND e.`id` != :result_edition_id
+          AND UPPER(e.`format`) IN ('MOBI', 'AZW', 'AZW3', 'PRC', 'FB2', 'TXT')
+          AND COALESCE(e.`hidden`, 0) = 0
+        ORDER BY e.`createdAt` ASC
+        LIMIT 1
+        """,
+        {
+            "source_path": str(source_path.resolve()),
+            "work_id": result.work_id,
+            "result_edition_id": result.edition_id,
+        },
+    )
+    if not source_edition:
+        return
+    _update(db, "LibraryEdition", str(source_edition["id"]), {"primary": False, "hidden": True, "updatedAt": _now()})
+    _update(db, "LibraryEdition", result.edition_id, {"primary": True, "hidden": False, "updatedAt": _now()})
+    _update(
+        db,
+        "LibraryWork",
+        result.work_id,
+        {"primaryEditionId": result.edition_id, "workType": "EPUB", "updatedAt": _now()},
+    )
 
 
 def _import_pdf(db: Session, settings: Settings, options: ImportOptions, task_id: str, file_size: int, ext: str, identity: BookIdentity) -> ImportResult:
@@ -1736,7 +1917,8 @@ def parse_comic_volume_info(parsed: dict[str, Any], path: Path, original_name: s
 def _ensure_import_task(db: Session, options: ImportOptions) -> str:
     existing = _row(
         db,
-        "SELECT `id` FROM `ImportTask` WHERE `sourcePath` = :source_path AND `status` = 'PENDING' ORDER BY `createdAt` ASC LIMIT 1",
+        "SELECT `id` FROM `ImportTask` WHERE `sourcePath` = :source_path AND `status` = 'PENDING' "
+        "ORDER BY CAST(`createdAt` AS INTEGER) ASC, `id` ASC LIMIT 1",
         {"source_path": str(options.source_file_path)},
     )
     if existing:
@@ -2436,8 +2618,8 @@ def _id() -> str:
     return f"py_{time.time_ns()}"
 
 
-def _now() -> str:
-    return time.strftime("%Y-%m-%d %H:%M:%S")
+def _now() -> int:
+    return now_timestamp_ms()
 
 
 def _content_hash(path: Path) -> str:

@@ -522,9 +522,9 @@ def test_bootstrap_returns_each_edition_latest_progress_for_version_navigation(c
     assert data["selectedVolume"]["id"] == "volume-v2"
     editions = {item["id"]: item for item in data["availableEditions"]}
     assert editions["edition-v2"]["progress"] == 31
-    assert editions["edition-v2"]["lastReadAt"] == "2026-07-08T04:00:00"
+    assert editions["edition-v2"]["lastReadAt"] == "2026-07-07T20:00:00Z"
     assert editions["edition-v2-alt"]["progress"] == 73.5
-    assert editions["edition-v2-alt"]["lastReadAt"] == "2026-07-09T06:00:00"
+    assert editions["edition-v2-alt"]["lastReadAt"] == "2026-07-08T22:00:00Z"
     assert editions["edition-v2-unread"]["progress"] == 0
     assert editions["edition-v2-unread"]["lastReadAt"] is None
 

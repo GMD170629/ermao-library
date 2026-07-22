@@ -1,6 +1,6 @@
 'use client';
 
-import { Edit3, GitMerge, Loader2, Search } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Edit3, GitMerge, Loader2, Search } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
@@ -9,6 +9,7 @@ import { Select } from '../../components/ui/select';
 
 type Kind = 'AUTHOR' | 'TAG' | 'SERIES' | 'PUBLISHER';
 type Category = { id: string; kind: Kind; name: string; aliases: string[]; bookCount: number };
+type CategoryPage = { categories: Category[]; page: number; pageSize: number; total: number; totalPages: number };
 type ApiPayload<T> = { ok: boolean; data?: T; error?: { message: string } };
 const tabs: Array<{ key: Kind; label: string }> = [
   { key: 'AUTHOR', label: '作者' }, { key: 'TAG', label: '标签' }, { key: 'SERIES', label: '丛书' }, { key: 'PUBLISHER', label: '出版社' }
@@ -23,8 +24,12 @@ async function payload<T>(response: Response, fallback: string) {
 export function ClassificationManagementPanel() {
   const [kind, setKind] = useState<Kind>('AUTHOR');
   const [items, setItems] = useState<Category[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selectedItems, setSelectedItems] = useState<Category[]>([]);
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState('20');
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [renameItem, setRenameItem] = useState<Category | null>(null);
@@ -34,14 +39,17 @@ export function ClassificationManagementPanel() {
   const [error, setError] = useState('');
   const toast = useToast();
 
-  async function load(nextKind = kind, nextSearch = search) {
+  async function load(nextKind = kind, nextSearch = search, nextPage = page, nextPageSize = pageSize) {
     setLoading(true);
     setError('');
     try {
-      const params = new URLSearchParams({ kind: nextKind });
+      const params = new URLSearchParams({ kind: nextKind, page: String(nextPage), pageSize: nextPageSize });
       if (nextSearch.trim()) params.set('search', nextSearch.trim());
-      const data = await payload<{ categories: Category[] }>(await fetch(`/api/library/categories?${params}`), '读取分类失败');
+      const data = await payload<CategoryPage>(await fetch(`/api/library/categories?${params}`), '读取分类失败');
       setItems(data.categories);
+      setPage(data.page);
+      setTotal(data.total);
+      setTotalPages(data.totalPages);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '读取分类失败');
     } finally {
@@ -50,16 +58,17 @@ export function ClassificationManagementPanel() {
   }
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(kind, search), 180);
+    const timer = window.setTimeout(() => void load(kind, search, page, pageSize), 180);
     return () => window.clearTimeout(timer);
-  }, [kind, search]);
+  }, [kind, search, page, pageSize]);
 
-  const selectedItems = useMemo(() => items.filter((item) => selected.includes(item.id)), [items, selected]);
+  const selectedIds = useMemo(() => selectedItems.map((item) => item.id), [selectedItems]);
 
   function changeKind(nextKind: Kind) {
     setKind(nextKind);
-    setSelected([]);
+    setSelectedItems([]);
     setSearch('');
+    setPage(1);
   }
 
   async function rename() {
@@ -69,6 +78,7 @@ export function ClassificationManagementPanel() {
       await payload(await fetch(`/api/library/categories/${renameItem.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: renameValue.trim() }) }), '重命名失败');
       toast.success('分类已重命名');
       setRenameItem(null);
+      setSelectedItems([]);
       await load();
     } catch (reason) {
       toast.error('重命名失败', reason instanceof Error ? reason.message : '重命名失败');
@@ -87,10 +97,10 @@ export function ClassificationManagementPanel() {
     try {
       await payload(await fetch('/api/library/categories/merge', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind, targetId, sourceIds: selected.filter((id) => id !== targetId) })
+        body: JSON.stringify({ kind, targetId, sourceIds: selectedIds.filter((id) => id !== targetId) })
       }), '合并分类失败');
       toast.success('分类已合并');
-      setSelected([]);
+      setSelectedItems([]);
       setMergeOpen(false);
       await load();
     } catch (reason) {
@@ -110,22 +120,47 @@ export function ClassificationManagementPanel() {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <label className="flex h-11 min-w-[260px] items-center gap-2 rounded-xl border border-black/[0.09] bg-white px-3">
-          <Search size={16} className="text-[#8A847E]" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`搜索${tabs.find((tab) => tab.key === kind)?.label}`} className="min-w-0 flex-1 bg-transparent text-sm outline-none" />
+          <Search size={16} className="text-[#8A847E]" /><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); setSelectedItems([]); }} placeholder={`搜索${tabs.find((tab) => tab.key === kind)?.label}`} className="min-w-0 flex-1 bg-transparent text-sm outline-none" />
         </label>
-        <Button icon={GitMerge} disabled={selected.length < 2} onClick={openMerge}>合并所选（{selected.length}）</Button>
+        <Button icon={GitMerge} disabled={selectedItems.length < 2} onClick={openMerge}>合并所选（{selectedItems.length}）</Button>
       </div>
       {error ? <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
       <div className="overflow-hidden rounded-2xl border border-black/[0.07] bg-white/65">
         {loading ? <div className="flex min-h-44 items-center justify-center text-sm text-[#817B75]"><Loader2 size={17} className="mr-2 animate-spin" />正在读取分类…</div> : items.length === 0 ? <div className="flex min-h-44 items-center justify-center text-sm text-[#817B75]">没有匹配的分类</div> : (
           <div className="divide-y divide-black/[0.055]">
             {items.map((item) => <div key={item.id} className="flex items-center gap-3 px-4 py-3.5">
-              <input type="checkbox" checked={selected.includes(item.id)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} className="h-4 w-4 accent-[#EF4D2F]" />
+              <input type="checkbox" checked={selectedIds.includes(item.id)} onChange={(event) => setSelectedItems((current) => event.target.checked ? [...current.filter((selectedItem) => selectedItem.id !== item.id), item] : current.filter((selectedItem) => selectedItem.id !== item.id))} className="h-4 w-4 accent-[#EF4D2F]" />
               <div className="min-w-0 flex-1"><div className="font-medium text-[#34312E]">{item.name}</div>{item.aliases.length ? <div className="mt-0.5 truncate text-xs text-[#948E88]">曾用名：{item.aliases.join('、')}</div> : null}</div>
               <div className="text-sm tabular-nums text-[#817B75]">{item.bookCount} 本</div>
               <Button variant="ghost" icon={Edit3} className="px-3" onClick={() => { setRenameItem(item); setRenameValue(item.name); }}>重命名</Button>
             </div>)}
           </div>
         )}
+        {!loading && total > 0 ? (
+          <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-black/[0.07] px-4 py-3 text-sm text-[#77716A]">
+            <div className="flex items-center gap-3">
+              <span>共 {total} 项</span>
+              <Select
+                value={pageSize}
+                onChange={(value) => { setPageSize(value); setPage(1); }}
+                ariaLabel="每页显示数量"
+                options={[
+                  { value: '20', label: '每页 20 项' },
+                  { value: '50', label: '每页 50 项' },
+                  { value: '100', label: '每页 100 项' }
+                ]}
+                size="sm"
+                align="left"
+                className="min-w-[118px]"
+              />
+            </div>
+            <nav className="flex items-center gap-2" aria-label="分类治理分页">
+              <button type="button" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white transition hover:bg-[#F7F4F0] disabled:opacity-40" aria-label="上一页"><ChevronLeft size={16} /></button>
+              <span className="min-w-16 text-center text-[#4F4A45]">{page} / {totalPages}</span>
+              <button type="button" disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white transition hover:bg-[#F7F4F0] disabled:opacity-40" aria-label="下一页"><ChevronRight size={16} /></button>
+            </nav>
+          </footer>
+        ) : null}
       </div>
 
       {renameItem ? <Modal title={`重命名“${renameItem.name}”`} onClose={() => setRenameItem(null)}>

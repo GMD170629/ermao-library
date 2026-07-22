@@ -53,6 +53,26 @@ body {
   background-clip: padding-box;
 }
 
+/* The work detail page uses the document as its only scroll surface. Keep it
+   scrollable while removing redundant browser chrome from the page and any
+   responsive overflow containers rendered inside it. */
+html[data-shuku-work-detail='true'],
+html[data-shuku-work-detail='true'] body,
+html[data-shuku-work-detail='true'] .shuku-app-shell,
+html[data-shuku-work-detail='true'] .shuku-app-shell * {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+html[data-shuku-work-detail='true']::-webkit-scrollbar,
+html[data-shuku-work-detail='true'] body::-webkit-scrollbar,
+html[data-shuku-work-detail='true'] .shuku-app-shell::-webkit-scrollbar,
+html[data-shuku-work-detail='true'] .shuku-app-shell *::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 /* The EPUB scrolled layout remains fully scrollable; only its browser chrome
    is hidden. The iframe document applies the matching rule in epub-theme.ts. */
 [data-reader-engine='epub-v2'][data-reader-flow='scrolled'],

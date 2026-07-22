@@ -1,6 +1,7 @@
 'use client';
 
 import { Database, Plus, RotateCcw, Trash2, WandSparkles } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { cn } from '../../components/ui/cn';
 import { Combobox } from '../../components/ui/combobox';
 import { Select } from '../../components/ui/select';
@@ -39,6 +40,7 @@ type SmartFilterBuilderProps = {
   fields: SmartFilterField[];
   rules: SmartFilterRules;
   loading?: boolean;
+  actions?: ReactNode;
   onChange: (rules: SmartFilterRules) => void;
 };
 
@@ -86,7 +88,7 @@ function inputClassName() {
   return 'h-11 min-w-0 rounded-xl border border-black/[0.09] bg-white px-3 text-sm text-[#34302D] outline-none transition focus:border-[#EFAE9B] focus:ring-2 focus:ring-[#F9D8CE]';
 }
 
-export function SmartFilterBuilder({ fields, rules, loading = false, onChange }: SmartFilterBuilderProps) {
+export function SmartFilterBuilder({ fields, rules, loading = false, actions, onChange }: SmartFilterBuilderProps) {
   const fieldOptions = fields.map((field) => ({ value: field.key, label: field.label, group: field.group }));
 
   function addCondition() {
@@ -193,6 +195,7 @@ export function SmartFilterBuilder({ fields, rules, loading = false, onChange }:
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {actions}
           <span className="text-xs text-[#8A837D]">匹配</span>
           <Select
             value={rules.combinator}

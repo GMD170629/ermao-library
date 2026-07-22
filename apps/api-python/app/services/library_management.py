@@ -10,6 +10,7 @@ from typing import Any, Iterable
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.core.time import now_timestamp_ms, timestamp_ms_to_iso, to_timestamp_ms
 from app.services.book_identity import UNKNOWN_AUTHOR, identity_merge_key, normalize_identity_part
 from app.services.library_filters import compile_filter_rules
 
@@ -189,7 +190,32 @@ def backfill_library_facets(db: Session) -> int:
     return len(work_ids)
 
 
-def list_categories(db: Session, kind: str, search: str = "") -> list[dict[str, Any]]:
+def count_categories(db: Session, kind: str, search: str = "") -> int:
+    normalized_kind = kind.strip().upper()
+    if normalized_kind not in FACET_KINDS:
+        raise ValueError("分类类型无效")
+    params: dict[str, Any] = {"kind": normalized_kind}
+    search_sql = ""
+    if search.strip():
+        search_sql = " AND (LOWER(`name`) LIKE :search OR LOWER(`aliases`) LIKE :search)"
+        params["search"] = f"%{search.strip().lower()}%"
+    return int(
+        db.execute(
+            text(f"SELECT COUNT(1) FROM `LibraryFacet` WHERE `kind` = :kind{search_sql}"),
+            params,
+        ).scalar()
+        or 0
+    )
+
+
+def list_categories(
+    db: Session,
+    kind: str,
+    search: str = "",
+    *,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
     normalized_kind = kind.strip().upper()
     if normalized_kind not in FACET_KINDS:
         raise ValueError("分类类型无效")
@@ -213,10 +239,16 @@ def list_categories(db: Session, kind: str, search: str = "") -> list[dict[str, 
             "LEFT JOIN `LibraryWorkFacet` wf ON wf.`facetId` = f.`id` "
             "LEFT JOIN `LibraryWork` w ON w.`id` = wf.`workId`"
         )
+    pagination_sql = ""
+    if limit is not None:
+        if limit <= 0 or offset < 0:
+            raise ValueError("分页参数无效")
+        pagination_sql = " LIMIT :limit OFFSET :offset"
+        params.update({"limit": limit, "offset": offset})
     rows = _rows(
         db,
         f"SELECT f.*, {count_sql} WHERE f.`kind` = :kind{search_sql} "
-        "GROUP BY f.`id` ORDER BY `bookCount` DESC, f.`name` COLLATE NOCASE ASC",
+        f"GROUP BY f.`id` ORDER BY `bookCount` DESC, f.`name` COLLATE NOCASE ASC{pagination_sql}",
         params,
     )
     return [
@@ -791,8 +823,8 @@ def undo_operation(db: Session, operation_id: str, user_id: str | None) -> dict[
         raise ValueError("操作记录不存在")
     if operation.get("status") == "UNDONE":
         raise ValueError("该操作已经撤销")
-    expires_at = str(operation.get("expiresAt") or "")
-    if expires_at and expires_at < _now().isoformat():
+    expires_at = to_timestamp_ms(operation.get("expiresAt"))
+    if expires_at is not None and expires_at < now_timestamp_ms():
         raise ValueError("撤销期限已过")
     inverse = _parse_json(operation.get("inverseJson"), {})
     action = str(operation.get("action") or "")
@@ -868,7 +900,7 @@ def undo_operation(db: Session, operation_id: str, user_id: str | None) -> dict[
     now = _now()
     db.execute(text("UPDATE `LibraryOperation` SET `status` = 'UNDONE', `undoneAt` = :now, `updatedAt` = :now WHERE `id` = :id"), {"now": now, "id": operation_id})
     db.commit()
-    return {"id": operation_id, "status": "UNDONE", "undoneAt": now.isoformat(), "userId": user_id}
+    return {"id": operation_id, "status": "UNDONE", "undoneAt": timestamp_ms_to_iso(now), "userId": user_id}
 
 
 def operation_view(operation: dict[str, Any]) -> dict[str, Any]:
@@ -876,6 +908,6 @@ def operation_view(operation: dict[str, Any]) -> dict[str, Any]:
         **operation,
         "payload": _parse_json(operation.get("payloadJson"), {}),
         "undoAvailable": operation.get("status") == "COMPLETED" and (
-            not operation.get("expiresAt") or str(operation.get("expiresAt")) >= _now().isoformat()
+            not operation.get("expiresAt") or (to_timestamp_ms(operation.get("expiresAt")) or 0) >= now_timestamp_ms()
         ),
     }

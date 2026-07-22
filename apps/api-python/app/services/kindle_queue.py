@@ -16,6 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.core.time import now_timestamp_ms
 from app.services.email_settings import (
     EmailSettingsError,
     get_email_settings,
@@ -104,9 +105,10 @@ def next_queued_task(db: Session) -> dict[str, Any] | None:
         row = db.execute(
             text(
                 "SELECT * FROM `KindleSendTask` WHERE `status` = 'queued' "
-                "AND (`nextAttemptAt` IS NULL OR datetime(`nextAttemptAt`) <= CURRENT_TIMESTAMP) "
-                "ORDER BY `createdAt` ASC LIMIT 1"
-            )
+                "AND (`nextAttemptAt` IS NULL OR CAST(`nextAttemptAt` AS INTEGER) <= :now) "
+                "ORDER BY CAST(`createdAt` AS INTEGER) ASC, `id` ASC LIMIT 1"
+            ),
+            {"now": now_timestamp_ms()},
         ).mappings().first()
         return dict(row) if row else None
     except SQLAlchemyError:

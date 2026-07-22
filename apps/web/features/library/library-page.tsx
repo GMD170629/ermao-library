@@ -45,8 +45,11 @@ const sortOptions = [
   { value: 'recent_import', label: '最近加入' },
   { value: 'title', label: '标题' },
   { value: 'author', label: '作者' },
-  { value: 'progress', label: '阅读进度' }
+  { value: 'publisher', label: '出版社' },
+  { value: 'series', label: '系列' }
 ];
+
+type SortDirection = 'asc' | 'desc';
 
 const formatOptions = [
   { value: '全部', label: '全部' },
@@ -97,6 +100,14 @@ function routeSort(value: string | null) {
   return value && validSorts.has(value) ? value : 'recent_read';
 }
 
+function defaultSortDirection(sort: string): SortDirection {
+  return sort === 'recent_read' || sort === 'recent_import' ? 'desc' : 'asc';
+}
+
+function routeSortDirection(value: string | null, sort: string): SortDirection {
+  return value === 'asc' || value === 'desc' ? value : defaultSortDirection(sort);
+}
+
 function parseSmartFilterRules(value: string | null): SmartFilterRules {
   if (!value) return { combinator: 'ALL', conditions: [] };
   try {
@@ -134,7 +145,9 @@ export function LibraryPage() {
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [formatFilter, setFormatFilter] = useState('全部');
   const [statusFilter, setStatusFilter] = useState(() => routeStatus(searchParams.get('status')));
-  const [sort, setSort] = useState(() => routeSort(searchParams.get('sort')));
+  const initialSort = routeSort(searchParams.get('sort'));
+  const [sort, setSort] = useState(initialSort);
+  const [sortDirection, setSortDirection] = useState<SortDirection>(() => routeSortDirection(searchParams.get('sortDirection'), initialSort));
   const [search, setSearch] = useState(() => searchParams.get('search') ?? '');
   const [smartFilterRules, setSmartFilterRules] = useState<SmartFilterRules>(() => parseSmartFilterRules(searchParams.get('filters')));
   const [smartFilterFields, setSmartFilterFields] = useState<SmartFilterField[]>([]);
@@ -185,14 +198,15 @@ export function LibraryPage() {
     if (smartFilterQuery) params.set('filters', smartFilterQuery);
     params.set('visibility', 'active');
     params.set('sort', sort);
+    params.set('sortDirection', sortDirection);
     params.set('page', String(page));
     params.set('pageSize', pageSize);
     return params.toString();
-  }, [formatFilter, page, pageSize, search, seriesNameFilter, smartFilterQuery, sort, statusFilter]);
+  }, [formatFilter, page, pageSize, search, seriesNameFilter, smartFilterQuery, sort, sortDirection, statusFilter]);
 
   useEffect(() => {
     setPage(1);
-  }, [formatFilter, search, seriesNameFilter, smartFilterQuery, sort, statusFilter]);
+  }, [formatFilter, search, seriesNameFilter, smartFilterQuery, sort, sortDirection, statusFilter]);
 
   useEffect(() => {
     const savedView = window.localStorage.getItem('shuku.library.view');
@@ -202,7 +216,9 @@ export function LibraryPage() {
   useEffect(() => {
     const routeParams = new URLSearchParams(searchParamString);
     setStatusFilter(routeStatus(routeParams.get('status')));
-    setSort(routeSort(routeParams.get('sort')));
+    const nextSort = routeSort(routeParams.get('sort'));
+    setSort(nextSort);
+    setSortDirection(routeSortDirection(routeParams.get('sortDirection'), nextSort));
     setSearch(routeParams.get('search') ?? '');
     if (routeParams.get('upload') === '1') setUploadDialogOpen(true);
   }, [searchParamString]);
@@ -296,11 +312,14 @@ export function LibraryPage() {
     });
   }
 
-  function updateSort(nextSort: string) {
+  function updateSort(nextSort: string, nextDirection: SortDirection) {
     setSort(nextSort);
+    setSortDirection(nextDirection);
     replaceRoute((params) => {
       if (nextSort === 'recent_read') params.delete('sort');
       else params.set('sort', nextSort);
+      if (nextDirection === defaultSortDirection(nextSort)) params.delete('sortDirection');
+      else params.set('sortDirection', nextDirection);
     });
   }
 
@@ -607,7 +626,7 @@ export function LibraryPage() {
               className="min-w-0 flex-1 bg-transparent text-sm text-[#2A2724] outline-none placeholder:text-[#98928C]"
             />
           </label>
-          <div className="inline-flex h-12 self-start rounded-xl bg-black/[0.035] p-1 sm:self-auto" role="group" aria-label="图书类型">
+          <div className="inline-flex h-12 w-full self-start rounded-xl bg-black/[0.035] p-1 sm:w-auto sm:self-auto" role="group" aria-label="图书类型">
             {formatOptions.map((option) => (
               <button
                 key={option.value}
@@ -615,7 +634,7 @@ export function LibraryPage() {
                 onClick={() => setFormatFilter(option.value)}
                 aria-pressed={formatFilter === option.value}
                 className={cn(
-                  'min-w-[70px] rounded-lg px-3 text-sm transition',
+                  'min-w-0 flex-1 rounded-lg px-2 text-sm transition sm:min-w-[70px] sm:flex-none sm:px-3',
                   formatFilter === option.value ? 'bg-[#F9DED4] font-medium text-[#EF4D2F] shadow-sm' : 'text-[#706A64] hover:text-[#34312E]'
                 )}
               >
@@ -626,9 +645,6 @@ export function LibraryPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" onClick={() => setSmartShelfOpen(true)} className="inline-flex h-11 items-center gap-2 rounded-xl border border-black/[0.09] bg-white/55 px-3 text-sm font-medium text-[#69635E] transition hover:bg-black/[0.025]"><BookmarkPlus size={16} />保存筛选</button>
-          <Select value={sort} options={sortOptions} onChange={updateSort} ariaLabel="排序方式" className="min-w-[128px]" align="right" />
-          <Select value={pageSize} options={pageSizeOptions} onChange={(nextPageSize) => { setPage(1); setPageSize(nextPageSize); }} ariaLabel="每页数量" className="min-w-[112px]" align="right" />
           <div className="inline-flex h-11 rounded-xl border border-black/[0.09] bg-white/55 p-1">
             <button
               type="button"
@@ -655,12 +671,13 @@ export function LibraryPage() {
             type="button"
             onClick={() => setFiltersOpen((open) => !open)}
             aria-expanded={filtersOpen}
+            aria-label="更多筛选"
             className={cn(
-              'inline-flex h-11 items-center gap-2 rounded-xl border px-4 text-sm font-medium transition',
+              'inline-flex h-11 w-11 items-center justify-center gap-2 rounded-xl border px-0 text-sm font-medium transition sm:w-auto sm:px-4',
               filtersOpen || advancedFilterCount > 0 ? 'border-[#F3B6A4] bg-[#FFF2ED] text-[#D7462B]' : 'border-black/[0.09] bg-white/55 text-[#69635E] hover:bg-black/[0.025]'
             )}
           >
-            更多筛选
+            <span className="hidden sm:inline">更多筛选</span>
             {advancedFilterCount > 0 ? <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#EF4D2F] px-1 text-[10px] text-white">{advancedFilterCount}</span> : null}
             <Filter size={15} strokeWidth={1.8} />
           </button>
@@ -677,7 +694,15 @@ export function LibraryPage() {
             </div>
             <button type="button" disabled={advancedFilterCount === 0} onClick={clearAdvancedFilters} className="h-9 self-start rounded-lg px-2.5 text-xs font-medium text-[#77716B] transition hover:bg-white hover:text-[#EF4D2F] disabled:cursor-not-allowed disabled:opacity-35 sm:self-auto">清除全部筛选</button>
           </div> : null}
-          <SmartFilterBuilder fields={smartFilterFields} rules={smartFilterRules} loading={filterSchemaLoading || !filterSchemaLoaded} onChange={setSmartFilterRules} />
+          <SmartFilterBuilder
+            fields={smartFilterFields}
+            rules={smartFilterRules}
+            loading={filterSchemaLoading || !filterSchemaLoaded}
+            actions={(
+              <button type="button" onClick={() => setSmartShelfOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-black/[0.09] bg-white px-3 text-sm font-medium text-[#69635E] transition hover:bg-black/[0.025]"><BookmarkPlus size={15} />保存筛选</button>
+            )}
+            onChange={setSmartFilterRules}
+          />
         </>
       ) : null}
 
@@ -714,10 +739,10 @@ export function LibraryPage() {
               ))}
             </div>
           ) : (
-            <div className="mt-8"><BookTable books={books} onDelete={openDeleteBook} selectable selectedIds={selectedWorkIds} onSelect={(book) => toggleSelection(book.id)} onSelectAll={togglePageSelection} onSelectionChange={setSelectedWorkIds} onContextMenu={(_book, position) => setBatchContextPosition(position)} /></div>
+            <div className="mt-8"><BookTable books={books} onDelete={openDeleteBook} selectable selectedIds={selectedWorkIds} onSelect={(book) => toggleSelection(book.id)} onSelectAll={togglePageSelection} onSelectionChange={setSelectedWorkIds} onContextMenu={(_book, position) => setBatchContextPosition(position)} sort={sort} sortDirection={sortDirection} onSort={updateSort} /></div>
           )}
 
-          {meta.totalPages > 1 ? <Pagination page={page} totalPages={meta.totalPages} loading={loading} onPage={setPage} /> : null}
+          <Pagination page={page} totalPages={meta.totalPages} loading={loading} pageSize={pageSize} onPage={setPage} onPageSize={(nextPageSize) => { setPage(1); setPageSize(nextPageSize); }} />
         </>
       ) : null}
 
@@ -729,10 +754,11 @@ export function LibraryPage() {
   );
 }
 
-function Pagination({ page, totalPages, loading, onPage }: { page: number; totalPages: number; loading: boolean; onPage: (page: number) => void }) {
+function Pagination({ page, totalPages, loading, pageSize, onPage, onPageSize }: { page: number; totalPages: number; loading: boolean; pageSize: string; onPage: (page: number) => void; onPageSize: (pageSize: string) => void }) {
   const candidates = Array.from(new Set([1, page - 1, page, page + 1, totalPages])).filter((item) => item >= 1 && item <= totalPages).sort((a, b) => a - b);
   return (
-    <nav className="mt-10 flex items-center justify-center gap-1.5" aria-label="书库分页">
+    <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
+    {totalPages > 1 ? <nav className="flex items-center justify-center gap-1.5" aria-label="书库分页">
       <button type="button" aria-label="上一页" disabled={page <= 1 || loading} onClick={() => onPage(Math.max(1, page - 1))} className="flex h-9 w-9 items-center justify-center rounded-lg text-[#736D67] hover:bg-black/[0.035] disabled:opacity-30">
         <ChevronLeft size={18} />
       </button>
@@ -757,6 +783,8 @@ function Pagination({ page, totalPages, loading, onPage }: { page: number; total
       <button type="button" aria-label="下一页" disabled={page >= totalPages || loading} onClick={() => onPage(Math.min(totalPages, page + 1))} className="flex h-9 w-9 items-center justify-center rounded-lg text-[#736D67] hover:bg-black/[0.035] disabled:opacity-30">
         <ChevronRight size={18} />
       </button>
-    </nav>
+    </nav> : null}
+    <Select value={pageSize} options={pageSizeOptions} onChange={onPageSize} ariaLabel="每页数量" size="sm" className="min-w-[104px]" align="right" />
+    </div>
   );
 }

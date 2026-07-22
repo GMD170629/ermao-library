@@ -1,4 +1,4 @@
-export type ReadingFormat = 'COMIC' | 'EPUB' | 'PDF' | 'AUDIO';
+export type ReadingFormat = 'COMIC' | 'EPUB' | 'PDF' | 'AUDIO' | 'MOBI' | 'AZW' | 'AZW3' | 'PRC' | 'FB2' | 'TXT';
 export type MediaKind = 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
 export type WorkDetailTabKey = MediaKind | 'STRUCTURE';
 export type ReadingStatus = 'UNREAD' | 'READING' | 'FINISHED';
@@ -149,6 +149,8 @@ export type WorkView = {
     sourcePath?: string | null;
     primary: boolean;
     hidden: boolean;
+    readable: boolean;
+    conversionAvailable: boolean;
     size: string;
     pageCount: number | null;
     chapterCount: number | null;

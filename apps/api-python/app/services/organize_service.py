@@ -15,6 +15,7 @@ from urllib.request import urlopen
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
+from app.core.time import now_timestamp_ms
 from app.services.book_identity import UNKNOWN_AUTHOR, identity_merge_key, normalize_identity_part
 
 
@@ -1069,10 +1070,14 @@ def external_metadata_cache_get(db: Session, provider: str, query_key: str) -> d
         """
         SELECT `rawJson` FROM `ExternalMetadataCache`
         WHERE `provider` = :provider AND `queryKey` = :query_key
-          AND (`expiresAt` IS NULL OR datetime(`expiresAt`) > CURRENT_TIMESTAMP)
+          AND (`expiresAt` IS NULL OR CASE
+                WHEN CAST(`expiresAt` AS TEXT) GLOB '*[^0-9]*'
+                THEN CAST(ROUND((julianday(`expiresAt`) - 2440587.5) * 86400000) AS INTEGER)
+                ELSE CAST(`expiresAt` AS INTEGER)
+              END > :now)
         LIMIT 1
         """,
-        {"provider": provider, "query_key": query_key},
+        {"provider": provider, "query_key": query_key, "now": now_timestamp_ms()},
     )
     parsed = parse_json_value((cached or {}).get("rawJson"))
     return parsed if isinstance(parsed, dict) and external_metadata_result_cacheable(parsed) else None
@@ -1096,7 +1101,7 @@ def external_metadata_cache_put(db: Session, provider: str, query_key: str, resu
     if not query_key or not has_table(db, "ExternalMetadataCache") or not external_metadata_result_cacheable(result):
         return
     candidates = result["candidates"]
-    timestamp = now()
+    timestamp = now_timestamp_ms()
     payload = json_text(
         {
             "candidates": candidates,
@@ -1120,7 +1125,7 @@ def external_metadata_cache_put(db: Session, provider: str, query_key: str, resu
             "provider": provider,
             "query_key": query_key,
             "raw_json": payload,
-            "expires_at": timestamp + timedelta(hours=24),
+            "expires_at": timestamp + 24 * 60 * 60 * 1000,
             "now": timestamp,
         },
     )

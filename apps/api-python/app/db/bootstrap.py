@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from hashlib import sha1
 from importlib import resources
 import json
@@ -13,17 +13,20 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.core.time import to_timestamp_ms
 from app.services.book_identity import UNKNOWN_AUTHOR, identity_merge_key, normalize_identity_part
 
 LOGGER = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 11
+CURRENT_SCHEMA_VERSION = 12
 DEFAULT_SYSTEM_NAME = "二毛图书"
 LEGACY_DEFAULT_SYSTEM_NAMES = {"书库星舰", "书栖"}
 IDENTITY_MIGRATION_SETTING = "migration.libraryIdentityVersion"
 IDENTITY_MIGRATION_VERSION = "1"
 METADATA_TITLE_MATCH_MIGRATION_SETTING = "migration.metadataTitleMatchVersion"
 METADATA_TITLE_MATCH_MIGRATION_VERSION = "1"
+LIBRARY_FACET_BACKFILL_SETTING = "migration.libraryFacetBackfillVersion"
+LIBRARY_FACET_BACKFILL_VERSION = "1"
 
 
 def _decoded_setting_value(value: object) -> object:
@@ -450,7 +453,12 @@ def _migrate_schema_v10(connection: sqlite3.Connection) -> None:
         FROM (
             SELECT `id`, ROW_NUMBER() OVER (
                 PARTITION BY `workId`
-                ORDER BY datetime(`createdAt`) DESC, datetime(`updatedAt`) DESC, `id` DESC
+                ORDER BY
+                    CASE WHEN CAST(`createdAt` AS TEXT) GLOB '*[^0-9]*'
+                         THEN julianday(`createdAt`) * 86400000 ELSE CAST(`createdAt` AS INTEGER) END DESC,
+                    CASE WHEN CAST(`updatedAt` AS TEXT) GLOB '*[^0-9]*'
+                         THEN julianday(`updatedAt`) * 86400000 ELSE CAST(`updatedAt` AS INTEGER) END DESC,
+                    `id` DESC
             ) AS `position`
             FROM `OrganizeJob`
             WHERE `status` IN ({unresolved})
@@ -506,6 +514,109 @@ def _migrate_schema_v11(connection: sqlite3.Connection) -> None:
     )
 
 
+_LEGACY_LOCAL_TIMESTAMP_TABLES = {
+    "BookConversionTask",
+    "BookIdentityCache",
+    "ImportLog",
+    "ImportTask",
+    "LibraryEdition",
+    "LibraryFile",
+    "LibraryMetadata",
+    "LibraryReadingUnit",
+    "LibraryVolume",
+    "LibraryWork",
+    "OrganizeJob",
+}
+
+
+def _timestamp_columns(connection: sqlite3.Connection, table: str) -> list[str]:
+    return [
+        str(row[1])
+        for row in connection.execute(f"PRAGMA table_info(`{table}`)").fetchall()
+        if str(row[1]).endswith("At") or str(row[1]).endswith("_at")
+    ]
+
+
+def _migrate_schema_v12(connection: sqlite3.Connection) -> None:
+    """Normalize every persisted application datetime to Unix milliseconds."""
+
+    local_timezone = datetime.now().astimezone().tzinfo
+    tables = [
+        str(row[0])
+        for row in connection.execute(
+            "SELECT `name` FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+    ]
+    for table in tables:
+        columns = _timestamp_columns(connection, table)
+        if not columns:
+            continue
+        rows = connection.execute(
+            f"SELECT rowid, {', '.join(f'`{column}`' for column in columns)} FROM `{table}`"
+        ).fetchall()
+        naive_timezone = local_timezone if table in _LEGACY_LOCAL_TIMESTAMP_TABLES else timezone.utc
+        for row in rows:
+            updates: dict[str, int] = {}
+            for index, column in enumerate(columns, start=1):
+                timestamp = to_timestamp_ms(row[index], naive_timezone=naive_timezone)
+                if timestamp is not None and str(row[index]) != str(timestamp):
+                    updates[column] = timestamp
+            if not updates:
+                continue
+            assignments = ", ".join(f"`{column}` = :{column}" for column in updates)
+            connection.execute(
+                f"UPDATE `{table}` SET {assignments} WHERE rowid = :rowid",
+                {**updates, "rowid": row[0]},
+            )
+    if _table_exists(connection, "ImportTask"):
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS `ImportTask_createdAt_id_idx` ON `ImportTask`(`createdAt`, `id`)"
+        )
+    if _table_exists(connection, "LibraryWork"):
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS `LibraryWork_createdAt_id_idx` ON `LibraryWork`(`createdAt`, `id`)"
+        )
+
+
+def _timestamp_trigger_expression(column: str) -> str:
+    value = f"CAST(NEW.`{column}` AS TEXT)"
+    numeric = f"TRIM({value}) NOT GLOB '*[^0-9]*' AND LENGTH(TRIM({value})) > 0"
+    return (
+        "CASE "
+        f"WHEN NEW.`{column}` IS NULL THEN NULL "
+        f"WHEN {numeric} THEN CASE WHEN LENGTH(TRIM({value})) <= 10 "
+        f"THEN CAST(NEW.`{column}` AS INTEGER) * 1000 ELSE CAST(NEW.`{column}` AS INTEGER) END "
+        f"ELSE COALESCE(CAST(ROUND((julianday(NEW.`{column}`) - 2440587.5) * 86400000) AS INTEGER), NEW.`{column}`) END"
+    )
+
+
+def _install_timestamp_triggers(connection: sqlite3.Connection) -> None:
+    tables = [
+        str(row[0])
+        for row in connection.execute(
+            "SELECT `name` FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+    ]
+    for table in tables:
+        columns = _timestamp_columns(connection, table)
+        if not columns:
+            continue
+        assignments = ", ".join(
+            f"`{column}` = {_timestamp_trigger_expression(column)}" for column in columns
+        )
+        column_list = ", ".join(f"`{column}`" for column in columns)
+        connection.execute(f"DROP TRIGGER IF EXISTS `normalize_{table}_timestamps_insert`")
+        connection.execute(f"DROP TRIGGER IF EXISTS `normalize_{table}_timestamps_update`")
+        connection.execute(
+            f"CREATE TRIGGER `normalize_{table}_timestamps_insert` AFTER INSERT ON `{table}` "
+            f"BEGIN UPDATE `{table}` SET {assignments} WHERE rowid = NEW.rowid; END"
+        )
+        connection.execute(
+            f"CREATE TRIGGER `normalize_{table}_timestamps_update` AFTER UPDATE OF {column_list} ON `{table}` "
+            f"BEGIN UPDATE `{table}` SET {assignments} WHERE rowid = NEW.rowid; END"
+        )
+
+
 SchemaMigration = Callable[[sqlite3.Connection], None]
 SCHEMA_MIGRATIONS: dict[int, SchemaMigration] = {
     1: _migrate_schema_v1,
@@ -519,6 +630,7 @@ SCHEMA_MIGRATIONS: dict[int, SchemaMigration] = {
     9: _migrate_schema_v9,
     10: _migrate_schema_v10,
     11: _migrate_schema_v11,
+    12: _migrate_schema_v12,
 }
 
 REQUIRED_COLUMNS_BY_VERSION: dict[int, dict[str, set[str]]] = {
@@ -560,6 +672,7 @@ REQUIRED_COLUMNS_BY_VERSION: dict[int, dict[str, set[str]]] = {
     },
     10: {},
     11: {},
+    12: {},
 }
 
 
@@ -660,6 +773,7 @@ def apply_schema(engine: Engine, settings: Settings | None = None) -> None:
         driver_connection.execute("PRAGMA journal_mode = WAL")
         _run_schema_migrations(driver_connection, settings)
         driver_connection.executescript(ddl)
+        _install_timestamp_triggers(driver_connection)
         actual_version = int(driver_connection.execute("PRAGMA user_version").fetchone()[0])
         if actual_version != CURRENT_SCHEMA_VERSION:
             raise RuntimeError(
@@ -678,7 +792,25 @@ def seed_baseline_data(db: Session) -> None:
     backfill_library_identity_keys(db)
     from app.services.library_management import backfill_library_facets
 
-    backfill_library_facets(db)
+    facet_backfill_version = db.execute(
+        text("SELECT `value` FROM `SystemSetting` WHERE `key` = :key"),
+        {"key": LIBRARY_FACET_BACKFILL_SETTING},
+    ).scalar()
+    if str(facet_backfill_version or "") != LIBRARY_FACET_BACKFILL_VERSION:
+        backfill_library_facets(db)
+        db.execute(
+            text(
+                "INSERT INTO `SystemSetting` (`key`, `value`, `createdAt`, `updatedAt`) "
+                "VALUES (:key, :value, :now, :now) "
+                "ON CONFLICT (`key`) DO UPDATE SET `value` = excluded.`value`, `updatedAt` = excluded.`updatedAt`"
+            ),
+            {
+                "key": LIBRARY_FACET_BACKFILL_SETTING,
+                "value": LIBRARY_FACET_BACKFILL_VERSION,
+                "now": now,
+            },
+        )
+        db.commit()
     requeue_metadata_no_match_tasks_for_title_aliases(db)
     reconcile_metadata_lookup_organize_statuses(db)
 

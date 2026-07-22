@@ -400,7 +400,9 @@ def test_external_metadata_cache_only_saves_successful_non_empty_results(db_sess
     db_session.commit()
 
     external_metadata_cache_put(db_session, provider, "活着", {"candidates": [{"title": "活着"}], "message": None})
-    success_hours = db_session.execute(text("SELECT (julianday(expiresAt) - julianday(updatedAt)) * 24 FROM ExternalMetadataCache")).scalar()
+    success_hours = db_session.execute(
+        text("SELECT (CAST(expiresAt AS INTEGER) - CAST(updatedAt AS INTEGER)) / 3600000.0 FROM ExternalMetadataCache")
+    ).scalar()
     assert 23.9 < success_hours < 24.1
     assert external_metadata_cache_get(db_session, provider, "活着")["candidates"][0]["title"] == "活着"
 

@@ -33,11 +33,11 @@ export function SettingsSecondaryNav() {
               href={href}
               aria-current={active ? 'page' : undefined}
               className={cn(
-                'flex min-h-12 min-w-0 items-center gap-2 rounded-2xl px-3 py-3 text-[13px] font-medium transition focus:outline-none focus:ring-4 focus:ring-[#FAD9D0] sm:gap-3 sm:px-4 sm:text-sm',
-                active ? 'bg-[#FCE5DE] text-[#ED4D2D]' : 'text-[#4F4B46] hover:bg-[#F3F0EC] hover:text-[#242220]'
+                'flex min-h-11 min-w-0 items-center gap-2 rounded-xl px-3 text-[13px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5] sm:gap-3 sm:text-[15px]',
+                active ? 'bg-[#F9DED4] text-[#EF4D2F]' : 'text-[#34312E] hover:bg-black/[0.04]'
               )}
             >
-              <Icon size={18} className="shrink-0" strokeWidth={1.8} />
+              <Icon size={20} className="shrink-0" strokeWidth={1.75} />
               <span className="whitespace-nowrap">{label}</span>
             </Link>
           );

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+from app.core.time import to_timestamp_ms
 
 
 TEXT_OPERATORS = ["contains", "not_contains", "equals", "not_equals", "starts_with", "ends_with", "is_empty", "is_not_empty"]
@@ -256,17 +258,42 @@ def _date_predicate(expression: str, operator: str, value: Any, key: str, params
         return f"({expression}) IS NULL"
     if operator == "is_not_empty":
         return f"({expression}) IS NOT NULL"
-    comparison = {"equals": "=", "not_equals": "!=", "after": ">", "on_or_after": ">=", "before": "<", "on_or_before": "<="}
+    def bounds(raw: Any) -> tuple[int, int]:
+        parsed = date.fromisoformat(str(raw))
+        start = to_timestamp_ms(f"{parsed.isoformat()}T00:00:00")
+        end_date = parsed + timedelta(days=1)
+        end = to_timestamp_ms(f"{end_date.isoformat()}T00:00:00")
+        assert start is not None and end is not None
+        return start, end
+
+    raw_expression = f"({expression})"
+    text_expression = f"CAST({raw_expression} AS TEXT)"
+    cast_expression = (
+        f"CASE WHEN {text_expression} GLOB '*[^0-9]*' "
+        f"THEN CAST(ROUND((julianday({raw_expression}) - 2440587.5) * 86400000) AS INTEGER) "
+        f"ELSE CAST({raw_expression} AS INTEGER) END"
+    )
     if operator == "between":
         first, second = value
-        date.fromisoformat(str(first))
-        date.fromisoformat(str(second))
-        params[f"{key}_from"] = str(first)
-        params[f"{key}_to"] = str(second)
-        return f"DATE({expression}) BETWEEN DATE(:{key}_from) AND DATE(:{key}_to)"
-    date.fromisoformat(str(value))
-    params[key] = str(value)
-    return f"DATE({expression}) {comparison[operator]} DATE(:{key})"
+        start, _ = bounds(first)
+        _, end = bounds(second)
+        params[f"{key}_from"] = start
+        params[f"{key}_to"] = end
+        return f"({cast_expression} >= :{key}_from AND {cast_expression} < :{key}_to)"
+    start, end = bounds(value)
+    params[f"{key}_start"] = start
+    params[f"{key}_end"] = end
+    if operator == "equals":
+        return f"({cast_expression} >= :{key}_start AND {cast_expression} < :{key}_end)"
+    if operator == "not_equals":
+        return f"NOT ({cast_expression} >= :{key}_start AND {cast_expression} < :{key}_end)"
+    if operator == "after":
+        return f"{cast_expression} >= :{key}_end"
+    if operator == "on_or_after":
+        return f"{cast_expression} >= :{key}_start"
+    if operator == "before":
+        return f"{cast_expression} < :{key}_start"
+    return f"{cast_expression} < :{key}_end"
 
 
 def _relation_text_clause(base_sql: str, expression: str, operator: str, value: Any, key: str, params: dict[str, Any]) -> str:

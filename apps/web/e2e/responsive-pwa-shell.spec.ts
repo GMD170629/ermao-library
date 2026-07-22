@@ -299,6 +299,10 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
   await page.getByRole('button', { name: '列表', exact: true }).click();
   await expect(page.getByTestId('book-list-mobile-card')).toBeVisible();
   await expect(page.getByTestId('book-list-desktop-table')).toBeHidden();
+  await expect(page.getByRole('button', { name: `查看《${mobileBook.title}》`, exact: true })).toHaveCSS('width', '44px');
+  await expect(page.getByRole('button', { name: `删除《${mobileBook.title}》`, exact: true })).toHaveCSS('width', '44px');
+  await expect(page.getByRole('button', { name: '更多筛选', exact: true })).toHaveCSS('width', '44px');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 
   await page.goto('/organize');
   await expect(page.getByTestId('organize-job-mobile-card')).toBeVisible();
@@ -311,6 +315,7 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
 
 test('desktop book list opens details from both the cover and title', async ({ page }) => {
   const requestedPageSizes: string[] = [];
+  const requestedSorts: Array<{ sort: string; direction: string }> = [];
   const book = {
     id: 'desktop-list-work',
     title: '桌面列表入口测试',
@@ -321,24 +326,57 @@ test('desktop book list opens details from both the cover and title', async ({ p
     status: '未读',
     statusValue: 'UNREAD',
     progress: 0,
+    added: '2026-07-20',
     lastRead: '未阅读',
     tags: [],
+    publisher: '测试出版社',
+    seriesName: '测试系列',
     coverUrl: '',
     gradient: 'from-orange-100 to-stone-200'
   };
   await page.route('**/api/works?**', async (route) => {
     const requestedPageSize = new URL(route.request().url()).searchParams.get('pageSize') ?? '';
+    const requestUrl = new URL(route.request().url());
+    const requestedSort = requestUrl.searchParams.get('sort') ?? '';
+    const requestedDirection = requestUrl.searchParams.get('sortDirection') ?? '';
     requestedPageSizes.push(requestedPageSize);
+    requestedSorts.push({ sort: requestedSort, direction: requestedDirection });
     await route.fulfill({ json: { ok: true, data: { books: [book], total: 1, page: 1, pageSize: Number(requestedPageSize), totalPages: 1 } } });
   });
   await page.setViewportSize({ width: 1280, height: 900 });
 
   await page.goto('/library');
+  await expect(page.getByRole('button', { name: '保存筛选' })).toHaveCount(0);
+  await page.getByRole('button', { name: '更多筛选' }).click();
+  await expect(page.getByRole('button', { name: '保存筛选' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '网格排序方式' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '每页数量' })).toContainText('20 本/页');
   await page.getByRole('button', { name: '每页数量' }).click();
   await page.getByRole('option', { name: '100 本/页' }).click();
   await expect.poll(() => requestedPageSizes.at(-1)).toBe('100');
   await page.getByRole('button', { name: '列表', exact: true }).click();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await expect(page.getByRole('button', { name: '进度排序' })).toHaveCount(0);
+  await expect(page.getByRole('columnheader', { name: '标题排序' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: '作者排序' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: '出版社排序' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: '系列排序' })).toBeVisible();
+  await page.getByRole('button', { name: '标题排序' }).click();
+  await expect.poll(() => requestedSorts.at(-1)).toEqual({ sort: 'title', direction: 'asc' });
+  await page.getByRole('button', { name: '标题排序，当前正序' }).click();
+  await expect.poll(() => requestedSorts.at(-1)).toEqual({ sort: 'title', direction: 'desc' });
+  await expect(page).toHaveURL(/sort=title/);
+  await expect(page).toHaveURL(/sortDirection=desc/);
+  await page.getByRole('button', { name: '作者排序' }).click();
+  await expect.poll(() => requestedSorts.at(-1)).toEqual({ sort: 'author', direction: 'asc' });
+  await page.getByRole('button', { name: '出版社排序' }).click();
+  await expect.poll(() => requestedSorts.at(-1)).toEqual({ sort: 'publisher', direction: 'asc' });
+  await page.getByRole('button', { name: '系列排序' }).click();
+  await expect.poll(() => requestedSorts.at(-1)).toEqual({ sort: 'series', direction: 'asc' });
+  await page.getByRole('button', { name: '加入时间排序' }).click();
+  await expect.poll(() => requestedSorts.at(-1)).toEqual({ sort: 'recent_import', direction: 'desc' });
+  await page.getByRole('button', { name: '加入时间排序，当前倒序' }).click();
+  await expect.poll(() => requestedSorts.at(-1)).toEqual({ sort: 'recent_import', direction: 'asc' });
   await page.getByRole('button', { name: '查看《桌面列表入口测试》封面' }).click();
   await expect(page).toHaveURL(/\/works\/desktop-list-work$/);
 

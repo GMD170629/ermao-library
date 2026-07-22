@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import fnmatch
-import os
 import queue
 import re
 import threading
@@ -18,6 +16,11 @@ from watchdog.observers import Observer
 
 from app.core.config import Settings
 from app.services.system_events import record_system_event
+from app.services.import_preferences import (
+    SUPPORTED_IMPORT_EXTENSIONS,
+    load_import_preferences,
+    matches_ignore_patterns,
+)
 from app.worker.importer import is_supported_import_file
 from app.services.audio_metadata import audio_bundle_root, collect_audio_bundle_files, is_supported_audio_file
 from app.worker.persistent_import_queue import enqueue_import_task
@@ -35,6 +38,11 @@ class MonitorFolderConfig:
     ignore_hidden: bool = True
     ignore_patterns: str | None = None
     min_file_size_bytes: int = 10240
+    global_ignore_patterns: str = ""
+    allowed_extensions: tuple[str, ...] = SUPPORTED_IMPORT_EXTENSIONS
+    stability_check_enabled: bool = True
+    stability_check_seconds: float = 2.0
+    auto_convert_to_epub: bool = True
 
 
 class ImportQueueProtocol(Protocol):
@@ -136,7 +144,6 @@ class WorkerManager:
         self.db_factory = db_factory
         self.settings = settings
         self.security = PathSecurityService(settings)
-        self.stable_delay_seconds = int(os.environ.get("MONITOR_FILE_STABLE_DELAY_MS") or "2000") / 1000
         self.watchers: dict[str, WatchState] = {}
         self.import_queue = ImportQueue(db_factory, settings)
         self.last_handled_rescan_request: str | None = None
@@ -275,7 +282,9 @@ class WorkerManager:
         existing = state.timers.pop(candidate, None)
         if existing:
             existing.cancel()
-        timer = threading.Timer(self.stable_delay_seconds, lambda: self.import_queue.enqueue(candidate, folder))
+        # File-system events are briefly debounced here; the configurable
+        # stability window is applied once, immediately before enqueueing.
+        timer = threading.Timer(0.25, lambda: self.import_queue.enqueue(candidate, folder))
         state.timers[candidate] = timer
         timer.start()
 
@@ -301,6 +310,7 @@ def enabled_monitor_folders(db: Session) -> list[MonitorFolderConfig]:
     except SQLAlchemyError as exc:
         print(f"[import-worker] monitor folders unavailable, retrying later: {exc}", flush=True)
         return []
+    preferences = load_import_preferences(db)
     return [
             MonitorFolderConfig(
                 id=row["id"],
@@ -309,13 +319,14 @@ def enabled_monitor_folders(db: Session) -> list[MonitorFolderConfig]:
                 ignore_hidden=bool(row.get("ignoreHidden", True)),
                 ignore_patterns=row.get("ignorePatterns"),
                 min_file_size_bytes=int(row.get("minFileSizeBytes") or 10240),
+                global_ignore_patterns=preferences.ignore_patterns,
+                allowed_extensions=preferences.allowed_extensions,
+                stability_check_enabled=preferences.stability_check_enabled,
+                stability_check_seconds=preferences.stability_check_seconds,
+                auto_convert_to_epub=preferences.auto_convert_to_epub,
         )
         for row in rows
     ]
-
-
-def parse_ignore_patterns(value: str | None) -> list[str]:
-    return [line.strip() for line in (value or "").splitlines() if line.strip()]
 
 
 def should_ignore_path(path: Path, folder: MonitorFolderConfig) -> bool:
@@ -323,15 +334,30 @@ def should_ignore_path(path: Path, folder: MonitorFolderConfig) -> bool:
         return True
     if folder.ignore_hidden and any(part.startswith(".") and len(part) > 1 for part in path.parts):
         return True
-    return any(fnmatch.fnmatch(path.name, pattern) or pattern.replace("*", "") in path.name for pattern in parse_ignore_patterns(folder.ignore_patterns))
+    return matches_ignore_patterns(path, folder.global_ignore_patterns) or matches_ignore_patterns(path, folder.ignore_patterns)
 
 
 def should_ignore_file(path: Path, folder: MonitorFolderConfig) -> bool:
-    return should_ignore_path(path, folder) or not is_supported_import_file(path)
+    if should_ignore_path(path, folder) or not is_supported_import_file(path):
+        return True
+    if path.suffix and path.suffix.lower() not in folder.allowed_extensions:
+        return True
+    return False
 
 
 def config_signature(folder: MonitorFolderConfig) -> str:
-    return "|".join([folder.root_path, folder.shelf_id or "", str(folder.ignore_hidden), folder.ignore_patterns or "", str(folder.min_file_size_bytes)])
+    return "|".join([
+        folder.root_path,
+        folder.shelf_id or "",
+        str(folder.ignore_hidden),
+        folder.ignore_patterns or "",
+        str(folder.min_file_size_bytes),
+        folder.global_ignore_patterns,
+        ",".join(folder.allowed_extensions),
+        str(folder.stability_check_enabled),
+        str(folder.stability_check_seconds),
+        str(folder.auto_convert_to_epub),
+    ])
 
 
 _TRACK_FILE_PATTERN = re.compile(
@@ -451,8 +477,15 @@ def _add_work_to_target_shelf(db: Session, folder: MonitorFolderConfig, work_id:
 
 
 def import_watched_file(db: Session, settings: Settings, path: Path, folder: MonitorFolderConfig) -> bool:
-    delay = int(os.environ.get("MONITOR_FILE_STABLE_DELAY_MS") or "2000") / 1000
-    if not wait_for_stable_import_source(path, folder.min_file_size_bytes, delay):
+    if should_ignore_file(path, folder) and path.is_file():
+        return False
+    delay = folder.stability_check_seconds
+    stable = (
+        wait_for_stable_import_source(path, folder.min_file_size_bytes, delay)
+        if folder.stability_check_enabled
+        else import_source_meets_minimum_size(path, folder.min_file_size_bytes)
+    )
+    if not stable:
         record_system_event(
             db,
             source="import",
@@ -461,7 +494,13 @@ def import_watched_file(db: Session, settings: Settings, path: Path, folder: Mon
             target_type="monitorFolder",
             target_id=folder.id,
             message=f"扫描到的文件尚未稳定，暂缓导入：{path.name}",
-            metadata={"sourcePath": str(path), "monitorFolderId": folder.id, "minFileSizeBytes": folder.min_file_size_bytes},
+            metadata={
+                "sourcePath": str(path),
+                "monitorFolderId": folder.id,
+                "minFileSizeBytes": folder.min_file_size_bytes,
+                "stabilityCheckEnabled": folder.stability_check_enabled,
+                "stabilityCheckSeconds": delay,
+            },
             commit=True,
             prune=True,
         )
@@ -495,6 +534,16 @@ def import_watched_file(db: Session, settings: Settings, path: Path, folder: Mon
         allow_terminal_requeue=path.is_dir(),
     )
     return True
+
+
+def import_source_meets_minimum_size(path: Path, min_file_size_bytes: int) -> bool:
+    try:
+        if path.is_file():
+            return path.stat().st_size >= min_file_size_bytes
+        files = collect_audio_bundle_files(path)
+        return bool(files) and all(item.stat().st_size >= min_file_size_bytes for item in files)
+    except (OSError, ValueError):
+        return False
 
 
 def load_known_import_paths(db: Session) -> set[Path]:

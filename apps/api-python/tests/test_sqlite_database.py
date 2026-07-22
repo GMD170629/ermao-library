@@ -74,7 +74,7 @@ def test_empty_storage_bootstraps_complete_sqlite_database(tmp_path) -> None:
             assert connection.exec_driver_sql("PRAGMA journal_mode").scalar() == "wal"
             assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
             assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar() == 10_000
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 11
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 12
             assert connection.execute(text("SELECT COUNT(*) FROM `User`")).scalar() == 0
             assert "avatarPath" in {column[1] for column in connection.exec_driver_sql("PRAGMA table_info(`User`)").fetchall()}
             assert "shelfId" in {column[1] for column in connection.exec_driver_sql("PRAGMA table_info(`MonitorFolder`)").fetchall()}
@@ -148,7 +148,7 @@ def test_bootstrap_migrates_reader_preference_default_to_v3_without_losing_rows(
                 column[1]: column
                 for column in connection.exec_driver_sql("PRAGMA table_info(`ReaderBookPreference`)").fetchall()
             }
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 11
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 12
             assert columns["schemaVersion"][4] == "3"
             migrated = connection.execute(text(
                 "SELECT `id`, `userId`, `workId`, `schemaVersion`, `preferences`, `createdAt`, `updatedAt` "
@@ -160,8 +160,8 @@ def test_bootstrap_migrates_reader_preference_default_to_v3_without_losing_rows(
                 "workId": "reader-work",
                 "schemaVersion": 2,
                 "preferences": '{"schemaVersion":2}',
-                "createdAt": "2026-07-01T01:00:00",
-                "updatedAt": "2026-07-02T01:00:00",
+                "createdAt": "1782867600000",
+                "updatedAt": "1782954000000",
             }
             indexes = {
                 row[1]: row
@@ -194,7 +194,7 @@ def test_bootstrap_migrates_reader_preference_default_to_v3_without_losing_rows(
         bootstrap_database(engine, settings)
 
         with engine.connect() as connection:
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 11
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 12
             assert connection.execute(text(
                 "SELECT COUNT(*) FROM `ReaderBookPreference` WHERE `id` = 'preference-default'"
             )).scalar() == 1
@@ -290,10 +290,10 @@ def test_bootstrap_migrates_v1_import_tasks_before_creating_new_indexes(tmp_path
             }
             indexes = {row[1] for row in connection.exec_driver_sql("PRAGMA index_list(`ImportTask`)").fetchall()}
             assert "ImportTask_status_leaseExpiresAt_idx" in indexes
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 11
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 12
             assert connection.exec_driver_sql("PRAGMA foreign_key_check").first() is None
 
-            backup_path = settings.database_path.parent / "migrations" / "shuku-before-v11.sqlite3"
+            backup_path = settings.database_path.parent / "migrations" / "shuku-before-v12.sqlite3"
         assert backup_path.is_file()
         with sqlite3.connect(backup_path) as backup:
             assert backup.execute("PRAGMA user_version").fetchone()[0] == 1
@@ -387,7 +387,7 @@ def test_v5_migration_allows_duplicate_work_identity_keys(tmp_path) -> None:
                 row[1]: row
                 for row in connection.exec_driver_sql("PRAGMA index_list(`LibraryWork`)").fetchall()
             }
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 11
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 12
             assert "LibraryWork_mergeKey_key" not in indexes
             assert indexes["LibraryWork_mergeKey_idx"][2] == 0
             assert connection.execute(
@@ -604,7 +604,7 @@ def test_bootstrap_repairs_current_version_with_incomplete_import_task_schema(tm
         with engine.connect() as connection:
             columns = {column[1] for column in connection.exec_driver_sql("PRAGMA table_info(`ImportTask`)").fetchall()}
             assert {"errorCode", "retryable", "attempts", "leaseOwner", "leaseExpiresAt"}.issubset(columns)
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 11
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 12
             indexes = {row[1] for row in connection.exec_driver_sql("PRAGMA index_list(`ImportTask`)").fetchall()}
             assert "ImportTask_status_leaseExpiresAt_idx" in indexes
     finally:
@@ -840,5 +840,62 @@ def test_bootstrap_preserves_an_existing_customized_account(tmp_path) -> None:
             assert [dict(user) for user in users] == [
                 {"email": "custom@example.com", "name": "Custom name", "passwordHash": "custom-hash"}
             ]
+    finally:
+        engine.dispose()
+
+
+def test_timestamp_migration_and_triggers_persist_unix_milliseconds(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with engine.begin() as connection:
+            connection.exec_driver_sql("DROP TRIGGER `normalize_SystemSetting_timestamps_update`")
+            connection.execute(
+                text(
+                    "UPDATE `SystemSetting` SET `createdAt` = '2026-07-22T14:42:51Z', "
+                    "`updatedAt` = '2026-07-22T14:42:51.125+00:00' WHERE `key` = 'language'"
+                )
+            )
+            connection.exec_driver_sql("PRAGMA user_version = 11")
+
+        bootstrap_database(engine, settings)
+
+        with engine.begin() as connection:
+            migrated = connection.execute(
+                text("SELECT `createdAt`, `updatedAt` FROM `SystemSetting` WHERE `key` = 'language'")
+            ).one()
+            assert migrated == ("1784731371000", "1784731371125")
+
+            connection.execute(
+                text(
+                    "INSERT INTO `User` (`id`, `email`, `name`, `passwordHash`, `createdAt`, `updatedAt`) "
+                    "VALUES ('timestamp-user', 'timestamp@example.test', 'Timestamp', 'hash', "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            stored = connection.execute(
+                text("SELECT `createdAt`, `updatedAt` FROM `User` WHERE `id` = 'timestamp-user'")
+            ).one()
+            assert all(str(value).isdigit() and len(str(value)) == 13 for value in stored)
+    finally:
+        engine.dispose()
+
+
+def test_bootstrap_runs_library_facet_backfill_only_once(tmp_path, monkeypatch) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT `value` FROM `SystemSetting` WHERE `key` = 'migration.libraryFacetBackfillVersion'")
+            ).scalar() == "1"
+
+        def unexpected_backfill(_db):
+            raise AssertionError("facet backfill must not run again after the migration marker is stored")
+
+        monkeypatch.setattr("app.services.library_management.backfill_library_facets", unexpected_backfill)
+        bootstrap_database(engine, settings)
     finally:
         engine.dispose()

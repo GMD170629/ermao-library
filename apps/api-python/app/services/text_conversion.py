@@ -20,6 +20,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.core.time import now_timestamp_ms
 from app.services.epub_normalizer import (
     EPUB_NORMALIZER_VERSION,
     EpubInspection,
@@ -85,8 +86,8 @@ def is_convertible_text_ebook(path: str | Path) -> bool:
     return Path(path).suffix.lower() in CONVERTIBLE_TEXT_EXTS
 
 
-def _now() -> str:
-    return time.strftime("%Y-%m-%d %H:%M:%S")
+def _now() -> int:
+    return now_timestamp_ms()
 
 
 def _id() -> str:
