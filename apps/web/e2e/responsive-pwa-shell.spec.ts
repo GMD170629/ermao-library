@@ -117,8 +117,8 @@ test('desktop library navigation keeps only All and Reading', async ({ page }) =
   await expect(sidebar.getByRole('link', { name: '已读', exact: true })).toHaveCount(0);
 });
 
-test('wide shelf details use the same five-column book density as the home page', async ({ page }) => {
-  const books = Array.from({ length: 7 }, (_, index) => ({
+test('wide shelf details keep five-column density and paginate large shelves', async ({ page }) => {
+  const books = Array.from({ length: 23 }, (_, index) => ({
     id: `shelf-work-${index + 1}`,
     title: `书架读物 ${index + 1}`,
     author: '测试作者',
@@ -178,6 +178,16 @@ test('wide shelf details use the same five-column book density as the home page'
   expect(Math.min(...layout.coverWidths)).toBeGreaterThan(220);
   expect(Math.max(...layout.coverWidths)).toBeLessThanOrEqual(240);
   expect(layout.sixthTop).toBeGreaterThan(layout.firstRowTop ?? 0);
+  await expect(grid.locator('[data-book-cover="true"]')).toHaveCount(20);
+  await expect(page.getByText('第 1–20 本，共 23 本')).toBeVisible();
+
+  await page.getByRole('button', { name: '下一页' }).click();
+
+  await expect(page.getByText('书架读物 21', { exact: true })).toBeVisible();
+  await expect(page.getByText('书架读物 1', { exact: true })).toHaveCount(0);
+  await expect(grid.locator('[data-book-cover="true"]')).toHaveCount(3);
+  await expect(page.getByText('第 21–23 本，共 23 本')).toBeVisible();
+  await expect(page.getByRole('button', { name: '下一页' })).toBeDisabled();
 });
 
 test('legacy mobile URLs redirect authenticated users to the shared web home', async ({ page }) => {
@@ -286,7 +296,7 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
   await page.setViewportSize({ width: 390, height: 844 });
 
   await page.goto('/library');
-  await page.getByRole('button', { name: '列表' }).click();
+  await page.getByRole('button', { name: '列表', exact: true }).click();
   await expect(page.getByTestId('book-list-mobile-card')).toBeVisible();
   await expect(page.getByTestId('book-list-desktop-table')).toBeHidden();
 
@@ -297,4 +307,42 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
   await page.goto('/management/logs');
   await expect(page.getByTestId('system-event-mobile-card')).toBeVisible();
   await expect(page.getByTestId('system-event-desktop-table')).toBeHidden();
+});
+
+test('desktop book list opens details from both the cover and title', async ({ page }) => {
+  const requestedPageSizes: string[] = [];
+  const book = {
+    id: 'desktop-list-work',
+    title: '桌面列表入口测试',
+    author: '测试作者',
+    type: 'ebook',
+    format: 'EPUB',
+    formatValue: 'EPUB',
+    status: '未读',
+    statusValue: 'UNREAD',
+    progress: 0,
+    lastRead: '未阅读',
+    tags: [],
+    coverUrl: '',
+    gradient: 'from-orange-100 to-stone-200'
+  };
+  await page.route('**/api/works?**', async (route) => {
+    const requestedPageSize = new URL(route.request().url()).searchParams.get('pageSize') ?? '';
+    requestedPageSizes.push(requestedPageSize);
+    await route.fulfill({ json: { ok: true, data: { books: [book], total: 1, page: 1, pageSize: Number(requestedPageSize), totalPages: 1 } } });
+  });
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  await page.goto('/library');
+  await expect(page.getByRole('button', { name: '每页数量' })).toContainText('20 本/页');
+  await page.getByRole('button', { name: '每页数量' }).click();
+  await page.getByRole('option', { name: '100 本/页' }).click();
+  await expect.poll(() => requestedPageSizes.at(-1)).toBe('100');
+  await page.getByRole('button', { name: '列表', exact: true }).click();
+  await page.getByRole('button', { name: '查看《桌面列表入口测试》封面' }).click();
+  await expect(page).toHaveURL(/\/works\/desktop-list-work$/);
+
+  await page.goto('/library');
+  await page.getByRole('button', { name: '查看《桌面列表入口测试》详情' }).click();
+  await expect(page).toHaveURL(/\/works\/desktop-list-work$/);
 });

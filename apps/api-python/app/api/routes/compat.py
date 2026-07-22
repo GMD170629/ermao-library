@@ -2333,7 +2333,7 @@ def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: 
     if not _has_table(db, "LibraryWork"):
         return ok({"books": [], "page": page, "pageSize": pageSize, "total": 0, "totalPages": 1})
     page = max(1, page)
-    page_size = min(60, max(1, pageSize))
+    page_size = min(100, max(1, pageSize))
     where = []
     params: dict[str, Any] = {"limit": page_size, "offset": (page - 1) * page_size}
     if visibility == "ignored":
@@ -2705,6 +2705,263 @@ async def delete_work(work_id: str, request: Request, db: Session = Depends(get_
     return ok(result)
 
 
+_BULK_TEXT_FIELDS: dict[str, tuple[str, str]] = {
+    "title": ("LibraryWork", "title"),
+    "author": ("LibraryWork", "author"),
+    "description": ("LibraryWork", "description"),
+    "seriesName": ("LibraryWork", "seriesName"),
+    "tags": ("LibraryWork", "tags"),
+    "publisher": ("LibraryEdition", "publisher"),
+    "language": ("LibraryEdition", "language"),
+    "isbn": ("LibraryEdition", "isbn"),
+    "identifier": ("LibraryEdition", "identifier"),
+    "versionName": ("LibraryEdition", "versionName"),
+    "narrator": ("LibraryEdition", "narrator"),
+}
+_BULK_TEMPLATE_VARIABLES = {"value", "match", "index", "index0", "number", "letter", "letter_upper"}
+_BULK_TEMPLATE_PATTERN = re.compile(r"{{\s*([A-Za-z_][A-Za-z0-9_]*)(?:\s*\|\s*(lower|upper|title|trim))?\s*}}")
+
+
+def _bulk_work_ids(raw_ids: Any, *, maximum: int = 500) -> list[str]:
+    if not isinstance(raw_ids, list):
+        return []
+    return list(dict.fromkeys(str(item).strip() for item in raw_ids if str(item).strip()))[:maximum]
+
+
+def _primary_edition(db: Session, work_id: str) -> dict[str, Any] | None:
+    if not _has_table(db, "LibraryEdition"):
+        return None
+    return _row(
+        db,
+        "SELECT edition.* FROM `LibraryEdition` edition "
+        "LEFT JOIN `LibraryWork` work ON work.`id` = edition.`workId` "
+        "WHERE edition.`workId` = :work_id AND COALESCE(edition.`hidden`, 0) = 0 "
+        "ORDER BY CASE WHEN edition.`id` = work.`primaryEditionId` THEN 0 "
+        "WHEN COALESCE(edition.`primary`, 0) = 1 THEN 1 ELSE 2 END, edition.`createdAt` ASC LIMIT 1",
+        {"work_id": work_id},
+    )
+
+
+def _sequence_letters(value: int) -> str:
+    number = max(1, value)
+    result = ""
+    while number:
+        number, remainder = divmod(number - 1, 26)
+        result = chr(97 + remainder) + result
+    return result
+
+
+def _render_bulk_template(template: str, *, value: str, match: str, index: int, number: int) -> str:
+    invalid = [name for name in re.findall(r"{{\s*([^}|\s]+)", template) if name not in _BULK_TEMPLATE_VARIABLES]
+    if invalid:
+        raise ValueError(f"不支持的模板变量：{invalid[0]}")
+    context: dict[str, Any] = {
+        "value": value,
+        "match": match,
+        "index": index + 1,
+        "index0": index,
+        "number": number,
+        "letter": _sequence_letters(number),
+        "letter_upper": _sequence_letters(number).upper(),
+    }
+
+    def replace_variable(template_match: re.Match[str]) -> str:
+        variable, filter_name = template_match.groups()
+        rendered = str(context[variable])
+        if filter_name == "lower":
+            return rendered.lower()
+        if filter_name == "upper":
+            return rendered.upper()
+        if filter_name == "title":
+            return rendered.title()
+        if filter_name == "trim":
+            return rendered.strip()
+        return rendered
+
+    return _BULK_TEMPLATE_PATTERN.sub(replace_variable, template)
+
+
+def _bulk_replace_text(
+    value: str,
+    *,
+    find: str,
+    replacement: str,
+    regex: bool,
+    case_sensitive: bool,
+    index: int,
+    number: int,
+) -> str:
+    flags = 0 if case_sensitive else re.IGNORECASE
+    try:
+        pattern = re.compile(find if regex else re.escape(find), flags)
+    except re.error as exc:
+        raise ValueError(f"正则表达式无效：{exc}") from None
+
+    def replace_match(match: re.Match[str]) -> str:
+        return _render_bulk_template(
+            replacement,
+            value=value,
+            match=match.group(0),
+            index=index,
+            number=number,
+        )
+
+    return pattern.sub(replace_match, value)
+
+
+def _bulk_find_replace_rows(db: Session, payload: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
+    work_ids = _bulk_work_ids(payload.get("ids") or payload.get("bookIds"))
+    field = str(payload.get("field") or "").strip()
+    find = str(payload.get("find") or "")
+    replacement = str(payload.get("replacement") or "")
+    if not work_ids:
+        return [], "请选择至少一本图书"
+    if field not in _BULK_TEXT_FIELDS:
+        return [], "请选择可查找替换的元数据字段"
+    if not find:
+        return [], "查找内容不能为空"
+    regex = payload.get("regex") is True
+    case_sensitive = payload.get("caseSensitive") is True
+    start_number = max(1, _coerce_int(payload.get("startNumber"), 1))
+    try:
+        _render_bulk_template(replacement, value="", match="", index=0, number=start_number)
+    except ValueError as exc:
+        return [], str(exc)
+    table, column = _BULK_TEXT_FIELDS[field]
+    results: list[dict[str, Any]] = []
+    for index, work_id in enumerate(work_ids):
+        work = _get_work(db, work_id)
+        if not work:
+            continue
+        target = work if table == "LibraryWork" else _primary_edition(db, work_id)
+        if not target:
+            continue
+        raw_value = target.get(column)
+        if field == "tags":
+            current_tags = [str(item) for item in _parse_json(raw_value, []) if str(item).strip()]
+            try:
+                next_tags = [
+                    _bulk_replace_text(
+                        item,
+                        find=find,
+                        replacement=replacement,
+                        regex=regex,
+                        case_sensitive=case_sensitive,
+                        index=index,
+                        number=start_number + index,
+                    ).strip()
+                    for item in current_tags
+                ]
+            except ValueError as exc:
+                return [], str(exc)
+            next_tags = list(dict.fromkeys(item for item in next_tags if item))
+            before_value: Any = current_tags
+            after_value: Any = next_tags
+        else:
+            before_value = str(raw_value or "")
+            try:
+                after_value = _bulk_replace_text(
+                    before_value,
+                    find=find,
+                    replacement=replacement,
+                    regex=regex,
+                    case_sensitive=case_sensitive,
+                    index=index,
+                    number=start_number + index,
+                )
+            except ValueError as exc:
+                return [], str(exc)
+        if before_value == after_value:
+            continue
+        results.append(
+            {
+                "workId": work_id,
+                "title": work.get("title") or "未命名图书",
+                "targetId": target.get("id"),
+                "table": table,
+                "column": column,
+                "before": before_value,
+                "after": after_value,
+            }
+        )
+    return results, None
+
+
+def _apply_bulk_reading_status(db: Session, user_id: str, work_ids: list[str], status: str) -> int:
+    updated = 0
+    now = _now()
+    for work_id in work_ids:
+        work = _get_work(db, work_id)
+        if not work:
+            continue
+        if status == "UNREAD":
+            for table in ("LibraryReadingProgress", "ReaderProgressCursor", "LibraryConsumptionState"):
+                if _has_table(db, table):
+                    db.execute(
+                        text(f"DELETE FROM `{table}` WHERE `userId` = :user_id AND `workId` = :work_id"),
+                        {"user_id": user_id, "work_id": work_id},
+                    )
+        else:
+            editions = _rows(
+                db,
+                "SELECT * FROM `LibraryEdition` WHERE `workId` = :work_id AND COALESCE(`hidden`, 0) = 0",
+                {"work_id": work_id},
+            ) if _has_table(db, "LibraryEdition") else []
+            for edition_index, edition in enumerate(editions):
+                _set_consumption_status(
+                    db,
+                    user_id,
+                    work_id,
+                    _edition_media_kind(edition),
+                    "FINISHED",
+                    edition_id=str(edition["id"]),
+                )
+                if not _has_table(db, "LibraryReadingProgress"):
+                    continue
+                existing_progress = _row(
+                    db,
+                    "SELECT `id` FROM `LibraryReadingProgress` WHERE `userId` = :user_id AND `workId` = :work_id AND `editionId` = :edition_id LIMIT 1",
+                    {"user_id": user_id, "work_id": work_id, "edition_id": edition["id"]},
+                )
+                if existing_progress:
+                    db.execute(
+                        text("UPDATE `LibraryReadingProgress` SET `percent` = 100, `updatedAt` = :now WHERE `userId` = :user_id AND `workId` = :work_id AND `editionId` = :edition_id"),
+                        {"now": now, "user_id": user_id, "work_id": work_id, "edition_id": edition["id"]},
+                    )
+                else:
+                    progress_values = {
+                        "id": f"bulk_progress_{time_ns()}_{edition_index}",
+                        "userId": user_id,
+                        "workId": work_id,
+                        "editionId": edition["id"],
+                        "volumeId": None,
+                        "readerType": "comic" if _edition_media_kind(edition) == "COMIC" else "audio" if _edition_media_kind(edition) == "AUDIOBOOK" else "pdf" if str(edition.get("format")).upper() == "PDF" else "epub",
+                        "position": "100",
+                        "page": edition.get("pageCount") or edition.get("chapterCount"),
+                        "percent": 100,
+                        "extra": "{}",
+                        "schemaVersion": 2,
+                        "createdAt": now,
+                        "updatedAt": now,
+                    }
+                    columns = _set_columns(db, "LibraryReadingProgress")
+                    filtered = {key: value for key, value in progress_values.items() if key in columns}
+                    db.execute(
+                        text(
+                            "INSERT INTO `LibraryReadingProgress` "
+                            f"({', '.join(f'`{key}`' for key in filtered)}) VALUES ({', '.join(f':{key}' for key in filtered)})"
+                        ),
+                        filtered,
+                    )
+        db.execute(
+            text("UPDATE `LibraryWork` SET `status` = :status, `updatedAt` = :now WHERE `id` = :work_id"),
+            {"status": status, "now": now, "work_id": work_id},
+        )
+        updated += 1
+    db.commit()
+    return updated
+
+
 @router.post("/works/bulk")
 async def bulk_works(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
     user, auth_error = _auth(db, request, settings)
@@ -2739,20 +2996,77 @@ async def bulk_works(request: Request, db: Session = Depends(get_db), settings: 
                 updated += 1
         if updated:
             _record_system_event(db, level="info", source="library", actor_type="admin", actor_id=user.id, action=f"bulk.{action}", target_type="work", message=f"批量更新作品 {updated} 个", metadata={"ids": ids, "action": action})
-    elif _has_table(db, "LibraryWork") and ids and action in {"add_tags", "remove_tags", "set_status", "add_to_shelf", "update_fields"}:
-        normalized_ids = list(dict.fromkeys(str(item).strip() for item in ids if str(item).strip()))
+    elif _has_table(db, "LibraryWork") and ids and action in {"add_tags", "remove_tags", "set_status", "add_to_shelf", "remove_from_shelf", "update_fields", "update_metadata", "shelf_membership", "reading_status", "find_replace"}:
+        normalized_ids = _bulk_work_ids(ids)
         tags = [str(item).strip() for item in payload.get("tags") or [] if str(item).strip()]
         status = str(payload.get("status") or "").strip().upper()
         if action == "set_status" and status not in {"UNREAD", "READING", "FINISHED"}:
             return fail("阅读状态无效", status_code=400)
+        if action == "reading_status" and status not in {"UNREAD", "FINISHED"}:
+            return fail("批量阅读状态仅支持未读或已读", status_code=400)
         shelf_id = str(payload.get("shelfId") or "").strip()
-        if action == "add_to_shelf":
+        membership = str(payload.get("membership") or ("REMOVE" if action == "remove_from_shelf" else "ADD")).strip().upper()
+        if action in {"add_to_shelf", "remove_from_shelf", "shelf_membership"}:
             shelf = _row(db, "SELECT * FROM `Shelf` WHERE `id` = :id", {"id": shelf_id}) if shelf_id else None
             if not shelf or str(shelf.get("kind") or "STATIC").upper() != "STATIC":
                 return fail("请选择普通书架", status_code=400)
+            if membership not in {"ADD", "REMOVE"}:
+                return fail("书架操作无效", status_code=400)
         editable = {"author", "description", "publicationStatus", "trackingStatus", "seriesName", "seriesIndex", "publishedYear"}
         raw_fields = payload.get("fields") if isinstance(payload.get("fields"), dict) else {}
         fields = {key: value for key, value in raw_fields.items() if key in editable}
+        if action == "find_replace":
+            replacements, replace_error = _bulk_find_replace_rows(db, payload)
+            if replace_error:
+                return fail(replace_error, status_code=400)
+            changed_work_ids: set[str] = set()
+            now = _now()
+            for replacement in replacements:
+                if replacement["column"] == "versionName" and not str(replacement["after"] or "").strip():
+                    return fail("版本名称替换后不能为空", status_code=400)
+                value = _json_text(replacement["after"]) if replacement["column"] == "tags" else replacement["after"] or None
+                if replacement["column"] in {"title", "author"}:
+                    work = _get_work(db, replacement["workId"]) or {}
+                    title_value = str(value if replacement["column"] == "title" else work.get("title") or "").strip()
+                    author_value = str(value if replacement["column"] == "author" else work.get("author") or "").strip() or UNKNOWN_AUTHOR
+                    if not title_value:
+                        return fail("查找替换后的标题不能为空", status_code=400)
+                    db.execute(
+                        text(
+                            "UPDATE `LibraryWork` SET `title` = :title, `author` = :author, `normalizedTitle` = :normalized_title, "
+                            "`normalizedAuthor` = :normalized_author, `mergeKey` = :merge_key, `updatedAt` = :now WHERE `id` = :work_id"
+                        ),
+                        {
+                            "title": title_value,
+                            "author": author_value,
+                            "normalized_title": normalize_identity_part(title_value),
+                            "normalized_author": normalize_identity_part(author_value),
+                            "merge_key": identity_merge_key(title_value, author_value),
+                            "now": now,
+                            "work_id": replacement["workId"],
+                        },
+                    )
+                else:
+                    db.execute(
+                        text(f"UPDATE `{replacement['table']}` SET `{replacement['column']}` = :value, `updatedAt` = :now WHERE `id` = :target_id"),
+                        {"value": value, "now": now, "target_id": replacement["targetId"]},
+                    )
+                changed_work_ids.add(str(replacement["workId"]))
+            for work_id in changed_work_ids:
+                sync_work_facets(db, work_id, commit=False)
+            db.commit()
+            updated = len(changed_work_ids)
+            if updated:
+                _record_system_event(db, level="info", source="library", actor_type="admin", actor_id=user.id, action="bulk.find_replace", target_type="work", message=f"批量查找替换 {updated} 本图书", metadata={"ids": normalized_ids, "field": payload.get("field"), "changedValues": len(replacements)})
+            return ok({"updated": updated, "changedValues": len(replacements), "ids": normalized_ids})
+        if action == "reading_status":
+            updated = _apply_bulk_reading_status(db, user.id, normalized_ids, status)
+            if updated:
+                _record_system_event(db, level="info", source="library", actor_type="admin", actor_id=user.id, action=f"bulk.reading_status.{status.lower()}", target_type="work", message=f"批量设置阅读状态 {updated} 本图书", metadata={"ids": normalized_ids, "status": status})
+            return ok({"updated": updated, "ids": normalized_ids, "status": status})
+        metadata_fields = payload.get("fields") if action == "update_metadata" and isinstance(payload.get("fields"), dict) else {}
+        add_tags = [str(item).strip() for item in payload.get("addTags") or [] if str(item).strip()]
+        remove_tags = [str(item).strip() for item in payload.get("removeTags") or [] if str(item).strip()]
         for work_id in normalized_ids:
             work = _get_work(db, work_id)
             if not work:
@@ -2767,12 +3081,39 @@ async def bulk_works(request: Request, db: Session = Depends(get_db), settings: 
                 _update(db, "LibraryWork", work_id, {"tags": _json_text(next_tags), "updatedAt": _now()})
             elif action == "set_status":
                 _update(db, "LibraryWork", work_id, {"status": status, "updatedAt": _now()})
-            elif action == "add_to_shelf":
-                db.execute(
-                    text("INSERT OR IGNORE INTO `ShelfWork` (`shelfId`, `workId`, `createdAt`) VALUES (:shelf_id, :work_id, :now)"),
-                    {"shelf_id": shelf_id, "work_id": work_id, "now": _now()},
-                )
+            elif action in {"add_to_shelf", "remove_from_shelf", "shelf_membership"}:
+                if membership == "ADD":
+                    db.execute(
+                        text("INSERT OR IGNORE INTO `ShelfWork` (`shelfId`, `workId`, `createdAt`) VALUES (:shelf_id, :work_id, :now)"),
+                        {"shelf_id": shelf_id, "work_id": work_id, "now": _now()},
+                    )
+                else:
+                    db.execute(
+                        text("DELETE FROM `ShelfWork` WHERE `shelfId` = :shelf_id AND `workId` = :work_id"),
+                        {"shelf_id": shelf_id, "work_id": work_id},
+                    )
                 db.commit()
+            elif action == "update_metadata":
+                work_values: dict[str, Any] = {"updatedAt": _now()}
+                if "author" in metadata_fields:
+                    author = str(metadata_fields.get("author") or "").strip() or UNKNOWN_AUTHOR
+                    work_values.update({"author": author, "normalizedAuthor": normalize_identity_part(author), "mergeKey": identity_merge_key(str(work.get("title") or ""), author)})
+                if "seriesName" in metadata_fields:
+                    work_values["seriesName"] = str(metadata_fields.get("seriesName") or "").strip() or None
+                current_tags = [str(item) for item in _parse_json(work.get("tags"), []) if str(item).strip()]
+                if add_tags:
+                    current_tags = list(dict.fromkeys([*current_tags, *add_tags]))
+                if remove_tags:
+                    removed = {item.casefold() for item in remove_tags}
+                    current_tags = [item for item in current_tags if item.casefold() not in removed]
+                if add_tags or remove_tags:
+                    work_values["tags"] = _json_text(current_tags)
+                if len(work_values) > 1:
+                    _update(db, "LibraryWork", work_id, work_values)
+                if "publisher" in metadata_fields:
+                    edition = _primary_edition(db, work_id)
+                    if edition:
+                        _update(db, "LibraryEdition", str(edition["id"]), {"publisher": str(metadata_fields.get("publisher") or "").strip() or None, "updatedAt": _now()})
             elif fields:
                 _update(db, "LibraryWork", work_id, {**fields, "updatedAt": _now()})
             sync_work_facets(db, work_id)
@@ -2780,6 +3121,148 @@ async def bulk_works(request: Request, db: Session = Depends(get_db), settings: 
         if updated:
             _record_system_event(db, level="info", source="library", actor_type="admin", actor_id=user.id, action=f"bulk.{action}", target_type="work", message=f"批量更新作品 {updated} 个", metadata={"ids": normalized_ids, "action": action})
     return ok({"updated": updated, "ids": ids})
+
+
+@router.post("/works/bulk/find-replace/preview")
+async def preview_bulk_find_replace(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+    _user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    payload = await request.json()
+    replacements, replace_error = _bulk_find_replace_rows(db, payload)
+    if replace_error:
+        return fail(replace_error, status_code=400)
+    return ok({"changedWorks": len({item["workId"] for item in replacements}), "changedValues": len(replacements), "items": replacements[:30]})
+
+
+def _prepare_cover_image(image: Image.Image, *, ratio: str | None, max_dimension: int, quality: int) -> tuple[Image.Image, int]:
+    prepared = ImageOps.exif_transpose(image).convert("RGB")
+    ratios = {"2:3": 2 / 3, "3:4": 3 / 4, "1:1": 1.0}
+    target_ratio = ratios.get(str(ratio or ""))
+    if target_ratio:
+        width, height = prepared.size
+        current_ratio = width / height if height else target_ratio
+        if current_ratio > target_ratio:
+            crop_width = max(1, round(height * target_ratio))
+            left = max(0, (width - crop_width) // 2)
+            prepared = prepared.crop((left, 0, left + crop_width, height))
+        elif current_ratio < target_ratio:
+            crop_height = max(1, round(width / target_ratio))
+            top = max(0, (height - crop_height) // 2)
+            prepared = prepared.crop((0, top, width, top + crop_height))
+    if max(prepared.size) > max_dimension:
+        prepared.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
+    return prepared, quality
+
+
+@router.post("/works/bulk/cover")
+async def bulk_work_covers(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    form = await request.form()
+    try:
+        raw_ids = json.loads(str(form.get("ids") or "[]"))
+    except json.JSONDecodeError:
+        return fail("图书选择无效", status_code=400)
+    work_ids = _bulk_work_ids(raw_ids)
+    action = str(form.get("action") or "").strip().lower()
+    if not work_ids:
+        return fail("请选择至少一本图书", status_code=400)
+    if action not in {"crop", "regenerate", "compress", "replace"}:
+        return fail("封面操作无效", status_code=400)
+    ratio = str(form.get("ratio") or "2:3")
+    if action == "crop" and ratio not in {"2:3", "3:4", "1:1"}:
+        return fail("封面裁剪比例无效", status_code=400)
+    quality = max(40, min(95, _coerce_int(form.get("quality"), 82)))
+    max_dimension = max(600, min(3200, _coerce_int(form.get("maxDimension"), 1600)))
+    upload = form.get("cover")
+    uploaded_image: Image.Image | None = None
+    if action == "replace":
+        if not upload or not hasattr(upload, "read"):
+            return fail("请选择替换封面", status_code=400)
+        raw_image = await upload.read()
+        if not raw_image or len(raw_image) > 12 * 1024 * 1024:
+            return fail("封面文件为空或超过 12 MB", status_code=400)
+        try:
+            uploaded_image = Image.open(io.BytesIO(raw_image))
+            uploaded_image.load()
+        except (UnidentifiedImageError, OSError):
+            return fail("封面文件不是可识别的图片", status_code=400)
+
+    target_dir = settings.resolved_storage_root / "covers" / "bulk"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    created_paths: list[Path] = []
+    pending_updates: list[tuple[str, str, str]] = []
+    skipped: list[dict[str, str]] = []
+    try:
+        for work_id in work_ids:
+            work = _get_work(db, work_id)
+            if not work:
+                skipped.append({"workId": work_id, "reason": "作品不存在"})
+                continue
+            if action == "regenerate":
+                relative = _preferred_work_cover_path(db, work_id) or ensure_default_cover(settings)
+                path = _stored_path(relative, settings)
+                if path is None or not path.is_file():
+                    relative = ensure_default_cover(settings)
+                pending_updates.append((work_id, relative, cover_status(relative, settings)))
+                continue
+            source_image: Image.Image
+            if uploaded_image is not None:
+                source_image = uploaded_image.copy()
+            else:
+                source_relative = str(work.get("coverPath") or _preferred_work_cover_path(db, work_id) or ensure_default_cover(settings))
+                source_path = _stored_path(source_relative, settings)
+                if source_path is None or not source_path.is_file():
+                    source_path = _stored_path(ensure_default_cover(settings), settings)
+                if source_path is None:
+                    skipped.append({"workId": work_id, "reason": "找不到可处理的封面"})
+                    continue
+                try:
+                    source_image = Image.open(source_path)
+                    source_image.load()
+                except (UnidentifiedImageError, OSError):
+                    skipped.append({"workId": work_id, "reason": "当前封面无法读取"})
+                    continue
+            processed, output_quality = _prepare_cover_image(
+                source_image,
+                ratio=ratio if action == "crop" else None,
+                max_dimension=max_dimension,
+                quality=quality,
+            )
+            safe_id = re.sub(r"[^A-Za-z0-9_-]", "_", work_id)[:100] or "work"
+            target = target_dir / f"{safe_id}-{time_ns()}.jpg"
+            processed.save(target, format="JPEG", quality=output_quality, optimize=True, progressive=True)
+            created_paths.append(target)
+            relative = str(target.relative_to(settings.resolved_storage_root))
+            pending_updates.append((work_id, relative, "READY"))
+        now = _now()
+        for work_id, relative, status in pending_updates:
+            db.execute(
+                text("UPDATE `LibraryWork` SET `coverPath` = :cover_path, `coverStatus` = :cover_status, `updatedAt` = :now WHERE `id` = :work_id"),
+                {"cover_path": relative, "cover_status": status, "now": now, "work_id": work_id},
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        for path in created_paths:
+            path.unlink(missing_ok=True)
+        raise
+    updated = len(pending_updates)
+    if updated:
+        _record_system_event(
+            db,
+            level="info",
+            source="library",
+            actor_type="admin",
+            actor_id=user.id,
+            action=f"bulk.cover.{action}",
+            target_type="work",
+            message=f"批量处理封面 {updated} 本图书",
+            metadata={"ids": work_ids, "action": action, "ratio": ratio if action == "crop" else None, "quality": quality, "maxDimension": max_dimension, "skipped": skipped},
+        )
+    return ok({"updated": updated, "ids": [item[0] for item in pending_updates], "skipped": skipped})
 
 
 @router.post("/works/import")

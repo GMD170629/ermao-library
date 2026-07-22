@@ -4,7 +4,7 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEMPLATE_DIR="$ROOT_DIR/deploy/fnos"
 APP_VERSION="${APP_VERSION:-$(node -p "require('$ROOT_DIR/package.json').version")}"
-IMAGE_REFERENCE="gamersgu/shuku-starship-web:prod"
+IMAGE_REFERENCE="gamersgu/shuku-starship-web:${APP_VERSION}"
 FNPACK_BIN="${FNPACK_BIN:-fnpack}"
 VALIDATE_ONLY="${FNOS_VALIDATE_ONLY:-false}"
 OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/dist/fnos}"
@@ -95,9 +95,9 @@ if manifest.get("disable_authorization_path") != "true":
     raise SystemExit("fnOS arbitrary directory authorization must remain disabled")
 expected_metadata = {
     "maintainer": "六面体",
-    "maintainer_url": "https://github.com/GMD170629/shuku-starship",
+    "maintainer_url": "https://github.com/GMD170629/ermao-library",
     "distributor": "六面体",
-    "distributor_url": "https://github.com/GMD170629/shuku-starship",
+    "distributor_url": "https://github.com/GMD170629/ermao-library",
 }
 metadata_errors = [
     f"{key}: expected {value!r}, got {manifest.get(key)!r}"
@@ -178,12 +178,12 @@ for required_text in ("/shuku.monitor", "/monitor", "共享数据目录"):
 PY
 
 compose="$PACKAGE_DIR/app/docker/docker-compose.yaml"
-if ! grep -Fq 'image: gamersgu/shuku-starship-web:prod' "$compose" || \
+if ! grep -Fq "image: $IMAGE_REFERENCE" "$compose" || \
    ! grep -Fq 'user: "${TRIM_UID}:${TRIM_GID}"' "$compose" || \
    ! grep -Fq '${TRIM_PKGVAR}/storage:/app/storage' "$compose" || \
    ! grep -Fq '${TRIM_DATA_SHARE_PATHS}:/monitor' "$compose" || \
    ! grep -Fq 'MONITOR_ROOT: /monitor' "$compose"; then
-  echo "fnOS Compose is missing the prod image, package user, or required data mounts" >&2
+  echo "fnOS Compose is missing the versioned image, package user, or required data mounts" >&2
   exit 1
 fi
 

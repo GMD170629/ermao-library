@@ -20,6 +20,7 @@ DEFAULT_INTERVAL_MINUTES = 60
 MIN_INTERVAL_MINUTES = 15
 MAX_INTERVAL_MINUTES = 7 * 24 * 60
 ACTIVE_JOB_STATUSES = ("LOOKUP_PENDING", "PENDING", "QUEUED", "RUNNING", "RETRY_WAIT", "REVIEWING")
+UNRESOLVED_JOB_STATUSES = (*ACTIVE_JOB_STATUSES, "FAILED")
 TERMINAL_JOB_STATUSES = ("APPLIED", "COMPLETED", "DISMISSED", "CANCELLED", "FAILED")
 DEFAULT_RULES = {
     "unrecognized": True,
@@ -220,9 +221,9 @@ def eligible_organize_works(
             placeholders.append(f":{key}")
         where.append(f"w.`id` IN ({', '.join(placeholders)})")
     if _has_table(db, "OrganizeJob"):
-        active = ", ".join(f"'{item}'" for item in ACTIVE_JOB_STATUSES)
+        unresolved = ", ".join(f"'{item}'" for item in UNRESOLVED_JOB_STATUSES)
         where.append(
-            f"NOT EXISTS (SELECT 1 FROM `OrganizeJob` j WHERE j.`workId` = w.`id` AND j.`status` IN ({active}))"
+            f"NOT EXISTS (SELECT 1 FROM `OrganizeJob` j WHERE j.`workId` = w.`id` AND j.`status` IN ({unresolved}))"
         )
         if trigger == "NEW":
             where.append("NOT EXISTS (SELECT 1 FROM `OrganizeJob` j WHERE j.`workId` = w.`id` AND j.`trigger` = 'NEW')")
@@ -345,7 +346,11 @@ def create_organize_run(
             "scope": json.dumps(scope, ensure_ascii=False),
             "dedupe_key": key,
             "status": run_status,
-            "queued_count": len(works),
+            # The eligibility read and inserts are intentionally separated. A
+            # concurrent organizer may claim a work in between; the database
+            # unique index is the final arbiter, so the actual count is filled
+            # after the inserts below.
+            "queued_count": 0,
             "started_at": now,
             "finished_at": now if not works else None,
             "now": now,
@@ -358,7 +363,7 @@ def create_organize_run(
         job_id = _id("organize_job")
         task_id = _id("metadata_lookup")
         reasons = list(work.get("reasonCodes") or [])
-        db.execute(
+        inserted = db.execute(
             text(
                 """
                 INSERT INTO `OrganizeJob`
@@ -367,6 +372,9 @@ def create_organize_run(
                 VALUES
                     (:id, :run_id, :work_id, :edition_id, NULL, :trigger, 'LOOKUP_PENDING',
                      '[]', :reasons, :summary, NULL, NULL, NULL, :now, :now)
+                ON CONFLICT(`workId`) WHERE `status` IN
+                    ('LOOKUP_PENDING', 'PENDING', 'QUEUED', 'RUNNING', 'RETRY_WAIT', 'REVIEWING', 'FAILED')
+                DO NOTHING
                 """
             ),
             {
@@ -380,6 +388,8 @@ def create_organize_run(
                 "now": now,
             },
         )
+        if not inserted.rowcount:
+            continue
         db.execute(
             text(
                 """
@@ -404,8 +414,32 @@ def create_organize_run(
             text("UPDATE `LibraryWork` SET `organizeStatus` = 'LOOKUP_PENDING', `updatedAt` = :now WHERE `id` = :id"),
             {"id": work_id, "now": now},
         )
+    queued_count = int(
+        db.execute(
+            text("SELECT COUNT(*) FROM `OrganizeJob` WHERE `runId` = :run_id"),
+            {"run_id": run_id},
+        ).scalar()
+        or 0
+    )
+    db.execute(
+        text(
+            "UPDATE `OrganizeRun` SET `queuedCount` = :queued_count, `status` = :status, "
+            "`finishedAt` = :finished_at, `updatedAt` = :now WHERE `id` = :run_id"
+        ),
+        {
+            "run_id": run_id,
+            "queued_count": queued_count,
+            "status": "RUNNING" if queued_count else "COMPLETED",
+            "finished_at": None if queued_count else now,
+            "now": now,
+        },
+    )
     db.commit()
-    return get_organize_run(db, run_id) or {"id": run_id, "status": run_status, "queuedCount": len(works)}
+    return get_organize_run(db, run_id) or {
+        "id": run_id,
+        "status": "RUNNING" if queued_count else "COMPLETED",
+        "queuedCount": queued_count,
+    }
 
 
 def _run_view(row: dict[str, Any]) -> dict[str, Any]:
@@ -518,6 +552,18 @@ def recognize_organize_job(db: Session, job_id: str) -> dict[str, Any]:
     work = _row(db, "SELECT * FROM `LibraryWork` WHERE `id` = :id", {"id": job["workId"]})
     if not work:
         raise ValueError("作品已不存在")
+    unresolved = ", ".join(f"'{item}'" for item in UNRESOLVED_JOB_STATUSES)
+    current_unresolved = _row(
+        db,
+        f"SELECT * FROM `OrganizeJob` WHERE `workId` = :work_id AND `id` != :id "
+        f"AND `status` IN ({unresolved}) ORDER BY `updatedAt` DESC, `createdAt` DESC LIMIT 1",
+        {"work_id": job["workId"], "id": job_id},
+    )
+    if current_unresolved:
+        # Re-recognition is a work-level intent. Reuse its unresolved record
+        # when the action originated from an older successful history row.
+        job = current_unresolved
+        job_id = str(current_unresolved["id"])
     now = _now()
     providers = enabled_metadata_provider_ids(db, str(work.get("workType") or ""))
     tasks = _rows(

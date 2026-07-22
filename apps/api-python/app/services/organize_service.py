@@ -471,7 +471,9 @@ def ensure_organize_job_for_work(db: Session, work_id: str) -> dict[str, Any] | 
         return None
     existing = row(
         db,
-        "SELECT * FROM `OrganizeJob` WHERE `workId` = :work_id AND `status` IN ('PENDING', 'LOOKUP_PENDING', 'REVIEWING') ORDER BY `updatedAt` DESC LIMIT 1",
+        "SELECT * FROM `OrganizeJob` WHERE `workId` = :work_id "
+        "AND `status` IN ('LOOKUP_PENDING', 'PENDING', 'QUEUED', 'RUNNING', 'RETRY_WAIT', 'REVIEWING', 'FAILED') "
+        "ORDER BY `updatedAt` DESC LIMIT 1",
         {"work_id": work_id},
     )
     if existing:
@@ -779,7 +781,7 @@ def normalize_douban_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
 def douban_crawler_headers(settings: dict[str, str | None]) -> dict[str, str]:
     return {
         "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
-        "User-Agent": string_value(settings.get("metadata.douban.userAgent")) or "ShukuStarship/0.1 (+https://github.com/GMD170629/shuku-starship)",
+        "User-Agent": string_value(settings.get("metadata.douban.userAgent")) or "ShukuStarship/0.1 (+https://github.com/GMD170629/ermao-library)",
         "Referer": "https://book.douban.com",
     }
 
@@ -991,7 +993,7 @@ def run_ai_metadata_provider(db: Session, context: dict[str, Any], force: bool =
 def run_bangumi_metadata_provider(db: Session, context: dict[str, Any], settings: dict[str, str | None], force: bool = True, query: str | None = None, match_title: str | None = None) -> dict[str, Any]:
     if not coerce_bool(settings.get("metadata.bangumi.enabled")):
         return {"provider": "bangumi", "enabled": False, "added": 0, "cacheHit": False, "message": "Bangumi 元数据源未启用", "suggestions": []}
-    user_agent = string_value(settings.get("metadata.bangumi.userAgent")) or "ShukuStarship/0.1 (https://github.com/GMD170629/shuku-starship)"
+    user_agent = string_value(settings.get("metadata.bangumi.userAgent")) or "ShukuStarship/0.1 (https://github.com/GMD170629/ermao-library)"
     if not user_agent:
         return {"provider": "bangumi", "enabled": False, "added": 0, "cacheHit": False, "message": "Bangumi User-Agent 未配置", "suggestions": []}
     base_url = string_value(settings.get("metadata.bangumi.baseUrl")).rstrip("/") or "https://api.bgm.tv"

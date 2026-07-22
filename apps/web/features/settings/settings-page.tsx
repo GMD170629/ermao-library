@@ -126,10 +126,10 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   const [settings, setSettings] = useState<AppSettings>({
     'metadata.external.enabled': 'false',
     'metadata.douban.enabled': 'false',
-    'metadata.douban.userAgent': 'ShukuStarship/0.1 (+https://github.com/GMD170629/shuku-starship)',
+    'metadata.douban.userAgent': 'ShukuStarship/0.1 (+https://github.com/GMD170629/ermao-library)',
     'metadata.bangumi.enabled': 'false',
     'metadata.bangumi.accessToken': '',
-    'metadata.bangumi.userAgent': 'ShukuStarship/0.1 (https://github.com/GMD170629/shuku-starship)',
+    'metadata.bangumi.userAgent': 'ShukuStarship/0.1 (https://github.com/GMD170629/ermao-library)',
     'metadata.ai.enabled': 'false',
     'metadata.ai.baseUrl': '',
     'metadata.ai.apiKey': '',

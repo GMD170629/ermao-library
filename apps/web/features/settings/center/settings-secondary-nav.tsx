@@ -1,6 +1,6 @@
 'use client';
 
-import { Database, FileText, Mail, Settings, Sparkles } from 'lucide-react';
+import { Database, FileText, Info, Mail, Settings, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '../../../components/ui/cn';
@@ -11,7 +11,8 @@ export const settingsItems = [
   { href: '/settings/organize', label: '智能整理', icon: Sparkles },
   { href: '/settings/email', label: '邮件与 Kindle', icon: Mail },
   { href: '/settings/data', label: '数据与系统', icon: Database },
-  { href: '/settings/logs', label: '系统日志', icon: FileText }
+  { href: '/settings/logs', label: '系统日志', icon: FileText },
+  { href: '/settings/about', label: '关于', icon: Info }
 ];
 
 export function isSettingsItemActive(pathname: string, href: string) {

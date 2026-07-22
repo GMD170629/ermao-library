@@ -113,6 +113,88 @@ def test_interval_schedule_queues_due_candidates_and_advances_next_run(tmp_path)
         engine.dispose()
 
 
+def test_unresolved_work_is_not_queued_again_until_recognition_completes(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            _insert_work(db, "unrecognized-work")
+            first_run = create_organize_run(db, work_ids=["unrecognized-work"])
+            first_job = db.execute(
+                text("SELECT `id` FROM `OrganizeJob` WHERE `workId` = 'unrecognized-work'")
+            ).mappings().one()
+            db.execute(
+                text(
+                    "UPDATE `OrganizeJob` SET `status` = 'FAILED', `summary` = '没有找到匹配结果' "
+                    "WHERE `id` = :id"
+                ),
+                {"id": first_job["id"]},
+            )
+            db.execute(
+                text(
+                    "UPDATE `LibraryWork` SET `organized` = 0, `organizeStatus` = 'REVIEWING' "
+                    "WHERE `id` = 'unrecognized-work'"
+                )
+            )
+            db.commit()
+
+            update_organize_policy(
+                db,
+                {"enabled": True, "scheduleMode": "INTERVAL", "intervalMinutes": 15},
+            )
+            db.execute(
+                text(
+                    "UPDATE `OrganizePolicy` SET `nextRunAt` = '2026-01-01T00:00:00+00:00' "
+                    "WHERE `id` = 'default'"
+                )
+            )
+            db.commit()
+
+            assert organize_candidate_summary(db)["total"] == 0
+            assert process_organize_schedule_tick(db) == 0
+            assert db.execute(
+                text("SELECT COUNT(*) FROM `OrganizeJob` WHERE `workId` = 'unrecognized-work'")
+            ).scalar() == 1
+
+            db.execute(
+                text("UPDATE `OrganizeJob` SET `status` = 'COMPLETED' WHERE `id` = :id"),
+                {"id": first_job["id"]},
+            )
+            db.execute(
+                text(
+                    "UPDATE `LibraryWork` SET `organized` = 1, `organizeStatus` = 'APPLIED' "
+                    "WHERE `id` = 'unrecognized-work'"
+                )
+            )
+            db.commit()
+
+            second_run = create_organize_run(db, work_ids=["unrecognized-work"])
+            second_job_id = db.execute(
+                text(
+                    "SELECT `id` FROM `OrganizeJob` WHERE `workId` = 'unrecognized-work' "
+                    "AND `status` = 'LOOKUP_PENDING'"
+                )
+            ).scalar_one()
+            redirected_recognition = recognize_organize_job(db, str(first_job["id"]))
+
+            assert first_run["queuedCount"] == 1
+            assert second_run["queuedCount"] == 1
+            assert redirected_recognition["id"] == second_job_id
+            assert db.execute(
+                text("SELECT COUNT(*) FROM `OrganizeJob` WHERE `workId` = 'unrecognized-work'")
+            ).scalar() == 2
+            assert db.execute(
+                text(
+                    "SELECT COUNT(*) FROM `OrganizeJob` WHERE `workId` = 'unrecognized-work' "
+                    "AND `status` IN ('LOOKUP_PENDING', 'PENDING', 'QUEUED', 'RUNNING', "
+                    "'RETRY_WAIT', 'REVIEWING', 'FAILED')"
+                )
+            ).scalar() == 1
+    finally:
+        engine.dispose()
+
+
 def test_missing_description_alone_does_not_make_an_organized_work_eligible(tmp_path) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)

@@ -2,7 +2,7 @@
 
 这个目录是二毛图书的 fnOS Docker 应用模板。它与仓库根目录的原生 Docker Compose 部署相互独立，二者使用同一个生产镜像。fnOS 包通过独立宿主端口提供 Web 服务，不注册统一网关路径或 Unix Socket。
 
-应用开发者与发布者均为“六面体”，项目主页为 [GMD170629/shuku-starship](https://github.com/GMD170629/shuku-starship)。二毛图书支持 EPUB、漫画、PDF、文本读物和有声书的导入、整理、检索与沉浸阅读，适合部署在家庭 NAS 上集中管理个人藏书并跨设备访问。
+应用开发者与发布者均为“六面体”，项目主页为 [GMD170629/ermao-library](https://github.com/GMD170629/ermao-library)。二毛图书支持 EPUB、漫画、PDF、文本读物和有声书的导入、整理、检索与沉浸阅读，适合部署在家庭 NAS 上集中管理个人藏书并跨设备访问。
 
 有声书支持单个 M4B、M4A、MP3 以及多分轨音频导入，提供章节与轨道切换、倍速、音量、睡眠定时、跨页面连续播放和独立进度同步。
 
@@ -17,9 +17,9 @@
 pnpm fnos:build
 ```
 
-产物生成在 `dist/fnos/`。版本默认读取根目录 `package.json`，镜像固定使用 `gamersgu/shuku-starship-web:prod`。构建脚本会检查回调脚本语法、模板占位符、应用用户权限、共享数据目录、`/monitor` 挂载、独立端口入口、端口向导与范围校验、SQLite 持久化挂载和桌面图标资源。
+产物生成在 `dist/fnos/`。版本默认读取根目录 `package.json`，包内镜像同步使用 `gamersgu/shuku-starship-web:<应用版本>`，例如版本 `0.1.25` 会引用 `gamersgu/shuku-starship-web:0.1.25`。构建脚本会检查版本化镜像引用、回调脚本语法、模板占位符、应用用户权限、共享数据目录、`/monitor` 挂载、独立端口入口、端口向导与范围校验、SQLite 持久化挂载和桌面图标资源。
 
-GitHub Actions 页面中的 Artifact 会被 GitHub 固定包装成 ZIP，解压后是 `.fpk`。推送 `v*.*.*` 标签，或手动运行工作流并启用 `publish_release`，会把原始 `.fpk` 上传到 GitHub Releases，供 fnOS 直接下载和安装。
+GitHub Actions 会先构建并推送同版本的 Docker 镜像，再生成引用该镜像的 `.fpk`。正式发布版本时，同一次构建还会同步更新 `prod` 和 `latest` 镜像标签。Actions 页面中的 Artifact 会被 GitHub 固定包装成 ZIP，解压后是 `.fpk`。推送 `v*.*.*` 标签，或手动运行工作流并启用 `publish_release`，会把原始 `.fpk` 上传到 GitHub Releases，供 fnOS 直接下载和安装。
 
 未安装 `fnpack` 时，可以只运行同步校验：
 

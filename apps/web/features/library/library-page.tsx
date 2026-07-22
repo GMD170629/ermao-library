@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowRight, BookmarkPlus, CheckSquare, ChevronLeft, ChevronRight, FileText, Filter, Grid3X3, List, Loader2, Plus, Search, Trash2, UploadCloud, X } from 'lucide-react';
+import { ArrowRight, BookmarkPlus, ChevronLeft, ChevronRight, FileText, Filter, Grid3X3, List, Loader2, Plus, Search, Trash2, UploadCloud, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { BookCard } from '../../components/book/book-card';
@@ -12,6 +12,7 @@ import { cn } from '../../components/ui/cn';
 import { useToast } from '../../components/ui/feedback';
 import { Select } from '../../components/ui/select';
 import type { WorkView } from '../../types/work';
+import { LibraryBatchContextMenu, LibraryBatchDialog, type LibraryBatchAction } from './library-batch-actions';
 import { SmartFilterBuilder, type SmartFilterField, type SmartFilterRules } from './smart-filter-builder';
 
 type BooksResponse = {
@@ -32,8 +33,6 @@ type ImportResponse = {
   };
   error?: { message: string };
 };
-
-type ShelfOption = { id: string; name: string; kind?: 'STATIC' | 'SMART' };
 
 type FilterSchemaResponse = {
   ok: boolean;
@@ -63,10 +62,17 @@ const statusOptions = [
   { value: 'FINISHED', label: '已完成' }
 ];
 
+const pageSizeOptions = [
+  { value: '20', label: '20 本/页' },
+  { value: '50', label: '50 本/页' },
+  { value: '100', label: '100 本/页' }
+];
+
 const validStatuses = new Set(statusOptions.map((option) => option.value));
 const validSorts = new Set(sortOptions.map((option) => option.value));
 const convertibleTextExtensions = new Set(['mobi', 'azw', 'azw3', 'prc', 'fb2', 'txt']);
 const audioExtensions = new Set(['m4b', 'm4a', 'mp3']);
+const DEFAULT_LIBRARY_PAGE_SIZE = 20;
 
 function fileExtension(file: File | null) {
   return file?.name.split('.').pop()?.toLowerCase() ?? '';
@@ -136,7 +142,8 @@ export function LibraryPage() {
   const [filterSchemaLoaded, setFilterSchemaLoaded] = useState(false);
   const [books, setBooks] = useState<WorkView[]>([]);
   const [page, setPage] = useState(1);
-  const [meta, setMeta] = useState({ total: 0, pageSize: 24, totalPages: 1 });
+  const [pageSize, setPageSize] = useState(String(DEFAULT_LIBRARY_PAGE_SIZE));
+  const [meta, setMeta] = useState({ total: 0, pageSize: DEFAULT_LIBRARY_PAGE_SIZE, totalPages: 1 });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -151,13 +158,9 @@ export function LibraryPage() {
   const [deleteTarget, setDeleteTarget] = useState<WorkView | null>(null);
   const [deleteSource, setDeleteSource] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [selectionMode, setSelectionMode] = useState(false);
   const [selectedWorkIds, setSelectedWorkIds] = useState<string[]>([]);
-  const [batchDialogOpen, setBatchDialogOpen] = useState(false);
-  const [batchAction, setBatchAction] = useState('add_tags');
-  const [batchValue, setBatchValue] = useState('');
-  const [batchSaving, setBatchSaving] = useState(false);
-  const [shelves, setShelves] = useState<ShelfOption[]>([]);
+  const [batchDialogAction, setBatchDialogAction] = useState<LibraryBatchAction | null>(null);
+  const [batchContextPosition, setBatchContextPosition] = useState<{ x: number; y: number } | null>(null);
   const [smartShelfOpen, setSmartShelfOpen] = useState(false);
   const [smartShelfName, setSmartShelfName] = useState('');
   const [smartShelfSaving, setSmartShelfSaving] = useState(false);
@@ -173,7 +176,6 @@ export function LibraryPage() {
   }), [smartFilterRules]);
   const incompleteSmartFilterCount = smartFilterRules.conditions.length - applicableSmartFilterRules.conditions.length;
   const smartFilterQuery = useMemo(() => applicableSmartFilterRules.conditions.length > 0 ? JSON.stringify(serializableSmartFilterRules(applicableSmartFilterRules)) : '', [applicableSmartFilterRules]);
-
   const query = useMemo(() => {
     const params = new URLSearchParams();
     if (search.trim()) params.set('search', search.trim());
@@ -184,8 +186,9 @@ export function LibraryPage() {
     params.set('visibility', 'active');
     params.set('sort', sort);
     params.set('page', String(page));
+    params.set('pageSize', pageSize);
     return params.toString();
-  }, [formatFilter, page, search, seriesNameFilter, smartFilterQuery, sort, statusFilter]);
+  }, [formatFilter, page, pageSize, search, seriesNameFilter, smartFilterQuery, sort, statusFilter]);
 
   useEffect(() => {
     setPage(1);
@@ -240,7 +243,7 @@ export function LibraryPage() {
         setBooks(data?.books ?? []);
         setMeta({
           total: data?.total ?? 0,
-          pageSize: data?.pageSize ?? 24,
+          pageSize: data?.pageSize ?? Number(pageSize),
           totalPages: data?.totalPages ?? 1
         });
         setError('');
@@ -254,6 +257,11 @@ export function LibraryPage() {
       active = false;
     };
   }, [page, query, reloadKey]);
+
+  useEffect(() => {
+    const visibleIds = new Set(books.map((book) => book.id));
+    setSelectedWorkIds((current) => current.filter((id) => visibleIds.has(id)));
+  }, [books]);
 
   const advancedFilterCount = [statusFilter !== '全部', seriesNameFilter].filter(Boolean).length + smartFilterRules.conditions.length;
   const pageTitle = seriesNameFilter
@@ -404,39 +412,20 @@ export function LibraryPage() {
     setSelectedWorkIds((current) => current.includes(bookId) ? current.filter((id) => id !== bookId) : [...current, bookId]);
   }
 
-  function toggleSelectionMode() {
-    setSelectionMode((current) => !current);
+  function togglePageSelection(selected: boolean) {
+    setSelectedWorkIds(selected ? books.map((book) => book.id) : []);
+  }
+
+  function openBatchAction(action: LibraryBatchAction) {
+    setBatchContextPosition(null);
+    setBatchDialogAction(action);
+  }
+
+  function finishBatchAction(nextMessage: string) {
+    setMessage(nextMessage);
+    setBatchDialogAction(null);
     setSelectedWorkIds([]);
-  }
-
-  async function loadShelves() {
-    try {
-      const payload = await fetch('/api/shelves').then((response) => response.json()) as { ok: boolean; data?: { shelves: ShelfOption[] } };
-      setShelves((payload.data?.shelves ?? []).filter((shelf) => (shelf.kind ?? 'STATIC') === 'STATIC'));
-    } catch { setShelves([]); }
-  }
-
-  async function applyBatch() {
-    if (!selectedWorkIds.length) return;
-    setBatchSaving(true);
-    try {
-      const body: Record<string, unknown> = { ids: selectedWorkIds, action: batchAction };
-      if (batchAction === 'add_tags' || batchAction === 'remove_tags') body.tags = batchValue.split(/[,，;；]/).map((item) => item.trim()).filter(Boolean);
-      if (batchAction === 'set_status') body.status = batchValue || 'UNREAD';
-      if (batchAction === 'add_to_shelf') body.shelfId = batchValue;
-      if (batchAction === 'update_fields') body.fields = { seriesName: batchValue.trim() || null };
-      const response = await fetch('/api/works/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const payload = await response.json() as { ok: boolean; data?: { updated: number }; error?: { message: string } };
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '批量更新失败');
-      toast.success(`已更新 ${payload.data?.updated ?? selectedWorkIds.length} 本图书`);
-      setBatchDialogOpen(false);
-      setBatchValue('');
-      setSelectedWorkIds([]);
-      setSelectionMode(false);
-      setReloadKey((key) => key + 1);
-    } catch (reason) {
-      toast.error('批量更新失败', reason instanceof Error ? reason.message : '批量更新失败');
-    } finally { setBatchSaving(false); }
+    setReloadKey((key) => key + 1);
   }
 
   async function saveSmartShelf() {
@@ -596,25 +585,6 @@ export function LibraryPage() {
         </div>
       ) : null}
 
-      {batchDialogOpen ? (
-        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-[#241F1C]/35 p-0 backdrop-blur-[2px] md:items-center md:p-6" role="dialog" aria-modal="true" aria-label="批量管理图书">
-          <div className="w-full max-w-md rounded-t-3xl bg-[#FFFEFC] p-6 shadow-2xl md:rounded-3xl">
-            <div className="flex items-start justify-between gap-4"><div><h2 className="text-lg font-semibold text-[#2D2926]">批量管理 {selectedWorkIds.length} 本图书</h2><p className="mt-1 text-sm text-[#817B75]">只修改当前选择的作品级信息。</p></div><button type="button" onClick={() => setBatchDialogOpen(false)}><X size={18} /></button></div>
-            <label className="mt-5 block text-sm text-[#6F6963]">操作
-              <select value={batchAction} onChange={(event) => { setBatchAction(event.target.value); setBatchValue(''); if (event.target.value === 'add_to_shelf') void loadShelves(); }} className="mt-2 h-11 w-full rounded-xl border border-black/[0.1] bg-white px-3 outline-none">
-                <option value="add_tags">添加标签</option><option value="remove_tags">移除标签</option><option value="set_status">设置阅读状态</option><option value="add_to_shelf">加入普通书架</option><option value="update_fields">设置丛书名称</option>
-              </select>
-            </label>
-            <label className="mt-4 block text-sm text-[#6F6963]">{batchAction === 'set_status' ? '阅读状态' : batchAction === 'add_to_shelf' ? '目标书架' : batchAction === 'update_fields' ? '丛书名称' : '标签（可用逗号分隔）'}
-              {batchAction === 'set_status' ? <select value={batchValue || 'UNREAD'} onChange={(event) => setBatchValue(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-black/[0.1] bg-white px-3"><option value="UNREAD">未开始</option><option value="READING">进行中</option><option value="FINISHED">已完成</option></select>
-              : batchAction === 'add_to_shelf' ? <select value={batchValue} onChange={(event) => setBatchValue(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-black/[0.1] bg-white px-3"><option value="">请选择书架</option>{shelves.map((shelf) => <option key={shelf.id} value={shelf.id}>{shelf.name}</option>)}</select>
-              : <input value={batchValue} onChange={(event) => setBatchValue(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-black/[0.1] bg-white px-4 outline-none focus:border-[#E8A18D]" placeholder={batchAction === 'update_fields' ? '例如：银河帝国系列' : '例如：科幻, 待读'} />}
-            </label>
-            <div className="mt-6 flex justify-end gap-2"><Button variant="secondary" onClick={() => setBatchDialogOpen(false)}>取消</Button><Button loading={batchSaving} disabled={batchAction === 'add_to_shelf' && !batchValue} onClick={() => void applyBatch()}>应用更改</Button></div>
-          </div>
-        </div>
-      ) : null}
-
       {smartShelfOpen ? (
         <div className="fixed inset-0 z-[90] flex items-end justify-center bg-[#241F1C]/35 p-0 backdrop-blur-[2px] md:items-center md:p-6" role="dialog" aria-modal="true" aria-label="保存智能书架">
           <div className="w-full max-w-md rounded-t-3xl bg-[#FFFEFC] p-6 shadow-2xl md:rounded-3xl">
@@ -656,9 +626,9 @@ export function LibraryPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" onClick={toggleSelectionMode} className={cn('inline-flex h-11 items-center gap-2 rounded-xl border px-3 text-sm font-medium transition', selectionMode ? 'border-[#F3B6A4] bg-[#FFF2ED] text-[#D7462B]' : 'border-black/[0.09] bg-white/55 text-[#69635E]')}><CheckSquare size={16} />{selectionMode ? '退出选择' : '批量管理'}</button>
           <button type="button" onClick={() => setSmartShelfOpen(true)} className="inline-flex h-11 items-center gap-2 rounded-xl border border-black/[0.09] bg-white/55 px-3 text-sm font-medium text-[#69635E] transition hover:bg-black/[0.025]"><BookmarkPlus size={16} />保存筛选</button>
           <Select value={sort} options={sortOptions} onChange={updateSort} ariaLabel="排序方式" className="min-w-[128px]" align="right" />
+          <Select value={pageSize} options={pageSizeOptions} onChange={(nextPageSize) => { setPage(1); setPageSize(nextPageSize); }} ariaLabel="每页数量" className="min-w-[112px]" align="right" />
           <div className="inline-flex h-11 rounded-xl border border-black/[0.09] bg-white/55 p-1">
             <button
               type="button"
@@ -737,21 +707,24 @@ export function LibraryPage() {
                   priority={index === 0}
                   onDelete={() => openDeleteBook(book)}
                   onClick={() => router.push(`/works/${book.id}`)}
-                  selectionMode={selectionMode}
+                  selectable
                   selected={selectedWorkIds.includes(book.id)}
                   onSelect={() => toggleSelection(book.id)}
                 />
               ))}
             </div>
           ) : (
-            <div className="mt-8"><BookTable books={books} onDelete={openDeleteBook} selectionMode={selectionMode} selectedIds={selectedWorkIds} onSelect={(book) => toggleSelection(book.id)} /></div>
+            <div className="mt-8"><BookTable books={books} onDelete={openDeleteBook} selectable selectedIds={selectedWorkIds} onSelect={(book) => toggleSelection(book.id)} onSelectAll={togglePageSelection} onSelectionChange={setSelectedWorkIds} onContextMenu={(_book, position) => setBatchContextPosition(position)} /></div>
           )}
 
           {meta.totalPages > 1 ? <Pagination page={page} totalPages={meta.totalPages} loading={loading} onPage={setPage} /> : null}
         </>
       ) : null}
 
-      {selectionMode ? <div className="fixed bottom-5 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 flex-wrap items-center justify-between gap-3 rounded-2xl border border-black/[0.08] bg-[#282522] px-4 py-3 text-white shadow-2xl"><div className="text-sm"><span className="font-semibold">已选择 {selectedWorkIds.length} 本</span><button type="button" onClick={() => setSelectedWorkIds(books.map((book) => book.id))} className="ml-3 text-xs text-white/65 hover:text-white">选择本页</button></div><div className="flex gap-2"><Button variant="secondary" onClick={() => setSelectedWorkIds([])}>清空</Button><Button disabled={!selectedWorkIds.length} onClick={() => setBatchDialogOpen(true)}>继续</Button></div></div> : null}
+      {selectedWorkIds.length > 0 ? <div className="fixed bottom-5 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-2xl -translate-x-1/2 flex-wrap items-center justify-between gap-3 rounded-2xl border border-black/[0.08] bg-[#282522] px-4 py-3 text-white shadow-2xl"><div><div className="text-sm font-semibold">已选择 {selectedWorkIds.length} 本</div><div className="mt-0.5 hidden text-[11px] text-white/55 sm:block">列表中右键可直接选择批量操作</div></div><div className="flex gap-2"><Button variant="secondary" onClick={() => { setSelectedWorkIds([]); setBatchContextPosition(null); }}>清空</Button><Button onClick={() => openBatchAction('metadata')}>批量操作</Button></div></div> : null}
+
+      <LibraryBatchContextMenu position={batchContextPosition} selectedCount={selectedWorkIds.length} onClose={() => setBatchContextPosition(null)} onSelect={openBatchAction} />
+      <LibraryBatchDialog action={batchDialogAction} selectedIds={selectedWorkIds} onActionChange={setBatchDialogAction} onClose={() => setBatchDialogAction(null)} onApplied={finishBatchAction} />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import zipfile
 
 import pytest
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -73,7 +74,7 @@ def test_empty_storage_bootstraps_complete_sqlite_database(tmp_path) -> None:
             assert connection.exec_driver_sql("PRAGMA journal_mode").scalar() == "wal"
             assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
             assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar() == 10_000
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 9
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 10
             assert connection.execute(text("SELECT COUNT(*) FROM `User`")).scalar() == 0
             assert "avatarPath" in {column[1] for column in connection.exec_driver_sql("PRAGMA table_info(`User`)").fetchall()}
             assert "shelfId" in {column[1] for column in connection.exec_driver_sql("PRAGMA table_info(`MonitorFolder`)").fetchall()}
@@ -147,7 +148,7 @@ def test_bootstrap_migrates_reader_preference_default_to_v3_without_losing_rows(
                 column[1]: column
                 for column in connection.exec_driver_sql("PRAGMA table_info(`ReaderBookPreference`)").fetchall()
             }
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 9
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 10
             assert columns["schemaVersion"][4] == "3"
             migrated = connection.execute(text(
                 "SELECT `id`, `userId`, `workId`, `schemaVersion`, `preferences`, `createdAt`, `updatedAt` "
@@ -193,7 +194,7 @@ def test_bootstrap_migrates_reader_preference_default_to_v3_without_losing_rows(
         bootstrap_database(engine, settings)
 
         with engine.connect() as connection:
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 9
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 10
             assert connection.execute(text(
                 "SELECT COUNT(*) FROM `ReaderBookPreference` WHERE `id` = 'preference-default'"
             )).scalar() == 1
@@ -289,10 +290,10 @@ def test_bootstrap_migrates_v1_import_tasks_before_creating_new_indexes(tmp_path
             }
             indexes = {row[1] for row in connection.exec_driver_sql("PRAGMA index_list(`ImportTask`)").fetchall()}
             assert "ImportTask_status_leaseExpiresAt_idx" in indexes
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 9
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 10
             assert connection.exec_driver_sql("PRAGMA foreign_key_check").first() is None
 
-            backup_path = settings.database_path.parent / "migrations" / "shuku-before-v9.sqlite3"
+            backup_path = settings.database_path.parent / "migrations" / "shuku-before-v10.sqlite3"
         assert backup_path.is_file()
         with sqlite3.connect(backup_path) as backup:
             assert backup.execute("PRAGMA user_version").fetchone()[0] == 1
@@ -386,12 +387,106 @@ def test_v5_migration_allows_duplicate_work_identity_keys(tmp_path) -> None:
                 row[1]: row
                 for row in connection.exec_driver_sql("PRAGMA index_list(`LibraryWork`)").fetchall()
             }
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 9
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 10
             assert "LibraryWork_mergeKey_key" not in indexes
             assert indexes["LibraryWork_mergeKey_idx"][2] == 0
             assert connection.execute(
                 text("SELECT COUNT(*) FROM `LibraryWork` WHERE `mergeKey` = '同名书:同作者'")
             ).scalar() == 2
+    finally:
+        engine.dispose()
+
+
+def test_v10_migration_consolidates_duplicate_unresolved_organize_records(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with engine.begin() as connection:
+            connection.execute(text("DROP INDEX `OrganizeJob_unresolved_workId_key`"))
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO `LibraryWork`
+                        (`id`, `origin`, `title`, `normalizedTitle`, `author`, `normalizedAuthor`,
+                         `workType`, `tags`, `metadataQuality`, `organizeStatus`, `hidden`, `organized`,
+                         `createdAt`, `updatedAt`)
+                    VALUES
+                        ('duplicate-unresolved-work', 'MANUAL', '重复未识别', '重复未识别',
+                         '未知作者', '未知作者', 'EPUB', '[]', 0, 'REVIEWING', 0, 0,
+                         '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO `OrganizeJob`
+                        (`id`, `workId`, `status`, `issueCodes`, `summary`, `createdAt`, `updatedAt`)
+                    VALUES
+                        ('older-unresolved', 'duplicate-unresolved-work', 'FAILED', '[]', '旧记录',
+                         '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00'),
+                        ('newer-unresolved', 'duplicate-unresolved-work', 'FAILED', '[]', '新记录',
+                         '2026-02-01T00:00:00+00:00', '2026-02-01T00:00:00+00:00')
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO `MetadataLookupTask`
+                        (`id`, `workId`, `organizeJobId`, `status`, `providerOrder`, `attempts`,
+                         `nextAttemptAt`, `createdAt`, `updatedAt`)
+                    VALUES
+                        ('older-lookup', 'duplicate-unresolved-work', 'older-unresolved', 'PENDING',
+                         '[]', 0, '2026-01-01T00:00:00+00:00',
+                         '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')
+                    """
+                )
+            )
+            connection.exec_driver_sql("PRAGMA user_version = 9")
+
+        bootstrap_database(engine, settings)
+
+        with engine.begin() as connection:
+            jobs = connection.execute(
+                text(
+                    "SELECT `id`, `status`, `summary` FROM `OrganizeJob` "
+                    "WHERE `workId` = 'duplicate-unresolved-work' ORDER BY `id`"
+                )
+            ).mappings().all()
+            assert [dict(job) for job in jobs] == [
+                {
+                    "id": "newer-unresolved",
+                    "status": "FAILED",
+                    "summary": "新记录",
+                },
+                {
+                    "id": "older-unresolved",
+                    "status": "CANCELLED",
+                    "summary": "已取消",
+                },
+            ]
+            assert connection.execute(
+                text("SELECT `status` FROM `MetadataLookupTask` WHERE `id` = 'older-lookup'")
+            ).scalar() == "CANCELLED"
+            indexes = {
+                row[1]: row
+                for row in connection.exec_driver_sql("PRAGMA index_list(`OrganizeJob`)").fetchall()
+            }
+            assert indexes["OrganizeJob_unresolved_workId_key"][2] == 1
+            with pytest.raises(IntegrityError):
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO `OrganizeJob`
+                            (`id`, `workId`, `status`, `issueCodes`, `createdAt`, `updatedAt`)
+                        VALUES
+                            ('third-unresolved', 'duplicate-unresolved-work', 'LOOKUP_PENDING', '[]',
+                             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        """
+                    )
+                )
     finally:
         engine.dispose()
 
@@ -436,7 +531,7 @@ def test_bootstrap_repairs_current_version_with_incomplete_import_task_schema(tm
         with engine.connect() as connection:
             columns = {column[1] for column in connection.exec_driver_sql("PRAGMA table_info(`ImportTask`)").fetchall()}
             assert {"errorCode", "retryable", "attempts", "leaseOwner", "leaseExpiresAt"}.issubset(columns)
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 9
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 10
             indexes = {row[1] for row in connection.exec_driver_sql("PRAGMA index_list(`ImportTask`)").fetchall()}
             assert "ImportTask_status_leaseExpiresAt_idx" in indexes
     finally:

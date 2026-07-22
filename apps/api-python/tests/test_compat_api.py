@@ -603,7 +603,7 @@ def test_metadata_system_settings_decode_json_saved_values(db_session):
     for key, value in {
         "metadata.douban.baseUrl": '""',
         "metadata.douban.enabled": "true",
-        "metadata.bangumi.userAgent": '"ShukuStarship/0.1 (https://github.com/GMD170629/shuku-starship)"',
+        "metadata.bangumi.userAgent": '"ShukuStarship/0.1 (https://github.com/GMD170629/ermao-library)"',
     }.items():
         db_session.execute(
             text("INSERT INTO SystemSetting (`key`, `value`, `createdAt`, `updatedAt`) VALUES (:key, :value, 'now', 'now')"),
@@ -616,7 +616,7 @@ def test_metadata_system_settings_decode_json_saved_values(db_session):
     assert settings == {
         "metadata.douban.baseUrl": "",
         "metadata.douban.enabled": "true",
-        "metadata.bangumi.userAgent": "ShukuStarship/0.1 (https://github.com/GMD170629/shuku-starship)",
+        "metadata.bangumi.userAgent": "ShukuStarship/0.1 (https://github.com/GMD170629/ermao-library)",
     }
 
 
@@ -1118,6 +1118,9 @@ def test_works_recent_read_sort_uses_latest_user_progress_across_pages(client, d
     assert [book["id"] for book in progress_sorted["data"]["books"]] == ["work-old", "work-new", "work-unread"]
     assert [book["progress"] for book in progress_sorted["data"]["books"]] == [80, 50, 0]
 
+    maximum_page = client.get("/api/works", params={"pageSize": 999}).json()
+    assert maximum_page["data"]["pageSize"] == 100
+
 
 def test_primary_edition_is_scoped_and_unique_and_can_be_split(client, db_session):
     create_worker_tables(db_session)
@@ -1290,6 +1293,179 @@ def test_bulk_works_delete_records_removes_selected_books(client, db_session, te
     assert not managed_file.exists()
     remaining = db_session.execute(text("SELECT id FROM LibraryWork ORDER BY id")).scalars().all()
     assert remaining == ["bulk-keep"]
+
+
+def _create_bulk_management_fixture(db_session):
+    create_worker_tables(db_session)
+    for statement in [
+        "ALTER TABLE LibraryWork ADD COLUMN seriesName TEXT",
+        "ALTER TABLE LibraryWork ADD COLUMN seriesIndex REAL",
+        "ALTER TABLE LibraryWork ADD COLUMN publishedYear INTEGER",
+        "ALTER TABLE LibraryEdition ADD COLUMN mediaKind TEXT DEFAULT 'EBOOK'",
+        "ALTER TABLE LibraryEdition ADD COLUMN narrator TEXT",
+        "ALTER TABLE LibraryEdition ADD COLUMN durationMs INTEGER",
+    ]:
+        db_session.execute(text(statement))
+    db_session.execute(text("CREATE TABLE Shelf (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, kind TEXT DEFAULT 'STATIC', rulesJson TEXT DEFAULT '{}', pinned INTEGER DEFAULT 0, createdAt TEXT, updatedAt TEXT)"))
+    db_session.execute(text("CREATE TABLE ShelfWork (shelfId TEXT NOT NULL, workId TEXT NOT NULL, createdAt TEXT, PRIMARY KEY (shelfId, workId))"))
+    db_session.execute(text("CREATE TABLE LibraryConsumptionState (id TEXT PRIMARY KEY, userId TEXT, workId TEXT, mediaKind TEXT, status TEXT, lastEditionId TEXT, lastVolumeId TEXT, lastUnitId TEXT, createdAt TEXT, updatedAt TEXT)"))
+    db_session.execute(text("CREATE TABLE LibraryReadingProgress (id TEXT PRIMARY KEY, userId TEXT, workId TEXT, editionId TEXT, volumeId TEXT, readerType TEXT, position TEXT, page INTEGER, percent REAL, extra TEXT, schemaVersion INTEGER, createdAt TEXT, updatedAt TEXT)"))
+    db_session.execute(text("INSERT INTO Shelf (id, name, kind, createdAt, updatedAt) VALUES ('bulk-shelf', '批量书架', 'STATIC', 'now', 'now')"))
+    for index, work_id in enumerate(("bulk-manage-1", "bulk-manage-2"), start=1):
+        db_session.execute(
+            text(
+                """INSERT INTO LibraryWork (
+                    id, origin, title, normalizedTitle, author, normalizedAuthor, description, workType, status,
+                    publicationStatus, trackingStatus, tags, metadataQuality, organizeStatus, coverStatus,
+                    hidden, organized, primaryEditionId, mergeKey, createdAt, updatedAt
+                ) VALUES (
+                    :id, 'MANUAL', :title, :normalized_title, '旧作者', '旧作者', '旧简介', 'EPUB', 'READING',
+                    'UNKNOWN', 'NOT_TRACKING', :tags, 0, 'REVIEWING', 'PENDING', 0, 0, :edition_id,
+                    :merge_key, '2026-07-20T00:00:00', '2026-07-20T00:00:00'
+                )"""
+            ),
+            {
+                "id": work_id,
+                "title": f"Book {index}",
+                "normalized_title": f"book{index}",
+                "tags": json.dumps(["旧标签", f"保留{index}"], ensure_ascii=False),
+                "edition_id": f"{work_id}-edition",
+                "merge_key": f"book{index}:旧作者",
+            },
+        )
+        db_session.execute(
+            text(
+                """INSERT INTO LibraryEdition (
+                    id, workId, origin, mediaKind, format, versionName, versionKey, language, publisher,
+                    importStatus, sizeBytes, coverStatus, "primary", hidden, createdAt, updatedAt
+                ) VALUES (
+                    :id, :work_id, 'MANUAL', 'EBOOK', 'EPUB', '旧版本', :id, 'zh-CN', '旧出版社',
+                    'COMPLETED', 0, 'PENDING', 1, 0, '2026-07-20T00:00:00', '2026-07-20T00:00:00'
+                )"""
+            ),
+            {"id": f"{work_id}-edition", "work_id": work_id},
+        )
+    db_session.commit()
+
+
+def test_bulk_management_updates_metadata_shelves_and_find_replace(client, db_session):
+    _create_bulk_management_fixture(db_session)
+    _login(client, db_session)
+    ids = ["bulk-manage-1", "bulk-manage-2"]
+
+    metadata = client.post(
+        "/api/works/bulk",
+        json={
+            "ids": ids,
+            "action": "update_metadata",
+            "fields": {"author": "新作者", "publisher": "新出版社", "seriesName": "新系列"},
+            "addTags": ["新标签"],
+            "removeTags": ["旧标签"],
+        },
+    )
+    assert metadata.status_code == 200
+    assert metadata.json()["data"]["updated"] == 2
+    works = db_session.execute(text("SELECT author, seriesName, tags FROM LibraryWork ORDER BY id")).mappings().all()
+    assert all(row["author"] == "新作者" and row["seriesName"] == "新系列" for row in works)
+    assert all(json.loads(row["tags"])[-1] == "新标签" and "旧标签" not in json.loads(row["tags"]) for row in works)
+    assert db_session.execute(text("SELECT COUNT(*) FROM LibraryEdition WHERE publisher = '新出版社'")).scalar() == 2
+
+    added = client.post("/api/works/bulk", json={"ids": ids, "action": "shelf_membership", "membership": "ADD", "shelfId": "bulk-shelf"})
+    assert added.status_code == 200
+    assert db_session.execute(text("SELECT COUNT(*) FROM ShelfWork WHERE shelfId = 'bulk-shelf'")).scalar() == 2
+    removed = client.post("/api/works/bulk", json={"ids": [ids[0]], "action": "shelf_membership", "membership": "REMOVE", "shelfId": "bulk-shelf"})
+    assert removed.status_code == 200
+    assert db_session.execute(text("SELECT workId FROM ShelfWork")).scalar() == ids[1]
+
+    replacement_payload = {
+        "ids": ids,
+        "field": "title",
+        "find": "Book",
+        "replacement": "卷{{ number }}-{{ match|upper }}",
+        "startNumber": 3,
+        "caseSensitive": False,
+        "regex": False,
+    }
+    preview = client.post("/api/works/bulk/find-replace/preview", json=replacement_payload)
+    assert preview.status_code == 200
+    assert preview.json()["data"]["changedWorks"] == 2
+    assert preview.json()["data"]["items"][0]["after"] == "卷3-BOOK 1"
+    applied = client.post("/api/works/bulk", json={**replacement_payload, "action": "find_replace"})
+    assert applied.status_code == 200
+    assert db_session.execute(text("SELECT title FROM LibraryWork ORDER BY id")).scalars().all() == ["卷3-BOOK 1", "卷4-BOOK 2"]
+
+    invalid = client.post("/api/works/bulk/find-replace/preview", json={**replacement_payload, "replacement": "{{ unsafe }}"})
+    assert invalid.status_code == 400
+    assert "不支持的模板变量" in invalid.json()["error"]["message"]
+
+
+def test_bulk_reading_status_clears_or_finishes_all_progress(client, db_session):
+    _create_bulk_management_fixture(db_session)
+    _login(client, db_session)
+    user_id = db_session.execute(text("SELECT id FROM User WHERE email = 'admin@example.com'")).scalar()
+    db_session.execute(
+        text("INSERT INTO LibraryReadingProgress (id, userId, workId, editionId, readerType, position, percent, extra, schemaVersion, createdAt, updatedAt) VALUES ('bulk-reading-progress', :user_id, 'bulk-manage-1', 'bulk-manage-1-edition', 'epub', 'chapter-1', 37, '{}', 2, 'now', 'now')"),
+        {"user_id": user_id},
+    )
+    db_session.execute(
+        text("INSERT INTO LibraryConsumptionState (id, userId, workId, mediaKind, status, createdAt, updatedAt) VALUES ('bulk-reading-state', :user_id, 'bulk-manage-1', 'EBOOK', 'READING', 'now', 'now')"),
+        {"user_id": user_id},
+    )
+    db_session.commit()
+
+    unread = client.post("/api/works/bulk", json={"ids": ["bulk-manage-1"], "action": "reading_status", "status": "UNREAD"})
+    assert unread.status_code == 200
+    assert db_session.execute(text("SELECT COUNT(*) FROM LibraryReadingProgress WHERE workId = 'bulk-manage-1'")).scalar() == 0
+    assert db_session.execute(text("SELECT COUNT(*) FROM LibraryConsumptionState WHERE workId = 'bulk-manage-1'")).scalar() == 0
+    assert db_session.execute(text("SELECT status FROM LibraryWork WHERE id = 'bulk-manage-1'")).scalar() == "UNREAD"
+
+    finished = client.post("/api/works/bulk", json={"ids": ["bulk-manage-1"], "action": "reading_status", "status": "FINISHED"})
+    assert finished.status_code == 200
+    assert db_session.execute(text("SELECT percent FROM LibraryReadingProgress WHERE workId = 'bulk-manage-1'")).scalar() == 100
+    assert db_session.execute(text("SELECT status FROM LibraryConsumptionState WHERE workId = 'bulk-manage-1'")).scalar() == "FINISHED"
+    assert db_session.execute(text("SELECT status FROM LibraryWork WHERE id = 'bulk-manage-1'")).scalar() == "FINISHED"
+
+
+def test_bulk_cover_crop_compress_replace_and_regenerate(client, db_session, test_settings):
+    _create_bulk_management_fixture(db_session)
+    _login(client, db_session)
+    source_dir = test_settings.resolved_storage_root / "covers" / "source"
+    source_dir.mkdir(parents=True)
+    for work_id, color in (("bulk-manage-1", "#ef4d2f"), ("bulk-manage-2", "#355c7d")):
+        source = source_dir / f"{work_id}.png"
+        Image.new("RGB", (900, 900), color).save(source)
+        db_session.execute(text("UPDATE LibraryWork SET coverPath = :path, coverStatus = 'READY' WHERE id = :id"), {"path": str(source.relative_to(test_settings.resolved_storage_root)), "id": work_id})
+        db_session.execute(text("UPDATE LibraryEdition SET coverPath = :path, coverStatus = 'READY' WHERE workId = :id"), {"path": str(source.relative_to(test_settings.resolved_storage_root)), "id": work_id})
+    db_session.commit()
+    ids = json.dumps(["bulk-manage-1", "bulk-manage-2"])
+
+    cropped = client.post("/api/works/bulk/cover", data={"ids": ids, "action": "crop", "ratio": "2:3", "maxDimension": "1200", "quality": "84"})
+    assert cropped.status_code == 200
+    assert cropped.json()["data"]["updated"] == 2
+    crop_path = db_session.execute(text("SELECT coverPath FROM LibraryWork WHERE id = 'bulk-manage-1'")).scalar()
+    with Image.open(test_settings.resolved_storage_root / crop_path) as crop_image:
+        assert crop_image.width * 3 == crop_image.height * 2
+
+    compressed = client.post("/api/works/bulk/cover", data={"ids": ids, "action": "compress", "maxDimension": "600", "quality": "50"})
+    assert compressed.status_code == 200
+    compressed_path = db_session.execute(text("SELECT coverPath FROM LibraryWork WHERE id = 'bulk-manage-1'")).scalar()
+    with Image.open(test_settings.resolved_storage_root / compressed_path) as compressed_image:
+        assert max(compressed_image.size) <= 600
+
+    replacement = BytesIO()
+    Image.new("RGB", (640, 960), "#f6e7cf").save(replacement, format="PNG")
+    replaced = client.post(
+        "/api/works/bulk/cover",
+        data={"ids": ids, "action": "replace", "maxDimension": "1600", "quality": "82"},
+        files={"cover": ("replacement.png", replacement.getvalue(), "image/png")},
+    )
+    assert replaced.status_code == 200
+    assert replaced.json()["data"]["updated"] == 2
+
+    regenerated = client.post("/api/works/bulk/cover", data={"ids": ids, "action": "regenerate"})
+    assert regenerated.status_code == 200
+    regenerated_path = db_session.execute(text("SELECT coverPath FROM LibraryWork WHERE id = 'bulk-manage-1'")).scalar()
+    assert regenerated_path == "covers/source/bulk-manage-1.png"
 
 
 def test_delete_work_removes_storage_managed_files_only(client, db_session, test_settings):

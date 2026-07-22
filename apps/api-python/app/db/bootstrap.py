@@ -17,7 +17,7 @@ from app.services.book_identity import UNKNOWN_AUTHOR, identity_merge_key, norma
 
 LOGGER = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 9
+CURRENT_SCHEMA_VERSION = 10
 DEFAULT_SYSTEM_NAME = "二毛图书"
 LEGACY_DEFAULT_SYSTEM_NAMES = {"书库星舰", "书栖"}
 IDENTITY_MIGRATION_SETTING = "migration.libraryIdentityVersion"
@@ -438,6 +438,56 @@ def _migrate_schema_v9(connection: sqlite3.Connection) -> None:
     connection.execute("CREATE INDEX IF NOT EXISTS `LibraryOperation_status_expiresAt_idx` ON `LibraryOperation`(`status`, `expiresAt`)")
 
 
+def _migrate_schema_v10(connection: sqlite3.Connection) -> None:
+    """Keep at most one unresolved organize record for each work."""
+    if not _table_exists(connection, "OrganizeJob"):
+        return
+    unresolved = "'LOOKUP_PENDING', 'PENDING', 'QUEUED', 'RUNNING', 'RETRY_WAIT', 'REVIEWING', 'FAILED'"
+    connection.execute(
+        f"""
+        CREATE TEMP TABLE `_OrganizeUnresolvedDuplicates` AS
+        SELECT `id`
+        FROM (
+            SELECT `id`, ROW_NUMBER() OVER (
+                PARTITION BY `workId`
+                ORDER BY datetime(`createdAt`) DESC, datetime(`updatedAt`) DESC, `id` DESC
+            ) AS `position`
+            FROM `OrganizeJob`
+            WHERE `status` IN ({unresolved})
+        ) ranked
+        WHERE `position` > 1
+        """
+    )
+    if _table_exists(connection, "MetadataLookupTask"):
+        connection.execute(
+            """
+            UPDATE `MetadataLookupTask`
+            SET `status` = 'CANCELLED', `nextAttemptAt` = NULL,
+                `finishedAt` = COALESCE(`finishedAt`, CURRENT_TIMESTAMP),
+                `updatedAt` = CURRENT_TIMESTAMP
+            WHERE `organizeJobId` IN (SELECT `id` FROM `_OrganizeUnresolvedDuplicates`)
+              AND `status` IN ('PENDING', 'RUNNING')
+            """
+        )
+    connection.execute(
+        """
+        UPDATE `OrganizeJob`
+        SET `status` = 'CANCELLED', `summary` = '已由较新的未识别记录取代',
+            `errorSummary` = NULL, `finishedAt` = COALESCE(`finishedAt`, CURRENT_TIMESTAMP),
+            `updatedAt` = CURRENT_TIMESTAMP
+        WHERE `id` IN (SELECT `id` FROM `_OrganizeUnresolvedDuplicates`)
+        """
+    )
+    connection.execute("DROP TABLE `_OrganizeUnresolvedDuplicates`")
+    connection.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS `OrganizeJob_unresolved_workId_key`
+        ON `OrganizeJob`(`workId`)
+        WHERE `status` IN ('LOOKUP_PENDING', 'PENDING', 'QUEUED', 'RUNNING', 'RETRY_WAIT', 'REVIEWING', 'FAILED')
+        """
+    )
+
+
 SchemaMigration = Callable[[sqlite3.Connection], None]
 SCHEMA_MIGRATIONS: dict[int, SchemaMigration] = {
     1: _migrate_schema_v1,
@@ -449,6 +499,7 @@ SCHEMA_MIGRATIONS: dict[int, SchemaMigration] = {
     7: _migrate_schema_v7,
     8: _migrate_schema_v8,
     9: _migrate_schema_v9,
+    10: _migrate_schema_v10,
 }
 
 REQUIRED_COLUMNS_BY_VERSION: dict[int, dict[str, set[str]]] = {
@@ -488,6 +539,7 @@ REQUIRED_COLUMNS_BY_VERSION: dict[int, dict[str, set[str]]] = {
         "LibraryEditionFacet": {"facetId", "editionId"},
         "LibraryOperation": {"action", "status", "payloadJson", "inverseJson", "expiresAt", "undoneAt"},
     },
+    10: {},
 }
 
 

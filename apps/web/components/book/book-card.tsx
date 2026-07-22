@@ -28,7 +28,7 @@ export function BookCard({
   priority = false,
   onDelete,
   onClick,
-  selectionMode = false,
+  selectable = false,
   selected = false,
   onSelect
 }: {
@@ -49,7 +49,7 @@ export function BookCard({
   priority?: boolean;
   onDelete?: () => void;
   onClick?: () => void;
-  selectionMode?: boolean;
+  selectable?: boolean;
   selected?: boolean;
   onSelect?: () => void;
 }) {
@@ -73,16 +73,20 @@ export function BookCard({
 
   return (
     <div
-      onClick={selectionMode ? onSelect : onClick}
+      onClick={onClick}
       onKeyDown={openBook}
-      role={selectionMode ? 'checkbox' : onClick ? 'link' : undefined}
-      aria-checked={selectionMode ? selected : undefined}
-      tabIndex={onClick || selectionMode ? 0 : undefined}
-      aria-label={selectionMode ? `${selected ? '取消选择' : '选择'}《${book.title}》` : onClick ? `查看《${book.title}》` : undefined}
+      role={onClick ? 'link' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      aria-label={onClick ? `查看《${book.title}》` : undefined}
       className={`group relative min-w-0 cursor-pointer rounded-xl outline-none transition focus-visible:ring-2 focus-visible:ring-[#F6B7A5] ${selected ? 'ring-2 ring-[#EF4D2F] ring-offset-4 ring-offset-[#F7F4F0]' : ''}`}
     >
-      {selectionMode ? <span className={`absolute left-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full border shadow-sm ${selected ? 'border-[#EF4D2F] bg-[#EF4D2F] text-white' : 'border-black/[0.12] bg-white/95 text-transparent'}`}><Check size={15} /></span> : null}
-      {onDelete && !selectionMode ? (
+      {selectable ? (
+        <label className={`absolute left-2 top-2 z-10 flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border shadow-sm ${selected ? 'border-[#EF4D2F] bg-[#EF4D2F] text-white' : 'border-black/[0.12] bg-white/95 text-transparent'}`} onClick={(event) => event.stopPropagation()}>
+          <input type="checkbox" checked={selected} onChange={onSelect} className="sr-only" aria-label={`${selected ? '取消选择' : '选择'}《${book.title}》`} />
+          <Check size={15} aria-hidden="true" />
+        </label>
+      ) : null}
+      {onDelete ? (
         <button
           type="button"
           onClick={deleteBook}

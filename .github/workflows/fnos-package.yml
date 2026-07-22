@@ -1,4 +1,4 @@
-name: Validate fnOS application package
+name: Build and release fnOS application package
 
 on:
   pull_request:
@@ -21,9 +21,23 @@ on:
       - 'docker-compose.prod.yml'
       - 'package.json'
       - '.github/workflows/fnos-package.yml'
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Publish the package to a GitHub Release'
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
+
+env:
+  FNPACK_VERSION: '1.2.3'
+  FNPACK_SHA256: '54b97fa7b70968c4d05c79840f5daeff508957d0bb2062fdb0376d00d9615c93'
 
 jobs:
   validate:
@@ -38,3 +52,110 @@ jobs:
         env:
           FNOS_VALIDATE_ONLY: 'true'
         run: scripts/build-fnos-package.sh
+
+  package:
+    name: Build fnOS FPK
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Read and verify package version
+        id: version
+        shell: bash
+        run: |
+          app_version="$(node -p "require('./package.json').version")"
+          if [[ "${GITHUB_REF_TYPE}" == 'tag' && "${GITHUB_REF_NAME}" != "v${app_version}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package version v${app_version}" >&2
+            exit 1
+          fi
+          echo "app_version=${app_version}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=v${app_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: apps/api-python/.python-version
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Test Python backend with production runtime version
+        working-directory: apps/api-python
+        run: uv run --extra dev --locked pytest -q
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Prepare Docker image tags
+        id: docker_meta
+        uses: docker/metadata-action@v5
+        with:
+          images: gamersgu/shuku-starship-web
+          flavor: latest=false
+          tags: |
+            type=raw,value=${{ steps.version.outputs.app_version }}
+            type=raw,value=prod,enable=${{ github.ref_type == 'tag' || inputs.publish_release == true }}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' || inputs.publish_release == true }}
+
+      - name: Build and push release Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile.prod
+          target: runner
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.docker_meta.outputs.tags }}
+          labels: ${{ steps.docker_meta.outputs.labels }}
+          cache-from: type=gha,scope=fnos-versioned-image
+          cache-to: type=gha,mode=max,scope=fnos-versioned-image
+
+      - name: Install official fnpack
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 \
+            --output "$RUNNER_TEMP/fnpack" \
+            "https://static2.fnnas.com/fnpack/fnpack-${FNPACK_VERSION}-linux-amd64"
+          echo "${FNPACK_SHA256}  $RUNNER_TEMP/fnpack" | sha256sum --check --strict
+          chmod +x "$RUNNER_TEMP/fnpack"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/fnpack" --help >/dev/null
+
+      - name: Build fnOS package
+        env:
+          APP_VERSION: ${{ steps.version.outputs.app_version }}
+        run: scripts/build-fnos-package.sh
+
+      - name: Upload fnOS package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shuku-starship-fnos-${{ steps.version.outputs.app_version }}-x86
+          path: dist/fnos/*.fpk
+          if-no-files-found: error
+
+      - name: Publish fnOS package to GitHub Release
+        if: github.ref_type == 'tag' || inputs.publish_release == true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/fnos/*.fpk --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/fnos/*.fpk \
+              --target "$GITHUB_SHA" \
+              --title "$RELEASE_TAG" \
+              --generate-notes
+          fi

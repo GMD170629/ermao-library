@@ -812,6 +812,9 @@ CREATE INDEX IF NOT EXISTS `ImportTask_status_leaseExpiresAt_idx` ON `ImportTask
 CREATE INDEX IF NOT EXISTS `BookConversionTask_status_createdAt_idx` ON `BookConversionTask`(`status`, `createdAt`);
 CREATE INDEX IF NOT EXISTS `BookConversionTask_sourceHash_idx` ON `BookConversionTask`(`sourceHash`);
 CREATE INDEX IF NOT EXISTS `OrganizeJob_workId_status_idx` ON `OrganizeJob`(`workId`, `status`);
+CREATE UNIQUE INDEX IF NOT EXISTS `OrganizeJob_unresolved_workId_key`
+ON `OrganizeJob`(`workId`)
+WHERE `status` IN ('LOOKUP_PENDING', 'PENDING', 'QUEUED', 'RUNNING', 'RETRY_WAIT', 'REVIEWING', 'FAILED');
 CREATE INDEX IF NOT EXISTS `OrganizeJob_runId_status_idx` ON `OrganizeJob`(`runId`, `status`);
 CREATE INDEX IF NOT EXISTS `OrganizeJob_editionId_idx` ON `OrganizeJob`(`editionId`);
 CREATE INDEX IF NOT EXISTS `OrganizeJob_importTaskId_idx` ON `OrganizeJob`(`importTaskId`);
@@ -873,4 +876,4 @@ CREATE INDEX IF NOT EXISTS `LibraryConsumptionState_workId_idx` ON `LibraryConsu
 CREATE UNIQUE INDEX IF NOT EXISTS `LibraryConsumptionState_user_work_media_key` ON `LibraryConsumptionState`(`userId`, `workId`, `mediaKind`);
 CREATE UNIQUE INDEX IF NOT EXISTS `WorkDetailPreference_user_work_key` ON `WorkDetailPreference`(`userId`, `workId`);
 
-PRAGMA user_version = 9;
+PRAGMA user_version = 10;
