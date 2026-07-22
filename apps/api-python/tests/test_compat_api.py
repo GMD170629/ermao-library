@@ -755,15 +755,15 @@ def test_series_endpoint_hides_single_book_series_by_default(client, db_session)
     assert payload["ok"] is True
     assert payload["data"]["total"] == 1
     assert payload["data"]["series"] == [
-        {"name": "星舰纪元", "bookCount": 2, "latestUpdatedAt": "2026-06-11T04:00:00Z"},
+        {"name": "星舰纪元", "bookCount": 2, "latestUpdatedAt": "2026-06-11T12:00:00Z"},
     ]
 
     include_single = client.get("/api/series?visibility=active&limit=10&minBooks=1")
     assert include_single.status_code == 200
     assert include_single.json()["data"]["total"] == 2
     assert include_single.json()["data"]["series"] == [
-            {"name": "星舰纪元", "bookCount": 2, "latestUpdatedAt": "2026-06-11T04:00:00Z"},
-            {"name": "午夜档案", "bookCount": 1, "latestUpdatedAt": "2026-06-09T16:00:00Z"},
+            {"name": "星舰纪元", "bookCount": 2, "latestUpdatedAt": "2026-06-11T12:00:00Z"},
+            {"name": "午夜档案", "bookCount": 1, "latestUpdatedAt": "2026-06-10T00:00:00Z"},
     ]
 
 
@@ -1136,7 +1136,7 @@ def test_works_recent_read_sort_uses_latest_user_progress_across_pages(client, d
     books = payload["data"]["books"]
     assert [book["id"] for book in books] == ["work-new", "work-old", "work-unread"]
     assert books[0]["lastRead"] == "2026-06-17"
-    assert books[0]["lastReadAt"] == "2026-06-17T01:00:00Z"
+    assert books[0]["lastReadAt"] == "2026-06-17T09:00:00Z"
     assert books[2]["lastRead"] == "尚未阅读"
     assert books[2]["lastReadAt"] is None
 

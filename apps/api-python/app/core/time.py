@@ -40,7 +40,7 @@ def to_timestamp_ms(value: Any, *, naive_timezone=None) -> int | None:
         except ValueError:
             return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=naive_timezone or datetime.now().astimezone().tzinfo)
+        parsed = parsed.replace(tzinfo=naive_timezone or timezone.utc)
     return int(parsed.timestamp() * 1000)
 
 
