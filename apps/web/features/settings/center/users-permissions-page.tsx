@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Button } from '../../../components/ui/button';
 import { cn } from '../../../components/ui/cn';
 import { useToast } from '../../../components/ui/feedback';
+import { Select } from '../../../components/ui/select';
 import { useI18n } from '../../../i18n/provider';
 import { SettingsCenterShell } from './settings-center-shell';
 
@@ -335,28 +336,49 @@ export function UsersPermissionsPage() {
                 <span className="mt-1.5 block text-xs font-normal text-[#89827B]">{t('至少 10 个字符，由管理员安全地告知用户。')}</span>
               </label>
             ) : null}
-            <label className="text-sm font-medium text-[#3E3935]">
+            <div className="text-sm font-medium text-[#3E3935]">
               {t('界面语言')}
-              <select value={form.locale} onChange={(event) => setForm({ ...form, locale: event.target.value as UserForm['locale'] })} className="mt-2 h-11 w-full rounded-xl border border-[#DCD7D1] bg-white px-3 outline-none focus:border-[#E9775C] focus:ring-2 focus:ring-[#FAD9D0]">
-                <option value="zh-CN">简体中文</option>
-                <option value="en-US">English</option>
-              </select>
-            </label>
-            <label className="text-sm font-medium text-[#3E3935]">
+              <Select
+                value={form.locale}
+                options={[
+                  { value: 'zh-CN', label: '简体中文' },
+                  { value: 'en-US', label: 'English', translate: false }
+                ]}
+                ariaLabel="界面语言"
+                onChange={(locale) => setForm({ ...form, locale })}
+                className="mt-2 w-full"
+                triggerClassName="!border-[#DCD7D1] focus:!border-[#E9775C] focus:!ring-2 focus:!ring-[#FAD9D0]"
+              />
+            </div>
+            <div className="text-sm font-medium text-[#3E3935]">
               {t('角色')}
-              <select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value as UserRole })} className="mt-2 h-11 w-full rounded-xl border border-[#DCD7D1] bg-white px-3 outline-none focus:border-[#E9775C] focus:ring-2 focus:ring-[#FAD9D0]">
-                <option value="member">{t('普通用户')}</option>
-                <option value="admin">{t('管理员')}</option>
-              </select>
-            </label>
+              <Select
+                value={form.role}
+                options={[
+                  { value: 'member', label: '普通用户' },
+                  { value: 'admin', label: '管理员' }
+                ]}
+                ariaLabel="角色"
+                onChange={(role) => setForm({ ...form, role })}
+                className="mt-2 w-full"
+                triggerClassName="!border-[#DCD7D1] focus:!border-[#E9775C] focus:!ring-2 focus:!ring-[#FAD9D0]"
+              />
+            </div>
             {!creating ? (
-              <label className="text-sm font-medium text-[#3E3935]">
+              <div className="text-sm font-medium text-[#3E3935]">
                 {t('账户状态')}
-                <select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as UserStatus })} className="mt-2 h-11 w-full rounded-xl border border-[#DCD7D1] bg-white px-3 outline-none focus:border-[#E9775C] focus:ring-2 focus:ring-[#FAD9D0]">
-                  <option value="active">{t('有效')}</option>
-                  <option value="disabled">{t('已停用')}</option>
-                </select>
-              </label>
+                <Select
+                  value={form.status}
+                  options={[
+                    { value: 'active', label: '有效' },
+                    { value: 'disabled', label: '已停用' }
+                  ]}
+                  ariaLabel="账户状态"
+                  onChange={(status) => setForm({ ...form, status })}
+                  className="mt-2 w-full"
+                  triggerClassName="!border-[#DCD7D1] focus:!border-[#E9775C] focus:!ring-2 focus:!ring-[#FAD9D0]"
+                />
+              </div>
             ) : null}
           </div>
 

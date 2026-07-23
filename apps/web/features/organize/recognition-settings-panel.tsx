@@ -4,6 +4,7 @@ import { Clock3, Save, Sparkles } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { useToast } from '../../components/ui/feedback';
+import { Select } from '../../components/ui/select';
 import { useI18n } from '../../i18n/provider';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
@@ -118,6 +119,17 @@ export function RecognitionSettingsPanel({ compact = false, onSaved }: { compact
   }
 
   const cardClass = compact ? '' : 'max-w-4xl rounded-[26px] border border-[#E2DDD7] bg-white p-5 shadow-sm shadow-stone-900/[0.03] sm:p-6';
+  const intervalOptions = [15, 30, 60, 180, 360, 720, 1440].map((value) => ({
+    value: String(value),
+    label: value < 60
+      ? i18nAttribute('{value0} 分钟', { value0: value })
+      : value === 60
+        ? i18nAttribute('每小时')
+        : value === 1440
+          ? i18nAttribute('每天')
+          : i18nAttribute('每 {value0} 小时', { value0: value / 60 }),
+    translate: false
+  }));
   return (
     <div className={cardClass}>
       {!compact ? (
@@ -129,7 +141,7 @@ export function RecognitionSettingsPanel({ compact = false, onSaved }: { compact
       {error ? <div className="mt-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
       <div className={compact ? '' : 'mt-5'}>
         {settingRow('定时执行识别', '开启后按固定间隔扫描书库；导入流程本身不会直接创建整理任务。', <Toggle checked={policy.enabled && policy.scheduleMode === 'INTERVAL'} disabled={loading} label={i18nAttribute("定时执行识别")} onChange={(checked) => setPolicy({ ...policy, enabled: checked, scheduleMode: checked ? 'INTERVAL' : 'MANUAL' })} />)}
-        {policy.enabled && policy.scheduleMode === 'INTERVAL' ? settingRow('执行间隔', '建议至少 30 分钟，避免对外部数据源产生过密请求。', <select aria-label={i18nAttribute("识别任务执行间隔")} value={policy.intervalMinutes} onChange={(event) => setPolicy({ ...policy, intervalMinutes: Number(event.target.value) })} className="h-11 min-w-36 rounded-xl border border-[#DCD7D1] bg-white px-3 text-sm text-[#393632] outline-none focus:border-[#EF8B73]">{[15, 30, 60, 180, 360, 720, 1440].map((value) => <option value={value} key={value}>{value < 60 ? i18nAttribute("{value0} 分钟", { value0: value }) : value === 60 ? i18nAttribute("每小时") : value === 1440 ? i18nAttribute("每天") : i18nAttribute("每 {value0} 小时", { value0: value / 60 })}</option>)}</select>) : null}
+        {policy.enabled && policy.scheduleMode === 'INTERVAL' ? settingRow('执行间隔', '建议至少 30 分钟，避免对外部数据源产生过密请求。', <Select value={String(policy.intervalMinutes)} options={intervalOptions} ariaLabel="识别任务执行间隔" onChange={(value) => setPolicy({ ...policy, intervalMinutes: Number(value) })} className="min-w-36" triggerClassName="!border-[#DCD7D1] !text-[#393632]" />) : null}
         {settingRow('新增后自动执行', '仅处理开启此设置之后新增的读物，历史书库不会被一次性加入。', <Toggle checked={policy.autoRunOnNew} disabled={loading} label={i18nAttribute("新增后自动执行")} onChange={(autoRunOnNew) => setPolicy({ ...policy, autoRunOnNew })} />)}
         {settingRow('覆盖已有标题和作者', '开启后，识别结果会更新已有标题和作者；其他元数据仍只补全缺失字段。', <Toggle checked={policy.overwriteTitleAuthor} disabled={loading} label={i18nAttribute("覆盖已有标题和作者")} onChange={(overwriteTitleAuthor) => setPolicy({ ...policy, overwriteTitleAuthor })} />)}
       </div>
