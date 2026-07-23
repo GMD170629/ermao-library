@@ -10,6 +10,7 @@ from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -25,6 +26,7 @@ from app.services.email_settings import (
     smtp_connection_settings,
 )
 from app.services.system_events import record_system_event
+from app.services.queue_runtime import QueueHeartbeatPump
 
 
 MAX_SEND_ATTEMPTS = 3
@@ -332,6 +334,13 @@ class KindleSendQueueWorker:
         self._stop_event = threading.Event()
         self._process_lock = threading.Lock()
         self._thread = threading.Thread(target=self._run, name="shuku-kindle-send-queue", daemon=True)
+        self._instance_id = f"kindle-{uuid4().hex}"
+        self._heartbeat = QueueHeartbeatPump(
+            db_factory,
+            queue_name="kindle",
+            instance_id=self._instance_id,
+            poll_interval_seconds=settings.kindle_send_queue_interval_seconds,
+        )
 
     def start(self) -> None:
         with self.db_factory() as db:
@@ -355,10 +364,21 @@ class KindleSendQueueWorker:
             self._process_lock.release()
 
     def _run(self) -> None:
-        while not self._stop_event.is_set():
-            if self.process_once():
-                continue
-            self._stop_event.wait(self.settings.kindle_send_queue_interval_seconds)
+        self._heartbeat.start()
+        try:
+            while not self._stop_event.is_set():
+                error = None
+                try:
+                    processed = self.process_once()
+                except Exception as exc:
+                    processed = False
+                    error = exc
+                self._heartbeat.pulse(processed=processed, error=error)
+                if processed:
+                    continue
+                self._stop_event.wait(self.settings.kindle_send_queue_interval_seconds)
+        finally:
+            self._heartbeat.stop()
 
 
 def start_kindle_send_queue_worker(db_factory: Callable[[], Session], settings: Settings) -> KindleSendQueueWorker | None:

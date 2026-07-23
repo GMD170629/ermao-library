@@ -1,6 +1,6 @@
 'use client';
 
-import { ChevronDown, ChevronLeft, ChevronRight, Download, RefreshCw, Search, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Download, HardDrive, RefreshCw, Save, Search, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { Badge, type BadgeTone } from '../../components/ui/badge';
@@ -29,7 +29,7 @@ type EventsData = {
   events: SystemEvent[];
   total: number;
   totalPages?: number;
-  storage: { sizeBytes: number; maxBytes: number };
+  storage: { sizeBytes: number; maxBytes: number; lastPrunedAt?: string | null };
   facets: { sources: Array<{ source: string; count: number }>; levels: Array<{ level: string; count: number }> };
 };
 
@@ -102,6 +102,9 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
+  const [storage, setStorage] = useState<{ sizeBytes: number; maxBytes: number; lastPrunedAt?: string | null }>({ sizeBytes: 0, maxBytes: 5 * 1024 * 1024 });
+  const [logMaxMb, setLogMaxMb] = useState(5);
+  const [savingLimit, setSavingLimit] = useState(false);
   const toast = useToast();
 
   const buildParams = useCallback((targetPage: number, pageSize = 40) => {
@@ -128,6 +131,10 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
       setEvents(payload.data?.events ?? []);
       setTotal(payload.data?.total ?? 0);
       setTotalPages(Math.max(1, Number(payload.data?.totalPages ?? 1)));
+      if (payload.data?.storage) {
+        setStorage(payload.data.storage);
+        setLogMaxMb(Math.round(payload.data.storage.maxBytes / 1024 / 1024));
+      }
       setError('');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '读取日志失败');
@@ -147,6 +154,32 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
     toast.success(`已清理 ${payload.data?.deleted ?? 0} 条日志`);
     if (page === 1) await load();
     else setPage(1);
+  }
+
+  async function saveLogLimit() {
+    if (!Number.isInteger(logMaxMb) || logMaxMb < 1 || logMaxMb > 100) {
+      toast.error('日志容量设置无效', '容量上限必须在 1 MB 到 100 MB 之间');
+      return;
+    }
+    const nextBytes = logMaxMb * 1024 * 1024;
+    if (nextBytes < storage.maxBytes && !window.confirm(i18nAttribute('降低容量上限会立即删除最旧日志，是否继续？'))) return;
+    setSavingLimit(true);
+    try {
+      const response = await fetch('/api/system/log-settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ maxBytes: nextBytes })
+      });
+      const payload = await response.json() as { ok?: boolean; data?: { storage?: typeof storage }; error?: { message?: string } };
+      if (!payload.ok || !payload.data?.storage) throw new Error(payload.error?.message ?? '保存日志容量失败');
+      setStorage(payload.data.storage);
+      toast.success('日志容量上限已保存');
+      await load();
+    } catch (reason) {
+      toast.error('保存日志容量失败', reason instanceof Error ? reason.message : '请稍后重试');
+    } finally {
+      setSavingLimit(false);
+    }
   }
 
   function applySearch() {
@@ -208,6 +241,46 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
     <div className={embedded ? 'space-y-4' : 'space-y-6'}>
       {!embedded ? <PageTitle title={i18nAttribute("系统日志")} desc={i18nAttribute("按级别、来源、日期和关键字查看系统事件。")} action={<Button variant="secondary" icon={RefreshCw} loading={loading} loadingText={i18nAttribute("刷新中")} onClick={() => void load()}><I18nText>刷新</I18nText></Button>} /> : null}
       {!embedded ? <ManagementNav /> : null}
+
+      <section className="rounded-[22px] border border-[#DEDAD4] bg-white p-4 sm:p-5" aria-labelledby="log-storage-title">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <HardDrive size={20} className="mt-0.5 text-[#ED4D2D]" />
+            <div>
+              <h2 id="log-storage-title" className="font-semibold text-[#2A2825]"><I18nText>日志容量管理</I18nText></h2>
+              <p className="mt-1 text-sm leading-6 text-[#77716A]">
+                {i18nAttribute('当前使用 {used} MB / {max} MB', {
+                  used: (storage.sizeBytes / 1024 / 1024).toLocaleString(locale, { maximumFractionDigits: 2 }),
+                  max: (storage.maxBytes / 1024 / 1024).toLocaleString(locale, { maximumFractionDigits: 0 })
+                })}
+              </p>
+              <p className="text-xs text-[#918A83]">
+                {storage.lastPrunedAt
+                  ? i18nAttribute('上次自动清理：{time}', { time: new Date(storage.lastPrunedAt).toLocaleString(locale) })
+                  : i18nAttribute('尚未执行自动清理')}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-end gap-2">
+            <label className="text-xs text-[#716B64]">
+              <I18nText>容量上限（MB）</I18nText>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                step={1}
+                value={logMaxMb}
+                onChange={(event) => setLogMaxMb(Number(event.target.value))}
+                className="mt-1 h-10 w-28 rounded-xl border border-[#DEDAD4] px-3 text-sm text-[#2A2825] outline-none focus:border-[#F0A28F] focus:ring-2 focus:ring-[#FAD9D0]"
+              />
+            </label>
+            <Button variant="secondary" icon={Save} loading={savingLimit} loadingText={i18nAttribute("保存中")} onClick={() => void saveLogLimit()}><I18nText>保存</I18nText></Button>
+          </div>
+        </div>
+        <div className="mt-4 h-2 overflow-hidden rounded-full bg-[#EEEAE6]">
+          <div className="h-full rounded-full bg-[#ED6A4F]" style={{ width: `${Math.min(100, storage.maxBytes ? storage.sizeBytes / storage.maxBytes * 100 : 0)}%` }} />
+        </div>
+      </section>
 
       <section className="rounded-[22px] border border-[#DEDAD4] bg-white p-4" aria-label={i18nAttribute("日志筛选")}>
         <div className="flex flex-wrap gap-2">

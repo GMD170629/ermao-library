@@ -74,6 +74,49 @@ class SystemEvent(Base):
     created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp)
 
 
+class SystemHealthRun(Base):
+    __tablename__ = "SystemHealthRun"
+
+    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
+    actor_user_id: Mapped[str] = mapped_column("actorUserId", String(191), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="running")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    snapshot: Mapped[str] = mapped_column(Text, nullable=False)
+    started_at: Mapped[datetime] = mapped_column("startedAt", TimestampMilliseconds(), nullable=False, default=db_timestamp)
+    finished_at: Mapped[datetime | None] = mapped_column("finishedAt", TimestampMilliseconds(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp)
+    updated_at: Mapped[datetime] = mapped_column("updatedAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, onupdate=db_timestamp)
+
+
+class QueueRuntimeState(Base):
+    __tablename__ = "QueueRuntimeState"
+
+    queue_name: Mapped[str] = mapped_column("queueName", String(64), primary_key=True)
+    instance_id: Mapped[str] = mapped_column("instanceId", String(191), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    poll_interval_seconds: Mapped[float] = mapped_column("pollIntervalSeconds", Float, nullable=False)
+    started_at: Mapped[datetime] = mapped_column("startedAt", TimestampMilliseconds(), nullable=False)
+    heartbeat_at: Mapped[datetime] = mapped_column("heartbeatAt", TimestampMilliseconds(), nullable=False)
+    last_processed_at: Mapped[datetime | None] = mapped_column("lastProcessedAt", TimestampMilliseconds(), nullable=True)
+    last_error: Mapped[str | None] = mapped_column("lastError", Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column("updatedAt", TimestampMilliseconds(), nullable=False)
+
+
+class QueueControlOperation(Base):
+    __tablename__ = "QueueControlOperation"
+
+    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
+    queue_name: Mapped[str] = mapped_column("queueName", String(64), nullable=False, index=True)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    actor_user_id: Mapped[str] = mapped_column("actorUserId", String(191), nullable=False)
+    message_code: Mapped[str | None] = mapped_column("messageCode", String(191), nullable=True)
+    requested_at: Mapped[datetime] = mapped_column("requestedAt", TimestampMilliseconds(), nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column("startedAt", TimestampMilliseconds(), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column("finishedAt", TimestampMilliseconds(), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column("updatedAt", TimestampMilliseconds(), nullable=False)
+
+
 class ReaderBookPreference(Base):
     """Versioned server default for one user's view of one library work.
 

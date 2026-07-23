@@ -689,7 +689,8 @@ def scan_directory_with_logging(
 
     known_paths = load_known_import_paths(db)
     summary = scan_directory_for_imports(root_path, folder, StagedImportQueue(), known_paths=known_paths)
-    for path, _queued_folder in candidates:
+    for index, (path, _queued_folder) in enumerate(candidates, start=1):
+        flush_batch = index % 100 == 0
         record_system_event(
             db,
             source="import",
@@ -698,6 +699,8 @@ def scan_directory_with_logging(
             target_id=folder.id,
             message=f"扫描到可导入文件：{path.name}",
             metadata={**base_metadata, "sourcePath": str(path), "format": path.suffix.lower().removeprefix(".")},
+            commit=flush_batch,
+            prune=flush_batch,
         )
     error_count = len(summary.errors)
     action = "scan.completed_with_errors" if error_count else "scan.completed"

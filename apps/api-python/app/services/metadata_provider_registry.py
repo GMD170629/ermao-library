@@ -158,7 +158,7 @@ class BuiltinMetadataProvider:
                 f"{base_url}/models",
                 headers={"Accept": "application/json", "Authorization": f"Bearer {api_key}"},
             )
-        with urlopen(request, timeout=12) as response:
+        with urlopen(request, timeout=10) as response:
             status = int(getattr(response, "status", 200) or 200)
         return {"ok": 200 <= status < 400, "message": "连接正常" if status < 400 else f"服务返回 HTTP {status}"}
 

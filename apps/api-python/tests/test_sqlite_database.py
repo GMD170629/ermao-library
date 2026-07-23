@@ -56,6 +56,9 @@ EXPECTED_TABLES = {
     "Source",
     "SourceSearchRecord",
     "SystemEvent",
+    "SystemHealthRun",
+    "QueueRuntimeState",
+    "QueueControlOperation",
     "SystemSetting",
     "User",
     "UserMonitorFolderAccess",
@@ -77,7 +80,7 @@ def test_empty_storage_bootstraps_complete_sqlite_database(tmp_path) -> None:
             assert connection.exec_driver_sql("PRAGMA journal_mode").scalar() == "wal"
             assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
             assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar() == 10_000
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 13
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == bootstrap_module.CURRENT_SCHEMA_VERSION
             assert connection.execute(text("SELECT COUNT(*) FROM `User`")).scalar() == 0
             assert "avatarPath" in {column[1] for column in connection.exec_driver_sql("PRAGMA table_info(`User`)").fetchall()}
             assert "shelfId" in {column[1] for column in connection.exec_driver_sql("PRAGMA table_info(`MonitorFolder`)").fetchall()}
@@ -151,7 +154,7 @@ def test_bootstrap_migrates_reader_preference_default_to_v3_without_losing_rows(
                 column[1]: column
                 for column in connection.exec_driver_sql("PRAGMA table_info(`ReaderBookPreference`)").fetchall()
             }
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 13
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == bootstrap_module.CURRENT_SCHEMA_VERSION
             assert columns["schemaVersion"][4] == "3"
             migrated = connection.execute(text(
                 "SELECT `id`, `userId`, `workId`, `schemaVersion`, `preferences`, `createdAt`, `updatedAt` "
@@ -197,7 +200,7 @@ def test_bootstrap_migrates_reader_preference_default_to_v3_without_losing_rows(
         bootstrap_database(engine, settings)
 
         with engine.connect() as connection:
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 13
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == bootstrap_module.CURRENT_SCHEMA_VERSION
             assert connection.execute(text(
                 "SELECT COUNT(*) FROM `ReaderBookPreference` WHERE `id` = 'preference-default'"
             )).scalar() == 1
@@ -293,10 +296,10 @@ def test_bootstrap_migrates_v1_import_tasks_before_creating_new_indexes(tmp_path
             }
             indexes = {row[1] for row in connection.exec_driver_sql("PRAGMA index_list(`ImportTask`)").fetchall()}
             assert "ImportTask_status_leaseExpiresAt_idx" in indexes
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 13
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == bootstrap_module.CURRENT_SCHEMA_VERSION
             assert connection.exec_driver_sql("PRAGMA foreign_key_check").first() is None
 
-            backup_path = settings.database_path.parent / "migrations" / "shuku-before-v13.sqlite3"
+            backup_path = settings.database_path.parent / "migrations" / f"shuku-before-v{bootstrap_module.CURRENT_SCHEMA_VERSION}.sqlite3"
         assert backup_path.is_file()
         with sqlite3.connect(backup_path) as backup:
             assert backup.execute("PRAGMA user_version").fetchone()[0] == 1
@@ -390,7 +393,7 @@ def test_v5_migration_allows_duplicate_work_identity_keys(tmp_path) -> None:
                 row[1]: row
                 for row in connection.exec_driver_sql("PRAGMA index_list(`LibraryWork`)").fetchall()
             }
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 13
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == bootstrap_module.CURRENT_SCHEMA_VERSION
             assert "LibraryWork_mergeKey_key" not in indexes
             assert indexes["LibraryWork_mergeKey_idx"][2] == 0
             assert connection.execute(
@@ -607,7 +610,7 @@ def test_bootstrap_repairs_current_version_with_incomplete_import_task_schema(tm
         with engine.connect() as connection:
             columns = {column[1] for column in connection.exec_driver_sql("PRAGMA table_info(`ImportTask`)").fetchall()}
             assert {"errorCode", "retryable", "attempts", "leaseOwner", "leaseExpiresAt"}.issubset(columns)
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 13
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == bootstrap_module.CURRENT_SCHEMA_VERSION
             indexes = {row[1] for row in connection.exec_driver_sql("PRAGMA index_list(`ImportTask`)").fetchall()}
             assert "ImportTask_status_leaseExpiresAt_idx" in indexes
     finally:
@@ -1171,5 +1174,30 @@ def test_bootstrap_runs_library_facet_backfill_only_once(tmp_path, monkeypatch) 
 
         monkeypatch.setattr("app.services.library_management.backfill_library_facets", unexpected_backfill)
         bootstrap_database(engine, settings)
+    finally:
+        engine.dispose()
+
+
+def test_apply_schema_retries_transient_database_lock(tmp_path, monkeypatch) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_sqlite_engine(settings.database_path)
+    original_apply = bootstrap_module._apply_schema_once
+    attempts = 0
+
+    def apply_with_transient_lock(target_engine, target_settings):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return original_apply(target_engine, target_settings)
+
+    monkeypatch.setattr(bootstrap_module, "_apply_schema_once", apply_with_transient_lock)
+    monkeypatch.setattr(bootstrap_module.time, "sleep", lambda _seconds: None)
+    try:
+        bootstrap_module.apply_schema(engine, settings)
+        assert attempts == 2
+        with engine.connect() as connection:
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar_one() == bootstrap_module.CURRENT_SCHEMA_VERSION
     finally:
         engine.dispose()

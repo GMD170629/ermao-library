@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from uuid import uuid4
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ from app.core.config import Settings
 from app.services.download_executor import execute_download_task, has_table
 from app.worker.importer import is_supported_import_file
 from app.worker.persistent_import_queue import enqueue_import_task
+from app.services.queue_runtime import QueueHeartbeatPump
 
 
 class DownloadQueueWorker:
@@ -22,6 +24,13 @@ class DownloadQueueWorker:
         self._stop_event = threading.Event()
         self._process_lock = threading.Lock()
         self._thread = threading.Thread(target=self._run, name="shuku-download-queue", daemon=True)
+        self._instance_id = f"download-{uuid4().hex}"
+        self._heartbeat = QueueHeartbeatPump(
+            db_factory,
+            queue_name="download",
+            instance_id=self._instance_id,
+            poll_interval_seconds=settings.download_queue_interval_seconds,
+        )
 
     def start(self) -> None:
         self._thread.start()
@@ -43,11 +52,21 @@ class DownloadQueueWorker:
             self._process_lock.release()
 
     def _run(self) -> None:
-        while not self._stop_event.is_set():
-            processed = self.process_once()
-            if processed:
-                continue
-            self._stop_event.wait(self.settings.download_queue_interval_seconds)
+        self._heartbeat.start()
+        try:
+            while not self._stop_event.is_set():
+                error = None
+                try:
+                    processed = self.process_once()
+                except Exception as exc:
+                    processed = False
+                    error = exc
+                self._heartbeat.pulse(processed=processed, error=error)
+                if processed:
+                    continue
+                self._stop_event.wait(self.settings.download_queue_interval_seconds)
+        finally:
+            self._heartbeat.stop()
 
 
 def next_queued_task(db: Session) -> dict[str, Any] | None:

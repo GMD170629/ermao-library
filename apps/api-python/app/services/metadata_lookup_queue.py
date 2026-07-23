@@ -9,6 +9,7 @@ from time import time_ns
 from typing import Any, Callable
 from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
+from uuid import uuid4
 
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
@@ -19,6 +20,7 @@ from app.services.book_identity import UNKNOWN_AUTHOR, identity_merge_key, norma
 from app.services.library_management import sync_work_facets
 from app.services.metadata_provider_registry import metadata_provider_registry, search_with_metadata_provider
 from app.services.organize_service import context_for_job, metadata_candidate_title_exact_match, metadata_search_candidates
+from app.services.queue_runtime import QueueHeartbeatPump
 
 
 LOGGER = logging.getLogger(__name__)
@@ -593,6 +595,13 @@ class MetadataLookupWorker:
         self._poll_seconds = poll_seconds
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="metadata-lookup-worker", daemon=True)
+        self._instance_id = f"metadata-{uuid4().hex}"
+        self._heartbeat = QueueHeartbeatPump(
+            db_factory,
+            queue_name="metadata",
+            instance_id=self._instance_id,
+            poll_interval_seconds=poll_seconds,
+        )
 
     def start(self) -> None:
         with self._db_factory() as db:
@@ -607,12 +616,19 @@ class MetadataLookupWorker:
             self._thread.join(timeout=max(2.0, self._poll_seconds + 1.0))
 
     def _run(self) -> None:
-        while not self._stop.is_set():
-            worked = False
-            try:
-                with self._db_factory() as db:
-                    worked = process_next_metadata_lookup_task(db, self._settings)
-            except Exception:
-                LOGGER.exception("metadata lookup worker iteration failed")
-            if not worked:
-                self._stop.wait(self._poll_seconds)
+        self._heartbeat.start()
+        try:
+            while not self._stop.is_set():
+                worked = False
+                error = None
+                try:
+                    with self._db_factory() as db:
+                        worked = process_next_metadata_lookup_task(db, self._settings)
+                except Exception as exc:
+                    error = exc
+                    LOGGER.exception("metadata lookup worker iteration failed")
+                self._heartbeat.pulse(processed=worked, error=error)
+                if not worked:
+                    self._stop.wait(self._poll_seconds)
+        finally:
+            self._heartbeat.stop()

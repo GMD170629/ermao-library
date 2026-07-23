@@ -5,11 +5,19 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
 cleanup() {
-  for pid in $(jobs -p); do
-    kill "$pid" 2>/dev/null || true
+  trap - INT TERM EXIT
+  for pid in $CHILD_PIDS; do
+    if kill -0 "$pid" 2>/dev/null; then
+      pkill -TERM -P "$pid" 2>/dev/null || true
+      kill -TERM "$pid" 2>/dev/null || true
+    fi
+  done
+  for pid in $CHILD_PIDS; do
+    wait "$pid" 2>/dev/null || true
   done
 }
 trap cleanup INT TERM EXIT
+CHILD_PIDS=""
 
 if [ -f .env ]; then
   set -a
@@ -65,11 +73,13 @@ fi
 
 (
   cd apps/api-python
+  exec env \
   MONITOR_ROOT="$MONITOR_ROOT" \
     STORAGE_ROOT="$STORAGE_ROOT" \
     SESSION_SECRET="$SESSION_SECRET" \
     uv run --extra dev uvicorn app.main:app --host 127.0.0.1 --port "$PYTHON_API_PORT"
 ) &
+CHILD_PIDS="$CHILD_PIDS $!"
 
 echo "Waiting for Python API..."
 i=0
@@ -84,12 +94,14 @@ done
 
 (
   cd apps/api-python
+  exec env \
   MONITOR_ROOT="$MONITOR_ROOT" \
     STORAGE_ROOT="$STORAGE_ROOT" \
     SESSION_SECRET="$SESSION_SECRET" \
     MONITOR_REFRESH_INTERVAL_MS="${MONITOR_REFRESH_INTERVAL_MS:-10000}" \
     uv run --extra dev python -m app.worker.main
 ) &
+CHILD_PIDS="$CHILD_PIDS $!"
 
 pnpm --filter @shuku/web exec node scripts/prepare-pdfjs-worker.mjs
 
@@ -98,5 +110,6 @@ if [ "$WEB_MODE" = "start" ]; then
 else
   pnpm --filter @shuku/web exec next dev -H "$WEB_HOST" -p "$WEB_PORT" &
 fi
+CHILD_PIDS="$CHILD_PIDS $!"
 
 wait

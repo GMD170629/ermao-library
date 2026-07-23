@@ -43,3 +43,19 @@ def test_prune_system_events_discards_info_before_protected_error_events(db_sess
     assert result["deleted"] == 3
     assert db_session.execute(text("SELECT COUNT(*) FROM SystemEvent WHERE level = 'info'")).scalar() == 0
     assert db_session.execute(text("SELECT COUNT(*) FROM SystemEvent WHERE id = :id"), {"id": protected_id}).scalar() == 1
+
+
+def test_prune_system_events_enforces_hard_limit_after_protected_events(db_session):
+    for index in range(3):
+        record_system_event(
+            db_session,
+            source="library",
+            action="deleted",
+            level="error",
+            message=f"关键审计事件 {index}" + ("界" * 300),
+        )
+
+    result = prune_system_events(db_session, max_bytes=300, commit=True)
+
+    assert result["sizeBytes"] <= 300
+    assert result["deleted"] >= 1

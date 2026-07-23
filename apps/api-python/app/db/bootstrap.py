@@ -6,6 +6,7 @@ from importlib import resources
 import json
 import logging
 import sqlite3
+import time
 from typing import Callable
 
 from sqlalchemy import text
@@ -19,7 +20,8 @@ from app.services.book_identity import UNKNOWN_AUTHOR, identity_merge_key, norma
 
 LOGGER = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 13
+CURRENT_SCHEMA_VERSION = 14
+SCHEMA_LOCK_RETRY_SECONDS = 60.0
 DEFAULT_SYSTEM_NAME = "二毛图书"
 LEGACY_DEFAULT_SYSTEM_NAMES = {"书库星舰", "书栖"}
 IDENTITY_MIGRATION_SETTING = "migration.libraryIdentityVersion"
@@ -784,6 +786,35 @@ def _migrate_schema_v13(connection: sqlite3.Connection) -> None:
         )
 
 
+def _migrate_schema_v14(connection: sqlite3.Connection) -> None:
+    """Add realtime health runs and queue runtime/control state."""
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS `SystemHealthRun` (
+            `id` TEXT NOT NULL, `actorUserId` TEXT NOT NULL,
+            `status` TEXT NOT NULL DEFAULT 'running', `version` INTEGER NOT NULL DEFAULT 1,
+            `snapshot` TEXT NOT NULL, `startedAt` TEXT NOT NULL, `finishedAt` TEXT NULL,
+            `createdAt` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, `updatedAt` TEXT NOT NULL,
+            PRIMARY KEY (`id`)
+        );
+        CREATE TABLE IF NOT EXISTS `QueueRuntimeState` (
+            `queueName` TEXT NOT NULL, `instanceId` TEXT NOT NULL, `status` TEXT NOT NULL,
+            `pollIntervalSeconds` REAL NOT NULL, `startedAt` TEXT NOT NULL,
+            `heartbeatAt` TEXT NOT NULL, `lastProcessedAt` TEXT NULL, `lastError` TEXT NULL,
+            `updatedAt` TEXT NOT NULL, PRIMARY KEY (`queueName`)
+        );
+        CREATE TABLE IF NOT EXISTS `QueueControlOperation` (
+            `id` TEXT NOT NULL, `queueName` TEXT NOT NULL, `action` TEXT NOT NULL,
+            `status` TEXT NOT NULL, `actorUserId` TEXT NOT NULL, `messageCode` TEXT NULL,
+            `requestedAt` TEXT NOT NULL, `startedAt` TEXT NULL, `finishedAt` TEXT NULL,
+            `updatedAt` TEXT NOT NULL, PRIMARY KEY (`id`)
+        );
+        CREATE INDEX IF NOT EXISTS `QueueControlOperation_queue_status_idx`
+            ON `QueueControlOperation`(`queueName`, `status`, `requestedAt`);
+        """
+    )
+
+
 def _timestamp_trigger_expression(column: str) -> str:
     value = f"CAST(NEW.`{column}` AS TEXT)"
     numeric = f"TRIM({value}) NOT GLOB '*[^0-9]*' AND LENGTH(TRIM({value})) > 0"
@@ -838,6 +869,7 @@ SCHEMA_MIGRATIONS: dict[int, SchemaMigration] = {
     11: _migrate_schema_v11,
     12: _migrate_schema_v12,
     13: _migrate_schema_v13,
+    14: _migrate_schema_v14,
 }
 
 REQUIRED_COLUMNS_BY_VERSION: dict[int, dict[str, set[str]]] = {
@@ -980,7 +1012,7 @@ def _run_schema_migrations(connection: sqlite3.Connection, settings: Settings | 
     return original_version, CURRENT_SCHEMA_VERSION
 
 
-def apply_schema(engine: Engine, settings: Settings | None = None) -> None:
+def _apply_schema_once(engine: Engine, settings: Settings | None = None) -> None:
     ddl = resources.files("app.db").joinpath("schema.sql").read_text(encoding="utf-8")
     raw_connection = engine.raw_connection()
     try:
@@ -997,6 +1029,26 @@ def apply_schema(engine: Engine, settings: Settings | None = None) -> None:
         driver_connection.commit()
     finally:
         raw_connection.close()
+
+
+def apply_schema(engine: Engine, settings: Settings | None = None) -> None:
+    deadline = time.monotonic() + SCHEMA_LOCK_RETRY_SECONDS
+    retry_delay = 0.25
+    while True:
+        try:
+            _apply_schema_once(engine, settings)
+            return
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or time.monotonic() >= deadline:
+                raise
+            remaining = max(0.0, deadline - time.monotonic())
+            delay = min(retry_delay, remaining)
+            LOGGER.warning(
+                "database is busy during schema initialization; retrying in %.2fs",
+                delay,
+            )
+            time.sleep(delay)
+            retry_delay = min(retry_delay * 2, 2.0)
 
 
 def seed_baseline_data(db: Session) -> None:

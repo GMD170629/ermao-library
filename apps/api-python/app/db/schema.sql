@@ -536,6 +536,48 @@ CREATE TABLE IF NOT EXISTS `SystemEvent` (
     PRIMARY KEY (`id`)
 );
 
+CREATE TABLE IF NOT EXISTS `SystemHealthRun` (
+    `id` TEXT NOT NULL,
+    `actorUserId` TEXT NOT NULL,
+    `status` TEXT NOT NULL DEFAULT 'running',
+    `version` INTEGER NOT NULL DEFAULT 1,
+    `snapshot` TEXT NOT NULL,
+    `startedAt` TEXT NOT NULL,
+    `finishedAt` TEXT NULL,
+    `createdAt` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt` TEXT NOT NULL,
+    PRIMARY KEY (`id`)
+);
+
+CREATE TABLE IF NOT EXISTS `QueueRuntimeState` (
+    `queueName` TEXT NOT NULL,
+    `instanceId` TEXT NOT NULL,
+    `status` TEXT NOT NULL,
+    `pollIntervalSeconds` REAL NOT NULL,
+    `startedAt` TEXT NOT NULL,
+    `heartbeatAt` TEXT NOT NULL,
+    `lastProcessedAt` TEXT NULL,
+    `lastError` TEXT NULL,
+    `updatedAt` TEXT NOT NULL,
+    PRIMARY KEY (`queueName`)
+);
+
+CREATE TABLE IF NOT EXISTS `QueueControlOperation` (
+    `id` TEXT NOT NULL,
+    `queueName` TEXT NOT NULL,
+    `action` TEXT NOT NULL,
+    `status` TEXT NOT NULL,
+    `actorUserId` TEXT NOT NULL,
+    `messageCode` TEXT NULL,
+    `requestedAt` TEXT NOT NULL,
+    `startedAt` TEXT NULL,
+    `finishedAt` TEXT NULL,
+    `updatedAt` TEXT NOT NULL,
+    PRIMARY KEY (`id`)
+);
+CREATE INDEX IF NOT EXISTS `QueueControlOperation_queue_status_idx`
+    ON `QueueControlOperation`(`queueName`, `status`, `requestedAt`);
+
 CREATE TABLE IF NOT EXISTS `ReaderPreference` (
     `id` TEXT NOT NULL,
     `userId` TEXT NOT NULL,
@@ -931,4 +973,4 @@ CREATE INDEX IF NOT EXISTS `ReaderBookmark_user_edition_idx` ON `ReaderBookmark`
 CREATE UNIQUE INDEX IF NOT EXISTS `ReaderBookmark_user_edition_fingerprint_bookmark_key`
 ON `ReaderBookmark`(`userId`, `editionId`, `contentFingerprint`, `bookmarkId`);
 
-PRAGMA user_version = 13;
+PRAGMA user_version = 14;

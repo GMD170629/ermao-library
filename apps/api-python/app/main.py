@@ -2,7 +2,7 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.router import api_router
 from app.core.auth import get_current_user
@@ -13,6 +13,8 @@ from app.db.session import SessionLocal
 from app.db.session import engine
 from app.services.download_queue import start_download_queue_worker
 from app.services.kindle_queue import start_kindle_send_queue_worker
+from app.services.health_runs import fail_abandoned_health_runs
+from app.services.log_maintenance import SystemEventMaintenanceWorker
 from app.schemas.responses import fail
 
 
@@ -29,6 +31,10 @@ SYSTEM_MANAGER_PREFIXES = (
     "/api/backups",
     "/api/tracking",
     "/api/email-settings",
+    "/api/system/health/",
+    "/api/system/queues",
+    "/api/system/queue-operations",
+    "/api/system/log-settings",
 )
 
 
@@ -58,13 +64,30 @@ def _vary_api_response_by_cookie(response):
 def create_app(settings_override: Settings | None = None, session_factory: Callable[[], Session] | None = None) -> FastAPI:
     settings = settings_override or get_settings()
     factory = session_factory or SessionLocal
+    if session_factory is None:
+        runtime_factory = factory
+    else:
+        injected_session = factory()
+        runtime_factory = sessionmaker(
+            bind=injected_session.get_bind(),
+            autoflush=False,
+            autocommit=False,
+            expire_on_commit=False,
+        )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if session_factory is None:
             bootstrap_database(engine, settings)
-        download_queue_worker = start_download_queue_worker(factory, settings)
-        kindle_send_queue_worker = start_kindle_send_queue_worker(factory, settings)
+        download_queue_worker = start_download_queue_worker(runtime_factory, settings)
+        kindle_send_queue_worker = start_kindle_send_queue_worker(runtime_factory, settings)
+        startup_db = runtime_factory()
+        try:
+            fail_abandoned_health_runs(startup_db)
+        finally:
+            startup_db.close()
+        log_maintenance_worker = SystemEventMaintenanceWorker(runtime_factory)
+        log_maintenance_worker.start()
         app.state.download_queue_worker = download_queue_worker
         app.state.kindle_send_queue_worker = kindle_send_queue_worker
         try:
@@ -74,8 +97,11 @@ def create_app(settings_override: Settings | None = None, session_factory: Calla
                 download_queue_worker.stop()
             if kindle_send_queue_worker is not None:
                 kindle_send_queue_worker.stop()
+            log_maintenance_worker.stop()
 
     app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
+    app.state.session_factory = runtime_factory
+    app.state.close_factory_sessions = True
 
     @app.middleware("http")
     async def enforce_system_manager_boundary(request, call_next):

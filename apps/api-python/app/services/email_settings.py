@@ -247,11 +247,11 @@ def open_smtp_connection(config: SmtpConnectionSettings, *, timeout: int = 30) -
     return client
 
 
-def test_smtp_connection(values: dict[str, Any]) -> None:
+def test_smtp_connection(values: dict[str, Any], *, timeout: int = 30) -> None:
     config = smtp_connection_settings(values, require_sender=False)
     client: smtplib.SMTP | None = None
     try:
-        client = open_smtp_connection(config)
+        client = open_smtp_connection(config, timeout=timeout)
         client.noop()
     finally:
         if client is not None:

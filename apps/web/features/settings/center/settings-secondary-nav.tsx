@@ -1,6 +1,6 @@
 'use client';
 
-import { BookOpen, Database, FileText, Info, Mail, Sparkles, UserRound, Users } from 'lucide-react';
+import { Activity, BookOpen, Database, FileText, Info, Mail, Sparkles, UserRound, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -37,6 +37,7 @@ export const settingsGroups: readonly SettingsGroup[] = [
       { href: '/settings/library', label: '书库来源和导入', icon: Database, access: 'system' },
       { href: '/settings/organize', label: '智能整理', icon: Sparkles, access: 'system' },
       { href: '/settings/data', label: '数据和系统', icon: Database, access: 'system' },
+      { href: '/settings/health', label: '系统健康检查', icon: Activity, access: 'system' },
       { href: '/settings/logs', label: '系统日志', icon: FileText, access: 'system' }
     ]
   },

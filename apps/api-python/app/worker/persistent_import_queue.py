@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.core.time import now_timestamp_ms
 from app.services.audio_metadata import collect_audio_bundle_files
+from app.services.queue_runtime import QueueHeartbeatPump
 from app.worker.importer import ImportOptions, ImportResult, import_managed_book
 
 
@@ -216,6 +217,12 @@ class PersistentImportWorker:
         self.worker_id = f"import-{uuid.uuid4().hex}"
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._run, name="shuku-persistent-import-worker", daemon=True)
+        self._heartbeat = QueueHeartbeatPump(
+            db_factory,
+            queue_name="import",
+            instance_id=self.worker_id,
+            poll_interval_seconds=settings.import_queue_interval_seconds,
+        )
 
     def start(self) -> None:
         with self.db_factory() as db:
@@ -227,6 +234,12 @@ class PersistentImportWorker:
     def stop(self) -> None:
         self._stop_event.set()
         self._thread.join(timeout=10)
+
+    def request_stop(self) -> None:
+        self._stop_event.set()
+
+    def is_alive(self) -> bool:
+        return self._thread.is_alive()
 
     def process_once(self) -> bool:
         with self.db_factory() as db:
@@ -240,10 +253,21 @@ class PersistentImportWorker:
             return True
 
     def _run(self) -> None:
-        while not self._stop_event.is_set():
-            if self.process_once():
-                continue
-            self._stop_event.wait(self.settings.import_queue_interval_seconds)
+        self._heartbeat.start()
+        try:
+            while not self._stop_event.is_set():
+                error = None
+                processed = False
+                try:
+                    processed = self.process_once()
+                except Exception as exc:
+                    error = exc
+                self._heartbeat.pulse(processed=processed, error=error)
+                if processed:
+                    continue
+                self._stop_event.wait(self.settings.import_queue_interval_seconds)
+        finally:
+            self._heartbeat.stop()
 
 
 def start_persistent_import_worker(db_factory: Callable[[], Session], settings: Settings) -> PersistentImportWorker:

@@ -97,6 +97,7 @@ from app.services.source_providers import PROVIDER_CAPABILITIES, search_source_p
 from app.services.system_events import (
     prune_system_events as prune_structured_events,
     record_system_event as record_structured_event,
+    system_event_storage_view,
     system_event_size_bytes,
 )
 from app.services.default_cover import cover_status, ensure_default_cover, is_default_cover_path
@@ -447,8 +448,9 @@ def _system_event_size_bytes(db: Session) -> int:
     return system_event_size_bytes(db)
 
 
-def _prune_system_events(db: Session, max_bytes: int = 5 * 1024 * 1024) -> dict[str, Any]:
-    return prune_structured_events(db, max_bytes, commit=True)
+def _prune_system_events(db: Session, max_bytes: int | None = None) -> dict[str, Any]:
+    result = prune_structured_events(db, max_bytes, commit=True)
+    return {**result, "lastPrunedAt": system_event_storage_view(db).get("lastPrunedAt")}
 
 
 def _record_system_event(
