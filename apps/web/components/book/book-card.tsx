@@ -101,7 +101,7 @@ export function BookCard({
         book={book}
         size={compact ? 'small' : 'medium'}
         priority={priority}
-        className="aspect-[144/187] w-full rounded-[9px] shadow-[0_3px_10px_rgba(43,35,30,0.16)] transition duration-200 group-hover:-translate-y-0.5 group-hover:shadow-[0_8px_20px_rgba(43,35,30,0.18)]"
+        className="aspect-[2/3] w-full rounded-[9px] transition duration-200 group-hover:-translate-y-0.5"
       />
       <div className="mt-2">
         <div className={compact ? 'line-clamp-1 text-[13px] font-medium text-[#24211F]' : 'line-clamp-1 text-sm font-medium text-[#24211F]'}>{book.title}</div>

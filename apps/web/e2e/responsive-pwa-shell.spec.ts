@@ -115,6 +115,9 @@ test('desktop library navigation keeps only All and Reading', async ({ page }) =
   await expect(sidebar.getByRole('link', { name: '进行中', exact: true })).toBeVisible();
   await expect(sidebar.getByRole('link', { name: '未读', exact: true })).toHaveCount(0);
   await expect(sidebar.getByRole('link', { name: '已读', exact: true })).toHaveCount(0);
+  const accountLink = sidebar.getByRole('link', { name: '进入账户与设置' });
+  await expect(accountLink.getByText('Web', { exact: true })).toBeVisible();
+  await expect(accountLink.getByText('账户与设置', { exact: true })).toBeVisible();
 });
 
 test('wide shelf details keep five-column density and paginate large shelves', async ({ page }) => {
@@ -129,9 +132,16 @@ test('wide shelf details keep five-column density and paginate large shelves', a
     statusValue: 'UNREAD',
     progress: 0,
     tags: [],
-    coverUrl: '',
+    coverUrl: index === 0 ? '/test-landscape-cover.svg' : '',
     gradient: 'from-orange-100 to-stone-200'
   }));
+
+  await page.route('**/test-landscape-cover.svg', async (route) => {
+    await route.fulfill({
+      contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="#d94724"/></svg>'
+    });
+  });
 
   await page.route('**/api/shelves/wide-shelf', async (route) => {
     await route.fulfill({
@@ -158,6 +168,8 @@ test('wide shelf details keep five-column density and paginate large shelves', a
 
   const grid = page.getByTestId('shelf-book-grid');
   await expect(grid).toBeVisible();
+  const firstCover = grid.locator('[data-book-cover="true"]').first();
+  await expect(firstCover.locator('img')).toHaveCSS('object-fit', 'contain');
   const layout = await grid.evaluate((element) => {
     const bounds = element.parentElement?.parentElement?.getBoundingClientRect();
     const covers = Array.from(element.querySelectorAll<HTMLElement>('[data-book-cover="true"]'));
@@ -165,6 +177,9 @@ test('wide shelf details keep five-column density and paginate large shelves', a
     return {
       contentWidth: bounds?.width ?? 0,
       coverWidths: covers.map((cover) => cover.getBoundingClientRect().width),
+      coverRatios: covers.map((cover) => cover.getBoundingClientRect().height / cover.getBoundingClientRect().width),
+      firstCoverBackground: getComputedStyle(covers[0]).backgroundColor,
+      firstCoverShadow: getComputedStyle(covers[0]).boxShadow,
       columnCount: styles.gridTemplateColumns.split(' ').filter(Boolean).length,
       overflowX: styles.overflowX,
       firstRowTop: covers[0]?.getBoundingClientRect().top,
@@ -177,6 +192,9 @@ test('wide shelf details keep five-column density and paginate large shelves', a
   expect(layout.overflowX).toBe('visible');
   expect(Math.min(...layout.coverWidths)).toBeGreaterThan(220);
   expect(Math.max(...layout.coverWidths)).toBeLessThanOrEqual(240);
+  expect(layout.coverRatios.every((ratio) => Math.abs(ratio - 1.5) < 0.01)).toBe(true);
+  expect(layout.firstCoverBackground).toBe('rgba(0, 0, 0, 0)');
+  expect(layout.firstCoverShadow).toBe('none');
   expect(layout.sixthTop).toBeGreaterThan(layout.firstRowTop ?? 0);
   await expect(grid.locator('[data-book-cover="true"]')).toHaveCount(20);
   await expect(page.getByText('第 1–20 本，共 23 本')).toBeVisible();

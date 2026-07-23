@@ -28,12 +28,12 @@ def test_first_run_setup_creates_only_one_admin_and_signs_in(client, db_session)
 
     created = client.post(
         "/api/auth/setup",
-        json={"email": " OWNER@EXAMPLE.COM ", "password": "initial-password-123"},
+        json={"name": "  二毛  ", "email": " OWNER@EXAMPLE.COM ", "password": "initial-password-123"},
     )
     assert created.status_code == 201
     assert created.json()["data"]["initialized"] is True
     assert created.json()["data"]["user"]["email"] == "owner@example.com"
-    assert created.json()["data"]["user"]["name"] == "管理员"
+    assert created.json()["data"]["user"]["name"] == "二毛"
     assert created.json()["data"]["user"]["role"] == "admin"
     assert "shuku_session" in created.cookies
     assert client.get("/api/auth/setup/status").json()["data"] == {"initialized": True}
@@ -45,7 +45,7 @@ def test_first_run_setup_creates_only_one_admin_and_signs_in(client, db_session)
     )
     assert duplicate.status_code == 409
     users = db_session.query(User).all()
-    assert [(user.email, user.name, user.role) for user in users] == [("owner@example.com", "管理员", "admin")]
+    assert [(user.email, user.name, user.role) for user in users] == [("owner@example.com", "二毛", "admin")]
 
 
 def test_first_run_setup_validates_account_fields(client):
@@ -166,6 +166,20 @@ def test_account_email_change_requires_password_and_rejects_case_insensitive_dup
     assert changed.json()["data"]["user"]["email"] == "new@example.com"
     assert db_session.get(User, user.id).email == "new@example.com"
     assert client.get("/api/auth/me").json()["data"]["user"]["email"] == "new@example.com"
+
+
+def test_account_name_change_is_trimmed_and_returned_by_session(client, db_session):
+    user = _create_user(db_session)
+    _login(client)
+
+    blank = client.patch("/api/auth/account/name", json={"name": "   "})
+    assert blank.status_code == 422
+
+    changed = client.patch("/api/auth/account/name", json={"name": "  二毛  "})
+    assert changed.status_code == 200
+    assert changed.json()["data"]["user"]["name"] == "二毛"
+    assert db_session.get(User, user.id).name == "二毛"
+    assert client.get("/api/auth/me").json()["data"]["user"]["name"] == "二毛"
 
 
 def test_account_password_change_revokes_all_sessions(client, db_session):

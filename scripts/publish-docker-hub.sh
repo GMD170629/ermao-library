@@ -8,7 +8,7 @@ REGISTRY="${REGISTRY:-docker.io}"
 NAMESPACE="${DOCKERHUB_NAMESPACE:-${IMAGE_NAMESPACE:-gamersgu}}"
 CHANNEL_TAG="${TAG:-prod}"
 VERSION_TAG="${VERSION_TAG:-}"
-PLATFORM="${PLATFORM:-linux/amd64}"
+PLATFORM="${PLATFORM:-linux/amd64,linux/arm64}"
 RUN_CHECKS="${RUN_CHECKS:-true}"
 NO_CACHE="${NO_CACHE:-false}"
 
@@ -23,7 +23,7 @@ Options:
   --namespace NAME     Docker Hub namespace/user/org. Default: gamersgu
   --tag TAG            Channel tag to update. Default: prod
   --version-tag TAG    Extra immutable tag. Default: current git short SHA
-  --platform VALUE     Build platform. Default: linux/amd64
+  --platform VALUE     Build platform(s). Default: linux/amd64,linux/arm64
   --registry VALUE     Registry host. Default: docker.io
   --skip-checks        Skip local typecheck/test/build checks before docker build
   --no-cache           Build images without Docker cache

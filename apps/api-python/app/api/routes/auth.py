@@ -33,6 +33,7 @@ from app.schemas.auth import (
     PasswordResetRequest,
     SetupRequest,
     UpdateEmailRequest,
+    UpdateNameRequest,
     UpdatePasswordRequest,
 )
 from app.schemas.responses import fail, ok
@@ -140,7 +141,7 @@ def setup(payload: SetupRequest, db: Session = Depends(get_db), settings: Settin
         {
             "id": user_id,
             "email": email,
-            "name": "管理员",
+            "name": payload.name,
             "password_hash": hash_password(payload.password),
             "now": now,
         },
@@ -215,6 +216,25 @@ def update_email(
     except IntegrityError:
         db.rollback()
         return fail("该邮箱已被使用", status_code=409)
+    db.refresh(user)
+    return ok({"user": user.to_auth_view()})
+
+
+@router.patch("/account/name")
+def update_name(
+    payload: UpdateNameRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    user = _authenticated_user(db, request, settings)
+    if user is None:
+        return fail("UNAUTHORIZED", status_code=401)
+
+    user.name = payload.name
+    user.updated_at = db_timestamp()
+    db.add(user)
+    db.commit()
     db.refresh(user)
     return ok({"user": user.to_auth_view()})
 

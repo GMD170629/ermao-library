@@ -45,14 +45,14 @@ export function Cover({
 
   if (coverUrl && !imageFailed) {
     return (
-      <div data-book-cover="true" className={cn('relative overflow-hidden rounded-2xl bg-slate-100 shadow-sm', className)} style={style}>
+      <div data-book-cover="true" className={cn('relative overflow-hidden rounded-2xl bg-transparent', className)} style={style}>
         <Image
           src={coverUrl}
           alt={book.title}
           fill
           sizes={responsiveSize}
           unoptimized
-          className="object-cover"
+          className="rounded-[inherit] object-contain object-center"
           loading={priority ? 'eager' : 'lazy'}
           priority={priority}
           onError={() => setImageFailed(true)}

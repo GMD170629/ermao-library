@@ -1,6 +1,6 @@
 'use client';
 
-import { Camera, KeyRound, LogOut, Mail, Trash2 } from 'lucide-react';
+import { Camera, KeyRound, LogOut, Mail, Trash2, UserRound } from 'lucide-react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useRef, useState } from 'react';
@@ -13,6 +13,7 @@ import { DEFAULT_ACCOUNT_AVATAR_PATH } from '../../../lib/brand';
 type CurrentUser = {
   id: string;
   email: string;
+  name: string;
   avatarUrl?: string | null;
 };
 
@@ -30,6 +31,7 @@ export function AccountPanel() {
   const toast = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [user, setUser] = useState<CurrentUser | null>(null);
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [emailPassword, setEmailPassword] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
@@ -46,6 +48,7 @@ export function AccountPanel() {
         const nextUser = payload.ok ? payload.data?.user ?? null : null;
         if (!active) return;
         setUser(nextUser);
+        setName(nextUser?.name ?? '');
         setEmail(nextUser?.email ?? '');
       })
       .catch(() => undefined);
@@ -59,6 +62,7 @@ export function AccountPanel() {
   function applyUser(nextUser: CurrentUser | undefined) {
     if (!nextUser) return;
     setUser(nextUser);
+    setName(nextUser.name);
     setEmail(nextUser.email);
     setAvatarFailed(false);
     window.dispatchEvent(new CustomEvent('shuku:account-changed', { detail: nextUser }));
@@ -130,6 +134,31 @@ export function AccountPanel() {
     }
   }
 
+  async function saveName(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalizedName = name.trim();
+    if (!normalizedName) {
+      toast.error('请输入用户名');
+      return;
+    }
+    setBusy('name');
+    try {
+      const response = await fetch('/api/auth/account/name', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: normalizedName })
+      });
+      const payload = (await response.json()) as AuthPayload;
+      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '修改用户名失败');
+      applyUser(payload.data?.user);
+      toast.success('用户名已更新');
+    } catch (reason) {
+      toast.error('修改用户名失败', reason instanceof Error ? reason.message : '请稍后重试');
+    } finally {
+      setBusy('');
+    }
+  }
+
   async function savePassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (newPassword !== confirmPassword) {
@@ -163,7 +192,7 @@ export function AccountPanel() {
     <section aria-labelledby="account-title" className="space-y-7">
       <div>
         <h3 id="account-title" className="text-lg font-semibold text-[#2A2825]">账户</h3>
-        <p className="mt-1 text-sm leading-6 text-[#77716A]">管理登录头像、邮箱和密码。</p>
+        <p className="mt-1 text-sm leading-6 text-[#77716A]">管理头像、用户名、登录邮箱和密码。</p>
       </div>
 
       <section aria-labelledby="avatar-title" className="flex flex-col gap-4 border-b border-[#DEDAD4] pb-7 sm:flex-row sm:items-center">
@@ -202,6 +231,18 @@ export function AccountPanel() {
           </div>
         </div>
       </section>
+
+      <form onSubmit={saveName} className="border-b border-[#DEDAD4] pb-7">
+        <div className="flex items-center gap-2 text-sm font-semibold text-[#2A2825]"><UserRound size={16} />用户名</div>
+        <p className="mt-1 text-sm text-[#77716A]">用于侧边栏和账户区域展示，不影响登录。</p>
+        <label className="mt-4 block max-w-md text-sm text-[#5F5A55]">
+          用户名
+          <input type="text" required minLength={1} maxLength={40} autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} className={inputClassName} />
+        </label>
+        <Button type="submit" className="mt-4" loading={busy === 'name'} loadingText="保存中" disabled={!name.trim() || name.trim() === user?.name}>
+          保存用户名
+        </Button>
+      </form>
 
       <form onSubmit={saveEmail} className="border-b border-[#DEDAD4] pb-7">
         <div className="flex items-center gap-2 text-sm font-semibold text-[#2A2825]"><Mail size={16} />登录邮箱</div>

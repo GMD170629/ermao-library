@@ -44,6 +44,7 @@ async function readSetupPayload(response: Response): Promise<SetupPayload> {
 export function SetupPage() {
   const router = useRouter();
   const [stage, setStage] = useState<SetupStage>('checking');
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -108,7 +109,12 @@ export function SetupPage() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const normalizedName = name.trim();
     const normalizedEmail = email.trim();
+    if (!normalizedName) {
+      setError('请输入用户名');
+      return;
+    }
     if (!normalizedEmail) {
       setError('请输入登录邮箱');
       return;
@@ -141,8 +147,7 @@ export function SetupPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        // Keep the legacy API field during rolling upgrades; it is intentionally not user-configurable.
-        body: JSON.stringify({ name: '管理员', email: normalizedEmail, password })
+        body: JSON.stringify({ name: normalizedName, email: normalizedEmail, password })
       });
       const payload = await readSetupPayload(response);
       if (response.status === 409) {
@@ -280,8 +285,12 @@ export function SetupPage() {
 
               <form data-testid="setup-form" onSubmit={submit} noValidate className="mt-8 space-y-4">
                 <label className="block">
+                  <span className="text-sm font-semibold">用户名</span>
+                  <input autoFocus type="text" required minLength={1} maxLength={40} value={name} onChange={(event) => { setName(event.target.value); setError(''); }} autoComplete="name" placeholder="例如：二毛" className="mt-2 h-12 w-full rounded-2xl border border-[#B08B6E]/55 bg-[#E8DCC7] px-4 text-sm text-[#606C38] outline-none transition placeholder:text-[#8B9D83] focus:border-[#C66B3D] focus:ring-4 focus:ring-[#C66B3D]/15" />
+                </label>
+                <label className="block">
                   <span className="text-sm font-semibold">登录邮箱</span>
-                  <input autoFocus type="email" required maxLength={191} value={email} onChange={(event) => { setEmail(event.target.value); setError(''); }} autoComplete="username" placeholder="name@example.com" className="mt-2 h-12 w-full rounded-2xl border border-[#B08B6E]/55 bg-[#E8DCC7] px-4 text-sm text-[#606C38] outline-none transition placeholder:text-[#8B9D83] focus:border-[#C66B3D] focus:ring-4 focus:ring-[#C66B3D]/15" />
+                  <input type="email" required maxLength={191} value={email} onChange={(event) => { setEmail(event.target.value); setError(''); }} autoComplete="username" placeholder="name@example.com" className="mt-2 h-12 w-full rounded-2xl border border-[#B08B6E]/55 bg-[#E8DCC7] px-4 text-sm text-[#606C38] outline-none transition placeholder:text-[#8B9D83] focus:border-[#C66B3D] focus:ring-4 focus:ring-[#C66B3D]/15" />
                 </label>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="block">
@@ -308,10 +317,10 @@ export function SetupPage() {
             <h2 className="mt-6 text-xl font-semibold tracking-[-0.03em]">初始化清单</h2>
             <ol className="mt-8 space-y-6">
               <SetupStep icon={Database} title="检查系统状态" description="确认数据库和存储目录可用" complete={statusChecked} active={stage === 'checking' || stage === 'unavailable'} />
-              <SetupStep icon={UserRoundPlus} title="创建管理账户" description="设置邮箱和登录密码" complete={accountCreated} active={stage === 'account' || stage === 'creating-account'} />
+              <SetupStep icon={UserRoundPlus} title="创建管理账户" description="设置用户名、邮箱和登录密码" complete={accountCreated} active={stage === 'account' || stage === 'creating-account'} />
               <SetupStep icon={FolderPlus} title="添加监控文件夹" description="持续识别目录中的读物" complete={stage === 'complete'} active={folderActive} />
             </ol>
-            <p className="mt-auto pt-10 text-xs leading-6 text-[#E8DCC7]/70">账号信息仅保存在你的服务器中。以后可以在设置页面修改邮箱、密码和头像。</p>
+            <p className="mt-auto pt-10 text-xs leading-6 text-[#E8DCC7]/70">账号信息仅保存在你的服务器中。以后可以在设置页面修改用户名、邮箱、密码和头像。</p>
           </div>
         </aside>
       </section>

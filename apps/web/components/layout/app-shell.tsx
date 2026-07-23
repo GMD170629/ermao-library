@@ -804,21 +804,26 @@ export function AppShell({ children }: { children: ReactNode }) {
           aria-label="进入账户与设置"
           title={user?.email || '账户与设置'}
           className={cn(
-            'mt-5 flex min-h-16 w-fit shrink-0 items-center rounded-2xl px-3 transition',
-            pathname.startsWith('/settings') ? 'bg-[#FCE5DE]' : 'hover:bg-black/[0.035]'
+            'mt-3 flex min-h-[72px] w-full shrink-0 items-center gap-3 border-t border-black/[0.07] px-1 pt-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]',
+            pathname.startsWith('/settings') ? 'text-[#D94A2E]' : 'text-[#302D29]'
           )}
         >
           <Image
             key={user?.avatarUrl && !avatarFailed ? user.avatarUrl : DEFAULT_ACCOUNT_AVATAR_PATH}
             src={withBasePath(user?.avatarUrl && !avatarFailed ? user.avatarUrl : DEFAULT_ACCOUNT_AVATAR_PATH)}
-            width={44}
-            height={44}
-            alt="账户与设置"
+            width={46}
+            height={46}
+            alt="账户头像"
             priority
             unoptimized={Boolean(user?.avatarUrl && !avatarFailed)}
             onError={() => setAvatarFailed(true)}
-            className="h-11 w-11 shrink-0 rounded-full object-cover shadow-sm"
+            className="h-[46px] w-[46px] shrink-0 rounded-full object-cover shadow-sm"
           />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-semibold">{user?.name || '二毛'}</span>
+            <span className="mt-0.5 block truncate text-xs text-[#8A847E]">账户与设置</span>
+          </span>
+          <ChevronRight size={20} strokeWidth={1.7} className="shrink-0 text-[#77716B]" aria-hidden="true" />
         </Link>
       </aside>
 

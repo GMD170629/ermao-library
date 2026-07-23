@@ -98,6 +98,9 @@ jobs:
         working-directory: apps/api-python
         run: uv run --extra dev --locked pytest -q
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -124,7 +127,7 @@ jobs:
           context: .
           file: apps/web/Dockerfile.prod
           target: runner
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
@@ -150,7 +153,7 @@ jobs:
       - name: Upload fnOS package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: shuku-starship-fnos-${{ steps.version.outputs.app_version }}-x86
+          name: shuku-starship-fnos-${{ steps.version.outputs.app_version }}-all
           path: dist/fnos/*.fpk
           if-no-files-found: error
 

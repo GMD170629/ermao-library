@@ -27,7 +27,7 @@ GitHub Actions 会先构建并推送同版本的 Docker 镜像，再生成引用
 pnpm fnos:validate
 ```
 
-第一版包声明为 `platform=x86`，因为当前生产镜像仅发布 `linux/amd64`。发布 ARM64 镜像并完成真机验证前，不应改为 `platform=all`。
+fnOS 包声明为 `platform=all`，安装时会根据设备架构拉取对应的 `linux/amd64` 或 `linux/arm64` 生产镜像。
 
 ## 访问方式
 

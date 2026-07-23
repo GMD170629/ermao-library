@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class LoginRequest(BaseModel):
@@ -7,8 +7,23 @@ class LoginRequest(BaseModel):
 
 
 class SetupRequest(BaseModel):
+    name: str = Field(default="管理员", min_length=1, max_length=40)
     email: EmailStr
     password: str = Field(min_length=10, max_length=128)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        return value.strip()
+
+
+class UpdateNameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        return value.strip()
 
 
 class UpdateEmailRequest(BaseModel):

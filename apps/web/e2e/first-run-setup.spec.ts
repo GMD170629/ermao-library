@@ -7,7 +7,7 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
   await page.route('**/api/auth/setup', async (route) => {
     expect(route.request().method()).toBe('POST');
     expect(route.request().postDataJSON()).toEqual({
-      name: '管理员',
+      name: '二毛',
       email: 'owner@example.com',
       password: 'initial-password-123'
     });
@@ -17,7 +17,7 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
         ok: true,
         data: {
           initialized: true,
-          user: { name: '管理员', email: 'owner@example.com', role: 'admin' }
+          user: { name: '二毛', email: 'owner@example.com', role: 'admin' }
         }
       }
     });
@@ -43,10 +43,13 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
 
   await expect(page).toHaveURL(/\/setup$/);
   await expect(page.getByRole('heading', { name: '创建你的管理账户' })).toBeVisible();
-  await expect(page.getByLabel('账户名称')).toHaveCount(0);
+  const setupForm = page.getByTestId('setup-form');
   await page.getByRole('button', { name: '创建账户' }).click();
-  await expect(page.getByRole('alert')).toHaveText('请输入登录邮箱');
-  await expect(page.getByRole('alert')).toHaveClass(/bg-red-50/);
+  await expect(setupForm.getByRole('alert')).toHaveText('请输入用户名');
+  await expect(setupForm.getByRole('alert')).toHaveClass(/bg-red-50/);
+  await page.getByLabel('用户名').fill('二毛');
+  await page.getByRole('button', { name: '创建账户' }).click();
+  await expect(setupForm.getByRole('alert')).toHaveText('请输入登录邮箱');
   await page.getByLabel('登录邮箱').fill('owner@example.com');
   await page.getByLabel('登录密码').fill('initial-password-123');
   await page.getByLabel('确认密码').fill('initial-password-123');

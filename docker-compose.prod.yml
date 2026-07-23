@@ -3,7 +3,6 @@ name: shuku-starship
 services:
   web:
     image: gamersgu/shuku-starship-web:prod
-    platform: linux/amd64
     pull_policy: always
     container_name: shuku-prod-web
     restart: unless-stopped

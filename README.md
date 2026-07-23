@@ -52,7 +52,7 @@
 
 ## Docker Compose 安装（推荐）
 
-生产镜像目前面向 `linux/amd64`（x86-64）。发布与根 `package.json` 匹配的最新版本标签时，会同步更新版本镜像、`gamersgu/shuku-starship-web:prod` 和 `gamersgu/shuku-starship-web:latest`。复制下面的完整内容，粘贴到 NAS 的 Docker Compose 管理器中，或保存为 `compose.yaml` 后部署：
+生产镜像同时支持 `linux/amd64` 和 `linux/arm64`，Docker 会根据设备架构自动拉取对应镜像。发布与根 `package.json` 匹配的最新版本标签时，会同步更新版本镜像、`gamersgu/shuku-starship-web:prod` 和 `gamersgu/shuku-starship-web:latest`。复制下面的完整内容，粘贴到 NAS 的 Docker Compose 管理器中，或保存为 `compose.yaml` 后部署：
 
 ```yaml
 name: shuku-starship
@@ -60,7 +60,6 @@ name: shuku-starship
 services:
   web:
     image: gamersgu/shuku-starship-web:prod
-    platform: linux/amd64
     pull_policy: always
     container_name: shuku-prod-web
     restart: unless-stopped
@@ -175,7 +174,7 @@ Next.js 将 `/api/*` 转发到容器内的 FastAPI。SQLite 是当前唯一数�
 - 导入与转换：持久化 Python Worker、Watchdog、libmobi、EbookLib、lxml、Mutagen
 - 阅读器与播放器：EPUB.js、PDF.js、自研漫画阅读适配器、HTML5 Audio
 - 工程：pnpm Workspace、Turborepo、Playwright、Pytest
-- 部署：Docker Compose、统一 `linux/amd64` 镜像、PWA
+- 部署：Docker Compose、`linux/amd64` 与 `linux/arm64` 多架构镜像、PWA
 
 ## 更多文档
 

@@ -93,6 +93,8 @@ with open(manifest_path, encoding="utf-8") as file:
     )
 if manifest.get("disable_authorization_path") != "true":
     raise SystemExit("fnOS arbitrary directory authorization must remain disabled")
+if manifest.get("platform") != "all":
+    raise SystemExit("fnOS package must support all published image architectures")
 expected_metadata = {
     "maintainer": "六面体",
     "maintainer_url": "https://github.com/GMD170629/ermao-library",
@@ -184,6 +186,11 @@ if ! grep -Fq "image: $IMAGE_REFERENCE" "$compose" || \
    ! grep -Fq '${TRIM_DATA_SHARE_PATHS}:/monitor' "$compose" || \
    ! grep -Fq 'MONITOR_ROOT: /monitor' "$compose"; then
   echo "fnOS Compose is missing the versioned image, package user, or required data mounts" >&2
+  exit 1
+fi
+
+if grep -Eq '^[[:space:]]*platform:[[:space:]]*(linux/)?(amd64|arm64)' "$compose"; then
+  echo "fnOS Compose must select the image architecture automatically" >&2
   exit 1
 fi
 
@@ -287,7 +294,7 @@ if ! cmp -s "$PACKAGE_DIR/ICON.PNG" <(tar -xOzf "$artifact" ICON.PNG) || \
   exit 1
 fi
 
-destination="$OUTPUT_DIR/shuku-starship-${APP_VERSION}-x86.fpk"
+destination="$OUTPUT_DIR/shuku-starship-${APP_VERSION}-all.fpk"
 cp "$artifact" "$destination"
 
 echo "Built fnOS package: $destination"

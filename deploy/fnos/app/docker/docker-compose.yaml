@@ -1,7 +1,6 @@
 services:
   web:
     image: __IMAGE_REFERENCE__
-    platform: linux/amd64
     restart: unless-stopped
     user: "${TRIM_UID}:${TRIM_GID}"
     environment:
