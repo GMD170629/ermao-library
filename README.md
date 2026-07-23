@@ -1,10 +1,10 @@
 # 二毛图书（shuku-starship）
 
+[English](README.en.md) | 简体中文
+
 二毛图书是一套面向个人与家庭的自托管数字书库，用于整理 NAS、家庭服务器或本地硬盘中的电子书、PDF、漫画和有声书。它提供文件导入与自动转换、书库检索、元数据整理、在线阅读与音频播放、阅读进度同步、Kindle 发送和数据备份等能力。
 
 书库数据库、账户、阅读进度和系统设置都保存在自己的设备上；原始读物继续保留在指定目录中，不依赖第三方云端托管。
-
-![二毛图书首页](docs/design/system-app-redesign/qa/implementation-home-final.png)
 
 ## 交流与反馈
 
@@ -89,7 +89,7 @@ services:
 docker compose up -d
 ```
 
-安装完成后访问 `http://服务器地址:3000`。首次打开会进入初始化向导，依次创建管理账户并添加监控文件夹；监控文件夹可以暂时跳过。
+安装完成后访问 `http://服务器地址:3000`。
 
 默认情况下：
 
@@ -108,16 +108,6 @@ docker compose up -d
 
 更新或重建容器不会清空已挂载的书库和数据目录。
 
-### 安装为 PWA
-
-使用 HTTPS 访问后，可通过浏览器的“安装应用”或“添加到主屏幕”安装 PWA。局域网 HTTP 地址仍可正常使用 Web 功能，但除 `localhost` 外，浏览器不会在非安全上下文启用 Service Worker，因此离线回退、安装和更新提示需要 HTTPS 反向代理。
-
-## fnOS 状态
-
-仓库仍保留 fnOS 模板、构建脚本和 PR 校验，但自动生成 `.fpk` 以及向 GitHub Releases 发布安装包的流程目前已暂停。新安装推荐使用上面的原生 Docker Compose；历史 Release 中的 `.fpk` 不保证对应当前 `main` 版本。
-
-模板说明与本地构建方式见 [deploy/fnos/README.md](deploy/fnos/README.md)。
-
 ## 首次使用
 
 1. 打开系统并根据向导创建初始管理账户。
@@ -127,17 +117,9 @@ docker compose up -d
 5. 按需在“智能整理”配置豆瓣、Bangumi 或 AI 元数据来源。
 6. 如需发送到 Kindle，在“邮件与 Kindle”中配置 SMTP 与 Kindle 邮箱。
 
-## 数据目录与备份
-
-SQLite 数据库位于 `STORAGE_ROOT/database/shuku.sqlite3`。应用启动时会自动创建或升级数据库结构，不需要单独部署数据库服务。
-
-应用内备份主要用于恢复数据库记录和系统设置，不替代对 `MONITOR_HOST_PATH` 与整个 `STORAGE_PATH` 的文件级备份。迁移服务器前应同时备份这两个宿主机目录。
-
-忘记密码时，登录页会在监控书库根目录生成 `reset-password.html`；如果没有配置监控目录，则写入存储目录的 `password-reset` 子目录。重置链接 30 分钟失效且只能使用一次。
-
 ## 本地开发
 
-运行时固定为 Node.js 20.20.2、pnpm 9.12.2 和 Python 3.11.15。Node 版本记录在 `.nvmrc`，后端 Python 版本记录在 `apps/api-python/.python-version`；`uv` 会自动安装或选择对应解释器。不要使用 Node 22 或 Python 3.12 运行项目测试。
+运行时环境为 Node.js 20.20.2、pnpm 9.12.2 和 Python 3.11.15。Node 版本记录在 `.nvmrc`，后端 Python 版本记录在 `apps/api-python/.python-version`；`uv` 会自动安装或选择对应解释器。不要使用 Node 22 或 Python 3.12 运行项目测试。
 
 ```bash
 pnpm install
