@@ -19,8 +19,10 @@ from app.db.bootstrap import backfill_library_consumption_states
 
 BACKUP_TABLES: list[tuple[str, str]] = [
     ("users", "User"),
+    ("userPreferences", "UserPreference"),
     ("shelves", "Shelf"),
     ("monitorFolders", "MonitorFolder"),
+    ("userMonitorFolderAccess", "UserMonitorFolderAccess"),
     ("works", "LibraryWork"),
     ("editions", "LibraryEdition"),
     ("volumes", "LibraryVolume"),
@@ -44,10 +46,14 @@ BACKUP_TABLES: list[tuple[str, str]] = [
     ("readerPreferences", "ReaderPreference"),
     ("readerBookPreferences", "ReaderBookPreference"),
     ("readerProgressCursors", "ReaderProgressCursor"),
+    ("readerBookmarks", "ReaderBookmark"),
     ("systemSettings", "SystemSetting"),
 ]
 
 RESTORE_ORDER = [
+    "ReaderBookmark",
+    "UserMonitorFolderAccess",
+    "UserPreference",
     "BookIdentityCache",
     "ExternalMetadataCache",
     "MetadataLookupTask",
@@ -135,7 +141,9 @@ def json_bytes(value: Any) -> bytes:
 def counts_for_export(database_export: dict[str, list[dict[str, Any]]]) -> dict[str, int]:
     return {
         "users": len(database_export.get("users", [])),
+        "userPreferences": len(database_export.get("userPreferences", [])),
         "monitorFolders": len(database_export.get("monitorFolders", [])),
+        "userMonitorFolderAccess": len(database_export.get("userMonitorFolderAccess", [])),
         "works": len(database_export.get("works", [])),
         "editions": len(database_export.get("editions", [])),
         "volumes": len(database_export.get("volumes", [])),
@@ -154,6 +162,7 @@ def counts_for_export(database_export: dict[str, list[dict[str, Any]]]) -> dict[
         "readerPreferences": len(database_export.get("readerPreferences", [])),
         "readerBookPreferences": len(database_export.get("readerBookPreferences", [])),
         "readerProgressCursors": len(database_export.get("readerProgressCursors", [])),
+        "readerBookmarks": len(database_export.get("readerBookmarks", [])),
         "systemSettings": len(database_export.get("systemSettings", [])),
         "coverIndexEntries": len(database_export.get("coverIndex", [])),
     }
@@ -179,7 +188,7 @@ def create_backup(db: Session, settings: Settings, kind: str = "manual") -> Back
         "createdAt": created_at.isoformat(),
         "format": "zip",
         "contents": ["metadata.json", "database-export.json", "settings.json"],
-        "scope": ["database-v2", "system-settings", "library-metadata", "reading-metadata", "tags", "reading-progress", "monitor-folder-settings", "cover-cache-index"],
+        "scope": ["database-v2", "system-settings", "library-metadata", "reading-metadata", "tags", "reading-progress", "monitor-folder-settings", "multi-user-authorization", "user-preferences", "reader-bookmarks", "cover-cache-index"],
         "excludes": ["reader-content-files", "cover-image-files", "library-files/"],
         "counts": counts,
     }

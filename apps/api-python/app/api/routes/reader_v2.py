@@ -17,6 +17,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
+from app.core.authorization import (
+    authorization_context,
+    can_access_edition,
+    edition_visibility_sql,
+    read_user_preferences,
+)
 from app.core.config import Settings, get_settings
 from app.core.time import timestamp_ms_to_datetime
 from app.db.session import get_db
@@ -120,19 +126,6 @@ def _clamp(value: Any, minimum: float, maximum: float, fallback: float) -> float
         return fallback
 
 
-def _mark_work_reading_started(db: Session, work_id: str, now: datetime | None = None) -> bool:
-    """Advance only unread works; reopening a finished work must not regress it."""
-
-    result = db.execute(
-        text(
-            "UPDATE `LibraryWork` SET `status` = 'READING', `updatedAt` = :now "
-            "WHERE `id` = :work_id AND `status` IN ('UNREAD', 'WANT')"
-        ),
-        {"work_id": work_id, "now": now or _now()},
-    )
-    return int(result.rowcount or 0) > 0
-
-
 def _edition_media_kind(edition: dict[str, Any]) -> str:
     stored = str(edition.get("mediaKind") or "").strip().upper()
     if stored in {"EBOOK", "COMIC", "AUDIOBOOK"}:
@@ -191,29 +184,6 @@ def _upsert_consumption_state(
         )
 
 
-def _project_work_status(db: Session, user_id: str, work_id: str, now: datetime) -> None:
-    if "LibraryConsumptionState" not in _tables(db):
-        return
-    editions = _rows(db, "SELECT * FROM `LibraryEdition` WHERE `workId` = :work_id AND COALESCE(`hidden`, 0) = 0", {"work_id": work_id})
-    kinds = {_edition_media_kind(item) for item in editions}
-    states = {
-        str(item.get("mediaKind")): str(item.get("status") or "UNREAD").upper()
-        for item in _rows(
-            db,
-            "SELECT `mediaKind`, `status` FROM `LibraryConsumptionState` WHERE `userId` = :user_id AND `workId` = :work_id",
-            {"user_id": user_id, "work_id": work_id},
-        )
-    }
-    projected = (
-        "FINISHED"
-        if kinds and all(states.get(kind) == "FINISHED" for kind in kinds)
-        else "READING"
-        if any(states.get(kind) in {"READING", "FINISHED"} for kind in kinds)
-        else "UNREAD"
-    )
-    db.execute(text("UPDATE `LibraryWork` SET `status` = :status, `updatedAt` = :now WHERE `id` = :work_id"), {"status": projected, "now": now, "work_id": work_id})
-
-
 def _is_final_volume(db: Session, edition_id: str, volume_id: str | None) -> bool:
     if "LibraryVolume" not in _tables(db):
         return True
@@ -239,13 +209,6 @@ def _advance_work_status_for_progress(
     now: datetime,
 ) -> None:
     if "LibraryConsumptionState" not in _tables(db):
-        if completed:
-            db.execute(
-                text("UPDATE `LibraryWork` SET `status` = 'FINISHED', `updatedAt` = :now WHERE `id` = :work_id"),
-                {"work_id": work_id, "now": now},
-            )
-        else:
-            _mark_work_reading_started(db, work_id, now)
         return
     _upsert_consumption_state(
         db,
@@ -258,7 +221,6 @@ def _advance_work_status_for_progress(
         preserve_finished=True,
         now=now,
     )
-    _project_work_status(db, user_id, work_id, now)
 
 
 def _legacy_preferences(db: Session, user_id: str, reader_format: str) -> ReaderPreferences:
@@ -578,6 +540,8 @@ def reader_bootstrap_v2(
         return auth_error
     if not {"LibraryEdition", "LibraryWork"}.issubset(_tables(db)):
         return fail("阅读器数据库尚未初始化", status_code=503)
+    if not can_access_edition(db, user, edition_id):
+        return fail("版本不存在", status_code=404, code="EDITION_NOT_FOUND")
     edition = _row(db, "SELECT * FROM `LibraryEdition` WHERE `id` = :id", {"id": edition_id})
     if not edition:
         return fail("版本不存在", status_code=404)
@@ -723,16 +687,37 @@ def reader_bootstrap_v2(
     discarded = "content_fingerprint_mismatch" if fingerprint_mismatch else None
     resume_location = None if discarded else _location_from_progress(progress, reader_format, selected_volume_id)
     preferences, preferences_updated_at = _book_preferences(db, user.id, str(work["id"]), reader_format)
+    account_playback_rate = read_user_preferences(db, user.id).get("audio.playbackRate")
+    if reader_format == "audio" and isinstance(account_playback_rate, (int, float)):
+        preferences = preferences.model_copy(
+            update={
+                "audio": preferences.audio.model_copy(
+                    update={"playback_rate": max(0.75, min(3.0, float(account_playback_rate)))}
+                )
+            }
+        )
+    edition_scope, edition_scope_params = edition_visibility_sql(
+        authorization_context(db, user),
+        alias="LibraryEdition",
+        prefix="reader_versions",
+    )
     available_edition_rows = _rows(
         db,
-        "SELECT * FROM `LibraryEdition` WHERE `workId` = :work_id AND COALESCE(`hidden`, 0) = 0 ORDER BY COALESCE(`primary`, 0) DESC, `createdAt`, `id`",
-        {"work_id": work["id"]},
+        "SELECT * FROM `LibraryEdition` WHERE `workId` = :work_id AND COALESCE(`hidden`, 0) = 0 "
+        f"AND {edition_scope} ORDER BY COALESCE(`primary`, 0) DESC, `createdAt`, `id`",
+        {"work_id": work["id"], **edition_scope_params},
     )
+    visible_edition_ids = {str(item["id"]) for item in available_edition_rows}
     all_work_volumes = _rows(
         db,
         "SELECT v.* FROM `LibraryVolume` v JOIN `LibraryEdition` e ON e.`id` = v.`editionId` "
-        "WHERE e.`workId` = :work_id AND COALESCE(e.`hidden`, 0) = 0 ORDER BY e.`createdAt`, v.`sortOrder`, v.`id`",
-        {"work_id": work["id"]},
+        "WHERE e.`workId` = :work_id AND COALESCE(e.`hidden`, 0) = 0 "
+        f"AND e.`id` IN ({', '.join(f':visible_edition_{index}' for index, _item in enumerate(available_edition_rows))}) "
+        "ORDER BY e.`createdAt`, v.`sortOrder`, v.`id`",
+        {
+            "work_id": work["id"],
+            **{f"visible_edition_{index}": item["id"] for index, item in enumerate(available_edition_rows)},
+        },
     ) if "LibraryVolume" in _tables(db) else []
     latest_progress_by_edition: dict[str, dict[str, Any]] = {}
     for candidate in all_work_progresses:
@@ -754,7 +739,7 @@ def reader_bootstrap_v2(
             volumes=[_volume_summary(candidate) for candidate in all_work_volumes if candidate.get("editionId") == item.get("id")],
         )
         for item in available_edition_rows
-        if _reader_format(item.get("format")) is not None
+        if str(item.get("id")) in visible_edition_ids and _reader_format(item.get("format")) is not None
     ]
     volume_query = f"?volume={quote(selected_volume_id, safe='')}" if selected_volume_id else ""
     file_url = (
@@ -802,9 +787,6 @@ def reader_bootstrap_v2(
             unit_id=resume_unit_id,
             preserve_finished=True,
         )
-        _project_work_status(db, user.id, str(work["id"]), _now())
-        db.commit()
-    elif _mark_work_reading_started(db, str(work["id"])):
         db.commit()
     return ReaderBootstrapResponse(data=data)
 
@@ -822,6 +804,142 @@ def _resolve_progress_volume(db: Session, edition_id: str, requested_volume_id: 
     if len(volumes) > 1:
         return None, fail("多卷版本必须提供 volumeId", status_code=422)
     return None, None
+
+
+def _bookmark_view(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(row.get("bookmarkId") or ""),
+        "location": _json(row.get("locationJson"), {}),
+        "label": str(row.get("label") or ""),
+        "percent": _clamp(row.get("percent"), 0, 100, 0),
+        "createdAt": str(row.get("bookmarkCreatedAt") or ""),
+    }
+
+
+@router.get("/editions/{edition_id}/bookmarks")
+def list_reader_bookmarks(
+    edition_id: str,
+    request: Request,
+    content_fingerprint: str = Query(alias="contentFingerprint", min_length=1, max_length=191),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    if not can_access_edition(db, user, edition_id):
+        return fail("版本不存在", status_code=404, code="EDITION_NOT_FOUND")
+    if "ReaderBookmark" not in _tables(db):
+        return {"ok": True, "data": {"bookmarks": []}}
+    rows = _rows(
+        db,
+        "SELECT * FROM `ReaderBookmark` WHERE `userId` = :user_id AND `editionId` = :edition_id "
+        "AND `contentFingerprint` = :fingerprint ORDER BY `percent`, `bookmarkCreatedAt`, `bookmarkId`",
+        {
+            "user_id": user.id,
+            "edition_id": edition_id,
+            "fingerprint": content_fingerprint,
+        },
+    )
+    return {"ok": True, "data": {"bookmarks": [_bookmark_view(row) for row in rows]}}
+
+
+@router.put("/editions/{edition_id}/bookmarks")
+async def replace_reader_bookmarks(
+    edition_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    if not can_access_edition(db, user, edition_id):
+        return fail("版本不存在", status_code=404, code="EDITION_NOT_FOUND")
+    if "ReaderBookmark" not in _tables(db):
+        return fail("书签表尚未初始化", status_code=503, code="BOOKMARKS_UNAVAILABLE")
+    edition = _row(db, "SELECT `workId` FROM `LibraryEdition` WHERE `id` = :id", {"id": edition_id})
+    if not edition:
+        return fail("版本不存在", status_code=404, code="EDITION_NOT_FOUND")
+    payload = await request.json()
+    fingerprint = str(payload.get("contentFingerprint") or "").strip()
+    raw_bookmarks = payload.get("bookmarks")
+    if not fingerprint or len(fingerprint) > 191:
+        return fail("书签内容指纹无效", status_code=422, code="INVALID_BOOKMARK_FINGERPRINT")
+    if not isinstance(raw_bookmarks, list) or len(raw_bookmarks) > 500:
+        return fail("书签列表格式无效或数量超过 500", status_code=422, code="INVALID_BOOKMARKS")
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in raw_bookmarks:
+        if not isinstance(raw, dict):
+            return fail("书签列表格式无效", status_code=422, code="INVALID_BOOKMARKS")
+        bookmark_id = str(raw.get("id") or "").strip()
+        location = raw.get("location")
+        label = str(raw.get("label") or "").strip()
+        created_at = str(raw.get("createdAt") or "").strip()
+        try:
+            percent = float(raw.get("percent") or 0)
+        except (TypeError, ValueError):
+            return fail("书签进度无效", status_code=422, code="INVALID_BOOKMARKS")
+        if (
+            not bookmark_id
+            or len(bookmark_id) > 2000
+            or bookmark_id in seen
+            or not isinstance(location, dict)
+            or len(label) > 500
+            or not created_at
+            or not 0 <= percent <= 100
+        ):
+            return fail("书签列表格式无效", status_code=422, code="INVALID_BOOKMARKS")
+        seen.add(bookmark_id)
+        normalized.append(
+            {
+                "bookmark_id": bookmark_id,
+                "location": location,
+                "label": label,
+                "percent": percent,
+                "created_at": created_at,
+            }
+        )
+    db.execute(
+        text(
+            "DELETE FROM `ReaderBookmark` WHERE `userId` = :user_id AND `editionId` = :edition_id "
+            "AND `contentFingerprint` = :fingerprint"
+        ),
+        {"user_id": user.id, "edition_id": edition_id, "fingerprint": fingerprint},
+    )
+    now = _now()
+    for index, bookmark in enumerate(normalized):
+        db.execute(
+            text(
+                "INSERT INTO `ReaderBookmark` "
+                "(`id`, `userId`, `workId`, `editionId`, `contentFingerprint`, `bookmarkId`, "
+                "`locationJson`, `label`, `percent`, `bookmarkCreatedAt`, `createdAt`, `updatedAt`) "
+                "VALUES (:id, :user_id, :work_id, :edition_id, :fingerprint, :bookmark_id, "
+                ":location_json, :label, :percent, :bookmark_created_at, :now, :now)"
+            ),
+            {
+                "id": f"bookmark_{time_ns()}_{index}",
+                "user_id": user.id,
+                "work_id": str(edition["workId"]),
+                "edition_id": edition_id,
+                "fingerprint": fingerprint,
+                "bookmark_id": bookmark["bookmark_id"],
+                "location_json": _json_text(bookmark["location"]),
+                "label": bookmark["label"],
+                "percent": bookmark["percent"],
+                "bookmark_created_at": bookmark["created_at"],
+                "now": now,
+            },
+        )
+    db.commit()
+    return {"ok": True, "data": {"bookmarks": [_bookmark_view({
+        "bookmarkId": item["bookmark_id"],
+        "locationJson": _json_text(item["location"]),
+        "label": item["label"],
+        "percent": item["percent"],
+        "bookmarkCreatedAt": item["created_at"],
+    }) for item in normalized]}}
 
 
 def _epub_location_target(
@@ -851,9 +969,11 @@ def claim_reader_epub_locations(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
-    _user, auth_error = _auth(db, request, settings)
+    user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    if not can_access_edition(db, user, edition_id):
+        return fail("版本不存在", status_code=404, code="EDITION_NOT_FOUND")
     _edition, _volume_id, expected_fingerprint, target_error = _epub_location_target(db, edition_id, volume)
     if target_error:
         return target_error
@@ -886,9 +1006,11 @@ def save_reader_epub_locations(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
-    _user, auth_error = _auth(db, request, settings)
+    user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    if not can_access_edition(db, user, edition_id):
+        return fail("版本不存在", status_code=404, code="EDITION_NOT_FOUND")
     _edition, _volume_id, expected_fingerprint, target_error = _epub_location_target(db, edition_id, volume)
     if target_error:
         return target_error
@@ -1073,6 +1195,8 @@ def save_progress_v2(
         return auth_error
     if payload.user_id != user.id:
         return fail("READER_USER_MISMATCH", status_code=403)
+    if not can_access_edition(db, user, edition_id):
+        return fail("版本不存在", status_code=404, code="EDITION_NOT_FOUND")
     if "LibraryEdition" not in _tables(db):
         return fail("阅读器数据库尚未初始化", status_code=503)
     edition = _row(db, "SELECT * FROM `LibraryEdition` WHERE `id` = :id", {"id": edition_id})

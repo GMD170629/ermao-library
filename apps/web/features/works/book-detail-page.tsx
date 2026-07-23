@@ -293,6 +293,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const suppressSeriesClickRef = useRef(false);
 
   const [book, setBook] = useState<WorkView | null>(null);
+  const [canManageSystem, setCanManageSystem] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [readingUnits, setReadingUnits] = useState<ReadingUnitView[]>([]);
@@ -348,6 +349,15 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     return () => {
       delete document.documentElement.dataset.shukuWorkDetail;
     };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
+      .then((response) => response.json())
+      .then((payload) => setCanManageSystem(Boolean(payload?.ok && payload.data?.authorization?.canManageSystem)))
+      .catch(() => undefined);
+    return () => controller.abort();
   }, []);
 
   const loadBook = useCallback(() => {
@@ -1178,7 +1188,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                 triggerClassName="!rounded-xl !border-[#ead8cf] !bg-white/80 !shadow-none hover:!border-orange-200"
                 menuClassName="!rounded-xl !border-[#ead8cf]"
               /> : null}
-              <div ref={actionsRef} className="relative">
+              {canManageSystem || currentTab !== 'STRUCTURE' ? <div ref={actionsRef} className="relative">
                 <button
                   type="button"
                   onClick={() => setActionsOpen((open) => !open)}
@@ -1191,47 +1201,51 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                 </button>
                 {actionsOpen ? (
                   <div role="menu" className="absolute right-0 top-full z-40 mt-2 w-60 rounded-2xl border border-stone-200 bg-white p-2 shadow-xl shadow-stone-900/10">
-                    <button type="button" className={menuItemClass} onClick={() => { setActionsOpen(false); setEditingScope('work'); setEditing((value) => !value); }}>
-                      <Edit3 size={16} /> <I18nText>编辑信息</I18nText></button>
-                    <button type="button" className={menuItemClass} onClick={() => { setActionsOpen(false); setMetadataLookupOpen(true); }}>
-                      <Database size={16} /> <I18nText>元数据识别</I18nText></button>
-                    <button type="button" className={menuItemClass} disabled={saving} onClick={() => { setActionsOpen(false); coverInputRef.current?.click(); }}>
-                      <ImageUp size={16} /> <I18nText>上传自定义封面</I18nText></button>
-                    <button
-                      type="button"
-                      className={menuItemClass}
-                      disabled={saving}
-                      onClick={() => {
-                        setActionsOpen(false);
-                        void postAction(`/api/works/${book.id}/cover/regenerate`, '封面已重新生成', { refreshCover: true, refreshBook: true, busyKey: 'regenerateCover' });
-                      }}
-                    >
-                      <RefreshCw size={16} /> <I18nText>重新生成封面</I18nText></button>
+                    {canManageSystem ? <>
+                      <button type="button" className={menuItemClass} onClick={() => { setActionsOpen(false); setEditingScope('work'); setEditing((value) => !value); }}>
+                        <Edit3 size={16} /> <I18nText>编辑信息</I18nText></button>
+                      <button type="button" className={menuItemClass} onClick={() => { setActionsOpen(false); setMetadataLookupOpen(true); }}>
+                        <Database size={16} /> <I18nText>元数据识别</I18nText></button>
+                      <button type="button" className={menuItemClass} disabled={saving} onClick={() => { setActionsOpen(false); coverInputRef.current?.click(); }}>
+                        <ImageUp size={16} /> <I18nText>上传自定义封面</I18nText></button>
+                      <button
+                        type="button"
+                        className={menuItemClass}
+                        disabled={saving}
+                        onClick={() => {
+                          setActionsOpen(false);
+                          void postAction(`/api/works/${book.id}/cover/regenerate`, '封面已重新生成', { refreshCover: true, refreshBook: true, busyKey: 'regenerateCover' });
+                        }}
+                      >
+                        <RefreshCw size={16} /> <I18nText>重新生成封面</I18nText></button>
+                    </> : null}
                     {currentTab !== 'AUDIOBOOK' ? (
                       <button type="button" className={menuItemClass} disabled={!selectedEdition?.id} onClick={() => { setActionsOpen(false); downloadPrimaryEdition(); }}>
                         <Download size={16} /> <I18nText>下载当前版本</I18nText></button>
                     ) : null}
                     {currentTab === 'EBOOK' ? <button type="button" className={menuItemClass} onClick={() => { setActionsOpen(false); setKindleSendOpen(true); }}>
                       <Send size={16} /> <I18nText>发送到 Kindle</I18nText></button> : null}
-                    <div className="my-2 h-px bg-stone-100" />
-                    {book.ignored ? (
-                      <button type="button" className={menuItemClass} disabled={saving} onClick={() => { setActionsOpen(false); void setIgnored(false); }}>
-                        <EyeOff size={16} /> <I18nText>恢复显示</I18nText></button>
-                    ) : (
-                      <button type="button" className={menuItemClass} disabled={saving} onClick={() => { setActionsOpen(false); void setIgnored(true); }}>
-                        <EyeOff size={16} /> <I18nText>从书库隐藏</I18nText></button>
-                    )}
-                    <button type="button" className={cn(menuItemClass, 'text-red-600 hover:bg-red-50 hover:text-red-700')} disabled={saving} onClick={() => { setActionsOpen(false); setDeleteSource(false); setDangerActionOpen(true); }}>
-                      <Trash2 size={16} /> <I18nText>删除记录</I18nText></button>
+                    {canManageSystem ? <>
+                      <div className="my-2 h-px bg-stone-100" />
+                      {book.ignored ? (
+                        <button type="button" className={menuItemClass} disabled={saving} onClick={() => { setActionsOpen(false); void setIgnored(false); }}>
+                          <EyeOff size={16} /> <I18nText>恢复显示</I18nText></button>
+                      ) : (
+                        <button type="button" className={menuItemClass} disabled={saving} onClick={() => { setActionsOpen(false); void setIgnored(true); }}>
+                          <EyeOff size={16} /> <I18nText>从书库隐藏</I18nText></button>
+                      )}
+                      <button type="button" className={cn(menuItemClass, 'text-red-600 hover:bg-red-50 hover:text-red-700')} disabled={saving} onClick={() => { setActionsOpen(false); setDeleteSource(false); setDangerActionOpen(true); }}>
+                        <Trash2 size={16} /> <I18nText>删除记录</I18nText></button>
+                    </> : null}
                   </div>
                 ) : null}
-              </div>
+              </div> : null}
             </div>
           </div>
         </div>
       </section>
 
-      <input
+      {canManageSystem ? <input
         ref={coverInputRef}
         type="file"
         accept="image/jpeg,image/png,image/webp"
@@ -1240,11 +1254,11 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
           void uploadCover(event.target.files?.[0] ?? null);
           event.currentTarget.value = '';
         }}
-      />
+      /> : null}
 
       {message ? <div className="mt-4 text-sm text-emerald-600">{message}</div> : null}
 
-      {editing ? (
+      {canManageSystem && editing ? (
         <section id="work-metadata-editor" className="mt-5 rounded-[22px] border border-stone-200 bg-white p-5 sm:p-6">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -1439,7 +1453,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
               ) : selectedEdition && !selectedEdition.readable ? (
                 <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
                   <span><I18nText>原始 </I18nText>{selectedEdition.formatValue} <I18nText>文件已安全入库，当前阅读器暂不支持直接打开。</I18nText></span>
-                  {selectedEdition.conversionAvailable ? <Button loading={busyAction === `convert:${selectedEdition.id}`} disabled={saving && busyAction !== `convert:${selectedEdition.id}`} onClick={() => void convertEdition(selectedEdition)} className="!rounded-xl !bg-[#ff4f26] !text-white hover:!bg-[#e84420]"><I18nText>转换为 EPUB</I18nText></Button> : null}
+                  {canManageSystem && selectedEdition.conversionAvailable ? <Button loading={busyAction === `convert:${selectedEdition.id}`} disabled={saving && busyAction !== `convert:${selectedEdition.id}`} onClick={() => void convertEdition(selectedEdition)} className="!rounded-xl !bg-[#ff4f26] !text-white hover:!bg-[#e84420]"><I18nText>转换为 EPUB</I18nText></Button> : null}
                 </div>
               ) : (
                 <button type="button" disabled={!readerUrl} onClick={() => {
@@ -1533,9 +1547,9 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                 <h2 className="text-lg font-semibold text-stone-950"><I18nText>版本与内容</I18nText></h2>
                 <p className="mt-1 text-sm text-stone-500">{book.versionCount} <I18nText>个版本 · 覆盖 </I18nText>{detailTabs.filter((tab) => tab.key !== 'STRUCTURE').length} <I18nText>种媒介。管理模式下可调整各媒介主版本和卷册位置。</I18nText></p>
               </div>
-              <Button variant={manageStructure ? 'secondary' : 'primary'} icon={Settings2} onClick={() => setManageStructure((value) => !value)} className={cn('!rounded-xl', !manageStructure && '!bg-[#ff4f26] !text-white hover:!bg-[#e84420]')}>
+              {canManageSystem ? <Button variant={manageStructure ? 'secondary' : 'primary'} icon={Settings2} onClick={() => setManageStructure((value) => !value)} className={cn('!rounded-xl', !manageStructure && '!bg-[#ff4f26] !text-white hover:!bg-[#e84420]')}>
                 {manageStructure ? i18nAttribute("完成管理") : i18nAttribute("管理内容结构")}
-              </Button>
+              </Button> : null}
             </div>
 
             <div className="mt-6 space-y-5">
@@ -1554,7 +1568,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                     {edition.conversion ? <div className="mt-1 text-xs text-[#B45336]"><I18nText>由 </I18nText>{edition.conversion.sourceFormat} <I18nText>自动转换为 </I18nText>{edition.conversion.targetFormat}</div> : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {edition.readable ? <Button variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => openEdition(edition)}>{mediaKindForEdition(edition) === 'AUDIOBOOK' ? i18nAttribute("收听") : mediaKindForEdition(edition) === 'COMIC' ? i18nAttribute("查看") : i18nAttribute("阅读")}</Button> : edition.conversionAvailable ? <Button loading={busyAction === `convert:${edition.id}`} disabled={saving && busyAction !== `convert:${edition.id}`} variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => void convertEdition(edition)}><I18nText>转换为 EPUB</I18nText></Button> : <Button disabled variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5"><I18nText>暂不支持阅读</I18nText></Button>}
+                    {edition.readable ? <Button variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => openEdition(edition)}>{mediaKindForEdition(edition) === 'AUDIOBOOK' ? i18nAttribute("收听") : mediaKindForEdition(edition) === 'COMIC' ? i18nAttribute("查看") : i18nAttribute("阅读")}</Button> : canManageSystem && edition.conversionAvailable ? <Button loading={busyAction === `convert:${edition.id}`} disabled={saving && busyAction !== `convert:${edition.id}`} variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => void convertEdition(edition)}><I18nText>转换为 EPUB</I18nText></Button> : <Button disabled variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5"><I18nText>暂不支持阅读</I18nText></Button>}
                     {manageStructure ? <Button variant="ghost" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => editEdition(edition)}><I18nText>编辑版本</I18nText></Button> : null}
                     {manageStructure && !edition.primary && edition.id !== book.primaryEditionId ? (
                       <Button loading={busyAction === `primary:${edition.id}`} disabled={saving && busyAction !== `primary:${edition.id}`} variant="ghost" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => void postAction(`/api/works/${book.id}/editions/${edition.id}/primary`, '已设为主版本', { refreshBook: true, busyKey: `primary:${edition.id}` })}>
@@ -1591,7 +1605,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         </div>
       )}
 
-      <MetadataLookupModal
+      {canManageSystem ? <MetadataLookupModal
         book={book}
         open={metadataLookupOpen}
         onClose={() => setMetadataLookupOpen(false)}
@@ -1600,7 +1614,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
           void loadBook();
           toast.success('元数据已应用');
         }}
-      />
+      /> : null}
 
       <KindleSendModal
         book={book}
@@ -1609,7 +1623,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         onClose={() => setKindleSendOpen(false)}
       />
 
-      {splitTarget ? <div className="fixed inset-0 z-[95] flex items-end justify-center bg-stone-950/40 p-0 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={i18nAttribute("拆分版本")}>
+      {canManageSystem && splitTarget ? <div className="fixed inset-0 z-[95] flex items-end justify-center bg-stone-950/40 p-0 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={i18nAttribute("拆分版本")}>
         <div className="w-full max-w-lg rounded-t-[26px] border border-stone-200 bg-white p-6 shadow-2xl md:rounded-[26px]">
           <div className="flex items-start justify-between gap-4"><div><h2 className="text-lg font-semibold text-stone-950"><I18nText>拆分为独立作品</I18nText></h2><p className="mt-2 text-sm leading-6 text-stone-600">{i18nAttribute('将“{value0}”及关联的阅读进度移到新作品，文件不会复制或删除。', { value0: splitTarget.versionName })}</p></div><button type="button" onClick={() => setSplitTarget(null)}><X size={18} /></button></div>
           <div className="mt-5 grid gap-4"><label className="text-sm text-stone-600"><I18nText>新作品标题</I18nText><input value={splitForm.title} onChange={(event) => setSplitForm({ ...splitForm, title: event.target.value })} className={inputClassName()} /></label><label className="text-sm text-stone-600"><I18nText>作者</I18nText><input value={splitForm.author} onChange={(event) => setSplitForm({ ...splitForm, author: event.target.value })} className={inputClassName()} /></label><label className="flex items-start gap-3 rounded-xl bg-stone-50 p-4 text-sm text-stone-700"><input type="checkbox" checked={splitForm.copyShelves} onChange={(event) => setSplitForm({ ...splitForm, copyShelves: event.target.checked })} className="mt-0.5 accent-[#ff4f26]" /><span><I18nText>复制原作品的普通书架归属</I18nText><span className="mt-1 block text-xs text-stone-500"><I18nText>智能书架会根据规则自动计算，无需复制。</I18nText></span></span></label></div>
@@ -1617,7 +1631,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         </div>
       </div> : null}
 
-      {moveTargetOpen && movingVolume ? (
+      {canManageSystem && moveTargetOpen && movingVolume ? (
         <div className="fixed inset-0 z-[90] flex items-end justify-center bg-stone-950/40 p-0 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={i18nAttribute("转移图书内容")}>
           <div className="w-full max-w-2xl rounded-t-[26px] border border-stone-200 bg-white p-5 shadow-2xl md:rounded-[26px]">
             <div className="flex items-start justify-between gap-4">
@@ -1671,7 +1685,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         </div>
       ) : null}
 
-      {dangerActionOpen ? (
+      {canManageSystem && dangerActionOpen ? (
         <div className="fixed inset-0 z-[90] flex items-end justify-center bg-stone-950/40 p-0 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={i18nAttribute("删除图书记录")}>
           <div className="w-full max-w-lg rounded-t-[26px] border border-stone-200 bg-white p-5 shadow-2xl md:rounded-[26px]">
             <div className="flex items-start justify-between gap-4">

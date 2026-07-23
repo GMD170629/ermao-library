@@ -28,16 +28,25 @@ def test_first_run_setup_creates_only_one_admin_and_signs_in(client, db_session)
 
     created = client.post(
         "/api/auth/setup",
-        json={"name": "  二毛  ", "email": " OWNER@EXAMPLE.COM ", "password": "initial-password-123"},
+        json={
+            "name": "  二毛  ",
+            "email": " OWNER@EXAMPLE.COM ",
+            "password": "initial-password-123",
+            "locale": "en-US",
+        },
     )
     assert created.status_code == 201
     assert created.json()["data"]["initialized"] is True
     assert created.json()["data"]["user"]["email"] == "owner@example.com"
     assert created.json()["data"]["user"]["name"] == "二毛"
     assert created.json()["data"]["user"]["role"] == "admin"
+    assert created.json()["data"]["user"]["locale"] == "en-US"
     assert "shuku_session" in created.cookies
+    assert created.cookies["shuku_locale"] == "en-US"
     assert client.get("/api/auth/setup/status").json()["data"] == {"initialized": True}
-    assert client.get("/api/auth/me").status_code == 200
+    me = client.get("/api/auth/me")
+    assert me.status_code == 200
+    assert me.json()["data"]["user"]["locale"] == "en-US"
 
     duplicate = client.post(
         "/api/auth/setup",

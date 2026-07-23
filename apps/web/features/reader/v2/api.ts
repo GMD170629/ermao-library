@@ -9,6 +9,7 @@ import type {
   ReaderEditionSummary
 } from '../../../generated/reader-v2';
 import { withBasePath } from '../../../lib/base-path';
+import type { ReaderBookmark } from './bookmarks';
 
 type ReaderWireLocation = EpubLocation | ComicLocation | PdfLocation;
 type VisualReaderType = 'epub' | 'comic' | 'pdf';
@@ -103,4 +104,39 @@ export async function fetchReaderBootstrap(
     },
     initialLocation
   };
+}
+
+export async function fetchReaderBookmarks(
+  editionId: string,
+  contentFingerprint: string,
+  signal?: AbortSignal
+): Promise<ReaderBookmark[]> {
+  const query = new URLSearchParams({ contentFingerprint });
+  const response = await fetch(
+    `/api/reader/v2/editions/${encodeURIComponent(editionId)}/bookmarks?${query}`,
+    { credentials: 'same-origin', cache: 'no-store', signal }
+  );
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.ok || !Array.isArray(payload.data?.bookmarks)) {
+    throw new Error(payload?.error?.message ?? '读取书签失败');
+  }
+  return payload.data.bookmarks as ReaderBookmark[];
+}
+
+export async function saveReaderBookmarks(
+  editionId: string,
+  contentFingerprint: string,
+  bookmarks: ReaderBookmark[]
+): Promise<ReaderBookmark[]> {
+  const response = await fetch(`/api/reader/v2/editions/${encodeURIComponent(editionId)}/bookmarks`, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contentFingerprint, bookmarks })
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.ok || !Array.isArray(payload.data?.bookmarks)) {
+    throw new Error(payload?.error?.message ?? '保存书签失败');
+  }
+  return payload.data.bookmarks as ReaderBookmark[];
 }

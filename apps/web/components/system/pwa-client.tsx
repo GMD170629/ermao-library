@@ -9,6 +9,7 @@ import { prepareForPwaUpdate } from '../../lib/pwa/update-coordination';
 import { activateReaderV2User, clearPrivateReaderV2Data, deactivateReaderV2User, getReaderV2Runtime, startReaderV2Runtime, stopReaderV2Runtime } from '../../lib/reader-v2';
 import { withBasePath } from '../../lib/base-path';
 import { PRODUCT_NAME } from '../../lib/brand';
+import { clearCurrentUserNamespace, setCurrentUserNamespace, userDevicePreferenceKey } from '../../lib/user-preferences';
 import { cn } from '../ui/cn';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
@@ -49,12 +50,15 @@ function isIosSafari() {
 function canShowInstallHint() {
   if (typeof window === 'undefined') return false;
   if (isStandaloneDisplay()) return false;
-  return localStorage.getItem(INSTALL_ACCEPTED_KEY) !== '1' && localStorage.getItem(INSTALL_DISMISSED_KEY) !== '1';
+  return localStorage.getItem(userDevicePreferenceKey(INSTALL_ACCEPTED_KEY)) !== '1'
+    && localStorage.getItem(userDevicePreferenceKey(INSTALL_DISMISSED_KEY)) !== '1';
 }
 
 export async function clearPrivatePwaStorage() {
   window.dispatchEvent(new CustomEvent('shuku:private-data-clearing'));
+  navigator.serviceWorker?.controller?.postMessage({ type: 'CLEAR_PRIVATE_CACHES' });
   deactivateReaderV2User();
+  clearCurrentUserNamespace();
   const runtime = getReaderV2Runtime();
   await Promise.all([clearPrivatePwaData(), clearPrivateReaderV2Data(runtime.storage)]);
 }
@@ -63,8 +67,19 @@ async function refreshAuthenticatedReaderV2User(signal?: AbortSignal) {
   const response = await fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin', signal });
   const payload = await response.json().catch(() => null);
   const userId = payload?.ok && typeof payload.data?.user?.id === 'string' ? payload.data.user.id : '';
-  if (userId) activateReaderV2User(userId);
-  else if (response.status === 401) deactivateReaderV2User();
+  if (userId) {
+    const authzVersion = Number(payload?.data?.authorization?.authzVersion ?? 1);
+    activateReaderV2User(userId);
+    setCurrentUserNamespace(userId, authzVersion);
+    navigator.serviceWorker?.controller?.postMessage({
+      type: 'SET_PRIVATE_CACHE_NAMESPACE',
+      userId,
+      authzVersion
+    });
+  } else if (response.status === 401) {
+    deactivateReaderV2User();
+    clearCurrentUserNamespace();
+  }
 }
 
 export function PwaClient() {
@@ -77,7 +92,21 @@ export function PwaClient() {
   const [activatingUpdate, setActivatingUpdate] = useState(false);
   const refreshingRef = useRef(false);
   const restoreTimerRef = useRef<number | null>(null);
-  const showInstallPrompt = useMemo(() => Boolean(installEvent) || showIosHint, [installEvent, showIosHint]);
+  const installPromptAllowed = useMemo(
+    () => !(
+      pathname === '/login'
+      || pathname === '/setup'
+      || pathname === '/forgot-password'
+      || pathname === '/reset-password'
+      || pathname.startsWith('/reader/')
+      || pathname.startsWith('/listen/')
+    ),
+    [pathname]
+  );
+  const showInstallPrompt = useMemo(
+    () => installPromptAllowed && (Boolean(installEvent) || showIosHint),
+    [installEvent, installPromptAllowed, showIosHint]
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -108,7 +137,7 @@ export function PwaClient() {
     }
 
     function onAppInstalled() {
-      localStorage.setItem(INSTALL_ACCEPTED_KEY, '1');
+      localStorage.setItem(userDevicePreferenceKey(INSTALL_ACCEPTED_KEY), '1');
       setInstallEvent(null);
       setShowIosHint(false);
     }
@@ -157,15 +186,15 @@ export function PwaClient() {
     await installEvent.prompt();
     const choice = await installEvent.userChoice.catch(() => null);
     if (choice?.outcome === 'accepted') {
-      localStorage.setItem(INSTALL_ACCEPTED_KEY, '1');
+      localStorage.setItem(userDevicePreferenceKey(INSTALL_ACCEPTED_KEY), '1');
     } else {
-      localStorage.setItem(INSTALL_DISMISSED_KEY, '1');
+      localStorage.setItem(userDevicePreferenceKey(INSTALL_DISMISSED_KEY), '1');
     }
     setInstallEvent(null);
   }
 
   function dismissInstallPrompt() {
-    localStorage.setItem(INSTALL_DISMISSED_KEY, '1');
+    localStorage.setItem(userDevicePreferenceKey(INSTALL_DISMISSED_KEY), '1');
     setInstallEvent(null);
     setShowIosHint(false);
   }
@@ -265,14 +294,14 @@ function shouldEnablePwaDebug() {
   const params = new URLSearchParams(window.location.search);
   const requested = params.get('debug') ?? params.get('pwaDebug');
   if (requested === '1' || requested === 'true') {
-    localStorage.setItem(PWA_DEBUG_ENABLED_KEY, '1');
+    localStorage.setItem(userDevicePreferenceKey(PWA_DEBUG_ENABLED_KEY), '1');
     return true;
   }
   if (requested === '0' || requested === 'false') {
-    localStorage.removeItem(PWA_DEBUG_ENABLED_KEY);
+    localStorage.removeItem(userDevicePreferenceKey(PWA_DEBUG_ENABLED_KEY));
     return false;
   }
-  return localStorage.getItem(PWA_DEBUG_ENABLED_KEY) === '1';
+  return localStorage.getItem(userDevicePreferenceKey(PWA_DEBUG_ENABLED_KEY)) === '1';
 }
 
 function stringifyDebugValue(value: unknown) {
@@ -425,7 +454,7 @@ function PwaDebugPanel() {
   }, [appendLog, enabled]);
 
   function disableDebug() {
-    localStorage.removeItem(PWA_DEBUG_ENABLED_KEY);
+    localStorage.removeItem(userDevicePreferenceKey(PWA_DEBUG_ENABLED_KEY));
     setEnabled(false);
   }
 

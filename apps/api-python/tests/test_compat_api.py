@@ -1522,13 +1522,13 @@ def test_bulk_reading_status_clears_or_finishes_all_progress(client, db_session)
     assert unread.status_code == 200
     assert db_session.execute(text("SELECT COUNT(*) FROM LibraryReadingProgress WHERE workId = 'bulk-manage-1'")).scalar() == 0
     assert db_session.execute(text("SELECT COUNT(*) FROM LibraryConsumptionState WHERE workId = 'bulk-manage-1'")).scalar() == 0
-    assert db_session.execute(text("SELECT status FROM LibraryWork WHERE id = 'bulk-manage-1'")).scalar() == "UNREAD"
+    assert db_session.execute(text("SELECT status FROM LibraryWork WHERE id = 'bulk-manage-1'")).scalar() == "READING"
 
     finished = client.post("/api/works/bulk", json={"ids": ["bulk-manage-1"], "action": "reading_status", "status": "FINISHED"})
     assert finished.status_code == 200
     assert db_session.execute(text("SELECT percent FROM LibraryReadingProgress WHERE workId = 'bulk-manage-1'")).scalar() == 100
     assert db_session.execute(text("SELECT status FROM LibraryConsumptionState WHERE workId = 'bulk-manage-1'")).scalar() == "FINISHED"
-    assert db_session.execute(text("SELECT status FROM LibraryWork WHERE id = 'bulk-manage-1'")).scalar() == "FINISHED"
+    assert db_session.execute(text("SELECT status FROM LibraryWork WHERE id = 'bulk-manage-1'")).scalar() == "READING"
 
 
 def test_bulk_cover_crop_compress_replace_and_regenerate(client, db_session, test_settings):
@@ -2453,7 +2453,8 @@ def test_organize_jobs_return_frontend_contract(client, db_session):
     assert db_session.execute(text("SELECT COUNT(*) FROM LibraryWork WHERE id = 'work-contract'")).scalar() == 1
 
 
-def test_manual_organize_creation_routes_are_not_exposed(client):
+def test_manual_organize_creation_routes_are_not_exposed(client, db_session):
+    _login(client, db_session)
     assert client.post("/api/organize/runs", json={}).status_code == 405
     assert client.post("/api/organize/jobs", json={"workIds": ["work-1"]}).status_code == 405
 
@@ -2668,14 +2669,15 @@ def test_monitor_folder_and_system_settings_mutations(client, db_session, test_s
 
     created = client.post(
         "/api/monitor-folders",
-        json={"name": "Inbox", "rootPath": str(test_settings.resolved_monitor_root), "shelfId": "auto-shelf", "enabled": True},
+        json={"name": "Inbox", "rootPath": str(test_settings.resolved_monitor_root), "enabled": True},
     )
     assert created.status_code == 201
     folder_id = created.json()["data"]["folder"]["id"]
-    assert created.json()["data"]["folder"]["shelfId"] == "auto-shelf"
+    assert created.json()["data"]["folder"]["shelfId"] is None
 
-    invalid_shelf = client.put(f"/api/monitor-folders/{folder_id}", json={"shelfId": "missing-shelf"})
-    assert invalid_shelf.status_code == 400
+    retired_shelf_binding = client.put(f"/api/monitor-folders/{folder_id}", json={"shelfId": "auto-shelf"})
+    assert retired_shelf_binding.status_code == 400
+    assert retired_shelf_binding.json()["error"]["code"] == "MONITOR_FOLDER_SHELF_RETIRED"
 
     duplicate = client.post(
         "/api/monitor-folders",
@@ -2702,12 +2704,8 @@ def test_monitor_folder_and_system_settings_mutations(client, db_session, test_s
     updated = client.put(f"/api/monitor-folders/{folder_id}", json={"enabled": False})
     assert updated.status_code == 200
     assert updated.json()["data"]["folder"]["enabled"] is False
-    assert updated.json()["data"]["folder"]["shelfId"] == "auto-shelf"
+    assert updated.json()["data"]["folder"]["shelfId"] is None
     assert updated.json()["data"]["folder"]["updatedAt"]
-
-    cleared = client.put(f"/api/monitor-folders/{folder_id}", json={"shelfId": None})
-    assert cleared.status_code == 200
-    assert cleared.json()["data"]["folder"]["shelfId"] is None
 
     settings = client.put("/api/system-settings", json={"settings": {"readerTheme": "dark"}})
     assert settings.status_code == 200

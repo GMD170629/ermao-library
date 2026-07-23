@@ -10,6 +10,7 @@ import {
   getReaderV2Runtime,
   migrateLegacyBrowserReaderState
 } from '../../../lib/reader-v2';
+import { readDeviceReaderPreferences } from '../../../lib/reader-device-preferences';
 import { withBasePath } from '../../../lib/base-path';
 import { DEFAULT_READER_THEME, readerThemeSurfaces } from '../reader-theme';
 import { fetchReaderBootstrap, type ReaderBootstrap } from './api';
@@ -261,10 +262,14 @@ export function ReaderV2Page({ editionId }: { editionId: string }) {
           clientSequence: localResume.clientSequence
         });
       }
+      const deviceDefault = readDeviceReaderPreferences(
+        bootstrap.userId,
+        bootstrap.serverPreferences.settings
+      );
       const resolved = await runtime.preferences.resolve(
         bootstrap.userId,
         bootstrap.edition.workId,
-        bootstrap.serverPreferences.settings
+        deviceDefault
       );
       if (controller.signal.aborted) return;
       if (bootstrap.resumeFingerprintMismatch) {
@@ -308,7 +313,7 @@ export function ReaderV2Page({ editionId }: { editionId: string }) {
       bootstrap.userId,
       bootstrap.edition.workId,
       preferences,
-      bootstrap.serverPreferences.settings
+      readDeviceReaderPreferences(bootstrap.userId, bootstrap.serverPreferences.settings)
     ).catch((reason) => {
       setStorageError(reason instanceof Error ? reason.message : '本机阅读设置保存失败');
     });
@@ -321,7 +326,7 @@ export function ReaderV2Page({ editionId }: { editionId: string }) {
       const preferences = await runtime.preferences.reset(
         bootstrap.userId,
         bootstrap.edition.workId,
-        bootstrap.serverPreferences.settings
+        readDeviceReaderPreferences(bootstrap.userId, bootstrap.serverPreferences.settings)
       );
       dispatch({ type: 'preferences', preferences });
       setStorageError('');

@@ -2,6 +2,15 @@ def test_health_response_shape(client, test_settings):
     monitor = test_settings.resolved_monitor_root
     assert monitor is not None
     monitor.mkdir(parents=True)
+    setup = client.post(
+        "/api/auth/setup",
+        json={
+            "name": "Administrator",
+            "email": "admin@example.com",
+            "password": "starshipnas",
+        },
+    )
+    assert setup.status_code == 201
 
     response = client.get("/api/system/health")
 

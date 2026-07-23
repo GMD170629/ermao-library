@@ -19,7 +19,7 @@ from app.services.book_identity import UNKNOWN_AUTHOR, identity_merge_key, norma
 
 LOGGER = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 12
+CURRENT_SCHEMA_VERSION = 13
 DEFAULT_SYSTEM_NAME = "二毛图书"
 LEGACY_DEFAULT_SYSTEM_NAMES = {"书库星舰", "书栖"}
 IDENTITY_MIGRATION_SETTING = "migration.libraryIdentityVersion"
@@ -28,6 +28,8 @@ METADATA_TITLE_MATCH_MIGRATION_SETTING = "migration.metadataTitleMatchVersion"
 METADATA_TITLE_MATCH_MIGRATION_VERSION = "1"
 LIBRARY_FACET_BACKFILL_SETTING = "migration.libraryFacetBackfillVersion"
 LIBRARY_FACET_BACKFILL_VERSION = "1"
+LEGACY_READING_STATUS_OWNER_SETTING = "migration.multiUserLegacyReadingStatusOwnerId"
+LEGACY_KINDLE_EMAIL_OWNER_SETTING = "migration.personalKindleEmailOwnerId"
 
 
 def _decoded_setting_value(value: object) -> object:
@@ -579,6 +581,209 @@ def _migrate_schema_v12(connection: sqlite3.Connection) -> None:
         )
 
 
+def _migrate_schema_v13(connection: sqlite3.Connection) -> None:
+    """Add multi-user authorization, account preferences, shelf ownership, and bookmarks."""
+
+    user_columns = connection.execute("PRAGMA table_info(`User`)").fetchall() if _table_exists(connection, "User") else []
+    role_column = next((row for row in user_columns if str(row[1]) == "role"), None)
+    role_default = str(role_column[4] or "").strip("'\"").lower() if role_column is not None else ""
+    if role_column is not None and role_default != "member":
+        # SQLite cannot alter a column default directly. Replacing this
+        # non-key column in place preserves the User table identity and all
+        # incoming foreign keys while removing the legacy implicit-admin
+        # default.
+        connection.execute("ALTER TABLE `User` RENAME COLUMN `role` TO `roleV12`")
+        connection.execute("ALTER TABLE `User` ADD COLUMN `role` TEXT NOT NULL DEFAULT 'member'")
+        connection.execute(
+            "UPDATE `User` SET `role` = CASE "
+            "WHEN LOWER(COALESCE(`roleV12`, '')) = 'admin' THEN 'admin' ELSE 'member' END"
+        )
+        connection.execute("ALTER TABLE `User` DROP COLUMN `roleV12`")
+
+    _add_missing_columns(
+        connection,
+        "User",
+        {
+            "status": "TEXT NOT NULL DEFAULT 'active'",
+            "canManageSystem": "INTEGER NOT NULL DEFAULT 0",
+            "canViewManualImports": "INTEGER NOT NULL DEFAULT 0",
+            "authzVersion": "INTEGER NOT NULL DEFAULT 1",
+        },
+    )
+    _add_missing_columns(connection, "Shelf", {"ownerUserId": "TEXT NULL"})
+    _add_missing_columns(connection, "KindleSendTask", {"userId": "TEXT NULL"})
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS `UserMonitorFolderAccess` (
+            `userId` TEXT NOT NULL,
+            `monitorFolderId` TEXT NOT NULL,
+            `createdAt` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`userId`, `monitorFolderId`),
+            FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+            FOREIGN KEY (`monitorFolderId`) REFERENCES `MonitorFolder`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS `UserPreference` (
+            `userId` TEXT NOT NULL,
+            `key` TEXT NOT NULL,
+            `value` TEXT NOT NULL,
+            `createdAt` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updatedAt` TEXT NOT NULL,
+            PRIMARY KEY (`userId`, `key`),
+            FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS `ReaderBookmark` (
+            `id` TEXT NOT NULL,
+            `userId` TEXT NOT NULL,
+            `workId` TEXT NOT NULL,
+            `editionId` TEXT NOT NULL,
+            `contentFingerprint` TEXT NOT NULL,
+            `bookmarkId` TEXT NOT NULL,
+            `locationJson` TEXT NOT NULL,
+            `label` TEXT NOT NULL,
+            `percent` REAL NOT NULL DEFAULT 0,
+            `bookmarkCreatedAt` TEXT NOT NULL,
+            `createdAt` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updatedAt` TEXT NOT NULL,
+            PRIMARY KEY (`id`),
+            FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+            FOREIGN KEY (`workId`) REFERENCES `LibraryWork`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+            FOREIGN KEY (`editionId`) REFERENCES `LibraryEdition`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
+        )
+        """
+    )
+
+    first_user = connection.execute(
+        "SELECT `id` FROM `User` ORDER BY CAST(`createdAt` AS INTEGER) ASC, `id` ASC LIMIT 1"
+    ).fetchone() if _table_exists(connection, "User") else None
+    if first_user is not None:
+        first_user_id = str(first_user[0])
+        active_admin = connection.execute(
+            "SELECT 1 FROM `User` WHERE `role` = 'admin' AND COALESCE(`status`, 'active') = 'active' LIMIT 1"
+        ).fetchone()
+        if active_admin is None:
+            connection.execute(
+                "UPDATE `User` SET `role` = 'admin', `updatedAt` = CURRENT_TIMESTAMP WHERE `id` = ?",
+                (first_user_id,),
+            )
+        if _table_exists(connection, "Shelf"):
+            connection.execute(
+                "UPDATE `Shelf` SET `ownerUserId` = ? WHERE `ownerUserId` IS NULL",
+                (first_user_id,),
+            )
+        if _table_exists(connection, "KindleSendTask"):
+            connection.execute(
+                "UPDATE `KindleSendTask` SET `userId` = ? WHERE `userId` IS NULL",
+                (first_user_id,),
+            )
+
+        language_row = connection.execute(
+            "SELECT `value` FROM `SystemSetting` WHERE `key` = 'language' LIMIT 1"
+        ).fetchone() if _table_exists(connection, "SystemSetting") else None
+        language_value = str(language_row[0]) if language_row is not None else json.dumps(DEFAULT_LOCALE)
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO `UserPreference`
+                (`userId`, `key`, `value`, `createdAt`, `updatedAt`)
+            SELECT `id`, 'locale', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM `User`
+            """,
+            (language_value,),
+        )
+
+        if _table_exists(connection, "MonitorFolder") and _table_exists(connection, "Shelf"):
+            links = connection.execute(
+                "SELECT `shelfId`, `id` FROM `MonitorFolder` WHERE `shelfId` IS NOT NULL ORDER BY `id`"
+            ).fetchall()
+            folders_by_shelf: dict[str, list[str]] = {}
+            for shelf_id, folder_id in links:
+                folders_by_shelf.setdefault(str(shelf_id), []).append(str(folder_id))
+            for shelf_id, folder_ids in folders_by_shelf.items():
+                shelf_row = connection.execute(
+                    "SELECT `rulesJson` FROM `Shelf` WHERE `id` = ?",
+                    (shelf_id,),
+                ).fetchone()
+                if shelf_row is None:
+                    continue
+                try:
+                    rules = json.loads(str(shelf_row[0] or "{}"))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    rules = {}
+                current_members = [
+                    str(row[0])
+                    for row in connection.execute(
+                        "SELECT `workId` FROM `ShelfWork` WHERE `shelfId` = ?",
+                        (shelf_id,),
+                    ).fetchall()
+                ] if _table_exists(connection, "ShelfWork") else []
+                included_work_ids: list[str] = []
+                for work_id in current_members:
+                    source_match = None
+                    placeholders = ", ".join("?" for _folder_id in folder_ids)
+                    if _table_exists(connection, "LibraryEdition"):
+                        source_match = connection.execute(
+                            "SELECT 1 FROM `LibraryEdition` WHERE `workId` = ? "
+                            f"AND `monitorFolderId` IN ({placeholders}) LIMIT 1",
+                            (work_id, *folder_ids),
+                        ).fetchone()
+                    if source_match is None and _table_exists(connection, "LibraryWork"):
+                        source_match = connection.execute(
+                            "SELECT 1 FROM `LibraryWork` WHERE `id` = ? "
+                            f"AND `monitorFolderId` IN ({placeholders}) LIMIT 1",
+                            (work_id, *folder_ids),
+                        ).fetchone()
+                    if source_match is None:
+                        included_work_ids.append(work_id)
+                source_conditions = [
+                    {"field": "monitorFolder", "operator": "equals", "value": folder_id}
+                    for folder_id in folder_ids
+                ]
+                rules.update(
+                    {
+                        "combinator": "ANY",
+                        "conditions": source_conditions,
+                        "includedWorkIds": included_work_ids,
+                    }
+                )
+                connection.execute(
+                    "UPDATE `Shelf` SET `kind` = 'SMART', `rulesJson` = ?, `updatedAt` = CURRENT_TIMESTAMP WHERE `id` = ?",
+                    (json.dumps(rules, ensure_ascii=False, separators=(",", ":")), shelf_id),
+                )
+            connection.execute("UPDATE `MonitorFolder` SET `shelfId` = NULL WHERE `shelfId` IS NOT NULL")
+
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS `UserMonitorFolderAccess_folder_idx` "
+        "ON `UserMonitorFolderAccess`(`monitorFolderId`)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS `UserPreference_userId_idx` ON `UserPreference`(`userId`)"
+    )
+    if _table_exists(connection, "Shelf"):
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS `Shelf_ownerUserId_updatedAt_idx` "
+            "ON `Shelf`(`ownerUserId`, `updatedAt`)"
+        )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS `ReaderBookmark_user_edition_idx` "
+        "ON `ReaderBookmark`(`userId`, `editionId`)"
+    )
+    connection.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS `ReaderBookmark_user_edition_fingerprint_bookmark_key` "
+        "ON `ReaderBookmark`(`userId`, `editionId`, `contentFingerprint`, `bookmarkId`)"
+    )
+    if _table_exists(connection, "KindleSendTask"):
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS `KindleSendTask_userId_createdAt_idx` "
+            "ON `KindleSendTask`(`userId`, `createdAt`)"
+        )
+
+
 def _timestamp_trigger_expression(column: str) -> str:
     value = f"CAST(NEW.`{column}` AS TEXT)"
     numeric = f"TRIM({value}) NOT GLOB '*[^0-9]*' AND LENGTH(TRIM({value})) > 0"
@@ -632,6 +837,7 @@ SCHEMA_MIGRATIONS: dict[int, SchemaMigration] = {
     10: _migrate_schema_v10,
     11: _migrate_schema_v11,
     12: _migrate_schema_v12,
+    13: _migrate_schema_v13,
 }
 
 REQUIRED_COLUMNS_BY_VERSION: dict[int, dict[str, set[str]]] = {
@@ -674,6 +880,14 @@ REQUIRED_COLUMNS_BY_VERSION: dict[int, dict[str, set[str]]] = {
     10: {},
     11: {},
     12: {},
+    13: {
+        "User": {"status", "canManageSystem", "canViewManualImports", "authzVersion"},
+        "Shelf": {"ownerUserId"},
+        "UserMonitorFolderAccess": {"userId", "monitorFolderId"},
+        "UserPreference": {"userId", "key", "value"},
+        "ReaderBookmark": {"userId", "editionId", "contentFingerprint", "bookmarkId"},
+        "KindleSendTask": {"userId"},
+    },
 }
 
 
@@ -788,6 +1002,7 @@ def apply_schema(engine: Engine, settings: Settings | None = None) -> None:
 def seed_baseline_data(db: Session) -> None:
     now = datetime.now()
     seed_reader_progress_cursors(db)
+    migrate_global_kindle_email_to_original_admin(db)
     migrate_library_reading_statuses(db)
     backfill_library_consumption_states(db)
     backfill_library_identity_keys(db)
@@ -841,6 +1056,60 @@ def seed_baseline_data(db: Session) -> None:
     LOGGER.info("database bootstrap complete")
 
 
+def migrate_global_kindle_email_to_original_admin(db: Session) -> int:
+    """Move the legacy global Kindle recipient to the original administrator once."""
+
+    tables = {
+        str(item)
+        for item in db.execute(text("SELECT `name` FROM sqlite_master WHERE type = 'table'")).scalars()
+    }
+    if not {"User", "UserPreference", "SystemSetting"}.issubset(tables):
+        return 0
+    marker = db.execute(
+        text("SELECT `value` FROM `SystemSetting` WHERE `key` = :key"),
+        {"key": LEGACY_KINDLE_EMAIL_OWNER_SETTING},
+    ).mappings().first()
+    if marker is not None:
+        return 0
+    owner_id = db.execute(
+        text(
+            "SELECT `id` FROM `User` WHERE `role` = 'admin' "
+            "ORDER BY `createdAt` ASC, `id` ASC LIMIT 1"
+        )
+    ).scalar()
+    legacy_email = _decoded_setting_value(
+        db.execute(
+            text("SELECT `value` FROM `SystemSetting` WHERE `key` = 'kindle.email'")
+        ).scalar()
+    )
+    migrated = 0
+    if owner_id and isinstance(legacy_email, str) and legacy_email.strip():
+        db.execute(
+            text(
+                "INSERT INTO `UserPreference` (`userId`, `key`, `value`, `createdAt`, `updatedAt`) "
+                "VALUES (:user_id, 'kindle.email', :value, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+                "ON CONFLICT (`userId`, `key`) DO NOTHING"
+            ),
+            {
+                "user_id": str(owner_id),
+                "value": json.dumps(legacy_email.strip().lower(), ensure_ascii=False),
+            },
+        )
+        migrated = 1
+    db.execute(
+        text(
+            "INSERT INTO `SystemSetting` (`key`, `value`, `createdAt`, `updatedAt`) "
+            "VALUES (:key, :value, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        ),
+        {
+            "key": LEGACY_KINDLE_EMAIL_OWNER_SETTING,
+            "value": json.dumps(str(owner_id) if owner_id else None),
+        },
+    )
+    db.commit()
+    return migrated
+
+
 def migrate_library_reading_statuses(db: Session) -> int:
     """Replace the legacy WANT state with the explicit UNREAD lifecycle state."""
 
@@ -863,7 +1132,31 @@ def backfill_library_consumption_states(db: Session) -> int:
     required = {"User", "LibraryWork", "LibraryEdition", "LibraryConsumptionState"}
     if not required.issubset(table_names):
         return 0
-    users = [str(item) for item in db.execute(text("SELECT `id` FROM `User`")).scalars()]
+    users = [
+        str(item)
+        for item in db.execute(
+            text("SELECT `id` FROM `User` ORDER BY `createdAt` ASC, `id` ASC")
+        ).scalars()
+    ]
+    legacy_owner_value = db.execute(
+        text("SELECT `value` FROM `SystemSetting` WHERE `key` = :key"),
+        {"key": LEGACY_READING_STATUS_OWNER_SETTING},
+    ).scalar() if "SystemSetting" in table_names else None
+    legacy_owner_id = _decoded_setting_value(legacy_owner_value)
+    legacy_owner_id = str(legacy_owner_id) if legacy_owner_id else None
+    if legacy_owner_id is None and users and "SystemSetting" in table_names:
+        legacy_owner_id = users[0]
+        db.execute(
+            text(
+                "INSERT INTO `SystemSetting` (`key`, `value`, `createdAt`, `updatedAt`) "
+                "VALUES (:key, :value, :now, :now)"
+            ),
+            {
+                "key": LEGACY_READING_STATUS_OWNER_SETTING,
+                "value": json.dumps(legacy_owner_id),
+                "now": datetime.now(),
+            },
+        )
     works = [dict(item) for item in db.execute(text("SELECT * FROM `LibraryWork`")).mappings()]
     editions = [dict(item) for item in db.execute(text("SELECT * FROM `LibraryEdition` WHERE COALESCE(`hidden`, 0) = 0")).mappings()]
     editions_by_work: dict[str, list[dict[str, object]]] = {}
@@ -898,6 +1191,13 @@ def backfill_library_consumption_states(db: Session) -> int:
             work_editions = editions_by_work.get(work_id, [])
             primary_id = str(work.get("primaryEditionId") or "")
             primary_kind = edition_kind.get(primary_id)
+            if primary_kind is None:
+                legacy_primary = next(
+                    (item for item in work_editions if bool(item.get("primary"))),
+                    work_editions[0] if work_editions else None,
+                )
+                if legacy_primary is not None:
+                    primary_kind = edition_kind.get(str(legacy_primary["id"]))
             for media_kind in sorted({edition_kind[str(item["id"])] for item in work_editions}):
                 key = (user_id, work_id, media_kind)
                 if key in existing:
@@ -921,6 +1221,8 @@ def backfill_library_consumption_states(db: Session) -> int:
                         else None
                     )
                 else:
+                    if user_id != legacy_owner_id:
+                        continue
                     status = (
                         str(work.get("status") or "UNREAD").upper().replace("WANT", "UNREAD")
                         if media_kind == primary_kind

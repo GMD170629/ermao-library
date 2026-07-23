@@ -9,7 +9,8 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
     expect(route.request().postDataJSON()).toEqual({
       name: '二毛',
       email: 'owner@example.com',
-      password: 'initial-password-123'
+      password: 'initial-password-123',
+      locale: 'zh-CN'
     });
     await route.fulfill({
       status: 201,
@@ -112,26 +113,26 @@ test('login shows password errors in the system feedback style and in Chinese', 
   await page.goto('/login');
   await page.getByLabel('邮箱').fill('owner@example.com');
   await page.getByRole('button', { name: '登录' }).click();
-  await expect(page.getByRole('alert')).toHaveText('请输入登录密码');
+  await expect(page.getByRole('alert').filter({ hasText: '请输入登录密码' })).toHaveText('请输入登录密码');
 
   await page.getByLabel('密码').fill('wrong-password');
   await page.getByRole('button', { name: '登录' }).click();
-  const alert = page.getByRole('alert');
+  const alert = page.getByRole('alert').filter({ hasText: '邮箱或密码不正确' });
   await expect(alert).toHaveText('邮箱或密码不正确');
   await expect(alert).toHaveClass(/bg-red-50/);
 });
 
 test('login recovers to setup when the initial status check was unavailable', async ({ page }) => {
-  let statusRequests = 0;
+  let loginAttempted = false;
   await page.route('**/api/auth/setup/status', async (route) => {
-    statusRequests += 1;
-    if (statusRequests === 1) {
+    if (!loginAttempted) {
       await route.fulfill({ status: 503, json: { ok: false, error: { message: '暂时不可用' } } });
       return;
     }
     await route.fulfill({ json: { ok: true, data: { initialized: false } } });
   });
   await page.route('**/api/auth/login', async (route) => {
+    loginAttempted = true;
     await route.fulfill({
       status: 409,
       json: { ok: false, error: { message: '系统尚未初始化', details: { code: 'SETUP_REQUIRED' } } }

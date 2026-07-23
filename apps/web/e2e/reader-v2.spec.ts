@@ -127,7 +127,22 @@ async function mockReaderApi(
       return;
     }
     if (url.pathname === '/api/auth/me') {
-      await route.fulfill({ json: { ok: true, data: { user: { id: 'user-e2e', email: 'e2e@example.com', name: 'E2E', role: 'admin' } } } });
+      await route.fulfill({
+        json: {
+          ok: true,
+          data: {
+            user: { id: 'user-e2e', email: 'e2e@example.com', name: 'E2E', role: 'admin' },
+            authorization: {
+              isAdmin: true,
+              canManageSystem: true,
+              allLibraryScopes: true,
+              monitorFolderIds: [],
+              canViewManualImports: true,
+              authzVersion: 1
+            }
+          }
+        }
+      });
       return;
     }
     await route.fulfill({ json: { ok: true, data: {} } });
@@ -202,7 +217,7 @@ async function waitForReaderReady(page: Page) {
 
 test.beforeEach(async ({ context }) => {
   await context.addCookies([{ name: 'shuku_session', value: 'e2e-session', domain: '127.0.0.1', path: '/' }]);
-  await context.addInitScript(() => localStorage.setItem('shuku:pwa:install-dismissed', '1'));
+  await context.addInitScript(() => localStorage.setItem('shuku:pwa:install-dismissed:user-e2e', '1'));
 });
 
 test('browser reader uses the dynamic viewport and control overlays keep the canvas stable', async ({ page }) => {

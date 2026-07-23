@@ -16,6 +16,7 @@ import { SmartFilterBuilder, type SmartFilterField, type SmartFilterRules } from
 import { UploadBookDialog } from './upload-book-dialog';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
+import { currentUserId, saveAccountPreferences, userDevicePreferenceKey } from '../../lib/user-preferences';
 
 type BooksResponse = {
   ok: boolean;
@@ -135,7 +136,9 @@ export function LibraryPage() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
-  const [uploadDialogOpen, setUploadDialogOpen] = useState(searchParams.get('upload') === '1');
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [canManageSystem, setCanManageSystem] = useState(false);
+  const [authorizationLoaded, setAuthorizationLoaded] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<WorkView | null>(null);
   const [deleteSource, setDeleteSource] = useState(false);
@@ -173,8 +176,23 @@ export function LibraryPage() {
   }, [formatFilter, search, seriesNameFilter, smartFilterQuery, sort, sortDirection, statusFilter]);
 
   useEffect(() => {
-    const savedView = window.localStorage.getItem('shuku.library.view');
-    if (savedView === 'grid' || savedView === 'list') setView(savedView);
+    const controller = new AbortController();
+    Promise.all([
+      fetch('/api/auth/preferences', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
+        .then((response) => response.json())
+        .catch(() => null),
+      fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
+        .then((response) => response.json())
+        .catch(() => null)
+    ]).then(([preferencesPayload, sessionPayload]) => {
+      const accountView = preferencesPayload?.ok ? preferencesPayload.data?.preferences?.['library.view'] : null;
+      const deviceView = window.localStorage.getItem(userDevicePreferenceKey('shuku.library.view'));
+      const savedView = accountView ?? deviceView;
+      if (savedView === 'grid' || savedView === 'list') setView(savedView);
+      setCanManageSystem(Boolean(sessionPayload?.ok && sessionPayload.data?.authorization?.canManageSystem));
+      setAuthorizationLoaded(true);
+    });
+    return () => controller.abort();
   }, []);
 
   useEffect(() => {
@@ -184,8 +202,8 @@ export function LibraryPage() {
     setSort(nextSort);
     setSortDirection(routeSortDirection(routeParams.get('sortDirection'), nextSort));
     setSearch(routeParams.get('search') ?? '');
-    if (routeParams.get('upload') === '1') setUploadDialogOpen(true);
-  }, [searchParamString]);
+    setUploadDialogOpen(authorizationLoaded && canManageSystem && routeParams.get('upload') === '1');
+  }, [authorizationLoaded, canManageSystem, searchParamString]);
 
   useEffect(() => {
     if (!filtersOpen || filterSchemaLoaded) return;
@@ -256,7 +274,8 @@ export function LibraryPage() {
 
   function updateView(nextView: 'grid' | 'list') {
     setView(nextView);
-    window.localStorage.setItem('shuku.library.view', nextView);
+    window.localStorage.setItem(userDevicePreferenceKey('shuku.library.view', currentUserId()), nextView);
+    void saveAccountPreferences({ 'library.view': nextView }).catch(() => undefined);
   }
 
   function replaceRoute(mutator: (params: URLSearchParams) => void) {
@@ -288,6 +307,7 @@ export function LibraryPage() {
   }
 
   function openUploadDialog() {
+    if (!canManageSystem) return;
     setUploadDialogOpen(true);
   }
 
@@ -353,6 +373,7 @@ export function LibraryPage() {
   }
 
   function openBatchAction(action: LibraryBatchAction) {
+    if (!canManageSystem && action !== 'shelves' && action !== 'reading_status') return;
     setBatchContextPosition(null);
     setBatchDialogAction(action);
   }
@@ -395,7 +416,7 @@ export function LibraryPage() {
             {!loading ? <span className="shrink-0 text-[13px] text-[#8A847E] sm:text-[15px]">{meta.total} <I18nText>本</I18nText></span> : null}
           </div>
         </div>
-        <button
+        {canManageSystem ? <button
           type="button"
           onClick={openUploadDialog}
           aria-label={i18nAttribute("上传读物")}
@@ -403,10 +424,10 @@ export function LibraryPage() {
           className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-black/[0.12] bg-white/55 text-[#252321] transition hover:border-[#EF4D2F]/40 hover:bg-[#FFF4EF] hover:text-[#EF4D2F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]"
         >
           <Plus size={25} strokeWidth={1.6} />
-        </button>
+        </button> : null}
       </header>
 
-      <UploadBookDialog
+      {canManageSystem ? <UploadBookDialog
         open={uploadDialogOpen}
         onClose={closeUploadDialog}
         onImported={(nextMessage) => {
@@ -415,7 +436,7 @@ export function LibraryPage() {
           setReloadKey((key) => key + 1);
         }}
         onError={setError}
-      />
+      /> : null}
 
       {deleteTarget ? (
         <div className="fixed inset-0 z-[90] flex items-end justify-center bg-[#241F1C]/35 p-0 backdrop-blur-[2px] md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={i18nAttribute("删除图书记录")}>
@@ -551,8 +572,8 @@ export function LibraryPage() {
       {!loading && !error && books.length === 0 ? (
         <div className="mt-10 flex min-h-[260px] flex-col items-start justify-center rounded-2xl bg-black/[0.025] px-8">
           <div className="text-lg font-medium text-[#3A3632]"><I18nText>没有找到图书</I18nText></div>
-          <p className="mt-2 text-sm text-[#817B75]"><I18nText>调整搜索或筛选条件，也可以上传电子书、漫画或有声书文件。</I18nText></p>
-          <button type="button" onClick={openUploadDialog} className="mt-5 inline-flex items-center gap-2 text-sm font-medium text-[#EF4D2F]"><UploadCloud size={17} /><I18nText>上传读物</I18nText></button>
+          <p className="mt-2 text-sm text-[#817B75]">{canManageSystem ? <I18nText>调整搜索或筛选条件，也可以上传电子书、漫画或有声书文件。</I18nText> : <I18nText>调整搜索或筛选条件，或联系管理员开通更多书库范围。</I18nText>}</p>
+          {canManageSystem ? <button type="button" onClick={openUploadDialog} className="mt-5 inline-flex items-center gap-2 text-sm font-medium text-[#EF4D2F]"><UploadCloud size={17} /><I18nText>上传读物</I18nText></button> : null}
         </div>
       ) : null}
 
@@ -568,7 +589,7 @@ export function LibraryPage() {
                   key={book.id}
                   book={book}
                   priority={index === 0}
-                  onDelete={() => openDeleteBook(book)}
+                  onDelete={canManageSystem ? () => openDeleteBook(book) : undefined}
                   onClick={() => router.push(`/works/${book.id}`)}
                   selectable
                   selected={selectedWorkIds.includes(book.id)}
@@ -577,17 +598,17 @@ export function LibraryPage() {
               ))}
             </div>
           ) : (
-            <div className="mt-8"><BookTable books={books} onDelete={openDeleteBook} selectable selectedIds={selectedWorkIds} onSelect={(book) => toggleSelection(book.id)} onSelectAll={togglePageSelection} onSelectionChange={setSelectedWorkIds} onContextMenu={(_book, position) => setBatchContextPosition(position)} sort={sort} sortDirection={sortDirection} onSort={updateSort} /></div>
+            <div className="mt-8"><BookTable books={books} onDelete={canManageSystem ? openDeleteBook : undefined} selectable selectedIds={selectedWorkIds} onSelect={(book) => toggleSelection(book.id)} onSelectAll={togglePageSelection} onSelectionChange={setSelectedWorkIds} onContextMenu={(_book, position) => setBatchContextPosition(position)} sort={sort} sortDirection={sortDirection} onSort={updateSort} /></div>
           )}
 
           <Pagination page={page} totalPages={meta.totalPages} loading={loading} pageSize={pageSize} onPage={setPage} onPageSize={(nextPageSize) => { setPage(1); setPageSize(nextPageSize); }} />
         </>
       ) : null}
 
-      {selectedWorkIds.length > 0 ? <div className="fixed bottom-5 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-2xl -translate-x-1/2 flex-wrap items-center justify-between gap-3 rounded-2xl border border-black/[0.08] bg-[#282522] px-4 py-3 text-white shadow-2xl"><div><div className="text-sm font-semibold"><I18nText>已选择 </I18nText>{selectedWorkIds.length} <I18nText>本</I18nText></div><div className="mt-0.5 hidden text-[11px] text-white/55 sm:block"><I18nText>列表中右键可直接选择批量操作</I18nText></div></div><div className="flex gap-2"><Button variant="secondary" onClick={() => { setSelectedWorkIds([]); setBatchContextPosition(null); }}><I18nText>清空</I18nText></Button><Button onClick={() => openBatchAction('metadata')}><I18nText>批量操作</I18nText></Button></div></div> : null}
+      {selectedWorkIds.length > 0 ? <div className="fixed bottom-5 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-2xl -translate-x-1/2 flex-wrap items-center justify-between gap-3 rounded-2xl border border-black/[0.08] bg-[#282522] px-4 py-3 text-white shadow-2xl"><div><div className="text-sm font-semibold"><I18nText>已选择 </I18nText>{selectedWorkIds.length} <I18nText>本</I18nText></div><div className="mt-0.5 hidden text-[11px] text-white/55 sm:block"><I18nText>列表中右键可直接选择批量操作</I18nText></div></div><div className="flex gap-2"><Button variant="secondary" onClick={() => { setSelectedWorkIds([]); setBatchContextPosition(null); }}><I18nText>清空</I18nText></Button><Button onClick={() => openBatchAction(canManageSystem ? 'metadata' : 'shelves')}><I18nText>批量操作</I18nText></Button></div></div> : null}
 
-      <LibraryBatchContextMenu position={batchContextPosition} selectedCount={selectedWorkIds.length} onClose={() => setBatchContextPosition(null)} onSelect={openBatchAction} />
-      <LibraryBatchDialog action={batchDialogAction} selectedIds={selectedWorkIds} onActionChange={setBatchDialogAction} onClose={() => setBatchDialogAction(null)} onApplied={finishBatchAction} />
+      <LibraryBatchContextMenu position={batchContextPosition} selectedCount={selectedWorkIds.length} canManageSystem={canManageSystem} onClose={() => setBatchContextPosition(null)} onSelect={openBatchAction} />
+      <LibraryBatchDialog action={batchDialogAction} selectedIds={selectedWorkIds} canManageSystem={canManageSystem} onActionChange={setBatchDialogAction} onClose={() => setBatchDialogAction(null)} onApplied={finishBatchAction} />
     </div>
   );
 }

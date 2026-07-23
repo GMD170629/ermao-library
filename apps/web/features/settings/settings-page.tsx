@@ -17,17 +17,11 @@ type MonitorFolder = {
   id: string;
   name: string;
   rootPath: string;
-  shelfId?: string | null;
   enabled: boolean;
   ignorePatterns?: string | null;
   ignoreHidden: boolean;
   minFileSizeBytes: number;
   description?: string | null;
-};
-
-type ShelfSummary = {
-  id: string;
-  name: string;
 };
 
 type MonitorFoldersPayload = {
@@ -127,7 +121,6 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   const groups = ['监控文件夹', '备份与恢复', '元数据'];
   const [active, setActive] = useState(initialSection ?? '监控文件夹');
   const [folders, setFolders] = useState<MonitorFolder[]>([]);
-  const [shelves, setShelves] = useState<ShelfSummary[]>([]);
   const [backups, setBackups] = useState<BackupItem[]>([]);
   const [settings, setSettings] = useState<AppSettings>({
     'metadata.external.enabled': 'false',
@@ -143,7 +136,6 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   });
   const [name, setName] = useState('我的监控文件夹');
   const [rootPath, setRootPath] = useState('/books');
-  const [shelfId, setShelfId] = useState('');
   const [ignorePatterns, setIgnorePatterns] = useState('');
   const [ignoreHidden, setIgnoreHidden] = useState(true);
   const [minFileSizeKb, setMinFileSizeKb] = useState('0');
@@ -159,11 +151,6 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   const [expandedRules, setExpandedRules] = useState<Record<string, boolean>>({});
   const confirm = useConfirm();
   const toast = useToast();
-  const shelfOptions = useMemo(() => [
-    { value: '', label: '不指定书架' },
-    ...shelves.map((shelf) => ({ value: shelf.id, label: shelf.name, translate: false }))
-  ], [shelves]);
-  const shelfNames = useMemo(() => new Map(shelves.map((shelf) => [shelf.id, shelf.name])), [shelves]);
 
   const loadPaths = useCallback(async () => {
     const response = await fetch('/api/monitor-folders');
@@ -174,13 +161,6 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     } else {
       setError(payload.error?.message ?? '读取监控文件夹失败');
     }
-  }, []);
-
-  const loadShelves = useCallback(async () => {
-    const response = await fetch('/api/shelves');
-    const payload = (await response.json()) as { ok: boolean; data?: { shelves: ShelfSummary[] }; error?: { message: string } };
-    if (payload.ok) setShelves(payload.data?.shelves ?? []);
-    else setError(payload.error?.message ?? '读取书架失败');
   }, []);
 
   const loadBackups = useCallback(async () => {
@@ -201,7 +181,6 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   useEffect(() => {
     if (!initialSection || initialSection === '监控文件夹') {
       void loadPaths();
-      void loadShelves();
     }
     if (!initialSection || initialSection === '备份与恢复') void loadBackups();
     if (initialSection === '监控文件夹' || initialSection === '备份与恢复') return;
@@ -224,7 +203,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
         ...secretState
       }));
     }).catch(() => undefined);
-  }, [initialSection, loadBackups, loadPaths, loadShelves]);
+  }, [initialSection, loadBackups, loadPaths]);
 
   async function savePath(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -234,7 +213,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     const response = await fetch('/api/monitor-folders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, rootPath, shelfId: shelfId || null, enabled: true, ignorePatterns, ignoreHidden, minFileSizeBytes: Math.max(0, Math.round(Number(minFileSizeKb || 0) * 1024)) })
+      body: JSON.stringify({ name, rootPath, enabled: true, ignorePatterns, ignoreHidden, minFileSizeBytes: Math.max(0, Math.round(Number(minFileSizeKb || 0) * 1024)) })
     });
     const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
     if (!payload.ok) {
@@ -249,7 +228,6 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     await loadPaths();
     setShowCreateFolder(false);
     setShowCreateRules(false);
-    setShelfId('');
     setPathBusy('');
   }
 
@@ -280,7 +258,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     setPathBusy('');
   }
 
-  async function saveFolderSettings(path: MonitorFolder, updates: Pick<MonitorFolder, 'name' | 'rootPath' | 'shelfId' | 'ignorePatterns' | 'ignoreHidden' | 'minFileSizeBytes'>) {
+  async function saveFolderSettings(path: MonitorFolder, updates: Pick<MonitorFolder, 'name' | 'rootPath' | 'ignorePatterns' | 'ignoreHidden' | 'minFileSizeBytes'>) {
     setError('');
     setMessage('');
     setRuleBusy(path.id);
@@ -464,18 +442,14 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                   <span className="text-sm font-medium text-slate-700"><I18nText>名称</I18nText></span>
                   <input value={name} onChange={(event) => setName(event.target.value)} className="mt-1.5 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-[#F19B84] focus:ring-2 focus:ring-[#FCE5DE]" />
                 </label>
-                <div className="md:col-span-5">
+                <div className="md:col-span-7">
                   <span className="text-sm font-medium text-slate-700"><I18nText>监控文件夹路径</I18nText></span>
                   <DirectoryPathPicker value={rootPath} onChange={setRootPath} compact />
                 </div>
-                <label className="md:col-span-2">
-                  <span className="text-sm font-medium text-slate-700"><I18nText>自动加入书架 </I18nText><span className="font-normal text-slate-400"><I18nText>选填</I18nText></span></span>
-                  <Select value={shelfId} options={shelfOptions} onChange={setShelfId} ariaLabel={i18nAttribute("自动加入书架")} size="sm" className="mt-1.5 w-full" triggerClassName="h-10" />
-                </label>
                 <div className="md:col-span-2">
                   <Button className="h-10 w-full" icon={FolderOpen} loading={pathBusy === 'create'} loadingText={i18nAttribute("保存中")}><I18nText>保存</I18nText></Button>
                 </div>
-                <div className="text-xs leading-5 text-slate-500 md:col-span-12"><I18nText>选择书架后，这个文件夹新识别的图书会自动加入该书架；留空时只导入书库。</I18nText></div>
+                <div className="text-xs leading-5 text-slate-500 md:col-span-12"><I18nText>图书会进入书库；每位用户可按来源文件夹创建自己的智能书架。</I18nText></div>
                 <button
                   type="button"
                   aria-expanded={showCreateRules}
@@ -520,7 +494,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                       <div className="min-w-0 flex-1">
                         <div className="font-semibold">{path.name}</div>
                         <div className="break-words text-sm text-slate-500">{path.rootPath}</div>
-                        <div className="mt-2 text-xs text-slate-500"><I18nText>引用原文件 · 自动加入：</I18nText>{path.shelfId ? shelfNames.get(path.shelfId) ?? i18nAttribute("目标书架已不存在") : i18nAttribute("不指定书架")} · {path.ignoreHidden ? i18nAttribute("忽略隐藏文件") : i18nAttribute("包含隐藏文件")} <I18nText>· 小于 </I18nText>{Math.round((path.minFileSizeBytes ?? 0) / 1024)} <I18nText>KB 跳过</I18nText></div>
+                        <div className="mt-2 text-xs text-slate-500"><I18nText>引用原文件</I18nText> · {path.ignoreHidden ? i18nAttribute("忽略隐藏文件") : i18nAttribute("包含隐藏文件")} <I18nText>· 小于 </I18nText>{Math.round((path.minFileSizeBytes ?? 0) / 1024)} <I18nText>KB 跳过</I18nText></div>
                       </div>
                       <button disabled={pathBusy === `toggle:${path.id}`} onClick={() => togglePath(path)} className={cn('h-7 w-12 rounded-full p-1 transition disabled:cursor-not-allowed disabled:opacity-60', path.enabled ? 'bg-[#ff4f26]' : 'bg-slate-300')} aria-label={i18nAttribute("启用监控文件夹")}>
                         <span className={cn('block h-5 w-5 rounded-full bg-white transition', path.enabled && 'translate-x-5')} />
@@ -537,7 +511,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                     </div>
                     {expandedRules[path.id] ? (
                       <div className="mt-4 border-t border-slate-100 pt-4">
-                        <MonitorFolderEditor path={path} shelves={shelves} saving={ruleBusy === path.id} onSave={saveFolderSettings} compact />
+                        <MonitorFolderEditor path={path} saving={ruleBusy === path.id} onSave={saveFolderSettings} compact />
                       </div>
                     ) : null}
                   </div>
@@ -873,33 +847,24 @@ function DirectoryNodeRow({
 
 function MonitorFolderEditor({
   path,
-  shelves,
   saving,
   onSave,
   compact = false
 }: {
   path: MonitorFolder;
-  shelves: ShelfSummary[];
   saving: boolean;
-  onSave: (path: MonitorFolder, updates: Pick<MonitorFolder, 'name' | 'rootPath' | 'shelfId' | 'ignorePatterns' | 'ignoreHidden' | 'minFileSizeBytes'>) => Promise<void>;
+  onSave: (path: MonitorFolder, updates: Pick<MonitorFolder, 'name' | 'rootPath' | 'ignorePatterns' | 'ignoreHidden' | 'minFileSizeBytes'>) => Promise<void>;
   compact?: boolean;
 }) {
   const { t: i18nAttribute } = useAttributeI18n();
   const [folderName, setFolderName] = useState(path.name);
   const [folderPath, setFolderPath] = useState(path.rootPath);
-  const [targetShelfId, setTargetShelfId] = useState(path.shelfId ?? '');
   const [patterns, setPatterns] = useState(path.ignorePatterns ?? '');
   const [hidden, setHidden] = useState(path.ignoreHidden);
   const [minSizeKb, setMinSizeKb] = useState(String(Math.round((path.minFileSizeBytes ?? 0) / 1024)));
-  const targetOptions = useMemo(() => [
-    { value: '', label: '不指定书架' },
-    ...shelves.map((shelf) => ({ value: shelf.id, label: shelf.name, translate: false }))
-  ], [shelves]);
-
   useEffect(() => {
     setFolderName(path.name);
     setFolderPath(path.rootPath);
-    setTargetShelfId(path.shelfId ?? '');
     setPatterns(path.ignorePatterns ?? '');
     setHidden(path.ignoreHidden);
     setMinSizeKb(String(Math.round((path.minFileSizeBytes ?? 0) / 1024)));
@@ -916,12 +881,7 @@ function MonitorFolderEditor({
           <span className="text-sm font-medium text-slate-700"><I18nText>监控文件夹路径</I18nText></span>
           <DirectoryPathPicker value={folderPath} onChange={setFolderPath} compact />
         </div>
-        <label className="md:col-span-5">
-          <span className="text-sm font-medium text-slate-700"><I18nText>自动加入书架 </I18nText><span className="font-normal text-slate-400"><I18nText>选填</I18nText></span></span>
-          <Select value={targetShelfId} options={targetOptions} onChange={setTargetShelfId} ariaLabel={i18nAttribute("自动加入书架")} className="mt-1.5 w-full" triggerClassName="h-10" size="sm" />
-          <span className="mt-1.5 block text-xs leading-5 text-slate-500"><I18nText>留空时，新识别的图书只进入书库。</I18nText></span>
-        </label>
-        <label className="flex h-10 items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 md:col-span-3 md:mt-[26px]">
+        <label className="flex h-10 items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 md:col-span-4 md:mt-[26px]">
           <input type="checkbox" checked={hidden} onChange={(event) => setHidden(event.target.checked)} />
           <I18nText>忽略隐藏文件</I18nText></label>
         <label className="md:col-span-4">
@@ -956,7 +916,6 @@ function MonitorFolderEditor({
           onClick={() => onSave(path, {
             name: folderName.trim(),
             rootPath: folderPath,
-            shelfId: targetShelfId || null,
             ignorePatterns: patterns,
             ignoreHidden: hidden,
             minFileSizeBytes: Math.max(0, Math.round(Number(minSizeKb || 0) * 1024))

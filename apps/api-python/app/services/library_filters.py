@@ -177,27 +177,29 @@ def _column(alias: str, name: str) -> str:
     return f"`{alias}`.`{name}`"
 
 
-def _projected_reading_status_clause(alias: str, status: str, user_param: str) -> str:
+def _projected_reading_status_clause(
+    alias: str,
+    status: str,
+    user_param: str,
+    edition_scope_sql: str = "1 = 1",
+) -> str:
     media_expression = "edition_state.`mediaKind`"
     visible_state_exists = (
         "EXISTS (SELECT 1 FROM `LibraryConsumptionState` consumption_state "
         f"WHERE consumption_state.`userId` = :{user_param} AND consumption_state.`workId` = `{alias}`.`id` "
         "AND EXISTS (SELECT 1 FROM `LibraryEdition` edition_state "
         f"WHERE edition_state.`workId` = `{alias}`.`id` AND COALESCE(edition_state.`hidden`, 0) = 0 "
-        f"AND {media_expression} = consumption_state.`mediaKind`))"
+        f"AND {edition_scope_sql} AND {media_expression} = consumption_state.`mediaKind`))"
     )
     any_visible_edition = (
         "EXISTS (SELECT 1 FROM `LibraryEdition` edition_state "
-        f"WHERE edition_state.`workId` = `{alias}`.`id` AND COALESCE(edition_state.`hidden`, 0) = 0)"
-    )
-    any_work_state_exists = (
-        "EXISTS (SELECT 1 FROM `LibraryConsumptionState` any_state "
-        f"WHERE any_state.`workId` = `{alias}`.`id`)"
+        f"WHERE edition_state.`workId` = `{alias}`.`id` AND COALESCE(edition_state.`hidden`, 0) = 0 "
+        f"AND {edition_scope_sql})"
     )
     all_finished = (
         f"({any_visible_edition} AND NOT EXISTS (SELECT 1 FROM `LibraryEdition` edition_state "
         f"WHERE edition_state.`workId` = `{alias}`.`id` AND COALESCE(edition_state.`hidden`, 0) = 0 "
-        "AND NOT EXISTS (SELECT 1 FROM `LibraryConsumptionState` finished_state "
+        f"AND {edition_scope_sql} AND NOT EXISTS (SELECT 1 FROM `LibraryConsumptionState` finished_state "
         f"WHERE finished_state.`userId` = :{user_param} AND finished_state.`workId` = `{alias}`.`id` "
         f"AND finished_state.`mediaKind` = {media_expression} AND finished_state.`status` = 'FINISHED')))"
     )
@@ -207,13 +209,13 @@ def _projected_reading_status_clause(alias: str, status: str, user_param: str) -
         "AND started_state.`status` IN ('READING', 'FINISHED') "
         "AND EXISTS (SELECT 1 FROM `LibraryEdition` edition_state "
         f"WHERE edition_state.`workId` = `{alias}`.`id` AND COALESCE(edition_state.`hidden`, 0) = 0 "
-        f"AND {media_expression} = started_state.`mediaKind`))"
+        f"AND {edition_scope_sql} AND {media_expression} = started_state.`mediaKind`))"
     )
     if status == "FINISHED":
-        return f"(({visible_state_exists} AND {all_finished}) OR (NOT {any_work_state_exists} AND {_column(alias, 'status')} = 'FINISHED'))"
+        return f"({visible_state_exists} AND {all_finished})"
     if status == "READING":
-        return f"(({visible_state_exists} AND NOT {all_finished} AND {has_started}) OR (NOT {any_work_state_exists} AND {_column(alias, 'status')} = 'READING'))"
-    return f"(({visible_state_exists} AND NOT {has_started}) OR (NOT {visible_state_exists} AND {any_work_state_exists}) OR (NOT {any_work_state_exists} AND {_column(alias, 'status')} IN ('UNREAD', 'WANT')))"
+        return f"({visible_state_exists} AND NOT {all_finished} AND {has_started})"
+    return f"(NOT {has_started})"
 
 
 def _text_predicate(expression: str, operator: str, value: Any, key: str, params: dict[str, Any]) -> str:
@@ -312,12 +314,17 @@ def compile_filter_rules(
     alias: str = "w",
     user_id: str | None = None,
     param_prefix: str = "smart_filter",
+    edition_scope_sql: str = "1 = 1",
+    edition_scope_params: dict[str, Any] | None = None,
+    shelf_owner_user_id: str | None = None,
 ) -> tuple[str | None, dict[str, Any], str | None]:
     normalized, error = normalize_filter_rules(rules)
     if error:
         return None, {}, error
     clauses: list[str] = []
-    params: dict[str, Any] = {}
+    params: dict[str, Any] = dict(edition_scope_params or {})
+    if shelf_owner_user_id:
+        params[f"{param_prefix}_shelf_owner"] = shelf_owner_user_id
     work_columns = {
         "title": "title", "author": "author", "description": "description", "series": "seriesName",
         "publishedYear": "publishedYear", "seriesIndex": "seriesIndex", "metadataQuality": "metadataQuality",
@@ -344,7 +351,12 @@ def compile_filter_rules(
                 else:
                     normalized_status = str(value or "UNREAD").upper()
                     params["filter_user_id"] = user_id
-                    status_clause = _projected_reading_status_clause(alias, normalized_status, "filter_user_id")
+                    status_clause = _projected_reading_status_clause(
+                        alias,
+                        normalized_status,
+                        "filter_user_id",
+                        edition_scope_sql.replace("filter_edition", "edition_state"),
+                    )
                     clauses.append(f"NOT ({status_clause})" if operator == "not_equals" else status_clause)
                 continue
             if field_key in work_columns:
@@ -362,7 +374,7 @@ def compile_filter_rules(
                 if not _table_exists(db, "LibraryEdition"):
                     clauses.append("0 = 1")
                     continue
-                base = f"SELECT 1 FROM `LibraryEdition` filter_edition WHERE filter_edition.`workId` = `{alias}`.`id` AND COALESCE(filter_edition.`hidden`, 0) = 0"
+                base = f"SELECT 1 FROM `LibraryEdition` filter_edition WHERE filter_edition.`workId` = `{alias}`.`id` AND COALESCE(filter_edition.`hidden`, 0) = 0 AND {edition_scope_sql}"
                 clauses.append(_relation_text_clause(base, f"filter_edition.`{edition_columns[field_key]}`", operator, value, key, params))
                 continue
             if field_key == "tag":
@@ -373,31 +385,36 @@ def compile_filter_rules(
                     clauses.append(_text_predicate(_column(alias, "tags"), operator, value, key, params))
                 continue
             if field_key == "shelf":
-                base = f"SELECT 1 FROM `ShelfWork` filter_shelf_work JOIN `Shelf` filter_shelf ON filter_shelf.`id` = filter_shelf_work.`shelfId` WHERE filter_shelf_work.`workId` = `{alias}`.`id` AND COALESCE(filter_shelf.`kind`, 'STATIC') = 'STATIC'"
+                owner_clause = (
+                    f" AND filter_shelf.`ownerUserId` = :{param_prefix}_shelf_owner"
+                    if shelf_owner_user_id
+                    else ""
+                )
+                base = f"SELECT 1 FROM `ShelfWork` filter_shelf_work JOIN `Shelf` filter_shelf ON filter_shelf.`id` = filter_shelf_work.`shelfId` WHERE filter_shelf_work.`workId` = `{alias}`.`id` AND COALESCE(filter_shelf.`kind`, 'STATIC') = 'STATIC'{owner_clause}"
                 clauses.append(_relation_text_clause(base, "filter_shelf.`id`", operator, value, key, params))
                 continue
             if field_key == "monitorFolder":
                 params[key] = str(value or "")
-                positive = f"({_column(alias, 'monitorFolderId')} = :{key} OR EXISTS (SELECT 1 FROM `LibraryEdition` filter_edition WHERE filter_edition.`workId` = `{alias}`.`id` AND filter_edition.`monitorFolderId` = :{key}))"
+                positive = f"({_column(alias, 'monitorFolderId')} = :{key} OR EXISTS (SELECT 1 FROM `LibraryEdition` filter_edition WHERE filter_edition.`workId` = `{alias}`.`id` AND filter_edition.`monitorFolderId` = :{key} AND {edition_scope_sql}))"
                 if operator == "is_empty":
-                    clauses.append(f"({_column(alias, 'monitorFolderId')} IS NULL AND NOT EXISTS (SELECT 1 FROM `LibraryEdition` filter_edition WHERE filter_edition.`workId` = `{alias}`.`id` AND filter_edition.`monitorFolderId` IS NOT NULL))")
+                    clauses.append(f"({_column(alias, 'monitorFolderId')} IS NULL AND NOT EXISTS (SELECT 1 FROM `LibraryEdition` filter_edition WHERE filter_edition.`workId` = `{alias}`.`id` AND filter_edition.`monitorFolderId` IS NOT NULL AND {edition_scope_sql}))")
                 elif operator == "is_not_empty":
-                    clauses.append(f"({_column(alias, 'monitorFolderId')} IS NOT NULL OR EXISTS (SELECT 1 FROM `LibraryEdition` filter_edition WHERE filter_edition.`workId` = `{alias}`.`id` AND filter_edition.`monitorFolderId` IS NOT NULL))")
+                    clauses.append(f"({_column(alias, 'monitorFolderId')} IS NOT NULL OR EXISTS (SELECT 1 FROM `LibraryEdition` filter_edition WHERE filter_edition.`workId` = `{alias}`.`id` AND filter_edition.`monitorFolderId` IS NOT NULL AND {edition_scope_sql}))")
                 else:
                     clauses.append(f"NOT ({positive})" if operator == "not_equals" else positive)
                 continue
             if field_key == "sourcePath":
-                base = f"SELECT 1 FROM `LibraryEdition` filter_edition JOIN `LibraryFile` filter_file ON filter_file.`editionId` = filter_edition.`id` WHERE filter_edition.`workId` = `{alias}`.`id` AND COALESCE(filter_edition.`hidden`, 0) = 0"
+                base = f"SELECT 1 FROM `LibraryEdition` filter_edition JOIN `LibraryFile` filter_file ON filter_file.`editionId` = filter_edition.`id` WHERE filter_edition.`workId` = `{alias}`.`id` AND COALESCE(filter_edition.`hidden`, 0) = 0 AND {edition_scope_sql}"
                 clauses.append(_relation_text_clause(base, "filter_file.`path`", operator, value, key, params))
                 continue
             scalar_expressions = {
                 "progress": f"(SELECT filter_progress.`percent` FROM `LibraryReadingProgress` filter_progress WHERE filter_progress.`workId` = `{alias}`.`id`" + (" AND filter_progress.`userId` = :filter_user_id" if user_id else "") + " ORDER BY filter_progress.`updatedAt` DESC, filter_progress.`id` DESC LIMIT 1)",
                 "lastReadAt": f"(SELECT MAX(filter_progress.`updatedAt`) FROM `LibraryReadingProgress` filter_progress WHERE filter_progress.`workId` = `{alias}`.`id`" + (" AND filter_progress.`userId` = :filter_user_id" if user_id else "") + ")",
-                "fileSize": f"(SELECT SUM(filter_file.`sizeBytes`) FROM `LibraryEdition` filter_edition JOIN `LibraryFile` filter_file ON filter_file.`editionId` = filter_edition.`id` WHERE filter_edition.`workId` = `{alias}`.`id` AND COALESCE(filter_edition.`hidden`, 0) = 0)",
-                "pageCount": f"(SELECT MAX(filter_edition.`pageCount`) FROM `LibraryEdition` filter_edition WHERE filter_edition.`workId` = `{alias}`.`id` AND COALESCE(filter_edition.`hidden`, 0) = 0)",
-                "chapterCount": f"(SELECT MAX(filter_edition.`chapterCount`) FROM `LibraryEdition` filter_edition WHERE filter_edition.`workId` = `{alias}`.`id` AND COALESCE(filter_edition.`hidden`, 0) = 0)",
-                "duration": f"(SELECT MAX(filter_edition.`durationMs`) FROM `LibraryEdition` filter_edition WHERE filter_edition.`workId` = `{alias}`.`id` AND COALESCE(filter_edition.`hidden`, 0) = 0)",
-                "versionCount": f"(SELECT COUNT(*) FROM `LibraryEdition` filter_edition WHERE filter_edition.`workId` = `{alias}`.`id` AND COALESCE(filter_edition.`hidden`, 0) = 0)",
+                "fileSize": f"(SELECT SUM(filter_file.`sizeBytes`) FROM `LibraryEdition` filter_edition JOIN `LibraryFile` filter_file ON filter_file.`editionId` = filter_edition.`id` WHERE filter_edition.`workId` = `{alias}`.`id` AND COALESCE(filter_edition.`hidden`, 0) = 0 AND {edition_scope_sql})",
+                "pageCount": f"(SELECT MAX(filter_edition.`pageCount`) FROM `LibraryEdition` filter_edition WHERE filter_edition.`workId` = `{alias}`.`id` AND COALESCE(filter_edition.`hidden`, 0) = 0 AND {edition_scope_sql})",
+                "chapterCount": f"(SELECT MAX(filter_edition.`chapterCount`) FROM `LibraryEdition` filter_edition WHERE filter_edition.`workId` = `{alias}`.`id` AND COALESCE(filter_edition.`hidden`, 0) = 0 AND {edition_scope_sql})",
+                "duration": f"(SELECT MAX(filter_edition.`durationMs`) FROM `LibraryEdition` filter_edition WHERE filter_edition.`workId` = `{alias}`.`id` AND COALESCE(filter_edition.`hidden`, 0) = 0 AND {edition_scope_sql})",
+                "versionCount": f"(SELECT COUNT(*) FROM `LibraryEdition` filter_edition WHERE filter_edition.`workId` = `{alias}`.`id` AND COALESCE(filter_edition.`hidden`, 0) = 0 AND {edition_scope_sql})",
             }
             if field_key in scalar_expressions:
                 expression = scalar_expressions[field_key]

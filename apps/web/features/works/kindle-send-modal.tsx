@@ -10,10 +10,10 @@ import type { WorkView } from '../../types/work';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
-type EmailSettingsPayload = {
+type KindleSettingsPayload = {
   ok: boolean;
   data?: {
-    smtp: { host: string; username: string; fromEmail: string; passwordConfigured: boolean };
+    smtp: { configured: boolean; fromEmail: string };
     kindle: { email: string };
   };
   error?: { message: string };
@@ -67,13 +67,13 @@ export function KindleSendModal({ book, open, preferredEditionId, onClose }: { b
     setSelectedFileId(defaultOption?.fileId ?? '');
     setSettingsLoading(true);
     setSettingsError('');
-    fetch('/api/email-settings', { cache: 'no-store' })
+    fetch('/api/kindle-settings', { cache: 'no-store' })
       .then((response) => response.json())
-      .then((payload: EmailSettingsPayload) => {
+      .then((payload: KindleSettingsPayload) => {
         if (!payload.ok || !payload.data) throw new Error(payload.error?.message ?? '读取邮件设置失败');
         const smtp = payload.data.smtp;
         setRecipient(payload.data.kindle.email);
-        setSettingsReady(Boolean(smtp.host && smtp.fromEmail && payload.data.kindle.email && (!smtp.username || smtp.passwordConfigured)));
+        setSettingsReady(Boolean(smtp.configured && smtp.fromEmail && payload.data.kindle.email));
       })
       .catch((reason) => {
         setSettingsReady(false);
@@ -122,7 +122,7 @@ export function KindleSendModal({ book, open, preferredEditionId, onClose }: { b
         {!settingsLoading && !settingsReady ? (
           <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800 sm:flex-row sm:items-center sm:justify-between">
             <span className="flex items-start gap-2"><AlertTriangle size={17} className="mt-0.5 shrink-0" />{settingsError || i18nAttribute("请先补全 SMTP 和 Kindle 邮箱设置。")}</span>
-            <Link href="/settings/email?tab=smtp" className="inline-flex shrink-0 items-center gap-2 font-medium text-amber-900 hover:underline"><Settings size={15} /><I18nText>前往设置</I18nText></Link>
+            <Link href="/settings/email?tab=kindle" className="inline-flex shrink-0 items-center gap-2 font-medium text-amber-900 hover:underline"><Settings size={15} /><I18nText>前往设置</I18nText></Link>
           </div>
         ) : null}
 

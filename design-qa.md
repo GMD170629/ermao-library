@@ -175,6 +175,94 @@ final result: passed
 
 ---
 
+# 语言入口范围调整 QA — 2026-07-23
+
+## 对照目标与证据
+
+- 来源视觉真值：`/var/folders/d8/2c367y3s79b_hrmg8d1b8vzm0000gn/T/codex-clipboard-f418e8d8-24e4-4121-a180-c9a7ab569fa8.png`，2204 × 370 像素；用于确认用户设置中的完整语言选项仍应清晰可见。
+- 首页最终实现：`/Users/guyu/.codex/visualizations/2026/07/23/019f8d47-4d01-7eb2-ae24-43f7ca9ebd4b/compact-language-switcher/dashboard-without-language-selector.png`，1905 × 985 像素；已登录首页，右上角只保留上传入口。
+- 用户设置最终实现：`/Users/guyu/.codex/visualizations/2026/07/23/019f8d47-4d01-7eb2-ae24-43f7ca9ebd4b/compact-language-switcher/settings-language-card.png`，1905 × 985 像素；已登录个人信息页，完整语言设置可见。
+- 同屏聚焦对照：`/Users/guyu/.codex/visualizations/2026/07/23/019f8d47-4d01-7eb2-ae24-43f7ca9ebd4b/compact-language-switcher/comparison-language-setting-retained.png`，1905 × 550 像素。来源按 1905px 宽等比归一化，和实现中的语言卡裁切纵向同屏比较。
+- 浏览器 CSS 视口约为 1905 × 985，截图接口输出同尺寸像素；单一 Chrome 会话，未执行多浏览器测试。
+
+## Findings 与结论
+
+- [P1 已修复] 首页右上角出现了不需要的快捷语言选择器，增加了主页操作噪音。已删除首页入口，DOM 中标题后只剩“上传读物”按钮。
+- [P1 已保留] “用户设置 → 个人信息”继续显示完整的“简体中文 / English (United States)”具名单选组，语言设置没有被隐藏。
+- [P1 已保留] 首次引导页继续挂载小型语言选择器，提交初始化账户时会把所选 locale 写入首位管理员偏好并设置 locale cookie；已初始化实例访问 `/setup` 会按既有流程重定向，因此本轮不伪造首次引导页面截图。
+- 最终没有未解决的 P0、P1 或 P2。
+
+## 五项视觉核对
+
+- 字体与排版：用户设置保持现有标题、说明和选项字号层级；首页没有因删除入口产生标题偏移。
+- 间距与布局：首页右侧恢复为单一圆形上传按钮；个人信息语言卡继续使用紧凑横向布局。
+- 颜色与令牌：沿用暖白、暖灰、珊瑚选中态与现有边框令牌。
+- 图片与图标：没有新增或替换图片资产；语言图标与账户头像继续复用既有资源。
+- 文案与内容：保留完整语言名称与同步说明；首页不再重复暴露语言操作。
+
+## 交互与自动化验证
+
+- 浏览器 DOM 验证：首页无“界面语言”组合框，个人信息页仍有具名语言单选组。
+- 浏览器无 error；仅存在与本次改动无关的 Next Image LCP 开发提示。
+- Web 单元测试：181 passed。
+- 后端完整测试：315 passed，5 skipped。
+- TypeScript：通过。
+- ESLint：无 warning 或 error。
+- 中英文目录：2641 条消息通过一致性检查。
+- `git diff --check`：通过。
+
+final result: passed
+
+---
+
+# 当前设备阅读器设置与真实阅读器选项对齐 QA — 2026-07-23
+
+## 对照目标与证据
+
+- 来源视觉：`/var/folders/d8/2c367y3s79b_hrmg8d1b8vzm0000gn/T/codex-clipboard-3e63b64e-c814-4411-ac5c-4465dca6620f.png`，842 × 1114 像素。该图只作为“左侧标签 + 右侧分段控件”、暖色表面、选中态和紧凑节奏的视觉基准；用户明确要求不照抄弹窗元素。
+- 桌面实现：`/Users/guyu/.codex/visualizations/2026/07/23/019f8d47-4d01-7eb2-ae24-43f7ca9ebd4b/reader-device-settings/implementation-desktop.png`，1905 × 1258 像素；浏览器 CSS 视口 1920 × 937，设备像素比 2，截图接口已归一化为 CSS 像素宽度。
+- 移动实现：`/Users/guyu/.codex/visualizations/2026/07/23/019f8d47-4d01-7eb2-ae24-43f7ca9ebd4b/reader-device-settings/implementation-mobile.png`，375 × 2456 像素；浏览器 CSS 视口 390 × 844，设备像素比 1。
+- 聚焦实现：`/Users/guyu/.codex/visualizations/2026/07/23/019f8d47-4d01-7eb2-ae24-43f7ca9ebd4b/reader-device-settings/implementation-desktop-focus.png`。
+- 同屏比较：`/Users/guyu/.codex/visualizations/2026/07/23/019f8d47-4d01-7eb2-ae24-43f7ca9ebd4b/reader-device-settings/comparison-reference-desktop.png`，1933 × 940 像素。来源与实现聚焦区域均按 900px 高度等比归一化；完整标签、分段控件、色块、缩放步进器和卡片间距可直接检查，不需要额外局部裁切。
+- 状态：已登录管理员；当前设备偏好页；纯黑主题选中；EPUB、漫画、PDF 和音频均为默认值。
+
+## 设置能力核对
+
+- EPUB 只显示真实阅读器已有的字号、行距、字体、页宽和排版。已删除未正式开放的单双页入口和对 EPUB 实际无效的翻页动画入口。
+- 主题在数据层是 EPUB、漫画与 PDF 共用的一个偏好，因此独立为“阅读外观”，避免在三个区域重复编辑同一值。
+- 漫画与真实阅读器一致：模式、翻页、适配、画质、方向、缩放。
+- PDF 与真实阅读器一致：缩放、适配。
+- 音频与真实播放器一致：八档播放速度、音量；睡眠定时属于当前播放会话，不作为设备默认偏好。
+
+## 比较迭代
+
+| 严重度 | 早期问题 | 修正 | 修正后证据 |
+| --- | --- | --- | --- |
+| P1 | EPUB 暴露了产品未开放的单双页选项，以及保存后不会影响 EPUB 渲染的翻页动画；漫画和 PDF 又缺少真实存在的缩放。 | 以实际 Reader Shell 和适配器能力为唯一来源，删除两个 EPUB 入口并补齐漫画/PDF 缩放。 | 最终 DOM 中 EPUB 仅有 5 组真实排版设置；漫画为 6 组，PDF 为 2 组。 |
+| P2 | 第一版“阅读外观”卡片只使用左半区，桌面右侧形成大面积无意义空白。 | 将卡片改为桌面横向标题/控件布局，移动端自动恢复纵向。 | `implementation-desktop.png` 中主题控件与说明左右平衡，首屏高度由 1320px 降至 1258px。 |
+| P2 | 390px 视口下字体和音频多选项出现截断，尤其“微软雅黑”只显示前缀。 | 收紧移动卡片边距、标签轨道和按钮内边距，并对五项以上分段组选用更紧凑字号。 | 最终浏览器计算所有分段选项均无 `scrollWidth > clientWidth`，页面无横向溢出。 |
+
+## 五项视觉核对
+
+- 字体与排版：沿用产品现有中文系统字体栈；区块标题、说明、行标签和选项形成清楚的 16/12/11–12px 层级；桌面与移动端均无文本裁切。
+- 间距与布局：桌面使用最大 1240px 内容宽度、两列阅读器卡片和一致的 10px 行间距；移动端保持参考图的标签轨道与分段控件关系，页面无横向溢出。
+- 颜色与令牌：沿用应用的暖白、暖灰和珊瑚选中色；主题色块直接使用 Reader 的 day/warm/night/black 表面令牌。
+- 图片与图标：来源没有需要迁移的内容图片；实现继续使用项目既有 Lucide 图标和真实主题色令牌，没有新增占位图、手绘 SVG 或伪造资产。
+- 文案与内容：设置名称与真实阅读器一致，底层数值只用于保存；字号、行距和页宽分别显示“小/中/大”“小/中/大”“窄/中/宽”。
+
+## 交互、可访问性与验证
+
+- 实测主题从纯黑切换为暖色，`aria-pressed` 正确更新；漫画缩放从 100% 增加到 110%，界面立即更新。随后刷新页面丢弃未保存的测试状态，没有修改用户持久化偏好。
+- 分段按钮均有分组名称和 `aria-pressed`；主题按钮有可读名称；缩放步进器有“减少/增加”名称和边界禁用状态；音量保留原生 range。
+- 单一 Chrome 会话检查桌面 1920 × 937 和移动 390 × 844；没有执行多浏览器测试。
+- 最终浏览器 console error 为 0。
+- Web 单元测试：181 passed；TypeScript 通过；2643 条中英文文案校验通过；`git diff --check` 通过。
+- 最终没有未解决的 P0、P1 或 P2；与来源弹窗外壳、关闭按钮和恢复按钮的差异属于用户要求的有意差异。
+
+final result: passed
+
+---
+
 # 列表批量选择与右键管理 QA — 2026-07-22
 
 ## 对照目标与证据
@@ -261,6 +349,45 @@ final result: passed
 - TypeScript：`tsc --noEmit` 通过。
 - ESLint：无 warning 或 error。
 - Next.js production build：通过。
+- `git diff --check`：通过。
+
+final result: passed
+
+---
+
+# 当前设备阅读器设置宽度收紧 QA — 2026-07-23
+
+## 对照目标与证据
+
+- 来源视觉真值：`/var/folders/d8/2c367y3s79b_hrmg8d1b8vzm0000gn/T/codex-clipboard-d6e8f85d-39f9-4181-9aad-9b9846b4afdc.png`，2564 × 1172 像素。红框明确标出了主题色块之间、三段选项选中文字两侧过大的横向留白。
+- 浏览器实现：`/Users/guyu/.codex/visualizations/2026/07/23/019f8d47-4d01-7eb2-ae24-43f7ca9ebd4b/reader-device-settings-compact-width/implementation-desktop-final.jpg`，1905 × 1210 像素；CSS 视口 1920 × 937，设备像素比 2，整页截图由浏览器接口归一化为 CSS 像素宽度。
+- 全视图同屏对照：`/Users/guyu/.codex/visualizations/2026/07/23/019f8d47-4d01-7eb2-ae24-43f7ca9ebd4b/reader-device-settings-compact-width/comparison.png`。来源和实现各自等比归一化到 1200px 宽后纵向同屏排列，用于核对整体密度与页面留白。
+- 聚焦区域同屏对照：`/Users/guyu/.codex/visualizations/2026/07/23/019f8d47-4d01-7eb2-ae24-43f7ca9ebd4b/reader-device-settings-compact-width/comparison-focused.png`。来源裁切覆盖主题、EPUB 和漫画控件；实现裁切覆盖相同内容，均等比归一化到 1200px 宽，选项内边距可直接检查。
+- 状态：已登录管理员；`/settings/reader`；纯黑主题选中；其余阅读器设置为已保存值。
+
+## Findings 与比较迭代
+
+- [P2 已修复] 1240px 内容区让两列卡片和顶部主题卡片过宽，简单的二至三项分段控件被强制拉满，选中文字两侧形成明显空洞。内容最大宽度调整为 1040px，两列卡片各 514px；卡片间距由 16px 收紧至 12px。
+- [P2 已修复] 所有分段控件采用同一个流式宽度，没有根据选项数量控制密度。现在两项、三项、四项及五项以上控件分别采用 288、320、368、最多 416px 的宽度上限；浏览器实测字号组 320px、排版和漫画模式 288px、字体组 398px。
+- [P2 已修复] 四个主题色块占满横向卡片的整个右侧区域。主题组选项宽度收敛到 384px，色块仍保持 48px 高可点击区域和清晰选中态。
+- [P3 保留] 1920px 宽屏右侧会留出较多页面空白，这是本次主动限制设置表单阅读宽度的结果；它不会影响操作，也符合用户要求的紧凑方向。
+- 修正后同屏对照中，来源红框对应的两处大间距均已消除；没有未解决的 P0、P1 或 P2。
+
+## 五项视觉核对
+
+- 字体与排版：沿用现有中文系统字体栈、字号和字重；宽度收紧后“微软雅黑”、音频倍速及所有中英文设置名均保持可读，没有截断。
+- 间距与布局：卡片内边距从桌面 20px 收至 16px，区块正文间距从 10px 收至 8px；控件按选项数获得稳定宽度，页面没有横向溢出。
+- 颜色与令牌：暖白卡片、暖灰分段底、白色选中面与珊瑚文本均未改变，收紧宽度没有引入新的视觉令牌。
+- 图片与图标：没有新增或替换图片资产；继续使用现有 Lucide 图标和 Reader 真实主题色。
+- 文案与内容：设置项、选项、说明和存储语义完全未改，只调整布局尺寸。
+
+## 交互与验证
+
+- 在单一 Chrome 会话中实测字号由“中”切到“大”后 `aria-pressed="true"`，再切回“中”同样正确；未保存测试状态，刷新后没有修改用户偏好。
+- 重新载入页面期间监控 console 与 page error，均未捕获错误事件；没有执行多浏览器测试。
+- TypeScript：通过。
+- Web 单元测试：181 passed。
+- 中英文目录：2643 条消息通过一致性检查。
 - `git diff --check`：通过。
 
 final result: passed
@@ -716,6 +843,48 @@ final result: passed
 - TypeScript：通过。
 - ESLint：无 warning 或 error。
 - Next.js production build：通过。
+- `git diff --check`：通过。
+
+final result: passed
+
+---
+
+# 设置页动作、自动保存与个人信息表单 QA — 2026-07-23
+
+## 对照目标与证据
+
+- 来源视觉真值：`/var/folders/d8/2c367y3s79b_hrmg8d1b8vzm0000gn/T/codex-clipboard-068f0476-3d3f-4ba9-8e7d-abd86d7c8f18.png`，3708 × 1832 像素。红框标出需要从所有设置页移除的右上角全局加号；同一状态还要求设备偏好取消手动保存。
+- 设备偏好实现：`/Users/guyu/.codex/visualizations/2026/07/23/019f8d47-4d01-7eb2-ae24-43f7ca9ebd4b/settings-actions-auto-save-profile/reader-auto-save-final.jpg`，1905 × 1210 像素。
+- 个人信息实现：`/Users/guyu/.codex/visualizations/2026/07/23/019f8d47-4d01-7eb2-ae24-43f7ca9ebd4b/settings-actions-auto-save-profile/personal-info-compact-final.jpg`，1905 × 1155 像素。
+- 完整对照：`/Users/guyu/.codex/visualizations/2026/07/23/019f8d47-4d01-7eb2-ae24-43f7ca9ebd4b/settings-actions-auto-save-profile/comparison-reader-actions.png`。
+- 聚焦对照：`/Users/guyu/.codex/visualizations/2026/07/23/019f8d47-4d01-7eb2-ae24-43f7ca9ebd4b/settings-actions-auto-save-profile/comparison-reader-actions-focused.png`；来源先按 1920px 宽等比归一化，再与 1920 × 937 CSS 视口下的实现头部同屏比较，右上角动作可直接检查。
+- 状态：已登录管理员；当前设备偏好页与个人信息页；单一 Chrome 会话；设备像素比 2，浏览器截图接口输出 CSS 像素尺寸。
+
+## Findings 与比较迭代
+
+- [P1 已修复] 设置中心公共外壳在每个页面右上角注入全局上传加号，和当前设置任务无关，也与用户标注冲突。已从公共外壳删除该入口及其额外权限请求；创建用户等页面自身的明确业务动作不受影响。
+- [P1 已修复] 第一版自动保存使用 React effect 延迟写入，浏览器实测切换字号后刷新没有保留。已改为所有 Reader 与音频控件在状态更新时同步写入当前 `userId` 的设备命名空间；字号由“中”切换为“大”后立即刷新仍保持“大”，随后恢复为“中”并再次刷新验证成功。
+- [P2 已修复] 设备偏好同时显示“保存”和“恢复默认”，与自动保存语义冲突。右上角现在只保留“恢复默认”；DOM 中没有“保存”按钮或全局上传加号。
+- [P2 已修复] 个人信息原布局由多段大间距内容和独立的大型语言卡组成，首屏密度不一致。现在使用 920px 有界表单、单一账户卡、64px 头像行、紧凑的姓名/邮箱/密码字段和横向语言选择卡；所有原有接口、校验、按钮与退出能力保留。
+- 最终没有未解决的 P0、P1 或 P2。
+
+## 五项视觉核对
+
+- 字体与排版：延续项目中文系统字体栈；页面标题、卡片标题、字段标签、说明分别采用现有 30/16/14/12px 层级，英文语言名称允许自然换行。
+- 间距与布局：账户卡使用 16–20px 内边距、12–16px 字段间距和统一分隔线；头像、用户名、登录邮箱、密码、退出与语言均在 1155px 完整页面高度内呈现，没有横向溢出。
+- 颜色与令牌：继续使用暖白背景、暖灰边框、珊瑚主操作和浅暖灰头像区，没有新增视觉体系。
+- 图片与图标：复用真实账户头像、品牌图标和 Lucide 图标；没有新增占位图、手绘 SVG 或伪造资产。
+- 文案与内容：保留原有头像格式、用户名用途、邮箱验证、密码退出设备和语言同步说明；仅删除已经失效的手动保存与上传入口文案。
+
+## 交互、可访问性与自动化验证
+
+- 自动保存实测：字号“中”→“大”→刷新仍为“大”→恢复“中”→刷新仍为“中”；测试结束时用户原偏好已恢复。
+- 个人信息字段保持原生 label、autocomplete、required、长度限制、加载与禁用状态；实测编辑用户名会启用保存按钮，恢复原值后重新禁用，全程未提交账户修改；语言继续使用具名 radio group。
+- 浏览器 console/warn 日志为空；未执行多浏览器测试。
+- Web 单元测试：181 passed。
+- TypeScript：通过。
+- ESLint：无 warning 或 error。
+- 中英文目录：2641 条消息通过一致性检查。
 - `git diff --check`：通过。
 
 final result: passed

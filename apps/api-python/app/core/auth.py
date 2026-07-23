@@ -87,6 +87,10 @@ def get_current_user(db: Session, request: Request, settings: Settings) -> tuple
     user_session = db.query(UserSession).filter(UserSession.token_hash == hash_token(token)).one_or_none()
     if user_session is None or _normalize_db_datetime(user_session.expires_at) <= utcnow():
         return None, None, None
+    if getattr(user_session.user, "status", "active") != "active":
+        db.delete(user_session)
+        db.commit()
+        return None, None, None
 
     refreshed_expires_at = None
     if _normalize_db_datetime(user_session.expires_at) - utcnow() < timedelta(days=SESSION_REFRESH_DAYS):

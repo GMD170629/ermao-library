@@ -1,13 +1,13 @@
-const VERSION = 'shuku-pwa-v2.3.1';
+const VERSION = 'shuku-pwa-v2.4.0';
 const SHELL_CACHE = `${VERSION}-app-shell`;
 const STATIC_CACHE = `${VERSION}-static`;
-const PRIVATE_COVER_CACHE = `${VERSION}-private-cover`;
-const PRIVATE_API_CACHE = `${VERSION}-private-api`;
+const PRIVATE_CACHE_PREFIX = `${VERSION}-private-`;
+let privateCacheNamespace = '';
 const BASE_PATH = new URL(self.registration.scope).pathname.replace(/\/$/, '');
 const CACHE_LIMITS = {
   [STATIC_CACHE]: 96,
-  [PRIVATE_COVER_CACHE]: 160,
-  [PRIVATE_API_CACHE]: 80
+  cover: 160,
+  api: 80
 };
 function withBasePath(pathname) {
   if (!BASE_PATH || !pathname.startsWith('/')) return pathname;
@@ -39,7 +39,13 @@ const SHELL_URLS = [
   '/icons/icon-512.png',
   '/icons/maskable-512.png'
 ].map(withBasePath);
-const PRIVATE_CACHES = [PRIVATE_COVER_CACHE, PRIVATE_API_CACHE];
+function safeCacheNamespacePart(value) {
+  return String(value ?? '').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 160);
+}
+
+function privateCacheName(kind) {
+  return privateCacheNamespace ? `${PRIVATE_CACHE_PREFIX}${privateCacheNamespace}-${kind}` : '';
+}
 
 function debugLog(level, message, details) {
   self.clients.matchAll({ includeUncontrolled: true, type: 'window' })
@@ -127,8 +133,8 @@ function offlineApiResponse() {
   });
 }
 
-async function trimCache(cacheName) {
-  const limit = CACHE_LIMITS[cacheName];
+async function trimCache(cacheName, kind) {
+  const limit = CACHE_LIMITS[kind] ?? CACHE_LIMITS[cacheName];
   if (!limit) return;
   const cache = await caches.open(cacheName);
   const keys = await cache.keys();
@@ -143,7 +149,7 @@ async function cacheFirst(request, cacheName) {
   const response = await fetch(request);
   if (response.ok) {
     await cache.put(request, response.clone());
-    await trimCache(cacheName);
+    await trimCache(cacheName, 'static');
   }
   return response;
 }
@@ -159,14 +165,16 @@ async function networkFirstPage(request) {
 }
 
 async function networkFirstApi(request) {
-  const cache = await caches.open(PRIVATE_API_CACHE);
+  const cacheName = privateCacheName('api');
+  if (!cacheName) return fetch(request).catch(() => offlineApiResponse());
+  const cache = await caches.open(cacheName);
   try {
     const response = await fetch(request);
     if (response.ok) {
       const url = new URL(request.url);
       if (!isSensitiveApi(url.pathname) && !isLargeReaderPayload(url.pathname)) {
         await cache.put(request, response.clone());
-        await trimCache(PRIVATE_API_CACHE);
+        await trimCache(cacheName, 'api');
       }
     }
     return response;
@@ -176,12 +184,13 @@ async function networkFirstApi(request) {
 }
 
 async function staleWhileRevalidate(request, cacheName) {
+  if (!cacheName) return fetch(request);
   const cache = await caches.open(cacheName);
   const cached = await cache.match(request);
   const refresh = fetch(request).then(async (response) => {
     if (response.ok) {
       await cache.put(request, response.clone());
-      await trimCache(cacheName);
+      await trimCache(cacheName, 'cover');
     }
     return response;
   }).catch(() => cached);
@@ -189,7 +198,8 @@ async function staleWhileRevalidate(request, cacheName) {
 }
 
 async function clearPrivateCaches() {
-  await Promise.all(PRIVATE_CACHES.map((cacheName) => caches.delete(cacheName)));
+  const keys = await caches.keys();
+  await Promise.all(keys.filter((cacheName) => cacheName.startsWith(PRIVATE_CACHE_PREFIX)).map((cacheName) => caches.delete(cacheName)));
 }
 
 self.addEventListener('install', (event) => {
@@ -234,7 +244,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   if (isCoverRequest(url.pathname)) {
-    event.respondWith(staleWhileRevalidate(event.request, PRIVATE_COVER_CACHE));
+    event.respondWith(staleWhileRevalidate(event.request, privateCacheName('cover')));
     return;
   }
   if (withoutBasePath(url.pathname).startsWith('/api/')) {
@@ -253,6 +263,24 @@ self.addEventListener('message', (event) => {
   }
   if (event.data?.type === 'CLEAR_PRIVATE_CACHES') {
     debugLog('info', 'clear private caches requested');
+    privateCacheNamespace = '';
     event.waitUntil(clearPrivateCaches().then(() => debugLog('info', 'private caches cleared')));
+  }
+  if (event.data?.type === 'SET_PRIVATE_CACHE_NAMESPACE') {
+    const userId = safeCacheNamespacePart(event.data.userId);
+    const authzVersion = safeCacheNamespacePart(event.data.authzVersion);
+    const nextNamespace = userId && authzVersion ? `${userId}-${authzVersion}` : '';
+    if (nextNamespace && nextNamespace !== privateCacheNamespace) {
+      privateCacheNamespace = nextNamespace;
+      event.waitUntil(
+        caches.keys()
+          .then((keys) => Promise.all(
+            keys
+              .filter((cacheName) => cacheName.startsWith(PRIVATE_CACHE_PREFIX) && !cacheName.startsWith(`${PRIVATE_CACHE_PREFIX}${nextNamespace}-`))
+              .map((cacheName) => caches.delete(cacheName))
+          ))
+          .then(() => debugLog('info', 'private cache namespace updated', nextNamespace))
+      );
+    }
   }
 });

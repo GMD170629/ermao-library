@@ -7,6 +7,22 @@ import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { useI18n } from '../../i18n/provider';
 import { isDarkReaderTheme, readerThemeSurfaces } from './reader-theme';
+import {
+  READER_COMIC_DIRECTION_OPTIONS,
+  READER_COMIC_IMAGE_FIT_OPTIONS,
+  READER_COMIC_IMAGE_VARIANT_OPTIONS,
+  READER_FLOW_OPTIONS,
+  READER_FONT_FAMILY_OPTIONS,
+  READER_FONT_SIZE_OPTIONS,
+  READER_LINE_HEIGHT_OPTIONS,
+  READER_PAGE_TURN_ANIMATION_OPTIONS,
+  READER_PAGE_WIDTH_OPTIONS,
+  READER_PDF_FIT_OPTIONS,
+  READER_SPREAD_MODE_OPTIONS,
+  READER_THEME_OPTIONS,
+  closestReaderOptionValue,
+  type ReaderFontFamily
+} from './reader-preference-options';
 import type { ReaderBookmark } from './v2/bookmarks';
 import { resolveActiveEpubNavigationIndex } from './v2/epub-navigation';
 import type { ReaderInteractionPolicy } from './v2/adapters/reader-interaction';
@@ -22,30 +38,13 @@ type ComicImageVariant = ReaderPreferences['comic']['imageVariant'];
 
 export type ReaderKind = 'epub' | 'comic' | 'pdf';
 export type ReaderTheme = ReaderPreferences['appearance']['theme'];
-export const readerFontFamilyOptions = [
-  { value: 'pingfang', label: '苹方' },
-  { value: 'heiti', label: '黑体' },
-  { value: 'songti', label: '宋体' },
-  { value: 'yahei', label: '微软雅黑' },
-  { value: 'kaiti', label: '楷体' }
-] as const;
-const readerThemeOptions = [
-  { value: 'day', label: '白天' },
-  { value: 'warm', label: '暖色' },
-  { value: 'night', label: '夜间' },
-  { value: 'black', label: '纯黑' }
-] as const;
-const readerFontSizeOptions = [
-  { value: '16', label: '小' },
-  { value: '18', label: '中' },
-  { value: '22', label: '大' }
-] as const;
-const readerLineHeightOptions = [
-  { value: '1.6', label: '小', icon: Rows2 },
-  { value: '1.9', label: '中', icon: Rows3 },
-  { value: '2.2', label: '大', icon: Rows4 }
-] as const;
-export type ReaderFontFamily = typeof readerFontFamilyOptions[number]['value'];
+export const readerFontFamilyOptions = READER_FONT_FAMILY_OPTIONS;
+const readerFontSizeOptions = READER_FONT_SIZE_OPTIONS;
+const readerLineHeightOptions = READER_LINE_HEIGHT_OPTIONS.map((option, index) => ({
+  ...option,
+  icon: [Rows2, Rows3, Rows4][index]
+}));
+export type { ReaderFontFamily };
 export type EbookPageTurnAnimation = ReaderPreferences['epub']['pageTurnAnimation'];
 export type EbookSpreadMode = ReaderPreferences['epub']['spreadMode'];
 export type EbookFlow = 'paginated' | 'scrolled';
@@ -153,12 +152,6 @@ type ReaderPanelPlacement = { left: number; bottom: number };
 
 function clampPercent(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
-}
-
-function closestSettingValue(value: number, options: ReadonlyArray<{ value: string }>) {
-  return options.reduce((closest, option) => (
-    Math.abs(Number(option.value) - value) < Math.abs(Number(closest.value) - value) ? option : closest
-  )).value;
 }
 
 function progressPageLabel(progress: ReaderProgress) {
@@ -995,7 +988,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                   />
                   <CompactSettingOptions
                     label={i18nAttribute("字号")}
-                    value={closestSettingValue(settings.fontSize, readerFontSizeOptions)}
+                    value={closestReaderOptionValue(settings.fontSize, readerFontSizeOptions)}
                     options={readerFontSizeOptions}
                     disambiguateLabels
                     onChange={(value) => updateSettings({ fontSize: Number(value) })}
@@ -1003,7 +996,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                   />
                   <CompactSettingOptions
                     label={i18nAttribute("行距")}
-                    value={closestSettingValue(settings.lineHeight, readerLineHeightOptions)}
+                    value={closestReaderOptionValue(settings.lineHeight, readerLineHeightOptions)}
                     options={readerLineHeightOptions}
                     disambiguateLabels
                     onChange={(value) => updateSettings({ lineHeight: Number(value) })}
@@ -1012,21 +1005,21 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                   <CompactSettingOptions
                     label={i18nAttribute("字体")}
                     value={settings.fontFamily}
-                    options={readerFontFamilyOptions}
+                    options={READER_FONT_FAMILY_OPTIONS}
                     onChange={(value) => updateSettings({ fontFamily: value as ReaderFontFamily })}
                     dark={dark}
                   />
                   <CompactSettingOptions
                     label={i18nAttribute("页宽")}
-                    value={closestSettingValue(settings.pageWidth, [{ value: '760' }, { value: '1050' }, { value: '1350' }])}
-                    options={[{ value: '760', label: '窄' }, { value: '1050', label: '中' }, { value: '1350', label: '宽' }]}
+                    value={closestReaderOptionValue(settings.pageWidth, READER_PAGE_WIDTH_OPTIONS)}
+                    options={READER_PAGE_WIDTH_OPTIONS}
                     onChange={(value) => updateSettings({ pageWidth: Number(value) })}
                     dark={dark}
                   />
                   <CompactSettingOptions
                     label={i18nAttribute("排版")}
                     value={settings.ebookFlow}
-                    options={[{ value: 'paginated', label: '分页' }, { value: 'scrolled', label: '滚动' }]}
+                    options={READER_FLOW_OPTIONS}
                     onChange={(value) => updateSettings({ ebookFlow: value as EbookFlow })}
                     dark={dark}
                   />
@@ -1041,40 +1034,35 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                   <CompactSettingOptions
                     label={i18nAttribute("模式")}
                     value={settings.comicMode}
-                    options={[{ value: 'single', label: '单页' }, { value: 'double', label: '双页' }]}
+                    options={READER_SPREAD_MODE_OPTIONS}
                     onChange={(value) => updateSettings({ comicMode: value as ComicMode })}
                     dark={dark}
                   />
                   <CompactSettingOptions
                     label={i18nAttribute("翻页")}
                     value={settings.comicPageTurnAnimation}
-                    options={[{ value: 'slide', label: '平移' }, { value: 'off', label: '关闭' }]}
+                    options={READER_PAGE_TURN_ANIMATION_OPTIONS}
                     onChange={(value) => updateSettings({ comicPageTurnAnimation: value as ComicPageTurnAnimation })}
                     dark={dark}
                   />
                   <CompactSettingOptions
                     label={i18nAttribute("适配")}
                     value={settings.imageFit}
-                    options={[
-                      { value: 'width', label: '宽度' },
-                      { value: 'height', label: '高度' },
-                      { value: 'contain', label: '完整' },
-                      { value: 'original', label: '原始' }
-                    ]}
+                    options={READER_COMIC_IMAGE_FIT_OPTIONS}
                     onChange={(value) => updateSettings({ imageFit: value as ComicImageFit })}
                     dark={dark}
                   />
                   <CompactSettingOptions
                     label={i18nAttribute("画质")}
                     value={settings.imageVariant}
-                    options={[{ value: 'original', label: '原图' }, { value: 'data-saver', label: '省流' }]}
+                    options={READER_COMIC_IMAGE_VARIANT_OPTIONS}
                     onChange={(value) => updateSettings({ imageVariant: value as ComicImageVariant })}
                     dark={dark}
                   />
                   <CompactSettingOptions
                     label={i18nAttribute("方向")}
                     value={settings.comicDirection}
-                    options={[{ value: 'ltr', label: '左至右' }, { value: 'rtl', label: '右至左' }]}
+                    options={READER_COMIC_DIRECTION_OPTIONS}
                     onChange={(value) => updateSettings({ comicDirection: value as ComicDirection })}
                     dark={dark}
                   />
@@ -1091,7 +1079,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                   <CompactSettingOptions
                     label={i18nAttribute("适配")}
                     value={settings.pdfFit}
-                    options={[{ value: 'width', label: '宽度' }, { value: 'page', label: '整页' }]}
+                    options={READER_PDF_FIT_OPTIONS}
                     onChange={(value) => updateSettings({ pdfFit: value as PdfFit })}
                     dark={dark}
                   />
@@ -1172,7 +1160,7 @@ function ThemeSwatches({ value, onChange, dark }: { value: ReaderTheme; onChange
   const { t: i18nAttribute } = useAttributeI18n();
   return (
     <div role="group" aria-label={i18nAttribute("主题")} className={cn('flex items-center justify-center gap-3 rounded-2xl p-1.5', dark ? 'bg-white/[0.06]' : 'bg-stone-900/[0.04]')}>
-      {readerThemeOptions.map((option) => {
+      {READER_THEME_OPTIONS.map((option) => {
         const selected = value === option.value;
         const surface = readerThemeSurfaces[option.value];
         return (

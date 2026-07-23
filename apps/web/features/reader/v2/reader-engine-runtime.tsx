@@ -4,7 +4,7 @@ import type { ReaderAdapter, ReaderCommand, ReaderPreferences } from '@shuku/rea
 import { LoaderCircle, LockKeyhole, RotateCcw, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ReaderShell, type ReaderControls, type ReaderNavigationItem, type ReaderShellEvents, type ReaderVolumeNavigation } from '../reader-shell';
-import type { ReaderBootstrap } from './api';
+import { fetchReaderBookmarks, saveReaderBookmarks, type ReaderBootstrap } from './api';
 import { hasReaderBookmark, legacyReaderBookmarkStoragePrefix, mergeReaderBookmarks, readReaderBookmarks, readerBookmarkId, readerBookmarkStorageKey, removeReaderBookmark, toggleReaderBookmark, type ReaderBookmark } from './bookmarks';
 import { resolveActiveEpubNavigationIndex } from './epub-navigation';
 import { locationExtra, locationProgress, preferencesToReaderSettings, readerSettingsToPreferences } from './presentation';
@@ -71,6 +71,7 @@ export function ReaderEngineRuntime({
   const [passwordReason, setPasswordReason] = useState<'need-password' | 'incorrect-password' | null>(null);
   const [password, setPassword] = useState('');
   const [bookmarks, setBookmarks] = useState<ReaderBookmark[]>([]);
+  const bookmarkSyncReadyRef = useRef(false);
   const executeRef = useRef<(command: ReaderCommand) => Promise<boolean>>(async () => false);
   const shellEventsRef = useRef<ReaderShellEvents | null>(null);
   const interactionBlockedRef = useRef(true);
@@ -213,6 +214,9 @@ export function ReaderEngineRuntime({
   ), [bootstrap.contentFingerprint, bootstrap.edition.id, bootstrap.selectedVolume?.id, bootstrap.userId]);
 
   useEffect(() => {
+    const controller = new AbortController();
+    bookmarkSyncReadyRef.current = false;
+    let localBookmarks: ReaderBookmark[] = [];
     try {
       const current = readReaderBookmarks(window.localStorage.getItem(bookmarkStorageKey));
       const legacyPrefix = legacyReaderBookmarkStoragePrefix(bootstrap.userId, bootstrap.edition.id);
@@ -220,12 +224,32 @@ export function ReaderEngineRuntime({
       const legacy = Object.keys(window.localStorage)
         .filter((key) => key.startsWith(legacyPrefix) && key.endsWith(legacySuffix))
         .flatMap((key) => readReaderBookmarks(window.localStorage.getItem(key)));
-      const next = mergeReaderBookmarks(current, legacy);
-      setBookmarks(next);
-      if (legacy.length > 0) window.localStorage.setItem(bookmarkStorageKey, JSON.stringify(next));
+      localBookmarks = mergeReaderBookmarks(current, legacy);
+      setBookmarks(localBookmarks);
+      if (legacy.length > 0) window.localStorage.setItem(bookmarkStorageKey, JSON.stringify(localBookmarks));
     } catch {
       setBookmarks([]);
     }
+    fetchReaderBookmarks(bootstrap.edition.id, bootstrap.contentFingerprint, controller.signal)
+      .then((serverBookmarks) => {
+        setBookmarks((current) => {
+          const next = mergeReaderBookmarks(current, serverBookmarks);
+          try {
+            window.localStorage.setItem(bookmarkStorageKey, JSON.stringify(next));
+          } catch {
+            // Server state remains authoritative when local storage is unavailable.
+          }
+          bookmarkSyncReadyRef.current = true;
+          if (JSON.stringify(next) !== JSON.stringify(serverBookmarks)) {
+            void saveReaderBookmarks(bootstrap.edition.id, bootstrap.contentFingerprint, next).catch(() => undefined);
+          }
+          return next;
+        });
+      })
+      .catch((reason) => {
+        if (!(reason instanceof DOMException && reason.name === 'AbortError')) bookmarkSyncReadyRef.current = true;
+      });
+    return () => controller.abort();
   }, [bookmarkStorageKey, bootstrap.contentFingerprint, bootstrap.edition.id, bootstrap.userId]);
 
   const persistBookmarks = useCallback((update: (current: ReaderBookmark[]) => ReaderBookmark[]) => {
@@ -236,9 +260,12 @@ export function ReaderEngineRuntime({
       } catch {
         // The visible state still works when private browsing blocks storage.
       }
+      if (bookmarkSyncReadyRef.current) {
+        void saveReaderBookmarks(bootstrap.edition.id, bootstrap.contentFingerprint, next).catch(() => undefined);
+      }
       return next;
     });
-  }, [bookmarkStorageKey]);
+  }, [bookmarkStorageKey, bootstrap.contentFingerprint, bootstrap.edition.id]);
 
   const currentBookmarkLabel = useMemo(() => {
     if (currentLocation?.kind === 'comic') {

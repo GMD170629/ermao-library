@@ -1,15 +1,13 @@
 import { AccountPanel } from './account-panel';
 import { LanguageSettings } from './language-settings';
 import { SettingsCenterShell } from './settings-center-shell';
-import { WorkDetailTabOrderSettings } from './work-detail-tab-order-settings';
 
 export function GeneralSettingsPage() {
   return (
-    <SettingsCenterShell title="通用" description="管理图书详情展示偏好、账户信息与当前登录状态。">
-      <div className="space-y-8">
-        <LanguageSettings />
-        <WorkDetailTabOrderSettings />
+    <SettingsCenterShell title="个人信息" description="管理当前用户的头像、用户名、登录邮箱、密码和界面语言。">
+      <div className="max-w-[920px] space-y-4">
         <AccountPanel />
+        <LanguageSettings />
       </div>
     </SettingsCenterShell>
   );

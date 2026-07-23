@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import queue
 import re
 import threading
@@ -200,15 +201,32 @@ class WorkerManager:
         handled_at = settings.get(RESCAN_HANDLED_AT_KEY)
         if not requested_at or requested_at == handled_at or requested_at == self.last_handled_rescan_request:
             return
-        print(f"[import-worker] rescan requested at {requested_at}", flush=True)
+        request_timestamp = requested_at
+        requested_folder_ids: set[str] | None = None
+        try:
+            request_payload = json.loads(requested_at)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            request_payload = None
+        if isinstance(request_payload, dict):
+            request_timestamp = str(request_payload.get("requestedAt") or requested_at)
+            raw_folder_ids = request_payload.get("monitorFolderIds")
+            if isinstance(raw_folder_ids, list):
+                requested_folder_ids = {
+                    str(folder_id)
+                    for folder_id in raw_folder_ids
+                    if str(folder_id).strip()
+                }
+        print(f"[import-worker] rescan requested at {request_timestamp}", flush=True)
         folders = enabled_monitor_folders(db)
+        if requested_folder_ids is not None:
+            folders = [folder for folder in folders if folder.id in requested_folder_ids]
         record_system_event(
             db,
             source="import",
             action="rescan.started",
             target_type="monitorFolder",
             message=f"开始重新扫描 {len(folders)} 个监控文件夹",
-            metadata={"requestedAt": requested_at, "folderCount": len(folders)},
+            metadata={"requestedAt": request_timestamp, "folderCount": len(folders)},
             commit=True,
         )
         completed_folders = 0
@@ -225,12 +243,12 @@ class WorkerManager:
                     target_type="monitorFolder",
                     target_id=folder.id,
                     message=f"监控文件夹重新扫描失败：{folder.root_path}",
-                    metadata={"rootPath": folder.root_path, "trigger": "manual_rescan", "requestedAt": requested_at, "error": str(exc)},
+                    metadata={"rootPath": folder.root_path, "trigger": "manual_rescan", "requestedAt": request_timestamp, "error": str(exc)},
                     commit=True,
                     prune=True,
                 )
                 continue
-            scan_directory_with_logging(db, real_path, folder, self.import_queue, trigger="manual_rescan", requested_at=requested_at)
+            scan_directory_with_logging(db, real_path, folder, self.import_queue, trigger="manual_rescan", requested_at=request_timestamp)
             completed_folders += 1
         self.last_handled_rescan_request = requested_at
         upsert_system_setting(db, RESCAN_HANDLED_AT_KEY, requested_at)
@@ -241,7 +259,7 @@ class WorkerManager:
             level="warning" if completed_folders != len(folders) else "info",
             target_type="monitorFolder",
             message=f"重新扫描完成：{completed_folders}/{len(folders)} 个监控文件夹",
-            metadata={"requestedAt": requested_at, "folderCount": len(folders), "completedFolderCount": completed_folders},
+            metadata={"requestedAt": request_timestamp, "folderCount": len(folders), "completedFolderCount": completed_folders},
             commit=True,
             prune=True,
         )

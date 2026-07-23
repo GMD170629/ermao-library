@@ -1,9 +1,7 @@
 'use client';
 
-import { Plus } from 'lucide-react';
-import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { I18nText, useI18n } from '../../../i18n/provider';
+import { I18nText } from '../../../i18n/provider';
 import { MobileNavigationTrigger } from '../../../components/layout/mobile-navigation';
 import { SettingsSecondaryNav } from './settings-secondary-nav';
 
@@ -18,7 +16,6 @@ export function SettingsCenterShell({
   children: ReactNode;
   actions?: ReactNode;
 }) {
-  const { t } = useI18n();
   return (
     <div className="min-h-[calc(100vh-9rem)] rounded-[30px] bg-[#FCFBF9] px-5 py-6 text-[#272522] sm:px-7 lg:px-9 lg:py-8">
       <div className="flex items-center justify-between gap-4">
@@ -28,14 +25,6 @@ export function SettingsCenterShell({
         </div>
         <div className="flex items-center gap-2">
           {actions}
-          <Link
-            href="/library?upload=1"
-            aria-label={t('前往上传读物')}
-            title={t('上传读物')}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[#D8D4CE] bg-white text-[#2F2D2A] transition hover:border-[#F05A3C] hover:text-[#F05A3C] focus:outline-none focus:ring-4 focus:ring-[#FAD9D0]"
-          >
-            <Plus size={22} />
-          </Link>
         </div>
       </div>
 

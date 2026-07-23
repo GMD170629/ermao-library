@@ -14,7 +14,10 @@ router = APIRouter(tags=["health"])
 def health(db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
     health_status = run_system_health_checks(db, settings)
     status_code = status.HTTP_200_OK if health_status["status"] == "ok" else status.HTTP_503_SERVICE_UNAVAILABLE
-    return ok({"service": "shuku-starship", **health_status}, status_code=status_code)
+    return ok(
+        {"service": "shuku-starship", "status": health_status["status"]},
+        status_code=status_code,
+    )
 
 
 @router.get("/system/health")

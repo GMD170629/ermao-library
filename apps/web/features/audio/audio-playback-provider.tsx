@@ -5,6 +5,7 @@ import { UNAUTHORIZED_EVENT } from '../../lib/auth-session';
 import { activateReaderV2User, getReaderV2Runtime, type AudioProgressLocation } from '../../lib/reader-v2';
 import { withBasePath } from '../../lib/base-path';
 import { BEFORE_PWA_UPDATE_EVENT, type BeforePwaUpdateDetail } from '../../lib/pwa/update-coordination';
+import { AUDIO_DEVICE_PREFERENCES_KEY, readAudioDevicePreferences, writeAudioDevicePreferences } from '../../lib/audio-device-preferences';
 import { fetchAudioBootstrap } from './api';
 import {
   absolutePositionForTrack,
@@ -34,10 +35,8 @@ import type {
 
 const PLAYBACK_CHANNEL = 'shuku-audio-playback';
 const PLAYBACK_CLAIM_KEY = 'shuku:audio:playback-claim';
-const AUDIO_PREFERENCES_KEY = 'shuku:audio:preferences:v1';
 const PROGRESS_INTERVAL_MS = 15_000;
 
-type StoredAudioPreferences = { playbackRate?: number; volume?: number };
 type PendingAudioEditionLoad = AudioLoadIntent & {
   editionId: string;
   summary: AudioLaunchSummary | null;
@@ -70,33 +69,6 @@ const initialState: AudioPlaybackState = {
 };
 
 const AudioPlaybackContext = createContext<AudioPlaybackContextValue | null>(null);
-
-function preferenceStorageKey(userId?: string, workId?: string) {
-  return userId && workId
-    ? `${AUDIO_PREFERENCES_KEY}:${encodeURIComponent(userId)}:${encodeURIComponent(workId)}`
-    : AUDIO_PREFERENCES_KEY;
-}
-
-function readStoredPreferences(userId?: string, workId?: string): StoredAudioPreferences {
-  if (typeof window === 'undefined') return {};
-  try {
-    const scoped = window.localStorage.getItem(preferenceStorageKey(userId, workId));
-    const legacy = userId && workId ? window.localStorage.getItem(AUDIO_PREFERENCES_KEY) : null;
-    const value = JSON.parse(scoped ?? legacy ?? '{}') as StoredAudioPreferences;
-    return value && typeof value === 'object' ? value : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeStoredPreferences(preferences: StoredAudioPreferences, userId?: string, workId?: string) {
-  try {
-    window.localStorage.setItem(preferenceStorageKey(userId, workId), JSON.stringify(preferences));
-  } catch {
-    // Playback remains functional when storage is unavailable (for example,
-    // strict private-browsing modes).
-  }
-}
 
 function tabId() {
   const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -359,7 +331,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         failedLoadRef.current = null;
         bootstrapRef.current = bootstrap;
         activateReaderV2User(bootstrap.userId);
-        const preferences = readStoredPreferences(bootstrap.userId, bootstrap.edition.workId);
+        const preferences = readAudioDevicePreferences(bootstrap.userId, bootstrap.edition.workId);
         const playbackRate = clamp(preferences.playbackRate ?? bootstrap.preferences.playbackRate, 0.75, 3);
         const volume = clamp(preferences.volume ?? bootstrap.preferences.volume, 0, 1);
         const requestedChapter = request.chapterId
@@ -515,7 +487,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     if (audioRef.current) audioRef.current.playbackRate = normalized;
     updateState({ playbackRate: normalized });
     const bootstrap = bootstrapRef.current;
-    writeStoredPreferences({ playbackRate: normalized, volume: stateRef.current.volume }, bootstrap?.userId, bootstrap?.edition.workId);
+    writeAudioDevicePreferences({ playbackRate: normalized, volume: stateRef.current.volume }, bootstrap?.userId, bootstrap?.edition.workId);
     void persistProgress();
   }, [persistProgress, updateState]);
 
@@ -524,7 +496,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     if (audioRef.current) audioRef.current.volume = normalized;
     updateState({ volume: normalized });
     const bootstrap = bootstrapRef.current;
-    writeStoredPreferences({ playbackRate: stateRef.current.playbackRate, volume: normalized }, bootstrap?.userId, bootstrap?.edition.workId);
+    writeAudioDevicePreferences({ playbackRate: stateRef.current.playbackRate, volume: normalized }, bootstrap?.userId, bootstrap?.edition.workId);
   }, [updateState]);
 
   const setSleepTimer = useCallback((value: number | 'chapter' | null) => {
@@ -563,7 +535,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     pendingSeekRef.current = null;
     pendingAutoplayRef.current = false;
     sleepTargetChapterRef.current = null;
-    const preferences = readStoredPreferences();
+    const preferences = readAudioDevicePreferences();
     updateState({
       ...initialState,
       playbackRate: clamp(preferences.playbackRate ?? 1, 0.75, 3),
@@ -600,7 +572,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
   }, [updateState]);
 
   useEffect(() => {
-    const preferences = readStoredPreferences();
+    const preferences = readAudioDevicePreferences();
     const playbackRate = clamp(preferences.playbackRate ?? 1, 0.75, 3);
     const volume = clamp(preferences.volume ?? 1, 0, 1);
     if (audioRef.current) {
@@ -841,7 +813,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         const keys: string[] = [];
         for (let index = 0; index < window.localStorage.length; index += 1) {
           const key = window.localStorage.key(index);
-          if (key === AUDIO_PREFERENCES_KEY || key?.startsWith(`${AUDIO_PREFERENCES_KEY}:`)) keys.push(key);
+          if (key && (key === AUDIO_DEVICE_PREFERENCES_KEY || key.startsWith(`${AUDIO_DEVICE_PREFERENCES_KEY}:`))) keys.push(key);
         }
         keys.forEach((key) => window.localStorage.removeItem(key));
         window.localStorage.removeItem(PLAYBACK_CLAIM_KEY);

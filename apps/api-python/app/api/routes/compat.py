@@ -27,6 +27,18 @@ from sqlalchemy.orm import Session
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from app.core.auth import get_current_user
+from app.core.authorization import (
+    authorization_context,
+    can_access_edition,
+    can_access_file,
+    can_access_monitor_folder,
+    can_access_volume,
+    can_access_work,
+    can_manage_system,
+    edition_visibility_sql,
+    monitor_folder_visibility_sql,
+    work_visibility_sql,
+)
 from app.core.config import Settings, get_settings
 from app.core.i18n import SUPPORTED_LOCALES, configured_locale, normalize_locale
 from app.core.time import timestamp_ms_to_iso, to_timestamp_ms
@@ -145,6 +157,40 @@ def _auth(db: Session, request: Request, settings: Settings) -> tuple[User | Non
     if user is None:
         return None, fail("UNAUTHORIZED", status_code=401)
     return user, None
+
+
+def _system_auth(db: Session, request: Request, settings: Settings) -> tuple[User | None, Response | None]:
+    user, error = _auth(db, request, settings)
+    if error is not None:
+        return None, error
+    if user is None or not can_manage_system(user):
+        return None, fail("需要系统管理权限", status_code=403, code="SYSTEM_MANAGER_REQUIRED")
+    return user, None
+
+
+def _visible_work_or_none(db: Session, user: User, work_id: str) -> dict[str, Any] | None:
+    if not can_access_work(db, user, work_id):
+        return None
+    return _get_work(db, work_id)
+
+
+def _require_work_manager(db: Session, user: User, work_id: str) -> Response | None:
+    if not can_access_work(db, user, work_id):
+        return fail("作品不存在", status_code=404, code="WORK_NOT_FOUND")
+    if not can_manage_system(user):
+        return fail("需要系统管理权限", status_code=403, code="SYSTEM_MANAGER_REQUIRED")
+    return None
+
+
+def _visible_import_task_or_none(db: Session, user: User, task_id: str) -> dict[str, Any] | None:
+    task = (
+        _row(db, "SELECT * FROM `ImportTask` WHERE `id` = :id", {"id": task_id})
+        if _has_table(db, "ImportTask")
+        else None
+    )
+    if task is None or not can_access_monitor_folder(db, user, task.get("monitorFolderId")):
+        return None
+    return task
 
 
 def _rows(db: Session, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
@@ -807,9 +853,23 @@ def _resolve_consumption_target(
 
 def _project_work_status_for_user(db: Session, user_id: str, work_id: str) -> str:
     if not _has_table(db, "LibraryConsumptionState") or not _has_table(db, "LibraryEdition"):
-        work = _get_work(db, work_id)
-        return _reading_status((work or {}).get("status"))
-    edition_rows = _rows(db, "SELECT * FROM `LibraryEdition` WHERE `workId` = :work_id AND COALESCE(`hidden`, 0) = 0", {"work_id": work_id})
+        return "UNREAD"
+    user = db.get(User, user_id)
+    edition_scope = "1 = 1"
+    edition_params: dict[str, Any] = {"work_id": work_id}
+    if user is not None:
+        edition_scope, scope_params = edition_visibility_sql(
+            authorization_context(db, user),
+            alias="e",
+            prefix="status_projection",
+        )
+        edition_params.update(scope_params)
+    edition_rows = _rows(
+        db,
+        "SELECT e.* FROM `LibraryEdition` e WHERE e.`workId` = :work_id "
+        f"AND COALESCE(e.`hidden`, 0) = 0 AND {edition_scope}",
+        edition_params,
+    )
     media_kinds = {_edition_media_kind(item) for item in edition_rows}
     states = {
         str(item.get("mediaKind")): _reading_status(item.get("status"))
@@ -820,15 +880,7 @@ def _project_work_status_for_user(db: Session, user_id: str, work_id: str) -> st
         )
     }
     if not any(kind in states for kind in media_kinds):
-        any_user_state = _scalar(
-            db,
-            "SELECT 1 FROM `LibraryConsumptionState` WHERE `workId` = :work_id LIMIT 1",
-            {"work_id": work_id},
-        )
-        if any_user_state:
-            return "UNREAD"
-        work = _get_work(db, work_id)
-        return _reading_status((work or {}).get("status"))
+        return "UNREAD"
     if media_kinds and all(states.get(kind) == "FINISHED" for kind in media_kinds):
         return "FINISHED"
     if any(states.get(kind) in {"READING", "FINISHED"} for kind in media_kinds):
@@ -836,15 +888,24 @@ def _project_work_status_for_user(db: Session, user_id: str, work_id: str) -> st
     return "UNREAD"
 
 
-def _user_status_filter_sql(db: Session, status: str) -> str | None:
+def _user_status_filter_sql(
+    db: Session,
+    status: str,
+    context: Any,
+) -> tuple[str | None, dict[str, Any]]:
     """Build the current-user aggregate status filter for LibraryWork."""
 
     if not (_has_table(db, "LibraryConsumptionState") and _has_table(db, "LibraryEdition")):
         if status == "UNREAD":
-            return "`status` IN ('UNREAD', 'WANT')"
+            return "`status` IN ('UNREAD', 'WANT')", {}
         if status in {"READING", "FINISHED"}:
-            return "`status` = :status"
-        return None
+            return "`status` = :status", {}
+        return None, {}
+    edition_scope, scope_params = edition_visibility_sql(
+        context,
+        alias="edition_state",
+        prefix="status_filter",
+    )
     media_expression = (
         "edition_state.`mediaKind`"
         if _has_column(db, "LibraryEdition", "mediaKind")
@@ -856,20 +917,16 @@ def _user_status_filter_sql(db: Session, status: str) -> str | None:
         "AND consumption_state.`workId` = `LibraryWork`.`id` "
         "AND EXISTS (SELECT 1 FROM `LibraryEdition` edition_state "
         "WHERE edition_state.`workId` = `LibraryWork`.`id` AND COALESCE(edition_state.`hidden`, 0) = 0 "
-        f"AND {media_expression} = consumption_state.`mediaKind`))"
+        f"AND {edition_scope} AND {media_expression} = consumption_state.`mediaKind`))"
     )
     any_visible_edition = (
         "EXISTS (SELECT 1 FROM `LibraryEdition` edition_state WHERE edition_state.`workId` = `LibraryWork`.`id` "
-        "AND COALESCE(edition_state.`hidden`, 0) = 0)"
-    )
-    any_work_state_exists = (
-        "EXISTS (SELECT 1 FROM `LibraryConsumptionState` any_state "
-        "WHERE any_state.`workId` = `LibraryWork`.`id`)"
+        f"AND COALESCE(edition_state.`hidden`, 0) = 0 AND {edition_scope})"
     )
     all_finished = (
         f"({any_visible_edition} AND NOT EXISTS (SELECT 1 FROM `LibraryEdition` edition_state "
         "WHERE edition_state.`workId` = `LibraryWork`.`id` AND COALESCE(edition_state.`hidden`, 0) = 0 "
-        "AND NOT EXISTS (SELECT 1 FROM `LibraryConsumptionState` finished_state "
+        f"AND {edition_scope} AND NOT EXISTS (SELECT 1 FROM `LibraryConsumptionState` finished_state "
         "WHERE finished_state.`userId` = :current_user_id AND finished_state.`workId` = `LibraryWork`.`id` "
         f"AND finished_state.`mediaKind` = {media_expression} AND finished_state.`status` = 'FINISHED')))"
     )
@@ -879,15 +936,15 @@ def _user_status_filter_sql(db: Session, status: str) -> str | None:
         "AND started_state.`status` IN ('READING', 'FINISHED') "
         "AND EXISTS (SELECT 1 FROM `LibraryEdition` edition_state "
         "WHERE edition_state.`workId` = `LibraryWork`.`id` AND COALESCE(edition_state.`hidden`, 0) = 0 "
-        f"AND {media_expression} = started_state.`mediaKind`))"
+        f"AND {edition_scope} AND {media_expression} = started_state.`mediaKind`))"
     )
     if status == "FINISHED":
-        return f"(({visible_state_exists} AND {all_finished}) OR (NOT {any_work_state_exists} AND `status` = 'FINISHED'))"
+        return f"({visible_state_exists} AND {all_finished})", scope_params
     if status == "READING":
-        return f"(({visible_state_exists} AND NOT {all_finished} AND {has_started}) OR (NOT {any_work_state_exists} AND `status` = 'READING'))"
+        return f"({visible_state_exists} AND NOT {all_finished} AND {has_started})", scope_params
     if status == "UNREAD":
-        return f"(({visible_state_exists} AND NOT {has_started}) OR (NOT {visible_state_exists} AND {any_work_state_exists}) OR (NOT {any_work_state_exists} AND `status` IN ('UNREAD', 'WANT')))"
-    return None
+        return f"(NOT {has_started})", scope_params
+    return None, scope_params
 
 
 def _format_duration(duration_ms: Any) -> str:
@@ -937,10 +994,22 @@ def _work_view(db: Session, work: dict[str, Any], user_id: str | None = None) ->
     progresses_by_edition: dict[str, list[dict[str, Any]]] = {}
     conversion_by_edition: dict[str, dict[str, Any]] = {}
     if _has_table(db, "LibraryEdition"):
+        edition_where = "1 = 1"
+        edition_params: dict[str, Any] = {"work_id": work["id"]}
+        user = db.get(User, user_id) if user_id else None
+        if user is not None:
+            context = authorization_context(db, user)
+            edition_where, scope_params = edition_visibility_sql(
+                context,
+                alias="LibraryEdition",
+                prefix="work_view",
+            )
+            edition_params.update(scope_params)
         editions = _rows(
             db,
-            "SELECT * FROM `LibraryEdition` WHERE `workId` = :work_id AND `hidden` = 0 ORDER BY `primary` DESC, `createdAt` ASC",
-            {"work_id": work["id"]},
+            "SELECT * FROM `LibraryEdition` WHERE `workId` = :work_id AND `hidden` = 0 "
+            f"AND {edition_where} ORDER BY `primary` DESC, `createdAt` ASC",
+            edition_params,
         )
     edition_ids = [item["id"] for item in editions]
     if edition_ids and _has_table(db, "LibraryFile"):
@@ -1187,7 +1256,7 @@ def _work_view(db: Session, work: dict[str, Any], user_id: str | None = None) ->
         "id": work["id"],
         "workId": work["id"],
         "editionId": display["id"] if display else None,
-        "monitorFolderId": work.get("monitorFolderId"),
+        "monitorFolderId": display.get("monitorFolderId") if display else work.get("monitorFolderId"),
         "title": work.get("title") or "未命名作品",
         "author": work.get("author") or "未知作者",
         "publisher": display.get("publisher") if display else None,
@@ -1238,7 +1307,7 @@ def _work_view(db: Session, work: dict[str, Any], user_id: str | None = None) ->
         "files": [file_view(file) for file in first_files],
         "versionCount": len(editions),
         "volumeCount": len(volumes),
-        "primaryEditionId": work.get("primaryEditionId"),
+        "primaryEditionId": primary.get("id") if primary else None,
         "primaryEditionName": primary.get("versionName") if primary else None,
         "recentEditionId": progress.get("editionId") if progress else (display["id"] if display else None),
         "recentVolumeId": progress.get("volumeId") if progress else None,
@@ -2063,26 +2132,49 @@ def _unique_file_in_directory(directory: Path, filename: str) -> Path:
 
 @router.get("/dashboard/summary")
 def dashboard_summary(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
+    user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    total_books = _table_count(db, "LibraryWork", "`hidden` = 0")
-    comic_books = _table_count(db, "LibraryWork", "`hidden` = 0 AND `workType` = 'COMIC'")
-    novel_books = _table_count(db, "LibraryWork", "`hidden` = 0 AND `workType` = 'EPUB'")
-    storage = _scalar(db, "SELECT COALESCE(SUM(`sizeBytes`), 0) FROM `LibraryEdition` WHERE `hidden` = 0", default=0) if _has_table(db, "LibraryEdition") else 0
+    context = authorization_context(db, user)
+    work_scope, work_params = work_visibility_sql(context, alias="LibraryWork", prefix="dashboard")
+    total_books = _table_count(db, "LibraryWork", f"`hidden` = 0 AND {work_scope}", work_params)
+    comic_books = _table_count(db, "LibraryWork", f"`hidden` = 0 AND `workType` = 'COMIC' AND {work_scope}", work_params)
+    novel_books = _table_count(db, "LibraryWork", f"`hidden` = 0 AND `workType` = 'EPUB' AND {work_scope}", work_params)
+    edition_scope, edition_params = edition_visibility_sql(context, alias="LibraryEdition", prefix="dashboard_storage")
+    storage = _scalar(
+        db,
+        f"SELECT COALESCE(SUM(`sizeBytes`), 0) FROM `LibraryEdition` WHERE `hidden` = 0 AND {edition_scope}",
+        edition_params,
+        default=0,
+    ) if _has_table(db, "LibraryEdition") else 0
+    import_scope, import_params = monitor_folder_visibility_sql(
+        context,
+        "`monitorFolderId`",
+        prefix="dashboard_import",
+    )
     last_import = _row(
         db,
         "SELECT `finishedAt`, `updatedAt` FROM `ImportTask` WHERE `status` = 'COMPLETED' "
+        f"AND {import_scope} "
         f"ORDER BY {_timestamp_sql('`finishedAt`')} DESC, `id` DESC LIMIT 1",
+        import_params,
     ) if _has_table(db, "ImportTask") else None
-    latest_progress = _row(db, "SELECT `updatedAt` FROM `LibraryReadingProgress` ORDER BY `updatedAt` DESC LIMIT 1") if _has_table(db, "LibraryReadingProgress") else None
+    latest_progress = _row(
+        db,
+        "SELECT `updatedAt` FROM `LibraryReadingProgress` WHERE `userId` = :user_id ORDER BY `updatedAt` DESC LIMIT 1",
+        {"user_id": user.id},
+    ) if _has_table(db, "LibraryReadingProgress") else None
     return ok(
         {
             "totalBooks": total_books,
             "comicBooks": comic_books,
             "novelBooks": novel_books,
             "storageUsedBytes": int(storage or 0),
-            "monitorFolderCount": _table_count(db, "MonitorFolder", "`enabled` = 1"),
+            "monitorFolderCount": (
+                _table_count(db, "MonitorFolder", "`enabled` = 1")
+                if context.is_admin
+                else len(context.monitor_folder_ids)
+            ),
             "lastImportAt": _dt((last_import or {}).get("finishedAt") or (last_import or {}).get("updatedAt")),
             "latestSyncAt": _dt((latest_progress or {}).get("updatedAt")),
         }
@@ -2095,7 +2187,14 @@ def dashboard_recent_books(request: Request, limit: int = 5, db: Session = Depen
     if auth_error:
         return auth_error
     take = min(24, max(1, limit))
-    works = _rows(db, "SELECT * FROM `LibraryWork` WHERE `hidden` = 0 ORDER BY `createdAt` DESC LIMIT :take", {"take": take}) if _has_table(db, "LibraryWork") else []
+    context = authorization_context(db, user)
+    scope, params = work_visibility_sql(context, alias="LibraryWork", prefix="recent")
+    params["take"] = take
+    works = _rows(
+        db,
+        f"SELECT * FROM `LibraryWork` WHERE `hidden` = 0 AND {scope} ORDER BY `createdAt` DESC LIMIT :take",
+        params,
+    ) if _has_table(db, "LibraryWork") else []
     return ok({"books": [_work_view(db, work, user.id) for work in works]})
 
 
@@ -2106,13 +2205,16 @@ def dashboard_continue_reading(request: Request, db: Session = Depends(get_db), 
         return auth_error
     progress = None
     if _has_table(db, "LibraryReadingProgress") and _has_table(db, "LibraryWork"):
+        context = authorization_context(db, user)
+        scope, scope_params = work_visibility_sql(context, alias="w", prefix="continue")
         progress = _row(
             db,
             "SELECT p.* FROM `LibraryReadingProgress` p "
             "JOIN `LibraryWork` w ON w.`id` = p.`workId` "
-            "WHERE p.`userId` = :user_id AND w.`status` = 'READING' AND w.`hidden` = 0 "
+            "WHERE p.`userId` = :user_id AND p.`percent` > 0 AND p.`percent` < 100 AND w.`hidden` = 0 "
+            f"AND {scope} "
             "ORDER BY p.`updatedAt` DESC LIMIT 1",
-            {"user_id": user.id},
+            {"user_id": user.id, **scope_params},
         )
     if not progress:
         return ok({"item": None})
@@ -2320,7 +2422,7 @@ def management_folders(request: Request, db: Session = Depends(get_db), settings
 
 @router.get("/series")
 def list_series(request: Request, visibility: str = "active", limit: int = 50, minBooks: int = 2, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
+    user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     if not _has_table(db, "LibraryWork") or not _has_column(db, "LibraryWork", "seriesName"):
@@ -2330,6 +2432,13 @@ def list_series(request: Request, visibility: str = "active", limit: int = 50, m
     min_books = max(1, minBooks)
     where = ["`seriesName` IS NOT NULL", "TRIM(`seriesName`) != ''"]
     params: dict[str, Any] = {"limit": take, "min_books": min_books}
+    scope, scope_params = work_visibility_sql(
+        authorization_context(db, user),
+        alias="LibraryWork",
+        prefix="series",
+    )
+    where.append(scope)
+    params.update(scope_params)
     if visibility == "ignored":
         where.append("`hidden` = 1")
     elif visibility != "all":
@@ -2373,6 +2482,14 @@ def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: 
     page_size = min(100, max(1, pageSize))
     where = []
     params: dict[str, Any] = {"limit": page_size, "offset": (page - 1) * page_size}
+    context = authorization_context(db, user)
+    scope, scope_params = work_visibility_sql(
+        context,
+        alias="LibraryWork",
+        prefix="works",
+    )
+    where.append(scope)
+    params.update(scope_params)
     if visibility == "ignored":
         where.append("`hidden` = 1")
     elif visibility != "all":
@@ -2386,41 +2503,53 @@ def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: 
         params["term"] = f"%{term}%"
     type_filter = (request.query_params.get("type") or request.query_params.get("format") or "").strip()
     normalized_type = type_filter.upper()
+    media_filter_scope, media_filter_params = edition_visibility_sql(
+        context,
+        alias="media_filter",
+        prefix="works_media_filter",
+    )
+    params.update(media_filter_params)
     if type_filter.lower() == "ebook":
         where.append(
             "EXISTS (SELECT 1 FROM `LibraryEdition` media_filter WHERE media_filter.`workId` = `LibraryWork`.`id` "
             + ("AND media_filter.`mediaKind` = 'EBOOK' " if _has_column(db, "LibraryEdition", "mediaKind") else "AND media_filter.`format` IN ('EPUB', 'PDF', 'MOBI', 'AZW', 'AZW3', 'PRC', 'FB2', 'TXT') ")
-            + "AND COALESCE(media_filter.`hidden`, 0) = 0)"
+            + f"AND COALESCE(media_filter.`hidden`, 0) = 0 AND {media_filter_scope})"
         )
     elif type_filter.lower() in {"audio", "audiobook"}:
         where.append(
             "EXISTS (SELECT 1 FROM `LibraryEdition` media_filter WHERE media_filter.`workId` = `LibraryWork`.`id` "
             + ("AND media_filter.`mediaKind` = 'AUDIOBOOK' " if _has_column(db, "LibraryEdition", "mediaKind") else "AND media_filter.`format` = 'AUDIO' ")
-            + "AND COALESCE(media_filter.`hidden`, 0) = 0)"
+            + f"AND COALESCE(media_filter.`hidden`, 0) = 0 AND {media_filter_scope})"
         )
     elif normalized_type == "COMIC" and _has_table(db, "LibraryEdition"):
         where.append(
             "EXISTS (SELECT 1 FROM `LibraryEdition` media_filter WHERE media_filter.`workId` = `LibraryWork`.`id` "
             + ("AND media_filter.`mediaKind` = 'COMIC' " if _has_column(db, "LibraryEdition", "mediaKind") else "AND media_filter.`format` = 'COMIC' ")
-            + "AND COALESCE(media_filter.`hidden`, 0) = 0)"
+            + f"AND COALESCE(media_filter.`hidden`, 0) = 0 AND {media_filter_scope})"
         )
     elif normalized_type in {"EPUB", "PDF"} and _has_table(db, "LibraryEdition"):
         where.append(
             "EXISTS (SELECT 1 FROM `LibraryEdition` media_filter WHERE media_filter.`workId` = `LibraryWork`.`id` "
-            "AND media_filter.`format` = :edition_format AND COALESCE(media_filter.`hidden`, 0) = 0)"
+            f"AND media_filter.`format` = :edition_format AND COALESCE(media_filter.`hidden`, 0) = 0 AND {media_filter_scope})"
         )
         params["edition_format"] = normalized_type
     elif normalized_type in {"COMIC", "EPUB", "PDF"}:
         where.append("`workType` = :work_type")
         params["work_type"] = normalized_type
     elif normalized_type in {"CBZ", "ZIP"} and _has_table(db, "LibraryFile"):
+        file_edition_scope, file_edition_params = edition_visibility_sql(
+            context,
+            alias="le",
+            prefix="works_file_filter",
+        )
+        params.update(file_edition_params)
         where.append(
             """EXISTS (
                 SELECT 1 FROM `LibraryEdition` le
                 JOIN `LibraryFile` lf ON lf.`editionId` = le.`id`
                 WHERE le.`workId` = `LibraryWork`.`id`
-                AND LOWER(lf.`path`) LIKE :file_extension
-            )"""
+                AND LOWER(lf.`path`) LIKE :file_extension """
+            + f"AND {file_edition_scope})"
         )
         params["file_extension"] = f"%.{normalized_type.lower()}"
     raw_media_kinds = (request.query_params.get("mediaKinds") or request.query_params.get("mediaKind") or "").strip()
@@ -2442,14 +2571,16 @@ def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: 
                 media_expression = "CASE WHEN media_filter.`format` = 'COMIC' THEN 'COMIC' WHEN media_filter.`format` = 'AUDIO' THEN 'AUDIOBOOK' ELSE 'EBOOK' END"
             where.append(
                 "EXISTS (SELECT 1 FROM `LibraryEdition` media_filter WHERE media_filter.`workId` = `LibraryWork`.`id` "
-                f"AND {media_expression} IN ({', '.join(media_params)}) AND COALESCE(media_filter.`hidden`, 0) = 0)"
+                f"AND {media_expression} IN ({', '.join(media_params)}) AND COALESCE(media_filter.`hidden`, 0) = 0 "
+                f"AND {media_filter_scope})"
             )
     status = (request.query_params.get("status") or "").strip().upper()
     if status == "WANT":
         status = "UNREAD"
-    status_clause = _user_status_filter_sql(db, status)
+    status_clause, status_params = _user_status_filter_sql(db, status, context)
     if status_clause:
         where.append(status_clause)
+        params.update(status_params)
         params["status"] = status
         params["current_user_id"] = user.id
     publication_status = (request.query_params.get("publicationStatus") or "").strip().upper()
@@ -2478,12 +2609,20 @@ def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: 
             filter_rules = json.loads(raw_filters)
         except json.JSONDecodeError:
             return fail("筛选规则格式不正确", status_code=400)
+        advanced_edition_scope, advanced_edition_params = edition_visibility_sql(
+            context,
+            alias="filter_edition",
+            prefix="advanced_filter",
+        )
         filter_clause, filter_params, filter_error = compile_filter_rules(
             db,
             filter_rules,
             alias="LibraryWork",
             user_id=user.id,
             param_prefix="library_filter",
+            edition_scope_sql=advanced_edition_scope,
+            edition_scope_params=advanced_edition_params,
+            shelf_owner_user_id=user.id if _has_column(db, "Shelf", "ownerUserId") else None,
         )
         if filter_error:
             return fail(filter_error, status_code=400)
@@ -2580,7 +2719,7 @@ def get_work(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    work = _get_work(db, work_id)
+    work = _visible_work_or_none(db, user, work_id)
     if not work:
         return fail("作品不存在", status_code=404)
     book = _work_view(db, work, user.id)
@@ -2609,7 +2748,7 @@ async def save_work_detail_preference(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    work = _get_work(db, work_id)
+    work = _visible_work_or_none(db, user, work_id)
     if not work:
         return fail("作品不存在", status_code=404)
     payload = await request.json()
@@ -2656,11 +2795,16 @@ async def update_work(work_id: str, request: Request, db: Session = Depends(get_
     if auth_error:
         return auth_error
     payload = await request.json()
-    existing_work = _get_work(db, work_id)
+    existing_work = _visible_work_or_none(db, user, work_id)
     if not existing_work:
         return fail("作品不存在", status_code=404)
     allowed = {"title", "author", "description", "status", "publicationStatus", "trackingStatus", "tags", "seriesName", "seriesIndex", "publishedYear", "hidden", "organized", "metadataQuality"}
     values = {key: (_json_text(value) if key == "tags" and isinstance(value, list) else value) for key, value in payload.items() if key in allowed}
+    global_fields = set(values) - {"status"}
+    if "ignored" in payload:
+        global_fields.add("hidden")
+    if global_fields and not can_manage_system(user):
+        return fail("需要系统管理权限", status_code=403, code="SYSTEM_MANAGER_REQUIRED")
     media_kind = str(payload.get("mediaKind") or "").strip().upper()
     if media_kind and media_kind not in {"EBOOK", "COMIC", "AUDIOBOOK"}:
         return fail("媒介类型无效", status_code=400)
@@ -2670,20 +2814,27 @@ async def update_work(work_id: str, request: Request, db: Session = Depends(get_
             status = "UNREAD"
         if status not in {"UNREAD", "READING", "FINISHED"}:
             return fail("阅读状态无效", status_code=400)
-        values["status"] = status
-        if media_kind:
-            available = {
-                _edition_media_kind(item)
-                for item in _rows(db, "SELECT * FROM `LibraryEdition` WHERE `workId` = :work_id AND COALESCE(`hidden`, 0) = 0", {"work_id": work_id})
-            } if _has_table(db, "LibraryEdition") else set()
-            if media_kind not in available:
-                return fail("该作品没有对应的媒介版本", status_code=409)
+        book_before_update = _work_view(db, existing_work, user.id)
+        available = {
+            str(item)
+            for item in book_before_update.get("availableMediaKinds", [])
+        }
+        target_media_kinds = [media_kind] if media_kind else sorted(available)
+        if not target_media_kinds or any(kind not in available for kind in target_media_kinds):
+            return fail("该作品没有对应的媒介版本", status_code=409)
+        requested_edition_id = str(payload.get("editionId") or "").strip() or None
+        requested_volume_id = str(payload.get("volumeId") or "").strip() or None
+        if requested_edition_id and not can_access_edition(db, user, requested_edition_id):
+            return fail("作品不存在", status_code=404, code="WORK_NOT_FOUND")
+        if requested_volume_id and not can_access_volume(db, user, requested_volume_id):
+            return fail("作品不存在", status_code=404, code="WORK_NOT_FOUND")
+        for target_media_kind in target_media_kinds:
             target, target_error = _resolve_consumption_target(
                 db,
                 work_id,
-                media_kind,
-                edition_id=str(payload.get("editionId") or "").strip() or None,
-                volume_id=str(payload.get("volumeId") or "").strip() or None,
+                target_media_kind,
+                edition_id=requested_edition_id if len(target_media_kinds) == 1 else None,
+                volume_id=requested_volume_id if len(target_media_kinds) == 1 else None,
                 unit_id=str(payload.get("unitId") or "").strip() or None,
             )
             if target_error:
@@ -2692,13 +2843,13 @@ async def update_work(work_id: str, request: Request, db: Session = Depends(get_
                 db,
                 user.id,
                 work_id,
-                media_kind,
+                target_media_kind,
                 status,
                 edition_id=(target or {}).get("editionId"),
                 volume_id=(target or {}).get("volumeId"),
                 unit_id=(target or {}).get("unitId"),
             )
-            values["status"] = _project_work_status_for_user(db, user.id, work_id)
+        values.pop("status", None)
     if "ignored" in payload:
         values["hidden"] = bool(payload.get("ignored"))
     try:
@@ -2723,6 +2874,9 @@ async def update_work(work_id: str, request: Request, db: Session = Depends(get_
                 "mergeKey": merge_key,
             }
         )
+    if not values:
+        db.commit()
+        return ok({"book": _work_view(db, existing_work, user.id)})
     work = _update(db, "LibraryWork", work_id, values)
     if not work:
         return fail("作品不存在", status_code=404)
@@ -2736,6 +2890,9 @@ async def delete_work(work_id: str, request: Request, db: Session = Depends(get_
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    permission_error = _require_work_manager(db, user, work_id)
+    if permission_error is not None:
+        return permission_error
     payload = await _request_json_or_empty(request)
     delete_source = payload.get("deleteSource") is True
     work = _get_work(db, work_id)
@@ -2938,51 +3095,92 @@ def _bulk_find_replace_rows(db: Session, payload: dict[str, Any]) -> tuple[list[
     return results, None
 
 
-def _apply_bulk_reading_status(db: Session, user_id: str, work_ids: list[str], status: str) -> int:
+def _apply_bulk_reading_status(db: Session, user: User, work_ids: list[str], status: str) -> int:
     updated = 0
     now = _now()
+    context = authorization_context(db, user)
+    edition_scope, edition_scope_params = edition_visibility_sql(
+        context,
+        alias="LibraryEdition",
+        prefix="bulk_reading_status",
+    )
     for work_id in work_ids:
         work = _get_work(db, work_id)
         if not work:
             continue
+        editions = (
+            _rows(
+                db,
+                "SELECT * FROM `LibraryEdition` WHERE `workId` = :work_id "
+                f"AND COALESCE(`hidden`, 0) = 0 AND {edition_scope}",
+                {"work_id": work_id, **edition_scope_params},
+            )
+            if _has_table(db, "LibraryEdition")
+            else []
+        )
+        if not editions:
+            continue
+        media_editions: dict[str, dict[str, Any]] = {}
+        for edition in editions:
+            media_editions.setdefault(_edition_media_kind(edition), edition)
         if status == "UNREAD":
-            for table in ("LibraryReadingProgress", "ReaderProgressCursor", "LibraryConsumptionState"):
-                if _has_table(db, table):
+            if _has_table(db, "LibraryReadingProgress"):
+                for edition in editions:
                     db.execute(
-                        text(f"DELETE FROM `{table}` WHERE `userId` = :user_id AND `workId` = :work_id"),
-                        {"user_id": user_id, "work_id": work_id},
+                        text(
+                            "DELETE FROM `LibraryReadingProgress` "
+                            "WHERE `userId` = :user_id AND `editionId` = :edition_id"
+                        ),
+                        {"user_id": user.id, "edition_id": edition["id"]},
+                    )
+            if _has_table(db, "ReaderProgressCursor"):
+                db.execute(
+                    text(
+                        "DELETE FROM `ReaderProgressCursor` "
+                        "WHERE `userId` = :user_id AND `workId` = :work_id"
+                    ),
+                    {"user_id": user.id, "work_id": work_id},
+                )
+            if _has_table(db, "LibraryConsumptionState"):
+                for media_kind in media_editions:
+                    db.execute(
+                        text(
+                            "DELETE FROM `LibraryConsumptionState` "
+                            "WHERE `userId` = :user_id AND `workId` = :work_id "
+                            "AND `mediaKind` = :media_kind"
+                        ),
+                        {"user_id": user.id, "work_id": work_id, "media_kind": media_kind},
                     )
         else:
-            editions = _rows(
-                db,
-                "SELECT * FROM `LibraryEdition` WHERE `workId` = :work_id AND COALESCE(`hidden`, 0) = 0",
-                {"work_id": work_id},
-            ) if _has_table(db, "LibraryEdition") else []
-            for edition_index, edition in enumerate(editions):
+            for media_kind, edition in media_editions.items():
                 _set_consumption_status(
                     db,
-                    user_id,
+                    user.id,
                     work_id,
-                    _edition_media_kind(edition),
-                    "FINISHED",
+                    media_kind,
+                    status,
                     edition_id=str(edition["id"]),
                 )
+            if status != "FINISHED":
+                updated += 1
+                continue
+            for edition_index, edition in enumerate(editions):
                 if not _has_table(db, "LibraryReadingProgress"):
                     continue
                 existing_progress = _row(
                     db,
                     "SELECT `id` FROM `LibraryReadingProgress` WHERE `userId` = :user_id AND `workId` = :work_id AND `editionId` = :edition_id LIMIT 1",
-                    {"user_id": user_id, "work_id": work_id, "edition_id": edition["id"]},
+                    {"user_id": user.id, "work_id": work_id, "edition_id": edition["id"]},
                 )
                 if existing_progress:
                     db.execute(
                         text("UPDATE `LibraryReadingProgress` SET `percent` = 100, `updatedAt` = :now WHERE `userId` = :user_id AND `workId` = :work_id AND `editionId` = :edition_id"),
-                        {"now": now, "user_id": user_id, "work_id": work_id, "edition_id": edition["id"]},
+                        {"now": now, "user_id": user.id, "work_id": work_id, "edition_id": edition["id"]},
                     )
                 else:
                     progress_values = {
                         "id": f"bulk_progress_{time_ns()}_{edition_index}",
-                        "userId": user_id,
+                        "userId": user.id,
                         "workId": work_id,
                         "editionId": edition["id"],
                         "volumeId": None,
@@ -3004,10 +3202,6 @@ def _apply_bulk_reading_status(db: Session, user_id: str, work_ids: list[str], s
                         ),
                         filtered,
                     )
-        db.execute(
-            text("UPDATE `LibraryWork` SET `status` = :status, `updatedAt` = :now WHERE `id` = :work_id"),
-            {"status": status, "now": now, "work_id": work_id},
-        )
         updated += 1
     db.commit()
     return updated
@@ -3026,6 +3220,18 @@ async def bulk_works(request: Request, db: Session = Depends(get_db), settings: 
         action = "ignore" if payload.get("ignored") else "restore"
     if action is None and payload.get("deleteRecords"):
         action = "delete_records"
+    normalized_scope_ids = _bulk_work_ids(ids)
+    if normalized_scope_ids:
+        inaccessible = [
+            work_id
+            for work_id in normalized_scope_ids
+            if not can_access_work(db, user, work_id)
+        ]
+        if inaccessible:
+            return fail("作品不存在", status_code=404, code="WORK_NOT_FOUND")
+    personal_actions = {"set_status", "reading_status", "shelf_membership", "add_to_shelf", "remove_from_shelf"}
+    if action not in personal_actions and not can_manage_system(user):
+        return fail("需要系统管理权限", status_code=403, code="SYSTEM_MANAGER_REQUIRED")
     if _has_table(db, "LibraryWork") and ids and action in {"delete", "delete_records"}:
         deleted_files = 0
         failed_file_deletes: list[dict[str, str]] = []
@@ -3058,7 +3264,7 @@ async def bulk_works(request: Request, db: Session = Depends(get_db), settings: 
         shelf_id = str(payload.get("shelfId") or "").strip()
         membership = str(payload.get("membership") or ("REMOVE" if action == "remove_from_shelf" else "ADD")).strip().upper()
         if action in {"add_to_shelf", "remove_from_shelf", "shelf_membership"}:
-            shelf = _row(db, "SELECT * FROM `Shelf` WHERE `id` = :id", {"id": shelf_id}) if shelf_id else None
+            shelf = _owned_shelf(db, shelf_id, user.id) if shelf_id else None
             if not shelf or str(shelf.get("kind") or "STATIC").upper() != "STATIC":
                 return fail("请选择普通书架", status_code=400)
             if membership not in {"ADD", "REMOVE"}:
@@ -3110,10 +3316,10 @@ async def bulk_works(request: Request, db: Session = Depends(get_db), settings: 
             if updated:
                 _record_system_event(db, level="info", source="library", actor_type="admin", actor_id=user.id, action="bulk.find_replace", target_type="work", message=f"批量查找替换 {updated} 本图书", metadata={"ids": normalized_ids, "field": payload.get("field"), "changedValues": len(replacements)})
             return ok({"updated": updated, "changedValues": len(replacements), "ids": normalized_ids})
-        if action == "reading_status":
-            updated = _apply_bulk_reading_status(db, user.id, normalized_ids, status)
+        if action in {"set_status", "reading_status"}:
+            updated = _apply_bulk_reading_status(db, user, normalized_ids, status)
             if updated:
-                _record_system_event(db, level="info", source="library", actor_type="admin", actor_id=user.id, action=f"bulk.reading_status.{status.lower()}", target_type="work", message=f"批量设置阅读状态 {updated} 本图书", metadata={"ids": normalized_ids, "status": status})
+                _record_system_event(db, level="info", source="library", actor_type="user", actor_id=user.id, action=f"bulk.reading_status.{status.lower()}", target_type="work", message=f"批量设置阅读状态 {updated} 本图书", metadata={"ids": normalized_ids, "status": status})
             return ok({"updated": updated, "ids": normalized_ids, "status": status})
         metadata_fields = payload.get("fields") if action == "update_metadata" and isinstance(payload.get("fields"), dict) else {}
         add_tags = [str(item).strip() for item in payload.get("addTags") or [] if str(item).strip()]
@@ -3130,8 +3336,6 @@ async def bulk_works(request: Request, db: Session = Depends(get_db), settings: 
                     removed = {item.casefold() for item in tags}
                     next_tags = [item for item in current_tags if item.casefold() not in removed]
                 _update(db, "LibraryWork", work_id, {"tags": _json_text(next_tags), "updatedAt": _now()})
-            elif action == "set_status":
-                _update(db, "LibraryWork", work_id, {"status": status, "updatedAt": _now()})
             elif action in {"add_to_shelf", "remove_from_shelf", "shelf_membership"}:
                 if membership == "ADD":
                     db.execute(
@@ -3176,10 +3380,13 @@ async def bulk_works(request: Request, db: Session = Depends(get_db), settings: 
 
 @router.post("/works/bulk/find-replace/preview")
 async def preview_bulk_find_replace(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
+    user, auth_error = _system_auth(db, request, settings)
     if auth_error:
         return auth_error
     payload = await request.json()
+    for work_id in _bulk_work_ids(payload.get("ids") or payload.get("bookIds") or []):
+        if not can_access_work(db, user, work_id):
+            return fail("作品不存在", status_code=404, code="WORK_NOT_FOUND")
     replacements, replace_error = _bulk_find_replace_rows(db, payload)
     if replace_error:
         return fail(replace_error, status_code=400)
@@ -3220,6 +3427,8 @@ async def bulk_work_covers(request: Request, db: Session = Depends(get_db), sett
     action = str(form.get("action") or "").strip().lower()
     if not work_ids:
         return fail("请选择至少一本图书", status_code=400)
+    if any(not can_access_work(db, user, work_id) for work_id in work_ids):
+        return fail("作品不存在", status_code=404, code="WORK_NOT_FOUND")
     if action not in {"crop", "regenerate", "compress", "replace"}:
         return fail("封面操作无效", status_code=400)
     ratio = str(form.get("ratio") or "2:3")
@@ -3345,6 +3554,9 @@ async def import_work(request: Request, db: Session = Depends(get_db), settings:
     if ignored_files:
         return fail("部分文件命中全局导入忽略规则。", status_code=400, details={"files": ignored_files})
     monitor_folder = _enabled_monitor_folder_for_path(db, upload_dir)
+    monitor_folder_id = str((monitor_folder or {}).get("id") or "") or None
+    if not can_access_monitor_folder(db, user, monitor_folder_id):
+        return fail("目标文件夹不存在或无权访问", status_code=404, code="MONITOR_FOLDER_NOT_FOUND")
     auto_import = True
     tasks: list[dict[str, Any]] = []
     results: list[dict[str, Any]] = []
@@ -3528,9 +3740,12 @@ async def create_monitor_folder(request: Request, db: Session = Depends(get_db),
         return fail("请填写监控文件夹路径", status_code=400)
     if _monitor_folder_by_root_path(db, root_path):
         return fail("监控文件夹路径已存在", status_code=409, details={"rootPath": root_path})
-    shelf_id, shelf_error = _optional_shelf_id(db, payload.get("shelfId"))
-    if shelf_error:
-        return fail(shelf_error, status_code=400)
+    if payload.get("shelfId"):
+        return fail(
+            "监控文件夹不再绑定全局书架，请创建个人来源文件夹智能书架",
+            status_code=400,
+            code="MONITOR_FOLDER_SHELF_RETIRED",
+        )
     try:
         folder = _insert(
             db,
@@ -3539,7 +3754,7 @@ async def create_monitor_folder(request: Request, db: Session = Depends(get_db),
                 "id": f"py_{time_ns()}",
                 "name": payload.get("name") or Path(root_path).name or "监控文件夹",
                 "rootPath": root_path,
-                "shelfId": shelf_id,
+                "shelfId": None,
                 "enabled": bool(payload.get("enabled", True)),
                 "ignorePatterns": payload.get("ignorePatterns"),
                 "ignoreHidden": bool(payload.get("ignoreHidden", True)),
@@ -3563,7 +3778,13 @@ async def update_monitor_folder(folder_id: str, request: Request, db: Session = 
     if auth_error:
         return auth_error
     payload = await request.json()
-    mapping = {"rootPath": "rootPath", "shelfId": "shelfId", "minFileSizeBytes": "minFileSizeBytes", "ignorePatterns": "ignorePatterns", "ignoreHidden": "ignoreHidden", "enabled": "enabled", "name": "name", "description": "description"}
+    if payload.get("shelfId"):
+        return fail(
+            "监控文件夹不再绑定全局书架，请创建个人来源文件夹智能书架",
+            status_code=400,
+            code="MONITOR_FOLDER_SHELF_RETIRED",
+        )
+    mapping = {"rootPath": "rootPath", "minFileSizeBytes": "minFileSizeBytes", "ignorePatterns": "ignorePatterns", "ignoreHidden": "ignoreHidden", "enabled": "enabled", "name": "name", "description": "description"}
     values = {mapping[key]: value for key, value in payload.items() if key in mapping}
     existing = _row(db, "SELECT * FROM `MonitorFolder` WHERE `id` = :id", {"id": folder_id}) if _has_table(db, "MonitorFolder") else None
     if not existing:
@@ -3575,11 +3796,6 @@ async def update_monitor_folder(folder_id: str, request: Request, db: Session = 
         if _monitor_folder_by_root_path(db, root_path, exclude_id=folder_id):
             return fail("监控文件夹路径已存在", status_code=409, details={"rootPath": root_path})
         values["rootPath"] = root_path
-    if "shelfId" in values:
-        shelf_id, shelf_error = _optional_shelf_id(db, values["shelfId"])
-        if shelf_error:
-            return fail(shelf_error, status_code=400)
-        values["shelfId"] = shelf_id
     if values:
         values["updatedAt"] = _now()
     try:
@@ -3598,9 +3814,58 @@ def delete_monitor_folder(folder_id: str, request: Request, db: Session = Depend
     if auth_error:
         return auth_error
     existing = _row(db, "SELECT * FROM `MonitorFolder` WHERE `id` = :id", {"id": folder_id}) if _has_table(db, "MonitorFolder") else None
-    deleted = _delete(db, "MonitorFolder", folder_id)
+    affected_user_ids = (
+        [
+            str(item)
+            for item in db.execute(
+                text(
+                    "SELECT `userId` FROM `UserMonitorFolderAccess` "
+                    "WHERE `monitorFolderId` = :folder_id"
+                ),
+                {"folder_id": folder_id},
+            ).scalars()
+        ]
+        if _has_table(db, "UserMonitorFolderAccess")
+        else []
+    )
+    result = (
+        db.execute(text("DELETE FROM `MonitorFolder` WHERE `id` = :id"), {"id": folder_id})
+        if _has_table(db, "MonitorFolder")
+        else None
+    )
+    deleted = bool(result and result.rowcount)
+    if deleted and affected_user_ids:
+        placeholders = ", ".join(f":affected_user_{index}" for index in range(len(affected_user_ids)))
+        db.execute(
+            text(
+                "UPDATE `User` SET `authzVersion` = COALESCE(`authzVersion`, 1) + 1, "
+                f"`updatedAt` = :updated_at WHERE `id` IN ({placeholders})"
+            ),
+            {
+                "updated_at": _now(),
+                **{
+                    f"affected_user_{index}": affected_user_id
+                    for index, affected_user_id in enumerate(affected_user_ids)
+                },
+            },
+        )
+    db.commit()
     if deleted:
-        _record_system_event(db, level="warning", source="folder", actor_type="admin", actor_id=user.id, action="deleted", target_type="monitorFolder", target_id=folder_id, message=f"删除来源目录：{(existing or {}).get('name') or folder_id}", metadata={"rootPath": (existing or {}).get("rootPath")})
+        _record_system_event(
+            db,
+            level="warning",
+            source="folder",
+            actor_type="admin",
+            actor_id=user.id,
+            action="deleted",
+            target_type="monitorFolder",
+            target_id=folder_id,
+            message=f"删除来源目录：{(existing or {}).get('name') or folder_id}",
+            metadata={
+                "rootPath": (existing or {}).get("rootPath"),
+                "authorizationInvalidatedFor": len(affected_user_ids),
+            },
+        )
     return ok({"deleted": deleted, "id": folder_id})
 
 
@@ -4030,6 +4295,7 @@ def _response_headers(size: int, mtime: float, media_type: str, name: str, extra
         "Content-Type": media_type,
         "Content-Disposition": f"inline; filename*=UTF-8''{quote(name)}",
         "Cache-Control": "private, max-age=86400" if media_type.lower().startswith("image/") else "private, max-age=60",
+        "Vary": "Cookie",
         "ETag": _weak_etag(size, int(mtime * 1000), extra),
         "Last-Modified": format_datetime(modified, usegmt=True),
     }
@@ -4038,7 +4304,9 @@ def _response_headers(size: int, mtime: float, media_type: str, name: str, extra
 def _bytes_response(data: bytes, request: Request, media_type: str, name: str, mtime: float | None = None, extra: str = "") -> Response:
     started_at = monotonic()
     size = len(data)
-    headers = _response_headers(size, mtime or _now().timestamp(), media_type, name, extra)
+    user_id = str(getattr(request.state, "user_id", "") or "")
+    cache_identity = f"{extra}|user:{user_id}" if user_id else extra
+    headers = _response_headers(size, mtime or _now().timestamp(), media_type, name, cache_identity)
     if not request.headers.get("range") and _not_modified(request, headers["ETag"], headers["Last-Modified"]):
         return Response(status_code=304, headers=headers)
     range_header = request.headers.get("range")
@@ -4193,7 +4461,13 @@ def _file_response(path: Path | None, request: Request, user_id: str, media_type
     request.state.user_id = user_id
     stat = path.stat()
     resolved_media_type = media_type or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    headers = _response_headers(stat.st_size, stat.st_mtime, resolved_media_type, name or path.name)
+    headers = _response_headers(
+        stat.st_size,
+        stat.st_mtime,
+        resolved_media_type,
+        name or path.name,
+        extra=f"user:{user_id}",
+    )
     if not request.headers.get("range") and _not_modified(request, headers["ETag"], headers["Last-Modified"]):
         return Response(status_code=304, headers=headers)
     byte_range = None
@@ -4270,7 +4544,13 @@ def _send_zip_entry(archive_path: Path | None, entry_name: str | None, request: 
     request.state.user_id = user_id
     resolved_media_type = media_type or mimetypes.guess_type(entry_name)[0] or "application/octet-stream"
     size = int(info.file_size)
-    headers = _response_headers(size, archive_path.stat().st_mtime, resolved_media_type, Path(entry_name).name, extra=entry_name)
+    headers = _response_headers(
+        size,
+        archive_path.stat().st_mtime,
+        resolved_media_type,
+        Path(entry_name).name,
+        extra=f"{entry_name}|user:{user_id}",
+    )
     if not request.headers.get("range") and _not_modified(request, headers["ETag"], headers["Last-Modified"]):
         return Response(status_code=304, headers=headers)
     byte_range = None
@@ -4408,6 +4688,8 @@ def get_file(file_id: str, request: Request, db: Session = Depends(get_db), sett
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    if not can_access_file(db, user, file_id):
+        return fail("文件不存在", status_code=404, code="FILE_NOT_FOUND")
     file = _row(db, "SELECT * FROM `LibraryFile` WHERE `id` = :id", {"id": file_id}) if _has_table(db, "LibraryFile") else None
     return _send_file(_stored_path((file or {}).get("path"), settings), request, user.id, media_type=(file or {}).get("mimeType"), name=Path((file or {}).get("path") or "file").name, route="files", file_id=file_id)
 
@@ -4417,7 +4699,11 @@ def get_edition_file(edition_id: str, request: Request, db: Session = Depends(ge
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    if not can_access_edition(db, user, edition_id):
+        return fail("版本不存在", status_code=404, code="EDITION_NOT_FOUND")
     volume_id = request.query_params.get("volume")
+    if volume_id and not can_access_volume(db, user, volume_id):
+        return fail("版本不存在", status_code=404, code="EDITION_NOT_FOUND")
     if volume_id and _has_table(db, "LibraryFile"):
         file = _row(db, "SELECT * FROM `LibraryFile` WHERE `editionId` = :edition_id AND `volumeId` = :volume_id ORDER BY `sortOrder` ASC LIMIT 1", {"edition_id": edition_id, "volume_id": volume_id})
     else:
@@ -4433,6 +4719,12 @@ def get_cover(request: Request, work_id: str | None = None, edition_id: str | No
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    if work_id and not can_access_work(db, user, work_id):
+        return fail("条目不存在", status_code=404, code="COVER_NOT_FOUND")
+    if edition_id and not can_access_edition(db, user, edition_id):
+        return fail("条目不存在", status_code=404, code="COVER_NOT_FOUND")
+    if volume_id and not can_access_volume(db, user, volume_id):
+        return fail("条目不存在", status_code=404, code="COVER_NOT_FOUND")
     row = None
     table = None
     row_id = None
@@ -4522,9 +4814,12 @@ def _preferred_work_cover_path(db: Session, work_id: str) -> str | None:
 
 @router.post("/works/{work_id}/cover/upload")
 async def upload_cover(work_id: str, request: Request, cover: UploadFile = File(...), db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
+    user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    permission_error = _require_work_manager(db, user, work_id)
+    if permission_error is not None:
+        return permission_error
     target_dir = settings.resolved_storage_root / "covers"
     target_dir.mkdir(parents=True, exist_ok=True)
     suffix = Path(cover.filename or "cover.jpg").suffix or ".jpg"
@@ -4538,9 +4833,12 @@ async def upload_cover(work_id: str, request: Request, cover: UploadFile = File(
 
 @router.post("/works/{work_id}/cover/regenerate")
 def regenerate_cover(work_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
+    user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    permission_error = _require_work_manager(db, user, work_id)
+    if permission_error is not None:
+        return permission_error
     work = _row(db, "SELECT `id` FROM `LibraryWork` WHERE `id` = :id", {"id": work_id}) if _has_table(db, "LibraryWork") else None
     if not work:
         return fail("作品不存在", status_code=404)
@@ -4553,9 +4851,11 @@ def regenerate_cover(work_id: str, request: Request, db: Session = Depends(get_d
 
 @router.get("/volumes/{volume_id}/pages")
 def list_volume_pages(volume_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
+    user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    if not can_access_volume(db, user, volume_id):
+        return fail("页面不存在", status_code=404, code="VOLUME_NOT_FOUND")
     units = _rows(db, "SELECT * FROM `LibraryReadingUnit` WHERE `volumeId` = :volume_id AND LOWER(`unitType`) = 'page' ORDER BY `sortOrder` ASC", {"volume_id": volume_id}) if _has_table(db, "LibraryReadingUnit") else []
     if not units:
         _ensure_volume_page_index(db, settings, volume_id)
@@ -4568,6 +4868,8 @@ def get_volume_page(volume_id: str, page_index: int, request: Request, db: Sessi
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    if not can_access_volume(db, user, volume_id):
+        return fail("页面不存在", status_code=404, code="VOLUME_NOT_FOUND")
     unit = _row(db, "SELECT * FROM `LibraryReadingUnit` WHERE `volumeId` = :volume_id AND LOWER(`unitType`) = 'page' AND `sortOrder` = :sort_order", {"volume_id": volume_id, "sort_order": page_index}) if _has_table(db, "LibraryReadingUnit") else None
     if not unit:
         _ensure_volume_page_index(db, settings, volume_id)
@@ -5350,13 +5652,19 @@ def list_import_tasks(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
-    _user, auth_error = _auth(db, request, settings)
+    user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     page = max(1, page)
     page_size = min(50, max(1, pageSize))
-    filters: list[str] = []
-    params: dict[str, Any] = {}
+    context = authorization_context(db, user)
+    scope_sql, scope_params = monitor_folder_visibility_sql(
+        context,
+        "`monitorFolderId`",
+        prefix="import_tasks",
+    )
+    filters: list[str] = [scope_sql]
+    params: dict[str, Any] = dict(scope_params)
     normalized_status = str(status or "").strip().upper()
     if normalized_status and normalized_status != "ALL":
         if normalized_status not in {"PENDING", "PARSING", "COMPLETED", "FAILED"}:
@@ -5383,8 +5691,8 @@ def list_import_tasks(
     ) if total else []
     views = [_import_task_view(db, task, log_limit=20) for task in tasks]
     summary = {
-        "completed": _table_count(db, "ImportTask", "`status` = 'COMPLETED'"),
-        "failed": _table_count(db, "ImportTask", "`status` = 'FAILED'"),
+        "completed": _table_count(db, "ImportTask", f"{scope_sql} AND `status` = 'COMPLETED'", scope_params),
+        "failed": _table_count(db, "ImportTask", f"{scope_sql} AND `status` = 'FAILED'", scope_params),
     }
     return ok({"tasks": views, "summary": summary, "page": page, "pageSize": page_size, "total": total, "totalPages": total_pages})
 
@@ -5412,6 +5720,8 @@ async def scan_import_directory(request: Request, db: Session = Depends(get_db),
     if not matching_folders:
         return fail("所选目录不在已启用的监控文件夹内，请先添加或启用对应监控文件夹", status_code=400)
     _folder_path, folder = max(matching_folders, key=lambda item: len(item[0].parts))
+    if not can_access_monitor_folder(db, user, str(folder.get("id"))):
+        return fail("目录不可用", status_code=404, code="MONITOR_FOLDER_NOT_FOUND")
     folder_config = MonitorFolderConfig(
         id=str(folder.get("id")),
         root_path=str(folder.get("rootPath")),
@@ -5477,14 +5787,28 @@ def clear_import_tasks(request: Request, db: Session = Depends(get_db), settings
         return auth_error
     deleted = 0
     if _has_table(db, "ImportTask"):
+        context = authorization_context(db, user)
+        scope_sql, scope_params = monitor_folder_visibility_sql(
+            context,
+            "`monitorFolderId`",
+            prefix="clear_import_tasks",
+        )
         if _has_table(db, "BookConversionTask"):
             db.execute(
                 text(
                     "DELETE FROM `BookConversionTask` WHERE `importTaskId` IN "
-                    "(SELECT `id` FROM `ImportTask` WHERE `status` IN ('COMPLETED', 'FAILED'))"
-                )
+                    "(SELECT `id` FROM `ImportTask` WHERE `status` IN ('COMPLETED', 'FAILED') "
+                    f"AND {scope_sql})"
+                ),
+                scope_params,
             )
-        result = db.execute(text("DELETE FROM `ImportTask` WHERE `status` IN ('COMPLETED', 'FAILED')"))
+        result = db.execute(
+            text(
+                "DELETE FROM `ImportTask` WHERE `status` IN ('COMPLETED', 'FAILED') "
+                f"AND {scope_sql}"
+            ),
+            scope_params,
+        )
         db.commit()
         deleted = result.rowcount or 0
     if deleted:
@@ -5497,7 +5821,7 @@ async def delete_import_task(task_id: str, request: Request, db: Session = Depen
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    task = _row(db, "SELECT * FROM `ImportTask` WHERE `id` = :id", {"id": task_id}) if _has_table(db, "ImportTask") else None
+    task = _visible_import_task_or_none(db, user, task_id)
     if not task:
         return fail("导入记录不存在", status_code=404)
     if task.get("status") not in {"COMPLETED", "FAILED"}:
@@ -5588,18 +5912,49 @@ def rescan_import_tasks(request: Request, db: Session = Depends(get_db), setting
     if auth_error:
         return auth_error
     requested_at = _now().isoformat()
+    context = authorization_context(db, user)
+    requested_value = (
+        requested_at
+        if context.is_admin
+        else _json_text(
+            {
+                "requestedAt": requested_at,
+                "monitorFolderIds": list(context.monitor_folder_ids),
+            }
+        )
+    )
+    if not context.is_admin and not context.monitor_folder_ids:
+        return fail("没有可重新识别的授权文件夹", status_code=403, code="NO_IMPORT_SCOPE")
     if _has_table(db, "SystemSetting"):
         existing = _row(db, "SELECT `key` FROM `SystemSetting` WHERE `key` = :key", {"key": "monitor.rescanRequestedAt"})
         if existing:
-            db.execute(text("UPDATE `SystemSetting` SET `value` = :value, `updatedAt` = :updated_at WHERE `key` = :key"), {"key": "monitor.rescanRequestedAt", "value": requested_at, "updated_at": _now()})
+            db.execute(text("UPDATE `SystemSetting` SET `value` = :value, `updatedAt` = :updated_at WHERE `key` = :key"), {"key": "monitor.rescanRequestedAt", "value": requested_value, "updated_at": _now()})
         else:
             db.execute(
                 text("INSERT INTO `SystemSetting` (`key`, `value`, `createdAt`, `updatedAt`) VALUES (:key, :value, :created_at, :updated_at)"),
-                {"key": "monitor.rescanRequestedAt", "value": requested_at, "created_at": _now(), "updated_at": _now()},
+                {"key": "monitor.rescanRequestedAt", "value": requested_value, "created_at": _now(), "updated_at": _now()},
             )
         db.commit()
-    _record_system_event(db, level="info", source="import", actor_type="admin", actor_id=user.id, action="rescan.requested", target_type="monitorFolder", message="请求重新识别监控文件夹", metadata={"requestedAt": requested_at})
-    return ok({"requestedAt": requested_at})
+    _record_system_event(
+        db,
+        level="info",
+        source="import",
+        actor_type="admin",
+        actor_id=user.id,
+        action="rescan.requested",
+        target_type="monitorFolder",
+        message="请求重新识别监控文件夹",
+        metadata={
+            "requestedAt": requested_at,
+            "monitorFolderIds": None if context.is_admin else list(context.monitor_folder_ids),
+        },
+    )
+    return ok(
+        {
+            "requestedAt": requested_at,
+            "monitorFolderIds": None if context.is_admin else list(context.monitor_folder_ids),
+        }
+    )
 
 
 @router.post("/import-tasks/{task_id}/retry")
@@ -5607,7 +5962,7 @@ def retry_import_task(task_id: str, request: Request, db: Session = Depends(get_
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    task = _row(db, "SELECT * FROM `ImportTask` WHERE `id` = :id", {"id": task_id}) if _has_table(db, "ImportTask") else None
+    task = _visible_import_task_or_none(db, user, task_id)
     if not task:
         return fail("导入任务不存在", status_code=404)
     if task.get("status") != "FAILED":
@@ -5685,10 +6040,10 @@ def retry_import_task(task_id: str, request: Request, db: Session = Depends(get_
 
 @router.get("/import-tasks/{task_id}")
 def get_import_task(task_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
+    user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    task = _row(db, "SELECT * FROM `ImportTask` WHERE `id` = :id", {"id": task_id}) if _has_table(db, "ImportTask") else None
+    task = _visible_import_task_or_none(db, user, task_id)
     if not task:
         return fail("导入任务不存在", status_code=404)
     return ok({"task": _import_task_view(db, task, log_limit=100)})
@@ -5696,10 +6051,10 @@ def get_import_task(task_id: str, request: Request, db: Session = Depends(get_db
 
 @router.get("/import-tasks/{task_id}/logs")
 def get_import_logs(task_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
+    user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    if not _has_table(db, "ImportTask") or not _row(db, "SELECT `id` FROM `ImportTask` WHERE `id` = :id", {"id": task_id}):
+    if _visible_import_task_or_none(db, user, task_id) is None:
         return fail("导入任务不存在", status_code=404)
     page = _positive_int(request.query_params.get("page"), 1, 100000)
     page_size = _positive_int(request.query_params.get("pageSize"), 100, 200)
@@ -5729,8 +6084,29 @@ def list_shelves(request: Request, db: Session = Depends(get_db), settings: Sett
     if auth_error:
         return auth_error
     shelf_order = "COALESCE(`pinned`, 0) DESC, `updatedAt` DESC" if _has_column(db, "Shelf", "pinned") else "`updatedAt` DESC"
-    shelves = _rows(db, f"SELECT * FROM `Shelf` ORDER BY {shelf_order}") if _has_table(db, "Shelf") else []
+    if not _has_table(db, "Shelf"):
+        shelves = []
+    elif _has_column(db, "Shelf", "ownerUserId"):
+        shelves = _rows(
+            db,
+            f"SELECT * FROM `Shelf` WHERE `ownerUserId` = :user_id ORDER BY {shelf_order}",
+            {"user_id": user.id},
+        )
+    else:
+        shelves = _rows(db, f"SELECT * FROM `Shelf` ORDER BY {shelf_order}")
     return ok({"shelves": [_shelf_view(db, shelf, user.id) for shelf in shelves]})
+
+
+def _owned_shelf(db: Session, shelf_id: str, user_id: str) -> dict[str, Any] | None:
+    if not _has_table(db, "Shelf"):
+        return None
+    if _has_column(db, "Shelf", "ownerUserId"):
+        return _row(
+            db,
+            "SELECT * FROM `Shelf` WHERE `id` = :id AND `ownerUserId` = :user_id",
+            {"id": shelf_id, "user_id": user_id},
+        )
+    return _row(db, "SELECT * FROM `Shelf` WHERE `id` = :id", {"id": shelf_id})
 
 
 def _shelf_view(db: Session, shelf: dict[str, Any], user_id: str) -> dict[str, Any]:
@@ -5748,8 +6124,14 @@ def _shelf_view(db: Session, shelf: dict[str, Any], user_id: str) -> dict[str, A
         if _has_table(db, "ShelfWork")
         else []
     )
-    books = [_work_view(db, work, user_id) for work_id in work_ids if (work := _get_work(db, work_id))]
-    return {**shelf, "kind": kind, "rules": rules, "bookCount": len(books), "bookIds": work_ids, "books": books}
+    user = db.get(User, user_id)
+    visible_ids = [
+        work_id
+        for work_id in work_ids
+        if user is not None and can_access_work(db, user, work_id)
+    ]
+    books = [_work_view(db, work, user_id) for work_id in visible_ids if (work := _get_work(db, work_id))]
+    return {**shelf, "kind": kind, "rules": rules, "bookCount": len(books), "bookIds": visible_ids, "books": books}
 
 
 def _normalized_smart_shelf_rules(value: Any) -> tuple[dict[str, Any], str | None]:
@@ -5782,10 +6164,17 @@ def _normalized_smart_shelf_rules(value: Any) -> tuple[dict[str, Any], str | Non
         return {}, dynamic_error
     if dynamic_rules["conditions"]:
         rules.update(dynamic_rules)
+    included_work_ids = [
+        str(item).strip()
+        for item in value.get("includedWorkIds") or []
+        if str(item).strip()
+    ]
+    if included_work_ids:
+        rules["includedWorkIds"] = list(dict.fromkeys(included_work_ids))[:500]
     return rules, None
 
 
-def _normalized_shelf_work_ids(db: Session, value: Any) -> tuple[list[str], str | None]:
+def _normalized_shelf_work_ids(db: Session, value: Any, user: User) -> tuple[list[str], str | None]:
     if not isinstance(value, list):
         return [], "图书列表格式不正确"
     work_ids: list[str] = []
@@ -5800,6 +6189,9 @@ def _normalized_shelf_work_ids(db: Session, value: Any) -> tuple[list[str], str 
     existing_ids = {work_id for work_id in work_ids if _get_work(db, work_id)}
     if missing := [work_id for work_id in work_ids if work_id not in existing_ids]:
         return [], f"有 {len(missing)} 本图书已不存在，请刷新后重试"
+    inaccessible = [work_id for work_id in work_ids if not can_access_work(db, user, work_id)]
+    if inaccessible:
+        return [], "选择的图书不存在，请刷新后重试"
     return work_ids, None
 
 
@@ -5820,7 +6212,7 @@ def get_shelf(shelf_id: str, request: Request, db: Session = Depends(get_db), se
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    shelf = _row(db, "SELECT * FROM `Shelf` WHERE `id` = :id", {"id": shelf_id}) if _has_table(db, "Shelf") else None
+    shelf = _owned_shelf(db, shelf_id, user.id)
     if not shelf:
         return fail("书架不存在", status_code=404)
     return ok({"shelf": _shelf_view(db, shelf, user.id)})
@@ -5841,10 +6233,10 @@ async def create_shelf(request: Request, db: Session = Depends(get_db), settings
     rules, rules_error = _normalized_smart_shelf_rules(payload.get("rules"))
     if rules_error:
         return fail(rules_error, status_code=400)
-    work_ids, work_error = _normalized_shelf_work_ids(db, payload.get("bookIds", payload.get("workIds", [])))
+    work_ids, work_error = _normalized_shelf_work_ids(db, payload.get("bookIds", payload.get("workIds", [])), user)
     if work_error:
         return fail(work_error, status_code=400)
-    shelf = _insert(db, "Shelf", {"id": f"py_{time_ns()}", "name": name, "description": str(payload.get("description") or "").strip() or None, "kind": kind, "rulesJson": _json_text(rules), "pinned": bool(payload.get("pinned")), "createdAt": _now(), "updatedAt": _now()})
+    shelf = _insert(db, "Shelf", {"id": f"py_{time_ns()}", "ownerUserId": user.id, "name": name, "description": str(payload.get("description") or "").strip() or None, "kind": kind, "rulesJson": _json_text(rules), "pinned": bool(payload.get("pinned")), "createdAt": _now(), "updatedAt": _now()})
     if kind == "STATIC":
         _replace_shelf_works(db, shelf["id"], work_ids)
     return ok({"shelf": _shelf_view(db, shelf, user.id)}, status_code=201)
@@ -5863,7 +6255,7 @@ async def update_shelf(shelf_id: str, request: Request, db: Session = Depends(ge
             return fail("请填写书架名称", status_code=400)
     if "description" in values:
         values["description"] = str(values["description"] or "").strip() or None
-    existing_shelf = _row(db, "SELECT * FROM `Shelf` WHERE `id` = :id", {"id": shelf_id}) if _has_table(db, "Shelf") else None
+    existing_shelf = _owned_shelf(db, shelf_id, user.id)
     if not existing_shelf:
         return fail("书架不存在", status_code=404)
     kind = str(payload.get("kind") or existing_shelf.get("kind") or "STATIC").strip().upper()
@@ -5876,7 +6268,7 @@ async def update_shelf(shelf_id: str, request: Request, db: Session = Depends(ge
     works = payload.get("bookIds", payload.get("workIds"))
     work_ids: list[str] | None = None
     if works is not None:
-        work_ids, work_error = _normalized_shelf_work_ids(db, works)
+        work_ids, work_error = _normalized_shelf_work_ids(db, works, user)
         if work_error:
             return fail(work_error, status_code=400)
     values["updatedAt"] = _now()
@@ -5892,10 +6284,10 @@ async def update_shelf(shelf_id: str, request: Request, db: Session = Depends(ge
 
 @router.delete("/shelves/{shelf_id}")
 def delete_shelf(shelf_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
+    user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    shelf = _row(db, "SELECT `id` FROM `Shelf` WHERE `id` = :id", {"id": shelf_id}) if _has_table(db, "Shelf") else None
+    shelf = _owned_shelf(db, shelf_id, user.id)
     if not shelf:
         return fail("书架不存在", status_code=404)
     if "shelfId" in _set_columns(db, "MonitorFolder"):
@@ -5908,21 +6300,178 @@ def delete_shelf(shelf_id: str, request: Request, db: Session = Depends(get_db),
 
 @router.get("/library/facets")
 def library_facets(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
+    user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    facets = {kind.lower(): list_categories(db, kind) for kind in ("AUTHOR", "TAG", "SERIES", "PUBLISHER")}
-    status_rows = _rows(db, "SELECT `status` AS `value`, COUNT(*) AS `count` FROM `LibraryWork` WHERE COALESCE(`hidden`, 0) = 0 GROUP BY `status`")
-    media_rows = _rows(db, "SELECT `mediaKind` AS `value`, COUNT(DISTINCT `workId`) AS `count` FROM `LibraryEdition` WHERE COALESCE(`hidden`, 0) = 0 GROUP BY `mediaKind`")
+    facets = {kind.lower(): _visible_categories(db, user, kind) for kind in ("AUTHOR", "TAG", "SERIES", "PUBLISHER")}
+    context = authorization_context(db, user)
+    work_scope, work_params = work_visibility_sql(context, alias="w", prefix="facet_status")
+    visible_works = _rows(
+        db,
+        f"SELECT w.* FROM `LibraryWork` w WHERE COALESCE(w.`hidden`, 0) = 0 AND {work_scope}",
+        work_params,
+    )
+    status_counts: dict[str, int] = {}
+    for work in visible_works:
+        status = str(_work_view(db, work, user.id).get("status") or "UNREAD")
+        status_counts[status] = status_counts.get(status, 0) + 1
+    status_rows = [{"value": value, "count": count} for value, count in sorted(status_counts.items())]
+    edition_scope, edition_params = edition_visibility_sql(context, alias="e", prefix="facet_media")
+    media_rows = _rows(
+        db,
+        "SELECT e.`mediaKind` AS `value`, COUNT(DISTINCT e.`workId`) AS `count` "
+        "FROM `LibraryEdition` e WHERE COALESCE(e.`hidden`, 0) = 0 "
+        f"AND {edition_scope} GROUP BY e.`mediaKind`",
+        edition_params,
+    )
     return ok({"facets": facets, "statuses": status_rows, "mediaKinds": media_rows})
+
+
+def _visible_categories(db: Session, user: User, kind: str) -> list[dict[str, Any]]:
+    normalized_kind = kind.upper()
+    if user.role == "admin":
+        return list_categories(db, normalized_kind)
+    context = authorization_context(db, user)
+    if normalized_kind == "PUBLISHER":
+        scope, params = edition_visibility_sql(context, alias="e", prefix="category_publisher")
+        rows = _rows(
+            db,
+            "SELECT f.*, COUNT(DISTINCT e.`workId`) AS `bookCount` FROM `LibraryFacet` f "
+            "JOIN `LibraryEditionFacet` ef ON ef.`facetId` = f.`id` "
+            "JOIN `LibraryEdition` e ON e.`id` = ef.`editionId` "
+            "JOIN `LibraryWork` w ON w.`id` = e.`workId` "
+            "WHERE f.`kind` = 'PUBLISHER' AND COALESCE(e.`hidden`, 0) = 0 "
+            f"AND COALESCE(w.`hidden`, 0) = 0 AND {scope} "
+            "GROUP BY f.`id` ORDER BY `bookCount` DESC, f.`name` COLLATE NOCASE ASC",
+            params,
+        )
+    else:
+        scope, params = work_visibility_sql(context, alias="w", prefix=f"category_{normalized_kind.lower()}")
+        params["kind"] = normalized_kind
+        rows = _rows(
+            db,
+            "SELECT f.*, COUNT(DISTINCT w.`id`) AS `bookCount` FROM `LibraryFacet` f "
+            "JOIN `LibraryWorkFacet` wf ON wf.`facetId` = f.`id` "
+            "JOIN `LibraryWork` w ON w.`id` = wf.`workId` "
+            "WHERE f.`kind` = :kind AND COALESCE(w.`hidden`, 0) = 0 "
+            f"AND {scope} GROUP BY f.`id` "
+            "ORDER BY `bookCount` DESC, f.`name` COLLATE NOCASE ASC",
+            params,
+        )
+    return [
+        {**row, "aliases": _parse_json(row.get("aliases"), []), "bookCount": int(row.get("bookCount") or 0)}
+        for row in rows
+    ]
+
+
+def _scoped_filter_schema(db: Session, user: User) -> dict[str, Any]:
+    schema = library_filter_schema(db)
+    context = authorization_context(db, user)
+    options_by_source: dict[str, list[dict[str, Any]]] = {}
+    if context.is_admin:
+        options_by_source = {}
+    else:
+        work_scope, work_params = work_visibility_sql(context, alias="w", prefix="filter_options_work")
+        work_rows = _rows(
+            db,
+            "SELECT w.`author`, w.`tags`, w.`seriesName`, w.`origin` FROM `LibraryWork` w "
+            f"WHERE COALESCE(w.`hidden`, 0) = 0 AND {work_scope}",
+            work_params,
+        )
+        edition_scope, edition_params = edition_visibility_sql(context, alias="e", prefix="filter_options_edition")
+        edition_rows = _rows(
+            db,
+            "SELECT e.`publisher`, e.`language`, e.`format`, e.`importStatus`, e.`origin`, e.`mediaKind` "
+            "FROM `LibraryEdition` e WHERE COALESCE(e.`hidden`, 0) = 0 "
+            f"AND {edition_scope}",
+            edition_params,
+        )
+
+        def counted(values: list[str]) -> list[dict[str, Any]]:
+            counts: dict[str, int] = {}
+            for value in values:
+                normalized = value.strip()
+                if normalized:
+                    counts[normalized] = counts.get(normalized, 0) + 1
+            return [
+                {"value": value, "label": value, "count": count}
+                for value, count in sorted(counts.items(), key=lambda item: (-item[1], item[0].casefold()))
+            ]
+
+        authors = [
+            part.strip()
+            for row in work_rows
+            for part in re.split(r"[、,，;/；|]+", str(row.get("author") or ""))
+            if part.strip()
+        ]
+        tags = [
+            str(tag).strip()
+            for row in work_rows
+            for tag in _parse_json(row.get("tags"), [])
+            if str(tag).strip()
+        ]
+        options_by_source.update({
+            "authors": counted(authors),
+            "tags": counted(tags),
+            "series": counted([str(row.get("seriesName") or "") for row in work_rows]),
+            "publishers": counted([str(row.get("publisher") or "") for row in edition_rows]),
+            "languages": counted([str(row.get("language") or "") for row in edition_rows]),
+            "formats": counted([str(row.get("format") or "") for row in edition_rows]),
+            "importStatuses": counted([str(row.get("importStatus") or "") for row in edition_rows]),
+            "origins": counted([
+                *[str(row.get("origin") or "") for row in work_rows],
+                *[str(row.get("origin") or "") for row in edition_rows],
+            ]),
+        })
+        visible_media_kinds = {str(row.get("mediaKind") or "") for row in edition_rows}
+        existing_media = next(
+            (field.get("options", []) for field in schema["fields"] if field.get("optionSource") == "mediaKinds"),
+            [],
+        )
+        options_by_source["mediaKinds"] = [
+            option for option in existing_media if option.get("value") in visible_media_kinds
+        ]
+
+    if context.is_admin:
+        monitor_rows = _rows(db, "SELECT `id`, `name`, `rootPath` FROM `MonitorFolder` ORDER BY `name` COLLATE NOCASE ASC")
+    elif context.monitor_folder_ids:
+        placeholders = ", ".join(f":folder_{index}" for index, _folder_id in enumerate(context.monitor_folder_ids))
+        monitor_rows = _rows(
+            db,
+            f"SELECT `id`, `name`, `rootPath` FROM `MonitorFolder` WHERE `id` IN ({placeholders}) ORDER BY `name` COLLATE NOCASE ASC",
+            {f"folder_{index}": folder_id for index, folder_id in enumerate(context.monitor_folder_ids)},
+        )
+    else:
+        monitor_rows = []
+    options_by_source["monitorFolders"] = [
+        {"value": str(row["id"]), "label": str(row["name"]), "rootPath": row.get("rootPath")}
+        for row in monitor_rows
+    ]
+    options_by_source["shelves"] = [
+        {"value": str(row["id"]), "label": str(row["name"])}
+        for row in _rows(
+            db,
+            "SELECT `id`, `name` FROM `Shelf` WHERE `ownerUserId` = :user_id "
+            "AND COALESCE(`kind`, 'STATIC') = 'STATIC' ORDER BY `name` COLLATE NOCASE ASC",
+            {"user_id": user.id},
+        )
+    ] if _has_column(db, "Shelf", "ownerUserId") else []
+    schema["fields"] = [
+        {
+            **field,
+            "options": options_by_source.get(str(field.get("optionSource")), field.get("options", [])),
+        }
+        for field in schema["fields"]
+    ]
+    return schema
 
 
 @router.get("/library/filter-schema")
 def library_filter_options(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
+    user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    return ok(library_filter_schema(db))
+    return ok(_scoped_filter_schema(db, user))
 
 
 @router.get("/library/categories")
@@ -6416,9 +6965,12 @@ def _apply_remote_cover(work_id: str, cover_url: str, settings: Settings) -> dic
 
 @router.post("/works/{work_id}/metadata/search")
 async def metadata_search(work_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
+    user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    permission_error = _require_work_manager(db, user, work_id)
+    if permission_error is not None:
+        return permission_error
     payload = await request.json()
     source = str(payload.get("providerId") or payload.get("source") or "bangumi")
     if source not in metadata_provider_registry().ids():
@@ -6440,6 +6992,11 @@ async def update_work_edition(work_id: str, edition_id: str, request: Request, d
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    permission_error = _require_work_manager(db, user, work_id)
+    if permission_error is not None:
+        return permission_error
+    if not can_access_edition(db, user, edition_id):
+        return fail("版本不存在或不属于该作品", status_code=404, code="EDITION_NOT_FOUND")
     edition = _row(
         db,
         "SELECT * FROM `LibraryEdition` WHERE `id` = :edition_id AND `workId` = :work_id AND COALESCE(`hidden`, 0) = 0",
@@ -6465,6 +7022,11 @@ def convert_work_edition(work_id: str, edition_id: str, request: Request, db: Se
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    permission_error = _require_work_manager(db, user, work_id)
+    if permission_error is not None:
+        return permission_error
+    if not can_access_edition(db, user, edition_id):
+        return fail("版本不存在或不属于该作品", status_code=404, code="EDITION_NOT_FOUND")
     work = _get_work(db, work_id)
     edition = (
         _row(
@@ -6524,6 +7086,13 @@ async def compatible_work_action(work_id: str, request: Request, edition_id: str
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    permission_error = _require_work_manager(db, user, work_id)
+    if permission_error is not None:
+        return permission_error
+    if edition_id and not can_access_edition(db, user, edition_id):
+        return fail("版本不存在或不属于该作品", status_code=404, code="EDITION_NOT_FOUND")
+    if volume_id and not can_access_volume(db, user, volume_id):
+        return fail("卷不存在或不属于该作品", status_code=404, code="VOLUME_NOT_FOUND")
     if request.url.path.endswith("/metadata/apply"):
         payload = await request.json()
         candidate = payload.get("candidate") if isinstance(payload.get("candidate"), dict) else {}

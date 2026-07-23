@@ -21,7 +21,7 @@ export function LibraryImportSettingsPage() {
   ];
 
   return (
-    <SettingsCenterShell title={i18nAttribute("书库来源与导入")} description={i18nAttribute("管理监控文件夹、识别规则与最近导入活动。")}>
+    <SettingsCenterShell title={i18nAttribute("书库来源和导入")} description={i18nAttribute("管理监控文件夹、识别规则与最近导入活动。")}>
       <div>
         <div className="mb-6 flex gap-1 overflow-x-auto border-b border-[#DEDAD4]" role="tablist" aria-label={i18nAttribute("书库来源与导入")}>
           {tabs.map((tab) => {

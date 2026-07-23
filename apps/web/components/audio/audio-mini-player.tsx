@@ -23,13 +23,13 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { formatAudioTime } from '../../features/audio/audio-model';
 import { useAudioPlayback } from '../../features/audio/audio-playback-provider';
+import { AUDIO_PLAYBACK_RATE_OPTIONS } from '../../lib/audio-device-preferences';
 import { withBasePath } from '../../lib/base-path';
 import { cn } from '../ui/cn';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 const hiddenPrefixes = ['/login', '/setup', '/forgot-password', '/reset-password', '/offline'];
-const playbackRates = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
 const sleepOptions = [15, 30, 45, 60] as const;
 const chaptersPanelId = 'audio-mini-player-chapters';
 const settingsPanelId = 'audio-mini-player-settings';
@@ -248,7 +248,7 @@ export function AudioMiniPlayer() {
               <span className="font-semibold tabular-nums text-[#C8452B]">{player.playbackRate}×</span>
             </div>
             <div className="mt-2 grid grid-cols-4 gap-1.5" role="group" aria-label={i18nAttribute("选择播放速度")}>
-              {playbackRates.map((rate) => (
+              {AUDIO_PLAYBACK_RATE_OPTIONS.map((rate) => (
                 <button
                   key={rate}
                   type="button"

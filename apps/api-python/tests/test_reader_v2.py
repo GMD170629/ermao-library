@@ -107,6 +107,17 @@ def _reader_tables(db_session) -> None:
             )"""
         )
     )
+    db_session.execute(
+        text(
+            """CREATE TABLE LibraryConsumptionState (
+                id TEXT PRIMARY KEY, userId TEXT NOT NULL, workId TEXT NOT NULL,
+                mediaKind TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'UNREAD',
+                lastEditionId TEXT, lastVolumeId TEXT, lastUnitId TEXT,
+                createdAt TEXT, updatedAt TEXT,
+                UNIQUE(userId, workId, mediaKind)
+            )"""
+        )
+    )
     db_session.commit()
 
 
@@ -594,7 +605,7 @@ def test_progress_v2_validates_fingerprint_and_writes_v2_and_legacy_projections(
     assert dict(persisted) == {"mutationId": "mutation-1", "percent": 50.0}
 
 
-def test_reading_status_advances_from_unread_to_reading_and_finishes_only_on_last_volume(client, db_session):
+def test_reading_status_is_user_scoped_and_finishes_only_on_last_volume(client, db_session):
     _reader_tables(db_session)
     user_id = _login(client, db_session)
     _epub_fixture(db_session)
@@ -612,7 +623,14 @@ def test_reading_status_advances_from_unread_to_reading_and_finishes_only_on_las
     db_session.commit()
 
     first = client.get("/api/reader/v2/editions/edition-v2/bootstrap?volume=volume-v2").json()["data"]
-    assert db_session.execute(text("SELECT status FROM LibraryWork WHERE id = 'work-v2'")).scalar_one() == "READING"
+    assert db_session.execute(text("SELECT status FROM LibraryWork WHERE id = 'work-v2'")).scalar_one() == "UNREAD"
+    assert db_session.execute(
+        text(
+            "SELECT status FROM LibraryConsumptionState "
+            "WHERE userId = :user_id AND workId = 'work-v2' AND mediaKind = 'EBOOK'"
+        ),
+        {"user_id": user_id},
+    ).scalar_one() == "READING"
 
     first_finished = client.put(
         "/api/reader/v2/editions/edition-v2/progress",
@@ -629,7 +647,7 @@ def test_reading_status_advances_from_unread_to_reading_and_finishes_only_on_las
         },
     )
     assert first_finished.status_code == 200
-    assert db_session.execute(text("SELECT status FROM LibraryWork WHERE id = 'work-v2'")).scalar_one() == "READING"
+    assert db_session.execute(text("SELECT status FROM LibraryWork WHERE id = 'work-v2'")).scalar_one() == "UNREAD"
 
     final = client.get("/api/reader/v2/editions/edition-v2/bootstrap?volume=volume-v2-final").json()["data"]
     final_finished = client.put(
@@ -647,10 +665,17 @@ def test_reading_status_advances_from_unread_to_reading_and_finishes_only_on_las
         },
     )
     assert final_finished.status_code == 200
-    assert db_session.execute(text("SELECT status FROM LibraryWork WHERE id = 'work-v2'")).scalar_one() == "FINISHED"
+    assert db_session.execute(text("SELECT status FROM LibraryWork WHERE id = 'work-v2'")).scalar_one() == "UNREAD"
+    assert db_session.execute(
+        text(
+            "SELECT status FROM LibraryConsumptionState "
+            "WHERE userId = :user_id AND workId = 'work-v2' AND mediaKind = 'EBOOK'"
+        ),
+        {"user_id": user_id},
+    ).scalar_one() == "FINISHED"
 
     client.get("/api/reader/v2/editions/edition-v2/bootstrap?volume=volume-v2-final")
-    assert db_session.execute(text("SELECT status FROM LibraryWork WHERE id = 'work-v2'")).scalar_one() == "FINISHED"
+    assert db_session.execute(text("SELECT status FROM LibraryWork WHERE id = 'work-v2'")).scalar_one() == "UNREAD"
     assert client.get("/api/dashboard/continue-reading").json()["data"]["item"] is None
 
 

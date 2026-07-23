@@ -1,7 +1,7 @@
 {
   "name": "shuku-starship",
   "private": true,
-  "version": "0.2.3",
+  "version": "0.3.0",
   "packageManager": "pnpm@9.12.2",
   "engines": {
     "node": "20.20.2",

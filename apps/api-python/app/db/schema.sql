@@ -6,7 +6,11 @@ CREATE TABLE IF NOT EXISTS `User` (
     `name` TEXT NOT NULL,
     `passwordHash` TEXT NOT NULL,
     `avatarPath` TEXT NULL,
-    `role` TEXT NOT NULL DEFAULT 'admin',
+    `role` TEXT NOT NULL DEFAULT 'member',
+    `status` TEXT NOT NULL DEFAULT 'active',
+    `canManageSystem` INTEGER NOT NULL DEFAULT 0,
+    `canViewManualImports` INTEGER NOT NULL DEFAULT 0,
+    `authzVersion` INTEGER NOT NULL DEFAULT 1,
     `createdAt` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updatedAt` TEXT NOT NULL,
     PRIMARY KEY (`id`)
@@ -48,6 +52,25 @@ CREATE TABLE IF NOT EXISTS `MonitorFolder` (
     `updatedAt` TEXT NOT NULL,
     PRIMARY KEY (`id`),
     FOREIGN KEY (`shelfId`) REFERENCES `Shelf`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS `UserMonitorFolderAccess` (
+    `userId` TEXT NOT NULL,
+    `monitorFolderId` TEXT NOT NULL,
+    `createdAt` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`userId`, `monitorFolderId`),
+    FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (`monitorFolderId`) REFERENCES `MonitorFolder`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS `UserPreference` (
+    `userId` TEXT NOT NULL,
+    `key` TEXT NOT NULL,
+    `value` TEXT NOT NULL,
+    `createdAt` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt` TEXT NOT NULL,
+    PRIMARY KEY (`userId`, `key`),
+    FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS `Source` (
@@ -229,6 +252,7 @@ CREATE TABLE IF NOT EXISTS `LibraryFile` (
 
 CREATE TABLE IF NOT EXISTS `KindleSendTask` (
     `id` TEXT NOT NULL,
+    `userId` TEXT NULL,
     `workId` TEXT NULL,
     `editionId` TEXT NULL,
     `volumeId` TEXT NULL,
@@ -260,7 +284,8 @@ CREATE TABLE IF NOT EXISTS `KindleSendTask` (
     FOREIGN KEY (`workId`) REFERENCES `LibraryWork`(`id`) ON DELETE SET NULL ON UPDATE CASCADE,
     FOREIGN KEY (`editionId`) REFERENCES `LibraryEdition`(`id`) ON DELETE SET NULL ON UPDATE CASCADE,
     FOREIGN KEY (`volumeId`) REFERENCES `LibraryVolume`(`id`) ON DELETE SET NULL ON UPDATE CASCADE,
-    FOREIGN KEY (`fileId`) REFERENCES `LibraryFile`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
+    FOREIGN KEY (`fileId`) REFERENCES `LibraryFile`(`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+    FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS `ImportTask` (
@@ -584,6 +609,7 @@ CREATE TABLE IF NOT EXISTS `BookIdentityCache` (
 
 CREATE TABLE IF NOT EXISTS `Shelf` (
     `id` TEXT NOT NULL,
+    `ownerUserId` TEXT NULL,
     `name` TEXT NOT NULL,
     `description` TEXT NULL,
     `kind` TEXT NOT NULL DEFAULT 'STATIC',
@@ -591,7 +617,8 @@ CREATE TABLE IF NOT EXISTS `Shelf` (
     `pinned` INTEGER NOT NULL DEFAULT 0,
     `createdAt` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updatedAt` TEXT NOT NULL,
-    PRIMARY KEY (`id`)
+    PRIMARY KEY (`id`),
+    FOREIGN KEY (`ownerUserId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS `ShelfWork` (
@@ -746,12 +773,33 @@ CREATE TABLE IF NOT EXISTS `WorkDetailPreference` (
     FOREIGN KEY (`workId`) REFERENCES `LibraryWork`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS `ReaderBookmark` (
+    `id` TEXT NOT NULL,
+    `userId` TEXT NOT NULL,
+    `workId` TEXT NOT NULL,
+    `editionId` TEXT NOT NULL,
+    `contentFingerprint` TEXT NOT NULL,
+    `bookmarkId` TEXT NOT NULL,
+    `locationJson` TEXT NOT NULL,
+    `label` TEXT NOT NULL,
+    `percent` REAL NOT NULL DEFAULT 0,
+    `bookmarkCreatedAt` TEXT NOT NULL,
+    `createdAt` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt` TEXT NOT NULL,
+    PRIMARY KEY (`id`),
+    FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (`workId`) REFERENCES `LibraryWork`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (`editionId`) REFERENCES `LibraryEdition`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS `User_email_key` ON `User`(`email`);
 CREATE UNIQUE INDEX IF NOT EXISTS `Session_tokenHash_key` ON `Session`(`tokenHash`);
 CREATE UNIQUE INDEX IF NOT EXISTS `PasswordResetToken_tokenHash_key` ON `PasswordResetToken`(`tokenHash`);
 CREATE INDEX IF NOT EXISTS `PasswordResetToken_userId_createdAt_idx` ON `PasswordResetToken`(`userId`, `createdAt`);
 CREATE INDEX IF NOT EXISTS `PasswordResetToken_expiresAt_idx` ON `PasswordResetToken`(`expiresAt`);
 CREATE UNIQUE INDEX IF NOT EXISTS `MonitorFolder_rootPath_key` ON `MonitorFolder`(`rootPath`);
+CREATE INDEX IF NOT EXISTS `UserMonitorFolderAccess_folder_idx` ON `UserMonitorFolderAccess`(`monitorFolderId`);
+CREATE INDEX IF NOT EXISTS `UserPreference_userId_idx` ON `UserPreference`(`userId`);
 CREATE INDEX IF NOT EXISTS `Source_enabled_idx` ON `Source`(`enabled`);
 CREATE INDEX IF NOT EXISTS `Source_kind_idx` ON `Source`(`kind`);
 CREATE INDEX IF NOT EXISTS `Source_providerType_idx` ON `Source`(`providerType`);
@@ -801,6 +849,7 @@ CREATE INDEX IF NOT EXISTS `LibraryFile_fullHash_idx` ON `LibraryFile`(`fullHash
 CREATE INDEX IF NOT EXISTS `LibraryFile_sizeBytes_mtimeMs_idx` ON `LibraryFile`(`sizeBytes`, `mtimeMs`);
 CREATE INDEX IF NOT EXISTS `KindleSendTask_status_nextAttemptAt_createdAt_idx` ON `KindleSendTask`(`status`, `nextAttemptAt`, `createdAt`);
 CREATE INDEX IF NOT EXISTS `KindleSendTask_workId_createdAt_idx` ON `KindleSendTask`(`workId`, `createdAt`);
+CREATE INDEX IF NOT EXISTS `KindleSendTask_userId_createdAt_idx` ON `KindleSendTask`(`userId`, `createdAt`);
 CREATE UNIQUE INDEX IF NOT EXISTS `KindleSendTask_active_file_recipient_key` ON `KindleSendTask`(`fileId`, `recipientEmail`) WHERE `status` IN ('queued', 'sending');
 CREATE INDEX IF NOT EXISTS `ImportTask_monitorFolderId_status_idx` ON `ImportTask`(`monitorFolderId`, `status`);
 CREATE INDEX IF NOT EXISTS `ImportTask_status_createdAt_idx` ON `ImportTask`(`status`, `createdAt`);
@@ -854,6 +903,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS `ExternalMetadataCache_provider_queryKey_key` 
 CREATE INDEX IF NOT EXISTS `BookIdentityCache_parserVersion_idx` ON `BookIdentityCache`(`parserVersion`);
 CREATE INDEX IF NOT EXISTS `Shelf_updatedAt_idx` ON `Shelf`(`updatedAt`);
 CREATE INDEX IF NOT EXISTS `Shelf_kind_updatedAt_idx` ON `Shelf`(`kind`, `updatedAt`);
+CREATE INDEX IF NOT EXISTS `Shelf_ownerUserId_updatedAt_idx` ON `Shelf`(`ownerUserId`, `updatedAt`);
 CREATE INDEX IF NOT EXISTS `ShelfWork_workId_idx` ON `ShelfWork`(`workId`);
 CREATE INDEX IF NOT EXISTS `ShelfWork_shelfId_createdAt_idx` ON `ShelfWork`(`shelfId`, `createdAt`);
 CREATE INDEX IF NOT EXISTS `LibraryFacet_kind_name_idx` ON `LibraryFacet`(`kind`, `name`);
@@ -877,5 +927,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS `LibraryReadingProgress_userId_editionId_volum
 CREATE INDEX IF NOT EXISTS `LibraryConsumptionState_workId_idx` ON `LibraryConsumptionState`(`workId`);
 CREATE UNIQUE INDEX IF NOT EXISTS `LibraryConsumptionState_user_work_media_key` ON `LibraryConsumptionState`(`userId`, `workId`, `mediaKind`);
 CREATE UNIQUE INDEX IF NOT EXISTS `WorkDetailPreference_user_work_key` ON `WorkDetailPreference`(`userId`, `workId`);
+CREATE INDEX IF NOT EXISTS `ReaderBookmark_user_edition_idx` ON `ReaderBookmark`(`userId`, `editionId`);
+CREATE UNIQUE INDEX IF NOT EXISTS `ReaderBookmark_user_edition_fingerprint_bookmark_key`
+ON `ReaderBookmark`(`userId`, `editionId`, `contentFingerprint`, `bookmarkId`);
 
-PRAGMA user_version = 12;
+PRAGMA user_version = 13;

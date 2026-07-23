@@ -4,6 +4,7 @@ import { AlertCircle, ArrowRight, Check, Database, FolderPlus, Loader2, ShieldCh
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { CompactLanguageSwitcher } from '../../components/layout/compact-language-switcher';
 import { withBasePath } from '../../lib/base-path';
 import { PRODUCT_NAME } from '../../lib/brand';
 import { I18nText } from '@/i18n/provider';
@@ -44,7 +45,7 @@ async function readSetupPayload(response: Response): Promise<SetupPayload> {
 }
 
 export function SetupPage() {
-  const { t: i18nAttribute } = useAttributeI18n();
+  const { locale, t: i18nAttribute } = useAttributeI18n();
   const router = useRouter();
   const [stage, setStage] = useState<SetupStage>('checking');
   const [name, setName] = useState('');
@@ -150,7 +151,7 @@ export function SetupPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ name: normalizedName, email: normalizedEmail, password })
+        body: JSON.stringify({ name: normalizedName, email: normalizedEmail, password, locale })
       });
       const payload = await readSetupPayload(response);
       if (response.status === 409) {
@@ -222,14 +223,17 @@ export function SetupPage() {
     >
       <section className="grid w-full max-w-[1040px] overflow-hidden rounded-[32px] border border-[#B08B6E]/40 bg-[#D4B895] shadow-[0_30px_90px_rgba(96,108,56,0.16)] lg:grid-cols-[minmax(0,1.25fr)_minmax(300px,0.75fr)]">
         <div className="p-7 sm:p-10 lg:p-14">
-          <div className="flex items-center gap-3">
-            <span className="h-12 w-12 overflow-hidden rounded-2xl bg-[#E8DCC7] shadow-sm">
-              <Image src={withBasePath('/icons/icon-192.png')} alt="" width={48} height={48} className="h-full w-full object-cover" priority />
-            </span>
-            <div>
-              <div className="text-sm font-semibold text-[#C66B3D]">{PRODUCT_NAME}</div>
-              <div className="mt-0.5 text-xs text-[#606C38]/70"><I18nText>首次启动设置</I18nText></div>
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="h-12 w-12 shrink-0 overflow-hidden rounded-2xl bg-[#E8DCC7] shadow-sm">
+                <Image src={withBasePath('/icons/icon-192.png')} alt="" width={48} height={48} className="h-full w-full object-cover" priority />
+              </span>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-[#C66B3D]">{PRODUCT_NAME}</div>
+                <div className="mt-0.5 text-xs text-[#606C38]/70"><I18nText>首次启动设置</I18nText></div>
+              </div>
             </div>
+            <CompactLanguageSwitcher variant="setup" />
           </div>
 
           {stage === 'checking' ? (

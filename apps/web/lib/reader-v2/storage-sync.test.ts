@@ -28,7 +28,7 @@ test('preference snapshots are isolated by user/work and reset to server inherit
   const serverDefault = normalizeReaderPreferences({ theme: 'day', epub: { fontSize: 20 } });
 
   const inherited = await repository.resolve('user-1', 'work-1', serverDefault);
-  assert.equal(inherited.source, 'server');
+  assert.equal(inherited.source, 'inherited');
   assert.equal(inherited.preferences.appearance.theme, 'day');
 
   await repository.save('user-1', 'work-1', normalizeReaderPreferences({ appearance: { theme: 'black' } }, serverDefault), serverDefault);
@@ -36,11 +36,11 @@ test('preference snapshots are isolated by user/work and reset to server inherit
   assert.equal(local.source, 'local');
   assert.equal(local.preferences.appearance.theme, 'black');
   assert.equal(local.preferences.epub.fontSize, 20);
-  assert.equal((await repository.resolve('user-2', 'work-1', serverDefault)).source, 'server');
+  assert.equal((await repository.resolve('user-2', 'work-1', serverDefault)).source, 'inherited');
 
   const reset = await repository.reset('user-1', 'work-1', serverDefault);
   assert.equal(reset.appearance.theme, 'day');
-  assert.equal((await repository.resolve('user-1', 'work-1', serverDefault)).source, 'server');
+  assert.equal((await repository.resolve('user-1', 'work-1', serverDefault)).source, 'inherited');
 });
 
 test('IndexedDB preference reads lazily rewrite V2 and malformed snapshots to one complete V3 snapshot', async () => {

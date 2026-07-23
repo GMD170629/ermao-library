@@ -10,7 +10,9 @@ from typing import Any, Iterable
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.core.authorization import authorization_context, edition_visibility_sql, work_visibility_sql
 from app.core.time import now_timestamp_ms, timestamp_ms_to_iso, to_timestamp_ms
+from app.models.auth import User
 from app.services.book_identity import UNKNOWN_AUTHOR, identity_merge_key, normalize_identity_part
 from app.services.library_filters import compile_filter_rules
 
@@ -339,18 +341,62 @@ def _create_operation(
 def smart_shelf_work_ids(db: Session, rules: dict[str, Any], user_id: str | None = None) -> list[str]:
     where = ["COALESCE(w.`hidden`, 0) = 0"]
     params: dict[str, Any] = {}
+    direct_edition_scope = "1 = 1"
+    filter_edition_scope = "1 = 1"
+    filter_edition_params: dict[str, Any] = {}
+    if user_id:
+        user = db.get(User, user_id)
+        if user is not None:
+            context = authorization_context(db, user)
+            work_scope, work_scope_params = work_visibility_sql(
+                context,
+                alias="w",
+                prefix="smart_shelf_work",
+            )
+            where.append(work_scope)
+            params.update(work_scope_params)
+            direct_edition_scope, direct_edition_params = edition_visibility_sql(
+                context,
+                alias="e",
+                prefix="smart_shelf_direct_edition",
+            )
+            params.update(direct_edition_params)
+            filter_edition_scope, filter_edition_params = edition_visibility_sql(
+                context,
+                alias="filter_edition",
+                # compile_filter_rules substitutes the SQL alias
+                # `filter_edition` for reading-state projections. Keep that
+                # alias out of bind names so the substitution cannot rename a
+                # placeholder without also renaming its parameter.
+                prefix="smart_shelf_scope",
+            )
     search = str(rules.get("search") or "").strip()
     if search:
         where.append("(LOWER(w.`title`) LIKE :search OR LOWER(COALESCE(w.`author`, '')) LIKE :search OR LOWER(w.`tags`) LIKE :search)")
         params["search"] = f"%{search.lower()}%"
     statuses = [str(item).upper() for item in rules.get("statuses") or [] if str(item).upper() in STATUS_RANK]
     if statuses:
-        placeholders = []
-        for index, status in enumerate(statuses):
-            key = f"status_{index}"
-            placeholders.append(f":{key}")
-            params[key] = status
-        where.append(f"w.`status` IN ({', '.join(placeholders)})")
+        status_clause, status_params, status_error = compile_filter_rules(
+            db,
+            {
+                "combinator": "ANY",
+                "conditions": [
+                    {"field": "readingStatus", "operator": "equals", "value": status}
+                    for status in statuses
+                ],
+            },
+            alias="w",
+            user_id=user_id,
+            param_prefix="shelf_status",
+            edition_scope_sql=filter_edition_scope,
+            edition_scope_params=filter_edition_params,
+            shelf_owner_user_id=user_id,
+        )
+        if status_error:
+            return []
+        if status_clause:
+            where.append(status_clause)
+            params.update(status_params)
     media_kinds = [str(item).upper() for item in rules.get("mediaKinds") or [] if str(item).upper() in {"EBOOK", "COMIC", "AUDIOBOOK"}]
     if media_kinds:
         placeholders = []
@@ -360,7 +406,8 @@ def smart_shelf_work_ids(db: Session, rules: dict[str, Any], user_id: str | None
             params[key] = kind
         where.append(
             "EXISTS (SELECT 1 FROM `LibraryEdition` e WHERE e.`workId` = w.`id` "
-            f"AND COALESCE(e.`hidden`, 0) = 0 AND e.`mediaKind` IN ({', '.join(placeholders)}))"
+            f"AND COALESCE(e.`hidden`, 0) = 0 AND {direct_edition_scope} "
+            f"AND e.`mediaKind` IN ({', '.join(placeholders)}))"
         )
     tags = _unique_names(rules.get("tags") or [])
     for index, tag in enumerate(tags):
@@ -384,7 +431,8 @@ def smart_shelf_work_ids(db: Session, rules: dict[str, Any], user_id: str | None
             params[key] = publisher.lower()
         where.append(
             "EXISTS (SELECT 1 FROM `LibraryEdition` e WHERE e.`workId` = w.`id` "
-            f"AND COALESCE(e.`hidden`, 0) = 0 AND ({' OR '.join(publisher_terms)}))"
+            f"AND COALESCE(e.`hidden`, 0) = 0 AND {direct_edition_scope} "
+            f"AND ({' OR '.join(publisher_terms)}))"
         )
     dynamic_clause, dynamic_params, dynamic_error = compile_filter_rules(
         db,
@@ -392,13 +440,16 @@ def smart_shelf_work_ids(db: Session, rules: dict[str, Any], user_id: str | None
         alias="w",
         user_id=user_id,
         param_prefix="shelf_filter",
+        edition_scope_sql=filter_edition_scope,
+        edition_scope_params=filter_edition_params,
+        shelf_owner_user_id=user_id,
     )
     if dynamic_error:
         return []
     if dynamic_clause:
         where.append(dynamic_clause)
         params.update(dynamic_params)
-    return [
+    matched_ids = [
         str(row["id"])
         for row in _rows(
             db,
@@ -406,6 +457,12 @@ def smart_shelf_work_ids(db: Session, rules: dict[str, Any], user_id: str | None
             params,
         )
     ]
+    included_ids = [
+        str(item).strip()
+        for item in rules.get("includedWorkIds") or []
+        if str(item).strip()
+    ]
+    return list(dict.fromkeys([*matched_ids, *included_ids]))
 
 
 def duplicate_groups(db: Session) -> list[dict[str, Any]]:

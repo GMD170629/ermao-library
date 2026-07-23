@@ -29,13 +29,14 @@ import { buildLoginRedirectPath, isPublicAppPath, safePostLoginPath } from '../.
 import { installUnauthorizedFetchInterceptor, UNAUTHORIZED_EVENT } from '../../lib/auth-session';
 import { withBasePath } from '../../lib/base-path';
 import { DEFAULT_ACCOUNT_AVATAR_PATH, PRODUCT_NAME } from '../../lib/brand';
+import { clearCurrentUserNamespace, setCurrentUserNamespace, userDevicePreferenceKey } from '../../lib/user-preferences';
 import type { WorkView } from '../../types/work';
 import { Cover } from '../book/cover';
 import { clearPrivatePwaStorage, PwaClient } from '../system/pwa-client';
 import { cn } from '../ui/cn';
 import { useToast } from '../ui/feedback';
 import { useAudioPlayback } from '../../features/audio/audio-playback-provider';
-import { isSettingsItemActive, settingsItems } from '../../features/settings/center/settings-secondary-nav';
+import { isSettingsItemActive, settingsGroups, settingsItemAllowed, type SettingsAuthorization } from '../../features/settings/center/settings-secondary-nav';
 import { MOBILE_NAVIGATION_DRAWER_ID, MobileNavigationProvider } from './mobile-navigation';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
@@ -77,7 +78,10 @@ type SessionStatus = 'checking' | 'authenticated' | 'unavailable' | 'redirecting
 
 type MePayload = {
   ok: boolean;
-  data?: { user?: { id?: string; email: string; name: string; role: string; avatarUrl?: string | null } };
+  data?: {
+    user?: { id?: string; email: string; name: string; role: string; locale?: string; avatarUrl?: string | null };
+    authorization?: SettingsAuthorization & { authzVersion?: number };
+  };
 };
 
 function ensureMeta(name: string) {
@@ -105,11 +109,12 @@ function isActive(pathname: string, currentSearch: URLSearchParams, href: string
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { t: i18nAttribute } = useAttributeI18n();
+  const { t: i18nAttribute, setLocale } = useAttributeI18n();
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [user, setUser] = useState<{ id?: string; email: string; name: string; role: string; avatarUrl?: string | null } | null>(null);
+  const [authorization, setAuthorization] = useState<(SettingsAuthorization & { authzVersion?: number }) | null>(null);
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [shelves, setShelves] = useState<ShelfSummary[]>([]);
   const [librarySearch, setLibrarySearch] = useState('');
@@ -205,6 +210,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (!isProtectedPage || authRedirectingRef.current) return;
     authRedirectingRef.current = true;
     setSessionStatus('redirecting');
+    clearCurrentUserNamespace();
     void clearPrivatePwaStorage().catch(() => undefined);
     router.replace(buildLoginRedirectPath(pathname, currentSearchString));
   }, [currentSearchString, isProtectedPage, pathname, router]);
@@ -242,6 +248,26 @@ export function AppShell({ children }: { children: ReactNode }) {
         if (nextUser) {
           authRedirectingRef.current = false;
           setUser(nextUser);
+          const nextAuthorization = payload?.data?.authorization ?? null;
+          setAuthorization(nextAuthorization);
+          if (nextUser.id) {
+            const nextVersion = Number(nextAuthorization?.authzVersion ?? 1);
+            const previousNamespace = window.sessionStorage.getItem('shuku:session:authz-namespace');
+            const nextNamespace = `${nextUser.id}:${nextVersion}`;
+            if (previousNamespace && previousNamespace !== nextNamespace) {
+              void clearPrivatePwaStorage().catch(() => undefined);
+            }
+            setCurrentUserNamespace(nextUser.id, nextVersion);
+            if (nextUser.locale === 'zh-CN' || nextUser.locale === 'en-US') {
+              window.localStorage.setItem(userDevicePreferenceKey('shuku.locale', nextUser.id), nextUser.locale);
+              setLocale(nextUser.locale);
+            }
+            navigator.serviceWorker?.controller?.postMessage({
+              type: 'SET_PRIVATE_CACHE_NAMESPACE',
+              userId: nextUser.id,
+              authzVersion: nextVersion
+            });
+          }
           setSessionStatus('authenticated');
         } else {
           // A network/proxy/server failure is not proof that the user signed out.
@@ -259,7 +285,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       active = false;
       controller.abort();
     };
-  }, [isProtectedPage, pathname, redirectToLogin]);
+  }, [isProtectedPage, pathname, redirectToLogin, setLocale]);
 
   useEffect(() => {
     if (pathname !== '/login') return undefined;
@@ -360,6 +386,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         .then((response) => response.json())
         .then((payload) => {
           if (active && payload?.ok) setUser(payload.data.user);
+          if (active && payload?.ok) setAuthorization(payload.data.authorization ?? null);
         })
         .catch(() => undefined);
     };
@@ -711,23 +738,33 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="mt-6 min-h-0 flex-1 overflow-y-auto pr-1">
           {isSettingsMode ? (
             <section>
-              <div className="mb-2 px-3 text-[13px] text-[#8A857F]"><I18nText>设置</I18nText></div>
-              <nav aria-label={i18nAttribute("设置分类")} className="space-y-1">
-                {settingsItems.map(({ href, icon: Icon, label }) => {
-                  const active = isSettingsItemActive(pathname, href);
+              <nav aria-label={i18nAttribute("设置分类")} className="space-y-5">
+                {settingsGroups.map((group) => {
+                  const items = group.items.filter((item) => settingsItemAllowed(item.access, authorization));
+                  if (!items.length) return null;
                   return (
-                    <Link
-                      key={href}
-                      href={href}
-                      aria-current={active ? 'page' : undefined}
-                      className={cn(
-                        'flex min-h-11 items-center gap-3 rounded-xl px-3 text-[15px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]',
-                        active ? 'bg-[#F9DED4] text-[#EF4D2F]' : 'text-[#34312E] hover:bg-black/[0.04]'
-                      )}
-                    >
-                      <Icon size={20} strokeWidth={1.75} />
-                      <span className="truncate">{i18nAttribute(label)}</span>
-                    </Link>
+                    <section key={group.key} aria-label={group.label ? i18nAttribute(group.label) : undefined}>
+                      {group.label ? <div className="mb-2 px-3 text-xs font-semibold tracking-[0.08em] text-[#938D86]">{i18nAttribute(group.label)}</div> : null}
+                      <div className="space-y-1">
+                        {items.map(({ href, icon: Icon, label }) => {
+                          const active = isSettingsItemActive(pathname, href);
+                          return (
+                            <Link
+                              key={href}
+                              href={href}
+                              aria-current={active ? 'page' : undefined}
+                              className={cn(
+                                'flex min-h-11 items-center gap-3 rounded-xl px-3 text-[15px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]',
+                                active ? 'bg-[#F9DED4] text-[#EF4D2F]' : 'text-[#34312E] hover:bg-black/[0.04]'
+                              )}
+                            >
+                              <Icon size={20} strokeWidth={1.75} />
+                              <span className="truncate">{i18nAttribute(label)}</span>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    </section>
                   );
                 })}
               </nav>

@@ -1,12 +1,16 @@
 import { HardDrive } from 'lucide-react';
 import { SettingsPage } from '../settings-page';
 import { SettingsCenterShell } from './settings-center-shell';
+import { WorkDetailTabOrderSettings } from './work-detail-tab-order-settings';
 import { I18nText } from '@/i18n/provider';
 
 export function DataSystemSettingsPage() {
   return (
-    <SettingsCenterShell title="数据与系统" description="备份书库数据，并在需要时恢复。">
+    <SettingsCenterShell title="数据和系统" description="管理全系统统一的数据备份、恢复与界面结构设置。">
       <SettingsPage embedded initialSection="备份与恢复" />
+      <div className="mt-8 border-t border-[#DEDAD4] pt-7">
+        <WorkDetailTabOrderSettings />
+      </div>
       <section className="mt-8 border-t border-[#DEDAD4] pt-7" aria-labelledby="backup-location-title">
         <h3 id="backup-location-title" className="text-lg font-semibold text-[#2A2825]"><I18nText>存储位置</I18nText></h3>
         <div className="mt-4 flex items-start gap-3 py-2 text-sm text-[#645F59]">

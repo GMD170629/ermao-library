@@ -5,7 +5,20 @@ async function mockWebAppApi(page: Page) {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname.endsWith('/api/auth/me')) {
       await route.fulfill({
-        json: { ok: true, data: { user: { id: 'web-user', email: 'web@example.com', name: 'Web', role: 'admin' } } }
+        json: {
+          ok: true,
+          data: {
+            user: { id: 'web-user', email: 'web@example.com', name: 'Web', role: 'admin' },
+            authorization: {
+              isAdmin: true,
+              canManageSystem: true,
+              allLibraryScopes: true,
+              monitorFolderIds: [],
+              canViewManualImports: true,
+              authzVersion: 1
+            }
+          }
+        }
       });
       return;
     }
@@ -27,6 +40,7 @@ async function mockWebAppApi(page: Page) {
 
 test.beforeEach(async ({ context, page }) => {
   await context.addCookies([{ name: 'shuku_session', value: 'web-session', domain: '127.0.0.1', path: '/' }]);
+  await context.addInitScript(() => localStorage.setItem('shuku:pwa:install-dismissed:web-user', '1'));
   await mockWebAppApi(page);
 });
 

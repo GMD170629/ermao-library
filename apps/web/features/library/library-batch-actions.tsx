@@ -61,11 +61,13 @@ function valueLabel(value: string | string[]) {
 export function LibraryBatchContextMenu({
   position,
   selectedCount,
+  canManageSystem,
   onClose,
   onSelect
 }: {
   position: ContextPosition | null;
   selectedCount: number;
+  canManageSystem: boolean;
   onClose: () => void;
   onSelect: (action: LibraryBatchAction) => void;
 }) {
@@ -114,7 +116,7 @@ export function LibraryBatchContextMenu({
         <span className="rounded-full bg-[#FFF0EA] px-2 py-1 text-[11px] font-medium text-[#D7462B]"><I18nText>已选 </I18nText>{selectedCount} <I18nText>本</I18nText></span>
       </div>
       <div className="space-y-0.5">
-        {actions.map((item) => {
+        {actions.filter((item) => canManageSystem || item.value === 'shelves' || item.value === 'reading_status').map((item) => {
           const Icon = item.icon;
           return (
             <button
@@ -177,12 +179,14 @@ function FieldToggle({
 export function LibraryBatchDialog({
   action,
   selectedIds,
+  canManageSystem,
   onActionChange,
   onClose,
   onApplied
 }: {
   action: LibraryBatchAction | null;
   selectedIds: string[];
+  canManageSystem: boolean;
   onActionChange: (action: LibraryBatchAction) => void;
   onClose: () => void;
   onApplied: (message: string) => void;
@@ -400,7 +404,7 @@ export function LibraryBatchDialog({
             <button type="button" disabled={saving} onClick={onClose} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[#77716B] transition hover:bg-black/[0.05] disabled:opacity-40" aria-label={i18nAttribute("关闭批量操作")}><X size={18} /></button>
           </div>
           <nav className="mt-4 flex gap-1.5 overflow-x-auto pb-1" aria-label={i18nAttribute("批量操作类型")}>
-            {actions.map((item) => {
+            {actions.filter((item) => canManageSystem || item.value === 'shelves' || item.value === 'reading_status').map((item) => {
               const Icon = item.icon;
               return (
                 <button key={item.value} type="button" onClick={() => onActionChange(item.value)} aria-current={action === item.value ? 'page' : undefined} className={cn('inline-flex h-10 shrink-0 items-center gap-2 rounded-xl px-3 text-xs font-medium transition', action === item.value ? 'bg-[#2D2926] text-white shadow-sm' : 'bg-black/[0.035] text-[#716A64] hover:bg-[#FFF0EA] hover:text-[#D7462B]')}>

@@ -32,10 +32,19 @@ test('service worker caches the shared web shell without a dedicated mobile entr
   assert.match(source, /'\/login'/);
   assert.match(source, /'\/setup'/);
   assert.doesNotMatch(source, /'\/mobile/);
-  assert.match(source, /const VERSION = 'shuku-pwa-v2\.3\.1'/);
+  assert.match(source, /const VERSION = 'shuku-pwa-v2\.4\.0'/);
 });
 
 test('localized web manifest is never pinned in a service-worker cache', () => {
   assert.doesNotMatch(source.match(/const SHELL_URLS = \[[\s\S]*?\]\.map\(withBasePath\)/)?.[0] ?? '', /manifest\.webmanifest/);
   assert.doesNotMatch(source.match(/function isStaticAsset[\s\S]*?\n\}/)?.[0] ?? '', /manifest\.webmanifest/);
+});
+
+test('private API and cover caches are partitioned by user and authorization version', () => {
+  assert.match(source, /const PRIVATE_CACHE_PREFIX = `\$\{VERSION\}-private-`/);
+  assert.match(source, /event\.data\?\.type === 'SET_PRIVATE_CACHE_NAMESPACE'/);
+  assert.match(source, /const nextNamespace = userId && authzVersion \? `\$\{userId\}-\$\{authzVersion\}` : ''/);
+  assert.match(source, /privateCacheName\('api'\)/);
+  assert.match(source, /privateCacheName\('cover'\)/);
+  assert.match(source, /event\.data\?\.type === 'CLEAR_PRIVATE_CACHES'/);
 });

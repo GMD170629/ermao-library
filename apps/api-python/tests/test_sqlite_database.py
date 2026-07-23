@@ -47,6 +47,7 @@ EXPECTED_TABLES = {
     "OrganizeRun",
     "PasswordResetToken",
     "ReaderBookPreference",
+    "ReaderBookmark",
     "ReaderPreference",
     "ReaderProgressCursor",
     "Session",
@@ -57,6 +58,8 @@ EXPECTED_TABLES = {
     "SystemEvent",
     "SystemSetting",
     "User",
+    "UserMonitorFolderAccess",
+    "UserPreference",
     "WorkDetailPreference",
 }
 
@@ -74,7 +77,7 @@ def test_empty_storage_bootstraps_complete_sqlite_database(tmp_path) -> None:
             assert connection.exec_driver_sql("PRAGMA journal_mode").scalar() == "wal"
             assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
             assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar() == 10_000
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 12
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 13
             assert connection.execute(text("SELECT COUNT(*) FROM `User`")).scalar() == 0
             assert "avatarPath" in {column[1] for column in connection.exec_driver_sql("PRAGMA table_info(`User`)").fetchall()}
             assert "shelfId" in {column[1] for column in connection.exec_driver_sql("PRAGMA table_info(`MonitorFolder`)").fetchall()}
@@ -148,7 +151,7 @@ def test_bootstrap_migrates_reader_preference_default_to_v3_without_losing_rows(
                 column[1]: column
                 for column in connection.exec_driver_sql("PRAGMA table_info(`ReaderBookPreference`)").fetchall()
             }
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 12
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 13
             assert columns["schemaVersion"][4] == "3"
             migrated = connection.execute(text(
                 "SELECT `id`, `userId`, `workId`, `schemaVersion`, `preferences`, `createdAt`, `updatedAt` "
@@ -194,7 +197,7 @@ def test_bootstrap_migrates_reader_preference_default_to_v3_without_losing_rows(
         bootstrap_database(engine, settings)
 
         with engine.connect() as connection:
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 12
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 13
             assert connection.execute(text(
                 "SELECT COUNT(*) FROM `ReaderBookPreference` WHERE `id` = 'preference-default'"
             )).scalar() == 1
@@ -290,10 +293,10 @@ def test_bootstrap_migrates_v1_import_tasks_before_creating_new_indexes(tmp_path
             }
             indexes = {row[1] for row in connection.exec_driver_sql("PRAGMA index_list(`ImportTask`)").fetchall()}
             assert "ImportTask_status_leaseExpiresAt_idx" in indexes
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 12
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 13
             assert connection.exec_driver_sql("PRAGMA foreign_key_check").first() is None
 
-            backup_path = settings.database_path.parent / "migrations" / "shuku-before-v12.sqlite3"
+            backup_path = settings.database_path.parent / "migrations" / "shuku-before-v13.sqlite3"
         assert backup_path.is_file()
         with sqlite3.connect(backup_path) as backup:
             assert backup.execute("PRAGMA user_version").fetchone()[0] == 1
@@ -387,7 +390,7 @@ def test_v5_migration_allows_duplicate_work_identity_keys(tmp_path) -> None:
                 row[1]: row
                 for row in connection.exec_driver_sql("PRAGMA index_list(`LibraryWork`)").fetchall()
             }
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 12
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 13
             assert "LibraryWork_mergeKey_key" not in indexes
             assert indexes["LibraryWork_mergeKey_idx"][2] == 0
             assert connection.execute(
@@ -604,7 +607,7 @@ def test_bootstrap_repairs_current_version_with_incomplete_import_task_schema(tm
         with engine.connect() as connection:
             columns = {column[1] for column in connection.exec_driver_sql("PRAGMA table_info(`ImportTask`)").fetchall()}
             assert {"errorCode", "retryable", "attempts", "leaseOwner", "leaseExpiresAt"}.issubset(columns)
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 12
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar() == 13
             indexes = {row[1] for row in connection.exec_driver_sql("PRAGMA index_list(`ImportTask`)").fetchall()}
             assert "ImportTask_status_leaseExpiresAt_idx" in indexes
     finally:
@@ -690,6 +693,114 @@ def test_backup_restore_preserves_monitor_folder_target_shelf(tmp_path) -> None:
             assert restored["restored"] is True
             assert db.execute(text("SELECT `shelfId` FROM `MonitorFolder` WHERE `id` = 'watch-folder'")).scalar() == "auto-shelf"
             assert db.execute(text("PRAGMA foreign_key_check")).first() is None
+    finally:
+        engine.dispose()
+
+
+def test_backup_restore_preserves_multi_user_authorization_preferences_and_bookmarks(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"), monitor_root=str(tmp_path / "books"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            db.execute(
+                text(
+                    "INSERT INTO `User` "
+                    "(`id`, `email`, `name`, `passwordHash`, `role`, `canManageSystem`, "
+                    "`canViewManualImports`, `authzVersion`, `createdAt`, `updatedAt`) "
+                    "VALUES ('backup-user', 'backup-user@example.test', 'Backup User', 'hash', "
+                    "'member', 1, 0, 7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            db.execute(
+                text(
+                    "INSERT INTO `MonitorFolder` "
+                    "(`id`, `name`, `rootPath`, `enabled`, `ignoreHidden`, `minFileSizeBytes`, "
+                    "`createdAt`, `updatedAt`) "
+                    "VALUES ('backup-folder', 'Backup Folder', :root_path, 1, 1, 10240, "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                ),
+                {"root_path": str(settings.resolved_monitor_root)},
+            )
+            db.execute(
+                text(
+                    "INSERT INTO `UserMonitorFolderAccess` (`userId`, `monitorFolderId`, `createdAt`) "
+                    "VALUES ('backup-user', 'backup-folder', CURRENT_TIMESTAMP)"
+                )
+            )
+            db.execute(
+                text(
+                    "INSERT INTO `UserPreference` (`userId`, `key`, `value`, `createdAt`, `updatedAt`) "
+                    "VALUES ('backup-user', 'locale', '\"en-US\"', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            db.execute(
+                text(
+                    "INSERT INTO `Shelf` (`id`, `ownerUserId`, `name`, `createdAt`, `updatedAt`) "
+                    "VALUES ('backup-shelf', 'backup-user', 'Backup Shelf', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            db.execute(
+                text(
+                    "INSERT INTO `LibraryWork` "
+                    "(`id`, `monitorFolderId`, `origin`, `title`, `normalizedTitle`, `workType`, "
+                    "`status`, `tags`, `createdAt`, `updatedAt`) "
+                    "VALUES ('backup-work', 'backup-folder', 'WATCH', 'Backup Work', 'backup work', "
+                    "'EPUB', 'UNREAD', '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            db.execute(
+                text(
+                    "INSERT INTO `LibraryEdition` "
+                    "(`id`, `workId`, `monitorFolderId`, `origin`, `mediaKind`, `format`, "
+                    "`versionName`, `versionKey`, `importStatus`, `primary`, `hidden`, `createdAt`, `updatedAt`) "
+                    "VALUES ('backup-edition', 'backup-work', 'backup-folder', 'WATCH', 'EBOOK', "
+                    "'EPUB', 'Default', 'backup-edition', 'COMPLETED', 1, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            db.execute(
+                text(
+                    "INSERT INTO `ReaderBookmark` "
+                    "(`id`, `userId`, `workId`, `editionId`, `contentFingerprint`, `bookmarkId`, "
+                    "`locationJson`, `label`, `percent`, `bookmarkCreatedAt`, `createdAt`, `updatedAt`) "
+                    "VALUES ('backup-bookmark', 'backup-user', 'backup-work', 'backup-edition', "
+                    "'sha256:backup', 'epub:backup', '{\"kind\":\"epub\"}', 'Backup', 25, "
+                    "'2026-07-23T00:00:00Z', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            db.commit()
+            backup = create_backup(db, settings)
+
+            db.execute(text("DELETE FROM `ReaderBookmark` WHERE `userId` = 'backup-user'"))
+            db.execute(text("DELETE FROM `UserMonitorFolderAccess` WHERE `userId` = 'backup-user'"))
+            db.execute(text("DELETE FROM `UserPreference` WHERE `userId` = 'backup-user'"))
+            db.execute(text("DELETE FROM `Shelf` WHERE `ownerUserId` = 'backup-user'"))
+            db.commit()
+
+            restored = restore_backup(db, settings, backup.id)
+
+            assert restored["restored"] is True
+            assert db.execute(
+                text(
+                    "SELECT `monitorFolderId` FROM `UserMonitorFolderAccess` "
+                    "WHERE `userId` = 'backup-user'"
+                )
+            ).scalar_one() == "backup-folder"
+            assert db.execute(
+                text(
+                    "SELECT `value` FROM `UserPreference` "
+                    "WHERE `userId` = 'backup-user' AND `key` = 'locale'"
+                )
+            ).scalar_one() == '"en-US"'
+            assert db.execute(
+                text("SELECT `ownerUserId` FROM `Shelf` WHERE `id` = 'backup-shelf'")
+            ).scalar_one() == "backup-user"
+            assert db.execute(
+                text(
+                    "SELECT `bookmarkId` FROM `ReaderBookmark` "
+                    "WHERE `userId` = 'backup-user' AND `editionId` = 'backup-edition'"
+                )
+            ).scalar_one() == "epub:backup"
     finally:
         engine.dispose()
 
@@ -840,6 +951,169 @@ def test_bootstrap_preserves_an_existing_customized_account(tmp_path) -> None:
             assert [dict(user) for user in users] == [
                 {"email": "custom@example.com", "name": "Custom name", "passwordHash": "custom-hash"}
             ]
+    finally:
+        engine.dispose()
+
+
+def test_v13_migration_changes_implicit_user_role_default_without_demoting_owner(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE `User` (
+                        `id` TEXT NOT NULL PRIMARY KEY,
+                        `email` TEXT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `passwordHash` TEXT NOT NULL,
+                        `avatarPath` TEXT NULL,
+                        `role` TEXT NOT NULL DEFAULT 'admin',
+                        `createdAt` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        `updatedAt` TEXT NOT NULL
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO `User` "
+                    "(`id`, `email`, `name`, `passwordHash`, `createdAt`, `updatedAt`) "
+                    "VALUES ('owner', 'owner@example.test', 'Owner', 'hash', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            connection.exec_driver_sql("PRAGMA user_version = 12")
+
+        bootstrap_database(engine, settings)
+
+        with engine.begin() as connection:
+            role_column = next(
+                row
+                for row in connection.exec_driver_sql("PRAGMA table_info(`User`)").fetchall()
+                if row[1] == "role"
+            )
+            assert str(role_column[4]).strip("'\"") == "member"
+            assert connection.execute(text("SELECT `role` FROM `User` WHERE `id` = 'owner'")).scalar() == "admin"
+            connection.execute(
+                text(
+                    "INSERT INTO `User` "
+                    "(`id`, `email`, `name`, `passwordHash`, `createdAt`, `updatedAt`) "
+                    "VALUES ('new-member', 'member@example.test', 'Member', 'hash', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            assert connection.execute(
+                text("SELECT `role` FROM `User` WHERE `id` = 'new-member'")
+            ).scalar() == "member"
+    finally:
+        engine.dispose()
+
+
+def test_legacy_global_reading_status_is_never_reassigned_after_original_owner_deletion(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO `User` (`id`, `email`, `name`, `passwordHash`, `role`, `createdAt`, `updatedAt`) "
+                    "VALUES "
+                    "('original-owner', 'owner@example.test', 'Owner', 'hash', 'admin', 1000, 1000), "
+                    "('member', 'member@example.test', 'Member', 'hash', 'member', 2000, 2000)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO `LibraryWork` "
+                    "(`id`, `origin`, `title`, `normalizedTitle`, `workType`, `status`, `tags`, `createdAt`, `updatedAt`) "
+                    "VALUES ('legacy-finished', 'MANUAL', 'Legacy', 'legacy', 'EPUB', 'FINISHED', '[]', 1000, 1000)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO `LibraryEdition` "
+                    "(`id`, `workId`, `origin`, `mediaKind`, `format`, `versionName`, `versionKey`, "
+                    "`importStatus`, `primary`, `hidden`, `createdAt`, `updatedAt`) "
+                    "VALUES ('legacy-edition', 'legacy-finished', 'MANUAL', 'EBOOK', 'EPUB', "
+                    "'Default', 'legacy-edition', 'COMPLETED', 1, 0, 1000, 1000)"
+                )
+            )
+
+        bootstrap_database(engine, settings)
+        with engine.connect() as connection:
+            states = connection.execute(
+                text(
+                    "SELECT `userId`, `status` FROM `LibraryConsumptionState` "
+                    "WHERE `workId` = 'legacy-finished' ORDER BY `userId`"
+                )
+            ).all()
+            assert states == [("original-owner", "FINISHED")]
+            assert json.loads(
+                connection.execute(
+                    text(
+                        "SELECT `value` FROM `SystemSetting` "
+                        "WHERE `key` = 'migration.multiUserLegacyReadingStatusOwnerId'"
+                    )
+                ).scalar_one()
+            ) == "original-owner"
+
+        with engine.begin() as connection:
+            connection.execute(text("DELETE FROM `User` WHERE `id` = 'original-owner'"))
+
+        bootstrap_database(engine, settings)
+        with engine.connect() as connection:
+            assert connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM `LibraryConsumptionState` "
+                    "WHERE `userId` = 'member' AND `workId` = 'legacy-finished'"
+                )
+            ).scalar_one() == 0
+    finally:
+        engine.dispose()
+
+
+def test_legacy_global_kindle_email_migrates_only_to_original_admin(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+        bootstrap_module.apply_schema(engine, settings)
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO `User` (`id`, `email`, `name`, `passwordHash`, `role`, `createdAt`, `updatedAt`) "
+                    "VALUES "
+                    "('original-admin', 'admin@example.test', 'Admin', 'hash', 'admin', 1000, 1000), "
+                    "('member', 'member@example.test', 'Member', 'hash', 'member', 2000, 2000)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO `SystemSetting` (`key`, `value`, `createdAt`, `updatedAt`) "
+                    "VALUES ('kindle.email', :value, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                ),
+                {"value": json.dumps("legacy_123@kindle.com")},
+            )
+
+        bootstrap_database(engine, settings)
+        with engine.connect() as connection:
+            rows = connection.execute(
+                text(
+                    "SELECT `userId`, `value` FROM `UserPreference` "
+                    "WHERE `key` = 'kindle.email' ORDER BY `userId`"
+                )
+            ).all()
+            assert rows == [("original-admin", json.dumps("legacy_123@kindle.com"))]
+            assert json.loads(
+                connection.execute(
+                    text(
+                        "SELECT `value` FROM `SystemSetting` "
+                        "WHERE `key` = 'migration.personalKindleEmailOwnerId'"
+                    )
+                ).scalar_one()
+            ) == "original-admin"
     finally:
         engine.dispose()
 

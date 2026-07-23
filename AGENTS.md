@@ -61,4 +61,5 @@ For every versioned release:
    - generated lockfiles such as `pnpm-lock.yaml` and `apps/api-python/uv.lock` when their package-version metadata changes.
 3. Verify that the system Web “About” page displays the new version and that backend version responses/runtime metadata report the same version.
 4. Verify that the GitHub tag is exactly `v<version>` and matches the root `package.json` version before publishing. Do not publish when any application, page, runtime metadata, lockfile, tag, or artifact still reports the previous or a conflicting version.
-5. Include version-consistency checks in the release validation or workflow whenever practical, so a mismatched Web, backend, package, artifact, or GitHub release version fails before publication.
+5. Fill in the GitHub Release description before publishing. Write a few concise sentences that summarize the release's most important fixes, improvements, and user-visible feature changes; do not publish a release with an empty description or only an auto-generated change list.
+6. Include version-consistency checks in the release validation or workflow whenever practical, so a mismatched Web, backend, package, artifact, or GitHub release version fails before publication.

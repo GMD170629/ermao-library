@@ -24,6 +24,7 @@ from app.core.auth import (
     set_session_cookie,
     verify_password,
 )
+from app.core.authorization import authorization_context, read_user_preferences, write_user_preference
 from app.core.config import Settings, get_settings
 from app.core.i18n import configured_locale
 from app.db.session import get_db
@@ -61,6 +62,25 @@ def _normalized_email(value: object) -> str:
 def _authenticated_user(db: Session, request: Request, settings: Settings) -> User | None:
     user, _token, _refreshed_expires_at = get_current_user(db, request, settings)
     return user
+
+
+def _user_locale(db: Session, user: User) -> str:
+    preferences = read_user_preferences(db, user.id)
+    locale = preferences.get("locale")
+    return str(locale) if locale in {"zh-CN", "en-US"} else configured_locale(db)
+
+
+def _session_payload(db: Session, user: User) -> dict[str, object]:
+    preferences = read_user_preferences(db, user.id)
+    locale = preferences.get("locale")
+    if locale not in {"zh-CN", "en-US"}:
+        locale = configured_locale(db)
+        preferences["locale"] = locale
+    return {
+        "user": {**user.to_auth_view(), "locale": locale},
+        "authorization": authorization_context(db, user).to_view(),
+        "preferences": preferences,
+    }
 
 
 def _request_app_base_url(request: Request) -> str:
@@ -151,14 +171,23 @@ def setup(payload: SetupRequest, db: Session = Depends(get_db), settings: Settin
         db.rollback()
         return fail("系统已经完成初始化，请直接登录", status_code=409)
 
+    write_user_preference(db, user_id, "locale", payload.locale)
     db.commit()
     user = db.get(User, user_id)
     if user is None:
         return fail("账户创建失败", status_code=500)
 
     user_session, token = create_session(db, user.id)
-    response = ok({"initialized": True, "user": user.to_auth_view()}, status_code=201)
+    response = ok({"initialized": True, **_session_payload(db, user)}, status_code=201)
     response.headers["Cache-Control"] = "no-store"
+    response.set_cookie(
+        "shuku_locale",
+        payload.locale,
+        path=settings.cookie_path,
+        max_age=60 * 60 * 24 * 365,
+        samesite="lax",
+        secure=settings.secure_cookies,
+    )
     set_session_cookie(response, token, user_session.expires_at, settings)
     return response
 
@@ -171,9 +200,11 @@ def login(payload: LoginRequest, db: Session = Depends(get_db), settings: Settin
         return fail("系统尚未初始化", status_code=409, details={"code": "SETUP_REQUIRED"})
     if user is None or not verify_password(payload.password, user.password_hash):
         return fail("邮箱或密码不正确", status_code=401)
+    if user.status != "active":
+        return fail("账户已停用，请联系管理员", status_code=403, code="ACCOUNT_DISABLED")
 
     user_session, token = create_session(db, user.id)
-    response = ok({"user": user.to_auth_view()})
+    response = ok(_session_payload(db, user))
     set_session_cookie(response, token, user_session.expires_at, settings)
     return response
 
@@ -185,7 +216,7 @@ def me(request: Request, db: Session = Depends(get_db), settings: Settings = Dep
         response = fail("UNAUTHORIZED", status_code=401)
         delete_session_cookie(response, settings)
         return response
-    response = ok({"user": user.to_auth_view()})
+    response = ok(_session_payload(db, user))
     if token is not None and refreshed_expires_at is not None:
         set_session_cookie(response, token, refreshed_expires_at, settings)
     return response

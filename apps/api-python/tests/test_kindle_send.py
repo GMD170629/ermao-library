@@ -35,6 +35,8 @@ def _prepare(client, db_session, test_settings, *, max_attachment_mb: float | No
     }
     saved = client.put("/api/email-settings", json={"smtp": smtp, "kindle": {"email": "reader_123@kindle.com"}})
     assert saved.status_code == 200
+    personal = client.put("/api/kindle-settings", json={"email": "reader_123@kindle.com"})
+    assert personal.status_code == 200
     path = test_settings.resolved_storage_root / "books" / "work-kindle" / "edition-kindle" / "book.epub"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"epub fixture")
@@ -152,6 +154,45 @@ def test_enqueue_deduplicates_and_rejects_unsupported_files(client, db_session, 
     unsupported = client.post("/api/kindle-send-tasks", json={"workId": "work-kindle", "fileId": "file-comic"})
     assert unsupported.status_code == 400
     assert "EPUB 和 PDF" in unsupported.json()["error"]["message"]
+
+
+def test_kindle_email_and_send_queue_are_personal_while_smtp_remains_system_managed(
+    client,
+    db_session,
+    test_settings,
+):
+    _prepare(client, db_session, test_settings)
+    member = User(
+        email="kindle-member@example.com",
+        name="普通用户",
+        password_hash=hash_password("starshipnas"),
+        role="member",
+        can_view_manual_imports=True,
+    )
+    db_session.add(member)
+    db_session.commit()
+    assert client.post("/api/auth/logout").status_code == 200
+    assert client.post(
+        "/api/auth/login",
+        json={"email": member.email, "password": "starshipnas"},
+    ).status_code == 200
+
+    assert client.get("/api/email-settings").status_code == 403
+    saved = client.put("/api/kindle-settings", json={"email": "member_456@kindle.com"})
+    assert saved.status_code == 200
+    assert saved.json()["data"]["kindle"]["email"] == "member_456@kindle.com"
+    created = _enqueue(client)
+    assert created["userId"] == member.id
+    assert created["recipientEmail"] == "member_456@kindle.com"
+    assert client.get("/api/kindle-send-tasks").json()["data"]["total"] == 1
+
+    assert client.post("/api/auth/logout").status_code == 200
+    assert client.post(
+        "/api/auth/login",
+        json={"email": "kindle-admin@example.com", "password": "starshipnas"},
+    ).status_code == 200
+    assert client.get("/api/kindle-send-tasks").json()["data"]["total"] == 0
+    assert client.post(f"/api/kindle-send-tasks/{created['id']}/cancel").status_code == 404
 
 
 def test_enqueue_rejects_attachment_above_configured_limit(client, db_session, test_settings):
