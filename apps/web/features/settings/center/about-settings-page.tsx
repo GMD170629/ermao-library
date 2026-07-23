@@ -4,6 +4,7 @@ import rootPackage from '../../../../../package.json';
 import { withBasePath } from '../../../lib/base-path';
 import { PRODUCT_DESCRIPTION, PRODUCT_NAME } from '../../../lib/brand';
 import { SettingsCenterShell } from './settings-center-shell';
+import { I18nText } from '@/i18n/provider';
 
 const PROJECT_URL = 'https://github.com/GMD170629/ermao-library';
 
@@ -33,7 +34,7 @@ export function AboutSettingsPage() {
             </div>
           </div>
           <div className="flex items-center justify-between gap-4 border-t border-[#DEDAD4] bg-[#F7F5F2] px-6 py-5 md:block md:border-l md:border-t-0 md:px-7 md:py-7">
-            <span className="text-xs font-medium uppercase tracking-[0.12em] text-[#827B73]">当前版本</span>
+            <span className="text-xs font-medium uppercase tracking-[0.12em] text-[#827B73]"><I18nText>当前版本</I18nText></span>
             <strong className="font-mono text-2xl font-semibold tabular-nums tracking-[-0.03em] text-[#ED4D2D] md:mt-3 md:block md:text-[30px]">
               v{rootPackage.version}
             </strong>
@@ -45,7 +46,7 @@ export function AboutSettingsPage() {
             <div key={label} className="flex items-start gap-3 px-6 py-5">
               <Icon size={19} className="mt-0.5 shrink-0 text-[#ED4D2D]" strokeWidth={1.8} aria-hidden="true" />
               <div>
-                <div className="text-xs text-[#827B73]">{label}</div>
+                <div className="text-xs text-[#827B73]"><I18nText>{label}</I18nText></div>
                 <div className="mt-1 text-sm font-medium leading-6 text-[#2A2825]">{value}</div>
               </div>
             </div>
@@ -57,16 +58,15 @@ export function AboutSettingsPage() {
         <div className="flex items-start gap-3">
           <Info size={20} className="mt-0.5 shrink-0 text-[#827B73]" strokeWidth={1.8} aria-hidden="true" />
           <div>
-            <h3 id="project-introduction-title" className="text-lg font-semibold text-[#2A2825]">项目介绍</h3>
+            <h3 id="project-introduction-title" className="text-lg font-semibold text-[#2A2825]"><I18nText>项目介绍</I18nText></h3>
             <p className="mt-2 max-w-3xl text-sm leading-7 text-[#645F59]">
-              {PRODUCT_NAME} 是一款面向个人藏书的开源、自托管阅读与书库管理应用。它提供读物导入、整理、检索、阅读与收听能力，适合部署在家庭 NAS 上，并通过浏览器在不同设备间访问。
-            </p>
+              {PRODUCT_NAME} <I18nText>是一款面向个人藏书的开源、自托管阅读与书库管理应用。它提供读物导入、整理、检索、阅读与收听能力，适合部署在家庭 NAS 上，并通过浏览器在不同设备间访问。</I18nText></p>
           </div>
         </div>
       </section>
 
       <section className="mt-8 border-t border-[#DEDAD4] pt-7" aria-labelledby="project-link-title">
-        <h3 id="project-link-title" className="text-lg font-semibold text-[#2A2825]">项目地址</h3>
+        <h3 id="project-link-title" className="text-lg font-semibold text-[#2A2825]"><I18nText>项目地址</I18nText></h3>
         <a
           href={PROJECT_URL}
           target="_blank"

@@ -4,6 +4,7 @@ import Image from 'next/image';
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { withBasePath } from '../../lib/base-path';
 import { cn } from '../ui/cn';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 export type CoverBook = {
   id?: string | number;
@@ -30,6 +31,7 @@ export function Cover({
   priority?: boolean;
   style?: CSSProperties;
 }) {
+  const { t: i18nAttribute } = useAttributeI18n();
   const requestedSize = size ?? (small ? 'small' : 'medium');
   const responsiveSize = requestedSize === 'small' ? '48px' : requestedSize === 'large' ? '280px' : '180px';
   const coverUrl = useMemo(() => {
@@ -45,7 +47,7 @@ export function Cover({
 
   if (coverUrl && !imageFailed) {
     return (
-      <div data-book-cover="true" className={cn('relative overflow-hidden rounded-2xl bg-transparent', className)} style={style}>
+      <div data-book-cover="true" data-i18n-skip className={cn('relative overflow-hidden rounded-2xl bg-transparent', className)} style={style}>
         <Image
           src={coverUrl}
           alt={book.title}
@@ -62,10 +64,10 @@ export function Cover({
   }
 
   return (
-    <div data-book-cover="true" className={cn('relative overflow-hidden rounded-2xl bg-[#252421] shadow-sm', className)} style={style}>
+    <div data-book-cover="true" data-i18n-skip className={cn('relative overflow-hidden rounded-2xl bg-[#252421] shadow-sm', className)} style={style}>
       <Image
         src={fallbackCoverUrl}
-        alt={`${book.title}的缺省封面`}
+        alt={i18nAttribute("{value0}的缺省封面", { value0: book.title })}
         fill
         sizes={responsiveSize}
         className="object-cover"

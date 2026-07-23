@@ -25,6 +25,8 @@ import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { useToast } from '../../components/ui/feedback';
 import { Select, type SelectOption } from '../../components/ui/select';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 export type LibraryBatchAction = 'metadata' | 'find_replace' | 'shelves' | 'reading_status' | 'covers';
 
@@ -67,6 +69,7 @@ export function LibraryBatchContextMenu({
   onClose: () => void;
   onSelect: (action: LibraryBatchAction) => void;
 }) {
+  const { t: i18nAttribute } = useAttributeI18n();
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -102,13 +105,13 @@ export function LibraryBatchContextMenu({
     <div
       ref={menuRef}
       role="menu"
-      aria-label="批量管理图书"
+      aria-label={i18nAttribute("批量管理图书")}
       style={{ left, top, width }}
       className="fixed z-[130] overflow-hidden rounded-2xl border border-black/[0.1] bg-[#FFFEFC] p-2 shadow-[0_22px_70px_rgba(47,37,31,0.24)]"
     >
       <div className="flex items-center justify-between px-3 pb-2 pt-1.5">
-        <span className="text-xs font-semibold text-[#625C56]">批量管理</span>
-        <span className="rounded-full bg-[#FFF0EA] px-2 py-1 text-[11px] font-medium text-[#D7462B]">已选 {selectedCount} 本</span>
+        <span className="text-xs font-semibold text-[#625C56]"><I18nText>批量管理</I18nText></span>
+        <span className="rounded-full bg-[#FFF0EA] px-2 py-1 text-[11px] font-medium text-[#D7462B]"><I18nText>已选 </I18nText>{selectedCount} <I18nText>本</I18nText></span>
       </div>
       <div className="space-y-0.5">
         {actions.map((item) => {
@@ -125,14 +128,14 @@ export function LibraryBatchContextMenu({
                 <Icon size={16} />
               </span>
               <span className="min-w-0">
-                <span className="block text-sm font-medium text-[#302C29]">{item.label}</span>
+                <span className="block text-sm font-medium text-[#302C29]">{i18nAttribute(item.label)}</span>
                 <span className="mt-0.5 block truncate text-[11px] text-[#8B847D]">{item.description}</span>
               </span>
             </button>
           );
         })}
       </div>
-      <div className="mt-2 border-t border-black/[0.06] px-3 pt-2 text-[11px] leading-5 text-[#948D86]">拖动经过行可连续选择；按 Shift 点击可选择区间。</div>
+      <div className="mt-2 border-t border-black/[0.06] px-3 pt-2 text-[11px] leading-5 text-[#948D86]"><I18nText>拖动经过行可连续选择；按 Shift 点击可选择区间。</I18nText></div>
     </div>,
     document.body
   );
@@ -153,6 +156,7 @@ function FieldToggle({
   hint: string;
   children: React.ReactNode;
 }) {
+  const { t: i18nAttribute } = useAttributeI18n();
   return (
     <div className={cn('rounded-2xl border p-4 transition', checked ? 'border-[#F1BAAA] bg-[#FFF9F6]' : 'border-black/[0.07] bg-white/60')}>
       <label className="flex cursor-pointer items-start gap-3">
@@ -160,7 +164,7 @@ function FieldToggle({
         <span className="flex min-w-0 flex-1 items-start gap-2.5">
           <Icon size={17} className="mt-0.5 shrink-0 text-[#7C756E]" />
           <span>
-            <span className="block text-sm font-semibold text-[#34302D]">{label}</span>
+            <span className="block text-sm font-semibold text-[#34302D]">{i18nAttribute(label)}</span>
             <span className="mt-0.5 block text-xs leading-5 text-[#8A837C]">{hint}</span>
           </span>
         </span>
@@ -183,6 +187,7 @@ export function LibraryBatchDialog({
   onClose: () => void;
   onApplied: (message: string) => void;
 }) {
+  const { t: i18nAttribute } = useAttributeI18n();
   const toast = useToast();
   const [saving, setSaving] = useState(false);
   const [authorEnabled, setAuthorEnabled] = useState(false);
@@ -390,11 +395,11 @@ export function LibraryBatchDialog({
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className="text-xl font-semibold tracking-[-0.02em] text-[#282421]">{activeAction?.label}</h2>
-              <p className="mt-1 text-sm text-[#817A74]">当前操作会应用到已选择的 {selectedIds.length} 本图书。</p>
+              <p className="mt-1 text-sm text-[#817A74]"><I18nText>当前操作会应用到已选择的 </I18nText>{selectedIds.length} <I18nText>本图书。</I18nText></p>
             </div>
-            <button type="button" disabled={saving} onClick={onClose} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[#77716B] transition hover:bg-black/[0.05] disabled:opacity-40" aria-label="关闭批量操作"><X size={18} /></button>
+            <button type="button" disabled={saving} onClick={onClose} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[#77716B] transition hover:bg-black/[0.05] disabled:opacity-40" aria-label={i18nAttribute("关闭批量操作")}><X size={18} /></button>
           </div>
-          <nav className="mt-4 flex gap-1.5 overflow-x-auto pb-1" aria-label="批量操作类型">
+          <nav className="mt-4 flex gap-1.5 overflow-x-auto pb-1" aria-label={i18nAttribute("批量操作类型")}>
             {actions.map((item) => {
               const Icon = item.icon;
               return (
@@ -410,45 +415,40 @@ export function LibraryBatchDialog({
           {action === 'metadata' ? (
             <div className="space-y-3">
               <div className="grid gap-3 md:grid-cols-3">
-                <FieldToggle checked={authorEnabled} onChange={setAuthorEnabled} icon={UserRound} label="作者" hint="统一覆盖作品作者">
-                  <input value={author} onChange={(event) => setAuthor(event.target.value)} className={inputClass} placeholder="例如：余华" />
+                <FieldToggle checked={authorEnabled} onChange={setAuthorEnabled} icon={UserRound} label={i18nAttribute("作者")} hint={i18nAttribute("统一覆盖作品作者")}>
+                  <input value={author} onChange={(event) => setAuthor(event.target.value)} className={inputClass} placeholder={i18nAttribute("例如：余华")} />
                 </FieldToggle>
-                <FieldToggle checked={publisherEnabled} onChange={setPublisherEnabled} icon={Building2} label="出版社" hint="更新每本书的主版本">
-                  <input value={publisher} onChange={(event) => setPublisher(event.target.value)} className={inputClass} placeholder="例如：人民文学出版社" />
+                <FieldToggle checked={publisherEnabled} onChange={setPublisherEnabled} icon={Building2} label={i18nAttribute("出版社")} hint={i18nAttribute("更新每本书的主版本")}>
+                  <input value={publisher} onChange={(event) => setPublisher(event.target.value)} className={inputClass} placeholder={i18nAttribute("例如：人民文学出版社")} />
                 </FieldToggle>
-                <FieldToggle checked={seriesEnabled} onChange={setSeriesEnabled} icon={LibraryBig} label="系列" hint="统一设置或留空清除">
-                  <input value={seriesName} onChange={(event) => setSeriesName(event.target.value)} className={inputClass} placeholder="例如：银河帝国" />
+                <FieldToggle checked={seriesEnabled} onChange={setSeriesEnabled} icon={LibraryBig} label={i18nAttribute("系列")} hint={i18nAttribute("统一设置或留空清除")}>
+                  <input value={seriesName} onChange={(event) => setSeriesName(event.target.value)} className={inputClass} placeholder={i18nAttribute("例如：银河帝国")} />
                 </FieldToggle>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
-                <label className="rounded-2xl border border-black/[0.07] bg-white/60 p-4 text-sm font-semibold text-[#34302D]">添加标签
-                  <span className="mt-1 block text-xs font-normal leading-5 text-[#8A837C]">逗号或换行分隔；已有标签不会重复。</span>
-                  <textarea value={addTags} onChange={(event) => setAddTags(event.target.value)} className={cn(textareaClass, 'mt-3')} placeholder={'科幻, 待读\n2026 精选'} />
+                <label className="rounded-2xl border border-black/[0.07] bg-white/60 p-4 text-sm font-semibold text-[#34302D]"><I18nText>添加标签</I18nText><span className="mt-1 block text-xs font-normal leading-5 text-[#8A837C]"><I18nText>逗号或换行分隔；已有标签不会重复。</I18nText></span>
+                  <textarea value={addTags} onChange={(event) => setAddTags(event.target.value)} className={cn(textareaClass, 'mt-3')} placeholder={i18nAttribute("科幻, 待读\n2026 精选")} />
                 </label>
-                <label className="rounded-2xl border border-black/[0.07] bg-white/60 p-4 text-sm font-semibold text-[#34302D]">删除标签
-                  <span className="mt-1 block text-xs font-normal leading-5 text-[#8A837C]">按完整标签名匹配，不区分大小写。</span>
-                  <textarea value={removeTags} onChange={(event) => setRemoveTags(event.target.value)} className={cn(textareaClass, 'mt-3')} placeholder="待整理, 临时" />
+                <label className="rounded-2xl border border-black/[0.07] bg-white/60 p-4 text-sm font-semibold text-[#34302D]"><I18nText>删除标签</I18nText><span className="mt-1 block text-xs font-normal leading-5 text-[#8A837C]"><I18nText>按完整标签名匹配，不区分大小写。</I18nText></span>
+                  <textarea value={removeTags} onChange={(event) => setRemoveTags(event.target.value)} className={cn(textareaClass, 'mt-3')} placeholder={i18nAttribute("待整理, 临时")} />
                 </label>
               </div>
-              <p className="rounded-xl bg-[#F6F3EF] px-4 py-3 text-xs leading-5 text-[#777069]">未勾选的字段会保持原值；勾选后留空可清除出版社或系列，作者留空会统一设为“未知作者”。</p>
+              <p className="rounded-xl bg-[#F6F3EF] px-4 py-3 text-xs leading-5 text-[#777069]"><I18nText>未勾选的字段会保持原值；勾选后留空可清除出版社或系列，作者留空会统一设为“未知作者”。</I18nText></p>
             </div>
           ) : null}
 
           {action === 'find_replace' ? (
             <div className="space-y-5">
               <div className="grid gap-4 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-                <label className="block text-sm font-medium text-[#4D4843]">查找字段
-                  <Select value={findField} onChange={(value) => setFindField(value)} options={findFieldOptions} className="mt-2 w-full" menuWidth={320} ariaLabel="查找字段" />
+                <label className="block text-sm font-medium text-[#4D4843]"><I18nText>查找字段</I18nText><Select value={findField} onChange={(value) => setFindField(value)} options={findFieldOptions} className="mt-2 w-full" menuWidth={320} ariaLabel={i18nAttribute("查找字段")} />
                 </label>
-                <label className="block text-sm font-medium text-[#4D4843]">查找内容
-                  <input value={findText} onChange={(event) => setFindText(event.target.value)} className={cn(inputClass, 'mt-2')} placeholder={regex ? '例如：第\\s*(\\d+)\\s*卷' : '输入要查找的关键字'} />
+                <label className="block text-sm font-medium text-[#4D4843]"><I18nText>查找内容</I18nText><input value={findText} onChange={(event) => setFindText(event.target.value)} className={cn(inputClass, 'mt-2')} placeholder={regex ? i18nAttribute("例如：第\\s*(\\d+)\\s*卷") : i18nAttribute("输入要查找的关键字")} />
                 </label>
               </div>
-              <label className="block text-sm font-medium text-[#4D4843]">替换为
-                <textarea value={replacement} onChange={(event) => setReplacement(event.target.value)} className={cn(textareaClass, 'mt-2 font-mono')} placeholder="输入文字，或插入下方安全 Jinja 变量" />
+              <label className="block text-sm font-medium text-[#4D4843]"><I18nText>替换为</I18nText><textarea value={replacement} onChange={(event) => setReplacement(event.target.value)} className={cn(textareaClass, 'mt-2 font-mono')} placeholder={i18nAttribute("输入文字，或插入下方安全 Jinja 变量")} />
               </label>
               <div>
-                <div className="flex items-center gap-2 text-xs font-semibold text-[#766F69]"><Braces size={14} />插入模板变量</div>
+                <div className="flex items-center gap-2 text-xs font-semibold text-[#766F69]"><Braces size={14} /><I18nText>插入模板变量</I18nText></div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {[
                     ['{{ match }}', '匹配文字'],
@@ -461,19 +461,19 @@ export function LibraryBatchDialog({
               </div>
               <div className="flex flex-col gap-3 rounded-2xl border border-black/[0.07] bg-[#F9F7F4] p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex flex-wrap gap-4">
-                  <label className="flex cursor-pointer items-center gap-2 text-sm text-[#5E5853]"><input type="checkbox" checked={regex} onChange={(event) => setRegex(event.target.checked)} className="h-4 w-4 accent-[#EF4D2F]" />正则匹配</label>
-                  <label className="flex cursor-pointer items-center gap-2 text-sm text-[#5E5853]"><input type="checkbox" checked={caseSensitive} onChange={(event) => setCaseSensitive(event.target.checked)} className="h-4 w-4 accent-[#EF4D2F]" />区分大小写</label>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm text-[#5E5853]"><input type="checkbox" checked={regex} onChange={(event) => setRegex(event.target.checked)} className="h-4 w-4 accent-[#EF4D2F]" /><I18nText>正则匹配</I18nText></label>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm text-[#5E5853]"><input type="checkbox" checked={caseSensitive} onChange={(event) => setCaseSensitive(event.target.checked)} className="h-4 w-4 accent-[#EF4D2F]" /><I18nText>区分大小写</I18nText></label>
                 </div>
-                <label className="flex items-center gap-2 text-sm text-[#5E5853]"><Hash size={15} />序列起始值<input type="number" min="1" value={startNumber} onChange={(event) => setStartNumber(event.target.value)} className="h-9 w-20 rounded-lg border border-black/[0.1] bg-white px-2 text-center outline-none focus:border-[#E8A18D]" /></label>
+                <label className="flex items-center gap-2 text-sm text-[#5E5853]"><Hash size={15} /><I18nText>序列起始值</I18nText><input type="number" min="1" value={startNumber} onChange={(event) => setStartNumber(event.target.value)} className="h-9 w-20 rounded-lg border border-black/[0.1] bg-white px-2 text-center outline-none focus:border-[#E8A18D]" /></label>
               </div>
               <div className="rounded-2xl border border-black/[0.07] bg-white/65 p-4">
                 <div className="flex items-center justify-between gap-3">
-                  <div><div className="text-sm font-semibold text-[#393531]">替换预览</div><div className="mt-1 text-xs text-[#8A837C]">确认前最多展示 30 条实际变化。</div></div>
-                  <Button variant="secondary" icon={Eye} loading={previewing} loadingText="生成中" disabled={!findText} onClick={() => void loadPreview()}>生成预览</Button>
+                  <div><div className="text-sm font-semibold text-[#393531]"><I18nText>替换预览</I18nText></div><div className="mt-1 text-xs text-[#8A837C]"><I18nText>确认前最多展示 30 条实际变化。</I18nText></div></div>
+                  <Button variant="secondary" icon={Eye} loading={previewing} loadingText={i18nAttribute("生成中")} disabled={!findText} onClick={() => void loadPreview()}><I18nText>生成预览</I18nText></Button>
                 </div>
-                {!previewCurrent ? <div className="mt-4 rounded-xl bg-[#F7F4F0] px-4 py-6 text-center text-xs text-[#918A83]">填写规则后生成预览，避免误改元数据。</div> : preview && preview.changedWorks === 0 ? <div className="mt-4 rounded-xl bg-amber-50 px-4 py-4 text-sm text-amber-800">没有找到匹配内容，不会修改任何图书。</div> : preview ? (
+                {!previewCurrent ? <div className="mt-4 rounded-xl bg-[#F7F4F0] px-4 py-6 text-center text-xs text-[#918A83]"><I18nText>填写规则后生成预览，避免误改元数据。</I18nText></div> : preview && preview.changedWorks === 0 ? <div className="mt-4 rounded-xl bg-amber-50 px-4 py-4 text-sm text-amber-800"><I18nText>没有找到匹配内容，不会修改任何图书。</I18nText></div> : preview ? (
                   <div className="mt-4">
-                    <div className="mb-2 text-xs font-medium text-[#777069]">将修改 {preview.changedWorks} 本图书，共 {preview.changedValues} 处</div>
+                    <div className="mb-2 text-xs font-medium text-[#777069]"><I18nText>将修改 </I18nText>{preview.changedWorks} <I18nText>本图书，共 </I18nText>{preview.changedValues} <I18nText>处</I18nText></div>
                     <div className="max-h-64 space-y-2 overflow-auto pr-1">
                       {preview.items.map((item, index) => (
                         <div key={`${item.workId}-${index}`} className="rounded-xl border border-black/[0.06] bg-[#FAF8F5] px-3 py-2.5">
@@ -497,27 +497,26 @@ export function LibraryBatchDialog({
               <div className="grid grid-cols-2 gap-3">
                 {([['ADD', '加入书架', '保留已有书架归属'], ['REMOVE', '移除书架', '只移除指定书架归属']] as const).map(([value, label, description]) => (
                   <button key={value} type="button" onClick={() => setMembership(value)} className={cn('rounded-2xl border p-4 text-left transition', membership === value ? 'border-[#EFAE9B] bg-[#FFF3EE] ring-2 ring-[#FFE2D8]' : 'border-black/[0.08] bg-white hover:bg-black/[0.02]')}>
-                    <span className="flex items-center justify-between text-sm font-semibold text-[#37322F]">{label}{membership === value ? <Check size={16} className="text-[#EF4D2F]" /> : null}</span>
+                    <span className="flex items-center justify-between text-sm font-semibold text-[#37322F]">{i18nAttribute(label)}{membership === value ? <Check size={16} className="text-[#EF4D2F]" /> : null}</span>
                     <span className="mt-1.5 block text-xs leading-5 text-[#837C75]">{description}</span>
                   </button>
                 ))}
               </div>
-              <label className="block text-sm font-medium text-[#4D4843]">目标书架
-                <Select value={shelfId} onChange={setShelfId} options={shelves.map((shelf) => ({ value: shelf.id, label: shelf.name }))} placeholder={shelvesLoading ? '正在读取书架…' : shelves.length ? '请选择普通书架' : '暂无普通书架'} disabled={shelvesLoading || shelves.length === 0} className="mt-2 w-full" menuWidth={420} ariaLabel="目标书架" />
+              <label className="block text-sm font-medium text-[#4D4843]"><I18nText>目标书架</I18nText><Select value={shelfId} onChange={setShelfId} options={shelves.map((shelf) => ({ value: shelf.id, label: shelf.name, translate: false }))} placeholder={shelvesLoading ? i18nAttribute("正在读取书架…") : shelves.length ? i18nAttribute("请选择普通书架") : i18nAttribute("暂无普通书架")} disabled={shelvesLoading || shelves.length === 0} className="mt-2 w-full" menuWidth={420} ariaLabel={i18nAttribute("目标书架")} />
               </label>
-              {shelves.length === 0 && !shelvesLoading ? <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">当前没有普通书架。请先在书架管理中创建普通书架，智能书架会按规则自动更新，不能手动加入。</div> : null}
+              {shelves.length === 0 && !shelvesLoading ? <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800"><I18nText>当前没有普通书架。请先在书架管理中创建普通书架，智能书架会按规则自动更新，不能手动加入。</I18nText></div> : null}
             </div>
           ) : null}
 
           {action === 'reading_status' ? (
             <div className="grid gap-4 md:grid-cols-2">
               <button type="button" onClick={() => setReadingStatus('UNREAD')} className={cn('rounded-2xl border p-5 text-left transition', readingStatus === 'UNREAD' ? 'border-[#EFAE9B] bg-[#FFF3EE] ring-2 ring-[#FFE2D8]' : 'border-black/[0.08] bg-white hover:bg-black/[0.02]')}>
-                <span className="flex items-center justify-between text-base font-semibold text-[#37322F]">设为未读{readingStatus === 'UNREAD' ? <Check size={18} className="text-[#EF4D2F]" /> : null}</span>
-                <span className="mt-3 block text-sm leading-6 text-[#746D67]">清空当前用户在这些图书中的全部阅读位置、页码、进度和媒介阅读状态。操作后进度从 0% 重新开始。</span>
+                <span className="flex items-center justify-between text-base font-semibold text-[#37322F]"><I18nText>设为未读</I18nText>{readingStatus === 'UNREAD' ? <Check size={18} className="text-[#EF4D2F]" /> : null}</span>
+                <span className="mt-3 block text-sm leading-6 text-[#746D67]"><I18nText>清空当前用户在这些图书中的全部阅读位置、页码、进度和媒介阅读状态。操作后进度从 0% 重新开始。</I18nText></span>
               </button>
               <button type="button" onClick={() => setReadingStatus('FINISHED')} className={cn('rounded-2xl border p-5 text-left transition', readingStatus === 'FINISHED' ? 'border-[#EFAE9B] bg-[#FFF3EE] ring-2 ring-[#FFE2D8]' : 'border-black/[0.08] bg-white hover:bg-black/[0.02]')}>
-                <span className="flex items-center justify-between text-base font-semibold text-[#37322F]">设为已读{readingStatus === 'FINISHED' ? <Check size={18} className="text-[#EF4D2F]" /> : null}</span>
-                <span className="mt-3 block text-sm leading-6 text-[#746D67]">把电子书、漫画和有声书的阅读状态统一设为已完成，并将所有版本的阅读进度更新为 100%。</span>
+                <span className="flex items-center justify-between text-base font-semibold text-[#37322F]"><I18nText>设为已读</I18nText>{readingStatus === 'FINISHED' ? <Check size={18} className="text-[#EF4D2F]" /> : null}</span>
+                <span className="mt-3 block text-sm leading-6 text-[#746D67]"><I18nText>把电子书、漫画和有声书的阅读状态统一设为已完成，并将所有版本的阅读进度更新为 100%。</I18nText></span>
               </button>
             </div>
           ) : null}
@@ -533,46 +532,43 @@ export function LibraryBatchDialog({
                 ] as const).map(([value, label, description, Icon]) => (
                   <button key={value} type="button" onClick={() => setCoverAction(value)} className={cn('rounded-2xl border p-4 text-left transition', coverAction === value ? 'border-[#EFAE9B] bg-[#FFF3EE] ring-2 ring-[#FFE2D8]' : 'border-black/[0.08] bg-white hover:bg-black/[0.02]')}>
                     <span className="flex items-center justify-between"><Icon size={18} className={coverAction === value ? 'text-[#EF4D2F]' : 'text-[#756E68]'} />{coverAction === value ? <Check size={15} className="text-[#EF4D2F]" /> : null}</span>
-                    <span className="mt-3 block text-sm font-semibold text-[#37322F]">{label}</span>
+                    <span className="mt-3 block text-sm font-semibold text-[#37322F]">{i18nAttribute(label)}</span>
                     <span className="mt-1 block text-[11px] leading-5 text-[#837C75]">{description}</span>
                   </button>
                 ))}
               </div>
               {coverAction === 'crop' ? (
-                <label className="block rounded-2xl border border-black/[0.07] bg-white/70 p-4 text-sm font-medium text-[#4D4843]">目标比例
-                  <Select value={coverRatio} onChange={setCoverRatio} options={[{ value: '2:3', label: '2:3 · 常用图书封面' }, { value: '3:4', label: '3:4 · 宽版封面' }, { value: '1:1', label: '1:1 · 方形封面' }]} className="mt-2 w-full" ariaLabel="封面裁剪比例" />
-                  <span className="mt-2 block text-xs font-normal leading-5 text-[#8A837C]">以每张当前封面的中心为焦点裁剪，原始文件不会被改写。</span>
+                <label className="block rounded-2xl border border-black/[0.07] bg-white/70 p-4 text-sm font-medium text-[#4D4843]"><I18nText>目标比例</I18nText><Select value={coverRatio} onChange={setCoverRatio} options={[{ value: '2:3', label: '2:3 · 常用图书封面' }, { value: '3:4', label: '3:4 · 宽版封面' }, { value: '1:1', label: '1:1 · 方形封面' }]} className="mt-2 w-full" ariaLabel={i18nAttribute("封面裁剪比例")} />
+                  <span className="mt-2 block text-xs font-normal leading-5 text-[#8A837C]"><I18nText>以每张当前封面的中心为焦点裁剪，原始文件不会被改写。</I18nText></span>
                 </label>
               ) : null}
               {coverAction === 'replace' ? (
                 <label className={cn('flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed px-5 py-8 text-center transition', coverFile ? 'border-[#EFAE9B] bg-[#FFF5F1]' : 'border-black/[0.14] bg-white hover:border-[#EFAE9B] hover:bg-[#FFF9F6]')}>
                   <ImagePlus size={24} className="text-[#EF4D2F]" />
-                  <span className="mt-3 text-sm font-semibold text-[#3F3A36]">{coverFile ? coverFile.name : '选择一张替换封面'}</span>
-                  <span className="mt-1 text-xs leading-5 text-[#8A837C]">支持 JPEG、PNG、WEBP，最大 12 MB；会应用到全部已选图书。</span>
+                  <span className="mt-3 text-sm font-semibold text-[#3F3A36]">{coverFile ? coverFile.name : i18nAttribute("选择一张替换封面")}</span>
+                  <span className="mt-1 text-xs leading-5 text-[#8A837C]"><I18nText>支持 JPEG、PNG、WEBP，最大 12 MB；会应用到全部已选图书。</I18nText></span>
                   <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(event) => setCoverFile(event.target.files?.[0] ?? null)} />
                 </label>
               ) : null}
               {coverAction === 'compress' || coverAction === 'replace' ? (
                 <div className="grid gap-4 rounded-2xl border border-black/[0.07] bg-[#F9F7F4] p-4 sm:grid-cols-2">
-                  <label className="text-sm font-medium text-[#4D4843]">JPEG 质量
-                    <div className="mt-2 flex items-center gap-3"><input type="range" min="40" max="95" value={coverQuality} onChange={(event) => setCoverQuality(event.target.value)} className="h-2 flex-1 accent-[#EF4D2F]" /><span className="w-10 text-right text-sm tabular-nums text-[#635D57]">{coverQuality}</span></div>
+                  <label className="text-sm font-medium text-[#4D4843]"><I18nText>JPEG 质量</I18nText><div className="mt-2 flex items-center gap-3"><input type="range" min="40" max="95" value={coverQuality} onChange={(event) => setCoverQuality(event.target.value)} className="h-2 flex-1 accent-[#EF4D2F]" /><span className="w-10 text-right text-sm tabular-nums text-[#635D57]">{coverQuality}</span></div>
                   </label>
-                  <label className="text-sm font-medium text-[#4D4843]">最长边
-                    <Select value={coverMaxDimension} onChange={setCoverMaxDimension} options={[{ value: '1200', label: '1200 px · 更小体积' }, { value: '1600', label: '1600 px · 推荐' }, { value: '2400', label: '2400 px · 高清' }, { value: '3200', label: '3200 px · 原图优先' }]} className="mt-2 w-full" ariaLabel="封面最长边" />
+                  <label className="text-sm font-medium text-[#4D4843]"><I18nText>最长边</I18nText><Select value={coverMaxDimension} onChange={setCoverMaxDimension} options={[{ value: '1200', label: '1200 px · 更小体积' }, { value: '1600', label: '1600 px · 推荐' }, { value: '2400', label: '2400 px · 高清' }, { value: '3200', label: '3200 px · 原图优先' }]} className="mt-2 w-full" ariaLabel={i18nAttribute("封面最长边")} />
                   </label>
                 </div>
               ) : null}
-              {coverAction === 'regenerate' ? <div className="rounded-xl bg-[#F6F3EF] px-4 py-3 text-sm leading-6 text-[#706963]">系统会优先恢复主版本或卷册中已提取的封面；找不到可用封面时使用默认封面。上传的自定义封面会被替换。</div> : null}
+              {coverAction === 'regenerate' ? <div className="rounded-xl bg-[#F6F3EF] px-4 py-3 text-sm leading-6 text-[#706963]"><I18nText>系统会优先恢复主版本或卷册中已提取的封面；找不到可用封面时使用默认封面。上传的自定义封面会被替换。</I18nText></div> : null}
             </div>
           ) : null}
         </div>
 
         <footer className="flex shrink-0 flex-col gap-3 border-t border-black/[0.07] bg-[#FFFEFC] px-5 py-4 sm:flex-row sm:items-center sm:justify-between md:px-6">
-          <div className="text-xs leading-5 text-[#837C75]">仅处理当前已选择的 {selectedIds.length} 本图书；未选择的项目不会变化。</div>
+          <div className="text-xs leading-5 text-[#837C75]"><I18nText>仅处理当前已选择的 </I18nText>{selectedIds.length} <I18nText>本图书；未选择的项目不会变化。</I18nText></div>
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="secondary" disabled={saving} onClick={onClose}>取消</Button>
-            <Button type="button" loading={saving} loadingText="正在处理" disabled={disabled} onClick={() => void submit()}>
-              {action === 'find_replace' ? '确认替换' : '应用更改'}
+            <Button type="button" variant="secondary" disabled={saving} onClick={onClose}><I18nText>取消</I18nText></Button>
+            <Button type="button" loading={saving} loadingText={i18nAttribute("正在处理")} disabled={disabled} onClick={() => void submit()}>
+              {action === 'find_replace' ? i18nAttribute("确认替换") : i18nAttribute("应用更改")}
             </Button>
           </div>
         </footer>

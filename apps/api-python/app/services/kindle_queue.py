@@ -16,6 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.core.i18n import configured_locale
 from app.core.time import now_timestamp_ms
 from app.services.email_settings import (
     EmailSettingsError,
@@ -230,10 +231,17 @@ def _send_task(db: Session, settings: Settings, task: dict[str, Any]) -> None:
     message = EmailMessage()
     message_id = make_msgid()
     message["Message-ID"] = message_id
-    message["Subject"] = str(task.get("subject") or task.get("bookTitle") or "发送到 Kindle")
-    message["From"] = formataddr((config.from_name, config.from_email))
+    locale = configured_locale(db)
+    fallback_subject = "Send to Kindle" if locale == "en-US" else "发送到 Kindle"
+    message["Subject"] = str(task.get("subject") or task.get("bookTitle") or fallback_subject)
+    sender_name = "Ermao Books" if locale == "en-US" and config.from_name == "二毛图书" else config.from_name
+    message["From"] = formataddr((sender_name, config.from_email))
     message["To"] = str(task.get("recipientEmail") or "")
-    message.set_content(f"《{task.get('bookTitle') or '图书'}》已由二毛图书发送至 Kindle。")
+    book_title = str(task.get("bookTitle") or ("Book" if locale == "en-US" else "图书"))
+    if locale == "en-US":
+        message.set_content(f"“{book_title}” has been sent to Kindle by Ermao Books.")
+    else:
+        message.set_content(f"《{book_title}》已由二毛图书发送至 Kindle。")
     media_type = str(task.get("mimeType") or mimetypes.guess_type(path.name)[0] or "application/octet-stream")
     maintype, subtype = (media_type.split("/", 1) + ["octet-stream"])[:2]
     attachment_name = Path(str(task.get("fileName") or path.name)).name.replace("\r", "").replace("\n", "")

@@ -3,6 +3,7 @@
 import { Loader2 } from 'lucide-react';
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
+import { useI18n } from '../../i18n/provider';
 import { cn } from './cn';
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
@@ -23,6 +24,7 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 export function Button({ children, icon: Icon, loading = false, loadingText, variant = 'primary', className = '', disabled, ...props }: ButtonProps) {
+  const { t } = useI18n();
   return (
     <button
       className={cn(
@@ -36,7 +38,7 @@ export function Button({ children, icon: Icon, loading = false, loadingText, var
       {...props}
     >
       {loading ? <Loader2 size={16} className="shrink-0 animate-spin" strokeWidth={2.4} /> : Icon ? <Icon size={16} className="shrink-0" strokeWidth={2.2} /> : null}
-      {loading && loadingText ? loadingText : children}
+      {loading && loadingText ? t(loadingText) : typeof children === 'string' ? t(children) : children}
     </button>
   );
 }

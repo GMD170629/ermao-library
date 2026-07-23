@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef } from 'react';
 import { useAudioPlayback } from './audio-playback-provider';
+import { I18nText } from '@/i18n/provider';
 
 export function AudioListenRedirect({ editionId }: { editionId: string }) {
   const player = useAudioPlayback();
@@ -41,11 +42,11 @@ export function AudioListenRedirect({ editionId }: { editionId: string }) {
       <div className="flex min-h-[60dvh] items-center justify-center px-4">
         <div className="w-full max-w-md rounded-[24px] border border-[#E8D8D1] bg-[#FFFCF9] p-7 text-center shadow-sm">
           <AlertTriangle className="mx-auto text-[#D85C3D]" size={30} />
-          <h1 className="mt-4 text-xl font-semibold text-[#2A2825]">有声书暂时无法打开</h1>
+          <h1 className="mt-4 text-xl font-semibold text-[#2A2825]"><I18nText>有声书暂时无法打开</I18nText></h1>
           <p className="mt-2 text-sm leading-6 text-[#77716B]">{player.loadError}</p>
           <div className="mt-6 flex justify-center gap-3">
-            <Link href="/library" className="flex min-h-11 items-center rounded-xl border border-black/[0.08] bg-white px-4 text-sm font-medium text-[#4C4843]">返回书库</Link>
-            <button type="button" onClick={() => void player.retry()} className="flex min-h-11 items-center gap-2 rounded-xl bg-[#EF4D2F] px-4 text-sm font-semibold text-white"><RotateCcw size={16} />重试</button>
+            <Link href="/library" className="flex min-h-11 items-center rounded-xl border border-black/[0.08] bg-white px-4 text-sm font-medium text-[#4C4843]"><I18nText>返回书库</I18nText></Link>
+            <button type="button" onClick={() => void player.retry()} className="flex min-h-11 items-center gap-2 rounded-xl bg-[#EF4D2F] px-4 text-sm font-semibold text-white"><RotateCcw size={16} /><I18nText>重试</I18nText></button>
           </div>
         </div>
       </div>
@@ -56,7 +57,7 @@ export function AudioListenRedirect({ editionId }: { editionId: string }) {
     <div className="flex min-h-[60dvh] items-center justify-center" role="status" aria-live="polite">
       <div className="text-center text-[#77716B]">
         <LoaderCircle size={28} className="mx-auto animate-spin text-[#EF4D2F] motion-reduce:animate-none" />
-        <p className="mt-4 text-sm">正在返回图书详情…</p>
+        <p className="mt-4 text-sm"><I18nText>正在返回图书详情…</I18nText></p>
       </div>
     </div>
   );

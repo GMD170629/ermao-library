@@ -25,6 +25,7 @@ from app.core.auth import (
     verify_password,
 )
 from app.core.config import Settings, get_settings
+from app.core.i18n import configured_locale
 from app.db.session import get_db
 from app.models.auth import PasswordResetToken, Session as UserSession, User, cuid, db_timestamp
 from app.schemas.auth import (
@@ -375,7 +376,7 @@ def request_password_reset(
             db.commit()
             reset_url = password_reset_url(_request_app_base_url(request), raw_token)
             try:
-                write_password_reset_file(settings, reset_url)
+                write_password_reset_file(settings, reset_url, configured_locale(db))
             except OSError:
                 LOGGER.exception("failed to write local password reset file")
                 db.delete(reset_token)

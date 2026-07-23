@@ -25,7 +25,6 @@ const SHELL_URLS = [
   '/offline',
   '/login',
   '/setup',
-  '/manifest.webmanifest',
   '/favicon.ico',
   '/favicon-16x16.png',
   '/favicon-32x32.png',
@@ -90,7 +89,6 @@ function isStaticAsset(pathname) {
   pathname = withoutBasePath(pathname);
   return pathname.startsWith('/_next/static/')
     || pathname.startsWith('/icons/')
-    || pathname === '/manifest.webmanifest'
     || /\.(css|js|svg)$/i.test(pathname);
 }
 
@@ -123,7 +121,7 @@ function shouldBypass(request) {
 }
 
 function offlineApiResponse() {
-  return new Response(JSON.stringify({ ok: false, error: { code: 'OFFLINE', message: '当前离线，稍后重试' } }), {
+  return new Response(JSON.stringify({ ok: false, error: { code: 'OFFLINE', message: '当前网络不可用' } }), {
     status: 503,
     headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }
   });

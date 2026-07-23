@@ -18,8 +18,19 @@ def ok(data: object, status_code: int = 200) -> JSONResponse:
     return JSONResponse(jsonable_encoder({"ok": True, "data": _normalize_timestamps(data)}), status_code=status_code)
 
 
-def fail(message: str, status_code: int = 400, details: object | None = None) -> JSONResponse:
+def fail(
+    message: str,
+    status_code: int = 400,
+    details: object | None = None,
+    *,
+    code: str | None = None,
+    params: dict[str, object] | None = None,
+) -> JSONResponse:
     error: dict[str, object] = {"message": message}
+    if code is not None:
+        error["code"] = code
+    if params is not None:
+        error["params"] = params
     if details is not None:
         error["details"] = details
     return JSONResponse(jsonable_encoder({"ok": False, "error": _normalize_timestamps(error)}), status_code=status_code)

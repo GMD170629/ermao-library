@@ -38,6 +38,7 @@ import { useAudioPlayback } from '../audio/audio-playback-provider';
 import { resolveChapterReadingStates } from './chapter-reading-state';
 import { MetadataLookupModal } from './metadata-lookup-modal';
 import { KindleSendModal } from './kindle-send-modal';
+import { I18nText } from '@/i18n/provider';
 import {
   audioDetailProjection,
   detailTabsForBook,
@@ -48,6 +49,7 @@ import {
   selectedEditionForDetailTab,
   workDetailTabHref
 } from './work-detail-tabs';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 const DEFAULT_DESCRIPTION = '暂无简介，可在详情页补充元数据。';
 const DESKTOP_CHAPTER_PAGE_SIZE = 120;
@@ -268,6 +270,7 @@ function inputClassName() {
 }
 
 export function BookDetailPage({ bookId }: { bookId: string }) {
+  const { t: i18nAttribute } = useAttributeI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
   const toast = useToast();
@@ -914,7 +917,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     return <div className="rounded-2xl border border-red-100 bg-red-50 p-8 text-sm text-red-700">{error}</div>;
   }
   if (!book || !displayBook) {
-    return <div className="shuku-loading-panel p-8 text-sm" role="status" aria-live="polite">正在读取图书详情...</div>;
+    return <div className="shuku-loading-panel p-8 text-sm" role="status" aria-live="polite"><I18nText>正在读取图书详情...</I18nText></div>;
   }
 
   const detailTabs = detailTabsForBook(book);
@@ -1094,8 +1097,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
           onClick={() => router.push('/library')}
           className="flex min-h-11 items-center gap-2 rounded-xl px-2 text-sm text-stone-500 transition hover:bg-black/[0.035] hover:text-stone-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]"
         >
-          <ChevronLeft size={17} /> 返回全部图书
-        </button>
+          <ChevronLeft size={17} /> <I18nText>返回全部图书</I18nText></button>
       </div>
 
       {error ? <div className="mb-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
@@ -1106,6 +1108,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
 
           <div className="flex min-w-0 flex-col py-1 lg:h-[285px]">
             <h1
+              data-i18n-skip
               className="line-clamp-2 text-3xl font-semibold leading-[1.15] tracking-tight text-stone-950 sm:text-[34px]"
               title={book.title}
             >
@@ -1113,21 +1116,22 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
             </h1>
             {currentTab === 'AUDIOBOOK' ? (
               <div className="mt-3 text-stone-600">
-                <div className="text-base">{book.author}</div>
+                <div data-i18n-skip className="text-base">{book.author}</div>
                 {activeMedia?.narrator || selectedEdition?.narrator ? (
                   <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
-                    <span className="text-stone-500">演播 {activeMedia?.narrator || selectedEdition?.narrator}</span>
+                    <span className="text-stone-500"><I18nText>演播 </I18nText><span data-i18n-skip>{activeMedia?.narrator || selectedEdition?.narrator}</span></span>
                   </div>
                 ) : null}
               </div>
             ) : (
-              <div className="mt-3 text-base text-stone-600" data-testid="work-detail-header-meta">{book.author}</div>
+              <div data-i18n-skip className="mt-3 text-base text-stone-600" data-testid="work-detail-header-meta">{book.author}</div>
             )}
             <p
+              data-i18n-skip={book.desc === DEFAULT_DESCRIPTION ? undefined : ''}
               className={cn('mt-5 line-clamp-3 max-w-3xl whitespace-pre-line text-sm leading-7', book.desc === DEFAULT_DESCRIPTION ? 'text-stone-400' : 'text-stone-600')}
-              title={book.desc === DEFAULT_DESCRIPTION ? '暂无简介' : book.desc}
+              title={book.desc === DEFAULT_DESCRIPTION ? i18nAttribute("暂无简介") : book.desc}
             >
-              {book.desc === DEFAULT_DESCRIPTION ? '暂无简介' : book.desc}
+              {book.desc === DEFAULT_DESCRIPTION ? i18nAttribute("暂无简介") : book.desc}
             </p>
 
             {currentTab !== 'STRUCTURE' ? <div className="mt-7 max-w-3xl lg:mt-auto">
@@ -1144,7 +1148,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
               </div>
               {currentTab === 'AUDIOBOOK' && (activeMedia?.durationMs || selectedEdition?.durationMs) ? (
                 <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-stone-500">
-                  {formatDuration(activeMedia?.durationMs ?? selectedEdition?.durationMs) ? <span>总时长 {formatDuration(activeMedia?.durationMs ?? selectedEdition?.durationMs)}</span> : null}
+                  {formatDuration(activeMedia?.durationMs ?? selectedEdition?.durationMs) ? <span><I18nText>总时长 </I18nText>{formatDuration(activeMedia?.durationMs ?? selectedEdition?.durationMs)}</span> : null}
                 </div>
               ) : null}
             </div> : null}
@@ -1179,7 +1183,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                   type="button"
                   onClick={() => setActionsOpen((open) => !open)}
                   className="flex h-11 w-12 items-center justify-center rounded-xl border border-[#ead8cf] bg-white/80 text-stone-600 transition hover:border-orange-200 hover:bg-white hover:text-stone-950"
-                  aria-label="更多图书操作"
+                  aria-label={i18nAttribute("更多图书操作")}
                   aria-haspopup="menu"
                   aria-expanded={actionsOpen}
                 >
@@ -1188,14 +1192,11 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                 {actionsOpen ? (
                   <div role="menu" className="absolute right-0 top-full z-40 mt-2 w-60 rounded-2xl border border-stone-200 bg-white p-2 shadow-xl shadow-stone-900/10">
                     <button type="button" className={menuItemClass} onClick={() => { setActionsOpen(false); setEditingScope('work'); setEditing((value) => !value); }}>
-                      <Edit3 size={16} /> 编辑信息
-                    </button>
+                      <Edit3 size={16} /> <I18nText>编辑信息</I18nText></button>
                     <button type="button" className={menuItemClass} onClick={() => { setActionsOpen(false); setMetadataLookupOpen(true); }}>
-                      <Database size={16} /> 元数据识别
-                    </button>
+                      <Database size={16} /> <I18nText>元数据识别</I18nText></button>
                     <button type="button" className={menuItemClass} disabled={saving} onClick={() => { setActionsOpen(false); coverInputRef.current?.click(); }}>
-                      <ImageUp size={16} /> 上传自定义封面
-                    </button>
+                      <ImageUp size={16} /> <I18nText>上传自定义封面</I18nText></button>
                     <button
                       type="button"
                       className={menuItemClass}
@@ -1205,29 +1206,23 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                         void postAction(`/api/works/${book.id}/cover/regenerate`, '封面已重新生成', { refreshCover: true, refreshBook: true, busyKey: 'regenerateCover' });
                       }}
                     >
-                      <RefreshCw size={16} /> 重新生成封面
-                    </button>
+                      <RefreshCw size={16} /> <I18nText>重新生成封面</I18nText></button>
                     {currentTab !== 'AUDIOBOOK' ? (
                       <button type="button" className={menuItemClass} disabled={!selectedEdition?.id} onClick={() => { setActionsOpen(false); downloadPrimaryEdition(); }}>
-                        <Download size={16} /> 下载当前版本
-                      </button>
+                        <Download size={16} /> <I18nText>下载当前版本</I18nText></button>
                     ) : null}
                     {currentTab === 'EBOOK' ? <button type="button" className={menuItemClass} onClick={() => { setActionsOpen(false); setKindleSendOpen(true); }}>
-                      <Send size={16} /> 发送到 Kindle
-                    </button> : null}
+                      <Send size={16} /> <I18nText>发送到 Kindle</I18nText></button> : null}
                     <div className="my-2 h-px bg-stone-100" />
                     {book.ignored ? (
                       <button type="button" className={menuItemClass} disabled={saving} onClick={() => { setActionsOpen(false); void setIgnored(false); }}>
-                        <EyeOff size={16} /> 恢复显示
-                      </button>
+                        <EyeOff size={16} /> <I18nText>恢复显示</I18nText></button>
                     ) : (
                       <button type="button" className={menuItemClass} disabled={saving} onClick={() => { setActionsOpen(false); void setIgnored(true); }}>
-                        <EyeOff size={16} /> 从书库隐藏
-                      </button>
+                        <EyeOff size={16} /> <I18nText>从书库隐藏</I18nText></button>
                     )}
                     <button type="button" className={cn(menuItemClass, 'text-red-600 hover:bg-red-50 hover:text-red-700')} disabled={saving} onClick={() => { setActionsOpen(false); setDeleteSource(false); setDangerActionOpen(true); }}>
-                      <Trash2 size={16} /> 删除记录
-                    </button>
+                      <Trash2 size={16} /> <I18nText>删除记录</I18nText></button>
                   </div>
                 ) : null}
               </div>
@@ -1253,49 +1248,49 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         <section id="work-metadata-editor" className="mt-5 rounded-[22px] border border-stone-200 bg-white p-5 sm:p-6">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 className="text-lg font-semibold text-stone-950">编辑元数据</h2>
-              <p className="mt-1 text-sm text-stone-500">作品信息用于所有版本；版本信息记录出版社、ISBN、语言与版本说明。</p>
+              <h2 className="text-lg font-semibold text-stone-950"><I18nText>编辑元数据</I18nText></h2>
+              <p className="mt-1 text-sm text-stone-500"><I18nText>作品信息用于所有版本；版本信息记录出版社、ISBN、语言与版本说明。</I18nText></p>
             </div>
-            <button type="button" onClick={() => setEditing(false)} className="flex h-9 w-9 items-center justify-center rounded-xl text-stone-500 hover:bg-stone-100" aria-label="关闭编辑">
+            <button type="button" onClick={() => setEditing(false)} className="flex h-9 w-9 items-center justify-center rounded-xl text-stone-500 hover:bg-stone-100" aria-label={i18nAttribute("关闭编辑")}>
               <X size={18} />
             </button>
           </div>
           <div className="mt-5 inline-flex rounded-xl bg-stone-100 p-1">
-            <button type="button" onClick={() => setEditingScope('work')} className={cn('rounded-lg px-4 py-2 text-sm', editingScope === 'work' ? 'bg-white font-medium text-[#e84420] shadow-sm' : 'text-stone-600')}>作品信息</button>
-            <button type="button" onClick={() => { const edition = book.editions.find((item) => item.id === (editingEditionId ?? selectedEdition?.id)) ?? selectedEdition ?? book.editions[0]; if (edition) editEdition(edition); }} className={cn('rounded-lg px-4 py-2 text-sm', editingScope === 'edition' ? 'bg-white font-medium text-[#e84420] shadow-sm' : 'text-stone-600')}>版本信息</button>
+            <button type="button" onClick={() => setEditingScope('work')} className={cn('rounded-lg px-4 py-2 text-sm', editingScope === 'work' ? 'bg-white font-medium text-[#e84420] shadow-sm' : 'text-stone-600')}><I18nText>作品信息</I18nText></button>
+            <button type="button" onClick={() => { const edition = book.editions.find((item) => item.id === (editingEditionId ?? selectedEdition?.id)) ?? selectedEdition ?? book.editions[0]; if (edition) editEdition(edition); }} className={cn('rounded-lg px-4 py-2 text-sm', editingScope === 'edition' ? 'bg-white font-medium text-[#e84420] shadow-sm' : 'text-stone-600')}><I18nText>版本信息</I18nText></button>
           </div>
           {editingScope === 'work' ? <div className="mt-5 grid gap-4 md:grid-cols-2">
-            <label className="text-sm text-stone-600">标题<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className={inputClassName()} /></label>
-            <label className="text-sm text-stone-600">作者<input value={form.author} onChange={(event) => setForm({ ...form, author: event.target.value })} className={inputClassName()} /></label>
+            <label className="text-sm text-stone-600"><I18nText>标题</I18nText><input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className={inputClassName()} /></label>
+            <label className="text-sm text-stone-600"><I18nText>作者</I18nText><input value={form.author} onChange={(event) => setForm({ ...form, author: event.target.value })} className={inputClassName()} /></label>
             {currentTab !== 'STRUCTURE' ? <label className="text-sm text-stone-600">
               {copy.status}
               <Select value={form.status} options={currentStatusOptions} onChange={(status) => setForm({ ...form, status })} ariaLabel={copy.status} className="mt-2 w-full" triggerClassName="!rounded-xl !border-stone-200 !shadow-none" />
             </label> : null}
-            <label className="text-sm text-stone-600">出版年<input value={form.publishedYear} onChange={(event) => setForm({ ...form, publishedYear: event.target.value })} type="number" min="1000" max="3000" className={inputClassName()} /></label>
-            <label className="text-sm text-stone-600">系列名<input value={form.seriesName} onChange={(event) => setForm({ ...form, seriesName: event.target.value })} className={inputClassName()} /></label>
-            <label className="text-sm text-stone-600">系列序号<input value={form.seriesIndex} onChange={(event) => setForm({ ...form, seriesIndex: event.target.value })} type="number" step="0.01" className={inputClassName()} /></label>
-            <label className="text-sm text-stone-600 md:col-span-2">标签<input value={form.tags} onChange={(event) => setForm({ ...form, tags: event.target.value })} placeholder="标签，用逗号分隔" className={inputClassName()} /></label>
-            <label className="text-sm text-stone-600 md:col-span-2">简介<textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} rows={5} className="mt-2 w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 outline-none transition focus:border-orange-300 focus:ring-4 focus:ring-orange-100/70" /></label>
+            <label className="text-sm text-stone-600"><I18nText>出版年</I18nText><input value={form.publishedYear} onChange={(event) => setForm({ ...form, publishedYear: event.target.value })} type="number" min="1000" max="3000" className={inputClassName()} /></label>
+            <label className="text-sm text-stone-600"><I18nText>系列名</I18nText><input value={form.seriesName} onChange={(event) => setForm({ ...form, seriesName: event.target.value })} className={inputClassName()} /></label>
+            <label className="text-sm text-stone-600"><I18nText>系列序号</I18nText><input value={form.seriesIndex} onChange={(event) => setForm({ ...form, seriesIndex: event.target.value })} type="number" step="0.01" className={inputClassName()} /></label>
+            <label className="text-sm text-stone-600 md:col-span-2"><I18nText>标签</I18nText><input value={form.tags} onChange={(event) => setForm({ ...form, tags: event.target.value })} placeholder={i18nAttribute("标签，用逗号分隔")} className={inputClassName()} /></label>
+            <label className="text-sm text-stone-600 md:col-span-2"><I18nText>简介</I18nText><textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} rows={5} className="mt-2 w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 outline-none transition focus:border-orange-300 focus:ring-4 focus:ring-orange-100/70" /></label>
           </div> : <div className="mt-5 grid gap-4 md:grid-cols-2">
-            <label className="text-sm text-stone-600 md:col-span-2">编辑版本<Select value={editingEditionId ?? ''} options={book.editions.map((edition) => ({ value: edition.id, label: `${edition.versionName} · ${edition.format}` }))} onChange={(id) => { const edition = book.editions.find((item) => item.id === id); if (edition) editEdition(edition); }} ariaLabel="编辑版本" className="mt-2 w-full" /></label>
-            <label className="text-sm text-stone-600">版本名称<input value={editionForm.versionName} onChange={(event) => setEditionForm({ ...editionForm, versionName: event.target.value })} className={inputClassName()} /></label>
-            <label className="text-sm text-stone-600">出版社<input value={editionForm.publisher} onChange={(event) => setEditionForm({ ...editionForm, publisher: event.target.value })} className={inputClassName()} /></label>
-            <label className="text-sm text-stone-600">出版日期<input type="date" value={editionForm.publishedAt} onChange={(event) => setEditionForm({ ...editionForm, publishedAt: event.target.value })} className={inputClassName()} /></label>
-            <label className="text-sm text-stone-600">语言<input value={editionForm.language} onChange={(event) => setEditionForm({ ...editionForm, language: event.target.value })} placeholder="例如 zh-CN" className={inputClassName()} /></label>
+            <label className="text-sm text-stone-600 md:col-span-2"><I18nText>编辑版本</I18nText><Select value={editingEditionId ?? ''} options={book.editions.map((edition) => ({ value: edition.id, label: `${edition.versionName} · ${edition.format}` }))} onChange={(id) => { const edition = book.editions.find((item) => item.id === id); if (edition) editEdition(edition); }} ariaLabel={i18nAttribute("编辑版本")} className="mt-2 w-full" /></label>
+            <label className="text-sm text-stone-600"><I18nText>版本名称</I18nText><input value={editionForm.versionName} onChange={(event) => setEditionForm({ ...editionForm, versionName: event.target.value })} className={inputClassName()} /></label>
+            <label className="text-sm text-stone-600"><I18nText>出版社</I18nText><input value={editionForm.publisher} onChange={(event) => setEditionForm({ ...editionForm, publisher: event.target.value })} className={inputClassName()} /></label>
+            <label className="text-sm text-stone-600"><I18nText>出版日期</I18nText><input type="date" value={editionForm.publishedAt} onChange={(event) => setEditionForm({ ...editionForm, publishedAt: event.target.value })} className={inputClassName()} /></label>
+            <label className="text-sm text-stone-600"><I18nText>语言</I18nText><input value={editionForm.language} onChange={(event) => setEditionForm({ ...editionForm, language: event.target.value })} placeholder={i18nAttribute("例如 zh-CN")} className={inputClassName()} /></label>
             <label className="text-sm text-stone-600">ISBN<input value={editionForm.isbn} onChange={(event) => setEditionForm({ ...editionForm, isbn: event.target.value })} className={inputClassName()} /></label>
-            <label className="text-sm text-stone-600">其他标识符<input value={editionForm.identifier} onChange={(event) => setEditionForm({ ...editionForm, identifier: event.target.value })} className={inputClassName()} /></label>
-            {book.editions.find((edition) => edition.id === editingEditionId)?.mediaKind === 'AUDIOBOOK' ? <label className="text-sm text-stone-600 md:col-span-2">演播者<input value={editionForm.narrator} onChange={(event) => setEditionForm({ ...editionForm, narrator: event.target.value })} className={inputClassName()} /></label> : null}
-            <label className="text-sm text-stone-600 md:col-span-2">版本说明<textarea value={editionForm.description} onChange={(event) => setEditionForm({ ...editionForm, description: event.target.value })} rows={4} className="mt-2 w-full rounded-xl border border-stone-200 bg-white px-4 py-3 outline-none focus:border-orange-300" /></label>
+            <label className="text-sm text-stone-600"><I18nText>其他标识符</I18nText><input value={editionForm.identifier} onChange={(event) => setEditionForm({ ...editionForm, identifier: event.target.value })} className={inputClassName()} /></label>
+            {book.editions.find((edition) => edition.id === editingEditionId)?.mediaKind === 'AUDIOBOOK' ? <label className="text-sm text-stone-600 md:col-span-2"><I18nText>演播者</I18nText><input value={editionForm.narrator} onChange={(event) => setEditionForm({ ...editionForm, narrator: event.target.value })} className={inputClassName()} /></label> : null}
+            <label className="text-sm text-stone-600 md:col-span-2"><I18nText>版本说明</I18nText><textarea value={editionForm.description} onChange={(event) => setEditionForm({ ...editionForm, description: event.target.value })} rows={4} className="mt-2 w-full rounded-xl border border-stone-200 bg-white px-4 py-3 outline-none focus:border-orange-300" /></label>
           </div>}
           <div className="mt-5 flex justify-end gap-3">
-            <Button variant="secondary" className="!rounded-xl" onClick={() => setEditing(false)}>取消</Button>
-            <Button loading={busyAction === (editingScope === 'work' ? 'saveMetadata' : 'saveEditionMetadata')} loadingText="保存中" disabled={saving} icon={Save} onClick={() => void (editingScope === 'work' ? saveMetadata() : saveEditionMetadata())} className="!rounded-xl !bg-[#ff4f26] !text-white hover:!bg-[#e84420]">保存信息</Button>
+            <Button variant="secondary" className="!rounded-xl" onClick={() => setEditing(false)}><I18nText>取消</I18nText></Button>
+            <Button loading={busyAction === (editingScope === 'work' ? 'saveMetadata' : 'saveEditionMetadata')} loadingText={i18nAttribute("保存中")} disabled={saving} icon={Save} onClick={() => void (editingScope === 'work' ? saveMetadata() : saveEditionMetadata())} className="!rounded-xl !bg-[#ff4f26] !text-white hover:!bg-[#e84420]"><I18nText>保存信息</I18nText></Button>
           </div>
         </section>
       ) : null}
 
       <div className="mt-6 overflow-x-auto">
-        <div className="inline-flex min-w-full gap-9 border-b border-stone-200 sm:min-w-0" role="tablist" aria-label="图书内容版本">
+        <div className="inline-flex min-w-full gap-9 border-b border-stone-200 sm:min-w-0" role="tablist" aria-label={i18nAttribute("图书内容版本")}>
           {detailTabs.map((tab) => {
             const selected = tab.key === currentTab;
             return (
@@ -1314,7 +1309,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                   selected ? 'text-stone-950' : 'text-stone-500 hover:text-stone-950'
                 )}
               >
-                <span>{tab.label}</span>
+                <span>{i18nAttribute(tab.label)}</span>
                 {selected ? <span className="absolute inset-x-0 -bottom-px h-0.5 bg-[#ff4f26]" /> : null}
               </button>
             );
@@ -1327,16 +1322,16 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
           <section id={`work-detail-panel-${currentTab.toLowerCase()}`} role="tabpanel" aria-labelledby={`work-detail-tab-${currentTab.toLowerCase()}`} className="py-6">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold text-stone-950">{hasAudioNavigation ? '音频章节' : hasChapterNavigation ? '章节' : hasVolumeSections ? '卷册' : '阅读内容'}</h2>
+                <h2 className="text-lg font-semibold text-stone-950">{hasAudioNavigation ? i18nAttribute("音频章节") : hasChapterNavigation ? i18nAttribute("章节") : hasVolumeSections ? i18nAttribute("卷册") : i18nAttribute("阅读内容")}</h2>
                 <p className="mt-1 text-sm text-stone-500">
                   {hasAudioNavigation
                     ? readingUnitsPage.total > 0
-                      ? `共 ${readingUnitsPage.total} 章${formatDuration(activeMedia?.durationMs ?? selectedEdition?.durationMs) ? ` · ${formatDuration(activeMedia?.durationMs ?? selectedEdition?.durationMs)}` : ''}`
-                      : '打开播放器查看音轨与章节'
+                      ? i18nAttribute("共 {value0} 章{value1}", { value0: readingUnitsPage.total, value1: formatDuration(activeMedia?.durationMs ?? selectedEdition?.durationMs) ? ` · ${formatDuration(activeMedia?.durationMs ?? selectedEdition?.durationMs)}` : '' })
+                      : i18nAttribute("打开播放器查看音轨与章节")
                     : hasChapterNavigation
-                    ? readingUnitsPage.total > 0 ? `共 ${readingUnitsPage.total} 章` : '未解析章节'
-                    : !selectedEdition?.readable ? `${selectedEdition?.formatValue ?? '该'} 格式已入库，转换为 EPUB 后可阅读`
-                    : hasVolumeSections ? `${volumeSections.length} 个卷册` : '打开阅读器查看内容'}
+                    ? readingUnitsPage.total > 0 ? i18nAttribute("共 {value0} 章", { value0: readingUnitsPage.total }) : i18nAttribute("未解析章节")
+                    : !selectedEdition?.readable ? i18nAttribute("{value0} 格式已入库，转换为 EPUB 后可阅读", { value0: selectedEdition?.formatValue ?? '该' })
+                    : hasVolumeSections ? i18nAttribute("{value0} 个卷册", { value0: volumeSections.length }) : i18nAttribute("打开阅读器查看内容")}
                 </p>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
@@ -1345,7 +1340,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                     value={selectedEdition?.id ?? ''}
                     options={mediaEditions.map((edition) => ({ value: edition.id, label: edition.versionName }))}
                     onChange={selectMediaEdition}
-                    ariaLabel={`选择${detailTabs.find((tab) => tab.key === currentTab)?.label ?? '当前媒介'}版本`}
+                    ariaLabel={i18nAttribute("选择{value0}版本", { value0: detailTabs.find((tab) => tab.key === currentTab)?.label ?? '当前媒介' })}
                     className="min-w-[190px]"
                     triggerClassName="!rounded-xl !border-[#ead8cf] !shadow-none"
                   />
@@ -1365,7 +1360,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
             <div className="mt-4">
               {chapterLoading && readingUnits.length === 0 && (hasChapterNavigation || hasAudioNavigation || volumeSections.length === 0) ? (
                 <div className="rounded-xl border border-stone-100 bg-stone-50 px-4 py-5 text-sm text-stone-500" role="status" aria-live="polite">
-                  正在切换到{detailTabs.find((tab) => tab.key === currentTab)?.label ?? '所选版本'}…
+                  <I18nText>正在切换到</I18nText>{detailTabs.find((tab) => tab.key === currentTab)?.label ?? i18nAttribute("所选版本")}…
                 </div>
               ) : hasAudioNavigation && readingUnits.length > 0 ? (
                 <div className={cn('divide-y divide-stone-100 border-y border-stone-100 transition', chapterLoading && 'opacity-65')} aria-busy={chapterLoading || undefined}>
@@ -1412,7 +1407,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                       <button key={unit.id} type="button" disabled={!chapterUrl} onClick={() => chapterUrl && router.push(chapterUrl)} className={cn('grid min-h-14 w-full grid-cols-[48px_minmax(0,1fr)_100px_28px] items-center gap-3 px-1 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-50', state === 'current' ? 'bg-[#fff4ef] text-[#e84420]' : 'hover:bg-stone-50')}>
                         <span className="tabular-nums text-stone-500">{displayIndex}</span>
                         <span className={cn('truncate font-medium', state === 'current' ? 'text-[#e84420]' : 'text-stone-800')}>{unit.title}</span>
-                        <span className={cn('text-xs', state === 'current' ? 'text-[#e84420]' : 'text-stone-400')}>{state === 'current' ? '正在阅读' : state === 'read' ? '已读' : '未读'}</span>
+                        <span className={cn('text-xs', state === 'current' ? 'text-[#e84420]' : 'text-stone-400')}>{state === 'current' ? i18nAttribute("正在阅读") : state === 'read' ? i18nAttribute("已读") : i18nAttribute("未读")}</span>
                         {state === 'current' ? <BarChart3 size={18} className="text-[#ff4f26]" /> : state === 'read' ? <CheckCircle2 size={18} className="text-stone-400" /> : <Circle size={18} className="text-stone-400" />}
                       </button>
                     );
@@ -1443,8 +1438,8 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                 </div>
               ) : selectedEdition && !selectedEdition.readable ? (
                 <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
-                  <span>原始 {selectedEdition.formatValue} 文件已安全入库，当前阅读器暂不支持直接打开。</span>
-                  {selectedEdition.conversionAvailable ? <Button loading={busyAction === `convert:${selectedEdition.id}`} disabled={saving && busyAction !== `convert:${selectedEdition.id}`} onClick={() => void convertEdition(selectedEdition)} className="!rounded-xl !bg-[#ff4f26] !text-white hover:!bg-[#e84420]">转换为 EPUB</Button> : null}
+                  <span><I18nText>原始 </I18nText>{selectedEdition.formatValue} <I18nText>文件已安全入库，当前阅读器暂不支持直接打开。</I18nText></span>
+                  {selectedEdition.conversionAvailable ? <Button loading={busyAction === `convert:${selectedEdition.id}`} disabled={saving && busyAction !== `convert:${selectedEdition.id}`} onClick={() => void convertEdition(selectedEdition)} className="!rounded-xl !bg-[#ff4f26] !text-white hover:!bg-[#e84420]"><I18nText>转换为 EPUB</I18nText></Button> : null}
                 </div>
               ) : (
                 <button type="button" disabled={!readerUrl} onClick={() => {
@@ -1452,16 +1447,16 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                   if (hasAudioNavigation && readerEditionId) startAudioEdition(readerEditionId);
                   else router.push(readerUrl);
                 }} className="flex w-full items-center justify-between rounded-xl border border-stone-200 px-4 py-4 text-left text-sm text-stone-600 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50">
-                  <span>{hasAudioNavigation ? '打开迷你播放器查看音轨与章节' : '在阅读器中查看内容'}</span><ChevronRight size={17} />
+                  <span>{hasAudioNavigation ? i18nAttribute("打开迷你播放器查看音轨与章节") : i18nAttribute("在阅读器中查看内容")}</span><ChevronRight size={17} />
                 </button>
               )}
 
               {(hasChapterNavigation || hasAudioNavigation) && readingUnitsPage.total > 0 ? (
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-stone-500">
-                  <span>第 {readingUnitsPage.page} / {readingUnitsPage.totalPages} 页</span>
+                  <span><I18nText>第 </I18nText>{readingUnitsPage.page} / {readingUnitsPage.totalPages} <I18nText>页</I18nText></span>
                   <div className="flex gap-2">
-                    <Button variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5" disabled={chapterLoading || readingUnitsPage.page <= 1} onClick={() => setChapterPage((current) => Math.max(1, current - 1))}>上一页</Button>
-                    <Button variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5" disabled={chapterLoading || readingUnitsPage.page >= readingUnitsPage.totalPages} onClick={() => setChapterPage((current) => Math.min(readingUnitsPage.totalPages, current + 1))}>下一页</Button>
+                    <Button variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5" disabled={chapterLoading || readingUnitsPage.page <= 1} onClick={() => setChapterPage((current) => Math.max(1, current - 1))}><I18nText>上一页</I18nText></Button>
+                    <Button variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5" disabled={chapterLoading || readingUnitsPage.page >= readingUnitsPage.totalPages} onClick={() => setChapterPage((current) => Math.min(readingUnitsPage.totalPages, current + 1))}><I18nText>下一页</I18nText></Button>
                   </div>
                 </div>
               ) : null}
@@ -1473,29 +1468,29 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
           <section>
             <div className="flex items-center justify-between gap-4">
               <div>
-                <h2 className="text-lg font-semibold text-stone-950">系列</h2>
+                <h2 className="text-lg font-semibold text-stone-950"><I18nText>系列</I18nText></h2>
                 <p className="mt-1 text-sm text-stone-500">
-                  {book.seriesName ? `${book.seriesName}${book.seriesIndex !== null ? ` · 第 ${book.seriesIndex} 部` : ''}` : '尚未归入系列，可通过“编辑信息”补充。'}
+                  {book.seriesName ? (book.seriesIndex !== null ? i18nAttribute('{value0} · 第 {value1} 部', { value0: book.seriesName, value1: book.seriesIndex }) : book.seriesName) : i18nAttribute("尚未归入系列，可通过“编辑信息”补充。")}
                 </p>
               </div>
               {book.seriesName && seriesTotal > 0 ? (
                 <div className="flex items-center gap-3">
-                  <span className="text-sm text-stone-400">{seriesTotal} 本</span>
-                  <div className="flex items-center gap-1" aria-label="浏览系列图书">
-                    <button type="button" disabled={!seriesCanScrollLeft} onClick={() => scrollSeries(-1)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-stone-200 text-stone-600 transition hover:border-orange-200 hover:text-[#e84420] disabled:cursor-not-allowed disabled:opacity-35" aria-label="向左浏览系列"><ChevronLeft size={17} /></button>
-                    <button type="button" disabled={!seriesCanScrollRight} onClick={() => scrollSeries(1)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-stone-200 text-stone-600 transition hover:border-orange-200 hover:text-[#e84420] disabled:cursor-not-allowed disabled:opacity-35" aria-label="向右浏览系列"><ChevronRight size={17} /></button>
+                  <span className="text-sm text-stone-400">{seriesTotal} <I18nText>本</I18nText></span>
+                  <div className="flex items-center gap-1" aria-label={i18nAttribute("浏览系列图书")}>
+                    <button type="button" disabled={!seriesCanScrollLeft} onClick={() => scrollSeries(-1)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-stone-200 text-stone-600 transition hover:border-orange-200 hover:text-[#e84420] disabled:cursor-not-allowed disabled:opacity-35" aria-label={i18nAttribute("向左浏览系列")}><ChevronLeft size={17} /></button>
+                    <button type="button" disabled={!seriesCanScrollRight} onClick={() => scrollSeries(1)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-stone-200 text-stone-600 transition hover:border-orange-200 hover:text-[#e84420] disabled:cursor-not-allowed disabled:opacity-35" aria-label={i18nAttribute("向右浏览系列")}><ChevronRight size={17} /></button>
                   </div>
-                  <button type="button" onClick={() => router.push(`/library?seriesName=${encodeURIComponent(book.seriesName ?? '')}`)} className="text-sm font-medium text-[#ED4D2D] hover:text-[#C83B23]">查看全部</button>
+                  <button type="button" onClick={() => router.push(`/library?seriesName=${encodeURIComponent(book.seriesName ?? '')}`)} className="text-sm font-medium text-[#ED4D2D] hover:text-[#C83B23]"><I18nText>查看全部</I18nText></button>
                 </div>
               ) : null}
             </div>
-            {book.seriesName && seriesLoading ? <div className="mt-4 text-sm text-stone-400">正在读取系列...</div> : null}
+            {book.seriesName && seriesLoading ? <div className="mt-4 text-sm text-stone-400"><I18nText>正在读取系列...</I18nText></div> : null}
             {book.seriesName && !seriesLoading && seriesBooks.length > 0 ? (
               <div
                 ref={seriesScrollerRef}
                 className="mt-4 flex cursor-grab snap-x snap-proximity gap-6 overflow-x-auto overscroll-x-contain border-y border-stone-100 py-4 active:cursor-grabbing"
                 tabIndex={0}
-                aria-label="系列图书列表"
+                aria-label={i18nAttribute("系列图书列表")}
                 onScroll={updateSeriesScrollState}
                 onPointerDown={startSeriesDrag}
                 onPointerMove={moveSeriesDrag}
@@ -1535,11 +1530,11 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
           <section className="border-t border-stone-200 pt-8">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <h2 className="text-lg font-semibold text-stone-950">版本与内容</h2>
-                <p className="mt-1 text-sm text-stone-500">{book.versionCount} 个版本 · 覆盖 {detailTabs.filter((tab) => tab.key !== 'STRUCTURE').length} 种媒介。管理模式下可调整各媒介主版本和卷册位置。</p>
+                <h2 className="text-lg font-semibold text-stone-950"><I18nText>版本与内容</I18nText></h2>
+                <p className="mt-1 text-sm text-stone-500">{book.versionCount} <I18nText>个版本 · 覆盖 </I18nText>{detailTabs.filter((tab) => tab.key !== 'STRUCTURE').length} <I18nText>种媒介。管理模式下可调整各媒介主版本和卷册位置。</I18nText></p>
               </div>
               <Button variant={manageStructure ? 'secondary' : 'primary'} icon={Settings2} onClick={() => setManageStructure((value) => !value)} className={cn('!rounded-xl', !manageStructure && '!bg-[#ff4f26] !text-white hover:!bg-[#e84420]')}>
-                {manageStructure ? '完成管理' : '管理内容结构'}
+                {manageStructure ? i18nAttribute("完成管理") : i18nAttribute("管理内容结构")}
               </Button>
             </div>
 
@@ -1550,23 +1545,22 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                   <span className={cn('inline-flex min-w-16 justify-center rounded-lg border px-3 py-2 text-xs font-semibold', formatTone(edition.formatValue))}>{edition.formatValue}</span>
                   <div className="min-w-[220px] flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="font-semibold text-stone-950">{edition.versionName}</h3>
-                      <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-medium text-stone-600">{mediaKindForEdition(edition) === 'AUDIOBOOK' ? '有声书' : mediaKindForEdition(edition) === 'COMIC' ? '漫画' : '电子书'}</span>
-                      {edition.primary || edition.id === book.primaryEditionId ? <span className="rounded-full bg-[#fff0e9] px-2 py-0.5 text-[11px] font-medium text-[#e84420]">媒介主版本</span> : null}
+                      <h3 data-i18n-skip className="font-semibold text-stone-950">{edition.versionName}</h3>
+                      <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-medium text-stone-600">{mediaKindForEdition(edition) === 'AUDIOBOOK' ? i18nAttribute("有声书") : mediaKindForEdition(edition) === 'COMIC' ? i18nAttribute("漫画") : i18nAttribute("电子书")}</span>
+                      {edition.primary || edition.id === book.primaryEditionId ? <span className="rounded-full bg-[#fff0e9] px-2 py-0.5 text-[11px] font-medium text-[#e84420]"><I18nText>媒介主版本</I18nText></span> : null}
                     </div>
                     <div className="mt-1 text-xs text-stone-500">{edition.size} · {editionUnitLabel(edition)} · {fileName(edition.files[0]?.path)}</div>
-                    {!edition.readable ? <div className="mt-1 text-xs text-amber-700">原始文件已入库，转换为 EPUB 后可阅读</div> : null}
-                    {edition.conversion ? <div className="mt-1 text-xs text-[#B45336]">由 {edition.conversion.sourceFormat} 自动转换为 {edition.conversion.targetFormat}</div> : null}
+                    {!edition.readable ? <div className="mt-1 text-xs text-amber-700"><I18nText>原始文件已入库，转换为 EPUB 后可阅读</I18nText></div> : null}
+                    {edition.conversion ? <div className="mt-1 text-xs text-[#B45336]"><I18nText>由 </I18nText>{edition.conversion.sourceFormat} <I18nText>自动转换为 </I18nText>{edition.conversion.targetFormat}</div> : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {edition.readable ? <Button variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => openEdition(edition)}>{mediaKindForEdition(edition) === 'AUDIOBOOK' ? '收听' : mediaKindForEdition(edition) === 'COMIC' ? '查看' : '阅读'}</Button> : edition.conversionAvailable ? <Button loading={busyAction === `convert:${edition.id}`} disabled={saving && busyAction !== `convert:${edition.id}`} variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => void convertEdition(edition)}>转换为 EPUB</Button> : <Button disabled variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5">暂不支持阅读</Button>}
-                    {manageStructure ? <Button variant="ghost" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => editEdition(edition)}>编辑版本</Button> : null}
+                    {edition.readable ? <Button variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => openEdition(edition)}>{mediaKindForEdition(edition) === 'AUDIOBOOK' ? i18nAttribute("收听") : mediaKindForEdition(edition) === 'COMIC' ? i18nAttribute("查看") : i18nAttribute("阅读")}</Button> : edition.conversionAvailable ? <Button loading={busyAction === `convert:${edition.id}`} disabled={saving && busyAction !== `convert:${edition.id}`} variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => void convertEdition(edition)}><I18nText>转换为 EPUB</I18nText></Button> : <Button disabled variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5"><I18nText>暂不支持阅读</I18nText></Button>}
+                    {manageStructure ? <Button variant="ghost" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => editEdition(edition)}><I18nText>编辑版本</I18nText></Button> : null}
                     {manageStructure && !edition.primary && edition.id !== book.primaryEditionId ? (
                       <Button loading={busyAction === `primary:${edition.id}`} disabled={saving && busyAction !== `primary:${edition.id}`} variant="ghost" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => void postAction(`/api/works/${book.id}/editions/${edition.id}/primary`, '已设为主版本', { refreshBook: true, busyKey: `primary:${edition.id}` })}>
-                        设为主版本
-                      </Button>
+                        <I18nText>设为主版本</I18nText></Button>
                     ) : null}
-                    {manageStructure && book.editions.length > 1 ? <Button variant="ghost" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => { setSplitTarget(edition); setSplitForm({ title: `${book.title}（${edition.versionName}）`, author: book.author === '未知作者' ? '' : book.author, copyShelves: true }); }}>拆分为作品</Button> : null}
+                    {manageStructure && book.editions.length > 1 ? <Button variant="ghost" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => { setSplitTarget(edition); setSplitForm({ title: `${book.title}（${edition.versionName}）`, author: book.author === '未知作者' ? '' : book.author, copyShelves: true }); }}><I18nText>拆分为作品</I18nText></Button> : null}
                   </div>
                 </div>
 
@@ -1575,20 +1569,20 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                     {edition.volumes.map((volume, index) => (
                       <div key={volume.id} className="flex min-h-12 items-center gap-3 border-b border-stone-100 py-2 last:border-b-0">
                         <span className="w-8 text-xs tabular-nums text-stone-400">{String(index + 1).padStart(2, '0')}</span>
-                        <span className="min-w-0 flex-1 truncate text-sm text-stone-800">{volume.title}</span>
-                        <span className="text-xs text-stone-400">{volume.chapterCount ? `${volume.chapterCount} 章` : volume.pageCount ? `${volume.pageCount} 页` : ''}</span>
+                        <span data-i18n-skip className="min-w-0 flex-1 truncate text-sm text-stone-800">{volume.title}</span>
+                        <span className="text-xs text-stone-400">{volume.chapterCount ? i18nAttribute("{value0} 章", { value0: volume.chapterCount }) : volume.pageCount ? i18nAttribute("{value0} 页", { value0: volume.pageCount }) : ''}</span>
                         {manageStructure ? (
                           <div className="flex items-center gap-1">
-                            <button type="button" disabled={saving || index === 0} onClick={() => void moveVolume(volume.id, 'up')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 disabled:opacity-30" aria-label={`前移 ${volume.title}`}><ChevronLeft size={16} /></button>
-                            <button type="button" disabled={saving || index === edition.volumes.length - 1} onClick={() => void moveVolume(volume.id, 'down')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 disabled:opacity-30" aria-label={`后移 ${volume.title}`}><ChevronRight size={16} /></button>
-                            <button type="button" disabled={saving} onClick={() => openMoveTarget(volume)} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 disabled:opacity-30" aria-label={`移动 ${volume.title} 到其他图书`}><MoveRight size={16} /></button>
+                            <button type="button" disabled={saving || index === 0} onClick={() => void moveVolume(volume.id, 'up')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 disabled:opacity-30" aria-label={i18nAttribute("前移 {value0}", { value0: volume.title })}><ChevronLeft size={16} /></button>
+                            <button type="button" disabled={saving || index === edition.volumes.length - 1} onClick={() => void moveVolume(volume.id, 'down')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 disabled:opacity-30" aria-label={i18nAttribute("后移 {value0}", { value0: volume.title })}><ChevronRight size={16} /></button>
+                            <button type="button" disabled={saving} onClick={() => openMoveTarget(volume)} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 disabled:opacity-30" aria-label={i18nAttribute("移动 {value0} 到其他图书", { value0: volume.title })}><MoveRight size={16} /></button>
                           </div>
                         ) : null}
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="border-t border-stone-100 px-5 py-3 text-sm text-stone-400">单文件版本，没有独立卷册。</div>
+                  <div className="border-t border-stone-100 px-5 py-3 text-sm text-stone-400"><I18nText>单文件版本，没有独立卷册。</I18nText></div>
                 )}
               </article>
             ))}
@@ -1615,62 +1609,62 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         onClose={() => setKindleSendOpen(false)}
       />
 
-      {splitTarget ? <div className="fixed inset-0 z-[95] flex items-end justify-center bg-stone-950/40 p-0 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true" aria-label="拆分版本">
+      {splitTarget ? <div className="fixed inset-0 z-[95] flex items-end justify-center bg-stone-950/40 p-0 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={i18nAttribute("拆分版本")}>
         <div className="w-full max-w-lg rounded-t-[26px] border border-stone-200 bg-white p-6 shadow-2xl md:rounded-[26px]">
-          <div className="flex items-start justify-between gap-4"><div><h2 className="text-lg font-semibold text-stone-950">拆分为独立作品</h2><p className="mt-2 text-sm leading-6 text-stone-600">将“{splitTarget.versionName}”及关联的阅读进度移到新作品，文件不会复制或删除。</p></div><button type="button" onClick={() => setSplitTarget(null)}><X size={18} /></button></div>
-          <div className="mt-5 grid gap-4"><label className="text-sm text-stone-600">新作品标题<input value={splitForm.title} onChange={(event) => setSplitForm({ ...splitForm, title: event.target.value })} className={inputClassName()} /></label><label className="text-sm text-stone-600">作者<input value={splitForm.author} onChange={(event) => setSplitForm({ ...splitForm, author: event.target.value })} className={inputClassName()} /></label><label className="flex items-start gap-3 rounded-xl bg-stone-50 p-4 text-sm text-stone-700"><input type="checkbox" checked={splitForm.copyShelves} onChange={(event) => setSplitForm({ ...splitForm, copyShelves: event.target.checked })} className="mt-0.5 accent-[#ff4f26]" /><span>复制原作品的普通书架归属<span className="mt-1 block text-xs text-stone-500">智能书架会根据规则自动计算，无需复制。</span></span></label></div>
-          <div className="mt-6 flex justify-end gap-2"><Button variant="secondary" onClick={() => setSplitTarget(null)}>取消</Button><Button loading={busyAction === `split:${splitTarget.id}`} disabled={!splitForm.title.trim()} onClick={() => void splitSelectedEdition()}>确认拆分</Button></div>
+          <div className="flex items-start justify-between gap-4"><div><h2 className="text-lg font-semibold text-stone-950"><I18nText>拆分为独立作品</I18nText></h2><p className="mt-2 text-sm leading-6 text-stone-600">{i18nAttribute('将“{value0}”及关联的阅读进度移到新作品，文件不会复制或删除。', { value0: splitTarget.versionName })}</p></div><button type="button" onClick={() => setSplitTarget(null)}><X size={18} /></button></div>
+          <div className="mt-5 grid gap-4"><label className="text-sm text-stone-600"><I18nText>新作品标题</I18nText><input value={splitForm.title} onChange={(event) => setSplitForm({ ...splitForm, title: event.target.value })} className={inputClassName()} /></label><label className="text-sm text-stone-600"><I18nText>作者</I18nText><input value={splitForm.author} onChange={(event) => setSplitForm({ ...splitForm, author: event.target.value })} className={inputClassName()} /></label><label className="flex items-start gap-3 rounded-xl bg-stone-50 p-4 text-sm text-stone-700"><input type="checkbox" checked={splitForm.copyShelves} onChange={(event) => setSplitForm({ ...splitForm, copyShelves: event.target.checked })} className="mt-0.5 accent-[#ff4f26]" /><span><I18nText>复制原作品的普通书架归属</I18nText><span className="mt-1 block text-xs text-stone-500"><I18nText>智能书架会根据规则自动计算，无需复制。</I18nText></span></span></label></div>
+          <div className="mt-6 flex justify-end gap-2"><Button variant="secondary" onClick={() => setSplitTarget(null)}><I18nText>取消</I18nText></Button><Button loading={busyAction === `split:${splitTarget.id}`} disabled={!splitForm.title.trim()} onClick={() => void splitSelectedEdition()}><I18nText>确认拆分</I18nText></Button></div>
         </div>
       </div> : null}
 
       {moveTargetOpen && movingVolume ? (
-        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-stone-950/40 p-0 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true" aria-label="转移图书内容">
+        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-stone-950/40 p-0 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={i18nAttribute("转移图书内容")}>
           <div className="w-full max-w-2xl rounded-t-[26px] border border-stone-200 bg-white p-5 shadow-2xl md:rounded-[26px]">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-lg font-semibold text-stone-950">转移图书内容</h2>
-                <p className="mt-2 text-sm leading-6 text-stone-600">将「{movingVolume.title}」及其内容按媒介和卷册结构转移到另一图书。</p>
+                <h2 className="text-lg font-semibold text-stone-950"><I18nText>转移图书内容</I18nText></h2>
+                <p className="mt-2 text-sm leading-6 text-stone-600">{i18nAttribute('将「{value0}」及其内容按媒介和卷册结构转移到另一图书。', { value0: movingVolume.title })}</p>
               </div>
-              <button type="button" onClick={() => setMoveTargetOpen(false)} className="flex h-10 w-10 items-center justify-center rounded-xl text-stone-500 hover:bg-stone-100" aria-label="关闭"><X size={18} /></button>
+              <button type="button" onClick={() => setMoveTargetOpen(false)} className="flex h-10 w-10 items-center justify-center rounded-xl text-stone-500 hover:bg-stone-100" aria-label={i18nAttribute("关闭")}><X size={18} /></button>
             </div>
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               <section>
-                <label className="text-sm font-medium text-stone-700">目标图书</label>
+                <label className="text-sm font-medium text-stone-700"><I18nText>目标图书</I18nText></label>
                 <div className="mt-2 flex h-11 items-center gap-2 rounded-xl border border-stone-200 px-3">
-                  <input value={targetSearch} onChange={(event) => setTargetSearch(event.target.value)} placeholder="搜索标题、作者或标签" className="w-full bg-transparent text-sm outline-none" />
+                  <input value={targetSearch} onChange={(event) => setTargetSearch(event.target.value)} placeholder={i18nAttribute("搜索标题、作者或标签")} className="w-full bg-transparent text-sm outline-none" />
                 </div>
                 <div className="mt-3 max-h-72 space-y-2 overflow-auto pr-1">
                   {targetBooks.map((targetBook) => (
-                    <button key={targetBook.id} type="button" onClick={() => { setTargetBookId(targetBook.id); setTargetEditionId(targetBook.editions.find((edition) => edition.id === targetBook.primaryEditionId)?.id ?? targetBook.editions[0]?.id ?? ''); }} className={cn('w-full rounded-xl border p-3 text-left transition', targetBook.id === targetBookId ? 'border-orange-200 bg-[#fff4ef]' : 'border-stone-100 bg-stone-50 hover:bg-stone-100')}>
+                    <button data-i18n-skip key={targetBook.id} type="button" onClick={() => { setTargetBookId(targetBook.id); setTargetEditionId(targetBook.editions.find((edition) => edition.id === targetBook.primaryEditionId)?.id ?? targetBook.editions[0]?.id ?? ''); }} className={cn('w-full rounded-xl border p-3 text-left transition', targetBook.id === targetBookId ? 'border-orange-200 bg-[#fff4ef]' : 'border-stone-100 bg-stone-50 hover:bg-stone-100')}>
                       <span className="block truncate text-sm font-medium text-stone-950">{targetBook.title}</span>
-                      <span className="mt-1 block truncate text-xs text-stone-500">{targetBook.author} · {targetBook.versionCount} 个版本</span>
+                      <span className="mt-1 block truncate text-xs text-stone-500">{targetBook.author} · {targetBook.versionCount} <I18nText>个版本</I18nText></span>
                     </button>
                   ))}
-                  {targetBooksLoading ? <div className="rounded-xl bg-stone-50 p-3 text-sm text-stone-500">正在搜索...</div> : null}
-                  {!targetBooksLoading && targetBooks.length === 0 ? <div className="rounded-xl bg-stone-50 p-3 text-sm text-stone-500">没有找到可选图书。</div> : null}
+                  {targetBooksLoading ? <div className="rounded-xl bg-stone-50 p-3 text-sm text-stone-500"><I18nText>正在搜索...</I18nText></div> : null}
+                  {!targetBooksLoading && targetBooks.length === 0 ? <div className="rounded-xl bg-stone-50 p-3 text-sm text-stone-500"><I18nText>没有找到可选图书。</I18nText></div> : null}
                 </div>
               </section>
               <section>
-                <div className="text-sm font-medium text-stone-700">目标图书内容</div>
-                <div className="mt-2 rounded-xl bg-stone-50 p-3 text-xs leading-5 text-stone-500">源格式：{movingEdition?.format ?? book.format}。不同媒介会并存；同格式且双方都有卷册时合并卷册，否则保留为独立版本。</div>
+                <div className="text-sm font-medium text-stone-700"><I18nText>目标图书内容</I18nText></div>
+                <div className="mt-2 rounded-xl bg-stone-50 p-3 text-xs leading-5 text-stone-500"><I18nText>源格式：</I18nText>{movingEdition?.format ?? book.format}<I18nText>。不同媒介会并存；同格式且双方都有卷册时合并卷册，否则保留为独立版本。</I18nText></div>
                 <div className="mt-3 max-h-72 space-y-2 overflow-auto pr-1">
                   {targetEditionOptions.map((edition) => {
                     return (
                       <div key={edition.id} className={cn('w-full rounded-xl border p-3', edition.primary ? 'border-orange-100 bg-[#fffaf7]' : 'border-stone-100 bg-white')}>
-                        <span className="block truncate text-sm font-medium text-stone-950">{edition.versionName}</span>
-                        <span className="mt-1 block text-xs text-stone-500">{edition.format} · {edition.volumes.length} 个卷册 · {mediaKindForEdition(edition) === 'AUDIOBOOK' ? '有声书' : mediaKindForEdition(edition) === 'COMIC' ? '漫画' : '电子书'}</span>
+                        <span data-i18n-skip className="block truncate text-sm font-medium text-stone-950">{edition.versionName}</span>
+                        <span className="mt-1 block text-xs text-stone-500">{edition.format} · {edition.volumes.length} <I18nText>个卷册 · </I18nText>{mediaKindForEdition(edition) === 'AUDIOBOOK' ? i18nAttribute("有声书") : mediaKindForEdition(edition) === 'COMIC' ? i18nAttribute("漫画") : i18nAttribute("电子书")}</span>
                       </div>
                     );
                   })}
-                  {!selectedTargetBook ? <div className="rounded-xl bg-stone-50 p-3 text-sm text-stone-500">先选择一本目标图书。</div> : null}
+                  {!selectedTargetBook ? <div className="rounded-xl bg-stone-50 p-3 text-sm text-stone-500"><I18nText>先选择一本目标图书。</I18nText></div> : null}
                 </div>
               </section>
             </div>
             <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-              <div className="max-w-md text-sm text-stone-500">{selectedTargetEdition ? transferPreview : '请选择目标图书'}</div>
+              <div className="max-w-md text-sm text-stone-500">{selectedTargetEdition ? transferPreview : i18nAttribute("请选择目标图书")}</div>
               <div className="flex gap-2">
-                <Button variant="secondary" className="!rounded-xl" onClick={() => setMoveTargetOpen(false)}>取消</Button>
-                <Button loading={busyAction === `move-to:${movingVolume.id}`} loadingText="转移中" disabled={!targetEditionId || saving} icon={MoveRight} onClick={() => void moveVolumeToTarget()} className="!rounded-xl !bg-[#ff4f26] !text-white hover:!bg-[#e84420]">确认转移</Button>
+                <Button variant="secondary" className="!rounded-xl" onClick={() => setMoveTargetOpen(false)}><I18nText>取消</I18nText></Button>
+                <Button loading={busyAction === `move-to:${movingVolume.id}`} loadingText={i18nAttribute("转移中")} disabled={!targetEditionId || saving} icon={MoveRight} onClick={() => void moveVolumeToTarget()} className="!rounded-xl !bg-[#ff4f26] !text-white hover:!bg-[#e84420]"><I18nText>确认转移</I18nText></Button>
               </div>
             </div>
           </div>
@@ -1678,25 +1672,25 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       ) : null}
 
       {dangerActionOpen ? (
-        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-stone-950/40 p-0 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true" aria-label="删除图书记录">
+        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-stone-950/40 p-0 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={i18nAttribute("删除图书记录")}>
           <div className="w-full max-w-lg rounded-t-[26px] border border-stone-200 bg-white p-5 shadow-2xl md:rounded-[26px]">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-lg font-semibold text-stone-950">删除图书记录</h2>
-                <p className="mt-2 text-sm leading-6 text-stone-600">删除《{book.title}》的书库记录和系统生成文件。你可以选择是否同时删除监控或上传目录中的源文件。</p>
+                <h2 className="text-lg font-semibold text-stone-950"><I18nText>删除图书记录</I18nText></h2>
+                <p className="mt-2 text-sm leading-6 text-stone-600">{i18nAttribute('删除《{value0}》的书库记录和系统生成文件。你可以选择是否同时删除监控或上传目录中的源文件。', { value0: book.title })}</p>
               </div>
-              <button type="button" onClick={() => setDangerActionOpen(false)} className="flex h-10 w-10 items-center justify-center rounded-xl text-stone-500 hover:bg-stone-100" aria-label="关闭"><X size={18} /></button>
+              <button type="button" onClick={() => setDangerActionOpen(false)} className="flex h-10 w-10 items-center justify-center rounded-xl text-stone-500 hover:bg-stone-100" aria-label={i18nAttribute("关闭")}><X size={18} /></button>
             </div>
             <label className={cn('mt-5 flex cursor-pointer gap-3 rounded-2xl border p-4 transition', deleteSource ? 'border-red-200 bg-red-50' : 'border-stone-200 bg-stone-50 hover:bg-stone-100')}>
               <input type="checkbox" checked={deleteSource} onChange={(event) => setDeleteSource(event.target.checked)} className="mt-0.5 h-4 w-4 accent-red-600" />
               <span>
-                <span className="block text-sm font-semibold text-stone-900">同步删除源文件</span>
-                <span className="mt-1 block text-xs leading-5 text-stone-500">源文件将从监控或上传目录中永久删除；该操作无法恢复。</span>
+                <span className="block text-sm font-semibold text-stone-900"><I18nText>同步删除源文件</I18nText></span>
+                <span className="mt-1 block text-xs leading-5 text-stone-500"><I18nText>源文件将从监控或上传目录中永久删除；该操作无法恢复。</I18nText></span>
               </span>
             </label>
             <div className="mt-5 flex justify-end gap-2">
-              <Button variant="secondary" className="!rounded-xl" onClick={() => setDangerActionOpen(false)}>取消</Button>
-              <Button variant="danger" loading={busyAction === 'delete'} loadingText="删除中" disabled={saving && busyAction !== 'delete'} icon={Trash2} onClick={() => void deleteRecord()} className="!rounded-xl">{deleteSource ? '删除记录和源文件' : '删除记录'}</Button>
+              <Button variant="secondary" className="!rounded-xl" onClick={() => setDangerActionOpen(false)}><I18nText>取消</I18nText></Button>
+              <Button variant="danger" loading={busyAction === 'delete'} loadingText={i18nAttribute("删除中")} disabled={saving && busyAction !== 'delete'} icon={Trash2} onClick={() => void deleteRecord()} className="!rounded-xl">{deleteSource ? i18nAttribute("删除记录和源文件") : i18nAttribute("删除记录")}</Button>
             </div>
           </div>
         </div>

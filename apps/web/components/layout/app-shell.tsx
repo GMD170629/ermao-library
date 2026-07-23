@@ -37,6 +37,8 @@ import { useToast } from '../ui/feedback';
 import { useAudioPlayback } from '../../features/audio/audio-playback-provider';
 import { isSettingsItemActive, settingsItems } from '../../features/settings/center/settings-secondary-nav';
 import { MOBILE_NAVIGATION_DRAWER_ID, MobileNavigationProvider } from './mobile-navigation';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 const primaryNavItems = [
   { href: '/', icon: Home, label: '首页' }
@@ -103,6 +105,7 @@ function isActive(pathname: string, currentSearch: URLSearchParams, href: string
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const { t: i18nAttribute } = useAttributeI18n();
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -601,8 +604,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         role="status"
         aria-live="polite"
       >
-        正在验证登录状态...
-      </div>
+        <I18nText>正在验证登录状态...</I18nText></div>
     );
   }
 
@@ -629,14 +631,13 @@ export function AppShell({ children }: { children: ReactNode }) {
         </Link>
 
         {isSettingsMode ? (
-          <nav aria-label="返回主导航" className="mt-8 space-y-1">
+          <nav aria-label={i18nAttribute("返回主导航")} className="mt-8 space-y-1">
             <Link
               href="/"
               className="flex min-h-11 items-center gap-3 rounded-xl px-3 text-[15px] font-medium text-[#34312E] transition hover:bg-black/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]"
             >
               <ArrowLeft size={20} strokeWidth={1.75} />
-              返回阅读
-            </Link>
+              <I18nText>返回阅读</I18nText></Link>
           </nav>
         ) : null}
 
@@ -653,8 +654,8 @@ export function AppShell({ children }: { children: ReactNode }) {
               }}
               onKeyDown={handleSearchKeyDown}
               className="min-w-0 flex-1 bg-transparent text-sm text-[#2A2927] outline-none placeholder:text-[#8C8883]"
-              placeholder="搜索图书"
-              aria-label="搜索本地书库"
+              placeholder={i18nAttribute("搜索图书")}
+              aria-label={i18nAttribute("搜索本地书库")}
               autoComplete="off"
               data-testid="top-search-input"
             />
@@ -663,7 +664,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           {searchFocused && librarySearch.trim() ? (
             <div data-testid="top-search-dropdown" className="absolute left-0 top-[calc(100%+8px)] z-40 w-[420px] overflow-hidden rounded-2xl border border-black/[0.07] bg-white shadow-[0_18px_55px_rgba(53,43,35,0.16)]">
               <div className="max-h-[360px] overflow-y-auto py-2">
-                {searchLoading ? <div className="px-4 py-5 text-sm text-[#77736F]">正在搜索书库...</div> : null}
+                {searchLoading ? <div className="px-4 py-5 text-sm text-[#77736F]"><I18nText>正在搜索书库...</I18nText></div> : null}
                 {!searchLoading && searchBooks.map((book, index) => (
                   <button
                     key={book.id}
@@ -681,13 +682,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                     )}
                   >
                     <Cover book={book} size="small" className="h-14 w-10 shrink-0 rounded-md shadow-sm" small />
-                    <span className="min-w-0 flex-1">
+                    <span data-i18n-skip className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-[#252321]">{book.title}</span>
                       <span className="mt-1 block truncate text-xs text-[#817C76]">{book.author} · {book.format}</span>
                     </span>
                   </button>
                 ))}
-                {!searchLoading && searchBooks.length === 0 ? <div className="px-4 py-5 text-sm text-[#77736F]">书库中没有匹配读物</div> : null}
+                {!searchLoading && searchBooks.length === 0 ? <div className="px-4 py-5 text-sm text-[#77736F]"><I18nText>书库中没有匹配读物</I18nText></div> : null}
               </div>
               <button
                 type="button"
@@ -700,8 +701,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                   searchActiveIndex === searchBooks.length ? 'bg-[#FDE9E2]' : 'bg-white hover:bg-[#FFF5F1] focus:bg-[#FFF5F1]'
                 )}
               >
-                <span className="truncate">查看“{librarySearch.trim()}”的全部结果</span>
-                <span className="shrink-0 text-xs text-[#A29D97]">{searchTotal} 本</span>
+                <span className="truncate">{i18nAttribute('查看“{value0}”的全部结果', { value0: librarySearch.trim() })}</span>
+                <span className="shrink-0 text-xs text-[#A29D97]">{searchTotal} <I18nText>本</I18nText></span>
               </button>
             </div>
           ) : null}
@@ -710,8 +711,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="mt-6 min-h-0 flex-1 overflow-y-auto pr-1">
           {isSettingsMode ? (
             <section>
-              <div className="mb-2 px-3 text-[13px] text-[#8A857F]">设置</div>
-              <nav aria-label="设置分类" className="space-y-1">
+              <div className="mb-2 px-3 text-[13px] text-[#8A857F]"><I18nText>设置</I18nText></div>
+              <nav aria-label={i18nAttribute("设置分类")} className="space-y-1">
                 {settingsItems.map(({ href, icon: Icon, label }) => {
                   const active = isSettingsItemActive(pathname, href);
                   return (
@@ -725,7 +726,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                       )}
                     >
                       <Icon size={20} strokeWidth={1.75} />
-                      <span className="truncate">{label}</span>
+                      <span className="truncate">{i18nAttribute(label)}</span>
                     </Link>
                   );
                 })}
@@ -742,13 +743,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                 )}
               >
                 <Icon size={20} strokeWidth={1.8} />
-                {label}
+                {i18nAttribute(label)}
               </Link>
             ))}
           </nav>
 
           <section className="mt-7">
-            <div className="mb-2 px-3 text-[13px] text-[#8A857F]">书库</div>
+            <div className="mb-2 px-3 text-[13px] text-[#8A857F]"><I18nText>书库</I18nText></div>
             <nav className="space-y-1">
               {libraryNavItems.map(({ href, icon: Icon, label }) => (
                 <Link
@@ -760,14 +761,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                   )}
                 >
                   <Icon size={20} strokeWidth={1.75} />
-                  {label}
+                  {i18nAttribute(label)}
                 </Link>
               ))}
             </nav>
           </section>
 
           <section className="mt-7">
-            <div className="mb-2 px-3 text-[13px] text-[#8A857F]">我的书架</div>
+            <div className="mb-2 px-3 text-[13px] text-[#8A857F]"><I18nText>我的书架</I18nText></div>
             <nav className="space-y-1">
               {shelves.map((shelf) => {
                 const href = `/shelves?shelf=${encodeURIComponent(shelf.id)}`;
@@ -781,7 +782,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     )}
                   >
                     <BookOpen size={20} strokeWidth={1.65} />
-                    <span className="truncate">{shelf.name}</span>
+                    <span data-i18n-skip className="truncate">{shelf.name}</span>
                   </Link>
                 );
               })}
@@ -793,16 +794,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                 )}
               >
                 <Plus size={20} strokeWidth={1.7} />
-                新建书架
-              </Link>
+                <I18nText>新建书架</I18nText></Link>
             </nav>
           </section></>}
         </div>
 
         <Link
           href="/settings"
-          aria-label="进入账户与设置"
-          title={user?.email || '账户与设置'}
+          aria-label={i18nAttribute("进入账户与设置")}
+          title={user?.email || i18nAttribute("账户与设置")}
           className={cn(
             'mt-3 flex min-h-[72px] w-full shrink-0 items-center gap-3 border-t border-black/[0.07] px-1 pt-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]',
             pathname.startsWith('/settings') ? 'text-[#D94A2E]' : 'text-[#302D29]'
@@ -813,15 +813,15 @@ export function AppShell({ children }: { children: ReactNode }) {
             src={withBasePath(user?.avatarUrl && !avatarFailed ? user.avatarUrl : DEFAULT_ACCOUNT_AVATAR_PATH)}
             width={46}
             height={46}
-            alt="账户头像"
+            alt={i18nAttribute("账户头像")}
             priority
             unoptimized={Boolean(user?.avatarUrl && !avatarFailed)}
             onError={() => setAvatarFailed(true)}
             className="h-[46px] w-[46px] shrink-0 rounded-full object-cover shadow-sm"
           />
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-semibold">{user?.name || '二毛'}</span>
-            <span className="mt-0.5 block truncate text-xs text-[#8A847E]">账户与设置</span>
+            <span className="block truncate text-sm font-semibold">{user?.name || i18nAttribute("二毛")}</span>
+            <span className="mt-0.5 block truncate text-xs text-[#8A847E]"><I18nText>账户与设置</I18nText></span>
           </span>
           <ChevronRight size={20} strokeWidth={1.7} className="shrink-0 text-[#77716B]" aria-hidden="true" />
         </Link>
@@ -845,7 +845,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           type="button"
           className="shuku-mobile-drawer-scrim absolute inset-0 bg-[#241F1C]/45 backdrop-blur-[1.5px]"
           onClick={() => closeMobileDrawer(true)}
-          aria-label="关闭导航菜单"
+          aria-label={i18nAttribute("关闭导航菜单")}
           tabIndex={mobileDrawerOpen ? 0 : -1}
         />
         <aside
@@ -855,7 +855,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           className="shuku-mobile-drawer-panel absolute inset-y-0 left-0 flex w-[min(82vw,320px)] touch-pan-y flex-col border-r border-black/[0.055] bg-[#F3F0EC] px-4 shadow-[22px_0_60px_rgba(41,31,25,0.20)]"
           role="dialog"
           aria-modal="true"
-          aria-label="主导航"
+          aria-label={i18nAttribute("主导航")}
           onPointerDown={handleDrawerPointerDown}
           onPointerUp={handleDrawerPointerUp}
           onPointerCancel={() => { drawerSwipeStartRef.current = null; }}
@@ -870,7 +870,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               type="button"
               onClick={() => closeMobileDrawer(true)}
               className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[13px] border border-black/[0.075] bg-white/45 text-[#5D5751] transition duration-200 hover:bg-white/80 hover:text-[#272421] active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]"
-              aria-label="关闭导航菜单"
+              aria-label={i18nAttribute("关闭导航菜单")}
             >
               <X size={22} strokeWidth={1.7} aria-hidden="true" />
             </button>
@@ -884,15 +884,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                 value={librarySearch}
                 onChange={(event) => setLibrarySearch(event.target.value)}
                 className="min-w-0 flex-1 bg-transparent text-[15px] text-[#2A2927] outline-none placeholder:text-[#8C8883]"
-                placeholder="搜索图书"
-                aria-label="搜索图书"
+                placeholder={i18nAttribute("搜索图书")}
+                aria-label={i18nAttribute("搜索图书")}
                 autoComplete="off"
               />
             </label>
           </form>
 
           <div className="mt-5 min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
-            <nav aria-label="主要页面" className="space-y-1">
+            <nav aria-label={i18nAttribute("主要页面")} className="space-y-1">
               {primaryNavItems.map(({ href, icon: Icon, label }) => (
                 <Link
                   key={`${href}-drawer`}
@@ -905,14 +905,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                   )}
                 >
                   <Icon size={21} strokeWidth={1.75} aria-hidden="true" />
-                  {label}
+                  {i18nAttribute(label)}
                 </Link>
               ))}
             </nav>
 
             <section className="mt-6">
-              <div className="mb-2 px-3.5 text-[13px] font-medium text-[#8A857F]">书库</div>
-              <nav aria-label="书库" className="space-y-1">
+              <div className="mb-2 px-3.5 text-[13px] font-medium text-[#8A857F]"><I18nText>书库</I18nText></div>
+              <nav aria-label={i18nAttribute("书库")} className="space-y-1">
                 {libraryNavItems.map(({ href, icon: Icon, label }) => (
                   <Link
                     key={`${href}-drawer`}
@@ -925,15 +925,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                     )}
                   >
                     <Icon size={21} strokeWidth={1.75} aria-hidden="true" />
-                    {label}
+                    {i18nAttribute(label)}
                   </Link>
                 ))}
               </nav>
             </section>
 
             <section className="mt-6 border-t border-black/[0.065] pt-5">
-              <div className="mb-2 px-3.5 text-[13px] font-medium text-[#8A857F]">我的书架</div>
-              <nav aria-label="我的书架" className="space-y-1">
+              <div className="mb-2 px-3.5 text-[13px] font-medium text-[#8A857F]"><I18nText>我的书架</I18nText></div>
+              <nav aria-label={i18nAttribute("我的书架")} className="space-y-1">
                 {shelves.map((shelf) => {
                   const href = `/shelves?shelf=${encodeURIComponent(shelf.id)}`;
                   return (
@@ -948,7 +948,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                       )}
                     >
                       <BookOpen size={21} strokeWidth={1.7} aria-hidden="true" />
-                      <span className="truncate">{shelf.name}</span>
+                      <span data-i18n-skip className="truncate">{shelf.name}</span>
                     </Link>
                   );
                 })}
@@ -958,8 +958,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   className="flex min-h-12 items-center gap-3 rounded-[14px] px-3.5 text-[15px] text-[#69635D] transition duration-200 hover:bg-black/[0.045] active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]"
                 >
                   <Plus size={21} strokeWidth={1.75} aria-hidden="true" />
-                  新建书架
-                </Link>
+                  <I18nText>新建书架</I18nText></Link>
               </nav>
             </section>
           </div>
@@ -978,14 +977,14 @@ export function AppShell({ children }: { children: ReactNode }) {
               src={withBasePath(user?.avatarUrl && !avatarFailed ? user.avatarUrl : DEFAULT_ACCOUNT_AVATAR_PATH)}
               width={46}
               height={46}
-              alt="账户头像"
+              alt={i18nAttribute("账户头像")}
               unoptimized={Boolean(user?.avatarUrl && !avatarFailed)}
               onError={() => setAvatarFailed(true)}
               className="h-[46px] w-[46px] shrink-0 rounded-full object-cover shadow-sm"
             />
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-semibold">{user?.name || '二毛'}</span>
-              <span className="mt-0.5 block truncate text-xs text-[#8A847E]">账户与设置</span>
+              <span className="block truncate text-sm font-semibold">{user?.name || i18nAttribute("二毛")}</span>
+              <span className="mt-0.5 block truncate text-xs text-[#8A847E]"><I18nText>账户与设置</I18nText></span>
             </span>
             <ChevronRight size={20} strokeWidth={1.7} className="shrink-0 text-[#77716B]" aria-hidden="true" />
           </Link>

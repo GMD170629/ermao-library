@@ -9,6 +9,8 @@ import { Select } from '../../../components/ui/select';
 import { KindleSendQueuePage } from '../../kindle/kindle-send-queue-page';
 import { SettingsCenterShell } from './settings-center-shell';
 import { SettingsTabs } from './settings-tabs';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type EmailSettings = {
   smtp: {
@@ -42,6 +44,7 @@ function inputClassName() {
 }
 
 export function EmailSettingsPage() {
+  const { t: i18nAttribute } = useAttributeI18n();
   const searchParams = useSearchParams();
   const requested = searchParams.get('tab');
   const active = requested === 'kindle' || requested === 'queue' ? requested : 'smtp';
@@ -136,7 +139,7 @@ export function EmailSettingsPage() {
   }
 
   return (
-    <SettingsCenterShell title="邮件与 Kindle" description="配置 SMTP 发件服务、Kindle 收件邮箱并查看图书发送状态。">
+    <SettingsCenterShell title={i18nAttribute("邮件与 Kindle")} description={i18nAttribute("配置 SMTP 发件服务、Kindle 收件邮箱并查看图书发送状态。")}>
       <SettingsTabs active={active} tabs={[
         { key: 'smtp', label: 'SMTP 设置', href: '/settings/email?tab=smtp' },
         { key: 'kindle', label: 'Kindle 设置', href: '/settings/email?tab=kindle' },
@@ -148,44 +151,44 @@ export function EmailSettingsPage() {
           <section className="max-w-4xl rounded-[26px] border border-[#E2DDD7] bg-white p-5 shadow-sm shadow-stone-900/[0.03] sm:p-6">
             <div className="flex items-start gap-3">
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FFF0EA] text-[#DD4729]"><MailCheck size={19} /></span>
-              <div><h3 className="text-lg font-semibold text-[#292724]">SMTP 发件服务</h3><p className="mt-1 text-sm leading-6 text-[#77716A]">支持 STARTTLS、SSL/TLS 和不加密连接。测试连接不会发送邮件。</p></div>
+              <div><h3 className="text-lg font-semibold text-[#292724]"><I18nText>SMTP 发件服务</I18nText></h3><p className="mt-1 text-sm leading-6 text-[#77716A]"><I18nText>支持 STARTTLS、SSL/TLS 和不加密连接。测试连接不会发送邮件。</I18nText></p></div>
             </div>
             <div className="mt-6 grid gap-5 md:grid-cols-2">
-              <label className="text-sm font-medium text-[#5E5953]">SMTP 主机<input disabled={loading} value={smtp.host} onChange={(event) => setSmtp({ ...smtp, host: event.target.value })} placeholder="smtp.example.com" className={inputClassName()} /></label>
-              <label className="text-sm font-medium text-[#5E5953]">端口<input disabled={loading} type="number" min={1} max={65535} value={smtp.port} onChange={(event) => setSmtp({ ...smtp, port: Number(event.target.value) })} className={inputClassName()} /></label>
+              <label className="text-sm font-medium text-[#5E5953]"><I18nText>SMTP 主机</I18nText><input disabled={loading} value={smtp.host} onChange={(event) => setSmtp({ ...smtp, host: event.target.value })} placeholder="smtp.example.com" className={inputClassName()} /></label>
+              <label className="text-sm font-medium text-[#5E5953]"><I18nText>端口</I18nText><input disabled={loading} type="number" min={1} max={65535} value={smtp.port} onChange={(event) => setSmtp({ ...smtp, port: Number(event.target.value) })} className={inputClassName()} /></label>
               <div className="text-sm font-medium text-[#5E5953]">
-                <div>安全模式</div>
+                <div><I18nText>安全模式</I18nText></div>
                 <Select
                   disabled={loading}
                   value={smtp.security}
                   options={securityOptions}
                   onChange={(security) => setSmtp({ ...smtp, security })}
-                  ariaLabel="SMTP 安全模式"
+                  ariaLabel={i18nAttribute("SMTP 安全模式")}
                   className="mt-2 w-full"
                   triggerClassName="h-11"
                 />
               </div>
-              <label className="text-sm font-medium text-[#5E5953]">附件大小上限（MB，可选）<input disabled={loading} type="number" min={1} max={1000} value={smtp.maxAttachmentMb ?? ''} onChange={(event) => setSmtp({ ...smtp, maxAttachmentMb: event.target.value ? Number(event.target.value) : null })} placeholder="留空则由邮件服务商限制" className={inputClassName()} /></label>
-              <label className="text-sm font-medium text-[#5E5953]">SMTP 用户名<input disabled={loading} value={smtp.username} onChange={(event) => setSmtp({ ...smtp, username: event.target.value })} autoComplete="username" placeholder="无需认证时留空" className={inputClassName()} /></label>
-              <label className="text-sm font-medium text-[#5E5953]">SMTP 密码<input disabled={loading || clearPassword} value={smtp.password} onChange={(event) => { setSmtp({ ...smtp, password: event.target.value }); setClearPassword(false); }} type="password" autoComplete="new-password" placeholder={settings.smtp.passwordConfigured ? '已配置，留空表示不修改' : '无需认证时留空'} className={inputClassName()} /></label>
-              <label className="text-sm font-medium text-[#5E5953]">发件邮箱<input disabled={loading} value={smtp.fromEmail} onChange={(event) => setSmtp({ ...smtp, fromEmail: event.target.value })} type="email" placeholder="reader@example.com" className={inputClassName()} /></label>
-              <label className="text-sm font-medium text-[#5E5953]">发件名称<input disabled={loading} value={smtp.fromName} onChange={(event) => setSmtp({ ...smtp, fromName: event.target.value })} placeholder="二毛图书" className={inputClassName()} /></label>
+              <label className="text-sm font-medium text-[#5E5953]"><I18nText>附件大小上限（MB，可选）</I18nText><input disabled={loading} type="number" min={1} max={1000} value={smtp.maxAttachmentMb ?? ''} onChange={(event) => setSmtp({ ...smtp, maxAttachmentMb: event.target.value ? Number(event.target.value) : null })} placeholder={i18nAttribute("留空则由邮件服务商限制")} className={inputClassName()} /></label>
+              <label className="text-sm font-medium text-[#5E5953]"><I18nText>SMTP 用户名</I18nText><input disabled={loading} value={smtp.username} onChange={(event) => setSmtp({ ...smtp, username: event.target.value })} autoComplete="username" placeholder={i18nAttribute("无需认证时留空")} className={inputClassName()} /></label>
+              <label className="text-sm font-medium text-[#5E5953]"><I18nText>SMTP 密码</I18nText><input disabled={loading || clearPassword} value={smtp.password} onChange={(event) => { setSmtp({ ...smtp, password: event.target.value }); setClearPassword(false); }} type="password" autoComplete="new-password" placeholder={settings.smtp.passwordConfigured ? i18nAttribute("已配置，留空表示不修改") : i18nAttribute("无需认证时留空")} className={inputClassName()} /></label>
+              <label className="text-sm font-medium text-[#5E5953]"><I18nText>发件邮箱</I18nText><input disabled={loading} value={smtp.fromEmail} onChange={(event) => setSmtp({ ...smtp, fromEmail: event.target.value })} type="email" placeholder="reader@example.com" className={inputClassName()} /></label>
+              <label className="text-sm font-medium text-[#5E5953]"><I18nText>发件名称</I18nText><input disabled={loading} value={smtp.fromName} onChange={(event) => setSmtp({ ...smtp, fromName: event.target.value })} placeholder={i18nAttribute("二毛图书")} className={inputClassName()} /></label>
             </div>
             {settings.smtp.passwordConfigured ? (
-              <button type="button" onClick={() => { setClearPassword((value) => !value); setSmtp({ ...smtp, password: '' }); }} className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-[#A34A36] hover:text-[#D94322]"><Trash2 size={15} />{clearPassword ? '取消清除 SMTP 密码' : '保存时清除 SMTP 密码'}</button>
+              <button type="button" onClick={() => { setClearPassword((value) => !value); setSmtp({ ...smtp, password: '' }); }} className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-[#A34A36] hover:text-[#D94322]"><Trash2 size={15} />{clearPassword ? i18nAttribute("取消清除 SMTP 密码") : i18nAttribute("保存时清除 SMTP 密码")}</button>
             ) : null}
-            {smtp.security === 'none' ? <div className="mt-5 flex items-start gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-700"><ShieldCheck size={17} className="mt-0.5 shrink-0" />当前连接不会加密，仅应在可信内网邮件服务器中使用。</div> : null}
+            {smtp.security === 'none' ? <div className="mt-5 flex items-start gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-700"><ShieldCheck size={17} className="mt-0.5 shrink-0" /><I18nText>当前连接不会加密，仅应在可信内网邮件服务器中使用。</I18nText></div> : null}
             <div className="mt-6 flex flex-wrap justify-end gap-3">
-              <Button variant="secondary" icon={KeyRound} loading={busy === 'test-smtp'} loadingText="测试中" onClick={() => void testConnection()}>测试连接</Button>
-              <Button icon={Save} loading={busy === 'save-smtp'} loadingText="保存中" onClick={() => void saveSmtp()}>保存 SMTP</Button>
+              <Button variant="secondary" icon={KeyRound} loading={busy === 'test-smtp'} loadingText={i18nAttribute("测试中")} onClick={() => void testConnection()}><I18nText>测试连接</I18nText></Button>
+              <Button icon={Save} loading={busy === 'save-smtp'} loadingText={i18nAttribute("保存中")} onClick={() => void saveSmtp()}><I18nText>保存 SMTP</I18nText></Button>
             </div>
           </section>
         ) : active === 'kindle' ? (
           <section className="max-w-3xl rounded-[26px] border border-[#E2DDD7] bg-white p-5 shadow-sm shadow-stone-900/[0.03] sm:p-6">
-            <div className="flex items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FFF0EA] text-[#DD4729]"><Send size={19} /></span><div><h3 className="text-lg font-semibold text-[#292724]">Kindle 收件邮箱</h3><p className="mt-1 text-sm leading-6 text-[#77716A]">图书会以单个 EPUB 或 PDF 附件发送到这个地址。</p></div></div>
-            <label className="mt-6 block text-sm font-medium text-[#5E5953]">Kindle 邮箱<input disabled={loading} value={kindleEmail} onChange={(event) => setKindleEmail(event.target.value)} type="email" placeholder="name_123@kindle.com" className={inputClassName()} /></label>
-            <div className="mt-5 rounded-2xl bg-[#F8F6F3] px-4 py-3 text-sm leading-6 text-[#706A63]">当前发件地址：<span className="font-medium text-[#3F3B37]">{settings.smtp.fromEmail || '尚未配置'}</span>。请确保该地址可以向你的 Kindle 邮箱发送个人文档。</div>
-            <div className="mt-6 flex justify-end"><Button icon={Save} loading={busy === 'save-kindle'} loadingText="保存中" onClick={() => void saveKindle()}>保存 Kindle 邮箱</Button></div>
+            <div className="flex items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FFF0EA] text-[#DD4729]"><Send size={19} /></span><div><h3 className="text-lg font-semibold text-[#292724]"><I18nText>Kindle 收件邮箱</I18nText></h3><p className="mt-1 text-sm leading-6 text-[#77716A]"><I18nText>图书会以单个 EPUB 或 PDF 附件发送到这个地址。</I18nText></p></div></div>
+            <label className="mt-6 block text-sm font-medium text-[#5E5953]"><I18nText>Kindle 邮箱</I18nText><input disabled={loading} value={kindleEmail} onChange={(event) => setKindleEmail(event.target.value)} type="email" placeholder="name_123@kindle.com" className={inputClassName()} /></label>
+            <div className="mt-5 rounded-2xl bg-[#F8F6F3] px-4 py-3 text-sm leading-6 text-[#706A63]"><I18nText>当前发件地址：</I18nText><span className="font-medium text-[#3F3B37]">{settings.smtp.fromEmail || i18nAttribute("尚未配置")}</span><I18nText>。请确保该地址可以向你的 Kindle 邮箱发送个人文档。</I18nText></div>
+            <div className="mt-6 flex justify-end"><Button icon={Save} loading={busy === 'save-kindle'} loadingText={i18nAttribute("保存中")} onClick={() => void saveKindle()}><I18nText>保存 Kindle 邮箱</I18nText></Button></div>
           </section>
         ) : <KindleSendQueuePage embedded />}
       </div>

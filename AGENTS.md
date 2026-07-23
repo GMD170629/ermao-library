@@ -23,6 +23,20 @@ Example: if the user says EPUB left/right page turning and swipe page turning do
 
 Use this same "reported symptom -> expected capability set -> implementation audit" pattern for other feature areas such as upload/import, search/filtering, library organization, settings, progress sync, offline/PWA behavior, and mobile layouts.
 
+## Internationalization Completeness
+
+The application has complete internationalization support for `zh-CN` and `en-US`. Treat English adaptation as part of the definition of done for every new feature and user-visible change.
+
+For every implementation:
+
+1. Audit all user-visible text, including headings, buttons, form labels, placeholders, validation messages, empty states, errors, toasts, confirmation dialogs, accessibility labels, page metadata, PWA content, emails, downloaded/generated documents, and backend-generated status messages.
+2. Use the shared Web i18n APIs in `apps/web/i18n` instead of shipping untranslated UI literals. Add both the Chinese source message and a deliberate English translation to the locale catalogs.
+3. Preserve interpolation placeholders exactly across locales. Dynamic values such as book titles, authors, tags, series names, shelf names, file paths, and other user-provided content must remain unchanged and must not be treated as translatable application copy.
+4. Use the active locale for dates, times, numbers, percentages, and relative-time formatting. Do not introduce hard-coded `zh-CN` formatting in user-facing features.
+5. Keep backend and non-DOM surfaces in scope. When a feature adds API errors, system events, email content, PWA metadata, service-worker responses, or generated files, provide an English-compatible message contract or localized output as appropriate.
+6. Update or add tests for both locales when behavior, metadata, interpolation, or generated content changes.
+7. Run `pnpm i18n:check` from `apps/web` before considering the work complete. Do not ship with missing catalog entries, Chinese text remaining in the English catalog, stale keys, or mismatched placeholders.
+
 ## EPUB.js Dependency Boundary
 
 Treat EPUB.js as an immutable third-party dependency:

@@ -11,6 +11,7 @@ const publicPaths = [
   '/api/auth/capabilities',
   '/api/auth/password-reset/request',
   '/api/auth/password-reset/confirm',
+  '/api/app-config',
   '/api/health'
 ];
 
@@ -28,7 +29,7 @@ export function middleware(request: NextRequest) {
   const hasSession = Boolean(request.cookies.get('shuku_session')?.value);
   if (!hasSession) {
     if (isApi) {
-      return NextResponse.json({ ok: false, error: { message: '未登录' } }, { status: 401 });
+      return NextResponse.json({ ok: false, error: { code: 'UNAUTHORIZED', message: '未登录' } }, { status: 401 });
     }
     const login = request.nextUrl.clone();
     const next = `${pathname}${request.nextUrl.search}`;

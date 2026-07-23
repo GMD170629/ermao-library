@@ -1,15 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { buildWebManifest } from './manifest';
 
-type Manifest = {
-  start_url?: string;
-  shortcuts?: Array<{ url?: string }>;
-};
-
-const manifest = JSON.parse(
-  readFileSync(new URL('../../public/manifest.webmanifest', import.meta.url), 'utf8')
-) as Manifest;
+const manifest = buildWebManifest('zh-CN');
 
 test('installed PWA launches the responsive web application', () => {
   assert.equal(manifest.start_url, '.');
@@ -22,4 +15,16 @@ test('PWA shortcuts point to normal web routes', () => {
     'library?upload=1',
     '.'
   ]);
+});
+
+test('PWA manifest localizes install metadata and shortcuts', () => {
+  const english = buildWebManifest('en-US');
+  assert.equal(english.lang, 'en-US');
+  assert.equal(english.name, 'Ermao Books');
+  assert.deepEqual(english.shortcuts.map((shortcut) => shortcut.name), [
+    'Open Library',
+    'Upload Books',
+    'Continue'
+  ]);
+  assert.equal(JSON.stringify(english).match(/[\u3400-\u9fff]/u), null);
 });

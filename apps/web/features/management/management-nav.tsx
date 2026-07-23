@@ -4,6 +4,7 @@ import { Activity, LayoutDashboard } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '../../components/ui/cn';
+import { useI18n } from '../../i18n/provider';
 
 const items = [
   { href: '/management', label: '概览', icon: LayoutDashboard },
@@ -12,6 +13,7 @@ const items = [
 
 export function ManagementNav() {
   const pathname = usePathname();
+  const { t } = useI18n();
   return (
     <nav className="flex flex-wrap gap-2">
       {items.map(({ href, label, icon: Icon }) => {
@@ -26,7 +28,7 @@ export function ManagementNav() {
             )}
           >
             <Icon size={16} />
-            {label}
+            {t(label)}
           </Link>
         );
       })}

@@ -1,5 +1,8 @@
+'use client';
+
 import Link from 'next/link';
 import { cn } from '../../../components/ui/cn';
+import { useI18n } from '../../../i18n/provider';
 
 export type SettingsTab = {
   key: string;
@@ -9,8 +12,9 @@ export type SettingsTab = {
 };
 
 export function SettingsTabs({ tabs, active }: { tabs: SettingsTab[]; active: string }) {
+  const { t } = useI18n();
   return (
-    <nav aria-label="页面分区" className="flex flex-wrap gap-7 border-b border-[#DEDAD4]">
+    <nav aria-label={t('页面分区')} className="flex flex-wrap gap-7 border-b border-[#DEDAD4]">
       {tabs.map((tab) => (
         <Link
           key={tab.key}
@@ -21,7 +25,7 @@ export function SettingsTabs({ tabs, active }: { tabs: SettingsTab[]; active: st
             active === tab.key ? 'text-[#ED4D2D]' : 'text-[#716B64] hover:text-[#2C2926]'
           )}
         >
-          {tab.label}
+          {t(tab.label)}
           {typeof tab.count === 'number' ? <span className="text-xs">{tab.count}</span> : null}
           {active === tab.key ? <span className="absolute inset-x-0 bottom-[-1px] h-0.5 rounded-full bg-[#ED4D2D]" /> : null}
         </Link>

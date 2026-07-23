@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
+import { I18nText } from '../../i18n/provider';
 import { cn } from './cn';
 
 type Tone = 'blue' | 'green' | 'amber' | 'slate';
@@ -29,10 +30,10 @@ export function StatCard({
         <div className={cn('flex h-10 w-10 items-center justify-center rounded-2xl', colors[tone])}>
           <Icon size={20} />
         </div>
-        <span className="text-xs text-slate-400">{hint}</span>
+        <span className="text-xs text-slate-400"><I18nText>{hint}</I18nText></span>
       </div>
       <div className="mt-4 text-2xl font-semibold tracking-tight text-slate-950">{value}</div>
-      <div className="mt-1 text-sm text-slate-500">{label}</div>
+      <div className="mt-1 text-sm text-slate-500"><I18nText>{label}</I18nText></div>
     </div>
   );
 }

@@ -6,6 +6,8 @@ import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { useToast } from '../../components/ui/feedback';
 import { Select } from '../../components/ui/select';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type Kind = 'AUTHOR' | 'TAG' | 'SERIES' | 'PUBLISHER';
 type Category = { id: string; kind: Kind; name: string; aliases: string[]; bookCount: number };
@@ -22,6 +24,7 @@ async function payload<T>(response: Response, fallback: string) {
 }
 
 export function ClassificationManagementPanel() {
+  const { t: i18nAttribute } = useAttributeI18n();
   const [kind, setKind] = useState<Kind>('AUTHOR');
   const [items, setItems] = useState<Category[]>([]);
   const [selectedItems, setSelectedItems] = useState<Category[]>([]);
@@ -111,39 +114,39 @@ export function ClassificationManagementPanel() {
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-black/[0.07] bg-white/60 p-5">
-        <h2 className="text-base font-semibold text-[#2C2926]">分类治理</h2>
-        <p className="mt-1 text-sm leading-6 text-[#817B75]">统一作者、标签、丛书和出版社命名。重命名与合并会同步更新作品和版本元数据。</p>
+        <h2 className="text-base font-semibold text-[#2C2926]"><I18nText>分类治理</I18nText></h2>
+        <p className="mt-1 text-sm leading-6 text-[#817B75]"><I18nText>统一作者、标签、丛书和出版社命名。重命名与合并会同步更新作品和版本元数据。</I18nText></p>
         <div className="mt-4 flex flex-wrap gap-2">
-          {tabs.map((tab) => <button key={tab.key} type="button" onClick={() => changeKind(tab.key)} className={cn('rounded-xl px-4 py-2 text-sm transition', kind === tab.key ? 'bg-[#F9DED4] font-medium text-[#D7462B]' : 'bg-black/[0.035] text-[#6F6963] hover:bg-black/[0.06]')}>{tab.label}</button>)}
+          {tabs.map((tab) => <button key={tab.key} type="button" onClick={() => changeKind(tab.key)} className={cn('rounded-xl px-4 py-2 text-sm transition', kind === tab.key ? 'bg-[#F9DED4] font-medium text-[#D7462B]' : 'bg-black/[0.035] text-[#6F6963] hover:bg-black/[0.06]')}>{i18nAttribute(tab.label)}</button>)}
         </div>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <label className="flex h-11 min-w-[260px] items-center gap-2 rounded-xl border border-black/[0.09] bg-white px-3">
-          <Search size={16} className="text-[#8A847E]" /><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); setSelectedItems([]); }} placeholder={`搜索${tabs.find((tab) => tab.key === kind)?.label}`} className="min-w-0 flex-1 bg-transparent text-sm outline-none" />
+          <Search size={16} className="text-[#8A847E]" /><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); setSelectedItems([]); }} placeholder={i18nAttribute("搜索{value0}", { value0: tabs.find((tab) => tab.key === kind)?.label })} className="min-w-0 flex-1 bg-transparent text-sm outline-none" />
         </label>
-        <Button icon={GitMerge} disabled={selectedItems.length < 2} onClick={openMerge}>合并所选（{selectedItems.length}）</Button>
+        <Button icon={GitMerge} disabled={selectedItems.length < 2} onClick={openMerge}><I18nText>合并所选（</I18nText>{selectedItems.length}）</Button>
       </div>
       {error ? <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
       <div className="overflow-hidden rounded-2xl border border-black/[0.07] bg-white/65">
-        {loading ? <div className="flex min-h-44 items-center justify-center text-sm text-[#817B75]"><Loader2 size={17} className="mr-2 animate-spin" />正在读取分类…</div> : items.length === 0 ? <div className="flex min-h-44 items-center justify-center text-sm text-[#817B75]">没有匹配的分类</div> : (
+        {loading ? <div className="flex min-h-44 items-center justify-center text-sm text-[#817B75]"><Loader2 size={17} className="mr-2 animate-spin" /><I18nText>正在读取分类…</I18nText></div> : items.length === 0 ? <div className="flex min-h-44 items-center justify-center text-sm text-[#817B75]"><I18nText>没有匹配的分类</I18nText></div> : (
           <div className="divide-y divide-black/[0.055]">
             {items.map((item) => <div key={item.id} className="flex items-center gap-3 px-4 py-3.5">
               <input type="checkbox" checked={selectedIds.includes(item.id)} onChange={(event) => setSelectedItems((current) => event.target.checked ? [...current.filter((selectedItem) => selectedItem.id !== item.id), item] : current.filter((selectedItem) => selectedItem.id !== item.id))} className="h-4 w-4 accent-[#EF4D2F]" />
-              <div className="min-w-0 flex-1"><div className="font-medium text-[#34312E]">{item.name}</div>{item.aliases.length ? <div className="mt-0.5 truncate text-xs text-[#948E88]">曾用名：{item.aliases.join('、')}</div> : null}</div>
-              <div className="text-sm tabular-nums text-[#817B75]">{item.bookCount} 本</div>
-              <Button variant="ghost" icon={Edit3} className="px-3" onClick={() => { setRenameItem(item); setRenameValue(item.name); }}>重命名</Button>
+              <div className="min-w-0 flex-1"><div className="font-medium text-[#34312E]">{item.name}</div>{item.aliases.length ? <div className="mt-0.5 truncate text-xs text-[#948E88]"><I18nText>曾用名：</I18nText>{item.aliases.join('、')}</div> : null}</div>
+              <div className="text-sm tabular-nums text-[#817B75]">{item.bookCount} <I18nText>本</I18nText></div>
+              <Button variant="ghost" icon={Edit3} className="px-3" onClick={() => { setRenameItem(item); setRenameValue(item.name); }}><I18nText>重命名</I18nText></Button>
             </div>)}
           </div>
         )}
         {!loading && total > 0 ? (
           <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-black/[0.07] px-4 py-3 text-sm text-[#77716A]">
             <div className="flex items-center gap-3">
-              <span>共 {total} 项</span>
+              <span><I18nText>共 </I18nText>{total} <I18nText>项</I18nText></span>
               <Select
                 value={pageSize}
                 onChange={(value) => { setPageSize(value); setPage(1); }}
-                ariaLabel="每页显示数量"
+                ariaLabel={i18nAttribute("每页显示数量")}
                 options={[
                   { value: '20', label: '每页 20 项' },
                   { value: '50', label: '每页 50 项' },
@@ -154,29 +157,29 @@ export function ClassificationManagementPanel() {
                 className="min-w-[118px]"
               />
             </div>
-            <nav className="flex items-center gap-2" aria-label="分类治理分页">
-              <button type="button" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white transition hover:bg-[#F7F4F0] disabled:opacity-40" aria-label="上一页"><ChevronLeft size={16} /></button>
+            <nav className="flex items-center gap-2" aria-label={i18nAttribute("分类治理分页")}>
+              <button type="button" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white transition hover:bg-[#F7F4F0] disabled:opacity-40" aria-label={i18nAttribute("上一页")}><ChevronLeft size={16} /></button>
               <span className="min-w-16 text-center text-[#4F4A45]">{page} / {totalPages}</span>
-              <button type="button" disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white transition hover:bg-[#F7F4F0] disabled:opacity-40" aria-label="下一页"><ChevronRight size={16} /></button>
+              <button type="button" disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white transition hover:bg-[#F7F4F0] disabled:opacity-40" aria-label={i18nAttribute("下一页")}><ChevronRight size={16} /></button>
             </nav>
           </footer>
         ) : null}
       </div>
 
-      {renameItem ? <Modal title={`重命名“${renameItem.name}”`} onClose={() => setRenameItem(null)}>
+      {renameItem ? <Modal title={i18nAttribute("重命名“{value0}”", { value0: renameItem.name })} onClose={() => setRenameItem(null)}>
         <input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void rename(); }} className="h-11 w-full rounded-xl border border-black/[0.1] bg-white px-4 outline-none focus:border-[#E9A18D]" />
-        <div className="mt-5 flex justify-end gap-2"><Button variant="secondary" onClick={() => setRenameItem(null)}>取消</Button><Button loading={saving} onClick={() => void rename()}>保存</Button></div>
+        <div className="mt-5 flex justify-end gap-2"><Button variant="secondary" onClick={() => setRenameItem(null)}><I18nText>取消</I18nText></Button><Button loading={saving} onClick={() => void rename()}><I18nText>保存</I18nText></Button></div>
       </Modal> : null}
 
-      {mergeOpen ? <Modal title={`合并 ${selectedItems.length} 个分类`} onClose={() => setMergeOpen(false)}>
-        <p className="mb-4 text-sm leading-6 text-[#746E68]">选择保留的规范名称，其余名称会作为别名保留，关联作品不会丢失。</p>
-        <Select value={targetId} options={selectedItems.map((item) => ({ value: item.id, label: `${item.name}（${item.bookCount} 本）` }))} onChange={setTargetId} ariaLabel="保留的分类名称" className="w-full" />
-        <div className="mt-5 flex justify-end gap-2"><Button variant="secondary" onClick={() => setMergeOpen(false)}>取消</Button><Button loading={saving} icon={GitMerge} onClick={() => void merge()}>确认合并</Button></div>
+      {mergeOpen ? <Modal title={i18nAttribute("合并 {value0} 个分类", { value0: selectedItems.length })} onClose={() => setMergeOpen(false)}>
+        <p className="mb-4 text-sm leading-6 text-[#746E68]"><I18nText>选择保留的规范名称，其余名称会作为别名保留，关联作品不会丢失。</I18nText></p>
+        <Select value={targetId} options={selectedItems.map((item) => ({ value: item.id, label: `${item.name}（${item.bookCount} 本）`, translate: false }))} onChange={setTargetId} ariaLabel={i18nAttribute("保留的分类名称")} className="w-full" />
+        <div className="mt-5 flex justify-end gap-2"><Button variant="secondary" onClick={() => setMergeOpen(false)}><I18nText>取消</I18nText></Button><Button loading={saving} icon={GitMerge} onClick={() => void merge()}><I18nText>确认合并</I18nText></Button></div>
       </Modal> : null}
     </div>
   );
 }
 
 function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
-  return <div className="fixed inset-0 z-[90] flex items-end justify-center bg-[#241F1C]/35 p-0 backdrop-blur-[2px] md:items-center md:p-6" role="dialog" aria-modal="true"><div className="w-full max-w-md rounded-t-3xl bg-[#FFFEFC] p-6 shadow-2xl md:rounded-3xl"><div className="mb-5 flex items-center justify-between"><h3 className="text-lg font-semibold text-[#2E2A27]">{title}</h3><button type="button" onClick={onClose} className="text-sm text-[#817B75]">关闭</button></div>{children}</div></div>;
+  return <div className="fixed inset-0 z-[90] flex items-end justify-center bg-[#241F1C]/35 p-0 backdrop-blur-[2px] md:items-center md:p-6" role="dialog" aria-modal="true"><div className="w-full max-w-md rounded-t-3xl bg-[#FFFEFC] p-6 shadow-2xl md:rounded-3xl"><div className="mb-5 flex items-center justify-between"><h3 className="text-lg font-semibold text-[#2E2A27]">{title}</h3><button type="button" onClick={onClose} className="text-sm text-[#817B75]"><I18nText>关闭</I18nText></button></div>{children}</div></div>;
 }

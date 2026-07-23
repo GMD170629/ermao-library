@@ -3,6 +3,8 @@
 import { ChevronDown, ChevronRight, FolderOpen, RotateCcw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { cn } from '../ui/cn';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useExpressionI18n } from '@/i18n/provider';
 
 type MonitorFolder = {
   id: string;
@@ -75,6 +77,7 @@ export function TargetDirectoryPicker({
   onStatusChange?: (status: TargetDirectoryStatus) => void;
   className?: string;
 }) {
+  const { t: i18nExpression } = useExpressionI18n();
   const [open, setOpen] = useState(false);
   const [monitorRoot, setMonitorRoot] = useState('');
   const [folders, setFolders] = useState<MonitorFolder[]>([]);
@@ -180,7 +183,7 @@ export function TargetDirectoryPicker({
   return (
     <div ref={rootRef} className={cn('relative', className)}>
       <label className="text-sm text-slate-600">
-        {label}
+        {i18nExpression(label)}
         <button
           type="button"
           onClick={() => setOpen((current) => !current)}
@@ -198,18 +201,18 @@ export function TargetDirectoryPicker({
       <div className={cn('mt-2 text-xs leading-5', value ? (selectedAutoImport ? 'text-emerald-700' : 'text-amber-700') : showRequiredState ? 'text-red-600' : 'text-slate-500')}>
         {value
           ? processingMode === 'queue'
-            ? '上传文件会由后台自动处理并导入书库'
+            ? i18nExpression("上传文件会由后台自动处理并导入书库")
             : selectedAutoImport
-              ? '该目录会自动入库'
-              : '该目录未启用监控，仅保存文件'
+              ? i18nExpression("该目录会自动入库")
+              : i18nExpression("该目录未启用监控，仅保存文件")
           : requiredMessage}
       </div>
       {open ? (
         <div className="absolute left-0 right-0 top-full z-50 mt-2 rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-700 shadow-xl shadow-slate-200/60">
           <div className="mb-2 flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="font-medium text-slate-950">监控根目录</div>
-              <div className="truncate text-xs text-slate-500">{monitorRoot || '读取中'}</div>
+              <div className="font-medium text-slate-950"><I18nText>监控根目录</I18nText></div>
+              <div className="truncate text-xs text-slate-500">{monitorRoot || i18nExpression("读取中")}</div>
             </div>
             <button
               type="button"
@@ -217,8 +220,7 @@ export function TargetDirectoryPicker({
               className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50"
             >
               <RotateCcw size={14} />
-              刷新
-            </button>
+              <I18nText>刷新</I18nText></button>
           </div>
           <div className="max-h-72 overflow-auto rounded-xl bg-slate-50 p-2">
             {rootNode ? (
@@ -234,7 +236,7 @@ export function TargetDirectoryPicker({
                 onToggle={toggleDirectory}
               />
             ) : (
-              <div className="px-3 py-2 text-slate-500">{loadingPath ? '正在读取目录...' : '暂无可选目录'}</div>
+              <div className="px-3 py-2 text-slate-500">{loadingPath ? i18nExpression("正在读取目录...") : i18nExpression("暂无可选目录")}</div>
             )}
           </div>
           {treeError ? <div className="mt-2 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{treeError}</div> : null}
@@ -265,6 +267,7 @@ function TargetDirectoryNodeRow({
   onSelect: (path: string) => void;
   onToggle: (path: string) => void;
 }) {
+  const { t: i18nExpression } = useExpressionI18n();
   const isExpanded = Boolean(expanded[node.path]);
   const isSelected = selectedPath === node.path;
   const children = node.children ?? [];
@@ -277,7 +280,7 @@ function TargetDirectoryNodeRow({
           type="button"
           onClick={() => onToggle(node.path)}
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
-          aria-label={isExpanded ? '收起目录' : '展开目录'}
+          aria-label={isExpanded ? i18nExpression("收起目录") : i18nExpression("展开目录")}
         >
           <ChevronRight size={15} className={cn('transition', isExpanded && 'rotate-90')} />
         </button>
@@ -285,8 +288,8 @@ function TargetDirectoryNodeRow({
           <FolderOpen size={15} className="shrink-0" />
           <span className="truncate">{node.path}</span>
         </button>
-        {autoImport ? <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">自动入库</span> : null}
-        {loadingPath === node.path ? <span className="shrink-0 text-xs text-slate-400">读取中</span> : null}
+        {autoImport ? <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700"><I18nText>自动入库</I18nText></span> : null}
+        {loadingPath === node.path ? <span className="shrink-0 text-xs text-slate-400"><I18nText>读取中</I18nText></span> : null}
       </div>
       {isExpanded ? (
         <div>
@@ -306,7 +309,7 @@ function TargetDirectoryNodeRow({
                 onToggle={onToggle}
               />
             );
-          }) : <div className="px-3 py-1.5 text-xs text-slate-400" style={{ paddingLeft: `${42 + level * 18}px` }}>没有子目录</div>}
+          }) : <div className="px-3 py-1.5 text-xs text-slate-400" style={{ paddingLeft: `${42 + level * 18}px` }}><I18nText>没有子目录</I18nText></div>}
         </div>
       ) : null}
     </div>

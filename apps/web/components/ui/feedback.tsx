@@ -4,6 +4,8 @@ import { AlertTriangle, CheckCircle2, Info, X } from 'lucide-react';
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button } from './button';
 import { cn } from './cn';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type ToastTone = 'success' | 'error' | 'info';
 
@@ -52,6 +54,7 @@ const toastTone = {
 };
 
 export function FeedbackProvider({ children }: { children: ReactNode }) {
+  const { t: i18nAttribute } = useAttributeI18n();
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmOptions, setConfirmOptions] = useState<ConfirmOptions | null>(null);
   const [confirmInput, setConfirmInput] = useState('');
@@ -101,10 +104,10 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
             <div key={item.id} className={cn('flex gap-3 rounded-2xl border p-4 shadow-xl backdrop-blur', tone.className)}>
               <Icon size={18} className={cn('mt-0.5 shrink-0', tone.iconClassName)} />
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold">{item.title}</div>
-                {item.description ? <div className="mt-1 text-sm opacity-80">{item.description}</div> : null}
+                <div className="text-sm font-semibold">{i18nAttribute(item.title)}</div>
+                {item.description ? <div className="mt-1 text-sm opacity-80">{i18nAttribute(item.description)}</div> : null}
               </div>
-              <button type="button" onClick={() => removeToast(item.id)} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition hover:bg-white/60" aria-label="关闭提示">
+              <button type="button" onClick={() => removeToast(item.id)} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition hover:bg-white/60" aria-label={i18nAttribute("关闭提示")}>
                 <X size={15} />
               </button>
             </div>
@@ -112,21 +115,20 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
         })}
       </div>
       {confirmOptions ? (
-        <div className="fixed inset-0 z-[130] flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={confirmOptions.title}>
+        <div className="fixed inset-0 z-[130] flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={i18nAttribute(confirmOptions.title)}>
           <div className="w-full max-w-md rounded-t-3xl border border-slate-200 bg-white p-5 shadow-2xl md:rounded-3xl">
             <div className="flex items-start gap-3">
               <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl', confirmOptions.tone === 'danger' ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600')}>
                 {confirmOptions.tone === 'danger' ? <AlertTriangle size={20} /> : <Info size={20} />}
               </div>
               <div className="min-w-0">
-                <h2 className="text-base font-semibold text-slate-950">{confirmOptions.title}</h2>
-                {confirmOptions.description ? <p className="mt-2 text-sm leading-6 text-slate-600">{confirmOptions.description}</p> : null}
+                <h2 className="text-base font-semibold text-slate-950">{i18nAttribute(confirmOptions.title)}</h2>
+                {confirmOptions.description ? <p className="mt-2 text-sm leading-6 text-slate-600">{i18nAttribute(confirmOptions.description)}</p> : null}
               </div>
             </div>
             {confirmOptions.confirmationText ? (
               <label className="mt-5 block text-sm text-slate-600">
-                请输入 {confirmOptions.confirmationText} 确认
-                <input
+                <I18nText>请输入 </I18nText>{confirmOptions.confirmationText} <I18nText>确认</I18nText><input
                   value={confirmInput}
                   onChange={(event) => setConfirmInput(event.target.value)}
                   className="mt-2 h-11 w-full rounded-2xl border border-slate-200 px-4 text-slate-900 outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
@@ -135,9 +137,9 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
               </label>
             ) : null}
             <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <Button type="button" variant="secondary" onClick={() => closeConfirm(false)}>{confirmOptions.cancelLabel ?? '取消'}</Button>
+              <Button type="button" variant="secondary" onClick={() => closeConfirm(false)}>{i18nAttribute(confirmOptions.cancelLabel ?? '取消')}</Button>
               <Button type="button" variant={confirmOptions.tone === 'danger' ? 'danger' : 'primary'} disabled={!confirmationMatches} onClick={() => closeConfirm(true)}>
-                {confirmOptions.confirmLabel ?? '确认'}
+                {i18nAttribute(confirmOptions.confirmLabel ?? '确认')}
               </Button>
             </div>
           </div>

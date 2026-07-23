@@ -169,6 +169,12 @@ def test_enqueue_rejects_attachment_above_configured_limit(client, db_session, t
 
 def test_worker_submits_mime_message_and_logs_masked_recipient(client, db_session, test_settings, monkeypatch):
     _prepare(client, db_session, test_settings)
+    db_session.execute(text(
+        "INSERT INTO `SystemSetting` (`key`, `value`, `createdAt`, `updatedAt`) "
+        "VALUES ('language', 'en-US', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+        "ON CONFLICT (`key`) DO UPDATE SET `value` = excluded.`value`, `updatedAt` = excluded.`updatedAt`"
+    ))
+    db_session.commit()
     task = _enqueue(client)
     fake = FakeSmtp()
     monkeypatch.setattr(kindle_queue, "open_smtp_connection", lambda _config: fake)
@@ -181,7 +187,9 @@ def test_worker_submits_mime_message_and_logs_masked_recipient(client, db_sessio
     message = fake.messages[0]
     assert message["To"] == "reader_123@kindle.com"
     assert message["Subject"] == "Kindle Test Book"
+    assert "Ermao Books" in message["From"]
     assert message.get_content_maintype() == "multipart"
+    assert "has been sent to Kindle by Ermao Books" in message.get_body(preferencelist=("plain",)).get_content()
     assert message.get_payload()[-1].get_filename() == "book.epub"
     events = "\n".join(str(row[0]) for row in db_session.execute(text("SELECT `metadata` FROM `SystemEvent` WHERE `source` = 'kindle'")))
     assert "reader_123@kindle.com" not in events

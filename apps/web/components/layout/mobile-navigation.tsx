@@ -3,6 +3,7 @@
 import { Menu } from 'lucide-react';
 import { createContext, useContext, type ReactNode } from 'react';
 import { cn } from '../ui/cn';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 export const MOBILE_NAVIGATION_DRAWER_ID = 'mobile-navigation-drawer';
 
@@ -26,6 +27,7 @@ export function MobileNavigationProvider({
 }
 
 export function MobileNavigationTrigger({ className }: { className?: string }) {
+  const { t: i18nAttribute } = useAttributeI18n();
   const navigation = useContext(MobileNavigationContext);
   if (!navigation) return null;
 
@@ -38,7 +40,7 @@ export function MobileNavigationTrigger({ className }: { className?: string }) {
         navigation.open && 'bg-[#FCE5DE] text-[#D94A2E]',
         className
       )}
-      aria-label="打开导航菜单"
+      aria-label={i18nAttribute("打开导航菜单")}
       aria-controls={MOBILE_NAVIGATION_DRAWER_ID}
       aria-expanded={navigation.open}
     >

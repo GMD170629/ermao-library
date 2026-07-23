@@ -10,6 +10,8 @@ import { resolveActiveEpubNavigationIndex } from './epub-navigation';
 import { locationExtra, locationProgress, preferencesToReaderSettings, readerSettingsToPreferences } from './presentation';
 import { useReaderSession } from './use-reader-session';
 import { isReaderInteractiveAdapter, type ReaderAdapterInputIntent } from './adapters/reader-interaction';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type ReaderEngineRuntimeProps = {
   bootstrap: ReaderBootstrap;
@@ -62,6 +64,7 @@ export function ReaderEngineRuntime({
   onIndexProgress,
   onReady
 }: ReaderEngineRuntimeProps) {
+  const { t: i18nAttribute } = useAttributeI18n();
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
   const [adapter, setAdapter] = useState<ReaderAdapter | null>(null);
   const [adapterLoadError, setAdapterLoadError] = useState('');
@@ -349,7 +352,7 @@ export function ReaderEngineRuntime({
         shellEventsRef.current = events;
         return (
           <div className="relative h-full min-h-0 w-full overflow-hidden">
-            <div ref={setContainer} className="h-full min-h-0 w-full" aria-label={`${bootstrap.book.title} 阅读内容`} />
+            <div ref={setContainer} className="h-full min-h-0 w-full" aria-label={i18nAttribute("{value0} 阅读内容", { value0: bootstrap.book.title })} />
             {(!adapter
               || session.state.lifecycle === 'bootstrapping'
               || session.state.lifecycle === 'loading'
@@ -359,11 +362,11 @@ export function ReaderEngineRuntime({
                 <div className="text-sm">{phaseLabel(session.state.phase, bootstrap.readerType)}</div>
                 {session.state.phase === 'generating-pagination' ? (
                   <div className="w-full max-w-sm">
-                    <p className="text-xs opacity-70">首次打开需要完成一次，之后将直接进入阅读。</p>
+                    <p className="text-xs opacity-70"><I18nText>首次打开需要完成一次，之后将直接进入阅读。</I18nText></p>
                     <div
                       className="mt-4 h-2 overflow-hidden rounded-full bg-white/15"
                       role="progressbar"
-                      aria-label="全书位置索引进度"
+                      aria-label={i18nAttribute("全书位置索引进度")}
                       aria-valuemin={0}
                       aria-valuemax={100}
                       aria-valuenow={Math.round(session.state.paginationProgress?.percent ?? 0)}
@@ -375,10 +378,10 @@ export function ReaderEngineRuntime({
                     </div>
                     <div className="mt-2 text-xs tabular-nums opacity-75">
                       {session.state.paginationProgress
-                        ? `已处理 ${session.state.paginationProgress.completed} / ${session.state.paginationProgress.total} 章 · ${Math.round(session.state.paginationProgress.percent)}%`
-                        : '正在准备章节索引…'}
+                        ? i18nAttribute("已处理 {value0} / {value1} 章 · {value2}%", { value0: session.state.paginationProgress.completed, value1: session.state.paginationProgress.total, value2: Math.round(session.state.paginationProgress.percent) })
+                        : i18nAttribute("正在准备章节索引…")}
                     </div>
-                    <button type="button" onClick={onBack} className="mt-4 min-h-11 rounded-xl bg-white/10 px-4 text-sm transition hover:bg-white/15">取消并返回书库</button>
+                    <button type="button" onClick={onBack} className="mt-4 min-h-11 rounded-xl bg-white/10 px-4 text-sm transition hover:bg-white/15"><I18nText>取消并返回书库</I18nText></button>
                   </div>
                 ) : null}
               </div>
@@ -386,11 +389,11 @@ export function ReaderEngineRuntime({
             {session.state.lifecycle === 'error' || adapterLoadError ? (
               <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/45 p-6 text-center backdrop-blur-sm">
                 <div className="w-full max-w-sm rounded-2xl bg-slate-950/90 p-5 text-white shadow-2xl">
-                  <div className="text-base font-semibold">阅读器加载失败</div>
-                  <p className="mt-2 text-sm text-slate-300">{adapterLoadError || session.state.error?.message || '请检查网络或文件是否仍然存在。'}</p>
+                  <div className="text-base font-semibold"><I18nText>阅读器加载失败</I18nText></div>
+                  <p className="mt-2 text-sm text-slate-300">{adapterLoadError || session.state.error?.message || i18nAttribute("请检查网络或文件是否仍然存在。")}</p>
                   <div className="mt-4 grid grid-cols-2 gap-2">
-                    <button type="button" onClick={onBack} className="min-h-11 rounded-xl bg-white/10 px-3 text-sm">返回书库</button>
-                    <button type="button" onClick={onRetry} className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-sm"><RotateCcw size={16} />重试</button>
+                    <button type="button" onClick={onBack} className="min-h-11 rounded-xl bg-white/10 px-3 text-sm"><I18nText>返回书库</I18nText></button>
+                    <button type="button" onClick={onRetry} className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-sm"><RotateCcw size={16} /><I18nText>重试</I18nText></button>
                   </div>
                 </div>
               </div>
@@ -427,12 +430,12 @@ export function ReaderEngineRuntime({
                   className="w-full max-w-sm rounded-2xl bg-slate-950 p-5 text-white shadow-2xl"
                 >
                   <div className="flex items-center justify-between gap-3">
-                    <div id="reader-pdf-password-title" className="flex items-center gap-2 font-semibold"><LockKeyhole size={18} />PDF 需要密码</div>
-                    <button type="button" aria-label="取消输入密码" onClick={() => { if (canProvidePassword(adapter)) adapter.providePassword(null); setPasswordReason(null); }} className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-white/10"><X size={17} /></button>
+                    <div id="reader-pdf-password-title" className="flex items-center gap-2 font-semibold"><LockKeyhole size={18} /><I18nText>PDF 需要密码</I18nText></div>
+                    <button type="button" aria-label={i18nAttribute("取消输入密码")} onClick={() => { if (canProvidePassword(adapter)) adapter.providePassword(null); setPasswordReason(null); }} className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-white/10"><X size={17} /></button>
                   </div>
-                  <p className="mt-2 text-sm text-slate-300">{passwordReason === 'incorrect-password' ? '密码不正确，请重新输入。' : '密码仅用于本次打开，不会保存。'}</p>
+                  <p className="mt-2 text-sm text-slate-300">{passwordReason === 'incorrect-password' ? i18nAttribute("密码不正确，请重新输入。") : i18nAttribute("密码仅用于本次打开，不会保存。")}</p>
                   <input autoFocus type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="mt-4 h-11 w-full rounded-xl border border-white/15 bg-white/10 px-3 outline-none focus:border-blue-400" />
-                  <button type="submit" disabled={!password} className="mt-3 min-h-11 w-full rounded-xl bg-blue-600 px-4 text-sm font-medium disabled:opacity-50">打开 PDF</button>
+                  <button type="submit" disabled={!password} className="mt-3 min-h-11 w-full rounded-xl bg-blue-600 px-4 text-sm font-medium disabled:opacity-50"><I18nText>打开 PDF</I18nText></button>
                 </form>
               </div>
             ) : null}

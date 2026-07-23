@@ -19,6 +19,8 @@ import {
   shelfPaginationCandidates
 } from './shelf-pagination';
 import { summarizeSmartShelfRules, type SmartShelfRules } from './smart-shelf-rules';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type ShelfView = {
   id: string;
@@ -61,6 +63,7 @@ async function readPayload<T extends { ok: boolean; error?: { message: string } 
 }
 
 export function ShelvesPage() {
+  const { t: i18nAttribute } = useAttributeI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
   const currentSearch = searchParams.toString();
@@ -288,49 +291,50 @@ export function ShelvesPage() {
   const pageAction = activeId ? (
     <div className="flex flex-wrap gap-2">
       <Button variant="secondary" icon={ArrowLeft} onClick={() => editing ? void leaveEditor() : router.push('/shelves', { scroll: false })}>
-        {editing ? '取消' : '全部书架'}
+        {editing ? i18nAttribute("取消") : i18nAttribute("全部书架")}
       </Button>
-      {!editing && activeShelf ? <Button icon={Edit3} onClick={() => router.push(`/shelves?shelf=${encodeURIComponent(activeShelf.id)}&edit=1`, { scroll: false })}>管理书架</Button> : null}
-      {editing ? <Button icon={Save} loading={saving} loadingText="保存中" disabled={detailLoading} onClick={saveShelf}>{activeIsNew ? '创建书架' : '保存更改'}</Button> : null}
+      {!editing && activeShelf ? <Button icon={Edit3} onClick={() => router.push(`/shelves?shelf=${encodeURIComponent(activeShelf.id)}&edit=1`, { scroll: false })}><I18nText>管理书架</I18nText></Button> : null}
+      {editing ? <Button icon={Save} loading={saving} loadingText={i18nAttribute("保存中")} disabled={detailLoading} onClick={saveShelf}>{activeIsNew ? i18nAttribute("创建书架") : i18nAttribute("保存更改")}</Button> : null}
     </div>
-  ) : <Button icon={Plus} onClick={() => router.push('/shelves?create=1', { scroll: false })}>创建书架</Button>;
+  ) : <Button icon={Plus} onClick={() => router.push('/shelves?create=1', { scroll: false })}><I18nText>创建书架</I18nText></Button>;
 
   return (
     <div className="shuku-content-frame space-y-6">
       <PageTitle
-        title={activeIsNew ? '创建书架' : activeShelf?.name ?? (activeId ? '书架详情' : '书架')}
+        title={activeIsNew ? i18nAttribute("创建书架") : activeShelf?.name ?? (activeId ? i18nAttribute("书架详情") : i18nAttribute("书架"))}
+        translateTitle={!activeShelf}
         desc={activeIsNew
-          ? '填写基本信息，也可以现在就加入第一批图书。'
+          ? i18nAttribute("填写基本信息，也可以现在就加入第一批图书。")
           : activeShelf
-            ? `${activeShelf.bookCount} 本图书${activeShelf.kind === 'SMART' ? ' · 智能书架，结果自动更新' : activeShelf.description ? ` · ${activeShelf.description}` : ''}`
-            : '创建自定义书架，按主题、系列或阅读计划整理图书。'}
+            ? i18nAttribute("{value0} 本图书{value1}", { value0: activeShelf.bookCount, value1: activeShelf.kind === 'SMART' ? ' · 智能书架，结果自动更新' : activeShelf.description ? ` · ${activeShelf.description}` : '' })
+            : i18nAttribute("创建自定义书架，按主题、系列或阅读计划整理图书。")}
         action={pageAction}
       />
 
       {error ? <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">{error}</div> : null}
 
-      {activeId && detailLoading ? <div className="shuku-loading-panel p-6 text-sm" role="status" aria-live="polite">正在读取书架详情...</div> : null}
+      {activeId && detailLoading ? <div className="shuku-loading-panel p-6 text-sm" role="status" aria-live="polite"><I18nText>正在读取书架详情...</I18nText></div> : null}
 
       {activeId && !detailLoading && editing ? (
         <section className="rounded-[24px] border border-[#E5DED8] bg-white p-5 shadow-[0_12px_36px_rgba(63,48,40,0.06)] md:p-6">
           <div className="flex flex-col gap-3 border-b border-[#EEE8E3] pb-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <div className="flex items-center gap-2 font-semibold text-[#2A2825]"><Edit3 size={17} /> {activeIsNew ? '书架信息' : '编辑书架'}</div>
-              <div className="mt-1 text-sm text-[#7C756F]">{activeIsSmart ? '可以修改基本信息并查看自动收录条件；图书由规则自动管理。' : `勾选或移除图书后，点击“${activeIsNew ? '创建书架' : '保存更改'}”统一生效。`}</div>
+              <div className="flex items-center gap-2 font-semibold text-[#2A2825]"><Edit3 size={17} /> {activeIsNew ? i18nAttribute("书架信息") : i18nAttribute("编辑书架")}</div>
+              <div className="mt-1 text-sm text-[#7C756F]">{activeIsSmart ? i18nAttribute("可以修改基本信息并查看自动收录条件；图书由规则自动管理。") : i18nAttribute("勾选或移除图书后，点击“{value0}”统一生效。", { value0: activeIsNew ? '创建书架' : '保存更改' })}</div>
             </div>
-            <Badge>{activeIsSmart ? activeShelf?.bookCount ?? 0 : selectedBookIds.length} 本图书</Badge>
+            <Badge>{activeIsSmart ? activeShelf?.bookCount ?? 0 : selectedBookIds.length} <I18nText>本图书</I18nText></Badge>
           </div>
 
           <div className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,1fr)_390px]">
             <div className="space-y-6">
               <div className="grid gap-4 md:grid-cols-[minmax(0,320px)_1fr]">
                 <label className="block">
-                  <span className="text-sm font-medium text-[#5F5954]">名称 <span className="text-[#D94724]">*</span></span>
-                  <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className="mt-2 h-11 w-full rounded-xl border border-[#DED8D1] px-4 text-sm outline-none transition focus:border-[#ED9D86] focus:ring-4 focus:ring-[#FFE4DC]" placeholder="例如：周末阅读、轻小说收藏" autoFocus={activeIsNew} />
+                  <span className="text-sm font-medium text-[#5F5954]"><I18nText>名称 </I18nText><span className="text-[#D94724]">*</span></span>
+                  <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className="mt-2 h-11 w-full rounded-xl border border-[#DED8D1] px-4 text-sm outline-none transition focus:border-[#ED9D86] focus:ring-4 focus:ring-[#FFE4DC]" placeholder={i18nAttribute("例如：周末阅读、轻小说收藏")} autoFocus={activeIsNew} />
                 </label>
                 <label className="block">
-                  <span className="text-sm font-medium text-[#5F5954]">描述 <span className="font-normal text-[#9A938D]">选填</span></span>
-                  <input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className="mt-2 h-11 w-full rounded-xl border border-[#DED8D1] px-4 text-sm outline-none transition focus:border-[#ED9D86] focus:ring-4 focus:ring-[#FFE4DC]" placeholder="这个书架收录什么图书" />
+                  <span className="text-sm font-medium text-[#5F5954]"><I18nText>描述 </I18nText><span className="font-normal text-[#9A938D]"><I18nText>选填</I18nText></span></span>
+                  <input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className="mt-2 h-11 w-full rounded-xl border border-[#DED8D1] px-4 text-sm outline-none transition focus:border-[#ED9D86] focus:ring-4 focus:ring-[#FFE4DC]" placeholder={i18nAttribute("这个书架收录什么图书")} />
                 </label>
               </div>
 
@@ -338,10 +342,10 @@ export function ShelvesPage() {
                 <div>
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                     <div>
-                      <div className="text-sm font-semibold text-[#2A2825]">自动加入条件</div>
-                      <div className="mt-1 text-xs leading-5 text-[#8A837D]">基础条件需全部满足{activeShelf?.rules?.conditions?.length ? `，组合条件${activeShelf.rules.combinator === 'ANY' ? '满足任一条即可' : '需全部满足'}` : ''}。图书不能手动加入或移出。</div>
+                      <div className="text-sm font-semibold text-[#2A2825]"><I18nText>自动加入条件</I18nText></div>
+                      <div className="mt-1 text-xs leading-5 text-[#8A837D]"><I18nText>基础条件需全部满足</I18nText>{activeShelf?.rules?.conditions?.length ? i18nAttribute("，组合条件{value0}", { value0: activeShelf.rules.combinator === 'ANY' ? '满足任一条即可' : '需全部满足' }) : ''}<I18nText>。图书不能手动加入或移出。</I18nText></div>
                     </div>
-                    <Badge tone="amber">智能书架</Badge>
+                    <Badge tone="amber"><I18nText>智能书架</I18nText></Badge>
                   </div>
                   {smartRuleSummaries.length > 0 ? (
                     <dl className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -353,56 +357,55 @@ export function ShelvesPage() {
                       ))}
                     </dl>
                   ) : (
-                    <div className="mt-3 rounded-2xl border border-dashed border-[#DCD5CE] bg-[#FAF8F6] px-4 py-5 text-sm text-[#746E68]">没有额外筛选条件，将自动收录全部可见图书。</div>
+                    <div className="mt-3 rounded-2xl border border-dashed border-[#DCD5CE] bg-[#FAF8F6] px-4 py-5 text-sm text-[#746E68]"><I18nText>没有额外筛选条件，将自动收录全部可见图书。</I18nText></div>
                   )}
                 </div>
               ) : <div>
                 <div className="mb-3 flex items-center justify-between">
-                  <div className="text-sm font-semibold text-[#2A2825]">书架中的图书</div>
-                  <span className="text-xs text-[#8A837D]">移除只影响本书架，不会删除图书</span>
+                  <div className="text-sm font-semibold text-[#2A2825]"><I18nText>书架中的图书</I18nText></div>
+                  <span className="text-xs text-[#8A837D]"><I18nText>移除只影响本书架，不会删除图书</I18nText></span>
                 </div>
                 {selectedBooks.length > 0 ? (
                   <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
                     {selectedBooks.map((book) => (
                       <div key={book.id} className="group rounded-[16px] bg-[#F7F4F1] p-2.5">
                         <Cover book={book} className="aspect-[2/3] w-full" size="small" />
-                        <div className="mt-2 line-clamp-1 text-sm font-medium text-[#2A2825]">{book.title}</div>
+                        <div data-i18n-skip className="mt-2 line-clamp-1 text-sm font-medium text-[#2A2825]">{book.title}</div>
                         <button type="button" onClick={() => toggleBook(book.id, false)} className="mt-2 inline-flex h-8 w-full items-center justify-center gap-1 rounded-lg bg-white text-xs font-medium text-red-600 outline-none transition hover:bg-red-50 focus-visible:ring-2 focus-visible:ring-red-200">
-                          <X size={13} /> 从书架移除
-                        </button>
+                          <X size={13} /> <I18nText>从书架移除</I18nText></button>
                       </div>
                     ))}
                   </div>
                 ) : (
                   <div className="rounded-2xl border border-dashed border-[#DCD5CE] bg-[#FAF8F6] p-8 text-center">
                     <BookOpen size={22} className="mx-auto text-[#B3AAA2]" />
-                    <div className="mt-3 text-sm font-medium text-[#5F5954]">书架还是空的</div>
-                    <div className="mt-1 text-sm text-[#918A84]">在右侧搜索图书并勾选加入。</div>
+                    <div className="mt-3 text-sm font-medium text-[#5F5954]"><I18nText>书架还是空的</I18nText></div>
+                    <div className="mt-1 text-sm text-[#918A84]"><I18nText>在右侧搜索图书并勾选加入。</I18nText></div>
                   </div>
                 )}
               </div>}
             </div>
 
             {!activeIsSmart ? <aside className="self-start rounded-[20px] bg-[#F6F3F0] p-4 xl:sticky xl:top-6">
-              <div className="text-sm font-semibold text-[#2A2825]">添加图书</div>
-              <div className="mt-1 text-xs leading-5 text-[#827B75]">按书名、作者或标签搜索，勾选后随书架一起保存。</div>
+              <div className="text-sm font-semibold text-[#2A2825]"><I18nText>添加图书</I18nText></div>
+              <div className="mt-1 text-xs leading-5 text-[#827B75]"><I18nText>按书名、作者或标签搜索，勾选后随书架一起保存。</I18nText></div>
               <div className="mt-3 flex h-11 items-center gap-2 rounded-xl border border-[#DED8D1] bg-white px-3 transition focus-within:border-[#ED9D86] focus-within:ring-4 focus-within:ring-[#FFE4DC]">
                 <Search size={16} className="text-[#AAA29B]" />
-                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索书名、作者或标签" className="w-full bg-transparent text-sm outline-none" />
+                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={i18nAttribute("搜索书名、作者或标签")} className="w-full bg-transparent text-sm outline-none" />
               </div>
               <div className="mt-4 max-h-[520px] space-y-2 overflow-y-auto pr-1">
-                {!search.trim() ? <div className="rounded-xl bg-white/70 p-4 text-sm text-[#8D857E]">输入关键词开始查找。</div> : null}
-                {searchLoading ? <div className="rounded-xl bg-white/70 p-4 text-sm text-[#8D857E]">正在搜索...</div> : null}
-                {!searchLoading && search.trim() && searchBooks.length === 0 ? <div className="rounded-xl bg-white/70 p-4 text-sm text-[#8D857E]">没有找到匹配的图书。</div> : null}
+                {!search.trim() ? <div className="rounded-xl bg-white/70 p-4 text-sm text-[#8D857E]"><I18nText>输入关键词开始查找。</I18nText></div> : null}
+                {searchLoading ? <div className="rounded-xl bg-white/70 p-4 text-sm text-[#8D857E]"><I18nText>正在搜索...</I18nText></div> : null}
+                {!searchLoading && search.trim() && searchBooks.length === 0 ? <div className="rounded-xl bg-white/70 p-4 text-sm text-[#8D857E]"><I18nText>没有找到匹配的图书。</I18nText></div> : null}
                 {!searchLoading && searchBooks.map((book) => {
                   const checked = selectedBookIds.includes(book.id);
                   return (
                     <label key={book.id} className={cn('flex cursor-pointer items-center gap-3 rounded-xl border bg-white p-2.5 transition', checked ? 'border-[#F0AA96] ring-2 ring-[#FBE1D9]' : 'border-transparent hover:border-[#E3DAD3]')}>
                       <input type="checkbox" checked={checked} onChange={(event) => toggleBook(book.id, event.target.checked)} className="h-4 w-4 accent-[#E94B27]" />
                       <Cover book={book} className="h-16 w-11 shrink-0" small />
-                      <div className="min-w-0 flex-1">
+                      <div data-i18n-skip className="min-w-0 flex-1">
                         <div className="line-clamp-1 text-sm font-medium text-[#2A2825]">{book.title}</div>
-                        <div className="mt-1 line-clamp-1 text-xs text-[#8B847E]">{book.author || '未知作者'} · {book.format}</div>
+                        <div className="mt-1 line-clamp-1 text-xs text-[#8B847E]">{book.author || i18nAttribute("未知作者")} · {book.format}</div>
                       </div>
                       {checked ? <Check size={16} className="shrink-0 text-[#D94724]" /> : null}
                     </label>
@@ -411,16 +414,16 @@ export function ShelvesPage() {
               </div>
             </aside> : (
               <aside className="self-start rounded-[20px] border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900 xl:sticky xl:top-6">
-                <div className="font-semibold">图书自动管理</div>
-                <div className="mt-1">智能书架会随图书信息和阅读状态变化自动更新，因此不提供手动添加或移除。</div>
+                <div className="font-semibold"><I18nText>图书自动管理</I18nText></div>
+                <div className="mt-1"><I18nText>智能书架会随图书信息和阅读状态变化自动更新，因此不提供手动添加或移除。</I18nText></div>
               </aside>
             )}
           </div>
 
           {!activeIsNew ? (
             <div className="mt-6 flex flex-col gap-3 border-t border-[#EEE8E3] pt-5 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm text-[#817A74]">{activeIsSmart ? '删除智能书架只会删除自动收录规则，不会删除任何图书。' : '不再需要这个分类时，可以只删除书架，图书会继续保留在书库。'}</div>
-              <Button variant="danger" icon={Trash2} disabled={saving} onClick={deleteShelf}>删除书架</Button>
+              <div className="text-sm text-[#817A74]">{activeIsSmart ? i18nAttribute("删除智能书架只会删除自动收录规则，不会删除任何图书。") : i18nAttribute("不再需要这个分类时，可以只删除书架，图书会继续保留在书库。")}</div>
+              <Button variant="danger" icon={Trash2} disabled={saving} onClick={deleteShelf}><I18nText>删除书架</I18nText></Button>
             </div>
           ) : null}
         </section>
@@ -430,10 +433,10 @@ export function ShelvesPage() {
         <section>
           <div className="mb-5 flex flex-col gap-3 border-b border-[#E7E0DA] pb-5 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <div className="text-sm font-medium text-[#716A64]">收录图书</div>
-              <div className="mt-1 text-sm text-[#948C85]">{activeShelf.kind === 'SMART' ? '符合保存条件的图书会自动加入或移出；点击封面查看详情。' : '点击封面查看图书详情；使用“管理书架”调整名称和图书。'}</div>
+              <div className="text-sm font-medium text-[#716A64]"><I18nText>收录图书</I18nText></div>
+              <div className="mt-1 text-sm text-[#948C85]">{activeShelf.kind === 'SMART' ? i18nAttribute("符合保存条件的图书会自动加入或移出；点击封面查看详情。") : i18nAttribute("点击封面查看图书详情；使用“管理书架”调整名称和图书。")}</div>
             </div>
-            <Badge>{activeShelf.bookCount} 本</Badge>
+            <Badge>{activeShelf.bookCount} <I18nText>本</I18nText></Badge>
           </div>
           {shelfBooks.length > 0 ? (
             <>
@@ -456,21 +459,21 @@ export function ShelvesPage() {
           ) : (
             <div className="rounded-[24px] border border-dashed border-[#DCD5CE] bg-[#FAF8F6] px-6 py-12 text-center">
               <BookOpen size={28} className="mx-auto text-[#B4ABA4]" />
-              <div className="mt-4 font-semibold text-[#403C38]">这个书架还没有图书</div>
-              <div className="mt-1 text-sm text-[#8D857E]">{activeShelf.kind === 'SMART' ? '当前没有图书符合保存的筛选条件。' : '打开管理页，搜索并加入想放在这里的图书。'}</div>
-              {activeShelf.kind !== 'SMART' ? <Button className="mt-5" icon={Plus} onClick={() => router.push(`/shelves?shelf=${encodeURIComponent(activeShelf.id)}&edit=1`, { scroll: false })}>添加图书</Button> : null}
+              <div className="mt-4 font-semibold text-[#403C38]"><I18nText>这个书架还没有图书</I18nText></div>
+              <div className="mt-1 text-sm text-[#8D857E]">{activeShelf.kind === 'SMART' ? i18nAttribute("当前没有图书符合保存的筛选条件。") : i18nAttribute("打开管理页，搜索并加入想放在这里的图书。")}</div>
+              {activeShelf.kind !== 'SMART' ? <Button className="mt-5" icon={Plus} onClick={() => router.push(`/shelves?shelf=${encodeURIComponent(activeShelf.id)}&edit=1`, { scroll: false })}><I18nText>添加图书</I18nText></Button> : null}
             </div>
           )}
         </section>
       ) : null}
 
-      {!activeId && loading ? <div className="shuku-loading-panel p-6 text-sm" role="status" aria-live="polite">正在读取书架...</div> : null}
+      {!activeId && loading ? <div className="shuku-loading-panel p-6 text-sm" role="status" aria-live="polite"><I18nText>正在读取书架...</I18nText></div> : null}
       {!activeId && !loading && shelves.length === 0 ? (
         <div className="rounded-[24px] border border-dashed border-[#DCD5CE] bg-[#FAF8F6] px-6 py-12 text-center">
           <BookOpen size={28} className="mx-auto text-[#B4ABA4]" />
-          <div className="mt-4 font-semibold text-[#403C38]">还没有自定义书架</div>
-          <div className="mt-1 text-sm text-[#8D857E]">按主题、阅读计划或收藏方式创建第一个书架。</div>
-          <Button className="mt-5" icon={Plus} onClick={() => router.push('/shelves?create=1', { scroll: false })}>创建第一个书架</Button>
+          <div className="mt-4 font-semibold text-[#403C38]"><I18nText>还没有自定义书架</I18nText></div>
+          <div className="mt-1 text-sm text-[#8D857E]"><I18nText>按主题、阅读计划或收藏方式创建第一个书架。</I18nText></div>
+          <Button className="mt-5" icon={Plus} onClick={() => router.push('/shelves?create=1', { scroll: false })}><I18nText>创建第一个书架</I18nText></Button>
         </div>
       ) : null}
       {!activeId && !loading && shelves.length > 0 ? (
@@ -486,14 +489,14 @@ export function ShelvesPage() {
                 {(shelf.books ?? []).slice(0, 3).map((book, index) => (
                   <Cover key={`${book.id}-${index}`} book={book} className={cn('h-24 w-16 shrink-0 shadow-md transition duration-200 group-hover:-translate-y-1', index > 0 && '-ml-3')} small />
                 ))}
-                {(shelf.books ?? []).length === 0 ? <div className="flex w-full items-center justify-center self-center text-sm text-[#A09790]"><BookOpen size={17} className="mr-2" /> 暂无图书</div> : null}
+                {(shelf.books ?? []).length === 0 ? <div className="flex w-full items-center justify-center self-center text-sm text-[#A09790]"><BookOpen size={17} className="mr-2" /> <I18nText>暂无图书</I18nText></div> : null}
               </div>
               <div className="mt-4">
-                <div className="flex items-center gap-2"><div className="line-clamp-1 font-semibold text-[#2A2825]">{shelf.name}</div>{shelf.kind === 'SMART' ? <Badge tone="amber">智能</Badge> : null}</div>
-                <div className="mt-1 line-clamp-2 min-h-10 text-sm leading-5 text-[#817A74]">{shelf.description || '自定义书架'}</div>
+                <div className="flex items-center gap-2"><div data-i18n-skip className="line-clamp-1 font-semibold text-[#2A2825]">{shelf.name}</div>{shelf.kind === 'SMART' ? <Badge tone="amber"><I18nText>智能</I18nText></Badge> : null}</div>
+                <div data-i18n-skip={shelf.description ? '' : undefined} className="mt-1 line-clamp-2 min-h-10 text-sm leading-5 text-[#817A74]">{shelf.description || i18nAttribute("自定义书架")}</div>
                 <div className="mt-3 flex items-center justify-between border-t border-[#EEE8E3] pt-3 text-xs text-[#938B84]">
-                  <span>{shelf.bookCount} 本图书</span>
-                  <span className="font-medium text-[#D94724] transition group-hover:translate-x-0.5">打开书架 →</span>
+                  <span>{shelf.bookCount} <I18nText>本图书</I18nText></span>
+                  <span className="font-medium text-[#D94724] transition group-hover:translate-x-0.5"><I18nText>打开书架 →</I18nText></span>
                 </div>
               </div>
             </button>
@@ -517,15 +520,16 @@ function ShelfPagination({
   totalPages: number;
   onPage: (page: number) => void;
 }) {
+  const { t: i18nAttribute } = useAttributeI18n();
   const candidates = shelfPaginationCandidates(page, totalPages);
   const firstItem = (page - 1) * pageSize + 1;
   const lastItem = Math.min(page * pageSize, totalItems);
 
   return (
     <div className="mt-10 flex flex-col items-center gap-3 border-t border-[#EEE8E3] pt-6">
-      <div className="text-xs tabular-nums text-[#8A837D]">第 {firstItem}–{lastItem} 本，共 {totalItems} 本</div>
-      <nav className="flex items-center justify-center gap-1.5" aria-label="书架图书分页">
-        <button type="button" aria-label="上一页" disabled={page <= 1} onClick={() => onPage(Math.max(1, page - 1))} className="flex h-9 w-9 items-center justify-center rounded-lg text-[#736D67] transition hover:bg-black/[0.035] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F7C7B8] disabled:cursor-not-allowed disabled:opacity-30">
+      <div className="text-xs tabular-nums text-[#8A837D]"><I18nText>第 </I18nText>{firstItem}–{lastItem} <I18nText>本，共 </I18nText>{totalItems} <I18nText>本</I18nText></div>
+      <nav className="flex items-center justify-center gap-1.5" aria-label={i18nAttribute("书架图书分页")}>
+        <button type="button" aria-label={i18nAttribute("上一页")} disabled={page <= 1} onClick={() => onPage(Math.max(1, page - 1))} className="flex h-9 w-9 items-center justify-center rounded-lg text-[#736D67] transition hover:bg-black/[0.035] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F7C7B8] disabled:cursor-not-allowed disabled:opacity-30">
           <ChevronLeft size={18} />
         </button>
         {candidates.map((item, index) => {
@@ -535,7 +539,7 @@ function ShelfPagination({
               {previous && item - previous > 1 ? <span className="px-1 text-sm text-[#9A948E]" aria-hidden="true">…</span> : null}
               <button
                 type="button"
-                aria-label={`第 ${item} 页`}
+                aria-label={i18nAttribute("第 {value0} 页", { value0: item })}
                 aria-current={item === page ? 'page' : undefined}
                 onClick={() => onPage(item)}
                 className={cn('flex h-9 min-w-9 items-center justify-center rounded-lg px-2 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F7C7B8]', item === page ? 'bg-[#F9DED4] font-medium text-[#D94724]' : 'text-[#625D58] hover:bg-black/[0.035]')}
@@ -545,7 +549,7 @@ function ShelfPagination({
             </span>
           );
         })}
-        <button type="button" aria-label="下一页" disabled={page >= totalPages} onClick={() => onPage(Math.min(totalPages, page + 1))} className="flex h-9 w-9 items-center justify-center rounded-lg text-[#736D67] transition hover:bg-black/[0.035] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F7C7B8] disabled:cursor-not-allowed disabled:opacity-30">
+        <button type="button" aria-label={i18nAttribute("下一页")} disabled={page >= totalPages} onClick={() => onPage(Math.min(totalPages, page + 1))} className="flex h-9 w-9 items-center justify-center rounded-lg text-[#736D67] transition hover:bg-black/[0.035] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F7C7B8] disabled:cursor-not-allowed disabled:opacity-30">
           <ChevronRight size={18} />
         </button>
       </nav>

@@ -7,6 +7,8 @@ import { FormEvent, ReactNode, useEffect, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { withBasePath } from '../../lib/base-path';
 import { PRODUCT_NAME } from '../../lib/brand';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type ApiPayload = {
   ok: boolean;
@@ -32,6 +34,7 @@ function AuthCard({ title, description, children }: { title: string; description
 }
 
 export function ForgotPasswordPage() {
+  const { t: i18nAttribute } = useAttributeI18n();
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -60,26 +63,24 @@ export function ForgotPasswordPage() {
   }
 
   return (
-    <AuthCard title="重置密码" description={`输入你在${PRODUCT_NAME}中使用的登录邮箱。`}>
+    <AuthCard title={i18nAttribute("重置密码")} description={i18nAttribute("输入你在{value0}中使用的登录邮箱。", { value0: PRODUCT_NAME })}>
       <form onSubmit={submit} className="mt-8">
         <label className="block text-sm font-medium text-[#4F4B47]">
-          登录邮箱
-          <input type="email" required autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@example.com" className={inputClassName} />
+          <I18nText>登录邮箱</I18nText><input type="email" required autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@example.com" className={inputClassName} />
         </label>
         {message ? <div className="mt-4 rounded-[12px] border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-800">{message}</div> : null}
         {error ? <div className="mt-4 rounded-[12px] border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
-        <Button className="mt-5 h-12 w-full rounded-[12px]" icon={FileKey2} loading={loading} loadingText="创建中">
-          创建密码重置文件
-        </Button>
+        <Button className="mt-5 h-12 w-full rounded-[12px]" icon={FileKey2} loading={loading} loadingText={i18nAttribute("创建中")}>
+          <I18nText>创建密码重置文件</I18nText></Button>
       </form>
       <Link href="/login" className="mt-6 flex items-center justify-center gap-2 text-sm text-[#6F6A65] transition hover:text-[#D94A2B]">
-        <ArrowLeft size={15} />返回登录
-      </Link>
+        <ArrowLeft size={15} /><I18nText>返回登录</I18nText></Link>
     </AuthCard>
   );
 }
 
 export function ResetPasswordPage() {
+  const { t: i18nAttribute } = useAttributeI18n();
   const [token, setToken] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -132,32 +133,27 @@ export function ResetPasswordPage() {
   }
 
   return (
-    <AuthCard title={complete ? '密码已重置' : '设置新密码'} description={complete ? '现在可以使用新密码登录。' : '新密码至少需要 10 个字符，链接仅能使用一次。'}>
+    <AuthCard title={complete ? i18nAttribute("密码已重置") : i18nAttribute("设置新密码")} description={complete ? i18nAttribute("现在可以使用新密码登录。") : i18nAttribute("新密码至少需要 10 个字符，链接仅能使用一次。")}>
       {complete ? (
         <Link href="/login" className="mt-8 inline-flex h-12 w-full items-center justify-center rounded-[12px] bg-[#FF4F2A] px-4 text-sm font-medium text-white transition hover:bg-[#E94320]">
-          返回登录
-        </Link>
+          <I18nText>返回登录</I18nText></Link>
       ) : (
         <form onSubmit={submit} className="mt-8 space-y-4">
           <label className="block text-sm font-medium text-[#4F4B47]">
-            新密码
-            <input type="password" required minLength={10} maxLength={128} autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} className={inputClassName} />
+            <I18nText>新密码</I18nText><input type="password" required minLength={10} maxLength={128} autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} className={inputClassName} />
           </label>
           <label className="block text-sm font-medium text-[#4F4B47]">
-            再次输入新密码
-            <input type="password" required minLength={10} maxLength={128} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className={inputClassName} />
+            <I18nText>再次输入新密码</I18nText><input type="password" required minLength={10} maxLength={128} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className={inputClassName} />
           </label>
-          {!token && !error ? <div className="rounded-[12px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">重置链接缺少令牌，请重新申请。</div> : null}
+          {!token && !error ? <div className="rounded-[12px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"><I18nText>重置链接缺少令牌，请重新申请。</I18nText></div> : null}
           {error ? <div className="rounded-[12px] border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
-          <Button className="h-12 w-full rounded-[12px]" icon={LockKeyhole} loading={loading} loadingText="重置中" disabled={!token}>
-            重置密码
-          </Button>
+          <Button className="h-12 w-full rounded-[12px]" icon={LockKeyhole} loading={loading} loadingText={i18nAttribute("重置中")} disabled={!token}>
+            <I18nText>重置密码</I18nText></Button>
         </form>
       )}
       {!complete ? (
         <Link href="/login" className="mt-6 flex items-center justify-center gap-2 text-sm text-[#6F6A65] transition hover:text-[#D94A2B]">
-          <ArrowLeft size={15} />返回登录
-        </Link>
+          <ArrowLeft size={15} /><I18nText>返回登录</I18nText></Link>
       ) : null}
     </AuthCard>
   );

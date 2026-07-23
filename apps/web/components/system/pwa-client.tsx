@@ -3,13 +3,16 @@
 import { Bug, Clipboard, Download, RefreshCw, Trash2, Wifi, WifiOff, X } from 'lucide-react';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clearPrivatePwaData } from '../../lib/pwa/progressQueue';
 import { prepareForPwaUpdate } from '../../lib/pwa/update-coordination';
 import { activateReaderV2User, clearPrivateReaderV2Data, deactivateReaderV2User, getReaderV2Runtime, startReaderV2Runtime, stopReaderV2Runtime } from '../../lib/reader-v2';
 import { withBasePath } from '../../lib/base-path';
 import { PRODUCT_NAME } from '../../lib/brand';
 import { cn } from '../ui/cn';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
+import { useI18n as useExpressionI18n } from '@/i18n/provider';
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -194,6 +197,7 @@ export function PwaClient() {
 }
 
 function OfflineBanner({ offline, recentlyRestored }: { offline: boolean; recentlyRestored: boolean }) {
+  const { t: i18nExpression } = useExpressionI18n();
   if (!offline && !recentlyRestored) return null;
   return (
     <div
@@ -208,12 +212,13 @@ function OfflineBanner({ offline, recentlyRestored }: { offline: boolean; recent
       aria-live="polite"
     >
       {offline ? <WifiOff size={17} className="shrink-0" /> : <Wifi size={17} className="shrink-0" />}
-      <span>{offline ? '当前网络不可用，尚未加载的读物与音频将无法打开。' : '网络已恢复，正在同步使用进度'}</span>
+      <span>{offline ? i18nExpression("当前网络不可用，尚未加载的读物与音频将无法打开。") : i18nExpression("网络已恢复，正在同步使用进度")}</span>
     </div>
   );
 }
 
 function InstallPwaPrompt({ androidInstallReady, iosHint, onInstall, onDismiss }: { androidInstallReady: boolean; iosHint: boolean; onInstall: () => void; onDismiss: () => void }) {
+  const { t: i18nAttribute } = useAttributeI18n();
   return (
     <div className="shuku-pwa-bottom-overlay fixed inset-x-3 bottom-20 z-[70] mx-auto max-w-md rounded-2xl border border-slate-200 bg-white/95 p-4 text-slate-900 shadow-2xl shadow-slate-950/15 backdrop-blur lg:bottom-6">
       <div className="flex items-start justify-between gap-3">
@@ -222,34 +227,34 @@ function InstallPwaPrompt({ androidInstallReady, iosHint, onInstall, onDismiss }
             <Image src={withBasePath('/icons/icon-192.png')} alt="" width={40} height={40} className="h-full w-full object-cover" />
           </div>
           <div className="min-w-0">
-            <div className="text-sm font-semibold">添加到桌面</div>
+            <div className="text-sm font-semibold"><I18nText>添加到桌面</I18nText></div>
             <div className="mt-1 text-xs leading-5 text-slate-600">
-              {iosHint ? '点击分享按钮 → 添加到主屏幕' : `把${PRODUCT_NAME}添加到桌面，获得更接近 App 的阅读体验。`}
+              {iosHint ? i18nAttribute("点击分享按钮 → 添加到主屏幕") : i18nAttribute("把{value0}添加到桌面，获得更接近 App 的阅读体验。", { value0: PRODUCT_NAME })}
             </div>
           </div>
         </div>
-        <button type="button" onClick={onDismiss} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100" aria-label="关闭安装提示">
+        <button type="button" onClick={onDismiss} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100" aria-label={i18nAttribute("关闭安装提示")}>
           <X size={17} />
         </button>
       </div>
       {androidInstallReady ? (
         <button type="button" onClick={onInstall} className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-medium text-white transition active:scale-[0.99] hover:bg-slate-800">
           <Download size={17} />
-          添加到桌面
-        </button>
+          <I18nText>添加到桌面</I18nText></button>
       ) : null}
     </div>
   );
 }
 
 function UpdateAvailableToast({ activating, onRefresh }: { activating: boolean; onRefresh: () => void }) {
+  const { t: i18nExpression } = useExpressionI18n();
   return (
     <div className="shuku-pwa-top-overlay fixed inset-x-3 top-4 z-[90] mx-auto max-w-md rounded-2xl border border-blue-200 bg-blue-50/95 p-4 text-blue-950 shadow-2xl shadow-blue-950/10 backdrop-blur" role="status" aria-live="polite">
-      <div className="text-sm font-semibold">发现新版本</div>
-      <p className="mt-1 text-xs leading-5 text-blue-900">请在合适的阅读位置确认升级；应用不会自动刷新正在阅读的页面。</p>
+      <div className="text-sm font-semibold"><I18nText>发现新版本</I18nText></div>
+      <p className="mt-1 text-xs leading-5 text-blue-900"><I18nText>请在合适的阅读位置确认升级；应用不会自动刷新正在阅读的页面。</I18nText></p>
       <button type="button" disabled={activating} onClick={onRefresh} className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-medium text-white transition active:scale-[0.99] hover:bg-blue-700 disabled:cursor-wait disabled:opacity-70">
         <RefreshCw size={17} className={activating ? 'animate-spin motion-reduce:animate-none' : undefined} />
-        {activating ? '正在保存当前位置…' : '保存当前位置并升级'}
+        {activating ? i18nExpression("正在保存当前位置…") : i18nExpression("保存当前位置并升级")}
       </button>
     </div>
   );
@@ -289,23 +294,24 @@ function getStandaloneLabel() {
 }
 
 function PwaDebugPanel() {
+  const { t: i18nAttribute, locale } = useAttributeI18n();
   const [enabled, setEnabled] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
   const [copied, setCopied] = useState(false);
   const [logs, setLogs] = useState<DebugLog[]>([]);
   const nextIdRef = useRef(1);
 
-  function appendLog(level: DebugLevel, source: string, parts: unknown[]) {
+  const appendLog = useCallback((level: DebugLevel, source: string, parts: unknown[]) => {
     const entry: DebugLog = {
       id: nextIdRef.current,
       level,
       source,
-      time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+      time: new Date().toLocaleTimeString(locale, { hour12: false }),
       message: parts.map(stringifyDebugValue).join(' ')
     };
     nextIdRef.current += 1;
     setLogs((current) => [...current.slice(-119), entry]);
-  }
+  }, [locale]);
 
   useEffect(() => {
     setEnabled(shouldEnablePwaDebug());
@@ -416,7 +422,7 @@ function PwaDebugPanel() {
       navigator.serviceWorker?.removeEventListener('controllerchange', recordControllerChange);
       window.removeEventListener('shuku:reader-debug', recordReaderDebug);
     };
-  }, [enabled]);
+  }, [appendLog, enabled]);
 
   function disableDebug() {
     localStorage.removeItem(PWA_DEBUG_ENABLED_KEY);
@@ -439,7 +445,7 @@ function PwaDebugPanel() {
           type="button"
           onClick={() => setCollapsed(false)}
           className="ml-auto flex min-h-11 items-center gap-2 rounded-full border border-slate-700 bg-slate-950/95 px-4 text-xs font-medium shadow-2xl shadow-slate-950/25 backdrop-blur"
-          aria-label="打开 PWA 调试面板"
+          aria-label={i18nAttribute("打开 PWA 调试面板")}
         >
           <Bug size={16} />
           PWA Debug
@@ -452,18 +458,18 @@ function PwaDebugPanel() {
               PWA Debug
             </div>
             <div className="flex items-center gap-1">
-              <button type="button" onClick={() => { void copyLogs(); }} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-300 transition hover:bg-slate-800" aria-label="复制日志">
+              <button type="button" onClick={() => { void copyLogs(); }} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-300 transition hover:bg-slate-800" aria-label={i18nAttribute("复制日志")}>
                 <Clipboard size={15} />
               </button>
-              <button type="button" onClick={() => setLogs([])} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-300 transition hover:bg-slate-800" aria-label="清空日志">
+              <button type="button" onClick={() => setLogs([])} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-300 transition hover:bg-slate-800" aria-label={i18nAttribute("清空日志")}>
                 <Trash2 size={15} />
               </button>
-              <button type="button" onClick={() => setCollapsed(true)} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-300 transition hover:bg-slate-800" aria-label="收起调试面板">
+              <button type="button" onClick={() => setCollapsed(true)} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-300 transition hover:bg-slate-800" aria-label={i18nAttribute("收起调试面板")}>
                 <X size={15} />
               </button>
             </div>
           </div>
-          {copied ? <div className="border-b border-emerald-900/60 bg-emerald-950 px-3 py-2 text-xs text-emerald-100">日志已复制</div> : null}
+          {copied ? <div className="border-b border-emerald-900/60 bg-emerald-950 px-3 py-2 text-xs text-emerald-100"><I18nText>日志已复制</I18nText></div> : null}
           <div className="max-h-72 overflow-y-auto px-3 py-2 font-mono text-[11px] leading-5" data-pwa-scroll="true">
             {logs.length ? logs.map((log) => (
               <div key={log.id} className={cn('break-words border-b border-slate-900 py-1 last:border-0', log.level === 'error' ? 'text-rose-200' : log.level === 'warn' || log.level === 'warning' ? 'text-amber-200' : 'text-slate-200')}>
@@ -471,11 +477,11 @@ function PwaDebugPanel() {
                 <span className="ml-2 text-slate-400">{log.source}/{log.level}</span>
                 <span className="ml-2">{log.message}</span>
               </div>
-            )) : <div className="py-5 text-center text-slate-500">暂无日志</div>}
+            )) : <div className="py-5 text-center text-slate-500"><I18nText>暂无日志</I18nText></div>}
           </div>
           <div className="flex items-center justify-between gap-2 border-t border-slate-800 px-3 py-2 text-[11px] text-slate-400">
-            <span>URL 加 ?debug=0 可关闭持久开关</span>
-            <button type="button" onClick={disableDebug} className="rounded-full px-3 py-1.5 text-slate-300 transition hover:bg-slate-800">关闭</button>
+            <span><I18nText>URL 加 ?debug=0 可关闭持久开关</I18nText></span>
+            <button type="button" onClick={disableDebug} className="rounded-full px-3 py-1.5 text-slate-300 transition hover:bg-slate-800"><I18nText>关闭</I18nText></button>
           </div>
         </div>
       )}

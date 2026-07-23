@@ -4,6 +4,9 @@ import { Clock3, Save, Sparkles } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { useToast } from '../../components/ui/feedback';
+import { useI18n } from '../../i18n/provider';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 export type OrganizePolicy = {
   id: string;
@@ -62,7 +65,9 @@ function settingRow(title: string, description: string, control: React.ReactNode
 }
 
 export function RecognitionSettingsPanel({ compact = false, onSaved }: { compact?: boolean; onSaved?: (policy: OrganizePolicy) => void }) {
+  const { t: i18nAttribute } = useAttributeI18n();
   const toast = useToast();
+  const { locale } = useI18n();
   const [policy, setPolicy] = useState<OrganizePolicy>(defaultPolicy);
   const [candidateCount, setCandidateCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -118,31 +123,31 @@ export function RecognitionSettingsPanel({ compact = false, onSaved }: { compact
       {!compact ? (
         <div className="flex items-start gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FFF0EA] text-[#DD4729]"><Sparkles size={19} /></span>
-          <div><h3 className="text-lg font-semibold text-[#292724]">元数据识别策略</h3><p className="mt-1 text-sm leading-6 text-[#77716A]">控制哪些读物进入整理队列，以及识别任务何时执行。</p></div>
+          <div><h3 className="text-lg font-semibold text-[#292724]"><I18nText>元数据识别策略</I18nText></h3><p className="mt-1 text-sm leading-6 text-[#77716A]"><I18nText>控制哪些读物进入整理队列，以及识别任务何时执行。</I18nText></p></div>
         </div>
       ) : null}
       {error ? <div className="mt-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
       <div className={compact ? '' : 'mt-5'}>
-        {settingRow('定时执行识别', '开启后按固定间隔扫描书库；导入流程本身不会直接创建整理任务。', <Toggle checked={policy.enabled && policy.scheduleMode === 'INTERVAL'} disabled={loading} label="定时执行识别" onChange={(checked) => setPolicy({ ...policy, enabled: checked, scheduleMode: checked ? 'INTERVAL' : 'MANUAL' })} />)}
-        {policy.enabled && policy.scheduleMode === 'INTERVAL' ? settingRow('执行间隔', '建议至少 30 分钟，避免对外部数据源产生过密请求。', <select aria-label="识别任务执行间隔" value={policy.intervalMinutes} onChange={(event) => setPolicy({ ...policy, intervalMinutes: Number(event.target.value) })} className="h-11 min-w-36 rounded-xl border border-[#DCD7D1] bg-white px-3 text-sm text-[#393632] outline-none focus:border-[#EF8B73]">{[15, 30, 60, 180, 360, 720, 1440].map((value) => <option value={value} key={value}>{value < 60 ? `${value} 分钟` : value === 60 ? '每小时' : value === 1440 ? '每天' : `每 ${value / 60} 小时`}</option>)}</select>) : null}
-        {settingRow('新增后自动执行', '仅处理开启此设置之后新增的读物，历史书库不会被一次性加入。', <Toggle checked={policy.autoRunOnNew} disabled={loading} label="新增后自动执行" onChange={(autoRunOnNew) => setPolicy({ ...policy, autoRunOnNew })} />)}
-        {settingRow('覆盖已有标题和作者', '开启后，识别结果会更新已有标题和作者；其他元数据仍只补全缺失字段。', <Toggle checked={policy.overwriteTitleAuthor} disabled={loading} label="覆盖已有标题和作者" onChange={(overwriteTitleAuthor) => setPolicy({ ...policy, overwriteTitleAuthor })} />)}
+        {settingRow('定时执行识别', '开启后按固定间隔扫描书库；导入流程本身不会直接创建整理任务。', <Toggle checked={policy.enabled && policy.scheduleMode === 'INTERVAL'} disabled={loading} label={i18nAttribute("定时执行识别")} onChange={(checked) => setPolicy({ ...policy, enabled: checked, scheduleMode: checked ? 'INTERVAL' : 'MANUAL' })} />)}
+        {policy.enabled && policy.scheduleMode === 'INTERVAL' ? settingRow('执行间隔', '建议至少 30 分钟，避免对外部数据源产生过密请求。', <select aria-label={i18nAttribute("识别任务执行间隔")} value={policy.intervalMinutes} onChange={(event) => setPolicy({ ...policy, intervalMinutes: Number(event.target.value) })} className="h-11 min-w-36 rounded-xl border border-[#DCD7D1] bg-white px-3 text-sm text-[#393632] outline-none focus:border-[#EF8B73]">{[15, 30, 60, 180, 360, 720, 1440].map((value) => <option value={value} key={value}>{value < 60 ? i18nAttribute("{value0} 分钟", { value0: value }) : value === 60 ? i18nAttribute("每小时") : value === 1440 ? i18nAttribute("每天") : i18nAttribute("每 {value0} 小时", { value0: value / 60 })}</option>)}</select>) : null}
+        {settingRow('新增后自动执行', '仅处理开启此设置之后新增的读物，历史书库不会被一次性加入。', <Toggle checked={policy.autoRunOnNew} disabled={loading} label={i18nAttribute("新增后自动执行")} onChange={(autoRunOnNew) => setPolicy({ ...policy, autoRunOnNew })} />)}
+        {settingRow('覆盖已有标题和作者', '开启后，识别结果会更新已有标题和作者；其他元数据仍只补全缺失字段。', <Toggle checked={policy.overwriteTitleAuthor} disabled={loading} label={i18nAttribute("覆盖已有标题和作者")} onChange={(overwriteTitleAuthor) => setPolicy({ ...policy, overwriteTitleAuthor })} />)}
       </div>
 
       <div className="mt-5 rounded-2xl bg-[#F8F6F3] p-4">
-        <div className="flex items-center gap-2 text-sm font-semibold text-[#3B3834]"><Clock3 size={16} className="text-[#DB4D2D]" />识别范围</div>
+        <div className="flex items-center gap-2 text-sm font-semibold text-[#3B3834]"><Clock3 size={16} className="text-[#DB4D2D]" /><I18nText>识别范围</I18nText></div>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <label className="flex items-center gap-3 text-sm text-[#625D57]"><input type="checkbox" checked={policy.rules.unrecognized} onChange={(event) => setPolicy({ ...policy, rules: { ...policy.rules, unrecognized: event.target.checked } })} className="h-4 w-4 accent-[#FF5530]" />尚未识别的读物</label>
-          <label className="flex items-center gap-3 text-sm text-[#625D57]"><input type="checkbox" checked={policy.rules.missingMetadata} onChange={(event) => setPolicy({ ...policy, rules: { ...policy.rules, missingMetadata: event.target.checked } })} className="h-4 w-4 accent-[#FF5530]" />缺少作者或封面</label>
+          <label className="flex items-center gap-3 text-sm text-[#625D57]"><input type="checkbox" checked={policy.rules.unrecognized} onChange={(event) => setPolicy({ ...policy, rules: { ...policy.rules, unrecognized: event.target.checked } })} className="h-4 w-4 accent-[#FF5530]" /><I18nText>尚未识别的读物</I18nText></label>
+          <label className="flex items-center gap-3 text-sm text-[#625D57]"><input type="checkbox" checked={policy.rules.missingMetadata} onChange={(event) => setPolicy({ ...policy, rules: { ...policy.rules, missingMetadata: event.target.checked } })} className="h-4 w-4 accent-[#FF5530]" /><I18nText>缺少作者或封面</I18nText></label>
         </div>
       </div>
 
       <div className="mt-5 flex flex-col gap-3 rounded-2xl border border-[#F1D8CF] bg-[#FFF8F5] px-4 py-3 text-sm text-[#8A4C3C] sm:flex-row sm:items-center sm:justify-between">
-        <span>按当前规则，书库中有 <strong>{candidateCount}</strong> 本读物可加入整理队列。</span>
-        {policy.nextRunAt ? <span className="text-xs">下次执行：{new Date(policy.nextRunAt).toLocaleString()}</span> : null}
+        <span><I18nText>按当前规则，书库中有 </I18nText><strong>{candidateCount}</strong> <I18nText>本读物可加入整理队列。</I18nText></span>
+        {policy.nextRunAt ? <span className="text-xs"><I18nText>下次执行：</I18nText>{new Date(policy.nextRunAt).toLocaleString(locale)}</span> : null}
       </div>
       <div className="mt-6 flex flex-wrap justify-end gap-3">
-        <Button icon={Save} loading={busy === 'save'} loadingText="保存中" onClick={() => void save()}>保存设置</Button>
+        <Button icon={Save} loading={busy === 'save'} loadingText={i18nAttribute("保存中")} onClick={() => void save()}><I18nText>保存设置</I18nText></Button>
       </div>
     </div>
   );

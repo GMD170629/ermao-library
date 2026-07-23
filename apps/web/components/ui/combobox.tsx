@@ -6,6 +6,8 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from './cn';
 import type { SelectOption } from './select';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useExpressionI18n } from '@/i18n/provider';
 
 type ComboboxProps = {
   value: string;
@@ -35,6 +37,7 @@ export function Combobox({
   inputClassName,
   disabled = false
 }: ComboboxProps) {
+  const { t: i18nExpression } = useExpressionI18n();
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [menuPosition, setMenuPosition] = useState<MenuPosition | null>(null);
@@ -133,14 +136,14 @@ export function Combobox({
       <input
         ref={inputRef}
         role="combobox"
-        aria-label={ariaLabel}
+        aria-label={ariaLabel ? i18nExpression(ariaLabel) : undefined}
         aria-autocomplete="list"
         aria-expanded={open}
         aria-controls={listboxId}
         aria-activedescendant={activeIndex >= 0 ? `${listboxId}-${activeIndex}` : undefined}
         disabled={disabled}
         value={value}
-        placeholder={placeholder}
+        placeholder={i18nExpression(placeholder)}
         onFocus={() => setOpen(true)}
         onClick={() => setOpen(true)}
         onChange={(event) => {
@@ -157,7 +160,7 @@ export function Combobox({
         type="button"
         tabIndex={-1}
         disabled={disabled}
-        aria-label={open ? '收起选项' : '展开选项'}
+        aria-label={open ? i18nExpression("收起选项") : i18nExpression("展开选项")}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => {
           setOpen((current) => !current);
@@ -199,12 +202,14 @@ export function Combobox({
                   selected && 'text-[#D94322]'
                 )}
               >
-                <span className="truncate">{option.label}</span>
+                <span data-i18n-skip={option.translate === false ? '' : undefined} className="truncate">
+                  {option.translate === false ? option.label : i18nExpression(option.label)}
+                </span>
                 {selected ? <Check size={15} className="shrink-0" /> : <span className="h-[15px] w-[15px] shrink-0" />}
               </button>
             );
           }) : (
-            <div className="px-3 py-3 text-xs leading-5 text-[#8A837D]">没有匹配选项，可继续使用当前输入值</div>
+            <div className="px-3 py-3 text-xs leading-5 text-[#8A837D]"><I18nText>没有匹配选项，可继续使用当前输入值</I18nText></div>
           )}
         </div>,
         document.body

@@ -8,8 +8,10 @@ import { cn } from '../../../components/ui/cn';
 import { ImportFileManager } from './import-file-manager';
 import { SettingsCenterShell } from './settings-center-shell';
 import { ImportPreferencesPanel } from './import-preferences-panel';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 export function LibraryImportSettingsPage() {
+  const { t: i18nAttribute } = useAttributeI18n();
   const [activeTab, setActiveTab] = useState<'history' | 'files' | 'folders' | 'preferences'>('history');
   const tabs = [
     { id: 'history' as const, label: '导入记录', icon: FileClock },
@@ -19,9 +21,9 @@ export function LibraryImportSettingsPage() {
   ];
 
   return (
-    <SettingsCenterShell title="书库来源与导入" description="管理监控文件夹、识别规则与最近导入活动。">
+    <SettingsCenterShell title={i18nAttribute("书库来源与导入")} description={i18nAttribute("管理监控文件夹、识别规则与最近导入活动。")}>
       <div>
-        <div className="mb-6 flex gap-1 overflow-x-auto border-b border-[#DEDAD4]" role="tablist" aria-label="书库来源与导入">
+        <div className="mb-6 flex gap-1 overflow-x-auto border-b border-[#DEDAD4]" role="tablist" aria-label={i18nAttribute("书库来源与导入")}>
           {tabs.map((tab) => {
             const Icon = tab.icon;
             return (
@@ -37,7 +39,7 @@ export function LibraryImportSettingsPage() {
                 )}
               >
                 <Icon size={17} />
-                {tab.label}
+                {i18nAttribute(tab.label)}
                 {activeTab === tab.id ? <span className="absolute inset-x-3 bottom-0 h-0.5 bg-[#E64A2E]" /> : null}
               </button>
             );
@@ -46,7 +48,7 @@ export function LibraryImportSettingsPage() {
         <section role="tabpanel" aria-label={tabs.find((tab) => tab.id === activeTab)?.label}>
           {activeTab === 'history' ? <ImportTasksPage embedded /> : null}
           {activeTab === 'files' ? <ImportFileManager /> : null}
-          {activeTab === 'folders' ? <SettingsPage embedded initialSection="监控文件夹" /> : null}
+          {activeTab === 'folders' ? <SettingsPage embedded initialSection={i18nAttribute("监控文件夹")} /> : null}
           {activeTab === 'preferences' ? <ImportPreferencesPanel /> : null}
         </section>
       </div>

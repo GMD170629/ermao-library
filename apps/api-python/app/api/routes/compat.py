@@ -28,6 +28,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 from app.core.auth import get_current_user
 from app.core.config import Settings, get_settings
+from app.core.i18n import SUPPORTED_LOCALES, configured_locale, normalize_locale
 from app.core.time import timestamp_ms_to_iso, to_timestamp_ms
 from app.db.session import get_db
 from app.models.auth import User
@@ -3634,6 +3635,14 @@ def _public_system_settings(values: dict[str, Any]) -> dict[str, Any]:
     return public
 
 
+@router.get("/app-config")
+def get_public_app_config(db: Session = Depends(get_db)):
+    return ok({
+        "language": configured_locale(db),
+        "supportedLocales": list(SUPPORTED_LOCALES),
+    })
+
+
 @router.get("/system-settings")
 def get_system_settings(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
     _user, auth_error = _auth(db, request, settings)
@@ -3742,6 +3751,16 @@ async def update_system_settings(request: Request, db: Session = Depends(get_db)
         return fail("设置格式不正确", status_code=400)
     if not isinstance(requested_clear_keys, list):
         return fail("清除凭据格式不正确", status_code=400)
+    if "language" in values:
+        language = normalize_locale(values.get("language"), fallback=None)
+        if language is None:
+            return fail(
+                "不支持的界面语言",
+                status_code=400,
+                code="INVALID_LOCALE",
+                params={"supportedLocales": list(SUPPORTED_LOCALES)},
+            )
+        values = {**values, "language": language}
     unsupported_keys = sorted(str(key) for key in values if str(key) in _RETIRED_SYSTEM_SETTING_KEYS)
     if unsupported_keys:
         return fail("包含不支持修改的设置项", status_code=400, details={"keys": unsupported_keys})

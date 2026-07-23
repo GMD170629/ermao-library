@@ -8,8 +8,10 @@ import { OrganizePage } from '../../organize/organize-page';
 import { RecognitionSettingsPanel } from '../../organize/recognition-settings-panel';
 import { SettingsCenterShell } from './settings-center-shell';
 import { SettingsTabs } from './settings-tabs';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 export function OrganizeSettingsPage() {
+  const { t: i18nAttribute } = useAttributeI18n();
   const searchParams = useSearchParams();
   const requested = searchParams.get('tab');
   const active = requested === 'recognition' || requested === 'metadata'
@@ -23,7 +25,7 @@ export function OrganizeSettingsPage() {
       : 'queue';
 
   return (
-    <SettingsCenterShell title="智能整理" description="由整理策略主动扫描书库，并通过可扩展的数据源插件识别和补全元数据。">
+    <SettingsCenterShell title={i18nAttribute("智能整理")} description={i18nAttribute("由整理策略主动扫描书库，并通过可扩展的数据源插件识别和补全元数据。")}>
       <SettingsTabs
         active={active}
         tabs={[

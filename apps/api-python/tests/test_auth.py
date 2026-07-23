@@ -3,7 +3,7 @@ import re
 from urllib.parse import unquote
 
 from PIL import Image
-from sqlalchemy import event
+from sqlalchemy import event, text
 
 from app.core.auth import hash_password
 from app.models.auth import PasswordResetToken, Session as UserSession, User
@@ -237,6 +237,12 @@ def test_password_reset_writes_local_file_is_hashed_single_use_and_revokes_sessi
     user = _create_user(db_session)
     _login(client)
     test_settings.resolved_monitor_root.mkdir(parents=True)
+    db_session.execute(text(
+        "INSERT INTO `SystemSetting` (`key`, `value`, `createdAt`, `updatedAt`) "
+        "VALUES ('language', 'en-US', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+        "ON CONFLICT (`key`) DO UPDATE SET `value` = excluded.`value`, `updatedAt` = excluded.`updatedAt`"
+    ))
+    db_session.commit()
 
     missing = client.post("/api/auth/password-reset/request", json={"email": "missing@example.com"})
     requested = client.post(
@@ -249,6 +255,8 @@ def test_password_reset_writes_local_file_is_hashed_single_use_and_revokes_sessi
     reset_file = test_settings.resolved_monitor_root / "reset-password.html"
     assert requested.json()["data"]["filePath"] == str(reset_file)
     document = reset_file.read_text(encoding="utf-8")
+    assert '<html lang="en-US">' in document
+    assert "Reset your Ermao Books password" in document
     match = re.search(r"https://books\.example\.test/app/shuku-starship/reset-password#token=([^\"]+)", document)
     assert match is not None
     raw_token = unquote(match.group(1))

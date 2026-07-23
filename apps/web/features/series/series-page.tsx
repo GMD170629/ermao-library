@@ -11,6 +11,8 @@ import { cn } from '../../components/ui/cn';
 import { PageTitle } from '../../components/ui/page-title';
 import { Select } from '../../components/ui/select';
 import type { SeriesSummary, WorkView } from '../../types/work';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type SeriesPayload = {
   ok: boolean;
@@ -50,6 +52,7 @@ const sortOptions = [
 ];
 
 export function SeriesPage({ initialName = '' }: { initialName?: string }) {
+  const { t: i18nAttribute } = useAttributeI18n();
   const router = useRouter();
   const [seriesName, setSeriesName] = useState(initialName.trim());
   const [series, setSeries] = useState<SeriesSummary[]>([]);
@@ -133,23 +136,24 @@ export function SeriesPage({ initialName = '' }: { initialName?: string }) {
       <div className="space-y-6">
         <PageTitle
           title={seriesName}
-          desc={`系列详情 · ${bookTotal} 本在库读物`}
+          translateTitle={false}
+          desc={i18nAttribute("系列详情 · {value0} 本在库读物", { value0: bookTotal })}
           action={
             <div className="flex flex-wrap gap-3">
-              <Button variant="secondary" icon={ArrowLeft} onClick={() => router.push('/series')}>全部系列</Button>
-              <Select value={sort} options={sortOptions} onChange={setSort} ariaLabel="系列排序" />
+              <Button variant="secondary" icon={ArrowLeft} onClick={() => router.push('/series')}><I18nText>全部系列</I18nText></Button>
+              <Select value={sort} options={sortOptions} onChange={setSort} ariaLabel={i18nAttribute("系列排序")} />
             </div>
           }
         />
-        {loading ? <div className="shuku-loading-panel p-8 text-sm" role="status" aria-live="polite">正在读取系列图书...</div> : null}
+        {loading ? <div className="shuku-loading-panel p-8 text-sm" role="status" aria-live="polite"><I18nText>正在读取系列图书...</I18nText></div> : null}
         {error ? <div className="rounded-3xl border border-red-100 bg-red-50 p-8 text-sm text-red-700">{error}</div> : null}
         {!loading && !error && books.length === 0 ? (
           <div className="rounded-3xl border border-slate-200 bg-white p-8">
             <div className="flex items-center gap-3 text-slate-900">
               <Layers size={20} />
-              <div className="font-semibold">这个系列暂无在库读物</div>
+              <div className="font-semibold"><I18nText>这个系列暂无在库读物</I18nText></div>
             </div>
-            <p className="mt-2 text-sm text-slate-500">该系列可能还没有图书，或相关读物已被隐藏。</p>
+            <p className="mt-2 text-sm text-slate-500"><I18nText>该系列可能还没有图书，或相关读物已被隐藏。</I18nText></p>
           </div>
         ) : null}
         {!loading && !error && books.length > 0 ? (
@@ -165,17 +169,17 @@ export function SeriesPage({ initialName = '' }: { initialName?: string }) {
 
   return (
     <div className="space-y-6">
-      <PageTitle title="系列" desc={`当前书库中的图书系列 · ${seriesTotal} 个`} />
+      <PageTitle title={i18nAttribute("系列")} desc={i18nAttribute("当前书库中的图书系列 · {value0} 个", { value0: seriesTotal })} />
       <div className="rounded-[22px] border border-slate-200 bg-white p-3 shadow-sm">
         <div className="flex h-10 min-w-0 items-center gap-3 rounded-2xl border border-slate-200 px-3 md:max-w-md">
           <Search size={16} className="text-slate-400" />
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索系列" className="w-full bg-transparent text-sm outline-none" />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={i18nAttribute("搜索系列")} className="w-full bg-transparent text-sm outline-none" />
         </div>
       </div>
-      {loading ? <div className="shuku-loading-panel p-8 text-sm" role="status" aria-live="polite">正在读取系列...</div> : null}
+      {loading ? <div className="shuku-loading-panel p-8 text-sm" role="status" aria-live="polite"><I18nText>正在读取系列...</I18nText></div> : null}
       {error ? <div className="rounded-3xl border border-red-100 bg-red-50 p-8 text-sm text-red-700">{error}</div> : null}
       {!loading && !error && filteredSeries.length === 0 ? (
-        <div className="rounded-3xl border border-slate-200 bg-white p-8 text-sm text-slate-500">暂无系列。为图书补充系列元数据后，这里会自动出现。</div>
+        <div className="rounded-3xl border border-slate-200 bg-white p-8 text-sm text-slate-500"><I18nText>暂无系列。为图书补充系列元数据后，这里会自动出现。</I18nText></div>
       ) : null}
       {!loading && !error && filteredSeries.length > 0 ? (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -190,10 +194,9 @@ export function SeriesPage({ initialName = '' }: { initialName?: string }) {
                   <div className="line-clamp-2 font-semibold text-slate-950">{item.name}</div>
                   <div className="mt-2 flex items-center gap-2 text-sm text-slate-500">
                     <BookOpen size={15} />
-                    {item.bookCount} 本读物
-                  </div>
+                    {item.bookCount} <I18nText>本读物</I18nText></div>
                 </div>
-                <Badge tone="blue">系列</Badge>
+                <Badge tone="blue"><I18nText>系列</I18nText></Badge>
               </div>
             </Link>
           ))}

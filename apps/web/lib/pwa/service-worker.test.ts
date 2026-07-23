@@ -34,3 +34,8 @@ test('service worker caches the shared web shell without a dedicated mobile entr
   assert.doesNotMatch(source, /'\/mobile/);
   assert.match(source, /const VERSION = 'shuku-pwa-v2\.3\.1'/);
 });
+
+test('localized web manifest is never pinned in a service-worker cache', () => {
+  assert.doesNotMatch(source.match(/const SHELL_URLS = \[[\s\S]*?\]\.map\(withBasePath\)/)?.[0] ?? '', /manifest\.webmanifest/);
+  assert.doesNotMatch(source.match(/function isStaticAsset[\s\S]*?\n\}/)?.[0] ?? '', /manifest\.webmanifest/);
+});

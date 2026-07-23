@@ -4,6 +4,7 @@ import { Database, FileText, Info, Mail, Settings, Sparkles } from 'lucide-react
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '../../../components/ui/cn';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 export const settingsItems = [
   { href: '/settings', label: '通用', icon: Settings },
@@ -20,10 +21,11 @@ export function isSettingsItemActive(pathname: string, href: string) {
 }
 
 export function SettingsSecondaryNav() {
+  const { t: i18nAttribute } = useAttributeI18n();
   const pathname = usePathname();
 
   return (
-    <nav aria-label="设置分类" className="border-b border-[#DEDAD4] pb-5 lg:border-b-0 lg:border-r lg:pb-0 lg:pr-7">
+    <nav aria-label={i18nAttribute("设置分类")} className="border-b border-[#DEDAD4] pb-5 lg:border-b-0 lg:border-r lg:pb-0 lg:pr-7">
       <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-1">
         {settingsItems.map(({ href, label, icon: Icon }) => {
           const active = isSettingsItemActive(pathname, href);
@@ -38,7 +40,7 @@ export function SettingsSecondaryNav() {
               )}
             >
               <Icon size={20} className="shrink-0" strokeWidth={1.75} />
-              <span className="whitespace-nowrap">{label}</span>
+              <span className="whitespace-nowrap">{i18nAttribute(label)}</span>
             </Link>
           );
         })}

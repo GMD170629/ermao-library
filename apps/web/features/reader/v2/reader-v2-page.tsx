@@ -17,6 +17,8 @@ import { resolveRequestedEpubHref } from './epub-direct-target';
 import { resolveStartupResume } from './local-resume';
 import { ReaderEngineRuntime } from './reader-engine-runtime';
 import { useReaderPwaSurface } from './use-reader-pwa-surface';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 const openingStorageKey = 'shuku:reader:opening';
 
@@ -73,6 +75,7 @@ function OpeningCover({ context, ready, background, color, indexProgress }: {
   color: string;
   indexProgress: { completed: number; total: number; percent: number } | null;
 }) {
+  const { t: i18nAttribute } = useAttributeI18n();
   const [visible, setVisible] = useState(true);
   const [expanded, setExpanded] = useState(false);
   const reducedMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -121,15 +124,15 @@ function OpeningCover({ context, ready, background, color, indexProgress }: {
         />
       ) : <LoaderCircle size={30} className="animate-spin motion-reduce:animate-none" />}
       <div className="absolute inset-x-6 bottom-[calc(4rem+var(--shuku-safe-area-bottom))] text-center">
-        <div className="line-clamp-2 text-lg font-semibold">{context?.title ?? '正在打开阅读器'}</div>
+        <div className="line-clamp-2 text-lg font-semibold">{context?.title ?? i18nAttribute("正在打开阅读器")}</div>
         {context?.author ? <div className="mt-1 text-sm opacity-65">{context.author}</div> : null}
         {indexProgress ? (
           <div className="mx-auto mt-5 w-full max-w-sm">
-            <div className="text-sm font-medium">正在建立全书位置索引</div>
+            <div className="text-sm font-medium"><I18nText>正在建立全书位置索引</I18nText></div>
             <div
               className="mt-3 h-2 overflow-hidden rounded-full bg-current/15"
               role="progressbar"
-              aria-label="全书位置索引进度"
+              aria-label={i18nAttribute("全书位置索引进度")}
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={Math.round(indexProgress.percent)}
@@ -141,10 +144,10 @@ function OpeningCover({ context, ready, background, color, indexProgress }: {
             </div>
             <div className="mt-2 text-xs tabular-nums opacity-65">
               {indexProgress.total > 0
-                ? `已处理 ${indexProgress.completed} / ${indexProgress.total} 章 · ${Math.round(indexProgress.percent)}%`
-                : '正在准备章节索引…'}
+                ? i18nAttribute("已处理 {value0} / {value1} 章 · {value2}%", { value0: indexProgress.completed, value1: indexProgress.total, value2: Math.round(indexProgress.percent) })
+                : i18nAttribute("正在准备章节索引…")}
             </div>
-            <div className="mt-1 text-xs opacity-55">首次打开需要完成一次，之后将直接进入阅读。</div>
+            <div className="mt-1 text-xs opacity-55"><I18nText>首次打开需要完成一次，之后将直接进入阅读。</I18nText></div>
           </div>
         ) : null}
       </div>
@@ -348,11 +351,11 @@ export function ReaderV2Page({ editionId }: { editionId: string }) {
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950 p-6 text-center text-white">
         <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/5 p-6">
           <AlertTriangle className="mx-auto text-amber-300" size={30} />
-          <div className="mt-4 text-lg font-semibold">阅读器无法启动</div>
+          <div className="mt-4 text-lg font-semibold"><I18nText>阅读器无法启动</I18nText></div>
           <p className="mt-2 text-sm text-slate-300">{state.error}</p>
           <div className="mt-5 grid grid-cols-2 gap-2">
-            <button type="button" onClick={() => router.push('/library')} className="min-h-11 rounded-xl bg-white/10 px-3 text-sm">返回书库</button>
-            <button type="button" onClick={() => setRetry((value) => value + 1)} className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-sm"><RotateCcw size={16} />重试</button>
+            <button type="button" onClick={() => router.push('/library')} className="min-h-11 rounded-xl bg-white/10 px-3 text-sm"><I18nText>返回书库</I18nText></button>
+            <button type="button" onClick={() => setRetry((value) => value + 1)} className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-sm"><RotateCcw size={16} /><I18nText>重试</I18nText></button>
           </div>
         </div>
       </div>

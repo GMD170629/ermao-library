@@ -9,7 +9,10 @@ import { Button } from '../../components/ui/button';
 import { useConfirm, useToast } from '../../components/ui/feedback';
 import { PageTitle } from '../../components/ui/page-title';
 import { Select } from '../../components/ui/select';
+import { useI18n } from '../../i18n/provider';
 import type { WorkView } from '../../types/work';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type ProviderExecution = {
   id: string;
@@ -160,17 +163,19 @@ function StatusBadge({ category }: { category: OrganizeStatusCategory }) {
   );
 }
 
-function formatDateTime(value: string | null | undefined) {
+function formatDateTime(value: string | null | undefined, locale: string) {
   if (!value) return { date: '—', time: '' };
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return { date: String(value), time: '' };
   return {
-    date: date.toLocaleDateString(),
-    time: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    date: date.toLocaleDateString(locale),
+    time: date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
   };
 }
 
 export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' }: { embedded?: boolean; jobBasePath?: string }) {
+  const { t: i18nAttribute } = useAttributeI18n();
+  const { locale } = useI18n();
   const router = useRouter();
   const confirm = useConfirm();
   const toast = useToast();
@@ -258,14 +263,14 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
     <div className={embedded ? 'space-y-4' : 'space-y-6'}>
       {!embedded ? (
         <PageTitle
-          title="整理队列"
-          desc="查看全部整理记录；任务由定时策略或新增后自动执行产生。"
-          action={<Button variant="secondary" icon={RefreshCw} onClick={() => void loadJobs()}>刷新</Button>}
+          title={i18nAttribute("整理队列")}
+          desc={i18nAttribute("查看全部整理记录；任务由定时策略或新增后自动执行产生。")}
+          action={<Button variant="secondary" icon={RefreshCw} onClick={() => void loadJobs()}><I18nText>刷新</I18nText></Button>}
         />
       ) : (
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm leading-6 text-[#77716A]">查看全部整理记录，跟踪每次识别的入队原因、状态与数据源。</p>
-          <Button variant="ghost" icon={RefreshCw} aria-label="刷新整理记录" onClick={() => void loadJobs()}>刷新</Button>
+          <p className="text-sm leading-6 text-[#77716A]"><I18nText>查看全部整理记录，跟踪每次识别的入队原因、状态与数据源。</I18nText></p>
+          <Button variant="ghost" icon={RefreshCw} aria-label={i18nAttribute("刷新整理记录")} onClick={() => void loadJobs()}><I18nText>刷新</I18nText></Button>
         </div>
       )}
 
@@ -289,14 +294,14 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
             <input
               value={search}
               onChange={(event) => { setSearch(event.target.value); setPage(1); }}
-              placeholder="搜索书名、作者、入队原因或数据源"
+              placeholder={i18nAttribute("搜索书名、作者、入队原因或数据源")}
               className="h-11 w-full rounded-xl border border-[#E2DDD7] bg-[#FCFBF9] pl-10 pr-4 text-sm outline-none focus:border-[#EF8B73]"
             />
           </div>
           <Select
             value={statusFilter}
             onChange={(value) => { setStatusFilter(value); setPage(1); }}
-            ariaLabel="整理记录状态筛选"
+            ariaLabel={i18nAttribute("整理记录状态筛选")}
             options={[
               { value: 'ALL', label: '全部状态' },
               { value: 'SUCCESS', label: '成功' },
@@ -308,11 +313,11 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
             triggerClassName="h-11 min-w-[132px]"
             align="right"
           />
-          <span className="px-1 text-xs text-[#8B847D]">共 {total} 条</span>
+          <span className="px-1 text-xs text-[#8B847D]"><I18nText>共 </I18nText>{total} <I18nText>条</I18nText></span>
         </div>
 
-        {loading ? <div className="shuku-loading-panel p-8 text-sm" role="status" aria-live="polite">正在读取整理记录...</div> : null}
-        {!loading && jobs.length === 0 ? <div className="p-10 text-center text-sm text-slate-500">{searchQuery || statusFilter !== 'ALL' ? '没有符合当前筛选条件的记录。' : '尚无整理记录。任务会在定时策略或新增后自动执行时产生。'}</div> : null}
+        {loading ? <div className="shuku-loading-panel p-8 text-sm" role="status" aria-live="polite"><I18nText>正在读取整理记录...</I18nText></div> : null}
+        {!loading && jobs.length === 0 ? <div className="p-10 text-center text-sm text-slate-500">{searchQuery || statusFilter !== 'ALL' ? i18nAttribute("没有符合当前筛选条件的记录。") : i18nAttribute("尚无整理记录。任务会在定时策略或新增后自动执行时产生。")}</div> : null}
 
         {!loading && jobs.length > 0 ? (
           <>
@@ -321,24 +326,24 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
                 const category = job.statusCategory ?? 'WAITING';
                 const reasons = jobReasons(job);
                 const sources = jobSources(job);
-                const time = formatDateTime(job.createdAt ?? job.updatedAt);
+                const time = formatDateTime(job.createdAt ?? job.updatedAt, locale);
                 return (
                   <article key={job.id} data-testid="organize-job-mobile-card" className="p-4">
                     <button type="button" onClick={() => router.push(`${jobBasePath}/${job.id}`)} className="flex w-full min-w-0 items-center gap-3 text-left">
                       <Cover book={job.book} className="h-16 w-12 shrink-0 rounded-lg" small />
-                      <span className="min-w-0 flex-1">
+                      <span data-i18n-skip className="min-w-0 flex-1">
                         <span className="line-clamp-2 font-semibold leading-5 text-slate-900">{job.book.title}</span>
                         <span className="mt-1 block truncate text-xs text-slate-500">{job.book.author} · {job.book.format}</span>
                       </span>
                       <StatusBadge category={category} />
                     </button>
                     <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-slate-100 pt-4 text-sm">
-                      <div><dt className="text-xs text-slate-500">入队原因</dt><dd className="mt-1 flex flex-wrap gap-1">{reasons.slice(0, 2).map((reason) => <Badge key={reason} tone="slate">{reason}</Badge>)}</dd></div>
-                      <div><dt className="text-xs text-slate-500">数据源</dt><dd className="mt-1 flex flex-wrap gap-1">{sources.length ? sources.slice(0, 2).map((source) => <Badge key={source} tone="blue">{sourceLabel(source)}</Badge>) : <span className="text-slate-400">—</span>}</dd></div>
-                      <div><dt className="text-xs text-slate-500">入队时间</dt><dd className="mt-1 text-xs leading-5 text-slate-700">{time.date} {time.time}</dd></div>
+                      <div><dt className="text-xs text-slate-500"><I18nText>入队原因</I18nText></dt><dd className="mt-1 flex flex-wrap gap-1">{reasons.slice(0, 2).map((reason) => <Badge key={reason} tone="slate">{reason}</Badge>)}</dd></div>
+                      <div><dt className="text-xs text-slate-500"><I18nText>数据源</I18nText></dt><dd className="mt-1 flex flex-wrap gap-1">{sources.length ? sources.slice(0, 2).map((source) => <Badge key={source} tone="blue">{sourceLabel(source)}</Badge>) : <span className="text-slate-400">—</span>}</dd></div>
+                      <div><dt className="text-xs text-slate-500"><I18nText>入队时间</I18nText></dt><dd className="mt-1 text-xs leading-5 text-slate-700">{time.date} {time.time}</dd></div>
                       <div className="col-span-2 flex flex-wrap justify-end gap-2">
-                        <Button variant="secondary" icon={RotateCcw} className="min-h-9 px-3 py-1.5 text-xs" loading={busy === `recognize:${job.id}`} loadingText="入队中" disabled={Boolean(busy)} onClick={() => void mutateJob(job, 'recognize')}>重新识别</Button>
-                        <Button variant="danger" icon={Trash2} className="min-h-9 px-3 py-1.5 text-xs" loading={busy === `delete:${job.id}`} loadingText="删除中" disabled={Boolean(busy)} onClick={() => void mutateJob(job, 'delete')}>删除</Button>
+                        <Button variant="secondary" icon={RotateCcw} className="min-h-9 px-3 py-1.5 text-xs" loading={busy === `recognize:${job.id}`} loadingText={i18nAttribute("入队中")} disabled={Boolean(busy)} onClick={() => void mutateJob(job, 'recognize')}><I18nText>重新识别</I18nText></Button>
+                        <Button variant="danger" icon={Trash2} className="min-h-9 px-3 py-1.5 text-xs" loading={busy === `delete:${job.id}`} loadingText={i18nAttribute("删除中")} disabled={Boolean(busy)} onClick={() => void mutateJob(job, 'delete')}><I18nText>删除</I18nText></Button>
                       </div>
                     </dl>
                   </article>
@@ -350,12 +355,12 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
               <table className="w-full table-fixed text-left text-sm">
                 <thead className="bg-[#FAF9F7] text-xs text-[#716B64]">
                   <tr>
-                    <th className="w-[24%] px-5 py-4 font-medium">读物</th>
-                    <th className="w-[19%] px-3 py-4 font-medium">入队原因</th>
-                    <th className="w-[12%] px-3 py-4 font-medium">状态</th>
-                    <th className="w-[18%] px-3 py-4 font-medium">数据源</th>
-                    <th className="w-[12%] px-3 py-4 font-medium">入队时间</th>
-                    <th className="w-[15%] px-5 py-4 text-right font-medium">操作</th>
+                    <th className="w-[24%] px-5 py-4 font-medium"><I18nText>读物</I18nText></th>
+                    <th className="w-[19%] px-3 py-4 font-medium"><I18nText>入队原因</I18nText></th>
+                    <th className="w-[12%] px-3 py-4 font-medium"><I18nText>状态</I18nText></th>
+                    <th className="w-[18%] px-3 py-4 font-medium"><I18nText>数据源</I18nText></th>
+                    <th className="w-[12%] px-3 py-4 font-medium"><I18nText>入队时间</I18nText></th>
+                    <th className="w-[15%] px-5 py-4 text-right font-medium"><I18nText>操作</I18nText></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -363,13 +368,13 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
                     const category = job.statusCategory ?? 'WAITING';
                     const reasons = jobReasons(job);
                     const sources = jobSources(job);
-                    const time = formatDateTime(job.createdAt ?? job.updatedAt);
+                    const time = formatDateTime(job.createdAt ?? job.updatedAt, locale);
                     return (
                       <tr key={job.id} className="transition-colors hover:bg-[#FCFBF9]">
                         <td className="px-5 py-4 align-middle">
                           <button type="button" onClick={() => router.push(`${jobBasePath}/${job.id}`)} className="flex w-full min-w-0 items-center gap-3 text-left">
                             <Cover book={job.book} className="h-12 w-9 shrink-0 rounded-lg" small />
-                            <span className="min-w-0"><span className="block truncate font-semibold text-slate-900">{job.book.title}</span><span className="mt-1 block truncate text-xs text-slate-500">{job.book.author} · {job.book.format}</span></span>
+                            <span data-i18n-skip className="min-w-0"><span className="block truncate font-semibold text-slate-900">{job.book.title}</span><span className="mt-1 block truncate text-xs text-slate-500">{job.book.author} · {job.book.format}</span></span>
                           </button>
                         </td>
                         <td className="px-3 py-4 align-middle"><div className="flex min-w-0 flex-wrap gap-1">{reasons.slice(0, 2).map((reason) => <Badge key={reason} tone="slate">{reason}</Badge>)}{reasons.length > 2 ? <span className="text-xs text-slate-400">+{reasons.length - 2}</span> : null}</div></td>
@@ -378,8 +383,8 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
                         <td className="px-3 py-4 align-middle text-xs leading-5 text-slate-500"><span className="block">{time.date}</span><span className="block tabular-nums">{time.time}</span></td>
                         <td className="px-5 py-4 align-middle">
                           <div className="flex flex-wrap justify-end gap-1.5">
-                            <Button variant="ghost" icon={RotateCcw} className="min-h-8 px-2.5 py-1.5 text-xs" loading={busy === `recognize:${job.id}`} loadingText="入队中" disabled={Boolean(busy)} onClick={() => void mutateJob(job, 'recognize')}>重新识别</Button>
-                            <Button variant="ghost" icon={Trash2} className="min-h-8 px-2.5 py-1.5 text-xs text-red-600 hover:bg-red-50 hover:text-red-700" loading={busy === `delete:${job.id}`} loadingText="删除中" disabled={Boolean(busy)} onClick={() => void mutateJob(job, 'delete')}>删除</Button>
+                            <Button variant="ghost" icon={RotateCcw} className="min-h-8 px-2.5 py-1.5 text-xs" loading={busy === `recognize:${job.id}`} loadingText={i18nAttribute("入队中")} disabled={Boolean(busy)} onClick={() => void mutateJob(job, 'recognize')}><I18nText>重新识别</I18nText></Button>
+                            <Button variant="ghost" icon={Trash2} className="min-h-8 px-2.5 py-1.5 text-xs text-red-600 hover:bg-red-50 hover:text-red-700" loading={busy === `delete:${job.id}`} loadingText={i18nAttribute("删除中")} disabled={Boolean(busy)} onClick={() => void mutateJob(job, 'delete')}><I18nText>删除</I18nText></Button>
                           </div>
                         </td>
                       </tr>
@@ -394,11 +399,11 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
         {!loading && total > 0 ? (
           <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-[#EAE5DF] px-4 py-3 text-sm text-[#77716A] sm:px-5">
             <div className="flex items-center gap-3">
-              <span>共 {total} 条记录</span>
+              <span><I18nText>共 </I18nText>{total} <I18nText>条记录</I18nText></span>
               <Select
                 value={pageSize}
                 onChange={(value) => { setPageSize(value); setPage(1); }}
-                ariaLabel="每页显示数量"
+                ariaLabel={i18nAttribute("每页显示数量")}
                 options={[
                   { value: '20', label: '每页 20 条' },
                   { value: '50', label: '每页 50 条' },
@@ -409,10 +414,10 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
                 className="min-w-[118px]"
               />
             </div>
-            <nav className="flex items-center gap-2" aria-label="识别记录分页">
-              <button type="button" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white transition hover:bg-[#F7F4F0] disabled:opacity-40" aria-label="上一页"><ChevronLeft size={16} /></button>
+            <nav className="flex items-center gap-2" aria-label={i18nAttribute("识别记录分页")}>
+              <button type="button" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white transition hover:bg-[#F7F4F0] disabled:opacity-40" aria-label={i18nAttribute("上一页")}><ChevronLeft size={16} /></button>
               <span className="min-w-16 text-center text-[#4F4A45]">{page} / {totalPages}</span>
-              <button type="button" disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white transition hover:bg-[#F7F4F0] disabled:opacity-40" aria-label="下一页"><ChevronRight size={16} /></button>
+              <button type="button" disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white transition hover:bg-[#F7F4F0] disabled:opacity-40" aria-label={i18nAttribute("下一页")}><ChevronRight size={16} /></button>
             </nav>
           </footer>
         ) : null}

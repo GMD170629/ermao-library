@@ -13,6 +13,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.core.i18n import DEFAULT_LOCALE
 from app.core.time import to_timestamp_ms
 from app.services.book_identity import UNKNOWN_AUTHOR, identity_merge_key, normalize_identity_part
 
@@ -816,7 +817,7 @@ def seed_baseline_data(db: Session) -> None:
 
     system_settings = {
         "systemName": DEFAULT_SYSTEM_NAME,
-        "language": "zh-CN",
+        "language": DEFAULT_LOCALE,
         "workDetail.tabOrder": json.dumps(["EBOOK", "COMIC", "AUDIOBOOK", "STRUCTURE"], ensure_ascii=False),
     }
     for key, value in system_settings.items():

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.config import Settings, get_settings
+from app.core.i18n import configured_locale
 from app.db.session import get_db
 from app.models.auth import User
 from app.schemas.responses import fail, ok
@@ -253,13 +254,16 @@ async def create_kindle_send_task(request: Request, db: Session = Depends(get_db
 
     now = datetime.now(timezone.utc)
     task_id = f"kindle_{time_ns()}"
+    locale = configured_locale(db)
+    fallback_book_title = "Untitled Book" if locale == "en-US" else "未命名图书"
+    fallback_subject = "Send to Kindle" if locale == "en-US" else "发送到 Kindle"
     params = {
         "id": task_id,
         "work_id": file_row["workId"],
         "edition_id": file_row["editionId"],
         "volume_id": file_row.get("volumeId"),
         "file_id": file_id,
-        "book_title": str(file_row.get("bookTitle") or "未命名图书"),
+        "book_title": str(file_row.get("bookTitle") or fallback_book_title),
         "edition_name": file_row.get("versionName"),
         "volume_title": file_row.get("volumeTitle"),
         "file_name": file_name,
@@ -268,7 +272,7 @@ async def create_kindle_send_task(request: Request, db: Session = Depends(get_db
         "size_bytes": size_bytes,
         "sender_email": smtp_config.from_email,
         "recipient_email": recipient,
-        "subject": str(file_row.get("bookTitle") or "发送到 Kindle"),
+        "subject": str(file_row.get("bookTitle") or fallback_subject),
         "smtp_host": smtp_config.host,
         "smtp_port": smtp_config.port,
         "smtp_security": smtp_config.security,

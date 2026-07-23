@@ -7,7 +7,10 @@ import { Badge, type BadgeTone } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { useToast } from '../../components/ui/feedback';
 import { PageTitle } from '../../components/ui/page-title';
+import { useI18n } from '../../i18n/provider';
 import { ManagementNav } from './management-nav';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type SystemEvent = {
   id: string;
@@ -83,6 +86,8 @@ function localDateBoundary(value: string, nextDay = false) {
 }
 
 export function ManagementLogsPage({ embedded = false }: { embedded?: boolean }) {
+  const { t: i18nAttribute } = useAttributeI18n();
+  const { locale } = useI18n();
   const [events, setEvents] = useState<SystemEvent[]>([]);
   const [source, setSource] = useState('');
   const [level, setLevel] = useState('');
@@ -132,7 +137,7 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
   }, [buildParams, dateFrom, dateTo, page]);
 
   async function clearLogs() {
-    if (!window.confirm('清理信息和警告日志？错误与关键审计事件会保留。')) return;
+    if (!window.confirm(i18nAttribute('清理信息和警告日志？错误与关键审计事件会保留。'))) return;
     const response = await fetch('/api/management/events', { method: 'DELETE' });
     const payload = await response.json().catch(() => null) as { ok?: boolean; data?: { deleted: number }; error?: { message: string } } | null;
     if (!payload?.ok) {
@@ -172,7 +177,7 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
       const rows = [
         ['时间', '级别', '来源', '摘要', '动作', '关联类型'].map(csvCell).join(','),
         ...exported.map((event) => [
-          new Date(event.createdAt).toLocaleString(),
+          new Date(event.createdAt).toLocaleString(locale),
           levelLabel(event.level),
           sourceLabel(event.source),
           redactString(event.message),
@@ -201,41 +206,38 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
 
   return (
     <div className={embedded ? 'space-y-4' : 'space-y-6'}>
-      {!embedded ? <PageTitle title="系统日志" desc="按级别、来源、日期和关键字查看系统事件。" action={<Button variant="secondary" icon={RefreshCw} loading={loading} loadingText="刷新中" onClick={() => void load()}>刷新</Button>} /> : null}
+      {!embedded ? <PageTitle title={i18nAttribute("系统日志")} desc={i18nAttribute("按级别、来源、日期和关键字查看系统事件。")} action={<Button variant="secondary" icon={RefreshCw} loading={loading} loadingText={i18nAttribute("刷新中")} onClick={() => void load()}><I18nText>刷新</I18nText></Button>} /> : null}
       {!embedded ? <ManagementNav /> : null}
 
-      <section className="rounded-[22px] border border-[#DEDAD4] bg-white p-4" aria-label="日志筛选">
+      <section className="rounded-[22px] border border-[#DEDAD4] bg-white p-4" aria-label={i18nAttribute("日志筛选")}>
         <div className="flex flex-wrap gap-2">
           {['', 'info', 'warning', 'error'].map((item) => (
-            <button key={item || 'all-level'} type="button" onClick={() => { setLevel(item); setPage(1); }} className={`min-h-9 rounded-xl border px-3 text-sm ${level === item ? 'border-[#F4B7A8] bg-[#FCE5DE] text-[#ED4D2D]' : 'border-[#DEDAD4] text-[#625D57] hover:bg-[#F6F3F0]'}`}>{item ? levelLabel(item) : '全部级别'}</button>
+            <button key={item || 'all-level'} type="button" onClick={() => { setLevel(item); setPage(1); }} className={`min-h-9 rounded-xl border px-3 text-sm ${level === item ? 'border-[#F4B7A8] bg-[#FCE5DE] text-[#ED4D2D]' : 'border-[#DEDAD4] text-[#625D57] hover:bg-[#F6F3F0]'}`}>{item ? levelLabel(item) : i18nAttribute("全部级别")}</button>
           ))}
           <span className="mx-1 hidden h-9 w-px bg-[#DEDAD4] sm:block" />
           {['', 'import', 'download', 'folder', 'library', 'system'].map((item) => (
-            <button key={item || 'all-source'} type="button" onClick={() => { setSource(item); setPage(1); }} className={`min-h-9 rounded-xl border px-3 text-sm ${source === item ? 'border-[#F4B7A8] bg-[#FCE5DE] text-[#ED4D2D]' : 'border-[#DEDAD4] text-[#625D57] hover:bg-[#F6F3F0]'}`}>{item ? sourceLabel(item) : '全部来源'}</button>
+            <button key={item || 'all-source'} type="button" onClick={() => { setSource(item); setPage(1); }} className={`min-h-9 rounded-xl border px-3 text-sm ${source === item ? 'border-[#F4B7A8] bg-[#FCE5DE] text-[#ED4D2D]' : 'border-[#DEDAD4] text-[#625D57] hover:bg-[#F6F3F0]'}`}>{item ? sourceLabel(item) : i18nAttribute("全部来源")}</button>
           ))}
         </div>
 
         <div className="mt-4 grid gap-3 lg:grid-cols-[150px_150px_minmax(0,1fr)] lg:items-end">
           <label className="text-xs text-[#716B64]">
-            开始日期
-            <input type="date" value={dateFrom} onChange={(event) => { setDateFrom(event.target.value); setPage(1); }} className="mt-1 h-10 w-full rounded-xl border border-[#DEDAD4] bg-white px-3 text-sm text-[#2A2825] outline-none focus:border-[#F0A28F] focus:ring-2 focus:ring-[#FAD9D0]" />
+            <I18nText>开始日期</I18nText><input type="date" value={dateFrom} onChange={(event) => { setDateFrom(event.target.value); setPage(1); }} className="mt-1 h-10 w-full rounded-xl border border-[#DEDAD4] bg-white px-3 text-sm text-[#2A2825] outline-none focus:border-[#F0A28F] focus:ring-2 focus:ring-[#FAD9D0]" />
           </label>
           <label className="text-xs text-[#716B64]">
-            结束日期
-            <input type="date" value={dateTo} onChange={(event) => { setDateTo(event.target.value); setPage(1); }} className="mt-1 h-10 w-full rounded-xl border border-[#DEDAD4] bg-white px-3 text-sm text-[#2A2825] outline-none focus:border-[#F0A28F] focus:ring-2 focus:ring-[#FAD9D0]" />
+            <I18nText>结束日期</I18nText><input type="date" value={dateTo} onChange={(event) => { setDateTo(event.target.value); setPage(1); }} className="mt-1 h-10 w-full rounded-xl border border-[#DEDAD4] bg-white px-3 text-sm text-[#2A2825] outline-none focus:border-[#F0A28F] focus:ring-2 focus:ring-[#FAD9D0]" />
           </label>
           <label className="text-xs text-[#716B64]">
-            关键字
-            <span className="mt-1 flex h-10 items-center gap-2 rounded-xl border border-[#DEDAD4] px-3 focus-within:border-[#F0A28F] focus-within:ring-2 focus-within:ring-[#FAD9D0]">
+            <I18nText>关键字</I18nText><span className="mt-1 flex h-10 items-center gap-2 rounded-xl border border-[#DEDAD4] px-3 focus-within:border-[#F0A28F] focus-within:ring-2 focus-within:ring-[#FAD9D0]">
               <Search size={15} className="text-[#958F88]" />
-              <input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') applySearch(); }} className="min-w-0 flex-1 bg-transparent text-sm text-[#2A2825] outline-none" placeholder="搜索摘要、动作或关联对象" />
+              <input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') applySearch(); }} className="min-w-0 flex-1 bg-transparent text-sm text-[#2A2825] outline-none" placeholder={i18nAttribute("搜索摘要、动作或关联对象")} />
             </span>
           </label>
           <div className="flex flex-wrap justify-end gap-2 lg:col-span-3">
-            <Button variant="secondary" icon={Search} className="whitespace-nowrap" onClick={applySearch}>搜索</Button>
-            <Button variant="secondary" icon={RefreshCw} loading={loading} loadingText="刷新中" className="whitespace-nowrap" onClick={() => void load()}>刷新</Button>
-            <Button variant="secondary" icon={Download} loading={exporting} loadingText="导出中" className="whitespace-nowrap" onClick={() => void exportLogs()}>导出</Button>
-            <Button variant="ghost" icon={Trash2} className="whitespace-nowrap" onClick={() => void clearLogs()}>清理</Button>
+            <Button variant="secondary" icon={Search} className="whitespace-nowrap" onClick={applySearch}><I18nText>搜索</I18nText></Button>
+            <Button variant="secondary" icon={RefreshCw} loading={loading} loadingText={i18nAttribute("刷新中")} className="whitespace-nowrap" onClick={() => void load()}><I18nText>刷新</I18nText></Button>
+            <Button variant="secondary" icon={Download} loading={exporting} loadingText={i18nAttribute("导出中")} className="whitespace-nowrap" onClick={() => void exportLogs()}><I18nText>导出</I18nText></Button>
+            <Button variant="ghost" icon={Trash2} className="whitespace-nowrap" onClick={() => void clearLogs()}><I18nText>清理</I18nText></Button>
           </div>
         </div>
       </section>
@@ -243,7 +245,7 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
       {error ? <div className="rounded-2xl border border-red-100 bg-red-50 p-4 text-sm text-red-700">{error}</div> : null}
 
       <div className="space-y-3 md:hidden">
-        {!loading && events.length === 0 ? <div className="rounded-[22px] border border-[#DEDAD4] bg-white px-5 py-10 text-center text-sm text-[#817B75]">当前筛选条件下暂无日志。</div> : null}
+        {!loading && events.length === 0 ? <div className="rounded-[22px] border border-[#DEDAD4] bg-white px-5 py-10 text-center text-sm text-[#817B75]"><I18nText>当前筛选条件下暂无日志。</I18nText></div> : null}
         {events.map((event) => {
           const href = targetHref(event);
           const expanded = expandedEventId === event.id;
@@ -253,20 +255,20 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
               <div className="flex flex-wrap items-center gap-2">
                 <Badge tone={tone(event.level)}>{levelLabel(event.level)}</Badge>
                 <Badge tone="slate">{sourceLabel(event.source)}</Badge>
-                <time className="text-xs tabular-nums text-[#77716A]">{new Date(event.createdAt).toLocaleString()}</time>
+                <time className="text-xs tabular-nums text-[#77716A]">{new Date(event.createdAt).toLocaleString(locale)}</time>
               </div>
-              <p className="mt-3 break-words text-sm font-medium leading-6 text-[#2A2825]">{redactString(event.message)}</p>
+              <p className="mt-3 break-words text-sm font-medium leading-6 text-[#2A2825]">{i18nAttribute(redactString(event.message))}</p>
               {expanded ? (
                 <div className="mt-3 rounded-xl bg-[#F7F4F1] p-3 text-xs leading-5 text-[#68625C]">
-                  <div><span className="text-[#969089]">动作：</span>{event.action || '—'}</div>
-                  <div><span className="text-[#969089]">执行者：</span>{event.actorType || 'system'}</div>
-                  {event.targetType ? <div><span className="text-[#969089]">关联：</span>{event.targetType}{event.targetId ? ` · ${event.targetId}` : ''}</div> : null}
+                  <div><span className="text-[#969089]"><I18nText>动作：</I18nText></span>{event.action || '—'}</div>
+                  <div><span className="text-[#969089]"><I18nText>执行者：</I18nText></span>{event.actorType || 'system'}</div>
+                  {event.targetType ? <div><span className="text-[#969089]"><I18nText>关联：</I18nText></span>{event.targetType}{event.targetId ? ` · ${event.targetId}` : ''}</div> : null}
                   {Object.keys(event.metadata ?? {}).length > 0 ? <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-white p-2 text-[11px] text-[#716B64]">{JSON.stringify(safeMetadata, null, 2)}</pre> : null}
-                  {href ? <Link href={href} className="mt-2 inline-flex font-medium text-[#ED4D2D] hover:text-[#C83B23]">打开关联对象</Link> : null}
+                  {href ? <Link href={href} className="mt-2 inline-flex font-medium text-[#ED4D2D] hover:text-[#C83B23]"><I18nText>打开关联对象</I18nText></Link> : null}
                 </div>
               ) : null}
               <button type="button" onClick={() => setExpandedEventId(expanded ? '' : event.id)} aria-expanded={expanded} className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-[#DEDAD4] text-sm font-medium text-[#625D57] transition hover:bg-[#F6F3F0]">
-                {expanded ? '收起详情' : '查看详情'}
+                {expanded ? i18nAttribute("收起详情") : i18nAttribute("查看详情")}
                 <ChevronDown size={16} className={expanded ? 'rotate-180 transition' : 'transition'} />
               </button>
             </article>
@@ -278,16 +280,16 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
         <table className="w-full table-fixed text-left text-sm">
           <thead className="border-b border-[#E7E2DD] bg-[#F8F6F3] text-xs font-medium text-[#77716A]">
             <tr>
-              <th className="w-[170px] px-4 py-3">时间</th>
-              <th className="w-[92px] px-3 py-3">级别</th>
-              <th className="w-[120px] px-3 py-3">来源</th>
-              <th className="px-3 py-3">摘要</th>
-              <th className="w-[70px] px-3 py-3 text-right">详情</th>
+              <th className="w-[170px] px-4 py-3"><I18nText>时间</I18nText></th>
+              <th className="w-[92px] px-3 py-3"><I18nText>级别</I18nText></th>
+              <th className="w-[120px] px-3 py-3"><I18nText>来源</I18nText></th>
+              <th className="px-3 py-3"><I18nText>摘要</I18nText></th>
+              <th className="w-[70px] px-3 py-3 text-right"><I18nText>详情</I18nText></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[#EEEAE6]">
             {!loading && events.length === 0 ? (
-              <tr><td colSpan={5} className="px-5 py-12 text-center text-sm text-[#817B75]">当前筛选条件下暂无日志。</td></tr>
+              <tr><td colSpan={5} className="px-5 py-12 text-center text-sm text-[#817B75]"><I18nText>当前筛选条件下暂无日志。</I18nText></td></tr>
             ) : null}
             {events.map((event) => {
               const href = targetHref(event);
@@ -295,23 +297,23 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
               const safeMetadata = sanitizeValue(event.metadata);
               return (
                 <tr key={event.id} className="group align-top hover:bg-[#FCFAF8]">
-                  <td className="px-4 py-3.5 tabular-nums text-[#716B64]">{new Date(event.createdAt).toLocaleString()}</td>
+                  <td className="px-4 py-3.5 tabular-nums text-[#716B64]">{new Date(event.createdAt).toLocaleString(locale)}</td>
                   <td className="px-3 py-3"><Badge tone={tone(event.level)}>{levelLabel(event.level)}</Badge></td>
                   <td className="px-3 py-3 text-[#5F5A54]">{sourceLabel(event.source)}</td>
                   <td className="px-3 py-3.5">
-                    <div className="break-words font-medium leading-6 text-[#2A2825]">{redactString(event.message)}</div>
+                    <div className="break-words font-medium leading-6 text-[#2A2825]">{i18nAttribute(redactString(event.message))}</div>
                     {expanded ? (
                       <div className="mt-3 rounded-xl bg-[#F7F4F1] p-3 text-xs leading-5 text-[#68625C]">
-                        <div><span className="text-[#969089]">动作：</span>{event.action || '—'}</div>
-                        <div><span className="text-[#969089]">执行者：</span>{event.actorType || 'system'}</div>
-                        {event.targetType ? <div><span className="text-[#969089]">关联：</span>{event.targetType}{event.targetId ? ` · ${event.targetId}` : ''}</div> : null}
+                        <div><span className="text-[#969089]"><I18nText>动作：</I18nText></span>{event.action || '—'}</div>
+                        <div><span className="text-[#969089]"><I18nText>执行者：</I18nText></span>{event.actorType || 'system'}</div>
+                        {event.targetType ? <div><span className="text-[#969089]"><I18nText>关联：</I18nText></span>{event.targetType}{event.targetId ? ` · ${event.targetId}` : ''}</div> : null}
                         {Object.keys(event.metadata ?? {}).length > 0 ? <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-white p-2 text-[11px] text-[#716B64]">{JSON.stringify(safeMetadata, null, 2)}</pre> : null}
-                        {href ? <Link href={href} className="mt-2 inline-flex font-medium text-[#ED4D2D] hover:text-[#C83B23]">打开关联对象</Link> : null}
+                        {href ? <Link href={href} className="mt-2 inline-flex font-medium text-[#ED4D2D] hover:text-[#C83B23]"><I18nText>打开关联对象</I18nText></Link> : null}
                       </div>
                     ) : null}
                   </td>
                   <td className="px-3 py-3 text-right">
-                    <button type="button" onClick={() => setExpandedEventId(expanded ? '' : event.id)} aria-expanded={expanded} aria-label={expanded ? '收起日志详情' : '展开日志详情'} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[#77716A] transition hover:bg-[#F2EEEA] hover:text-[#ED4D2D]">
+                    <button type="button" onClick={() => setExpandedEventId(expanded ? '' : event.id)} aria-expanded={expanded} aria-label={expanded ? i18nAttribute("收起日志详情") : i18nAttribute("展开日志详情")} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[#77716A] transition hover:bg-[#F2EEEA] hover:text-[#ED4D2D]">
                       <ChevronDown size={16} className={expanded ? 'rotate-180 transition' : 'transition'} />
                     </button>
                   </td>
@@ -323,12 +325,12 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
       </div>
 
       <footer className="flex flex-wrap items-center justify-between gap-3 text-sm text-[#77716A]">
-        <span>共 {total} 条记录</span>
+        <span><I18nText>共 </I18nText>{total} <I18nText>条记录</I18nText></span>
         {totalPages > 1 ? (
           <div className="flex items-center gap-2">
-            <button type="button" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white disabled:opacity-40" aria-label="上一页"><ChevronLeft size={16} /></button>
+            <button type="button" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white disabled:opacity-40" aria-label={i18nAttribute("上一页")}><ChevronLeft size={16} /></button>
             <span className="min-w-14 text-center text-[#4F4A45]">{page} / {totalPages}</span>
-            <button type="button" disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white disabled:opacity-40" aria-label="下一页"><ChevronRight size={16} /></button>
+            <button type="button" disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white disabled:opacity-40" aria-label={i18nAttribute("下一页")}><ChevronRight size={16} /></button>
           </div>
         ) : null}
       </footer>

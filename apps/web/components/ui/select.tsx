@@ -4,6 +4,7 @@ import { Check, ChevronDown } from 'lucide-react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useI18n } from '../../i18n/provider';
 import { cn } from './cn';
 
 export type SelectOption = {
@@ -11,6 +12,7 @@ export type SelectOption = {
   label: string;
   disabled?: boolean;
   group?: string;
+  translate?: boolean;
 };
 
 type SelectProps<TValue extends string> = {
@@ -87,6 +89,7 @@ export function Select<TValue extends string>({
   disabled = false,
   menuWidth
 }: SelectProps<TValue>) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [menuPosition, setMenuPosition] = useState<MenuPosition | null>(null);
@@ -197,7 +200,7 @@ export function Select<TValue extends string>({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listboxId}
-        aria-label={ariaLabel}
+        aria-label={ariaLabel ? t(ariaLabel) : undefined}
         onClick={() => setOpen((next) => !next)}
         onKeyDown={onKeyDown}
         className={cn(
@@ -207,7 +210,9 @@ export function Select<TValue extends string>({
           triggerClassName
         )}
       >
-        <span className="truncate">{selected?.label ?? placeholder}</span>
+        <span data-i18n-skip={selected?.translate === false ? '' : undefined} className="truncate">
+          {selected ? (selected.translate === false ? selected.label : t(selected.label)) : t(placeholder)}
+        </span>
         <ChevronDown size={16} className={cn('shrink-0 transition', open && 'rotate-180')} />
       </button>
       {open && menuPosition ? createPortal(
@@ -234,7 +239,7 @@ export function Select<TValue extends string>({
             return (
               <div key={option.value}>
                 {option.group && option.group !== options[index - 1]?.group ? (
-                  <div className={cn('sticky top-0 z-10 px-3 pb-1 pt-2 text-[11px] font-semibold tracking-[0.08em]', groupTone[tone])}>{option.group}</div>
+                  <div className={cn('sticky top-0 z-10 px-3 pb-1 pt-2 text-[11px] font-semibold tracking-[0.08em]', groupTone[tone])}>{t(option.group)}</div>
                 ) : null}
                 <button
                   type="button"
@@ -249,7 +254,9 @@ export function Select<TValue extends string>({
                     isSelected && optionTone[tone].selected
                   )}
                 >
-                  <span className="truncate">{option.label}</span>
+                  <span data-i18n-skip={option.translate === false ? '' : undefined} className="truncate">
+                    {option.translate === false ? option.label : t(option.label)}
+                  </span>
                   {isSelected ? <Check size={15} className="shrink-0" /> : <span className="h-[15px] w-[15px] shrink-0" />}
                 </button>
               </div>

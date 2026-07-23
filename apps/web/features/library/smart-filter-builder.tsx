@@ -5,6 +5,8 @@ import type { ReactNode } from 'react';
 import { cn } from '../../components/ui/cn';
 import { Combobox } from '../../components/ui/combobox';
 import { Select } from '../../components/ui/select';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 export type SmartFilterOption = {
   value: string;
@@ -89,6 +91,7 @@ function inputClassName() {
 }
 
 export function SmartFilterBuilder({ fields, rules, loading = false, actions, onChange }: SmartFilterBuilderProps) {
+  const { t: i18nAttribute } = useAttributeI18n();
   const fieldOptions = fields.map((field) => ({ value: field.key, label: field.label, group: field.group }));
 
   function addCondition() {
@@ -125,16 +128,16 @@ export function SmartFilterBuilder({ fields, rules, loading = false, actions, on
 
   function valueEditor(condition: SmartFilterCondition, field: SmartFilterField) {
     if (!needsValue(condition.operator)) {
-      return <div className="flex h-11 items-center rounded-xl bg-black/[0.025] px-3 text-sm text-[#8A837D]">无需填写值</div>;
+      return <div className="flex h-11 items-center rounded-xl bg-black/[0.025] px-3 text-sm text-[#8A837D]"><I18nText>无需填写值</I18nText></div>;
     }
     if (condition.operator === 'between') {
       const values = Array.isArray(condition.value) ? condition.value : ['', ''];
       const type = field.type === 'date' ? 'date' : 'number';
       return (
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-          <input aria-label={`${field.label}起始值`} type={type} value={values[0] ?? ''} onChange={(event) => updateCondition(condition.id, { value: [event.target.value, values[1] ?? ''] })} className={inputClassName()} />
-          <span className="text-xs text-[#9B938D]">至</span>
-          <input aria-label={`${field.label}结束值`} type={type} value={values[1] ?? ''} onChange={(event) => updateCondition(condition.id, { value: [values[0] ?? '', event.target.value] })} className={inputClassName()} />
+          <input aria-label={i18nAttribute("{value0}起始值", { value0: field.label })} type={type} value={values[0] ?? ''} onChange={(event) => updateCondition(condition.id, { value: [event.target.value, values[1] ?? ''] })} className={inputClassName()} />
+          <span className="text-xs text-[#9B938D]"><I18nText>至</I18nText></span>
+          <input aria-label={i18nAttribute("{value0}结束值", { value0: field.label })} type={type} value={values[1] ?? ''} onChange={(event) => updateCondition(condition.id, { value: [values[0] ?? '', event.target.value] })} className={inputClassName()} />
         </div>
       );
     }
@@ -148,8 +151,8 @@ export function SmartFilterBuilder({ fields, rules, loading = false, actions, on
             label: `${option.label}${typeof option.count === 'number' ? ` · ${option.count}` : ''}`
           }))}
           onChange={(nextValue) => updateCondition(condition.id, { value: nextValue })}
-          placeholder="请选择"
-          ariaLabel={`${field.label}筛选值`}
+          placeholder={i18nAttribute("请选择")}
+          ariaLabel={i18nAttribute("{value0}筛选值", { value0: field.label })}
           className="w-full min-w-0"
           triggerClassName="!h-11 !rounded-xl !border-black/[0.09] !px-3 !font-normal !text-[#34302D]"
         />
@@ -164,20 +167,20 @@ export function SmartFilterBuilder({ fields, rules, loading = false, actions, on
             label: `${option.label}${typeof option.count === 'number' ? ` · ${option.count}` : ''}`
           }))}
           onChange={(nextValue) => updateCondition(condition.id, { value: nextValue })}
-          placeholder={`选择或输入${field.label}`}
-          ariaLabel={`${field.label}筛选值`}
+          placeholder={i18nAttribute("选择或输入{value0}", { value0: field.label })}
+          ariaLabel={i18nAttribute("{value0}筛选值", { value0: field.label })}
         />
       );
     }
     return (
       <div className="relative">
         <input
-          aria-label={`${field.label}筛选值`}
+          aria-label={i18nAttribute("{value0}筛选值", { value0: field.label })}
           type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
           value={value}
           onChange={(event) => updateCondition(condition.id, { value: event.target.value })}
           className={cn(inputClassName(), 'w-full', field.unit && 'pr-14')}
-          placeholder={`填写${field.label}`}
+          placeholder={i18nAttribute("填写{value0}", { value0: field.label })}
         />
         {field.unit ? <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#938B85]">{field.unit}</span> : null}
       </div>
@@ -185,38 +188,38 @@ export function SmartFilterBuilder({ fields, rules, loading = false, actions, on
   }
 
   return (
-    <section className="mt-3 overflow-hidden rounded-[22px] border border-black/[0.07] bg-white/70 shadow-[0_10px_30px_rgba(59,44,36,0.035)]" aria-label="智能组合筛选">
+    <section className="mt-3 overflow-hidden rounded-[22px] border border-black/[0.07] bg-white/70 shadow-[0_10px_30px_rgba(59,44,36,0.035)]" aria-label={i18nAttribute("智能组合筛选")}>
       <div className="flex flex-col gap-4 border-b border-black/[0.06] px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
         <div className="flex min-w-0 items-start gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FFF0EA] text-[#DE4C2E]"><WandSparkles size={18} /></span>
           <div>
-            <div className="font-semibold text-[#302C29]">智能组合筛选</div>
-            <div className="mt-0.5 text-xs leading-5 text-[#817A74]">所有作品、版本、文件、阅读和书架维度都可以自由组合，修改后实时生效。</div>
+            <div className="font-semibold text-[#302C29]"><I18nText>智能组合筛选</I18nText></div>
+            <div className="mt-0.5 text-xs leading-5 text-[#817A74]"><I18nText>所有作品、版本、文件、阅读和书架维度都可以自由组合，修改后实时生效。</I18nText></div>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {actions}
-          <span className="text-xs text-[#8A837D]">匹配</span>
+          <span className="text-xs text-[#8A837D]"><I18nText>匹配</I18nText></span>
           <Select
             value={rules.combinator}
             options={[{ value: 'ALL', label: '全部条件' }, { value: 'ANY', label: '任一条件' }]}
             onChange={(combinator) => onChange({ ...rules, combinator })}
-            ariaLabel="筛选条件组合方式"
+            ariaLabel={i18nAttribute("筛选条件组合方式")}
             size="sm"
             className="min-w-[128px]"
             triggerClassName="!h-10 !rounded-xl !border-black/[0.09] !px-3 !text-sm"
           />
-          <button type="button" disabled={loading || fields.length === 0 || rules.conditions.length >= 30} onClick={addCondition} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#2E2A27] px-3.5 text-sm font-medium text-white transition hover:bg-[#161412] disabled:cursor-not-allowed disabled:opacity-40"><Plus size={15} />添加条件</button>
+          <button type="button" disabled={loading || fields.length === 0 || rules.conditions.length >= 30} onClick={addCondition} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#2E2A27] px-3.5 text-sm font-medium text-white transition hover:bg-[#161412] disabled:cursor-not-allowed disabled:opacity-40"><Plus size={15} /><I18nText>添加条件</I18nText></button>
         </div>
       </div>
 
       <div className="space-y-2.5 p-4 sm:p-5">
-        {loading ? <div className="flex min-h-28 items-center justify-center text-sm text-[#8A837D]">正在读取可筛选维度...</div> : null}
+        {loading ? <div className="flex min-h-28 items-center justify-center text-sm text-[#8A837D]"><I18nText>正在读取可筛选维度...</I18nText></div> : null}
         {!loading && rules.conditions.length === 0 ? (
           <button type="button" onClick={addCondition} className="flex min-h-28 w-full flex-col items-center justify-center rounded-2xl border border-dashed border-[#DCD5CE] bg-[#FAF8F6] px-6 text-center transition hover:border-[#E4A692] hover:bg-[#FFF8F5]">
             <Database size={20} className="text-[#B0A69E]" />
-            <span className="mt-2 text-sm font-medium text-[#5E5752]">添加第一个筛选条件</span>
-            <span className="mt-1 text-xs text-[#928A83]">可按元数据、格式、阅读、书架、加入时间或原始文件夹筛选</span>
+            <span className="mt-2 text-sm font-medium text-[#5E5752]"><I18nText>添加第一个筛选条件</I18nText></span>
+            <span className="mt-1 text-xs text-[#928A83]"><I18nText>可按元数据、格式、阅读、书架、加入时间或原始文件夹筛选</I18nText></span>
           </button>
         ) : null}
         {!loading && rules.conditions.map((condition, index) => {
@@ -229,7 +232,7 @@ export function SmartFilterBuilder({ fields, rules, loading = false, actions, on
                 value={condition.field}
                 options={fieldOptions}
                 onChange={(fieldKey) => changeField(condition, fieldKey)}
-                ariaLabel={`第 ${index + 1} 条筛选维度`}
+                ariaLabel={i18nAttribute("第 {value0} 条筛选维度", { value0: index + 1 })}
                 className="w-full min-w-0"
                 triggerClassName="!h-11 !rounded-xl !border-black/[0.09] !px-3 !font-normal !text-[#34302D]"
                 menuWidth={280}
@@ -238,20 +241,20 @@ export function SmartFilterBuilder({ fields, rules, loading = false, actions, on
                 value={condition.operator}
                 options={field.operators.map((operator) => ({ value: operator, label: operatorLabels[operator] ?? operator }))}
                 onChange={(operator) => changeOperator(condition, operator)}
-                ariaLabel={`第 ${index + 1} 条筛选条件`}
+                ariaLabel={i18nAttribute("第 {value0} 条筛选条件", { value0: index + 1 })}
                 className="w-full min-w-0"
                 triggerClassName="!h-11 !rounded-xl !border-black/[0.09] !px-3 !font-normal !text-[#34302D]"
               />
               <div className="min-w-0">{valueEditor(condition, field)}</div>
-              <button type="button" onClick={() => removeCondition(condition.id)} className="flex h-10 w-10 items-center justify-center rounded-xl text-[#9A928B] transition hover:bg-red-50 hover:text-red-600" aria-label={`删除第 ${index + 1} 条筛选条件`}><Trash2 size={16} /></button>
+              <button type="button" onClick={() => removeCondition(condition.id)} className="flex h-10 w-10 items-center justify-center rounded-xl text-[#9A928B] transition hover:bg-red-50 hover:text-red-600" aria-label={i18nAttribute("删除第 {value0} 条筛选条件", { value0: index + 1 })}><Trash2 size={16} /></button>
             </div>
           );
         })}
       </div>
 
       <div className="flex flex-col gap-3 border-t border-black/[0.055] bg-black/[0.018] px-4 py-3 text-xs text-[#7C756F] sm:flex-row sm:items-center sm:justify-between sm:px-5">
-        <span>{rules.conditions.length > 0 ? `已启用 ${rules.conditions.length} 条规则 · ${rules.combinator === 'ALL' ? '同时满足全部条件' : '满足任意一条即可'}` : '未添加组合条件，显示基础筛选结果'}</span>
-        <button type="button" disabled={rules.conditions.length === 0} onClick={() => onChange({ combinator: 'ALL', conditions: [] })} className="inline-flex h-9 items-center gap-1.5 self-start rounded-lg px-2.5 font-medium text-[#7B746E] transition hover:bg-white hover:text-[#D74A2D] disabled:cursor-not-allowed disabled:opacity-35 sm:self-auto"><RotateCcw size={13} />清空组合条件</button>
+        <span>{rules.conditions.length > 0 ? i18nAttribute("已启用 {value0} 条规则 · {value1}", { value0: rules.conditions.length, value1: rules.combinator === 'ALL' ? '同时满足全部条件' : '满足任意一条即可' }) : i18nAttribute("未添加组合条件，显示基础筛选结果")}</span>
+        <button type="button" disabled={rules.conditions.length === 0} onClick={() => onChange({ combinator: 'ALL', conditions: [] })} className="inline-flex h-9 items-center gap-1.5 self-start rounded-lg px-2.5 font-medium text-[#7B746E] transition hover:bg-white hover:text-[#D74A2D] disabled:cursor-not-allowed disabled:opacity-35 sm:self-auto"><RotateCcw size={13} /><I18nText>清空组合条件</I18nText></button>
       </div>
     </section>
   );

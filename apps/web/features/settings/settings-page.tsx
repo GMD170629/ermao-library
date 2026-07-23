@@ -5,9 +5,13 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 're
 import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { useConfirm, useToast } from '../../components/ui/feedback';
+import { useI18n } from '../../i18n/provider';
 import { PageTitle } from '../../components/ui/page-title';
 import { Select } from '../../components/ui/select';
 import { withBasePath } from '../../lib/base-path';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
+import { useI18n as useExpressionI18n } from '@/i18n/provider';
 
 type MonitorFolder = {
   id: string;
@@ -118,6 +122,8 @@ function settingsForSave(settings: AppSettings) {
 }
 
 export function SettingsPage({ embedded = false, initialSection }: { embedded?: boolean; initialSection?: string }) {
+  const { t: i18nAttribute } = useAttributeI18n();
+  const { locale } = useI18n();
   const groups = ['监控文件夹', '备份与恢复', '元数据'];
   const [active, setActive] = useState(initialSection ?? '监控文件夹');
   const [folders, setFolders] = useState<MonitorFolder[]>([]);
@@ -155,7 +161,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   const toast = useToast();
   const shelfOptions = useMemo(() => [
     { value: '', label: '不指定书架' },
-    ...shelves.map((shelf) => ({ value: shelf.id, label: shelf.name }))
+    ...shelves.map((shelf) => ({ value: shelf.id, label: shelf.name, translate: false }))
   ], [shelves]);
   const shelfNames = useMemo(() => new Map(shelves.map((shelf) => [shelf.id, shelf.name])), [shelves]);
 
@@ -327,7 +333,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
       tone: 'danger'
     });
     if (!first) return;
-    const confirmText = window.prompt(`二次确认：请输入 RESTORE 恢复备份 ${backup.filename}`);
+    const confirmText = window.prompt(i18nAttribute('二次确认：请输入 RESTORE 恢复备份 {value0}', { value0: backup.filename }));
     if (confirmText !== 'RESTORE') {
       setError('恢复已取消：确认文本不匹配');
       toast.info('恢复已取消', '确认文本不匹配');
@@ -427,9 +433,9 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   return (
     <div className={embedded ? '' : 'space-y-6'}>
       {!embedded ? <PageTitle
-        title="系统设置"
-        desc="配置监控导入、备份、智能整理和外部来源。"
-        action={active === '元数据' ? <Button icon={CheckCircle2} loading={settingsBusy} loadingText="保存中" onClick={saveSettings}>保存设置</Button> : undefined}
+        title={i18nAttribute("系统设置")}
+        desc={i18nAttribute("配置监控导入、备份、智能整理和外部来源。")}
+        action={active === '元数据' ? <Button icon={CheckCircle2} loading={settingsBusy} loadingText={i18nAttribute("保存中")} onClick={saveSettings}><I18nText>保存设置</I18nText></Button> : undefined}
       /> : null}
       <div className={embedded ? 'block' : 'grid grid-cols-1 gap-6 lg:grid-cols-12'}>
         {!embedded ? <div className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm lg:col-span-3">
@@ -450,26 +456,26 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
             <div className="mt-6 space-y-5">
               <div className="flex justify-end">
                 <Button type="button" variant="secondary" icon={FolderOpen} onClick={() => setShowCreateFolder((current) => !current)}>
-                  {showCreateFolder ? '收起添加表单' : '添加文件夹'}
+                  {showCreateFolder ? i18nAttribute("收起添加表单") : i18nAttribute("添加文件夹")}
                 </Button>
               </div>
               {showCreateFolder ? <form onSubmit={savePath} className="grid grid-cols-1 gap-3 rounded-[20px] border border-slate-200 bg-slate-50 p-4 md:grid-cols-12 md:items-end">
                 <label className="md:col-span-3">
-                  <span className="text-sm font-medium text-slate-700">名称</span>
+                  <span className="text-sm font-medium text-slate-700"><I18nText>名称</I18nText></span>
                   <input value={name} onChange={(event) => setName(event.target.value)} className="mt-1.5 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-[#F19B84] focus:ring-2 focus:ring-[#FCE5DE]" />
                 </label>
                 <div className="md:col-span-5">
-                  <span className="text-sm font-medium text-slate-700">监控文件夹路径</span>
+                  <span className="text-sm font-medium text-slate-700"><I18nText>监控文件夹路径</I18nText></span>
                   <DirectoryPathPicker value={rootPath} onChange={setRootPath} compact />
                 </div>
                 <label className="md:col-span-2">
-                  <span className="text-sm font-medium text-slate-700">自动加入书架 <span className="font-normal text-slate-400">选填</span></span>
-                  <Select value={shelfId} options={shelfOptions} onChange={setShelfId} ariaLabel="自动加入书架" size="sm" className="mt-1.5 w-full" triggerClassName="h-10" />
+                  <span className="text-sm font-medium text-slate-700"><I18nText>自动加入书架 </I18nText><span className="font-normal text-slate-400"><I18nText>选填</I18nText></span></span>
+                  <Select value={shelfId} options={shelfOptions} onChange={setShelfId} ariaLabel={i18nAttribute("自动加入书架")} size="sm" className="mt-1.5 w-full" triggerClassName="h-10" />
                 </label>
                 <div className="md:col-span-2">
-                  <Button className="h-10 w-full" icon={FolderOpen} loading={pathBusy === 'create'} loadingText="保存中">保存</Button>
+                  <Button className="h-10 w-full" icon={FolderOpen} loading={pathBusy === 'create'} loadingText={i18nAttribute("保存中")}><I18nText>保存</I18nText></Button>
                 </div>
-                <div className="text-xs leading-5 text-slate-500 md:col-span-12">选择书架后，这个文件夹新识别的图书会自动加入该书架；留空时只导入书库。</div>
+                <div className="text-xs leading-5 text-slate-500 md:col-span-12"><I18nText>选择书架后，这个文件夹新识别的图书会自动加入该书架；留空时只导入书库。</I18nText></div>
                 <button
                   type="button"
                   aria-expanded={showCreateRules}
@@ -477,30 +483,28 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                   className="flex min-h-9 items-center gap-2 text-left text-sm font-medium text-slate-600 hover:text-[#D94724] md:col-span-12"
                 >
                   <SlidersHorizontal size={15} />
-                  扫描规则
-                  <ChevronDown size={15} className={cn('transition-transform', showCreateRules && 'rotate-180')} />
-                  <span className="font-normal text-slate-400">默认忽略隐藏文件，不限制文件大小</span>
+                  <I18nText>扫描规则</I18nText><ChevronDown size={15} className={cn('transition-transform', showCreateRules && 'rotate-180')} />
+                  <span className="font-normal text-slate-400"><I18nText>默认忽略隐藏文件，不限制文件大小</I18nText></span>
                 </button>
                 {showCreateRules ? (
                   <div className="grid gap-3 border-t border-slate-200 pt-3 md:col-span-12 md:grid-cols-12">
                     <label className="md:col-span-7">
-                      <span className="text-sm font-medium text-slate-700">自定义忽略规则</span>
+                      <span className="text-sm font-medium text-slate-700"><I18nText>自定义忽略规则</I18nText></span>
                       <textarea
                         value={ignorePatterns}
                         onChange={(event) => setIgnorePatterns(event.target.value)}
                         rows={2}
-                        placeholder="每行一条 glob 规则，例如 **/temp/**"
+                        placeholder={i18nAttribute("每行一条 glob 规则，例如 **/temp/**")}
                         className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-sm outline-none focus:border-[#F19B84] focus:ring-2 focus:ring-[#FCE5DE]"
                       />
                     </label>
                     <label className="md:col-span-3">
-                      <span className="text-sm font-medium text-slate-700">最小文件大小 KB</span>
+                      <span className="text-sm font-medium text-slate-700"><I18nText>最小文件大小 KB</I18nText></span>
                       <input type="number" min={0} value={minFileSizeKb} onChange={(event) => setMinFileSizeKb(event.target.value)} className="mt-1.5 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-[#F19B84] focus:ring-2 focus:ring-[#FCE5DE]" />
                     </label>
                     <label className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 md:col-span-2 md:mt-[26px]">
                       <input type="checkbox" checked={ignoreHidden} onChange={(event) => setIgnoreHidden(event.target.checked)} />
-                      忽略隐藏文件
-                    </label>
+                      <I18nText>忽略隐藏文件</I18nText></label>
                   </div>
                 ) : null}
                 {message ? <div className="md:col-span-12 rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{message}</div> : null}
@@ -516,9 +520,9 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                       <div className="min-w-0 flex-1">
                         <div className="font-semibold">{path.name}</div>
                         <div className="break-words text-sm text-slate-500">{path.rootPath}</div>
-                        <div className="mt-2 text-xs text-slate-500">引用原文件 · 自动加入：{path.shelfId ? shelfNames.get(path.shelfId) ?? '目标书架已不存在' : '不指定书架'} · {path.ignoreHidden ? '忽略隐藏文件' : '包含隐藏文件'} · 小于 {Math.round((path.minFileSizeBytes ?? 0) / 1024)} KB 跳过</div>
+                        <div className="mt-2 text-xs text-slate-500"><I18nText>引用原文件 · 自动加入：</I18nText>{path.shelfId ? shelfNames.get(path.shelfId) ?? i18nAttribute("目标书架已不存在") : i18nAttribute("不指定书架")} · {path.ignoreHidden ? i18nAttribute("忽略隐藏文件") : i18nAttribute("包含隐藏文件")} <I18nText>· 小于 </I18nText>{Math.round((path.minFileSizeBytes ?? 0) / 1024)} <I18nText>KB 跳过</I18nText></div>
                       </div>
-                      <button disabled={pathBusy === `toggle:${path.id}`} onClick={() => togglePath(path)} className={cn('h-7 w-12 rounded-full p-1 transition disabled:cursor-not-allowed disabled:opacity-60', path.enabled ? 'bg-[#ff4f26]' : 'bg-slate-300')} aria-label="启用监控文件夹">
+                      <button disabled={pathBusy === `toggle:${path.id}`} onClick={() => togglePath(path)} className={cn('h-7 w-12 rounded-full p-1 transition disabled:cursor-not-allowed disabled:opacity-60', path.enabled ? 'bg-[#ff4f26]' : 'bg-slate-300')} aria-label={i18nAttribute("启用监控文件夹")}>
                         <span className={cn('block h-5 w-5 rounded-full bg-white transition', path.enabled && 'translate-x-5')} />
                       </button>
                       <Button
@@ -528,9 +532,8 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                         onClick={() => setExpandedRules((current) => ({ ...current, [path.id]: !current[path.id] }))}
                         aria-expanded={Boolean(expandedRules[path.id])}
                       >
-                        设置
-                      </Button>
-                      <Button variant="danger" icon={Trash2} loading={pathBusy === `delete:${path.id}`} loadingText="删除中" onClick={() => deletePath(path)}>删除</Button>
+                        <I18nText>设置</I18nText></Button>
+                      <Button variant="danger" icon={Trash2} loading={pathBusy === `delete:${path.id}`} loadingText={i18nAttribute("删除中")} onClick={() => deletePath(path)}><I18nText>删除</I18nText></Button>
                     </div>
                     {expandedRules[path.id] ? (
                       <div className="mt-4 border-t border-slate-100 pt-4">
@@ -539,18 +542,18 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                     ) : null}
                   </div>
                 ))}
-                {folders.length === 0 ? <div className="rounded-3xl bg-slate-50 p-6 text-sm text-slate-500">尚未保存监控文件夹。</div> : null}
+                {folders.length === 0 ? <div className="rounded-3xl bg-slate-50 p-6 text-sm text-slate-500"><I18nText>尚未保存监控文件夹。</I18nText></div> : null}
               </div>
             </div>
           ) : active === '备份与恢复' ? (
             <div className="mt-6 space-y-5">
               <div className="flex flex-col gap-4 rounded-3xl border border-slate-200 bg-slate-50 p-5 md:flex-row md:items-center md:justify-between">
                 <div>
-                  <div className="font-semibold">备份范围</div>
-                  <div className="mt-1 text-sm leading-6 text-slate-500">仅包含系统设置和数据库数据，包括读物元数据、标签、阅读进度、监控文件夹配置和封面缓存索引；不包含原始读物文件或封面图片文件。</div>
-                  <div className="mt-2 text-xs text-slate-500">当前支持手动备份；恢复备份会覆盖数据库中的相关记录。</div>
+                  <div className="font-semibold"><I18nText>备份范围</I18nText></div>
+                  <div className="mt-1 text-sm leading-6 text-slate-500"><I18nText>仅包含系统设置和数据库数据，包括读物元数据、标签、阅读进度、监控文件夹配置和封面缓存索引；不包含原始读物文件或封面图片文件。</I18nText></div>
+                  <div className="mt-2 text-xs text-slate-500"><I18nText>当前支持手动备份；恢复备份会覆盖数据库中的相关记录。</I18nText></div>
                 </div>
-                <Button icon={Save} onClick={createBackup} loading={backupBusy === 'create'} loadingText="创建中">备份</Button>
+                <Button icon={Save} onClick={createBackup} loading={backupBusy === 'create'} loadingText={i18nAttribute("创建中")}><I18nText>备份</I18nText></Button>
               </div>
               {message ? <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{message}</div> : null}
               {error ? <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
@@ -563,23 +566,22 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-semibold">{backup.filename}</span>
-                        <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">{backup.kind === 'automatic' ? '自动' : backup.kind === 'manual' ? '手动' : '未知'}</span>
+                        <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">{backup.kind === 'automatic' ? i18nAttribute("自动") : backup.kind === 'manual' ? i18nAttribute("手动") : i18nAttribute("未知")}</span>
                       </div>
-                      <div className="mt-1 text-sm text-slate-500">{new Date(backup.createdAt).toLocaleString()} · {formatBytes(backup.sizeBytes)}</div>
+                      <div className="mt-1 text-sm text-slate-500">{new Date(backup.createdAt).toLocaleString(locale)} · {formatBytes(backup.sizeBytes)}</div>
                       {backup.counts ? (
                         <div className="mt-2 text-xs text-slate-500">
-                          {backup.counts.works} 部作品 · {backup.counts.readingProgresses} 条阅读进度 · {backup.counts.monitorFolders} 个监控文件夹
-                        </div>
+                          {backup.counts.works} <I18nText>部作品 · </I18nText>{backup.counts.readingProgresses} <I18nText>条阅读进度 · </I18nText>{backup.counts.monitorFolders} <I18nText>个监控文件夹</I18nText></div>
                       ) : null}
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Button variant="secondary" icon={Download} onClick={() => downloadBackup(backup)}>下载</Button>
-                      <Button variant="secondary" icon={RotateCcw} onClick={() => restoreBackup(backup)} loading={backupBusy === `restore:${backup.id}`} loadingText="恢复中">恢复</Button>
-                      <Button variant="danger" icon={Trash2} onClick={() => deleteBackup(backup)} loading={backupBusy === `delete:${backup.id}`} loadingText="删除中">删除</Button>
+                      <Button variant="secondary" icon={Download} onClick={() => downloadBackup(backup)}><I18nText>下载</I18nText></Button>
+                      <Button variant="secondary" icon={RotateCcw} onClick={() => restoreBackup(backup)} loading={backupBusy === `restore:${backup.id}`} loadingText={i18nAttribute("恢复中")}><I18nText>恢复</I18nText></Button>
+                      <Button variant="danger" icon={Trash2} onClick={() => deleteBackup(backup)} loading={backupBusy === `delete:${backup.id}`} loadingText={i18nAttribute("删除中")}><I18nText>删除</I18nText></Button>
                     </div>
                   </div>
                 ))}
-                {backups.length === 0 ? <div className="rounded-3xl bg-slate-50 p-6 text-sm text-slate-500">尚未创建备份。</div> : null}
+                {backups.length === 0 ? <div className="rounded-3xl bg-slate-50 p-6 text-sm text-slate-500"><I18nText>尚未创建备份。</I18nText></div> : null}
               </div>
             </div>
           ) : active === '元数据' ? (
@@ -587,13 +589,12 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
               <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div>
-                    <div className="font-semibold">外部数据源</div>
-                    <div className="mt-1 text-sm text-slate-500">电子书抓取豆瓣读书网页，漫画使用 Bangumi 官方 API。</div>
+                    <div className="font-semibold"><I18nText>外部数据源</I18nText></div>
+                    <div className="mt-1 text-sm text-slate-500"><I18nText>电子书抓取豆瓣读书网页，漫画使用 Bangumi 官方 API。</I18nText></div>
                   </div>
                   <label className="flex items-center gap-3 rounded-2xl bg-white px-4 py-2 text-sm text-slate-700">
                     <input type="checkbox" checked={settings['metadata.external.enabled'] === 'true'} onChange={(event) => setSettings(toggleExternalSettings(settings, event.target.checked))} />
-                    启用外部元数据
-                  </label>
+                    <I18nText>启用外部元数据</I18nText></label>
                 </div>
               </div>
 
@@ -601,17 +602,16 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                 <section className="rounded-3xl border border-slate-200 bg-white p-5">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h2 className="font-semibold">豆瓣图书</h2>
-                      <p className="mt-1 text-sm text-slate-500">用于电子书，通过豆瓣读书网页抓取图书信息。</p>
+                      <h2 className="font-semibold"><I18nText>豆瓣图书</I18nText></h2>
+                      <p className="mt-1 text-sm text-slate-500"><I18nText>用于电子书，通过豆瓣读书网页抓取图书信息。</I18nText></p>
                     </div>
                     <label className="flex items-center gap-2 text-sm text-slate-700">
                       <input type="checkbox" checked={settings['metadata.douban.enabled'] === 'true'} onChange={(event) => setSettings(toggleExternalProvider(settings, 'metadata.douban.enabled', event.target.checked))} />
-                      启用
-                    </label>
+                      <I18nText>启用</I18nText></label>
                   </div>
                   <div className="mt-4 rounded-2xl bg-[#F7F4F0] px-4 py-3">
-                    <div className="text-xs text-slate-500">获取方式</div>
-                    <div className="mt-1 text-sm font-medium text-slate-700">抓取网页</div>
+                    <div className="text-xs text-slate-500"><I18nText>获取方式</I18nText></div>
+                    <div className="mt-1 text-sm font-medium text-slate-700"><I18nText>抓取网页</I18nText></div>
                   </div>
                   <label className="mt-4 block text-sm text-slate-600">
                     User-Agent
@@ -622,13 +622,12 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                 <section className="rounded-3xl border border-slate-200 bg-white p-5">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h2 className="font-semibold">Bangumi 漫画</h2>
-                      <p className="mt-1 text-sm text-slate-500">用于漫画。User-Agent 为必填，Access Token 可选。</p>
+                      <h2 className="font-semibold"><I18nText>Bangumi 漫画</I18nText></h2>
+                      <p className="mt-1 text-sm text-slate-500"><I18nText>用于漫画。User-Agent 为必填，Access Token 可选。</I18nText></p>
                     </div>
                     <label className="flex items-center gap-2 text-sm text-slate-700">
                       <input type="checkbox" checked={settings['metadata.bangumi.enabled'] === 'true'} onChange={(event) => setSettings(toggleExternalProvider(settings, 'metadata.bangumi.enabled', event.target.checked))} />
-                      启用
-                    </label>
+                      <I18nText>启用</I18nText></label>
                   </div>
                   <label className="mt-4 block text-sm text-slate-600">
                     User-Agent
@@ -636,8 +635,8 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                   </label>
                   <label className="mt-4 block text-sm text-slate-600">
                     Access Token
-                    <input type="password" value={settings['metadata.bangumi.accessToken']} onChange={(event) => updateSecret('metadata.bangumi.accessToken', event.target.value)} placeholder={settings['metadata.bangumi.accessTokenConfigured'] === 'true' ? '已配置；留空则保留原 Token' : '输入 Access Token'} className="mt-2 h-11 w-full rounded-2xl border border-slate-200 px-4 text-sm outline-none" />
-                    {settings['metadata.bangumi.accessTokenConfigured'] === 'true' || pendingSecretClears.includes('metadata.bangumi.accessToken') ? <button type="button" onClick={() => toggleSecretClear('metadata.bangumi.accessToken')} className="mt-2 text-xs font-medium text-[#D94724] hover:text-[#B83A1F]">{pendingSecretClears.includes('metadata.bangumi.accessToken') ? '撤销清除' : '清除已配置 Token'}</button> : null}
+                    <input type="password" value={settings['metadata.bangumi.accessToken']} onChange={(event) => updateSecret('metadata.bangumi.accessToken', event.target.value)} placeholder={settings['metadata.bangumi.accessTokenConfigured'] === 'true' ? i18nAttribute("已配置；留空则保留原 Token") : i18nAttribute("输入 Access Token")} className="mt-2 h-11 w-full rounded-2xl border border-slate-200 px-4 text-sm outline-none" />
+                    {settings['metadata.bangumi.accessTokenConfigured'] === 'true' || pendingSecretClears.includes('metadata.bangumi.accessToken') ? <button type="button" onClick={() => toggleSecretClear('metadata.bangumi.accessToken')} className="mt-2 text-xs font-medium text-[#D94724] hover:text-[#B83A1F]">{pendingSecretClears.includes('metadata.bangumi.accessToken') ? i18nAttribute("撤销清除") : i18nAttribute("清除已配置 Token")}</button> : null}
                   </label>
                 </section>
               </div>
@@ -645,27 +644,24 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
               <section className="rounded-3xl border border-slate-200 bg-white p-5">
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div>
-                    <h2 className="font-semibold">AI 元数据识别</h2>
-                    <p className="mt-1 text-sm text-slate-500">使用 OpenAI-compatible Chat Completions，仅发送文件相对路径与文件名，不读取正文全文。</p>
+                    <h2 className="font-semibold"><I18nText>AI 元数据识别</I18nText></h2>
+                    <p className="mt-1 text-sm text-slate-500"><I18nText>使用 OpenAI-compatible Chat Completions，仅发送文件相对路径与文件名，不读取正文全文。</I18nText></p>
                   </div>
                   <label className="flex items-center gap-2 text-sm text-slate-700">
                     <input type="checkbox" checked={settings['metadata.ai.enabled'] === 'true'} onChange={(event) => setSettings({ ...settings, 'metadata.ai.enabled': String(event.target.checked) })} />
-                    启用
-                  </label>
+                    <I18nText>启用</I18nText></label>
                 </div>
                 <div className="mt-4 grid gap-4 md:grid-cols-3">
                   <label className="text-sm text-slate-600">
-                    API 地址
-                    <input value={settings['metadata.ai.baseUrl']} onChange={(event) => setSettings({ ...settings, 'metadata.ai.baseUrl': event.target.value })} placeholder="https://api.openai.com/v1" className="mt-2 h-11 w-full rounded-2xl border border-slate-200 px-4 text-sm outline-none" />
+                    <I18nText>API 地址</I18nText><input value={settings['metadata.ai.baseUrl']} onChange={(event) => setSettings({ ...settings, 'metadata.ai.baseUrl': event.target.value })} placeholder="https://api.openai.com/v1" className="mt-2 h-11 w-full rounded-2xl border border-slate-200 px-4 text-sm outline-none" />
                   </label>
                   <label className="text-sm text-slate-600">
-                    模型
-                    <input value={settings['metadata.ai.model']} onChange={(event) => setSettings({ ...settings, 'metadata.ai.model': event.target.value })} placeholder="gpt-4.1-mini" className="mt-2 h-11 w-full rounded-2xl border border-slate-200 px-4 text-sm outline-none" />
+                    <I18nText>模型</I18nText><input value={settings['metadata.ai.model']} onChange={(event) => setSettings({ ...settings, 'metadata.ai.model': event.target.value })} placeholder="gpt-4.1-mini" className="mt-2 h-11 w-full rounded-2xl border border-slate-200 px-4 text-sm outline-none" />
                   </label>
                   <label className="text-sm text-slate-600">
                     API Key
-                    <input type="password" value={settings['metadata.ai.apiKey']} onChange={(event) => updateSecret('metadata.ai.apiKey', event.target.value)} placeholder={settings['metadata.ai.apiKeyConfigured'] === 'true' ? '已配置；留空则保留原 Key' : '输入 API Key'} className="mt-2 h-11 w-full rounded-2xl border border-slate-200 px-4 text-sm outline-none" />
-                    {settings['metadata.ai.apiKeyConfigured'] === 'true' || pendingSecretClears.includes('metadata.ai.apiKey') ? <button type="button" onClick={() => toggleSecretClear('metadata.ai.apiKey')} className="mt-2 text-xs font-medium text-[#D94724] hover:text-[#B83A1F]">{pendingSecretClears.includes('metadata.ai.apiKey') ? '撤销清除' : '清除已配置 Key'}</button> : null}
+                    <input type="password" value={settings['metadata.ai.apiKey']} onChange={(event) => updateSecret('metadata.ai.apiKey', event.target.value)} placeholder={settings['metadata.ai.apiKeyConfigured'] === 'true' ? i18nAttribute("已配置；留空则保留原 Key") : i18nAttribute("输入 API Key")} className="mt-2 h-11 w-full rounded-2xl border border-slate-200 px-4 text-sm outline-none" />
+                    {settings['metadata.ai.apiKeyConfigured'] === 'true' || pendingSecretClears.includes('metadata.ai.apiKey') ? <button type="button" onClick={() => toggleSecretClear('metadata.ai.apiKey')} className="mt-2 text-xs font-medium text-[#D94724] hover:text-[#B83A1F]">{pendingSecretClears.includes('metadata.ai.apiKey') ? i18nAttribute("撤销清除") : i18nAttribute("清除已配置 Key")}</button> : null}
                   </label>
                 </div>
               </section>
@@ -679,7 +675,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
       </div>
       {embedded && active === '元数据' ? (
         <div className="mt-6 flex justify-end border-t border-[#DEDAD4] pt-5">
-          <Button icon={CheckCircle2} loading={settingsBusy} loadingText="保存中" onClick={saveSettings}>保存更改</Button>
+          <Button icon={CheckCircle2} loading={settingsBusy} loadingText={i18nAttribute("保存中")} onClick={saveSettings}><I18nText>保存更改</I18nText></Button>
         </div>
       ) : null}
     </div>
@@ -687,6 +683,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
 }
 
 function DirectoryPathPicker({ value, onChange, compact = false }: { value: string; onChange: (value: string) => void; compact?: boolean }) {
+  const { t: i18nExpression } = useExpressionI18n();
   const [open, setOpen] = useState(false);
   const [monitorRoot, setMonitorRoot] = useState('');
   const [nodes, setNodes] = useState<Record<string, DirectoryNode>>({});
@@ -767,16 +764,15 @@ function DirectoryPathPicker({ value, onChange, compact = false }: { value: stri
           aria-expanded={open}
         >
           <FolderOpen size={16} />
-          选择
-          <ChevronDown size={16} className={cn('transition', open && 'rotate-180')} />
+          <I18nText>选择</I18nText><ChevronDown size={16} className={cn('transition', open && 'rotate-180')} />
         </button>
       </div>
       {open ? (
         <div className="absolute left-0 right-0 top-full z-50 mt-2 rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-700 shadow-xl shadow-slate-200/60">
           <div className="mb-2 flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="font-medium text-slate-950">监控根目录</div>
-              <div className="truncate text-xs text-slate-500">{monitorRoot || '读取中'}</div>
+              <div className="font-medium text-slate-950"><I18nText>监控根目录</I18nText></div>
+              <div className="truncate text-xs text-slate-500">{monitorRoot || i18nExpression("读取中")}</div>
             </div>
             <button
               type="button"
@@ -784,8 +780,7 @@ function DirectoryPathPicker({ value, onChange, compact = false }: { value: stri
               className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50"
             >
               <RotateCcw size={14} />
-              刷新
-            </button>
+              <I18nText>刷新</I18nText></button>
           </div>
           <div className="max-h-72 overflow-auto rounded-xl bg-slate-50 p-2">
             {rootNode ? (
@@ -800,11 +795,11 @@ function DirectoryPathPicker({ value, onChange, compact = false }: { value: stri
                 onToggle={toggleDirectory}
               />
             ) : (
-              <div className="px-3 py-2 text-slate-500">{loadingPath ? '正在读取目录...' : '暂无可选目录'}</div>
+              <div className="px-3 py-2 text-slate-500">{loadingPath ? i18nExpression("正在读取目录...") : i18nExpression("暂无可选目录")}</div>
             )}
           </div>
           {treeError ? <div className="mt-2 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{treeError}</div> : null}
-          <div className="mt-2 text-xs leading-5 text-slate-500">只能浏览监控根目录内的目录；也可以直接粘贴路径。</div>
+          <div className="mt-2 text-xs leading-5 text-slate-500"><I18nText>只能浏览监控根目录内的目录；也可以直接粘贴路径。</I18nText></div>
         </div>
       ) : null}
     </div>
@@ -830,6 +825,7 @@ function DirectoryNodeRow({
   onSelect: (path: string) => void;
   onToggle: (path: string) => void;
 }) {
+  const { t: i18nExpression } = useExpressionI18n();
   const isExpanded = Boolean(expanded[node.path]);
   const isSelected = selectedPath === node.path;
   const children = node.children ?? [];
@@ -841,7 +837,7 @@ function DirectoryNodeRow({
           type="button"
           onClick={() => onToggle(node.path)}
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
-          aria-label={isExpanded ? '收起目录' : '展开目录'}
+          aria-label={isExpanded ? i18nExpression("收起目录") : i18nExpression("展开目录")}
         >
           <ChevronRight size={15} className={cn('transition', isExpanded && 'rotate-90')} />
         </button>
@@ -849,7 +845,7 @@ function DirectoryNodeRow({
           <FolderOpen size={15} className="shrink-0" />
           <span className="truncate">{node.name || node.path}</span>
         </button>
-        {loadingPath === node.path ? <span className="text-xs text-slate-400">读取中</span> : null}
+        {loadingPath === node.path ? <span className="text-xs text-slate-400"><I18nText>读取中</I18nText></span> : null}
       </div>
       {isExpanded ? (
         <div>
@@ -868,7 +864,7 @@ function DirectoryNodeRow({
                 onToggle={onToggle}
               />
             );
-          }) : <div className="px-3 py-1.5 text-xs text-slate-400" style={{ paddingLeft: `${42 + level * 18}px` }}>没有子目录</div>}
+          }) : <div className="px-3 py-1.5 text-xs text-slate-400" style={{ paddingLeft: `${42 + level * 18}px` }}><I18nText>没有子目录</I18nText></div>}
         </div>
       ) : null}
     </div>
@@ -888,6 +884,7 @@ function MonitorFolderEditor({
   onSave: (path: MonitorFolder, updates: Pick<MonitorFolder, 'name' | 'rootPath' | 'shelfId' | 'ignorePatterns' | 'ignoreHidden' | 'minFileSizeBytes'>) => Promise<void>;
   compact?: boolean;
 }) {
+  const { t: i18nAttribute } = useAttributeI18n();
   const [folderName, setFolderName] = useState(path.name);
   const [folderPath, setFolderPath] = useState(path.rootPath);
   const [targetShelfId, setTargetShelfId] = useState(path.shelfId ?? '');
@@ -896,7 +893,7 @@ function MonitorFolderEditor({
   const [minSizeKb, setMinSizeKb] = useState(String(Math.round((path.minFileSizeBytes ?? 0) / 1024)));
   const targetOptions = useMemo(() => [
     { value: '', label: '不指定书架' },
-    ...shelves.map((shelf) => ({ value: shelf.id, label: shelf.name }))
+    ...shelves.map((shelf) => ({ value: shelf.id, label: shelf.name, translate: false }))
   ], [shelves]);
 
   useEffect(() => {
@@ -912,24 +909,23 @@ function MonitorFolderEditor({
     <div className={cn(!compact && 'rounded-3xl border border-slate-200 bg-slate-50 p-5')}>
       <div className="grid gap-4 md:grid-cols-12">
         <label className="md:col-span-4">
-          <span className="text-sm font-medium text-slate-700">名称</span>
+          <span className="text-sm font-medium text-slate-700"><I18nText>名称</I18nText></span>
           <input value={folderName} onChange={(event) => setFolderName(event.target.value)} className="mt-1.5 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#F19B84] focus:ring-2 focus:ring-[#FCE5DE]" />
         </label>
         <div className="md:col-span-8">
-          <span className="text-sm font-medium text-slate-700">监控文件夹路径</span>
+          <span className="text-sm font-medium text-slate-700"><I18nText>监控文件夹路径</I18nText></span>
           <DirectoryPathPicker value={folderPath} onChange={setFolderPath} compact />
         </div>
         <label className="md:col-span-5">
-          <span className="text-sm font-medium text-slate-700">自动加入书架 <span className="font-normal text-slate-400">选填</span></span>
-          <Select value={targetShelfId} options={targetOptions} onChange={setTargetShelfId} ariaLabel="自动加入书架" className="mt-1.5 w-full" triggerClassName="h-10" size="sm" />
-          <span className="mt-1.5 block text-xs leading-5 text-slate-500">留空时，新识别的图书只进入书库。</span>
+          <span className="text-sm font-medium text-slate-700"><I18nText>自动加入书架 </I18nText><span className="font-normal text-slate-400"><I18nText>选填</I18nText></span></span>
+          <Select value={targetShelfId} options={targetOptions} onChange={setTargetShelfId} ariaLabel={i18nAttribute("自动加入书架")} className="mt-1.5 w-full" triggerClassName="h-10" size="sm" />
+          <span className="mt-1.5 block text-xs leading-5 text-slate-500"><I18nText>留空时，新识别的图书只进入书库。</I18nText></span>
         </label>
         <label className="flex h-10 items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 md:col-span-3 md:mt-[26px]">
           <input type="checkbox" checked={hidden} onChange={(event) => setHidden(event.target.checked)} />
-          忽略隐藏文件
-        </label>
+          <I18nText>忽略隐藏文件</I18nText></label>
         <label className="md:col-span-4">
-          <span className="text-sm font-medium text-slate-700">最小文件大小 KB</span>
+          <span className="text-sm font-medium text-slate-700"><I18nText>最小文件大小 KB</I18nText></span>
           <input
             type="number"
             min={0}
@@ -940,22 +936,22 @@ function MonitorFolderEditor({
         </label>
       </div>
       <label className="mt-4 block">
-        <span className="text-sm font-medium text-slate-700">自定义忽略规则</span>
+        <span className="text-sm font-medium text-slate-700"><I18nText>自定义忽略规则</I18nText></span>
         <textarea
           value={patterns}
           onChange={(event) => setPatterns(event.target.value)}
           rows={4}
-          placeholder="每行一条 glob 规则，例如 **/temp/**"
+          placeholder={i18nAttribute("每行一条 glob 规则，例如 **/temp/**")}
           className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-sm outline-none focus:border-[#F19B84] focus:ring-2 focus:ring-[#FCE5DE]"
         />
       </label>
-      <div className="mt-2 text-xs leading-5 text-slate-500">默认已忽略封面、缩略图、临时文件、说明文件和普通图片；这里填写额外规则，每行一条。</div>
+      <div className="mt-2 text-xs leading-5 text-slate-500"><I18nText>默认已忽略封面、缩略图、临时文件、说明文件和普通图片；这里填写额外规则，每行一条。</I18nText></div>
       <div className="mt-3 flex justify-end">
         <Button
           type="button"
           icon={CheckCircle2}
           loading={saving}
-          loadingText="保存中"
+          loadingText={i18nAttribute("保存中")}
           disabled={!folderName.trim() || !folderPath.trim()}
           onClick={() => onSave(path, {
             name: folderName.trim(),
@@ -966,8 +962,7 @@ function MonitorFolderEditor({
             minFileSizeBytes: Math.max(0, Math.round(Number(minSizeKb || 0) * 1024))
           })}
         >
-          保存设置
-        </Button>
+          <I18nText>保存设置</I18nText></Button>
       </div>
     </div>
   );

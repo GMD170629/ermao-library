@@ -7,7 +7,10 @@ import { Cover } from '../../components/book/cover';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { PageTitle } from '../../components/ui/page-title';
+import { useI18n } from '../../i18n/provider';
 import { normalizeOrganizeJob, organizeStatusCategory, organizeStatusLabel, type OrganizeJobView } from './organize-page';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type JobResponse = {
   ok: boolean;
@@ -37,7 +40,9 @@ function metadataChecks(job: OrganizeJobView) {
 }
 
 export function OrganizeJobDetailPage({ jobId, embedded = false }: { jobId: string; embedded?: boolean; returnPath?: string }) {
+  const { t: i18nAttribute } = useAttributeI18n();
   const router = useRouter();
+  const { locale } = useI18n();
   const [job, setJob] = useState<OrganizeJobView | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -63,18 +68,18 @@ export function OrganizeJobDetailPage({ jobId, embedded = false }: { jobId: stri
 
   const checks = useMemo(() => (job ? metadataChecks(job) : []), [job]);
 
-  if (loading) return <div className="shuku-loading-panel p-8 text-sm" role="status" aria-live="polite">正在读取整理任务...</div>;
-  if (!job) return <div className="rounded-3xl border border-red-100 bg-red-50 p-8 text-sm text-red-700">{error || '整理任务不存在'}</div>;
+  if (loading) return <div className="shuku-loading-panel p-8 text-sm" role="status" aria-live="polite"><I18nText>正在读取整理任务...</I18nText></div>;
+  if (!job) return <div className="rounded-3xl border border-red-100 bg-red-50 p-8 text-sm text-red-700">{error || i18nAttribute("整理任务不存在")}</div>;
 
   return (
     <div className={embedded ? 'space-y-5' : 'space-y-6'}>
       {!embedded ? <PageTitle
-        title="整理详情"
-        desc="查看本次识别的状态、数据源和元数据完整度。"
-        action={<Button variant="secondary" icon={RefreshCw} onClick={loadJob}>刷新</Button>}
+        title={i18nAttribute("整理详情")}
+        desc={i18nAttribute("查看本次识别的状态、数据源和元数据完整度。")}
+        action={<Button variant="secondary" icon={RefreshCw} onClick={loadJob}><I18nText>刷新</I18nText></Button>}
       /> : (
         <div className="flex flex-wrap justify-end gap-2">
-          <Button variant="secondary" icon={RefreshCw} onClick={loadJob}>刷新</Button>
+          <Button variant="secondary" icon={RefreshCw} onClick={loadJob}><I18nText>刷新</I18nText></Button>
         </div>
       )}
 
@@ -84,34 +89,34 @@ export function OrganizeJobDetailPage({ jobId, embedded = false }: { jobId: stri
         <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex gap-4">
             <Cover book={job.book} className="h-40 w-28" />
-            <div className="min-w-0">
+            <div data-i18n-skip className="min-w-0">
               <h2 className="line-clamp-2 text-lg font-semibold text-slate-900">{job.book.title}</h2>
               <p className="mt-1 text-sm text-slate-500">{job.book.author} · {job.book.format}</p>
               <div className="mt-3 flex flex-wrap gap-1">
                 <Badge tone={job.statusCategory === 'SUCCESS' ? 'green' : job.statusCategory === 'FAILED' ? 'red' : job.statusCategory === 'RECOGNIZING' ? 'blue' : 'amber'}>{organizeStatusLabel(job.statusCategory ?? organizeStatusCategory(job.status, job.metadataLookupStatus))}</Badge>
-                {!embedded ? <Badge tone={job.book.metadataQuality >= 80 ? 'green' : 'blue'}>质量 {job.book.metadataQuality}</Badge> : null}
+                {!embedded ? <Badge tone={job.book.metadataQuality >= 80 ? 'green' : 'blue'}><I18nText>质量 </I18nText>{job.book.metadataQuality}</Badge> : null}
               </div>
             </div>
           </div>
           <dl className="mt-5 space-y-3 text-sm">
-            <div><dt className="text-slate-500">文件路径</dt><dd className="mt-1 break-all text-slate-800">{job.book.path || '未记录'}</dd></div>
-            <div><dt className="text-slate-500">导入时间</dt><dd className="mt-1 text-slate-800">{new Date(job.book.importedAt).toLocaleString()}</dd></div>
-            <div><dt className="text-slate-500">任务更新时间</dt><dd className="mt-1 text-slate-800">{new Date(job.updatedAt).toLocaleString()}</dd></div>
-            <div><dt className="text-slate-500">整理摘要</dt><dd className="mt-1 text-slate-800">{job.summary ?? '暂无整理摘要'}</dd></div>
+            <div><dt className="text-slate-500"><I18nText>文件路径</I18nText></dt><dd className="mt-1 break-all text-slate-800">{job.book.path || i18nAttribute("未记录")}</dd></div>
+            <div><dt className="text-slate-500"><I18nText>导入时间</I18nText></dt><dd className="mt-1 text-slate-800">{new Date(job.book.importedAt).toLocaleString(locale)}</dd></div>
+            <div><dt className="text-slate-500"><I18nText>任务更新时间</I18nText></dt><dd className="mt-1 text-slate-800">{new Date(job.updatedAt).toLocaleString(locale)}</dd></div>
+            <div><dt className="text-slate-500"><I18nText>整理摘要</I18nText></dt><dd className="mt-1 text-slate-800">{job.summary ?? i18nAttribute("暂无整理摘要")}</dd></div>
           </dl>
           <div className="mt-5 flex flex-wrap gap-2">
-            <Button variant="secondary" icon={ExternalLink} onClick={() => router.push(`/works/${job.book.id}`)}>打开读物详情</Button>
+            <Button variant="secondary" icon={ExternalLink} onClick={() => router.push(`/works/${job.book.id}`)}><I18nText>打开读物详情</I18nText></Button>
           </div>
         </section>
 
         {!embedded ? <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="text-lg font-semibold">缺失信息</h2>
+          <h2 className="text-lg font-semibold"><I18nText>缺失信息</I18nText></h2>
           <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {checks.map((check) => (
               <div key={check.key} className="rounded-2xl border border-slate-200 p-3">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-medium text-slate-800">{check.label}</span>
-                  <Badge tone={check.complete ? 'green' : 'amber'}>{check.complete ? '已有' : '缺失'}</Badge>
+                  <Badge tone={check.complete ? 'green' : 'amber'}>{check.complete ? i18nAttribute("已有") : i18nAttribute("缺失")}</Badge>
                 </div>
                 <div className="mt-2 line-clamp-2 text-xs text-slate-500">{valueLabel(check.value)}</div>
               </div>

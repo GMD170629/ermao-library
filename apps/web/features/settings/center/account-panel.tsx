@@ -9,6 +9,8 @@ import { Button } from '../../../components/ui/button';
 import { useToast } from '../../../components/ui/feedback';
 import { withBasePath } from '../../../lib/base-path';
 import { DEFAULT_ACCOUNT_AVATAR_PATH } from '../../../lib/brand';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type CurrentUser = {
   id: string;
@@ -27,6 +29,7 @@ const inputClassName = 'mt-2 h-11 w-full rounded-[12px] border border-[#DED8D1] 
 const fallbackAvatar = withBasePath(DEFAULT_ACCOUNT_AVATAR_PATH);
 
 export function AccountPanel() {
+  const { t: i18nAttribute } = useAttributeI18n();
   const router = useRouter();
   const toast = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -191,15 +194,15 @@ export function AccountPanel() {
   return (
     <section aria-labelledby="account-title" className="space-y-7">
       <div>
-        <h3 id="account-title" className="text-lg font-semibold text-[#2A2825]">账户</h3>
-        <p className="mt-1 text-sm leading-6 text-[#77716A]">管理头像、用户名、登录邮箱和密码。</p>
+        <h3 id="account-title" className="text-lg font-semibold text-[#2A2825]"><I18nText>账户</I18nText></h3>
+        <p className="mt-1 text-sm leading-6 text-[#77716A]"><I18nText>管理头像、用户名、登录邮箱和密码。</I18nText></p>
       </div>
 
       <section aria-labelledby="avatar-title" className="flex flex-col gap-4 border-b border-[#DEDAD4] pb-7 sm:flex-row sm:items-center">
         <Image
           key={avatarSrc}
           src={avatarSrc}
-          alt="账户头像"
+          alt={i18nAttribute("账户头像")}
           width={80}
           height={80}
           unoptimized
@@ -207,8 +210,8 @@ export function AccountPanel() {
           className="h-20 w-20 shrink-0 rounded-full border border-black/[0.06] object-cover shadow-sm"
         />
         <div className="min-w-0 flex-1">
-          <h4 id="avatar-title" className="text-sm font-semibold text-[#2A2825]">头像</h4>
-          <p className="mt-1 text-sm text-[#77716A]">支持 JPEG、PNG、WebP，系统会自动裁切为正方形，最大 5 MB。</p>
+          <h4 id="avatar-title" className="text-sm font-semibold text-[#2A2825]"><I18nText>头像</I18nText></h4>
+          <p className="mt-1 text-sm text-[#77716A]"><I18nText>支持 JPEG、PNG、WebP，系统会自动裁切为正方形，最大 5 MB。</I18nText></p>
           <div className="mt-3 flex flex-wrap gap-2">
             <input
               ref={fileInputRef}
@@ -220,77 +223,66 @@ export function AccountPanel() {
                 if (file) void uploadAvatar(file);
               }}
             />
-            <Button type="button" variant="secondary" icon={Camera} loading={busy === 'avatar'} loadingText="处理中" onClick={() => fileInputRef.current?.click()}>
-              {user?.avatarUrl ? '更换头像' : '上传头像'}
+            <Button type="button" variant="secondary" icon={Camera} loading={busy === 'avatar'} loadingText={i18nAttribute("处理中")} onClick={() => fileInputRef.current?.click()}>
+              {user?.avatarUrl ? i18nAttribute("更换头像") : i18nAttribute("上传头像")}
             </Button>
             {user?.avatarUrl ? (
               <Button type="button" variant="ghost" icon={Trash2} disabled={busy === 'avatar'} onClick={() => void removeAvatar()}>
-                使用默认头像
-              </Button>
+                <I18nText>使用默认头像</I18nText></Button>
             ) : null}
           </div>
         </div>
       </section>
 
       <form onSubmit={saveName} className="border-b border-[#DEDAD4] pb-7">
-        <div className="flex items-center gap-2 text-sm font-semibold text-[#2A2825]"><UserRound size={16} />用户名</div>
-        <p className="mt-1 text-sm text-[#77716A]">用于侧边栏和账户区域展示，不影响登录。</p>
+        <div className="flex items-center gap-2 text-sm font-semibold text-[#2A2825]"><UserRound size={16} /><I18nText>用户名</I18nText></div>
+        <p className="mt-1 text-sm text-[#77716A]"><I18nText>用于侧边栏和账户区域展示，不影响登录。</I18nText></p>
         <label className="mt-4 block max-w-md text-sm text-[#5F5A55]">
-          用户名
-          <input type="text" required minLength={1} maxLength={40} autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} className={inputClassName} />
+          <I18nText>用户名</I18nText><input type="text" required minLength={1} maxLength={40} autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} className={inputClassName} />
         </label>
-        <Button type="submit" className="mt-4" loading={busy === 'name'} loadingText="保存中" disabled={!name.trim() || name.trim() === user?.name}>
-          保存用户名
-        </Button>
+        <Button type="submit" className="mt-4" loading={busy === 'name'} loadingText={i18nAttribute("保存中")} disabled={!name.trim() || name.trim() === user?.name}>
+          <I18nText>保存用户名</I18nText></Button>
       </form>
 
       <form onSubmit={saveEmail} className="border-b border-[#DEDAD4] pb-7">
-        <div className="flex items-center gap-2 text-sm font-semibold text-[#2A2825]"><Mail size={16} />登录邮箱</div>
+        <div className="flex items-center gap-2 text-sm font-semibold text-[#2A2825]"><Mail size={16} /><I18nText>登录邮箱</I18nText></div>
         <div className="mt-4 grid max-w-2xl gap-4 sm:grid-cols-2">
           <label className="text-sm text-[#5F5A55]">
-            邮箱
-            <input type="email" required autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} className={inputClassName} />
+            <I18nText>邮箱</I18nText><input type="email" required autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} className={inputClassName} />
           </label>
           <label className="text-sm text-[#5F5A55]">
-            当前密码
-            <input type="password" required maxLength={128} autoComplete="current-password" value={emailPassword} onChange={(event) => setEmailPassword(event.target.value)} className={inputClassName} />
+            <I18nText>当前密码</I18nText><input type="password" required maxLength={128} autoComplete="current-password" value={emailPassword} onChange={(event) => setEmailPassword(event.target.value)} className={inputClassName} />
           </label>
         </div>
-        <Button type="submit" className="mt-4" loading={busy === 'email'} loadingText="保存中" disabled={!email.trim() || !emailPassword}>
-          修改邮箱
-        </Button>
+        <Button type="submit" className="mt-4" loading={busy === 'email'} loadingText={i18nAttribute("保存中")} disabled={!email.trim() || !emailPassword}>
+          <I18nText>修改邮箱</I18nText></Button>
       </form>
 
       <form onSubmit={savePassword} className="border-b border-[#DEDAD4] pb-7">
-        <div className="flex items-center gap-2 text-sm font-semibold text-[#2A2825]"><KeyRound size={16} />修改密码</div>
-        <p className="mt-1 text-sm text-[#77716A]">修改后会退出所有已登录设备。</p>
+        <div className="flex items-center gap-2 text-sm font-semibold text-[#2A2825]"><KeyRound size={16} /><I18nText>修改密码</I18nText></div>
+        <p className="mt-1 text-sm text-[#77716A]"><I18nText>修改后会退出所有已登录设备。</I18nText></p>
         <div className="mt-4 grid max-w-3xl gap-4 md:grid-cols-3">
           <label className="text-sm text-[#5F5A55]">
-            当前密码
-            <input type="password" required maxLength={128} autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} className={inputClassName} />
+            <I18nText>当前密码</I18nText><input type="password" required maxLength={128} autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} className={inputClassName} />
           </label>
           <label className="text-sm text-[#5F5A55]">
-            新密码
-            <input type="password" required minLength={10} maxLength={128} autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} className={inputClassName} />
+            <I18nText>新密码</I18nText><input type="password" required minLength={10} maxLength={128} autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} className={inputClassName} />
           </label>
           <label className="text-sm text-[#5F5A55]">
-            再次输入新密码
-            <input type="password" required minLength={10} maxLength={128} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className={inputClassName} />
+            <I18nText>再次输入新密码</I18nText><input type="password" required minLength={10} maxLength={128} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className={inputClassName} />
           </label>
         </div>
-        <Button type="submit" className="mt-4" loading={busy === 'password'} loadingText="更新中" disabled={!currentPassword || !newPassword || !confirmPassword}>
-          更新密码
-        </Button>
+        <Button type="submit" className="mt-4" loading={busy === 'password'} loadingText={i18nAttribute("更新中")} disabled={!currentPassword || !newPassword || !confirmPassword}>
+          <I18nText>更新密码</I18nText></Button>
       </form>
 
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <div className="text-sm font-medium text-[#2A2825]">退出当前设备</div>
-          <div className="mt-1 truncate text-sm text-[#77716A]">{user?.email ?? '正在读取账户…'}</div>
+          <div className="text-sm font-medium text-[#2A2825]"><I18nText>退出当前设备</I18nText></div>
+          <div className="mt-1 truncate text-sm text-[#77716A]">{user?.email ?? i18nAttribute("正在读取账户…")}</div>
         </div>
-        <Button type="button" variant="ghost" icon={LogOut} loading={busy === 'logout'} loadingText="退出中" onClick={() => void logout()}>
-          退出登录
-        </Button>
+        <Button type="button" variant="ghost" icon={LogOut} loading={busy === 'logout'} loadingText={i18nAttribute("退出中")} onClick={() => void logout()}>
+          <I18nText>退出登录</I18nText></Button>
       </div>
     </section>
   );

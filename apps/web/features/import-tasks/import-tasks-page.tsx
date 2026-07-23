@@ -6,9 +6,12 @@ import { Badge } from '../../components/ui/badge';
 import type { BadgeTone } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { useConfirm, useToast } from '../../components/ui/feedback';
+import { useI18n } from '../../i18n/provider';
 import { PageTitle } from '../../components/ui/page-title';
 import { Progress } from '../../components/ui/progress';
 import { Select } from '../../components/ui/select';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type ImportTask = {
   id: string;
@@ -129,6 +132,8 @@ function retryQueueMessage(task: ImportTask) {
 }
 
 export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
+  const { t: i18nAttribute } = useAttributeI18n();
+  const { locale } = useI18n();
   const [tasks, setTasks] = useState<ImportTask[]>([]);
   const [summary, setSummary] = useState(emptySummary);
   const [page, setPage] = useState(1);
@@ -349,24 +354,22 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   return (
     <div className={embedded ? 'space-y-4' : 'space-y-6'}>
       {!embedded ? <PageTitle
-        title="导入任务"
-        desc="查看手动上传和监控文件夹自动导入状态。"
+        title={i18nAttribute("导入任务")}
+        desc={i18nAttribute("查看手动上传和监控文件夹自动导入状态。")}
         action={(
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="secondary" icon={RefreshCw} loading={loading} loadingText="刷新中" onClick={() => void loadTasks(page)}>刷新</Button>
-            <Button loading={busy === 'rescan'} loadingText="请求中" variant="secondary" icon={Search} onClick={() => void requestRescan()}>
-              强制重新识别
-            </Button>
-            <Button loading={busy === 'clear'} loadingText="清空中" variant="danger" icon={Trash2} onClick={() => void clearFinishedTasks()}>
-              清空记录
-            </Button>
+            <Button variant="secondary" icon={RefreshCw} loading={loading} loadingText={i18nAttribute("刷新中")} onClick={() => void loadTasks(page)}><I18nText>刷新</I18nText></Button>
+            <Button loading={busy === 'rescan'} loadingText={i18nAttribute("请求中")} variant="secondary" icon={Search} onClick={() => void requestRescan()}>
+              <I18nText>强制重新识别</I18nText></Button>
+            <Button loading={busy === 'clear'} loadingText={i18nAttribute("清空中")} variant="danger" icon={Trash2} onClick={() => void clearFinishedTasks()}>
+              <I18nText>清空记录</I18nText></Button>
           </div>
         )}
       /> : (
         <div className="flex flex-wrap justify-end gap-2">
-          <Button variant="secondary" icon={RefreshCw} loading={loading} loadingText="刷新中" onClick={() => void loadTasks(page)}>刷新</Button>
-          <Button loading={busy === 'rescan'} loadingText="请求中" variant="secondary" icon={Search} onClick={() => void requestRescan()}>重新识别全部文件夹</Button>
-          <Button loading={busy === 'clear'} loadingText="清空中" variant="ghost" icon={Trash2} onClick={() => void clearFinishedTasks()}>清理已结束记录</Button>
+          <Button variant="secondary" icon={RefreshCw} loading={loading} loadingText={i18nAttribute("刷新中")} onClick={() => void loadTasks(page)}><I18nText>刷新</I18nText></Button>
+          <Button loading={busy === 'rescan'} loadingText={i18nAttribute("请求中")} variant="secondary" icon={Search} onClick={() => void requestRescan()}><I18nText>重新识别全部文件夹</I18nText></Button>
+          <Button loading={busy === 'clear'} loadingText={i18nAttribute("清空中")} variant="ghost" icon={Trash2} onClick={() => void clearFinishedTasks()}><I18nText>清理已结束记录</I18nText></Button>
         </div>
       )}
       <form onSubmit={submitSearch} className="flex flex-col gap-3 rounded-[20px] border border-[#DEDAD4] bg-[#FAF9F7] p-3 md:flex-row md:items-center">
@@ -375,23 +378,23 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
           <input
             value={keywordDraft}
             onChange={(event) => setKeywordDraft(event.target.value)}
-            placeholder="搜索文件名、路径、图书或错误信息"
+            placeholder={i18nAttribute("搜索文件名、路径、图书或错误信息")}
             className="h-10 min-w-0 flex-1 bg-transparent text-sm text-[#2A2825] outline-none placeholder:text-[#A6A099]"
-            aria-label="搜索导入记录"
+            aria-label={i18nAttribute("搜索导入记录")}
           />
-          {keywordDraft ? <button type="button" onClick={() => { setKeywordDraft(''); setKeyword(''); setPage(1); }} className="text-[#8A847D] hover:text-[#2A2825]" aria-label="清空搜索"><X size={15} /></button> : null}
+          {keywordDraft ? <button type="button" onClick={() => { setKeywordDraft(''); setKeyword(''); setPage(1); }} className="text-[#8A847D] hover:text-[#2A2825]" aria-label={i18nAttribute("清空搜索")}><X size={15} /></button> : null}
         </label>
         <Select
           value={statusFilter}
           options={statusOptions}
           onChange={(status) => { setStatusFilter(status); setPage(1); }}
-          ariaLabel="按状态筛选"
+          ariaLabel={i18nAttribute("按状态筛选")}
           className="min-w-[132px]"
           triggerClassName="h-10"
           menuClassName="min-w-[160px]"
         />
-        <Button type="submit" variant="secondary">搜索</Button>
-        {selectedIds.size > 0 ? <Button type="button" variant="danger" icon={Trash2} onClick={openBulkDelete}>删除所选（{selectedIds.size}）</Button> : null}
+        <Button type="submit" variant="secondary"><I18nText>搜索</I18nText></Button>
+        {selectedIds.size > 0 ? <Button type="button" variant="danger" icon={Trash2} onClick={openBulkDelete}><I18nText>删除所选（</I18nText>{selectedIds.size}）</Button> : null}
       </form>
       {selectableTasks.length > 0 ? (
         <label className="flex w-fit cursor-pointer items-center gap-2 px-1 text-sm text-[#77716A]">
@@ -401,8 +404,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
             onChange={(event) => setSelectedIds(event.target.checked ? new Set(selectableTasks.map((task) => task.id)) : new Set())}
             className="h-4 w-4 accent-[#E64A2E]"
           />
-          选择本页已结束记录
-        </label>
+          <I18nText>选择本页已结束记录</I18nText></label>
       ) : null}
       {message ? <div className="rounded-3xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-700">{message}</div> : null}
       {activeTask ? (
@@ -414,18 +416,18 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
       ) : null}
       {!embedded ? <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {[
-          ['已完成', summary.completed],
-          ['失败', summary.failed]
-        ].map(([label, value]) => (
+          { label: '已完成', value: summary.completed },
+          { label: '失败', value: summary.failed }
+        ].map(({ label, value }) => (
           <div key={label} className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="text-xs text-slate-500">{label}</div>
+            <div className="text-xs text-slate-500">{i18nAttribute(label)}</div>
             <div className="mt-1 text-2xl font-semibold text-slate-950">{value}</div>
           </div>
         ))}
       </div> : null}
-      {loading ? <div className="shuku-loading-panel p-8 text-sm" role="status" aria-live="polite">正在读取导入任务...</div> : null}
+      {loading ? <div className="shuku-loading-panel p-8 text-sm" role="status" aria-live="polite"><I18nText>正在读取导入任务...</I18nText></div> : null}
       {error ? <div className="rounded-3xl border border-red-100 bg-red-50 p-8 text-sm text-red-700">{error}</div> : null}
-      {!loading && !error && tasks.length === 0 ? <div className="rounded-3xl border border-slate-200 bg-white p-8 text-sm text-slate-500">暂无导入任务。</div> : null}
+      {!loading && !error && tasks.length === 0 ? <div className="rounded-3xl border border-slate-200 bg-white p-8 text-sm text-slate-500"><I18nText>暂无导入任务。</I18nText></div> : null}
       <div className="space-y-3">
         {tasks.map((task) => (
           <div key={task.id} className={`rounded-[28px] border bg-white p-5 shadow-sm transition ${selectedIds.has(task.id) ? 'border-[#F19B84] ring-2 ring-[#FCE5DE]' : 'border-slate-200'}`}>
@@ -437,7 +439,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
                     checked={selectedIds.has(task.id)}
                     onChange={() => toggleTaskSelection(task.id)}
                     className="mt-1 h-4 w-4 shrink-0 accent-[#E64A2E]"
-                    aria-label={`选择 ${task.originalName ?? task.sourcePath}`}
+                    aria-label={i18nAttribute("选择 {value0}", { value0: task.originalName ?? task.sourcePath })}
                   />
                 ) : <span className="w-4 shrink-0" />}
                 <div className="min-w-0">
@@ -453,10 +455,10 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
                 {task.errorSummary ? (
                   <div className="mt-3 space-y-2 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
                     <div className="flex gap-2"><AlertTriangle size={16} />{task.errorSummary}</div>
-                    {task.friendlyError ? <div className="pl-6 text-red-600">建议：{task.friendlyError}</div> : null}
+                    {task.friendlyError ? <div className="pl-6 text-red-600"><I18nText>建议：</I18nText>{task.friendlyError}</div> : null}
                     {task.retryable ? (
                       <div className="pl-6 pt-1">
-                        <Button className="min-h-9 px-3 py-1.5" variant="secondary" icon={RefreshCw} loading={retryingTaskId === task.id} loadingText="正在重试" onClick={() => void retryTask(task)}>{retryActionLabel(task)}</Button>
+                        <Button className="min-h-9 px-3 py-1.5" variant="secondary" icon={RefreshCw} loading={retryingTaskId === task.id} loadingText={i18nAttribute("正在重试")} onClick={() => void retryTask(task)}>{retryActionLabel(task)}</Button>
                       </div>
                     ) : null}
                   </div>
@@ -464,9 +466,9 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <div className="text-sm text-slate-500">{new Date(task.createdAt).toLocaleString()}</div>
+                <div className="text-sm text-slate-500">{new Date(task.createdAt).toLocaleString(locale)}</div>
                 {task.status === 'COMPLETED' || task.status === 'FAILED' ? (
-                  <Button className="min-h-9 px-3 py-1.5" variant="ghost" icon={Trash2} onClick={() => openDeleteTask(task)}>删除</Button>
+                  <Button className="min-h-9 px-3 py-1.5" variant="ghost" icon={Trash2} onClick={() => openDeleteTask(task)}><I18nText>删除</I18nText></Button>
                 ) : null}
               </div>
             </div>
@@ -480,21 +482,21 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
                 ))}
               </div>
             ) : null}
-            {task.status === 'COMPLETED' ? <div className="mt-4 flex items-center gap-2 text-sm text-emerald-600"><CheckCircle2 size={16} />导入完成</div> : null}
+            {task.status === 'COMPLETED' ? <div className="mt-4 flex items-center gap-2 text-sm text-emerald-600"><CheckCircle2 size={16} /><I18nText>导入完成</I18nText></div> : null}
           </div>
         ))}
       </div>
       {dialogTargets.length > 0 ? (
-        <div className="fixed inset-0 z-[130] flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true" aria-label="删除导入记录">
+        <div className="fixed inset-0 z-[130] flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={i18nAttribute("删除导入记录")}>
           <div className="w-full max-w-lg rounded-t-3xl border border-slate-200 bg-white p-5 shadow-2xl md:rounded-3xl">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-lg font-semibold text-slate-950">{bulkDeleteOpen ? `批量删除 ${dialogTargets.length} 条导入记录` : '删除导入记录'}</h2>
-                <p className="mt-2 break-words text-sm leading-6 text-slate-600">{bulkDeleteOpen ? '选择对所有已选记录执行的删除行为。' : `选择“${dialogTargets[0].originalName ?? dialogTargets[0].sourcePath}”的删除范围。`}</p>
+                <h2 className="text-lg font-semibold text-slate-950">{bulkDeleteOpen ? i18nAttribute("批量删除 {value0} 条导入记录", { value0: dialogTargets.length }) : i18nAttribute("删除导入记录")}</h2>
+                <p className="mt-2 break-words text-sm leading-6 text-slate-600">{bulkDeleteOpen ? i18nAttribute("选择对所有已选记录执行的删除行为。") : i18nAttribute("选择“{value0}”的删除范围。", { value0: dialogTargets[0].originalName ?? dialogTargets[0].sourcePath })}</p>
               </div>
-              <button type="button" disabled={Boolean(deletingTaskId)} onClick={() => { setDeleteTarget(null); setBulkDeleteOpen(false); }} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 disabled:opacity-50" aria-label="关闭"><X size={18} /></button>
+              <button type="button" disabled={Boolean(deletingTaskId)} onClick={() => { setDeleteTarget(null); setBulkDeleteOpen(false); }} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 disabled:opacity-50" aria-label={i18nAttribute("关闭")}><X size={18} /></button>
             </div>
-            <div className="mt-5 space-y-2" role="radiogroup" aria-label="删除范围">
+            <div className="mt-5 space-y-2" role="radiogroup" aria-label={i18nAttribute("删除范围")}>
               {([
                 { value: 'record' as const, label: '仅删除导入记录', description: '保留源文件和转换后的文件。', available: true },
                 { value: 'source' as const, label: '同步删除源文件', description: '转换文件会保留；直接使用这些源文件的书库版本将无法继续阅读。', available: canDeleteSources },
@@ -510,8 +512,8 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
                   className={`w-full rounded-2xl border px-4 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-45 ${deleteMode === option.value ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
                 >
                   <span className="flex items-center justify-between gap-3 text-sm font-semibold text-slate-900">
-                    {option.label}
-                    {!option.available ? <span className="text-xs font-normal text-slate-400">文件不存在</span> : null}
+                    {i18nAttribute(option.label)}
+                    {!option.available ? <span className="text-xs font-normal text-slate-400"><I18nText>文件不存在</I18nText></span> : null}
                   </span>
                   <span className="mt-1 block text-xs leading-5 text-slate-500">{option.description}</span>
                 </button>
@@ -521,17 +523,17 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
               <label className={`mt-4 flex cursor-pointer gap-3 rounded-2xl border p-4 transition ${deleteLibraryRecord ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}>
                 <input type="checkbox" checked={deleteLibraryRecord} disabled={Boolean(deletingTaskId)} onChange={(event) => setDeleteLibraryRecord(event.target.checked)} className="mt-0.5 h-4 w-4 accent-red-600" />
                 <span>
-                  <span className="block text-sm font-semibold text-slate-900">同步删除关联卷册或版本</span>
-                  <span className="mt-1 block text-xs leading-5 text-slate-500">仅删除所选记录直接关联的卷册或版本及其阅读进度和系统生成文件；同一本书的其他卷册和版本会保留，全部清空后才删除图书记录。源文件是否删除由上方选项决定。</span>
+                  <span className="block text-sm font-semibold text-slate-900"><I18nText>同步删除关联卷册或版本</I18nText></span>
+                  <span className="mt-1 block text-xs leading-5 text-slate-500"><I18nText>仅删除所选记录直接关联的卷册或版本及其阅读进度和系统生成文件；同一本书的其他卷册和版本会保留，全部清空后才删除图书记录。源文件是否删除由上方选项决定。</I18nText></span>
                 </span>
               </label>
             ) : (
-              <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-500">{bulkDeleteOpen ? '所选记录没有一一对应的独立书库图书，本次仅处理导入记录和所选文件。' : '这条导入记录没有关联的书库图书，无需同步删除书库记录。'}</div>
+              <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-500">{bulkDeleteOpen ? i18nAttribute("所选记录没有一一对应的独立书库图书，本次仅处理导入记录和所选文件。") : i18nAttribute("这条导入记录没有关联的书库图书，无需同步删除书库记录。")}</div>
             )}
-            {deleteMode !== 'record' || deleteLibraryRecord ? <div className="mt-4 flex gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800"><AlertTriangle size={16} className="mt-0.5 shrink-0" />已选择的文件和书库数据删除后无法恢复。</div> : null}
+            {deleteMode !== 'record' || deleteLibraryRecord ? <div className="mt-4 flex gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800"><AlertTriangle size={16} className="mt-0.5 shrink-0" /><I18nText>已选择的文件和书库数据删除后无法恢复。</I18nText></div> : null}
             <div className="mt-6 flex justify-end gap-2">
-              <Button type="button" variant="secondary" disabled={Boolean(deletingTaskId)} onClick={() => { setDeleteTarget(null); setBulkDeleteOpen(false); }}>取消</Button>
-              <Button type="button" variant="danger" icon={Trash2} loading={Boolean(deletingTaskId)} loadingText="删除中" onClick={() => void deleteTasks()}>{deleteMode === 'record' && !deleteLibraryRecord ? '删除记录' : '确认删除'}</Button>
+              <Button type="button" variant="secondary" disabled={Boolean(deletingTaskId)} onClick={() => { setDeleteTarget(null); setBulkDeleteOpen(false); }}><I18nText>取消</I18nText></Button>
+              <Button type="button" variant="danger" icon={Trash2} loading={Boolean(deletingTaskId)} loadingText={i18nAttribute("删除中")} onClick={() => void deleteTasks()}>{deleteMode === 'record' && !deleteLibraryRecord ? i18nAttribute("删除记录") : i18nAttribute("确认删除")}</Button>
             </div>
           </div>
         </div>
@@ -539,12 +541,12 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
       {!error && total > 0 ? (
         <footer className="flex flex-wrap items-center justify-between gap-3 pt-1 text-sm text-[#77716A]">
           <div className="flex flex-wrap items-center gap-3">
-            <span>共 {total} 条记录</span>
+            <span><I18nText>共 </I18nText>{total} <I18nText>条记录</I18nText></span>
             <Select
               value={pageSize}
               options={pageSizeOptions}
               onChange={(size) => { setPageSize(size); setPage(1); }}
-              ariaLabel="每页显示数量"
+              ariaLabel={i18nAttribute("每页显示数量")}
               size="sm"
               align="left"
               className="min-w-[112px]"
@@ -552,13 +554,13 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
             />
           </div>
           {totalPages > 1 ? (
-            <nav className="flex items-center gap-2" aria-label="导入活动分页">
+            <nav className="flex items-center gap-2" aria-label={i18nAttribute("导入活动分页")}>
               <button
                 type="button"
                 disabled={page <= 1 || loading}
                 onClick={() => setPage((current) => Math.max(1, current - 1))}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white transition hover:bg-[#F7F4F0] disabled:opacity-40"
-                aria-label="上一页"
+                aria-label={i18nAttribute("上一页")}
               >
                 <ChevronLeft size={16} />
               </button>
@@ -568,7 +570,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
                 disabled={page >= totalPages || loading}
                 onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white transition hover:bg-[#F7F4F0] disabled:opacity-40"
-                aria-label="下一页"
+                aria-label={i18nAttribute("下一页")}
               >
                 <ChevronRight size={16} />
               </button>

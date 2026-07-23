@@ -2741,6 +2741,32 @@ def test_import_preferences_are_normalized_and_persisted(client, db_session):
     assert loaded["import.ignorePatterns"] == "*.tmp\n草稿*"
 
 
+def test_application_locale_is_public_validated_and_persisted(client, db_session):
+    initial = client.get("/api/app-config")
+    assert initial.status_code == 200
+    assert initial.json()["data"] == {
+        "language": "zh-CN",
+        "supportedLocales": ["zh-CN", "en-US"],
+    }
+
+    _login(client, db_session)
+    saved = client.patch("/api/system-settings", json={"settings": {"language": "en-US"}})
+    assert saved.status_code == 200
+    assert saved.json()["data"]["settings"]["language"] == "en-US"
+
+    public = client.get("/api/app-config")
+    assert public.status_code == 200
+    assert public.json()["data"]["language"] == "en-US"
+
+    rejected = client.patch("/api/system-settings", json={"settings": {"language": "fr-FR"}})
+    assert rejected.status_code == 400
+    assert rejected.json()["error"]["code"] == "INVALID_LOCALE"
+    assert rejected.json()["error"]["params"]["supportedLocales"] == ["zh-CN", "en-US"]
+
+    loaded = client.get("/api/system-settings")
+    assert loaded.json()["data"]["settings"]["language"] == "en-US"
+
+
 def test_raw_text_detail_exposes_deferred_epub_conversion(client, db_session, test_settings, tmp_path):
     create_worker_tables(db_session)
     _login(client, db_session)

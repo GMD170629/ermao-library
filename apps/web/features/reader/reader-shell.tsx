@@ -5,11 +5,14 @@ import { Bookmark, Check, ChevronLeft, ChevronRight, Gauge, Highlighter, ListTre
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
+import { useI18n } from '../../i18n/provider';
 import { isDarkReaderTheme, readerThemeSurfaces } from './reader-theme';
 import type { ReaderBookmark } from './v2/bookmarks';
 import { resolveActiveEpubNavigationIndex } from './v2/epub-navigation';
 import type { ReaderInteractionPolicy } from './v2/adapters/reader-interaction';
 import { hasActiveTextSelection, isReaderControlTarget, readerKeyIntent, readerPinchZoom, readerPointerIntentInViewport, readerSwipeIntent, type ReaderInputIntent } from './v2/input-router';
+import { I18nText } from '@/i18n/provider';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type ComicDirection = ReaderPreferences['comic']['direction'];
 type ComicMode = ReaderPreferences['comic']['mode'];
@@ -162,10 +165,10 @@ function progressPageLabel(progress: ReaderProgress) {
   return progress.total ? `第 ${progress.page} 页 / 共 ${progress.total} 页` : `第 ${progress.page} 页`;
 }
 
-function bookmarkDateLabel(createdAt: string) {
+function bookmarkDateLabel(createdAt: string, locale: string) {
   const date = new Date(createdAt);
   if (Number.isNaN(date.getTime())) return '';
-  return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(date);
+  return new Intl.DateTimeFormat(locale, { month: 'numeric', day: 'numeric' }).format(date);
 }
 
 function numberFromExtra(value: unknown) {
@@ -197,6 +200,8 @@ function shouldIgnoreReaderInteraction(target: EventTarget | null) {
 }
 
 export function ReaderShell({ readerType, progress, progressExtra = {}, controls, settings, capabilities = null, readingDirection, onBack, onSettingsChange, onResetSettings, interactionBlocked = false, horizontalPaging = 'shell-discrete', navigationItems, volumeNavigation, bookmarkActive = false, currentBookmarkId = null, bookmarks = [], canBookmark = false, onToggleBookmark, onJumpBookmark, onRemoveBookmark, children }: ReaderShellProps) {
+  const { t: i18nAttribute } = useAttributeI18n();
+  const { locale } = useI18n();
   const controlsVisibleRef = useRef(false);
   const controlsRef = useRef<ReaderControls | null>(null);
   const readerViewportRef = useRef<HTMLElement | null>(null);
@@ -675,7 +680,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
             onClick={requestBackFromControl}
             onTouchEnd={requestBackFromControl}
             className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition active:scale-[0.97]', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}
-            aria-label="返回详情页"
+            aria-label={i18nAttribute("返回详情页")}
           >
             <ChevronLeft size={22} />
           </button>
@@ -684,7 +689,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
             disabled={!canBookmark || !onToggleBookmark}
             onClick={() => toggleBookmark()}
             className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition active:scale-[0.97] disabled:opacity-40', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5', bookmarkActive ? 'text-amber-600' : '')}
-            aria-label={bookmarkActive ? '快速移除当前书签' : '快速添加书签'}
+            aria-label={bookmarkActive ? i18nAttribute("快速移除当前书签") : i18nAttribute("快速添加书签")}
             aria-pressed={bookmarkActive}
           >
             <Bookmark size={19} fill={bookmarkActive ? 'currentColor' : 'none'} />
@@ -706,7 +711,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
       >
         <div className={cn('mx-auto flex h-full flex-col gap-3', readerBottomControlsMaxWidth)}>
           <div className="flex items-center justify-between gap-3 text-[11px] opacity-60 md:text-xs">
-            <span className="truncate">{readerType === 'epub' ? (currentNavigationTitle ?? '阅读中') : progressPageLabel(progress)}</span>
+            <span className="truncate">{readerType === 'epub' ? (currentNavigationTitle ?? i18nAttribute("阅读中")) : progressPageLabel(progress)}</span>
             <span className="shrink-0">{clampPercent(progress.percent)}%</span>
           </div>
           <div className="min-h-0 flex-1" aria-hidden="true" />
@@ -741,11 +746,11 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
           <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-current/10 md:hidden" aria-hidden="true">
             <div className="h-full" style={{ width: `${clampPercent(progress.percent)}%`, backgroundColor: accentColor }} />
           </div>
-          <ReaderDockButton icon={ListTree} label="目录" selected={panel === 'toc'} expanded={panel === 'toc'} panelTrigger="toc" onClick={(event) => togglePanel('toc', event.currentTarget)} dark={dark} />
+          <ReaderDockButton icon={ListTree} label={i18nAttribute("目录")} selected={panel === 'toc'} expanded={panel === 'toc'} panelTrigger="toc" onClick={(event) => togglePanel('toc', event.currentTarget)} dark={dark} />
           <ReaderDockButton
             icon={Bookmark}
-            label="书签"
-            ariaLabel="书签"
+            label={i18nAttribute("书签")}
+            ariaLabel={i18nAttribute("书签")}
             active={bookmarkActive}
             selected={panel === 'bookmarks'}
             expanded={panel === 'bookmarks'}
@@ -753,9 +758,9 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
             onClick={(event) => togglePanel('bookmarks', event.currentTarget)}
             dark={dark}
           />
-          <ReaderDockButton icon={Gauge} label="进度" prominent selected={panel === 'progress'} expanded={panel === 'progress'} panelTrigger="progress" onClick={(event) => togglePanel('progress', event.currentTarget)} dark={dark} className="md:hidden" />
+          <ReaderDockButton icon={Gauge} label={i18nAttribute("进度")} prominent selected={panel === 'progress'} expanded={panel === 'progress'} panelTrigger="progress" onClick={(event) => togglePanel('progress', event.currentTarget)} dark={dark} className="md:hidden" />
           <div className="hidden min-w-0 flex-1 items-center gap-2 px-2 md:flex lg:px-4">
-            <button type="button" aria-label="上一页" disabled={!controls || capabilities?.canGoPrevious === false} onClick={() => { void controls?.prev(); keepControlsOpen(); }} className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition active:scale-[0.97] disabled:opacity-35', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}>
+            <button type="button" aria-label={i18nAttribute("上一页")} disabled={!controls || capabilities?.canGoPrevious === false} onClick={() => { void controls?.prev(); keepControlsOpen(); }} className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition active:scale-[0.97] disabled:opacity-35', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}>
               <ChevronLeft size={20} />
             </button>
             <div className="min-w-0 flex-1">
@@ -764,7 +769,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                 <span className="shrink-0 tabular-nums">{clampPercent(progress.percent)}%</span>
               </div>
               <input
-                aria-label="阅读进度"
+                aria-label={i18nAttribute("阅读进度")}
                 type="range"
                 min={0}
                 max={100}
@@ -779,12 +784,12 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                 style={{ accentColor }}
               />
             </div>
-            <button type="button" aria-label="下一页" disabled={!controls || capabilities?.canGoNext === false} onClick={() => { void controls?.next(); keepControlsOpen(); }} className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition active:scale-[0.97] disabled:opacity-35', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}>
+            <button type="button" aria-label={i18nAttribute("下一页")} disabled={!controls || capabilities?.canGoNext === false} onClick={() => { void controls?.next(); keepControlsOpen(); }} className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition active:scale-[0.97] disabled:opacity-35', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}>
               <ChevronRight size={20} />
             </button>
           </div>
-          {supportsTextAnnotations ? <ReaderDockButton icon={Highlighter} label="标注" ariaLabel="标注与批注" selected={panel === 'annotations'} expanded={panel === 'annotations'} panelTrigger="annotations" onClick={(event) => togglePanel('annotations', event.currentTarget)} dark={dark} /> : null}
-          <ReaderDockButton icon={Settings} label="显示" ariaLabel="阅读设置" selected={panel === 'settings'} expanded={panel === 'settings'} panelTrigger="settings" onClick={(event) => togglePanel('settings', event.currentTarget)} dark={dark} />
+          {supportsTextAnnotations ? <ReaderDockButton icon={Highlighter} label={i18nAttribute("标注")} ariaLabel={i18nAttribute("标注与批注")} selected={panel === 'annotations'} expanded={panel === 'annotations'} panelTrigger="annotations" onClick={(event) => togglePanel('annotations', event.currentTarget)} dark={dark} /> : null}
+          <ReaderDockButton icon={Settings} label={i18nAttribute("显示")} ariaLabel={i18nAttribute("阅读设置")} selected={panel === 'settings'} expanded={panel === 'settings'} panelTrigger="settings" onClick={(event) => togglePanel('settings', event.currentTarget)} dark={dark} />
         </div>
       </div>
 
@@ -826,15 +831,15 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
           <div className="flex items-center justify-between gap-3">
             <div>
               <div id="reader-panel-title" className="text-sm font-semibold">
-                {panel === 'toc' ? '目录' : panel === 'bookmarks' ? '书签' : panel === 'settings' ? '阅读设置' : panel === 'annotations' ? '标注与批注' : '阅读进度'}
+                {panel === 'toc' ? i18nAttribute("目录") : panel === 'bookmarks' ? i18nAttribute("书签") : panel === 'settings' ? i18nAttribute("阅读设置") : panel === 'annotations' ? i18nAttribute("标注与批注") : i18nAttribute("阅读进度")}
               </div>
               {panel === 'settings' ? null : (
                 <div className="mt-0.5 text-xs opacity-60">
-                  {panel === 'bookmarks' ? `${orderedBookmarks.length} 个书签` : progressDetail}
+                  {panel === 'bookmarks' ? i18nAttribute("{value0} 个书签", { value0: orderedBookmarks.length }) : progressDetail}
                 </div>
               )}
             </div>
-            <button type="button" onClick={() => { closePanel(); keepControlsOpen(); }} className="flex h-11 w-11 items-center justify-center rounded-full transition active:scale-[0.98] hover:bg-white/10" aria-label="关闭面板">
+            <button type="button" onClick={() => { closePanel(); keepControlsOpen(); }} className="flex h-11 w-11 items-center justify-center rounded-full transition active:scale-[0.98] hover:bg-white/10" aria-label={i18nAttribute("关闭面板")}>
               <X size={18} />
             </button>
           </div>
@@ -855,7 +860,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
 
           {panel === 'toc' && !volumeNavigation ? (
             <div data-pwa-scroll="true" className="mt-5 min-h-0 flex-1 overflow-auto overscroll-contain pr-1">
-              {navItems.length === 0 ? <div className="py-6 text-sm opacity-60">暂无可跳转条目</div> : null}
+              {navItems.length === 0 ? <div className="py-6 text-sm opacity-60"><I18nText>暂无可跳转条目</I18nText></div> : null}
               <div className="space-y-1">
                 {navItems.map((item) => (
                   <button
@@ -885,36 +890,36 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                     ? dark ? 'border-amber-400/30 bg-amber-400/10 text-amber-300' : 'border-amber-700/20 bg-amber-700/10 text-amber-800'
                     : dark ? 'border-white/10 hover:bg-white/10' : 'border-stone-900/10 hover:bg-stone-900/5'
                 )}
-                aria-label={bookmarkActive ? '移除当前位置书签' : '添加当前位置书签'}
+                aria-label={bookmarkActive ? i18nAttribute("移除当前位置书签") : i18nAttribute("添加当前位置书签")}
               >
                 <Bookmark size={16} fill={bookmarkActive ? 'currentColor' : 'none'} />
-                {bookmarkActive ? '移除当前位置' : '添加当前位置'}
+                {bookmarkActive ? i18nAttribute("移除当前位置") : i18nAttribute("添加当前位置")}
               </button>
               <div data-pwa-scroll="true" className="mt-3 min-h-0 flex-1 overflow-auto overscroll-contain pr-1">
                 {orderedBookmarks.length === 0 ? (
                   <div className="flex min-h-32 flex-col items-center justify-center rounded-2xl border border-dashed border-current/15 px-5 text-center">
                     <Bookmark size={22} className="opacity-35" />
-                    <div className="mt-2 text-sm font-medium">还没有书签</div>
-                    <div className="mt-1 text-xs opacity-55">保存当前位置后，可从这里快速返回</div>
+                    <div className="mt-2 text-sm font-medium"><I18nText>还没有书签</I18nText></div>
+                    <div className="mt-1 text-xs opacity-55"><I18nText>保存当前位置后，可从这里快速返回</I18nText></div>
                   </div>
                 ) : (
                   <div className="space-y-1.5">
                     {orderedBookmarks.map((bookmark) => {
                       const active = bookmark.id === currentBookmarkId;
-                      const dateLabel = bookmarkDateLabel(bookmark.createdAt);
+                      const dateLabel = bookmarkDateLabel(bookmark.createdAt, locale);
                       return (
                         <div key={bookmark.id} className={cn('flex min-h-12 items-stretch rounded-xl transition', active ? dark ? 'bg-amber-400/10 text-amber-300' : 'bg-amber-700/10 text-amber-800' : dark ? 'bg-white/[0.06]' : 'bg-stone-900/[0.04]')}>
                           <button
                             type="button"
                             onClick={() => { void jumpToBookmark(bookmark); }}
                             className="min-w-0 flex-1 px-3 py-2.5 text-left active:scale-[0.99]"
-                            aria-label={`跳转到书签：${bookmark.label}`}
+                            aria-label={i18nAttribute("跳转到书签：{value0}", { value0: bookmark.label })}
                           >
-                            <span className="block truncate text-sm font-medium">{bookmark.label}</span>
+                            <span className="block truncate text-sm font-medium">{i18nAttribute(bookmark.label)}</span>
                             <span className="mt-0.5 flex items-center gap-2 text-[11px] opacity-55">
                               <span className="tabular-nums">{clampPercent(bookmark.percent)}%</span>
                               {dateLabel ? <span>{dateLabel}</span> : null}
-                              {active ? <span>当前位置</span> : null}
+                              {active ? <span><I18nText>当前位置</I18nText></span> : null}
                             </span>
                           </button>
                           {onRemoveBookmark ? (
@@ -922,7 +927,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                               type="button"
                               onClick={() => onRemoveBookmark(bookmark.id)}
                               className={cn('flex w-11 shrink-0 items-center justify-center rounded-xl transition active:scale-[0.96]', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}
-                              aria-label={`删除书签：${bookmark.label}`}
+                              aria-label={i18nAttribute("删除书签：{value0}", { value0: bookmark.label })}
                             >
                               <Trash2 size={15} />
                             </button>
@@ -943,7 +948,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                 <div className="mt-1 text-xs opacity-60">{currentNavigationTitle ?? progressPageLabel(progress)}</div>
               </div>
               <input
-                aria-label="阅读进度"
+                aria-label={i18nAttribute("阅读进度")}
                 type="range"
                 min={0}
                 max={100}
@@ -955,25 +960,25 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                 style={{ accentColor }}
               />
               <div className="grid grid-cols-2 gap-3">
-                <Button aria-label="上一页" disabled={!controls || capabilities?.canGoPrevious === false} variant="ghost" icon={ChevronLeft} className={cn('min-h-12 border border-current/10', dark ? 'text-slate-100 hover:bg-white/10' : '')} onClick={() => { void controls?.prev(); keepControlsOpen(); }}>上一页</Button>
-                <Button aria-label="下一页" disabled={!controls || capabilities?.canGoNext === false} variant="ghost" icon={ChevronRight} className={cn('min-h-12 border border-current/10', dark ? 'text-slate-100 hover:bg-white/10' : '')} onClick={() => { void controls?.next(); keepControlsOpen(); }}>下一页</Button>
+                <Button aria-label={i18nAttribute("上一页")} disabled={!controls || capabilities?.canGoPrevious === false} variant="ghost" icon={ChevronLeft} className={cn('min-h-12 border border-current/10', dark ? 'text-slate-100 hover:bg-white/10' : '')} onClick={() => { void controls?.prev(); keepControlsOpen(); }}><I18nText>上一页</I18nText></Button>
+                <Button aria-label={i18nAttribute("下一页")} disabled={!controls || capabilities?.canGoNext === false} variant="ghost" icon={ChevronRight} className={cn('min-h-12 border border-current/10', dark ? 'text-slate-100 hover:bg-white/10' : '')} onClick={() => { void controls?.next(); keepControlsOpen(); }}><I18nText>下一页</I18nText></Button>
               </div>
             </div>
           ) : null}
 
           {panel === 'annotations' ? (
             <div className="mt-5 min-h-0 flex-1">
-              <div className={cn('grid grid-cols-2 gap-1 rounded-2xl p-1', dark ? 'bg-white/10' : 'bg-stone-900/5')} role="tablist" aria-label="标注分类">
-                <button type="button" role="tab" aria-selected={annotationTab === 'book'} onClick={() => setAnnotationTab('book')} className={cn('min-h-11 rounded-xl px-3 text-sm font-medium transition', annotationTab === 'book' ? dark ? 'bg-white/15 shadow-sm' : 'bg-white text-amber-800 shadow-sm' : 'opacity-60')}>书内注释</button>
-                <button type="button" role="tab" aria-selected={annotationTab === 'mine'} onClick={() => setAnnotationTab('mine')} className={cn('min-h-11 rounded-xl px-3 text-sm font-medium transition', annotationTab === 'mine' ? dark ? 'bg-white/15 shadow-sm' : 'bg-white text-amber-800 shadow-sm' : 'opacity-60')}>我的标注</button>
+              <div className={cn('grid grid-cols-2 gap-1 rounded-2xl p-1', dark ? 'bg-white/10' : 'bg-stone-900/5')} role="tablist" aria-label={i18nAttribute("标注分类")}>
+                <button type="button" role="tab" aria-selected={annotationTab === 'book'} onClick={() => setAnnotationTab('book')} className={cn('min-h-11 rounded-xl px-3 text-sm font-medium transition', annotationTab === 'book' ? dark ? 'bg-white/15 shadow-sm' : 'bg-white text-amber-800 shadow-sm' : 'opacity-60')}><I18nText>书内注释</I18nText></button>
+                <button type="button" role="tab" aria-selected={annotationTab === 'mine'} onClick={() => setAnnotationTab('mine')} className={cn('min-h-11 rounded-xl px-3 text-sm font-medium transition', annotationTab === 'mine' ? dark ? 'bg-white/15 shadow-sm' : 'bg-white text-amber-800 shadow-sm' : 'opacity-60')}><I18nText>我的标注</I18nText></button>
               </div>
               <div role="tabpanel" data-pwa-scroll="true" className="mt-4 min-h-0 overflow-auto rounded-2xl border border-current/10 p-5 text-center">
                 <Highlighter className="mx-auto opacity-45" size={24} />
-                <div className="mt-3 text-sm font-medium">{annotationTab === 'book' ? '暂无可展示的书内注释' : '还没有划线或批注'}</div>
+                <div className="mt-3 text-sm font-medium">{annotationTab === 'book' ? i18nAttribute("暂无可展示的书内注释") : i18nAttribute("还没有划线或批注")}</div>
                 <p className="mx-auto mt-2 max-w-xs text-xs leading-5 opacity-60">
                   {annotationTab === 'book'
-                    ? '当前版本尚未建立注释索引；后续接入 EPUB 脚注与尾注解析后会集中显示在这里。'
-                    : '划线、批注与跨设备同步的数据层尚未接入；这里先保留统一入口与完整的响应式结构。'}
+                    ? i18nAttribute("当前版本尚未建立注释索引；后续接入 EPUB 脚注与尾注解析后会集中显示在这里。")
+                    : i18nAttribute("划线、批注与跨设备同步的数据层尚未接入；这里先保留统一入口与完整的响应式结构。")}
                 </p>
               </div>
             </div>
@@ -989,7 +994,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                     dark={dark}
                   />
                   <CompactSettingOptions
-                    label="字号"
+                    label={i18nAttribute("字号")}
                     value={closestSettingValue(settings.fontSize, readerFontSizeOptions)}
                     options={readerFontSizeOptions}
                     disambiguateLabels
@@ -997,7 +1002,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                     dark={dark}
                   />
                   <CompactSettingOptions
-                    label="行距"
+                    label={i18nAttribute("行距")}
                     value={closestSettingValue(settings.lineHeight, readerLineHeightOptions)}
                     options={readerLineHeightOptions}
                     disambiguateLabels
@@ -1005,21 +1010,21 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                     dark={dark}
                   />
                   <CompactSettingOptions
-                    label="字体"
+                    label={i18nAttribute("字体")}
                     value={settings.fontFamily}
                     options={readerFontFamilyOptions}
                     onChange={(value) => updateSettings({ fontFamily: value as ReaderFontFamily })}
                     dark={dark}
                   />
                   <CompactSettingOptions
-                    label="页宽"
+                    label={i18nAttribute("页宽")}
                     value={closestSettingValue(settings.pageWidth, [{ value: '760' }, { value: '1050' }, { value: '1350' }])}
                     options={[{ value: '760', label: '窄' }, { value: '1050', label: '中' }, { value: '1350', label: '宽' }]}
                     onChange={(value) => updateSettings({ pageWidth: Number(value) })}
                     dark={dark}
                   />
                   <CompactSettingOptions
-                    label="排版"
+                    label={i18nAttribute("排版")}
                     value={settings.ebookFlow}
                     options={[{ value: 'paginated', label: '分页' }, { value: 'scrolled', label: '滚动' }]}
                     onChange={(value) => updateSettings({ ebookFlow: value as EbookFlow })}
@@ -1034,21 +1039,21 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                     dark={dark}
                   />
                   <CompactSettingOptions
-                    label="模式"
+                    label={i18nAttribute("模式")}
                     value={settings.comicMode}
                     options={[{ value: 'single', label: '单页' }, { value: 'double', label: '双页' }]}
                     onChange={(value) => updateSettings({ comicMode: value as ComicMode })}
                     dark={dark}
                   />
                   <CompactSettingOptions
-                    label="翻页"
+                    label={i18nAttribute("翻页")}
                     value={settings.comicPageTurnAnimation}
                     options={[{ value: 'slide', label: '平移' }, { value: 'off', label: '关闭' }]}
                     onChange={(value) => updateSettings({ comicPageTurnAnimation: value as ComicPageTurnAnimation })}
                     dark={dark}
                   />
                   <CompactSettingOptions
-                    label="适配"
+                    label={i18nAttribute("适配")}
                     value={settings.imageFit}
                     options={[
                       { value: 'width', label: '宽度' },
@@ -1060,20 +1065,20 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                     dark={dark}
                   />
                   <CompactSettingOptions
-                    label="画质"
+                    label={i18nAttribute("画质")}
                     value={settings.imageVariant}
                     options={[{ value: 'original', label: '原图' }, { value: 'data-saver', label: '省流' }]}
                     onChange={(value) => updateSettings({ imageVariant: value as ComicImageVariant })}
                     dark={dark}
                   />
                   <CompactSettingOptions
-                    label="方向"
+                    label={i18nAttribute("方向")}
                     value={settings.comicDirection}
                     options={[{ value: 'ltr', label: '左至右' }, { value: 'rtl', label: '右至左' }]}
                     onChange={(value) => updateSettings({ comicDirection: value as ComicDirection })}
                     dark={dark}
                   />
-                  {capabilities?.canZoom !== false ? <CompactStepper label="缩放" value={`${Math.round(settings.comicZoom * 100)}%`} onMinus={() => updateSettings({ comicZoom: Math.max(0.6, Number((settings.comicZoom - 0.1).toFixed(1))) })} onPlus={() => updateSettings({ comicZoom: Math.min(2.4, Number((settings.comicZoom + 0.1).toFixed(1))) })} dark={dark} /> : null}
+                  {capabilities?.canZoom !== false ? <CompactStepper label={i18nAttribute("缩放")} value={`${Math.round(settings.comicZoom * 100)}%`} onMinus={() => updateSettings({ comicZoom: Math.max(0.6, Number((settings.comicZoom - 0.1).toFixed(1))) })} onPlus={() => updateSettings({ comicZoom: Math.min(2.4, Number((settings.comicZoom + 0.1).toFixed(1))) })} dark={dark} /> : null}
                 </>
               ) : (
                 <>
@@ -1082,9 +1087,9 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                     onChange={(value) => updateSettings({ theme: value as ReaderTheme })}
                     dark={dark}
                   />
-                  {capabilities?.canZoom !== false ? <CompactStepper label="缩放" value={`${Math.round(settings.pdfZoom * 100)}%`} onMinus={() => updateSettings({ pdfZoom: Math.max(0.6, Number((settings.pdfZoom - 0.1).toFixed(1))) })} onPlus={() => updateSettings({ pdfZoom: Math.min(2.4, Number((settings.pdfZoom + 0.1).toFixed(1))) })} dark={dark} /> : null}
+                  {capabilities?.canZoom !== false ? <CompactStepper label={i18nAttribute("缩放")} value={`${Math.round(settings.pdfZoom * 100)}%`} onMinus={() => updateSettings({ pdfZoom: Math.max(0.6, Number((settings.pdfZoom - 0.1).toFixed(1))) })} onPlus={() => updateSettings({ pdfZoom: Math.min(2.4, Number((settings.pdfZoom + 0.1).toFixed(1))) })} dark={dark} /> : null}
                   <CompactSettingOptions
-                    label="适配"
+                    label={i18nAttribute("适配")}
                     value={settings.pdfFit}
                     options={[{ value: 'width', label: '宽度' }, { value: 'page', label: '整页' }]}
                     onChange={(value) => updateSettings({ pdfFit: value as PdfFit })}
@@ -1096,12 +1101,11 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                 <button
                   type="button"
                   onClick={() => { void onResetSettings(); keepControlsOpen(); }}
-                  aria-label="恢复本书默认设置"
+                  aria-label={i18nAttribute("恢复本书默认设置")}
                   className={cn('flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-current/10 px-3 text-xs font-medium transition active:scale-[0.98]', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}
                 >
                   <RotateCcw size={15} />
-                  恢复默认
-                </button>
+                  <I18nText>恢复默认</I18nText></button>
               ) : null}
             </div>
           ) : null}
@@ -1126,6 +1130,7 @@ function ReaderDockButton({ icon: Icon, label, ariaLabel, active = false, select
   dark: boolean;
   className?: string;
 }) {
+  const { t: i18nAttribute } = useAttributeI18n();
   return (
     <button
       type="button"
@@ -1157,15 +1162,16 @@ function ReaderDockButton({ icon: Icon, label, ariaLabel, active = false, select
         <span className={cn('flex items-center justify-center', prominent ? 'h-9 w-9 rounded-full bg-amber-700 text-white shadow-sm' : '')}>
           <Icon size={prominent ? 18 : 19} strokeWidth={1.8} fill={active ? 'currentColor' : 'none'} />
         </span>
-        <span className="max-w-full truncate">{label}</span>
+        <span className="max-w-full truncate">{i18nAttribute(label)}</span>
       </span>
     </button>
   );
 }
 
 function ThemeSwatches({ value, onChange, dark }: { value: ReaderTheme; onChange: (value: ReaderTheme) => void; dark: boolean }) {
+  const { t: i18nAttribute } = useAttributeI18n();
   return (
-    <div role="group" aria-label="主题" className={cn('flex items-center justify-center gap-3 rounded-2xl p-1.5', dark ? 'bg-white/[0.06]' : 'bg-stone-900/[0.04]')}>
+    <div role="group" aria-label={i18nAttribute("主题")} className={cn('flex items-center justify-center gap-3 rounded-2xl p-1.5', dark ? 'bg-white/[0.06]' : 'bg-stone-900/[0.04]')}>
       {readerThemeOptions.map((option) => {
         const selected = value === option.value;
         const surface = readerThemeSurfaces[option.value];
@@ -1173,7 +1179,7 @@ function ThemeSwatches({ value, onChange, dark }: { value: ReaderTheme; onChange
           <button
             key={option.value}
             type="button"
-            aria-label={option.label}
+            aria-label={i18nAttribute(option.label)}
             aria-pressed={selected}
             onClick={() => onChange(option.value)}
             className={cn('flex h-11 w-11 items-center justify-center rounded-full border-2 border-transparent p-1 transition active:scale-[0.96]', selected ? dark ? 'border-amber-400/80' : 'border-amber-700/70' : dark ? 'hover:border-white/15' : 'hover:border-stone-900/10')}
@@ -1197,12 +1203,13 @@ function CompactSettingOptions({ label, value, options, onChange, dark, disabled
   disabled?: boolean;
   disambiguateLabels?: boolean;
 }) {
+  const { t: i18nAttribute } = useAttributeI18n();
   return (
     <div className={cn('flex items-center gap-3', disabled && 'opacity-45')}>
-      <span className="w-9 shrink-0 text-xs font-medium opacity-55">{label}</span>
+      <span className="w-9 shrink-0 text-xs font-medium opacity-55">{i18nAttribute(label)}</span>
       <div
         role="group"
-        aria-label={label}
+        aria-label={i18nAttribute(label)}
         className={cn('grid min-w-0 flex-1 gap-1 rounded-xl p-1', dark ? 'bg-white/[0.07]' : 'bg-stone-900/[0.05]')}
         style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
         aria-disabled={disabled}
@@ -1214,7 +1221,7 @@ function CompactSettingOptions({ label, value, options, onChange, dark, disabled
             <button
               key={option.value}
               type="button"
-              aria-label={disambiguateLabels ? `${label}${option.label}` : option.label}
+              aria-label={i18nAttribute(disambiguateLabels ? `${label}${option.label}` : option.label)}
               aria-pressed={selected}
               disabled={disabled}
               onClick={() => onChange(option.value)}
@@ -1226,7 +1233,7 @@ function CompactSettingOptions({ label, value, options, onChange, dark, disabled
               )}
             >
               {Icon ? <Icon size={15} strokeWidth={1.8} /> : null}
-              <span className="truncate">{option.label}</span>
+              <span className="truncate">{i18nAttribute(option.label)}</span>
             </button>
           );
         })}
@@ -1236,15 +1243,16 @@ function CompactSettingOptions({ label, value, options, onChange, dark, disabled
 }
 
 function CompactStepper({ label, value, onMinus, onPlus, dark }: { label: string; value: string; onMinus: () => void; onPlus: () => void; dark: boolean }) {
+  const { t: i18nAttribute } = useAttributeI18n();
   return (
     <div className="flex items-center gap-3">
-      <span className="w-9 shrink-0 text-xs font-medium opacity-55">{label}</span>
+      <span className="w-9 shrink-0 text-xs font-medium opacity-55">{i18nAttribute(label)}</span>
       <div className={cn('flex min-w-0 flex-1 items-center rounded-xl p-1', dark ? 'bg-white/[0.07]' : 'bg-stone-900/[0.05]')}>
-        <button type="button" onClick={onMinus} className={cn('flex h-9 w-9 items-center justify-center rounded-lg transition active:scale-[0.97]', dark ? 'hover:bg-white/10' : 'hover:bg-white/60')} aria-label={`${label}减少`}>
+        <button type="button" onClick={onMinus} className={cn('flex h-9 w-9 items-center justify-center rounded-lg transition active:scale-[0.97]', dark ? 'hover:bg-white/10' : 'hover:bg-white/60')} aria-label={i18nAttribute("{value0}减少", { value0: label })}>
           <Minus size={14} />
         </button>
         <span className="min-w-14 flex-1 text-center text-xs tabular-nums">{value}</span>
-        <button type="button" onClick={onPlus} className={cn('flex h-9 w-9 items-center justify-center rounded-lg transition active:scale-[0.97]', dark ? 'hover:bg-white/10' : 'hover:bg-white/60')} aria-label={`${label}增加`}>
+        <button type="button" onClick={onPlus} className={cn('flex h-9 w-9 items-center justify-center rounded-lg transition active:scale-[0.97]', dark ? 'hover:bg-white/10' : 'hover:bg-white/60')} aria-label={i18nAttribute("{value0}增加", { value0: label })}>
           <Plus size={14} />
         </button>
       </div>
@@ -1253,6 +1261,7 @@ function CompactStepper({ label, value, onMinus, onPlus, dark }: { label: string
 }
 
 function VolumeNavigationPanel({ navigation, readerType, activeItemKey, dark, onJumpItem }: { navigation: ReaderVolumeNavigation; readerType: ReaderKind; activeItemKey: string | null; dark: boolean; onJumpItem: (item: ReaderNavigationItem) => void }) {
+  const { t: i18nAttribute } = useAttributeI18n();
   const showEditions = navigation.editions.length > 1;
   const showVolumes = navigation.volumeSections.length > 1;
   const idleText = navigation.loading ? '正在切换...' : null;
@@ -1262,7 +1271,7 @@ function VolumeNavigationPanel({ navigation, readerType, activeItemKey, dark, on
     <div data-pwa-scroll="true" className="mt-5 min-h-0 flex-1 overflow-auto overscroll-contain pr-1">
       {idleText ? <div className="mb-3 rounded-xl bg-white/10 px-3 py-2 text-xs opacity-70">{idleText}</div> : null}
       {showEditions ? (
-        <VolumeNavigationGroup title="版本">
+        <VolumeNavigationGroup title={i18nAttribute("版本")}>
           {navigation.editions.map((edition) => {
             const selected = edition.id === navigation.currentEditionId;
             const detail = [
@@ -1280,7 +1289,7 @@ function VolumeNavigationPanel({ navigation, readerType, activeItemKey, dark, on
               >
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium">{edition.versionName}</span>
-                  <span className="mt-0.5 block truncate text-xs opacity-65">{detail || '默认版本'}</span>
+                  <span className="mt-0.5 block truncate text-xs opacity-65">{detail || i18nAttribute("默认版本")}</span>
                 </span>
               </button>
             );
@@ -1289,7 +1298,7 @@ function VolumeNavigationPanel({ navigation, readerType, activeItemKey, dark, on
       ) : null}
 
       {showVolumes ? (
-        <VolumeNavigationGroup title={isComic ? '卷/话' : '卷册'}>
+        <VolumeNavigationGroup title={isComic ? i18nAttribute("卷/话") : i18nAttribute("卷册")}>
           {navigation.volumeSections.map((volume, index) => (
             <button
               key={volume.id}
@@ -1300,16 +1309,16 @@ function VolumeNavigationPanel({ navigation, readerType, activeItemKey, dark, on
             >
               <span className="w-8 shrink-0 tabular-nums opacity-60">{index + 1}</span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium">{volume.title || `第 ${index + 1} ${isComic ? '话' : '卷'}`}</span>
-                <span className="mt-0.5 block truncate text-xs opacity-65">{volume.pageCount || 0} {isComic ? '页' : '章'}</span>
+                <span className="block truncate font-medium">{volume.title || i18nAttribute("第 {value0} {value1}", { value0: index + 1, value1: isComic ? '话' : '卷' })}</span>
+                <span className="mt-0.5 block truncate text-xs opacity-65">{volume.pageCount || 0} {isComic ? i18nAttribute("页") : i18nAttribute("章")}</span>
               </span>
             </button>
           ))}
         </VolumeNavigationGroup>
       ) : null}
 
-      <VolumeNavigationGroup title={isComic ? (showVolumes ? '当前卷页码' : '页码') : (showVolumes ? '当前卷章节' : '章节')}>
-        {navigation.pages.length === 0 ? <div className="py-6 text-sm opacity-60">{isComic ? '暂无可跳转页码' : '暂无可跳转章节'}</div> : null}
+      <VolumeNavigationGroup title={isComic ? (showVolumes ? i18nAttribute("当前卷页码") : i18nAttribute("页码")) : (showVolumes ? i18nAttribute("当前卷章节") : i18nAttribute("章节"))}>
+        {navigation.pages.length === 0 ? <div className="py-6 text-sm opacity-60">{isComic ? i18nAttribute("暂无可跳转页码") : i18nAttribute("暂无可跳转章节")}</div> : null}
         <div className={isComic ? 'grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-3' : 'space-y-1'}>
           {navigation.pages.map((item) => (
             <button

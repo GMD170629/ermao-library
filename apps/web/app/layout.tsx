@@ -6,6 +6,8 @@ import { AppShell } from '../components/layout/app-shell';
 import { AudioMiniPlayer } from '../components/audio/audio-mini-player';
 import { FeedbackProvider } from '../components/ui/feedback';
 import { AudioPlaybackProvider } from '../features/audio/audio-playback-provider';
+import { I18nProvider } from '../i18n/provider';
+import { getRequestLocale, getServerTranslator } from '../i18n/server';
 import { APP_BASE_PATH, withBasePath } from '../lib/base-path';
 import { PRODUCT_DESCRIPTION, PRODUCT_NAME } from '../lib/brand';
 
@@ -22,35 +24,38 @@ const basePathFetchBridge = `(() => {
   window.__shukuBasePathFetchInstalled = true;
 })();`;
 
-export const metadata: Metadata = {
-  applicationName: PRODUCT_NAME,
-  title: PRODUCT_NAME,
-  description: PRODUCT_DESCRIPTION,
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: 'black-translucent',
-    title: PRODUCT_NAME
-  },
-  icons: {
-    icon: [
-      { url: withBasePath('/favicon.ico'), sizes: 'any' },
-      { url: withBasePath('/favicon-16x16.png'), sizes: '16x16', type: 'image/png' },
-      { url: withBasePath('/favicon-32x32.png'), sizes: '32x32', type: 'image/png' },
-      { url: withBasePath('/icons/icon-192.png'), sizes: '192x192', type: 'image/png' },
-      { url: withBasePath('/icons/icon-512.png'), sizes: '512x512', type: 'image/png' }
-    ],
-    apple: [
-      { url: withBasePath('/apple-touch-icon-120x120.png'), sizes: '120x120', type: 'image/png' },
-      { url: withBasePath('/apple-touch-icon-152x152.png'), sizes: '152x152', type: 'image/png' },
-      { url: withBasePath('/apple-touch-icon-167x167.png'), sizes: '167x167', type: 'image/png' },
-      { url: withBasePath('/apple-touch-icon-180x180.png'), sizes: '180x180', type: 'image/png' },
-      { url: withBasePath('/apple-touch-icon.png'), sizes: '180x180', type: 'image/png' }
-    ],
-    other: [
-      { rel: 'apple-touch-icon-precomposed', url: withBasePath('/apple-touch-icon-precomposed.png'), sizes: '180x180', type: 'image/png' }
-    ]
-  }
-};
+export function generateMetadata(): Metadata {
+  const t = getServerTranslator();
+  return {
+    applicationName: t(PRODUCT_NAME),
+    title: t(PRODUCT_NAME),
+    description: t(PRODUCT_DESCRIPTION),
+    appleWebApp: {
+      capable: true,
+      statusBarStyle: 'black-translucent',
+      title: t(PRODUCT_NAME)
+    },
+    icons: {
+      icon: [
+        { url: withBasePath('/favicon.ico'), sizes: 'any' },
+        { url: withBasePath('/favicon-16x16.png'), sizes: '16x16', type: 'image/png' },
+        { url: withBasePath('/favicon-32x32.png'), sizes: '32x32', type: 'image/png' },
+        { url: withBasePath('/icons/icon-192.png'), sizes: '192x192', type: 'image/png' },
+        { url: withBasePath('/icons/icon-512.png'), sizes: '512x512', type: 'image/png' }
+      ],
+      apple: [
+        { url: withBasePath('/apple-touch-icon-120x120.png'), sizes: '120x120', type: 'image/png' },
+        { url: withBasePath('/apple-touch-icon-152x152.png'), sizes: '152x152', type: 'image/png' },
+        { url: withBasePath('/apple-touch-icon-167x167.png'), sizes: '167x167', type: 'image/png' },
+        { url: withBasePath('/apple-touch-icon-180x180.png'), sizes: '180x180', type: 'image/png' },
+        { url: withBasePath('/apple-touch-icon.png'), sizes: '180x180', type: 'image/png' }
+      ],
+      other: [
+        { rel: 'apple-touch-icon-precomposed', url: withBasePath('/apple-touch-icon-precomposed.png'), sizes: '180x180', type: 'image/png' }
+      ]
+    }
+  };
+}
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -66,21 +71,24 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const locale = getRequestLocale();
   return (
-    <html lang="zh-CN">
+    <html lang={locale} suppressHydrationWarning>
       <head>
         <link rel="manifest" href={withBasePath('/manifest.webmanifest')} />
         <Script id="shuku-base-path-fetch" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: basePathFetchBridge }} />
       </head>
       <body>
-        <FeedbackProvider>
-          <AudioPlaybackProvider>
-            <Suspense fallback={<div className="min-h-screen bg-[var(--shuku-bg)]" />}>
-              <AppShell>{children}</AppShell>
-              <AudioMiniPlayer />
-            </Suspense>
-          </AudioPlaybackProvider>
-        </FeedbackProvider>
+        <I18nProvider initialLocale={locale}>
+          <FeedbackProvider>
+            <AudioPlaybackProvider>
+              <Suspense fallback={<div className="min-h-screen bg-[var(--shuku-bg)]" />}>
+                <AppShell>{children}</AppShell>
+                <AudioMiniPlayer />
+              </Suspense>
+            </AudioPlaybackProvider>
+          </FeedbackProvider>
+        </I18nProvider>
       </body>
     </html>
   );

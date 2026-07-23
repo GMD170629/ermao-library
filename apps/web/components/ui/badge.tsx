@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { I18nText } from '../../i18n/provider';
 import { cn } from './cn';
 
 export type BadgeTone = 'slate' | 'blue' | 'green' | 'amber' | 'red';
@@ -11,10 +12,23 @@ const tones: Record<BadgeTone, string> = {
   red: 'bg-red-50 text-red-700 border-red-100'
 };
 
-export function Badge({ children, tone = 'slate', className }: { children: ReactNode; tone?: BadgeTone; className?: string }) {
+export function Badge({
+  children,
+  tone = 'slate',
+  className,
+  translate = true
+}: {
+  children: ReactNode;
+  tone?: BadgeTone;
+  className?: string;
+  translate?: boolean;
+}) {
   return (
-    <span className={cn('inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium', tones[tone], className)}>
-      {children}
+    <span
+      data-i18n-skip={translate ? undefined : ''}
+      className={cn('inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium', tones[tone], className)}
+    >
+      {translate && typeof children === 'string' ? <I18nText>{children}</I18nText> : children}
     </span>
   );
 }
