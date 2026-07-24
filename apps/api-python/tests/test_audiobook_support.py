@@ -425,6 +425,35 @@ def test_audio_bundle_keeps_byte_identical_tracks_as_distinct_chapters(db_sessio
     assert [row["sortOrder"] for row in chapters] == [1, 2]
 
 
+def test_file_import_does_not_apply_browser_upload_bundle_byte_limit(
+    db_session, test_settings, monkeypatch
+) -> None:
+    _initialize_schema(db_session)
+    folder = test_settings.resolved_monitor_root / "large-local-audiobook"
+    folder.mkdir(parents=True)
+    (folder / "01.mp3").write_bytes(b"first-local-track")
+    (folder / "02.mp3").write_bytes(b"second-local-track")
+    local_settings = test_settings.model_copy(
+        update={
+            "audiobook_max_file_bytes": 1024,
+            "audiobook_max_bundle_bytes": 20,
+        }
+    )
+    assert sum(path.stat().st_size for path in folder.iterdir()) > local_settings.audiobook_max_bundle_bytes
+    monkeypatch.setattr(importer_module, "parse_audio_metadata", _fake_audio_metadata)
+
+    result = import_managed_book(
+        db_session,
+        local_settings,
+        ImportOptions(source_file_path=folder, origin="WATCH", requested_title="大型本地有声书"),
+    )
+
+    assert db_session.execute(
+        text("SELECT COUNT(*) FROM `LibraryFile` WHERE `editionId` = :edition_id"),
+        {"edition_id": result.edition_id},
+    ).scalar_one() == 2
+
+
 def test_two_single_file_audio_editions_in_one_folder_have_distinct_version_keys(
     db_session, test_settings, monkeypatch
 ) -> None:
@@ -801,6 +830,29 @@ def test_manual_multi_audio_upload_creates_one_bundle_task_and_assets(client, db
     ).mappings().one()
     assert dict(work) == {"title": "上传有声书", "author": "上传作者"}
     assert not any(".part" in path.name for path in target.iterdir())
+
+
+def test_manual_multi_audio_upload_keeps_aggregate_byte_limit(client, db_session, test_settings) -> None:
+    _initialize_schema(db_session)
+    _login(client, db_session)
+    target = test_settings.resolved_monitor_root / "limited-upload"
+    target.mkdir(parents=True, exist_ok=True)
+    test_settings.audiobook_max_file_bytes = 1024
+    test_settings.audiobook_max_bundle_bytes = 20
+
+    response = client.post(
+        "/api/works/import",
+        data={"targetPath": str(target), "bookTitle": "超过上传上限"},
+        files=[
+            ("files", ("01.mp3", b"first-upload-track", "audio/mpeg")),
+            ("files", ("02.mp3", b"second-upload-track", "audio/mpeg")),
+        ],
+    )
+
+    assert response.status_code == 400
+    assert "有声书文件总量超过上限 20 bytes" in response.json()["error"]["message"]
+    assert list(target.iterdir()) == []
+    assert db_session.execute(text("SELECT COUNT(*) FROM `ImportTask`")).scalar_one() == 0
 
 
 def test_failed_audio_upload_removes_staging_files_and_never_queues(client, db_session, test_settings, monkeypatch) -> None:

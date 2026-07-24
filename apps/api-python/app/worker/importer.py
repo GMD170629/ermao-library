@@ -160,9 +160,6 @@ def import_managed_book(db: Session, settings: Settings, options: ImportOptions)
             oversized = [item.name for item in audio_sources if item.stat().st_size > settings.audiobook_max_file_bytes]
             if oversized:
                 raise ValueError(f"音频文件超过单文件上限 {settings.audiobook_max_file_bytes} bytes：{oversized[0]}")
-            bundle_size = sum(item.stat().st_size for item in audio_sources)
-            if bundle_size > settings.audiobook_max_bundle_bytes:
-                raise ValueError(f"有声书文件总量超过上限 {settings.audiobook_max_bundle_bytes} bytes")
         converted: ConversionArtifact | None = None
         effective_options = options
         should_convert_text = source_ext in CONVERTIBLE_TEXT_EXTS and (
