@@ -22,6 +22,8 @@ on:
       - 'package.json'
       - '.github/workflows/fnos-package.yml'
   push:
+    branches:
+      - prod
     tags:
       - 'v*.*.*'
   workflow_dispatch:
@@ -53,9 +55,62 @@ jobs:
           FNOS_VALIDATE_ONLY: 'true'
         run: scripts/build-fnos-package.sh
 
+  publish-prod-image:
+    name: Publish prod Docker image
+    if: github.ref == 'refs/heads/prod'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify application versions
+        shell: bash
+        run: |
+          app_version="$(node -p "require('./package.json').version")"
+          web_version="$(node -p "require('./apps/web/package.json').version")"
+          python_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' apps/api-python/pyproject.toml | head -n 1)"
+          runtime_version="$(sed -n 's/^[[:space:]]*app_version: str = "\([^"]*\)"/\1/p' apps/api-python/app/core/config.py)"
+          lock_version="$(awk '/^name = "shuku-starship-api-python"$/ { found=1; next } found && /^version = / { gsub(/"/, "", $3); print $3; exit }' apps/api-python/uv.lock)"
+          for version_source in "$web_version" "$python_version" "$runtime_version" "$lock_version"; do
+            if [[ "$version_source" != "$app_version" ]]; then
+              echo "Application versions are inconsistent: root=$app_version web=$web_version python=$python_version runtime=$runtime_version lock=$lock_version" >&2
+              exit 1
+            fi
+          done
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push prod Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile.prod
+          target: runner
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            gamersgu/shuku-starship-web:prod
+            gamersgu/shuku-starship-web:latest
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=prod-image
+          cache-to: type=gha,mode=max,scope=prod-image
+
   package:
     name: Build fnOS FPK
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.ref != 'refs/heads/prod'
     runs-on: ubuntu-latest
     permissions:
       contents: write
