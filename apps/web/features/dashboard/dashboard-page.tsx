@@ -4,7 +4,7 @@ import { ArrowRight, BookOpen, Headphones, Images, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { BookCard } from '../../components/book/book-card';
+import { BookshelfSection } from '../../components/book/bookshelf';
 import { Cover } from '../../components/book/cover';
 import { MobileNavigationTrigger } from '../../components/layout/mobile-navigation';
 import { Progress } from '../../components/ui/progress';
@@ -67,15 +67,15 @@ export function DashboardPage() {
     let active = true;
     Promise.allSettled([
       api<{ item: ContinueItem }>('/api/dashboard/continue-reading'),
-      api<{ books: WorkView[] }>('/api/works?visibility=active&sort=recent_read&pageSize=5'),
-      api<{ books: WorkView[] }>('/api/dashboard/recent-books?limit=5')
+      api<{ books: WorkView[] }>('/api/works?visibility=active&sort=recent_read&pageSize=10'),
+      api<{ books: WorkView[] }>('/api/dashboard/recent-books?limit=10')
     ]).then(([continueResult, readingResult, addedResult]) => {
       if (!active) return;
       if (continueResult.status === 'fulfilled') setContinueItem(continueResult.value.item);
       if (readingResult.status === 'fulfilled') {
-        setRecentReading(readingResult.value.books.filter((book) => Boolean(book.lastReadAt)).slice(0, 5));
+        setRecentReading(readingResult.value.books.filter((book) => Boolean(book.lastReadAt)).slice(0, 10));
       }
-      if (addedResult.status === 'fulfilled') setRecentBooks(addedResult.value.books.slice(0, 5));
+      if (addedResult.status === 'fulfilled') setRecentBooks(addedResult.value.books.slice(0, 10));
 
       const failure = [continueResult, readingResult, addedResult].find((result) => result.status === 'rejected');
       setError(failure?.status === 'rejected' ? (failure.reason instanceof Error ? failure.reason.message : '部分书库内容暂时无法读取') : '');
@@ -100,9 +100,9 @@ export function DashboardPage() {
           onClick={() => setUploadDialogOpen(true)}
           aria-label={i18nAttribute("上传读物")}
           title={i18nAttribute("上传读物")}
-          className="flex h-12 w-12 items-center justify-center rounded-full border border-black/[0.12] bg-white/55 text-[#252321] transition hover:border-[#EF4D2F]/40 hover:bg-[#FFF4EF] hover:text-[#EF4D2F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]"
+          className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#FF4F2A] text-white transition hover:bg-[#E94320] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]"
         >
-          <Plus size={25} strokeWidth={1.6} />
+          <Plus size={22} strokeWidth={1.7} />
         </button>
       </header>
 
@@ -231,8 +231,25 @@ function BookSection({
   onOpen: (book: WorkView) => void;
 }) {
   const { t: i18nAttribute } = useAttributeI18n();
+  if (!loading && books.length > 0) {
+    const recentReadingTitle = i18nAttribute("最近阅读");
+    return (
+      <BookshelfSection
+        title={title}
+        books={books}
+        onOpen={onOpen}
+        testId={`dashboard-${title === recentReadingTitle ? 'recent-reading' : 'recent-added'}-shelf`}
+        action={(
+          <button type="button" onClick={onMore} className="inline-flex items-center gap-1.5 text-sm font-medium text-[#EF4D2F] transition hover:text-[#C83B23]">
+            <I18nText>查看全部</I18nText><ArrowRight size={16} strokeWidth={1.8} />
+          </button>
+        )}
+      />
+    );
+  }
+
   return (
-    <section className="mt-6">
+    <section className="mt-7">
       <div className="flex items-center justify-between gap-4">
         <h2 className="text-[22px] font-semibold tracking-tight text-[#24211F]">{title}</h2>
         <button type="button" onClick={onMore} className="inline-flex items-center gap-1.5 text-sm font-medium text-[#EF4D2F] transition hover:text-[#C83B23]">
@@ -240,22 +257,7 @@ function BookSection({
         </button>
       </div>
       {loading ? (
-        <div className="mt-5 h-[360px] animate-pulse rounded-2xl bg-black/[0.025]" />
-      ) : books.length > 0 ? (
-        <div
-          data-testid={`dashboard-${title === '最近阅读' ? 'recent-reading' : 'recent-added'}-rail`}
-          role="region"
-          aria-label={i18nAttribute("{value0}图书横向列表", { value0: title })}
-          tabIndex={0}
-          className="mt-4 grid snap-x snap-proximity grid-flow-col gap-7 overflow-x-auto overscroll-x-contain pb-3"
-          style={{ gridAutoColumns: 'max(152px, calc((100% - 7rem) / 5))' }}
-        >
-          {books.map((book) => (
-            <div key={book.id} className="min-w-0 snap-start">
-              <BookCard book={book} onClick={() => onOpen(book)} />
-            </div>
-          ))}
-        </div>
+        <div className="mt-5 h-[220px] animate-pulse rounded-2xl bg-black/[0.025]" />
       ) : (
         <div className="mt-5 rounded-2xl bg-black/[0.025] px-6 py-8 text-sm text-[#817B75]">{emptyText}</div>
       )}

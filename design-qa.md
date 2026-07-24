@@ -175,6 +175,103 @@ final result: passed
 
 ---
 
+# 图书层板透视、端盖与封面立体感 QA — 2026-07-24
+
+## 对照目标与证据
+
+- 完整页面来源视觉：`/Users/guyu/.codex/generated_images/019f921d-b533-7952-8add-35d5df114745/call_I3u48ShXdfpQbn6bdOFjzJw8.png`，1487 × 1058 像素。
+- 层板聚焦来源视觉：`/var/folders/d8/2c367y3s79b_hrmg8d1b8vzm0000gn/T/codex-clipboard-b59f33af-97aa-41bf-ab3d-cb50d44025c2.png`，2534 × 708 像素。
+- 桌面实现：`artifacts/design-qa/library-shelf-realistic-normal-v4.png`，1440 × 1024 像素；Chrome CSS 视口 1440 × 1024，已登录真实书库，6 本图书。
+- 移动实现：`artifacts/design-qa/library-shelf-realistic-mobile-v4.png`，375 × 1117 像素；Chrome CSS 外部视口 390 × 844，内容宽度 375px。
+- 完整同屏对照：`artifacts/design-qa/library-shelf-realistic-full-comparison-v4.jpg`，1820 × 640 像素。来源与实现各自等比归一化为 900px 宽后并排。
+- 聚焦同屏对照：`artifacts/design-qa/library-shelf-realistic-focus-comparison-v4.jpg`，1820 × 205 像素。来源裁切层板区域和实现裁切层板区域各自等比归一化为 900px 宽，端盖、上表面、正面厚度、接触遮挡和投影可直接检查。
+- 来源包含大量示例图书，实现使用真实 6 本书库；图书数量差异不作为视觉缺陷，比较重点是层板和封面立体关系。
+
+## Findings 与比较迭代
+
+| 严重度 | 早期问题 | 修正 | 修正后证据 |
+| --- | --- | --- | --- |
+| P1 | 层板由浅色矩形和大范围 `box-shadow` 构成，正面厚度、上表面和端部透视不清晰，看起来像带光晕的横线。 | 依据来源生成独立透明 PNG 层板材质，包含浅透视上表面、暖灰正面和左右回收端盖；投影改为跟随透明轮廓的两级 `drop-shadow`。 | `library-shelf-realistic-focus-comparison-v4.jpg` 显示实现已有明确正面厚度、下沿暗部和方向性投影。 |
+| P1 | 整条材质直接横向压缩时，超宽和移动视口会压扁左右回收端盖。 | 将材质拆为固定 20px 左端盖、可伸缩中段和固定 20px 右端盖；端盖不随容器宽度变形。 | 1440px 桌面与 375px 移动截图均保留可辨认的斜向收边。 |
+| P2 | 封面使用 7px 圆角和四周均匀柔光，视觉上更像悬浮卡片。 | 圆角降至 3px，阴影改为统一向右下的窄接触阴影与次级环境阴影；封面整体向下压入层板 2px。 | 聚焦对照中封面硬边更接近实体书，层板前沿遮挡书本底部。 |
+| P2 | 悬浮时出现标题和作者信息浮层。 | 完全删除信息浮层；悬浮和键盘聚焦只做底部锚定的 1.03 倍放大，并保留减少动态效果支持。 | Chromium 自动化验证缩放矩阵大于 1，页面中 `tooltip` 数量始终为 0。 |
+| P2 | 新层板图片在开发模式产生 LCP 警告。 | 三段层板材质均标记为优先加载；干净 Chrome 标签复核后 console 无 error 或 warn。 | 最终浏览器日志为空。 |
+
+最终没有未解决的 P0、P1 或 P2。
+
+## 五项视觉核对
+
+- 字体与排版：页面标题、数量和管理入口未改动；层板调整没有改变既有文字层级。
+- 间距与布局：层板主体 14px、投影布局区 30px；书本底部压入 2px，多排之间为投影保留稳定呼吸空间。
+- 颜色与令牌：材质使用暖象牙与暖灰正面，投影采用棕灰色而非纯黑；与现有暖白页面背景一致。
+- 图片与资产：层板使用 ImageGen 生成的真实透明位图资产，并拆分为左端盖、中段和右端盖；透明边缘经过软遮罩、去绿边并检查，无绿色残留或明显透明光晕。
+- 文案与内容：没有新增可见文案；书名、作者和封面保持真实数据，不在悬浮层重复展示。
+
+## 交互、响应式与自动化验证
+
+- 默认封面可点击打开详情，现有导航行为未变。
+- 悬浮和键盘聚焦只放大，不显示信息弹窗；按钮仍保留具名 `aria-label` 和可见焦点环。
+- 390 × 844 下为 2 列、3 排、3 条独立层板，页面内容宽度 375px，无横向溢出。
+- Chromium 响应式与书库 E2E：10 passed，其中包含层板资产高度、轮廓投影、默认封面阴影、悬浮缩放和无 tooltip 断言。
+- TypeScript：通过。
+- 浏览器 console：最终干净标签无 error 或 warn。
+
+final result: passed
+
+---
+
+# 图书首页、全部图书与书架展示 QA — 2026-07-24
+
+## 对照目标与证据
+
+- 首页来源视觉：`/Users/guyu/.codex/generated_images/019f921d-b533-7952-8add-35d5df114745/call_oJ8QLa0I5xSnW9QyKURs2sb4.png`，1487 × 1058 像素。
+- 全部图书来源视觉：`/Users/guyu/.codex/generated_images/019f921d-b533-7952-8add-35d5df114745/call_I3u48ShXdfpQbn6bdOFjzJw8.png`，1487 × 1058 像素。
+- 首页实现：`artifacts/design-qa/home-implementation-final.png`，1425 × 1053 像素；已登录真实书库，包含现有“继续”、最近阅读和最近加入。
+- 全部图书实现：`artifacts/design-qa/library-implementation-final.png`，1440 × 1024 像素；已登录真实书库，书架浏览态。
+- 书架详情实现：`artifacts/design-qa/shelf-detail-final.png`，1440 × 1024 像素；“听米有声”智能书架。
+- 管理列表实现：`artifacts/design-qa/library-management-final.png`，1440 × 1024 像素；保留原有筛选、批量操作和列表管理能力。
+- 移动实现：`artifacts/design-qa/home-mobile-final.png` 与 `artifacts/design-qa/library-mobile-final.png`，390 × 844 CSS 视口。
+- 完整同屏对照：`artifacts/design-qa/home-comparison-final.jpg` 与 `artifacts/design-qa/library-comparison-final.jpg`。
+- 聚焦同屏对照：`artifacts/design-qa/home-focus-comparison-final.jpg` 与 `artifacts/design-qa/library-focus-comparison-final.jpg`。来源与实现各自等比缩放至 700px 宽后并排；没有拉伸封面或改变来源纵横比。
+- 来源中的导航不是本轮实现目标；根据用户范围，本轮完整保留现有导航。来源使用大量示例图书，而真实登录书库只有 6 本；连续向下加载能力由 75 本夹具覆盖。
+
+## Findings 与比较迭代
+
+| 严重度 | 早期问题 | 修正 | 修正后证据 |
+| --- | --- | --- | --- |
+| P1 | 首页横向书架中的封面按钮没有占满固定宽度容器，Next Image 的父级宽度为 0，封面不可见。 | 为封面按钮补齐 `w-full`，让图片比例盒正确继承 104/118/128px 轨道宽度。 | `home-implementation-final.png` 中最近阅读与最近加入封面完整显示；浏览器测得桌面封面宽度为 128px。 |
+| P1 | 全部图书继续沿用大卡片和工具栏，会削弱大量藏书连续陈列的整体感。 | 浏览态改为不分区域的连续书架；根据容器宽度自动使用 2/4/6/8/10 列，并在接近页尾时追加下一批。 | `library-comparison-final.jpg` 和 75 本自动化夹具验证向下滚动追加。 |
+| P2 | 首页与全部图书的新增入口视觉处理不一致。 | 两处统一为 44px 珊瑚色圆角方形按钮；没有更改侧栏或导航结构。 | 两张最终桌面截图中的页面级操作一致。 |
+| P2 | 全部图书首屏封面在开发模式触发 Next Image LCP 提示。 | 将书架首行封面标记为优先加载。 | 新建干净 Chrome 标签重新加载全部图书后 console 无 error 或 warn。 |
+
+最终没有未解决的 P0、P1 或 P2。
+
+## 五项视觉核对
+
+- 字体与排版：继续使用现有标题和正文栈；书架浏览只保留页面标题、数量与必要操作，不增加筛选噪音。
+- 间距与布局：首页保留原有“继续”大面板；下方书架使用统一封面比例和层板。全部图书不再分区，书架逐行向下延伸。
+- 颜色与令牌：沿用暖白背景、暖灰层板、轻阴影和珊瑚主色；没有修改现有导航令牌。
+- 图片与图标：全部使用真实图书封面和项目现有 Lucide 图标；没有新增占位图、手绘 SVG 或伪造封面。
+- 文案与内容：新增“管理图书”“返回书架”“正在加载更多图书”“已加载 x / y 本”均提供 zh-CN 与 en-US；作者和书名保持用户内容原样。
+
+## 交互、响应式与自动化验证
+
+- 首页：现有继续阅读流程保持；最近阅读与最近加入复用同一书架组件，封面可点击并支持键盘焦点。
+- 全部图书：默认书架浏览，向下接近页尾自动加载下一批并去重；“管理图书”进入原列表模式，“返回书架”恢复浏览模式。
+- 管理列表：桌面表格 6 行真实数据；移动端继续使用原有管理卡片，没有压缩成不可用表格。
+- 书架详情：智能书架内容复用连续书架组件；编辑和返回能力保持。
+- 响应式：1440px 桌面无横向溢出；390 × 844 下每行 2 本、6 本共 3 行，无横向溢出。
+- 浏览器：干净 Chrome 标签复核首页与全部图书，最终 console 无 error 或 warn。
+- TypeScript：通过。
+- 中英文目录：2741 条消息通过一致性检查。
+- Web 单元测试：182 passed。
+- Chromium 响应式与书库 E2E：10 passed。
+- Next.js production build：通过。
+
+final result: passed
+
+---
+
 # 语言入口范围调整 QA — 2026-07-23
 
 ## 对照目标与证据

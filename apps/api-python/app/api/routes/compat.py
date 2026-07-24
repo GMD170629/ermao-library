@@ -125,6 +125,11 @@ COMIC_PAGE_DATA_SAVER_VARIANT = "data-saver"
 COMIC_PAGE_ORIGINAL_VARIANT = "original"
 COMIC_PAGE_DATA_SAVER_MEDIA_TYPE = "image/webp"
 COMIC_PAGE_DATA_SAVER_QUALITY = 82
+SMALL_COVER_MAX_BYTES = 50 * 1024
+SMALL_COVER_MAX_DIMENSION = 600
+SMALL_COVER_MEDIA_TYPE = "image/webp"
+SMALL_COVER_CACHE_VERSION = 1
+SMALL_COVER_QUALITIES = (82, 74, 66, 58, 50, 42, 34, 26, 18, 10)
 
 
 def _now() -> datetime:
@@ -4364,6 +4369,19 @@ def _write_cache_bytes(path: Path, data: bytes) -> None:
         tmp.unlink(missing_ok=True)
 
 
+def _small_cover_cache_key(path: Path, stat: os.stat_result) -> str:
+    return (
+        f"{path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}:"
+        f"small-cover-v{SMALL_COVER_CACHE_VERSION}:"
+        f"max-{SMALL_COVER_MAX_DIMENSION}:bytes-{SMALL_COVER_MAX_BYTES}"
+    )
+
+
+def _small_cover_cache_path(settings: Settings, cache_key: str) -> Path:
+    digest = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()
+    return settings.resolved_storage_root / "cache" / "covers" / digest[:2] / f"{digest}.webp"
+
+
 def _image_has_alpha(image: Image.Image) -> bool:
     return image.mode in {"RGBA", "LA"} or (image.mode == "P" and "transparency" in image.info)
 
@@ -4372,6 +4390,58 @@ def _image_for_webp(image: Image.Image) -> Image.Image:
     if image.mode in {"RGB", "RGBA"}:
         return image
     return image.convert("RGBA" if _image_has_alpha(image) else "RGB")
+
+
+def _small_cover_webp_bytes(path: Path) -> bytes | None:
+    try:
+        with Image.open(path) as source:
+            if getattr(source, "is_animated", False):
+                source.seek(0)
+            prepared = _image_for_webp(ImageOps.exif_transpose(source))
+            prepared.thumbnail(
+                (SMALL_COVER_MAX_DIMENSION, SMALL_COVER_MAX_DIMENSION),
+                Image.Resampling.LANCZOS,
+            )
+            while True:
+                for quality in SMALL_COVER_QUALITIES:
+                    output = io.BytesIO()
+                    prepared.save(output, format="WEBP", quality=quality, method=6)
+                    data = output.getvalue()
+                    if len(data) <= SMALL_COVER_MAX_BYTES:
+                        return data
+                width, height = prepared.size
+                next_size = (
+                    max(1, int(width * 0.85)),
+                    max(1, int(height * 0.85)),
+                )
+                if next_size == prepared.size:
+                    return None
+                prepared = prepared.resize(next_size, Image.Resampling.LANCZOS)
+    except (OSError, ValueError, UnidentifiedImageError) as exc:
+        logger.debug("failed to create small cover image path=%s error=%s", path, exc)
+        return None
+
+
+def _small_cover_response(path: Path, request: Request, user_id: str, settings: Settings) -> Response | None:
+    stat = path.stat()
+    cache_key = _small_cover_cache_key(path, stat)
+    cache_path = _small_cover_cache_path(settings, cache_key)
+    data = cache_path.read_bytes() if cache_path.is_file() else None
+    if data is None or len(data) > SMALL_COVER_MAX_BYTES:
+        data = _small_cover_webp_bytes(path)
+        if data is None:
+            return None
+        _write_cache_bytes(cache_path, data)
+    request.state.user_id = user_id
+    cache_identity = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()[:24]
+    return _bytes_response(
+        data,
+        request,
+        SMALL_COVER_MEDIA_TYPE,
+        str(path.with_suffix(".webp").name),
+        mtime=stat.st_mtime,
+        extra=f"small-cover-{cache_identity}",
+    )
 
 
 def _comic_page_webp_bytes(data: bytes) -> bytes | None:
@@ -4752,6 +4822,15 @@ def get_cover(request: Request, work_id: str | None = None, edition_id: str | No
             _update(db, str(table), str(row_id), values)
             db.commit()
         cover_path = _stored_path(stored_default, settings)
+    if request.query_params.get("size") == "small" and cover_path is not None:
+        response = _small_cover_response(cover_path, request, user.id, settings)
+        if response is not None:
+            return response
+        default_path = _stored_path(ensure_default_cover(settings), settings)
+        if default_path is not None and default_path != cover_path:
+            response = _small_cover_response(default_path, request, user.id, settings)
+            if response is not None:
+                return response
     return _send_file(cover_path, request, user.id, route="cover", file_id=cover_id)
 
 
@@ -6096,7 +6175,7 @@ def list_shelves(request: Request, db: Session = Depends(get_db), settings: Sett
         )
     else:
         shelves = _rows(db, f"SELECT * FROM `Shelf` ORDER BY {shelf_order}")
-    return ok({"shelves": [_shelf_view(db, shelf, user.id) for shelf in shelves]})
+    return ok({"shelves": [_shelf_summary_view(db, shelf, user) for shelf in shelves]})
 
 
 def _owned_shelf(db: Session, shelf_id: str, user_id: str) -> dict[str, Any] | None:
@@ -6111,10 +6190,10 @@ def _owned_shelf(db: Session, shelf_id: str, user_id: str) -> dict[str, Any] | N
     return _row(db, "SELECT * FROM `Shelf` WHERE `id` = :id", {"id": shelf_id})
 
 
-def _shelf_view(db: Session, shelf: dict[str, Any], user_id: str) -> dict[str, Any]:
+def _shelf_work_ids(db: Session, shelf: dict[str, Any], user: User) -> list[str]:
     kind = str(shelf.get("kind") or "STATIC").upper()
     rules = _parse_json(shelf.get("rulesJson"), {})
-    work_ids = smart_shelf_work_ids(db, rules, user_id) if kind == "SMART" else (
+    work_ids = smart_shelf_work_ids(db, rules, user.id) if kind == "SMART" else (
         [
             row["workId"]
             for row in _rows(
@@ -6126,14 +6205,116 @@ def _shelf_view(db: Session, shelf: dict[str, Any], user_id: str) -> dict[str, A
         if _has_table(db, "ShelfWork")
         else []
     )
-    user = db.get(User, user_id)
-    visible_ids = [
-        work_id
-        for work_id in work_ids
-        if user is not None and can_access_work(db, user, work_id)
-    ]
-    books = [_work_view(db, work, user_id) for work_id in visible_ids if (work := _get_work(db, work_id))]
-    return {**shelf, "kind": kind, "rules": rules, "bookCount": len(books), "bookIds": visible_ids, "books": books}
+    if not work_ids or not _has_table(db, "LibraryWork"):
+        return []
+
+    context = authorization_context(db, user)
+    scope, scope_params = work_visibility_sql(
+        context,
+        alias="LibraryWork",
+        prefix="shelf_books",
+    )
+    visible: set[str] = set()
+    # Keep well below SQLite's bind-variable limit while checking access in bulk.
+    for chunk_start in range(0, len(work_ids), 400):
+        chunk = work_ids[chunk_start:chunk_start + 400]
+        placeholders: list[str] = []
+        params = dict(scope_params)
+        for index, work_id in enumerate(chunk):
+            key = f"shelf_work_{index}"
+            placeholders.append(f":{key}")
+            params[key] = work_id
+        rows = _rows(
+            db,
+            "SELECT `LibraryWork`.`id` FROM `LibraryWork` "
+            f"WHERE `LibraryWork`.`id` IN ({', '.join(placeholders)}) AND {scope}",
+            params,
+        )
+        visible.update(str(row["id"]) for row in rows)
+    return [str(work_id) for work_id in work_ids if str(work_id) in visible]
+
+
+def _shelf_book_views(db: Session, work_ids: list[str]) -> list[dict[str, Any]]:
+    if not work_ids:
+        return []
+    placeholders: list[str] = []
+    params: dict[str, Any] = {}
+    for index, work_id in enumerate(work_ids):
+        key = f"shelf_card_{index}"
+        placeholders.append(f":{key}")
+        params[key] = work_id
+    works = _rows(
+        db,
+        f"SELECT * FROM `LibraryWork` WHERE `id` IN ({', '.join(placeholders)})",
+        params,
+    )
+    works_by_id = {str(work["id"]): work for work in works}
+    labels = _labels()
+    result: list[dict[str, Any]] = []
+    for work_id in work_ids:
+        work = works_by_id.get(str(work_id))
+        if not work:
+            continue
+        format_value = str(work.get("workType") or "EPUB").upper()
+        result.append(
+            {
+                "id": str(work["id"]),
+                "title": work.get("title") or "未命名作品",
+                "author": work.get("author") or "未知作者",
+                "format": labels["format"].get(format_value, format_value),
+                "gradient": "from-slate-950 via-blue-800 to-cyan-500",
+                "coverStatus": work.get("coverStatus") or "PENDING",
+                "coverUrl": _cover_url("works", str(work["id"]), work, size="medium"),
+            }
+        )
+    return result
+
+
+def _shelf_base_view(shelf: dict[str, Any], work_ids: list[str]) -> dict[str, Any]:
+    kind = str(shelf.get("kind") or "STATIC").upper()
+    return {
+        **shelf,
+        "kind": kind,
+        "rules": _parse_json(shelf.get("rulesJson"), {}),
+        "bookCount": len(work_ids),
+    }
+
+
+def _shelf_summary_view(db: Session, shelf: dict[str, Any], user: User) -> dict[str, Any]:
+    work_ids = _shelf_work_ids(db, shelf, user)
+    return {
+        **_shelf_base_view(shelf, work_ids),
+        "books": _shelf_book_views(db, work_ids[:3]),
+    }
+
+
+def _shelf_detail_view(
+    db: Session,
+    shelf: dict[str, Any],
+    user: User,
+    *,
+    page: int = 1,
+    page_size: int = 24,
+    include_book_ids: bool = True,
+) -> dict[str, Any]:
+    work_ids = _shelf_work_ids(db, shelf, user)
+    page = max(1, page)
+    page_size = min(100, max(1, page_size))
+    total = len(work_ids)
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    start = (page - 1) * page_size
+    page_ids = work_ids[start:start + page_size]
+    result = {
+        **_shelf_base_view(shelf, work_ids),
+        "books": _shelf_book_views(db, page_ids),
+        "page": page,
+        "pageSize": page_size,
+        "total": total,
+        "totalPages": total_pages,
+    }
+    if include_book_ids:
+        result["bookIds"] = work_ids
+    return result
 
 
 def _normalized_smart_shelf_rules(value: Any) -> tuple[dict[str, Any], str | None]:
@@ -6210,14 +6391,31 @@ def _replace_shelf_works(db: Session, shelf_id: str, work_ids: list[str]) -> Non
 
 
 @router.get("/shelves/{shelf_id}")
-def get_shelf(shelf_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def get_shelf(
+    shelf_id: str,
+    request: Request,
+    page: int = 1,
+    pageSize: int = 24,
+    includeBookIds: bool = True,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     shelf = _owned_shelf(db, shelf_id, user.id)
     if not shelf:
         return fail("书架不存在", status_code=404)
-    return ok({"shelf": _shelf_view(db, shelf, user.id)})
+    return ok({
+        "shelf": _shelf_detail_view(
+            db,
+            shelf,
+            user,
+            page=page,
+            page_size=pageSize,
+            include_book_ids=includeBookIds,
+        )
+    })
 
 
 @router.post("/shelves")
@@ -6241,7 +6439,7 @@ async def create_shelf(request: Request, db: Session = Depends(get_db), settings
     shelf = _insert(db, "Shelf", {"id": f"py_{time_ns()}", "ownerUserId": user.id, "name": name, "description": str(payload.get("description") or "").strip() or None, "kind": kind, "rulesJson": _json_text(rules), "pinned": bool(payload.get("pinned")), "createdAt": _now(), "updatedAt": _now()})
     if kind == "STATIC":
         _replace_shelf_works(db, shelf["id"], work_ids)
-    return ok({"shelf": _shelf_view(db, shelf, user.id)}, status_code=201)
+    return ok({"shelf": _shelf_detail_view(db, shelf, user)}, status_code=201)
 
 
 @router.patch("/shelves/{shelf_id}")
@@ -6281,7 +6479,7 @@ async def update_shelf(shelf_id: str, request: Request, db: Session = Depends(ge
         _replace_shelf_works(db, shelf_id, work_ids)
     elif kind == "SMART" and str(existing_shelf.get("kind") or "STATIC").upper() != "SMART":
         _replace_shelf_works(db, shelf_id, [])
-    return ok({"shelf": _shelf_view(db, shelf, user.id)})
+    return ok({"shelf": _shelf_detail_view(db, shelf, user)})
 
 
 @router.delete("/shelves/{shelf_id}")

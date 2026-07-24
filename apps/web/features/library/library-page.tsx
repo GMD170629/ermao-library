@@ -1,9 +1,9 @@
 'use client';
 
-import { BookmarkPlus, ChevronLeft, ChevronRight, Filter, Grid3X3, List, Loader2, Plus, Search, Trash2, UploadCloud, X } from 'lucide-react';
+import { BookmarkPlus, BookOpen, ChevronLeft, ChevronRight, Filter, List, Loader2, Plus, Search, Trash2, UploadCloud, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
-import { BookCard } from '../../components/book/book-card';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { BookshelfCollection } from '../../components/book/bookshelf';
 import { BookTable } from '../../components/book/book-table';
 import { MobileNavigationTrigger } from '../../components/layout/mobile-navigation';
 import { Button } from '../../components/ui/button';
@@ -64,6 +64,7 @@ const pageSizeOptions = [
 const validStatuses = new Set(statusOptions.map((option) => option.value));
 const validSorts = new Set(sortOptions.map((option) => option.value));
 const DEFAULT_LIBRARY_PAGE_SIZE = 20;
+const BROWSE_LIBRARY_PAGE_SIZE = 50;
 
 function routeStatus(value: string | null) {
   if (value === 'WANT') return 'UNREAD';
@@ -149,6 +150,9 @@ export function LibraryPage() {
   const [smartShelfOpen, setSmartShelfOpen] = useState(false);
   const [smartShelfName, setSmartShelfName] = useState('');
   const [smartShelfSaving, setSmartShelfSaving] = useState(false);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+  const requestedScopeRef = useRef('');
+  const requestedReloadKeyRef = useRef(reloadKey);
   const toast = useToast();
   const applicableSmartFilterRules = useMemo<SmartFilterRules>(() => ({
     combinator: smartFilterRules.combinator,
@@ -156,7 +160,7 @@ export function LibraryPage() {
   }), [smartFilterRules]);
   const incompleteSmartFilterCount = smartFilterRules.conditions.length - applicableSmartFilterRules.conditions.length;
   const smartFilterQuery = useMemo(() => applicableSmartFilterRules.conditions.length > 0 ? JSON.stringify(serializableSmartFilterRules(applicableSmartFilterRules)) : '', [applicableSmartFilterRules]);
-  const query = useMemo(() => {
+  const queryBase = useMemo(() => {
     const params = new URLSearchParams();
     if (search.trim()) params.set('search', search.trim());
     if (formatFilter !== '全部') params.set('type', formatFilter);
@@ -166,14 +170,15 @@ export function LibraryPage() {
     params.set('visibility', 'active');
     params.set('sort', sort);
     params.set('sortDirection', sortDirection);
-    params.set('page', String(page));
-    params.set('pageSize', pageSize);
     return params.toString();
-  }, [formatFilter, page, pageSize, search, seriesNameFilter, smartFilterQuery, sort, sortDirection, statusFilter]);
+  }, [formatFilter, search, seriesNameFilter, smartFilterQuery, sort, sortDirection, statusFilter]);
+  const requestPageSize = view === 'grid' ? String(BROWSE_LIBRARY_PAGE_SIZE) : pageSize;
+  const requestScope = `${queryBase}&pageSize=${requestPageSize}&view=${view}`;
 
   useEffect(() => {
     setPage(1);
-  }, [formatFilter, search, seriesNameFilter, smartFilterQuery, sort, sortDirection, statusFilter]);
+    setBooks([]);
+  }, [requestScope]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -227,21 +232,37 @@ export function LibraryPage() {
 
   useEffect(() => {
     let active = true;
+    const scopeChanged = requestedScopeRef.current !== requestScope;
+    const reloadChanged = requestedReloadKeyRef.current !== reloadKey;
+    const requestedPage = scopeChanged || reloadChanged ? 1 : page;
+    requestedScopeRef.current = requestScope;
+    requestedReloadKeyRef.current = reloadKey;
+    if (requestedPage !== page) setPage(requestedPage);
+
+    const params = new URLSearchParams(queryBase);
+    params.set('page', String(requestedPage));
+    params.set('pageSize', requestPageSize);
     setLoading(true);
-    fetch(`/api/works?${query}`)
+    fetch(`/api/works?${params.toString()}`)
       .then((response) => response.json() as Promise<BooksResponse>)
       .then((payload) => {
         if (!active) return;
         if (!payload.ok) throw new Error(payload.error?.message ?? '读取书库失败');
         const data = payload.data;
-        if (data && page > data.totalPages && data.totalPages > 0) {
+        if (data && requestedPage > data.totalPages && data.totalPages > 0) {
           setPage(data.totalPages);
           return;
         }
-        setBooks(data?.books ?? []);
+        const nextBooks = data?.books ?? [];
+        setBooks((current) => {
+          if (view !== 'grid' || requestedPage <= 1) return nextBooks;
+          const merged = new Map(current.map((book) => [book.id, book]));
+          nextBooks.forEach((book) => merged.set(book.id, book));
+          return Array.from(merged.values());
+        });
         setMeta({
           total: data?.total ?? 0,
-          pageSize: data?.pageSize ?? Number(pageSize),
+          pageSize: data?.pageSize ?? Number(requestPageSize),
           totalPages: data?.totalPages ?? 1
         });
         setError('');
@@ -254,7 +275,18 @@ export function LibraryPage() {
     return () => {
       active = false;
     };
-  }, [page, query, reloadKey]);
+  }, [page, queryBase, reloadKey, requestPageSize, requestScope, view]);
+
+  useEffect(() => {
+    const sentinel = loadMoreRef.current;
+    if (!sentinel || view !== 'grid' || loading || page >= meta.totalPages) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      setPage((current) => Math.min(meta.totalPages, current + 1));
+    }, { rootMargin: '700px 0px' });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loading, meta.totalPages, page, view]);
 
   useEffect(() => {
     const visibleIds = new Set(books.map((book) => book.id));
@@ -274,6 +306,11 @@ export function LibraryPage() {
 
   function updateView(nextView: 'grid' | 'list') {
     setView(nextView);
+    if (nextView === 'grid') {
+      setFiltersOpen(false);
+      setSelectedWorkIds([]);
+      setBatchContextPosition(null);
+    }
     window.localStorage.setItem(userDevicePreferenceKey('shuku.library.view', currentUserId()), nextView);
     void saveAccountPreferences({ 'library.view': nextView }).catch(() => undefined);
   }
@@ -416,15 +453,25 @@ export function LibraryPage() {
             {!loading ? <span className="shrink-0 text-[13px] text-[#8A847E] sm:text-[15px]">{meta.total} <I18nText>本</I18nText></span> : null}
           </div>
         </div>
-        {canManageSystem ? <button
-          type="button"
-          onClick={openUploadDialog}
-          aria-label={i18nAttribute("上传读物")}
-          title={i18nAttribute("上传读物")}
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-black/[0.12] bg-white/55 text-[#252321] transition hover:border-[#EF4D2F]/40 hover:bg-[#FFF4EF] hover:text-[#EF4D2F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]"
-        >
-          <Plus size={25} strokeWidth={1.6} />
-        </button> : null}
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => updateView(view === 'grid' ? 'list' : 'grid')}
+            className="inline-flex h-11 items-center gap-2 rounded-xl px-3 text-sm font-medium text-[#625D58] transition hover:bg-black/[0.035] hover:text-[#2D2926] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]"
+          >
+            {view === 'grid' ? <List size={17} strokeWidth={1.8} /> : <BookOpen size={17} strokeWidth={1.8} />}
+            {view === 'grid' ? <I18nText>管理图书</I18nText> : <I18nText>返回书架</I18nText>}
+          </button>
+          {canManageSystem ? <button
+            type="button"
+            onClick={openUploadDialog}
+            aria-label={i18nAttribute("上传读物")}
+            title={i18nAttribute("上传读物")}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#FF4F2A] text-white transition hover:bg-[#E94320] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]"
+          >
+            <Plus size={22} strokeWidth={1.7} />
+          </button> : null}
+        </div>
       </header>
 
       {canManageSystem ? <UploadBookDialog
@@ -474,7 +521,7 @@ export function LibraryPage() {
         </div>
       ) : null}
 
-      <div className="mt-8 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+      {view === 'list' ? <div className="mt-8 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
           <label className="flex h-12 min-w-0 items-center gap-3 rounded-xl border border-black/[0.1] bg-white/65 px-4 sm:w-[300px] lg:w-[340px]">
             <Search size={18} className="shrink-0 text-[#8A847E]" strokeWidth={1.8} />
@@ -504,28 +551,6 @@ export function LibraryPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex h-11 rounded-xl border border-black/[0.09] bg-white/55 p-1">
-            <button
-              type="button"
-              title={i18nAttribute("网格")}
-              aria-label={i18nAttribute("网格")}
-              aria-pressed={view === 'grid'}
-              onClick={() => updateView('grid')}
-              className={cn('flex h-9 w-10 items-center justify-center rounded-lg transition', view === 'grid' ? 'bg-[#F9DED4] text-[#EF4D2F]' : 'text-[#756F69] hover:bg-black/[0.035]')}
-            >
-              <Grid3X3 size={17} />
-            </button>
-            <button
-              type="button"
-              title={i18nAttribute("列表")}
-              aria-label={i18nAttribute("列表")}
-              aria-pressed={view === 'list'}
-              onClick={() => updateView('list')}
-              className={cn('flex h-9 w-10 items-center justify-center rounded-lg transition', view === 'list' ? 'bg-[#F9DED4] text-[#EF4D2F]' : 'text-[#756F69] hover:bg-black/[0.035]')}
-            >
-              <List size={17} />
-            </button>
-          </div>
           <button
             type="button"
             onClick={() => setFiltersOpen((open) => !open)}
@@ -541,9 +566,9 @@ export function LibraryPage() {
             <Filter size={15} strokeWidth={1.8} />
           </button>
         </div>
-      </div>
+      </div> : null}
 
-      {filtersOpen ? (
+      {view === 'list' && filtersOpen ? (
         <>
           {seriesNameFilter || statusFilter !== '全部' ? <div className="mt-3 flex flex-col gap-3 rounded-2xl border border-black/[0.055] bg-black/[0.018] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap items-center gap-2 text-xs text-[#7B746E]">
@@ -566,7 +591,7 @@ export function LibraryPage() {
       ) : null}
 
       {message ? <div className="mt-4 text-sm text-emerald-700">{message}</div> : null}
-      {loading ? <div className="mt-8 flex min-h-[240px] items-center justify-center rounded-2xl bg-black/[0.02] text-sm text-[#817B75]" role="status" aria-live="polite"><Loader2 size={17} className="mr-2 animate-spin" /><I18nText>正在读取书库...</I18nText></div> : null}
+      {loading && books.length === 0 ? <div className="mt-8 flex min-h-[240px] items-center justify-center rounded-2xl bg-black/[0.02] text-sm text-[#817B75]" role="status" aria-live="polite"><Loader2 size={17} className="mr-2 animate-spin" /><I18nText>正在读取书库...</I18nText></div> : null}
       {error ? <div className="mt-6 rounded-2xl bg-red-50 px-6 py-5 text-sm text-red-700">{error}</div> : null}
 
       {!loading && !error && books.length === 0 ? (
@@ -577,31 +602,24 @@ export function LibraryPage() {
         </div>
       ) : null}
 
-      {!loading && !error && books.length > 0 ? (
+      {!error && books.length > 0 ? (
         <>
           {view === 'grid' ? (
-            <div
-              data-testid="library-book-grid"
-              className="mt-7 grid grid-cols-2 gap-7 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5"
-            >
-              {books.map((book, index) => (
-                <BookCard
-                  key={book.id}
-                  book={book}
-                  priority={index === 0}
-                  onDelete={canManageSystem ? () => openDeleteBook(book) : undefined}
-                  onClick={() => router.push(`/works/${book.id}`)}
-                  selectable
-                  selected={selectedWorkIds.includes(book.id)}
-                  onSelect={() => toggleSelection(book.id)}
-                />
-              ))}
+            <div className="mt-8">
+              <BookshelfCollection
+                books={books}
+                testId="library-book-bookshelves"
+                onOpen={(book) => router.push(`/works/${book.id}`)}
+              />
+              <div ref={loadMoreRef} className="flex min-h-20 items-center justify-center py-5 text-xs tabular-nums text-[#8A847E]" role="status" aria-live="polite">
+                {loading && page > 1 ? <><Loader2 size={15} className="mr-2 animate-spin" /><I18nText>正在加载更多图书...</I18nText></> : i18nAttribute("已加载 {value0} / {value1} 本", { value0: books.length, value1: meta.total })}
+              </div>
             </div>
           ) : (
             <div className="mt-8"><BookTable books={books} onDelete={canManageSystem ? openDeleteBook : undefined} selectable selectedIds={selectedWorkIds} onSelect={(book) => toggleSelection(book.id)} onSelectAll={togglePageSelection} onSelectionChange={setSelectedWorkIds} onContextMenu={(_book, position) => setBatchContextPosition(position)} sort={sort} sortDirection={sortDirection} onSort={updateSort} /></div>
           )}
 
-          <Pagination page={page} totalPages={meta.totalPages} loading={loading} pageSize={pageSize} onPage={setPage} onPageSize={(nextPageSize) => { setPage(1); setPageSize(nextPageSize); }} />
+          {view === 'list' ? <Pagination page={page} totalPages={meta.totalPages} loading={loading} pageSize={pageSize} onPage={setPage} onPageSize={(nextPageSize) => { setPage(1); setPageSize(nextPageSize); }} /> : null}
         </>
       ) : null}
 

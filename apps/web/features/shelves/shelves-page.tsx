@@ -1,9 +1,9 @@
 'use client';
 
-import { ArrowLeft, BookOpen, Check, ChevronLeft, ChevronRight, Edit3, Plus, Save, Search, Trash2, X } from 'lucide-react';
+import { ArrowLeft, BookOpen, Check, Edit3, Loader2, Plus, Save, Search, Trash2, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BookCard } from '../../components/book/book-card';
+import { BookshelfCollection } from '../../components/book/bookshelf';
 import { Cover } from '../../components/book/cover';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
@@ -11,16 +11,11 @@ import { cn } from '../../components/ui/cn';
 import { useConfirm, useToast } from '../../components/ui/feedback';
 import { PageTitle } from '../../components/ui/page-title';
 import type { WorkView } from '../../types/work';
-import {
-  SHELF_DETAIL_PAGE_SIZE,
-  clampShelfPage,
-  shelfPageCount,
-  shelfPageItems,
-  shelfPaginationCandidates
-} from './shelf-pagination';
 import { summarizeSmartShelfRules, type SmartShelfRules } from './smart-shelf-rules';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
+
+type ShelfBookView = Pick<WorkView, 'id' | 'title' | 'author' | 'format' | 'gradient' | 'coverUrl' | 'coverStatus'>;
 
 type ShelfView = {
   id: string;
@@ -28,7 +23,11 @@ type ShelfView = {
   description: string | null;
   bookCount: number;
   bookIds?: string[];
-  books?: WorkView[];
+  books?: ShelfBookView[];
+  page?: number;
+  pageSize?: number;
+  total?: number;
+  totalPages?: number;
   createdAt: string;
   updatedAt: string;
   kind?: 'STATIC' | 'SMART';
@@ -76,11 +75,12 @@ export function ShelvesPage() {
   const [searchBooks, setSearchBooks] = useState<WorkView[]>([]);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
-  const [shelfPage, setShelfPage] = useState(1);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const openRequestRef = useRef(0);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
   const confirm = useConfirm();
   const toast = useToast();
 
@@ -108,7 +108,6 @@ export function ShelvesPage() {
       setSelectedBookIds([]);
       setSearch('');
       setSearchBooks([]);
-      setShelfPage(1);
       setForm(emptyForm);
       setError('');
     }
@@ -139,16 +138,26 @@ export function ShelvesPage() {
     };
   }, [activeId, activeIsSmart, editing, search]);
 
+  useEffect(() => {
+    const sentinel = loadMoreRef.current;
+    const currentPage = activeShelf?.page ?? 1;
+    const totalPages = activeShelf?.totalPages ?? 1;
+    if (!sentinel || detailLoading || loadingMore || !activeShelf || currentPage >= totalPages) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      void openShelf(activeShelf.id, currentPage + 1, true);
+    }, { rootMargin: '700px 0px' });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [activeShelf, detailLoading, loadingMore]);
+
   const previewBooksById = useMemo(() => {
-    const books = new Map<string, WorkView>();
+    const books = new Map<string, ShelfBookView>();
     [...(activeShelf?.books ?? []), ...searchBooks].forEach((book) => books.set(book.id, book));
     return books;
   }, [activeShelf, searchBooks]);
-  const selectedBooks = selectedBookIds.map((id) => previewBooksById.get(id)).filter(Boolean) as WorkView[];
+  const selectedBooks = selectedBookIds.map((id) => previewBooksById.get(id)).filter(Boolean) as ShelfBookView[];
   const shelfBooks = activeShelf?.books ?? [];
-  const shelfTotalPages = shelfPageCount(shelfBooks.length);
-  const visibleShelfPage = clampShelfPage(shelfPage, shelfBooks.length);
-  const visibleShelfBooks = shelfPageItems(shelfBooks, visibleShelfPage);
   const initialBookIds = activeShelf?.bookIds ?? (activeShelf?.books ?? []).map((book) => book.id);
   const hasUnsavedChanges = activeIsNew
     ? Boolean(form.name.trim() || form.description.trim() || selectedBookIds.length)
@@ -171,26 +180,45 @@ export function ShelvesPage() {
     }
   }
 
-  async function openShelf(id: string) {
+  async function openShelf(id: string, page = 1, append = false) {
     const requestId = openRequestRef.current + 1;
     openRequestRef.current = requestId;
     setActiveId(id);
-    setDetailLoading(true);
+    if (append) setLoadingMore(true);
+    else setDetailLoading(true);
     setError('');
     try {
-      const payload = await readPayload<ShelfPayload>(await fetch(`/api/shelves/${id}`), '读取书架详情失败');
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: '24',
+        includeBookIds: page === 1 ? 'true' : 'false'
+      });
+      const payload = await readPayload<ShelfPayload>(await fetch(`/api/shelves/${id}?${params}`), '读取书架详情失败');
       if (requestId !== openRequestRef.current || !payload.data) return;
       const shelf = payload.data.shelf;
-      setActiveShelf(shelf);
-      setForm({ name: shelf.name, description: shelf.description ?? '' });
-      setSelectedBookIds(shelf.bookIds ?? (shelf.books ?? []).map((book) => book.id));
-      setSearch('');
-      setSearchBooks([]);
-      setShelfPage(1);
+      setActiveShelf((current) => {
+        if (!append || !current || current.id !== shelf.id) return shelf;
+        const books = new Map((current.books ?? []).map((book) => [book.id, book]));
+        (shelf.books ?? []).forEach((book) => books.set(book.id, book));
+        return {
+          ...shelf,
+          bookIds: shelf.bookIds ?? current.bookIds,
+          books: Array.from(books.values())
+        };
+      });
+      if (!append) {
+        setForm({ name: shelf.name, description: shelf.description ?? '' });
+        setSelectedBookIds(shelf.bookIds ?? (shelf.books ?? []).map((book) => book.id));
+        setSearch('');
+        setSearchBooks([]);
+      }
     } catch (reason) {
       if (requestId === openRequestRef.current) setError(reason instanceof Error ? reason.message : '读取书架详情失败');
     } finally {
-      if (requestId === openRequestRef.current) setDetailLoading(false);
+      if (requestId === openRequestRef.current) {
+        setDetailLoading(false);
+        setLoadingMore(false);
+      }
     }
   }
 
@@ -201,7 +229,6 @@ export function ShelvesPage() {
     setSelectedBookIds([]);
     setSearch('');
     setSearchBooks([]);
-    setShelfPage(1);
     setError('');
   }
 
@@ -366,16 +393,24 @@ export function ShelvesPage() {
                   <span className="text-xs text-[#8A837D]"><I18nText>移除只影响本书架，不会删除图书</I18nText></span>
                 </div>
                 {selectedBooks.length > 0 ? (
-                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
-                    {selectedBooks.map((book) => (
-                      <div key={book.id} className="group rounded-[16px] bg-[#F7F4F1] p-2.5">
-                        <Cover book={book} className="aspect-[2/3] w-full" size="small" />
-                        <div data-i18n-skip className="mt-2 line-clamp-1 text-sm font-medium text-[#2A2825]">{book.title}</div>
-                        <button type="button" onClick={() => toggleBook(book.id, false)} className="mt-2 inline-flex h-8 w-full items-center justify-center gap-1 rounded-lg bg-white text-xs font-medium text-red-600 outline-none transition hover:bg-red-50 focus-visible:ring-2 focus-visible:ring-red-200">
-                          <X size={13} /> <I18nText>从书架移除</I18nText></button>
-                      </div>
-                    ))}
-                  </div>
+                  <>
+                    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
+                      {selectedBooks.map((book) => (
+                        <div key={book.id} className="group rounded-[16px] bg-[#F7F4F1] p-2.5">
+                          <Cover book={book} className="aspect-[2/3] w-full" size="small" />
+                          <div data-i18n-skip className="mt-2 line-clamp-1 text-sm font-medium text-[#2A2825]">{book.title}</div>
+                          <button type="button" onClick={() => toggleBook(book.id, false)} className="mt-2 inline-flex h-8 w-full items-center justify-center gap-1 rounded-lg bg-white text-xs font-medium text-red-600 outline-none transition hover:bg-red-50 focus-visible:ring-2 focus-visible:ring-red-200">
+                            <X size={13} /> <I18nText>从书架移除</I18nText></button>
+                        </div>
+                      ))}
+                    </div>
+                    <ShelfLoadStatus
+                      sentinelRef={loadMoreRef}
+                      loading={loadingMore}
+                      loaded={activeShelf?.books?.length ?? 0}
+                      total={activeShelf?.total ?? activeShelf?.bookCount ?? 0}
+                    />
+                  </>
                 ) : (
                   <div className="rounded-2xl border border-dashed border-[#DCD5CE] bg-[#FAF8F6] p-8 text-center">
                     <BookOpen size={22} className="mx-auto text-[#B3AAA2]" />
@@ -440,21 +475,17 @@ export function ShelvesPage() {
           </div>
           {shelfBooks.length > 0 ? (
             <>
-              <div
-                data-testid="shelf-book-grid"
-                className="grid grid-cols-2 gap-7 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5"
-              >
-                {visibleShelfBooks.map((book) => <BookCard key={book.id} book={book} onClick={() => router.push(`/works/${book.id}`)} />)}
-              </div>
-              {shelfTotalPages > 1 ? (
-                <ShelfPagination
-                  page={visibleShelfPage}
-                  pageSize={SHELF_DETAIL_PAGE_SIZE}
-                  totalItems={shelfBooks.length}
-                  totalPages={shelfTotalPages}
-                  onPage={setShelfPage}
-                />
-              ) : null}
+              <BookshelfCollection
+                books={shelfBooks}
+                testId="shelf-book-bookshelves"
+                onOpen={(book) => router.push(`/works/${book.id}`)}
+              />
+              <ShelfLoadStatus
+                sentinelRef={loadMoreRef}
+                loading={loadingMore}
+                loaded={shelfBooks.length}
+                total={activeShelf.total ?? activeShelf.bookCount}
+              />
             </>
           ) : (
             <div className="rounded-[24px] border border-dashed border-[#DCD5CE] bg-[#FAF8F6] px-6 py-12 text-center">
@@ -507,52 +538,24 @@ export function ShelvesPage() {
   );
 }
 
-function ShelfPagination({
-  page,
-  pageSize,
-  totalItems,
-  totalPages,
-  onPage
+function ShelfLoadStatus({
+  sentinelRef,
+  loading,
+  loaded,
+  total
 }: {
-  page: number;
-  pageSize: number;
-  totalItems: number;
-  totalPages: number;
-  onPage: (page: number) => void;
+  sentinelRef: { current: HTMLDivElement | null };
+  loading: boolean;
+  loaded: number;
+  total: number;
 }) {
   const { t: i18nAttribute } = useAttributeI18n();
-  const candidates = shelfPaginationCandidates(page, totalPages);
-  const firstItem = (page - 1) * pageSize + 1;
-  const lastItem = Math.min(page * pageSize, totalItems);
 
   return (
-    <div className="mt-10 flex flex-col items-center gap-3 border-t border-[#EEE8E3] pt-6">
-      <div className="text-xs tabular-nums text-[#8A837D]"><I18nText>第 </I18nText>{firstItem}–{lastItem} <I18nText>本，共 </I18nText>{totalItems} <I18nText>本</I18nText></div>
-      <nav className="flex items-center justify-center gap-1.5" aria-label={i18nAttribute("书架图书分页")}>
-        <button type="button" aria-label={i18nAttribute("上一页")} disabled={page <= 1} onClick={() => onPage(Math.max(1, page - 1))} className="flex h-9 w-9 items-center justify-center rounded-lg text-[#736D67] transition hover:bg-black/[0.035] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F7C7B8] disabled:cursor-not-allowed disabled:opacity-30">
-          <ChevronLeft size={18} />
-        </button>
-        {candidates.map((item, index) => {
-          const previous = candidates[index - 1];
-          return (
-            <span key={item} className="contents">
-              {previous && item - previous > 1 ? <span className="px-1 text-sm text-[#9A948E]" aria-hidden="true">…</span> : null}
-              <button
-                type="button"
-                aria-label={i18nAttribute("第 {value0} 页", { value0: item })}
-                aria-current={item === page ? 'page' : undefined}
-                onClick={() => onPage(item)}
-                className={cn('flex h-9 min-w-9 items-center justify-center rounded-lg px-2 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F7C7B8]', item === page ? 'bg-[#F9DED4] font-medium text-[#D94724]' : 'text-[#625D58] hover:bg-black/[0.035]')}
-              >
-                {item}
-              </button>
-            </span>
-          );
-        })}
-        <button type="button" aria-label={i18nAttribute("下一页")} disabled={page >= totalPages} onClick={() => onPage(Math.min(totalPages, page + 1))} className="flex h-9 w-9 items-center justify-center rounded-lg text-[#736D67] transition hover:bg-black/[0.035] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F7C7B8] disabled:cursor-not-allowed disabled:opacity-30">
-          <ChevronRight size={18} />
-        </button>
-      </nav>
+    <div ref={sentinelRef} className="flex min-h-20 items-center justify-center py-5 text-xs tabular-nums text-[#8A847E]" role="status" aria-live="polite">
+      {loading
+        ? <><Loader2 size={15} className="mr-2 animate-spin" /><I18nText>正在加载更多图书...</I18nText></>
+        : i18nAttribute("已加载 {value0} / {value1} 本", { value0: loaded, value1: total })}
     </div>
   );
 }

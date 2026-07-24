@@ -681,32 +681,62 @@ def test_core_compat_endpoints_return_envelopes(client, db_session, test_setting
         assert "data" in payload, endpoint
 
 
-def test_shelf_create_list_update_and_detail_share_complete_contract(client, db_session):
+def test_shelf_list_is_summary_and_detail_is_lightweight_paginated(client, db_session):
     db_session.execute(text("CREATE TABLE Shelf (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)"))
     db_session.execute(text("CREATE TABLE ShelfWork (shelfId TEXT NOT NULL, workId TEXT NOT NULL, createdAt TEXT NOT NULL, PRIMARY KEY (shelfId, workId))"))
     db_session.execute(text("CREATE TABLE LibraryWork (id TEXT PRIMARY KEY, title TEXT NOT NULL, author TEXT, hidden BOOLEAN, createdAt TEXT, updatedAt TEXT)"))
-    db_session.execute(text("INSERT INTO LibraryWork (id, title, author, hidden, createdAt, updatedAt) VALUES ('work-1', '星海列车', '林川', 0, 'now', 'now')"))
+    for index in range(25):
+        db_session.execute(
+            text(
+                "INSERT INTO LibraryWork (id, title, author, hidden, createdAt, updatedAt) "
+                "VALUES (:id, :title, '林川', 0, 'now', 'now')"
+            ),
+            {"id": f"work-{index + 1:02d}", "title": f"星海列车 {index + 1:02d}"},
+        )
     db_session.commit()
     _login(client, db_session)
 
-    created = client.post("/api/shelves", json={"name": "漫画", "description": "收藏漫画", "bookIds": ["work-1", "work-1"]})
+    book_ids = [f"work-{index + 1:02d}" for index in range(25)]
+    created = client.post("/api/shelves", json={"name": "漫画", "description": "收藏漫画", "bookIds": book_ids})
     assert created.status_code == 201
     shelf = created.json()["data"]["shelf"]
     assert shelf["name"] == "漫画"
-    assert shelf["bookIds"] == ["work-1"]
-    assert shelf["bookCount"] == 1
-    assert shelf["books"][0]["title"] == "星海列车"
+    assert shelf["bookIds"] == book_ids
+    assert shelf["bookCount"] == 25
+    assert len(shelf["books"]) == 24
+    assert set(shelf["books"][0]) == {"id", "title", "author", "format", "gradient", "coverStatus", "coverUrl"}
+
+    statements: list[str] = []
+    engine = db_session.get_bind()
+
+    def capture_statement(_connection, _cursor, statement, _parameters, _context, _executemany):
+        statements.append(" ".join(statement.split()))
+
+    event.listen(engine, "before_cursor_execute", capture_statement)
+    try:
+        listed = client.get("/api/shelves").json()["data"]["shelves"]
+        detailed = client.get(
+            f"/api/shelves/{shelf['id']}?page=2&pageSize=10&includeBookIds=false"
+        ).json()["data"]["shelf"]
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_statement)
+
+    assert listed[0]["id"] == shelf["id"]
+    assert listed[0]["bookCount"] == 25
+    assert len(listed[0]["books"]) == 3
+    assert "bookIds" not in listed[0]
+    assert detailed["bookCount"] == 25
+    assert detailed["page"] == 2
+    assert detailed["pageSize"] == 10
+    assert detailed["totalPages"] == 3
+    assert [book["id"] for book in detailed["books"]] == book_ids[10:20]
+    assert "bookIds" not in detailed
+    assert len(statements) < 60
 
     updated = client.patch(f"/api/shelves/{shelf['id']}", json={"bookIds": []})
     assert updated.status_code == 200
     assert updated.json()["data"]["shelf"]["name"] == "漫画"
     assert updated.json()["data"]["shelf"]["books"] == []
-
-    listed = client.get("/api/shelves").json()["data"]["shelves"]
-    detailed = client.get(f"/api/shelves/{shelf['id']}").json()["data"]["shelf"]
-    assert listed[0]["id"] == shelf["id"]
-    assert listed[0]["books"] == []
-    assert detailed["bookCount"] == 0
 
     deleted = client.delete(f"/api/shelves/{shelf['id']}")
     assert deleted.status_code == 200
@@ -2134,8 +2164,117 @@ def test_cover_endpoints_persist_and_serve_default_for_existing_entries(client, 
     assert db_session.execute(text("SELECT coverPath FROM LibraryVolume WHERE id = 'volume-default'")).scalar() == default_path
     assert (test_settings.resolved_storage_root / default_path).is_file()
 
+    for url in (
+        "/api/works/work-default/cover?size=small",
+        "/api/editions/edition-default/cover?size=small",
+        "/api/volumes/volume-default/cover?size=small",
+    ):
+        response = client.get(url)
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/webp"
+        assert int(response.headers["content-length"]) == len(response.content) <= 50 * 1024
+        with Image.open(BytesIO(response.content)) as image:
+            assert image.format == "WEBP"
+
     missing = client.get("/api/works/not-found/cover")
     assert missing.status_code == 404
+
+
+def test_small_cover_endpoints_compress_cache_and_preserve_other_variants(client, db_session, test_settings):
+    create_worker_tables(db_session)
+    _login(client, db_session)
+    db_session.execute(
+        text(
+            """INSERT INTO LibraryWork (
+                id, origin, title, normalizedTitle, author, normalizedAuthor, workType, status,
+                publicationStatus, trackingStatus, tags, metadataQuality, organizeStatus, coverStatus,
+                hidden, organized, primaryEditionId, mergeKey, createdAt, updatedAt
+            ) VALUES (
+                'work-small-cover', 'MANUAL', 'Small Cover', 'smallcover', 'Author', 'author', 'EPUB', 'UNREAD',
+                'UNKNOWN', 'NOT_TRACKING', '[]', 0, 'REVIEWING', 'READY',
+                0, 0, 'edition-small-cover', 'small:cover', 'now', 'now'
+            )"""
+        )
+    )
+    db_session.execute(
+        text(
+            """INSERT INTO LibraryEdition (
+                id, workId, origin, format, versionName, versionKey, importStatus, coverStatus,
+                "primary", hidden, createdAt, updatedAt
+            ) VALUES (
+                'edition-small-cover', 'work-small-cover', 'MANUAL', 'EPUB', 'EPUB', 'small-cover-edition',
+                'COMPLETED', 'READY', 1, 0, 'now', 'now'
+            )"""
+        )
+    )
+    db_session.execute(
+        text(
+            """INSERT INTO LibraryVolume (
+                id, editionId, title, sortOrder, createdAt, updatedAt
+            ) VALUES ('volume-small-cover', 'edition-small-cover', '正文', 0, 'now', 'now')"""
+        )
+    )
+    source = test_settings.resolved_storage_root / "covers" / "small-cover-source.png"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    Image.effect_noise((1200, 1800), 100).convert("RGB").save(source, format="PNG")
+    relative = str(source.relative_to(test_settings.resolved_storage_root))
+    db_session.execute(
+        text("UPDATE LibraryWork SET coverPath = :path WHERE id = 'work-small-cover'"),
+        {"path": relative},
+    )
+    db_session.execute(
+        text("UPDATE LibraryEdition SET coverPath = :path WHERE id = 'edition-small-cover'"),
+        {"path": relative},
+    )
+    db_session.execute(
+        text("UPDATE LibraryVolume SET coverPath = :path WHERE id = 'volume-small-cover'"),
+        {"path": relative},
+    )
+    db_session.commit()
+
+    endpoints = (
+        "/api/works/work-small-cover/cover",
+        "/api/editions/edition-small-cover/cover",
+        "/api/volumes/volume-small-cover/cover",
+    )
+    etag = None
+    for endpoint in endpoints:
+        response = client.get(f"{endpoint}?size=small")
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/webp"
+        assert int(response.headers["content-length"]) == len(response.content) <= 50 * 1024
+        with Image.open(BytesIO(response.content)) as image:
+            assert image.format == "WEBP"
+            assert image.width * 3 == image.height * 2
+            assert max(image.size) <= compat.SMALL_COVER_MAX_DIMENSION
+        etag = etag or response.headers["etag"]
+
+    cache_files = list((test_settings.resolved_storage_root / "cache" / "covers").rglob("*.webp"))
+    assert len(cache_files) == 1
+    repeated = client.get(f"{endpoints[0]}?size=small")
+    assert repeated.headers["etag"] == etag
+    assert len(list((test_settings.resolved_storage_root / "cache" / "covers").rglob("*.webp"))) == 1
+
+    for size in (None, "medium", "large", "unexpected"):
+        suffix = "" if size is None else f"?size={size}"
+        response = client.get(f"{endpoints[0]}{suffix}")
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/png"
+        assert response.content == source.read_bytes()
+
+    Image.new("RGB", (20, 30), "#ef4d2f").save(source, format="PNG")
+    updated = client.get(f"{endpoints[0]}?size=small")
+    assert updated.headers["etag"] != etag
+    with Image.open(BytesIO(updated.content)) as image:
+        assert image.size == (20, 30)
+
+    source.write_bytes(b"not an image")
+    fallback = client.get(f"{endpoints[0]}?size=small")
+    assert fallback.status_code == 200
+    assert fallback.headers["content-type"] == "image/webp"
+    assert len(fallback.content) <= 50 * 1024
+    with Image.open(BytesIO(fallback.content)) as image:
+        assert image.format == "WEBP"
 
 
 def test_move_content_applies_volume_media_and_backup_rules(client, db_session):

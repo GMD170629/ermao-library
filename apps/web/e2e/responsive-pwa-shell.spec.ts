@@ -134,8 +134,80 @@ test('desktop library navigation keeps only All and Reading', async ({ page }) =
   await expect(accountLink.getByText('账户与设置', { exact: true })).toBeVisible();
 });
 
-test('wide shelf details keep five-column density and paginate large shelves', async ({ page }) => {
-  const books = Array.from({ length: 23 }, (_, index) => ({
+test('dashboard recent shelves share a ten-book horizontal rail without visible scrollbars or progress bars', async ({ page }) => {
+  const requestedQueries: string[] = [];
+  const recentReading = Array.from({ length: 12 }, (_, index) => ({
+    id: `recent-reading-${index + 1}`,
+    title: `最近阅读 ${index + 1}`,
+    author: '测试作者',
+    type: 'ebook',
+    format: 'EPUB',
+    formatValue: 'EPUB',
+    status: '在读',
+    statusValue: 'READING',
+    progress: 40 + index,
+    lastReadAt: `2026-07-24T${String(12 - index).padStart(2, '0')}:00:00.000Z`,
+    tags: [],
+    coverUrl: '',
+    gradient: 'from-orange-100 to-stone-200'
+  }));
+  const recentAdded = recentReading.map((book, index) => ({
+    ...book,
+    id: `recent-added-${index + 1}`,
+    title: `最近加入 ${index + 1}`,
+    lastReadAt: null,
+    progress: 0
+  }));
+
+  await page.route('**/api/works?**', async (route) => {
+    requestedQueries.push(route.request().url());
+    await route.fulfill({ json: { ok: true, data: { books: recentReading, total: recentReading.length } } });
+  });
+  await page.route('**/api/dashboard/recent-books?**', async (route) => {
+    requestedQueries.push(route.request().url());
+    await route.fulfill({ json: { ok: true, data: { books: recentAdded } } });
+  });
+
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await page.goto('/');
+
+  const readingShelf = page.getByTestId('dashboard-recent-reading-shelf');
+  const addedShelf = page.getByTestId('dashboard-recent-added-shelf');
+  await expect(readingShelf.locator('[data-book-cover="true"]')).toHaveCount(10);
+  await expect(addedShelf.locator('[data-book-cover="true"]')).toHaveCount(10);
+
+  for (const shelf of [readingShelf, addedShelf]) {
+    const scroller = shelf.getByTestId(`${await shelf.getAttribute('data-testid')}-scroller`);
+    await expect(scroller).toHaveCSS('overflow-x', 'auto');
+    await expect(scroller).toHaveCSS('scrollbar-width', 'none');
+    const geometry = await scroller.evaluate((element) => {
+      const ledge = element.querySelector<HTMLElement>('[data-testid="bookshelf-ledge-asset"]');
+      const covers = Array.from(element.querySelectorAll<HTMLElement>('[data-book-cover="true"]'));
+      return {
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+        ledgeWidth: ledge?.getBoundingClientRect().width ?? 0,
+        firstTop: covers[0]?.getBoundingClientRect().top ?? 0,
+        lastTop: covers.at(-1)?.getBoundingClientRect().top ?? 0
+      };
+    });
+    expect(geometry.scrollWidth).toBeGreaterThan(geometry.clientWidth);
+    expect(geometry.ledgeWidth).toBeGreaterThanOrEqual(geometry.scrollWidth - 10);
+    expect(Math.abs(geometry.firstTop - geometry.lastTop)).toBeLessThan(1);
+  }
+
+  await expect(readingShelf.locator('[data-bookshelf-progress]')).toHaveCount(0);
+  expect(requestedQueries.some((url) => new URL(url).searchParams.get('pageSize') === '10')).toBe(true);
+  expect(requestedQueries.some((url) => new URL(url).searchParams.get('limit') === '10')).toBe(true);
+});
+
+test('wide shelf details use responsive bookshelf rows and load more on scroll', async ({ page }) => {
+  const coverRequestUrls: string[] = [];
+  const shelfRequestUrls: string[] = [];
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname.includes('/cover')) coverRequestUrls.push(request.url());
+  });
+  const books = Array.from({ length: 25 }, (_, index) => ({
     id: `shelf-work-${index + 1}`,
     title: `书架读物 ${index + 1}`,
     author: '测试作者',
@@ -157,7 +229,12 @@ test('wide shelf details keep five-column density and paginate large shelves', a
     });
   });
 
-  await page.route('**/api/shelves/wide-shelf', async (route) => {
+  await page.route('**/api/shelves/wide-shelf**', async (route) => {
+    const url = new URL(route.request().url());
+    shelfRequestUrls.push(url.toString());
+    const requestedPage = Number(url.searchParams.get('page') ?? '1');
+    const requestedPageSize = Number(url.searchParams.get('pageSize') ?? '24');
+    const start = (requestedPage - 1) * requestedPageSize;
     await route.fulfill({
       json: {
         ok: true,
@@ -167,8 +244,12 @@ test('wide shelf details keep five-column density and paginate large shelves', a
             name: '宽屏书架',
             description: '验证书架详情布局',
             bookCount: books.length,
-            bookIds: books.map((book) => book.id),
-            books,
+            ...(requestedPage === 1 ? { bookIds: books.map((book) => book.id) } : {}),
+            books: books.slice(start, start + requestedPageSize),
+            page: requestedPage,
+            pageSize: requestedPageSize,
+            total: books.length,
+            totalPages: Math.ceil(books.length / requestedPageSize),
             createdAt: '2026-07-17T08:30:00.000Z',
             updatedAt: '2026-07-17T08:30:00.000Z'
           }
@@ -180,46 +261,84 @@ test('wide shelf details keep five-column density and paginate large shelves', a
   await page.setViewportSize({ width: 2048, height: 1152 });
   await page.goto('/shelves?shelf=wide-shelf');
 
-  const grid = page.getByTestId('shelf-book-grid');
+  const grid = page.getByTestId('shelf-book-bookshelves');
   await expect(grid).toBeVisible();
+  await expect(grid.locator('[data-book-cover="true"]')).toHaveCount(25);
+  await expect.poll(() => coverRequestUrls.some((url) => url.includes('/shelf-work-2/cover?size=small'))).toBe(true);
   const firstCover = grid.locator('[data-book-cover="true"]').first();
+  const firstBook = grid.getByRole('button', { name: '查看《书架读物 1》' });
+  const firstBookVisual = firstBook.locator('[data-bookshelf-book-visual]');
   await expect(firstCover.locator('img')).toHaveCSS('object-fit', 'contain');
+  await expect(grid.getByTestId('bookshelf-ledge')).toHaveCount(3);
+  await expect(grid.getByTestId('bookshelf-ledge').first()).toHaveCSS('height', '30px');
+  await expect(grid.getByTestId('bookshelf-ledge-asset').first()).toHaveCSS('height', '14px');
+  const ledgeFilter = await grid.getByTestId('bookshelf-ledge-asset').first().evaluate((element) => getComputedStyle(element).filter);
+  expect(ledgeFilter.match(/drop-shadow/g)).toHaveLength(1);
+  const shelfContact = await grid.evaluate((element) => {
+    const firstLedge = element.querySelector<HTMLElement>('[data-testid="bookshelf-ledge-asset"]');
+    const firstRowGrid = element.querySelector<HTMLElement>('[data-testid="bookshelf-row"] .grid');
+    const rowCovers = firstRowGrid?.querySelectorAll<HTMLElement>('[data-book-cover="true"]');
+    const firstCover = rowCovers?.[0];
+    const lastCover = rowCovers?.[rowCovers.length - 1];
+    if (!firstCover || !lastCover || !firstLedge || !firstRowGrid) return null;
+    const coverBounds = firstCover.getBoundingClientRect();
+    const lastCoverBounds = lastCover.getBoundingClientRect();
+    const ledgeBounds = firstLedge.getBoundingClientRect();
+    return {
+      overlap: coverBounds.bottom - ledgeBounds.top,
+      leftInset: coverBounds.left - ledgeBounds.left,
+      rightInset: ledgeBounds.right - lastCoverBounds.right
+    };
+  });
+  expect(shelfContact).not.toBeNull();
+  expect(shelfContact?.overlap).toBeGreaterThanOrEqual(2);
+  expect(shelfContact?.overlap).toBeLessThanOrEqual(4);
+  expect(shelfContact?.leftInset).toBeGreaterThanOrEqual(20);
+  expect(shelfContact?.rightInset).toBeGreaterThanOrEqual(20);
+  await expect(firstBook.getByText('书架读物 1', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
+  await firstBook.hover();
+  await expect.poll(async () => firstBookVisual.evaluate((element) => {
+    const transform = getComputedStyle(element).transform;
+    if (transform === 'none') return 1;
+    return Number(transform.split('(')[1]?.split(',')[0] ?? 1);
+  })).toBeGreaterThan(1);
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
   const layout = await grid.evaluate((element) => {
     const bounds = element.parentElement?.parentElement?.getBoundingClientRect();
     const covers = Array.from(element.querySelectorAll<HTMLElement>('[data-book-cover="true"]'));
-    const styles = getComputedStyle(element);
+    const rows = Array.from(element.querySelectorAll<HTMLElement>('[data-testid="bookshelf-row"]'));
+    const firstRowGrid = rows[0]?.querySelector<HTMLElement>('.grid');
+    const firstCoverShadow = getComputedStyle(covers[0]).boxShadow;
     return {
       contentWidth: bounds?.width ?? 0,
       coverWidths: covers.map((cover) => cover.getBoundingClientRect().width),
       coverRatios: covers.map((cover) => cover.getBoundingClientRect().height / cover.getBoundingClientRect().width),
       firstCoverBackground: getComputedStyle(covers[0]).backgroundColor,
-      firstCoverShadow: getComputedStyle(covers[0]).boxShadow,
-      columnCount: styles.gridTemplateColumns.split(' ').filter(Boolean).length,
-      overflowX: styles.overflowX,
+      firstCoverHasVisibleShadow: firstCoverShadow !== 'none'
+        && firstCoverShadow
+          .split(/,\s*(?=rgba)/)
+          .some((shadow) => !shadow.startsWith('rgba(0, 0, 0, 0)')),
+      rowCount: rows.length,
+      columnCount: firstRowGrid ? getComputedStyle(firstRowGrid).gridTemplateColumns.split(' ').filter(Boolean).length : 0,
       firstRowTop: covers[0]?.getBoundingClientRect().top,
-      sixthTop: covers[5]?.getBoundingClientRect().top
+      eleventhTop: covers[10]?.getBoundingClientRect().top
     };
   });
 
   expect(layout.contentWidth).toBeLessThanOrEqual(1280);
-  expect(layout.columnCount).toBe(5);
-  expect(layout.overflowX).toBe('visible');
-  expect(Math.min(...layout.coverWidths)).toBeGreaterThan(220);
-  expect(Math.max(...layout.coverWidths)).toBeLessThanOrEqual(240);
+  expect(layout.columnCount).toBe(10);
+  expect(layout.rowCount).toBe(3);
+  expect(Math.min(...layout.coverWidths)).toBeGreaterThan(90);
+  expect(Math.max(...layout.coverWidths)).toBeLessThanOrEqual(130);
   expect(layout.coverRatios.every((ratio) => Math.abs(ratio - 1.5) < 0.01)).toBe(true);
   expect(layout.firstCoverBackground).toBe('rgba(0, 0, 0, 0)');
-  expect(layout.firstCoverShadow).toBe('none');
-  expect(layout.sixthTop).toBeGreaterThan(layout.firstRowTop ?? 0);
-  await expect(grid.locator('[data-book-cover="true"]')).toHaveCount(20);
-  await expect(page.getByText('第 1–20 本，共 23 本')).toBeVisible();
-
-  await page.getByRole('button', { name: '下一页' }).click();
-
-  await expect(page.getByText('书架读物 21', { exact: true })).toBeVisible();
-  await expect(page.getByText('书架读物 1', { exact: true })).toHaveCount(0);
-  await expect(grid.locator('[data-book-cover="true"]')).toHaveCount(3);
-  await expect(page.getByText('第 21–23 本，共 23 本')).toBeVisible();
-  await expect(page.getByRole('button', { name: '下一页' })).toBeDisabled();
+  expect(layout.firstCoverHasVisibleShadow).toBe(true);
+  expect(layout.eleventhTop).toBeGreaterThan(layout.firstRowTop ?? 0);
+  await expect(grid.getByRole('button', { name: '查看《书架读物 25》' })).toBeVisible();
+  await expect(page.getByText('已加载 25 / 25 本')).toBeVisible();
+  expect(shelfRequestUrls.some((url) => new URL(url).searchParams.get('page') === '2')).toBe(true);
+  await expect(page.getByRole('button', { name: '下一页' })).toHaveCount(0);
 });
 
 test('legacy mobile URLs redirect authenticated users to the shared web home', async ({ page }) => {
@@ -258,7 +377,7 @@ test('mobile page actions keep labels horizontal and move below long headings', 
   expect(layout?.whiteSpace).toBe('nowrap');
 });
 
-test('mobile data-heavy views use cards instead of compressed desktop tables', async ({ page }) => {
+test('mobile data-heavy views use cards instead of compressed desktop tables', async ({ context, page }) => {
   const mobileBook = {
     id: 'mobile-work',
     workId: 'mobile-work',
@@ -289,7 +408,20 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
   await page.route('**/api/works?**', async (route) => {
     await route.fulfill({ json: { ok: true, data: { books: [mobileBook], total: 1, page: 1, pageSize: 24, totalPages: 1 } } });
   });
-  await page.route('**/api/organize/jobs?**', async (route) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  await page.goto('/library');
+  await page.getByRole('button', { name: '管理图书', exact: true }).click();
+  await expect(page.getByTestId('book-list-mobile-card')).toBeVisible();
+  await expect(page.getByTestId('book-list-desktop-table')).toBeHidden();
+  await expect(page.getByRole('button', { name: `查看《${mobileBook.title}》`, exact: true })).toHaveCSS('width', '44px');
+  await expect(page.getByRole('button', { name: `删除《${mobileBook.title}》`, exact: true })).toHaveCSS('width', '44px');
+  await expect(page.getByRole('button', { name: '更多筛选', exact: true })).toHaveCSS('width', '44px');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+
+  const organizePage = await context.newPage();
+  await mockWebAppApi(organizePage);
+  await organizePage.route('**/api/organize/jobs?**', async (route) => {
     await route.fulfill({
       json: {
         ok: true,
@@ -310,7 +442,15 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
       }
     });
   });
-  await page.route('**/api/management/events?**', async (route) => {
+  await organizePage.setViewportSize({ width: 390, height: 844 });
+  await organizePage.goto('/organize');
+  await expect(organizePage.getByTestId('organize-job-mobile-card')).toBeVisible();
+  await expect(organizePage.getByTestId('organize-job-desktop-table')).toBeHidden();
+  await organizePage.close();
+
+  const logsPage = await context.newPage();
+  await mockWebAppApi(logsPage);
+  await logsPage.route('**/api/management/events?**', async (route) => {
     await route.fulfill({
       json: {
         ok: true,
@@ -324,25 +464,64 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
       }
     });
   });
+  await logsPage.setViewportSize({ width: 390, height: 844 });
+  await logsPage.goto('/management/logs');
+  await expect(logsPage.getByTestId('system-event-mobile-card')).toBeVisible();
+  await expect(logsPage.getByTestId('system-event-desktop-table')).toBeHidden();
+  await logsPage.close();
+});
 
-  await page.setViewportSize({ width: 390, height: 844 });
+test('all-books shelves load the next batch while scrolling down', async ({ page }) => {
+  const requestedPages: string[] = [];
+  const coverRequestUrls: string[] = [];
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname.includes('/cover')) coverRequestUrls.push(request.url());
+  });
+  const books = Array.from({ length: 75 }, (_, index) => ({
+    id: `continuous-work-${index + 1}`,
+    title: `连续书架读物 ${index + 1}`,
+    author: '测试作者',
+    type: 'ebook',
+    format: 'EPUB',
+    formatValue: 'EPUB',
+    status: '未读',
+    statusValue: 'UNREAD',
+    progress: 0,
+    tags: [],
+    coverUrl: '',
+    gradient: 'from-orange-100 to-stone-200'
+  }));
 
+  await page.route('**/api/works?**', async (route) => {
+    const url = new URL(route.request().url());
+    const requestedPage = Number(url.searchParams.get('page') ?? '1');
+    const requestedPageSize = Number(url.searchParams.get('pageSize') ?? '50');
+    requestedPages.push(String(requestedPage));
+    const start = (requestedPage - 1) * requestedPageSize;
+    await route.fulfill({
+      json: {
+        ok: true,
+        data: {
+          books: books.slice(start, start + requestedPageSize),
+          total: books.length,
+          page: requestedPage,
+          pageSize: requestedPageSize,
+          totalPages: Math.ceil(books.length / requestedPageSize)
+        }
+      }
+    });
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/library');
-  await page.getByRole('button', { name: '列表', exact: true }).click();
-  await expect(page.getByTestId('book-list-mobile-card')).toBeVisible();
-  await expect(page.getByTestId('book-list-desktop-table')).toBeHidden();
-  await expect(page.getByRole('button', { name: `查看《${mobileBook.title}》`, exact: true })).toHaveCSS('width', '44px');
-  await expect(page.getByRole('button', { name: `删除《${mobileBook.title}》`, exact: true })).toHaveCSS('width', '44px');
-  await expect(page.getByRole('button', { name: '更多筛选', exact: true })).toHaveCSS('width', '44px');
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 
-  await page.goto('/organize');
-  await expect(page.getByTestId('organize-job-mobile-card')).toBeVisible();
-  await expect(page.getByTestId('organize-job-desktop-table')).toBeHidden();
-
-  await page.goto('/management/logs');
-  await expect(page.getByTestId('system-event-mobile-card')).toBeVisible();
-  await expect(page.getByTestId('system-event-desktop-table')).toBeHidden();
+  const shelves = page.getByTestId('library-book-bookshelves');
+  await expect(shelves.locator('[data-book-cover="true"]')).toHaveCount(50);
+  await expect.poll(() => coverRequestUrls.some((url) => url.includes('/continuous-work-1/cover?size=small'))).toBe(true);
+  await shelves.locator('[data-book-cover="true"]').last().scrollIntoViewIfNeeded();
+  await expect.poll(() => requestedPages.includes('2')).toBe(true);
+  await expect(shelves.locator('[data-book-cover="true"]')).toHaveCount(75);
+  await expect(page.getByText('已加载 75 / 75 本')).toBeVisible();
 });
 
 test('desktop book list opens details from both the cover and title', async ({ page }) => {
@@ -379,6 +558,8 @@ test('desktop book list opens details from both the cover and title', async ({ p
 
   await page.goto('/library');
   await expect(page.getByRole('button', { name: '保存筛选' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '更多筛选' })).toHaveCount(0);
+  await page.getByRole('button', { name: '管理图书', exact: true }).click();
   await page.getByRole('button', { name: '更多筛选' }).click();
   await expect(page.getByRole('button', { name: '保存筛选' })).toBeVisible();
   await expect(page.getByRole('button', { name: '网格排序方式' })).toHaveCount(0);
@@ -386,7 +567,6 @@ test('desktop book list opens details from both the cover and title', async ({ p
   await page.getByRole('button', { name: '每页数量' }).click();
   await page.getByRole('option', { name: '100 本/页' }).click();
   await expect.poll(() => requestedPageSizes.at(-1)).toBe('100');
-  await page.getByRole('button', { name: '列表', exact: true }).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await expect(page.getByRole('button', { name: '进度排序' })).toHaveCount(0);
   await expect(page.getByRole('columnheader', { name: '标题排序' })).toBeVisible();
