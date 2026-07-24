@@ -2945,9 +2945,13 @@ def test_scan_selected_directory_reuses_monitor_rules_and_known_import_paths(cli
     fresh = selected / "fresh.epub"
     known = selected / "known.epub"
     hidden = selected / ".hidden.epub"
+    globally_ignored = selected / "ignore-me.epub"
+    disabled_format = selected / "disabled.pdf"
     fresh.write_bytes(b"fresh")
     known.write_bytes(b"known")
     hidden.write_bytes(b"hidden")
+    globally_ignored.write_bytes(b"ignored")
+    disabled_format.write_bytes(b"disabled")
 
     created = client.post(
         "/api/monitor-folders",
@@ -2961,6 +2965,14 @@ def test_scan_selected_directory_reuses_monitor_rules_and_known_import_paths(cli
     )
     assert created.status_code == 201
     folder_id = created.json()["data"]["folder"]["id"]
+    db_session.execute(
+        text(
+            "INSERT INTO SystemSetting (`key`, `value`, `createdAt`, `updatedAt`) VALUES "
+            "('import.allowedExtensions', :extensions, 'now', 'now'), "
+            "('import.ignorePatterns', :patterns, 'now', 'now')"
+        ),
+        {"extensions": json.dumps([".epub"]), "patterns": "ignore-me.epub"},
+    )
     db_session.execute(
         text(
             """INSERT INTO ImportTask (
@@ -2979,7 +2991,7 @@ def test_scan_selected_directory_reuses_monitor_rules_and_known_import_paths(cli
     assert scanned.status_code == 200
     data = scanned.json()["data"]
     assert data["queued"] == 1
-    assert data["skipped"] == 2
+    assert data["skipped"] == 4
     queued = db_session.execute(text("SELECT * FROM ImportTask WHERE sourcePath = :path"), {"path": str(fresh.resolve())}).mappings().one()
     assert queued["status"] == "PENDING"
     assert queued["monitorFolderId"] == folder_id
@@ -2990,6 +3002,73 @@ def test_scan_selected_directory_reuses_monitor_rules_and_known_import_paths(cli
     outside.mkdir()
     rejected = client.post("/api/import-tasks/scan-directory", json={"path": str(outside)})
     assert rejected.status_code == 400
+
+
+def test_scan_selected_audiobook_directory_queues_one_directory_bundle(client, db_session, test_settings):
+    create_worker_tables(db_session)
+    _login(client, db_session)
+    scan_root = test_settings.resolved_monitor_root / "有声书"
+    selected = scan_root / "鬼吹灯I-2-龙岭迷窟 (全42集)"
+    selected.mkdir(parents=True)
+    tracks = [
+        selected / "28. 龙岭迷窟 28.mp3",
+        selected / "40. 龙岭迷窟 40.mp3",
+        selected / "41. 龙岭迷窟 41.mp3",
+    ]
+    for index, track in enumerate(tracks, start=1):
+        track.write_bytes(f"track-{index}".encode())
+
+    created = client.post(
+        "/api/monitor-folders",
+        json={
+            "name": "Audiobooks",
+            "rootPath": str(scan_root),
+            "enabled": True,
+            "minFileSizeBytes": 0,
+        },
+    )
+    assert created.status_code == 201
+    folder_id = created.json()["data"]["folder"]["id"]
+    for index, track in enumerate(tracks, start=1):
+        db_session.execute(
+            text(
+                """INSERT INTO ImportTask (
+                    id, monitorFolderId, origin, status, originalName, sourcePath,
+                    progress, duplicate, createdAt, updatedAt
+                ) VALUES (
+                    :id, :folder_id, 'WATCH', 'COMPLETED', :original_name, :source_path,
+                    100, 0, '2026-07-24T00:00:00', '2026-07-24T00:00:00'
+                )"""
+            ),
+            {
+                "id": f"legacy-audio-{index}",
+                "folder_id": folder_id,
+                "original_name": track.name,
+                "source_path": str(track.resolve()),
+            },
+        )
+    db_session.commit()
+
+    scanned = client.post("/api/import-tasks/scan-directory", json={"path": str(selected)})
+
+    assert scanned.status_code == 200
+    data = scanned.json()["data"]
+    assert data["filesScanned"] == len(tracks)
+    assert data["candidatesFound"] == 1
+    assert data["queued"] == 1
+    tasks = db_session.execute(
+        text(
+            "SELECT `sourcePath`, `originalName` FROM `ImportTask` "
+            "WHERE `monitorFolderId` = :folder_id AND `status` = 'PENDING'"
+        ),
+        {"folder_id": folder_id},
+    ).mappings().all()
+    assert [dict(task) for task in tasks] == [
+        {
+            "sourcePath": str(selected.resolve()),
+            "originalName": selected.name,
+        }
+    ]
 
 
 def test_system_settings_hide_active_secrets_and_reject_retired_settings(client, db_session):

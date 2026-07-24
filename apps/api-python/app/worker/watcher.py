@@ -18,6 +18,7 @@ from watchdog.observers import Observer
 from app.core.config import Settings
 from app.services.system_events import record_system_event
 from app.services.import_preferences import (
+    ImportPreferences,
     SUPPORTED_IMPORT_EXTENSIONS,
     load_import_preferences,
     matches_ignore_patterns,
@@ -329,22 +330,24 @@ def enabled_monitor_folders(db: Session) -> list[MonitorFolderConfig]:
         print(f"[import-worker] monitor folders unavailable, retrying later: {exc}", flush=True)
         return []
     preferences = load_import_preferences(db)
-    return [
-            MonitorFolderConfig(
-                id=row["id"],
-                root_path=row["rootPath"],
-                shelf_id=row.get("shelfId"),
-                ignore_hidden=bool(row.get("ignoreHidden", True)),
-                ignore_patterns=row.get("ignorePatterns"),
-                min_file_size_bytes=int(row.get("minFileSizeBytes") or 10240),
-                global_ignore_patterns=preferences.ignore_patterns,
-                allowed_extensions=preferences.allowed_extensions,
-                stability_check_enabled=preferences.stability_check_enabled,
-                stability_check_seconds=preferences.stability_check_seconds,
-                auto_convert_to_epub=preferences.auto_convert_to_epub,
-        )
-        for row in rows
-    ]
+    return [monitor_folder_config(row, preferences=preferences) for row in rows]
+
+
+def monitor_folder_config(row: Any, *, preferences: ImportPreferences | None = None) -> MonitorFolderConfig:
+    preferences = preferences or ImportPreferences()
+    return MonitorFolderConfig(
+        id=str(row["id"]),
+        root_path=str(row["rootPath"]),
+        shelf_id=str(row.get("shelfId")) if row.get("shelfId") else None,
+        ignore_hidden=bool(row.get("ignoreHidden", True)),
+        ignore_patterns=row.get("ignorePatterns"),
+        min_file_size_bytes=int(row.get("minFileSizeBytes") or 10240),
+        global_ignore_patterns=preferences.ignore_patterns,
+        allowed_extensions=preferences.allowed_extensions,
+        stability_check_enabled=preferences.stability_check_enabled,
+        stability_check_seconds=preferences.stability_check_seconds,
+        auto_convert_to_epub=preferences.auto_convert_to_epub,
+    )
 
 
 def should_ignore_path(path: Path, folder: MonitorFolderConfig) -> bool:
@@ -595,10 +598,9 @@ def scan_directory_for_imports(
     *,
     summary: ScanSummary | None = None,
     known_paths: set[Path] | None = None,
-    _scan_root: Path | None = None,
 ) -> ScanSummary:
     summary = summary or ScanSummary()
-    scan_root = (_scan_root or root_path).resolve()
+    monitor_root = Path(folder.root_path).expanduser().resolve()
     summary.directories_scanned += 1
     try:
         bundle_files = collect_audio_bundle_files(root_path)
@@ -607,7 +609,11 @@ def scan_directory_for_imports(
         return summary
     is_bundle = (
         bool(bundle_files)
-        and root_path.resolve() != scan_root
+        # The configured monitor root is the collection boundary. A selected
+        # child directory must retain the same grouping semantics whether it
+        # is reached by a full monitor scan or chosen directly in file
+        # management.
+        and root_path.resolve() != monitor_root
         and _is_proven_audio_bundle_directory(root_path, bundle_files)
     )
     handled_bundle_files: set[Path] = set()
@@ -635,7 +641,7 @@ def scan_directory_for_imports(
                     # CD/Disc child tracks are represented by the parent bundle.
                     continue
                 if not should_ignore_path(entry, folder):
-                    scan_directory_for_imports(entry, folder, import_queue, summary=summary, known_paths=known_paths, _scan_root=scan_root)
+                    scan_directory_for_imports(entry, folder, import_queue, summary=summary, known_paths=known_paths)
                 continue
             if not entry.is_file():
                 continue

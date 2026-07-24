@@ -112,7 +112,7 @@ from app.services.text_conversion import CONVERTIBLE_TEXT_EXTS
 from app.worker.importer import is_supported_import_file, parse_comic_archive, parse_series_volume_info
 from app.services.audio_metadata import collect_audio_bundle_files, is_supported_audio_file
 from app.worker.persistent_import_queue import enqueue_import_task
-from app.worker.watcher import MonitorFolderConfig, load_known_import_paths, scan_directory_for_imports
+from app.worker.watcher import MonitorFolderConfig, load_known_import_paths, monitor_folder_config, scan_directory_for_imports
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -5803,14 +5803,7 @@ async def scan_import_directory(request: Request, db: Session = Depends(get_db),
     _folder_path, folder = max(matching_folders, key=lambda item: len(item[0].parts))
     if not can_access_monitor_folder(db, user, str(folder.get("id"))):
         return fail("目录不可用", status_code=404, code="MONITOR_FOLDER_NOT_FOUND")
-    folder_config = MonitorFolderConfig(
-        id=str(folder.get("id")),
-        root_path=str(folder.get("rootPath")),
-        shelf_id=str(folder.get("shelfId")) if folder.get("shelfId") else None,
-        ignore_hidden=bool(folder.get("ignoreHidden", True)),
-        ignore_patterns=folder.get("ignorePatterns"),
-        min_file_size_bytes=int(folder.get("minFileSizeBytes") or 0),
-    )
+    folder_config = monitor_folder_config(folder, preferences=load_import_preferences(db))
 
     class PersistentQueue:
         def __init__(self) -> None:
@@ -5824,6 +5817,7 @@ async def scan_import_directory(request: Request, db: Session = Depends(get_db),
                 original_name=path.name,
                 monitor_folder_id=selected_folder.id,
                 message="从文件管理手动加入导入队列",
+                allow_terminal_requeue=path.is_dir(),
             )
             if created:
                 self.queued += 1
