@@ -2964,6 +2964,7 @@ def test_scan_selected_directory_reuses_monitor_rules_and_known_import_paths(cli
         },
     )
     assert created.status_code == 201
+    assert created.json()["data"]["folder"]["minFileSizeBytes"] == 0
     folder_id = created.json()["data"]["folder"]["id"]
     db_session.execute(
         text(

@@ -11,6 +11,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from app.services.book_identity import (
+    UNKNOWN_AUTHOR,
+    normalize_identity_part,
+    recognize_book_identity_with_regex,
+)
+
 
 SUPPORTED_AUDIO_EXTS = {".m4b", ".m4a", ".mp3"}
 SUPPORTED_AUDIO_CODECS = {"aac", "mp3"}
@@ -53,6 +59,31 @@ class AudioFileMetadata:
     cover_extension: str | None = None
 
 
+@dataclass(frozen=True)
+class AudioVolumeDirectory:
+    path: Path
+    title: str
+    volume_index: float | None
+    author: str | None
+    files: tuple[Path, ...]
+
+
+@dataclass(frozen=True)
+class AudioBundleStructure:
+    root: Path
+    title: str
+    author: str | None
+    volumes: tuple[AudioVolumeDirectory, ...]
+
+    @property
+    def files(self) -> tuple[Path, ...]:
+        return tuple(path for volume in self.volumes for path in volume.files)
+
+    @property
+    def is_multi_volume(self) -> bool:
+        return len(self.volumes) > 1 or bool(self.volumes and self.volumes[0].path != self.root)
+
+
 def is_supported_audio_file(path: str | Path) -> bool:
     return Path(path).suffix.lower() in SUPPORTED_AUDIO_EXTS
 
@@ -83,22 +114,99 @@ def read_audio_group_identity(path: str | Path) -> tuple[str | None, str | None]
     return album.casefold() if album else None, author.casefold() if author else None
 
 
-def collect_audio_bundle_files(path: str | Path) -> list[Path]:
-    """Collect one audiobook folder, including a single CD/Disc directory level."""
+def _directory_identity(path: Path) -> tuple[str, str | None, float | None]:
+    identity = recognize_book_identity_with_regex(f"{path.name}.epub")
+    author = identity.author if identity.author != UNKNOWN_AUTHOR else None
+    return identity.title.strip() or path.name, author, identity.volume_index
+
+
+def _directory_audio_files(path: Path) -> list[Path]:
+    files = [item.resolve() for item in path.iterdir() if item.is_file() and is_supported_audio_file(item)]
+    for child in path.iterdir():
+        if child.is_dir() and DISC_DIRECTORY_PATTERN.match(child.name.strip()):
+            files.extend(item.resolve() for item in child.iterdir() if item.is_file() and is_supported_audio_file(item))
+    return sorted(dict.fromkeys(files), key=_natural_audio_key)
+
+
+def inspect_audio_bundle(path: str | Path) -> AudioBundleStructure | None:
+    """Resolve a single- or multi-volume audiobook directory.
+
+    Disc/CD directories are physical track groupings. Other child directories
+    become volumes only when the shared identity parser finds a volume number,
+    or when their normalized title contains the parent book title.
+    """
 
     root = Path(path).expanduser().resolve()
     if root.is_file():
-        return [root] if is_supported_audio_file(root) else []
+        if not is_supported_audio_file(root):
+            return None
+        return AudioBundleStructure(
+            root=root,
+            title=root.stem,
+            author=None,
+            volumes=(AudioVolumeDirectory(root, root.stem, None, None, (root,)),),
+        )
     if not root.is_dir():
-        return []
-    files = [item.resolve() for item in root.iterdir() if item.is_file() and is_supported_audio_file(item)]
-    for child in root.iterdir():
-        if child.is_dir() and DISC_DIRECTORY_PATTERN.match(child.name.strip()):
-            files.extend(item.resolve() for item in child.iterdir() if item.is_file() and is_supported_audio_file(item))
-    result = sorted(dict.fromkeys(files), key=_natural_audio_key)
-    if len(result) > MAX_AUDIO_BUNDLE_TRACKS:
+        return None
+
+    root_title, root_author, _root_volume_index = _directory_identity(root)
+    direct_files = _directory_audio_files(root)
+    root_key = normalize_identity_part(root_title)
+    matched_volumes: list[AudioVolumeDirectory] = []
+    for child in sorted((item for item in root.iterdir() if item.is_dir()), key=lambda item: _natural_audio_key(item)):
+        if DISC_DIRECTORY_PATTERN.match(child.name.strip()):
+            continue
+        child_files = _directory_audio_files(child)
+        if not child_files:
+            continue
+        child_title, child_author, volume_index = _directory_identity(child)
+        child_key = normalize_identity_part(child_title)
+        title_contains_parent = bool(root_key and child_key and root_key != child_key and root_key in child_key)
+        if volume_index is None and not title_contains_parent:
+            continue
+        matched_volumes.append(
+            AudioVolumeDirectory(
+                path=child.resolve(),
+                title=child.name,
+                volume_index=volume_index,
+                author=child_author,
+                files=tuple(child_files),
+            )
+        )
+
+    if direct_files and matched_volumes:
+        raise ValueError("有声书书名目录不能同时包含直属音轨和卷目录，请整理为单卷或多卷结构后重试")
+    if matched_volumes:
+        matched_volumes.sort(
+            key=lambda volume: (
+                volume.volume_index is None,
+                volume.volume_index if volume.volume_index is not None else float("inf"),
+                _natural_audio_key(volume.path),
+            )
+        )
+        volumes = tuple(matched_volumes)
+    elif direct_files:
+        volumes = (
+            AudioVolumeDirectory(
+                path=root,
+                title="正文",
+                volume_index=None,
+                author=None,
+                files=tuple(direct_files),
+            ),
+        )
+    else:
+        return None
+
+    result = AudioBundleStructure(root=root, title=root_title, author=root_author, volumes=volumes)
+    if len(result.files) > MAX_AUDIO_BUNDLE_TRACKS:
         raise ValueError(f"有声书分轨超过 {MAX_AUDIO_BUNDLE_TRACKS} 个，请拆分后导入")
     return result
+
+
+def collect_audio_bundle_files(path: str | Path) -> list[Path]:
+    structure = inspect_audio_bundle(path)
+    return list(structure.files) if structure else []
 
 
 def audio_bundle_root(path: str | Path, monitor_root: str | Path | None = None) -> Path:
@@ -107,7 +215,15 @@ def audio_bundle_root(path: str | Path, monitor_root: str | Path | None = None) 
         return source
     parent = source.parent
     if DISC_DIRECTORY_PATTERN.match(parent.name.strip()):
-        return parent.parent
+        parent = parent.parent
+    grandparent = parent.parent
+    if grandparent != parent:
+        try:
+            structure = inspect_audio_bundle(grandparent)
+        except (OSError, ValueError):
+            structure = None
+        if structure and any(volume.path == parent for volume in structure.volumes):
+            return grandparent
     if monitor_root is not None:
         try:
             if parent == Path(monitor_root).expanduser().resolve():

@@ -377,12 +377,17 @@ def test_direct_user_epub_import_bypasses_libmobi_normalizer(
     assert db_session.execute(text("SELECT COUNT(*) FROM BookConversionTask")).scalar_one() == 0
 
 
-def test_persistent_queue_recovers_expired_lease_and_claims_once(db_session, test_settings, tmp_path):
+def test_single_import_worker_recovers_interrupted_task_without_waiting_for_lease(db_session, test_settings, tmp_path):
     create_worker_tables(db_session)
     source = tmp_path / "queued.epub"
     source.write_bytes(b"queued")
     insert_import_task(db_session, "task-stale", source, status="PARSING")
-    db_session.execute(text("UPDATE ImportTask SET leaseOwner = 'old-worker', leaseExpiresAt = '2020-01-01 00:00:00' WHERE id = 'task-stale'"))
+    db_session.execute(
+        text(
+            "UPDATE ImportTask SET leaseOwner = 'old-worker', leaseExpiresAt = 9999999999999 "
+            "WHERE id = 'task-stale'"
+        )
+    )
     db_session.commit()
 
     assert recover_stale_import_tasks(db_session) == 1

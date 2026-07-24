@@ -498,7 +498,22 @@ def _raw_progress_percent(progress: dict[str, Any] | None) -> int:
     return max(0, min(100, round(float(progress.get("percent", 0) if progress else 0))))
 
 
-def _display_progress_percent(edition: dict[str, Any] | None, progress: dict[str, Any] | None, volumes: list[dict[str, Any]]) -> int:
+def _display_progress_percent(
+    edition: dict[str, Any] | None,
+    progress: dict[str, Any] | None,
+    volumes: list[dict[str, Any]],
+    progresses: list[dict[str, Any]] | None = None,
+) -> int:
+    if edition and str(edition.get("format") or "").upper() == "AUDIO" and len(volumes) > 1:
+        progress_rows = progresses or ([progress] if progress else [])
+        weighted_total = 0.0
+        duration_total = 0.0
+        for volume in volumes:
+            duration = max(1.0, float(volume.get("durationMs") or 0))
+            volume_progress = _progress_for_volume(progress_rows, str(volume["id"]))
+            weighted_total += duration * _raw_progress_percent(volume_progress)
+            duration_total += duration
+        return max(0, min(100, round(weighted_total / duration_total))) if duration_total else 0
     return _raw_progress_percent(progress)
 
 
@@ -625,7 +640,7 @@ def _empty_progress_for_volume(edition: dict[str, Any] | None, volume: dict[str,
 
 
 def _continue_progress_for_edition(edition: dict[str, Any] | None, progresses: list[dict[str, Any]], volumes: list[dict[str, Any]]) -> dict[str, Any] | None:
-    if edition and edition.get("format") in {"EPUB", "COMIC"} and len(volumes) > 1:
+    if edition and edition.get("format") in {"EPUB", "COMIC", "AUDIO"} and len(volumes) > 1:
         volume = _choose_continue_volume(volumes, progresses)
         volume_progress = _progress_for_volume(progresses, volume.get("id") if volume else None)
         return volume_progress or _empty_progress_for_volume(edition, volume)
@@ -1081,7 +1096,12 @@ def _work_view(db: Session, work: dict[str, Any], user_id: str | None = None) ->
         else []
     )
     progress_navigation = _progress_navigation(progress, progress_units)
-    percent = _progress_percent_with_navigation(progress, progress_units) if progress_edition and progress_edition.get("format") == "EPUB" else _display_progress_percent(progress_edition, progress, progress_volumes)
+    percent = _progress_percent_with_navigation(progress, progress_units) if progress_edition and progress_edition.get("format") == "EPUB" else _display_progress_percent(
+        progress_edition,
+        progress,
+        progress_volumes,
+        progresses_by_edition.get(str(progress_edition["id"]), []) if progress_edition else [],
+    )
     labels = _labels()
     total_size = sum(int(file.get("sizeBytes") or 0) for files in files_by_edition.values() for file in files)
 
@@ -1167,7 +1187,7 @@ def _work_view(db: Session, work: dict[str, Any], user_id: str | None = None) ->
                 "trackCount": edition.get("trackCount"),
                 "narrator": edition.get("narrator"),
                 "abridged": edition.get("abridged"),
-                "progress": _display_progress_percent(edition, e_progress, raw_edition_volumes),
+                "progress": _display_progress_percent(edition, e_progress, raw_edition_volumes, e_progress_rows),
                 "lastReadAt": _dt(e_progress.get("updatedAt")) if e_progress else None,
                 "coverUrl": _cover_url("editions", edition["id"], edition, size="medium"),
                 "conversion": conversion_by_edition.get(edition["id"]),
@@ -1218,6 +1238,7 @@ def _work_view(db: Session, work: dict[str, Any], user_id: str | None = None) ->
             selected_edition,
             selected_progress,
             volumes_by_edition.get(str(selected_edition["id"]), []),
+            progresses_by_edition.get(str(selected_edition["id"]), []),
         )
         media_groups_by_kind[media_kind] = {
             "kind": media_kind,
@@ -3753,6 +3774,13 @@ async def create_monitor_folder(request: Request, db: Session = Depends(get_db),
             status_code=400,
             code="MONITOR_FOLDER_SHELF_RETIRED",
         )
+    raw_min_file_size = payload.get("minFileSizeBytes")
+    try:
+        min_file_size_bytes = int(10240 if raw_min_file_size is None else raw_min_file_size)
+    except (TypeError, ValueError):
+        return fail("最小文件大小必须是非负整数", status_code=400)
+    if min_file_size_bytes < 0:
+        return fail("最小文件大小必须是非负整数", status_code=400)
     try:
         folder = _insert(
             db,
@@ -3765,7 +3793,7 @@ async def create_monitor_folder(request: Request, db: Session = Depends(get_db),
                 "enabled": bool(payload.get("enabled", True)),
                 "ignorePatterns": payload.get("ignorePatterns"),
                 "ignoreHidden": bool(payload.get("ignoreHidden", True)),
-                "minFileSizeBytes": int(payload.get("minFileSizeBytes") or 10240),
+                "minFileSizeBytes": min_file_size_bytes,
                 "description": payload.get("description"),
                 "createdAt": _now(),
                 "updatedAt": _now(),
@@ -3803,6 +3831,13 @@ async def update_monitor_folder(folder_id: str, request: Request, db: Session = 
         if _monitor_folder_by_root_path(db, root_path, exclude_id=folder_id):
             return fail("监控文件夹路径已存在", status_code=409, details={"rootPath": root_path})
         values["rootPath"] = root_path
+    if "minFileSizeBytes" in values:
+        try:
+            values["minFileSizeBytes"] = int(values["minFileSizeBytes"])
+        except (TypeError, ValueError):
+            return fail("最小文件大小必须是非负整数", status_code=400)
+        if values["minFileSizeBytes"] < 0:
+            return fail("最小文件大小必须是非负整数", status_code=400)
     if values:
         values["updatedAt"] = _now()
     try:
@@ -5118,6 +5153,10 @@ def _organize_job_view(db: Session, job: dict[str, Any], user_id: str | None, pe
 def _friendly_import_error(message: str | None, error_code: str | None = None) -> str | None:
     text_value = message or ""
     code = (error_code or "").upper()
+    if code == "SOURCE_NOT_FOUND":
+        return "文件不存在：可能已被移动、删除，或监控目录配置已变化。"
+    if code == "IMPORT_WORKER_FAILED":
+        return "导入工作进程意外中断，本次任务已经结束，可以稍后重试。"
     if code == "CONVERTER_UNAVAILABLE":
         return "转换服务暂时不可用，请检查 libmobi 是否已安装后重试。"
     if code == "DRM_PROTECTED":

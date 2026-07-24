@@ -335,13 +335,14 @@ def enabled_monitor_folders(db: Session) -> list[MonitorFolderConfig]:
 
 def monitor_folder_config(row: Any, *, preferences: ImportPreferences | None = None) -> MonitorFolderConfig:
     preferences = preferences or ImportPreferences()
+    raw_min_file_size = row.get("minFileSizeBytes")
     return MonitorFolderConfig(
         id=str(row["id"]),
         root_path=str(row["rootPath"]),
         shelf_id=str(row.get("shelfId")) if row.get("shelfId") else None,
         ignore_hidden=bool(row.get("ignoreHidden", True)),
         ignore_patterns=row.get("ignorePatterns"),
-        min_file_size_bytes=int(row.get("minFileSizeBytes") or 10240),
+        min_file_size_bytes=int(10240 if raw_min_file_size is None else raw_min_file_size),
         global_ignore_patterns=preferences.ignore_patterns,
         allowed_extensions=preferences.allowed_extensions,
         stability_check_enabled=preferences.stability_check_enabled,

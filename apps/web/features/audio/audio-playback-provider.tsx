@@ -39,6 +39,7 @@ const PROGRESS_INTERVAL_MS = 15_000;
 
 type PendingAudioEditionLoad = AudioLoadIntent & {
   editionId: string;
+  volumeId: string | null;
   summary: AudioLaunchSummary | null;
   promise: Promise<void>;
 };
@@ -257,7 +258,12 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     if (!normalizedEditionId) return Promise.resolve();
 
     const pendingLoad = pendingLoadRef.current;
-    if (!options.force && pendingLoad?.editionId === normalizedEditionId) {
+    const requestedVolumeId = options.volumeId?.trim() || null;
+    if (
+      !options.force
+      && pendingLoad?.editionId === normalizedEditionId
+      && pendingLoad.volumeId === requestedVolumeId
+    ) {
       const merged = mergeAudioLoadIntent(pendingLoad, {
         autoplay: options.autoplay,
         chapterId: options.chapterId ?? undefined
@@ -271,7 +277,11 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
       return pendingLoad.promise;
     }
 
-    if (!options.force && bootstrapRef.current?.edition.id === normalizedEditionId) {
+    if (
+      !options.force
+      && bootstrapRef.current?.edition.id === normalizedEditionId
+      && (!requestedVolumeId || bootstrapRef.current.volumeId === requestedVolumeId)
+    ) {
       if (pendingLoadRef.current || stateRef.current.pendingEditionId) {
         loadSequenceRef.current += 1;
         loadAbortRef.current?.abort();
@@ -307,6 +317,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     loadAbortRef.current = controller;
     const request: PendingAudioEditionLoad = {
       editionId: normalizedEditionId,
+      volumeId: requestedVolumeId,
       autoplay: Boolean(options.autoplay),
       chapterId: options.chapterId?.trim() || null,
       summary: options.summary ?? null,
@@ -325,7 +336,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
       if (previousBootstrap) await persistProgress(false, true);
       if (controller.signal.aborted || requestId !== loadSequenceRef.current) return;
       try {
-        const bootstrap = await fetchAudioBootstrap(normalizedEditionId, controller.signal);
+        const bootstrap = await fetchAudioBootstrap(normalizedEditionId, request.volumeId, controller.signal);
         if (controller.signal.aborted || requestId !== loadSequenceRef.current) return;
         loadAbortRef.current = null;
         failedLoadRef.current = null;
@@ -369,6 +380,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         trackIndexRef.current = previousTrackIndex;
         failedLoadRef.current = {
           editionId: normalizedEditionId,
+          volumeId: request.volumeId,
           chapterId: request.chapterId,
           summary: request.summary
         };
@@ -552,6 +564,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
       force: true,
       autoplay: true,
       chapterId: failedLoad?.chapterId ?? undefined,
+      volumeId: failedLoad?.volumeId ?? undefined,
       summary: failedLoad?.summary ?? stateRef.current.pendingSummary ?? undefined
     });
   }, [loadEdition]);

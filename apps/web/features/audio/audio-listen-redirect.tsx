@@ -12,15 +12,17 @@ export function AudioListenRedirect({ editionId }: { editionId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const chapterId = searchParams.get('chapter')?.trim() || null;
+  const volumeId = searchParams.get('volume')?.trim() || null;
   const trackParam = searchParams.get('track');
   const appliedTrackRef = useRef('');
 
   useEffect(() => {
     void player.loadEdition(editionId, {
       autoplay: false,
+      volumeId,
       chapterId: chapterId ?? undefined
     });
-  }, [chapterId, editionId, player.loadEdition]);
+  }, [chapterId, editionId, player.loadEdition, volumeId]);
 
   useEffect(() => {
     const bootstrap = player.bootstrap?.edition.id === editionId ? player.bootstrap : null;

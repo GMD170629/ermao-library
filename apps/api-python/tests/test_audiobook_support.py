@@ -387,7 +387,7 @@ def test_audio_sample_collision_uses_full_hash_and_does_not_false_deduplicate(
     assert {row["hashStatus"] for row in hashes} == {"COMPLETED"}
 
 
-def test_audio_bundle_rejects_byte_identical_tracks(db_session, test_settings, monkeypatch) -> None:
+def test_audio_bundle_keeps_byte_identical_tracks_as_distinct_chapters(db_session, test_settings, monkeypatch) -> None:
     _initialize_schema(db_session)
     folder = test_settings.resolved_monitor_root / "duplicate-tracks"
     folder.mkdir(parents=True)
@@ -396,15 +396,33 @@ def test_audio_bundle_rejects_byte_identical_tracks(db_session, test_settings, m
     (folder / "02.mp3").write_bytes(payload)
     monkeypatch.setattr(importer_module, "parse_audio_metadata", _fake_audio_metadata)
 
-    with pytest.raises(ValueError, match="字节完全相同的重复音轨"):
-        import_managed_book(
-            db_session,
-            test_settings,
-            ImportOptions(source_file_path=folder, origin="MANUAL", requested_title="重复音轨", requested_author="测试作者"),
-        )
-    assert db_session.execute(
-        text("SELECT COUNT(*) FROM `LibraryEdition` WHERE `mediaKind` = 'AUDIOBOOK'")
-    ).scalar() == 0
+    result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(source_file_path=folder, origin="MANUAL", requested_title="重复音轨", requested_author="测试作者"),
+    )
+
+    files = db_session.execute(
+        text(
+            "SELECT `id`, `path`, `fingerprint`, `sortOrder` FROM `LibraryFile` "
+            "WHERE `editionId` = :edition_id ORDER BY `sortOrder`"
+        ),
+        {"edition_id": result.edition_id},
+    ).mappings().all()
+    chapters = db_session.execute(
+        text(
+            "SELECT `fileId`, `title`, `sortOrder` FROM `LibraryReadingUnit` "
+            "WHERE `editionId` = :edition_id AND `unitType` = 'audio_chapter' ORDER BY `sortOrder`"
+        ),
+        {"edition_id": result.edition_id},
+    ).mappings().all()
+    assert len(files) == 2
+    assert len({row["id"] for row in files}) == 2
+    assert len({row["path"] for row in files}) == 2
+    assert len({row["fingerprint"] for row in files}) == 1
+    assert [row["sortOrder"] for row in files] == [0, 1]
+    assert [row["fileId"] for row in chapters] == [row["id"] for row in files]
+    assert [row["sortOrder"] for row in chapters] == [1, 2]
 
 
 def test_two_single_file_audio_editions_in_one_folder_have_distinct_version_keys(
@@ -896,7 +914,7 @@ def test_completed_directory_bundle_can_enqueue_again_after_a_new_episode(
     ).scalar() == 2
 
 
-def test_emby_author_book_multidisc_layout_infers_identity_orders_tracks_and_uses_folder_cover(
+def test_nested_author_directory_is_not_used_as_audiobook_author(
     db_session, test_settings, monkeypatch
 ) -> None:
     _initialize_schema(db_session)
@@ -943,7 +961,7 @@ def test_emby_author_book_multidisc_layout_infers_identity_orders_tracks_and_use
         text("SELECT `title`, `author` FROM `LibraryWork` WHERE `id` = :id"),
         {"id": result.work_id},
     ).mappings().one()
-    assert dict(work) == {"title": "The Left Hand of Darkness", "author": "Ursula K. Le Guin"}
+    assert dict(work) == {"title": "The Left Hand of Darkness", "author": "未知作者"}
     imported_tracks = db_session.execute(
         text(
             "SELECT `discNumber`, `trackNumber`, `sortOrder` FROM `LibraryFile` "
@@ -961,6 +979,126 @@ def test_emby_author_book_multidisc_layout_infers_identity_orders_tracks_and_use
     ).scalar_one()
     assert Path(cover_path).suffix == ".png"
     assert Path(cover_path).read_bytes() == cover.getvalue()
+
+
+def test_multivolume_directory_uses_embedded_identity_and_filters_reader_bootstrap(
+    client, db_session, test_settings, monkeypatch
+) -> None:
+    _initialize_schema(db_session)
+    user = _login(client, db_session, email="multi-volume-audio@example.com")
+    book_dir = test_settings.resolved_monitor_root / "[Ghost Blows Out the Light][Author A]"
+    first_volume = book_dir / "Vol.1"
+    second_volume = book_dir / "Ghost Blows Out the Light Desert"
+    first_volume.mkdir(parents=True)
+    second_volume.mkdir()
+    first_track = first_volume / "01.mp3"
+    second_track = second_volume / "02.mp3"
+    first_track.write_bytes(b"multi-volume-track-one")
+    second_track.write_bytes(b"multi-volume-track-two")
+
+    structure = audio_metadata_module.inspect_audio_bundle(book_dir)
+    assert structure is not None
+    assert structure.title == "Ghost Blows Out the Light"
+    assert structure.author == "Author A"
+    assert [volume.title for volume in structure.volumes] == [
+        "Vol.1",
+        "Ghost Blows Out the Light Desert",
+    ]
+    assert [volume.volume_index for volume in structure.volumes] == [1, None]
+    queue = _RecordingQueue()
+    scan_directory_for_imports(
+        test_settings.resolved_monitor_root,
+        MonitorFolderConfig(
+            id="multi-volume",
+            root_path=str(test_settings.resolved_monitor_root),
+            min_file_size_bytes=0,
+        ),
+        queue,
+    )
+    assert queue.paths == [book_dir.resolve()]
+
+    monkeypatch.setattr(importer_module, "parse_audio_metadata", _emby_audio_metadata)
+    result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(source_file_path=book_dir, origin="WATCH", original_name=book_dir.name),
+    )
+
+    work = db_session.execute(
+        text("SELECT `title`, `author` FROM `LibraryWork` WHERE `id` = :id"),
+        {"id": result.work_id},
+    ).mappings().one()
+    assert dict(work) == {"title": "Ghost Blows Out the Light", "author": "Author A"}
+    volumes = db_session.execute(
+        text(
+            "SELECT `id`, `title`, `volumeIndex`, `sortOrder`, `chapterCount` "
+            "FROM `LibraryVolume` WHERE `editionId` = :edition_id ORDER BY `sortOrder`"
+        ),
+        {"edition_id": result.edition_id},
+    ).mappings().all()
+    assert [(row["title"], row["volumeIndex"], row["sortOrder"], row["chapterCount"]) for row in volumes] == [
+        ("Vol.1", 1, 0, 1),
+        ("Ghost Blows Out the Light Desert", None, 1, 1),
+    ]
+
+    first_bootstrap = client.get(
+        f"/api/reader/v2/editions/{result.edition_id}/bootstrap?volume={volumes[0]['id']}"
+    )
+    second_bootstrap = client.get(
+        f"/api/reader/v2/editions/{result.edition_id}/bootstrap?volume={volumes[1]['id']}"
+    )
+    assert first_bootstrap.status_code == 200
+    assert second_bootstrap.status_code == 200
+    assert [track["title"] for track in first_bootstrap.json()["data"]["tracks"]] == ["Chapter 1"]
+    assert [track["title"] for track in second_bootstrap.json()["data"]["tracks"]] == ["Chapter 2"]
+
+    for index, (volume, percent) in enumerate(zip(volumes, (100, 0), strict=True), start=1):
+        db_session.execute(
+            text(
+                "INSERT INTO `LibraryReadingProgress` "
+                "(`id`, `userId`, `workId`, `editionId`, `volumeId`, `readerType`, `position`, `percent`, "
+                "`extra`, `schemaVersion`, `locationType`, `locationJson`, `updatedAt`) "
+                "VALUES (:id, :user_id, :work_id, :edition_id, :volume_id, 'audio', '0', :percent, "
+                "'{}', 2, 'audio', '{}', :updated_at)"
+            ),
+            {
+                "id": f"multi-volume-progress-{index}",
+                "user_id": user.id,
+                "work_id": result.work_id,
+                "edition_id": result.edition_id,
+                "volume_id": volume["id"],
+                "percent": percent,
+                "updated_at": f"2026-07-24T00:00:0{index}+00:00",
+            },
+        )
+    db_session.commit()
+    detail = client.get(
+        f"/api/works/{result.work_id}",
+        params={"detailTab": "AUDIOBOOK", "editionId": result.edition_id},
+    ).json()["data"]
+    selected_edition = next(item for item in detail["book"]["editions"] if item["id"] == result.edition_id)
+    assert selected_edition["progress"] == 50
+    assert detail["activeMedia"]["progress"] == 50
+
+
+def test_audio_directory_structure_rejects_mixed_tracks_and_keeps_unmatched_children_independent(tmp_path) -> None:
+    mixed = tmp_path / "Mixed Book"
+    volume = mixed / "Vol.1"
+    volume.mkdir(parents=True)
+    (mixed / "00.mp3").write_bytes(b"direct")
+    (volume / "01.mp3").write_bytes(b"volume")
+    with pytest.raises(ValueError, match="不能同时包含直属音轨和卷目录"):
+        audio_metadata_module.inspect_audio_bundle(mixed)
+
+    collection = tmp_path / "Author Name"
+    independent_book = collection / "Independent Book"
+    independent_book.mkdir(parents=True)
+    (independent_book / "01.mp3").write_bytes(b"independent")
+    assert audio_metadata_module.inspect_audio_bundle(collection) is None
+    independent = audio_metadata_module.inspect_audio_bundle(independent_book)
+    assert independent is not None
+    assert independent.title == "Independent Book"
+    assert independent.author is None
 
 
 def test_emby_flat_layout_appends_strictly_named_chapters_to_one_edition(

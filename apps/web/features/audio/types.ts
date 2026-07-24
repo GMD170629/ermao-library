@@ -40,6 +40,14 @@ export type AudioEditionSummary = {
   narrator: string | null;
 };
 
+export type AudioVolumeSummary = {
+  id: string;
+  title: string;
+  index: number;
+  chapterCount: number;
+  durationMs: number;
+};
+
 export type AudioLaunchSummary = {
   editionId: string;
   workId: string;
@@ -58,6 +66,7 @@ export type AudioBootstrap = {
   contentFingerprint: string;
   book: AudioBookSummary;
   edition: AudioEditionSummary;
+  volumes: AudioVolumeSummary[];
   tracks: AudioTrack[];
   chapters: AudioChapter[];
   totalDurationMs: number;
@@ -103,6 +112,7 @@ export type LoadAudioEditionOptions = {
   autoplay?: boolean;
   force?: boolean;
   chapterId?: string;
+  volumeId?: string | null;
   summary?: AudioLaunchSummary;
 };
 

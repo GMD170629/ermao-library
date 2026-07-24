@@ -5,6 +5,7 @@ import { Bookmark, Check, ChevronLeft, ChevronRight, Gauge, Highlighter, ListTre
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
+import { VolumeSelect } from '../../components/ui/volume-select';
 import { useI18n } from '../../i18n/provider';
 import { isDarkReaderTheme, readerThemeSurfaces } from './reader-theme';
 import {
@@ -1285,7 +1286,23 @@ function VolumeNavigationPanel({ navigation, readerType, activeItemKey, dark, on
         </VolumeNavigationGroup>
       ) : null}
 
-      {showVolumes ? (
+      {showVolumes && !isComic ? (
+        <VolumeNavigationGroup title={i18nAttribute("卷册")}>
+          <VolumeSelect
+            items={navigation.volumeSections.map((volume, index) => ({
+              id: volume.id,
+              title: volume.title || i18nAttribute("第 {value0} 卷", { value0: index + 1 })
+            }))}
+            value={navigation.currentVolumeId}
+            onChange={navigation.onSelectVolume}
+            disabled={navigation.loading}
+            dark={dark}
+            className="w-full"
+          />
+        </VolumeNavigationGroup>
+      ) : null}
+
+      {showVolumes && isComic ? (
         <VolumeNavigationGroup title={isComic ? i18nAttribute("卷/话") : i18nAttribute("卷册")}>
           {navigation.volumeSections.map((volume, index) => (
             <button

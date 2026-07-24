@@ -22,12 +22,14 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.services.book_identity import BookIdentity, UNKNOWN_AUTHOR, identity_merge_key, logical_import_path, normalize_identity_part, parse_bracketed_series_identity, recognize_book_identity
 from app.services.audio_metadata import (
+    AudioBundleStructure,
     AudioChapterMetadata,
     AudioFileMetadata,
     DISC_DIRECTORY_PATTERN,
     MAX_AUDIO_CHAPTERS,
     SUPPORTED_AUDIO_EXTS,
     collect_audio_bundle_files,
+    inspect_audio_bundle,
     is_supported_audio_file,
     parse_audio_metadata,
 )
@@ -106,32 +108,40 @@ def import_file_size_limit_bytes_for_ext(ext: str) -> int | None:
 def import_managed_book(db: Session, settings: Settings, options: ImportOptions) -> ImportResult:
     original_source = (options.original_source_file_path or options.source_file_path).resolve()
     source = options.source_file_path.resolve()
-    audio_sources = collect_audio_bundle_files(source)
-    source_ext = source.suffix.lower() if source.is_file() else ".audio-bundle" if audio_sources else ""
-    ext = source_ext
-    if ext not in SUPPORTED_EXTS and ext != ".audio-bundle":
-        raise ValueError("当前版本仅支持 EPUB、MOBI、AZW、AZW3、PRC、FB2、TXT、CBZ、ZIP、PDF、M4B、M4A、MP3 格式。")
     task_id = options.import_task_id or _ensure_import_task(db, options)
     started = time.time()
+    audio_structure: AudioBundleStructure | None = None
+    audio_sources: list[Path] = []
+    source_ext = source.suffix.lower()
+    ext = source_ext
     _update(db, "ImportTask", task_id, {"status": "PARSING", "progress": 5, "startedAt": _now(), "message": "正在校验文件"})
-    _log_import(db, task_id, "info", f"import started: {source}")
-    record_system_event(
-        db,
-        source="import",
-        action="import.started",
-        target_type="importTask",
-        target_id=task_id,
-        message=f"开始导入文件：{options.original_name or source.name}",
-        metadata={
-            "sourcePath": str(original_source),
-            "originalName": options.original_name or source.name,
-            "origin": options.origin,
-            "monitorFolderId": options.monitor_folder_id,
-            "format": source_ext.removeprefix("."),
-        },
-    )
     db.commit()
     try:
+        if not original_source.exists():
+            raise FileNotFoundError(f"导入源已不存在：{original_source}")
+        audio_structure = inspect_audio_bundle(source)
+        audio_sources = list(audio_structure.files) if audio_structure else []
+        source_ext = source.suffix.lower() if source.is_file() else ".audio-bundle" if audio_sources else ""
+        ext = source_ext
+        if ext not in SUPPORTED_EXTS and ext != ".audio-bundle":
+            raise ValueError("当前版本仅支持 EPUB、MOBI、AZW、AZW3、PRC、FB2、TXT、CBZ、ZIP、PDF、M4B、M4A、MP3 格式。")
+        _log_import(db, task_id, "info", f"import started: {source}")
+        record_system_event(
+            db,
+            source="import",
+            action="import.started",
+            target_type="importTask",
+            target_id=task_id,
+            message=f"开始导入文件：{options.original_name or source.name}",
+            metadata={
+                "sourcePath": str(original_source),
+                "originalName": options.original_name or source.name,
+                "origin": options.origin,
+                "monitorFolderId": options.monitor_folder_id,
+                "format": source_ext.removeprefix("."),
+            },
+        )
+        db.commit()
         import_preferences = load_import_preferences(db)
         preference_sources = audio_sources if audio_sources else [original_source]
         disallowed_sources = [item for item in preference_sources if not extension_is_allowed(item, import_preferences)]
@@ -222,7 +232,7 @@ def import_managed_book(db: Session, settings: Settings, options: ImportOptions)
                 },
             )
             audio_metadata = [parse_audio_metadata(path) for path in audio_sources]
-            identity = _audio_identity(db, settings, original_source, options, audio_metadata)
+            identity = _audio_identity(db, settings, original_source, options, audio_metadata, audio_structure)
         else:
             identity = _existing_series_volume_identity(db, settings, effective_options) or recognize_book_identity(db, settings, original_source, options.original_name)
         if options.requested_work_id:
@@ -253,7 +263,7 @@ def import_managed_book(db: Session, settings: Settings, options: ImportOptions)
         elif ext == ".pdf":
             result = _import_pdf(db, settings, effective_options, task_id, stat.st_size, ext, identity)
         elif audio_metadata:
-            result = _import_audio(db, settings, effective_options, task_id, identity, audio_metadata)
+            result = _import_audio(db, settings, effective_options, task_id, identity, audio_metadata, audio_structure)
         else:
             result = _import_comic(db, settings, effective_options, task_id, stat.st_size, ext, identity)
         sync_work_facets(db, result.work_id, commit=False)
@@ -341,8 +351,13 @@ def import_managed_book(db: Session, settings: Settings, options: ImportOptions)
         db.rollback()
         message = str(exc)
         current_task = _row(db, "SELECT * FROM `ImportTask` WHERE `id` = :id", {"id": task_id}) or {}
-        audio_retryable = bool(audio_sources and original_source.exists())
-        _update(db, "ImportTask", task_id, {"status": "FAILED", "progress": 100, "errorCode": current_task.get("errorCode") or ("AUDIO_IMPORT_FAILED" if audio_retryable else "IMPORT_FAILED"), "retryable": audio_retryable or bool(current_task.get("retryable")), "errorSummary": message, "message": "导入失败，详情见错误信息", "leaseOwner": None, "leaseExpiresAt": None, "duration": int((time.time() - started) * 1000), "finishedAt": _now()})
+        source_missing = not original_source.exists()
+        audio_retryable = bool(audio_sources and not source_missing)
+        error_code = current_task.get("errorCode") or (
+            "SOURCE_NOT_FOUND" if source_missing else "AUDIO_IMPORT_FAILED" if audio_retryable else "IMPORT_FAILED"
+        )
+        retryable = False if source_missing else audio_retryable or bool(current_task.get("retryable"))
+        _update(db, "ImportTask", task_id, {"status": "FAILED", "progress": 100, "errorCode": error_code, "retryable": retryable, "errorSummary": message, "message": "导入源文件或目录不存在，任务已结束" if source_missing else "导入失败，详情见错误信息", "leaseOwner": None, "leaseExpiresAt": None, "duration": int((time.time() - started) * 1000), "finishedAt": _now()})
         if _has_table(db, "ImportAsset"):
             db.execute(
                 text(
@@ -350,7 +365,7 @@ def import_managed_book(db: Session, settings: Settings, options: ImportOptions)
                     "`errorSummary` = :error_summary, `updatedAt` = :updated_at "
                     "WHERE `importTaskId` = :task_id AND `status` != 'COMPLETED'"
                 ),
-                {"error_code": "IMPORT_FAILED", "error_summary": message, "updated_at": _now(), "task_id": task_id},
+                {"error_code": error_code, "error_summary": message, "updated_at": _now(), "task_id": task_id},
             )
         _log_import(db, task_id, "error", message)
         record_system_event(
@@ -778,19 +793,29 @@ def _import_audio(
     task_id: str,
     identity: BookIdentity,
     metadata_items: list[AudioFileMetadata],
+    structure: AudioBundleStructure | None = None,
 ) -> ImportResult:
     if not metadata_items:
         raise ValueError("有声书目录中没有可导入的音频文件")
     chapter_total = sum(max(1, len(item.chapters)) for item in metadata_items)
     if chapter_total > MAX_AUDIO_CHAPTERS:
         raise ValueError(f"有声书章节总数超过 {MAX_AUDIO_CHAPTERS} 个，请拆分后导入")
+    source_root = options.source_file_path.resolve()
+    directory_bundle = source_root.is_dir()
+    volume_groups = list(structure.volumes) if directory_bundle and structure else []
+    source_volume_order = {
+        path.resolve(): volume_index
+        for volume_index, group in enumerate(volume_groups)
+        for path in group.files
+    }
     effective_track_numbers = _effective_audio_track_numbers(metadata_items)
     metadata_items = sorted(
         metadata_items,
-        key=lambda item: _audio_metadata_sort_key(item, effective_track_numbers.get(item.path)),
+        key=lambda item: (
+            source_volume_order.get(item.path.resolve(), 0),
+            _audio_metadata_sort_key(item, effective_track_numbers.get(item.path)),
+        ),
     )
-    source_root = options.source_file_path.resolve()
-    directory_bundle = source_root.is_dir()
     flat_title = _flat_audio_filename_title(source_root) if source_root.is_file() else None
     flat_bundle_key = _flat_audio_bundle_key(source_root, flat_title) if flat_title else None
     display_titles = _audio_track_titles(metadata_items)
@@ -803,10 +828,11 @@ def _import_audio(
         }
         for item in metadata_items
     ]
-    _reject_duplicate_audio_tracks(content_info)
     existing_by_path = _audio_files_by_path(db, [item.path for item in metadata_items])
     if existing_by_path and not directory_bundle:
         raise ValueError("音频文件已入库，请使用原目录重新扫描")
+    if existing_by_path and structure and structure.is_multi_volume:
+        raise ValueError("多卷有声书中已有音轨入库；为保护已有作品和进度，本次不会自动重组，请使用未入库的完整目录")
 
     narrator_values = _consistent_audio_values(
         metadata_items,
@@ -829,6 +855,7 @@ def _import_audio(
     total_duration = sum(item.duration_ms for item in metadata_items)
     reconciled = False
     created = False
+    volumes: list[dict[str, Any]] = []
     if existing_by_path:
         work, created = _ensure_audio_work(db, options, identity, merge_key)
         edition, volume = _prepare_existing_audio_bundle(
@@ -840,6 +867,7 @@ def _import_audio(
             base_name,
             narrator,
         )
+        volumes = [volume]
         reconciled = True
     else:
         duplicate_result, duplicate_files = _audio_content_duplicate_result(db, content_info)
@@ -887,6 +915,7 @@ def _import_audio(
                 bundle_key,
                 narrator,
             )
+            volumes = [volume]
             reconciled = True
         else:
             work, created = _ensure_audio_work(db, options, identity, merge_key)
@@ -917,20 +946,40 @@ def _import_audio(
                     "updatedAt": _now(),
                 },
             )
-            volume = _insert(
-                db,
-                "LibraryVolume",
-                {
-                    "id": _id(),
-                    "editionId": edition["id"],
-                    "title": "正文",
-                    "sortOrder": 0,
-                    "chapterCount": 0,
-                    "durationMs": total_duration,
-                    "createdAt": _now(),
-                    "updatedAt": _now(),
-                },
-            )
+            volume_specs = volume_groups or [None]
+            volumes = []
+            for volume_index, group in enumerate(volume_specs):
+                group_duration = (
+                    sum(item.duration_ms for item in metadata_items if item.path.resolve() in set(group.files))
+                    if group is not None
+                    else total_duration
+                )
+                volumes.append(
+                    _insert(
+                        db,
+                        "LibraryVolume",
+                        {
+                            "id": _id(),
+                            "editionId": edition["id"],
+                            "title": group.title if group is not None else "正文",
+                            "volumeIndex": group.volume_index if group is not None else None,
+                            "sortOrder": volume_index,
+                            "chapterCount": 0,
+                            "durationMs": group_duration,
+                            "createdAt": _now(),
+                            "updatedAt": _now(),
+                        },
+                    )
+                )
+            volume = volumes[0]
+    if not volumes:
+        volumes = [volume]
+    volume_by_source_path = {
+        path.resolve(): volumes[index]
+        for index, group in enumerate(volume_groups)
+        if index < len(volumes)
+        for path in group.files
+    }
     cover_path = edition.get("coverPath") or _extract_audio_cover(
         settings,
         work["id"],
@@ -943,12 +992,13 @@ def _import_audio(
     manifest_chapters: list[dict[str, Any]] = []
     chapter_sort_order = 0
     for index, item in enumerate(metadata_items):
+        item_volume = volume_by_source_path.get(item.path.resolve(), volume)
         item_content = content_info[index]
         stat = item.path.stat()
         sort_order = index
         file_values = {
             "editionId": edition["id"],
-            "volumeId": volume["id"],
+            "volumeId": item_volume["id"],
             "path": str(item.path),
             "filePathHash": _hash_text(str(item.path)),
             "fingerprint": item_content["fingerprint"],
@@ -1018,7 +1068,7 @@ def _import_audio(
                 continue
             unit_values = {
                 "editionId": edition["id"],
-                "volumeId": volume["id"],
+                "volumeId": item_volume["id"],
                 "fileId": file_row["id"],
                 "unitType": "audio_chapter",
                 "title": chapter.title or display_titles[item.path] or f"第 {chapter_sort_order} 章",
@@ -1121,12 +1171,34 @@ def _import_audio(
     actual_chapters = int(_scalar(db, "SELECT COUNT(*) FROM `LibraryReadingUnit` WHERE `editionId` = :edition_id AND `unitType` = 'audio_chapter'", {"edition_id": edition["id"]}, 0))
     if reconciled:
         _refresh_audio_progress_after_bundle_sync(db, str(edition["id"]), str(volume["id"]))
-    _update(
-        db,
-        "LibraryVolume",
-        volume["id"],
-        {"coverPath": cover_path, "chapterCount": actual_chapters, "durationMs": actual_duration, "updatedAt": _now()},
-    )
+    for item_volume in volumes:
+        volume_chapters = int(
+            _scalar(
+                db,
+                "SELECT COUNT(*) FROM `LibraryReadingUnit` WHERE `volumeId` = :volume_id AND `unitType` = 'audio_chapter'",
+                {"volume_id": item_volume["id"]},
+                0,
+            )
+        )
+        volume_duration = int(
+            _scalar(
+                db,
+                "SELECT COALESCE(SUM(`durationMs`), 0) FROM `LibraryFile` WHERE `volumeId` = :volume_id AND UPPER(`kind`) = 'AUDIO'",
+                {"volume_id": item_volume["id"]},
+                0,
+            )
+        )
+        _update(
+            db,
+            "LibraryVolume",
+            item_volume["id"],
+            {
+                "coverPath": cover_path,
+                "chapterCount": volume_chapters,
+                "durationMs": volume_duration,
+                "updatedAt": _now(),
+            },
+        )
     _update(
         db,
         "LibraryEdition",
@@ -1172,19 +1244,6 @@ def _audio_files_by_path(db: Session, paths: list[Path]) -> dict[str, dict[str, 
         rows = _rows(db, f"SELECT * FROM `LibraryFile` WHERE `path` IN ({placeholders})", params)
         found.update({str(row["path"]): row for row in rows})
     return found
-
-
-def _reject_duplicate_audio_tracks(content_info: list[dict[str, Any]]) -> None:
-    pending_by_sample: dict[tuple[int, str], list[dict[str, Any]]] = {}
-    for info in content_info:
-        signature = (int(info["size"]), str(info["fingerprint"]))
-        pending_by_sample.setdefault(signature, []).append(info)
-    for group in pending_by_sample.values():
-        if len(group) < 2:
-            continue
-        full_hashes = [_audio_info_full_hash(info) for info in group]
-        if len(set(full_hashes)) != len(full_hashes):
-            raise ValueError("有声书目录中包含字节完全相同的重复音轨，请移除后重试")
 
 
 def _ensure_audio_work(
@@ -2086,20 +2145,6 @@ def _audio_content_duplicate_result(
     if not content_info or not _has_table(db, "LibraryFile"):
         return None, []
 
-    # Sample collisions inside the pending bundle are the only reason to hash
-    # brand-new tracks eagerly. Exact duplicates are rejected; different full
-    # hashes are valid tracks that happened to share the bounded sample.
-    pending_by_sample: dict[tuple[int, str], list[dict[str, Any]]] = {}
-    for info in content_info:
-        signature = (int(info["size"]), str(info["fingerprint"]))
-        pending_by_sample.setdefault(signature, []).append(info)
-    for group in pending_by_sample.values():
-        if len(group) < 2:
-            continue
-        full_hashes = [_audio_info_full_hash(info) for info in group]
-        if len(set(full_hashes)) != len(full_hashes):
-            raise ValueError("有声书目录中包含字节完全相同的重复音轨，请移除后重试")
-
     matches: list[dict[str, Any] | None] = []
     for info in content_info:
         candidates = _rows(
@@ -2175,6 +2220,7 @@ def _audio_identity(
     source: Path,
     options: ImportOptions,
     metadata_items: list[AudioFileMetadata],
+    structure: AudioBundleStructure | None = None,
 ) -> BookIdentity:
     requested_title = re.sub(r"\s+", " ", str(options.requested_title or "")).strip()
     requested_author = re.sub(r"\s+", " ", str(options.requested_author or "")).strip()
@@ -2182,7 +2228,18 @@ def _audio_identity(
     fallback_title = _clean_audio_work_title(fallback.title)
     directory_bundle = source.is_dir()
     flat_title = _flat_audio_filename_title(source) if source.is_file() else None
-    directory_author = _emby_audio_directory_author(db, settings, source, options) if directory_bundle else None
+    directory_author = structure.author if directory_bundle and structure else None
+    volume_authors = {
+        _normalize_key(volume.author): volume.author
+        for volume in (structure.volumes if directory_bundle and structure else ())
+        if volume.author
+    }
+    volume_author = next(iter(volume_authors.values())) if len(volume_authors) == 1 else None
+    author_diagnostic = None
+    if len(volume_authors) > 1:
+        author_diagnostic = "有声书各卷目录中的内嵌作者不一致，已忽略卷目录作者"
+    elif directory_author and volume_author and _normalize_key(directory_author) != _normalize_key(volume_author):
+        author_diagnostic = "有声书书名目录与卷目录中的内嵌作者不一致，已采用书名目录作者"
     albums = [] if requested_title or directory_bundle else _consistent_audio_values(metadata_items, "album", "专辑/书名")
     authors = [] if requested_author else _consistent_audio_values(
         metadata_items,
@@ -2192,6 +2249,8 @@ def _audio_identity(
     )
     if requested_title:
         title = requested_title
+    elif directory_bundle and structure:
+        title = structure.title
     elif directory_bundle:
         title = fallback_title
     elif albums:
@@ -2204,12 +2263,12 @@ def _audio_identity(
         title = fallback_title
     if requested_author:
         author = requested_author
-    elif directory_bundle and fallback.author != UNKNOWN_AUTHOR:
-        author = fallback.author
-    elif authors:
-        author = authors[0]
     elif directory_author:
         author = directory_author
+    elif volume_author:
+        author = volume_author
+    elif authors:
+        author = authors[0]
     elif flat_title:
         # The documented flat layout encodes book title and chapter, not an
         # author. Do not let the generic filename parser reinterpret the
@@ -2223,6 +2282,7 @@ def _audio_identity(
         author=str(author).strip() or UNKNOWN_AUTHOR,
         confidence=max(fallback.confidence, 0.95 if albums or authors else fallback.confidence),
         cache_hit=False,
+        fallback_reason=author_diagnostic or fallback.fallback_reason,
     )
 
 
@@ -2253,57 +2313,6 @@ def _flat_audio_filename_title(path: Path) -> str | None:
 def _flat_audio_bundle_key(path: Path, title: str) -> str:
     source_group = f"{path.parent.resolve()}\0{_normalize_key(title)}"
     return _hash_text(source_group)[:24]
-
-
-def _emby_audio_directory_author(
-    db: Session,
-    settings: Settings,
-    source: Path,
-    options: ImportOptions,
-) -> str | None:
-    """Infer Author from the documented ``Author/Book`` directory layout.
-
-    Inference only happens relative to a configured monitor root and only for
-    exactly two path components. This prevents arbitrary parent directories
-    (for example ``media`` or a download destination) from becoming authors.
-    """
-
-    roots: list[Path] = []
-    if _has_table(db, "MonitorFolder"):
-        if options.monitor_folder_id:
-            row = _row(
-                db,
-                "SELECT `rootPath` FROM `MonitorFolder` WHERE `id` = :id LIMIT 1",
-                {"id": options.monitor_folder_id},
-            )
-            if row and row.get("rootPath"):
-                roots.append(Path(str(row["rootPath"])).expanduser().resolve())
-        else:
-            for value in db.execute(
-                text("SELECT `rootPath` FROM `MonitorFolder` WHERE `enabled` = 1 AND `rootPath` IS NOT NULL")
-            ).scalars():
-                try:
-                    roots.append(Path(str(value)).expanduser().resolve())
-                except OSError:
-                    continue
-    if settings.resolved_monitor_root is not None:
-        roots.append(settings.resolved_monitor_root.resolve())
-    matching = [root for root in roots if source == root or root in source.parents]
-    if not matching:
-        return None
-    root = max(matching, key=lambda item: len(item.parts))
-    try:
-        relative = source.relative_to(root)
-    except ValueError:
-        return None
-    if len(relative.parts) != 2:
-        return None
-    author = re.sub(r"\s+", " ", relative.parts[0]).strip()
-    generic = {
-        _normalize_key(value)
-        for value in ["audiobook", "audiobooks", "audio books", "books", "library", "media", "有声书", "听书"]
-    }
-    return author if author and _normalize_key(author) not in generic else None
 
 
 def _consistent_audio_values(

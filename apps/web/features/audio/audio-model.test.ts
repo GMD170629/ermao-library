@@ -24,6 +24,11 @@ const bootstrap = normalizeAudioBootstrap({
   contentFingerprint: 'sha256:audio',
   book: { id: 'work-1', title: '三体', author: '刘慈欣' },
   edition: { id: 'edition-1', workId: 'work-1', versionName: '完整有声版', narrator: '王明' },
+  selectedVolume: { id: 'volume-1', title: '第一卷' },
+  volumes: [
+    { id: 'volume-1', title: '第一卷', index: 0, chapterCount: 2, durationMs: 30_000 },
+    { id: 'volume-2', title: '第二卷', index: 1, chapterCount: 1, durationMs: 20_000 }
+  ],
   tracks: [
     { fileId: 'file-2', title: '下', url: '/api/files/file-2', mimeType: 'audio/mp4', durationMs: 20_000, sortOrder: 2 },
     { fileId: 'file-1', title: '上', url: '/api/files/file-1', mimeType: 'audio/mpeg', durationMs: 10_000, sortOrder: 1 }
@@ -41,6 +46,8 @@ test('normalizes and orders audio bootstrap tracks and chapters', () => {
   assert.equal(bootstrap.schemaVersion, 2);
   assert.deepEqual(bootstrap.tracks.map((track) => track.fileId), ['file-1', 'file-2']);
   assert.deepEqual(bootstrap.chapters.map((chapter) => chapter.id), ['chapter-1', 'chapter-2']);
+  assert.equal(bootstrap.volumeId, 'volume-1');
+  assert.deepEqual(bootstrap.volumes.map((volume) => volume.id), ['volume-1', 'volume-2']);
   assert.deepEqual(normalizeResumeTarget(bootstrap), { trackIndex: 1, positionMs: 7_000 });
 });
 

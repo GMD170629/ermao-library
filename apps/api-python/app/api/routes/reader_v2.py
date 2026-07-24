@@ -633,8 +633,10 @@ def reader_bootstrap_v2(
 
     audio_file_rows = _rows(
         db,
-        "SELECT * FROM `LibraryFile` WHERE `editionId` = :edition_id ORDER BY `sortOrder`, `id`",
-        {"edition_id": edition_id},
+        "SELECT * FROM `LibraryFile` WHERE `editionId` = :edition_id "
+        + ("AND `volumeId` = :volume_id " if selected_volume_id else "")
+        + "ORDER BY `sortOrder`, `id`",
+        {"edition_id": edition_id, **({"volume_id": selected_volume_id} if selected_volume_id else {})},
     ) if reader_format == "audio" and "LibraryFile" in _tables(db) else []
     audio_manifest_row = _row(
         db,
@@ -675,7 +677,14 @@ def reader_bootstrap_v2(
         for index, item in enumerate(units)
         if item.get("fileId")
     ] if reader_format == "audio" else []
-    total_duration_ms = max(sum(track.duration_ms for track in audio_tracks), int(edition.get("durationMs") or 0)) if reader_format == "audio" else None
+    total_duration_ms = (
+        max(
+            sum(track.duration_ms for track in audio_tracks),
+            int((selected_volume or {}).get("durationMs") or 0),
+        )
+        if reader_format == "audio"
+        else None
+    )
 
     content_fingerprint = _content_fingerprint(db, edition, selected_volume_id)
     progress = _progress_for_volume(progresses, selected_volume_id)
@@ -1322,6 +1331,26 @@ def save_progress_v2(
         keys = ", ".join(f"`{key}`" for key in insert_values)
         placeholders = ", ".join(f":{key}" for key in insert_values)
         db.execute(text(f"INSERT INTO `LibraryReadingProgress` ({keys}) VALUES ({placeholders})"), insert_values)
+    if reader_format == "audio":
+        volume_rows = _rows(
+            db,
+            "SELECT `id` FROM `LibraryVolume` WHERE `editionId` = :edition_id ORDER BY `sortOrder`, `id`",
+            {"edition_id": edition_id},
+        )
+        progress_rows = _rows(
+            db,
+            "SELECT `volumeId`, `percent` FROM `LibraryReadingProgress` "
+            "WHERE `userId` = :user_id AND `editionId` = :edition_id",
+            {"user_id": user.id, "edition_id": edition_id},
+        )
+        progress_by_volume = {
+            str(row.get("volumeId")): float(row.get("percent") or 0)
+            for row in progress_rows
+            if row.get("volumeId")
+        }
+        completes_work = bool(volume_rows) and all(
+            progress_by_volume.get(str(volume["id"]), 0) >= 100 for volume in volume_rows
+        )
     _advance_work_status_for_progress(
         db,
         user_id=user.id,

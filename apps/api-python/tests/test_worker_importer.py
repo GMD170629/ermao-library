@@ -12,9 +12,9 @@ from app.services.book_identity import BookIdentity
 from app.services.default_cover import DEFAULT_COVER_ASSET_PATH
 from app.services.import_preferences import SUPPORTED_IMPORT_EXTENSIONS, load_import_preferences
 from app.worker.importer import ImportOptions, _work_merge_key, import_managed_book, parse_comic_volume_from_name, parse_epub_metadata, parse_pdf_metadata, parse_series_volume_info
-from app.worker.persistent_import_queue import process_import_task
+from app.worker.persistent_import_queue import fail_claimed_import_task, process_import_task
 from app.worker.path_security import PathSecurityError, PathSecurityService, normalize_configured_path
-from app.worker.watcher import MonitorFolderConfig, import_watched_file, scan_directory_with_logging, should_ignore_file
+from app.worker.watcher import MonitorFolderConfig, import_watched_file, monitor_folder_config, scan_directory_with_logging, should_ignore_file
 
 
 def create_worker_tables(db):
@@ -531,6 +531,95 @@ def test_structural_parse_failure_rolls_back_all_library_records(db_session, tes
     failed_event = db_session.execute(text("SELECT level, metadata FROM SystemEvent WHERE action = 'import.failed'")).mappings().one()
     assert failed_event["level"] == "error"
     assert json.loads(failed_event["metadata"])["error"]
+
+
+def test_deleted_source_fails_and_finishes_claimed_import_task(db_session, test_settings, tmp_path):
+    create_worker_tables(db_session)
+    source = tmp_path / "deleted-before-import.epub"
+    source.write_bytes(b"queued")
+    task = {
+        "id": "deleted-source-task",
+        "origin": "WATCH",
+        "status": "PARSING",
+        "originalName": source.name,
+        "sourcePath": str(source),
+    }
+    db_session.execute(
+        text(
+            "INSERT INTO ImportTask "
+            "(id, origin, status, originalName, sourcePath, progress, duplicate, duration, retryable, attempts, "
+            "leaseOwner, leaseExpiresAt, message, createdAt, updatedAt) "
+            "VALUES (:id, :origin, :status, :original_name, :source_path, 0, 0, 0, 0, 1, "
+            "'worker-old', 9999999999999, '正在准备导入', 1, 1)"
+        ),
+        {
+            "id": task["id"],
+            "origin": task["origin"],
+            "status": task["status"],
+            "original_name": task["originalName"],
+            "source_path": task["sourcePath"],
+        },
+    )
+    db_session.commit()
+    source.unlink()
+
+    with pytest.raises(FileNotFoundError, match="导入源已不存在"):
+        process_import_task(db_session, test_settings, task)
+
+    stored = db_session.execute(
+        text(
+            "SELECT status, progress, errorCode, retryable, message, errorSummary, "
+            "leaseOwner, leaseExpiresAt, finishedAt FROM ImportTask WHERE id = :id"
+        ),
+        {"id": task["id"]},
+    ).mappings().one()
+    assert stored["status"] == "FAILED"
+    assert stored["progress"] == 100
+    assert stored["errorCode"] == "SOURCE_NOT_FOUND"
+    assert bool(stored["retryable"]) is False
+    assert stored["message"] == "导入源文件或目录不存在，任务已结束"
+    assert "deleted-before-import.epub" in stored["errorSummary"]
+    assert stored["leaseOwner"] is None
+    assert stored["leaseExpiresAt"] is None
+    assert stored["finishedAt"] is not None
+
+
+def test_worker_fallback_forces_unhandled_claimed_task_to_terminal_failure(db_session, tmp_path):
+    create_worker_tables(db_session)
+    missing_source = tmp_path / "worker-crashed.epub"
+    task = {
+        "id": "worker-fallback-task",
+        "status": "PARSING",
+        "sourcePath": str(missing_source),
+    }
+    db_session.execute(
+        text(
+            "INSERT INTO ImportTask "
+            "(id, origin, status, originalName, sourcePath, progress, duplicate, duration, retryable, attempts, "
+            "leaseOwner, leaseExpiresAt, message, createdAt, updatedAt) "
+            "VALUES (:id, 'WATCH', 'PARSING', 'worker-crashed.epub', :source_path, 5, 0, 0, 0, 1, "
+            "'worker-old', 9999999999999, '正在准备导入', 1, 1)"
+        ),
+        {"id": task["id"], "source_path": task["sourcePath"]},
+    )
+    db_session.commit()
+
+    assert fail_claimed_import_task(db_session, task, RuntimeError("unexpected worker failure")) is True
+
+    stored = db_session.execute(
+        text(
+            "SELECT status, progress, errorCode, retryable, leaseOwner, leaseExpiresAt, finishedAt "
+            "FROM ImportTask WHERE id = :id"
+        ),
+        {"id": task["id"]},
+    ).mappings().one()
+    assert stored["status"] == "FAILED"
+    assert stored["progress"] == 100
+    assert stored["errorCode"] == "SOURCE_NOT_FOUND"
+    assert bool(stored["retryable"]) is False
+    assert stored["leaseOwner"] is None
+    assert stored["leaseExpiresAt"] is None
+    assert stored["finishedAt"] is not None
 
 
 def test_watch_epub_prefers_filename_when_opf_title_conflicts(db_session, test_settings, tmp_path):
@@ -1186,6 +1275,21 @@ def test_monitor_ignore_rules():
     assert should_ignore_file(Path("/tmp/readme.md"), folder)
     assert not should_ignore_file(Path("/tmp/readme.txt"), folder)
     assert not should_ignore_file(Path("/tmp/book.epub"), folder)
+
+
+def test_monitor_folder_config_preserves_zero_minimum_file_size():
+    folder = monitor_folder_config(
+        {
+            "id": "folder-zero",
+            "rootPath": "/library",
+            "shelfId": None,
+            "ignoreHidden": True,
+            "ignorePatterns": None,
+            "minFileSizeBytes": 0,
+        }
+    )
+
+    assert folder.min_file_size_bytes == 0
 
 
 def test_global_import_preferences_filter_extensions_conversion_and_patterns(db_session):

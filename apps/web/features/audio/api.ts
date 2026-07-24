@@ -1,6 +1,6 @@
 import { withBasePath } from '../../lib/base-path';
 import { clamp, orderedChapters, orderedTracks } from './audio-model';
-import type { AudioBootstrap, AudioChapter, AudioLocation, AudioTrack } from './types';
+import type { AudioBootstrap, AudioChapter, AudioLocation, AudioTrack, AudioVolumeSummary } from './types';
 
 type ErrorPayload = { error?: { message?: string }; detail?: string };
 
@@ -86,6 +86,18 @@ export function normalizeAudioBootstrap(input: unknown, requestedEditionId = '')
   const calculatedDuration = tracks.reduce((sum, track) => sum + track.durationMs, 0);
   const resumeLocation = normalizeLocation(raw.resumeLocation ?? raw.resume_location);
   const selectedVolume = record(raw.selectedVolume ?? raw.selected_volume);
+  const volumes = (Array.isArray(raw.volumes) ? raw.volumes : []).map((value, index) => {
+    const volume = record(value);
+    const id = stringValue(volume.id).trim();
+    if (!id) return null;
+    return {
+      id,
+      title: stringValue(volume.title, `卷 ${index + 1}`),
+      index: numberValue(volume.index, index),
+      chapterCount: Math.max(0, numberValue(volume.chapterCount ?? volume.chapter_count)),
+      durationMs: Math.max(0, numberValue(volume.durationMs ?? volume.duration_ms))
+    };
+  }).filter((volume): volume is AudioVolumeSummary => volume !== null);
   const editionId = stringValue(edition.id, requestedEditionId);
   const workId = stringValue(edition.workId ?? edition.work_id ?? book.id);
   if (!editionId || !workId) throw new Error('有声书启动信息缺少版本或图书标识');
@@ -107,6 +119,7 @@ export function normalizeAudioBootstrap(input: unknown, requestedEditionId = '')
       versionName: stringValue(edition.versionName ?? edition.version_name, '有声书'),
       narrator: nullableString(edition.narrator ?? raw.narrator)
     },
+    volumes,
     tracks,
     chapters,
     totalDurationMs: Math.max(numberValue(raw.totalDurationMs ?? raw.total_duration_ms), calculatedDuration),
@@ -122,8 +135,9 @@ export function normalizeAudioBootstrap(input: unknown, requestedEditionId = '')
   };
 }
 
-export async function fetchAudioBootstrap(editionId: string, signal?: AbortSignal) {
-  const response = await fetch(`/api/reader/v2/editions/${encodeURIComponent(editionId)}/bootstrap`, {
+export async function fetchAudioBootstrap(editionId: string, volumeId?: string | null, signal?: AbortSignal) {
+  const query = volumeId ? `?volume=${encodeURIComponent(volumeId)}` : '';
+  const response = await fetch(`/api/reader/v2/editions/${encodeURIComponent(editionId)}/bootstrap${query}`, {
     credentials: 'same-origin',
     cache: 'no-store',
     signal

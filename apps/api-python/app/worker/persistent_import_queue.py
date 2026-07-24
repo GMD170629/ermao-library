@@ -117,16 +117,19 @@ def recover_stale_import_tasks(db: Session) -> int:
     if not _has_table(db, "ImportTask"):
         return 0
     columns = _columns(db, "ImportTask")
-    if "leaseExpiresAt" not in columns:
-        return 0
+    lease_reset = (
+        ", `leaseOwner` = NULL, `leaseExpiresAt` = NULL"
+        if {"leaseOwner", "leaseExpiresAt"}.issubset(columns)
+        else ""
+    )
     now = _now()
     result = db.execute(
         text(
-            "UPDATE `ImportTask` SET `status` = 'PENDING', `progress` = 0, `message` = '后台任务恢复后重新排队', "
-            "`leaseOwner` = NULL, `leaseExpiresAt` = NULL, `updatedAt` = :now "
-            "WHERE `status` = 'PARSING' AND (`leaseExpiresAt` IS NULL OR CAST(`leaseExpiresAt` AS INTEGER) < :now)"
+            "UPDATE `ImportTask` SET `status` = 'PENDING', `progress` = 0, `message` = :message, "
+            f"`updatedAt` = :now{lease_reset} "
+            "WHERE `status` = 'PARSING'"
         ),
-        {"now": now},
+        {"now": now, "message": "后台任务恢复后重新排队"},
     )
     db.commit()
     return int(result.rowcount or 0)
@@ -210,6 +213,54 @@ def process_import_task(db: Session, settings: Settings, task: dict[str, Any]) -
     return result
 
 
+def fail_claimed_import_task(db: Session, task: dict[str, Any], error: Exception) -> bool:
+    """Force an already claimed task into a terminal state after an unexpected worker error."""
+
+    db.rollback()
+    source = Path(str(task.get("sourcePath") or ""))
+    source_missing = not source.exists()
+    error_code = "SOURCE_NOT_FOUND" if source_missing else "IMPORT_WORKER_FAILED"
+    error_summary = (
+        f"导入源已不存在：{source}"
+        if source_missing
+        else str(error) or error.__class__.__name__
+    )
+    now = _now()
+    result = db.execute(
+        text(
+            "UPDATE `ImportTask` SET `status` = 'FAILED', `progress` = 100, "
+            "`errorCode` = :error_code, `retryable` = :retryable, `errorSummary` = :error_summary, "
+            "`message` = :message, `leaseOwner` = NULL, `leaseExpiresAt` = NULL, "
+            "`finishedAt` = :now, `updatedAt` = :now "
+            "WHERE `id` = :task_id AND `status` IN ('PENDING', 'PARSING')"
+        ),
+        {
+            "task_id": task["id"],
+            "error_code": error_code,
+            "retryable": not source_missing,
+            "error_summary": error_summary,
+            "message": "导入源文件或目录不存在，任务已结束" if source_missing else "导入工作进程异常，任务已结束",
+            "now": now,
+        },
+    )
+    if result.rowcount and _has_table(db, "ImportAsset"):
+        db.execute(
+            text(
+                "UPDATE `ImportAsset` SET `status` = 'FAILED', `errorCode` = :error_code, "
+                "`errorSummary` = :error_summary, `updatedAt` = :now "
+                "WHERE `importTaskId` = :task_id AND `status` != 'COMPLETED'"
+            ),
+            {
+                "task_id": task["id"],
+                "error_code": error_code,
+                "error_summary": error_summary,
+                "now": now,
+            },
+        )
+    db.commit()
+    return bool(result.rowcount)
+
+
 class PersistentImportWorker:
     def __init__(self, db_factory: Callable[[], Session], settings: Settings) -> None:
         self.db_factory = db_factory
@@ -243,12 +294,14 @@ class PersistentImportWorker:
 
     def process_once(self) -> bool:
         with self.db_factory() as db:
+            recovered = recover_stale_import_tasks(db)
             task = claim_next_import_task(db, self.worker_id, max(900, self.settings.ebook_conversion_timeout_seconds + 300))
             if not task:
-                return False
+                return bool(recovered)
             try:
                 process_import_task(db, self.settings, task)
             except Exception as exc:
+                fail_claimed_import_task(db, task, exc)
                 print(f"[import-worker] persistent task failed {task.get('id')}: {exc}", flush=True)
             return True
 

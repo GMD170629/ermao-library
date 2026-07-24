@@ -32,6 +32,7 @@ import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { useToast } from '../../components/ui/feedback';
 import { Select } from '../../components/ui/select';
+import { VolumeSelect } from '../../components/ui/volume-select';
 import { withBasePath } from '../../lib/base-path';
 import type { MediaKind, ReadingStatus, WorkDetailTabKey, WorkView } from '../../types/work';
 import { useAudioPlayback } from '../audio/audio-playback-provider';
@@ -1056,14 +1057,16 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     replaceDetailDeepLink(currentTab, editionId);
   }
 
-  function startAudioEdition(editionId: string, chapterId?: string, chapterTitle?: string) {
+  function startAudioEdition(editionId: string, chapterId?: string, chapterTitle?: string, volumeId?: string | null) {
     const alreadyLoaded = audioPlayback.bootstrap?.edition.id === editionId
-      && audioPlayback.bootstrap.edition.workId === book!.id;
+      && audioPlayback.bootstrap.edition.workId === book!.id
+      && (!volumeId || audioPlayback.bootstrap.volumeId === volumeId);
     if (chapterId && alreadyLoaded) {
       audioPlayback.selectChapter(chapterId, true);
     } else {
       void audioPlayback.loadEdition(editionId, {
         autoplay: true,
+        volumeId,
         chapterId: chapterId && !alreadyLoaded ? chapterId : undefined,
         summary: {
           editionId,
@@ -1170,7 +1173,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
               icon={PrimaryActionIcon}
               onClick={() => {
                 if (!readerUrl) return;
-                if (currentTab === 'AUDIOBOOK' && readerEditionId) startAudioEdition(readerEditionId);
+                if (currentTab === 'AUDIOBOOK' && readerEditionId) startAudioEdition(readerEditionId, undefined, undefined, activeVolumeId);
                 else router.push(readerUrl);
               }}
               className="!h-12 !min-h-12 w-full !rounded-xl !bg-[#ff4f26] !px-8 !text-base !text-white hover:!bg-[#e84420] sm:flex-1 xl:!flex-none xl:w-full"
@@ -1359,14 +1362,14 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                     triggerClassName="!rounded-xl !border-[#ead8cf] !shadow-none"
                   />
                 ) : null}
-                {hasChapterNavigation && hasVolumeSections ? (
-                  <div className="flex flex-wrap gap-2">
-                  {volumeSections.map((volume) => (
-                    <button key={volume.id} type="button" onClick={() => selectChapterVolume(volume.id)} className={cn('rounded-full border px-4 py-2 text-sm transition', volume.id === activeVolumeId ? 'border-orange-200 bg-[#fff4ef] text-[#e84420]' : 'border-stone-200 text-stone-600 hover:border-stone-300')}>
-                      {volume.title}
-                    </button>
-                  ))}
-                  </div>
+                {(hasChapterNavigation || hasAudioNavigation) && hasVolumeSections ? (
+                  <VolumeSelect
+                    items={volumeSections.map((volume) => ({ id: volume.id, title: volume.title }))}
+                    value={activeVolumeId}
+                    onChange={selectChapterVolume}
+                    disabled={chapterLoading}
+                    className="w-full min-w-[260px] sm:w-[360px]"
+                  />
                 ) : null}
               </div>
             </div>
@@ -1397,7 +1400,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                         key={unit.id}
                         type="button"
                         disabled={!readerEditionId}
-                        onClick={() => readerEditionId && startAudioEdition(readerEditionId, unit.id, unit.title)}
+                        onClick={() => readerEditionId && startAudioEdition(readerEditionId, unit.id, unit.title, activeVolumeId)}
                         className={cn(
                           'grid min-h-14 w-full grid-cols-[42px_minmax(0,1fr)_72px_28px] items-center gap-3 px-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-50 sm:grid-cols-[48px_minmax(0,1fr)_100px_28px]',
                           current ? 'bg-[#fff4ef] text-[#e84420]' : 'hover:bg-stone-50'
@@ -1458,7 +1461,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
               ) : (
                 <button type="button" disabled={!readerUrl} onClick={() => {
                   if (!readerUrl) return;
-                  if (hasAudioNavigation && readerEditionId) startAudioEdition(readerEditionId);
+                  if (hasAudioNavigation && readerEditionId) startAudioEdition(readerEditionId, undefined, undefined, activeVolumeId);
                   else router.push(readerUrl);
                 }} className="flex w-full items-center justify-between rounded-xl border border-stone-200 px-4 py-4 text-left text-sm text-stone-600 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50">
                   <span>{hasAudioNavigation ? i18nAttribute("打开迷你播放器查看音轨与章节") : i18nAttribute("在阅读器中查看内容")}</span><ChevronRight size={17} />

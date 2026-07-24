@@ -26,6 +26,7 @@ import { useAudioPlayback } from '../../features/audio/audio-playback-provider';
 import { AUDIO_PLAYBACK_RATE_OPTIONS } from '../../lib/audio-device-preferences';
 import { withBasePath } from '../../lib/base-path';
 import { cn } from '../ui/cn';
+import { VolumeSelect } from '../ui/volume-select';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
@@ -205,6 +206,18 @@ export function AudioMiniPlayer() {
               <X size={17} />
             </button>
           </header>
+          {bootstrap.volumes.length > 1 ? (
+            <div className="border-b border-black/[0.07] px-4 py-2.5">
+              <VolumeSelect
+                items={bootstrap.volumes.map((volume) => ({ id: volume.id, title: volume.title }))}
+                value={bootstrap.volumeId}
+                onChange={(volumeId) => void player.loadEdition(bootstrap.edition.id, { volumeId })}
+                disabled={Boolean(player.pendingEditionId)}
+                compact
+                className="w-full"
+              />
+            </div>
+          ) : null}
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
             {chapterItems.map((item, index) => (
               <button
