@@ -58,6 +58,26 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         if setup.status_code == 409:
             pytest.skip("the configured PostgreSQL database is not an isolated test database")
         assert setup.status_code == 201, setup.text
+        assert client.get("/api/v2/auth/setup/status").json() == {"required": False}
+        assert (
+            client.post(
+                "/api/v2/auth/setup",
+                json={
+                    "email": f"second-{email}",
+                    "displayName": "Second Administrator",
+                    "password": "correct horse battery staple",
+                    "locale": "en-US",
+                },
+            ).status_code
+            == 409
+        )
+        assert (
+            client.post(
+                "/api/v2/auth/login",
+                json={"email": email, "password": "definitely incorrect"},
+            ).status_code
+            == 401
+        )
         created = client.post(
             "/api/v2/catalog/works",
             json={
@@ -78,6 +98,22 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         account = client.get("/api/v2/account")
         assert account.status_code == 200
         account_id = account.json()["id"]
+        account_update = client.patch(
+            "/api/v2/account",
+            json={"displayName": "Updated Integration Admin", "locale": "zh-CN"},
+        )
+        assert account_update.status_code == 200, account_update.text
+        assert account_update.json()["displayName"] == "Updated Integration Admin"
+        assert (
+            client.patch(
+                "/api/v2/account",
+                json={
+                    "password": "replacement administrator password",
+                    "currentPassword": "incorrect current password",
+                },
+            ).status_code
+            == 403
+        )
         preferences = client.patch(
             "/api/v2/account/preferences",
             json={"values": {"libraryView": "grid", "pageSize": 24}},
@@ -96,6 +132,26 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
             },
         )
         assert member.status_code == 201, member.text
+        assert (
+            client.post(
+                "/api/v2/admin/users",
+                json={
+                    "email": member.json()["email"],
+                    "displayName": "Duplicate Integration Member",
+                    "password": "another correct horse battery staple",
+                    "locale": "zh-CN",
+                    "role": "member",
+                },
+            ).status_code
+            == 409
+        )
+        assert (
+            client.patch(
+                "/api/v2/account",
+                json={"email": member.json()["email"]},
+            ).status_code
+            == 409
+        )
         users = client.get("/api/v2/admin/users?pageSize=10")
         assert users.status_code == 200
         assert users.json()["total"] == 2
@@ -117,6 +173,30 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         )
         assert enabled_member.status_code == 200, enabled_member.text
         assert enabled_member.json()["displayName"] == "Managed Integration Member"
+        missing_account_id = uuid.uuid4()
+        assert (
+            client.patch(
+                f"/api/v2/admin/users/{account_id}",
+                json={"disabled": True},
+            ).status_code
+            == 409
+        )
+        assert (
+            client.patch(
+                f"/api/v2/admin/users/{missing_account_id}",
+                json={"displayName": "Missing Account"},
+            ).status_code
+            == 404
+        )
+        assert (
+            client.put(
+                f"/api/v2/admin/users/{missing_account_id}/password",
+                json={"password": "missing account password"},
+            ).status_code
+            == 404
+        )
+        assert client.delete(f"/api/v2/admin/users/{account_id}").status_code == 409
+        assert client.delete(f"/api/v2/admin/users/{missing_account_id}").status_code == 404
         managed_password = "managed member password value"
         assert (
             client.put(
@@ -210,6 +290,16 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         assert work_update.status_code == 200, work_update.text
         assert work_update.json()["title"] == "Updated Architecture Test Book"
         assert client.get(f"/api/v2/catalog/works/{created.json()['id']}").status_code == 200
+        missing_catalog_id = uuid.uuid4()
+        assert client.get(f"/api/v2/catalog/works/{missing_catalog_id}").status_code == 404
+        assert (
+            client.patch(
+                f"/api/v2/catalog/works/{missing_catalog_id}",
+                json={"title": "Missing Work"},
+            ).status_code
+            == 404
+        )
+        assert client.delete(f"/api/v2/catalog/works/{missing_catalog_id}").status_code == 404
         series = client.get("/api/v2/catalog/series?pageSize=10")
         assert series.status_code == 200
         assert series.json()["items"][0]["name"] == "Integration Series"
@@ -240,8 +330,48 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
             },
         )
         assert shelf_update.status_code == 200, shelf_update.text
+        assert client.get(f"/api/v2/catalog/shelves/{missing_catalog_id}").status_code == 404
+        assert (
+            client.patch(
+                f"/api/v2/catalog/shelves/{missing_catalog_id}",
+                json={"name": "Missing Shelf"},
+            ).status_code
+            == 404
+        )
+        assert (
+            client.put(
+                f"/api/v2/catalog/shelves/{missing_catalog_id}/works/{created.json()['id']}"
+            ).status_code
+            == 404
+        )
+        assert (
+            client.delete(
+                f"/api/v2/catalog/shelves/{missing_catalog_id}/works/{created.json()['id']}"
+            ).status_code
+            == 404
+        )
+        assert client.delete(f"/api/v2/catalog/shelves/{missing_catalog_id}").status_code == 404
         categories = client.get("/api/v2/catalog/categories?kind=TAG&pageSize=10")
         assert categories.status_code == 200
+        assert (
+            client.patch(
+                f"/api/v2/catalog/categories/{missing_catalog_id}",
+                json={"name": "Missing Category"},
+            ).status_code
+            == 404
+        )
+        assert (
+            client.post(
+                "/api/v2/catalog/categories/merge",
+                json={
+                    "kind": "TAG",
+                    "targetId": str(missing_catalog_id),
+                    "sourceIds": [str(uuid.uuid4())],
+                },
+            ).status_code
+            == 404
+        )
+        assert client.delete(f"/api/v2/catalog/categories/{missing_catalog_id}").status_code == 404
 
         monitor = tmp_path / "monitor"
         monitored = monitor / "library"
@@ -303,6 +433,33 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         assert bootstrap.status_code == 200, bootstrap.text
         assert bootstrap.json()["accountId"] == account_id
         assert len(bootstrap.json()["files"]) == 1
+        missing_reading_id = uuid.uuid4()
+        assert (
+            client.get(f"/api/v2/reading/editions/{missing_reading_id}/bootstrap").status_code
+            == 404
+        )
+        assert (
+            client.get(f"/api/v2/reading/editions/{missing_reading_id}/resource").status_code == 404
+        )
+        assert (
+            client.get(
+                f"/api/v2/reading/editions/{edition_id}/resource",
+                headers={"Range": "items=0-1"},
+            ).status_code
+            == 416
+        )
+        assert client.get(f"/api/v2/reading/files/{missing_reading_id}").status_code == 404
+        assert (
+            client.get(
+                f"/api/v2/reading/files/{bootstrap.json()['target']['fileId']}",
+                headers={"Range": "items=0-1"},
+            ).status_code
+            == 416
+        )
+        assert client.get(f"/api/v2/reading/volumes/{missing_reading_id}/pages").status_code == 404
+        assert (
+            client.get(f"/api/v2/reading/volumes/{missing_reading_id}/pages/0").status_code == 404
+        )
         imported_detail = client.get(
             f"/api/v2/catalog/works/{bootstrap.json()['target']['workId']}"
         )
