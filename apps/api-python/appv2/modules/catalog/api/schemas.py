@@ -121,6 +121,54 @@ class UpdateWorkRequest(CamelModel):
     metadata: dict[str, object] | None = None
 
 
+class UpdateEditionRequest(CamelModel):
+    version_name: str | None = Field(default=None, min_length=1, max_length=500)
+    publisher: str | None = Field(default=None, max_length=500)
+    published_at: str | None = Field(default=None, max_length=40)
+    language: str | None = Field(default=None, max_length=20)
+    isbn: str | None = Field(default=None, max_length=100)
+    identifier: str | None = Field(default=None, max_length=500)
+    narrator: str | None = Field(default=None, max_length=500)
+    description: str | None = None
+
+    def metadata_patch(self) -> dict[str, object]:
+        values: dict[str, object | None] = {
+            "publisher": self.publisher,
+            "publishedAt": self.published_at,
+            "isbn": self.isbn,
+            "identifier": self.identifier,
+            "narrator": self.narrator,
+            "description": self.description,
+        }
+        return {key: value for key, value in values.items() if value is not None}
+
+
+class SplitEditionRequest(CamelModel):
+    title: str = Field(min_length=1, max_length=500)
+    author: str | None = Field(default=None, max_length=500)
+    copy_shelves: bool = True
+
+
+class SplitEditionResponse(CamelModel):
+    new_work_id: uuid.UUID
+
+
+class MoveVolumeRequest(CamelModel):
+    direction: Literal["up", "down"]
+
+
+class MoveVolumeToRequest(CamelModel):
+    target_edition_id: uuid.UUID
+
+
+class VolumeTransferResponse(CamelModel):
+    transfer_mode: Literal[
+        "MERGED_VOLUME",
+        "ADDED_MEDIA",
+        "ADDED_BACKUP_EDITION",
+    ] = "MERGED_VOLUME"
+
+
 class ShelfResponse(CamelModel):
     id: uuid.UUID
     owner_id: uuid.UUID

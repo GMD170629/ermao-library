@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -148,7 +149,10 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         assert (
             client.patch(
                 "/api/v2/account",
-                json={"email": member.json()["email"]},
+                json={
+                    "email": member.json()["email"],
+                    "currentPassword": "correct horse battery staple",
+                },
             ).status_code
             == 409
         )
@@ -468,6 +472,168 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
             imported_detail.json()["editions"][0]["files"][0]["id"]
             == (bootstrap.json()["target"]["fileId"])
         )
+        imported_work_id = bootstrap.json()["target"]["workId"]
+        edition_update = client.patch(
+            f"/api/v2/catalog/works/{imported_work_id}/editions/{edition_id}",
+            json={
+                "versionName": "Integration Text Edition",
+                "publisher": "Shuku Test Press",
+                "publishedAt": "2026-07-25",
+                "language": "en-US",
+                "identifier": "integration-edition",
+                "description": "Edition metadata contract",
+            },
+        )
+        assert edition_update.status_code == 200, edition_update.text
+        assert edition_update.json()["title"] == "Integration Text Edition"
+        assert edition_update.json()["metadata"]["publisher"] == "Shuku Test Press"
+        assert (
+            client.post(
+                f"/api/v2/catalog/works/{imported_work_id}/editions/{edition_id}/primary"
+            ).status_code
+            == 204
+        )
+        assert (
+            client.post(
+                f"/api/v2/catalog/works/{imported_work_id}/editions/{edition_id}/split",
+                json={
+                    "title": "Cannot Split Only Edition",
+                    "author": "Integration",
+                    "copyShelves": True,
+                },
+            ).status_code
+            == 404
+        )
+        assert (
+            client.patch(
+                f"/api/v2/catalog/works/{imported_work_id}/editions/{missing_reading_id}",
+                json={"versionName": "Missing Edition"},
+            ).status_code
+            == 404
+        )
+        assert (
+            client.post(
+                f"/api/v2/catalog/works/{imported_work_id}/editions/{missing_reading_id}/primary"
+            ).status_code
+            == 404
+        )
+        assert (
+            client.post(
+                f"/api/v2/catalog/works/{imported_work_id}/volumes/{missing_reading_id}/move",
+                json={"direction": "up"},
+            ).status_code
+            == 404
+        )
+        assert (
+            client.post(
+                f"/api/v2/catalog/works/{imported_work_id}/volumes/{missing_reading_id}/move-to",
+                json={"targetEditionId": edition_id},
+            ).status_code
+            == 404
+        )
+        secondary_edition_id = uuid.uuid4()
+        first_volume_id = uuid.uuid4()
+        second_volume_id = uuid.uuid4()
+        now = datetime.now(UTC)
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO catalog.editions
+                        (id, work_id, title, format, language, is_primary, metadata,
+                         created_at, updated_at)
+                    VALUES
+                        (:id, :work_id, :title, 'txt', 'en-US', false,
+                         CAST(:metadata AS jsonb), :created_at, :updated_at)
+                    """
+                ),
+                {
+                    "id": secondary_edition_id,
+                    "work_id": uuid.UUID(imported_work_id),
+                    "title": "Secondary Integration Edition",
+                    "metadata": "{}",
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO catalog.volumes
+                        (id, edition_id, title, sort_order, page_count, duration_ms,
+                         created_at, updated_at)
+                    VALUES
+                        (:first_id, :edition_id, 'First volume', 0, 10, NULL,
+                         :created_at, :updated_at),
+                        (:second_id, :edition_id, 'Second volume', 1, 20, NULL,
+                         :created_at, :updated_at)
+                    """
+                ),
+                {
+                    "first_id": first_volume_id,
+                    "second_id": second_volume_id,
+                    "edition_id": secondary_edition_id,
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            )
+        assert (
+            client.post(
+                f"/api/v2/catalog/works/{imported_work_id}/editions/{secondary_edition_id}/primary"
+            ).status_code
+            == 204
+        )
+        primary_detail = client.get(f"/api/v2/catalog/works/{imported_work_id}").json()
+        assert next(
+            edition
+            for edition in primary_detail["editions"]
+            if edition["id"] == str(secondary_edition_id)
+        )["primary"]
+        assert (
+            client.post(
+                f"/api/v2/catalog/works/{imported_work_id}/volumes/{first_volume_id}/move",
+                json={"direction": "down"},
+            ).status_code
+            == 204
+        )
+        reordered_detail = client.get(f"/api/v2/catalog/works/{imported_work_id}").json()
+        reordered_volumes = next(
+            edition["volumes"]
+            for edition in reordered_detail["editions"]
+            if edition["id"] == str(secondary_edition_id)
+        )
+        assert [volume["id"] for volume in reordered_volumes] == [
+            str(second_volume_id),
+            str(first_volume_id),
+        ]
+        moved_volume = client.post(
+            f"/api/v2/catalog/works/{imported_work_id}/volumes/{first_volume_id}/move-to",
+            json={"targetEditionId": edition_id},
+        )
+        assert moved_volume.status_code == 200, moved_volume.text
+        assert moved_volume.json()["transferMode"] == "MERGED_VOLUME"
+        assert (
+            client.put(
+                f"/api/v2/catalog/shelves/{shelf.json()['id']}/works/{imported_work_id}"
+            ).status_code
+            == 204
+        )
+        split = client.post(
+            f"/api/v2/catalog/works/{imported_work_id}/editions/{secondary_edition_id}/split",
+            json={
+                "title": "Split Integration Work",
+                "author": "Integration",
+                "copyShelves": True,
+            },
+        )
+        assert split.status_code == 201, split.text
+        split_work_id = split.json()["newWorkId"]
+        split_detail = client.get(f"/api/v2/catalog/works/{split_work_id}")
+        assert split_detail.status_code == 200
+        assert split_detail.json()["editions"][0]["id"] == str(secondary_edition_id)
+        split_shelf = client.get(f"/api/v2/catalog/shelves/{shelf.json()['id']}")
+        assert split_shelf.status_code == 200
+        assert split_work_id in split_shelf.json()["bookIds"]
         progress = client.put(
             f"/api/v2/reading/editions/{edition_id}/progress",
             json={

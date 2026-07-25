@@ -136,6 +136,98 @@ def test_catalog_service_complete_success_and_failure_surface() -> None:
     with pytest.raises(CatalogNotFound):
         service.get_file(uuid.uuid4())
 
+    repository.update_edition.return_value = edition
+    assert (
+        service.update_edition(
+            work_id,
+            edition_id,
+            title="  Revised Edition ",
+            language="en-US",
+            metadata={"publisher": "Shuku"},
+        )
+        is edition
+    )
+    repository.update_edition.assert_called_with(
+        work_id,
+        edition_id,
+        title="Revised Edition",
+        language="en-US",
+        metadata={"publisher": "Shuku"},
+    )
+    with pytest.raises(ValueError, match="edition title"):
+        service.update_edition(
+            work_id,
+            edition_id,
+            title=" ",
+            language=None,
+            metadata=None,
+        )
+    repository.update_edition.return_value = None
+    with pytest.raises(CatalogNotFound):
+        service.update_edition(
+            work_id,
+            edition_id,
+            title=None,
+            language=None,
+            metadata=None,
+        )
+
+    repository.set_primary_edition.return_value = True
+    service.set_primary_edition(work_id, edition_id)
+    repository.set_primary_edition.return_value = False
+    with pytest.raises(CatalogNotFound):
+        service.set_primary_edition(work_id, edition_id)
+
+    new_work_id = uuid.uuid4()
+    repository.split_edition.return_value = new_work_id
+    assert (
+        service.split_edition(
+            work_id,
+            edition_id,
+            title="  Independent Work ",
+            author="Author",
+            copy_shelves=True,
+        )
+        == new_work_id
+    )
+    with pytest.raises(ValueError, match="work title"):
+        service.split_edition(
+            work_id,
+            edition_id,
+            title=" ",
+            author=None,
+            copy_shelves=False,
+        )
+    repository.split_edition.return_value = None
+    with pytest.raises(CatalogNotFound):
+        service.split_edition(
+            work_id,
+            edition_id,
+            title="Independent Work",
+            author=None,
+            copy_shelves=False,
+        )
+
+    volume_id = uuid.uuid4()
+    repository.move_volume.return_value = True
+    service.move_volume(work_id, volume_id, direction="up")
+    repository.move_volume.return_value = False
+    with pytest.raises(CatalogNotFound):
+        service.move_volume(work_id, volume_id, direction="down")
+    repository.move_volume_to.return_value = True
+    service.move_volume_to(
+        work_id,
+        volume_id,
+        target_edition_id=edition_id,
+    )
+    repository.move_volume_to.return_value = False
+    with pytest.raises(CatalogNotFound):
+        service.move_volume_to(
+            work_id,
+            volume_id,
+            target_edition_id=edition_id,
+        )
+
     imported = CatalogImport(
         title="Imported",
         author=None,

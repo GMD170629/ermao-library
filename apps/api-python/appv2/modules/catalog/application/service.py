@@ -143,6 +143,94 @@ class CatalogService:
                 raise CatalogNotFound
             return file
 
+    def update_edition(
+        self,
+        work_id: uuid.UUID,
+        edition_id: uuid.UUID,
+        *,
+        title: str | None,
+        language: str | None,
+        metadata: dict[str, object] | None,
+    ) -> CatalogEdition:
+        normalized_title = " ".join(title.split()) if title is not None else None
+        if normalized_title == "":
+            raise ValueError("edition title cannot be empty")
+        with self._uow_factory() as uow:
+            edition = uow.catalog.update_edition(
+                work_id,
+                edition_id,
+                title=normalized_title,
+                language=language,
+                metadata=metadata,
+            )
+            if edition is None:
+                raise CatalogNotFound
+            uow.commit()
+            return edition
+
+    def set_primary_edition(self, work_id: uuid.UUID, edition_id: uuid.UUID) -> None:
+        with self._uow_factory() as uow:
+            if not uow.catalog.set_primary_edition(work_id, edition_id):
+                raise CatalogNotFound
+            uow.commit()
+
+    def split_edition(
+        self,
+        work_id: uuid.UUID,
+        edition_id: uuid.UUID,
+        *,
+        title: str,
+        author: str | None,
+        copy_shelves: bool,
+    ) -> uuid.UUID:
+        normalized_title = " ".join(title.split())
+        if not normalized_title:
+            raise ValueError("work title cannot be empty")
+        with self._uow_factory() as uow:
+            new_work_id = uow.catalog.split_edition(
+                work_id,
+                edition_id,
+                title=normalized_title,
+                author=author,
+                copy_shelves=copy_shelves,
+            )
+            if new_work_id is None:
+                raise CatalogNotFound
+            uow.commit()
+            return new_work_id
+
+    def move_volume(
+        self,
+        work_id: uuid.UUID,
+        volume_id: uuid.UUID,
+        *,
+        direction: str,
+    ) -> None:
+        with self._uow_factory() as uow:
+            if not uow.catalog.move_volume(
+                work_id,
+                volume_id,
+                direction=direction,
+            ):
+                raise CatalogNotFound
+            uow.commit()
+
+    def move_volume_to(
+        self,
+        work_id: uuid.UUID,
+        volume_id: uuid.UUID,
+        *,
+        target_edition_id: uuid.UUID,
+    ) -> None:
+        with self._uow_factory() as uow:
+            if not uow.catalog.move_volume_to(
+                work_id,
+                volume_id,
+                target_edition_id=target_edition_id,
+            ):
+                raise CatalogNotFound
+            uow.commit()
+
     def import_file(self, imported: CatalogImport) -> CatalogEdition:
         with self._uow_factory() as uow:
             edition = uow.catalog.import_file(imported)

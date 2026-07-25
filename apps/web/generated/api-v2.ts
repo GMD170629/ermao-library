@@ -215,6 +215,19 @@ export type EditionDetailResponse = {
   volumes: Array<VolumeResponse>;
 };
 
+export type EditionResponse = {
+  id: string;
+  workId: string;
+  title: string;
+  format: string;
+  language: string | null;
+  primary: boolean;
+  metadata: {
+    [key: string]: unknown;
+  };
+  createdAt: string;
+};
+
 export type EmailSettingsRequest = {
   host: string;
   port: number;
@@ -424,6 +437,14 @@ export type MetadataJobResponse = {
   errorCode: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type MoveVolumeRequest = {
+  direction: "up" | "down";
+};
+
+export type MoveVolumeToRequest = {
+  targetEditionId: string;
 };
 
 export type Page_AccountResponse_ = {
@@ -853,6 +874,16 @@ export type SourceUpdate = {
   } | null;
 };
 
+export type SplitEditionRequest = {
+  title: string;
+  author?: string | null;
+  copyShelves?: boolean;
+};
+
+export type SplitEditionResponse = {
+  newWorkId: string;
+};
+
 export type UpdateAccountPreferences = {
   values: {
     [key: string]: unknown;
@@ -865,6 +896,17 @@ export type UpdateAccountRequest = {
   password?: string | null;
   currentPassword?: string | null;
   locale?: "zh-CN" | "en-US" | null;
+};
+
+export type UpdateEditionRequest = {
+  versionName?: string | null;
+  publisher?: string | null;
+  publishedAt?: string | null;
+  language?: string | null;
+  isbn?: string | null;
+  identifier?: string | null;
+  narrator?: string | null;
+  description?: string | null;
 };
 
 export type UpdateWorkRequest = {
@@ -884,6 +926,10 @@ export type VolumeResponse = {
   sortOrder: number;
   pageCount: number | null;
   durationMs: number | null;
+};
+
+export type VolumeTransferResponse = {
+  transferMode?: "MERGED_VOLUME" | "ADDED_MEDIA" | "ADDED_BACKUP_EDITION";
 };
 
 export type WorkDetailResponse = {
@@ -966,6 +1012,21 @@ export interface ApiV2Paths {
     get: { request: never; query: never; response: WorkDetailResponse };
     patch: { request: UpdateWorkRequest; query: never; response: WorkResponse };
     delete: { request: never; query: never; response: void };
+  };
+  "/api/v2/catalog/works/{work_id}/editions/{edition_id}": {
+    patch: { request: UpdateEditionRequest; query: never; response: EditionResponse };
+  };
+  "/api/v2/catalog/works/{work_id}/editions/{edition_id}/primary": {
+    post: { request: never; query: never; response: void };
+  };
+  "/api/v2/catalog/works/{work_id}/editions/{edition_id}/split": {
+    post: { request: SplitEditionRequest; query: never; response: SplitEditionResponse };
+  };
+  "/api/v2/catalog/works/{work_id}/volumes/{volume_id}/move": {
+    post: { request: MoveVolumeRequest; query: never; response: void };
+  };
+  "/api/v2/catalog/works/{work_id}/volumes/{volume_id}/move-to": {
+    post: { request: MoveVolumeToRequest; query: never; response: VolumeTransferResponse };
   };
   "/api/v2/catalog/shelves": {
     get: { request: never; query: never; response: Page_ShelfResponse_ };

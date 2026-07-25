@@ -223,6 +223,207 @@ class SqlCatalogRepository(CatalogRepository):
     def files_for_edition(self, edition_id: uuid.UUID) -> list[CatalogFile]:
         return self.list_files(edition_id)
 
+    def update_edition(
+        self,
+        work_id: uuid.UUID,
+        edition_id: uuid.UUID,
+        *,
+        title: str | None,
+        language: str | None,
+        metadata: dict[str, object] | None,
+    ) -> CatalogEdition | None:
+        record = self._session.scalar(
+            select(EditionRecord).where(
+                EditionRecord.id == edition_id,
+                EditionRecord.work_id == work_id,
+            )
+        )
+        if record is None:
+            return None
+        if title is not None:
+            record.title = title
+        if language is not None:
+            record.language = language or None
+        if metadata is not None:
+            merged = dict(record.metadata_json)
+            merged.update(metadata)
+            record.metadata_json = merged
+        self._session.flush()
+        return _edition(record)
+
+    def set_primary_edition(self, work_id: uuid.UUID, edition_id: uuid.UUID) -> bool:
+        selected = self._session.scalar(
+            select(EditionRecord).where(
+                EditionRecord.id == edition_id,
+                EditionRecord.work_id == work_id,
+            )
+        )
+        if selected is None:
+            return False
+        editions = self._session.scalars(
+            select(EditionRecord).where(EditionRecord.work_id == work_id)
+        ).all()
+        for edition in editions:
+            edition.is_primary = edition.id == edition_id
+        self._session.flush()
+        return True
+
+    def split_edition(
+        self,
+        work_id: uuid.UUID,
+        edition_id: uuid.UUID,
+        *,
+        title: str,
+        author: str | None,
+        copy_shelves: bool,
+    ) -> uuid.UUID | None:
+        source_work = self._session.get(WorkRecord, work_id)
+        edition = self._session.scalar(
+            select(EditionRecord).where(
+                EditionRecord.id == edition_id,
+                EditionRecord.work_id == work_id,
+            )
+        )
+        if source_work is None or edition is None:
+            return None
+        edition_count = int(
+            self._session.scalar(
+                select(func.count())
+                .select_from(EditionRecord)
+                .where(EditionRecord.work_id == work_id)
+            )
+            or 0
+        )
+        if edition_count < 2:
+            return None
+        new_work = WorkRecord(
+            title=title,
+            sort_title=title.casefold(),
+            author=author,
+            summary=source_work.summary,
+            media_type=source_work.media_type,
+            status="active",
+            metadata_json=dict(source_work.metadata_json),
+        )
+        self._session.add(new_work)
+        self._session.flush()
+        was_primary = edition.is_primary
+        edition.work_id = new_work.id
+        edition.is_primary = True
+        if was_primary:
+            replacement = self._session.scalar(
+                select(EditionRecord)
+                .where(
+                    EditionRecord.work_id == work_id,
+                    EditionRecord.id != edition_id,
+                )
+                .order_by(EditionRecord.created_at, EditionRecord.id)
+                .limit(1)
+            )
+            if replacement is not None:
+                replacement.is_primary = True
+        if copy_shelves:
+            shelf_items = self._session.scalars(
+                select(ShelfItemRecord).where(ShelfItemRecord.work_id == work_id)
+            ).all()
+            self._session.add_all(
+                ShelfItemRecord(
+                    shelf_id=item.shelf_id,
+                    work_id=new_work.id,
+                    sort_order=item.sort_order + 1,
+                )
+                for item in shelf_items
+            )
+        self._session.flush()
+        return new_work.id
+
+    def move_volume(
+        self,
+        work_id: uuid.UUID,
+        volume_id: uuid.UUID,
+        *,
+        direction: str,
+    ) -> bool:
+        volume = self._session.scalar(
+            select(VolumeRecord)
+            .join(EditionRecord, EditionRecord.id == VolumeRecord.edition_id)
+            .where(
+                VolumeRecord.id == volume_id,
+                EditionRecord.work_id == work_id,
+            )
+        )
+        if volume is None:
+            return False
+        comparison = (
+            VolumeRecord.sort_order < volume.sort_order
+            if direction == "up"
+            else VolumeRecord.sort_order > volume.sort_order
+        )
+        ordering = (
+            VolumeRecord.sort_order.desc() if direction == "up" else VolumeRecord.sort_order.asc()
+        )
+        neighbor = self._session.scalar(
+            select(VolumeRecord)
+            .where(
+                VolumeRecord.edition_id == volume.edition_id,
+                comparison,
+            )
+            .order_by(ordering, VolumeRecord.id)
+            .limit(1)
+        )
+        if neighbor is None:
+            return True
+        current_order = volume.sort_order
+        neighbor_order = neighbor.sort_order
+        volume.sort_order = -2_147_483_648
+        self._session.flush()
+        neighbor.sort_order = current_order
+        self._session.flush()
+        volume.sort_order = neighbor_order
+        self._session.flush()
+        return True
+
+    def move_volume_to(
+        self,
+        work_id: uuid.UUID,
+        volume_id: uuid.UUID,
+        *,
+        target_edition_id: uuid.UUID,
+    ) -> bool:
+        volume = self._session.scalar(
+            select(VolumeRecord)
+            .join(EditionRecord, EditionRecord.id == VolumeRecord.edition_id)
+            .where(
+                VolumeRecord.id == volume_id,
+                EditionRecord.work_id == work_id,
+            )
+        )
+        target = self._session.get(EditionRecord, target_edition_id)
+        if volume is None or target is None:
+            return False
+        if volume.edition_id == target_edition_id:
+            return True
+        next_order = (
+            int(
+                self._session.scalar(
+                    select(func.coalesce(func.max(VolumeRecord.sort_order), -1)).where(
+                        VolumeRecord.edition_id == target_edition_id
+                    )
+                )
+                or 0
+            )
+            + 1
+        )
+        volume.edition_id = target_edition_id
+        volume.sort_order = next_order
+        files = self._session.scalars(
+            select(FileRecord).where(FileRecord.volume_id == volume_id)
+        ).all()
+        for file in files:
+            file.edition_id = target_edition_id
+        self._session.flush()
+        return True
+
     def add_work(
         self,
         *,

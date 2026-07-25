@@ -173,6 +173,44 @@ class CatalogRepository(CatalogReadPort, CatalogImportPort, CatalogMetadataPort,
 
     def list_volumes(self, edition_id: uuid.UUID) -> list[CatalogVolume]: ...
 
+    def update_edition(
+        self,
+        work_id: uuid.UUID,
+        edition_id: uuid.UUID,
+        *,
+        title: str | None,
+        language: str | None,
+        metadata: dict[str, object] | None,
+    ) -> CatalogEdition | None: ...
+
+    def set_primary_edition(self, work_id: uuid.UUID, edition_id: uuid.UUID) -> bool: ...
+
+    def split_edition(
+        self,
+        work_id: uuid.UUID,
+        edition_id: uuid.UUID,
+        *,
+        title: str,
+        author: str | None,
+        copy_shelves: bool,
+    ) -> uuid.UUID | None: ...
+
+    def move_volume(
+        self,
+        work_id: uuid.UUID,
+        volume_id: uuid.UUID,
+        *,
+        direction: str,
+    ) -> bool: ...
+
+    def move_volume_to(
+        self,
+        work_id: uuid.UUID,
+        volume_id: uuid.UUID,
+        *,
+        target_edition_id: uuid.UUID,
+    ) -> bool: ...
+
     def list_shelves(self, owner_id: uuid.UUID) -> list[ShelfView]: ...
 
     def get_shelf(self, shelf_id: uuid.UUID, owner_id: uuid.UUID) -> ShelfView | None: ...

@@ -7,6 +7,7 @@ import type {
 } from '../../generated/api-v2';
 import type {
   MediaKind,
+  ReadingStatus,
   ReadingFormat,
   WorkView
 } from '../../types/work';
@@ -67,6 +68,17 @@ function metadataStrings(
     : [];
 }
 
+function readingStatus(metadata: Record<string, unknown>): ReadingStatus {
+  const value = metadata.readingStatus;
+  return value === 'READING' || value === 'FINISHED' ? value : 'UNREAD';
+}
+
+function readingStatusLabel(value: ReadingStatus): string {
+  if (value === 'READING') return '进行中';
+  if (value === 'FINISHED') return '已完成';
+  return '未开始';
+}
+
 function formatBytes(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -120,6 +132,7 @@ export function workResponseToView(
   const primary = detail?.editions.find((edition) => edition.primary) ?? detail?.editions[0];
   const format = readingFormat(primary?.format, kind);
   const metadata = work.metadata;
+  const workReadingStatus = readingStatus(metadata);
   const editions: WorkView['editions'] = (detail?.editions ?? []).map((edition) => {
     const editionMetadata = edition.metadata;
     const files = edition.files.map(fileResponseToView);
@@ -176,8 +189,8 @@ export function workResponseToView(
     format,
     size: formatBytes(files.reduce((total, file) => total + file.sizeBytes, 0)),
     progress: 0,
-    statusValue: 'UNREAD',
-    status: '未开始',
+    statusValue: workReadingStatus,
+    status: readingStatusLabel(workReadingStatus),
     publicationStatusValue: 'UNKNOWN',
     publicationStatus: '未知',
     trackingStatusValue: 'NOT_TRACKING',

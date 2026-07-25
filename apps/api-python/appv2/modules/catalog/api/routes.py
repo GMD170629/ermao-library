@@ -10,10 +10,17 @@ from appv2.modules.accounts.contracts import AccessScope, AccountView, CurrentAc
 from appv2.modules.catalog.api.schemas import (
     CreateWorkRequest,
     EditionDetailResponse,
+    EditionResponse,
+    MoveVolumeRequest,
+    MoveVolumeToRequest,
     ShelfRequest,
     ShelfResponse,
     ShelfUpdateRequest,
+    SplitEditionRequest,
+    SplitEditionResponse,
+    UpdateEditionRequest,
     UpdateWorkRequest,
+    VolumeTransferResponse,
     WorkDetailResponse,
     WorkResponse,
 )
@@ -221,6 +228,109 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
             )
         except CatalogNotFound as error:
             raise not_found(error) from error
+
+    @router.patch(
+        "/works/{work_id}/editions/{edition_id}",
+        response_model=EditionResponse,
+    )
+    def update_edition(
+        work_id: uuid.UUID,
+        edition_id: uuid.UUID,
+        payload: UpdateEditionRequest,
+        actor: Writer,
+    ) -> EditionResponse:
+        del actor
+        try:
+            edition = service.update_edition(
+                work_id,
+                edition_id,
+                title=payload.version_name,
+                language=payload.language,
+                metadata=payload.metadata_patch(),
+            )
+        except CatalogNotFound as error:
+            raise not_found(error) from error
+        return EditionResponse.from_view(edition)
+
+    @router.post(
+        "/works/{work_id}/editions/{edition_id}/primary",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    def set_primary_edition(
+        work_id: uuid.UUID,
+        edition_id: uuid.UUID,
+        actor: Writer,
+    ) -> None:
+        del actor
+        try:
+            service.set_primary_edition(work_id, edition_id)
+        except CatalogNotFound as error:
+            raise not_found(error) from error
+
+    @router.post(
+        "/works/{work_id}/editions/{edition_id}/split",
+        response_model=SplitEditionResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def split_edition(
+        work_id: uuid.UUID,
+        edition_id: uuid.UUID,
+        payload: SplitEditionRequest,
+        actor: Writer,
+    ) -> SplitEditionResponse:
+        del actor
+        try:
+            new_work_id = service.split_edition(
+                work_id,
+                edition_id,
+                title=payload.title,
+                author=payload.author,
+                copy_shelves=payload.copy_shelves,
+            )
+        except CatalogNotFound as error:
+            raise not_found(error) from error
+        return SplitEditionResponse(new_work_id=new_work_id)
+
+    @router.post(
+        "/works/{work_id}/volumes/{volume_id}/move",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    def move_volume(
+        work_id: uuid.UUID,
+        volume_id: uuid.UUID,
+        payload: MoveVolumeRequest,
+        actor: Writer,
+    ) -> None:
+        del actor
+        try:
+            service.move_volume(
+                work_id,
+                volume_id,
+                direction=payload.direction,
+            )
+        except CatalogNotFound as error:
+            raise not_found(error) from error
+
+    @router.post(
+        "/works/{work_id}/volumes/{volume_id}/move-to",
+        response_model=VolumeTransferResponse,
+    )
+    def move_volume_to(
+        work_id: uuid.UUID,
+        volume_id: uuid.UUID,
+        payload: MoveVolumeToRequest,
+        actor: Writer,
+    ) -> VolumeTransferResponse:
+        del actor
+        try:
+            service.move_volume_to(
+                work_id,
+                volume_id,
+                target_edition_id=payload.target_edition_id,
+            )
+        except CatalogNotFound as error:
+            raise not_found(error) from error
+        return VolumeTransferResponse()
 
     @router.get("/shelves", response_model=Page[ShelfResponse])
     def shelves(actor: Actor) -> Page[ShelfResponse]:
