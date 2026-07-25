@@ -132,6 +132,24 @@ class SqlReadingRepository(ReadingRepository):
         self._session.flush()
         return _progress(record)
 
+    def delete_progress(
+        self,
+        *,
+        user_id: uuid.UUID,
+        edition_ids: list[uuid.UUID],
+    ) -> int:
+        if not edition_ids:
+            return 0
+        records = self._session.scalars(
+            select(ProgressRecord).where(
+                ProgressRecord.user_id == user_id,
+                ProgressRecord.edition_id.in_(edition_ids),
+            )
+        ).all()
+        for record in records:
+            self._session.delete(record)
+        return len(records)
+
     def list_bookmarks(self, *, user_id: uuid.UUID, edition_id: uuid.UUID) -> list[BookmarkView]:
         records = self._session.scalars(
             select(BookmarkRecord)

@@ -33,6 +33,36 @@ class LocalCoverStorage(CoverStoragePort):
 
     def store(self, work_id: uuid.UUID, stream: BinaryIO) -> str:
         payload = stream.read(MAX_COVER_BYTES + 1)
+        return self._store_payload(work_id, payload)
+
+    def store_many(
+        self,
+        work_ids: list[uuid.UUID],
+        stream: BinaryIO,
+    ) -> dict[uuid.UUID, str]:
+        payload = stream.read(MAX_COVER_BYTES + 1)
+        replacement_id = uuid.uuid4().hex
+        stored: dict[uuid.UUID, str] = {}
+        try:
+            for work_id in dict.fromkeys(work_ids):
+                stored[work_id] = self._store_payload(
+                    work_id,
+                    payload,
+                    directory=f"{work_id}/replacements/{replacement_id}",
+                )
+        except Exception:
+            for key in stored.values():
+                self.delete(key)
+            raise
+        return stored
+
+    def _store_payload(
+        self,
+        work_id: uuid.UUID,
+        payload: bytes,
+        *,
+        directory: str | None = None,
+    ) -> str:
         if len(payload) > MAX_COVER_BYTES:
             raise InvalidCoverImage("cover image exceeds the 20 MiB limit")
         try:
@@ -45,7 +75,8 @@ class LocalCoverStorage(CoverStoragePort):
                     normalized = normalized.convert(
                         "RGBA" if "transparency" in source.info else "RGB"
                     )
-                target_dir = self._resolve(str(work_id))
+                relative_dir = directory or str(work_id)
+                target_dir = self._resolve(relative_dir)
                 target_dir.mkdir(parents=True, exist_ok=True)
                 for size, bounds in VARIANT_BOUNDS.items():
                     variant = normalized.copy()
@@ -56,7 +87,7 @@ class LocalCoverStorage(CoverStoragePort):
                     os.replace(temporary, destination)
         except (Image.DecompressionBombError, UnidentifiedImageError, OSError) as error:
             raise InvalidCoverImage("cover file is not a supported image") from error
-        return f"{work_id}/cover.webp"
+        return f"{relative_dir}/cover.webp"
 
     def open(self, key: str, size: str) -> CoverResource:
         source = self._resolve(key)

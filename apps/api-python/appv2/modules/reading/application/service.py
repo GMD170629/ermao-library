@@ -11,6 +11,8 @@ from typing import Literal
 from appv2.modules.catalog.contracts import CatalogFile, CatalogReadPort, CatalogVolume
 from appv2.modules.reading.contracts import (
     BookmarkView,
+    BulkProgressResult,
+    BulkProgressSkipped,
     ComicPage,
     PreferenceView,
     ProgressMutation,
@@ -226,6 +228,54 @@ class ReadingService:
                 raise ProgressConflict from error
             uow.commit()
             return progress
+
+    def bulk_set_progress(
+        self,
+        *,
+        user_id: uuid.UUID,
+        work_ids: list[uuid.UUID],
+        status: Literal["UNREAD", "FINISHED"],
+    ) -> BulkProgressResult:
+        skipped: list[BulkProgressSkipped] = []
+        edition_ids: list[uuid.UUID] = []
+        updated = 0
+        for work_id in dict.fromkeys(work_ids):
+            work = self._catalog.get_work(work_id)
+            if work is None:
+                skipped.append(BulkProgressSkipped(work_id, "WORK_NOT_FOUND"))
+                continue
+            editions = self._catalog.editions_for_work(work_id)
+            if not editions:
+                skipped.append(BulkProgressSkipped(work_id, "EDITION_NOT_FOUND"))
+                continue
+            edition_ids.extend(edition.id for edition in editions)
+            updated += 1
+        now = datetime.now(UTC)
+        with self._uow_factory() as uow:
+            if status == "UNREAD":
+                changed_values = uow.reading.delete_progress(
+                    user_id=user_id,
+                    edition_ids=edition_ids,
+                )
+            else:
+                for edition_id in edition_ids:
+                    uow.reading.save_progress(
+                        ProgressMutation(
+                            edition_id=edition_id,
+                            user_id=user_id,
+                            device_id="bulk-status",
+                            position={"kind": "completed"},
+                            percentage=1,
+                            occurred_at=now,
+                        )
+                    )
+                changed_values = len(edition_ids)
+            uow.commit()
+        return BulkProgressResult(
+            updated=updated,
+            changed_values=changed_values,
+            skipped=tuple(skipped),
+        )
 
     def list_bookmarks(self, *, user_id: uuid.UUID, edition_id: uuid.UUID) -> list[BookmarkView]:
         with self._uow_factory() as uow:

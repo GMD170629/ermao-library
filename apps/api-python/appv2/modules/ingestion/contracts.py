@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import BinaryIO, Protocol
 
@@ -14,6 +14,7 @@ class ImportRequest:
     requested_by: uuid.UUID
     idempotency_key: str
     move_source: bool = False
+    options: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +31,7 @@ class IngestionJob:
     kind: str
     status: str
     source_path: str
+    options: dict[str, object]
     attempt: int
     next_attempt_at: datetime
     lease_expires_at: datetime | None
@@ -69,6 +71,7 @@ class PreparedImport:
     title: str
     author: str | None
     media_type: str
+    file_media_type: str
     format: str
     source_path: str
     original_name: str
@@ -81,7 +84,12 @@ class IngestionRepository(Protocol):
     def enqueue(self, request: ImportRequest, *, kind: str = "import") -> ImportResult: ...
 
     def list_jobs(
-        self, *, offset: int, limit: int, status: str | None
+        self,
+        *,
+        offset: int,
+        limit: int,
+        status: str | None,
+        kind: str | None,
     ) -> tuple[list[IngestionJob], int]: ...
 
     def get_job(self, job_id: uuid.UUID) -> IngestionJob | None: ...
@@ -154,3 +162,13 @@ class UploadStoragePort(Protocol):
 
 class ImportPreparationPort(Protocol):
     def prepare(self, source_path: str) -> PreparedImport: ...
+
+
+class ConversionPreparationPort(Protocol):
+    def prepare(
+        self,
+        source_path: str,
+        *,
+        identity: str,
+        language: str | None,
+    ) -> PreparedImport: ...

@@ -1,9 +1,11 @@
 'use client';
 
-import { apiV2Fetch, apiV2Request } from '@/lib/api-v2';
+import { apiV2Request } from '@/lib/api-v2';
 import type {
   AccountResponse,
   EditionResponse,
+  JobAccepted,
+  PreferenceResponse,
   SplitEditionResponse,
   VolumeTransferResponse,
   WorkDetailResponse,
@@ -370,8 +372,10 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
 
   useEffect(() => {
     const controller = new AbortController();
-    apiV2Fetch('/api/v2/account', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
-      .then((response) => response.json() as Promise<AccountResponse>)
+    apiV2Request<AccountResponse>('/api/v2/account', {
+      cache: 'no-store',
+      signal: controller.signal
+    })
       .then((account) => setCanManageSystem(account.scopes.includes('operations:write')))
       .catch(() => undefined);
     return () => controller.abort();
@@ -775,9 +779,11 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setBusyAction(busyKey);
     setError('');
     try {
-      const response = await apiV2Fetch(`/api/v2/catalog/works/${bookId}/editions/${edition.id}/convert`, { method: 'POST' });
-      const payload = (await response.json()) as { ok: boolean; data?: { task?: { id: string } }; error?: { message: string } };
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '加入转换队列失败');
+      await apiV2Request<JobAccepted>('/api/v2/ingestion/conversions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ editionId: edition.id })
+      });
       toast.success('已加入转换队列', '转换完成后会生成可阅读的 EPUB 版本。');
       await loadBook();
     } catch (reason) {
@@ -1023,16 +1029,16 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     preferenceRequestRef.current?.abort();
     const controller = new AbortController();
     preferenceRequestRef.current = controller;
-    void apiV2Fetch(`/api/v2/catalog/works/${bookId}/detail-preference`, {
+    void apiV2Request<PreferenceResponse>('/api/v2/reading/preferences', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ selectedTab: tab }),
+      body: JSON.stringify({
+        scope: 'work',
+        targetId: bookId,
+        values: { selectedTab: tab }
+      }),
       signal: controller.signal,
       keepalive: true
-    }).then(async (response) => {
-      if (response.status === 404 || response.status === 405) return;
-      const payload = (await response.json()) as { ok: boolean; error?: { message?: string } };
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '记忆选项卡失败');
     }).catch((reason) => {
       if (reason instanceof DOMException && reason.name === 'AbortError') return;
       toast.error('没有保存详情页偏好', reason instanceof Error ? reason.message : '下次打开时可能不会恢复此选项卡');

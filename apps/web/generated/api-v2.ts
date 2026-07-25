@@ -54,6 +54,11 @@ export type BackupResponse = {
   updatedAt: string;
 };
 
+export type Body_bulk_cover_api_v2_catalog_works_bulk_cover_post = {
+  workIds: Array<string>;
+  cover: string;
+};
+
 export type Body_upload_api_v2_ingestion_imports_upload_post = {
   file: string;
 };
@@ -92,6 +97,47 @@ export type BootstrapResponse = {
   preference: PreferenceResponse | null;
   files: Array<ReaderFileResponse>;
   volumes: Array<ReaderVolumeResponse>;
+};
+
+export type BulkMetadataRequest = {
+  workIds: Array<string>;
+  author?: string | null;
+  publisher?: string | null;
+  seriesName?: string | null;
+  addTags?: Array<string>;
+  removeTags?: Array<string>;
+};
+
+export type BulkMutationResponse = {
+  updated: number;
+  changedValues: number;
+  skipped: Array<BulkSkippedResponse>;
+};
+
+export type BulkProgressRequest = {
+  workIds: Array<string>;
+  status: "UNREAD" | "FINISHED";
+};
+
+export type BulkProgressResponse = {
+  updated: number;
+  changedValues: number;
+  skipped: Array<BulkProgressSkippedResponse>;
+};
+
+export type BulkProgressSkippedResponse = {
+  workId: string;
+  reason: string;
+};
+
+export type BulkShelfRequest = {
+  workIds: Array<string>;
+  present: boolean;
+};
+
+export type BulkSkippedResponse = {
+  workId: string;
+  reason: string;
 };
 
 export type CandidateResponse = {
@@ -136,6 +182,10 @@ export type ComicPageResponse = {
   title: string;
   mimeType: string;
   size: number;
+};
+
+export type ConversionRequest = {
+  editionId: string;
 };
 
 export type CreateUserRequest = {
@@ -210,6 +260,33 @@ export type DownloadResponse = {
   nextAttemptAt: string;
   destinationPath: string | null;
   errorCode: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DuplicateGroupResponse = {
+  id: string;
+  confidence: number;
+  reasons: Array<string>;
+  works: Array<DuplicateWorkResponse>;
+};
+
+export type DuplicateMergeRequest = {
+  targetWorkId: string;
+  sourceWorkIds: Array<string>;
+};
+
+export type DuplicateWorkResponse = {
+  id: string;
+  title: string;
+  author: string | null;
+  mediaType: string;
+  status: string;
+  coverUrl: string | null;
+  summary: string | null;
+  metadata: {
+    [key: string]: unknown;
+  };
   createdAt: string;
   updatedAt: string;
 };
@@ -331,6 +408,29 @@ export type FileResponse = {
   durationMs: number | null;
 };
 
+export type FindReplaceItemResponse = {
+  workId: string;
+  title: string;
+  before: string | Array<string>;
+  after: string | Array<string>;
+};
+
+export type FindReplacePreviewResponse = {
+  changedWorks: number;
+  changedValues: number;
+  items: Array<FindReplaceItemResponse>;
+};
+
+export type FindReplaceRequest = {
+  workIds: Array<string>;
+  field: "title" | "author" | "description" | "seriesName" | "tags" | "publisher" | "versionName" | "language" | "isbn" | "identifier" | "narrator";
+  find: string;
+  replacement: string;
+  regex?: boolean;
+  caseSensitive?: boolean;
+  startNumber?: number;
+};
+
 export type FolderRequest = {
   path: string;
   recursive?: boolean;
@@ -418,6 +518,15 @@ export type KindleSettingsResponse = {
   options: {
     [key: string]: unknown;
   };
+};
+
+export type LibraryOperationResponse = {
+  id: string;
+  kind: string;
+  status: string;
+  affectedWorks: number;
+  undoAvailable: boolean;
+  createdAt: string;
 };
 
 export type LogSettingsRequest = {
@@ -517,6 +626,13 @@ export type Page_DeliveryJobResponse_ = {
 
 export type Page_DownloadResponse_ = {
   items: Array<DownloadResponse>;
+  page: number;
+  pageSize: number;
+  total: number;
+};
+
+export type Page_DuplicateGroupResponse_ = {
+  items: Array<DuplicateGroupResponse>;
   page: number;
   pageSize: number;
   total: number;
@@ -1034,6 +1150,18 @@ export interface ApiV2Paths {
   "/api/v2/catalog/series": {
     get: { request: never; query: { page?: number; pageSize?: number; visibility?: string }; response: Page_SeriesResponse_ };
   };
+  "/api/v2/catalog/works/bulk/metadata": {
+    post: { request: BulkMetadataRequest; query: never; response: BulkMutationResponse };
+  };
+  "/api/v2/catalog/works/bulk/find-replace/preview": {
+    post: { request: FindReplaceRequest; query: never; response: FindReplacePreviewResponse };
+  };
+  "/api/v2/catalog/works/bulk/find-replace": {
+    post: { request: FindReplaceRequest; query: never; response: BulkMutationResponse };
+  };
+  "/api/v2/catalog/works/bulk/cover": {
+    post: { request: Body_bulk_cover_api_v2_catalog_works_bulk_cover_post; query: never; response: BulkMutationResponse };
+  };
   "/api/v2/catalog/works/{work_id}": {
     get: { request: never; query: never; response: WorkDetailResponse };
     patch: { request: UpdateWorkRequest; query: never; response: WorkResponse };
@@ -1069,6 +1197,9 @@ export interface ApiV2Paths {
     patch: { request: ShelfUpdateRequest; query: never; response: ShelfResponse };
     delete: { request: never; query: never; response: void };
   };
+  "/api/v2/catalog/shelves/{shelf_id}/works/bulk": {
+    post: { request: BulkShelfRequest; query: never; response: BulkMutationResponse };
+  };
   "/api/v2/catalog/shelves/{shelf_id}/works/{work_id}": {
     put: { request: never; query: never; response: void };
     delete: { request: never; query: never; response: void };
@@ -1085,6 +1216,15 @@ export interface ApiV2Paths {
   };
   "/api/v2/catalog/categories/merge": {
     post: { request: CategoryMergeRequest; query: never; response: CategoryResponse };
+  };
+  "/api/v2/catalog/duplicates": {
+    get: { request: never; query: never; response: Page_DuplicateGroupResponse_ };
+  };
+  "/api/v2/catalog/duplicates/merge": {
+    post: { request: DuplicateMergeRequest; query: never; response: LibraryOperationResponse };
+  };
+  "/api/v2/catalog/operations/{operation_id}/undo": {
+    post: { request: never; query: never; response: LibraryOperationResponse };
   };
   "/api/v2/ingestion/imports": {
     get: { request: never; query: { page?: number; pageSize?: number; status?: string | null }; response: Page_JobResponse_ };
@@ -1122,6 +1262,7 @@ export interface ApiV2Paths {
   };
   "/api/v2/ingestion/conversions": {
     get: { request: never; query: { page?: number; pageSize?: number }; response: Page_JobResponse_ };
+    post: { request: ConversionRequest; query: never; response: JobAccepted };
   };
   "/api/v2/metadata/providers": {
     get: { request: never; query: never; response: Page_ProviderResponse_ };
@@ -1171,6 +1312,9 @@ export interface ApiV2Paths {
   "/api/v2/reading/editions/{edition_id}/progress": {
     get: { request: never; query: never; response: ProgressResponse | null };
     put: { request: ProgressRequest; query: never; response: ProgressResponse };
+  };
+  "/api/v2/reading/progress/bulk": {
+    post: { request: BulkProgressRequest; query: never; response: BulkProgressResponse };
   };
   "/api/v2/reading/editions/{edition_id}/bookmarks": {
     get: { request: never; query: never; response: Page_BookmarkResponse_ };

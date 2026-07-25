@@ -1,6 +1,7 @@
 'use client';
 
-import { apiV2Fetch } from '@/lib/api-v2';
+import type { DirectoryNodeResponse, DirectoryTreeResponse } from '@/generated/api-v2';
+import { apiV2Fetch, apiV2Request } from '@/lib/api-v2';
 
 import { CheckCircle2, ChevronDown, ChevronRight, Database, Download, FolderOpen, RotateCcw, Save, Settings2, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -54,22 +55,7 @@ type BackupResource = {
   createdAt: string;
 };
 
-type DirectoryNode = {
-  name: string;
-  path: string;
-  readable: boolean;
-  error?: string | null;
-  children: Array<{
-    name: string;
-    path: string;
-    readable: boolean;
-  }>;
-};
-
-type DirectoryTreePayload = {
-  node: DirectoryNode;
-  monitorRoot?: string | null;
-};
+type DirectoryNode = DirectoryNodeResponse;
 
 type AppSettings = Record<string, string>;
 
@@ -725,18 +711,15 @@ function DirectoryPathPicker({ value, onChange, compact = false }: { value: stri
     setTreeError('');
     try {
       const query = path ? `?path=${encodeURIComponent(path)}` : '';
-      const response = await apiV2Fetch(`/api/v2/ingestion/folders/tree${query}`);
-      const payload = (await response.json()) as { ok: boolean; data?: DirectoryTreePayload; error?: { message: string } };
-      if (!payload.ok || !payload.data?.node) {
-        setTreeError(payload.error?.message ?? '读取目录树失败');
-        return null;
-      }
-      const node = payload.data.node;
-      setMonitorRoot(payload.data.monitorRoot || node.path);
+      const payload = await apiV2Request<DirectoryTreeResponse>(
+        `/api/v2/ingestion/folders/tree${query}`
+      );
+      const node = payload.node;
+      setMonitorRoot(payload.monitorRoot || node.path);
       setNodes((current) => ({ ...current, [node.path]: node }));
       return node;
-    } catch {
-      setTreeError('读取目录树失败');
+    } catch (reason) {
+      setTreeError(reason instanceof Error ? reason.message : '读取目录树失败');
       return null;
     } finally {
       setLoadingPath('');

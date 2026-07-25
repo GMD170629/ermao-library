@@ -7,11 +7,15 @@ from typing import Literal
 from pydantic import Field
 
 from appv2.modules.catalog.contracts import (
+    BulkMutationResult,
     CatalogEdition,
     CatalogEditionDetail,
     CatalogFile,
     CatalogVolume,
     CatalogWork,
+    DuplicateGroupView,
+    FindReplacePreview,
+    LibraryOperationView,
     ShelfView,
 )
 from appv2.platform.http import CamelModel
@@ -199,3 +203,123 @@ class ShelfUpdateRequest(CamelModel):
     rules: dict[str, object] | None = None
     pinned: bool | None = None
     book_ids: list[uuid.UUID] | None = Field(default=None, max_length=10_000)
+
+
+class BulkMetadataRequest(CamelModel):
+    work_ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+    author: str | None = Field(default=None, max_length=500)
+    publisher: str | None = Field(default=None, max_length=500)
+    series_name: str | None = Field(default=None, max_length=500)
+    add_tags: list[str] = Field(default_factory=list, max_length=200)
+    remove_tags: list[str] = Field(default_factory=list, max_length=200)
+
+
+FindReplaceField = Literal[
+    "title",
+    "author",
+    "description",
+    "seriesName",
+    "tags",
+    "publisher",
+    "versionName",
+    "language",
+    "isbn",
+    "identifier",
+    "narrator",
+]
+
+
+class FindReplaceRequest(CamelModel):
+    work_ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+    field: FindReplaceField
+    find: str = Field(min_length=1, max_length=200)
+    replacement: str = Field(max_length=2000)
+    regex: bool = False
+    case_sensitive: bool = False
+    start_number: int = Field(default=1, ge=1, le=1_000_000)
+
+
+class FindReplaceItemResponse(CamelModel):
+    work_id: uuid.UUID
+    title: str
+    before: str | list[str]
+    after: str | list[str]
+
+
+class FindReplacePreviewResponse(CamelModel):
+    changed_works: int
+    changed_values: int
+    items: list[FindReplaceItemResponse]
+
+    @classmethod
+    def from_view(cls, value: FindReplacePreview) -> FindReplacePreviewResponse:
+        return cls(
+            changed_works=value.changed_works,
+            changed_values=value.changed_values,
+            items=[FindReplaceItemResponse.model_validate(item) for item in value.items],
+        )
+
+
+class BulkSkippedResponse(CamelModel):
+    work_id: uuid.UUID
+    reason: str
+
+
+class BulkMutationResponse(CamelModel):
+    updated: int
+    changed_values: int
+    skipped: list[BulkSkippedResponse]
+
+    @classmethod
+    def from_view(cls, value: BulkMutationResult) -> BulkMutationResponse:
+        return cls(
+            updated=value.updated,
+            changed_values=value.changed_values,
+            skipped=[BulkSkippedResponse.model_validate(item) for item in value.skipped],
+        )
+
+
+class BulkShelfRequest(CamelModel):
+    work_ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+    present: bool
+
+
+class DuplicateWorkResponse(WorkResponse):
+    pass
+
+
+class DuplicateGroupResponse(CamelModel):
+    id: uuid.UUID
+    confidence: float
+    reasons: list[str]
+    works: list[DuplicateWorkResponse]
+
+    @classmethod
+    def from_view(cls, value: DuplicateGroupView) -> DuplicateGroupResponse:
+        return cls(
+            id=value.id,
+            confidence=value.confidence,
+            reasons=list(value.reasons),
+            works=[
+                DuplicateWorkResponse(**WorkResponse.from_view(work).model_dump())
+                for work in value.works
+            ],
+        )
+
+
+class DuplicateMergeRequest(CamelModel):
+    target_work_id: uuid.UUID
+    source_work_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
+
+
+class LibraryOperationResponse(CamelModel):
+    id: uuid.UUID
+    kind: str
+    status: str
+    affected_works: int
+    undo_available: bool
+    created_at: datetime
+
+    @classmethod
+    def from_view(cls, value: LibraryOperationView) -> LibraryOperationResponse:
+        return cls.model_validate(value)

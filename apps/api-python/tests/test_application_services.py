@@ -62,8 +62,17 @@ def test_catalog_service_complete_success_and_failure_surface() -> None:
         author="Author",
         media_type="book",
         cover_key=f"{work_id}/cover.webp",
+        summary="A Book",
+        metadata={"seriesName": "Series", "tags": ["old", "keep"]},
     )
-    edition = SimpleNamespace(id=edition_id, work_id=work_id)
+    edition = SimpleNamespace(
+        id=edition_id,
+        work_id=work_id,
+        title="Book Edition",
+        language="zh-CN",
+        primary=True,
+        metadata={"publisher": "Old Publisher", "isbn": "old-isbn"},
+    )
     shelf = SimpleNamespace(id=shelf_id, kind="manual")
     category = SimpleNamespace(id=category_id)
 
@@ -171,6 +180,35 @@ def test_catalog_service_complete_success_and_failure_surface() -> None:
     with pytest.raises(CatalogNotFound):
         service.upload_cover(work_id, BytesIO(b"image"))
 
+    missing_cover_work_id = uuid.uuid4()
+    replacement_key = f"{work_id}/replacements/batch/cover.webp"
+    repository.get_work.side_effect = lambda value: work if value == work_id else None
+    repository.set_cover_key.return_value = work
+    covers.store_many.return_value = {work_id: replacement_key}
+    bulk_cover = service.bulk_upload_cover(
+        work_ids=[work_id, work_id, missing_cover_work_id],
+        stream=BytesIO(b"image"),
+    )
+    assert bulk_cover.updated == 1
+    assert bulk_cover.skipped[0].work_id == missing_cover_work_id
+    covers.store_many.assert_called_once()
+    covers.delete.assert_called_with(work.cover_key)
+    repository.set_cover_key.return_value = None
+    with pytest.raises(CatalogNotFound):
+        service.bulk_upload_cover(
+            work_ids=[work_id],
+            stream=BytesIO(b"image"),
+        )
+    covers.delete.assert_called_with(replacement_key)
+    covers.store_many.reset_mock()
+    empty_bulk_cover = service.bulk_upload_cover(
+        work_ids=[missing_cover_work_id],
+        stream=BytesIO(b"image"),
+    )
+    assert empty_bulk_cover.updated == 0
+    covers.store_many.assert_not_called()
+    repository.get_work.side_effect = None
+
     repository.update_edition.return_value = edition
     assert (
         service.update_edition(
@@ -267,6 +305,7 @@ def test_catalog_service_complete_success_and_failure_surface() -> None:
         title="Imported",
         author=None,
         media_type="book",
+        file_media_type="text/plain",
         format="txt",
         source_path="/monitor/imported.txt",
         original_name="imported.txt",
@@ -276,6 +315,10 @@ def test_catalog_service_complete_success_and_failure_surface() -> None:
     )
     repository.import_file.return_value = edition
     assert service.import_file(imported) is edition
+    repository.publish_conversion.return_value = edition
+    assert service.publish_conversion(edition_id, imported) is edition
+    repository.publish_conversion.return_value = None
+    assert service.publish_conversion(edition_id, imported) is None
     repository.apply_metadata.return_value = work
     assert service.apply_metadata(work_id, {"title": "Metadata"}) is work
     repository.apply_metadata.return_value = None
@@ -424,6 +467,181 @@ def test_catalog_service_complete_success_and_failure_surface() -> None:
     repository.delete_category.return_value = False
     with pytest.raises(CatalogNotFound):
         service.delete_category(category_id)
+
+    missing_work_id = uuid.uuid4()
+    editionless_work_id = uuid.uuid4()
+    editionless_work = SimpleNamespace(
+        id=editionless_work_id,
+        title="Editionless",
+        author=None,
+        summary=None,
+        metadata={},
+    )
+    repository.get_work.side_effect = lambda value: {
+        work_id: work,
+        editionless_work_id: editionless_work,
+    }.get(value)
+    repository.list_editions.side_effect = lambda value: [edition] if value == work_id else []
+    bulk_result = service.bulk_update_metadata(
+        work_ids=[work_id, work_id, missing_work_id],
+        author="Updated Author",
+        publisher="Updated Publisher",
+        series_name="Updated Series",
+        add_tags=["New", "KEEP"],
+        remove_tags=["old"],
+    )
+    assert bulk_result.updated == 1
+    assert bulk_result.changed_values == 4
+    assert bulk_result.skipped[0].reason == "WORK_NOT_FOUND"
+    repository.update_work.assert_called_with(
+        work_id,
+        title=None,
+        author="Updated Author",
+        summary=None,
+        status=None,
+        metadata={"seriesName": "Updated Series", "tags": ["keep", "New"]},
+    )
+    repository.update_edition.assert_called_with(
+        work_id,
+        edition_id,
+        title=None,
+        language=None,
+        metadata={"publisher": "Updated Publisher"},
+    )
+    skipped_publisher = service.bulk_update_metadata(
+        work_ids=[editionless_work_id],
+        author="Must not be partially applied",
+        publisher="Publisher",
+        series_name=None,
+        add_tags=[],
+        remove_tags=[],
+    )
+    assert skipped_publisher.updated == 0
+    assert skipped_publisher.skipped[0].reason == "PRIMARY_EDITION_NOT_FOUND"
+
+    preview, mutation = service.find_replace(
+        work_ids=[work_id, missing_work_id],
+        field="title",
+        find="Book",
+        replacement="Volume {{ number }}",
+        regex=False,
+        case_sensitive=True,
+        start_number=7,
+        apply=False,
+    )
+    assert mutation is None
+    assert preview.changed_works == 1
+    assert preview.items[0].after == "Volume 7"
+    applied_preview, applied = service.find_replace(
+        work_ids=[work_id],
+        field="tags",
+        find="e",
+        replacement="{{ match }}-{{ index }}",
+        regex=False,
+        case_sensitive=False,
+        start_number=1,
+        apply=True,
+    )
+    assert applied_preview.changed_values == 2
+    assert applied is not None
+    assert applied.updated == 1
+    repository.update_work.assert_called_with(
+        work_id,
+        title=None,
+        author=None,
+        summary=None,
+        status=None,
+        metadata={"tags": ["old", "ke-1e-1p"]},
+    )
+    with pytest.raises(ValueError, match="regular expression"):
+        service.find_replace(
+            work_ids=[work_id],
+            field="title",
+            find="[",
+            replacement="x",
+            regex=True,
+            case_sensitive=True,
+            start_number=1,
+            apply=True,
+        )
+    empty_title_preview, empty_title_result = service.find_replace(
+        work_ids=[work_id],
+        field="title",
+        find="Book",
+        replacement="",
+        regex=False,
+        case_sensitive=True,
+        start_number=1,
+        apply=True,
+    )
+    assert empty_title_preview.changed_works == 0
+    assert empty_title_result is not None
+    assert empty_title_result.skipped[0].reason == "EMPTY_TITLE"
+
+    repository.get_shelf.return_value = shelf
+    repository.add_shelf_item.side_effect = lambda *_args: _args[-1] != missing_work_id
+    shelf_result = service.bulk_shelf_membership(
+        owner_id=owner_id,
+        shelf_id=shelf_id,
+        work_ids=[work_id, missing_work_id],
+        present=True,
+    )
+    assert shelf_result.updated == 1
+    assert shelf_result.skipped[0].work_id == missing_work_id
+    repository.get_shelf.return_value = SimpleNamespace(kind="smart")
+    with pytest.raises(CatalogNotFound):
+        service.bulk_shelf_membership(
+            owner_id=owner_id,
+            shelf_id=shelf_id,
+            work_ids=[work_id],
+            present=True,
+        )
+
+    duplicate_group = SimpleNamespace(id=uuid.uuid4())
+    repository.list_duplicate_groups.return_value = [duplicate_group]
+    assert service.list_duplicate_groups() == [duplicate_group]
+    operation = SimpleNamespace(id=uuid.uuid4())
+    repository.merge_duplicate_works.return_value = operation
+    assert (
+        service.merge_duplicate_works(
+            actor_id=owner_id,
+            target_id=work_id,
+            source_ids=[missing_work_id, missing_work_id],
+        )
+        is operation
+    )
+    repository.merge_duplicate_works.assert_called_with(
+        actor_id=owner_id,
+        target_id=work_id,
+        source_ids=[missing_work_id],
+    )
+    with pytest.raises(ValueError, match="distinct"):
+        service.merge_duplicate_works(
+            actor_id=owner_id,
+            target_id=work_id,
+            source_ids=[work_id],
+        )
+    repository.merge_duplicate_works.return_value = None
+    with pytest.raises(CatalogNotFound):
+        service.merge_duplicate_works(
+            actor_id=owner_id,
+            target_id=work_id,
+            source_ids=[missing_work_id],
+        )
+    repository.undo_library_operation.return_value = operation
+    assert (
+        service.undo_library_operation(
+            actor_id=owner_id,
+            operation_id=operation.id,
+        )
+        is operation
+    )
+    repository.undo_library_operation.return_value = None
+    with pytest.raises(CatalogNotFound):
+        service.undo_library_operation(
+            actor_id=owner_id,
+            operation_id=operation.id,
+        )
     assert unit.commits >= 10
 
 
@@ -432,10 +650,12 @@ def test_ingestion_service_complete_success_and_failure_surface() -> None:
     repository = unit.ingestion
     discovery = MagicMock()
     uploads = MagicMock()
+    catalog = MagicMock()
     service = IngestionService(
         uow_factory=lambda: unit,
         discovery=discovery,
         uploads=uploads,
+        catalog=catalog,
     )
     actor = uuid.uuid4()
     job_id = uuid.uuid4()
@@ -471,6 +691,44 @@ def test_ingestion_service_complete_success_and_failure_surface() -> None:
         )
         is result
     )
+    source_edition_id = uuid.uuid4()
+    catalog.get_edition.return_value = SimpleNamespace(
+        id=source_edition_id,
+        format="txt",
+        language="zh-CN",
+    )
+    catalog.files_for_edition.return_value = [
+        SimpleNamespace(
+            storage_path="/monitor/book.txt",
+            checksum="b" * 64,
+        )
+    ]
+    assert (
+        service.enqueue_conversion(
+            edition_id=source_edition_id,
+            requested_by=actor,
+        )
+        is result
+    )
+    conversion_request = repository.enqueue.call_args.args[0]
+    assert conversion_request.options == {
+        "sourceEditionId": str(source_edition_id),
+        "sourceLanguage": "zh-CN",
+        "targetFormat": "epub",
+    }
+    assert repository.enqueue.call_args.kwargs["kind"] == "conversion"
+    catalog.get_edition.return_value = SimpleNamespace(format="epub")
+    with pytest.raises(ValueError, match="text editions"):
+        service.enqueue_conversion(
+            edition_id=source_edition_id,
+            requested_by=actor,
+        )
+    catalog.get_edition.return_value = None
+    with pytest.raises(IngestionNotFound):
+        service.enqueue_conversion(
+            edition_id=source_edition_id,
+            requested_by=actor,
+        )
 
     for method_name in ("retry", "cancel", "delete_job"):
         method = getattr(service, method_name)
@@ -1108,6 +1366,40 @@ def test_operations_and_reading_services() -> None:
             expected_version=2,
         )
     reading_repo.save_progress.side_effect = None
+    missing_work_id = uuid.uuid4()
+    editionless_work_id = uuid.uuid4()
+    catalog.get_work.side_effect = lambda value: {
+        work_id: work,
+        editionless_work_id: SimpleNamespace(id=editionless_work_id),
+    }.get(value)
+    catalog.editions_for_work.side_effect = lambda value: [edition] if value == work_id else []
+    finished = reading.bulk_set_progress(
+        user_id=user_id,
+        work_ids=[work_id, work_id, editionless_work_id, missing_work_id],
+        status="FINISHED",
+    )
+    assert finished.updated == 1
+    assert finished.changed_values == 1
+    assert {item.reason for item in finished.skipped} == {
+        "EDITION_NOT_FOUND",
+        "WORK_NOT_FOUND",
+    }
+    bulk_mutation = reading_repo.save_progress.call_args.args[0]
+    assert bulk_mutation.percentage == 1
+    assert bulk_mutation.position == {"kind": "completed"}
+    reading_repo.delete_progress.return_value = 1
+    unread = reading.bulk_set_progress(
+        user_id=user_id,
+        work_ids=[work_id],
+        status="UNREAD",
+    )
+    assert unread.updated == 1
+    assert unread.changed_values == 1
+    reading_repo.delete_progress.assert_called_with(
+        user_id=user_id,
+        edition_ids=[edition_id],
+    )
+    catalog.get_work.side_effect = None
     assert reading.list_bookmarks(user_id=user_id, edition_id=edition_id) == []
     bookmark = SimpleNamespace(id=bookmark_id)
     reading_repo.put_bookmark.return_value = bookmark

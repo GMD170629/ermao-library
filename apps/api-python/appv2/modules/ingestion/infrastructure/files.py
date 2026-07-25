@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import mimetypes
 import os
 import re
 import shutil
 import uuid
+import zipfile
 from pathlib import Path
 from typing import BinaryIO
 
 from appv2.modules.ingestion.contracts import (
+    ConversionPreparationPort,
     DirectoryNode,
     FileDiscoveryPort,
     ImportPreparationPort,
@@ -17,20 +20,22 @@ from appv2.modules.ingestion.contracts import (
     UploadStoragePort,
 )
 
+MAX_TEXT_CONVERSION_BYTES = 20 * 1024 * 1024
+
 SUPPORTED_FORMATS = {
-    ".epub": ("book", "epub"),
-    ".pdf": ("pdf", "pdf"),
-    ".cbz": ("comic", "cbz"),
-    ".cbr": ("comic", "cbr"),
-    ".txt": ("text", "txt"),
-    ".mobi": ("book", "mobi"),
-    ".azw3": ("book", "azw3"),
-    ".mp3": ("audiobook", "audio"),
-    ".m4a": ("audiobook", "audio"),
-    ".m4b": ("audiobook", "audio"),
-    ".flac": ("audiobook", "audio"),
-    ".ogg": ("audiobook", "audio"),
-    ".wav": ("audiobook", "audio"),
+    ".epub": ("book", "epub", "application/epub+zip"),
+    ".pdf": ("pdf", "pdf", "application/pdf"),
+    ".cbz": ("comic", "cbz", "application/vnd.comicbook+zip"),
+    ".cbr": ("comic", "cbr", "application/vnd.comicbook-rar"),
+    ".txt": ("text", "txt", "text/plain"),
+    ".mobi": ("book", "mobi", "application/x-mobipocket-ebook"),
+    ".azw3": ("book", "azw3", "application/vnd.amazon.ebook"),
+    ".mp3": ("audiobook", "audio", "audio/mpeg"),
+    ".m4a": ("audiobook", "audio", "audio/mp4"),
+    ".m4b": ("audiobook", "audio", "audio/mp4"),
+    ".flac": ("audiobook", "audio", "audio/flac"),
+    ".ogg": ("audiobook", "audio", "audio/ogg"),
+    ".wav": ("audiobook", "audio", "audio/wav"),
 }
 
 
@@ -121,7 +126,7 @@ class LocalImportPreparation(ImportPreparationPort):
         detected = SUPPORTED_FORMATS.get(suffix)
         if detected is None:
             raise ValueError("unsupported import format")
-        media_type, format_name = detected
+        media_type, format_name, file_media_type = detected
         checksum = hashlib.sha256()
         size = 0
         with path.open("rb") as source:
@@ -133,6 +138,7 @@ class LocalImportPreparation(ImportPreparationPort):
             title=title,
             author=None,
             media_type=media_type,
+            file_media_type=file_media_type,
             format=format_name,
             source_path=str(path),
             original_name=path.name,
@@ -144,3 +150,124 @@ class LocalImportPreparation(ImportPreparationPort):
                 "sourceDevice": os.stat(path).st_dev,
             },
         )
+
+
+class LocalTextToEpubConversion(ConversionPreparationPort):
+    def __init__(self, conversions_root: Path) -> None:
+        self._root = conversions_root.resolve()
+        self._root.mkdir(parents=True, exist_ok=True)
+
+    def prepare(
+        self,
+        source_path: str,
+        *,
+        identity: str,
+        language: str | None,
+    ) -> PreparedImport:
+        source = Path(source_path).expanduser().resolve()
+        if not source.is_file() or source.suffix.casefold() != ".txt":
+            raise ValueError("only existing text files can be converted")
+        payload = source.read_bytes()
+        if len(payload) > MAX_TEXT_CONVERSION_BYTES:
+            raise ValueError("text conversion source exceeds the 20 MiB limit")
+        try:
+            text = payload.decode("utf-8-sig")
+        except UnicodeDecodeError as error:
+            raise ValueError("text conversion source must be UTF-8") from error
+        source_checksum = hashlib.sha256(payload).hexdigest()
+        output_identity = hashlib.sha256(f"{source_checksum}\0{identity}".encode()).hexdigest()
+        title = re.sub(r"[_-]+", " ", source.stem).strip() or source.stem
+        destination = self._root / f"{output_identity}.epub"
+        if not destination.exists():
+            self._write_epub(
+                destination,
+                title=title,
+                text=text,
+                identifier=f"urn:uuid:{identity}",
+                language=language or "und",
+            )
+        output = destination.read_bytes()
+        return PreparedImport(
+            title=title,
+            author=None,
+            media_type="book",
+            file_media_type="application/epub+zip",
+            format="epub",
+            source_path=str(destination),
+            original_name=f"{source.stem}.epub",
+            size_bytes=len(output),
+            checksum=hashlib.sha256(output).hexdigest(),
+            metadata={
+                "convertedFromFormat": "txt",
+                "sourceEditionId": identity,
+                "sourceChecksum": source_checksum,
+            },
+        )
+
+    @staticmethod
+    def _write_epub(
+        destination: Path,
+        *,
+        title: str,
+        text: str,
+        identifier: str,
+        language: str,
+    ) -> None:
+        temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+        escaped_title = html.escape(title)
+        escaped_text = html.escape(text)
+        try:
+            with zipfile.ZipFile(temporary, "w") as archive:
+                archive.writestr(
+                    "mimetype",
+                    "application/epub+zip",
+                    compress_type=zipfile.ZIP_STORED,
+                )
+                archive.writestr(
+                    "META-INF/container.xml",
+                    '<?xml version="1.0" encoding="UTF-8"?>'
+                    '<container version="1.0" '
+                    'xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+                    '<rootfiles><rootfile full-path="OEBPS/content.opf" '
+                    'media-type="application/oebps-package+xml"/></rootfiles>'
+                    "</container>",
+                )
+                archive.writestr(
+                    "OEBPS/content.opf",
+                    '<?xml version="1.0" encoding="UTF-8"?>'
+                    '<package xmlns="http://www.idpf.org/2007/opf" '
+                    'unique-identifier="book-id" version="3.0">'
+                    '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+                    f'<dc:identifier id="book-id">{html.escape(identifier)}</dc:identifier>'
+                    f"<dc:title>{escaped_title}</dc:title>"
+                    f"<dc:language>{html.escape(language)}</dc:language>"
+                    "</metadata><manifest>"
+                    '<item id="nav" href="nav.xhtml" '
+                    'media-type="application/xhtml+xml" properties="nav"/>'
+                    '<item id="text" href="text.xhtml" '
+                    'media-type="application/xhtml+xml"/>'
+                    '</manifest><spine><itemref idref="text"/></spine></package>',
+                )
+                archive.writestr(
+                    "OEBPS/nav.xhtml",
+                    '<?xml version="1.0" encoding="UTF-8"?>'
+                    '<html xmlns="http://www.w3.org/1999/xhtml" '
+                    'xmlns:epub="http://www.idpf.org/2007/ops"><head>'
+                    f"<title>{escaped_title}</title></head><body>"
+                    '<nav epub:type="toc"><ol><li><a href="text.xhtml">'
+                    f"{escaped_title}</a></li></ol></nav></body></html>",
+                )
+                archive.writestr(
+                    "OEBPS/text.xhtml",
+                    '<?xml version="1.0" encoding="UTF-8"?>'
+                    '<html xmlns="http://www.w3.org/1999/xhtml"><head>'
+                    f"<title>{escaped_title}</title>"
+                    "<style>body{line-height:1.7;margin:5%;}"
+                    "pre{font-family:serif;white-space:pre-wrap;word-wrap:break-word;}"
+                    "</style></head><body>"
+                    f"<h1>{escaped_title}</h1><pre>{escaped_text}</pre>"
+                    "</body></html>",
+                )
+            os.replace(temporary, destination)
+        finally:
+            temporary.unlink(missing_ok=True)

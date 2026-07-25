@@ -4,15 +4,23 @@ from datetime import datetime
 from email.utils import format_datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 from fastapi.responses import FileResponse as FastAPIFileResponse
 from pydantic import Field
 
 from appv2.modules.accounts.contracts import AccessScope, AccountView, CurrentAccount
 from appv2.modules.catalog.api.schemas import (
+    BulkMetadataRequest,
+    BulkMutationResponse,
+    BulkShelfRequest,
     CreateWorkRequest,
+    DuplicateGroupResponse,
+    DuplicateMergeRequest,
     EditionDetailResponse,
     EditionResponse,
+    FindReplacePreviewResponse,
+    FindReplaceRequest,
+    LibraryOperationResponse,
     MoveVolumeRequest,
     MoveVolumeToRequest,
     ShelfRequest,
@@ -126,6 +134,14 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
             message_key="not_found",
         )
 
+    def invalid(error: ValueError) -> AppProblem:
+        return AppProblem(
+            status=422,
+            code="INVALID_CATALOG_MUTATION",
+            title="Invalid catalog mutation",
+            message_key="invalid_request",
+        )
+
     @router.get("/works", response_model=Page[WorkResponse])
     def works(
         actor: Actor,
@@ -183,6 +199,101 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
             metadata=payload.metadata,
         )
         return WorkResponse.from_view(work)
+
+    @router.post(
+        "/works/bulk/metadata",
+        response_model=BulkMutationResponse,
+    )
+    def bulk_metadata(
+        payload: BulkMetadataRequest,
+        actor: Writer,
+    ) -> BulkMutationResponse:
+        del actor
+        result = service.bulk_update_metadata(
+            work_ids=payload.work_ids,
+            author=payload.author,
+            publisher=payload.publisher,
+            series_name=payload.series_name,
+            add_tags=payload.add_tags,
+            remove_tags=payload.remove_tags,
+        )
+        return BulkMutationResponse.from_view(result)
+
+    @router.post(
+        "/works/bulk/find-replace/preview",
+        response_model=FindReplacePreviewResponse,
+    )
+    def preview_find_replace(
+        payload: FindReplaceRequest,
+        actor: Writer,
+    ) -> FindReplacePreviewResponse:
+        del actor
+        try:
+            preview, _result = service.find_replace(
+                work_ids=payload.work_ids,
+                field=payload.field,
+                find=payload.find,
+                replacement=payload.replacement,
+                regex=payload.regex,
+                case_sensitive=payload.case_sensitive,
+                start_number=payload.start_number,
+                apply=False,
+            )
+        except ValueError as error:
+            raise invalid(error) from error
+        return FindReplacePreviewResponse.from_view(preview)
+
+    @router.post(
+        "/works/bulk/find-replace",
+        response_model=BulkMutationResponse,
+    )
+    def apply_find_replace(
+        payload: FindReplaceRequest,
+        actor: Writer,
+    ) -> BulkMutationResponse:
+        del actor
+        try:
+            _preview, result = service.find_replace(
+                work_ids=payload.work_ids,
+                field=payload.field,
+                find=payload.find,
+                replacement=payload.replacement,
+                regex=payload.regex,
+                case_sensitive=payload.case_sensitive,
+                start_number=payload.start_number,
+                apply=True,
+            )
+        except ValueError as error:
+            raise invalid(error) from error
+        if result is None:
+            raise RuntimeError("applied find-and-replace has no result")
+        return BulkMutationResponse.from_view(result)
+
+    @router.post(
+        "/works/bulk/cover",
+        response_model=BulkMutationResponse,
+    )
+    def bulk_cover(
+        work_ids: Annotated[list[uuid.UUID], Form(alias="workIds")],
+        cover: Annotated[UploadFile, File()],
+        actor: Writer,
+    ) -> BulkMutationResponse:
+        del actor
+        try:
+            result = service.bulk_upload_cover(
+                work_ids=work_ids,
+                stream=cover.file,
+            )
+        except CatalogNotFound as error:
+            raise not_found(error) from error
+        except ValueError as error:
+            raise AppProblem(
+                status=422,
+                code="INVALID_COVER_IMAGE",
+                title="Invalid cover image",
+                message_key="invalid_request",
+            ) from error
+        return BulkMutationResponse.from_view(result)
 
     @router.get("/works/{work_id}", response_model=WorkDetailResponse)
     def work(work_id: uuid.UUID, actor: Actor) -> WorkDetailResponse:
@@ -450,6 +561,26 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
         except CatalogNotFound as error:
             raise not_found(error) from error
 
+    @router.post(
+        "/shelves/{shelf_id}/works/bulk",
+        response_model=BulkMutationResponse,
+    )
+    def bulk_shelf_membership(
+        shelf_id: uuid.UUID,
+        payload: BulkShelfRequest,
+        actor: Writer,
+    ) -> BulkMutationResponse:
+        try:
+            result = service.bulk_shelf_membership(
+                owner_id=actor.id,
+                shelf_id=shelf_id,
+                work_ids=payload.work_ids,
+                present=payload.present,
+            )
+        except CatalogNotFound as error:
+            raise not_found(error) from error
+        return BulkMutationResponse.from_view(result)
+
     @router.put(
         "/shelves/{shelf_id}/works/{work_id}",
         status_code=status.HTTP_204_NO_CONTENT,
@@ -536,5 +667,53 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
             service.delete_category(category_id)
         except CatalogNotFound as error:
             raise not_found(error) from error
+
+    @router.get("/duplicates", response_model=Page[DuplicateGroupResponse])
+    def duplicate_groups(actor: Writer) -> Page[DuplicateGroupResponse]:
+        del actor
+        groups = service.list_duplicate_groups()
+        return Page(
+            items=[DuplicateGroupResponse.from_view(group) for group in groups],
+            page=1,
+            page_size=max(len(groups), 1),
+            total=len(groups),
+        )
+
+    @router.post(
+        "/duplicates/merge",
+        response_model=LibraryOperationResponse,
+    )
+    def merge_duplicate_works(
+        payload: DuplicateMergeRequest,
+        actor: Writer,
+    ) -> LibraryOperationResponse:
+        try:
+            operation = service.merge_duplicate_works(
+                actor_id=actor.id,
+                target_id=payload.target_work_id,
+                source_ids=payload.source_work_ids,
+            )
+        except CatalogNotFound as error:
+            raise not_found(error) from error
+        except ValueError as error:
+            raise invalid(error) from error
+        return LibraryOperationResponse.from_view(operation)
+
+    @router.post(
+        "/operations/{operation_id}/undo",
+        response_model=LibraryOperationResponse,
+    )
+    def undo_library_operation(
+        operation_id: uuid.UUID,
+        actor: Writer,
+    ) -> LibraryOperationResponse:
+        try:
+            operation = service.undo_library_operation(
+                actor_id=actor.id,
+                operation_id=operation_id,
+            )
+        except CatalogNotFound as error:
+            raise not_found(error) from error
+        return LibraryOperationResponse.from_view(operation)
 
     return router

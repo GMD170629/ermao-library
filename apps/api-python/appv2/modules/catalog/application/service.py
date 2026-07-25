@@ -1,19 +1,27 @@
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Callable
 from typing import BinaryIO
 
 from appv2.modules.catalog.contracts import (
+    BulkMutationResult,
+    BulkSkipped,
     CatalogEdition,
     CatalogEditionDetail,
     CatalogFile,
     CatalogImport,
+    CatalogRepository,
     CatalogUnitOfWork,
     CatalogWork,
     CategoryView,
     CoverResource,
     CoverStoragePort,
+    DuplicateGroupView,
+    FindReplaceItem,
+    FindReplacePreview,
+    LibraryOperationView,
     SeriesView,
     ShelfView,
 )
@@ -22,6 +30,100 @@ from appv2.modules.catalog.domain import Work
 
 class CatalogNotFound(Exception):
     pass
+
+
+def _sequence_letters(value: int) -> str:
+    result = ""
+    current = max(value, 1)
+    while current:
+        current, remainder = divmod(current - 1, 26)
+        result = chr(65 + remainder) + result
+    return result
+
+
+def _render_replacement(
+    template: str,
+    *,
+    match: str,
+    value: str,
+    index: int,
+    number: int,
+) -> str:
+    replacements = {
+        "{{ match }}": match,
+        "{{ value }}": value,
+        "{{ number }}": str(number),
+        "{{ letter_upper }}": _sequence_letters(number),
+        "{{ index }}": str(index),
+    }
+    rendered = template
+    for marker, replacement in replacements.items():
+        rendered = rendered.replace(marker, replacement)
+    return rendered
+
+
+def _primary_edition(
+    repository: CatalogRepository,
+    work_id: uuid.UUID,
+) -> CatalogEdition | None:
+    editions = repository.list_editions(work_id)
+    return next(
+        (edition for edition in editions if edition.primary), editions[0] if editions else None
+    )
+
+
+def _field_value(
+    repository: CatalogRepository,
+    work: CatalogWork,
+    field: str,
+) -> tuple[str | list[str], CatalogEdition | None]:
+    if field == "title":
+        return work.title, None
+    if field == "author":
+        return work.author or "", None
+    if field == "description":
+        return work.summary or "", None
+    if field == "seriesName":
+        value = work.metadata.get("seriesName")
+        return value if isinstance(value, str) else "", None
+    if field == "tags":
+        value = work.metadata.get("tags")
+        return (
+            [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+        ), None
+    edition = _primary_edition(repository, work.id)
+    if edition is None:
+        return "", None
+    if field == "versionName":
+        return edition.title, edition
+    if field == "language":
+        return edition.language or "", edition
+    value = edition.metadata.get(field)
+    return value if isinstance(value, str) else "", edition
+
+
+def _replace_text(
+    value: str,
+    *,
+    pattern: re.Pattern[str],
+    replacement: str,
+    index: int,
+    number: int,
+) -> tuple[str, int]:
+    changed = 0
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal changed
+        changed += 1
+        return _render_replacement(
+            replacement,
+            match=match.group(0),
+            value=value,
+            index=index,
+            number=number,
+        )
+
+    return pattern.sub(replace, value), changed
 
 
 class CatalogService:
@@ -174,6 +276,46 @@ class CatalogService:
             uow.commit()
             return work
 
+    def bulk_upload_cover(
+        self,
+        *,
+        work_ids: list[uuid.UUID],
+        stream: BinaryIO,
+    ) -> BulkMutationResult:
+        valid_ids: list[uuid.UUID] = []
+        previous_keys: dict[uuid.UUID, str] = {}
+        skipped: list[BulkSkipped] = []
+        with self._uow_factory() as uow:
+            for work_id in dict.fromkeys(work_ids):
+                work = uow.catalog.get_work(work_id)
+                if work is None:
+                    skipped.append(BulkSkipped(work_id, "WORK_NOT_FOUND"))
+                else:
+                    valid_ids.append(work_id)
+                    if work.cover_key is not None:
+                        previous_keys[work_id] = work.cover_key
+        if not valid_ids:
+            return BulkMutationResult(0, 0, tuple(skipped))
+        keys = self._covers.store_many(valid_ids, stream)
+        try:
+            with self._uow_factory() as uow:
+                for work_id, key in keys.items():
+                    if uow.catalog.set_cover_key(work_id, key) is None:
+                        raise CatalogNotFound
+                uow.commit()
+        except Exception:
+            for key in keys.values():
+                self._covers.delete(key)
+            raise
+        for work_id, previous_key in previous_keys.items():
+            if previous_key != keys[work_id]:
+                self._covers.delete(previous_key)
+        return BulkMutationResult(
+            updated=len(valid_ids),
+            changed_values=len(valid_ids),
+            skipped=tuple(skipped),
+        )
+
     def update_edition(
         self,
         work_id: uuid.UUID,
@@ -265,6 +407,21 @@ class CatalogService:
     def import_file(self, imported: CatalogImport) -> CatalogEdition:
         with self._uow_factory() as uow:
             edition = uow.catalog.import_file(imported)
+            uow.commit()
+            return edition
+
+    def publish_conversion(
+        self,
+        source_edition_id: uuid.UUID,
+        converted: CatalogImport,
+    ) -> CatalogEdition | None:
+        with self._uow_factory() as uow:
+            edition = uow.catalog.publish_conversion(
+                source_edition_id,
+                converted,
+            )
+            if edition is None:
+                return None
             uow.commit()
             return edition
 
@@ -391,6 +548,261 @@ class CatalogService:
             if not changed:
                 raise CatalogNotFound
             uow.commit()
+
+    def bulk_update_metadata(
+        self,
+        *,
+        work_ids: list[uuid.UUID],
+        author: str | None,
+        publisher: str | None,
+        series_name: str | None,
+        add_tags: list[str],
+        remove_tags: list[str],
+    ) -> BulkMutationResult:
+        updated = 0
+        changed_values = 0
+        skipped: list[BulkSkipped] = []
+        with self._uow_factory() as uow:
+            for work_id in dict.fromkeys(work_ids):
+                work = uow.catalog.get_work(work_id)
+                if work is None:
+                    skipped.append(BulkSkipped(work_id, "WORK_NOT_FOUND"))
+                    continue
+                edition = _primary_edition(uow.catalog, work_id) if publisher is not None else None
+                if publisher is not None and edition is None:
+                    skipped.append(BulkSkipped(work_id, "PRIMARY_EDITION_NOT_FOUND"))
+                    continue
+                metadata: dict[str, object] = {}
+                if series_name is not None:
+                    metadata["seriesName"] = series_name
+                    changed_values += 1
+                if add_tags or remove_tags:
+                    existing = work.metadata.get("tags")
+                    tags = (
+                        [item for item in existing if isinstance(item, str)]
+                        if isinstance(existing, list)
+                        else []
+                    )
+                    removed = {value.casefold() for value in remove_tags}
+                    tags = [value for value in tags if value.casefold() not in removed]
+                    known = {value.casefold() for value in tags}
+                    for value in add_tags:
+                        if value.casefold() not in known:
+                            tags.append(value)
+                            known.add(value.casefold())
+                    metadata["tags"] = tags
+                    changed_values += 1
+                if author is not None or metadata:
+                    uow.catalog.update_work(
+                        work_id,
+                        title=None,
+                        author=author,
+                        summary=None,
+                        status=None,
+                        metadata=metadata or None,
+                    )
+                    changed_values += int(author is not None)
+                if publisher is not None:
+                    assert edition is not None
+                    uow.catalog.update_edition(
+                        work_id,
+                        edition.id,
+                        title=None,
+                        language=None,
+                        metadata={"publisher": publisher},
+                    )
+                    changed_values += 1
+                updated += 1
+            uow.commit()
+        return BulkMutationResult(
+            updated=updated,
+            changed_values=changed_values,
+            skipped=tuple(skipped),
+        )
+
+    def find_replace(
+        self,
+        *,
+        work_ids: list[uuid.UUID],
+        field: str,
+        find: str,
+        replacement: str,
+        regex: bool,
+        case_sensitive: bool,
+        start_number: int,
+        apply: bool,
+    ) -> tuple[FindReplacePreview, BulkMutationResult | None]:
+        if not find:
+            raise ValueError("find text cannot be empty")
+        try:
+            pattern = re.compile(
+                find if regex else re.escape(find),
+                0 if case_sensitive else re.IGNORECASE,
+            )
+        except re.error as error:
+            raise ValueError("invalid regular expression") from error
+        items: list[FindReplaceItem] = []
+        skipped: list[BulkSkipped] = []
+        changed_values = 0
+        updated = 0
+        with self._uow_factory() as uow:
+            for index, work_id in enumerate(dict.fromkeys(work_ids), start=1):
+                work = uow.catalog.get_work(work_id)
+                if work is None:
+                    skipped.append(BulkSkipped(work_id, "WORK_NOT_FOUND"))
+                    continue
+                before, edition = _field_value(uow.catalog, work, field)
+                number = start_number + index - 1
+                if isinstance(before, list):
+                    after_items: list[str] = []
+                    changes = 0
+                    for value in before:
+                        replaced, count = _replace_text(
+                            value,
+                            pattern=pattern,
+                            replacement=replacement,
+                            index=index,
+                            number=number,
+                        )
+                        after_items.append(replaced)
+                        changes += count
+                    after: str | list[str] = after_items
+                else:
+                    after, changes = _replace_text(
+                        before,
+                        pattern=pattern,
+                        replacement=replacement,
+                        index=index,
+                        number=number,
+                    )
+                if changes == 0:
+                    continue
+                if field == "title" and not str(after).strip():
+                    skipped.append(BulkSkipped(work_id, "EMPTY_TITLE"))
+                    continue
+                items.append(
+                    FindReplaceItem(
+                        work_id=work_id,
+                        title=work.title,
+                        before=before,
+                        after=after,
+                    )
+                )
+                changed_values += changes
+                updated += 1
+                if apply:
+                    self._apply_replaced_field(
+                        uow.catalog,
+                        work,
+                        edition,
+                        field=field,
+                        value=after,
+                    )
+            if apply:
+                uow.commit()
+        preview = FindReplacePreview(
+            changed_works=len(items),
+            changed_values=changed_values,
+            items=tuple(items),
+        )
+        result = BulkMutationResult(updated, changed_values, tuple(skipped)) if apply else None
+        return preview, result
+
+    @staticmethod
+    def _apply_replaced_field(
+        repository: CatalogRepository,
+        work: CatalogWork,
+        edition: CatalogEdition | None,
+        *,
+        field: str,
+        value: str | list[str],
+    ) -> None:
+        if field in {"title", "author", "description", "seriesName", "tags"}:
+            repository.update_work(
+                work.id,
+                title=str(value) if field == "title" else None,
+                author=str(value) if field == "author" else None,
+                summary=str(value) if field == "description" else None,
+                status=None,
+                metadata={field: value} if field in {"seriesName", "tags"} else None,
+            )
+            return
+        if edition is None:
+            return
+        repository.update_edition(
+            work.id,
+            edition.id,
+            title=str(value) if field == "versionName" else None,
+            language=str(value) if field == "language" else None,
+            metadata=({field: value} if field not in {"versionName", "language"} else None),
+        )
+
+    def bulk_shelf_membership(
+        self,
+        *,
+        owner_id: uuid.UUID,
+        shelf_id: uuid.UUID,
+        work_ids: list[uuid.UUID],
+        present: bool,
+    ) -> BulkMutationResult:
+        updated = 0
+        skipped: list[BulkSkipped] = []
+        with self._uow_factory() as uow:
+            shelf = uow.catalog.get_shelf(shelf_id, owner_id)
+            if shelf is None or shelf.kind != "manual":
+                raise CatalogNotFound
+            for work_id in dict.fromkeys(work_ids):
+                changed = (
+                    uow.catalog.add_shelf_item(shelf_id, owner_id, work_id)
+                    if present
+                    else uow.catalog.remove_shelf_item(shelf_id, owner_id, work_id)
+                )
+                if changed:
+                    updated += 1
+                else:
+                    skipped.append(BulkSkipped(work_id, "WORK_OR_MEMBERSHIP_NOT_FOUND"))
+            uow.commit()
+        return BulkMutationResult(updated, updated, tuple(skipped))
+
+    def list_duplicate_groups(self) -> list[DuplicateGroupView]:
+        with self._uow_factory() as uow:
+            return uow.catalog.list_duplicate_groups(limit=100)
+
+    def merge_duplicate_works(
+        self,
+        *,
+        actor_id: uuid.UUID,
+        target_id: uuid.UUID,
+        source_ids: list[uuid.UUID],
+    ) -> LibraryOperationView:
+        if target_id in source_ids or not source_ids:
+            raise ValueError("duplicate merge requires distinct source works")
+        with self._uow_factory() as uow:
+            operation = uow.catalog.merge_duplicate_works(
+                actor_id=actor_id,
+                target_id=target_id,
+                source_ids=list(dict.fromkeys(source_ids)),
+            )
+            if operation is None:
+                raise CatalogNotFound
+            uow.commit()
+            return operation
+
+    def undo_library_operation(
+        self,
+        *,
+        actor_id: uuid.UUID,
+        operation_id: uuid.UUID,
+    ) -> LibraryOperationView:
+        with self._uow_factory() as uow:
+            operation = uow.catalog.undo_library_operation(
+                actor_id=actor_id,
+                operation_id=operation_id,
+            )
+            if operation is None:
+                raise CatalogNotFound
+            uow.commit()
+            return operation
 
     def facets(self) -> dict[str, list[dict[str, object]]]:
         with self._uow_factory() as uow:

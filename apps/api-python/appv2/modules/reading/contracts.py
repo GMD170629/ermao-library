@@ -47,6 +47,19 @@ class ProgressView:
 
 
 @dataclass(frozen=True, slots=True)
+class BulkProgressSkipped:
+    work_id: uuid.UUID
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class BulkProgressResult:
+    updated: int
+    changed_values: int
+    skipped: tuple[BulkProgressSkipped, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class BookmarkView:
     id: uuid.UUID
     edition_id: uuid.UUID
@@ -82,6 +95,13 @@ class ReadingRepository(Protocol):
     def get_progress(self, *, user_id: uuid.UUID, edition_id: uuid.UUID) -> ProgressView | None: ...
 
     def save_progress(self, mutation: ProgressMutation) -> ProgressView: ...
+
+    def delete_progress(
+        self,
+        *,
+        user_id: uuid.UUID,
+        edition_ids: list[uuid.UUID],
+    ) -> int: ...
 
     def list_bookmarks(
         self, *, user_id: uuid.UUID, edition_id: uuid.UUID

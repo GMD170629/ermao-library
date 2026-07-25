@@ -6,6 +6,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import BinaryIO
 
+from appv2.modules.catalog.contracts import CatalogReadPort
 from appv2.modules.ingestion.contracts import (
     DirectoryNode,
     FileDiscoveryPort,
@@ -29,19 +30,27 @@ class IngestionService:
         uow_factory: Callable[[], IngestionUnitOfWork],
         discovery: FileDiscoveryPort,
         uploads: UploadStoragePort,
+        catalog: CatalogReadPort,
     ) -> None:
         self._uow_factory = uow_factory
         self._discovery = discovery
         self._uploads = uploads
+        self._catalog = catalog
 
     def list_jobs(
-        self, *, page: int, page_size: int, status: str | None
+        self,
+        *,
+        page: int,
+        page_size: int,
+        status: str | None,
+        kind: str | None = None,
     ) -> tuple[list[IngestionJob], int]:
         with self._uow_factory() as uow:
             return uow.ingestion.list_jobs(
                 offset=(page - 1) * page_size,
                 limit=page_size,
                 status=status,
+                kind=kind,
             )
 
     def enqueue(
@@ -52,6 +61,7 @@ class IngestionService:
         idempotency_key: str | None,
         move_source: bool = False,
         kind: str = "import",
+        options: dict[str, object] | None = None,
     ) -> ImportResult:
         key = idempotency_key or hashlib.sha256(f"{kind}\0{source_path}".encode()).hexdigest()
         request = ImportRequest(
@@ -59,11 +69,41 @@ class IngestionService:
             requested_by=requested_by,
             idempotency_key=key,
             move_source=move_source,
+            options=options or {},
         )
         with self._uow_factory() as uow:
             result = uow.ingestion.enqueue(request, kind=kind)
             uow.commit()
             return result
+
+    def enqueue_conversion(
+        self,
+        *,
+        edition_id: uuid.UUID,
+        requested_by: uuid.UUID,
+    ) -> ImportResult:
+        edition = self._catalog.get_edition(edition_id)
+        if edition is None:
+            raise IngestionNotFound
+        if edition.format != "txt":
+            raise ValueError("only text editions can be converted to EPUB")
+        files = self._catalog.files_for_edition(edition_id)
+        if not files:
+            raise IngestionNotFound
+        source = files[0]
+        return self.enqueue(
+            source_path=source.storage_path,
+            requested_by=requested_by,
+            idempotency_key=hashlib.sha256(
+                f"conversion\0{edition_id}\0{source.checksum}\0epub".encode()
+            ).hexdigest(),
+            kind="conversion",
+            options={
+                "sourceEditionId": str(edition_id),
+                "sourceLanguage": edition.language,
+                "targetFormat": "epub",
+            },
+        )
 
     def upload(
         self,

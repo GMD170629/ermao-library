@@ -365,6 +365,144 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
             },
         )
         assert shelf_update.status_code == 200, shelf_update.text
+        duplicate_work = client.post(
+            "/api/v2/catalog/works",
+            json={
+                "title": "Updated Architecture Test Book",
+                "author": "Codex",
+                "mediaType": "book",
+            },
+        )
+        assert duplicate_work.status_code == 201, duplicate_work.text
+        bulk_metadata = client.post(
+            "/api/v2/catalog/works/bulk/metadata",
+            json={
+                "workIds": [created.json()["id"], duplicate_work.json()["id"]],
+                "author": "Codex Updated",
+                "seriesName": "Bulk Integration Series",
+                "addTags": ["bulk"],
+                "removeTags": ["integration"],
+            },
+        )
+        assert bulk_metadata.status_code == 200, bulk_metadata.text
+        assert bulk_metadata.json()["updated"] == 2
+        preview_replace = client.post(
+            "/api/v2/catalog/works/bulk/find-replace/preview",
+            json={
+                "workIds": [created.json()["id"], duplicate_work.json()["id"]],
+                "field": "title",
+                "find": "Architecture",
+                "replacement": "Transactional",
+            },
+        )
+        assert preview_replace.status_code == 200, preview_replace.text
+        assert preview_replace.json()["changedWorks"] == 2
+        apply_replace = client.post(
+            "/api/v2/catalog/works/bulk/find-replace",
+            json={
+                "workIds": [created.json()["id"], duplicate_work.json()["id"]],
+                "field": "title",
+                "find": "Architecture",
+                "replacement": "Transactional",
+            },
+        )
+        assert apply_replace.status_code == 200, apply_replace.text
+        assert apply_replace.json()["updated"] == 2
+        assert (
+            client.post(
+                "/api/v2/catalog/works/bulk/find-replace/preview",
+                json={
+                    "workIds": [created.json()["id"]],
+                    "field": "title",
+                    "find": "[",
+                    "replacement": "invalid",
+                    "regex": True,
+                },
+            ).status_code
+            == 422
+        )
+        bulk_shelf = client.post(
+            f"/api/v2/catalog/shelves/{shelf.json()['id']}/works/bulk",
+            json={
+                "workIds": [duplicate_work.json()["id"], str(missing_catalog_id)],
+                "present": True,
+            },
+        )
+        assert bulk_shelf.status_code == 200, bulk_shelf.text
+        assert bulk_shelf.json()["updated"] == 1
+        assert bulk_shelf.json()["skipped"][0]["workId"] == str(missing_catalog_id)
+        duplicates = client.get("/api/v2/catalog/duplicates")
+        assert duplicates.status_code == 200, duplicates.text
+        duplicate_group = next(
+            group
+            for group in duplicates.json()["items"]
+            if {work["id"] for work in group["works"]}
+            == {created.json()["id"], duplicate_work.json()["id"]}
+        )
+        assert duplicate_group["confidence"] == 0.98
+        assert (
+            client.post(
+                "/api/v2/catalog/duplicates/merge",
+                json={
+                    "targetWorkId": created.json()["id"],
+                    "sourceWorkIds": [created.json()["id"]],
+                },
+            ).status_code
+            == 422
+        )
+        merge = client.post(
+            "/api/v2/catalog/duplicates/merge",
+            json={
+                "targetWorkId": created.json()["id"],
+                "sourceWorkIds": [duplicate_work.json()["id"]],
+            },
+        )
+        assert merge.status_code == 200, merge.text
+        assert merge.json()["affectedWorks"] == 1
+        assert merge.json()["undoAvailable"] is True
+        assert (
+            client.get(f"/api/v2/catalog/works/{duplicate_work.json()['id']}").json()["status"]
+            == "archived"
+        )
+        undo = client.post(
+            f"/api/v2/catalog/operations/{merge.json()['id']}/undo",
+        )
+        assert undo.status_code == 200, undo.text
+        assert undo.json()["status"] == "reverted"
+        assert (
+            client.get(f"/api/v2/catalog/works/{duplicate_work.json()['id']}").json()["status"]
+            == "active"
+        )
+        assert (
+            client.post(
+                f"/api/v2/catalog/operations/{merge.json()['id']}/undo",
+            ).status_code
+            == 404
+        )
+        bulk_cover = client.post(
+            "/api/v2/catalog/works/bulk/cover",
+            files=[
+                ("workIds", (None, created.json()["id"])),
+                ("workIds", (None, duplicate_work.json()["id"])),
+                ("cover", ("shared-cover.png", cover.getvalue(), "image/png")),
+            ],
+        )
+        assert bulk_cover.status_code == 200, bulk_cover.text
+        assert bulk_cover.json()["updated"] == 2
+        assert (
+            client.get(f"/api/v2/catalog/works/{duplicate_work.json()['id']}/cover").status_code
+            == 200
+        )
+        assert (
+            client.post(
+                "/api/v2/catalog/works/bulk/cover",
+                files=[
+                    ("workIds", (None, duplicate_work.json()["id"])),
+                    ("cover", ("invalid.txt", b"not-an-image", "text/plain")),
+                ],
+            ).status_code
+            == 422
+        )
         assert client.get(f"/api/v2/catalog/shelves/{missing_catalog_id}").status_code == 404
         assert (
             client.patch(
@@ -562,6 +700,55 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
             ).status_code
             == 404
         )
+        conversion = client.post(
+            "/api/v2/ingestion/conversions",
+            json={"editionId": edition_id},
+        )
+        assert conversion.status_code == 202, conversion.text
+        assert conversion.json()["duplicate"] is False
+        duplicate_conversion = client.post(
+            "/api/v2/ingestion/conversions",
+            json={"editionId": edition_id},
+        )
+        assert duplicate_conversion.status_code == 202
+        assert duplicate_conversion.json()["duplicate"] is True
+        assert (
+            client.post(
+                "/api/v2/ingestion/conversions",
+                json={"editionId": missing_reading_id},
+            ).status_code
+            == 404
+        )
+        conversion_container = build_container(settings)
+        try:
+            assert conversion_container.ingestion_worker.run_once("integration-conversion-worker")
+        finally:
+            conversion_container.close()
+        conversion_job = next(
+            job
+            for job in client.get("/api/v2/ingestion/conversions").json()["items"]
+            if job["id"] == conversion.json()["id"]
+        )
+        assert conversion_job["status"] == "completed"
+        converted_edition_id = conversion_job["resultId"]
+        converted_detail = client.get(f"/api/v2/catalog/works/{imported_work_id}").json()
+        converted_edition = next(
+            edition
+            for edition in converted_detail["editions"]
+            if edition["id"] == converted_edition_id
+        )
+        assert converted_edition["format"] == "epub"
+        assert converted_edition["metadata"]["conversion"]["sourceEditionId"] == str(edition_id)
+        converted_resource = client.get(f"/api/v2/reading/editions/{converted_edition_id}/resource")
+        assert converted_resource.status_code == 200
+        assert converted_resource.headers["content-type"] == "application/epub+zip"
+        assert (
+            client.post(
+                "/api/v2/ingestion/conversions",
+                json={"editionId": converted_edition_id},
+            ).status_code
+            == 422
+        )
         secondary_edition_id = uuid.uuid4()
         first_volume_id = uuid.uuid4()
         second_volume_id = uuid.uuid4()
@@ -710,6 +897,43 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
             },
         )
         assert progress_conflict.status_code == 409
+        bulk_finished = client.post(
+            "/api/v2/reading/progress/bulk",
+            json={
+                "workIds": [
+                    imported_work_id,
+                    created.json()["id"],
+                    str(missing_reading_id),
+                ],
+                "status": "FINISHED",
+            },
+        )
+        assert bulk_finished.status_code == 200, bulk_finished.text
+        assert bulk_finished.json()["updated"] == 1
+        assert bulk_finished.json()["changedValues"] == 2
+        assert len(bulk_finished.json()["skipped"]) == 2
+        finished_progress = client.get(f"/api/v2/reading/editions/{edition_id}/progress")
+        assert finished_progress.json()["percentage"] == 1
+        assert finished_progress.json()["position"] == {"kind": "completed"}
+        assert (
+            client.get(f"/api/v2/reading/editions/{converted_edition_id}/progress").json()[
+                "percentage"
+            ]
+            == 1
+        )
+        bulk_unread = client.post(
+            "/api/v2/reading/progress/bulk",
+            json={
+                "workIds": [imported_work_id],
+                "status": "UNREAD",
+            },
+        )
+        assert bulk_unread.status_code == 200, bulk_unread.text
+        assert bulk_unread.json()["changedValues"] == 2
+        assert client.get(f"/api/v2/reading/editions/{edition_id}/progress").json() is None
+        assert (
+            client.get(f"/api/v2/reading/editions/{converted_edition_id}/progress").json() is None
+        )
         resource = client.get(f"/api/v2/reading/editions/{edition_id}/resource")
         assert resource.status_code == 200, resource.text
         partial_resource = client.get(

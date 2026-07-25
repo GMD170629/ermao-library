@@ -35,6 +35,9 @@ class CatalogPorts(
     def get_edition(self, edition_id: uuid.UUID) -> CatalogEdition | None:
         return self._read.get_edition(edition_id)
 
+    def editions_for_work(self, work_id: uuid.UUID) -> list[CatalogEdition]:
+        return self._read.editions_for_work(work_id)
+
     def get_file(self, file_id: uuid.UUID) -> CatalogFile | None:
         return self._read.get_file(file_id)
 
@@ -49,6 +52,13 @@ class CatalogPorts(
 
     def import_file(self, imported: CatalogImport) -> CatalogEdition:
         return self._service.import_file(imported)
+
+    def publish_conversion(
+        self,
+        source_edition_id: uuid.UUID,
+        converted: CatalogImport,
+    ) -> CatalogEdition | None:
+        return self._service.publish_conversion(source_edition_id, converted)
 
     def apply_metadata(self, work_id: uuid.UUID, values: dict[str, object]) -> CatalogWork | None:
         return self._service.apply_metadata(work_id, values)

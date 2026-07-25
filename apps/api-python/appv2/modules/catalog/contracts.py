@@ -71,6 +71,7 @@ class CatalogImport:
     title: str
     author: str | None
     media_type: str
+    file_media_type: str
     format: str
     source_path: str
     original_name: str
@@ -90,6 +91,12 @@ class CoverResource:
 class CoverStoragePort(Protocol):
     def store(self, work_id: uuid.UUID, stream: BinaryIO) -> str: ...
 
+    def store_many(
+        self,
+        work_ids: list[uuid.UUID],
+        stream: BinaryIO,
+    ) -> dict[uuid.UUID, str]: ...
+
     def open(self, key: str, size: str) -> CoverResource: ...
 
     def delete(self, key: str) -> None: ...
@@ -99,6 +106,8 @@ class CatalogReadPort(Protocol):
     def get_work(self, work_id: uuid.UUID) -> CatalogWork | None: ...
 
     def get_edition(self, edition_id: uuid.UUID) -> CatalogEdition | None: ...
+
+    def editions_for_work(self, work_id: uuid.UUID) -> list[CatalogEdition]: ...
 
     def get_file(self, file_id: uuid.UUID) -> CatalogFile | None: ...
 
@@ -111,6 +120,12 @@ class CatalogReadPort(Protocol):
 
 class CatalogImportPort(Protocol):
     def import_file(self, imported: CatalogImport) -> CatalogEdition: ...
+
+    def publish_conversion(
+        self,
+        source_edition_id: uuid.UUID,
+        converted: CatalogImport,
+    ) -> CatalogEdition | None: ...
 
 
 class CatalogMetadataPort(Protocol):
@@ -146,6 +161,52 @@ class SeriesView:
     name: str
     book_count: int
     latest_updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class BulkSkipped:
+    work_id: uuid.UUID
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class BulkMutationResult:
+    updated: int
+    changed_values: int
+    skipped: tuple[BulkSkipped, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class FindReplaceItem:
+    work_id: uuid.UUID
+    title: str
+    before: str | list[str]
+    after: str | list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class FindReplacePreview:
+    changed_works: int
+    changed_values: int
+    items: tuple[FindReplaceItem, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class DuplicateGroupView:
+    id: uuid.UUID
+    confidence: float
+    reasons: tuple[str, ...]
+    works: tuple[CatalogWork, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class LibraryOperationView:
+    id: uuid.UUID
+    kind: str
+    status: str
+    affected_works: int
+    undo_available: bool
+    created_at: datetime
 
 
 class CatalogRepository(CatalogReadPort, CatalogImportPort, CatalogMetadataPort, Protocol):
@@ -304,6 +365,29 @@ class CatalogRepository(CatalogReadPort, CatalogImportPort, CatalogMetadataPort,
     ) -> CategoryView | None: ...
 
     def delete_category(self, category_id: uuid.UUID) -> bool: ...
+
+    def list_duplicate_groups(self, *, limit: int) -> list[DuplicateGroupView]: ...
+
+    def publish_conversion(
+        self,
+        source_edition_id: uuid.UUID,
+        converted: CatalogImport,
+    ) -> CatalogEdition | None: ...
+
+    def merge_duplicate_works(
+        self,
+        *,
+        actor_id: uuid.UUID,
+        target_id: uuid.UUID,
+        source_ids: list[uuid.UUID],
+    ) -> LibraryOperationView | None: ...
+
+    def undo_library_operation(
+        self,
+        *,
+        actor_id: uuid.UUID,
+        operation_id: uuid.UUID,
+    ) -> LibraryOperationView | None: ...
 
 
 class CatalogUnitOfWork(UnitOfWork, Protocol):

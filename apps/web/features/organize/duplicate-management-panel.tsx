@@ -1,42 +1,45 @@
 'use client';
 
-import { apiV2Fetch } from '@/lib/api-v2';
+import type {
+  DuplicateGroupResponse,
+  DuplicateWorkResponse,
+  LibraryOperationResponse,
+  Page_DuplicateGroupResponse_
+} from '@/generated/api-v2';
+import { apiV2Request } from '@/lib/api-v2';
 
 import { CheckCircle2, GitMerge, Loader2, RotateCcw, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { useToast } from '../../components/ui/feedback';
-import type { WorkView } from '../../types/work';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
-type DuplicateGroup = { id: string; confidence: number; reasons: string[]; works: WorkView[] };
-type ApiPayload<T> = { ok: boolean; data?: T; error?: { message: string } };
-
-async function payload<T>(response: Response, fallback: string) {
-  const result = await response.json().catch(() => null) as ApiPayload<T> | null;
-  if (!response.ok || !result?.ok) throw new Error(result?.error?.message ?? fallback);
-  return result.data as T;
+function workTags(work: DuplicateWorkResponse) {
+  const tags = work.metadata.tags;
+  return Array.isArray(tags)
+    ? tags.filter((value): value is string => typeof value === 'string')
+    : [];
 }
 
 export function DuplicateManagementPanel() {
   const { t: i18nAttribute } = useAttributeI18n();
-  const [groups, setGroups] = useState<DuplicateGroup[]>([]);
+  const [groups, setGroups] = useState<DuplicateGroupResponse[]>([]);
   const [targets, setTargets] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [merging, setMerging] = useState('');
   const [error, setError] = useState('');
-  const [lastOperation, setLastOperation] = useState<{ id: string; summary: string; undoAvailable: boolean } | null>(null);
+  const [lastOperation, setLastOperation] = useState<LibraryOperationResponse | null>(null);
   const toast = useToast();
 
   async function load() {
     setLoading(true);
     setError('');
     try {
-      const data = await payload<{ groups: DuplicateGroup[] }>(await apiV2Fetch('/api/v2/catalog/duplicates'), '读取重复项失败');
-      setGroups(data.groups);
-      setTargets(Object.fromEntries(data.groups.map((group) => [group.id, group.works[0]?.id ?? ''])));
+      const data = await apiV2Request<Page_DuplicateGroupResponse_>('/api/v2/catalog/duplicates');
+      setGroups(data.items);
+      setTargets(Object.fromEntries(data.items.map((group) => [group.id, group.works[0]?.id ?? ''])));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '读取重复项失败');
     } finally {
@@ -46,22 +49,27 @@ export function DuplicateManagementPanel() {
 
   useEffect(() => { void load(); }, []);
 
-  async function merge(group: DuplicateGroup) {
+  async function merge(group: DuplicateGroupResponse) {
     const targetWorkId = targets[group.id];
     if (!targetWorkId) return;
     setMerging(group.id);
     setError('');
     try {
-      const data = await payload<{ operation: { id: string; summary: string; undoAvailable: boolean } }>(
-        await apiV2Fetch('/api/v2/catalog/duplicates/merge', {
+      const operation = await apiV2Request<LibraryOperationResponse>(
+        '/api/v2/catalog/duplicates/merge',
+        {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ targetWorkId, sourceWorkIds: group.works.filter((work) => work.id !== targetWorkId).map((work) => work.id) })
-        }),
-        '合并重复项失败'
+        }
       );
-      setLastOperation(data.operation);
-      toast.success('重复项已合并', data.operation.summary);
+      setLastOperation(operation);
+      toast.success(
+        i18nAttribute('重复项已合并'),
+        i18nAttribute('已合并 {count} 个源作品，可在当前会话中撤销。', {
+          count: operation.affectedWorks
+        })
+      );
       await load();
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : '合并重复项失败';
@@ -75,8 +83,11 @@ export function DuplicateManagementPanel() {
   async function undo() {
     if (!lastOperation) return;
     try {
-      await payload(await apiV2Fetch(`/api/v2/catalog/operations/${lastOperation.id}/undo`, { method: 'POST' }), '撤销失败');
-      toast.success('已撤销合并');
+      await apiV2Request<LibraryOperationResponse>(
+        `/api/v2/catalog/operations/${lastOperation.id}/undo`,
+        { method: 'POST' }
+      );
+      toast.success(i18nAttribute('已撤销合并'));
       setLastOperation(null);
       await load();
     } catch (reason) {
@@ -98,7 +109,7 @@ export function DuplicateManagementPanel() {
 
       {lastOperation?.undoAvailable ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-          <span className="flex items-center gap-2"><CheckCircle2 size={16} />{lastOperation.summary}</span>
+          <span className="flex items-center gap-2"><CheckCircle2 size={16} />{i18nAttribute('已合并 {count} 个源作品，可在当前会话中撤销。', { count: lastOperation.affectedWorks })}</span>
           <Button variant="secondary" icon={RotateCcw} onClick={() => void undo()}><I18nText>撤销</I18nText></Button>
         </div>
       ) : null}
@@ -115,7 +126,14 @@ export function DuplicateManagementPanel() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="font-semibold text-[#302D2A]">{group.works[0]?.title ?? i18nAttribute("重复作品")}</div>
-              <div className="mt-1 text-xs text-[#8A847E]">{group.reasons.join('；')} <I18nText>· 匹配度 </I18nText>{Math.round(group.confidence * 100)}%</div>
+              <div className="mt-1 text-xs text-[#8A847E]">
+                {group.reasons.map((reason) => reason === 'NORMALIZED_TITLE'
+                  ? i18nAttribute('标题一致')
+                  : reason === 'NORMALIZED_AUTHOR'
+                    ? i18nAttribute('作者一致')
+                    : i18nAttribute('相似元数据')).join(i18nAttribute('；'))}
+                <I18nText> · 匹配度 </I18nText>{Math.round(group.confidence * 100)}%
+              </div>
             </div>
             <Button icon={GitMerge} loading={merging === group.id} loadingText={i18nAttribute("合并中")} onClick={() => void merge(group)}><I18nText>合并为主作品</I18nText></Button>
           </div>
@@ -125,8 +143,8 @@ export function DuplicateManagementPanel() {
                 <input type="radio" name={group.id} value={work.id} checked={targets[group.id] === work.id} onChange={() => setTargets((current) => ({ ...current, [group.id]: work.id }))} className="mt-1 accent-[#EF4D2F]" />
                 <span className="min-w-0">
                   <span className="block font-medium text-[#302D2A]">{work.title}</span>
-                  <span className="mt-1 block text-sm text-[#746E68]">{work.author} · {work.versionCount} <I18nText>个版本 · </I18nText>{work.size}</span>
-                  <span className="mt-2 flex flex-wrap gap-1.5">{work.tags.slice(0, 4).map((tag) => <Badge key={tag}>{tag}</Badge>)}</span>
+                  <span className="mt-1 block text-sm text-[#746E68]">{work.author || i18nAttribute('未知作者')} · {work.mediaType}</span>
+                  <span className="mt-2 flex flex-wrap gap-1.5">{workTags(work).slice(0, 4).map((tag) => <Badge key={tag}>{tag}</Badge>)}</span>
                   {targets[group.id] === work.id ? <span className="mt-3 block text-xs font-medium text-[#D34B32]"><I18nText>保留此记录的标题、封面与基础信息</I18nText></span> : null}
                 </span>
               </label>

@@ -36,22 +36,31 @@ def test_ingestion_worker_no_job_success_and_retry_failure() -> None:
     unit = WorkerUnitOfWork("ingestion")
     repository = unit.ingestion
     preparation = MagicMock()
+    conversion = MagicMock()
     catalog = MagicMock()
     worker = IngestionWorker(
         uow_factory=lambda: unit,
         preparation=preparation,
+        conversion=conversion,
         catalog=catalog,
         lease_seconds=60,
     )
     repository.claim_next.return_value = None
     assert worker.run_once("worker") is False
 
-    job = SimpleNamespace(id=uuid.uuid4(), source_path="/monitor/book.epub", attempt=1)
+    job = SimpleNamespace(
+        id=uuid.uuid4(),
+        source_path="/monitor/book.epub",
+        attempt=1,
+        kind="import",
+        options={},
+    )
     repository.claim_next.return_value = job
     preparation.prepare.return_value = SimpleNamespace(
         title="Book",
         author="Author",
         media_type="book",
+        file_media_type="application/epub+zip",
         format="epub",
         source_path="/monitor/book.epub",
         original_name="book.epub",
@@ -63,13 +72,40 @@ def test_ingestion_worker_no_job_success_and_retry_failure() -> None:
     assert worker.run_once("worker") is True
     repository.complete.assert_called_once()
 
+    source_edition_id = uuid.uuid4()
+    repository.claim_next.return_value = SimpleNamespace(
+        id=uuid.uuid4(),
+        source_path="/monitor/book.txt",
+        attempt=1,
+        kind="conversion",
+        options={"sourceEditionId": str(source_edition_id)},
+    )
+    conversion.prepare.return_value = preparation.prepare.return_value
+    catalog.publish_conversion.return_value = SimpleNamespace(id=uuid.uuid4())
+    assert worker.run_once("worker") is True
+    conversion.prepare.assert_called_once_with(
+        "/monitor/book.txt",
+        identity=str(source_edition_id),
+        language=None,
+    )
+    catalog.publish_conversion.assert_called_once()
+
     preparation.prepare.side_effect = ValueError("invalid import")
+    repository.claim_next.return_value = SimpleNamespace(
+        id=uuid.uuid4(),
+        source_path="/monitor/bad.epub",
+        attempt=1,
+        kind="import",
+        options={},
+    )
     assert worker.run_once("worker") is True
     assert repository.fail.call_args.kwargs["retry_at"] is not None
     repository.claim_next.return_value = SimpleNamespace(
         id=uuid.uuid4(),
         source_path="/monitor/bad.epub",
         attempt=5,
+        kind="import",
+        options={},
     )
     assert worker.run_once("worker") is True
     assert repository.fail.call_args.kwargs["retry_at"] is None

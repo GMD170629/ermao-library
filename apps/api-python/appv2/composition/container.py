@@ -24,6 +24,7 @@ from appv2.modules.discovery.infrastructure.repositories import discovery_uow_fa
 from appv2.modules.ingestion.application import IngestionService, IngestionWorker
 from appv2.modules.ingestion.infrastructure.files import (
     LocalImportPreparation,
+    LocalTextToEpubConversion,
     MonitorFileDiscovery,
     V2UploadStorage,
 )
@@ -117,11 +118,13 @@ def build_container(settings: Settings | None = None) -> Container:
         uow_factory=ingestion_uow,
         discovery=MonitorFileDiscovery(resolved.monitor_root),
         uploads=V2UploadStorage(storage.temp),
+        catalog=catalog_ports,
     )
     ingestion_queue = IngestionEnqueueAdapter(ingestion)
     ingestion_worker = IngestionWorker(
         uow_factory=ingestion_uow,
         preparation=LocalImportPreparation(),
+        conversion=LocalTextToEpubConversion(storage.conversions),
         catalog=catalog_ports,
         lease_seconds=resolved.worker_lease_seconds,
     )

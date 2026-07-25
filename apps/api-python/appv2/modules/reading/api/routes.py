@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
 from fastapi import APIRouter, Depends, Header, Query, status
 from pydantic import Field
@@ -15,7 +15,13 @@ from appv2.modules.reading.application import (
     ReadingNotFound,
     ReadingService,
 )
-from appv2.modules.reading.contracts import BookmarkView, ComicPage, PreferenceView, ProgressView
+from appv2.modules.reading.contracts import (
+    BookmarkView,
+    BulkProgressResult,
+    ComicPage,
+    PreferenceView,
+    ProgressView,
+)
 from appv2.platform.http import AppProblem, CamelModel, Page
 from appv2.platform.http.ranges import InvalidRange, parse_range_header
 
@@ -44,6 +50,30 @@ class ProgressRequest(CamelModel):
     percentage: float = Field(ge=0, le=1)
     occurred_at: datetime | None = None
     expected_version: int | None = Field(default=None, ge=0)
+
+
+class BulkProgressRequest(CamelModel):
+    work_ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+    status: Literal["UNREAD", "FINISHED"]
+
+
+class BulkProgressSkippedResponse(CamelModel):
+    work_id: uuid.UUID
+    reason: str
+
+
+class BulkProgressResponse(CamelModel):
+    updated: int
+    changed_values: int
+    skipped: list[BulkProgressSkippedResponse]
+
+    @classmethod
+    def from_result(cls, value: BulkProgressResult) -> Self:
+        return cls(
+            updated=value.updated,
+            changed_values=value.changed_values,
+            skipped=[BulkProgressSkippedResponse.model_validate(item) for item in value.skipped],
+        )
 
 
 class BookmarkResponse(CamelModel):
@@ -421,6 +451,18 @@ def create_router(service: ReadingService, current_account: CurrentAccount) -> A
     def progress(edition_id: uuid.UUID, actor: Actor) -> ProgressResponse | None:
         value = service.get_progress(user_id=actor.id, edition_id=edition_id)
         return ProgressResponse.from_view(value) if value else None
+
+    @router.post("/progress/bulk", response_model=BulkProgressResponse)
+    def bulk_progress(
+        payload: BulkProgressRequest,
+        actor: Actor,
+    ) -> BulkProgressResponse:
+        result = service.bulk_set_progress(
+            user_id=actor.id,
+            work_ids=payload.work_ids,
+            status=payload.status,
+        )
+        return BulkProgressResponse.from_result(result)
 
     @router.put("/editions/{edition_id}/progress", response_model=ProgressResponse)
     def save_progress(

@@ -16,6 +16,8 @@ from appv2.modules.catalog.contracts import (
     CatalogVolume,
     CatalogWork,
     CategoryView,
+    DuplicateGroupView,
+    LibraryOperationView,
     SeriesView,
     ShelfView,
 )
@@ -23,6 +25,7 @@ from appv2.modules.catalog.infrastructure.models import (
     CategoryRecord,
     EditionRecord,
     FileRecord,
+    LibraryOperationRecord,
     ShelfItemRecord,
     ShelfRecord,
     VolumeRecord,
@@ -107,6 +110,24 @@ def _category(record: CategoryRecord, book_count: int) -> CategoryView:
         created_at=record.created_at,
         updated_at=record.updated_at,
     )
+
+
+def _operation(record: LibraryOperationRecord) -> LibraryOperationView:
+    affected = record.payload.get("affectedWorks")
+    return LibraryOperationView(
+        id=record.id,
+        kind=record.kind,
+        status=record.status,
+        affected_works=affected if isinstance(affected, int) else 0,
+        undo_available=record.status == "completed" and record.undo_payload is not None,
+        created_at=record.created_at,
+    )
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
 
 
 class SqlCatalogRepository(CatalogRepository):
@@ -200,6 +221,9 @@ class SqlCatalogRepository(CatalogRepository):
             .order_by(EditionRecord.is_primary.desc(), EditionRecord.created_at)
         ).all()
         return [_edition(record) for record in records]
+
+    def editions_for_work(self, work_id: uuid.UUID) -> list[CatalogEdition]:
+        return self.list_editions(work_id)
 
     def list_files(self, edition_id: uuid.UUID) -> list[CatalogFile]:
         records = self._session.scalars(
@@ -514,9 +538,57 @@ class SqlCatalogRepository(CatalogRepository):
                 edition_id=edition.id,
                 storage_path=imported.source_path,
                 original_name=imported.original_name,
-                media_type=imported.media_type,
+                media_type=imported.file_media_type,
                 size_bytes=imported.size_bytes,
                 checksum=imported.checksum,
+                sort_order=0,
+            )
+        )
+        self._session.flush()
+        return _edition(edition)
+
+    def publish_conversion(
+        self,
+        source_edition_id: uuid.UUID,
+        converted: CatalogImport,
+    ) -> CatalogEdition | None:
+        source = self._session.get(EditionRecord, source_edition_id)
+        if source is None:
+            return None
+        existing_file = self._session.scalar(
+            select(FileRecord).where(FileRecord.checksum == converted.checksum).limit(1)
+        )
+        if existing_file is not None:
+            existing_edition = self._session.get(EditionRecord, existing_file.edition_id)
+            if existing_edition is not None and existing_edition.work_id == source.work_id:
+                return _edition(existing_edition)
+            raise ValueError("converted file checksum belongs to another work")
+        metadata = {
+            **converted.metadata,
+            "conversion": {
+                "sourceEditionId": str(source_edition_id),
+                "sourceFormat": source.format,
+                "targetFormat": converted.format,
+            },
+        }
+        edition = EditionRecord(
+            work_id=source.work_id,
+            title=source.title,
+            format=converted.format,
+            language=source.language,
+            is_primary=False,
+            metadata_json=metadata,
+        )
+        self._session.add(edition)
+        self._session.flush()
+        self._session.add(
+            FileRecord(
+                edition_id=edition.id,
+                storage_path=converted.source_path,
+                original_name=converted.original_name,
+                media_type=converted.file_media_type,
+                size_bytes=converted.size_bytes,
+                checksum=converted.checksum,
                 sort_order=0,
             )
         )
@@ -839,6 +911,286 @@ class SqlCatalogRepository(CatalogRepository):
             return False
         self._session.delete(record)
         return True
+
+    def list_duplicate_groups(self, *, limit: int) -> list[DuplicateGroupView]:
+        title_key = func.regexp_replace(
+            func.lower(func.trim(WorkRecord.title)),
+            r"\s+",
+            "",
+            "g",
+        )
+        author_key = func.regexp_replace(
+            func.lower(func.trim(func.coalesce(WorkRecord.author, ""))),
+            r"\s+",
+            "",
+            "g",
+        )
+        ranked = (
+            select(
+                WorkRecord.id.label("work_id"),
+                title_key.label("title_key"),
+                author_key.label("author_key"),
+                func.count(WorkRecord.id)
+                .over(partition_by=(title_key, author_key))
+                .label("duplicate_count"),
+            )
+            .where(WorkRecord.status == "active")
+            .subquery()
+        )
+        rows = self._session.execute(
+            select(WorkRecord, ranked.c.title_key, ranked.c.author_key)
+            .join(ranked, ranked.c.work_id == WorkRecord.id)
+            .where(ranked.c.duplicate_count > 1)
+            .order_by(ranked.c.title_key, ranked.c.author_key, WorkRecord.created_at)
+        ).all()
+        grouped: dict[tuple[str, str], list[CatalogWork]] = {}
+        for record, normalized_title, normalized_author in rows:
+            key = (str(normalized_title), str(normalized_author))
+            grouped.setdefault(key, []).append(_work(record))
+        result: list[DuplicateGroupView] = []
+        for (normalized_title, normalized_author), works in grouped.items():
+            if len(result) >= limit:
+                break
+            namespace_key = f"{normalized_title}\0{normalized_author}"
+            result.append(
+                DuplicateGroupView(
+                    id=uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"shuku:duplicate:{namespace_key}",
+                    ),
+                    confidence=0.98 if normalized_author else 0.9,
+                    reasons=("NORMALIZED_TITLE", "NORMALIZED_AUTHOR")
+                    if normalized_author
+                    else ("NORMALIZED_TITLE",),
+                    works=tuple(works),
+                )
+            )
+        return result
+
+    def merge_duplicate_works(
+        self,
+        *,
+        actor_id: uuid.UUID,
+        target_id: uuid.UUID,
+        source_ids: list[uuid.UUID],
+    ) -> LibraryOperationView | None:
+        target = self._session.scalar(
+            select(WorkRecord).where(
+                WorkRecord.id == target_id,
+                WorkRecord.status == "active",
+            )
+        )
+        sources = self._session.scalars(
+            select(WorkRecord).where(
+                WorkRecord.id.in_(source_ids),
+                WorkRecord.status == "active",
+            )
+        ).all()
+        if target is None or len(sources) != len(set(source_ids)):
+            return None
+        target_shelves_before = set(
+            self._session.scalars(
+                select(ShelfItemRecord.shelf_id).where(ShelfItemRecord.work_id == target_id)
+            ).all()
+        )
+        target_categories_before = set(
+            self._session.scalars(
+                select(WorkCategoryRecord.category_id).where(
+                    WorkCategoryRecord.work_id == target_id
+                )
+            ).all()
+        )
+        source_states: list[dict[str, object]] = []
+        moved_shelves: set[uuid.UUID] = set()
+        moved_categories: set[uuid.UUID] = set()
+        for source in sources:
+            editions = self._session.scalars(
+                select(EditionRecord).where(EditionRecord.work_id == source.id)
+            ).all()
+            shelf_links = self._session.scalars(
+                select(ShelfItemRecord).where(ShelfItemRecord.work_id == source.id)
+            ).all()
+            category_links = self._session.scalars(
+                select(WorkCategoryRecord).where(WorkCategoryRecord.work_id == source.id)
+            ).all()
+            source_states.append(
+                {
+                    "id": str(source.id),
+                    "status": source.status,
+                    "metadata": source.metadata_json,
+                    "editions": [
+                        {"id": str(edition.id), "primary": edition.is_primary}
+                        for edition in editions
+                    ],
+                    "shelfIds": [str(link.shelf_id) for link in shelf_links],
+                    "categoryIds": [str(link.category_id) for link in category_links],
+                }
+            )
+            for edition in editions:
+                edition.work_id = target_id
+                edition.is_primary = False
+            for shelf_link in shelf_links:
+                duplicate_link = (
+                    shelf_link.shelf_id in target_shelves_before
+                    or shelf_link.shelf_id in moved_shelves
+                )
+                moved_shelves.add(shelf_link.shelf_id)
+                if duplicate_link:
+                    self._session.delete(shelf_link)
+                else:
+                    shelf_link.work_id = target_id
+            for category_link in category_links:
+                duplicate_link = (
+                    category_link.category_id in target_categories_before
+                    or category_link.category_id in moved_categories
+                )
+                moved_categories.add(category_link.category_id)
+                if duplicate_link:
+                    self._session.delete(category_link)
+                else:
+                    category_link.work_id = target_id
+            source.status = "archived"
+            source.metadata_json = {
+                **source.metadata_json,
+                "mergedInto": str(target_id),
+            }
+        operation = LibraryOperationRecord(
+            actor_id=actor_id,
+            kind="duplicate_merge",
+            status="completed",
+            payload={
+                "targetWorkId": str(target_id),
+                "sourceWorkIds": [str(source.id) for source in sources],
+                "affectedWorks": len(sources),
+            },
+            undo_payload={
+                "targetWorkId": str(target_id),
+                "sources": source_states,
+                "movedShelfIds": [str(value) for value in moved_shelves],
+                "targetShelfIdsBefore": [str(value) for value in target_shelves_before],
+                "movedCategoryIds": [str(value) for value in moved_categories],
+                "targetCategoryIdsBefore": [str(value) for value in target_categories_before],
+            },
+        )
+        self._session.add(operation)
+        self._session.flush()
+        return _operation(operation)
+
+    def undo_library_operation(
+        self,
+        *,
+        actor_id: uuid.UUID,
+        operation_id: uuid.UUID,
+    ) -> LibraryOperationView | None:
+        operation = self._session.scalar(
+            select(LibraryOperationRecord).where(
+                LibraryOperationRecord.id == operation_id,
+                LibraryOperationRecord.actor_id == actor_id,
+                LibraryOperationRecord.kind == "duplicate_merge",
+                LibraryOperationRecord.status == "completed",
+            )
+        )
+        if operation is None or operation.undo_payload is None:
+            return None
+        undo = operation.undo_payload
+        target_id_value = undo.get("targetWorkId")
+        sources_value = undo.get("sources")
+        if not isinstance(target_id_value, str) or not isinstance(sources_value, list):
+            return None
+        target_id = uuid.UUID(target_id_value)
+        target_shelves_before = {
+            uuid.UUID(value) for value in _string_list(undo.get("targetShelfIdsBefore"))
+        }
+        target_categories_before = {
+            uuid.UUID(value) for value in _string_list(undo.get("targetCategoryIdsBefore"))
+        }
+        for value in _string_list(undo.get("movedShelfIds")):
+            if uuid.UUID(value) not in target_shelves_before:
+                shelf_link = self._session.scalar(
+                    select(ShelfItemRecord).where(
+                        ShelfItemRecord.shelf_id == uuid.UUID(value),
+                        ShelfItemRecord.work_id == target_id,
+                    )
+                )
+                if shelf_link is not None:
+                    self._session.delete(shelf_link)
+        for value in _string_list(undo.get("movedCategoryIds")):
+            if uuid.UUID(value) not in target_categories_before:
+                category_link = self._session.scalar(
+                    select(WorkCategoryRecord).where(
+                        WorkCategoryRecord.category_id == uuid.UUID(value),
+                        WorkCategoryRecord.work_id == target_id,
+                    )
+                )
+                if category_link is not None:
+                    self._session.delete(category_link)
+        for source_value in sources_value:
+            source_state = (
+                {str(key): item for key, item in source_value.items()}
+                if isinstance(source_value, dict)
+                else {}
+            )
+            source_id_value = source_state.get("id")
+            if not isinstance(source_id_value, str):
+                return None
+            source_id = uuid.UUID(source_id_value)
+            source = self._session.get(WorkRecord, source_id)
+            if source is None:
+                return None
+            status_value = source_state.get("status")
+            metadata_value = source_state.get("metadata")
+            source.status = status_value if isinstance(status_value, str) else "active"
+            source.metadata_json = (
+                {str(key): item for key, item in metadata_value.items()}
+                if isinstance(metadata_value, dict)
+                else {}
+            )
+            editions_value = source_state.get("editions")
+            if isinstance(editions_value, list):
+                for edition_value in editions_value:
+                    edition_state = (
+                        {str(key): item for key, item in edition_value.items()}
+                        if isinstance(edition_value, dict)
+                        else {}
+                    )
+                    edition_id_value = edition_state.get("id")
+                    if not isinstance(edition_id_value, str):
+                        continue
+                    edition = self._session.get(
+                        EditionRecord,
+                        uuid.UUID(edition_id_value),
+                    )
+                    if edition is not None:
+                        edition.work_id = source_id
+                        edition.is_primary = edition_state.get("primary") is True
+            for shelf_id_value in _string_list(source_state.get("shelfIds")):
+                shelf_id = uuid.UUID(shelf_id_value)
+                existing_shelf_link = self._session.scalar(
+                    select(ShelfItemRecord).where(
+                        ShelfItemRecord.shelf_id == shelf_id,
+                        ShelfItemRecord.work_id == source_id,
+                    )
+                )
+                if existing_shelf_link is None:
+                    self._session.add(ShelfItemRecord(shelf_id=shelf_id, work_id=source_id))
+            for category_id_value in _string_list(source_state.get("categoryIds")):
+                category_id = uuid.UUID(category_id_value)
+                existing_category_link = self._session.scalar(
+                    select(WorkCategoryRecord).where(
+                        WorkCategoryRecord.category_id == category_id,
+                        WorkCategoryRecord.work_id == source_id,
+                    )
+                )
+                if existing_category_link is None:
+                    self._session.add(
+                        WorkCategoryRecord(
+                            category_id=category_id,
+                            work_id=source_id,
+                        )
+                    )
+        operation.status = "reverted"
+        self._session.flush()
+        return _operation(operation)
 
 
 class CatalogSqlUnitOfWork:

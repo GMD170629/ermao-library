@@ -39,6 +39,10 @@ class EnqueueRequest(CamelModel):
     move_source: bool = False
 
 
+class ConversionRequest(CamelModel):
+    edition_id: uuid.UUID
+
+
 class JobAccepted(CamelModel):
     id: uuid.UUID
     status: str
@@ -160,7 +164,11 @@ def create_router(service: IngestionService, current_account: CurrentAccount) ->
     ) -> Page[JobResponse]:
         del actor
         size = min(max(page_size, 1), 200)
-        items, total = service.list_jobs(page=max(page, 1), page_size=size, status=job_status)
+        items, total = service.list_jobs(
+            page=max(page, 1),
+            page_size=size,
+            status=job_status,
+        )
         return Page(
             items=[JobResponse.from_view(item) for item in items],
             page=max(page, 1),
@@ -354,13 +362,42 @@ def create_router(service: IngestionService, current_account: CurrentAccount) ->
     ) -> Page[JobResponse]:
         del actor
         size = min(max(page_size, 1), 200)
-        items, total = service.list_jobs(page=max(page, 1), page_size=size, status=None)
-        items = [item for item in items if item.kind == "conversion"]
+        items, total = service.list_jobs(
+            page=max(page, 1),
+            page_size=size,
+            status=None,
+            kind="conversion",
+        )
         return Page(
             items=[JobResponse.from_view(item) for item in items],
             page=max(page, 1),
             page_size=size,
             total=total,
         )
+
+    @router.post(
+        "/conversions",
+        response_model=JobAccepted,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    def convert(
+        payload: ConversionRequest,
+        actor: Actor,
+    ) -> JobAccepted:
+        try:
+            result = service.enqueue_conversion(
+                edition_id=payload.edition_id,
+                requested_by=actor.id,
+            )
+        except IngestionNotFound as error:
+            raise missing(error) from error
+        except ValueError as error:
+            raise AppProblem(
+                status=422,
+                code="UNSUPPORTED_CONVERSION",
+                title="Unsupported conversion",
+                message_key="invalid_request",
+            ) from error
+        return JobAccepted.from_result(result)
 
     return router

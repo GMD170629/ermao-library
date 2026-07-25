@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+import zipfile
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
@@ -27,6 +28,7 @@ from appv2.modules.discovery.infrastructure.adapters import (
     HttpDownloadAdapter,
     JsonHttpSourceSearch,
 )
+from appv2.modules.ingestion.infrastructure.files import LocalTextToEpubConversion
 from appv2.modules.metadata.contracts import ProviderView
 from appv2.modules.metadata.infrastructure.providers import ConfiguredProviderRegistry
 from appv2.modules.operations.contracts import BackupView, RestoreRequest
@@ -123,9 +125,69 @@ def test_local_cover_storage_validates_and_materializes_variants(
         with pytest.raises(InvalidCoverImage, match="pixel limit"):
             storage.store(uuid.uuid4(), source)
 
+    second_work_id = uuid.uuid4()
+    source.seek(0)
+    keys = storage.store_many([work_id, second_work_id, second_work_id], source)
+    assert list(keys) == [work_id, second_work_id]
+    assert storage.open(keys[second_work_id], "large").path.exists()
+
     storage.delete(key)
     assert not small.path.exists()
+    storage.delete(keys[work_id])
+    storage.delete(keys[second_work_id])
     storage.delete(key)
+
+
+def test_text_conversion_creates_a_safe_reusable_epub(tmp_path: Path) -> None:
+    source = tmp_path / "A_Book.txt"
+    source.write_text("第一章\n<script>alert('x')</script>", encoding="utf-8")
+    conversion = LocalTextToEpubConversion(tmp_path / "conversions")
+
+    prepared = conversion.prepare(
+        str(source),
+        identity="00000000-0000-0000-0000-000000000001",
+        language="zh-CN",
+    )
+
+    assert prepared.title == "A Book"
+    assert prepared.format == "epub"
+    assert prepared.file_media_type == "application/epub+zip"
+    assert prepared.metadata["convertedFromFormat"] == "txt"
+    output = Path(prepared.source_path)
+    assert output.is_relative_to(tmp_path / "conversions")
+    with zipfile.ZipFile(output) as archive:
+        assert archive.namelist()[0] == "mimetype"
+        assert archive.read("mimetype") == b"application/epub+zip"
+        content = archive.read("OEBPS/text.xhtml").decode()
+        assert "&lt;script&gt;" in content
+        assert "<script>" not in content
+        package = archive.read("OEBPS/content.opf").decode()
+        assert "<dc:language>zh-CN</dc:language>" in package
+    assert (
+        conversion.prepare(
+            str(source),
+            identity="00000000-0000-0000-0000-000000000001",
+            language="zh-CN",
+        ).source_path
+        == prepared.source_path
+    )
+    other = conversion.prepare(
+        str(source),
+        identity="00000000-0000-0000-0000-000000000002",
+        language=None,
+    )
+    assert other.source_path != prepared.source_path
+    assert other.checksum != prepared.checksum
+    with pytest.raises(ValueError, match="text files"):
+        conversion.prepare(
+            str(tmp_path / "missing.txt"),
+            identity="missing",
+            language=None,
+        )
+    binary = tmp_path / "binary.txt"
+    binary.write_bytes(b"\xff")
+    with pytest.raises(ValueError, match="UTF-8"):
+        conversion.prepare(str(binary), identity="binary", language=None)
 
 
 def test_pg_backup_executor_create_open_delete_and_validation(

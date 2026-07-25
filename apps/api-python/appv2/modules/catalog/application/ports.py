@@ -25,6 +25,10 @@ class CatalogReadAdapter(CatalogReadPort):
         with self._uow_factory() as uow:
             return uow.catalog.get_edition(edition_id)
 
+    def editions_for_work(self, work_id: uuid.UUID) -> list[CatalogEdition]:
+        with self._uow_factory() as uow:
+            return uow.catalog.list_editions(work_id)
+
     def get_file(self, file_id: uuid.UUID) -> CatalogFile | None:
         with self._uow_factory() as uow:
             return uow.catalog.get_file(file_id)

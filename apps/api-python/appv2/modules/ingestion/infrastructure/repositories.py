@@ -29,6 +29,7 @@ def _job(record: IngestionJobRecord) -> IngestionJob:
         kind=record.kind,
         status=record.status,
         source_path=record.source_path,
+        options=record.options,
         attempt=record.attempt,
         next_attempt_at=record.next_attempt_at,
         lease_expires_at=record.lease_expires_at,
@@ -65,7 +66,10 @@ class SqlIngestionRepository(IngestionRepository):
                 source_path=request.source_path,
                 requested_by=request.requested_by,
                 idempotency_key=request.idempotency_key,
-                options={"moveSource": request.move_source},
+                options={
+                    **request.options,
+                    "moveSource": request.move_source,
+                },
                 attempt=0,
                 max_attempts=5,
                 next_attempt_at=datetime.now(UTC),
@@ -91,9 +95,18 @@ class SqlIngestionRepository(IngestionRepository):
         )
 
     def list_jobs(
-        self, *, offset: int, limit: int, status: str | None
+        self,
+        *,
+        offset: int,
+        limit: int,
+        status: str | None,
+        kind: str | None,
     ) -> tuple[list[IngestionJob], int]:
-        criteria = [IngestionJobRecord.status == status] if status else []
+        criteria = []
+        if status:
+            criteria.append(IngestionJobRecord.status == status)
+        if kind:
+            criteria.append(IngestionJobRecord.kind == kind)
         total = int(
             self._session.scalar(
                 select(func.count()).select_from(IngestionJobRecord).where(*criteria)
