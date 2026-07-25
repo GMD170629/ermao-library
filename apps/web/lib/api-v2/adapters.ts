@@ -1,5 +1,7 @@
 import type {
   AccountResponse,
+  FileResponse,
+  VolumeResponse,
   WorkDetailResponse,
   WorkResponse
 } from '../../generated/api-v2';
@@ -39,6 +41,77 @@ function readingFormat(format: string | undefined, kind: MediaKind): ReadingForm
   return kind === 'COMIC' ? 'COMIC' : kind === 'AUDIOBOOK' ? 'AUDIO' : 'EPUB';
 }
 
+function metadataString(
+  metadata: Record<string, unknown>,
+  key: string
+): string | null {
+  const value = metadata[key];
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function metadataNumber(
+  metadata: Record<string, unknown>,
+  key: string
+): number | null {
+  const value = metadata[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function metadataStrings(
+  metadata: Record<string, unknown>,
+  key: string
+): string[] {
+  const value = metadata[key];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
+}
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let amount = value;
+  let unit = 0;
+  while (amount >= 1024 && unit < units.length - 1) {
+    amount /= 1024;
+    unit += 1;
+  }
+  return `${unit === 0 ? Math.round(amount) : amount.toFixed(1)} ${units[unit]}`;
+}
+
+function fileResponseToView(file: FileResponse): WorkView['files'][number] {
+  return {
+    id: file.id,
+    editionId: file.editionId,
+    volumeId: file.volumeId,
+    path: file.originalName,
+    mimeType: file.mediaType,
+    kind: file.mediaType.startsWith('audio/') ? 'audio' : 'document',
+    sortOrder: file.sortOrder,
+    sizeBytes: file.sizeBytes,
+    size: formatBytes(file.sizeBytes),
+    durationMs: file.durationMs,
+    url: `/api/v2/reading/files/${encodeURIComponent(file.id)}`
+  };
+}
+
+function volumeResponseToView(
+  volume: VolumeResponse,
+  coverUrl: string
+): WorkView['volumes'][number] {
+  return {
+    id: volume.id,
+    editionId: volume.editionId,
+    title: volume.title,
+    volumeIndex: volume.sortOrder + 1,
+    sortOrder: volume.sortOrder,
+    pageCount: volume.pageCount,
+    chapterCount: null,
+    coverUrl,
+    durationMs: volume.durationMs
+  };
+}
+
 export function workResponseToView(
   work: WorkResponse | WorkDetailResponse
 ): WorkView {
@@ -46,28 +119,49 @@ export function workResponseToView(
   const detail = 'editions' in work ? work : null;
   const primary = detail?.editions.find((edition) => edition.primary) ?? detail?.editions[0];
   const format = readingFormat(primary?.format, kind);
-  const editions: WorkView['editions'] = (detail?.editions ?? []).map((edition) => ({
-    id: edition.id,
-    workId: edition.workId,
-    formatValue: readingFormat(edition.format, kind),
-    mediaKind: kind,
-    format: edition.format.toUpperCase(),
-    versionName: edition.title,
-    language: edition.language,
-    primary: edition.primary,
-    hidden: false,
-    readable: true,
-    conversionAvailable: false,
-    size: '—',
-    pageCount: null,
-    chapterCount: null,
-    progress: 0,
-    lastReadAt: null,
-    coverUrl: work.coverUrl ?? '',
-    conversion: null,
-    files: [],
-    volumes: []
-  }));
+  const metadata = work.metadata;
+  const editions: WorkView['editions'] = (detail?.editions ?? []).map((edition) => {
+    const editionMetadata = edition.metadata;
+    const files = edition.files.map(fileResponseToView);
+    const volumes = edition.volumes.map((volume) => (
+      volumeResponseToView(volume, work.coverUrl ?? '')
+    ));
+    return {
+      id: edition.id,
+      workId: edition.workId,
+      formatValue: readingFormat(edition.format, kind),
+      mediaKind: kind,
+      format: edition.format.toUpperCase(),
+      versionName: edition.title,
+      description: metadataString(editionMetadata, 'description'),
+      publisher: metadataString(editionMetadata, 'publisher'),
+      publishedAt: metadataString(editionMetadata, 'publishedAt'),
+      language: edition.language,
+      identifier: metadataString(editionMetadata, 'identifier'),
+      isbn: metadataString(editionMetadata, 'isbn'),
+      narrator: metadataString(editionMetadata, 'narrator'),
+      primary: edition.primary,
+      hidden: false,
+      readable: true,
+      conversionAvailable: false,
+      size: formatBytes(edition.files.reduce((total, file) => total + file.sizeBytes, 0)),
+      pageCount: edition.volumes.reduce<number | null>(
+        (total, volume) => (
+          total === null || volume.pageCount === null ? null : total + volume.pageCount
+        ),
+        0
+      ),
+      chapterCount: null,
+      progress: 0,
+      lastReadAt: null,
+      coverUrl: work.coverUrl ?? '',
+      conversion: null,
+      files,
+      volumes
+    };
+  });
+  const files = editions.flatMap((edition) => edition.files);
+  const volumes = editions.flatMap((edition) => edition.volumes);
   return {
     id: work.id,
     workId: work.id,
@@ -75,12 +169,12 @@ export function workResponseToView(
     monitorFolderId: null,
     title: work.title,
     author: work.author ?? '',
-    publisher: null,
+    publisher: metadataString(metadata, 'publisher'),
     type: kind === 'COMIC' ? 'comic' : kind === 'AUDIOBOOK' ? 'audiobook' : 'ebook',
     mediaKind: kind,
     formatValue: format,
     format,
-    size: '—',
+    size: formatBytes(files.reduce((total, file) => total + file.sizeBytes, 0)),
     progress: 0,
     statusValue: 'UNREAD',
     status: '未开始',
@@ -96,17 +190,20 @@ export function workResponseToView(
     organized: true,
     organizeStatus: 'ready',
     metadataQuality: 0,
-    tags: [],
-    seriesName: null,
-    seriesIndex: null,
-    publishedYear: null,
+    tags: metadataStrings(metadata, 'tags'),
+    seriesName: metadataString(metadata, 'seriesName'),
+    seriesIndex: metadataNumber(metadata, 'seriesIndex'),
+    publishedYear: metadataNumber(metadata, 'publishedYear'),
     added: work.createdAt,
     lastRead: '—',
     lastReadAt: null,
     chapter: '',
     chapterCount: null,
-    pageCount: null,
-    desc: '',
+    pageCount: volumes.reduce<number | null>(
+      (total, volume) => total === null || volume.pageCount === null ? null : total + volume.pageCount,
+      0
+    ),
+    desc: work.summary ?? '',
     path: '',
     fileHash: '',
     gradient: 'from-stone-100 to-stone-200',
@@ -117,9 +214,9 @@ export function workResponseToView(
     importStatus: 'completed',
     importError: null,
     importedAt: work.createdAt,
-    files: [],
+    files,
     versionCount: editions.length,
-    volumeCount: 0,
+    volumeCount: volumes.length,
     primaryEditionId: primary?.id ?? null,
     primaryEditionName: primary?.title ?? null,
     recentEditionId: primary?.id ?? null,
@@ -131,7 +228,7 @@ export function workResponseToView(
       { key: 'STRUCTURE', label: '内容结构', sortOrder: 1 }
     ],
     selectedDetailTab: kind,
-    volumes: [],
+    volumes,
     editions
   };
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { apiV2Fetch, workResponseToView } from '@/lib/api-v2';
+import { apiV2Fetch, apiV2Request, workResponseToView } from '@/lib/api-v2';
 import type {
   AccountPreferences,
   AccountResponse,
@@ -370,17 +370,13 @@ export function LibraryPage() {
     setError('');
     setMessage('');
     try {
-      const response = await apiV2Fetch(`/api/v2/catalog/works/${book.id}`, {
+      await apiV2Request<void>(`/api/v2/catalog/works/${book.id}`, {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deleteSource })
+        headers: { 'Content-Type': 'application/json' }
       });
-      const payload = (await response.json()) as { ok: boolean; data?: { failedFileDeletes?: Array<{ path: string; message: string }> }; error?: { message: string } };
-      if (!payload.ok) throw new Error(payload.error?.message ?? '删除失败');
       setDeleteTarget(null);
       setMessage('已删除书库记录');
-      const failedCount = payload.data?.failedFileDeletes?.length ?? 0;
-      toast.success('已删除书库记录', failedCount > 0 ? `有 ${failedCount} 个文件未能删除，请检查系统日志` : deleteSource ? '关联的源文件已同步删除' : '来源文件已保留');
+      toast.success('已删除书库记录', '来源文件已保留');
       setReloadKey((key) => key + 1);
     } catch (reason) {
       const nextError = reason instanceof Error ? reason.message : '删除失败';
@@ -431,9 +427,17 @@ export function LibraryPage() {
       if (statusFilter !== '全部') rules.statuses = [statusFilter];
       if (formatFilter !== '全部') rules.mediaKinds = [formatFilter === 'ebook' ? 'EBOOK' : formatFilter];
       if (applicableSmartFilterRules.conditions.length > 0) Object.assign(rules, serializableSmartFilterRules(applicableSmartFilterRules));
-      const response = await apiV2Fetch('/api/v2/catalog/shelves', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: smartShelfName.trim(), description: '由书库筛选条件自动更新', kind: 'SMART', rules, pinned: true }) });
-      const payload = await response.json() as { ok: boolean; error?: { message: string } };
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '保存智能书架失败');
+      await apiV2Request('/api/v2/catalog/shelves', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: smartShelfName.trim(),
+          description: '由书库筛选条件自动更新',
+          kind: 'smart',
+          rules,
+          pinned: true
+        })
+      });
       toast.success('智能书架已保存', '以后符合这些条件的图书会自动出现。');
       window.dispatchEvent(new Event('shuku:shelves-changed'));
       setSmartShelfOpen(false);

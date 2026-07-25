@@ -63,6 +63,7 @@ def test_catalog_service_complete_success_and_failure_surface() -> None:
         query="book",
         media_type="book",
         status="active",
+        series_name=None,
     ) == ([work], 1)
     repository.list_works.assert_called_with(
         offset=10,
@@ -70,14 +71,27 @@ def test_catalog_service_complete_success_and_failure_surface() -> None:
         query="book",
         media_type="book",
         status="active",
+        series_name=None,
     )
+    repository.list_series.return_value = (["series"], 1)
+    assert service.list_series(page=2, page_size=5, status="active") == (["series"], 1)
+    repository.list_series.assert_called_with(status="active", offset=5, limit=5)
 
     repository.get_work.return_value = work
     repository.list_editions.return_value = [edition]
     assert service.get_work(work_id) == (work, [edition])
+    repository.list_files.return_value = ["file"]
+    repository.list_volumes.return_value = ["volume"]
+    detailed_work, edition_details = service.get_work_detail(work_id)
+    assert detailed_work is work
+    assert edition_details[0].edition is edition
+    assert edition_details[0].files == ("file",)
+    assert edition_details[0].volumes == ("volume",)
     repository.get_work.return_value = None
     with pytest.raises(CatalogNotFound):
         service.get_work(work_id)
+    with pytest.raises(CatalogNotFound):
+        service.get_work_detail(work_id)
 
     repository.add_work.return_value = work
     assert (
@@ -762,15 +776,18 @@ def test_operations_and_reading_services() -> None:
     catalog.get_edition.return_value = edition
     catalog.get_work.return_value = work
     catalog.files_for_edition.return_value = [file]
+    catalog.volumes_for_edition.return_value = []
     reading_repo.get_progress.return_value = None
     reading_repo.list_bookmarks.return_value = []
     reading_repo.get_preference.return_value = None
-    target, progress, bookmarks, preference = reading.bootstrap(
+    target, progress, bookmarks, preference, files, volumes = reading.bootstrap(
         user_id=user_id,
         edition_id=edition_id,
     )
     assert target.file_id == file_id
     assert (progress, bookmarks, preference) == (None, [], None)
+    assert files == [file]
+    assert volumes == []
     catalog.get_edition.return_value = None
     with pytest.raises(ReadingNotFound):
         reading.bootstrap(user_id=user_id, edition_id=edition_id)
@@ -798,25 +815,42 @@ def test_operations_and_reading_services() -> None:
     with pytest.raises(ReadingNotFound):
         reading.resource(user_id=user_id, edition_id=edition_id, requested_range=None)
     resources.open.side_effect = None
+    catalog.get_file.return_value = file
+    assert (
+        reading.file_resource(
+            user_id=user_id,
+            file_id=file_id,
+            requested_range=None,
+        )
+        is stream
+    )
+    catalog.get_file.return_value = None
+    with pytest.raises(ReadingNotFound):
+        reading.file_resource(
+            user_id=user_id,
+            file_id=file_id,
+            requested_range=None,
+        )
+    catalog.get_file.return_value = file
     pages = [SimpleNamespace(index=0)]
     resources.comic_pages.return_value = pages
-    assert reading.comic_pages(edition_id=edition_id) == pages
+    assert reading.comic_pages(target_id=edition_id) == pages
     resources.comic_pages.side_effect = ValueError
     with pytest.raises(ReadingNotFound):
-        reading.comic_pages(edition_id=edition_id)
+        reading.comic_pages(target_id=edition_id)
     resources.comic_pages.side_effect = None
     resources.open_comic_page.return_value = stream
     assert (
         reading.comic_page(
             user_id=user_id,
-            edition_id=edition_id,
+            target_id=edition_id,
             page_index=0,
         )
         is stream
     )
     resources.open_comic_page.side_effect = FileNotFoundError
     with pytest.raises(ReadingNotFound):
-        reading.comic_page(user_id=user_id, edition_id=edition_id, page_index=0)
+        reading.comic_page(user_id=user_id, target_id=edition_id, page_index=0)
     resources.open_comic_page.side_effect = None
 
     assert reading.get_progress(user_id=user_id, edition_id=edition_id) is None

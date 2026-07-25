@@ -9,7 +9,7 @@ from pydantic import Field
 from appv2.modules.accounts.contracts import AccessScope, AccountView, CurrentAccount
 from appv2.modules.catalog.api.schemas import (
     CreateWorkRequest,
-    EditionResponse,
+    EditionDetailResponse,
     ShelfRequest,
     ShelfResponse,
     ShelfUpdateRequest,
@@ -18,7 +18,7 @@ from appv2.modules.catalog.api.schemas import (
     WorkResponse,
 )
 from appv2.modules.catalog.application import CatalogNotFound, CatalogService
-from appv2.modules.catalog.contracts import CategoryView
+from appv2.modules.catalog.contracts import CategoryView, SeriesView
 from appv2.platform.http import AppProblem, CamelModel, Page
 
 
@@ -41,6 +41,16 @@ class CategoryResponse(CamelModel):
             name=value.name,
             book_count=value.book_count,
         )
+
+
+class SeriesResponse(CamelModel):
+    name: str
+    book_count: int
+    latest_updated_at: datetime
+
+    @classmethod
+    def from_view(cls, value: SeriesView) -> "SeriesResponse":
+        return cls.model_validate(value)
 
 
 class CategoryUpdateRequest(CamelModel):
@@ -115,6 +125,7 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
         query: str | None = None,
         media_type: Annotated[str | None, Query(alias="mediaType")] = None,
         visibility: str = "active",
+        series_name: Annotated[str | None, Query(alias="seriesName")] = None,
     ) -> Page[WorkResponse]:
         del actor
         size = min(max(page_size, 1), 200)
@@ -124,11 +135,32 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
             query=query,
             media_type=media_type,
             status=visibility,
+            series_name=series_name,
         )
         return Page(
             items=[WorkResponse.from_view(item) for item in items],
             page=max(page, 1),
             page_size=size,
+            total=total,
+        )
+
+    @router.get("/series", response_model=Page[SeriesResponse])
+    def series(
+        actor: Actor,
+        page: int = 1,
+        page_size: Annotated[int, Query(alias="pageSize", ge=1, le=200)] = 100,
+        visibility: str = "active",
+    ) -> Page[SeriesResponse]:
+        del actor
+        values, total = service.list_series(
+            page=max(page, 1),
+            page_size=page_size,
+            status=visibility,
+        )
+        return Page(
+            items=[SeriesResponse.from_view(value) for value in values],
+            page=max(page, 1),
+            page_size=page_size,
             total=total,
         )
 
@@ -147,12 +179,12 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
     def work(work_id: uuid.UUID, actor: Actor) -> WorkDetailResponse:
         del actor
         try:
-            item, editions = service.get_work(work_id)
+            item, editions = service.get_work_detail(work_id)
         except CatalogNotFound as error:
             raise not_found(error) from error
         return WorkDetailResponse(
             **WorkResponse.from_view(item).model_dump(),
-            editions=[EditionResponse.from_view(value) for value in editions],
+            editions=[EditionDetailResponse.from_detail(value) for value in editions],
         )
 
     @router.patch("/works/{work_id}", response_model=WorkResponse)
@@ -169,6 +201,7 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
                 author=payload.author,
                 summary=payload.summary,
                 status=payload.status,
+                metadata=payload.metadata,
             )
         except CatalogNotFound as error:
             raise not_found(error) from error
@@ -184,6 +217,7 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
                 author=None,
                 summary=None,
                 status="archived",
+                metadata=None,
             )
         except CatalogNotFound as error:
             raise not_found(error) from error

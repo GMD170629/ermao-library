@@ -94,15 +94,27 @@ export function normalizeAudioBootstrap(input: unknown, requestedEditionId = '')
           workId: target.workId,
           versionName: target.editionTitle
         },
-        volumes: [],
-        tracks: [{
-          fileId: target.fileId,
-          title: target.editionTitle,
-          url: target.resourceUrl,
-          mimeType: target.mediaType,
-          durationMs: 0,
-          sortOrder: 0
-        }],
+        volumes: Array.isArray(root.volumes) ? root.volumes : [],
+        tracks: Array.isArray(root.files) && root.files.length > 0
+          ? root.files.map((value) => {
+              const file = record(value);
+              return {
+                fileId: file.id,
+                title: file.name,
+                url: file.url,
+                mimeType: file.mediaType,
+                durationMs: file.durationMs,
+                sortOrder: file.sortOrder
+              };
+            })
+          : [{
+              fileId: target.fileId,
+              title: target.editionTitle,
+              url: target.resourceUrl,
+              mimeType: target.mediaType,
+              durationMs: 0,
+              sortOrder: 0
+            }],
         chapters: [],
         totalDurationMs: 0,
         resumeLocation: record(progress.position).location ?? progress.position,

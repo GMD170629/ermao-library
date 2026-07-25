@@ -82,6 +82,8 @@ export type BootstrapResponse = {
   progress: ProgressResponse | null;
   bookmarks: Array<BookmarkResponse>;
   preference: PreferenceResponse | null;
+  files: Array<ReaderFileResponse>;
+  volumes: Array<ReaderVolumeResponse>;
 };
 
 export type CandidateResponse = {
@@ -198,14 +200,19 @@ export type DownloadResponse = {
   updatedAt: string;
 };
 
-export type EditionResponse = {
+export type EditionDetailResponse = {
   id: string;
   workId: string;
   title: string;
   format: string;
   language: string | null;
   primary: boolean;
+  metadata: {
+    [key: string]: unknown;
+  };
   createdAt: string;
+  files: Array<FileResponse>;
+  volumes: Array<VolumeResponse>;
 };
 
 export type EmailSettingsRequest = {
@@ -283,6 +290,18 @@ export type FacetsResponse = {
         [key: string]: unknown;
       }>;
   };
+};
+
+export type FileResponse = {
+  id: string;
+  editionId: string;
+  volumeId: string | null;
+  originalName: string;
+  mediaType: string;
+  sizeBytes: number;
+  checksum: string;
+  sortOrder: number;
+  durationMs: number | null;
 };
 
 export type FolderRequest = {
@@ -505,6 +524,13 @@ export type Page_ResultResponse_ = {
   total: number;
 };
 
+export type Page_SeriesResponse_ = {
+  items: Array<SeriesResponse>;
+  page: number;
+  pageSize: number;
+  total: number;
+};
+
 export type Page_ShelfResponse_ = {
   items: Array<ShelfResponse>;
   page: number;
@@ -626,6 +652,18 @@ export type ProviderUpdate = {
   } | null;
 };
 
+export type ReaderFileResponse = {
+  id: string;
+  editionId: string;
+  volumeId: string | null;
+  name: string;
+  mediaType: string;
+  sizeBytes: number;
+  sortOrder: number;
+  durationMs: number | null;
+  url: string;
+};
+
 export type ReaderTargetResponse = {
   workId: string;
   workTitle: string;
@@ -637,6 +675,15 @@ export type ReaderTargetResponse = {
   mediaType: string;
   resourceUrl: string;
   checksum: string;
+};
+
+export type ReaderVolumeResponse = {
+  id: string;
+  editionId: string;
+  title: string;
+  sortOrder: number;
+  pageCount: number | null;
+  durationMs: number | null;
 };
 
 export type RestoreAccepted = {
@@ -677,6 +724,12 @@ export type ScanDirectoryResponse = {
 
 export type SearchRequest = {
   query: string;
+};
+
+export type SeriesResponse = {
+  name: string;
+  bookCount: number;
+  latestUpdatedAt: string;
 };
 
 export type SessionResponse = {
@@ -819,6 +872,18 @@ export type UpdateWorkRequest = {
   author?: string | null;
   summary?: string | null;
   status?: "active" | "archived" | null;
+  metadata?: {
+    [key: string]: unknown;
+  } | null;
+};
+
+export type VolumeResponse = {
+  id: string;
+  editionId: string;
+  title: string;
+  sortOrder: number;
+  pageCount: number | null;
+  durationMs: number | null;
 };
 
 export type WorkDetailResponse = {
@@ -828,9 +893,13 @@ export type WorkDetailResponse = {
   mediaType: string;
   status: string;
   coverUrl: string | null;
+  summary: string | null;
+  metadata: {
+    [key: string]: unknown;
+  };
   createdAt: string;
   updatedAt: string;
-  editions: Array<EditionResponse>;
+  editions: Array<EditionDetailResponse>;
 };
 
 export type WorkResponse = {
@@ -840,6 +909,10 @@ export type WorkResponse = {
   mediaType: string;
   status: string;
   coverUrl: string | null;
+  summary: string | null;
+  metadata: {
+    [key: string]: unknown;
+  };
   createdAt: string;
   updatedAt: string;
 };
@@ -883,8 +956,11 @@ export interface ApiV2Paths {
     put: { request: AdminPasswordRequest; query: never; response: void };
   };
   "/api/v2/catalog/works": {
-    get: { request: never; query: { page?: number; pageSize?: number; query?: string | null; mediaType?: string | null; visibility?: string }; response: Page_WorkResponse_ };
+    get: { request: never; query: { page?: number; pageSize?: number; query?: string | null; mediaType?: string | null; visibility?: string; seriesName?: string | null }; response: Page_WorkResponse_ };
     post: { request: CreateWorkRequest; query: never; response: WorkResponse };
+  };
+  "/api/v2/catalog/series": {
+    get: { request: never; query: { page?: number; pageSize?: number; visibility?: string }; response: Page_SeriesResponse_ };
   };
   "/api/v2/catalog/works/{work_id}": {
     get: { request: never; query: never; response: WorkDetailResponse };
@@ -969,15 +1045,18 @@ export interface ApiV2Paths {
     get: { request: never; query: never; response: Page_CandidateResponse_ };
   };
   "/api/v2/reading/editions/{edition_id}/bootstrap": {
-    get: { request: never; query: never; response: BootstrapResponse };
+    get: { request: never; query: { volume?: string | null }; response: BootstrapResponse };
   };
   "/api/v2/reading/editions/{edition_id}/resource": {
     get: { request: never; query: never; response: unknown };
   };
-  "/api/v2/reading/volumes/{edition_id}/pages": {
+  "/api/v2/reading/files/{file_id}": {
+    get: { request: never; query: never; response: unknown };
+  };
+  "/api/v2/reading/volumes/{volume_id}/pages": {
     get: { request: never; query: never; response: ComicPageIndexResponse };
   };
-  "/api/v2/reading/volumes/{edition_id}/pages/{page_index}": {
+  "/api/v2/reading/volumes/{volume_id}/pages/{page_index}": {
     get: { request: never; query: never; response: unknown };
   };
   "/api/v2/reading/editions/{edition_id}/epub-locations/claim": {

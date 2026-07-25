@@ -5,11 +5,13 @@ from collections.abc import Callable
 
 from appv2.modules.catalog.contracts import (
     CatalogEdition,
+    CatalogEditionDetail,
     CatalogFile,
     CatalogImport,
     CatalogUnitOfWork,
     CatalogWork,
     CategoryView,
+    SeriesView,
     ShelfView,
 )
 from appv2.modules.catalog.domain import Work
@@ -31,6 +33,7 @@ class CatalogService:
         query: str | None,
         media_type: str | None,
         status: str,
+        series_name: str | None = None,
     ) -> tuple[list[CatalogWork], int]:
         with self._uow_factory() as uow:
             return uow.catalog.list_works(
@@ -39,6 +42,17 @@ class CatalogService:
                 query=query,
                 media_type=media_type,
                 status=status,
+                series_name=series_name,
+            )
+
+    def list_series(
+        self, *, page: int, page_size: int, status: str
+    ) -> tuple[list[SeriesView], int]:
+        with self._uow_factory() as uow:
+            return uow.catalog.list_series(
+                status=status,
+                offset=(page - 1) * page_size,
+                limit=page_size,
             )
 
     def get_work(self, work_id: uuid.UUID) -> tuple[CatalogWork, list[CatalogEdition]]:
@@ -47,6 +61,21 @@ class CatalogService:
             if work is None:
                 raise CatalogNotFound
             return work, uow.catalog.list_editions(work_id)
+
+    def get_work_detail(self, work_id: uuid.UUID) -> tuple[CatalogWork, list[CatalogEditionDetail]]:
+        with self._uow_factory() as uow:
+            work = uow.catalog.get_work(work_id)
+            if work is None:
+                raise CatalogNotFound
+            details = [
+                CatalogEditionDetail(
+                    edition=edition,
+                    files=tuple(uow.catalog.list_files(edition.id)),
+                    volumes=tuple(uow.catalog.list_volumes(edition.id)),
+                )
+                for edition in uow.catalog.list_editions(work_id)
+            ]
+            return work, details
 
     def create_work(
         self,
@@ -81,6 +110,7 @@ class CatalogService:
         author: str | None,
         summary: str | None,
         status: str | None,
+        metadata: dict[str, object] | None = None,
     ) -> CatalogWork:
         if title is not None:
             title = (
@@ -93,6 +123,7 @@ class CatalogService:
                 author=author,
                 summary=summary,
                 status=status,
+                metadata=metadata,
             )
             if updated is None:
                 raise CatalogNotFound

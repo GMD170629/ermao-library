@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-from appv2.modules.catalog.contracts import CatalogReadPort
+from appv2.modules.catalog.contracts import CatalogFile, CatalogReadPort, CatalogVolume
 from appv2.modules.reading.contracts import (
     BookmarkView,
     ComicPage,
@@ -57,8 +57,19 @@ class ReadingService:
         self._resources = resources
 
     def bootstrap(
-        self, *, user_id: uuid.UUID, edition_id: uuid.UUID
-    ) -> tuple[ReaderTarget, ProgressView | None, list[BookmarkView], PreferenceView | None]:
+        self,
+        *,
+        user_id: uuid.UUID,
+        edition_id: uuid.UUID,
+        volume_id: uuid.UUID | None = None,
+    ) -> tuple[
+        ReaderTarget,
+        ProgressView | None,
+        list[BookmarkView],
+        PreferenceView | None,
+        list[CatalogFile],
+        list[CatalogVolume],
+    ]:
         edition = self._catalog.get_edition(edition_id)
         if edition is None:
             raise ReadingNotFound
@@ -68,7 +79,10 @@ class ReadingService:
         files = self._catalog.files_for_edition(edition_id)
         if not files:
             raise ReadingNotFound
-        selected = files[0]
+        selected = next(
+            (file for file in files if volume_id is not None and file.volume_id == volume_id),
+            files[0],
+        )
         target = ReaderTarget(
             work_id=work.id,
             work_title=work.title,
@@ -78,7 +92,7 @@ class ReadingService:
             file_id=selected.id,
             format=edition.format,
             media_type=selected.media_type,
-            resource_url=f"/api/v2/reading/editions/{edition.id}/resource",
+            resource_url=f"/api/v2/reading/files/{selected.id}",
             checksum=selected.checksum,
         )
         with self._uow_factory() as uow:
@@ -87,7 +101,14 @@ class ReadingService:
             preference = uow.reading.get_preference(
                 user_id=user_id, scope="edition", target_id=edition_id
             )
-        return target, progress, bookmarks, preference
+        return (
+            target,
+            progress,
+            bookmarks,
+            preference,
+            files,
+            self._catalog.volumes_for_edition(edition_id),
+        )
 
     def resource(
         self,
@@ -110,13 +131,31 @@ class ReadingService:
         except (FileNotFoundError, ValueError) as error:
             raise ReadingNotFound from error
 
-    def comic_pages(self, *, edition_id: uuid.UUID) -> list[ComicPage]:
-        edition = self._catalog.get_edition(edition_id)
-        files = self._catalog.files_for_edition(edition_id)
-        if edition is None or not files:
+    def file_resource(
+        self,
+        *,
+        user_id: uuid.UUID,
+        file_id: uuid.UUID,
+        requested_range: ByteRange | None,
+    ) -> ResourceStream:
+        file = self._catalog.get_file(file_id)
+        if file is None:
             raise ReadingNotFound
         try:
-            return self._resources.comic_pages(files[0])
+            return self._resources.open(
+                file,
+                requested_range=requested_range,
+                stream_key=str(user_id),
+            )
+        except (FileNotFoundError, ValueError) as error:
+            raise ReadingNotFound from error
+
+    def comic_pages(self, *, target_id: uuid.UUID) -> list[ComicPage]:
+        file = self._comic_file(target_id)
+        if file is None:
+            raise ReadingNotFound
+        try:
+            return self._resources.comic_pages(file)
         except (FileNotFoundError, ValueError) as error:
             raise ReadingNotFound from error
 
@@ -124,21 +163,37 @@ class ReadingService:
         self,
         *,
         user_id: uuid.UUID,
-        edition_id: uuid.UUID,
+        target_id: uuid.UUID,
         page_index: int,
     ) -> ResourceStream:
-        edition = self._catalog.get_edition(edition_id)
-        files = self._catalog.files_for_edition(edition_id)
-        if edition is None or not files:
+        file = self._comic_file(target_id)
+        if file is None:
             raise ReadingNotFound
         try:
             return self._resources.open_comic_page(
-                files[0],
+                file,
                 page_index=page_index,
                 stream_key=str(user_id),
             )
         except (FileNotFoundError, ValueError) as error:
             raise ReadingNotFound from error
+
+    def _comic_file(self, target_id: uuid.UUID) -> CatalogFile | None:
+        edition = self._catalog.get_edition(target_id)
+        if edition is not None:
+            files = self._catalog.files_for_edition(edition.id)
+            return files[0] if files else None
+        volume = self._catalog.get_volume(target_id)
+        if volume is None:
+            return None
+        return next(
+            (
+                file
+                for file in self._catalog.files_for_edition(volume.edition_id)
+                if file.volume_id == volume.id
+            ),
+            None,
+        )
 
     def get_progress(self, *, user_id: uuid.UUID, edition_id: uuid.UUID) -> ProgressView | None:
         with self._uow_factory() as uow:

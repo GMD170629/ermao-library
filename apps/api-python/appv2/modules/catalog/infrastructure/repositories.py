@@ -13,8 +13,10 @@ from appv2.modules.catalog.contracts import (
     CatalogFile,
     CatalogImport,
     CatalogRepository,
+    CatalogVolume,
     CatalogWork,
     CategoryView,
+    SeriesView,
     ShelfView,
 )
 from appv2.modules.catalog.infrastructure.models import (
@@ -23,6 +25,7 @@ from appv2.modules.catalog.infrastructure.models import (
     FileRecord,
     ShelfItemRecord,
     ShelfRecord,
+    VolumeRecord,
     WorkCategoryRecord,
     WorkRecord,
 )
@@ -36,6 +39,8 @@ def _work(record: WorkRecord) -> CatalogWork:
         media_type=record.media_type,
         status=record.status,
         cover_key=record.cover_key,
+        summary=record.summary,
+        metadata=record.metadata_json,
         created_at=record.created_at,
         updated_at=record.updated_at,
     )
@@ -49,6 +54,7 @@ def _edition(record: EditionRecord) -> CatalogEdition:
         format=record.format,
         language=record.language,
         primary=record.is_primary,
+        metadata=record.metadata_json,
         created_at=record.created_at,
     )
 
@@ -57,11 +63,25 @@ def _file(record: FileRecord) -> CatalogFile:
     return CatalogFile(
         id=record.id,
         edition_id=record.edition_id,
+        volume_id=record.volume_id,
         storage_path=record.storage_path,
         original_name=record.original_name,
         media_type=record.media_type,
         size_bytes=record.size_bytes,
         checksum=record.checksum,
+        sort_order=record.sort_order,
+        duration_ms=record.duration_ms,
+    )
+
+
+def _volume(record: VolumeRecord) -> CatalogVolume:
+    return CatalogVolume(
+        id=record.id,
+        edition_id=record.edition_id,
+        title=record.title,
+        sort_order=record.sort_order,
+        page_count=record.page_count,
+        duration_ms=record.duration_ms,
     )
 
 
@@ -101,6 +121,7 @@ class SqlCatalogRepository(CatalogRepository):
         query: str | None,
         media_type: str | None,
         status: str,
+        series_name: str | None,
     ) -> tuple[list[CatalogWork], int]:
         criteria = [WorkRecord.status == status]
         if media_type:
@@ -108,6 +129,8 @@ class SqlCatalogRepository(CatalogRepository):
         if query:
             pattern = f"%{query.strip()}%"
             criteria.append(or_(WorkRecord.title.ilike(pattern), WorkRecord.author.ilike(pattern)))
+        if series_name:
+            criteria.append(WorkRecord.metadata_json["seriesName"].as_string() == series_name)
         total = int(
             self._session.scalar(select(func.count()).select_from(WorkRecord).where(*criteria)) or 0
         )
@@ -120,6 +143,40 @@ class SqlCatalogRepository(CatalogRepository):
         ).all()
         return [_work(record) for record in records], total
 
+    def list_series(self, *, status: str, offset: int, limit: int) -> tuple[list[SeriesView], int]:
+        series = WorkRecord.metadata_json["seriesName"].as_string()
+        criteria = [
+            WorkRecord.status == status,
+            series.is_not(None),
+            series != "",
+        ]
+        total = int(
+            self._session.scalar(
+                select(func.count(func.distinct(series))).select_from(WorkRecord).where(*criteria)
+            )
+            or 0
+        )
+        rows = self._session.execute(
+            select(
+                series.label("name"),
+                func.count(WorkRecord.id),
+                func.max(WorkRecord.updated_at),
+            )
+            .where(*criteria)
+            .group_by(series)
+            .order_by(series)
+            .offset(offset)
+            .limit(limit)
+        ).all()
+        return [
+            SeriesView(
+                name=str(name),
+                book_count=int(book_count),
+                latest_updated_at=latest_updated_at,
+            )
+            for name, book_count, latest_updated_at in rows
+        ], total
+
     def get_work(self, work_id: uuid.UUID) -> CatalogWork | None:
         record = self._session.get(WorkRecord, work_id)
         return _work(record) if record is not None else None
@@ -131,6 +188,10 @@ class SqlCatalogRepository(CatalogRepository):
     def get_file(self, file_id: uuid.UUID) -> CatalogFile | None:
         record = self._session.get(FileRecord, file_id)
         return _file(record) if record is not None else None
+
+    def get_volume(self, volume_id: uuid.UUID) -> CatalogVolume | None:
+        record = self._session.get(VolumeRecord, volume_id)
+        return _volume(record) if record is not None else None
 
     def list_editions(self, work_id: uuid.UUID) -> list[CatalogEdition]:
         records = self._session.scalars(
@@ -147,6 +208,17 @@ class SqlCatalogRepository(CatalogRepository):
             .order_by(FileRecord.sort_order, FileRecord.created_at)
         ).all()
         return [_file(record) for record in records]
+
+    def list_volumes(self, edition_id: uuid.UUID) -> list[CatalogVolume]:
+        records = self._session.scalars(
+            select(VolumeRecord)
+            .where(VolumeRecord.edition_id == edition_id)
+            .order_by(VolumeRecord.sort_order, VolumeRecord.created_at)
+        ).all()
+        return [_volume(record) for record in records]
+
+    def volumes_for_edition(self, edition_id: uuid.UUID) -> list[CatalogVolume]:
+        return self.list_volumes(edition_id)
 
     def files_for_edition(self, edition_id: uuid.UUID) -> list[CatalogFile]:
         return self.list_files(edition_id)
@@ -179,6 +251,7 @@ class SqlCatalogRepository(CatalogRepository):
         author: str | None,
         summary: str | None,
         status: str | None,
+        metadata: dict[str, object] | None,
     ) -> CatalogWork | None:
         record = self._session.get(WorkRecord, work_id)
         if record is None:
@@ -192,6 +265,10 @@ class SqlCatalogRepository(CatalogRepository):
             record.summary = summary
         if status is not None:
             record.status = status
+        if metadata is not None:
+            merged = dict(record.metadata_json)
+            merged.update(metadata)
+            record.metadata_json = merged
         self._session.flush()
         return _work(record)
 

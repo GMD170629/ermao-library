@@ -10,6 +10,7 @@ from appv2.modules.catalog.contracts import (
     CatalogImportPort,
     CatalogMetadataPort,
     CatalogReadPort,
+    CatalogVolume,
     CatalogWork,
 )
 from appv2.modules.delivery.contracts import DeliverableFile, DeliverableFilePort
@@ -37,8 +38,14 @@ class CatalogPorts(
     def get_file(self, file_id: uuid.UUID) -> CatalogFile | None:
         return self._read.get_file(file_id)
 
+    def get_volume(self, volume_id: uuid.UUID) -> CatalogVolume | None:
+        return self._read.get_volume(volume_id)
+
     def files_for_edition(self, edition_id: uuid.UUID) -> list[CatalogFile]:
         return self._read.files_for_edition(edition_id)
+
+    def volumes_for_edition(self, edition_id: uuid.UUID) -> list[CatalogVolume]:
+        return self._read.volumes_for_edition(edition_id)
 
     def import_file(self, imported: CatalogImport) -> CatalogEdition:
         return self._service.import_file(imported)

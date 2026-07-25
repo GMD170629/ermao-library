@@ -8,7 +8,9 @@ import pytest
 from appv2.modules.accounts.domain import User
 from appv2.modules.delivery.domain import Delivery
 from appv2.modules.discovery.domain import ExternalSource
+from appv2.modules.ingestion.domain import ImportJob
 from appv2.modules.metadata.domain import CandidateScore
+from appv2.modules.operations.domain import Backup
 from appv2.modules.reading.domain import ReadingProgress
 
 
@@ -75,3 +77,59 @@ def test_delivery_retry_rules() -> None:
         Delivery(status="completed", attempt=1).retry()
     with pytest.raises(ValueError):
         Delivery(status="failed", attempt=5).retry()
+
+
+@pytest.mark.parametrize("status", ["queued", "retry"])
+def test_import_job_claims_retryable_work(status: str) -> None:
+    job = ImportJob(
+        id=uuid.uuid4(),
+        source_path="/library/book.epub",
+        status=status,
+        attempt=2,
+        next_attempt_at=datetime.now(UTC),
+    )
+
+    claimed = job.claim()
+
+    assert claimed.status == "running"
+    assert claimed.attempt == 3
+    assert claimed.source_path == job.source_path
+
+
+def test_import_job_rejects_non_retryable_work() -> None:
+    job = ImportJob(
+        id=uuid.uuid4(),
+        source_path="/library/book.epub",
+        status="completed",
+        attempt=1,
+        next_attempt_at=datetime.now(UTC),
+    )
+
+    with pytest.raises(ValueError, match="only queued jobs"):
+        job.claim()
+
+
+def test_backup_accepts_matching_ready_archive() -> None:
+    Backup(status="ready", postgres_major=18, app_version="0.4.0").assert_restorable(
+        expected_app="0.4",
+        expected_postgres=18,
+    )
+
+
+@pytest.mark.parametrize(
+    ("backup", "error"),
+    [
+        (Backup(status="running", postgres_major=18, app_version="0.4.0"), "not ready"),
+        (
+            Backup(status="ready", postgres_major=17, app_version="0.4.0"),
+            "PostgreSQL major",
+        ),
+        (
+            Backup(status="ready", postgres_major=18, app_version="0.3.9"),
+            "application version",
+        ),
+    ],
+)
+def test_backup_rejects_incompatible_archive(backup: Backup, error: str) -> None:
+    with pytest.raises(ValueError, match=error):
+        backup.assert_restorable(expected_app="0.4", expected_postgres=18)

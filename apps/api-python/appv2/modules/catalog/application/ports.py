@@ -8,6 +8,7 @@ from appv2.modules.catalog.contracts import (
     CatalogFile,
     CatalogReadPort,
     CatalogUnitOfWork,
+    CatalogVolume,
     CatalogWork,
 )
 
@@ -28,6 +29,14 @@ class CatalogReadAdapter(CatalogReadPort):
         with self._uow_factory() as uow:
             return uow.catalog.get_file(file_id)
 
+    def get_volume(self, volume_id: uuid.UUID) -> CatalogVolume | None:
+        with self._uow_factory() as uow:
+            return uow.catalog.get_volume(volume_id)
+
     def files_for_edition(self, edition_id: uuid.UUID) -> list[CatalogFile]:
         with self._uow_factory() as uow:
             return uow.catalog.files_for_edition(edition_id)
+
+    def volumes_for_edition(self, edition_id: uuid.UUID) -> list[CatalogVolume]:
+        with self._uow_factory() as uow:
+            return uow.catalog.volumes_for_edition(edition_id)

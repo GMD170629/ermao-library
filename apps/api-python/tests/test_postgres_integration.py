@@ -200,11 +200,24 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
             json={
                 "title": "Updated Architecture Test Book",
                 "summary": "Updated through the v2 application use case",
+                "metadata": {
+                    "seriesName": "Integration Series",
+                    "seriesIndex": 1,
+                    "tags": ["integration"],
+                },
             },
         )
         assert work_update.status_code == 200, work_update.text
         assert work_update.json()["title"] == "Updated Architecture Test Book"
         assert client.get(f"/api/v2/catalog/works/{created.json()['id']}").status_code == 200
+        series = client.get("/api/v2/catalog/series?pageSize=10")
+        assert series.status_code == 200
+        assert series.json()["items"][0]["name"] == "Integration Series"
+        series_works = client.get(
+            "/api/v2/catalog/works?seriesName=Integration%20Series&pageSize=10"
+        )
+        assert series_works.status_code == 200
+        assert series_works.json()["total"] == 1
         assert client.get("/api/v2/catalog/facets").status_code == 200
         assert (
             client.delete(
@@ -289,6 +302,15 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         bootstrap = client.get(f"/api/v2/reading/editions/{edition_id}/bootstrap")
         assert bootstrap.status_code == 200, bootstrap.text
         assert bootstrap.json()["accountId"] == account_id
+        assert len(bootstrap.json()["files"]) == 1
+        imported_detail = client.get(
+            f"/api/v2/catalog/works/{bootstrap.json()['target']['workId']}"
+        )
+        assert imported_detail.status_code == 200
+        assert (
+            imported_detail.json()["editions"][0]["files"][0]["id"]
+            == (bootstrap.json()["target"]["fileId"])
+        )
         progress = client.put(
             f"/api/v2/reading/editions/{edition_id}/progress",
             json={
@@ -341,6 +363,11 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
             headers={"Range": "bytes=0-3"},
         )
         assert partial_resource.status_code == 206, partial_resource.text
+        file_partial = client.get(
+            f"/api/v2/reading/files/{bootstrap.json()['target']['fileId']}",
+            headers={"Range": "bytes=0-3"},
+        )
+        assert file_partial.status_code == 206, file_partial.text
         claim = client.post(
             f"/api/v2/reading/editions/{edition_id}/epub-locations/claim",
             json={

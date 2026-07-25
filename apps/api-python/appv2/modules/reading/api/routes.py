@@ -7,6 +7,7 @@ from pydantic import Field
 from starlette.responses import StreamingResponse
 
 from appv2.modules.accounts.contracts import AccessScope, AccountView, CurrentAccount
+from appv2.modules.catalog.contracts import CatalogFile, CatalogVolume
 from appv2.modules.reading.application import (
     LocationClaimConflict,
     LocationClaimResult,
@@ -97,12 +98,53 @@ class ReaderTargetResponse(CamelModel):
     checksum: str
 
 
+class ReaderFileResponse(CamelModel):
+    id: uuid.UUID
+    edition_id: uuid.UUID
+    volume_id: uuid.UUID | None
+    name: str
+    media_type: str
+    size_bytes: int
+    sort_order: int
+    duration_ms: int | None
+    url: str
+
+    @classmethod
+    def from_view(cls, file: CatalogFile) -> "ReaderFileResponse":
+        return cls(
+            id=file.id,
+            edition_id=file.edition_id,
+            volume_id=file.volume_id,
+            name=file.original_name,
+            media_type=file.media_type,
+            size_bytes=file.size_bytes,
+            sort_order=file.sort_order,
+            duration_ms=file.duration_ms,
+            url=f"/api/v2/reading/files/{file.id}",
+        )
+
+
+class ReaderVolumeResponse(CamelModel):
+    id: uuid.UUID
+    edition_id: uuid.UUID
+    title: str
+    sort_order: int
+    page_count: int | None
+    duration_ms: int | None
+
+    @classmethod
+    def from_view(cls, volume: CatalogVolume) -> "ReaderVolumeResponse":
+        return cls.model_validate(volume)
+
+
 class BootstrapResponse(CamelModel):
     account_id: uuid.UUID
     target: ReaderTargetResponse
     progress: ProgressResponse | None
     bookmarks: list[BookmarkResponse]
     preference: PreferenceResponse | None
+    files: list[ReaderFileResponse]
+    volumes: list[ReaderVolumeResponse]
 
 
 class ComicPageResponse(CamelModel):
@@ -184,10 +226,16 @@ def create_router(service: ReadingService, current_account: CurrentAccount) -> A
         )
 
     @router.get("/editions/{edition_id}/bootstrap", response_model=BootstrapResponse)
-    def bootstrap(edition_id: uuid.UUID, actor: Actor) -> BootstrapResponse:
+    def bootstrap(
+        edition_id: uuid.UUID,
+        actor: Actor,
+        volume_id: Annotated[uuid.UUID | None, Query(alias="volume")] = None,
+    ) -> BootstrapResponse:
         try:
-            target, progress, bookmarks, preference = service.bootstrap(
-                user_id=actor.id, edition_id=edition_id
+            target, progress, bookmarks, preference, files, volumes = service.bootstrap(
+                user_id=actor.id,
+                edition_id=edition_id,
+                volume_id=volume_id,
             )
         except ReadingNotFound as error:
             raise missing(error) from error
@@ -197,6 +245,8 @@ def create_router(service: ReadingService, current_account: CurrentAccount) -> A
             progress=ProgressResponse.from_view(progress) if progress else None,
             bookmarks=[BookmarkResponse.from_view(value) for value in bookmarks],
             preference=(PreferenceResponse.from_view(preference) if preference else None),
+            files=[ReaderFileResponse.from_view(value) for value in files],
+            volumes=[ReaderVolumeResponse.from_view(value) for value in volumes],
         )
 
     @router.get("/editions/{edition_id}/resource")
@@ -238,11 +288,50 @@ def create_router(service: ReadingService, current_account: CurrentAccount) -> A
             headers=headers,
         )
 
-    @router.get("/volumes/{edition_id}/pages", response_model=ComicPageIndexResponse)
-    def comic_pages(edition_id: uuid.UUID, actor: Actor) -> ComicPageIndexResponse:
+    @router.get("/files/{file_id}")
+    def file_resource(
+        file_id: uuid.UUID,
+        actor: Actor,
+        range_header: Annotated[str | None, Header(alias="Range")] = None,
+    ) -> StreamingResponse:
+        try:
+            requested_range = parse_range_header(range_header)
+            stream = service.file_resource(
+                user_id=actor.id,
+                file_id=file_id,
+                requested_range=requested_range,
+            )
+        except InvalidRange as error:
+            raise AppProblem(
+                status=416,
+                code="INVALID_RANGE",
+                title="Invalid range",
+                message_key="invalid_request",
+            ) from error
+        except ReadingNotFound as error:
+            raise missing(error) from error
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(stream.content_length),
+            "ETag": stream.etag,
+            "Last-Modified": stream.last_modified,
+            "Content-Disposition": f'inline; filename="{stream.filename}"',
+            "Cache-Control": "private, no-cache",
+        }
+        if stream.content_range is not None:
+            headers["Content-Range"] = stream.content_range
+        return StreamingResponse(
+            stream.body,
+            status_code=stream.status_code,
+            media_type=stream.media_type,
+            headers=headers,
+        )
+
+    @router.get("/volumes/{volume_id}/pages", response_model=ComicPageIndexResponse)
+    def comic_pages(volume_id: uuid.UUID, actor: Actor) -> ComicPageIndexResponse:
         del actor
         try:
-            pages = service.comic_pages(edition_id=edition_id)
+            pages = service.comic_pages(target_id=volume_id)
         except ReadingNotFound as error:
             raise missing(error) from error
         return ComicPageIndexResponse(
@@ -250,16 +339,16 @@ def create_router(service: ReadingService, current_account: CurrentAccount) -> A
             pages=[ComicPageResponse.from_view(page) for page in pages],
         )
 
-    @router.get("/volumes/{edition_id}/pages/{page_index}")
+    @router.get("/volumes/{volume_id}/pages/{page_index}")
     def comic_page(
-        edition_id: uuid.UUID,
+        volume_id: uuid.UUID,
         page_index: int,
         actor: Actor,
     ) -> StreamingResponse:
         try:
             stream = service.comic_page(
                 user_id=actor.id,
-                edition_id=edition_id,
+                target_id=volume_id,
                 page_index=page_index,
             )
         except ReadingNotFound as error:

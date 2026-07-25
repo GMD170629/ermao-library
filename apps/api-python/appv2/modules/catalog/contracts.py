@@ -16,6 +16,8 @@ class CatalogWork:
     media_type: str
     status: str
     cover_key: str | None
+    summary: str | None
+    metadata: dict[str, object]
     created_at: datetime
     updated_at: datetime
 
@@ -28,6 +30,7 @@ class CatalogEdition:
     format: str
     language: str | None
     primary: bool
+    metadata: dict[str, object]
     created_at: datetime
 
 
@@ -40,6 +43,26 @@ class CatalogFile:
     media_type: str
     size_bytes: int
     checksum: str
+    volume_id: uuid.UUID | None = None
+    sort_order: int = 0
+    duration_ms: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogVolume:
+    id: uuid.UUID
+    edition_id: uuid.UUID
+    title: str
+    sort_order: int
+    page_count: int | None
+    duration_ms: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogEditionDetail:
+    edition: CatalogEdition
+    files: tuple[CatalogFile, ...]
+    volumes: tuple[CatalogVolume, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,7 +85,11 @@ class CatalogReadPort(Protocol):
 
     def get_file(self, file_id: uuid.UUID) -> CatalogFile | None: ...
 
+    def get_volume(self, volume_id: uuid.UUID) -> CatalogVolume | None: ...
+
     def files_for_edition(self, edition_id: uuid.UUID) -> list[CatalogFile]: ...
+
+    def volumes_for_edition(self, edition_id: uuid.UUID) -> list[CatalogVolume]: ...
 
 
 class CatalogImportPort(Protocol):
@@ -97,6 +124,13 @@ class CategoryView:
     updated_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class SeriesView:
+    name: str
+    book_count: int
+    latest_updated_at: datetime
+
+
 class CatalogRepository(CatalogReadPort, CatalogImportPort, CatalogMetadataPort, Protocol):
     def list_works(
         self,
@@ -106,7 +140,12 @@ class CatalogRepository(CatalogReadPort, CatalogImportPort, CatalogMetadataPort,
         query: str | None,
         media_type: str | None,
         status: str,
+        series_name: str | None,
     ) -> tuple[list[CatalogWork], int]: ...
+
+    def list_series(
+        self, *, status: str, offset: int, limit: int
+    ) -> tuple[list[SeriesView], int]: ...
 
     def add_work(
         self,
@@ -125,11 +164,14 @@ class CatalogRepository(CatalogReadPort, CatalogImportPort, CatalogMetadataPort,
         author: str | None,
         summary: str | None,
         status: str | None,
+        metadata: dict[str, object] | None,
     ) -> CatalogWork | None: ...
 
     def list_editions(self, work_id: uuid.UUID) -> list[CatalogEdition]: ...
 
     def list_files(self, edition_id: uuid.UUID) -> list[CatalogFile]: ...
+
+    def list_volumes(self, edition_id: uuid.UUID) -> list[CatalogVolume]: ...
 
     def list_shelves(self, owner_id: uuid.UUID) -> list[ShelfView]: ...
 
