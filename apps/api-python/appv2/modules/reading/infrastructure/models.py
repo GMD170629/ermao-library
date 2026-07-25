@@ -40,7 +40,12 @@ class ProgressRecord(UUIDPrimaryKey, Timestamped, Base):
 class BookmarkRecord(UUIDPrimaryKey, Timestamped, Base):
     __tablename__ = "bookmarks"
     __table_args__ = (
-        UniqueConstraint("user_id", "edition_id", "client_id", name="user_edition_client"),
+        UniqueConstraint(
+            "user_id",
+            "edition_id",
+            "client_id",
+            name="uq_bookmarks_user_edition_client",
+        ),
         {"schema": "reading"},
     )
 

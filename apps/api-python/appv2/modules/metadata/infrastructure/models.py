@@ -65,7 +65,12 @@ class MetadataJobRecord(UUIDPrimaryKey, Timestamped, Base):
 class MetadataCandidateRecord(UUIDPrimaryKey, Timestamped, Base):
     __tablename__ = "candidates"
     __table_args__ = (
-        UniqueConstraint("job_id", "provider_id", "external_id", name="job_provider_external"),
+        UniqueConstraint(
+            "job_id",
+            "provider_id",
+            "external_id",
+            name="uq_candidates_job_provider_external",
+        ),
         {"schema": "metadata"},
     )
 

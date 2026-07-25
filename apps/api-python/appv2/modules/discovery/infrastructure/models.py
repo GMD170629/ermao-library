@@ -37,7 +37,11 @@ class SourceRecord(UUIDPrimaryKey, Timestamped, Base):
 class SearchResultRecord(UUIDPrimaryKey, Timestamped, Base):
     __tablename__ = "search_results"
     __table_args__ = (
-        UniqueConstraint("source_id", "external_id", name="source_external"),
+        UniqueConstraint(
+            "source_id",
+            "external_id",
+            name="uq_search_results_source_external",
+        ),
         {"schema": "discovery"},
     )
 
