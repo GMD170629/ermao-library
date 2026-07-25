@@ -10,6 +10,7 @@ from app.services.library_filters import compile_filter_rules, library_filter_sc
 from app.services.library_management import (
     backfill_library_facets,
     count_categories,
+    delete_category,
     duplicate_groups,
     list_categories,
     merge_categories,
@@ -116,6 +117,74 @@ def test_category_merge_rename_and_undo_restore_legacy_metadata(tmp_path) -> Non
             assert json.loads(db.execute(text("SELECT `tags` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar()) == ["科学幻想"]
             undo_operation(db, renamed["operation"]["id"], None)
             assert json.loads(db.execute(text("SELECT `tags` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar()) == ["科幻"]
+    finally:
+        engine.dispose()
+
+
+def test_category_delete_clears_all_metadata_kinds_and_supports_undo(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            _insert_work(db, "work-a", "边界", "林川、周禾", ["科幻", "收藏"])
+            db.execute(
+                text(
+                    "UPDATE `LibraryWork` SET `seriesName` = '星海丛书', `seriesIndex` = 3 "
+                    "WHERE `id` = 'work-a'"
+                )
+            )
+            db.commit()
+            backfill_library_facets(db)
+
+            for kind, name in (
+                ("TAG", "科幻"),
+                ("AUTHOR", "林川"),
+                ("SERIES", "星海丛书"),
+                ("PUBLISHER", "星海出版社"),
+            ):
+                category = next(item for item in list_categories(db, kind) if item["name"] == name)
+                deleted = delete_category(db, category["id"], None)
+                assert deleted["kind"] == kind
+                assert deleted["affectedBookCount"] == 1
+                assert all(item["id"] != category["id"] for item in list_categories(db, kind))
+
+                if kind == "TAG":
+                    assert json.loads(db.execute(text("SELECT `tags` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar()) == ["收藏"]
+                elif kind == "AUTHOR":
+                    assert db.execute(text("SELECT `author` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar() == "周禾"
+                elif kind == "SERIES":
+                    assert db.execute(text("SELECT `seriesName` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar() is None
+                    assert db.execute(text("SELECT `seriesIndex` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar() is None
+                else:
+                    assert db.execute(text("SELECT `publisher` FROM `LibraryEdition` WHERE `id` = 'edition-work-a'")).scalar() is None
+
+                undo_operation(db, deleted["operation"]["id"], None)
+                assert any(item["id"] == category["id"] for item in list_categories(db, kind))
+
+            assert json.loads(db.execute(text("SELECT `tags` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar()) == ["科幻", "收藏"]
+            assert db.execute(text("SELECT `author` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar() == "林川、周禾"
+            assert db.execute(text("SELECT `seriesName` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar() == "星海丛书"
+            assert db.execute(text("SELECT `seriesIndex` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar() == 3
+            assert db.execute(text("SELECT `publisher` FROM `LibraryEdition` WHERE `id` = 'edition-work-a'")).scalar() == "星海出版社"
+    finally:
+        engine.dispose()
+
+
+def test_deleting_a_work_only_author_uses_unknown_author_fallback(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            _insert_work(db, "work-a", "边界", "林川", [])
+            backfill_library_facets(db)
+            author = next(item for item in list_categories(db, "AUTHOR") if item["name"] == "林川")
+
+            delete_category(db, author["id"], None)
+
+            assert db.execute(text("SELECT `author` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar() == "未知作者"
+            assert db.execute(text("SELECT `normalizedAuthor` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar()
     finally:
         engine.dispose()
 

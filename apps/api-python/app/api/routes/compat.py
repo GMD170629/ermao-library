@@ -60,6 +60,7 @@ from app.services.health import run_system_health_checks
 from app.services.library_filters import compile_filter_rules, library_filter_schema, normalize_filter_rules
 from app.services.library_management import (
     count_categories,
+    delete_category,
     duplicate_groups,
     list_categories,
     merge_categories,
@@ -1023,6 +1024,124 @@ def _bookshelf_work_view(work: dict[str, Any]) -> dict[str, Any]:
         "coverStatus": work.get("coverStatus") or "PENDING",
         "coverUrl": _cover_url("works", work["id"], work, size="medium"),
     }
+
+
+def _management_work_views(
+    db: Session,
+    works: list[dict[str, Any]],
+    user_id: str,
+) -> list[dict[str, Any]]:
+    """Serialize a page of works without loading detail-only files and structure."""
+
+    if not works:
+        return []
+
+    work_ids = [str(work["id"]) for work in works]
+    placeholders = ", ".join(f":management_work_{index}" for index in range(len(work_ids)))
+    params: dict[str, Any] = {
+        f"management_work_{index}": work_id
+        for index, work_id in enumerate(work_ids)
+    }
+    user = db.get(User, user_id)
+    edition_scope = "1 = 1"
+    if user is not None:
+        edition_scope, scope_params = edition_visibility_sql(
+            authorization_context(db, user),
+            alias="management_edition",
+            prefix="management_view",
+        )
+        params.update(scope_params)
+
+    editions_by_work: dict[str, list[dict[str, Any]]] = {work_id: [] for work_id in work_ids}
+    if _has_table(db, "LibraryEdition"):
+        for edition in _rows(
+            db,
+            "SELECT management_edition.* FROM `LibraryEdition` management_edition "
+            f"WHERE management_edition.`workId` IN ({placeholders}) "
+            "AND COALESCE(management_edition.`hidden`, 0) = 0 "
+            f"AND {edition_scope} "
+            "ORDER BY management_edition.`workId` ASC, "
+            "management_edition.`primary` DESC, management_edition.`createdAt` ASC",
+            params,
+        ):
+            editions_by_work.setdefault(str(edition["workId"]), []).append(edition)
+
+    states_by_work: dict[str, dict[str, str]] = {work_id: {} for work_id in work_ids}
+    if _has_table(db, "LibraryConsumptionState"):
+        state_params = {**params, "management_user_id": user_id}
+        for state in _rows(
+            db,
+            "SELECT `workId`, `mediaKind`, `status` FROM `LibraryConsumptionState` "
+            "WHERE `userId` = :management_user_id "
+            f"AND `workId` IN ({placeholders})",
+            state_params,
+        ):
+            states_by_work.setdefault(str(state["workId"]), {})[
+                str(state.get("mediaKind") or "").upper()
+            ] = _reading_status(state.get("status"))
+
+    last_read_by_work: dict[str, str | None] = {}
+    if _has_table(db, "LibraryReadingProgress") and _has_table(db, "LibraryEdition"):
+        progress_params = {**params, "management_user_id": user_id}
+        for progress in _rows(
+            db,
+            "SELECT management_progress.`workId`, "
+            f"MAX({_timestamp_sql('management_progress.`updatedAt`')}) AS `lastReadAt` "
+            "FROM `LibraryReadingProgress` management_progress "
+            "JOIN `LibraryEdition` management_edition "
+            "ON management_edition.`id` = management_progress.`editionId` "
+            "WHERE management_progress.`userId` = :management_user_id "
+            f"AND management_progress.`workId` IN ({placeholders}) "
+            "AND COALESCE(management_edition.`hidden`, 0) = 0 "
+            f"AND {edition_scope} "
+            "GROUP BY management_progress.`workId`",
+            progress_params,
+        ):
+            last_read_by_work[str(progress["workId"])] = _dt(progress.get("lastReadAt"))
+
+    labels = _labels()
+    media_kind_order = [
+        key for key in _detail_tab_order(db)
+        if key in {"EBOOK", "COMIC", "AUDIOBOOK"}
+    ]
+    result = []
+    for work in works:
+        work_id = str(work["id"])
+        editions = editions_by_work.get(work_id, [])
+        primary_edition_id = work.get("primaryEditionId")
+        display = (
+            next((edition for edition in editions if edition["id"] == primary_edition_id), None)
+            or next((edition for edition in editions if bool(edition.get("primary"))), None)
+            or (editions[0] if editions else None)
+        )
+        available_kinds = {_edition_media_kind(edition) for edition in editions}
+        available_media_kinds = [
+            media_kind for media_kind in media_kind_order
+            if media_kind in available_kinds
+        ]
+        states = states_by_work.get(work_id, {})
+        if available_kinds and all(states.get(kind) == "FINISHED" for kind in available_kinds):
+            status_value = "FINISHED"
+        elif any(states.get(kind) in {"READING", "FINISHED"} for kind in available_kinds):
+            status_value = "READING"
+        else:
+            status_value = "UNREAD"
+        work_type = str((display or {}).get("format") or work.get("workType") or "EPUB").upper()
+        result.append(
+            {
+                **_bookshelf_work_view(work),
+                "publisher": (display or {}).get("publisher"),
+                "seriesName": work.get("seriesName"),
+                "tags": _parse_json(work.get("tags"), []),
+                "type": "comic" if work_type == "COMIC" else "audiobook" if work_type == "AUDIO" else "ebook",
+                "format": labels["format"].get(work_type, work_type),
+                "availableMediaKinds": available_media_kinds,
+                "statusValue": status_value,
+                "lastReadAt": last_read_by_work.get(work_id),
+                "importedAt": _dt(work.get("createdAt")),
+            }
+        )
+    return result
 
 
 def _work_view(db: Session, work: dict[str, Any], user_id: str | None = None) -> dict[str, Any]:
@@ -2701,6 +2820,7 @@ def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: 
     )
     total = _table_count(db, "LibraryWork", where_sql, params)
     bookshelf_view = view == "bookshelf"
+    management_view = view == "management"
     select_columns = (
         "`LibraryWork`.`id`, `LibraryWork`.`title`, `LibraryWork`.`author`, "
         "`LibraryWork`.`workType`, `LibraryWork`.`coverStatus`, "
@@ -2728,6 +2848,8 @@ def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: 
         page_views = (
             [_bookshelf_work_view(work) for work, _view in page_items]
             if bookshelf_view
+            else _management_work_views(db, [work for work, _view in page_items], user.id)
+            if management_view
             else [view for _work, view in page_items]
         )
         return ok({"books": page_views, "page": page, "pageSize": page_size, "total": total, "totalPages": max(1, (total + page_size - 1) // page_size)})
@@ -2760,6 +2882,8 @@ def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: 
     book_views = (
         [_bookshelf_work_view(work) for work in works]
         if bookshelf_view
+        else _management_work_views(db, works, user.id)
+        if management_view
         else [_work_view(db, work, user.id) for work in works]
     )
     return ok({"books": book_views, "page": page, "pageSize": page_size, "total": total, "totalPages": max(1, (total + page_size - 1) // page_size)})
@@ -6799,6 +6923,18 @@ async def update_library_category(facet_id: str, request: Request, db: Session =
     payload = await request.json()
     try:
         result = rename_category(db, facet_id, str(payload.get("name") or ""), user.id)
+    except ValueError as exc:
+        return fail(str(exc), status_code=400)
+    return ok(result)
+
+
+@router.delete("/library/categories/{facet_id}")
+def delete_library_category(facet_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    try:
+        result = delete_category(db, facet_id, user.id)
     except ValueError as exc:
         return fail(str(exc), status_code=400)
     return ok(result)

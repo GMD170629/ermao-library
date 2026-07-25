@@ -874,6 +874,94 @@ def rename_category(db: Session, facet_id: str, name: str, user_id: str | None) 
     return {"facetId": facet_id, "name": next_name, "operation": operation}
 
 
+def delete_category(db: Session, facet_id: str, user_id: str | None) -> dict[str, Any]:
+    facet = _row(db, "SELECT * FROM `LibraryFacet` WHERE `id` = :id", {"id": facet_id})
+    if not facet:
+        raise ValueError("分类不存在")
+
+    kind = str(facet["kind"])
+    source_name = str(facet["name"])
+    work_links = _rows(db, "SELECT * FROM `LibraryWorkFacet` WHERE `facetId` = :id", {"id": facet_id})
+    edition_links = _rows(db, "SELECT * FROM `LibraryEditionFacet` WHERE `facetId` = :id", {"id": facet_id})
+    affected_works = [
+        row for link in work_links
+        if (row := _row(db, "SELECT * FROM `LibraryWork` WHERE `id` = :id", {"id": link["workId"]}))
+    ]
+    affected_editions = [
+        row for link in edition_links
+        if (row := _row(db, "SELECT * FROM `LibraryEdition` WHERE `id` = :id", {"id": link["editionId"]}))
+    ]
+    now = _now()
+
+    if kind == "TAG":
+        for work in affected_works:
+            tags = [tag for tag in _work_tags(work.get("tags")) if _normalized_name(tag) != _normalized_name(source_name)]
+            db.execute(
+                text("UPDATE `LibraryWork` SET `tags` = :value, `updatedAt` = :now WHERE `id` = :id"),
+                {"value": _json(tags), "now": now, "id": work["id"]},
+            )
+    elif kind == "AUTHOR":
+        for work in affected_works:
+            authors = [author for author in split_authors(work.get("author")) if _normalized_name(author) != _normalized_name(source_name)]
+            author_text = "、".join(authors) or UNKNOWN_AUTHOR
+            db.execute(
+                text(
+                    "UPDATE `LibraryWork` SET `author` = :value, `normalizedAuthor` = :normalized, "
+                    "`mergeKey` = :merge_key, `updatedAt` = :now WHERE `id` = :id"
+                ),
+                {
+                    "value": author_text,
+                    "normalized": _normalized_name(author_text),
+                    "merge_key": identity_merge_key(str(work.get("title") or ""), author_text),
+                    "now": now,
+                    "id": work["id"],
+                },
+            )
+    elif kind == "SERIES":
+        for work in affected_works:
+            db.execute(
+                text("UPDATE `LibraryWork` SET `seriesName` = NULL, `seriesIndex` = NULL, `updatedAt` = :now WHERE `id` = :id"),
+                {"now": now, "id": work["id"]},
+            )
+    elif kind == "PUBLISHER":
+        for edition in affected_editions:
+            db.execute(
+                text("UPDATE `LibraryEdition` SET `publisher` = NULL, `updatedAt` = :now WHERE `id` = :id"),
+                {"now": now, "id": edition["id"]},
+            )
+    else:
+        raise ValueError("分类类型无效")
+
+    db.execute(text("DELETE FROM `LibraryFacet` WHERE `id` = :id"), {"id": facet_id})
+    operation = _create_operation(
+        db,
+        user_id=user_id,
+        action="DELETE_FACET",
+        target_type="facet",
+        target_id=facet_id,
+        summary=f"已删除{kind.lower()}分类“{source_name}”",
+        payload={"facetId": facet_id, "kind": kind, "name": source_name},
+        inverse={
+            "facet": facet,
+            "workLinks": work_links,
+            "editionLinks": edition_links,
+            "works": affected_works,
+            "editions": affected_editions,
+        },
+    )
+    db.commit()
+    return {
+        "facetId": facet_id,
+        "kind": kind,
+        "name": source_name,
+        "affectedBookCount": len({
+            *(str(link["workId"]) for link in work_links),
+            *(str(edition["workId"]) for edition in affected_editions),
+        }),
+        "operation": operation,
+    }
+
+
 def undo_operation(db: Session, operation_id: str, user_id: str | None) -> dict[str, Any]:
     operation = _row(db, "SELECT * FROM `LibraryOperation` WHERE `id` = :id", {"id": operation_id})
     if not operation:
@@ -952,6 +1040,19 @@ def undo_operation(db: Session, operation_id: str, user_id: str | None) -> dict[
         for edition in inverse.get("editions") or []:
             _update_row(db, "LibraryEdition", str(edition["id"]), edition, EDITION_RESTORE_COLUMNS)
         _update_row(db, "LibraryFacet", str(facet["id"]), facet, {"name", "normalizedName", "aliases", "updatedAt"})
+    elif action == "DELETE_FACET":
+        facet = inverse.get("facet") or {}
+        if not facet:
+            raise ValueError("撤销数据不完整")
+        for work in inverse.get("works") or []:
+            _update_row(db, "LibraryWork", str(work["id"]), work, WORK_RESTORE_COLUMNS)
+        for edition in inverse.get("editions") or []:
+            _update_row(db, "LibraryEdition", str(edition["id"]), edition, EDITION_RESTORE_COLUMNS)
+        _insert_snapshot(db, "LibraryFacet", facet)
+        for link in inverse.get("workLinks") or []:
+            _insert_snapshot(db, "LibraryWorkFacet", link)
+        for link in inverse.get("editionLinks") or []:
+            _insert_snapshot(db, "LibraryEditionFacet", link)
     else:
         raise ValueError("该操作不支持撤销")
     now = _now()

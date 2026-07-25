@@ -1,6 +1,6 @@
 'use client';
 
-import { ChevronLeft, ChevronRight, Edit3, GitMerge, Loader2, Search } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Edit3, GitMerge, Loader2, Search, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
@@ -39,6 +39,7 @@ export function ClassificationManagementPanel() {
   const [renameValue, setRenameValue] = useState('');
   const [mergeOpen, setMergeOpen] = useState(false);
   const [targetId, setTargetId] = useState('');
+  const [deleteItem, setDeleteItem] = useState<Category | null>(null);
   const [error, setError] = useState('');
   const toast = useToast();
 
@@ -111,6 +112,33 @@ export function ClassificationManagementPanel() {
     } finally { setSaving(false); }
   }
 
+  async function removeCategory() {
+    if (!deleteItem) return;
+    setSaving(true);
+    try {
+      await payload(await fetch(`/api/library/categories/${deleteItem.id}`, { method: 'DELETE' }), '删除分类失败');
+      toast.success('分类及对应元数据已删除');
+      setDeleteItem(null);
+      setSelectedItems((current) => current.filter((item) => item.id !== deleteItem.id));
+      await load();
+    } catch (reason) {
+      toast.error('删除失败', reason instanceof Error ? reason.message : '删除分类失败');
+    } finally { setSaving(false); }
+  }
+
+  function deleteDescription(item: Category) {
+    if (item.kind === 'AUTHOR') {
+      return i18nAttribute('将从 {value0} 本图书中移除作者“{value1}”。没有其他作者的图书会改为“未知作者”。', { value0: item.bookCount, value1: item.name });
+    }
+    if (item.kind === 'TAG') {
+      return i18nAttribute('将从 {value0} 本图书中移除标签“{value1}”。其他标签不会受到影响。', { value0: item.bookCount, value1: item.name });
+    }
+    if (item.kind === 'SERIES') {
+      return i18nAttribute('将清除 {value0} 本图书的丛书“{value1}”及对应丛书序号。', { value0: item.bookCount, value1: item.name });
+    }
+    return i18nAttribute('将从 {value0} 本图书的相关版本中清除出版社“{value1}”。', { value0: item.bookCount, value1: item.name });
+  }
+
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-black/[0.07] bg-white/60 p-5">
@@ -136,6 +164,7 @@ export function ClassificationManagementPanel() {
               <div className="min-w-0 flex-1"><div className="font-medium text-[#34312E]">{item.name}</div>{item.aliases.length ? <div className="mt-0.5 truncate text-xs text-[#948E88]"><I18nText>曾用名：</I18nText>{item.aliases.join('、')}</div> : null}</div>
               <div className="text-sm tabular-nums text-[#817B75]">{item.bookCount} <I18nText>本</I18nText></div>
               <Button variant="ghost" icon={Edit3} className="px-3" onClick={() => { setRenameItem(item); setRenameValue(item.name); }}><I18nText>重命名</I18nText></Button>
+              <Button variant="ghost" icon={Trash2} className="px-3 text-red-600 hover:bg-red-50 hover:text-red-700" onClick={() => setDeleteItem(item)}><I18nText>删除</I18nText></Button>
             </div>)}
           </div>
         )}
@@ -175,6 +204,12 @@ export function ClassificationManagementPanel() {
         <p className="mb-4 text-sm leading-6 text-[#746E68]"><I18nText>选择保留的规范名称，其余名称会作为别名保留，关联作品不会丢失。</I18nText></p>
         <Select value={targetId} options={selectedItems.map((item) => ({ value: item.id, label: `${item.name}（${item.bookCount} 本）`, translate: false }))} onChange={setTargetId} ariaLabel={i18nAttribute("保留的分类名称")} className="w-full" />
         <div className="mt-5 flex justify-end gap-2"><Button variant="secondary" onClick={() => setMergeOpen(false)}><I18nText>取消</I18nText></Button><Button loading={saving} icon={GitMerge} onClick={() => void merge()}><I18nText>确认合并</I18nText></Button></div>
+      </Modal> : null}
+
+      {deleteItem ? <Modal title={i18nAttribute("删除“{value0}”", { value0: deleteItem.name })} onClose={() => setDeleteItem(null)}>
+        <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm leading-6 text-red-800">{deleteDescription(deleteItem)}</p>
+        <p className="mt-3 text-sm leading-6 text-[#746E68]"><I18nText>此操作会同步修改图书元数据，请确认后再继续。</I18nText></p>
+        <div className="mt-5 flex justify-end gap-2"><Button variant="secondary" onClick={() => setDeleteItem(null)}><I18nText>取消</I18nText></Button><Button variant="danger" loading={saving} icon={Trash2} onClick={() => void removeCategory()}><I18nText>确认删除</I18nText></Button></div>
       </Modal> : null}
     </div>
   );

@@ -242,7 +242,7 @@ export function LibraryPage() {
     const params = new URLSearchParams(queryBase);
     params.set('page', String(requestedPage));
     params.set('pageSize', requestPageSize);
-    if (view === 'grid') params.set('view', 'bookshelf');
+    params.set('view', view === 'grid' ? 'bookshelf' : 'management');
     setLoading(true);
     fetch(`/api/works?${params.toString()}`)
       .then((response) => response.json() as Promise<BooksResponse>)

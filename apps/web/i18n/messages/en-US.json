@@ -2264,7 +2264,6 @@
   "暂时无法开始设置": "Cannot start settings for the moment",
   "暂停": "Paused",
   "暂无导入任务。": "No import tasks yet.",
-  "暂无简介": "Not available",
   "暂无简介，可在详情页补充元数据。": "There is no profile, and metadata can be added to the detailed pages.",
   "暂无结构化事件。": "There are no structured events.",
   "暂无可浏览目录": "Can not browse directory for now",
@@ -2750,5 +2749,17 @@
   "有声书书名目录不能同时包含直属音轨和卷目录，请整理为单卷或多卷结构后重试": "An audiobook folder cannot contain both direct tracks and volume folders. Organize it as either a single-volume or multi-volume audiobook and try again.",
   "有声书推荐目录": "Recommended audiobook folders",
   "有声书各卷目录中的内嵌作者不一致，已忽略卷目录作者": "Embedded authors differ between audiobook volume folders, so volume-folder authors were ignored.",
-  "有声书书名目录与卷目录中的内嵌作者不一致，已采用书名目录作者": "The embedded author in the audiobook folder differs from its volume folders, so the audiobook-folder author was used."
+  "有声书书名目录与卷目录中的内嵌作者不一致，已采用书名目录作者": "The embedded author in the audiobook folder differs from its volume folders, so the audiobook-folder author was used.",
+  "此操作会同步修改图书元数据，请确认后再继续。": "This action will update book metadata. Confirm before continuing.",
+  "分类“": "category \"",
+  "分类不存在": "Category does not exist",
+  "分类及对应元数据已删除": "The category and its corresponding metadata were deleted",
+  "将从 {value0} 本图书的相关版本中清除出版社“{value1}”。": "Publisher \"{value1}\" will be cleared from the relevant editions of {value0} books.",
+  "将从 {value0} 本图书中移除标签“{value1}”。其他标签不会受到影响。": "Tag \"{value1}\" will be removed from {value0} books. Other tags will not be affected.",
+  "将从 {value0} 本图书中移除作者“{value1}”。没有其他作者的图书会改为“未知作者”。": "Author \"{value1}\" will be removed from {value0} books. Books with no other authors will use \"Unknown Author\".",
+  "将清除 {value0} 本图书的丛书“{value1}”及对应丛书序号。": "Series \"{value1}\" and its series index will be cleared from {value0} books.",
+  "删除“{value0}”": "Delete \"{value0}\"",
+  "删除分类失败": "Failed to delete category",
+  "已删除": "Deleted",
+  "已删除{value0}分类“{value1}”": "Deleted {value0} category \"{value1}\""
 }

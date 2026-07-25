@@ -1186,7 +1186,7 @@ def test_works_recent_read_sort_uses_latest_user_progress_across_pages(client, d
     assert maximum_page["data"]["pageSize"] == 100
 
     def reject_detail_serialization(*_args, **_kwargs):
-        raise AssertionError("bookshelf view must not use the detail serializer")
+        raise AssertionError("summary views must not use the detail serializer")
 
     monkeypatch.setattr(compat, "_work_view", reject_detail_serialization)
     bookshelf = client.get(
@@ -1211,6 +1211,44 @@ def test_works_recent_read_sort_uses_latest_user_progress_across_pages(client, d
         "coverStatus",
         "coverUrl",
     }
+
+    management = client.get(
+        "/api/works",
+        params={
+            "visibility": "active",
+            "sort": "recent_read",
+            "sortDirection": "desc",
+            "page": 1,
+            "pageSize": 20,
+            "view": "management",
+        },
+    ).json()
+    assert management["ok"] is True
+    management_books = management["data"]["books"]
+    assert [book["id"] for book in management_books] == ["work-new", "work-old", "work-unread"]
+    assert set(management_books[0]) == {
+        "id",
+        "title",
+        "author",
+        "publisher",
+        "seriesName",
+        "tags",
+        "type",
+        "format",
+        "availableMediaKinds",
+        "statusValue",
+        "lastReadAt",
+        "importedAt",
+        "gradient",
+        "coverStatus",
+        "coverUrl",
+    }
+    assert management_books[0]["availableMediaKinds"] == ["EBOOK"]
+    assert management_books[0]["statusValue"] == "UNREAD"
+    assert management_books[0]["lastReadAt"] == "2026-06-17T09:00:00Z"
+    assert "editions" not in management_books[0]
+    assert "files" not in management_books[0]
+    assert "volumes" not in management_books[0]
 
 
 def test_works_sortable_metadata_fields_support_both_directions(client, db_session):

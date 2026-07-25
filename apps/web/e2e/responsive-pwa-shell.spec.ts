@@ -531,6 +531,7 @@ test('all-books shelves load the next batch while scrolling down', async ({ page
 test('desktop book list opens details from both the cover and title', async ({ page }) => {
   const requestedPageSizes: string[] = [];
   const requestedSorts: Array<{ sort: string; direction: string }> = [];
+  const requestedViews: string[] = [];
   const book = {
     id: 'desktop-list-work',
     title: '桌面列表入口测试',
@@ -567,6 +568,7 @@ test('desktop book list opens details from both the cover and title', async ({ p
       : book;
     requestedPageSizes.push(requestedPageSize);
     requestedSorts.push({ sort: requestedSort, direction: requestedDirection });
+    requestedViews.push(requestUrl.searchParams.get('view') ?? '');
     await route.fulfill({ json: { ok: true, data: { books: [responseBook], total: 1, page: 1, pageSize: Number(requestedPageSize), totalPages: 1 } } });
   });
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -582,6 +584,7 @@ test('desktop book list opens details from both the cover and title', async ({ p
   await page.getByRole('button', { name: '每页数量' }).click();
   await page.getByRole('option', { name: '100 本/页' }).click();
   await expect.poll(() => requestedPageSizes.at(-1)).toBe('100');
+  await expect.poll(() => requestedViews.at(-1)).toBe('management');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await expect(page.getByRole('button', { name: '进度排序' })).toHaveCount(0);
   await expect(page.getByRole('columnheader', { name: '标题排序' })).toBeVisible();
