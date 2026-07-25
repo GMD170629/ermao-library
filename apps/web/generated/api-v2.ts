@@ -161,6 +161,10 @@ export type DashboardResponse = {
     }>;
 };
 
+export type DeletedEventsResponse = {
+  deleted: number;
+};
+
 export type DeletedJobsResponse = {
   deleted: number;
 };
@@ -408,6 +412,16 @@ export type KindleSettingsResponse = {
   options: {
     [key: string]: unknown;
   };
+};
+
+export type LogSettingsRequest = {
+  maxBytes: number;
+};
+
+export type LogSettingsResponse = {
+  sizeBytes: number;
+  maxBytes: number;
+  lastPrunedAt: string | null;
 };
 
 export type LoginRequest = {
@@ -1203,7 +1217,12 @@ export interface ApiV2Paths {
     put: { request: SettingsRequest; query: never; response: SettingsResponse };
   };
   "/api/v2/operations/events": {
-    get: { request: never; query: { page?: number; pageSize?: number; kind?: string | null }; response: Page_EventResponse_ };
+    get: { request: never; query: { page?: number; pageSize?: number; kind?: string | null; source?: string | null; level?: string | null; search?: string | null; dateFrom?: string | null; dateTo?: string | null }; response: Page_EventResponse_ };
+    delete: { request: never; query: never; response: DeletedEventsResponse };
+  };
+  "/api/v2/operations/log-settings": {
+    get: { request: never; query: never; response: LogSettingsResponse };
+    put: { request: LogSettingsRequest; query: never; response: LogSettingsResponse };
   };
   "/api/v2/operations/backups": {
     get: { request: never; query: never; response: Page_BackupResponse_ };

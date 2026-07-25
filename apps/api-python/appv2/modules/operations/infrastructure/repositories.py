@@ -6,9 +6,10 @@ from datetime import datetime
 from types import TracebackType
 from typing import Literal, Self
 
-from sqlalchemy import func, select
+from sqlalchemy import Text, cast, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.sql.elements import ColumnElement
 
 from appv2.modules.operations.contracts import (
     BackupView,
@@ -106,9 +107,37 @@ class SqlOperationsRepository(OperationsRepository):
         )
 
     def list_events(
-        self, *, offset: int, limit: int, kind: str | None
+        self,
+        *,
+        offset: int,
+        limit: int,
+        kind: str | None,
+        source: str | None,
+        severity: str | None,
+        search: str | None,
+        date_from: datetime | None,
+        date_to: datetime | None,
     ) -> tuple[list[EventView], int]:
-        criteria = [EventRecord.kind == kind] if kind else []
+        criteria = []
+        if kind:
+            criteria.append(EventRecord.kind == kind)
+        if source:
+            criteria.append(EventRecord.kind.ilike(f"{source}.%"))
+        if severity:
+            criteria.append(EventRecord.severity == severity)
+        if search:
+            pattern = f"%{search.strip()}%"
+            criteria.append(
+                or_(
+                    EventRecord.kind.ilike(pattern),
+                    EventRecord.message_key.ilike(pattern),
+                    cast(EventRecord.params, Text).ilike(pattern),
+                )
+            )
+        if date_from:
+            criteria.append(EventRecord.created_at >= date_from)
+        if date_to:
+            criteria.append(EventRecord.created_at < date_to)
         total = int(
             self._session.scalar(select(func.count()).select_from(EventRecord).where(*criteria))
             or 0
@@ -121,6 +150,54 @@ class SqlOperationsRepository(OperationsRepository):
             .limit(limit)
         ).all()
         return [_event(record) for record in records], total
+
+    def clear_events(self) -> int:
+        criteria = EventRecord.severity.not_in(("error", "critical"))
+        count = int(
+            self._session.scalar(select(func.count()).select_from(EventRecord).where(criteria)) or 0
+        )
+        self._session.execute(delete(EventRecord).where(criteria))
+        return count
+
+    def event_storage_size(self) -> int:
+        return int(
+            self._session.scalar(
+                select(func.coalesce(func.sum(self._event_size()), 0)).select_from(EventRecord)
+            )
+            or 0
+        )
+
+    def prune_events(self, max_bytes: int) -> int:
+        rows = self._session.execute(
+            select(
+                EventRecord.id,
+                EventRecord.severity,
+                self._event_size().label("size_bytes"),
+            ).order_by(EventRecord.created_at, EventRecord.id)
+        ).all()
+        total = sum(int(size_bytes) for _, _, size_bytes in rows)
+        delete_ids: list[uuid.UUID] = []
+        for event_id, severity, size_bytes in rows:
+            if total <= max_bytes:
+                break
+            if severity in {"error", "critical"}:
+                continue
+            delete_ids.append(event_id)
+            total -= int(size_bytes)
+        if delete_ids:
+            self._session.execute(delete(EventRecord).where(EventRecord.id.in_(delete_ids)))
+        return len(delete_ids)
+
+    @staticmethod
+    def _event_size() -> ColumnElement[int]:
+        return (
+            func.pg_column_size(EventRecord.params)
+            + func.octet_length(EventRecord.kind)
+            + func.octet_length(EventRecord.severity)
+            + func.octet_length(EventRecord.message_key)
+            + func.coalesce(func.octet_length(EventRecord.trace_id), 0)
+            + 64
+        )
 
     def request_backup(
         self,

@@ -1,6 +1,11 @@
 'use client';
 
-import { apiV2Fetch } from '@/lib/api-v2';
+import type {
+  DeletedEventsResponse,
+  EventResponse,
+  LogSettingsResponse
+} from '@/generated/api-v2';
+import { apiV2Request } from '@/lib/api-v2';
 
 import { ChevronDown, ChevronLeft, ChevronRight, Download, HardDrive, RefreshCw, Save, Search, Trash2 } from 'lucide-react';
 import Link from 'next/link';
@@ -27,19 +32,29 @@ type SystemEvent = {
   createdAt: string;
 };
 
-type EventsData = {
-  events: SystemEvent[];
+type EventPage = {
+  items: EventResponse[];
+  page: number;
+  pageSize: number;
   total: number;
-  totalPages?: number;
-  storage: { sizeBytes: number; maxBytes: number; lastPrunedAt?: string | null };
-  facets: { sources: Array<{ source: string; count: number }>; levels: Array<{ level: string; count: number }> };
 };
 
-type EventsPayload = {
-  ok: boolean;
-  data?: EventsData;
-  error?: { message: string };
-};
+function eventResponseToSystemEvent(event: EventResponse): SystemEvent {
+  const targetType = typeof event.params.targetType === 'string' ? event.params.targetType : null;
+  const targetId = typeof event.params.targetId === 'string' ? event.params.targetId : null;
+  return {
+    id: event.id,
+    level: event.severity,
+    source: event.kind.split('.', 1)[0] || 'system',
+    actorType: event.actorId ? 'user' : 'system',
+    action: event.kind,
+    targetType,
+    targetId,
+    message: event.messageKey,
+    metadata: event.params,
+    createdAt: event.createdAt
+  };
+}
 
 function tone(level: string): BadgeTone {
   if (level === 'error') return 'red';
@@ -127,16 +142,15 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
     }
     setLoading(true);
     try {
-      const response = await apiV2Fetch(`/api/v2/operations/events?${buildParams(page).toString()}`);
-      const payload = (await response.json()) as EventsPayload;
-      if (!payload.ok) throw new Error(payload.error?.message ?? '读取日志失败');
-      setEvents(payload.data?.events ?? []);
-      setTotal(payload.data?.total ?? 0);
-      setTotalPages(Math.max(1, Number(payload.data?.totalPages ?? 1)));
-      if (payload.data?.storage) {
-        setStorage(payload.data.storage);
-        setLogMaxMb(Math.round(payload.data.storage.maxBytes / 1024 / 1024));
-      }
+      const [payload, logSettings] = await Promise.all([
+        apiV2Request<EventPage>(`/api/v2/operations/events?${buildParams(page).toString()}`),
+        apiV2Request<LogSettingsResponse>('/api/v2/operations/log-settings')
+      ]);
+      setEvents(payload.items.map(eventResponseToSystemEvent));
+      setTotal(payload.total);
+      setTotalPages(Math.max(1, Math.ceil(payload.total / payload.pageSize)));
+      setStorage(logSettings);
+      setLogMaxMb(Math.round(logSettings.maxBytes / 1024 / 1024));
       setError('');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '读取日志失败');
@@ -147,15 +161,18 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
 
   async function clearLogs() {
     if (!window.confirm(i18nAttribute('清理信息和警告日志？错误与关键审计事件会保留。'))) return;
-    const response = await apiV2Fetch('/api/v2/operations/events', { method: 'DELETE' });
-    const payload = await response.json().catch(() => null) as { ok?: boolean; data?: { deleted: number }; error?: { message: string } } | null;
-    if (!payload?.ok) {
-      toast.error('清理日志失败', payload?.error?.message ?? '请稍后重试');
+    try {
+      const payload = await apiV2Request<DeletedEventsResponse>(
+        '/api/v2/operations/events',
+        { method: 'DELETE' }
+      );
+      toast.success(`已清理 ${payload.deleted} 条日志`);
+      if (page === 1) await load();
+      else setPage(1);
+    } catch (reason) {
+      toast.error('清理日志失败', reason instanceof Error ? reason.message : '请稍后重试');
       return;
     }
-    toast.success(`已清理 ${payload.data?.deleted ?? 0} 条日志`);
-    if (page === 1) await load();
-    else setPage(1);
   }
 
   async function saveLogLimit() {
@@ -167,14 +184,12 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
     if (nextBytes < storage.maxBytes && !window.confirm(i18nAttribute('降低容量上限会立即删除最旧日志，是否继续？'))) return;
     setSavingLimit(true);
     try {
-      const response = await apiV2Fetch('/api/v2/operations/log-settings', {
+      const payload = await apiV2Request<LogSettingsResponse>('/api/v2/operations/log-settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ maxBytes: nextBytes })
       });
-      const payload = await response.json() as { ok?: boolean; data?: { storage?: typeof storage }; error?: { message?: string } };
-      if (!payload.ok || !payload.data?.storage) throw new Error(payload.error?.message ?? '保存日志容量失败');
-      setStorage(payload.data.storage);
+      setStorage(payload);
       toast.success('日志容量上限已保存');
       await load();
     } catch (reason) {
@@ -201,11 +216,11 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
       let exportPage = 1;
       let exportPages = 1;
       do {
-        const response = await apiV2Fetch(`/api/v2/operations/events?${buildParams(exportPage, 100).toString()}`);
-        const payload = (await response.json()) as EventsPayload;
-        if (!payload.ok) throw new Error(payload.error?.message ?? '导出日志失败');
-        exported.push(...(payload.data?.events ?? []));
-        exportPages = Math.max(1, Number(payload.data?.totalPages ?? 1));
+        const payload = await apiV2Request<EventPage>(
+          `/api/v2/operations/events?${buildParams(exportPage, 100).toString()}`
+        );
+        exported.push(...payload.items.map(eventResponseToSystemEvent));
+        exportPages = Math.max(1, Math.ceil(payload.total / payload.pageSize));
         exportPage += 1;
       } while (exportPage <= exportPages);
 

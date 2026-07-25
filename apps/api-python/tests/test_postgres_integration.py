@@ -897,6 +897,18 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         )
         assert settings_response.status_code == 200
         assert client.get("/api/v2/operations/events").json()["total"] >= 1
+        log_settings = client.get("/api/v2/operations/log-settings")
+        assert log_settings.status_code == 200
+        assert log_settings.json()["maxBytes"] == 5 * 1024 * 1024
+        saved_log_settings = client.put(
+            "/api/v2/operations/log-settings",
+            json={"maxBytes": 1024 * 1024},
+        )
+        assert saved_log_settings.status_code == 200, saved_log_settings.text
+        assert saved_log_settings.json()["maxBytes"] == 1024 * 1024
+        cleared_events = client.delete("/api/v2/operations/events")
+        assert cleared_events.status_code == 200
+        assert cleared_events.json()["deleted"] >= 1
         backup = client.post("/api/v2/operations/backups")
         assert backup.status_code == 202, backup.text
         assert backup.json()["appVersion"] == "0.4.0"

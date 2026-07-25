@@ -846,6 +846,28 @@ def test_operations_and_reading_services() -> None:
     assert operations.save_settings({"key": {"value": "on"}}, actor) == ["saved"]
     operations_repo.list_events.return_value = (["event"], 1)
     assert operations.list_events(page=1, page_size=10, kind=None) == (["event"], 1)
+    operations_repo.clear_events.return_value = 3
+    assert operations.clear_events(actor) == 3
+    operations_repo.list_settings.return_value = []
+    operations_repo.event_storage_size.return_value = 1024
+    log_settings = operations.log_settings()
+    assert log_settings.max_bytes == 5 * 1024 * 1024
+    assert log_settings.size_bytes == 1024
+    operations_repo.list_settings.return_value = [
+        SimpleNamespace(
+            key="operations.logRetention",
+            value={"maxBytes": 2 * 1024 * 1024},
+        )
+    ]
+    assert operations.log_settings().max_bytes == 2 * 1024 * 1024
+    operations_repo.prune_events.return_value = 2
+    saved_log_settings = operations.save_log_settings(3 * 1024 * 1024, actor)
+    assert saved_log_settings.max_bytes == 3 * 1024 * 1024
+    assert saved_log_settings.last_pruned_at is not None
+    operations_repo.prune_events.return_value = 0
+    assert operations.save_log_settings(4 * 1024 * 1024, actor).last_pruned_at is None
+    with pytest.raises(ValueError, match="log capacity"):
+        operations.save_log_settings(100, actor)
     operations_repo.request_backup.return_value = backup
     assert operations.request_backup(actor) is backup
     operations_repo.list_backups.return_value = [backup]

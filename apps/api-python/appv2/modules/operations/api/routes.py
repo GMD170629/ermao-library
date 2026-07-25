@@ -12,6 +12,7 @@ from appv2.modules.operations.contracts import (
     BackupView,
     EventView,
     HealthStatus,
+    LogStorageView,
     SettingView,
 )
 from appv2.platform.http import AppProblem, CamelModel, Page
@@ -62,6 +63,24 @@ class EventResponse(CamelModel):
 
     @classmethod
     def from_view(cls, value: EventView) -> "EventResponse":
+        return cls.model_validate(value)
+
+
+class DeletedEventsResponse(CamelModel):
+    deleted: int
+
+
+class LogSettingsRequest(CamelModel):
+    max_bytes: int = Field(ge=1024 * 1024, le=100 * 1024 * 1024)
+
+
+class LogSettingsResponse(CamelModel):
+    size_bytes: int
+    max_bytes: int
+    last_pruned_at: datetime | None
+
+    @classmethod
+    def from_view(cls, value: LogStorageView) -> "LogSettingsResponse":
         return cls.model_validate(value)
 
 
@@ -142,16 +161,48 @@ def create_router(
         page: int = 1,
         page_size: Annotated[int, Query(alias="pageSize", ge=1, le=200)] = 24,
         kind: str | None = None,
+        source: str | None = None,
+        level: str | None = None,
+        search: str | None = None,
+        date_from: Annotated[datetime | None, Query(alias="dateFrom")] = None,
+        date_to: Annotated[datetime | None, Query(alias="dateTo")] = None,
     ) -> Page[EventResponse]:
         require(actor, AccessScope.OPERATIONS_READ)
         size = min(max(page_size, 1), 200)
-        values, total = service.list_events(page=max(page, 1), page_size=size, kind=kind)
+        values, total = service.list_events(
+            page=max(page, 1),
+            page_size=size,
+            kind=kind,
+            source=source,
+            severity=level,
+            search=search,
+            date_from=date_from,
+            date_to=date_to,
+        )
         return Page(
             items=[EventResponse.from_view(value) for value in values],
             page=max(page, 1),
             page_size=size,
             total=total,
         )
+
+    @router.delete("/events", response_model=DeletedEventsResponse)
+    def clear_events(actor: Actor) -> DeletedEventsResponse:
+        require(actor, AccessScope.OPERATIONS_WRITE)
+        return DeletedEventsResponse(deleted=service.clear_events(actor.id))
+
+    @router.get("/log-settings", response_model=LogSettingsResponse)
+    def log_settings(actor: Actor) -> LogSettingsResponse:
+        require(actor, AccessScope.OPERATIONS_READ)
+        return LogSettingsResponse.from_view(service.log_settings())
+
+    @router.put("/log-settings", response_model=LogSettingsResponse)
+    def save_log_settings(
+        payload: LogSettingsRequest,
+        actor: Actor,
+    ) -> LogSettingsResponse:
+        require(actor, AccessScope.OPERATIONS_WRITE)
+        return LogSettingsResponse.from_view(service.save_log_settings(payload.max_bytes, actor.id))
 
     @router.get("/backups", response_model=Page[BackupResponse])
     def backups(actor: Actor) -> Page[BackupResponse]:

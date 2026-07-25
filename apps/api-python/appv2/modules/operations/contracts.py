@@ -52,6 +52,13 @@ class SettingView:
 
 
 @dataclass(frozen=True, slots=True)
+class LogStorageView:
+    size_bytes: int
+    max_bytes: int
+    last_pruned_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
 class BackupView:
     id: uuid.UUID
     status: str
@@ -94,8 +101,23 @@ class OperationsRepository(Protocol):
     ) -> None: ...
 
     def list_events(
-        self, *, offset: int, limit: int, kind: str | None
+        self,
+        *,
+        offset: int,
+        limit: int,
+        kind: str | None,
+        source: str | None,
+        severity: str | None,
+        search: str | None,
+        date_from: datetime | None,
+        date_to: datetime | None,
     ) -> tuple[list[EventView], int]: ...
+
+    def clear_events(self) -> int: ...
+
+    def event_storage_size(self) -> int: ...
+
+    def prune_events(self, max_bytes: int) -> int: ...
 
     def request_backup(
         self,

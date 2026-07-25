@@ -11,6 +11,7 @@ from appv2.modules.operations.contracts import (
     EventView,
     HealthContributor,
     HealthStatus,
+    LogStorageView,
     OperationsUnitOfWork,
     RestoreControlPort,
     SettingView,
@@ -19,6 +20,9 @@ from appv2.modules.operations.contracts import (
 
 class OperationsNotFound(Exception):
     pass
+
+
+DEFAULT_LOG_MAX_BYTES = 5 * 1024 * 1024
 
 
 class OperationsService:
@@ -64,12 +68,90 @@ class OperationsService:
             return settings
 
     def list_events(
-        self, *, page: int, page_size: int, kind: str | None
+        self,
+        *,
+        page: int,
+        page_size: int,
+        kind: str | None,
+        source: str | None = None,
+        severity: str | None = None,
+        search: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
     ) -> tuple[list[EventView], int]:
         with self._uow_factory() as uow:
             return uow.operations.list_events(
-                offset=(page - 1) * page_size, limit=page_size, kind=kind
+                offset=(page - 1) * page_size,
+                limit=page_size,
+                kind=kind,
+                source=source,
+                severity=severity,
+                search=search,
+                date_from=date_from,
+                date_to=date_to,
             )
+
+    def clear_events(self, actor_id: uuid.UUID) -> int:
+        with self._uow_factory() as uow:
+            deleted = uow.operations.clear_events()
+            uow.operations.append_event(
+                actor_id=actor_id,
+                kind="events.cleared",
+                severity="warning",
+                message_key="events.cleared",
+                params={"deleted": deleted},
+                trace_id=None,
+                now=datetime.now(UTC),
+            )
+            uow.commit()
+            return deleted
+
+    def log_settings(self) -> LogStorageView:
+        with self._uow_factory() as uow:
+            settings = uow.operations.list_settings()
+            max_bytes = self._log_max_bytes(settings)
+            return LogStorageView(
+                size_bytes=uow.operations.event_storage_size(),
+                max_bytes=max_bytes,
+                last_pruned_at=None,
+            )
+
+    def save_log_settings(self, max_bytes: int, actor_id: uuid.UUID) -> LogStorageView:
+        if not 1024 * 1024 <= max_bytes <= 100 * 1024 * 1024:
+            raise ValueError("log capacity must be between 1 MiB and 100 MiB")
+        now = datetime.now(UTC)
+        with self._uow_factory() as uow:
+            uow.operations.save_settings(
+                {"operations.logRetention": {"maxBytes": max_bytes}},
+                actor_id,
+            )
+            deleted = uow.operations.prune_events(max_bytes)
+            uow.operations.append_event(
+                actor_id=actor_id,
+                kind="events.retention.updated",
+                severity="warning",
+                message_key="events.retention.updated",
+                params={"maxBytes": max_bytes, "deleted": deleted},
+                trace_id=None,
+                now=now,
+            )
+            size_bytes = uow.operations.event_storage_size()
+            uow.commit()
+            return LogStorageView(
+                size_bytes=size_bytes,
+                max_bytes=max_bytes,
+                last_pruned_at=now if deleted else None,
+            )
+
+    @staticmethod
+    def _log_max_bytes(settings: list[SettingView]) -> int:
+        for setting in settings:
+            if setting.key != "operations.logRetention":
+                continue
+            value = setting.value.get("maxBytes")
+            if isinstance(value, int):
+                return value
+        return DEFAULT_LOG_MAX_BYTES
 
     def request_backup(self, actor_id: uuid.UUID) -> BackupView:
         backup_id = uuid.uuid4()
