@@ -119,7 +119,7 @@ async function main() {
       if (!contributorNames.has(expected)) throw new Error(`health response missing ${expected} contributor`);
     }
 
-    const openapiResponse = await fetch(`http://127.0.0.1:${port}/openapi.json`);
+    const openapiResponse = await fetch(`http://127.0.0.1:${port}/api/v2/openapi.json`);
     const openapi = await openapiResponse.json();
     if (!openapiResponse.ok || openapi.info?.version !== '0.4.0') {
       throw new Error(`unexpected OpenAPI metadata: ${JSON.stringify(openapi.info)}`);
