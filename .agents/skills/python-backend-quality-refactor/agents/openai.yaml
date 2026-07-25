@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Backend Quality Refactor"
+  short_description: "Safely refactor and validate the Shuku FastAPI backend"
+  default_prompt: "Use $python-backend-quality-refactor to assess and refactor the Python backend with compatibility-preserving quality gates."

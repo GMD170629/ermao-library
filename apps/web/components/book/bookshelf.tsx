@@ -5,9 +5,9 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import { Cover, type CoverBook } from './cover';
 
-export type BookshelfBook = CoverBook & { id: string };
+export type BookshelfItem = CoverBook & { id: string };
 
-function shelfRows<T extends BookshelfBook>(books: T[], columns: number) {
+function shelfRows<T extends BookshelfItem>(books: T[], columns: number) {
   const rows: T[][] = [];
   for (let index = 0; index < books.length; index += columns) {
     rows.push(books.slice(index, index + columns));
@@ -45,7 +45,7 @@ function useBookshelfColumns() {
   return { containerRef, columns };
 }
 
-function ShelfBook<T extends BookshelfBook>({
+function ShelfBook<T extends BookshelfItem>({
   book,
   onOpen,
   priority = false
@@ -89,7 +89,7 @@ function ShelfBook<T extends BookshelfBook>({
   );
 }
 
-function ShelfBookMetadata<T extends BookshelfBook>({
+function ShelfBookMetadata<T extends BookshelfItem>({
   book,
   divider = false
 }: {
@@ -164,7 +164,7 @@ function ShelfLedge() {
   );
 }
 
-export function BookshelfRail<T extends BookshelfBook>({
+export function BookshelfRail<T extends BookshelfItem>({
   books,
   onOpen,
   testId
@@ -204,7 +204,7 @@ export function BookshelfRail<T extends BookshelfBook>({
   );
 }
 
-export function BookshelfSection<T extends BookshelfBook>({
+export function BookshelfSection<T extends BookshelfItem>({
   title,
   books,
   onOpen,
@@ -228,7 +228,7 @@ export function BookshelfSection<T extends BookshelfBook>({
   );
 }
 
-export function BookshelfCollection<T extends BookshelfBook>({
+export function BookshelfCollection<T extends BookshelfItem>({
   books,
   onOpen,
   testId

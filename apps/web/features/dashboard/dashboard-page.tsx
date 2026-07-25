@@ -4,23 +4,29 @@ import { ArrowRight, BookOpen, Headphones, Images, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { BookshelfSection } from '../../components/book/bookshelf';
+import { BookshelfSection, type BookshelfItem } from '../../components/book/bookshelf';
 import { Cover } from '../../components/book/cover';
 import { MobileNavigationTrigger } from '../../components/layout/mobile-navigation';
 import { Progress } from '../../components/ui/progress';
 import { useI18n } from '../../i18n/provider';
 import { useAudioPlayback } from '../audio/audio-playback-provider';
 import { UploadBookDialog } from '../library/upload-book-dialog';
-import type { WorkView } from '../../types/work';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type ContinueItem = {
-  book: WorkView;
+  workId: string;
+  title: string;
+  author: string;
+  coverUrl: string;
+  mediaKind: 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
+  resumeEditionId: string | null;
+  resumeVolumeId: string | null;
   progress: number;
   lastReadAt: string;
   chapter: string | null;
-  position: string;
+  versionName: string | null;
+  narrator: string | null;
 } | null;
 
 async function api<T>(path: string): Promise<T> {
@@ -44,21 +50,14 @@ function shortReadTime(value: string, locale: string, t: (source: string, values
   });
 }
 
-function recentMediaKind(book: WorkView) {
-  const group = book.mediaGroups?.find((candidate) => candidate.recentEditionId === book.recentEditionId);
-  if (group) return group.kind;
-  if (book.mediaKind) return book.mediaKind;
-  return book.type === 'audiobook' ? 'AUDIOBOOK' : book.type === 'comic' ? 'COMIC' : 'EBOOK';
-}
-
 export function DashboardPage() {
   const { t: i18nAttribute } = useAttributeI18n();
   const router = useRouter();
   const audioPlayback = useAudioPlayback();
   const { locale, t } = useI18n();
   const [continueItem, setContinueItem] = useState<ContinueItem>(null);
-  const [recentReading, setRecentReading] = useState<WorkView[]>([]);
-  const [recentBooks, setRecentBooks] = useState<WorkView[]>([]);
+  const [recentReading, setRecentReading] = useState<BookshelfItem[]>([]);
+  const [recentBooks, setRecentBooks] = useState<BookshelfItem[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
@@ -67,13 +66,13 @@ export function DashboardPage() {
     let active = true;
     Promise.allSettled([
       api<{ item: ContinueItem }>('/api/dashboard/continue-reading'),
-      api<{ books: WorkView[] }>('/api/works?visibility=active&sort=recent_read&pageSize=10'),
-      api<{ books: WorkView[] }>('/api/dashboard/recent-books?limit=10')
+      api<{ books: BookshelfItem[] }>('/api/dashboard/recent-reading?limit=10'),
+      api<{ books: BookshelfItem[] }>('/api/dashboard/recent-books?limit=10')
     ]).then(([continueResult, readingResult, addedResult]) => {
       if (!active) return;
       if (continueResult.status === 'fulfilled') setContinueItem(continueResult.value.item);
       if (readingResult.status === 'fulfilled') {
-        setRecentReading(readingResult.value.books.filter((book) => Boolean(book.lastReadAt)).slice(0, 10));
+        setRecentReading(readingResult.value.books.slice(0, 10));
       }
       if (addedResult.status === 'fulfilled') setRecentBooks(addedResult.value.books.slice(0, 10));
 
@@ -86,7 +85,7 @@ export function DashboardPage() {
     };
   }, []);
 
-  const continueAuthor = continueItem?.book.author.trim() && continueItem.book.author !== '未知作者' ? continueItem.book.author : null;
+  const continueAuthor = continueItem?.author.trim() && continueItem.author !== '未知作者' ? continueItem.author : null;
 
   return (
     <div className="mx-auto max-w-[1280px]">
@@ -122,20 +121,20 @@ export function DashboardPage() {
         ) : continueItem ? (
           <div className="mt-4 flex min-h-[248px] flex-col gap-6 rounded-2xl bg-[#F4F1EE] p-4 sm:flex-row sm:items-center lg:px-6">
             <Link
-              href={`/works/${continueItem.book.id}`}
-              aria-label={i18nAttribute("查看《{value0}》详情", { value0: continueItem.book.title })}
+              href={`/works/${continueItem.workId}`}
+              aria-label={i18nAttribute("查看《{value0}》详情", { value0: continueItem.title })}
               className="shrink-0 rounded-[9px] outline-none transition hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-[#F6B7A5]"
             >
-              <Cover book={continueItem.book} size="large" priority className="h-[220px] w-[150px] rounded-[9px] shadow-[0_6px_18px_rgba(44,36,31,0.2)]" />
+              <Cover book={continueItem} size="large" priority className="h-[220px] w-[150px] rounded-[9px] shadow-[0_6px_18px_rgba(44,36,31,0.2)]" />
             </Link>
             <div className="min-w-0 flex-1 sm:pl-3">
               <h3 data-i18n-skip className="line-clamp-2 text-[27px] font-semibold tracking-[-0.025em] text-[#22201E]">
-                <Link href={`/works/${continueItem.book.id}`} className="rounded-sm transition hover:text-[#EF4D2F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]">
-                  {continueItem.book.title}
+                <Link href={`/works/${continueItem.workId}`} className="rounded-sm transition hover:text-[#EF4D2F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]">
+                  {continueItem.title}
                 </Link>
               </h3>
               {continueAuthor ? <p data-i18n-skip className="mt-1.5 text-sm text-[#746F69]">{continueAuthor}</p> : null}
-              <p data-i18n-skip={continueItem.chapter ?? continueItem.book.chapter ? '' : undefined} className="mt-8 line-clamp-1 text-[15px] text-[#494540]">{continueItem.chapter ?? continueItem.book.chapter ?? i18nAttribute("继续上次阅读")}</p>
+              <p data-i18n-skip={continueItem.chapter ? '' : undefined} className="mt-8 line-clamp-1 text-[15px] text-[#494540]">{continueItem.chapter ?? i18nAttribute("继续上次阅读")}</p>
               <div className="mt-4 flex max-w-[560px] items-center gap-4">
                 <Progress value={continueItem.progress} className="h-1.5 flex-1 bg-[#DDD8D3]" />
                 <span className="text-sm tabular-nums text-[#706B65]">{Math.round(continueItem.progress)}%</span>
@@ -143,13 +142,9 @@ export function DashboardPage() {
             </div>
             <div className="flex shrink-0 flex-col items-start gap-3 sm:items-center sm:px-3">
               {(() => {
-                const kind = recentMediaKind(continueItem.book);
-                const audioGroup = continueItem.book.mediaGroups?.find((group) => group.kind === 'AUDIOBOOK');
-                const editionId = kind === 'AUDIOBOOK'
-                  ? audioGroup?.recentEditionId ?? audioGroup?.primaryEditionId ?? continueItem.book.editions.find((edition) => edition.mediaKind === 'AUDIOBOOK')?.id ?? null
-                  : continueItem.book.recentEditionId ?? continueItem.book.editionId;
-                const audioEdition = editionId ? continueItem.book.editions.find((edition) => edition.id === editionId) : null;
-                const volumeQuery = continueItem.book.recentVolumeId ? `?volume=${encodeURIComponent(continueItem.book.recentVolumeId)}` : '';
+                const kind = continueItem.mediaKind;
+                const editionId = continueItem.resumeEditionId;
+                const volumeQuery = continueItem.resumeVolumeId ? `?volume=${encodeURIComponent(continueItem.resumeVolumeId)}` : '';
                 const href = editionId ? `/reader/${editionId}${volumeQuery}` : null;
                 const label = kind === 'AUDIOBOOK' ? '继续听' : kind === 'COMIC' ? '继续看' : '继续阅读';
                 const ContinueIcon = kind === 'AUDIOBOOK' ? Headphones : kind === 'COMIC' ? Images : BookOpen;
@@ -163,12 +158,12 @@ export function DashboardPage() {
                       autoplay: true,
                       summary: {
                         editionId,
-                        workId: continueItem.book.id,
-                        title: continueItem.book.title,
-                        author: continueItem.book.author === '未知作者' ? null : continueItem.book.author,
-                        coverUrl: continueItem.book.coverUrl,
-                        versionName: audioEdition?.versionName ?? null,
-                        narrator: audioEdition?.narrator ?? null,
+                        workId: continueItem.workId,
+                        title: continueItem.title,
+                        author: continueItem.author === '未知作者' ? null : continueItem.author,
+                        coverUrl: continueItem.coverUrl,
+                        versionName: continueItem.versionName,
+                        narrator: continueItem.narrator,
                         chapterTitle: continueItem.chapter
                       }
                     });
@@ -224,11 +219,11 @@ function BookSection({
   onOpen
 }: {
   title: string;
-  books: WorkView[];
+  books: BookshelfItem[];
   loading: boolean;
   emptyText: string;
   onMore: () => void;
-  onOpen: (book: WorkView) => void;
+  onOpen: (book: BookshelfItem) => void;
 }) {
   const { t: i18nAttribute } = useAttributeI18n();
   if (!loading && books.length > 0) {

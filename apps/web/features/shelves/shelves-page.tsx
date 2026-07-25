@@ -3,7 +3,7 @@
 import { ArrowLeft, BookOpen, Check, Edit3, Loader2, Plus, Save, Search, Trash2, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BookshelfCollection } from '../../components/book/bookshelf';
+import { BookshelfCollection, type BookshelfItem } from '../../components/book/bookshelf';
 import { Cover } from '../../components/book/cover';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
@@ -15,7 +15,7 @@ import { summarizeSmartShelfRules, type SmartShelfRules } from './smart-shelf-ru
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
-type ShelfBookView = Pick<WorkView, 'id' | 'title' | 'author' | 'format' | 'gradient' | 'coverUrl' | 'coverStatus'>;
+type BookSearchItem = BookshelfItem & { format: string };
 
 type ShelfView = {
   id: string;
@@ -23,7 +23,7 @@ type ShelfView = {
   description: string | null;
   bookCount: number;
   bookIds?: string[];
-  books?: ShelfBookView[];
+  books?: BookshelfItem[];
   page?: number;
   pageSize?: number;
   total?: number;
@@ -49,7 +49,7 @@ type ShelfPayload = {
 
 type BooksPayload = {
   ok: boolean;
-  data?: { books: WorkView[] };
+  data?: { books: BookSearchItem[] };
   error?: { message: string };
 };
 
@@ -72,7 +72,7 @@ export function ShelvesPage() {
   const [form, setForm] = useState(emptyForm);
   const [selectedBookIds, setSelectedBookIds] = useState<string[]>([]);
   const [search, setSearch] = useState('');
-  const [searchBooks, setSearchBooks] = useState<WorkView[]>([]);
+  const [searchBooks, setSearchBooks] = useState<BookSearchItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -120,7 +120,7 @@ export function ShelvesPage() {
       return;
     }
     let active = true;
-    const params = new URLSearchParams({ pageSize: '16', visibility: 'active', sort: 'title', view: 'bookshelf', search: search.trim() });
+    const params = new URLSearchParams({ pageSize: '16', visibility: 'active', sort: 'title', view: 'search', search: search.trim() });
     setSearchLoading(true);
     fetch(`/api/works?${params}`)
       .then((response) => readPayload<BooksPayload>(response, '搜索图书失败'))
@@ -152,11 +152,11 @@ export function ShelvesPage() {
   }, [activeShelf, detailLoading, loadingMore]);
 
   const previewBooksById = useMemo(() => {
-    const books = new Map<string, ShelfBookView>();
+    const books = new Map<string, BookshelfItem>();
     [...(activeShelf?.books ?? []), ...searchBooks].forEach((book) => books.set(book.id, book));
     return books;
   }, [activeShelf, searchBooks]);
-  const selectedBooks = selectedBookIds.map((id) => previewBooksById.get(id)).filter(Boolean) as ShelfBookView[];
+  const selectedBooks = selectedBookIds.map((id) => previewBooksById.get(id)).filter(Boolean) as BookshelfItem[];
   const shelfBooks = activeShelf?.books ?? [];
   const initialBookIds = activeShelf?.bookIds ?? (activeShelf?.books ?? []).map((book) => book.id);
   const hasUnsavedChanges = activeIsNew

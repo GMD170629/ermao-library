@@ -656,6 +656,7 @@ def test_core_compat_endpoints_return_envelopes(client, db_session, test_setting
     endpoints = [
         "/api/dashboard/summary",
         "/api/dashboard/recent-books",
+        "/api/dashboard/recent-reading",
         "/api/dashboard/continue-reading",
         "/api/dashboard/system-status",
         "/api/series",
@@ -704,7 +705,7 @@ def test_shelf_list_is_summary_and_detail_is_lightweight_paginated(client, db_se
     assert shelf["bookIds"] == book_ids
     assert shelf["bookCount"] == 25
     assert len(shelf["books"]) == 24
-    assert set(shelf["books"][0]) == {"id", "title", "author", "format", "gradient", "coverStatus", "coverUrl"}
+    assert set(shelf["books"][0]) == {"id", "title", "author", "coverUrl"}
 
     statements: list[str] = []
     engine = db_session.get_bind()
@@ -1206,11 +1207,34 @@ def test_works_recent_read_sort_uses_latest_user_progress_across_pages(client, d
         "id",
         "title",
         "author",
-        "format",
-        "gradient",
-        "coverStatus",
         "coverUrl",
     }
+
+    search = client.get(
+        "/api/works",
+        params={
+            "visibility": "active",
+            "search": "最近",
+            "view": "search",
+        },
+    ).json()
+    assert search["ok"] is True
+    assert set(search["data"]["books"][0]) == {
+        "id",
+        "title",
+        "author",
+        "coverUrl",
+        "format",
+    }
+
+    recent_reading = client.get("/api/dashboard/recent-reading", params={"limit": 10}).json()
+    recent_added = client.get("/api/dashboard/recent-books", params={"limit": 10}).json()
+    assert recent_reading["ok"] is True
+    assert recent_added["ok"] is True
+    bookshelf_item_keys = {"id", "title", "author", "coverUrl"}
+    assert all(set(book) == bookshelf_item_keys for book in recent_reading["data"]["books"])
+    assert all(set(book) == bookshelf_item_keys for book in recent_added["data"]["books"])
+    assert [book["id"] for book in recent_reading["data"]["books"]] == ["work-new", "work-old"]
 
     management = client.get(
         "/api/works",
@@ -1249,6 +1273,16 @@ def test_works_recent_read_sort_uses_latest_user_progress_across_pages(client, d
     assert "editions" not in management_books[0]
     assert "files" not in management_books[0]
     assert "volumes" not in management_books[0]
+
+    db_session.execute(text("UPDATE LibraryEdition SET hidden = 1 WHERE id = 'work-new-edition'"))
+    db_session.commit()
+    visible_recent = client.get("/api/dashboard/recent-reading", params={"limit": 10}).json()["data"]["books"]
+    assert [book["id"] for book in visible_recent] == ["work-old"]
+
+    monkeypatch.undo()
+    continue_item = client.get("/api/dashboard/continue-reading").json()["data"]["item"]
+    assert continue_item["workId"] == "work-old"
+    assert continue_item["resumeEditionId"] == "work-old-edition"
 
 
 def test_works_sortable_metadata_fields_support_both_directions(client, db_session):
@@ -4728,8 +4762,25 @@ def test_multi_volume_comic_progress_is_volume_scoped_and_bootstrap_opens_next_t
     assert second_detail["chapter"] == "第 2 卷 · 第 1 页"
 
     continue_item = client.get("/api/dashboard/continue-reading").json()["data"]["item"]
+    assert set(continue_item) == {
+        "workId",
+        "title",
+        "author",
+        "coverUrl",
+        "mediaKind",
+        "resumeEditionId",
+        "resumeVolumeId",
+        "progress",
+        "chapter",
+        "lastReadAt",
+        "versionName",
+        "narrator",
+    }
+    assert continue_item["workId"] == work_id
+    assert continue_item["mediaKind"] == "COMIC"
+    assert continue_item["resumeEditionId"] == edition_id
+    assert continue_item["resumeVolumeId"] == second_volume_id
     assert continue_item["progress"] == 20
-    assert continue_item["book"]["recentVolumeId"] == second_volume_id
     assert continue_item["chapter"] == "第 2 卷 · 第 1 页"
 
     resumed = client.get(f"/api/reader/v2/editions/{edition_id}/bootstrap").json()["data"]

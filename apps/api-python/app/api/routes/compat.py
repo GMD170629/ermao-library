@@ -1026,6 +1026,23 @@ def _bookshelf_work_view(work: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _bookshelf_item_view(work: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": work["id"],
+        "title": work.get("title") or "未命名作品",
+        "author": work.get("author") or "未知作者",
+        "coverUrl": _cover_url("works", work["id"], work, size="medium"),
+    }
+
+
+def _book_search_item_view(work: dict[str, Any]) -> dict[str, Any]:
+    work_type = str(work.get("workType") or "EPUB").upper()
+    return {
+        **_bookshelf_item_view(work),
+        "format": _labels()["format"].get(work_type, "未知"),
+    }
+
+
 def _management_work_views(
     db: Session,
     works: list[dict[str, Any]],
@@ -2355,10 +2372,58 @@ def dashboard_recent_books(request: Request, limit: int = 5, db: Session = Depen
     params["take"] = take
     works = _rows(
         db,
-        f"SELECT * FROM `LibraryWork` WHERE `hidden` = 0 AND {scope} ORDER BY `createdAt` DESC LIMIT :take",
+        "SELECT `LibraryWork`.`id`, `LibraryWork`.`title`, `LibraryWork`.`author`, "
+        "`LibraryWork`.`coverStatus`, `LibraryWork`.`coverPath`, `LibraryWork`.`createdAt` "
+        f"FROM `LibraryWork` WHERE `hidden` = 0 AND {scope} "
+        "ORDER BY `createdAt` DESC, `id` DESC LIMIT :take",
         params,
     ) if _has_table(db, "LibraryWork") else []
-    return ok({"books": [_work_view(db, work, user.id) for work in works]})
+    return ok({"books": [_bookshelf_item_view(work) for work in works]})
+
+
+@router.get("/dashboard/recent-reading")
+def dashboard_recent_reading(request: Request, limit: int = 10, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    if not all(_has_table(db, table) for table in ("LibraryWork", "LibraryEdition", "LibraryReadingProgress")):
+        return ok({"books": []})
+
+    take = min(24, max(1, limit))
+    context = authorization_context(db, user)
+    work_scope, work_params = work_visibility_sql(context, alias="w", prefix="dashboard_recent_reading")
+    edition_scope, edition_params = edition_visibility_sql(
+        context,
+        alias="recent_edition",
+        prefix="dashboard_recent_reading",
+    )
+    params = {
+        "user_id": user.id,
+        "take": take,
+        **work_params,
+        **edition_params,
+    }
+    latest_read_at = f"MAX({_timestamp_sql('p.`updatedAt`')})"
+    works = _rows(
+        db,
+        f"""
+        SELECT w.`id`, w.`title`, w.`author`, w.`coverStatus`, w.`coverPath`,
+               {latest_read_at} AS `lastReadAt`
+        FROM `LibraryWork` w
+        JOIN `LibraryReadingProgress` p ON p.`workId` = w.`id`
+        JOIN `LibraryEdition` recent_edition ON recent_edition.`id` = p.`editionId`
+        WHERE p.`userId` = :user_id
+          AND w.`hidden` = 0
+          AND COALESCE(recent_edition.`hidden`, 0) = 0
+          AND {work_scope}
+          AND {edition_scope}
+        GROUP BY w.`id`, w.`title`, w.`author`, w.`coverStatus`, w.`coverPath`
+        ORDER BY {latest_read_at} DESC, w.`id` DESC
+        LIMIT :take
+        """,
+        params,
+    )
+    return ok({"books": [_bookshelf_item_view(work) for work in works]})
 
 
 @router.get("/dashboard/continue-reading")
@@ -2367,17 +2432,24 @@ def dashboard_continue_reading(request: Request, db: Session = Depends(get_db), 
     if auth_error:
         return auth_error
     progress = None
-    if _has_table(db, "LibraryReadingProgress") and _has_table(db, "LibraryWork"):
+    if all(_has_table(db, table) for table in ("LibraryReadingProgress", "LibraryWork", "LibraryEdition")):
         context = authorization_context(db, user)
         scope, scope_params = work_visibility_sql(context, alias="w", prefix="continue")
+        edition_scope, edition_scope_params = edition_visibility_sql(
+            context,
+            alias="continue_edition",
+            prefix="continue",
+        )
         progress = _row(
             db,
             "SELECT p.* FROM `LibraryReadingProgress` p "
             "JOIN `LibraryWork` w ON w.`id` = p.`workId` "
+            "JOIN `LibraryEdition` continue_edition ON continue_edition.`id` = p.`editionId` "
             "WHERE p.`userId` = :user_id AND p.`percent` > 0 AND p.`percent` < 100 AND w.`hidden` = 0 "
-            f"AND {scope} "
+            "AND COALESCE(continue_edition.`hidden`, 0) = 0 "
+            f"AND {scope} AND {edition_scope} "
             "ORDER BY p.`updatedAt` DESC LIMIT 1",
-            {"user_id": user.id, **scope_params},
+            {"user_id": user.id, **scope_params, **edition_scope_params},
         )
     if not progress:
         return ok({"item": None})
@@ -2385,7 +2457,67 @@ def dashboard_continue_reading(request: Request, db: Session = Depends(get_db), 
     if not work or work.get("hidden"):
         return ok({"item": None})
     book = _work_view(db, work, user.id)
-    return ok({"item": {"book": book, "progress": book.get("progress") or 0, "lastReadAt": _dt(progress.get("updatedAt")), "chapter": book.get("chapter") if book.get("chapter") != "未开始" else None, "position": progress.get("position")}})
+    recent_edition_id = book.get("recentEditionId")
+    media_group = next(
+        (
+            group
+            for group in book.get("mediaGroups") or []
+            if group.get("recentEditionId") == recent_edition_id
+        ),
+        None,
+    )
+    media_kind = (
+        (media_group or {}).get("kind")
+        or ("AUDIOBOOK" if book.get("type") == "audiobook" else "COMIC" if book.get("type") == "comic" else "EBOOK")
+    )
+    if media_kind == "AUDIOBOOK":
+        audio_group = next(
+            (group for group in book.get("mediaGroups") or [] if group.get("kind") == "AUDIOBOOK"),
+            None,
+        )
+        resume_edition_id = (
+            (audio_group or {}).get("recentEditionId")
+            or (audio_group or {}).get("primaryEditionId")
+            or next(
+                (
+                    edition.get("id")
+                    for edition in book.get("editions") or []
+                    if edition.get("mediaKind") == "AUDIOBOOK"
+                ),
+                None,
+            )
+        )
+    else:
+        resume_edition_id = recent_edition_id or book.get("editionId")
+    resume_edition = next(
+        (
+            edition
+            for edition in book.get("editions") or []
+            if edition.get("id") == resume_edition_id
+        ),
+        None,
+    )
+    chapter = book.get("chapter")
+    if chapter == "未开始":
+        chapter = None
+    return ok(
+        {
+            "item": {
+                "workId": book.get("id"),
+                "title": book.get("title"),
+                "author": book.get("author"),
+                "coverUrl": book.get("coverUrl"),
+                "mediaKind": media_kind,
+                "resumeEditionId": resume_edition_id,
+                "resumeVolumeId": book.get("recentVolumeId"),
+                "progress": book.get("progress") or 0,
+                "chapter": chapter,
+                "lastReadAt": _dt(progress.get("updatedAt")),
+                "versionName": (resume_edition or {}).get("versionName"),
+                "narrator": (resume_edition or {}).get("narrator"),
+            }
+        }
+    )
 
 
 @router.get("/dashboard/system-status")
@@ -2820,12 +2952,13 @@ def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: 
     )
     total = _table_count(db, "LibraryWork", where_sql, params)
     bookshelf_view = view == "bookshelf"
+    search_view = view == "search"
     management_view = view == "management"
     select_columns = (
         "`LibraryWork`.`id`, `LibraryWork`.`title`, `LibraryWork`.`author`, "
         "`LibraryWork`.`workType`, `LibraryWork`.`coverStatus`, "
         "`LibraryWork`.`coverPath`, `LibraryWork`.`updatedAt`"
-        if bookshelf_view
+        if bookshelf_view or search_view
         else "`LibraryWork`.*"
     )
     if sort == "progress" and _has_table(db, "LibraryReadingProgress"):
@@ -2846,8 +2979,10 @@ def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: 
         start = (page - 1) * page_size
         page_items = work_views[start:start + page_size]
         page_views = (
-            [_bookshelf_work_view(work) for work, _view in page_items]
+            [_bookshelf_item_view(work) for work, _view in page_items]
             if bookshelf_view
+            else [_book_search_item_view(work) for work, _view in page_items]
+            if search_view
             else _management_work_views(db, [work for work, _view in page_items], user.id)
             if management_view
             else [view for _work, view in page_items]
@@ -2880,8 +3015,10 @@ def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: 
     else:
         works = _rows(db, f"SELECT {select_columns} FROM `LibraryWork` WHERE {where_sql} ORDER BY {order} LIMIT :limit OFFSET :offset", params)
     book_views = (
-        [_bookshelf_work_view(work) for work in works]
+        [_bookshelf_item_view(work) for work in works]
         if bookshelf_view
+        else [_book_search_item_view(work) for work in works]
+        if search_view
         else _management_work_views(db, works, user.id)
         if management_view
         else [_work_view(db, work, user.id) for work in works]
@@ -6467,28 +6604,17 @@ def _shelf_book_views(db: Session, work_ids: list[str]) -> list[dict[str, Any]]:
         params[key] = work_id
     works = _rows(
         db,
-        f"SELECT * FROM `LibraryWork` WHERE `id` IN ({', '.join(placeholders)})",
+        "SELECT `id`, `title`, `author` "
+        f"FROM `LibraryWork` WHERE `id` IN ({', '.join(placeholders)})",
         params,
     )
     works_by_id = {str(work["id"]): work for work in works}
-    labels = _labels()
     result: list[dict[str, Any]] = []
     for work_id in work_ids:
         work = works_by_id.get(str(work_id))
         if not work:
             continue
-        format_value = str(work.get("workType") or "EPUB").upper()
-        result.append(
-            {
-                "id": str(work["id"]),
-                "title": work.get("title") or "未命名作品",
-                "author": work.get("author") or "未知作者",
-                "format": labels["format"].get(format_value, format_value),
-                "gradient": "from-slate-950 via-blue-800 to-cyan-500",
-                "coverStatus": work.get("coverStatus") or "PENDING",
-                "coverUrl": _cover_url("works", str(work["id"]), work, size="medium"),
-            }
-        )
+        result.append(_bookshelf_item_view(work))
     return result
 
 

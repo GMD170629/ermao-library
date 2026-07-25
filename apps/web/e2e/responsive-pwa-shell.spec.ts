@@ -26,7 +26,7 @@ async function mockWebAppApi(page: Page) {
       await route.fulfill({ json: { ok: true, data: { item: null } } });
       return;
     }
-    if (pathname.endsWith('/api/dashboard/recent-books') || pathname.endsWith('/api/works')) {
+    if (pathname.endsWith('/api/dashboard/recent-reading') || pathname.endsWith('/api/dashboard/recent-books') || pathname.endsWith('/api/works')) {
       await route.fulfill({ json: { ok: true, data: { books: [], total: 0 } } });
       return;
     }
@@ -140,28 +140,17 @@ test('dashboard recent shelves share a ten-book horizontal rail without visible 
     id: `recent-reading-${index + 1}`,
     title: `最近阅读 ${index + 1}`,
     author: '测试作者',
-    type: 'ebook',
-    format: 'EPUB',
-    formatValue: 'EPUB',
-    status: '在读',
-    statusValue: 'READING',
-    progress: 40 + index,
-    lastReadAt: `2026-07-24T${String(12 - index).padStart(2, '0')}:00:00.000Z`,
-    tags: [],
-    coverUrl: '',
-    gradient: 'from-orange-100 to-stone-200'
+    coverUrl: ''
   }));
   const recentAdded = recentReading.map((book, index) => ({
     ...book,
     id: `recent-added-${index + 1}`,
-    title: `最近加入 ${index + 1}`,
-    lastReadAt: null,
-    progress: 0
+    title: `最近加入 ${index + 1}`
   }));
 
-  await page.route('**/api/works?**', async (route) => {
+  await page.route('**/api/dashboard/recent-reading?**', async (route) => {
     requestedQueries.push(route.request().url());
-    await route.fulfill({ json: { ok: true, data: { books: recentReading, total: recentReading.length } } });
+    await route.fulfill({ json: { ok: true, data: { books: recentReading } } });
   });
   await page.route('**/api/dashboard/recent-books?**', async (route) => {
     requestedQueries.push(route.request().url());
@@ -197,8 +186,8 @@ test('dashboard recent shelves share a ten-book horizontal rail without visible 
   }
 
   await expect(readingShelf.locator('[data-bookshelf-progress]')).toHaveCount(0);
-  expect(requestedQueries.some((url) => new URL(url).searchParams.get('pageSize') === '10')).toBe(true);
-  expect(requestedQueries.some((url) => new URL(url).searchParams.get('limit') === '10')).toBe(true);
+  expect(requestedQueries).toHaveLength(2);
+  expect(requestedQueries.every((url) => new URL(url).searchParams.get('limit') === '10')).toBe(true);
 });
 
 test('wide shelf details use responsive bookshelf rows and load more on scroll', async ({ page }) => {

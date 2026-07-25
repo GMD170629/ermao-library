@@ -30,7 +30,6 @@ import { installUnauthorizedFetchInterceptor, UNAUTHORIZED_EVENT } from '../../l
 import { withBasePath } from '../../lib/base-path';
 import { DEFAULT_ACCOUNT_AVATAR_PATH, PRODUCT_NAME } from '../../lib/brand';
 import { clearCurrentUserNamespace, setCurrentUserNamespace, userDevicePreferenceKey } from '../../lib/user-preferences';
-import type { WorkView } from '../../types/work';
 import { Cover } from '../book/cover';
 import { clearPrivatePwaStorage, PwaClient } from '../system/pwa-client';
 import { cn } from '../ui/cn';
@@ -60,8 +59,16 @@ const shellSurfaces = {
 
 type BooksPayload = {
   ok: boolean;
-  data?: { books: WorkView[]; total: number };
+  data?: { books: BookSearchItem[]; total: number };
   error?: { message: string };
+};
+
+type BookSearchItem = {
+  id: string;
+  title: string;
+  author: string;
+  coverUrl: string;
+  format: string;
 };
 
 type ShelfSummary = {
@@ -119,7 +126,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [shelves, setShelves] = useState<ShelfSummary[]>([]);
   const [librarySearch, setLibrarySearch] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
-  const [searchBooks, setSearchBooks] = useState<WorkView[]>([]);
+  const [searchBooks, setSearchBooks] = useState<BookSearchItem[]>([]);
   const [searchTotal, setSearchTotal] = useState(0);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchActiveIndex, setSearchActiveIndex] = useState(0);
@@ -526,7 +533,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setSearchLoading(true);
-      fetch(`/api/works?pageSize=5&visibility=active&sort=recent_read&view=bookshelf&search=${encodeURIComponent(keyword)}`, { signal: controller.signal })
+      fetch(`/api/works?pageSize=5&visibility=active&sort=recent_read&view=search&search=${encodeURIComponent(keyword)}`, { signal: controller.signal })
         .then((response) => response.json() as Promise<BooksPayload>)
         .then((payload) => {
           if (!payload.ok) throw new Error(payload.error?.message ?? '搜索书库失败');

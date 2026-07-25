@@ -10,9 +10,9 @@ export type CoverBook = {
   id?: string | number;
   title: string;
   author: string;
-  format: string;
-  gradient: string;
   coverUrl?: string;
+  format?: string;
+  gradient?: string;
   coverStatus?: string;
 };
 
