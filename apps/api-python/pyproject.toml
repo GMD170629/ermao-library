@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "shuku-starship-api-python"
-version = "0.3.2"
+version = "0.3.3"
 description = "Python FastAPI backend for 二毛图书"
 requires-python = "==3.11.*"
 dependencies = [
@@ -15,7 +15,7 @@ dependencies = [
   "pydantic-settings>=2.4.0",
   "email-validator>=2.2.0",
   "aiofiles>=24.1.0",
-  "Pillow>=10.4.0",
+  "Pillow>=11.3.0",
   "ebooklib>=0.18",
   "lxml>=5.2.0",
   "mutagen>=1.47.0",

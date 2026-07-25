@@ -450,7 +450,7 @@ wheels = [
 
 [[package]]
 name = "shuku-starship-api-python"
-version = "0.3.2"
+version = "0.3.3"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
@@ -484,7 +484,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0" },
     { name = "lxml", specifier = ">=5.2.0" },
     { name = "mutagen", specifier = ">=1.47.0" },
-    { name = "pillow", specifier = ">=10.4.0" },
+    { name = "pillow", specifier = ">=11.3.0" },
     { name = "pydantic", specifier = ">=2.8.0" },
     { name = "pydantic-settings", specifier = ">=2.4.0" },
     { name = "pypdfium2", specifier = ">=4.30.0" },

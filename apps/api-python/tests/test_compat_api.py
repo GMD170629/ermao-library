@@ -4953,7 +4953,7 @@ def test_imported_comic_serves_archive_page(client, db_session, test_settings, t
     assert cached.status_code == 304
 
 
-def test_comic_page_data_saver_returns_webp_for_archive_page(client, db_session, test_settings):
+def test_comic_page_data_saver_returns_extreme_avif_for_archive_page(client, db_session, test_settings):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
     _login(client, db_session)
@@ -4998,23 +4998,24 @@ def test_comic_page_data_saver_returns_webp_for_archive_page(client, db_session,
 
     data_saver = client.get(f"/api/volumes/{volume_id}/pages/1?imageVariant=data-saver")
     assert data_saver.status_code == 200
-    assert data_saver.content.startswith(b"RIFF")
-    assert data_saver.headers["content-type"].startswith("image/webp")
+    assert data_saver.content[4:12] == b"ftypavif"
+    assert data_saver.headers["content-type"].startswith("image/avif")
     assert data_saver.headers["x-comic-image-variant"] == "data-saver"
-    assert data_saver.headers["x-comic-image-quality"] == "webp;q=82"
-    assert len(data_saver.content) < len(source_jpeg)
+    assert data_saver.headers["x-comic-image-quality"] == "avif;mode=extreme;target=20%"
+    assert float(data_saver.headers["x-comic-image-compression-ratio"]) <= 0.20
+    assert len(data_saver.content) <= len(source_jpeg) * 0.20
     assert data_saver.headers["etag"] != original.headers["etag"]
 
     ranged = client.get(f"/api/volumes/{volume_id}/pages/1?imageVariant=data-saver", headers={"Range": "bytes=0-3"})
     assert ranged.status_code == 206
-    assert ranged.content == b"RIFF"
+    assert ranged.content == data_saver.content[:4]
     assert ranged.headers["content-range"] == f"bytes 0-3/{len(data_saver.content)}"
 
     cached = client.get(f"/api/volumes/{volume_id}/pages/1?imageVariant=data-saver", headers={"If-None-Match": data_saver.headers["etag"]})
     assert cached.status_code == 304
 
 
-def test_comic_page_data_saver_returns_webp_for_stored_page_file(client, db_session, test_settings):
+def test_comic_page_data_saver_returns_extreme_avif_for_stored_page_file(client, db_session, test_settings):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
     _login(client, db_session)
@@ -5044,11 +5045,20 @@ def test_comic_page_data_saver_returns_webp_for_stored_page_file(client, db_sess
 
     data_saver = client.get("/api/volumes/direct-volume/pages/1?imageVariant=data-saver")
     assert data_saver.status_code == 200
-    assert data_saver.content.startswith(b"RIFF")
-    assert data_saver.headers["content-type"].startswith("image/webp")
+    assert data_saver.content[4:12] == b"ftypavif"
+    assert data_saver.headers["content-type"].startswith("image/avif")
     assert data_saver.headers["x-comic-image-variant"] == "data-saver"
-    assert data_saver.headers["x-comic-image-quality"] == "webp;q=82"
-    assert len(data_saver.content) < len(source_jpeg)
+    assert data_saver.headers["x-comic-image-quality"] == "avif;mode=extreme;target=20%"
+    assert float(data_saver.headers["x-comic-image-compression-ratio"]) <= 0.20
+    assert len(data_saver.content) <= len(source_jpeg) * 0.20
+
+
+def test_comic_page_data_saver_never_returns_a_larger_transcode():
+    output = BytesIO()
+    Image.new("L", (1, 1), "white").save(output, format="PNG", optimize=True)
+    source = output.getvalue()
+
+    assert compat._comic_page_avif_bytes(source) is None
 
 
 def test_volume_pages_rebuilds_missing_comic_page_index(client, db_session, test_settings, tmp_path):

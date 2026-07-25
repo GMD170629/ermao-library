@@ -89,6 +89,35 @@ function ShelfBook<T extends BookshelfBook>({
   );
 }
 
+function ShelfBookMetadata<T extends BookshelfBook>({
+  book,
+  divider = false
+}: {
+  book: T;
+  divider?: boolean;
+}) {
+  return (
+    <div
+      data-bookshelf-book-metadata
+      data-i18n-skip
+      className={`min-w-0 px-2.5 py-2.5 text-left sm:px-3 ${divider ? 'border-r border-[#DED7CF]/70' : ''}`}
+    >
+      <div
+        className="truncate text-[12px] font-medium leading-5 text-[#302C29] sm:text-[13px]"
+        title={book.title}
+      >
+        {book.title}
+      </div>
+      <div
+        className="mt-0.5 truncate text-[11px] leading-4 text-[#817A74] sm:text-[12px]"
+        title={book.author}
+      >
+        {book.author}
+      </div>
+    </div>
+  );
+}
+
 function ShelfLedge() {
   return (
     <div
@@ -159,6 +188,16 @@ export function BookshelfRail<T extends BookshelfBook>({
             ))}
           </div>
           <ShelfLedge />
+          <div
+            data-testid={testId ? `${testId}-metadata` : undefined}
+            className="-mt-4 flex gap-5 border-b border-[#D8D0C7]/80 bg-[#F7F2EA] px-5 shadow-[0_5px_10px_-10px_rgba(45,36,30,0.5)] sm:gap-6 sm:px-7"
+          >
+            {books.map((book, index) => (
+              <div key={book.id} className="w-[104px] shrink-0 sm:w-[118px] xl:w-[128px]">
+                <ShelfBookMetadata book={book} divider={index < books.length - 1} />
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -202,7 +241,7 @@ export function BookshelfCollection<T extends BookshelfBook>({
   const rows = useMemo(() => shelfRows(books, columns), [books, columns]);
 
   return (
-    <div ref={containerRef} data-testid={testId} className="space-y-11">
+    <div ref={containerRef} data-testid={testId} className="space-y-10">
       {rows.map((row, rowIndex) => (
         <div key={`${row[0]?.id ?? 'empty'}-${rowIndex}`} data-testid="bookshelf-row" className="min-w-0 pt-2">
           <div
@@ -219,6 +258,15 @@ export function BookshelfCollection<T extends BookshelfBook>({
             ))}
           </div>
           <ShelfLedge />
+          <div
+            data-testid="bookshelf-metadata-band"
+            className="-mt-4 grid border-b border-[#D8D0C7]/80 bg-[#F7F2EA] px-5 shadow-[0_5px_10px_-10px_rgba(45,36,30,0.5)] sm:px-7"
+            style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+          >
+            {row.map((book, index) => (
+              <ShelfBookMetadata key={book.id} book={book} divider={index < row.length - 1} />
+            ))}
+          </div>
         </div>
       ))}
     </div>

@@ -7,6 +7,7 @@ import selectors
 import shutil
 import subprocess
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,13 @@ MAX_AUDIO_CHAPTERS = 10_000
 MAX_EMBEDDED_COVER_BYTES = 20 * 1024 * 1024
 MAX_FFPROBE_STDOUT_BYTES = 16 * 1024 * 1024
 MAX_FFPROBE_STDERR_BYTES = 256 * 1024
+MISDECLARED_TEXT_ENCODING_CANDIDATES = ("utf-8", "gb18030", "big5", "shift_jis", "cp1252")
+MUTAGEN_TEXT_ENCODINGS = {
+    0: "latin-1",
+    1: "utf-16",
+    2: "utf-16-be",
+    3: "utf-8",
+}
 DISC_DIRECTORY_PATTERN = re.compile(
     r"^(?:cd|disc|disk|碟|盘)\s*[-_. ]*\d+(?:\s*(?:of|/|[-–—])\s*\d+)?$",
     re.I,
@@ -340,7 +348,7 @@ def _read_with_ffprobe(path: Path, *, timeout_seconds: int) -> dict[str, Any]:
         end_ms = _seconds_to_ms(chapter.get("end_time"))
         if end_ms > start_ms:
             chapters.append({"title": chapter_tags.get("title") or f"第 {index + 1} 章", "start_ms": start_ms, "end_ms": end_ms})
-    return {
+    result = {
         "title": _first_tag(tags, "title"),
         "album": _first_tag(tags, "album"),
         "author": _first_tag(tags, "album_artist", "albumartist", "artist", "author"),
@@ -355,6 +363,8 @@ def _read_with_ffprobe(path: Path, *, timeout_seconds: int) -> dict[str, Any]:
         "chapters": chapters,
         "raw_tags": {"ffprobe": tags},
     }
+    _repair_audio_metadata_text(result, source="ffprobe")
+    return result
 
 
 def _run_process_with_output_limit(
@@ -433,14 +443,18 @@ def _read_with_mutagen(path: Path) -> dict[str, Any]:
         return {}
     tags = getattr(audio, "tags", None)
     raw_tags = _serializable_tags(tags)
-    values = _normalized_mutagen_tags(tags)
+    encoding_repairs: list[dict[str, str]] = []
+    values = _normalized_mutagen_tags(tags, repairs=encoding_repairs)
     info = getattr(audio, "info", None)
     chapters: list[dict[str, Any]] = []
     for index, chapter in enumerate(getattr(audio, "chapters", None) or []):
         start_ms = _seconds_to_ms(getattr(chapter, "start", None))
         end_ms = _seconds_to_ms(getattr(chapter, "end", None))
         if end_ms > start_ms:
-            chapters.append({"title": getattr(chapter, "title", None) or f"第 {index + 1} 章", "start_ms": start_ms, "end_ms": end_ms})
+            chapter_title, repair = _repair_misdecoded_text(str(getattr(chapter, "title", None) or f"第 {index + 1} 章"))
+            if repair:
+                encoding_repairs.append({"tag": f"chapter:{index + 1}", **repair})
+            chapters.append({"title": chapter_title, "start_ms": start_ms, "end_ms": end_ms})
     id3_chapters = []
     if tags is not None and hasattr(tags, "getall"):
         try:
@@ -452,9 +466,16 @@ def _read_with_mutagen(path: Path) -> dict[str, Any]:
         for index, chapter in enumerate(sorted(id3_chapters, key=lambda item: int(getattr(item, "start_time", 0)))):
             sub_frames = getattr(chapter, "sub_frames", None) or {}
             title_frame = next(iter(sub_frames.getall("TIT2")), None) if hasattr(sub_frames, "getall") else None
+            raw_title = str(getattr(title_frame, "text", [f"第 {index + 1} 章"])[0])
+            chapter_title, repair = _repair_misdecoded_text(
+                raw_title,
+                declared_encoding=_mutagen_declared_text_encoding(title_frame),
+            )
+            if repair:
+                encoding_repairs.append({"tag": f"CHAP:{index + 1}:TIT2", **repair})
             chapters.append(
                 {
-                    "title": str(getattr(title_frame, "text", [f"第 {index + 1} 章"])[0]),
+                    "title": chapter_title,
                     "start_ms": int(getattr(chapter, "start_time", 0)),
                     "end_ms": int(getattr(chapter, "end_time", 0)),
                 }
@@ -464,6 +485,8 @@ def _read_with_mutagen(path: Path) -> dict[str, Any]:
         raw_tags["coverWarning"] = f"embedded cover ignored: {len(cover_data)} bytes exceeds {MAX_EMBEDDED_COVER_BYTES}"
         cover_data = None
         cover_extension = None
+    if encoding_repairs:
+        raw_tags["encodingRepairs"] = encoding_repairs
     return {
         "title": _first_tag(values, "title", "©nam", "tit2"),
         "album": _first_tag(values, "album", "©alb", "talb"),
@@ -500,7 +523,11 @@ def _merge_metadata(primary: dict[str, Any], fallback: dict[str, Any]) -> dict[s
     return output
 
 
-def _normalized_mutagen_tags(tags: Any) -> dict[str, Any]:
+def _normalized_mutagen_tags(
+    tags: Any,
+    *,
+    repairs: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
     if tags is None:
         return {}
     output: dict[str, Any] = {}
@@ -509,6 +536,7 @@ def _normalized_mutagen_tags(tags: Any) -> dict[str, Any]:
     except AttributeError:
         return output
     for key, value in items:
+        frame = value
         normalized_key = str(key).lower()
         if normalized_key.startswith("txxx:"):
             normalized_key = normalized_key.split(":", 1)[1].strip().lower()
@@ -518,8 +546,179 @@ def _normalized_mutagen_tags(tags: Any) -> dict[str, Any]:
             value = value[0]
         if isinstance(value, tuple) and value:
             value = value[0]
+        if isinstance(value, str):
+            value, repair = _repair_misdecoded_text(
+                value,
+                declared_encoding=_mutagen_declared_text_encoding(frame),
+            )
+            if repair and repairs is not None:
+                repairs.append({"tag": str(key), **repair})
         output[normalized_key] = value
     return output
+
+
+def _mutagen_declared_text_encoding(frame: Any) -> str | None:
+    value = getattr(frame, "encoding", None)
+    try:
+        return MUTAGEN_TEXT_ENCODINGS.get(int(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _repair_audio_metadata_text(metadata: dict[str, Any], *, source: str) -> None:
+    repairs: list[dict[str, str]] = []
+    for field_name in ("title", "album", "author", "narrator"):
+        value = metadata.get(field_name)
+        if not isinstance(value, str):
+            continue
+        repaired, repair = _repair_misdecoded_text(value)
+        metadata[field_name] = repaired
+        if repair:
+            repairs.append({"tag": field_name, **repair})
+    for index, chapter in enumerate(metadata.get("chapters") or []):
+        if not isinstance(chapter, dict) or not isinstance(chapter.get("title"), str):
+            continue
+        repaired, repair = _repair_misdecoded_text(chapter["title"])
+        chapter["title"] = repaired
+        if repair:
+            repairs.append({"tag": f"chapter:{index + 1}", **repair})
+    if not repairs:
+        return
+    raw_tags = metadata.setdefault("raw_tags", {})
+    if isinstance(raw_tags, dict):
+        raw_tags.setdefault("encodingRepairs", []).extend({"source": source, **repair} for repair in repairs)
+
+
+def _repair_misdecoded_text(
+    value: str,
+    *,
+    declared_encoding: str | None = None,
+) -> tuple[str, dict[str, str] | None]:
+    """Conservatively repair legacy tag bytes decoded as Latin-1.
+
+    Old tag writers commonly stored bytes in a local encoding while marking
+    the frame as ISO-8859-1. Mutagen correctly follows that declaration, so
+    the original bytes remain reversibly represented by U+0000..U+00FF. We
+    only replace the text when the current value has strong mojibake signals,
+    a candidate round-trips byte-for-byte, and its quality is materially
+    better. Plain ASCII and normal Western text are intentionally untouched.
+    """
+
+    if not value or value.isascii():
+        return value, None
+    suspicion = _mojibake_suspicion(value)
+    if suspicion < 4:
+        return value, None
+    try:
+        raw = value.encode("latin-1", errors="strict")
+    except UnicodeEncodeError:
+        return value, None
+
+    original_score = _decoded_text_quality(value)
+    candidates: list[tuple[float, int, str, str]] = []
+    for priority, encoding in enumerate(MISDECLARED_TEXT_ENCODING_CANDIDATES):
+        try:
+            decoded = raw.decode(encoding, errors="strict")
+            if decoded.encode(encoding, errors="strict") != raw:
+                continue
+        except (UnicodeDecodeError, UnicodeEncodeError):
+            continue
+        if decoded == value or not decoded.strip() or "\ufffd" in decoded:
+            continue
+        score = _candidate_decoding_quality(decoded, encoding)
+        candidates.append((score, -priority, encoding, decoded))
+    if not candidates:
+        return value, None
+
+    candidates.sort(reverse=True)
+    best_score, _priority, encoding, decoded = candidates[0]
+    if best_score < original_score + 4:
+        return value, None
+    # Bytes in the C1 range are common Shift-JIS lead bytes. If a short
+    # all-ideograph value is equally plausible as GB18030 and Shift-JIS, there
+    # is not enough evidence to choose safely (for example a Japanese name
+    # with no kana), so retain the declared value for manual correction.
+    shift_jis_candidate = next((candidate for candidate in candidates if candidate[2] == "shift_jis"), None)
+    if (
+        encoding == "gb18030"
+        and shift_jis_candidate
+        and best_score - shift_jis_candidate[0] < 1
+        and any(0x80 <= byte <= 0x9F for byte in raw)
+        and _contains_only_cjk_letters(decoded)
+        and _contains_only_cjk_letters(shift_jis_candidate[3])
+    ):
+        return value, None
+    return decoded, {
+        "declaredEncoding": declared_encoding or "unknown",
+        "detectedEncoding": encoding,
+        "original": value,
+        "repaired": decoded,
+    }
+
+
+def _mojibake_suspicion(value: str) -> int:
+    score = 0
+    score += value.count("\ufffd") * 10
+    score += sum(8 for character in value if unicodedata.category(character) == "Cc" and character not in "\t\r\n")
+    score += len(re.findall(r"(?:Ã.|Â.|â..|ð.|Ð.|Ñ.|¡[¶·])", value)) * 4
+    score += len(re.findall(r"[\u00c0-\u00ff]{4,}", value)) * 5
+    latin1_non_ascii = sum(1 for character in value if "\u00a0" <= character <= "\u00ff")
+    if latin1_non_ascii >= 4 and latin1_non_ascii / max(1, len(value)) >= 0.35:
+        score += 5
+    return score
+
+
+def _decoded_text_quality(value: str) -> float:
+    score = 0.0
+    for character in value:
+        category = unicodedata.category(character)
+        if character == "\ufffd":
+            score -= 12
+        elif category == "Cc" and character not in "\t\r\n":
+            score -= 10
+        elif category[0] in {"L", "N"}:
+            score += 1
+        elif character.isspace() or category[0] == "P":
+            score += 0.25
+        elif category[0] == "S":
+            score -= 0.25
+    score -= _mojibake_suspicion(value) * 1.5
+    if any(_is_cjk_character(character) for character in value):
+        score += 3
+    if re.search(r"[\u3040-\u30ff]", value):
+        score += 3
+    if re.search(r"《[^》]+》|「[^」]+」|『[^』]+』", value):
+        score += 2
+    return score
+
+
+def _candidate_decoding_quality(value: str, encoding: str) -> float:
+    score = _decoded_text_quality(value)
+    # A strict, byte-for-byte UTF-8 round trip is much stronger evidence than
+    # a coincidentally valid two-byte legacy decoding.
+    if encoding == "utf-8":
+        score += 6
+    halfwidth_katakana = len(re.findall(r"[\uff61-\uff9f]", value))
+    # A dense run of halfwidth katakana is a frequent accidental Shift-JIS
+    # interpretation of valid Western or GBK bytes. Legitimate Japanese tags
+    # overwhelmingly use fullwidth kana, so require much stronger evidence.
+    score -= halfwidth_katakana * 4
+    has_cjk = any(_is_cjk_character(character) for character in value)
+    has_fullwidth_kana = bool(re.search(r"[\u3040-\u30ff]", value))
+    if encoding in {"gb18030", "big5"} and has_cjk and has_fullwidth_kana:
+        score -= 5
+    if encoding == "shift_jis" and has_fullwidth_kana:
+        score += 2
+    return score
+
+
+def _contains_only_cjk_letters(value: str) -> bool:
+    significant = [character for character in value if not character.isspace()]
+    return bool(significant) and all(_is_cjk_character(character) for character in significant)
+
+
+def _is_cjk_character(character: str) -> bool:
+    return 0x3400 <= ord(character) <= 0x9FFF
 
 
 def _serializable_tags(tags: Any) -> dict[str, Any]:

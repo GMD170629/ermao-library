@@ -272,6 +272,10 @@ test('wide shelf details use responsive bookshelf rows and load more on scroll',
   await expect(grid.getByTestId('bookshelf-ledge')).toHaveCount(3);
   await expect(grid.getByTestId('bookshelf-ledge').first()).toHaveCSS('height', '30px');
   await expect(grid.getByTestId('bookshelf-ledge-asset').first()).toHaveCSS('height', '14px');
+  await expect(grid.getByTestId('bookshelf-metadata-band')).toHaveCount(3);
+  await expect(grid.locator('[data-bookshelf-book-metadata]')).toHaveCount(25);
+  await expect(grid.locator('[data-bookshelf-book-metadata]').first()).toContainText('书架读物 1');
+  await expect(grid.locator('[data-bookshelf-book-metadata]').first()).toContainText('测试作者');
   const ledgeFilter = await grid.getByTestId('bookshelf-ledge-asset').first().evaluate((element) => getComputedStyle(element).filter);
   expect(ledgeFilter.match(/drop-shadow/g)).toHaveLength(1);
   const shelfContact = await grid.evaluate((element) => {

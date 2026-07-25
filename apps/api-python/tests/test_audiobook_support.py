@@ -203,6 +203,114 @@ def test_m4a_rfc6381_aac_codec_is_accepted_without_ffprobe(tmp_path, monkeypatch
     assert parsed.title == "RFC 6381 AAC"
 
 
+def test_audio_parser_repairs_gbk_bytes_misdeclared_as_latin1(tmp_path, monkeypatch) -> None:
+    source = tmp_path / "鲁迅01_祥林嫂之死－孔庆东.mp3"
+    source.write_bytes(b"fake-audio")
+    mutagen = pytest.importorskip("mutagen")
+
+    class TextFrame:
+        encoding = 0
+
+        def __init__(self, text_value: str):
+            self.text = [text_value]
+
+    class Tags(dict):
+        def __init__(self, *args, chapters=None, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.chapters = chapters or []
+
+        def getall(self, key):
+            return self.chapters if key == "CHAP" else []
+
+    def mislabeled(value: str) -> str:
+        return value.encode("gb18030").decode("latin-1")
+
+    chapter_title = TextFrame(mislabeled("第一章"))
+    chapter = SimpleNamespace(
+        start_time=0,
+        end_time=60_000,
+        sub_frames=SimpleNamespace(getall=lambda key: [chapter_title] if key == "TIT2" else []),
+    )
+    tags = Tags(
+        {
+            "TIT2": TextFrame(mislabeled("01.祥林嫂之死")),
+            "TALB": TextFrame(mislabeled("百家讲坛_《鲁迅》")),
+            "TPE1": TextFrame(mislabeled("孔庆东")),
+        },
+        chapters=[chapter],
+    )
+    monkeypatch.setattr(
+        mutagen,
+        "File",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            tags=tags,
+            info=SimpleNamespace(length=60, bitrate=128_000, sample_rate=44_100, channels=2),
+        ),
+    )
+    monkeypatch.setattr(audio_metadata_module, "_read_with_ffprobe", lambda _path, timeout_seconds: {})
+
+    parsed = parse_audio_metadata(source)
+
+    assert parsed.title == "01.祥林嫂之死"
+    assert parsed.album == "百家讲坛_《鲁迅》"
+    assert parsed.author == "孔庆东"
+    assert [chapter.title for chapter in parsed.chapters] == ["第一章"]
+    repairs = parsed.raw_tags["mutagen"]["encodingRepairs"]
+    assert [(item["tag"], item["declaredEncoding"], item["detectedEncoding"]) for item in repairs] == [
+        ("TIT2", "latin-1", "gb18030"),
+        ("TALB", "latin-1", "gb18030"),
+        ("TPE1", "latin-1", "gb18030"),
+        ("CHAP:1:TIT2", "latin-1", "gb18030"),
+    ]
+    assert repairs[0]["original"] == mislabeled("01.祥林嫂之死")
+    assert repairs[0]["repaired"] == "01.祥林嫂之死"
+
+
+@pytest.mark.parametrize(
+    ("value", "expected", "detected_encoding"),
+    [
+        ("Beyoncé".encode("utf-8").decode("latin-1"), "Beyoncé", "utf-8"),
+        ("繁體中文".encode("big5").decode("latin-1"), "繁體中文", "big5"),
+    ],
+)
+def test_misdeclared_tag_repair_supports_multiple_source_encodings(
+    value: str,
+    expected: str,
+    detected_encoding: str,
+) -> None:
+    repaired, diagnostic = audio_metadata_module._repair_misdecoded_text(
+        value,
+        declared_encoding="latin-1",
+    )
+
+    assert repaired == expected
+    assert diagnostic is not None
+    assert diagnostic["detectedEncoding"] == detected_encoding
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "The Old Man and the Sea",
+        "Beyoncé",
+        "François Truffaut",
+        "Márquez — Cien años de soledad",
+        "ÀÉÎÖÜ",
+    ],
+)
+def test_misdeclared_tag_repair_preserves_normal_english_and_western_text(value: str) -> None:
+    assert audio_metadata_module._repair_misdecoded_text(value) == (value, None)
+
+
+def test_misdeclared_tag_repair_keeps_ambiguous_legacy_text_unchanged() -> None:
+    ambiguous = "宮崎駿".encode("shift_jis").decode("latin-1")
+
+    assert audio_metadata_module._repair_misdecoded_text(
+        ambiguous,
+        declared_encoding="latin-1",
+    ) == (ambiguous, None)
+
+
 def test_audio_parser_falls_back_when_mutagen_fails_and_caps_probe_output(tmp_path, monkeypatch) -> None:
     source = tmp_path / "fallback.mp3"
     source.write_bytes(b"fake-audio")
