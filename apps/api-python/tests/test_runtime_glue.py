@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from appv2.composition.adapters import ApplicationQueueOverview
 from appv2.entrypoints import migrate as migrate_entrypoint
 from appv2.entrypoints import restore as restore_entrypoint
 from appv2.entrypoints import worker as worker_entrypoint
@@ -22,6 +23,47 @@ def scalar_result(value: object) -> MagicMock:
     result = MagicMock()
     result.scalar_one.return_value = value
     return result
+
+
+def queue_uow(repository_name: str, counts: dict[str, int]) -> MagicMock:
+    unit = MagicMock()
+    unit.__enter__.return_value = unit
+    repository = MagicMock()
+    repository.queue_counts.return_value = counts
+    setattr(unit, repository_name, repository)
+    return unit
+
+
+def test_application_queue_overview_is_the_only_cross_module_aggregator() -> None:
+    ingestion = queue_uow("ingestion", {"queued": 2})
+    metadata = queue_uow("metadata", {"failed": 1})
+    discovery = queue_uow("discovery", {})
+    delivery = queue_uow("delivery", {"running": 1})
+    operations = MagicMock()
+    operations.__enter__.return_value = operations
+    operations.operations.list_backups.return_value = [
+        SimpleNamespace(status="ready"),
+        SimpleNamespace(status="ready"),
+        SimpleNamespace(status="queued"),
+    ]
+    overview = ApplicationQueueOverview(
+        ingestion_uow=lambda: ingestion,
+        metadata_uow=lambda: metadata,
+        discovery_uow=lambda: discovery,
+        delivery_uow=lambda: delivery,
+        operations_uow=lambda: operations,
+    )
+
+    snapshots = overview.snapshots()
+
+    assert [value.name for value in snapshots] == [
+        "ingestion",
+        "metadata",
+        "discovery",
+        "delivery",
+        "backups",
+    ]
+    assert snapshots[-1].counts == {"ready": 2, "queued": 1}
 
 
 def test_advisory_lock_acquired_released_and_rejected() -> None:

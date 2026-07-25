@@ -227,6 +227,14 @@ class SqlDiscoveryRepository(DiscoveryRepository):
         ).all()
         return [_job(record) for record in records], total
 
+    def queue_counts(self) -> dict[str, int]:
+        rows = self._session.execute(
+            select(DownloadJobRecord.status, func.count())
+            .group_by(DownloadJobRecord.status)
+            .order_by(DownloadJobRecord.status)
+        ).all()
+        return {str(status): int(count) for status, count in rows}
+
     def claim_download(
         self, *, worker_id: str, now: datetime, lease_until: datetime
     ) -> tuple[DownloadJob, SearchResultView] | None:

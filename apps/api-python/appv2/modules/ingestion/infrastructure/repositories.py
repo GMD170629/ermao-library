@@ -122,6 +122,14 @@ class SqlIngestionRepository(IngestionRepository):
         ).all()
         return [_job(record) for record in records], total
 
+    def queue_counts(self) -> dict[str, int]:
+        rows = self._session.execute(
+            select(IngestionJobRecord.status, func.count())
+            .group_by(IngestionJobRecord.status)
+            .order_by(IngestionJobRecord.status)
+        ).all()
+        return {str(status): int(count) for status, count in rows}
+
     def get_job(self, job_id: uuid.UUID) -> IngestionJob | None:
         record = self._session.get(IngestionJobRecord, job_id)
         return _job(record) if record is not None else None

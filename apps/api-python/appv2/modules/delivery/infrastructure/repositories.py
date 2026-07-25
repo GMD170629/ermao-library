@@ -214,6 +214,14 @@ class SqlDeliveryRepository(DeliveryRepository):
         ).all()
         return [_job(record) for record in records], total
 
+    def queue_counts(self) -> dict[str, int]:
+        rows = self._session.execute(
+            select(DeliveryJobRecord.status, func.count())
+            .group_by(DeliveryJobRecord.status)
+            .order_by(DeliveryJobRecord.status)
+        ).all()
+        return {str(status): int(count) for status, count in rows}
+
     def claim_next(
         self, *, worker_id: str, now: datetime, lease_until: datetime
     ) -> DeliveryJob | None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 
 from appv2.modules.catalog.application import CatalogReadAdapter, CatalogService
 from appv2.modules.catalog.contracts import (
@@ -13,10 +14,20 @@ from appv2.modules.catalog.contracts import (
     CatalogVolume,
     CatalogWork,
 )
-from appv2.modules.delivery.contracts import DeliverableFile, DeliverableFilePort
-from appv2.modules.discovery.contracts import ImportEnqueuePort
+from appv2.modules.delivery.contracts import (
+    DeliverableFile,
+    DeliverableFilePort,
+    DeliveryUnitOfWork,
+)
+from appv2.modules.discovery.contracts import DiscoveryUnitOfWork, ImportEnqueuePort
 from appv2.modules.ingestion.application import IngestionService
-from appv2.modules.ingestion.contracts import ImportResult
+from appv2.modules.ingestion.contracts import ImportResult, IngestionUnitOfWork
+from appv2.modules.metadata.contracts import MetadataUnitOfWork
+from appv2.modules.operations.contracts import (
+    OperationsUnitOfWork,
+    QueueOverviewPort,
+    QueueSnapshot,
+)
 
 
 class CatalogPorts(
@@ -88,4 +99,42 @@ class IngestionEnqueueAdapter(ImportEnqueuePort):
             source_path=path,
             requested_by=requested_by,
             idempotency_key=idempotency_key,
+        )
+
+
+class ApplicationQueueOverview(QueueOverviewPort):
+    def __init__(
+        self,
+        *,
+        ingestion_uow: Callable[[], IngestionUnitOfWork],
+        metadata_uow: Callable[[], MetadataUnitOfWork],
+        discovery_uow: Callable[[], DiscoveryUnitOfWork],
+        delivery_uow: Callable[[], DeliveryUnitOfWork],
+        operations_uow: Callable[[], OperationsUnitOfWork],
+    ) -> None:
+        self._ingestion_uow = ingestion_uow
+        self._metadata_uow = metadata_uow
+        self._discovery_uow = discovery_uow
+        self._delivery_uow = delivery_uow
+        self._operations_uow = operations_uow
+
+    def snapshots(self) -> tuple[QueueSnapshot, ...]:
+        with self._ingestion_uow() as uow:
+            ingestion = QueueSnapshot("ingestion", uow.ingestion.queue_counts())
+        with self._metadata_uow() as uow:
+            metadata = QueueSnapshot("metadata", uow.metadata.queue_counts())
+        with self._discovery_uow() as uow:
+            discovery = QueueSnapshot("discovery", uow.discovery.queue_counts())
+        with self._delivery_uow() as uow:
+            delivery = QueueSnapshot("delivery", uow.delivery.queue_counts())
+        with self._operations_uow() as uow:
+            backup_counts: dict[str, int] = {}
+            for backup in uow.operations.list_backups():
+                backup_counts[backup.status] = backup_counts.get(backup.status, 0) + 1
+        return (
+            ingestion,
+            metadata,
+            discovery,
+            delivery,
+            QueueSnapshot("backups", backup_counts),
         )

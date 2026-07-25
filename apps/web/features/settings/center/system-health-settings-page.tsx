@@ -1,6 +1,10 @@
 'use client';
 
-import type { HealthResponse } from '@/generated/api-v2';
+import type {
+  HealthResponse,
+  Page_QueueResponse_,
+  QueueResponse
+} from '@/generated/api-v2';
 import { apiV2Request } from '@/lib/api-v2';
 
 import { Activity, AlertTriangle, CheckCircle2, Circle, LoaderCircle, RefreshCw, SkipForward, XCircle } from 'lucide-react';
@@ -54,6 +58,7 @@ const LABELS: Record<string, string> = {
   'health.item.downloadQueue': '下载队列',
   'health.item.kindleQueue': 'Kindle 发送队列',
   'health.item.metadataQueue': '元数据识别队列',
+  'health.item.backupQueue': '备份队列',
   'health.item.smtp': 'Kindle / SMTP 配置',
   'health.item.epubConversion': 'EPUB 转换能力',
   'health.item.ebookProviders': '电子书数据源',
@@ -122,6 +127,7 @@ export function SystemHealthSettingsPage() {
   const toast = useToast();
   const [run, setRun] = useState<HealthRun | null>(null);
   const [starting, setStarting] = useState(false);
+  const [updatingQueue, setUpdatingQueue] = useState('');
   const [now, setNow] = useState(Date.now());
   const allowNavigationRef = useRef(false);
 
@@ -169,8 +175,11 @@ export function SystemHealthSettingsPage() {
     setStarting(true);
     try {
       const startedAt = Date.now();
-      const payload = await apiV2Request<HealthResponse>('/api/v2/operations/health');
-      const items: HealthItem[] = payload.contributors.map((contributor) => ({
+      const [payload, queues] = await Promise.all([
+        apiV2Request<HealthResponse>('/api/v2/operations/health'),
+        apiV2Request<Page_QueueResponse_>('/api/v2/operations/queues')
+      ]);
+      const healthItems: HealthItem[] = payload.contributors.map((contributor) => ({
         id: contributor.name,
         group: 'storage',
         labelCode: contributor.name === 'database'
@@ -185,20 +194,56 @@ export function SystemHealthSettingsPage() {
         finishedAt: Date.parse(contributor.checkedAt),
         durationMs: Math.max(0, Date.parse(contributor.checkedAt) - startedAt)
       }));
+      const queueLabels: Record<string, string> = {
+        ingestion: 'health.item.importQueue',
+        metadata: 'health.item.metadataQueue',
+        discovery: 'health.item.downloadQueue',
+        delivery: 'health.item.kindleQueue',
+        backups: 'health.item.backupQueue'
+      };
+      const queueItems: HealthItem[] = queues.items.map((queue) => ({
+        id: `queue-${queue.name}`,
+        group: 'queues',
+        labelCode: queueLabels[queue.name] ?? 'health.item.importQueue',
+        status: queue.status === 'failed'
+          ? 'error'
+          : queue.enabled
+            ? 'ok'
+            : 'warning',
+        messageCode: queue.status === 'failed'
+          ? 'health.queue.recentError'
+          : queue.enabled
+            ? 'health.queue.ok'
+            : 'health.queue.disabled',
+        details: {
+          queueName: queue.name,
+          enabled: queue.enabled,
+          status: queue.status,
+          counts: queue.counts
+        },
+        startedAt,
+        finishedAt: Date.now(),
+        durationMs: Math.max(0, Date.now() - startedAt)
+      }));
+      const items = [...healthItems, ...queueItems];
       const errors = items.filter((item) => item.status === 'error').length;
+      const warnings = items.filter((item) => item.status === 'warning').length;
       applySnapshot({
         runId: `health-${startedAt}`,
-        status: errors ? 'error' : 'completed',
+        status: errors ? 'error' : warnings ? 'warning' : 'completed',
         version: 1,
         startedAt,
         finishedAt: Date.now(),
-        groups: [{ id: 'storage', labelCode: 'health.group.storage' }],
+        groups: [
+          { id: 'storage', labelCode: 'health.group.storage' },
+          { id: 'queues', labelCode: 'health.group.queues' }
+        ],
         items,
         summary: {
           total: items.length,
           completed: items.length,
-          ok: items.length - errors,
-          warning: 0,
+          ok: items.length - errors - warnings,
+          warning: warnings,
           error: errors,
           skipped: 0
         }
@@ -207,6 +252,32 @@ export function SystemHealthSettingsPage() {
       toast.error('启动健康检查失败', reason instanceof Error ? reason.message : t('请稍后重试'));
     } finally {
       setStarting(false);
+    }
+  }
+
+  async function updateQueue(item: HealthItem) {
+    const queueName = item.details.queueName;
+    const enabled = item.details.enabled;
+    if (typeof queueName !== 'string' || typeof enabled !== 'boolean') return;
+    setUpdatingQueue(queueName);
+    try {
+      await apiV2Request<QueueResponse>(
+        `/api/v2/operations/queues/${encodeURIComponent(queueName)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: !enabled })
+        }
+      );
+      toast.success(enabled ? '队列已暂停' : '队列已恢复');
+      await execute();
+    } catch (reason) {
+      toast.error(
+        enabled ? '暂停队列失败' : '恢复队列失败',
+        reason instanceof Error ? reason.message : t('请稍后重试')
+      );
+    } finally {
+      setUpdatingQueue('');
     }
   }
 
@@ -283,6 +354,17 @@ export function SystemHealthSettingsPage() {
                               <summary className="cursor-pointer font-medium"><I18nText>查看运行明细</I18nText></summary>
                               <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-white/80 p-3">{JSON.stringify(item.details, null, 2)}</pre>
                             </details>
+                          ) : null}
+                          {item.group === 'queues' ? (
+                            <Button
+                              variant="secondary"
+                              className="mt-3"
+                              loading={updatingQueue === item.details.queueName}
+                              loadingText={t('正在更新')}
+                              onClick={() => void updateQueue(item)}
+                            >
+                              {item.details.enabled === true ? t('暂停队列') : t('恢复队列')}
+                            </Button>
                           ) : null}
                         </div>
                       </div>

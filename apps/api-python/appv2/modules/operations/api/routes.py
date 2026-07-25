@@ -13,6 +13,7 @@ from appv2.modules.operations.contracts import (
     EventView,
     HealthStatus,
     LogStorageView,
+    QueueView,
     SettingView,
 )
 from appv2.platform.http import AppProblem, CamelModel, Page
@@ -33,6 +34,21 @@ class HealthResponse(CamelModel):
     status: str
     version: str
     contributors: list[HealthItem]
+
+
+class QueueResponse(CamelModel):
+    name: str
+    enabled: bool
+    status: str
+    counts: dict[str, int]
+
+    @classmethod
+    def from_view(cls, value: QueueView) -> "QueueResponse":
+        return cls.model_validate(value)
+
+
+class QueueUpdateRequest(CamelModel):
+    enabled: bool
 
 
 class SettingsResponse(CamelModel):
@@ -149,6 +165,34 @@ def create_router(
     def settings(actor: Actor) -> SettingsResponse:
         require(actor, AccessScope.OPERATIONS_READ)
         return SettingsResponse.from_views(service.list_settings())
+
+    @router.get("/queues", response_model=Page[QueueResponse])
+    def queues(actor: Actor) -> Page[QueueResponse]:
+        require(actor, AccessScope.OPERATIONS_READ)
+        values = service.list_queues()
+        return Page(
+            items=[QueueResponse.from_view(value) for value in values],
+            page=1,
+            page_size=max(len(values), 1),
+            total=len(values),
+        )
+
+    @router.patch("/queues/{queue_name}", response_model=QueueResponse)
+    def update_queue(
+        queue_name: str,
+        payload: QueueUpdateRequest,
+        actor: Actor,
+    ) -> QueueResponse:
+        require(actor, AccessScope.OPERATIONS_WRITE)
+        try:
+            value = service.set_queue_enabled(
+                queue_name=queue_name,
+                enabled=payload.enabled,
+                actor_id=actor.id,
+            )
+        except OperationsNotFound as error:
+            raise missing(error) from error
+        return QueueResponse.from_view(value)
 
     @router.put("/settings", response_model=SettingsResponse)
     def save_settings(payload: SettingsRequest, actor: Actor) -> SettingsResponse:

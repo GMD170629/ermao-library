@@ -20,6 +20,7 @@ from appv2.modules.metadata.application import (
 )
 from appv2.modules.metadata.contracts import MetadataCandidate, MetadataPatch
 from appv2.modules.operations.application import OperationsNotFound, OperationsService
+from appv2.modules.operations.contracts import QueueSnapshot
 from appv2.modules.reading.application import (
     LocationClaimConflict,
     ProgressConflict,
@@ -1169,9 +1170,15 @@ def test_operations_and_reading_services() -> None:
     healthy.check.return_value = SimpleNamespace(name="database", status="healthy")
     backup_executor = MagicMock()
     restore_control = MagicMock()
+    queues = MagicMock()
+    queues.snapshots.return_value = (
+        QueueSnapshot("ingestion", {"queued": 2}),
+        QueueSnapshot("metadata", {"failed": 1}),
+    )
     operations = OperationsService(
         uow_factory=lambda: operations_uow,
         health_contributors=(healthy,),
+        queues=queues,
         backup_executor=backup_executor,
         restore_control=restore_control,
         app_version="0.4.0",
@@ -1181,6 +1188,32 @@ def test_operations_and_reading_services() -> None:
     backup_id = uuid.uuid4()
     backup = SimpleNamespace(id=backup_id)
     assert operations.health()[0].status == "healthy"
+    operations_repo.list_settings.return_value = []
+    queue_views = operations.list_queues()
+    assert [(value.name, value.status) for value in queue_views] == [
+        ("ingestion", "pending"),
+        ("metadata", "failed"),
+    ]
+    paused = operations.set_queue_enabled(
+        queue_name="ingestion",
+        enabled=False,
+        actor_id=actor,
+    )
+    assert paused.status == "paused"
+    operations_repo.list_settings.return_value = [
+        SimpleNamespace(
+            key="operations.queues.ingestion",
+            value={"enabled": False},
+        )
+    ]
+    assert operations.disabled_queues() == frozenset({"ingestion"})
+    assert operations.list_queues()[0].enabled is False
+    with pytest.raises(OperationsNotFound):
+        operations.set_queue_enabled(
+            queue_name="unknown",
+            enabled=True,
+            actor_id=actor,
+        )
     operations_repo.list_settings.return_value = ["setting"]
     assert operations.list_settings() == ["setting"]
     operations_repo.save_settings.return_value = ["saved"]

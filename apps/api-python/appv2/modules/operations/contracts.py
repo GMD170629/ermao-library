@@ -59,6 +59,24 @@ class LogStorageView:
 
 
 @dataclass(frozen=True, slots=True)
+class QueueSnapshot:
+    name: str
+    counts: dict[str, int]
+
+
+@dataclass(frozen=True, slots=True)
+class QueueView:
+    name: str
+    enabled: bool
+    status: str
+    counts: dict[str, int]
+
+
+class QueueOverviewPort(Protocol):
+    def snapshots(self) -> tuple[QueueSnapshot, ...]: ...
+
+
+@dataclass(frozen=True, slots=True)
 class BackupView:
     id: uuid.UUID
     status: str

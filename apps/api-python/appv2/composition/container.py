@@ -3,7 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from appv2.composition.adapters import CatalogPorts, IngestionEnqueueAdapter
+from appv2.composition.adapters import (
+    ApplicationQueueOverview,
+    CatalogPorts,
+    IngestionEnqueueAdapter,
+)
 from appv2.modules.accounts.api import AccountDependency
 from appv2.modules.accounts.application import AccountService
 from appv2.modules.accounts.infrastructure.password_reset import LocalPasswordResetNotice
@@ -184,6 +188,13 @@ def build_container(settings: Settings | None = None) -> Container:
         health_contributors=(
             DatabaseHealth(database.engine),
             StorageHealth(storage.root),
+        ),
+        queues=ApplicationQueueOverview(
+            ingestion_uow=ingestion_uow,
+            metadata_uow=metadata_uow,
+            discovery_uow=discovery_uow,
+            delivery_uow=delivery_uow,
+            operations_uow=operations_uow,
         ),
         backup_executor=backup_executor,
         restore_control=FileRestoreControl(

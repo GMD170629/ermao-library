@@ -680,6 +680,13 @@ export type Page_ProviderResponse_ = {
   total: number;
 };
 
+export type Page_QueueResponse_ = {
+  items: Array<QueueResponse>;
+  page: number;
+  pageSize: number;
+  total: number;
+};
+
 export type Page_ResultResponse_ = {
   items: Array<ResultResponse>;
   page: number;
@@ -813,6 +820,19 @@ export type ProviderUpdate = {
   config?: {
     [key: string]: unknown;
   } | null;
+};
+
+export type QueueResponse = {
+  name: string;
+  enabled: boolean;
+  status: string;
+  counts: {
+    [key: string]: number;
+  };
+};
+
+export type QueueUpdateRequest = {
+  enabled: boolean;
 };
 
 export type ReaderFileResponse = {
@@ -1377,6 +1397,12 @@ export interface ApiV2Paths {
   "/api/v2/operations/settings": {
     get: { request: never; query: never; response: SettingsResponse };
     put: { request: SettingsRequest; query: never; response: SettingsResponse };
+  };
+  "/api/v2/operations/queues": {
+    get: { request: never; query: never; response: Page_QueueResponse_ };
+  };
+  "/api/v2/operations/queues/{queue_name}": {
+    patch: { request: QueueUpdateRequest; query: never; response: QueueResponse };
   };
   "/api/v2/operations/events": {
     get: { request: never; query: { page?: number; pageSize?: number; kind?: string | null; source?: string | null; level?: string | null; search?: string | null; dateFrom?: string | null; dateTo?: string | null }; response: Page_EventResponse_ };

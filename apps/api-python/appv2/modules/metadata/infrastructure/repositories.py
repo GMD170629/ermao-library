@@ -163,6 +163,14 @@ class SqlMetadataRepository(MetadataRepository):
         ).all()
         return [_job(record) for record in records], total
 
+    def queue_counts(self) -> dict[str, int]:
+        rows = self._session.execute(
+            select(MetadataJobRecord.status, func.count())
+            .group_by(MetadataJobRecord.status)
+            .order_by(MetadataJobRecord.status)
+        ).all()
+        return {str(status): int(count) for status, count in rows}
+
     def get_job(self, job_id: uuid.UUID) -> MetadataJob | None:
         record = self._session.get(MetadataJobRecord, job_id)
         return _job(record) if record is not None else None

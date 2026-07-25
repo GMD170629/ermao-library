@@ -277,6 +277,7 @@ def test_backup_and_restore_workers_cover_success_and_failure() -> None:
 
 def test_worker_runtime_invokes_every_queue_without_short_circuiting() -> None:
     container = MagicMock()
+    container.operations.disabled_queues.return_value = frozenset()
     container.ingestion_worker.run_once.return_value = False
     container.metadata_worker.run_once.return_value = True
     container.discovery_worker.run_once.return_value = False
@@ -289,3 +290,15 @@ def test_worker_runtime_invokes_every_queue_without_short_circuiting() -> None:
     container.discovery_worker.run_once.assert_called_once_with("worker")
     container.delivery_worker.run_once.assert_called_once_with("worker")
     container.backup_worker.run_once.assert_called_once_with()
+
+    container.reset_mock()
+    container.operations.disabled_queues.return_value = frozenset({"metadata", "backups"})
+    container.ingestion_worker.run_once.return_value = False
+    container.discovery_worker.run_once.return_value = False
+    container.delivery_worker.run_once.return_value = False
+    assert runtime.run_once() is False
+    container.ingestion_worker.run_once.assert_called_once_with("worker")
+    container.metadata_worker.run_once.assert_not_called()
+    container.discovery_worker.run_once.assert_called_once_with("worker")
+    container.delivery_worker.run_once.assert_called_once_with("worker")
+    container.backup_worker.run_once.assert_not_called()

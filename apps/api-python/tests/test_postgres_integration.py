@@ -573,6 +573,31 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
             files={"file": ("Uploaded Book.txt", b"uploaded content", "text/plain")},
         )
         assert upload.status_code == 202, upload.text
+        queues = client.get("/api/v2/operations/queues")
+        assert queues.status_code == 200, queues.text
+        ingestion_queue = next(
+            item for item in queues.json()["items"] if item["name"] == "ingestion"
+        )
+        assert ingestion_queue["counts"]["queued"] == 2
+        paused_queue = client.patch(
+            "/api/v2/operations/queues/ingestion",
+            json={"enabled": False},
+        )
+        assert paused_queue.status_code == 200, paused_queue.text
+        assert paused_queue.json()["status"] == "paused"
+        resumed_queue = client.patch(
+            "/api/v2/operations/queues/ingestion",
+            json={"enabled": True},
+        )
+        assert resumed_queue.status_code == 200, resumed_queue.text
+        assert resumed_queue.json()["enabled"] is True
+        assert (
+            client.patch(
+                "/api/v2/operations/queues/unknown",
+                json={"enabled": False},
+            ).status_code
+            == 404
+        )
 
         worker_container = build_container(settings)
         try:
@@ -715,7 +740,7 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         assert (
             client.post(
                 "/api/v2/ingestion/conversions",
-                json={"editionId": missing_reading_id},
+                json={"editionId": str(missing_reading_id)},
             ).status_code
             == 404
         )

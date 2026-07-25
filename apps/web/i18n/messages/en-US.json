@@ -1,4 +1,12 @@
 {
+  "备份队列": "Backup queue",
+  "队列已恢复": "Queue resumed",
+  "队列已暂停": "Queue paused",
+  "恢复队列": "Resume queue",
+  "恢复队列失败": "Failed to resume queue",
+  "暂停队列": "Pause queue",
+  "暂停队列失败": "Failed to pause queue",
+  "正在更新": "Updating",
   "标题一致": "Same title",
   "批量替换封面": "Replace covers in bulk",
   "使用同一张图片替换所选作品封面": "Use one image to replace the covers of all selected works",

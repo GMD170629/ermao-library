@@ -13,6 +13,9 @@ from appv2.modules.operations.contracts import (
     HealthStatus,
     LogStorageView,
     OperationsUnitOfWork,
+    QueueOverviewPort,
+    QueueSnapshot,
+    QueueView,
     RestoreControlPort,
     SettingView,
 )
@@ -23,6 +26,7 @@ class OperationsNotFound(Exception):
 
 
 DEFAULT_LOG_MAX_BYTES = 5 * 1024 * 1024
+QUEUE_SETTING_PREFIX = "operations.queues."
 
 
 class OperationsService:
@@ -31,6 +35,7 @@ class OperationsService:
         *,
         uow_factory: Callable[[], OperationsUnitOfWork],
         health_contributors: tuple[HealthContributor, ...],
+        queues: QueueOverviewPort,
         backup_executor: BackupExecutorPort,
         restore_control: RestoreControlPort,
         app_version: str,
@@ -38,6 +43,7 @@ class OperationsService:
     ) -> None:
         self._uow_factory = uow_factory
         self._health = health_contributors
+        self._queues = queues
         self._backup_executor = backup_executor
         self._restore_control = restore_control
         self._app_version = app_version
@@ -45,6 +51,79 @@ class OperationsService:
 
     def health(self) -> list[HealthStatus]:
         return [contributor.check() for contributor in self._health]
+
+    def list_queues(self) -> list[QueueView]:
+        snapshots = self._queues.snapshots()
+        with self._uow_factory() as uow:
+            settings = uow.operations.list_settings()
+        disabled = self._disabled_queue_names(settings)
+        return [
+            self._queue_view(snapshot, enabled=snapshot.name not in disabled)
+            for snapshot in snapshots
+        ]
+
+    def set_queue_enabled(
+        self,
+        *,
+        queue_name: str,
+        enabled: bool,
+        actor_id: uuid.UUID,
+    ) -> QueueView:
+        snapshots = self._queues.snapshots()
+        snapshot = next((value for value in snapshots if value.name == queue_name), None)
+        if snapshot is None:
+            raise OperationsNotFound
+        now = datetime.now(UTC)
+        with self._uow_factory() as uow:
+            uow.operations.save_settings(
+                {f"{QUEUE_SETTING_PREFIX}{queue_name}": {"enabled": enabled}},
+                actor_id,
+            )
+            uow.operations.append_event(
+                actor_id=actor_id,
+                kind="queue.enabled" if enabled else "queue.paused",
+                severity="info" if enabled else "warning",
+                message_key="queue.enabled" if enabled else "queue.paused",
+                params={"queue": queue_name},
+                trace_id=None,
+                now=now,
+            )
+            uow.commit()
+        return self._queue_view(snapshot, enabled=enabled)
+
+    def disabled_queues(self) -> frozenset[str]:
+        with self._uow_factory() as uow:
+            return self._disabled_queue_names(uow.operations.list_settings())
+
+    @staticmethod
+    def _disabled_queue_names(settings: list[SettingView]) -> frozenset[str]:
+        result: set[str] = set()
+        for setting in settings:
+            if not setting.key.startswith(QUEUE_SETTING_PREFIX):
+                continue
+            enabled = setting.value.get("enabled")
+            if enabled is False:
+                result.add(setting.key.removeprefix(QUEUE_SETTING_PREFIX))
+        return frozenset(result)
+
+    @staticmethod
+    def _queue_view(snapshot: QueueSnapshot, *, enabled: bool) -> QueueView:
+        if not enabled:
+            queue_status = "paused"
+        elif snapshot.counts.get("failed", 0):
+            queue_status = "failed"
+        elif snapshot.counts.get("running", 0):
+            queue_status = "running"
+        elif snapshot.counts.get("queued", 0) or snapshot.counts.get("retry", 0):
+            queue_status = "pending"
+        else:
+            queue_status = "idle"
+        return QueueView(
+            name=snapshot.name,
+            enabled=enabled,
+            status=queue_status,
+            counts=snapshot.counts,
+        )
 
     def list_settings(self) -> list[SettingView]:
         with self._uow_factory() as uow:
