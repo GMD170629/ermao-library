@@ -3,12 +3,16 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from urllib.parse import quote
 
 from appv2.modules.accounts.contracts import (
     ALL_SCOPES,
     MEMBER_SCOPES,
+    AccessScope,
     AccountsUnitOfWork,
     AccountView,
+    PasswordResetNoticePort,
     SessionGrant,
 )
 from appv2.modules.accounts.domain import User
@@ -35,6 +39,10 @@ class AccountNotFound(AccountsError):
     pass
 
 
+class InvalidResetToken(AccountsError):
+    pass
+
+
 class AccountService:
     def __init__(
         self,
@@ -43,11 +51,15 @@ class AccountService:
         password_hasher: PasswordHasher,
         session_secret: str,
         session_ttl_seconds: int,
+        password_reset_notice: PasswordResetNoticePort,
+        password_reset_ttl_seconds: int,
     ) -> None:
         self._uow_factory = uow_factory
         self._password_hasher = password_hasher
         self._session_secret = session_secret
         self._session_ttl = timedelta(seconds=session_ttl_seconds)
+        self._password_reset_notice = password_reset_notice
+        self._password_reset_ttl = timedelta(seconds=password_reset_ttl_seconds)
 
     def setup_required(self) -> bool:
         with self._uow_factory() as uow:
@@ -126,15 +138,17 @@ class AccountService:
         password: str,
         role: str,
         locale: str,
+        scopes: frozenset[AccessScope] | None = None,
+        monitor_folder_ids: tuple[uuid.UUID, ...] = (),
     ) -> AccountView:
         if role not in {"admin", "member"}:
             raise ValueError("invalid role")
         normalized_email = User.normalize_email(email)
         normalized_name = User.normalize_display_name(display_name)
         password_hash = self._password_hasher.hash(password)
-        scopes = ALL_SCOPES if role == "admin" else MEMBER_SCOPES
+        resolved_scopes = ALL_SCOPES if role == "admin" else (scopes or MEMBER_SCOPES)
         with self._uow_factory() as uow:
-            if uow.accounts.get_user_by_email(normalized_email) is not None:
+            if uow.accounts.email_in_use(normalized_email):
                 raise AccountConflict
             account = uow.accounts.add_user(
                 email=normalized_email,
@@ -142,7 +156,8 @@ class AccountService:
                 password_hash=password_hash,
                 role=role,
                 locale=locale,
-                scopes=scopes,
+                scopes=resolved_scopes,
+                monitor_folder_ids=monitor_folder_ids,
             )
             uow.commit()
             return account
@@ -174,10 +189,11 @@ class AccountService:
                     )
                 ):
                     raise AuthenticationFailed
-            if normalized_email is not None:
-                existing = uow.accounts.get_user_by_email(normalized_email)
-                if existing is not None and existing.id != user_id:
-                    raise AccountConflict
+            if normalized_email is not None and uow.accounts.email_in_use(
+                normalized_email,
+                excluding=user_id,
+            ):
+                raise AccountConflict
             account = uow.accounts.update_user(
                 user_id,
                 email=normalized_email,
@@ -191,6 +207,99 @@ class AccountService:
                 uow.sessions.revoke_user(user_id)
             uow.commit()
             return account
+
+    def update_managed_user(
+        self,
+        user_id: uuid.UUID,
+        *,
+        email: str | None,
+        display_name: str | None,
+        role: str | None,
+        disabled: bool | None,
+        locale: str | None,
+        scopes: frozenset[AccessScope] | None,
+        monitor_folder_ids: tuple[uuid.UUID, ...] | None,
+    ) -> AccountView:
+        if role is not None and role not in {"admin", "member"}:
+            raise ValueError("invalid role")
+        normalized_email = User.normalize_email(email) if email is not None else None
+        normalized_name = (
+            User.normalize_display_name(display_name) if display_name is not None else None
+        )
+        with self._uow_factory() as uow:
+            if normalized_email is not None and uow.accounts.email_in_use(
+                normalized_email,
+                excluding=user_id,
+            ):
+                raise AccountConflict
+            resolved_scopes = ALL_SCOPES if role == "admin" else scopes
+            account = uow.accounts.update_user(
+                user_id,
+                email=normalized_email,
+                display_name=normalized_name,
+                locale=locale,
+                role=role,
+                scopes=resolved_scopes,
+                disabled=disabled,
+                monitor_folder_ids=monitor_folder_ids,
+            )
+            if account is None:
+                raise AccountNotFound
+            if disabled or role is not None or scopes is not None:
+                uow.sessions.revoke_user(user_id)
+            uow.commit()
+            return account
+
+    def set_managed_password(self, user_id: uuid.UUID, password: str) -> AccountView:
+        password_hash = self._password_hasher.hash(password)
+        with self._uow_factory() as uow:
+            account = uow.accounts.update_user(user_id, password_hash=password_hash)
+            if account is None:
+                raise AccountNotFound
+            uow.sessions.revoke_user(user_id)
+            uow.commit()
+            return account
+
+    def request_password_reset(self, *, email: str, app_base_url: str) -> Path:
+        normalized_email = User.normalize_email(email)
+        now = datetime.now(UTC)
+        with self._uow_factory() as uow:
+            account = uow.accounts.get_user_by_email(normalized_email)
+            if account is None:
+                return self._password_reset_notice.path
+            token = new_session_token()
+            uow.password_resets.issue(
+                user_id=account.id,
+                token_hash=token_digest(token, self._session_secret),
+                expires_at=now + self._password_reset_ttl,
+                created_at=now,
+            )
+            reset_url = f"{app_base_url.rstrip('/')}/reset-password#token={quote(token, safe='')}"
+            path = self._password_reset_notice.write(
+                reset_url=reset_url,
+                locale=account.locale,
+            )
+            try:
+                uow.commit()
+            except Exception:
+                self._password_reset_notice.clear()
+                raise
+            return path
+
+    def confirm_password_reset(self, *, token: str, new_password: str) -> None:
+        now = datetime.now(UTC)
+        digest = token_digest(token, self._session_secret)
+        password_hash = self._password_hasher.hash(new_password)
+        with self._uow_factory() as uow:
+            user_id = uow.password_resets.consume(token_hash=digest, now=now)
+            if user_id is None:
+                raise InvalidResetToken
+            account = uow.accounts.update_user(user_id, password_hash=password_hash)
+            if account is None:
+                raise InvalidResetToken
+            uow.sessions.revoke_user(user_id)
+            uow.commit()
+        self._password_reset_notice.clear()
 
     def delete_user(self, user_id: uuid.UUID) -> None:
         with self._uow_factory() as uow:

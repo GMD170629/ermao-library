@@ -6,6 +6,7 @@ from pathlib import Path
 from appv2.composition.adapters import CatalogPorts, IngestionEnqueueAdapter
 from appv2.modules.accounts.api import AccountDependency
 from appv2.modules.accounts.application import AccountService
+from appv2.modules.accounts.infrastructure.password_reset import LocalPasswordResetNotice
 from appv2.modules.accounts.infrastructure.repositories import accounts_uow_factory
 from appv2.modules.catalog.application import CatalogReadAdapter, CatalogService
 from appv2.modules.catalog.infrastructure.repositories import catalog_uow_factory
@@ -103,6 +104,8 @@ def build_container(settings: Settings | None = None) -> Container:
         password_hasher=PasswordHasher(),
         session_secret=resolved.session_secret.get_secret_value(),
         session_ttl_seconds=resolved.session_ttl_seconds,
+        password_reset_notice=LocalPasswordResetNotice(storage.control),
+        password_reset_ttl_seconds=resolved.password_reset_ttl_seconds,
     )
     current_account = AccountDependency(accounts)
     catalog = CatalogService(catalog_uow)

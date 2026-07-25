@@ -1,6 +1,9 @@
+# ruff: noqa: S105
+
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from pathlib import Path
 
@@ -96,6 +99,75 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         users = client.get("/api/v2/admin/users?pageSize=10")
         assert users.status_code == 200
         assert users.json()["total"] == 2
+        member_id = member.json()["id"]
+        disabled_member = client.patch(
+            f"/api/v2/admin/users/{member_id}",
+            json={"disabled": True},
+        )
+        assert disabled_member.status_code == 200, disabled_member.text
+        assert disabled_member.json()["disabled"] is True
+        enabled_member = client.patch(
+            f"/api/v2/admin/users/{member_id}",
+            json={
+                "displayName": "Managed Integration Member",
+                "disabled": False,
+                "scopes": ["catalog:read", "reading:write"],
+                "monitorFolderIds": [],
+            },
+        )
+        assert enabled_member.status_code == 200, enabled_member.text
+        assert enabled_member.json()["displayName"] == "Managed Integration Member"
+        managed_password = "managed member password value"
+        assert (
+            client.put(
+                f"/api/v2/admin/users/{member_id}/password",
+                json={"password": managed_password},
+            ).status_code
+            == 204
+        )
+        with TestClient(create_app(settings)) as member_client:
+            member_login = member_client.post(
+                "/api/v2/auth/login",
+                json={
+                    "email": member.json()["email"],
+                    "password": managed_password,
+                },
+            )
+            assert member_login.status_code == 200, member_login.text
+            assert member_client.post("/api/v2/auth/logout").status_code == 204
+            assert member_client.get("/api/v2/account").status_code == 401
+
+        reset_request = client.post(
+            "/api/v2/auth/password-reset/request",
+            headers={"Accept-Language": "en-US"},
+            json={"email": member.json()["email"]},
+        )
+        assert reset_request.status_code == 202, reset_request.text
+        reset_file = Path(reset_request.json()["filePath"])
+        reset_document = reset_file.read_text(encoding="utf-8")
+        token_match = re.search(r"#token=([^\"<]+)", reset_document)
+        assert token_match is not None
+        reset_password = "reset member password value"
+        invalid_reset = client.post(
+            "/api/v2/auth/password-reset/confirm",
+            json={"token": "x" * 32, "newPassword": reset_password},
+        )
+        assert invalid_reset.status_code == 400
+        reset_confirm = client.post(
+            "/api/v2/auth/password-reset/confirm",
+            json={"token": token_match.group(1), "newPassword": reset_password},
+        )
+        assert reset_confirm.status_code == 200, reset_confirm.text
+        assert not reset_file.exists()
+        with TestClient(create_app(settings)) as reset_client:
+            reset_login = reset_client.post(
+                "/api/v2/auth/login",
+                json={
+                    "email": member.json()["email"],
+                    "password": reset_password,
+                },
+            )
+            assert reset_login.status_code == 200, reset_login.text
 
         shelf = client.post(
             "/api/v2/catalog/shelves",
@@ -110,6 +182,38 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         shelf_detail = client.get(f"/api/v2/catalog/shelves/{shelf.json()['id']}")
         assert shelf_detail.status_code == 200
         assert shelf_detail.json()["bookIds"] == [created.json()["id"]]
+        work_update = client.patch(
+            f"/api/v2/catalog/works/{created.json()['id']}",
+            json={
+                "title": "Updated Architecture Test Book",
+                "summary": "Updated through the v2 application use case",
+            },
+        )
+        assert work_update.status_code == 200, work_update.text
+        assert work_update.json()["title"] == "Updated Architecture Test Book"
+        assert client.get(f"/api/v2/catalog/works/{created.json()['id']}").status_code == 200
+        assert client.get("/api/v2/catalog/facets").status_code == 200
+        assert (
+            client.delete(
+                f"/api/v2/catalog/shelves/{shelf.json()['id']}/works/{created.json()['id']}"
+            ).status_code
+            == 204
+        )
+        assert (
+            client.put(
+                f"/api/v2/catalog/shelves/{shelf.json()['id']}/works/{created.json()['id']}"
+            ).status_code
+            == 204
+        )
+        shelf_update = client.patch(
+            f"/api/v2/catalog/shelves/{shelf.json()['id']}",
+            json={
+                "name": "Updated Integration Shelf",
+                "pinned": False,
+                "bookIds": [created.json()["id"]],
+            },
+        )
+        assert shelf_update.status_code == 200, shelf_update.text
         categories = client.get("/api/v2/catalog/categories?kind=TAG&pageSize=10")
         assert categories.status_code == 200
 
@@ -154,6 +258,20 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         ]
         assert len(completed_jobs) == 2
         edition_id = completed_jobs[0]["resultId"]
+        assert client.get("/api/v2/ingestion/conversions").status_code == 200
+        folder_update = client.patch(
+            f"/api/v2/ingestion/folders/{folder.json()['id']}",
+            json={"recursive": False, "options": {"ignoreHidden": False}},
+        )
+        assert folder_update.status_code == 200, folder_update.text
+        folder_scan = client.post(f"/api/v2/ingestion/folders/{folder.json()['id']}/scan")
+        assert folder_scan.status_code == 202, folder_scan.text
+        rescan = client.post("/api/v2/ingestion/imports/rescan")
+        assert rescan.status_code == 202, rescan.text
+        assert (
+            client.post(f"/api/v2/ingestion/imports/{completed_jobs[0]['id']}/retry").status_code
+            == 404
+        )
 
         bootstrap = client.get(f"/api/v2/reading/editions/{edition_id}/bootstrap")
         assert bootstrap.status_code == 200, bootstrap.text
@@ -186,6 +304,85 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
             },
         )
         assert reading_preference.status_code == 200
+        assert (
+            client.get(
+                f"/api/v2/reading/preferences?scope=edition&targetId={edition_id}"
+            ).status_code
+            == 200
+        )
+        assert client.get(f"/api/v2/reading/editions/{edition_id}/progress").status_code == 200
+        progress_conflict = client.put(
+            f"/api/v2/reading/editions/{edition_id}/progress",
+            json={
+                "deviceId": "integration-browser",
+                "position": {"location": {"type": "epub", "progression": 0.75}},
+                "percentage": 0.75,
+                "expectedVersion": 999,
+            },
+        )
+        assert progress_conflict.status_code == 409
+        resource = client.get(f"/api/v2/reading/editions/{edition_id}/resource")
+        assert resource.status_code == 200, resource.text
+        partial_resource = client.get(
+            f"/api/v2/reading/editions/{edition_id}/resource",
+            headers={"Range": "bytes=0-3"},
+        )
+        assert partial_resource.status_code == 206, partial_resource.text
+        claim = client.post(
+            f"/api/v2/reading/editions/{edition_id}/epub-locations/claim",
+            json={
+                "cacheVersion": 1,
+                "contentFingerprint": "integration-fingerprint",
+                "breakSize": 1024,
+            },
+        )
+        assert claim.status_code == 200, claim.text
+        assert claim.json()["status"] == "claimed"
+        lease_token = claim.json()["leaseToken"]
+        wrong_lease = client.put(
+            f"/api/v2/reading/editions/{edition_id}/epub-locations",
+            json={
+                "cacheVersion": 1,
+                "contentFingerprint": "integration-fingerprint",
+                "breakSize": 1024,
+                "leaseToken": "x" * 32,
+                "serialized": "[]",
+            },
+        )
+        assert wrong_lease.status_code == 409
+        saved_locations = client.put(
+            f"/api/v2/reading/editions/{edition_id}/epub-locations",
+            json={
+                "cacheVersion": 1,
+                "contentFingerprint": "integration-fingerprint",
+                "breakSize": 1024,
+                "leaseToken": lease_token,
+                "serialized": '[{"cfi":"epubcfi(/6/2)"}]',
+            },
+        )
+        assert saved_locations.status_code == 200, saved_locations.text
+        ready_claim = client.post(
+            f"/api/v2/reading/editions/{edition_id}/epub-locations/claim",
+            json={
+                "cacheVersion": 1,
+                "contentFingerprint": "integration-fingerprint",
+                "breakSize": 1024,
+            },
+        )
+        assert ready_claim.json()["status"] == "ready"
+        bookmark_id = bookmark.json()["id"]
+        assert (
+            client.delete(
+                f"/api/v2/reading/editions/{edition_id}/bookmarks/{bookmark_id}"
+            ).status_code
+            == 204
+        )
+        assert (
+            client.delete(
+                f"/api/v2/reading/editions/{edition_id}/bookmarks/{bookmark_id}"
+            ).status_code
+            == 404
+        )
 
         provider = client.post(
             "/api/v2/metadata/providers",
@@ -203,6 +400,23 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
             json={"workId": created.json()["id"], "query": "Architecture Test Book"},
         )
         assert metadata_job.status_code == 202, metadata_job.text
+        provider_update = client.patch(
+            f"/api/v2/metadata/providers/{provider.json()['id']}",
+            json={"name": "Updated Integration Provider", "priority": 50},
+        )
+        assert provider_update.status_code == 200, provider_update.text
+        metadata_container = build_container(settings)
+        try:
+            assert metadata_container.metadata_worker.run_once("metadata-worker")
+            assert not metadata_container.metadata_worker.run_once("metadata-worker")
+        finally:
+            metadata_container.close()
+        metadata_jobs = client.get("/api/v2/metadata/jobs?status=completed&pageSize=10")
+        assert metadata_jobs.status_code == 200
+        candidates = client.get(f"/api/v2/metadata/jobs/{metadata_job.json()['id']}/candidates")
+        assert candidates.status_code == 200
+        assert candidates.json()["total"] == 0
+        assert client.get(f"/api/v2/metadata/jobs/{uuid.uuid4()}/candidates").status_code == 404
 
         source = client.post(
             "/api/v2/discovery/sources",
@@ -216,6 +430,19 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         )
         assert source.status_code == 201, source.text
         assert client.get("/api/v2/discovery/sources").json()["total"] == 1
+        source_update = client.patch(
+            f"/api/v2/discovery/sources/{source.json()['id']}",
+            json={"name": "Updated Integration Source", "baseUrl": "https://example.org/books/"},
+        )
+        assert source_update.status_code == 200, source_update.text
+        disabled_search = client.post(
+            f"/api/v2/discovery/sources/{source.json()['id']}/search",
+            json={"query": "book"},
+        )
+        assert disabled_search.status_code == 404
+        assert client.get("/api/v2/discovery/results").json()["total"] == 0
+        assert client.get("/api/v2/discovery/downloads").json()["total"] == 0
+        assert client.post(f"/api/v2/discovery/downloads/{uuid.uuid4()}").status_code == 404
 
         kindle_settings = client.put(
             "/api/v2/delivery/kindle/settings",
@@ -238,6 +465,27 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
             },
         )
         assert email_settings.status_code == 200, email_settings.text
+        assert client.get("/api/v2/delivery/email/settings").status_code == 200
+        assert client.get("/api/v2/delivery/kindle/settings").status_code == 200
+        kindle_job = client.post(
+            "/api/v2/delivery/kindle/jobs",
+            json={
+                "fileId": bootstrap.json()["target"]["fileId"],
+                "subject": "Integration delivery",
+            },
+        )
+        assert kindle_job.status_code == 202, kindle_job.text
+        delivery_jobs = client.get("/api/v2/delivery/kindle/jobs?status=queued&pageSize=10")
+        assert delivery_jobs.status_code == 200
+        assert delivery_jobs.json()["total"] == 1
+        assert (
+            client.delete(f"/api/v2/delivery/kindle/jobs/{kindle_job.json()['id']}").status_code
+            == 204
+        )
+        assert (
+            client.post(f"/api/v2/delivery/kindle/jobs/{kindle_job.json()['id']}/retry").status_code
+            == 404
+        )
 
         settings_response = client.put(
             "/api/v2/operations/settings",
@@ -248,5 +496,19 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         backup = client.post("/api/v2/operations/backups")
         assert backup.status_code == 202, backup.text
         assert backup.json()["appVersion"] == "0.4.0"
+        backup_id = backup.json()["id"]
+        assert client.get("/api/v2/operations/backups").json()["total"] == 1
+        assert client.get(f"/api/v2/operations/backups/{backup_id}").status_code == 200
+        assert client.get(f"/api/v2/operations/backups/{backup_id}/download").status_code == 404
+        assert client.post(f"/api/v2/operations/backups/{backup_id}/restore").status_code == 404
+        assert client.get("/api/v2/operations/events?kind=backup.requested").status_code == 200
         assert client.get("/api/v2/reporting/dashboard").status_code == 200
         assert client.get("/api/v2/reporting/management").status_code == 200
+        assert client.delete(f"/api/v2/operations/backups/{backup_id}").status_code == 204
+        assert client.get(f"/api/v2/operations/backups/{backup_id}").status_code == 404
+        assert client.delete(f"/api/v2/discovery/sources/{source.json()['id']}").status_code == 204
+        assert client.delete(f"/api/v2/ingestion/folders/{folder.json()['id']}").status_code == 204
+        assert client.delete(f"/api/v2/catalog/shelves/{shelf.json()['id']}").status_code == 204
+        clear_finished = client.delete("/api/v2/ingestion/imports")
+        assert clear_finished.status_code == 200
+        assert clear_finished.json()["deleted"] >= 2

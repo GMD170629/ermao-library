@@ -2,6 +2,8 @@
 // AUTO-GENERATED from appv2 FastAPI OpenAPI. Do not edit by hand.
 // Run `pnpm --filter @shuku/web generate:api-v2`.
 
+export type AccessScope = "catalog:read" | "catalog:write" | "ingestion:write" | "metadata:write" | "reading:write" | "discovery:write" | "delivery:write" | "operations:read" | "operations:write" | "users:write";
+
 export type AccountPreferences = {
   values: {
     [key: string]: unknown;
@@ -15,7 +17,23 @@ export type AccountResponse = {
   role: string;
   locale: string;
   scopes: Array<string>;
+  disabled: boolean;
+  monitorFolderIds: Array<string>;
   createdAt: string;
+};
+
+export type AdminPasswordRequest = {
+  password: string;
+};
+
+export type AdminUpdateUserRequest = {
+  email?: string | null;
+  displayName?: string | null;
+  role?: "admin" | "member" | null;
+  disabled?: boolean | null;
+  locale?: "zh-CN" | "en-US" | null;
+  scopes?: Array<AccessScope> | null;
+  monitorFolderIds?: Array<string> | null;
 };
 
 export type BackupResponse = {
@@ -114,6 +132,8 @@ export type CreateUserRequest = {
   password: string;
   locale?: "zh-CN" | "en-US";
   role?: "admin" | "member";
+  scopes?: Array<AccessScope> | null;
+  monitorFolderIds?: Array<string>;
 };
 
 export type CreateWorkRequest = {
@@ -500,6 +520,25 @@ export type Page_WorkResponse_ = {
   total: number;
 };
 
+export type PasswordResetAccepted = {
+  accepted?: boolean;
+  message: string;
+  filePath: string;
+};
+
+export type PasswordResetCompleted = {
+  passwordReset?: boolean;
+};
+
+export type PasswordResetConfirmRequest = {
+  token: string;
+  newPassword: string;
+};
+
+export type PasswordResetRequest = {
+  email: string;
+};
+
 export type PreferenceRequest = {
   scope: string;
   targetId?: string | null;
@@ -812,6 +851,12 @@ export interface ApiV2Paths {
   "/api/v2/auth/logout": {
     post: { request: never; query: never; response: void };
   };
+  "/api/v2/auth/password-reset/request": {
+    post: { request: PasswordResetRequest; query: never; response: PasswordResetAccepted };
+  };
+  "/api/v2/auth/password-reset/confirm": {
+    post: { request: PasswordResetConfirmRequest; query: never; response: PasswordResetCompleted };
+  };
   "/api/v2/account": {
     get: { request: never; query: never; response: AccountResponse };
     patch: { request: UpdateAccountRequest; query: never; response: AccountResponse };
@@ -825,7 +870,11 @@ export interface ApiV2Paths {
     post: { request: CreateUserRequest; query: never; response: AccountResponse };
   };
   "/api/v2/admin/users/{user_id}": {
+    patch: { request: AdminUpdateUserRequest; query: never; response: AccountResponse };
     delete: { request: never; query: never; response: void };
+  };
+  "/api/v2/admin/users/{user_id}/password": {
+    put: { request: AdminPasswordRequest; query: never; response: void };
   };
   "/api/v2/catalog/works": {
     get: { request: never; query: { page?: number; pageSize?: number; query?: string | null; mediaType?: string | null; visibility?: string }; response: Page_WorkResponse_ };

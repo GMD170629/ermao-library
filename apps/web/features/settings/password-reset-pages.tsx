@@ -1,6 +1,6 @@
 'use client';
 
-import { apiV2Fetch } from '@/lib/api-v2';
+import { apiV2Request } from '@/lib/api-v2';
 
 import { ArrowLeft, FileKey2, LockKeyhole } from 'lucide-react';
 import Image from 'next/image';
@@ -12,11 +12,7 @@ import { PRODUCT_NAME } from '../../lib/brand';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
-type ApiPayload = {
-  ok: boolean;
-  data?: { message?: string; filePath?: string };
-  error?: { message?: string };
-};
+type PasswordResetAccepted = { message: string; filePath: string };
 
 const inputClassName = 'mt-2 h-12 w-full rounded-[12px] border border-[#DED8D1] bg-white px-4 text-sm text-[#17191D] outline-none transition placeholder:text-[#AAA39C] focus:border-[#ED9D86] focus:ring-4 focus:ring-[#FFE4DC]';
 
@@ -48,15 +44,15 @@ export function ForgotPasswordPage() {
     setError('');
     setMessage('');
     try {
-      const response = await apiV2Fetch('/api/v2/auth/password-reset/request', {
+      const payload = await apiV2Request<PasswordResetAccepted>('/api/v2/auth/password-reset/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim() })
       });
-      const payload = (await response.json()) as ApiPayload;
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '创建密码重置文件失败');
-      const path = payload.data?.filePath;
-      setMessage(path ? `${payload.data?.message ?? '密码重置文件已创建'} 文件位置：${path}` : (payload.data?.message ?? '密码重置文件已创建。'));
+      setMessage(i18nAttribute('{value0} 文件位置：{value1}', {
+        value0: payload.message,
+        value1: payload.filePath
+      }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '创建密码重置文件失败');
     } finally {
@@ -117,13 +113,11 @@ export function ResetPasswordPage() {
     }
     setLoading(true);
     try {
-      const response = await apiV2Fetch('/api/v2/auth/password-reset/confirm', {
+      await apiV2Request<{ passwordReset: true }>('/api/v2/auth/password-reset/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, newPassword })
       });
-      const payload = (await response.json()) as ApiPayload;
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '重置密码失败');
       window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
       setToken('');
       setComplete(true);

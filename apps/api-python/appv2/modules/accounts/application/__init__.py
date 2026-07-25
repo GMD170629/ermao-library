@@ -3,6 +3,7 @@ from appv2.modules.accounts.application.service import (
     AccountNotFound,
     AccountService,
     AuthenticationFailed,
+    InvalidResetToken,
     SetupAlreadyCompleted,
 )
 
@@ -11,5 +12,6 @@ __all__ = [
     "AccountNotFound",
     "AccountService",
     "AuthenticationFailed",
+    "InvalidResetToken",
     "SetupAlreadyCompleted",
 ]

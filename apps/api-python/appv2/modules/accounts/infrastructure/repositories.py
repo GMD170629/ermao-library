@@ -13,10 +13,12 @@ from appv2.modules.accounts.contracts import (
     AccessScope,
     AccountsRepository,
     AccountView,
+    PasswordResetsRepository,
     SessionsRepository,
 )
 from appv2.modules.accounts.infrastructure.models import (
     AccountPreferenceRecord,
+    PasswordResetRecord,
     SessionRecord,
     UserRecord,
 )
@@ -30,6 +32,8 @@ def _view(record: UserRecord) -> AccountView:
         role=record.role,
         locale=record.locale,
         scopes=frozenset(AccessScope(scope) for scope in record.scopes),
+        disabled=record.disabled_at is not None,
+        monitor_folder_ids=tuple(uuid.UUID(value) for value in record.monitor_folder_ids),
         created_at=record.created_at,
     )
 
@@ -51,6 +55,12 @@ class SqlAccountsRepository(AccountsRepository):
         )
         return _view(record) if record is not None else None
 
+    def email_in_use(self, email: str, *, excluding: uuid.UUID | None = None) -> bool:
+        query = select(func.count()).select_from(UserRecord).where(UserRecord.email == email)
+        if excluding is not None:
+            query = query.where(UserRecord.id != excluding)
+        return bool(self._session.scalar(query))
+
     def password_hash_for(self, user_id: uuid.UUID) -> str | None:
         return self._session.scalar(
             select(UserRecord.password_hash).where(
@@ -67,6 +77,7 @@ class SqlAccountsRepository(AccountsRepository):
         role: str,
         locale: str,
         scopes: frozenset[AccessScope],
+        monitor_folder_ids: tuple[uuid.UUID, ...] = (),
     ) -> AccountView:
         record = UserRecord(
             email=email,
@@ -75,6 +86,7 @@ class SqlAccountsRepository(AccountsRepository):
             role=role,
             locale=locale,
             scopes=sorted(scope.value for scope in scopes),
+            monitor_folder_ids=[str(value) for value in monitor_folder_ids],
         )
         self._session.add(record)
         self._session.flush()
@@ -88,6 +100,10 @@ class SqlAccountsRepository(AccountsRepository):
         display_name: str | None = None,
         password_hash: str | None = None,
         locale: str | None = None,
+        role: str | None = None,
+        scopes: frozenset[AccessScope] | None = None,
+        disabled: bool | None = None,
+        monitor_folder_ids: tuple[uuid.UUID, ...] | None = None,
     ) -> AccountView | None:
         record = self._session.get(UserRecord, user_id)
         if record is None or record.disabled_at is not None:
@@ -100,17 +116,21 @@ class SqlAccountsRepository(AccountsRepository):
             record.password_hash = password_hash
         if locale is not None:
             record.locale = locale
+        if role is not None:
+            record.role = role
+        if scopes is not None:
+            record.scopes = sorted(scope.value for scope in scopes)
+        if disabled is not None:
+            record.disabled_at = datetime.now(UTC) if disabled else None
+        if monitor_folder_ids is not None:
+            record.monitor_folder_ids = [str(value) for value in monitor_folder_ids]
         self._session.flush()
         return _view(record)
 
     def list_users(self, *, offset: int, limit: int) -> tuple[list[AccountView], int]:
-        criteria = UserRecord.disabled_at.is_(None)
-        total = int(
-            self._session.scalar(select(func.count()).select_from(UserRecord).where(criteria)) or 0
-        )
+        total = int(self._session.scalar(select(func.count()).select_from(UserRecord)) or 0)
         records = self._session.scalars(
             select(UserRecord)
-            .where(criteria)
             .order_by(UserRecord.created_at, UserRecord.id)
             .offset(offset)
             .limit(limit)
@@ -209,18 +229,62 @@ class SqlSessionsRepository(SessionsRepository):
         self._session.execute(delete(SessionRecord).where(SessionRecord.user_id == user_id))
 
 
+class SqlPasswordResetsRepository(PasswordResetsRepository):
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def issue(
+        self,
+        *,
+        user_id: uuid.UUID,
+        token_hash: str,
+        expires_at: datetime,
+        created_at: datetime,
+    ) -> None:
+        self._session.execute(
+            delete(PasswordResetRecord).where(PasswordResetRecord.user_id == user_id)
+        )
+        self._session.add(
+            PasswordResetRecord(
+                user_id=user_id,
+                token_hash=token_hash,
+                expires_at=expires_at,
+                created_at=created_at,
+            )
+        )
+        self._session.flush()
+
+    def consume(self, *, token_hash: str, now: datetime) -> uuid.UUID | None:
+        record = self._session.scalar(
+            select(PasswordResetRecord)
+            .where(
+                PasswordResetRecord.token_hash == token_hash,
+                PasswordResetRecord.consumed_at.is_(None),
+                PasswordResetRecord.expires_at > now,
+            )
+            .with_for_update()
+        )
+        if record is None:
+            return None
+        record.consumed_at = now
+        self._session.flush()
+        return record.user_id
+
+
 class AccountsSqlUnitOfWork:
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self._session_factory = session_factory
         self._session: Session | None = None
         self.accounts: AccountsRepository
         self.sessions: SessionsRepository
+        self.password_resets: PasswordResetsRepository
         self._committed = False
 
     def __enter__(self) -> Self:
         self._session = self._session_factory()
         self.accounts = SqlAccountsRepository(self._session)
         self.sessions = SqlSessionsRepository(self._session)
+        self.password_resets = SqlPasswordResetsRepository(self._session)
         self._committed = False
         return self
 

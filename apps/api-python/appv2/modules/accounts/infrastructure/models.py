@@ -23,6 +23,7 @@ class UserRecord(UUIDPrimaryKey, Timestamped, Base):
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     locale: Mapped[str] = mapped_column(String(10), nullable=False, default="zh-CN")
     scopes: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    monitor_folder_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 

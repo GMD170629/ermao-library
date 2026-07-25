@@ -1,6 +1,6 @@
 'use client';
 
-import { apiV2Fetch } from '@/lib/api-v2';
+import { apiV2Request } from '@/lib/api-v2';
 
 import { KeyRound, Plus, Save, ShieldCheck, Trash2, UserRoundCheck, UserRoundX } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
@@ -32,6 +32,30 @@ type MonitorFolder = {
   id: string;
   name: string;
   rootPath: string;
+};
+
+type AccountResource = {
+  id: string;
+  displayName: string;
+  email: string;
+  role: UserRole;
+  disabled: boolean;
+  scopes: string[];
+  monitorFolderIds: string[];
+  locale: 'zh-CN' | 'en-US';
+  createdAt?: string;
+};
+
+type FolderResource = {
+  id: string;
+  path: string;
+};
+
+type Page<T> = {
+  items: T[];
+  page: number;
+  pageSize: number;
+  total: number;
 };
 
 type UserForm = {
@@ -72,19 +96,38 @@ function formFromUser(user: ManagedUser): UserForm {
   };
 }
 
-async function apiRequest(path: string, init?: RequestInit) {
-  const response = await apiV2Fetch(path, {
+async function apiRequest<T>(path: string, init?: RequestInit) {
+  return apiV2Request<T>(path, {
     credentials: 'same-origin',
     ...init,
     headers: init?.body ? { 'Content-Type': 'application/json', ...init.headers } : init?.headers
   });
-  const payload = await response.json().catch(() => null);
-  if (!response.ok || !payload?.ok) {
-    const error = new Error(payload?.error?.message ?? '请求失败') as Error & { status?: number };
-    error.status = response.status;
-    throw error;
+}
+
+function managedUser(account: AccountResource): ManagedUser {
+  const scopes = new Set(account.scopes);
+  return {
+    id: account.id,
+    name: account.displayName,
+    email: account.email,
+    role: account.role,
+    status: account.disabled ? 'disabled' : 'active',
+    canManageSystem: scopes.has('operations:write'),
+    canViewManualImports: scopes.has('ingestion:write'),
+    monitorFolderIds: account.monitorFolderIds,
+    locale: account.locale,
+    authzVersion: 1,
+    createdAt: account.createdAt
+  };
+}
+
+function memberScopes(form: UserForm) {
+  const scopes = ['catalog:read', 'reading:write', 'discovery:write', 'delivery:write'];
+  if (form.canViewManualImports) scopes.push('ingestion:write');
+  if (form.canManageSystem) {
+    scopes.push('catalog:write', 'metadata:write', 'operations:read', 'operations:write');
   }
-  return payload.data;
+  return scopes;
 }
 
 export function UsersPermissionsPage() {
@@ -112,12 +155,16 @@ export function UsersPermissionsPage() {
     setLoading(true);
     try {
       const [usersData, folderData] = await Promise.all([
-        apiRequest('/api/v2/admin/users'),
-        apiRequest('/api/v2/ingestion/folders')
+        apiRequest<Page<AccountResource>>('/api/v2/admin/users?pageSize=200'),
+        apiRequest<Page<FolderResource>>('/api/v2/ingestion/folders?pageSize=200')
       ]);
-      const nextUsers = (usersData?.users ?? []) as ManagedUser[];
+      const nextUsers = usersData.items.map(managedUser);
       setUsers(nextUsers);
-      setFolders((folderData?.folders ?? []) as MonitorFolder[]);
+      setFolders(folderData.items.map((folder) => ({
+        id: folder.id,
+        name: folder.path.split(/[\\/]/).filter(Boolean).at(-1) ?? folder.path,
+        rootPath: folder.path
+      })));
       const nextId = preferredUserId && nextUsers.some((user) => user.id === preferredUserId)
         ? preferredUserId
         : selectedId && nextUsers.some((user) => user.id === selectedId)
@@ -168,23 +215,21 @@ export function UsersPermissionsPage() {
     setSaving(true);
     try {
       const body = {
-        name: form.name.trim(),
+        displayName: form.name.trim(),
         email: form.email.trim(),
         role: form.role,
-        status: form.status,
-        canManageSystem: form.role === 'member' && form.canManageSystem,
-        canViewManualImports: form.role === 'member' && form.canViewManualImports,
+        scopes: form.role === 'member' ? memberScopes(form) : undefined,
         monitorFolderIds: form.role === 'member' ? form.monitorFolderIds : [],
         locale: form.locale,
-        ...(creating ? { password: form.password } : {})
+        ...(creating ? { password: form.password } : { disabled: form.status === 'disabled' })
       };
-      const data = await apiRequest(
+      const data = await apiRequest<AccountResource>(
         creating ? '/api/v2/admin/users' : `/api/v2/admin/users/${encodeURIComponent(selectedId ?? '')}`,
         { method: creating ? 'POST' : 'PATCH', body: JSON.stringify(body) }
       );
       toast.success(creating ? t('用户已创建') : t('用户与权限已更新'));
       setCreating(false);
-      await refresh(data?.user?.id);
+      await refresh(data.id);
     } catch (reason) {
       toast.error(t('保存用户失败'), reason instanceof Error ? t(reason.message) : t('请稍后重试'));
     } finally {
@@ -194,9 +239,9 @@ export function UsersPermissionsPage() {
 
   async function toggleStatus(user: ManagedUser) {
     try {
-      await apiRequest(`/api/v2/admin/users/${encodeURIComponent(user.id)}`, {
+      await apiRequest<AccountResource>(`/api/v2/admin/users/${encodeURIComponent(user.id)}`, {
         method: 'PATCH',
-        body: JSON.stringify({ status: user.status === 'active' ? 'disabled' : 'active' })
+        body: JSON.stringify({ disabled: user.status === 'active' })
       });
       toast.success(user.status === 'active' ? t('用户已停用，会话已撤销') : t('用户已启用'));
       await refresh(user.id);
@@ -209,7 +254,7 @@ export function UsersPermissionsPage() {
     event.preventDefault();
     if (!passwordTarget) return;
     try {
-      await apiRequest(`/api/v2/admin/users/${encodeURIComponent(passwordTarget.id)}/password`, {
+      await apiRequest<void>(`/api/v2/admin/users/${encodeURIComponent(passwordTarget.id)}/password`, {
         method: 'PUT',
         body: JSON.stringify({ password })
       });
@@ -225,7 +270,7 @@ export function UsersPermissionsPage() {
     event.preventDefault();
     if (!deleteTarget) return;
     try {
-      await apiRequest(`/api/v2/admin/users/${encodeURIComponent(deleteTarget.id)}`, {
+      await apiRequest<void>(`/api/v2/admin/users/${encodeURIComponent(deleteTarget.id)}`, {
         method: 'DELETE',
         body: JSON.stringify({ confirmation: deleteConfirmation })
       });

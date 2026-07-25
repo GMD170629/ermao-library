@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     allowed_origins: tuple[str, ...] = ()
     default_locale: Literal["zh-CN", "en-US"] = "zh-CN"
     session_ttl_seconds: int = Field(default=30 * 24 * 60 * 60, ge=300)
+    password_reset_ttl_seconds: int = Field(default=30 * 60, ge=300, le=24 * 60 * 60)
     worker_poll_seconds: float = Field(default=1.0, ge=0.1, le=60)
     worker_lease_seconds: int = Field(default=300, ge=30, le=3600)
     file_streams_per_user_limit: int = Field(default=8, ge=1, le=128)

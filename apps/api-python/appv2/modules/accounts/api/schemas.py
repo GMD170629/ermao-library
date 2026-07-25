@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import EmailStr, Field
 
-from appv2.modules.accounts.contracts import AccountView
+from appv2.modules.accounts.contracts import AccessScope, AccountView
 from appv2.platform.http import CamelModel
 
 
@@ -29,6 +29,8 @@ class AccountResponse(CamelModel):
     role: str
     locale: str
     scopes: list[str]
+    disabled: bool
+    monitor_folder_ids: list[uuid.UUID]
     created_at: datetime
 
     @classmethod
@@ -40,6 +42,8 @@ class AccountResponse(CamelModel):
             role=account.role,
             locale=account.locale,
             scopes=sorted(scope.value for scope in account.scopes),
+            disabled=account.disabled,
+            monitor_folder_ids=list(account.monitor_folder_ids),
             created_at=account.created_at,
         )
 
@@ -71,3 +75,38 @@ class UpdateAccountPreferences(CamelModel):
 
 class CreateUserRequest(SetupRequest):
     role: Literal["admin", "member"] = "member"
+    scopes: list[AccessScope] | None = None
+    monitor_folder_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class AdminUpdateUserRequest(CamelModel):
+    email: EmailStr | None = None
+    display_name: str | None = Field(default=None, min_length=1, max_length=80)
+    role: Literal["admin", "member"] | None = None
+    disabled: bool | None = None
+    locale: Literal["zh-CN", "en-US"] | None = None
+    scopes: list[AccessScope] | None = None
+    monitor_folder_ids: list[uuid.UUID] | None = None
+
+
+class AdminPasswordRequest(CamelModel):
+    password: str = Field(min_length=10, max_length=1024)
+
+
+class PasswordResetRequest(CamelModel):
+    email: EmailStr
+
+
+class PasswordResetConfirmRequest(CamelModel):
+    token: str = Field(min_length=32, max_length=1024)
+    new_password: str = Field(min_length=10, max_length=1024)
+
+
+class PasswordResetAccepted(CamelModel):
+    accepted: bool = True
+    message: str
+    file_path: str
+
+
+class PasswordResetCompleted(CamelModel):
+    password_reset: bool = True
