@@ -47,6 +47,7 @@ import {
   editionsForDetailTab,
   formatDuration,
   mediaKindForEdition,
+  resolveVolumeIdForSections,
   resolvedDetailTab,
   selectedEditionForDetailTab,
   workDetailTabHref
@@ -168,10 +169,7 @@ function readerUrlForBook(
 ) {
   const editionId = readableEditionId(book, preferredEditionId);
   if (!editionId) return null;
-  const volumeId = [preferredVolumeId, book.recentVolumeId]
-    .find((candidate) => candidate && volumeSections.some((volume) => volume.id === candidate))
-    ?? volumeSections[0]?.id
-    ?? null;
+  const volumeId = resolveVolumeIdForSections(volumeSections, preferredVolumeId, book.recentVolumeId);
   return volumeId ? `/reader/${editionId}?volume=${encodeURIComponent(volumeId)}` : `/reader/${editionId}`;
 }
 
@@ -414,10 +412,15 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         if (nextActiveMedia?.selectedEditionId && nextActiveMedia.selectedEditionId !== selectedEditionId) {
           setSelectedEditionId(nextActiveMedia.selectedEditionId);
         }
-        if (nextVolumeSections.length > 0 && !nextVolumeSections.some((volume) => volume.id === selectedVolumeId)) {
-          const group = nextTab === 'STRUCTURE' ? null : nextBook.mediaGroups?.find((candidate) => candidate.kind === nextTab);
-          setSelectedVolumeId(group?.recentVolumeId ?? nextBook.recentVolumeId ?? nextVolumeSections[0]?.id ?? null);
-        }
+        const group = nextTab === 'STRUCTURE' ? null : nextBook.mediaGroups?.find((candidate) => candidate.kind === nextTab);
+        setSelectedVolumeId((currentVolumeId) => (
+          resolveVolumeIdForSections(
+            nextVolumeSections,
+            currentVolumeId,
+            group?.recentVolumeId,
+            nextBook.recentVolumeId
+          )
+        ));
         setForm({
           title: nextBook.title,
           author: nextBook.author === '未知作者' ? '' : nextBook.author,
@@ -949,7 +952,12 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const hasChapterNavigation = currentTab === 'EBOOK' && selectedEdition?.formatValue === 'EPUB';
   const hasAudioNavigation = currentTab === 'AUDIOBOOK';
   const activeGroup = mediaKind ? book.mediaGroups?.find((candidate) => candidate.kind === mediaKind) : null;
-  const activeVolumeId = selectedVolumeId ?? activeGroup?.recentVolumeId ?? book.recentVolumeId ?? volumeSections[0]?.id ?? null;
+  const activeVolumeId = resolveVolumeIdForSections(
+    volumeSections,
+    selectedVolumeId,
+    activeGroup?.recentVolumeId,
+    book.recentVolumeId
+  );
   const activeVolume = volumeSections.find((volume) => volume.id === activeVolumeId) ?? null;
   const fallbackReaderUrl = currentTab === 'AUDIOBOOK' && readerEditionId
     ? `/works/${encodeURIComponent(book.id)}?detailTab=AUDIOBOOK&editionId=${encodeURIComponent(readerEditionId)}`

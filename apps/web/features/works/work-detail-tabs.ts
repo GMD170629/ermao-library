@@ -115,6 +115,16 @@ export function selectedEditionForDetailTab(
   return editions[0] ?? null;
 }
 
+export function resolveVolumeIdForSections(
+  volumes: ReadonlyArray<{ id: string }>,
+  ...preferredVolumeIds: Array<string | null | undefined>
+): string | null {
+  const availableVolumeIds = new Set(volumes.map((volume) => volume.id));
+  return preferredVolumeIds.find((volumeId): volumeId is string => (
+    Boolean(volumeId && availableVolumeIds.has(volumeId))
+  )) ?? volumes[0]?.id ?? null;
+}
+
 export function moveWorkDetailTab(
   order: readonly WorkDetailTabKey[],
   key: WorkDetailTabKey,

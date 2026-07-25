@@ -8,6 +8,7 @@ import {
   moveWorkDetailTab,
   normalizeWorkDetailTabOrder,
   placeWorkDetailTab,
+  resolveVolumeIdForSections,
   resolvedDetailTab,
   workDetailTabHref
 } from './work-detail-tabs';
@@ -72,6 +73,23 @@ test('reorders tabs without losing any tab', () => {
     placeWorkDetailTab(['EBOOK', 'COMIC', 'AUDIOBOOK', 'STRUCTURE'], 'STRUCTURE', 'COMIC'),
     ['EBOOK', 'STRUCTURE', 'COMIC', 'AUDIOBOOK']
   );
+});
+
+test('keeps volume selection inside the active media edition', () => {
+  const audiobookVolumes = [{ id: 'audio-volume-1' }, { id: 'audio-volume-2' }];
+
+  assert.equal(
+    resolveVolumeIdForSections(audiobookVolumes, 'epub-volume', null),
+    'audio-volume-1'
+  );
+  assert.equal(
+    resolveVolumeIdForSections(audiobookVolumes, 'epub-volume', 'audio-volume-2'),
+    'audio-volume-2'
+  );
+});
+
+test('omits a stale cross-media volume when a single-volume edition has no selector', () => {
+  assert.equal(resolveVolumeIdForSections([], 'epub-volume'), null);
 });
 
 test('formats audiobook durations for chapter rows and hero summaries', () => {
