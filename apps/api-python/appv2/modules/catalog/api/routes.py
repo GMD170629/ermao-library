@@ -109,7 +109,7 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
 
     @router.get("/works", response_model=Page[WorkResponse])
     def works(
-        actor: Writer,
+        actor: Actor,
         page: int = 1,
         page_size: Annotated[int, Query(alias="pageSize", ge=1, le=200)] = 24,
         query: str | None = None,
