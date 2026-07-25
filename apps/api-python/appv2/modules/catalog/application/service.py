@@ -9,6 +9,7 @@ from appv2.modules.catalog.contracts import (
     CatalogImport,
     CatalogUnitOfWork,
     CatalogWork,
+    CategoryView,
     ShelfView,
 )
 from appv2.modules.catalog.domain import Work
@@ -138,6 +139,7 @@ class CatalogService:
         kind: str,
         rules: dict[str, object],
         pinned: bool,
+        book_ids: list[uuid.UUID],
     ) -> ShelfView:
         normalized = " ".join(name.split())
         if not normalized:
@@ -151,6 +153,12 @@ class CatalogService:
                 rules=rules,
                 pinned=pinned,
             )
+            if book_ids and not uow.catalog.replace_shelf_items(
+                shelf.id,
+                owner_id,
+                book_ids,
+            ):
+                raise CatalogNotFound
             uow.commit()
             return shelf
 
@@ -163,6 +171,7 @@ class CatalogService:
         description: str | None,
         rules: dict[str, object] | None,
         pinned: bool | None,
+        book_ids: list[uuid.UUID] | None,
     ) -> ShelfView:
         with self._uow_factory() as uow:
             shelf = uow.catalog.update_shelf(
@@ -175,8 +184,39 @@ class CatalogService:
             )
             if shelf is None:
                 raise CatalogNotFound
+            if (
+                book_ids is not None
+                and shelf.kind == "manual"
+                and not uow.catalog.replace_shelf_items(
+                    shelf_id,
+                    owner_id,
+                    book_ids,
+                )
+            ):
+                raise CatalogNotFound
             uow.commit()
             return shelf
+
+    def get_shelf(
+        self,
+        shelf_id: uuid.UUID,
+        owner_id: uuid.UUID,
+        *,
+        page: int,
+        page_size: int,
+    ) -> tuple[ShelfView, list[CatalogWork], list[uuid.UUID], int]:
+        with self._uow_factory() as uow:
+            shelf = uow.catalog.get_shelf(shelf_id, owner_id)
+            result = uow.catalog.list_shelf_works(
+                shelf_id,
+                owner_id,
+                offset=(page - 1) * page_size,
+                limit=page_size,
+            )
+            if shelf is None or result is None:
+                raise CatalogNotFound
+            works, work_ids, total = result
+            return shelf, works, work_ids, total
 
     def delete_shelf(self, shelf_id: uuid.UUID, owner_id: uuid.UUID) -> None:
         with self._uow_factory() as uow:
@@ -205,3 +245,56 @@ class CatalogService:
     def facets(self) -> dict[str, list[dict[str, object]]]:
         with self._uow_factory() as uow:
             return uow.catalog.category_facets()
+
+    def list_categories(
+        self,
+        *,
+        kind: str,
+        query: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[CategoryView], int]:
+        with self._uow_factory() as uow:
+            return uow.catalog.list_categories(
+                kind=kind,
+                query=query,
+                offset=(page - 1) * page_size,
+                limit=page_size,
+            )
+
+    def rename_category(self, category_id: uuid.UUID, name: str) -> CategoryView:
+        normalized = " ".join(name.split())
+        if not normalized:
+            raise ValueError("category name cannot be empty")
+        with self._uow_factory() as uow:
+            category = uow.catalog.rename_category(category_id, normalized)
+            if category is None:
+                raise CatalogNotFound
+            uow.commit()
+            return category
+
+    def merge_categories(
+        self,
+        *,
+        kind: str,
+        target_id: uuid.UUID,
+        source_ids: list[uuid.UUID],
+    ) -> CategoryView:
+        if target_id in source_ids or not source_ids:
+            raise ValueError("category merge requires distinct source categories")
+        with self._uow_factory() as uow:
+            category = uow.catalog.merge_categories(
+                kind=kind,
+                target_id=target_id,
+                source_ids=source_ids,
+            )
+            if category is None:
+                raise CatalogNotFound
+            uow.commit()
+            return category
+
+    def delete_category(self, category_id: uuid.UUID) -> None:
+        with self._uow_factory() as uow:
+            if not uow.catalog.delete_category(category_id):
+                raise CatalogNotFound
+            uow.commit()

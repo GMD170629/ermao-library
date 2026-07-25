@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import { CheckCircle2, GitMerge, Loader2, RotateCcw, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Badge } from '../../components/ui/badge';
@@ -32,7 +34,7 @@ export function DuplicateManagementPanel() {
     setLoading(true);
     setError('');
     try {
-      const data = await payload<{ groups: DuplicateGroup[] }>(await fetch('/api/library/duplicates'), '读取重复项失败');
+      const data = await payload<{ groups: DuplicateGroup[] }>(await apiV2Fetch('/api/v2/catalog/duplicates'), '读取重复项失败');
       setGroups(data.groups);
       setTargets(Object.fromEntries(data.groups.map((group) => [group.id, group.works[0]?.id ?? ''])));
     } catch (reason) {
@@ -51,7 +53,7 @@ export function DuplicateManagementPanel() {
     setError('');
     try {
       const data = await payload<{ operation: { id: string; summary: string; undoAvailable: boolean } }>(
-        await fetch('/api/library/duplicates/merge', {
+        await apiV2Fetch('/api/v2/catalog/duplicates/merge', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ targetWorkId, sourceWorkIds: group.works.filter((work) => work.id !== targetWorkId).map((work) => work.id) })
@@ -73,7 +75,7 @@ export function DuplicateManagementPanel() {
   async function undo() {
     if (!lastOperation) return;
     try {
-      await payload(await fetch(`/api/library/operations/${lastOperation.id}/undo`, { method: 'POST' }), '撤销失败');
+      await payload(await apiV2Fetch(`/api/v2/catalog/operations/${lastOperation.id}/undo`, { method: 'POST' }), '撤销失败');
       toast.success('已撤销合并');
       setLastOperation(null);
       await load();

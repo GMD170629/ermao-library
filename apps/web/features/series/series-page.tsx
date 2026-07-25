@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import { ArrowLeft, BookOpen, Layers, Search } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -76,7 +78,7 @@ export function SeriesPage({ initialName = '' }: { initialName?: string }) {
     setError('');
 
     if (!seriesName) {
-      fetch('/api/series?visibility=active&limit=100')
+      apiV2Fetch('/api/v2/catalog/series?visibility=active&limit=100')
         .then((response) => readApiJson<SeriesPayload>(response, '读取系列失败'))
         .then((payload) => {
           if (!active) return;
@@ -103,7 +105,7 @@ export function SeriesPage({ initialName = '' }: { initialName?: string }) {
       seriesName,
       sort
     });
-    fetch(`/api/works?${params}`)
+    apiV2Fetch(`/api/v2/catalog/works?${params}`)
       .then((response) => readApiJson<BooksPayload>(response, '读取系列图书失败'))
       .then((payload) => {
         if (!active) return;

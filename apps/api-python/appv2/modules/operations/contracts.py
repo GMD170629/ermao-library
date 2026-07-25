@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -65,6 +66,14 @@ class BackupView:
     updated_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class BackupArchive:
+    body: Iterable[bytes]
+    filename: str
+    size_bytes: int
+    checksum: str
+
+
 class OperationsRepository(Protocol):
     def list_settings(self) -> list[SettingView]: ...
 
@@ -123,6 +132,8 @@ class BackupExecutorPort(Protocol):
     def create(self, backup: BackupView) -> tuple[str, int]: ...
 
     def delete(self, backup: BackupView) -> None: ...
+
+    def open(self, backup: BackupView) -> BackupArchive: ...
 
 
 class RestoreControlPort(Protocol):

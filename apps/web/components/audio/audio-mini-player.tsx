@@ -115,7 +115,7 @@ export function AudioMiniPlayer() {
   if (pendingSummary) {
     const pendingCoverUrl = pendingSummary.coverUrl
       ? withBasePath(pendingSummary.coverUrl)
-      : withBasePath(`/api/works/${encodeURIComponent(pendingSummary.workId)}/cover?size=small`);
+      : withBasePath(`/api/v2/catalog/works/${encodeURIComponent(pendingSummary.workId)}/cover?size=small`);
     const pendingHref = `/works/${encodeURIComponent(pendingSummary.workId)}?detailTab=AUDIOBOOK&editionId=${encodeURIComponent(pendingSummary.editionId)}`;
     return (
       <section
@@ -161,7 +161,7 @@ export function AudioMiniPlayer() {
 
   const coverUrl = bootstrap.book.coverUrl
     ? withBasePath(bootstrap.book.coverUrl)
-    : withBasePath(`/api/works/${encodeURIComponent(bootstrap.book.id)}/cover?size=small`);
+    : withBasePath(`/api/v2/catalog/works/${encodeURIComponent(bootstrap.book.id)}/cover?size=small`);
   const workHref = `/works/${encodeURIComponent(bootstrap.edition.workId)}?detailTab=AUDIOBOOK&editionId=${encodeURIComponent(bootstrap.edition.id)}`;
   const isPlaying = player.lifecycle === 'playing';
   const isLoading = player.lifecycle === 'loading';

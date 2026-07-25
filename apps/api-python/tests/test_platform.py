@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import uuid
+import zipfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from pydantic import SecretStr, ValidationError
 
+from appv2.modules.catalog.contracts import CatalogFile
+from appv2.modules.ingestion.infrastructure.files import MonitorFileDiscovery
+from appv2.modules.operations.contracts import BackupView
+from appv2.modules.operations.infrastructure.backup import PgBackupExecutor
+from appv2.modules.reading.infrastructure.resources import LocalReaderResources
 from appv2.platform.auth import PasswordHasher, new_session_token, token_digest
 from appv2.platform.config import Settings
 from appv2.platform.filesystem import StorageLayout
@@ -83,3 +91,73 @@ def test_storage_layout_never_uses_legacy_database_directory(tmp_path: Path) -> 
     assert not (tmp_path / "database").exists()
     with pytest.raises(ValueError):
         layout.resolve_inside(tmp_path / "outside")
+
+
+def test_monitor_tree_is_bounded_and_lists_directories(tmp_path: Path) -> None:
+    monitor = tmp_path / "monitor"
+    (monitor / "Series" / "Book").mkdir(parents=True)
+    discovery = MonitorFileDiscovery(monitor)
+
+    root, configured = discovery.tree()
+    assert configured == str(monitor.resolve())
+    assert root.path == str(monitor.resolve())
+    assert [child.name for child in root.children] == ["Series"]
+
+    series, _ = discovery.tree(str(monitor / "Series"))
+    assert [child.name for child in series.children] == ["Book"]
+    with pytest.raises(ValueError):
+        discovery.tree(str(tmp_path))
+
+
+def test_cbz_pages_are_naturally_sorted_and_streamed(tmp_path: Path) -> None:
+    archive = tmp_path / "comic.cbz"
+    with zipfile.ZipFile(archive, "w") as target:
+        target.writestr("chapter/page10.jpg", b"page-ten")
+        target.writestr("chapter/page2.png", b"page-two")
+        target.writestr("__MACOSX/ignored.jpg", b"ignored")
+        target.writestr("notes.txt", b"ignored")
+    catalog_file = CatalogFile(
+        id=uuid.uuid4(),
+        edition_id=uuid.uuid4(),
+        storage_path=str(archive),
+        original_name=archive.name,
+        media_type="application/vnd.comicbook+zip",
+        size_bytes=archive.stat().st_size,
+        checksum="abc123",
+    )
+    resources = LocalReaderResources(allowed_roots=(tmp_path,), streams_per_user=2)
+
+    pages = resources.comic_pages(catalog_file)
+    assert [page.title for page in pages] == ["page2.png", "page10.jpg"]
+    stream = resources.open_comic_page(catalog_file, page_index=1, stream_key="reader")
+    assert stream.media_type == "image/png"
+    assert b"".join(stream.body) == b"page-two"
+    with pytest.raises(ValueError):
+        resources.open_comic_page(catalog_file, page_index=3, stream_key="reader")
+
+
+def test_completed_backup_archive_can_be_streamed(tmp_path: Path) -> None:
+    archive = tmp_path / "backup.dump"
+    archive.write_bytes(b"postgres-custom-backup")
+    now = datetime.now(UTC)
+    backup = BackupView(
+        id=uuid.uuid4(),
+        status="completed",
+        archive_name=archive.name,
+        app_version="0.4.0",
+        postgres_major=18,
+        alembic_revision="0001_appv2_initial",
+        checksum="checksum",
+        size_bytes=archive.stat().st_size,
+        error_detail=None,
+        created_at=now,
+        updated_at=now,
+    )
+    executor = PgBackupExecutor(
+        database_url="postgresql+psycopg://unused",
+        backups_root=tmp_path,
+    )
+
+    opened = executor.open(backup)
+    assert opened.filename == archive.name
+    assert b"".join(opened.body) == archive.read_bytes()

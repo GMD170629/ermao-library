@@ -2,15 +2,17 @@ import uuid
 from collections.abc import Callable
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Depends, Response, status
+from fastapi import APIRouter, Cookie, Depends, Query, Response, status
 
 from appv2.modules.accounts.api.schemas import (
+    AccountPreferences,
     AccountResponse,
     CreateUserRequest,
     LoginRequest,
     SessionResponse,
     SetupRequest,
     SetupStatusResponse,
+    UpdateAccountPreferences,
     UpdateAccountRequest,
 )
 from appv2.modules.accounts.application import (
@@ -159,6 +161,7 @@ def create_router(
                 email=str(payload.email) if payload.email is not None else None,
                 display_name=payload.display_name,
                 password=payload.password,
+                current_password=payload.current_password,
                 locale=payload.locale,
             )
         except AccountConflict as error:
@@ -168,7 +171,27 @@ def create_router(
                 title="Account conflict",
                 message_key="conflict",
             ) from error
+        except AuthenticationFailed as error:
+            raise AppProblem(
+                status=403,
+                code="CURRENT_PASSWORD_INVALID",
+                title="Current password is invalid",
+                message_key="permission_denied",
+            ) from error
         return AccountResponse.from_view(updated)
+
+    @router.get("/account/preferences", response_model=AccountPreferences)
+    def preferences(
+        actor: Annotated[AccountView, Depends(current_account)],
+    ) -> AccountPreferences:
+        return AccountPreferences(values=service.preferences(actor.id))
+
+    @router.patch("/account/preferences", response_model=AccountPreferences)
+    def save_preferences(
+        payload: UpdateAccountPreferences,
+        actor: Annotated[AccountView, Depends(current_account)],
+    ) -> AccountPreferences:
+        return AccountPreferences(values=service.save_preferences(actor.id, payload.values))
 
     def admin_actor(
         actor: Annotated[AccountView, Depends(current_account)],
@@ -179,7 +202,7 @@ def create_router(
     def users(
         actor: Annotated[AccountView, Depends(admin_actor)],
         page: int = 1,
-        page_size: int = 24,
+        page_size: Annotated[int, Query(alias="pageSize", ge=1, le=200)] = 24,
     ) -> Page[AccountResponse]:
         del actor
         items, total = service.list_users(page=page, page_size=min(page_size, 200))

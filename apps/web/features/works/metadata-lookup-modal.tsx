@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import { CheckCircle2, Search, Sparkles, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '../../components/ui/badge';
@@ -85,7 +87,7 @@ function isCoverField(field: MetadataField) {
 
 function previewCoverUrl(value: string) {
   if (value.startsWith('/')) return withBasePath(value);
-  return withBasePath(`/api/metadata/cover-proxy?url=${encodeURIComponent(value)}`);
+  return withBasePath(`/api/v2/metadata/cover-proxy?url=${encodeURIComponent(value)}`);
 }
 
 function defaultFields(book: WorkView, candidate: MetadataCandidate | null) {
@@ -141,7 +143,7 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
     setSelectedFields([]);
     setMessage('');
     setError('');
-    fetch('/api/metadata/providers', { cache: 'no-store' })
+    apiV2Fetch('/api/v2/metadata/providers', { cache: 'no-store' })
       .then((response) => response.json() as Promise<{ ok: boolean; data?: { providers: MetadataProviderOption[]; pipelines?: MetadataProviderPipeline[] }; error?: { message: string } }>)
       .then((payload) => {
         if (!payload.ok) throw new Error(payload.error?.message ?? '读取元数据插件失败');
@@ -165,7 +167,7 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
     setError('');
     setMessage('');
     try {
-      const response = await fetch(`/api/works/${book.id}/metadata/search`, {
+      const response = await apiV2Fetch(`/api/v2/catalog/works/${book.id}/metadata/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ source, query })
@@ -189,7 +191,7 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
     setError('');
     setMessage('');
     try {
-      const response = await fetch(`/api/works/${book.id}/metadata/apply`, {
+      const response = await apiV2Fetch(`/api/v2/catalog/works/${book.id}/metadata/apply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ source, candidate: selected, fields: selectedFields })

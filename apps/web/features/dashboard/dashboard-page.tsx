@@ -1,5 +1,8 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+import type { DashboardResponse } from '@/generated/api-v2';
+
 import { ArrowRight, BookOpen, Headphones, Images, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -29,13 +32,6 @@ type ContinueItem = {
   narrator: string | null;
 } | null;
 
-async function api<T>(path: string): Promise<T> {
-  const response = await fetch(path);
-  const payload = (await response.json()) as { ok: boolean; data?: T; error?: { message: string } };
-  if (!payload.ok || !payload.data) throw new Error(payload.error?.message ?? '读取数据失败');
-  return payload.data;
-}
-
 function shortReadTime(value: string, locale: string, t: (source: string, values?: Record<string, string>) => string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
@@ -64,22 +60,36 @@ export function DashboardPage() {
 
   useEffect(() => {
     let active = true;
-    Promise.allSettled([
-      api<{ item: ContinueItem }>('/api/dashboard/continue-reading'),
-      api<{ books: BookshelfItem[] }>('/api/dashboard/recent-reading?limit=10'),
-      api<{ books: BookshelfItem[] }>('/api/dashboard/recent-books?limit=10')
-    ]).then(([continueResult, readingResult, addedResult]) => {
-      if (!active) return;
-      if (continueResult.status === 'fulfilled') setContinueItem(continueResult.value.item);
-      if (readingResult.status === 'fulfilled') {
-        setRecentReading(readingResult.value.books.slice(0, 10));
-      }
-      if (addedResult.status === 'fulfilled') setRecentBooks(addedResult.value.books.slice(0, 10));
-
-      const failure = [continueResult, readingResult, addedResult].find((result) => result.status === 'rejected');
-      setError(failure?.status === 'rejected' ? (failure.reason instanceof Error ? failure.reason.message : '部分书库内容暂时无法读取') : '');
-      setLoading(false);
-    });
+    apiV2Fetch('/api/v2/reporting/dashboard')
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`读取数据失败（HTTP ${response.status}）`);
+        return response.json() as Promise<DashboardResponse>;
+      })
+      .then((dashboard) => {
+        if (!active) return;
+        const books = dashboard.recentItems.flatMap((item): BookshelfItem[] => {
+          if (typeof item.id !== 'string' || typeof item.title !== 'string') return [];
+          return [{
+            id: item.id,
+            title: item.title,
+            author: typeof item.author === 'string' ? item.author : '',
+            format: typeof item.mediaType === 'string' ? item.mediaType : '',
+            coverUrl: `/api/v2/catalog/works/${encodeURIComponent(item.id)}/cover`
+          }];
+        });
+        setContinueItem(null);
+        setRecentReading([]);
+        setRecentBooks(books.slice(0, 10));
+        setError('');
+      })
+      .catch((reason) => {
+        if (active) {
+          setError(reason instanceof Error ? reason.message : '部分书库内容暂时无法读取');
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
     return () => {
       active = false;
     };

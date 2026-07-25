@@ -15,7 +15,11 @@ from appv2.modules.accounts.contracts import (
     AccountView,
     SessionsRepository,
 )
-from appv2.modules.accounts.infrastructure.models import SessionRecord, UserRecord
+from appv2.modules.accounts.infrastructure.models import (
+    AccountPreferenceRecord,
+    SessionRecord,
+    UserRecord,
+)
 
 
 def _view(record: UserRecord) -> AccountView:
@@ -120,6 +124,43 @@ class SqlAccountsRepository(AccountsRepository):
         record.disabled_at = datetime.now(UTC)
         self._session.flush()
         return True
+
+    def preferences(self, user_id: uuid.UUID) -> dict[str, object]:
+        records = self._session.scalars(
+            select(AccountPreferenceRecord)
+            .where(AccountPreferenceRecord.user_id == user_id)
+            .order_by(AccountPreferenceRecord.key)
+        ).all()
+        return {record.key: record.value for record in records}
+
+    def save_preferences(
+        self,
+        user_id: uuid.UUID,
+        values: dict[str, object],
+    ) -> dict[str, object]:
+        existing = {
+            record.key: record
+            for record in self._session.scalars(
+                select(AccountPreferenceRecord).where(
+                    AccountPreferenceRecord.user_id == user_id,
+                    AccountPreferenceRecord.key.in_(values),
+                )
+            ).all()
+        }
+        for key, value in values.items():
+            record = existing.get(key)
+            if record is None:
+                self._session.add(
+                    AccountPreferenceRecord(
+                        user_id=user_id,
+                        key=key,
+                        value=value,
+                    )
+                )
+            else:
+                record.value = value
+        self._session.flush()
+        return self.preferences(user_id)
 
 
 class SqlSessionsRepository(SessionsRepository):

@@ -4,7 +4,7 @@ import json
 import sys
 from pathlib import Path
 
-from app.main import app
+from appv2.entrypoints.api import app
 
 
 def main() -> None:

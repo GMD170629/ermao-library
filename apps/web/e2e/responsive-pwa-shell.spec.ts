@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 async function mockWebAppApi(page: Page) {
   await page.route('**/api/**', async (route) => {
     const pathname = new URL(route.request().url()).pathname;
-    if (pathname.endsWith('/api/auth/me')) {
+    if (pathname.endsWith('/api/v2/account')) {
       await route.fulfill({
         json: {
           ok: true,
@@ -22,15 +22,15 @@ async function mockWebAppApi(page: Page) {
       });
       return;
     }
-    if (pathname.endsWith('/api/dashboard/continue-reading')) {
+    if (pathname.endsWith('/api/v2/reporting/dashboard/continue-reading')) {
       await route.fulfill({ json: { ok: true, data: { item: null } } });
       return;
     }
-    if (pathname.endsWith('/api/dashboard/recent-reading') || pathname.endsWith('/api/dashboard/recent-books') || pathname.endsWith('/api/works')) {
+    if (pathname.endsWith('/api/v2/reporting/dashboard/recent-reading') || pathname.endsWith('/api/v2/reporting/dashboard/recent-books') || pathname.endsWith('/api/v2/catalog/works')) {
       await route.fulfill({ json: { ok: true, data: { books: [], total: 0 } } });
       return;
     }
-    if (pathname.endsWith('/api/shelves')) {
+    if (pathname.endsWith('/api/v2/catalog/shelves')) {
       await route.fulfill({ json: { ok: true, data: { shelves: [{ id: 'to-read', name: '待读' }] } } });
       return;
     }
@@ -148,11 +148,11 @@ test('dashboard recent shelves share a ten-book horizontal rail without visible 
     title: `最近加入 ${index + 1}`
   }));
 
-  await page.route('**/api/dashboard/recent-reading?**', async (route) => {
+  await page.route('**/api/v2/reporting/dashboard/recent-reading?**', async (route) => {
     requestedQueries.push(route.request().url());
     await route.fulfill({ json: { ok: true, data: { books: recentReading } } });
   });
-  await page.route('**/api/dashboard/recent-books?**', async (route) => {
+  await page.route('**/api/v2/reporting/dashboard/recent-books?**', async (route) => {
     requestedQueries.push(route.request().url());
     await route.fulfill({ json: { ok: true, data: { books: recentAdded } } });
   });
@@ -218,7 +218,7 @@ test('wide shelf details use responsive bookshelf rows and load more on scroll',
     });
   });
 
-  await page.route('**/api/shelves/wide-shelf**', async (route) => {
+  await page.route('**/api/v2/catalog/shelves/wide-shelf**', async (route) => {
     const url = new URL(route.request().url());
     shelfRequestUrls.push(url.toString());
     const requestedPage = Number(url.searchParams.get('page') ?? '1');
@@ -398,7 +398,7 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
     metadataQuality: 20
   };
 
-  await page.route('**/api/works?**', async (route) => {
+  await page.route('**/api/v2/catalog/works?**', async (route) => {
     await route.fulfill({ json: { ok: true, data: { books: [mobileBook], total: 1, page: 1, pageSize: 24, totalPages: 1 } } });
   });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -414,7 +414,7 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
 
   const organizePage = await context.newPage();
   await mockWebAppApi(organizePage);
-  await organizePage.route('**/api/organize/jobs?**', async (route) => {
+  await organizePage.route('**/api/v2/metadata/jobs?**', async (route) => {
     await route.fulfill({
       json: {
         ok: true,
@@ -443,7 +443,7 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
 
   const logsPage = await context.newPage();
   await mockWebAppApi(logsPage);
-  await logsPage.route('**/api/management/events?**', async (route) => {
+  await logsPage.route('**/api/v2/operations/events?**', async (route) => {
     await route.fulfill({
       json: {
         ok: true,
@@ -485,7 +485,7 @@ test('all-books shelves load the next batch while scrolling down', async ({ page
     gradient: 'from-orange-100 to-stone-200'
   }));
 
-  await page.route('**/api/works?**', async (route) => {
+  await page.route('**/api/v2/catalog/works?**', async (route) => {
     const url = new URL(route.request().url());
     const requestedPage = Number(url.searchParams.get('page') ?? '1');
     const requestedPageSize = Number(url.searchParams.get('pageSize') ?? '50');
@@ -539,7 +539,7 @@ test('desktop book list opens details from both the cover and title', async ({ p
     coverUrl: '',
     gradient: 'from-orange-100 to-stone-200'
   };
-  await page.route('**/api/works?**', async (route) => {
+  await page.route('**/api/v2/catalog/works?**', async (route) => {
     const requestUrl = new URL(route.request().url());
     const requestedPageSize = requestUrl.searchParams.get('pageSize') ?? '';
     const requestedSort = requestUrl.searchParams.get('sort') ?? '';

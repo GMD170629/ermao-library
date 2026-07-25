@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 async function mockExpiredSession(page: Page) {
-  await page.route('**/api/auth/me', async (route) => {
+  await page.route('**/api/v2/account', async (route) => {
     await route.fulfill({
       status: 401,
       json: { ok: false, error: { message: 'UNAUTHORIZED' } }
@@ -10,7 +10,7 @@ async function mockExpiredSession(page: Page) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.route('**/api/auth/setup/status', async (route) => {
+  await page.route('**/api/v2/auth/setup/status', async (route) => {
     await route.fulfill({ json: { ok: true, data: { initialized: true } } });
   });
 });

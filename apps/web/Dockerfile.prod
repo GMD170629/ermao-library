@@ -24,12 +24,22 @@ ENV NODE_ENV=production \
   PORT=3000 \
   PYTHONDONTWRITEBYTECODE=1 \
   PYTHONUNBUFFERED=1 \
+  PG_MAJOR=18 \
   PATH=/opt/shuku-python/bin:$PATH
 
 COPY --from=deps /usr/local/bin/node /usr/local/bin/node
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssl ca-certificates libmobi-tools libstdc++6 \
+  && apt-get install -y --no-install-recommends openssl ca-certificates curl gnupg \
+  && install -d /usr/share/postgresql-common/pgdg \
+  && curl --fail --show-error --silent \
+      https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+      | gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg \
+  && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends \
+      libmobi-tools libstdc++6 postgresql-client-18 \
   && rm -rf /var/lib/apt/lists/* \
   && node --version \
   && python --version
@@ -38,14 +48,24 @@ COPY --from=builder /app/scripts/start-unified-app.sh ./scripts/start-unified-ap
 COPY --from=builder /app/apps/web/.next/standalone ./
 COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder /app/apps/web/public ./apps/web/public
-COPY --from=builder /app/apps/api-python/app ./apps/api-python/app
+COPY --from=builder /app/apps/api-python/appv2 ./apps/api-python/appv2
+COPY --from=builder /app/apps/api-python/alembic-v2.ini ./apps/api-python/alembic-v2.ini
+COPY --from=builder /app/apps/api-python/migrations-v2 ./apps/api-python/migrations-v2
 COPY --from=builder /app/apps/api-python/pyproject.toml ./apps/api-python/pyproject.toml
 RUN python -m venv /opt/shuku-python \
   && /opt/shuku-python/bin/pip install --no-cache-dir ./apps/api-python \
-  && /opt/shuku-python/bin/python -m compileall -q ./apps/api-python/app \
+  && /opt/shuku-python/bin/python -m compileall -q ./apps/api-python/appv2 \
   && rm -rf ./apps/api-python/build ./apps/api-python/*.egg-info \
   && chmod +x ./scripts/start-unified-app.sh \
-  && mkdir -p /app/storage/database /app/storage/covers /app/storage/indexes /app/storage/conversions /app/storage/temp/conversions /app/storage/logs /books
+  && mkdir -p \
+      /app/storage/v2/covers \
+      /app/storage/v2/conversions \
+      /app/storage/v2/temp \
+      /app/storage/v2/backups \
+      /app/storage/v2/control \
+      /app/storage/v2/logs \
+      /app/storage/v2/secrets \
+      /books
 
 EXPOSE 3000
 CMD ["./scripts/start-unified-app.sh"]

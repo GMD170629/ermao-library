@@ -1,3 +1,4 @@
+import { apiV2Fetch } from '@/lib/api-v2';
 import { withBasePath } from '../../lib/base-path';
 import { clamp, orderedChapters, orderedTracks } from './audio-model';
 import type { AudioBootstrap, AudioChapter, AudioLocation, AudioTrack, AudioVolumeSummary } from './types';
@@ -24,7 +25,7 @@ function normalizeTrack(value: unknown, index: number): AudioTrack | null {
   const item = record(value);
   const fileId = stringValue(item.fileId ?? item.file_id).trim();
   if (!fileId) return null;
-  const url = stringValue(item.url, `/api/files/${encodeURIComponent(fileId)}`);
+  const url = stringValue(item.url, `/api/v2/reading/files/${encodeURIComponent(fileId)}`);
   return {
     fileId,
     title: stringValue(item.title, `音轨 ${index + 1}`),
@@ -69,7 +70,46 @@ function normalizeLocation(value: unknown): AudioLocation | null {
 
 export function normalizeAudioBootstrap(input: unknown, requestedEditionId = ''): AudioBootstrap {
   const root = record(input);
-  const raw = root.ok === true && root.data ? record(root.data) : root;
+  const target = record(root.target);
+  const progress = record(root.progress);
+  const preference = record(root.preference);
+  const targetFormat = stringValue(target.format).toLowerCase();
+  const directV2 = typeof target.editionId === 'string';
+  const raw = directV2
+    ? {
+        schemaVersion: 2,
+        userId: root.accountId,
+        readerType: ['audio', 'mp3', 'm4a', 'm4b', 'aac', 'flac', 'ogg', 'opus'].includes(targetFormat)
+          ? 'audio'
+          : targetFormat,
+        contentFingerprint: target.checksum,
+        book: {
+          id: target.workId,
+          title: target.workTitle,
+          author: target.workAuthor,
+          coverUrl: null
+        },
+        edition: {
+          id: target.editionId,
+          workId: target.workId,
+          versionName: target.editionTitle
+        },
+        volumes: [],
+        tracks: [{
+          fileId: target.fileId,
+          title: target.editionTitle,
+          url: target.resourceUrl,
+          mimeType: target.mediaType,
+          durationMs: 0,
+          sortOrder: 0
+        }],
+        chapters: [],
+        totalDurationMs: 0,
+        resumeLocation: record(progress.position).location ?? progress.position,
+        progressPercent: numberValue(progress.percentage) * 100,
+        serverPreferences: { settings: preference.values ?? {} }
+      }
+    : root.ok === true && root.data ? record(root.data) : root;
   const schemaVersion = raw.schemaVersion ?? raw.schema_version;
   if (schemaVersion !== undefined && schemaVersion !== 2) throw new Error('当前客户端不支持这个有声书启动协议版本');
   if (raw.readerType !== 'audio' && raw.reader_type !== 'audio') throw new Error('该版本不是可播放的有声书');
@@ -137,7 +177,7 @@ export function normalizeAudioBootstrap(input: unknown, requestedEditionId = '')
 
 export async function fetchAudioBootstrap(editionId: string, volumeId?: string | null, signal?: AbortSignal) {
   const query = volumeId ? `?volume=${encodeURIComponent(volumeId)}` : '';
-  const response = await fetch(`/api/reader/v2/editions/${encodeURIComponent(editionId)}/bootstrap${query}`, {
+  const response = await apiV2Fetch(`/api/v2/reading/editions/${encodeURIComponent(editionId)}/bootstrap${query}`, {
     credentials: 'same-origin',
     cache: 'no-store',
     signal

@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test';
 
 test('an uninitialized installation opens the account setup wizard', async ({ page }) => {
-  await page.route('**/api/auth/setup/status', async (route) => {
+  await page.route('**/api/v2/auth/setup/status', async (route) => {
     await route.fulfill({ json: { ok: true, data: { initialized: false } } });
   });
-  await page.route('**/api/auth/setup', async (route) => {
+  await page.route('**/api/v2/auth/setup', async (route) => {
     expect(route.request().method()).toBe('POST');
     expect(route.request().postDataJSON()).toEqual({
       name: '二毛',
@@ -23,7 +23,7 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
       }
     });
   });
-  await page.route('**/api/monitor-folders', async (route) => {
+  await page.route('**/api/v2/ingestion/folders', async (route) => {
     if (route.request().method() === 'GET') {
       await route.fulfill({ json: { ok: true, data: { folders: [], monitorRoot: '/monitor' } } });
       return;
@@ -67,10 +67,10 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
 });
 
 test('an initialized installation cannot reopen the setup wizard', async ({ page }) => {
-  await page.route('**/api/auth/setup/status', async (route) => {
+  await page.route('**/api/v2/auth/setup/status', async (route) => {
     await route.fulfill({ json: { ok: true, data: { initialized: true } } });
   });
-  await page.route('**/api/auth/me', async (route) => {
+  await page.route('**/api/v2/account', async (route) => {
     await route.fulfill({ status: 401, json: { ok: false, error: { message: 'UNAUTHORIZED' } } });
   });
 
@@ -89,10 +89,10 @@ test('an authenticated owner can resume unfinished library onboarding after refr
       folderPath: '/monitor'
     }));
   });
-  await page.route('**/api/auth/setup/status', async (route) => {
+  await page.route('**/api/v2/auth/setup/status', async (route) => {
     await route.fulfill({ json: { ok: true, data: { initialized: true } } });
   });
-  await page.route('**/api/auth/me', async (route) => {
+  await page.route('**/api/v2/account', async (route) => {
     await route.fulfill({ json: { ok: true, data: { user: { email: 'owner@example.com' } } } });
   });
 
@@ -103,10 +103,10 @@ test('an authenticated owner can resume unfinished library onboarding after refr
 });
 
 test('login shows password errors in the system feedback style and in Chinese', async ({ page }) => {
-  await page.route('**/api/auth/setup/status', async (route) => {
+  await page.route('**/api/v2/auth/setup/status', async (route) => {
     await route.fulfill({ json: { ok: true, data: { initialized: true } } });
   });
-  await page.route('**/api/auth/login', async (route) => {
+  await page.route('**/api/v2/auth/login', async (route) => {
     await route.fulfill({ status: 401, json: { ok: false, error: { message: 'Incorrect email or password' } } });
   });
 
@@ -124,14 +124,14 @@ test('login shows password errors in the system feedback style and in Chinese', 
 
 test('login recovers to setup when the initial status check was unavailable', async ({ page }) => {
   let loginAttempted = false;
-  await page.route('**/api/auth/setup/status', async (route) => {
+  await page.route('**/api/v2/auth/setup/status', async (route) => {
     if (!loginAttempted) {
       await route.fulfill({ status: 503, json: { ok: false, error: { message: '暂时不可用' } } });
       return;
     }
     await route.fulfill({ json: { ok: true, data: { initialized: false } } });
   });
-  await page.route('**/api/auth/login', async (route) => {
+  await page.route('**/api/v2/auth/login', async (route) => {
     loginAttempted = true;
     await route.fulfill({
       status: 409,

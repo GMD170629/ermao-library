@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import { KeyRound, Plus, Save, ShieldCheck, Trash2, UserRoundCheck, UserRoundX } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Button } from '../../../components/ui/button';
@@ -71,7 +73,7 @@ function formFromUser(user: ManagedUser): UserForm {
 }
 
 async function apiRequest(path: string, init?: RequestInit) {
-  const response = await fetch(path, {
+  const response = await apiV2Fetch(path, {
     credentials: 'same-origin',
     ...init,
     headers: init?.body ? { 'Content-Type': 'application/json', ...init.headers } : init?.headers
@@ -110,8 +112,8 @@ export function UsersPermissionsPage() {
     setLoading(true);
     try {
       const [usersData, folderData] = await Promise.all([
-        apiRequest('/api/admin/users'),
-        apiRequest('/api/monitor-folders')
+        apiRequest('/api/v2/admin/users'),
+        apiRequest('/api/v2/ingestion/folders')
       ]);
       const nextUsers = (usersData?.users ?? []) as ManagedUser[];
       setUsers(nextUsers);
@@ -177,7 +179,7 @@ export function UsersPermissionsPage() {
         ...(creating ? { password: form.password } : {})
       };
       const data = await apiRequest(
-        creating ? '/api/admin/users' : `/api/admin/users/${encodeURIComponent(selectedId ?? '')}`,
+        creating ? '/api/v2/admin/users' : `/api/v2/admin/users/${encodeURIComponent(selectedId ?? '')}`,
         { method: creating ? 'POST' : 'PATCH', body: JSON.stringify(body) }
       );
       toast.success(creating ? t('用户已创建') : t('用户与权限已更新'));
@@ -192,7 +194,7 @@ export function UsersPermissionsPage() {
 
   async function toggleStatus(user: ManagedUser) {
     try {
-      await apiRequest(`/api/admin/users/${encodeURIComponent(user.id)}`, {
+      await apiRequest(`/api/v2/admin/users/${encodeURIComponent(user.id)}`, {
         method: 'PATCH',
         body: JSON.stringify({ status: user.status === 'active' ? 'disabled' : 'active' })
       });
@@ -207,7 +209,7 @@ export function UsersPermissionsPage() {
     event.preventDefault();
     if (!passwordTarget) return;
     try {
-      await apiRequest(`/api/admin/users/${encodeURIComponent(passwordTarget.id)}/password`, {
+      await apiRequest(`/api/v2/admin/users/${encodeURIComponent(passwordTarget.id)}/password`, {
         method: 'PUT',
         body: JSON.stringify({ password })
       });
@@ -223,7 +225,7 @@ export function UsersPermissionsPage() {
     event.preventDefault();
     if (!deleteTarget) return;
     try {
-      await apiRequest(`/api/admin/users/${encodeURIComponent(deleteTarget.id)}`, {
+      await apiRequest(`/api/v2/admin/users/${encodeURIComponent(deleteTarget.id)}`, {
         method: 'DELETE',
         body: JSON.stringify({ confirmation: deleteConfirmation })
       });

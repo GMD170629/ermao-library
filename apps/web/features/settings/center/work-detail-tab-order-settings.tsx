@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import { ArrowDown, ArrowUp, GripVertical, RotateCcw, Save } from 'lucide-react';
 import type { DragEvent } from 'react';
 import { useEffect, useMemo, useState } from 'react';
@@ -37,7 +39,7 @@ export function WorkDetailTabOrderSettings() {
 
   useEffect(() => {
     let active = true;
-    fetch('/api/system-settings')
+    apiV2Fetch('/api/v2/operations/settings')
       .then((response) => response.json() as Promise<SettingsPayload>)
       .then((payload) => {
         if (!active) return;
@@ -58,7 +60,7 @@ export function WorkDetailTabOrderSettings() {
   async function saveOrder() {
     setSaving(true);
     try {
-      const response = await fetch('/api/system-settings', {
+      const response = await apiV2Fetch('/api/v2/operations/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ settings: { [settingKey]: order } })

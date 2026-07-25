@@ -1,5 +1,13 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+import type {
+  FolderResponse,
+  ProblemDetails,
+  SessionResponse,
+  SetupStatusResponse
+} from '@/generated/api-v2';
+
 import { AlertCircle, ArrowRight, Check, Database, FolderPlus, Loader2, ShieldCheck, UserRoundPlus } from 'lucide-react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
@@ -11,13 +19,6 @@ import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type SetupStage = 'checking' | 'account' | 'creating-account' | 'folder' | 'saving-folder' | 'complete' | 'unavailable';
-type SetupPayload = {
-  ok: boolean;
-  data?: { initialized?: boolean; user?: { email?: string; name?: string } };
-  error?: { message?: string };
-  detail?: Array<{ loc?: Array<string | number>; msg?: string }>;
-};
-
 const setupProgressKey = 'shuku.setup.progress';
 
 type SetupProgress = {
@@ -26,23 +27,6 @@ type SetupProgress = {
   folderAdded: boolean;
   folderPath: string;
 };
-
-async function readSetupPayload(response: Response): Promise<SetupPayload> {
-  const contentType = response.headers.get('content-type') ?? '';
-  if (contentType.includes('application/json')) {
-    const payload = await response.json() as SetupPayload;
-    if (!payload.error?.message && payload.detail?.length) {
-      const passwordError = payload.detail.find((item) => item.loc?.includes('password'));
-      return {
-        ...payload,
-        error: { message: passwordError ? '密码格式不正确，请至少输入 10 位' : '账户信息格式不正确，请检查后重试' }
-      };
-    }
-    return payload;
-  }
-  const message = await response.text().catch(() => '');
-  return { ok: false, error: { message: message.trim() || `请求失败（HTTP ${response.status}）` } };
-}
 
 export function SetupPage() {
   const { locale, t: i18nAttribute } = useAttributeI18n();
@@ -65,19 +49,24 @@ export function SetupPage() {
     setStage('checking');
     setError('');
     try {
-      const response = await fetch('/api/auth/setup/status', {
+      const response = await apiV2Fetch('/api/v2/auth/setup/status', {
         cache: 'no-store',
         credentials: 'same-origin',
         signal
       });
-      const payload = await readSetupPayload(response);
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '无法检查系统状态');
-      if (!payload.data?.initialized) {
+      const payload = await response.json().catch(() => null) as
+        | SetupStatusResponse
+        | ProblemDetails
+        | null;
+      if (!response.ok || !payload || !('required' in payload)) {
+        throw new Error(payload && 'detail' in payload ? payload.detail : `请求失败（HTTP ${response.status}）`);
+      }
+      if (payload.required) {
         setStage('account');
         return;
       }
 
-      const session = await fetch('/api/auth/me', {
+      const session = await apiV2Fetch('/api/v2/account', {
         cache: 'no-store',
         credentials: 'same-origin',
         signal
@@ -147,31 +136,29 @@ export function SetupPage() {
     setStage('creating-account');
     setError('');
     try {
-      const response = await fetch('/api/auth/setup', {
+      const response = await apiV2Fetch('/api/v2/auth/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ name: normalizedName, email: normalizedEmail, password, locale })
+        body: JSON.stringify({
+          displayName: normalizedName,
+          email: normalizedEmail,
+          password,
+          locale
+        })
       });
-      const payload = await readSetupPayload(response);
+      const payload = await response.json().catch(() => null) as SessionResponse | ProblemDetails | null;
       if (response.status === 409) {
         router.replace('/login');
         return;
       }
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '账户创建失败');
-      const accountEmail = payload.data?.user?.email ?? normalizedEmail;
+      if (!response.ok || !payload || !('account' in payload)) {
+        throw new Error(payload && 'detail' in payload ? payload.detail : '账户创建失败');
+      }
+      const accountEmail = payload.account.email ?? normalizedEmail;
       setEmail(accountEmail);
       setStage('folder');
       saveProgress({ stage: 'folder', email: accountEmail, folderAdded: false, folderPath });
-      void fetch('/api/monitor-folders', { cache: 'no-store' })
-        .then((result) => result.json())
-        .then((result: { ok?: boolean; data?: { monitorRoot?: string | null } }) => {
-          if (result.ok && result.data?.monitorRoot) {
-            setFolderPath(result.data.monitorRoot);
-            saveProgress({ stage: 'folder', email: accountEmail, folderAdded: false, folderPath: result.data.monitorRoot });
-          }
-        })
-        .catch(() => undefined);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '无法连接初始化服务');
       setStage('account');
@@ -187,21 +174,21 @@ export function SetupPage() {
     setStage('saving-folder');
     setError('');
     try {
-      const response = await fetch('/api/monitor-folders', {
+      const response = await apiV2Fetch('/api/v2/ingestion/folders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         body: JSON.stringify({
-          name: folderName.trim() || '我的书库',
-          rootPath: folderPath.trim(),
-          enabled: true,
-          ignorePatterns: '',
-          ignoreHidden: true,
-          minFileSizeBytes: 0
+          path: folderPath.trim(),
+          recursive: true,
+          moveSource: false,
+          options: { name: folderName.trim() || '我的书库' }
         })
       });
-      const payload = await readSetupPayload(response);
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '监控文件夹添加失败');
+      const payload = await response.json().catch(() => null) as FolderResponse | ProblemDetails | null;
+      if (!response.ok || !payload || !('path' in payload)) {
+        throw new Error(payload && 'detail' in payload ? payload.detail : '监控文件夹添加失败');
+      }
       setFolderAdded(true);
       setStage('complete');
       saveProgress({ stage: 'complete', email, folderAdded: true, folderPath: folderPath.trim() });

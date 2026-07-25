@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import { ArrowDown, ArrowUp, Bot, BookOpen, CheckCircle2, Database, ExternalLink, Headphones, Images, Save, Settings2, TestTube2, Trash2, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Badge } from '../../components/ui/badge';
@@ -88,7 +90,7 @@ export function MetadataProvidersPanel() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/metadata/providers', { cache: 'no-store' });
+      const response = await apiV2Fetch('/api/v2/metadata/providers', { cache: 'no-store' });
       const payload = (await response.json()) as ProvidersResponse;
       if (!payload.ok || !payload.data) throw new Error(payload.error?.message ?? '读取数据源失败');
       setProviders(payload.data.providers ?? []);
@@ -123,7 +125,7 @@ export function MetadataProvidersPanel() {
   async function savePipeline(workType: WorkType, nextProviders: PipelineProvider[], message: string) {
     setBusy(`pipeline-${workType}`);
     try {
-      const response = await fetch(`/api/metadata/provider-pipelines/${workType}`, {
+      const response = await apiV2Fetch(`/api/v2/metadata/provider-pipelines/${workType}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: nextProviders.map((item) => ({ providerId: item.providerId, enabled: item.enabled })) })
@@ -163,7 +165,7 @@ export function MetadataProvidersPanel() {
   async function updateProvider(provider: MetadataProvider, body: Record<string, unknown>, successMessage?: string) {
     setBusy(provider.id);
     try {
-      const response = await fetch(`/api/metadata/providers/${provider.id}`, {
+      const response = await apiV2Fetch(`/api/v2/metadata/providers/${provider.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -196,7 +198,7 @@ export function MetadataProvidersPanel() {
   async function testProvider(provider: MetadataProvider) {
     setBusy(`test-${provider.id}`);
     try {
-      const response = await fetch(`/api/metadata/providers/${provider.id}/test`, { method: 'POST' });
+      const response = await apiV2Fetch(`/api/v2/metadata/providers/${provider.id}/test`, { method: 'POST' });
       const payload = (await response.json()) as ProvidersResponse;
       if (!payload.ok || !payload.data?.result) throw new Error(payload.error?.message ?? '连接测试失败');
       if (payload.data.provider) setProviders((current) => current.map((item) => item.id === provider.id ? payload.data!.provider! : item));

@@ -1,9 +1,12 @@
 'use client';
 
-import { Camera, KeyRound, LogOut, Trash2 } from 'lucide-react';
+import { apiV2Fetch } from '@/lib/api-v2';
+import type { AccountResponse, ProblemDetails } from '@/generated/api-v2';
+
+import { KeyRound, LogOut } from 'lucide-react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { clearPrivatePwaStorage } from '../../../components/system/pwa-client';
 import { Button } from '../../../components/ui/button';
 import { useToast } from '../../../components/ui/feedback';
@@ -19,12 +22,6 @@ type CurrentUser = {
   avatarUrl?: string | null;
 };
 
-type AuthPayload = {
-  ok: boolean;
-  data?: { user?: CurrentUser };
-  error?: { message?: string };
-};
-
 const inputClassName = 'mt-1.5 h-10 w-full rounded-[10px] border border-[#DED8D1] bg-white px-3 text-sm text-[#242220] outline-none transition placeholder:text-[#AAA39C] focus:border-[#ED9D86] focus:ring-3 focus:ring-[#FFE4DC]';
 const fallbackAvatar = withBasePath(DEFAULT_ACCOUNT_AVATAR_PATH);
 
@@ -32,7 +29,6 @@ export function AccountPanel() {
   const { t: i18nAttribute } = useAttributeI18n();
   const router = useRouter();
   const toast = useToast();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -45,10 +41,10 @@ export function AccountPanel() {
 
   useEffect(() => {
     let active = true;
-    fetch('/api/auth/me')
-      .then((response) => response.json() as Promise<AuthPayload>)
-      .then((payload) => {
-        const nextUser = payload.ok ? payload.data?.user ?? null : null;
+    apiV2Fetch('/api/v2/account')
+      .then(readAccount)
+      .then((account) => {
+        const nextUser = currentUser(account);
         if (!active) return;
         setUser(nextUser);
         setName(nextUser?.name ?? '');
@@ -62,6 +58,23 @@ export function AccountPanel() {
 
   const avatarSrc = user?.avatarUrl && !avatarFailed ? withBasePath(user.avatarUrl) : fallbackAvatar;
 
+  function currentUser(account: AccountResponse): CurrentUser {
+    return {
+      id: account.id,
+      email: account.email,
+      name: account.displayName,
+      avatarUrl: null
+    };
+  }
+
+  async function readAccount(response: Response): Promise<AccountResponse> {
+    const payload = await response.json().catch(() => null) as AccountResponse | ProblemDetails | null;
+    if (!response.ok || !payload || !('id' in payload)) {
+      throw new Error(payload && 'detail' in payload ? payload.detail : '读取账户失败');
+    }
+    return payload;
+  }
+
   function applyUser(nextUser: CurrentUser | undefined) {
     if (!nextUser) return;
     setUser(nextUser);
@@ -73,61 +86,22 @@ export function AccountPanel() {
 
   async function logout() {
     setBusy('logout');
-    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => null);
+    await apiV2Fetch('/api/v2/auth/logout', { method: 'POST' }).catch(() => null);
     await clearPrivatePwaStorage();
     router.replace('/login');
     router.refresh();
-  }
-
-  async function uploadAvatar(file: File) {
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('头像过大', '请选择不超过 5 MB 的图片');
-      return;
-    }
-    setBusy('avatar');
-    const form = new FormData();
-    form.append('avatar', file);
-    try {
-      const response = await fetch('/api/auth/avatar', { method: 'POST', body: form });
-      const payload = (await response.json()) as AuthPayload;
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '上传头像失败');
-      applyUser(payload.data?.user);
-      toast.success('头像已更新');
-    } catch (reason) {
-      toast.error('上传头像失败', reason instanceof Error ? reason.message : '请稍后重试');
-    } finally {
-      setBusy('');
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  }
-
-  async function removeAvatar() {
-    setBusy('avatar');
-    try {
-      const response = await fetch('/api/auth/avatar', { method: 'DELETE' });
-      const payload = (await response.json()) as AuthPayload;
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '移除头像失败');
-      applyUser(payload.data?.user);
-      toast.success('已恢复默认头像');
-    } catch (reason) {
-      toast.error('移除头像失败', reason instanceof Error ? reason.message : '请稍后重试');
-    } finally {
-      setBusy('');
-    }
   }
 
   async function saveEmail(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy('email');
     try {
-      const response = await fetch('/api/auth/account/email', {
+      const response = await apiV2Fetch('/api/v2/account', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), currentPassword: emailPassword })
       });
-      const payload = (await response.json()) as AuthPayload;
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '修改邮箱失败');
-      applyUser(payload.data?.user);
+      applyUser(currentUser(await readAccount(response)));
       setEmailPassword('');
       toast.success('登录邮箱已更新');
     } catch (reason) {
@@ -146,14 +120,12 @@ export function AccountPanel() {
     }
     setBusy('name');
     try {
-      const response = await fetch('/api/auth/account/name', {
+      const response = await apiV2Fetch('/api/v2/account', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: normalizedName })
+        body: JSON.stringify({ displayName: normalizedName })
       });
-      const payload = (await response.json()) as AuthPayload;
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '修改用户名失败');
-      applyUser(payload.data?.user);
+      applyUser(currentUser(await readAccount(response)));
       toast.success('用户名已更新');
     } catch (reason) {
       toast.error('修改用户名失败', reason instanceof Error ? reason.message : '请稍后重试');
@@ -174,13 +146,12 @@ export function AccountPanel() {
     }
     setBusy('password');
     try {
-      const response = await fetch('/api/auth/account/password', {
+      const response = await apiV2Fetch('/api/v2/account', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentPassword, newPassword })
+        body: JSON.stringify({ currentPassword, password: newPassword })
       });
-      const payload = (await response.json()) as { ok: boolean; error?: { message?: string } };
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '修改密码失败');
+      await readAccount(response);
       toast.success('密码已更新', '请使用新密码重新登录');
       await clearPrivatePwaStorage();
       router.replace('/login');
@@ -195,7 +166,7 @@ export function AccountPanel() {
     <section aria-labelledby="account-title" className="rounded-[20px] border border-[#E2DED8] bg-white p-4 sm:p-5">
       <div>
         <h3 id="account-title" className="text-base font-semibold text-[#2A2825]"><I18nText>账户</I18nText></h3>
-        <p className="mt-0.5 text-xs leading-5 text-[#77716A]"><I18nText>管理头像、用户名、登录邮箱和密码。</I18nText></p>
+        <p className="mt-0.5 text-xs leading-5 text-[#77716A]"><I18nText>管理用户名、登录邮箱和密码。</I18nText></p>
       </div>
 
       <section aria-labelledby="avatar-title" className="mt-4 flex flex-col gap-3 rounded-2xl bg-[#F7F4F0] p-3 sm:flex-row sm:items-center">
@@ -211,27 +182,7 @@ export function AccountPanel() {
         />
         <div className="min-w-0 flex-1">
           <h4 id="avatar-title" className="text-sm font-semibold text-[#2A2825]"><I18nText>头像</I18nText></h4>
-          <p className="mt-0.5 text-xs leading-5 text-[#77716A]"><I18nText>支持 JPEG、PNG、WebP，系统会自动裁切为正方形，最大 5 MB。</I18nText></p>
-        </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            className="sr-only"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void uploadAvatar(file);
-            }}
-          />
-          <Button type="button" variant="secondary" icon={Camera} loading={busy === 'avatar'} loadingText={i18nAttribute("处理中")} onClick={() => fileInputRef.current?.click()}>
-            {user?.avatarUrl ? i18nAttribute("更换头像") : i18nAttribute("上传头像")}
-          </Button>
-          {user?.avatarUrl ? (
-            <Button type="button" variant="ghost" icon={Trash2} disabled={busy === 'avatar'} onClick={() => void removeAvatar()}>
-              <I18nText>使用默认头像</I18nText>
-            </Button>
-          ) : null}
+          <p className="mt-0.5 text-xs leading-5 text-[#77716A]"><I18nText>使用默认账户头像。</I18nText></p>
         </div>
       </section>
 

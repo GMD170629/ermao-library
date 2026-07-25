@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import { AlertTriangle, Database, HardDrive, RefreshCw, Settings2 } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
@@ -65,7 +67,7 @@ export function ManagementOverviewPage() {
   async function load() {
     setLoading(true);
     try {
-      const response = await fetch('/api/management/overview');
+      const response = await apiV2Fetch('/api/v2/reporting/management');
       const data = (await response.json()) as OverviewPayload;
       if (!data.ok) throw new Error(data.error?.message ?? '读取管理概览失败');
       setPayload(data.data ?? null);

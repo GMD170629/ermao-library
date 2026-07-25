@@ -1,5 +1,8 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+import type { AccountResponse } from '@/generated/api-v2';
+
 import {
   DEFAULT_READER_PREFERENCES,
   normalizeReaderPreferences,
@@ -267,10 +270,10 @@ export function ReaderDeviceSettingsPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
-      .then((response) => response.json())
-      .then((payload) => {
-        const nextUserId = payload?.ok && typeof payload.data?.user?.id === 'string' ? payload.data.user.id : '';
+    apiV2Fetch('/api/v2/account', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
+      .then((response) => response.json() as Promise<AccountResponse>)
+      .then((account) => {
+        const nextUserId = typeof account.id === 'string' ? account.id : '';
         setUserId(nextUserId);
         if (nextUserId) {
           setPreferences(readDeviceReaderPreferences(nextUserId, DEFAULT_READER_PREFERENCES));

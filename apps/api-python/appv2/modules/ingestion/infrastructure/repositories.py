@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from types import TracebackType
 from typing import Literal, Self
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -172,6 +172,24 @@ class SqlIngestionRepository(IngestionRepository):
         record.lease_owner = None
         record.lease_expires_at = None
         return True
+
+    def delete_job(self, job_id: uuid.UUID) -> bool:
+        record = self._session.get(IngestionJobRecord, job_id)
+        if record is None or record.status not in {"completed", "failed", "cancelled"}:
+            return False
+        self._session.delete(record)
+        return True
+
+    def clear_finished(self) -> int:
+        criteria = IngestionJobRecord.status.in_(("completed", "failed", "cancelled"))
+        count = int(
+            self._session.scalar(
+                select(func.count()).select_from(IngestionJobRecord).where(criteria)
+            )
+            or 0
+        )
+        self._session.execute(delete(IngestionJobRecord).where(criteria))
+        return count
 
     def retry(self, job_id: uuid.UUID, now: datetime) -> bool:
         record = self._session.get(IngestionJobRecord, job_id)

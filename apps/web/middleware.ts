@@ -6,13 +6,13 @@ const publicPaths = [
   '/forgot-password',
   '/reset-password',
   '/offline',
-  '/api/auth/login',
-  '/api/auth/setup',
-  '/api/auth/capabilities',
-  '/api/auth/password-reset/request',
-  '/api/auth/password-reset/confirm',
-  '/api/app-config',
-  '/api/health'
+  '/api/v2/auth/login',
+  '/api/v2/auth/setup',
+  '/api/v2/auth/setup/status',
+  '/api/v2/auth/capabilities',
+  '/api/v2/auth/password-reset/request',
+  '/api/v2/auth/password-reset/confirm',
+  '/api/v2/operations/health'
 ];
 
 export function middleware(request: NextRequest) {
@@ -25,11 +25,24 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const isApi = pathname.startsWith('/api/');
-  const hasSession = Boolean(request.cookies.get('shuku_session')?.value);
+  const isApi = pathname.startsWith('/api/v2/');
+  const hasSession = Boolean(request.cookies.get('shuku_v2_session')?.value);
   if (!hasSession) {
     if (isApi) {
-      return NextResponse.json({ ok: false, error: { code: 'UNAUTHORIZED', message: '未登录' } }, { status: 401 });
+      return NextResponse.json(
+        {
+          type: 'https://shuku.app/problems/authentication-required',
+          title: 'Authentication required',
+          status: 401,
+          code: 'AUTHENTICATION_REQUIRED',
+          detail: '未登录',
+          params: {}
+        },
+        {
+          status: 401,
+          headers: { 'Content-Type': 'application/problem+json' }
+        }
+      );
     }
     const login = request.nextUrl.clone();
     const next = `${pathname}${request.nextUrl.search}`;

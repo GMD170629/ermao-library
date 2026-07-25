@@ -1,5 +1,8 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+import type { AccountResponse } from '@/generated/api-v2';
+
 import { Bug, Clipboard, Download, RefreshCw, Trash2, Wifi, WifiOff, X } from 'lucide-react';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
@@ -64,11 +67,11 @@ export async function clearPrivatePwaStorage() {
 }
 
 async function refreshAuthenticatedReaderV2User(signal?: AbortSignal) {
-  const response = await fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin', signal });
-  const payload = await response.json().catch(() => null);
-  const userId = payload?.ok && typeof payload.data?.user?.id === 'string' ? payload.data.user.id : '';
+  const response = await apiV2Fetch('/api/v2/account', { cache: 'no-store', credentials: 'same-origin', signal });
+  const payload = await response.json().catch(() => null) as AccountResponse | null;
+  const userId = response.ok && typeof payload?.id === 'string' ? payload.id : '';
   if (userId) {
-    const authzVersion = Number(payload?.data?.authorization?.authzVersion ?? 1);
+    const authzVersion = 1;
     activateReaderV2User(userId);
     setCurrentUserNamespace(userId, authzVersion);
     navigator.serviceWorker?.controller?.postMessage({

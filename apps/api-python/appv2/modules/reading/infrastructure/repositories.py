@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from appv2.modules.reading.contracts import (
     BookmarkView,
+    LocationCacheView,
     PreferenceView,
     ProgressMutation,
     ProgressView,
@@ -21,6 +22,7 @@ from appv2.modules.reading.contracts import (
 from appv2.modules.reading.domain import ReadingProgress
 from appv2.modules.reading.infrastructure.models import (
     BookmarkRecord,
+    LocationClaimRecord,
     ProgressRecord,
     ReaderPreferenceRecord,
 )
@@ -56,6 +58,19 @@ def _preference(record: ReaderPreferenceRecord) -> PreferenceView:
         target_id=record.target_id,
         values=record.values,
         updated_at=record.updated_at,
+    )
+
+
+def _location_cache(record: LocationClaimRecord) -> LocationCacheView:
+    return LocationCacheView(
+        edition_id=record.edition_id,
+        content_fingerprint=record.content_fingerprint,
+        cache_version=record.cache_version,
+        break_size=record.break_size,
+        serialized=record.serialized,
+        owner=record.owner,
+        token_hash=record.token_hash,
+        expires_at=record.expires_at,
     )
 
 
@@ -221,6 +236,81 @@ class SqlReadingRepository(ReadingRepository):
             record.values = values
         self._session.flush()
         return _preference(record)
+
+    def claim_locations(
+        self,
+        *,
+        edition_id: uuid.UUID,
+        content_fingerprint: str,
+        cache_version: int,
+        break_size: int,
+        owner: str,
+        token_hash: str,
+        now: datetime,
+        expires_at: datetime,
+    ) -> LocationCacheView:
+        record = self._session.scalar(
+            select(LocationClaimRecord)
+            .where(LocationClaimRecord.edition_id == edition_id)
+            .with_for_update()
+        )
+        matches = (
+            record is not None
+            and record.content_fingerprint == content_fingerprint
+            and record.cache_version == cache_version
+            and record.break_size == break_size
+        )
+        if record is None:
+            record = LocationClaimRecord(
+                edition_id=edition_id,
+                content_fingerprint=content_fingerprint,
+                cache_version=cache_version,
+                break_size=break_size,
+                serialized=None,
+                owner=owner,
+                token_hash=token_hash,
+                expires_at=expires_at,
+            )
+            self._session.add(record)
+        elif not matches or (record.serialized is None and record.expires_at <= now):
+            record.content_fingerprint = content_fingerprint
+            record.cache_version = cache_version
+            record.break_size = break_size
+            record.serialized = None
+            record.owner = owner
+            record.token_hash = token_hash
+            record.expires_at = expires_at
+        self._session.flush()
+        return _location_cache(record)
+
+    def save_locations(
+        self,
+        *,
+        edition_id: uuid.UUID,
+        content_fingerprint: str,
+        cache_version: int,
+        break_size: int,
+        token_hash: str,
+        serialized: str,
+        now: datetime,
+    ) -> LocationCacheView:
+        record = self._session.scalar(
+            select(LocationClaimRecord)
+            .where(LocationClaimRecord.edition_id == edition_id)
+            .with_for_update()
+        )
+        if (
+            record is None
+            or record.content_fingerprint != content_fingerprint
+            or record.cache_version != cache_version
+            or record.break_size != break_size
+            or record.token_hash != token_hash
+            or record.expires_at <= now
+        ):
+            raise ValueError("location claim is invalid or expired")
+        record.serialized = serialized
+        self._session.flush()
+        return _location_cache(record)
 
 
 class ReadingSqlUnitOfWork:

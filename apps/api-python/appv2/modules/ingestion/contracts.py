@@ -56,6 +56,15 @@ class MonitorFolder:
 
 
 @dataclass(frozen=True, slots=True)
+class DirectoryNode:
+    name: str
+    path: str
+    readable: bool
+    children: tuple[DirectoryNode, ...] = ()
+    error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class PreparedImport:
     title: str
     author: str | None
@@ -94,6 +103,10 @@ class IngestionRepository(Protocol):
 
     def cancel(self, job_id: uuid.UUID) -> bool: ...
 
+    def delete_job(self, job_id: uuid.UUID) -> bool: ...
+
+    def clear_finished(self) -> int: ...
+
     def retry(self, job_id: uuid.UUID, now: datetime) -> bool: ...
 
     def list_folders(self) -> list[MonitorFolder]: ...
@@ -131,6 +144,8 @@ class FileDiscoveryPort(Protocol):
     def validate_folder(self, path: str) -> str: ...
 
     def discover(self, path: str, *, recursive: bool) -> list[str]: ...
+
+    def tree(self, path: str | None = None) -> tuple[DirectoryNode, str]: ...
 
 
 class UploadStoragePort(Protocol):

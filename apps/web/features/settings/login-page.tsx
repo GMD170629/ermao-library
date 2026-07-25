@@ -1,5 +1,8 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+import type { ProblemDetails, SessionResponse, SetupStatusResponse } from '@/generated/api-v2';
+
 import { AlertCircle, Loader2, Lock } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -11,25 +14,6 @@ import { withBasePath } from '../../lib/base-path';
 import { PRODUCT_NAME, PRODUCT_TAGLINE } from '../../lib/brand';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
-
-type LoginPayload = { ok: boolean; error?: { message?: string; details?: { code?: string } } };
-type SetupStatusPayload = { ok: boolean; data?: { initialized?: boolean } };
-
-async function readLoginPayload(response: Response): Promise<LoginPayload> {
-  const contentType = response.headers.get('content-type') ?? '';
-  if (contentType.includes('application/json')) {
-    return (await response.json()) as LoginPayload;
-  }
-  const text = await response.text().catch(() => '');
-  return {
-    ok: false,
-    error: {
-      message: response.status >= 500
-        ? '登录服务暂时不可用，请确认 Python API 已启动。'
-        : text.trim() || `登录失败（HTTP ${response.status}）`
-    }
-  };
-}
 
 export function LoginPage() {
   const { t: i18nAttribute } = useAttributeI18n();
@@ -43,15 +27,15 @@ export function LoginPage() {
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
-    fetch('/api/auth/setup/status', {
+    apiV2Fetch('/api/v2/auth/setup/status', {
       cache: 'no-store',
       credentials: 'same-origin',
       signal: controller.signal
     })
       .then(async (response) => {
-        const payload = await response.json().catch(() => null) as SetupStatusPayload | null;
+        const payload = await response.json().catch(() => null) as SetupStatusResponse | null;
         if (!active) return;
-        if (response.ok && payload?.ok && payload.data?.initialized === false) {
+        if (response.ok && payload?.required === true) {
           router.replace('/setup');
           return;
         }
@@ -84,18 +68,19 @@ export function LoginPage() {
     setLoading(true);
     setError('');
     try {
-      const response = await fetch('/api/auth/login', {
+      const response = await apiV2Fetch('/api/v2/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: normalizedEmail, password })
       });
-      const payload = await readLoginPayload(response);
-      if (response.status === 409 && payload.error?.details?.code === 'SETUP_REQUIRED') {
+      const payload = await response.json().catch(() => null) as SessionResponse | ProblemDetails | null;
+      if (response.status === 409 && payload && 'code' in payload && payload.code === 'SETUP_REQUIRED') {
         router.replace('/setup');
         return;
       }
-      if (!response.ok || !payload.ok) {
-        setError(response.status === 401 ? '邮箱或密码不正确' : (payload.error?.message ?? '登录失败'));
+      if (!response.ok || !payload || !('account' in payload)) {
+        const detail = payload && 'detail' in payload ? payload.detail : undefined;
+        setError(response.status === 401 ? '邮箱或密码不正确' : (detail ?? '登录失败'));
         return;
       }
       const next = new URLSearchParams(window.location.search).get('next');

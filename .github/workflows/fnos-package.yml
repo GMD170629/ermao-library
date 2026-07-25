@@ -13,8 +13,11 @@ on:
       - 'apps/web/public/sw.js'
       - 'apps/web/Dockerfile.prod'
       - 'apps/web/next.config.js'
-      - 'apps/api-python/app/core/**'
-      - 'apps/api-python/app/db/**'
+      - 'apps/api-python/appv2/**'
+      - 'apps/api-python/migrations-v2/**'
+      - 'apps/api-python/alembic-v2.ini'
+      - 'apps/api-python/pyproject.toml'
+      - 'apps/api-python/uv.lock'
       - 'scripts/build-fnos-package.sh'
       - 'scripts/start-unified-app.sh'
       - 'docker-compose.yml'
@@ -70,7 +73,7 @@ jobs:
           app_version="$(node -p "require('./package.json').version")"
           web_version="$(node -p "require('./apps/web/package.json').version")"
           python_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' apps/api-python/pyproject.toml | head -n 1)"
-          runtime_version="$(sed -n 's/^[[:space:]]*app_version: str = "\([^"]*\)"/\1/p' apps/api-python/app/core/config.py)"
+          runtime_version="$(sed -n 's/^[[:space:]]*app_version: str = "\([^"]*\)"/\1/p' apps/api-python/appv2/platform/config/settings.py)"
           lock_version="$(awk '/^name = "shuku-starship-api-python"$/ { found=1; next } found && /^version = / { gsub(/"/, "", $3); print $3; exit }' apps/api-python/uv.lock)"
           for version_source in "$web_version" "$python_version" "$runtime_version" "$lock_version"; do
             if [[ "$version_source" != "$app_version" ]]; then
@@ -126,7 +129,7 @@ jobs:
           app_version="$(node -p "require('./package.json').version")"
           web_version="$(node -p "require('./apps/web/package.json').version")"
           python_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' apps/api-python/pyproject.toml | head -n 1)"
-          runtime_version="$(sed -n 's/^[[:space:]]*app_version: str = "\([^"]*\)"/\1/p' apps/api-python/app/core/config.py)"
+          runtime_version="$(sed -n 's/^[[:space:]]*app_version: str = "\([^"]*\)"/\1/p' apps/api-python/appv2/platform/config/settings.py)"
           lock_version="$(awk '/^name = "shuku-starship-api-python"$/ { found=1; next } found && /^version = / { gsub(/"/, "", $3); print $3; exit }' apps/api-python/uv.lock)"
           for version_source in "$web_version" "$python_version" "$runtime_version" "$lock_version"; do
             if [[ "$version_source" != "$app_version" ]]; then
@@ -225,5 +228,5 @@ jobs:
             gh release create "$RELEASE_TAG" dist/fnos/*.fpk \
               --target "$GITHUB_SHA" \
               --title "$RELEASE_TAG" \
-              --generate-notes
+              --notes "Shuku Starship ${RELEASE_TAG} completes the appv2 backend rewrite on PostgreSQL 18, moves every supported API to /api/v2, and refreshes the unified Web/fnOS runtime. It also adds isolated v2 storage, queue leasing, and PostgreSQL-native backup and restore."
           fi

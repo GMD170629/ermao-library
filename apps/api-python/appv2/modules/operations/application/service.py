@@ -5,6 +5,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from appv2.modules.operations.contracts import (
+    BackupArchive,
     BackupExecutorPort,
     BackupView,
     EventView,
@@ -111,6 +112,13 @@ class OperationsService:
                 raise OperationsNotFound
             self._backup_executor.delete(backup)
             uow.commit()
+
+    def download_backup(self, backup_id: uuid.UUID) -> BackupArchive:
+        backup = self.get_backup(backup_id)
+        try:
+            return self._backup_executor.open(backup)
+        except FileNotFoundError as error:
+            raise OperationsNotFound from error
 
     def request_restore(self, backup_id: uuid.UUID, actor_id: uuid.UUID) -> str:
         with self._uow_factory() as uow:

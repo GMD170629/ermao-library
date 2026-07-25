@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import { ChevronLeft, ChevronRight, RefreshCw, RotateCcw, Search, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -205,8 +207,8 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
       if (searchQuery) params.set('search', searchQuery);
       if (statusFilter !== 'ALL') params.set('status', statusFilter);
       const [jobsResponse, providersResponse] = await Promise.all([
-        fetch(`/api/organize/jobs?${params.toString()}`, { cache: 'no-store' }),
-        fetch('/api/metadata/providers', { cache: 'no-store' })
+        apiV2Fetch(`/api/v2/metadata/jobs?${params.toString()}`, { cache: 'no-store' }),
+        apiV2Fetch('/api/v2/metadata/providers', { cache: 'no-store' })
       ]);
       const jobsPayload = (await jobsResponse.json()) as JobsResponse;
       const providersPayload = (await providersResponse.json()) as ProvidersResponse;
@@ -244,8 +246,8 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
     })) return;
     setBusy(`${action}:${job.id}`);
     try {
-      const response = await fetch(
-        action === 'delete' ? `/api/organize/jobs/${job.id}` : `/api/organize/jobs/${job.id}/recognize`,
+      const response = await apiV2Fetch(
+        action === 'delete' ? `/api/v2/metadata/jobs/${job.id}` : `/api/v2/metadata/jobs/${job.id}/recognize`,
         { method: action === 'delete' ? 'DELETE' : 'POST' }
       );
       const payload = (await response.json()) as { ok: boolean; error?: { message: string } };

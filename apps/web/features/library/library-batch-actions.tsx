@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import {
   BookCheck,
   Braces,
@@ -258,7 +260,7 @@ export function LibraryBatchDialog({
     if (action !== 'shelves' || shelves.length > 0) return;
     let active = true;
     setShelvesLoading(true);
-    fetch('/api/shelves')
+    apiV2Fetch('/api/v2/catalog/shelves')
       .then((response) => response.json() as Promise<{ ok: boolean; data?: { shelves?: ShelfOption[] }; error?: { message?: string } }>)
       .then((payload) => {
         if (!active) return;
@@ -275,7 +277,7 @@ export function LibraryBatchDialog({
   if (!action || typeof document === 'undefined') return null;
 
   async function postJson(body: Record<string, unknown>) {
-    const response = await fetch('/api/works/bulk', {
+    const response = await apiV2Fetch('/api/v2/catalog/works/bulk', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids: selectedIds, ...body })
@@ -310,7 +312,7 @@ export function LibraryBatchDialog({
     setPreviewing(true);
     try {
       const signature = findReplaceSignature;
-      const response = await fetch('/api/works/bulk/find-replace/preview', {
+      const response = await apiV2Fetch('/api/v2/catalog/works/bulk/find-replace/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids: selectedIds, ...findReplaceBody() })
@@ -354,7 +356,7 @@ export function LibraryBatchDialog({
     form.append('quality', coverQuality);
     form.append('maxDimension', coverMaxDimension);
     if (coverFile) form.append('cover', coverFile);
-    const response = await fetch('/api/works/bulk/cover', { method: 'POST', body: form });
+    const response = await apiV2Fetch('/api/v2/catalog/works/bulk/cover', { method: 'POST', body: form });
     const payload = await response.json() as BulkResponse;
     if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '批量处理封面失败');
     const skipped = payload.data?.skipped?.length ?? 0;

@@ -1,16 +1,16 @@
 export const UNAUTHORIZED_EVENT = 'shuku:unauthorized';
 
 const nonRedirectingAuthPaths = [
-  '/api/auth/login',
-  '/api/auth/setup',
-  '/api/auth/setup/status',
-  '/api/auth/capabilities',
-  '/api/auth/password-reset/request',
-  '/api/auth/password-reset/confirm'
+  '/api/v2/auth/login',
+  '/api/v2/auth/setup',
+  '/api/v2/auth/setup/status',
+  '/api/v2/auth/capabilities',
+  '/api/v2/auth/password-reset/request',
+  '/api/v2/auth/password-reset/confirm'
 ];
 
 export function shouldHandleUnauthorizedPath(pathname: string) {
-  if (!pathname.includes('/api/')) return false;
+  if (!pathname.includes('/api/v2/')) return false;
   return !nonRedirectingAuthPaths.some((path) => pathname.endsWith(path));
 }
 

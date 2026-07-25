@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import BinaryIO
 
 from appv2.modules.ingestion.contracts import (
+    DirectoryNode,
     FileDiscoveryPort,
     ImportRequest,
     ImportResult,
@@ -91,9 +92,24 @@ class IngestionService:
                 raise IngestionNotFound
             uow.commit()
 
+    def delete_job(self, job_id: uuid.UUID) -> None:
+        with self._uow_factory() as uow:
+            if not uow.ingestion.delete_job(job_id):
+                raise IngestionNotFound
+            uow.commit()
+
+    def clear_finished(self) -> int:
+        with self._uow_factory() as uow:
+            count = uow.ingestion.clear_finished()
+            uow.commit()
+            return count
+
     def list_folders(self) -> list[MonitorFolder]:
         with self._uow_factory() as uow:
             return uow.ingestion.list_folders()
+
+    def directory_tree(self, path: str | None = None) -> tuple[DirectoryNode, str]:
+        return self._discovery.tree(path)
 
     def add_folder(
         self,
@@ -169,3 +185,21 @@ class IngestionService:
             )
             uow.commit()
         return results
+
+    def scan_all_folders(self, requested_by: uuid.UUID) -> list[ImportResult]:
+        results: list[ImportResult] = []
+        for folder in self.list_folders():
+            if folder.enabled:
+                results.extend(self.scan_folder(folder.id, requested_by))
+        return results
+
+    def scan_directory(self, path: str, requested_by: uuid.UUID) -> list[ImportResult]:
+        discovered = self._discovery.discover(path, recursive=True)
+        return [
+            self.enqueue(
+                source_path=source_path,
+                requested_by=requested_by,
+                idempotency_key=hashlib.sha256(f"scan\0{source_path}".encode()).hexdigest(),
+            )
+            for source_path in discovered
+        ]

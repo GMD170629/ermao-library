@@ -1,8 +1,30 @@
 services:
+  postgres:
+    image: postgres:18.4-alpine3.23
+    restart: unless-stopped
+    deploy:
+      replicas: ${POSTGRES_REPLICAS:-1}
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: shuku_v2
+      POSTGRES_USER: shuku
+      PGDATA: /var/lib/postgresql/18/docker
+    volumes:
+      - "${TRIM_PKGVAR}/postgres:/var/lib/postgresql"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shuku -d shuku_v2"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
   web:
     image: __IMAGE_REFERENCE__
     restart: unless-stopped
     user: "${TRIM_UID}:${TRIM_GID}"
+    env_file:
+      - .env
     environment:
       STORAGE_ROOT: /app/storage
       MONITOR_ROOT: /monitor
@@ -10,15 +32,16 @@ services:
       HOSTNAME: 0.0.0.0
       COOKIE_PATH: /
       SECURE_COOKIES: "false"
+      APP_VERSION: 0.4.0
     ports:
-      - "${wizard_port:?Web 访问端口未配置}:3000"
+      - "${wizard_port:?Web access port is not configured}:3000"
     volumes:
       - "${TRIM_PKGVAR}/storage:/app/storage"
       - "${TRIM_DATA_SHARE_PATHS}:/monitor"
     command: ["./scripts/start-unified-app.sh"]
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/v2/operations/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 30s
       timeout: 5s
       retries: 10
-      start_period: 90s
+      start_period: 120s

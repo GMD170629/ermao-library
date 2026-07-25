@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import { Clock3, Save, Sparkles } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '../../components/ui/button';
@@ -79,8 +81,8 @@ export function RecognitionSettingsPanel({ compact = false, onSaved }: { compact
     setLoading(true);
     try {
       const [policyResponse, candidateResponse] = await Promise.all([
-        fetch('/api/organize/policy', { cache: 'no-store' }),
-        fetch('/api/organize/candidates', { cache: 'no-store' })
+        apiV2Fetch('/api/v2/metadata/policy', { cache: 'no-store' }),
+        apiV2Fetch('/api/v2/metadata/candidates', { cache: 'no-store' })
       ]);
       const policyPayload = (await policyResponse.json()) as PolicyResponse;
       const candidatePayload = (await candidateResponse.json()) as CandidateResponse;
@@ -100,7 +102,7 @@ export function RecognitionSettingsPanel({ compact = false, onSaved }: { compact
   async function save() {
     setBusy('save');
     try {
-      const response = await fetch('/api/organize/policy', {
+      const response = await apiV2Fetch('/api/v2/metadata/policy', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(policy)

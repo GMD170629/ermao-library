@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import { AlertTriangle, Ban, BookOpen, Clock3, Mail, RefreshCw, RotateCcw, Send, Server, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -102,7 +104,7 @@ export function KindleSendQueuePage({ embedded = false }: { embedded?: boolean }
   const loadTasks = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
     try {
-      const response = await fetch('/api/kindle-send-tasks?pageSize=200', { cache: 'no-store' });
+      const response = await apiV2Fetch('/api/v2/delivery/kindle/jobs?pageSize=200', { cache: 'no-store' });
       const payload = (await response.json()) as TasksPayload;
       if (!payload.ok) throw new Error(payload.error?.message ?? '读取发送队列失败');
       setTasks(payload.data?.tasks ?? []);
@@ -129,8 +131,8 @@ export function KindleSendQueuePage({ embedded = false }: { embedded?: boolean }
     if (action === 'delete' && !await confirm({ title: '删除发送记录', description: `删除《${task.bookTitle}》的发送记录？`, confirmLabel: '删除', tone: 'danger' })) return;
     setBusy(`${action}:${task.id}`);
     try {
-      const response = await fetch(
-        action === 'delete' ? `/api/kindle-send-tasks/${task.id}` : `/api/kindle-send-tasks/${task.id}/${action}`,
+      const response = await apiV2Fetch(
+        action === 'delete' ? `/api/v2/delivery/kindle/jobs/${task.id}` : `/api/v2/delivery/kindle/jobs/${task.id}/${action}`,
         { method: action === 'delete' ? 'DELETE' : 'POST' }
       );
       const payload = (await response.json()) as { ok: boolean; error?: { message: string } };

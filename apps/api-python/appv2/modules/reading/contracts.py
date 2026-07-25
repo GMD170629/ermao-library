@@ -13,7 +13,11 @@ from appv2.platform.http.ranges import ByteRange
 
 @dataclass(frozen=True, slots=True)
 class ReaderTarget:
+    work_id: uuid.UUID
+    work_title: str
+    work_author: str | None
     edition_id: uuid.UUID
+    edition_title: str
     file_id: uuid.UUID
     format: str
     media_type: str
@@ -62,6 +66,18 @@ class PreferenceView:
     updated_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class LocationCacheView:
+    edition_id: uuid.UUID
+    content_fingerprint: str
+    cache_version: int
+    break_size: int
+    serialized: str | None
+    owner: str
+    token_hash: str
+    expires_at: datetime
+
+
 class ReadingRepository(Protocol):
     def get_progress(self, *, user_id: uuid.UUID, edition_id: uuid.UUID) -> ProgressView | None: ...
 
@@ -99,6 +115,31 @@ class ReadingRepository(Protocol):
         values: dict[str, object],
     ) -> PreferenceView: ...
 
+    def claim_locations(
+        self,
+        *,
+        edition_id: uuid.UUID,
+        content_fingerprint: str,
+        cache_version: int,
+        break_size: int,
+        owner: str,
+        token_hash: str,
+        now: datetime,
+        expires_at: datetime,
+    ) -> LocationCacheView: ...
+
+    def save_locations(
+        self,
+        *,
+        edition_id: uuid.UUID,
+        content_fingerprint: str,
+        cache_version: int,
+        break_size: int,
+        token_hash: str,
+        serialized: str,
+        now: datetime,
+    ) -> LocationCacheView: ...
+
 
 class ReadingUnitOfWork(UnitOfWork, Protocol):
     reading: ReadingRepository
@@ -116,11 +157,29 @@ class ResourceStream:
     filename: str
 
 
+@dataclass(frozen=True, slots=True)
+class ComicPage:
+    page_index: int
+    title: str
+    media_type: str
+    size_bytes: int
+
+
 class ReaderResourcePort(Protocol):
     def open(
         self,
         file: CatalogFile,
         *,
         requested_range: ByteRange | None,
+        stream_key: str,
+    ) -> ResourceStream: ...
+
+    def comic_pages(self, file: CatalogFile) -> list[ComicPage]: ...
+
+    def open_comic_page(
+        self,
+        file: CatalogFile,
+        *,
+        page_index: int,
         stream_key: str,
     ) -> ResourceStream: ...

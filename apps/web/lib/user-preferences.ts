@@ -1,3 +1,5 @@
+import { apiV2Fetch } from '@/lib/api-v2';
+import type { AccountPreferences, ProblemDetails } from '@/generated/api-v2';
 export const CURRENT_USER_ID_KEY = 'shuku:session:user-id';
 export const CURRENT_AUTHZ_NAMESPACE_KEY = 'shuku:session:authz-namespace';
 
@@ -23,15 +25,15 @@ export function userDevicePreferenceKey(key: string, userId = currentUserId()) {
 }
 
 export async function saveAccountPreferences(preferences: Record<string, unknown>) {
-  const response = await fetch('/api/auth/preferences', {
+  const response = await apiV2Fetch('/api/v2/account/preferences', {
     method: 'PATCH',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ preferences })
+    body: JSON.stringify({ values: preferences })
   });
-  const payload = await response.json().catch(() => null);
-  if (!response.ok || !payload?.ok) {
-    throw new Error(payload?.error?.message ?? '保存账户偏好失败');
+  const payload = await response.json().catch(() => null) as AccountPreferences | ProblemDetails | null;
+  if (!response.ok || !payload || !('values' in payload)) {
+    throw new Error(payload && 'detail' in payload ? payload.detail : '保存账户偏好失败');
   }
-  return payload.data?.preferences as Record<string, unknown> | undefined;
+  return payload.values;
 }

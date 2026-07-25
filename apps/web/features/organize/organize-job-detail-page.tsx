@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import { ExternalLink, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -49,7 +51,7 @@ export function OrganizeJobDetailPage({ jobId, embedded = false }: { jobId: stri
 
   const loadJob = useCallback(() => {
     setLoading(true);
-    fetch(`/api/organize/jobs/${jobId}`)
+    apiV2Fetch(`/api/v2/metadata/jobs/${jobId}`)
       .then((response) => response.json() as Promise<JobResponse>)
       .then((payload) => {
         if (!payload.ok || !payload.data?.job) throw new Error(payload.error?.message ?? '读取整理任务失败');

@@ -57,7 +57,16 @@ class UpdateAccountRequest(CamelModel):
     email: EmailStr | None = None
     display_name: str | None = Field(default=None, min_length=1, max_length=80)
     password: str | None = Field(default=None, min_length=10, max_length=1024)
+    current_password: str | None = Field(default=None, max_length=1024)
     locale: Literal["zh-CN", "en-US"] | None = None
+
+
+class AccountPreferences(CamelModel):
+    values: dict[str, object]
+
+
+class UpdateAccountPreferences(CamelModel):
+    values: dict[str, object]
 
 
 class CreateUserRequest(SetupRequest):

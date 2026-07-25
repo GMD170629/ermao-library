@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, status
+from fastapi import APIRouter, Depends, Header, Query, status
 from pydantic import Field
 
 from appv2.modules.accounts.contracts import AccountView, CurrentAccount
@@ -142,8 +142,8 @@ def create_router(service: MetadataService, current_account: CurrentAccount) -> 
     def jobs(
         actor: Actor,
         page: int = 1,
-        page_size: int = 24,
-        job_status: str | None = None,
+        page_size: Annotated[int, Query(alias="pageSize", ge=1, le=200)] = 24,
+        job_status: Annotated[str | None, Query(alias="status")] = None,
     ) -> Page[MetadataJobResponse]:
         del actor
         size = min(max(page_size, 1), 200)

@@ -1,5 +1,8 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+import type { JobAccepted, ProblemDetails } from '@/generated/api-v2';
+
 import { ArrowRight, FileText, UploadCloud, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { TargetDirectoryPicker } from '../../components/directory/target-directory-picker';
@@ -8,15 +11,6 @@ import { cn } from '../../components/ui/cn';
 import { useToast } from '../../components/ui/feedback';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
-
-type ImportResponse = {
-  ok: boolean;
-  data?: {
-    assetCount?: number;
-    results?: Array<{ message?: string }>;
-  };
-  error?: { message: string };
-};
 
 type UploadBookDialogProps = {
   open: boolean;
@@ -79,21 +73,31 @@ export function UploadBookDialog({ open, onClose, onImported, onError }: UploadB
     if (!file || !uploadTargetPath) return;
     setUploading(true);
     try {
-      const form = new FormData();
-      form.append('targetPath', uploadTargetPath);
-      if (uploadBookTitle.trim()) form.append('bookTitle', uploadBookTitle.trim());
-      if (uploadBookAuthor.trim()) form.append('bookAuthor', uploadBookAuthor.trim());
-      files.forEach((selectedFile) => form.append('files', selectedFile));
-      const response = await fetch('/api/works/import', { method: 'POST', body: form });
-      const text = await response.text();
-      const payload = text ? JSON.parse(text) as ImportResponse : { ok: false, error: { message: response.ok ? '导入失败' : `上传失败（HTTP ${response.status}）` } };
-      if (!payload.ok) throw new Error(payload.error?.message ?? '导入失败');
+      for (const selectedFile of files) {
+        const form = new FormData();
+        form.append('file', selectedFile);
+        const response = await apiV2Fetch('/api/v2/ingestion/imports/upload', {
+          method: 'POST',
+          body: form
+        });
+        const payload = await response.json().catch(() => null) as
+          | JobAccepted
+          | ProblemDetails
+          | null;
+        if (!response.ok || !payload || !('id' in payload)) {
+          throw new Error(
+            payload && 'detail' in payload
+              ? payload.detail
+              : `上传失败（HTTP ${response.status}）`
+          );
+        }
+      }
       const sourceFormat = fileFormat(file);
       const successMessage = files.length > 1
-        ? `${payload.data?.assetCount ?? files.length} 个音频文件已作为一本有声书加入导入队列`
+        ? `${files.length} 个音频文件已加入导入队列`
         : convertibleTextExtensions.has(fileExtension(file))
           ? `${sourceFormat} 文件已加入自动转换队列`
-          : (payload.data?.results?.[0]?.message ?? `${file.name} 已加入导入队列`);
+          : `${file.name} 已加入导入队列`;
       toast.success(successMessage);
       onImported?.(successMessage);
       setSelectedUploadFiles([]);

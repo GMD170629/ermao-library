@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import { ChevronDown, ChevronLeft, ChevronRight, Download, HardDrive, RefreshCw, Save, Search, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
@@ -125,7 +127,7 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
     }
     setLoading(true);
     try {
-      const response = await fetch(`/api/management/events?${buildParams(page).toString()}`);
+      const response = await apiV2Fetch(`/api/v2/operations/events?${buildParams(page).toString()}`);
       const payload = (await response.json()) as EventsPayload;
       if (!payload.ok) throw new Error(payload.error?.message ?? '读取日志失败');
       setEvents(payload.data?.events ?? []);
@@ -145,7 +147,7 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
 
   async function clearLogs() {
     if (!window.confirm(i18nAttribute('清理信息和警告日志？错误与关键审计事件会保留。'))) return;
-    const response = await fetch('/api/management/events', { method: 'DELETE' });
+    const response = await apiV2Fetch('/api/v2/operations/events', { method: 'DELETE' });
     const payload = await response.json().catch(() => null) as { ok?: boolean; data?: { deleted: number }; error?: { message: string } } | null;
     if (!payload?.ok) {
       toast.error('清理日志失败', payload?.error?.message ?? '请稍后重试');
@@ -165,7 +167,7 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
     if (nextBytes < storage.maxBytes && !window.confirm(i18nAttribute('降低容量上限会立即删除最旧日志，是否继续？'))) return;
     setSavingLimit(true);
     try {
-      const response = await fetch('/api/system/log-settings', {
+      const response = await apiV2Fetch('/api/v2/operations/log-settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ maxBytes: nextBytes })
@@ -199,7 +201,7 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
       let exportPage = 1;
       let exportPages = 1;
       do {
-        const response = await fetch(`/api/management/events?${buildParams(exportPage, 100).toString()}`);
+        const response = await apiV2Fetch(`/api/v2/operations/events?${buildParams(exportPage, 100).toString()}`);
         const payload = (await response.json()) as EventsPayload;
         if (!payload.ok) throw new Error(payload.error?.message ?? '导出日志失败');
         exported.push(...(payload.data?.events ?? []));

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 from appv2.modules.ingestion.contracts import (
+    DirectoryNode,
     FileDiscoveryPort,
     ImportPreparationPort,
     PreparedImport,
@@ -52,6 +53,49 @@ class MonitorFileDiscovery(FileDiscoveryPort):
             str(item.resolve())
             for item in iterator
             if item.is_file() and item.suffix.casefold() in SUPPORTED_FORMATS
+        )
+
+    def tree(self, path: str | None = None) -> tuple[DirectoryNode, str]:
+        if self._root is None:
+            raise ValueError("MONITOR_ROOT is not configured")
+        candidate = Path(path).expanduser().resolve() if path else self._root
+        if not candidate.is_relative_to(self._root):
+            raise ValueError("directory must remain under MONITOR_ROOT")
+        if not candidate.is_dir():
+            raise ValueError("directory does not exist")
+        children: list[DirectoryNode] = []
+        try:
+            directories = sorted(
+                (item for item in candidate.iterdir() if item.is_dir()),
+                key=lambda item: item.name.casefold(),
+            )
+        except OSError as error:
+            return (
+                DirectoryNode(
+                    name=candidate.name or str(candidate),
+                    path=str(candidate),
+                    readable=False,
+                    error=str(error),
+                ),
+                str(self._root),
+            )
+        for directory in directories:
+            readable = os.access(directory, os.R_OK | os.X_OK)
+            children.append(
+                DirectoryNode(
+                    name=directory.name,
+                    path=str(directory.resolve()),
+                    readable=readable,
+                )
+            )
+        return (
+            DirectoryNode(
+                name=candidate.name or str(candidate),
+                path=str(candidate),
+                readable=True,
+                children=tuple(children),
+            ),
+            str(self._root),
         )
 
 

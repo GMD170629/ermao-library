@@ -38,7 +38,7 @@ from appv2.modules.operations.infrastructure.backup import (
     FileRestoreControl,
     PgBackupExecutor,
 )
-from appv2.modules.operations.infrastructure.health import DatabaseHealth
+from appv2.modules.operations.infrastructure.health import DatabaseHealth, StorageHealth
 from appv2.modules.operations.infrastructure.repositories import operations_uow_factory
 from appv2.modules.operations.infrastructure.restore import (
     FileRestoreInbox,
@@ -170,7 +170,10 @@ def build_container(settings: Settings | None = None) -> Container:
     )
     operations = OperationsService(
         uow_factory=operations_uow,
-        health_contributors=(DatabaseHealth(database.engine),),
+        health_contributors=(
+            DatabaseHealth(database.engine),
+            StorageHealth(storage.root),
+        ),
         backup_executor=backup_executor,
         restore_control=FileRestoreControl(
             control_root=storage.control,

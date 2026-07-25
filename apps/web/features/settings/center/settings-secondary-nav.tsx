@@ -1,5 +1,8 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+import type { AccountResponse } from '@/generated/api-v2';
+
 import { Activity, BookOpen, Database, FileText, Info, Mail, Sparkles, UserRound, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import Link from 'next/link';
@@ -61,11 +64,6 @@ export function settingsItemAllowed(
   return Boolean(authorization?.canManageSystem);
 }
 
-type AuthorizationPayload = {
-  ok?: boolean;
-  data?: { authorization?: SettingsAuthorization };
-};
-
 export function isSettingsItemActive(pathname: string, href: string) {
   return href === '/settings' ? pathname === href : pathname.startsWith(href);
 }
@@ -87,10 +85,15 @@ export function SettingsSecondaryNav() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
-      .then((response) => response.json() as Promise<AuthorizationPayload>)
-      .then((payload) => {
-        const next = payload.ok ? payload.data?.authorization ?? null : null;
+    apiV2Fetch('/api/v2/account', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
+      .then((response) => response.json() as Promise<AccountResponse>)
+      .then((account) => {
+        const next = account.id
+          ? {
+              isAdmin: account.role === 'admin',
+              canManageSystem: account.scopes.includes('operations:write')
+            }
+          : null;
         setAuthorization(next);
         const currentItem = settingsItems.find((item) => isSettingsItemActive(pathname, item.href));
         if (currentItem && !settingsItemAllowed(currentItem.access, next)) router.replace('/forbidden');

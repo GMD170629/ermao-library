@@ -1,5 +1,8 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+import type { AccountResponse } from '@/generated/api-v2';
+
 import {
   BarChart3,
   BookOpen,
@@ -360,9 +363,9 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
-      .then((response) => response.json())
-      .then((payload) => setCanManageSystem(Boolean(payload?.ok && payload.data?.authorization?.canManageSystem)))
+    apiV2Fetch('/api/v2/account', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
+      .then((response) => response.json() as Promise<AccountResponse>)
+      .then((account) => setCanManageSystem(account.scopes.includes('operations:write')))
       .catch(() => undefined);
     return () => controller.abort();
   }, []);
@@ -382,7 +385,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     if (selectedVolumeId) params.set('volumeId', selectedVolumeId);
     setChapterLoading(true);
     setError('');
-    return fetch(`/api/works/${bookId}?${params.toString()}`, { signal: controller.signal })
+    return apiV2Fetch(`/api/v2/catalog/works/${bookId}?${params.toString()}`, { signal: controller.signal })
       .then((response) => response.json() as Promise<{
         ok: boolean;
         data?: {
@@ -504,7 +507,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       sort: 'series_index'
     });
     setSeriesLoading(true);
-    fetch(`/api/works?${params.toString()}`)
+    apiV2Fetch(`/api/v2/catalog/works?${params.toString()}`)
       .then((response) => response.json() as Promise<WorksResponse>)
       .then((payload) => {
         if (!active) return;
@@ -595,7 +598,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       setTargetBooksLoading(true);
       const params = new URLSearchParams({ visibility: 'active', pageSize: '12', page: '1' });
       if (targetSearch.trim()) params.set('search', targetSearch.trim());
-      fetch(`/api/works?${params.toString()}`)
+      apiV2Fetch(`/api/v2/catalog/works?${params.toString()}`)
         .then((response) => response.json() as Promise<WorksResponse>)
         .then((payload) => {
           if (!active) return;
@@ -632,7 +635,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setError('');
     setMessage('');
     try {
-      const response = await fetch(`/api/works/${bookId}`, {
+      const response = await apiV2Fetch(`/api/v2/catalog/works/${bookId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -684,7 +687,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setSaving(true);
     setBusyAction('saveEditionMetadata');
     try {
-      const response = await fetch(`/api/works/${bookId}/editions/${editingEditionId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(editionForm) });
+      const response = await apiV2Fetch(`/api/v2/catalog/works/${bookId}/editions/${editingEditionId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(editionForm) });
       const payload = await response.json() as { ok: boolean; data?: { book: WorkView }; error?: { message: string } };
       if (!response.ok || !payload.ok || !payload.data?.book) throw new Error(payload.error?.message ?? '保存版本信息失败');
       setBook(payload.data.book);
@@ -700,7 +703,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setSaving(true);
     setBusyAction(`split:${splitTarget.id}`);
     try {
-      const response = await fetch(`/api/works/${bookId}/editions/${splitTarget.id}/split`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(splitForm) });
+      const response = await apiV2Fetch(`/api/v2/catalog/works/${bookId}/editions/${splitTarget.id}/split`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(splitForm) });
       const payload = await response.json() as { ok: boolean; data?: { newWorkId: string }; error?: { message: string } };
       if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '拆分版本失败');
       setSplitTarget(null);
@@ -715,7 +718,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setBusyAction('status');
     setError('');
     try {
-      const response = await fetch(`/api/works/${bookId}`, {
+      const response = await apiV2Fetch(`/api/v2/catalog/works/${bookId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -746,7 +749,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setError('');
     setMessage('');
     try {
-      const response = await fetch(path, { method: 'POST' });
+      const response = await apiV2Fetch(path, { method: 'POST' });
       const payload = (await response.json()) as { ok: boolean; data?: { book?: WorkView }; error?: { message: string } };
       if (!payload.ok) throw new Error(payload.error?.message ?? '操作失败');
       if (payload.data?.book) setBook(payload.data.book);
@@ -770,7 +773,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setBusyAction(busyKey);
     setError('');
     try {
-      const response = await fetch(`/api/works/${bookId}/editions/${edition.id}/convert`, { method: 'POST' });
+      const response = await apiV2Fetch(`/api/v2/catalog/works/${bookId}/editions/${edition.id}/convert`, { method: 'POST' });
       const payload = (await response.json()) as { ok: boolean; data?: { task?: { id: string } }; error?: { message: string } };
       if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '加入转换队列失败');
       toast.success('已加入转换队列', '转换完成后会生成可阅读的 EPUB 版本。');
@@ -790,7 +793,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setBusyAction(`move:${volumeId}:${direction}`);
     setError('');
     try {
-      const response = await fetch(`/api/works/${bookId}/volumes/${volumeId}/move`, {
+      const response = await apiV2Fetch(`/api/v2/catalog/works/${bookId}/volumes/${volumeId}/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ direction })
@@ -824,7 +827,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setBusyAction(`move-to:${movingVolume.id}`);
     setError('');
     try {
-      const response = await fetch(`/api/works/${bookId}/volumes/${movingVolume.id}/move-to`, {
+      const response = await apiV2Fetch(`/api/v2/catalog/works/${bookId}/volumes/${movingVolume.id}/move-to`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ targetEditionId })
@@ -855,7 +858,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setBusyAction('ignored');
     setError('');
     try {
-      const response = await fetch(`/api/works/${bookId}`, {
+      const response = await apiV2Fetch(`/api/v2/catalog/works/${bookId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ignored })
@@ -880,7 +883,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setBusyAction('delete');
     setError('');
     try {
-      const response = await fetch(`/api/works/${bookId}`, {
+      const response = await apiV2Fetch(`/api/v2/catalog/works/${bookId}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deleteSource })
@@ -908,7 +911,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
 
   function downloadPrimaryEdition() {
     const editionId = activeMedia?.selectedEditionId ?? selectedEditionId ?? book?.editionId ?? book?.primaryEditionId ?? null;
-    if (editionId) window.location.href = withBasePath(`/api/editions/${editionId}/file`);
+    if (editionId) window.location.href = withBasePath(`/api/v2/reading/editions/${editionId}/file`);
   }
 
   async function uploadCover(file: File | null) {
@@ -919,7 +922,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     try {
       const formData = new FormData();
       formData.append('cover', file);
-      const response = await fetch(`/api/works/${bookId}/cover/upload`, { method: 'POST', body: formData });
+      const response = await apiV2Fetch(`/api/v2/catalog/works/${bookId}/cover/upload`, { method: 'POST', body: formData });
       const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
       if (!payload.ok) throw new Error(payload.error?.message ?? '上传封面失败');
       setCoverBust(Date.now());
@@ -1028,7 +1031,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     preferenceRequestRef.current?.abort();
     const controller = new AbortController();
     preferenceRequestRef.current = controller;
-    void fetch(`/api/works/${bookId}/detail-preference`, {
+    void apiV2Fetch(`/api/v2/catalog/works/${bookId}/detail-preference`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ selectedTab: tab }),
@@ -1235,7 +1238,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                         disabled={saving}
                         onClick={() => {
                           setActionsOpen(false);
-                          void postAction(`/api/works/${book.id}/cover/regenerate`, '封面已重新生成', { refreshCover: true, refreshBook: true, busyKey: 'regenerateCover' });
+                          void postAction(`/api/v2/catalog/works/${book.id}/cover/regenerate`, '封面已重新生成', { refreshCover: true, refreshBook: true, busyKey: 'regenerateCover' });
                         }}
                       >
                         <RefreshCw size={16} /> <I18nText>重新生成封面</I18nText></button>
@@ -1592,7 +1595,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                     {edition.readable ? <Button variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => openEdition(edition)}>{mediaKindForEdition(edition) === 'AUDIOBOOK' ? i18nAttribute("收听") : mediaKindForEdition(edition) === 'COMIC' ? i18nAttribute("查看") : i18nAttribute("阅读")}</Button> : canManageSystem && edition.conversionAvailable ? <Button loading={busyAction === `convert:${edition.id}`} disabled={saving && busyAction !== `convert:${edition.id}`} variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => void convertEdition(edition)}><I18nText>转换为 EPUB</I18nText></Button> : <Button disabled variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5"><I18nText>暂不支持阅读</I18nText></Button>}
                     {manageStructure ? <Button variant="ghost" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => editEdition(edition)}><I18nText>编辑版本</I18nText></Button> : null}
                     {manageStructure && !edition.primary && edition.id !== book.primaryEditionId ? (
-                      <Button loading={busyAction === `primary:${edition.id}`} disabled={saving && busyAction !== `primary:${edition.id}`} variant="ghost" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => void postAction(`/api/works/${book.id}/editions/${edition.id}/primary`, '已设为主版本', { refreshBook: true, busyKey: `primary:${edition.id}` })}>
+                      <Button loading={busyAction === `primary:${edition.id}`} disabled={saving && busyAction !== `primary:${edition.id}`} variant="ghost" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => void postAction(`/api/v2/catalog/works/${book.id}/editions/${edition.id}/primary`, '已设为主版本', { refreshBook: true, busyKey: `primary:${edition.id}` })}>
                         <I18nText>设为主版本</I18nText></Button>
                     ) : null}
                     {manageStructure && book.editions.length > 1 ? <Button variant="ghost" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => { setSplitTarget(edition); setSplitForm({ title: `${book.title}（${edition.versionName}）`, author: book.author === '未知作者' ? '' : book.author, copyShelves: true }); }}><I18nText>拆分为作品</I18nText></Button> : null}

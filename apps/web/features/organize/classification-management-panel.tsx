@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import { ChevronLeft, ChevronRight, Edit3, GitMerge, Loader2, Search, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../../components/ui/button';
@@ -11,16 +13,15 @@ import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type Kind = 'AUTHOR' | 'TAG' | 'SERIES' | 'PUBLISHER';
 type Category = { id: string; kind: Kind; name: string; aliases: string[]; bookCount: number };
-type CategoryPage = { categories: Category[]; page: number; pageSize: number; total: number; totalPages: number };
-type ApiPayload<T> = { ok: boolean; data?: T; error?: { message: string } };
+type CategoryPage = { items: Category[]; page: number; pageSize: number; total: number };
 const tabs: Array<{ key: Kind; label: string }> = [
   { key: 'AUTHOR', label: '作者' }, { key: 'TAG', label: '标签' }, { key: 'SERIES', label: '丛书' }, { key: 'PUBLISHER', label: '出版社' }
 ];
 
 async function payload<T>(response: Response, fallback: string) {
-  const result = await response.json().catch(() => null) as ApiPayload<T> | null;
-  if (!response.ok || !result?.ok) throw new Error(result?.error?.message ?? fallback);
-  return result.data as T;
+  const result = await response.json().catch(() => null) as (T & { detail?: string }) | null;
+  if (!response.ok) throw new Error(result?.detail ?? fallback);
+  return result as T;
 }
 
 export function ClassificationManagementPanel() {
@@ -49,11 +50,11 @@ export function ClassificationManagementPanel() {
     try {
       const params = new URLSearchParams({ kind: nextKind, page: String(nextPage), pageSize: nextPageSize });
       if (nextSearch.trim()) params.set('search', nextSearch.trim());
-      const data = await payload<CategoryPage>(await fetch(`/api/library/categories?${params}`), '读取分类失败');
-      setItems(data.categories);
+      const data = await payload<CategoryPage>(await apiV2Fetch(`/api/v2/catalog/categories?${params}`), '读取分类失败');
+      setItems(data.items);
       setPage(data.page);
       setTotal(data.total);
-      setTotalPages(data.totalPages);
+      setTotalPages(Math.max(1, Math.ceil(data.total / Math.max(data.pageSize, 1))));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '读取分类失败');
     } finally {
@@ -79,7 +80,7 @@ export function ClassificationManagementPanel() {
     if (!renameItem || !renameValue.trim()) return;
     setSaving(true);
     try {
-      await payload(await fetch(`/api/library/categories/${renameItem.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: renameValue.trim() }) }), '重命名失败');
+      await payload(await apiV2Fetch(`/api/v2/catalog/categories/${renameItem.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: renameValue.trim() }) }), '重命名失败');
       toast.success('分类已重命名');
       setRenameItem(null);
       setSelectedItems([]);
@@ -99,7 +100,7 @@ export function ClassificationManagementPanel() {
     if (!targetId) return;
     setSaving(true);
     try {
-      await payload(await fetch('/api/library/categories/merge', {
+      await payload(await apiV2Fetch('/api/v2/catalog/categories/merge', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ kind, targetId, sourceIds: selectedIds.filter((id) => id !== targetId) })
       }), '合并分类失败');
@@ -116,7 +117,7 @@ export function ClassificationManagementPanel() {
     if (!deleteItem) return;
     setSaving(true);
     try {
-      await payload(await fetch(`/api/library/categories/${deleteItem.id}`, { method: 'DELETE' }), '删除分类失败');
+      await payload(await apiV2Fetch(`/api/v2/catalog/categories/${deleteItem.id}`, { method: 'DELETE' }), '删除分类失败');
       toast.success('分类及对应元数据已删除');
       setDeleteItem(null);
       setSelectedItems((current) => current.filter((item) => item.id !== deleteItem.id));

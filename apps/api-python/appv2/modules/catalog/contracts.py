@@ -87,6 +87,16 @@ class ShelfView:
     created_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class CategoryView:
+    id: uuid.UUID
+    kind: str
+    name: str
+    book_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
 class CatalogRepository(CatalogReadPort, CatalogImportPort, CatalogMetadataPort, Protocol):
     def list_works(
         self,
@@ -157,7 +167,44 @@ class CatalogRepository(CatalogReadPort, CatalogImportPort, CatalogMetadataPort,
         self, shelf_id: uuid.UUID, owner_id: uuid.UUID, work_id: uuid.UUID
     ) -> bool: ...
 
+    def list_shelf_works(
+        self,
+        shelf_id: uuid.UUID,
+        owner_id: uuid.UUID,
+        *,
+        offset: int,
+        limit: int,
+    ) -> tuple[list[CatalogWork], list[uuid.UUID], int] | None: ...
+
+    def replace_shelf_items(
+        self,
+        shelf_id: uuid.UUID,
+        owner_id: uuid.UUID,
+        work_ids: list[uuid.UUID],
+    ) -> bool: ...
+
     def category_facets(self) -> dict[str, list[dict[str, object]]]: ...
+
+    def list_categories(
+        self,
+        *,
+        kind: str,
+        query: str | None,
+        offset: int,
+        limit: int,
+    ) -> tuple[list[CategoryView], int]: ...
+
+    def rename_category(self, category_id: uuid.UUID, name: str) -> CategoryView | None: ...
+
+    def merge_categories(
+        self,
+        *,
+        kind: str,
+        target_id: uuid.UUID,
+        source_ids: list[uuid.UUID],
+    ) -> CategoryView | None: ...
+
+    def delete_category(self, category_id: uuid.UUID) -> bool: ...
 
 
 class CatalogUnitOfWork(UnitOfWork, Protocol):

@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import { ArrowLeft, FileKey2, LockKeyhole } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -46,7 +48,7 @@ export function ForgotPasswordPage() {
     setError('');
     setMessage('');
     try {
-      const response = await fetch('/api/auth/password-reset/request', {
+      const response = await apiV2Fetch('/api/v2/auth/password-reset/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim() })
@@ -115,7 +117,7 @@ export function ResetPasswordPage() {
     }
     setLoading(true);
     try {
-      const response = await fetch('/api/auth/password-reset/confirm', {
+      const response = await apiV2Fetch('/api/v2/auth/password-reset/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, newPassword })

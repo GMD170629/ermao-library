@@ -69,4 +69,4 @@ class AccountPreferenceRecord(UUIDPrimaryKey, Timestamped, Base):
         ForeignKey("accounts.users.id", ondelete="CASCADE"), nullable=False
     )
     key: Mapped[str] = mapped_column(String(100), nullable=False)
-    value: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    value: Mapped[object] = mapped_column(JSONB, nullable=False)

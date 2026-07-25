@@ -1,3 +1,4 @@
+import { apiV2Fetch } from '@/lib/api-v2';
 import type { ReaderSource } from '@shuku/reader-core';
 
 const DATABASE_NAME = 'shuku-reader-epub-v2';
@@ -38,19 +39,23 @@ export function sharedEpubLocationsWaitMs(
 function sharedLocationsUrl(source: ReaderSource, suffix = '') {
   const query = new URLSearchParams();
   if (source.volumeId) query.set('volume', source.volumeId);
-  return `/api/reader/v2/editions/${encodeURIComponent(source.editionId)}/epub-locations${suffix}${query.size ? `?${query}` : ''}`;
+  return `/api/v2/reading/editions/${encodeURIComponent(source.editionId)}/epub-locations${suffix}${query.size ? `?${query}` : ''}`;
 }
 
 async function sharedLocationsPayload(response: Response) {
   const payload = await response.json().catch(() => null) as {
-    ok?: boolean;
-    data?: SharedEpubLocationsClaim;
-    error?: { message?: string };
+    status?: SharedEpubLocationsClaim['status'];
+    serialized?: string;
+    leaseToken?: string;
+    leaseExpiresAt?: number;
+    retryAfterMs?: number;
+    detail?: string;
   } | null;
-  if (!response.ok || !payload?.ok || !payload.data) {
-    throw new Error(payload?.error?.message ?? `EPUB 位置索引服务不可用（${response.status}）`);
+  if (!response.ok) {
+    throw new Error(payload?.detail ?? `EPUB 位置索引服务不可用（${response.status}）`);
   }
-  const data = payload.data;
+  if (!payload?.status) throw new Error('EPUB 位置索引服务返回了无效状态');
+  const data = payload as SharedEpubLocationsClaim;
   const valid = data.status === 'ready'
     ? typeof data.serialized === 'string' && data.serialized.length > 0
     : data.status === 'claimed'
@@ -70,7 +75,7 @@ export async function claimSharedEpubLocations(
   breakSize = EPUB_LOCATION_BREAK,
   signal?: AbortSignal
 ) {
-  const response = await fetch(sharedLocationsUrl(source, '/claim'), {
+  const response = await apiV2Fetch(sharedLocationsUrl(source, '/claim'), {
     method: 'POST',
     credentials: 'same-origin',
     cache: 'no-store',
@@ -92,7 +97,7 @@ export async function saveSharedEpubLocations(
   breakSize = EPUB_LOCATION_BREAK,
   signal?: AbortSignal
 ) {
-  const response = await fetch(sharedLocationsUrl(source), {
+  const response = await apiV2Fetch(sharedLocationsUrl(source), {
     method: 'PUT',
     credentials: 'same-origin',
     cache: 'no-store',

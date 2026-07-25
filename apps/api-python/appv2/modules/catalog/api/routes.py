@@ -1,7 +1,9 @@
 import uuid
+from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
+from pydantic import Field
 
 from appv2.modules.accounts.contracts import AccountView, CurrentAccount
 from appv2.modules.catalog.api.schemas import (
@@ -15,11 +17,57 @@ from appv2.modules.catalog.api.schemas import (
     WorkResponse,
 )
 from appv2.modules.catalog.application import CatalogNotFound, CatalogService
+from appv2.modules.catalog.contracts import CategoryView
 from appv2.platform.http import AppProblem, CamelModel, Page
 
 
 class FacetsResponse(CamelModel):
     facets: dict[str, list[dict[str, object]]]
+
+
+class CategoryResponse(CamelModel):
+    id: uuid.UUID
+    kind: str
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+    book_count: int
+
+    @classmethod
+    def from_view(cls, value: CategoryView) -> "CategoryResponse":
+        return cls(
+            id=value.id,
+            kind=value.kind,
+            name=value.name,
+            book_count=value.book_count,
+        )
+
+
+class CategoryUpdateRequest(CamelModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+class CategoryMergeRequest(CamelModel):
+    kind: str = Field(min_length=1, max_length=50)
+    target_id: uuid.UUID
+    source_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
+
+
+class ShelfDetailResponse(CamelModel):
+    id: uuid.UUID
+    owner_id: uuid.UUID
+    name: str
+    description: str | None
+    kind: str
+    rules: dict[str, object]
+    pinned: bool
+    created_at: datetime
+    book_count: int
+    book_ids: list[uuid.UUID]
+    books: list[WorkResponse]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
 
 
 def create_router(service: CatalogService, current_account: CurrentAccount) -> APIRouter:
@@ -38,9 +86,9 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
     def works(
         actor: Actor,
         page: int = 1,
-        page_size: int = 24,
+        page_size: Annotated[int, Query(alias="pageSize", ge=1, le=200)] = 24,
         query: str | None = None,
-        media_type: str | None = None,
+        media_type: Annotated[str | None, Query(alias="mediaType")] = None,
         visibility: str = "active",
     ) -> Page[WorkResponse]:
         del actor
@@ -130,8 +178,36 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
             kind=payload.kind,
             rules=payload.rules,
             pinned=payload.pinned,
+            book_ids=payload.book_ids,
         )
         return ShelfResponse.from_view(shelf)
+
+    @router.get("/shelves/{shelf_id}", response_model=ShelfDetailResponse)
+    def shelf(
+        shelf_id: uuid.UUID,
+        actor: Actor,
+        page: int = 1,
+        page_size: Annotated[int, Query(alias="pageSize", ge=1, le=200)] = 24,
+    ) -> ShelfDetailResponse:
+        try:
+            value, works, work_ids, total = service.get_shelf(
+                shelf_id,
+                actor.id,
+                page=max(page, 1),
+                page_size=page_size,
+            )
+        except CatalogNotFound as error:
+            raise not_found(error) from error
+        return ShelfDetailResponse(
+            **ShelfResponse.from_view(value).model_dump(),
+            book_count=total,
+            book_ids=work_ids,
+            books=[WorkResponse.from_view(work) for work in works],
+            page=max(page, 1),
+            page_size=page_size,
+            total=total,
+            total_pages=max(1, (total + page_size - 1) // page_size),
+        )
 
     @router.patch("/shelves/{shelf_id}", response_model=ShelfResponse)
     def update_shelf(
@@ -145,6 +221,7 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
                 description=payload.description,
                 rules=payload.rules,
                 pinned=payload.pinned,
+                book_ids=payload.book_ids,
             )
         except CatalogNotFound as error:
             raise not_found(error) from error
@@ -181,5 +258,67 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
     def facets(actor: Actor) -> FacetsResponse:
         del actor
         return FacetsResponse(facets=service.facets())
+
+    @router.get("/categories", response_model=Page[CategoryResponse])
+    def categories(
+        actor: Actor,
+        kind: str,
+        page: int = 1,
+        page_size: Annotated[int, Query(alias="pageSize", ge=1, le=200)] = 24,
+        search: str | None = None,
+    ) -> Page[CategoryResponse]:
+        del actor
+        values, total = service.list_categories(
+            kind=kind,
+            query=search,
+            page=max(page, 1),
+            page_size=page_size,
+        )
+        return Page(
+            items=[CategoryResponse.from_view(value) for value in values],
+            page=max(page, 1),
+            page_size=page_size,
+            total=total,
+        )
+
+    @router.patch("/categories/{category_id}", response_model=CategoryResponse)
+    def rename_category(
+        category_id: uuid.UUID,
+        payload: CategoryUpdateRequest,
+        actor: Actor,
+    ) -> CategoryResponse:
+        del actor
+        try:
+            category = service.rename_category(category_id, payload.name)
+        except CatalogNotFound as error:
+            raise not_found(error) from error
+        return CategoryResponse.from_view(category)
+
+    @router.post("/categories/merge", response_model=CategoryResponse)
+    def merge_categories(
+        payload: CategoryMergeRequest,
+        actor: Actor,
+    ) -> CategoryResponse:
+        del actor
+        try:
+            category = service.merge_categories(
+                kind=payload.kind,
+                target_id=payload.target_id,
+                source_ids=payload.source_ids,
+            )
+        except CatalogNotFound as error:
+            raise not_found(error) from error
+        return CategoryResponse.from_view(category)
+
+    @router.delete(
+        "/categories/{category_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    def delete_category(category_id: uuid.UUID, actor: Actor) -> None:
+        del actor
+        try:
+            service.delete_category(category_id)
+        except CatalogNotFound as error:
+            raise not_found(error) from error
 
     return router

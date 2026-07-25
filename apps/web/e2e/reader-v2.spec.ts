@@ -1,3 +1,4 @@
+import { apiV2Fetch } from '@/lib/api-v2';
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -38,7 +39,7 @@ function bootstrap(kind: 'epub' | 'comic' | 'pdf', epubUnitCount = 2) {
       })) : [],
       pages: kind === 'comic' ? [1, 2, 3].map((pageIndex) => ({ pageIndex, title: `第 ${pageIndex} 页`, mimeType: 'image/svg+xml', width: 600, height: 900, size: 100 })) : [],
       totalPages: pageCount,
-      fileUrl: `/api/editions/${editionId}/file`,
+      fileUrl: `/api/v2/reading/editions/${editionId}/file`,
       capabilities: {
         canGoNext: true,
         canGoPrevious: false,
@@ -73,7 +74,7 @@ async function mockReaderApi(
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (url.pathname.includes('/api/reader/v2/editions/') && url.pathname.endsWith('/bootstrap')) {
+    if (url.pathname.includes('/api/v2/reading/editions/') && url.pathname.endsWith('/bootstrap')) {
       if (options.bootstrapDelayMs) await new Promise((resolve) => setTimeout(resolve, options.bootstrapDelayMs));
       await route.fulfill({ json: bootstrap(kind, options.epubUnitCount) });
       return;
@@ -94,7 +95,7 @@ async function mockReaderApi(
       await route.fulfill({ json: { ok: true, data: { status: 'ready', serialized: sharedEpubLocations } } });
       return;
     }
-    if (url.pathname.includes('/api/reader/v2/editions/') && url.pathname.endsWith('/progress')) {
+    if (url.pathname.includes('/api/v2/reading/editions/') && url.pathname.endsWith('/progress')) {
       const body = request.postDataJSON();
       progressBodies.push(body);
       if (options.progressStatus && options.progressStatus >= 400) {
@@ -126,7 +127,7 @@ async function mockReaderApi(
       });
       return;
     }
-    if (url.pathname === '/api/auth/me') {
+    if (url.pathname === '/api/v2/account') {
       await route.fulfill({
         json: {
           ok: true,
@@ -652,7 +653,7 @@ test('comic navigation, local theme persistence, reset, and V2 progress transpor
   await page.getByRole('button', { name: '原图', exact: true }).click();
   await expect.poll(async () => {
     const src = await page.locator('[data-comic-spread-slot="current"] img').first().getAttribute('src');
-    return src ? page.evaluate(async (url) => fetch(url).then((response) => response.text()), src) : '';
+    return src ? page.evaluate(async (url) => apiV2Fetch(url).then((response) => response.text()), src) : '';
   }).toContain('original');
   await page.getByRole('button', { name: '右至左' }).click();
   await page.keyboard.press('Escape');

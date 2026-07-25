@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import { Check, RotateCcw, Save } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../../../components/ui/button';
@@ -98,7 +100,7 @@ export function ImportPreferencesPanel() {
 
   useEffect(() => {
     let active = true;
-    fetch('/api/system-settings')
+    apiV2Fetch('/api/v2/operations/settings')
       .then((response) => response.json() as Promise<SettingsPayload>)
       .then((payload) => {
         if (!payload.ok) throw new Error(payload.error?.message ?? '读取导入偏好失败');
@@ -128,7 +130,7 @@ export function ImportPreferencesPanel() {
   async function savePreferences() {
     setSaving(true);
     try {
-      const response = await fetch('/api/system-settings', {
+      const response = await apiV2Fetch('/api/v2/operations/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

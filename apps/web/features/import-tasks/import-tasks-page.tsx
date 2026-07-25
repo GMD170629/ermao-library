@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Clock, FileArchive, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '../../components/ui/badge';
@@ -63,25 +65,49 @@ const pageSizeOptions = [
   { value: '50', label: '50 条/页' }
 ];
 
-type ImportTasksPayload = {
-  ok: boolean;
-  data?: {
-    tasks: ImportTask[];
-    summary: typeof emptySummary;
-    page: number;
-    pageSize: number;
-    total: number;
-    totalPages: number;
-  };
-  error?: { message: string };
+type ImportJobResource = {
+  id: string;
+  kind: string;
+  status: string;
+  sourcePath: string;
+  attempt: number;
+  resultId?: string | null;
+  errorCode?: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
-function normalizeImportTask(task: ImportTask): ImportTask {
+type ImportTasksPayload = {
+  items: ImportJobResource[];
+  page: number;
+  pageSize: number;
+  total: number;
+  detail?: string;
+};
+
+function normalizeImportTask(job: ImportJobResource): ImportTask {
+  const status = {
+    queued: 'PENDING',
+    retry: 'PENDING',
+    running: 'PARSING',
+    completed: 'COMPLETED',
+    failed: 'FAILED',
+    cancelled: 'FAILED'
+  }[job.status.toLowerCase()] as ImportTask['status'] | undefined;
+  const sourceName = job.sourcePath.split(/[\\/]/).filter(Boolean).at(-1) ?? job.sourcePath;
   return {
-    ...task,
-    sourcePath: task.sourcePath ?? '',
-    progress: Number.isFinite(task.progress) ? task.progress : 0,
-    logs: Array.isArray(task.logs) ? task.logs : []
+    id: job.id,
+    origin: job.kind === 'download' ? 'DOWNLOAD' : job.kind === 'watch' ? 'WATCH' : 'MANUAL',
+    status: status ?? 'PENDING',
+    originalName: sourceName,
+    sourcePath: job.sourcePath,
+    progress: job.status === 'completed' ? 100 : job.status === 'running' ? 50 : 0,
+    errorCode: job.errorCode,
+    retryable: ['failed', 'cancelled'].includes(job.status),
+    createdAt: job.createdAt,
+    finishedAt: ['completed', 'failed', 'cancelled'].includes(job.status) ? job.updatedAt : null,
+    book: job.resultId ? { id: job.resultId, title: sourceName } : null,
+    logs: []
   };
 }
 
@@ -166,18 +192,21 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
       const params = new URLSearchParams({ page: String(targetPage), pageSize });
       if (statusFilter !== 'ALL') params.set('status', statusFilter);
       if (keyword) params.set('keyword', keyword);
-      const response = await fetch(`/api/import-tasks?${params.toString()}`);
+      const response = await apiV2Fetch(`/api/v2/ingestion/imports?${params.toString()}`);
       const text = await response.text();
       const payload = text ? JSON.parse(text) as ImportTasksPayload : null;
-      if (!response.ok) throw new Error(payload?.error?.message ?? `读取导入任务失败：HTTP ${response.status}`);
+      if (!response.ok) throw new Error(payload?.detail ?? `读取导入任务失败：HTTP ${response.status}`);
       if (!payload) throw new Error('读取导入任务失败：服务暂时没有返回内容');
-      if (!payload.ok) throw new Error(payload.error?.message ?? '读取导入任务失败');
       if (requestId !== requestIdRef.current) return;
-      const nextTotalPages = Math.max(1, Number(payload.data?.totalPages ?? 1));
-      const nextPage = Math.min(nextTotalPages, Math.max(1, Number(payload.data?.page ?? targetPage)));
-      setTasks((payload.data?.tasks ?? []).map(normalizeImportTask));
-      setSummary({ ...emptySummary, ...(payload.data?.summary ?? {}) });
-      setTotal(Math.max(0, Number(payload.data?.total ?? 0)));
+      const nextTotalPages = Math.max(1, Math.ceil(payload.total / Math.max(payload.pageSize, 1)));
+      const nextPage = Math.min(nextTotalPages, Math.max(1, Number(payload.page ?? targetPage)));
+      const normalizedTasks = payload.items.map(normalizeImportTask);
+      setTasks(normalizedTasks);
+      setSummary({
+        completed: normalizedTasks.filter((task) => task.status === 'COMPLETED').length,
+        failed: normalizedTasks.filter((task) => task.status === 'FAILED').length
+      });
+      setTotal(Math.max(0, Number(payload.total ?? 0)));
       setTotalPages(nextTotalPages);
       setPage((current) => current === nextPage ? current : nextPage);
       setError('');
@@ -194,11 +223,9 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   async function requestRescan() {
     setBusy('rescan');
     try {
-      const response = await fetch('/api/import-tasks/rescan', { method: 'POST' });
-      const text = await response.text();
-      const payload = text ? JSON.parse(text) as { ok: boolean; data?: { requestedAt: string }; error?: { message: string } } : null;
-      if (!response.ok) throw new Error(payload?.error?.message ?? `请求重新识别失败：HTTP ${response.status}`);
-      if (!payload?.ok) throw new Error(payload?.error?.message ?? '请求重新识别失败');
+      const response = await apiV2Fetch('/api/v2/ingestion/imports/rescan', { method: 'POST' });
+      const payload = await response.json().catch(() => null) as { detail?: string } | null;
+      if (!response.ok) throw new Error(payload?.detail ?? `请求重新识别失败：HTTP ${response.status}`);
       setMessage('已请求重新识别监控文件夹');
       toast.success('已请求重新识别监控文件夹');
       setError('');
@@ -223,12 +250,10 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
     if (!confirmed) return;
     setBusy('clear');
     try {
-      const response = await fetch('/api/import-tasks', { method: 'DELETE' });
-      const text = await response.text();
-      const payload = text ? JSON.parse(text) as { ok: boolean; data?: { deleted: number }; error?: { message: string } } : null;
-      if (!response.ok) throw new Error(payload?.error?.message ?? `清空记录失败：HTTP ${response.status}`);
-      if (!payload?.ok) throw new Error(payload?.error?.message ?? '清空记录失败');
-      const successMessage = `已清空 ${payload.data?.deleted ?? 0} 条已结束导入记录`;
+      const response = await apiV2Fetch('/api/v2/ingestion/imports', { method: 'DELETE' });
+      const payload = await response.json().catch(() => null) as { deleted?: number; detail?: string } | null;
+      if (!response.ok) throw new Error(payload?.detail ?? `清空记录失败：HTTP ${response.status}`);
+      const successMessage = `已清空 ${payload?.deleted ?? 0} 条已结束导入记录`;
       setMessage(successMessage);
       toast.success(successMessage);
       setError('');
@@ -246,11 +271,9 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   async function retryTask(task: ImportTask) {
     setRetryingTaskId(task.id);
     try {
-      const response = await fetch(`/api/import-tasks/${encodeURIComponent(task.id)}/retry`, { method: 'POST' });
-      const text = await response.text();
-      const payload = text ? JSON.parse(text) as { ok: boolean; error?: { message: string } } : null;
-      if (!response.ok) throw new Error(payload?.error?.message ?? `重试失败：HTTP ${response.status}`);
-      if (!payload?.ok) throw new Error(payload?.error?.message ?? '重试失败');
+      const response = await apiV2Fetch(`/api/v2/ingestion/imports/${encodeURIComponent(task.id)}/retry`, { method: 'POST' });
+      const payload = await response.json().catch(() => null) as { detail?: string } | null;
+      if (!response.ok) throw new Error(payload?.detail ?? `重试失败：HTTP ${response.status}`);
       setMessage(`${task.originalName ?? task.sourcePath} 已重新加入队列`);
       setError('');
       toast.success(retryQueueMessage(task));
@@ -279,17 +302,15 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
       let deletedLibraryRecords = 0;
       let failedFileDeletes = 0;
       for (const task of targets) {
-        const response = await fetch(`/api/import-tasks/${encodeURIComponent(task.id)}`, {
+        const response = await apiV2Fetch(`/api/v2/ingestion/imports/${encodeURIComponent(task.id)}`, {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ deleteMode, deleteLibraryRecord })
         });
-        const text = await response.text();
-        const payload = text ? JSON.parse(text) as { ok: boolean; data?: { deletedFiles?: number; deletedLibraryRecord?: boolean; failedFileDeletes?: Array<{ path: string; message: string }> }; error?: { message: string } } : null;
-        if (!response.ok) throw new Error(payload?.error?.message ?? `删除失败：HTTP ${response.status}`);
-        if (!payload?.ok) throw new Error(payload?.error?.message ?? '删除失败');
-        if (payload.data?.deletedLibraryRecord) deletedLibraryRecords += 1;
-        failedFileDeletes += payload.data?.failedFileDeletes?.length ?? 0;
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null) as { detail?: string } | null;
+          throw new Error(payload?.detail ?? `删除失败：HTTP ${response.status}`);
+        }
       }
       const fileMessage = deleteMode === 'source'
         ? `已删除 ${targets.length} 条导入记录和对应源文件`

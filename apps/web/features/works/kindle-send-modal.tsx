@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import { AlertTriangle, CheckCircle2, FileText, Mail, Send, Settings, X } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
@@ -67,7 +69,7 @@ export function KindleSendModal({ book, open, preferredEditionId, onClose }: { b
     setSelectedFileId(defaultOption?.fileId ?? '');
     setSettingsLoading(true);
     setSettingsError('');
-    fetch('/api/kindle-settings', { cache: 'no-store' })
+    apiV2Fetch('/api/v2/delivery/kindle/settings', { cache: 'no-store' })
       .then((response) => response.json())
       .then((payload: KindleSettingsPayload) => {
         if (!payload.ok || !payload.data) throw new Error(payload.error?.message ?? '读取邮件设置失败');
@@ -88,7 +90,7 @@ export function KindleSendModal({ book, open, preferredEditionId, onClose }: { b
     if (!selectedFileId) return;
     setSending(true);
     try {
-      const response = await fetch('/api/kindle-send-tasks', {
+      const response = await apiV2Fetch('/api/v2/delivery/kindle/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workId: book.id, fileId: selectedFileId })

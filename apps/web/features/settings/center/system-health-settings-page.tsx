@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import { Activity, AlertTriangle, CheckCircle2, Circle, LoaderCircle, RefreshCw, RotateCcw, SkipForward, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -151,7 +153,7 @@ export function SystemHealthSettingsPage() {
   }, []);
 
   const loadSnapshot = useCallback(async (runId: string) => {
-    const response = await fetch(`/api/system/health/runs/${encodeURIComponent(runId)}`, { cache: 'no-store' });
+    const response = await apiV2Fetch(`/api/v2/operations/health/runs/${encodeURIComponent(runId)}`, { cache: 'no-store' });
     const payload = await response.json() as RunPayload;
     if (!payload.ok || !payload.data?.run) throw new Error(payload.error?.message ?? t('读取健康检查状态失败'));
     applySnapshot(payload.data.run);
@@ -172,7 +174,7 @@ export function SystemHealthSettingsPage() {
     sourceRef.current?.close();
     errorsRef.current = 0;
     setStreamMode('sse');
-    const source = new EventSource(`/api/system/health/runs/${encodeURIComponent(runId)}/events?after=${after}`);
+    const source = new EventSource(`/api/v2/operations/health/runs/${encodeURIComponent(runId)}/events?after=${after}`);
     sourceRef.current = source;
     const receive = (event: Event) => {
       errorsRef.current = 0;
@@ -234,7 +236,7 @@ export function SystemHealthSettingsPage() {
   async function execute() {
     setStarting(true);
     try {
-      const response = await fetch('/api/system/health/runs', { method: 'POST' });
+      const response = await apiV2Fetch('/api/v2/operations/health/runs', { method: 'POST' });
       const payload = await response.json() as RunPayload;
       if (!payload.ok || !payload.data?.run) throw new Error(payload.error?.message ?? t('启动健康检查失败'));
       applySnapshot(payload.data.run);
@@ -248,7 +250,7 @@ export function SystemHealthSettingsPage() {
 
   async function restartImportQueue() {
     if (!window.confirm(t('安全重启导入队列？如果正在导入，将等待当前任务完成。'))) return;
-    const response = await fetch('/api/system/queues/import/restart', { method: 'POST' });
+    const response = await apiV2Fetch('/api/v2/operations/queues/import/restart', { method: 'POST' });
     const payload = await response.json() as { ok?: boolean; data?: { operation?: Operation }; error?: { message?: string } };
     if (!payload.ok || !payload.data?.operation) {
       toast.error('重启导入队列失败', payload.error?.message ?? t('请稍后重试'));
@@ -257,7 +259,7 @@ export function SystemHealthSettingsPage() {
     setOperation(payload.data.operation);
     const operationId = payload.data.operation.id;
     const timer = window.setInterval(async () => {
-      const statusResponse = await fetch(`/api/system/queue-operations/${encodeURIComponent(operationId)}`, { cache: 'no-store' });
+      const statusResponse = await apiV2Fetch(`/api/v2/operations/queue-operations/${encodeURIComponent(operationId)}`, { cache: 'no-store' });
       const statusPayload = await statusResponse.json() as { ok?: boolean; data?: { operation?: Operation } };
       const next = statusPayload.data?.operation;
       if (!next) return;

@@ -5,7 +5,7 @@ from collections.abc import Callable
 from types import TracebackType
 from typing import Literal, Self
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from appv2.modules.catalog.contracts import (
@@ -14,6 +14,7 @@ from appv2.modules.catalog.contracts import (
     CatalogImport,
     CatalogRepository,
     CatalogWork,
+    CategoryView,
     ShelfView,
 )
 from appv2.modules.catalog.infrastructure.models import (
@@ -22,6 +23,7 @@ from appv2.modules.catalog.infrastructure.models import (
     FileRecord,
     ShelfItemRecord,
     ShelfRecord,
+    WorkCategoryRecord,
     WorkRecord,
 )
 
@@ -73,6 +75,17 @@ def _shelf(record: ShelfRecord) -> ShelfView:
         rules=record.rules,
         pinned=record.pinned,
         created_at=record.created_at,
+    )
+
+
+def _category(record: CategoryRecord, book_count: int) -> CategoryView:
+    return CategoryView(
+        id=record.id,
+        kind=record.kind,
+        name=record.name,
+        book_count=book_count,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
     )
 
 
@@ -344,6 +357,95 @@ class SqlCatalogRepository(CatalogRepository):
         self._session.delete(record)
         return True
 
+    def list_shelf_works(
+        self,
+        shelf_id: uuid.UUID,
+        owner_id: uuid.UUID,
+        *,
+        offset: int,
+        limit: int,
+    ) -> tuple[list[CatalogWork], list[uuid.UUID], int] | None:
+        shelf = self._session.scalar(
+            select(ShelfRecord).where(
+                ShelfRecord.id == shelf_id,
+                ShelfRecord.owner_id == owner_id,
+            )
+        )
+        if shelf is None:
+            return None
+        if shelf.kind == "smart":
+            criteria = [WorkRecord.status == "active"]
+            media_type = shelf.rules.get("mediaType")
+            if isinstance(media_type, str) and media_type:
+                criteria.append(WorkRecord.media_type == media_type)
+            all_ids = list(
+                self._session.scalars(
+                    select(WorkRecord.id)
+                    .where(*criteria)
+                    .order_by(WorkRecord.sort_title, WorkRecord.id)
+                ).all()
+            )
+            records = self._session.scalars(
+                select(WorkRecord)
+                .where(*criteria)
+                .order_by(WorkRecord.sort_title, WorkRecord.id)
+                .offset(offset)
+                .limit(limit)
+            ).all()
+        else:
+            all_ids = list(
+                self._session.scalars(
+                    select(ShelfItemRecord.work_id)
+                    .where(ShelfItemRecord.shelf_id == shelf_id)
+                    .order_by(ShelfItemRecord.sort_order, ShelfItemRecord.id)
+                ).all()
+            )
+            records = self._session.scalars(
+                select(WorkRecord)
+                .join(ShelfItemRecord, ShelfItemRecord.work_id == WorkRecord.id)
+                .where(ShelfItemRecord.shelf_id == shelf_id)
+                .order_by(ShelfItemRecord.sort_order, ShelfItemRecord.id)
+                .offset(offset)
+                .limit(limit)
+            ).all()
+        return [_work(record) for record in records], all_ids, len(all_ids)
+
+    def replace_shelf_items(
+        self,
+        shelf_id: uuid.UUID,
+        owner_id: uuid.UUID,
+        work_ids: list[uuid.UUID],
+    ) -> bool:
+        shelf = self._session.scalar(
+            select(ShelfRecord).where(
+                ShelfRecord.id == shelf_id,
+                ShelfRecord.owner_id == owner_id,
+                ShelfRecord.kind == "manual",
+            )
+        )
+        if shelf is None:
+            return False
+        unique_ids = list(dict.fromkeys(work_ids))
+        if unique_ids:
+            existing = set(
+                self._session.scalars(
+                    select(WorkRecord.id).where(WorkRecord.id.in_(unique_ids))
+                ).all()
+            )
+            if existing != set(unique_ids):
+                return False
+        self._session.execute(delete(ShelfItemRecord).where(ShelfItemRecord.shelf_id == shelf_id))
+        self._session.add_all(
+            ShelfItemRecord(
+                shelf_id=shelf_id,
+                work_id=work_id,
+                sort_order=index,
+            )
+            for index, work_id in enumerate(unique_ids)
+        )
+        self._session.flush()
+        return True
+
     def category_facets(self) -> dict[str, list[dict[str, object]]]:
         rows = self._session.execute(
             select(CategoryRecord.kind, CategoryRecord.id, CategoryRecord.name).order_by(
@@ -354,6 +456,103 @@ class SqlCatalogRepository(CatalogRepository):
         for kind, category_id, name in rows:
             result.setdefault(kind, []).append({"id": str(category_id), "name": name})
         return result
+
+    def list_categories(
+        self,
+        *,
+        kind: str,
+        query: str | None,
+        offset: int,
+        limit: int,
+    ) -> tuple[list[CategoryView], int]:
+        criteria = [CategoryRecord.kind == kind]
+        if query:
+            criteria.append(CategoryRecord.name.ilike(f"%{query.strip()}%"))
+        total = int(
+            self._session.scalar(select(func.count()).select_from(CategoryRecord).where(*criteria))
+            or 0
+        )
+        rows = self._session.execute(
+            select(CategoryRecord, func.count(WorkCategoryRecord.id))
+            .outerjoin(
+                WorkCategoryRecord,
+                WorkCategoryRecord.category_id == CategoryRecord.id,
+            )
+            .where(*criteria)
+            .group_by(CategoryRecord.id)
+            .order_by(CategoryRecord.name)
+            .offset(offset)
+            .limit(limit)
+        ).all()
+        return [_category(record, int(count)) for record, count in rows], total
+
+    def rename_category(self, category_id: uuid.UUID, name: str) -> CategoryView | None:
+        record = self._session.get(CategoryRecord, category_id)
+        if record is None:
+            return None
+        record.name = name
+        self._session.flush()
+        count = int(
+            self._session.scalar(
+                select(func.count())
+                .select_from(WorkCategoryRecord)
+                .where(WorkCategoryRecord.category_id == category_id)
+            )
+            or 0
+        )
+        return _category(record, count)
+
+    def merge_categories(
+        self,
+        *,
+        kind: str,
+        target_id: uuid.UUID,
+        source_ids: list[uuid.UUID],
+    ) -> CategoryView | None:
+        target = self._session.get(CategoryRecord, target_id)
+        if target is None or target.kind != kind:
+            return None
+        sources = self._session.scalars(
+            select(CategoryRecord).where(
+                CategoryRecord.id.in_(source_ids),
+                CategoryRecord.kind == kind,
+            )
+        ).all()
+        if len(sources) != len(set(source_ids)):
+            return None
+        for source in sources:
+            links = self._session.scalars(
+                select(WorkCategoryRecord).where(WorkCategoryRecord.category_id == source.id)
+            ).all()
+            for link in links:
+                duplicate = self._session.scalar(
+                    select(WorkCategoryRecord).where(
+                        WorkCategoryRecord.work_id == link.work_id,
+                        WorkCategoryRecord.category_id == target_id,
+                    )
+                )
+                if duplicate is None:
+                    link.category_id = target_id
+                else:
+                    self._session.delete(link)
+            self._session.delete(source)
+        self._session.flush()
+        count = int(
+            self._session.scalar(
+                select(func.count())
+                .select_from(WorkCategoryRecord)
+                .where(WorkCategoryRecord.category_id == target_id)
+            )
+            or 0
+        )
+        return _category(target, count)
+
+    def delete_category(self, category_id: uuid.UUID) -> bool:
+        record = self._session.get(CategoryRecord, category_id)
+        if record is None:
+            return False
+        self._session.delete(record)
+        return True
 
 
 class CatalogSqlUnitOfWork:

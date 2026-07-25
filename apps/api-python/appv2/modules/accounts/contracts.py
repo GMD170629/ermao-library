@@ -86,6 +86,14 @@ class AccountsRepository(Protocol):
 
     def delete_user(self, user_id: uuid.UUID) -> bool: ...
 
+    def preferences(self, user_id: uuid.UUID) -> dict[str, object]: ...
+
+    def save_preferences(
+        self,
+        user_id: uuid.UUID,
+        values: dict[str, object],
+    ) -> dict[str, object]: ...
+
 
 class SessionsRepository(Protocol):
     def add(self, *, user_id: uuid.UUID, token_hash: str, expires_at: datetime) -> None: ...

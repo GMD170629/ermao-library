@@ -2,12 +2,17 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Self
 
-from fastapi import APIRouter, Depends, File, Header, UploadFile, status
+from fastapi import APIRouter, Depends, File, Header, Query, UploadFile, status
 from pydantic import Field
 
 from appv2.modules.accounts.contracts import AccountView, CurrentAccount
 from appv2.modules.ingestion.application import IngestionNotFound, IngestionService
-from appv2.modules.ingestion.contracts import ImportResult, IngestionJob, MonitorFolder
+from appv2.modules.ingestion.contracts import (
+    DirectoryNode,
+    ImportResult,
+    IngestionJob,
+    MonitorFolder,
+)
 from appv2.platform.http import AppProblem, CamelModel, Page
 
 
@@ -79,6 +84,47 @@ class FolderResponse(CamelModel):
         return cls.model_validate(folder)
 
 
+class DeletedJobsResponse(CamelModel):
+    deleted: int
+
+
+class DirectoryNodeResponse(CamelModel):
+    name: str
+    path: str
+    readable: bool
+    error: str | None
+    children: list["DirectoryNodeResponse"]
+
+    @classmethod
+    def from_view(cls, value: DirectoryNode) -> "DirectoryNodeResponse":
+        return cls(
+            name=value.name,
+            path=value.path,
+            readable=value.readable,
+            error=value.error,
+            children=[cls.from_view(child) for child in value.children],
+        )
+
+
+class DirectoryTreeResponse(CamelModel):
+    node: DirectoryNodeResponse
+    monitor_root: str
+
+
+class ScanDirectoryRequest(CamelModel):
+    path: str = Field(min_length=1)
+
+
+class ScanDirectoryResponse(CamelModel):
+    path: str
+    directories_scanned: int
+    files_scanned: int
+    candidates_found: int
+    queued: int
+    skipped: int
+    errors: list[dict[str, str]]
+
+
 def create_router(service: IngestionService, current_account: CurrentAccount) -> APIRouter:
     router = APIRouter(prefix="/ingestion")
     Actor = Annotated[AccountView, Depends(current_account)]
@@ -95,8 +141,8 @@ def create_router(service: IngestionService, current_account: CurrentAccount) ->
     def imports(
         actor: Actor,
         page: int = 1,
-        page_size: int = 24,
-        job_status: str | None = None,
+        page_size: Annotated[int, Query(alias="pageSize", ge=1, le=200)] = 24,
+        job_status: Annotated[str | None, Query(alias="status")] = None,
     ) -> Page[JobResponse]:
         del actor
         size = min(max(page_size, 1), 200)
@@ -151,11 +197,58 @@ def create_router(service: IngestionService, current_account: CurrentAccount) ->
             raise missing(error) from error
         return JobAccepted(id=job_id, status="queued", duplicate=False, result_id=None)
 
+    @router.post(
+        "/imports/rescan",
+        response_model=Page[JobAccepted],
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    def rescan(actor: Actor) -> Page[JobAccepted]:
+        results = service.scan_all_folders(actor.id)
+        return Page(
+            items=[JobAccepted.from_result(result) for result in results],
+            page=1,
+            page_size=max(len(results), 1),
+            total=len(results),
+        )
+
+    @router.delete("/imports", response_model=DeletedJobsResponse)
+    def clear_finished(actor: Actor) -> DeletedJobsResponse:
+        del actor
+        return DeletedJobsResponse(deleted=service.clear_finished())
+
+    @router.post(
+        "/imports/scan-directory",
+        response_model=ScanDirectoryResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    def scan_directory(
+        payload: ScanDirectoryRequest,
+        actor: Actor,
+    ) -> ScanDirectoryResponse:
+        try:
+            results = service.scan_directory(payload.path, actor.id)
+        except ValueError as error:
+            raise AppProblem(
+                status=400,
+                code="INVALID_MONITOR_PATH",
+                title="Invalid monitor path",
+                message_key="invalid_request",
+            ) from error
+        return ScanDirectoryResponse(
+            path=payload.path,
+            directories_scanned=1,
+            files_scanned=len(results),
+            candidates_found=len(results),
+            queued=sum(not result.duplicate for result in results),
+            skipped=sum(result.duplicate for result in results),
+            errors=[],
+        )
+
     @router.delete("/imports/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
-    def cancel(job_id: uuid.UUID, actor: Actor) -> None:
+    def delete_job(job_id: uuid.UUID, actor: Actor) -> None:
         del actor
         try:
-            service.cancel(job_id)
+            service.delete_job(job_id)
         except IngestionNotFound as error:
             raise missing(error) from error
 
@@ -168,6 +261,23 @@ def create_router(service: IngestionService, current_account: CurrentAccount) ->
             page=1,
             page_size=max(len(values), 1),
             total=len(values),
+        )
+
+    @router.get("/folders/tree", response_model=DirectoryTreeResponse)
+    def folder_tree(actor: Actor, path: str | None = None) -> DirectoryTreeResponse:
+        del actor
+        try:
+            node, monitor_root = service.directory_tree(path)
+        except ValueError as error:
+            raise AppProblem(
+                status=400,
+                code="INVALID_MONITOR_PATH",
+                title="Invalid monitor path",
+                message_key="invalid_request",
+            ) from error
+        return DirectoryTreeResponse(
+            node=DirectoryNodeResponse.from_view(node),
+            monitor_root=monitor_root,
         )
 
     @router.post("/folders", response_model=FolderResponse, status_code=status.HTTP_201_CREATED)
@@ -223,7 +333,11 @@ def create_router(service: IngestionService, current_account: CurrentAccount) ->
         )
 
     @router.get("/conversions", response_model=Page[JobResponse])
-    def conversions(actor: Actor, page: int = 1, page_size: int = 24) -> Page[JobResponse]:
+    def conversions(
+        actor: Actor,
+        page: int = 1,
+        page_size: Annotated[int, Query(alias="pageSize", ge=1, le=200)] = 24,
+    ) -> Page[JobResponse]:
         del actor
         size = min(max(page_size, 1), 200)
         items, total = service.list_jobs(page=max(page, 1), page_size=size, status=None)

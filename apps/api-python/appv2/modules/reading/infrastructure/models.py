@@ -73,6 +73,10 @@ class LocationClaimRecord(UUIDPrimaryKey, Base):
     )
 
     edition_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("catalog.editions.id"), nullable=False)
+    content_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False)
+    cache_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    break_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    serialized: Mapped[str | None] = mapped_column(Text)
     owner: Mapped[str] = mapped_column(String(200), nullable=False)
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

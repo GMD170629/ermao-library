@@ -154,6 +154,7 @@ class AccountService:
         email: str | None = None,
         display_name: str | None = None,
         password: str | None = None,
+        current_password: str | None = None,
         locale: str | None = None,
     ) -> AccountView:
         normalized_email = User.normalize_email(email) if email is not None else None
@@ -162,6 +163,17 @@ class AccountService:
         )
         password_hash = self._password_hasher.hash(password) if password else None
         with self._uow_factory() as uow:
+            if normalized_email is not None or password_hash is not None:
+                existing_password_hash = uow.accounts.password_hash_for(user_id)
+                if (
+                    current_password is None
+                    or existing_password_hash is None
+                    or not self._password_hasher.verify(
+                        current_password,
+                        existing_password_hash,
+                    )
+                ):
+                    raise AuthenticationFailed
             if normalized_email is not None:
                 existing = uow.accounts.get_user_by_email(normalized_email)
                 if existing is not None and existing.id != user_id:
@@ -185,6 +197,20 @@ class AccountService:
             if not uow.accounts.delete_user(user_id):
                 raise AccountNotFound
             uow.commit()
+
+    def preferences(self, user_id: uuid.UUID) -> dict[str, object]:
+        with self._uow_factory() as uow:
+            return uow.accounts.preferences(user_id)
+
+    def save_preferences(
+        self,
+        user_id: uuid.UUID,
+        values: dict[str, object],
+    ) -> dict[str, object]:
+        with self._uow_factory() as uow:
+            saved = uow.accounts.save_preferences(user_id, values)
+            uow.commit()
+            return saved
 
     def _create_grant(self, uow: AccountsUnitOfWork, account: AccountView) -> SessionGrant:
         token = new_session_token()

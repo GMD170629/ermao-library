@@ -1,18 +1,20 @@
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Header, status
+from fastapi import APIRouter, Depends, Header, Query, status
 from pydantic import Field
 from starlette.responses import StreamingResponse
 
 from appv2.modules.accounts.contracts import AccountView, CurrentAccount
 from appv2.modules.reading.application import (
+    LocationClaimConflict,
+    LocationClaimResult,
     ProgressConflict,
     ReadingNotFound,
     ReadingService,
 )
-from appv2.modules.reading.contracts import BookmarkView, PreferenceView, ProgressView
+from appv2.modules.reading.contracts import BookmarkView, ComicPage, PreferenceView, ProgressView
 from appv2.platform.http import AppProblem, CamelModel, Page
 from appv2.platform.http.ranges import InvalidRange, parse_range_header
 
@@ -83,7 +85,11 @@ class PreferenceRequest(CamelModel):
 
 
 class ReaderTargetResponse(CamelModel):
+    work_id: uuid.UUID
+    work_title: str
+    work_author: str | None
     edition_id: uuid.UUID
+    edition_title: str
     file_id: uuid.UUID
     format: str
     media_type: str
@@ -92,10 +98,63 @@ class ReaderTargetResponse(CamelModel):
 
 
 class BootstrapResponse(CamelModel):
+    account_id: uuid.UUID
     target: ReaderTargetResponse
     progress: ProgressResponse | None
     bookmarks: list[BookmarkResponse]
     preference: PreferenceResponse | None
+
+
+class ComicPageResponse(CamelModel):
+    page_index: int
+    title: str
+    mime_type: str
+    size: int
+
+    @classmethod
+    def from_view(cls, value: ComicPage) -> "ComicPageResponse":
+        return cls(
+            page_index=value.page_index,
+            title=value.title,
+            mime_type=value.media_type,
+            size=value.size_bytes,
+        )
+
+
+class ComicPageIndexResponse(CamelModel):
+    page_count: int
+    pages: list[ComicPageResponse]
+
+
+class EpubLocationClaimRequest(CamelModel):
+    cache_version: int = Field(ge=1)
+    content_fingerprint: str = Field(min_length=1, max_length=128)
+    break_size: int = Field(ge=100, le=100_000)
+
+
+class EpubLocationSaveRequest(EpubLocationClaimRequest):
+    lease_token: str = Field(min_length=20, max_length=500)
+    serialized: str = Field(min_length=1, max_length=20_000_000)
+
+
+class EpubLocationClaimResponse(CamelModel):
+    status: Literal["ready", "claimed", "generating"]
+    serialized: str | None = None
+    lease_token: str | None = None
+    lease_expires_at: int | None = None
+    retry_after_ms: int | None = None
+
+    @classmethod
+    def from_result(cls, value: LocationClaimResult) -> "EpubLocationClaimResponse":
+        return cls(
+            status=value.status,
+            serialized=value.serialized,
+            lease_token=value.lease_token,
+            lease_expires_at=(
+                int(value.lease_expires_at.timestamp() * 1000) if value.lease_expires_at else None
+            ),
+            retry_after_ms=value.retry_after_ms,
+        )
 
 
 def create_router(service: ReadingService, current_account: CurrentAccount) -> APIRouter:
@@ -119,6 +178,7 @@ def create_router(service: ReadingService, current_account: CurrentAccount) -> A
         except ReadingNotFound as error:
             raise missing(error) from error
         return BootstrapResponse(
+            account_id=actor.id,
             target=ReaderTargetResponse.model_validate(target),
             progress=ProgressResponse.from_view(progress) if progress else None,
             bookmarks=[BookmarkResponse.from_view(value) for value in bookmarks],
@@ -163,6 +223,96 @@ def create_router(service: ReadingService, current_account: CurrentAccount) -> A
             media_type=stream.media_type,
             headers=headers,
         )
+
+    @router.get("/volumes/{edition_id}/pages", response_model=ComicPageIndexResponse)
+    def comic_pages(edition_id: uuid.UUID, actor: Actor) -> ComicPageIndexResponse:
+        del actor
+        try:
+            pages = service.comic_pages(edition_id=edition_id)
+        except ReadingNotFound as error:
+            raise missing(error) from error
+        return ComicPageIndexResponse(
+            page_count=len(pages),
+            pages=[ComicPageResponse.from_view(page) for page in pages],
+        )
+
+    @router.get("/volumes/{edition_id}/pages/{page_index}")
+    def comic_page(
+        edition_id: uuid.UUID,
+        page_index: int,
+        actor: Actor,
+    ) -> StreamingResponse:
+        try:
+            stream = service.comic_page(
+                user_id=actor.id,
+                edition_id=edition_id,
+                page_index=page_index,
+            )
+        except ReadingNotFound as error:
+            raise missing(error) from error
+        return StreamingResponse(
+            stream.body,
+            status_code=stream.status_code,
+            media_type=stream.media_type,
+            headers={
+                "Content-Length": str(stream.content_length),
+                "ETag": stream.etag,
+                "Last-Modified": stream.last_modified,
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": f'inline; filename="{stream.filename}"',
+            },
+        )
+
+    @router.post(
+        "/editions/{edition_id}/epub-locations/claim",
+        response_model=EpubLocationClaimResponse,
+    )
+    def claim_epub_locations(
+        edition_id: uuid.UUID,
+        payload: EpubLocationClaimRequest,
+        actor: Actor,
+    ) -> EpubLocationClaimResponse:
+        try:
+            result = service.claim_epub_locations(
+                user_id=actor.id,
+                edition_id=edition_id,
+                content_fingerprint=payload.content_fingerprint,
+                cache_version=payload.cache_version,
+                break_size=payload.break_size,
+            )
+        except ReadingNotFound as error:
+            raise missing(error) from error
+        return EpubLocationClaimResponse.from_result(result)
+
+    @router.put(
+        "/editions/{edition_id}/epub-locations",
+        response_model=EpubLocationClaimResponse,
+    )
+    def save_epub_locations(
+        edition_id: uuid.UUID,
+        payload: EpubLocationSaveRequest,
+        actor: Actor,
+    ) -> EpubLocationClaimResponse:
+        del actor
+        try:
+            result = service.save_epub_locations(
+                edition_id=edition_id,
+                content_fingerprint=payload.content_fingerprint,
+                cache_version=payload.cache_version,
+                break_size=payload.break_size,
+                lease_token=payload.lease_token,
+                serialized=payload.serialized,
+            )
+        except ReadingNotFound as error:
+            raise missing(error) from error
+        except LocationClaimConflict as error:
+            raise AppProblem(
+                status=409,
+                code="EPUB_LOCATION_CLAIM_CONFLICT",
+                title="EPUB location claim conflict",
+                message_key="conflict",
+            ) from error
+        return EpubLocationClaimResponse.from_result(result)
 
     @router.get("/editions/{edition_id}/progress", response_model=ProgressResponse | None)
     def progress(edition_id: uuid.UUID, actor: Actor) -> ProgressResponse | None:
@@ -236,7 +386,9 @@ def create_router(service: ReadingService, current_account: CurrentAccount) -> A
 
     @router.get("/preferences", response_model=PreferenceResponse | None)
     def preference(
-        actor: Actor, scope: str = "global", target_id: uuid.UUID | None = None
+        actor: Actor,
+        scope: str = "global",
+        target_id: Annotated[uuid.UUID | None, Query(alias="targetId")] = None,
     ) -> PreferenceResponse | None:
         value = service.get_preference(user_id=actor.id, scope=scope, target_id=target_id)
         return PreferenceResponse.from_view(value) if value else None

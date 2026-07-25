@@ -26,8 +26,8 @@ test('always rewrites API requests to the local Python backend', async () => {
   assert.deepEqual(await loadRewrites(), {
     beforeFiles: [
       {
-        source: '/api/:path*',
-        destination: 'http://127.0.0.1:8000/api/:path*'
+        source: '/api/v2/:path*',
+        destination: 'http://127.0.0.1:8000/api/v2/:path*'
       }
     ]
   });

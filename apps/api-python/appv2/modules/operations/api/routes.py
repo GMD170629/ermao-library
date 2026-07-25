@@ -2,8 +2,9 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from pydantic import Field
+from starlette.responses import StreamingResponse
 
 from appv2.modules.accounts.contracts import AccountView, CurrentAccount
 from appv2.modules.operations.application import OperationsNotFound, OperationsService
@@ -128,7 +129,7 @@ def create_router(
     def events(
         actor: Actor,
         page: int = 1,
-        page_size: int = 24,
+        page_size: Annotated[int, Query(alias="pageSize", ge=1, le=200)] = 24,
         kind: str | None = None,
     ) -> Page[EventResponse]:
         del actor
@@ -168,6 +169,24 @@ def create_router(
         except OperationsNotFound as error:
             raise missing(error) from error
         return BackupResponse.from_view(value)
+
+    @router.get("/backups/{backup_id}/download")
+    def download_backup(backup_id: uuid.UUID, actor: Actor) -> StreamingResponse:
+        del actor
+        try:
+            archive = service.download_backup(backup_id)
+        except OperationsNotFound as error:
+            raise missing(error) from error
+        return StreamingResponse(
+            archive.body,
+            media_type="application/vnd.postgresql.custom-dump",
+            headers={
+                "Content-Length": str(archive.size_bytes),
+                "Content-Disposition": f'attachment; filename="{archive.filename}"',
+                "ETag": f'"{archive.checksum}"',
+                "Cache-Control": "private, no-store",
+            },
+        )
 
     @router.post(
         "/backups/{backup_id}/restore",

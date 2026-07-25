@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from alembic import command
-from alembic.config import Config
+from appv2.platform.config import get_settings
+from appv2.platform.database.migrations import migrate as migrate_database
 
 
 def migrate() -> None:
+    settings = get_settings()
     backend_root = Path(__file__).resolve().parents[2]
-    config = Config(backend_root / "alembic-v2.ini")
-    command.upgrade(config, "head")
+    migrate_database(settings.database_dsn, backend_root)
 
 
 def main() -> None:

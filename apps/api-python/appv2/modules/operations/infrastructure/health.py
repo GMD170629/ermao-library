@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 from sqlalchemy import Engine, text
 
@@ -27,6 +29,33 @@ class DatabaseHealth:
                 detail={"serverVersion": version, "requiredMajor": 18},
             )
         except Exception as error:
+            return HealthStatus(
+                name=self.name,
+                status="failed",
+                checked_at=checked_at,
+                detail={"error": type(error).__name__},
+            )
+
+
+class StorageHealth:
+    name = "storage"
+
+    def __init__(self, root: Path) -> None:
+        self._root = root
+
+    def check(self) -> HealthStatus:
+        checked_at = datetime.now(UTC)
+        try:
+            self._root.mkdir(parents=True, exist_ok=True)
+            with NamedTemporaryFile(dir=self._root, prefix=".health-", delete=True):
+                pass
+            return HealthStatus(
+                name=self.name,
+                status="healthy",
+                checked_at=checked_at,
+                detail={"root": str(self._root)},
+            )
+        except OSError as error:
             return HealthStatus(
                 name=self.name,
                 status="failed",

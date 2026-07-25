@@ -71,7 +71,7 @@ class PgRestoreExecutor(RestoreExecutorPort):
         backend_root: Path,
         expected_version: str,
     ) -> None:
-        self._database_url = database_url
+        self._database_url = database_url.replace("postgresql+psycopg://", "postgresql://", 1)
         self._backups_root = backups_root.resolve()
         self._backend_root = backend_root
         self._expected_version = expected_version

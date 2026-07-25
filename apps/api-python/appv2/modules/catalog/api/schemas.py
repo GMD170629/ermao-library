@@ -87,6 +87,7 @@ class ShelfRequest(CamelModel):
     kind: Literal["manual", "smart"] = "manual"
     rules: dict[str, object] = Field(default_factory=dict)
     pinned: bool = False
+    book_ids: list[uuid.UUID] = Field(default_factory=list, max_length=10_000)
 
 
 class ShelfUpdateRequest(CamelModel):
@@ -94,3 +95,4 @@ class ShelfUpdateRequest(CamelModel):
     description: str | None = None
     rules: dict[str, object] | None = None
     pinned: bool | None = None
+    book_ids: list[uuid.UUID] | None = Field(default=None, max_length=10_000)

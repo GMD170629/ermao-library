@@ -6,11 +6,13 @@ import os
 import shutil
 import subprocess
 import uuid
+from collections.abc import Iterable
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
 from appv2.modules.operations.contracts import (
+    BackupArchive,
     BackupExecutorPort,
     BackupManifest,
     BackupView,
@@ -20,7 +22,7 @@ from appv2.modules.operations.contracts import (
 
 class PgBackupExecutor(BackupExecutorPort):
     def __init__(self, *, database_url: str, backups_root: Path) -> None:
-        self._database_url = database_url
+        self._database_url = database_url.replace("postgresql+psycopg://", "postgresql://", 1)
         self._root = backups_root
 
     def create(self, backup: BackupView) -> tuple[str, int]:
@@ -61,6 +63,23 @@ class PgBackupExecutor(BackupExecutorPort):
         archive = self._archive(backup)
         archive.unlink(missing_ok=True)
         archive.with_suffix(f"{archive.suffix}.json").unlink(missing_ok=True)
+
+    def open(self, backup: BackupView) -> BackupArchive:
+        archive = self._archive(backup)
+        if not archive.is_file() or not backup.checksum:
+            raise FileNotFoundError("completed backup archive does not exist")
+
+        def body() -> Iterable[bytes]:
+            with archive.open("rb") as source:
+                while chunk := source.read(1024 * 1024):
+                    yield chunk
+
+        return BackupArchive(
+            body=body(),
+            filename=backup.archive_name,
+            size_bytes=archive.stat().st_size,
+            checksum=backup.checksum,
+        )
 
     def _archive(self, backup: BackupView) -> Path:
         path = (self._root / backup.archive_name).resolve()

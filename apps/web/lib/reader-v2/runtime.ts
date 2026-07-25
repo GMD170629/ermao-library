@@ -1,3 +1,4 @@
+import { apiV2Fetch } from '@/lib/api-v2';
 import { IndexedDbReaderV2Storage } from './storage';
 import { ReaderPreferenceRepository } from './preferences';
 import {
@@ -35,23 +36,33 @@ export function toWireLocation(location: ReaderProgressLocation) {
 
 async function progressTransport(mutation: Readonly<ProgressMutation>, signal: AbortSignal): Promise<ProgressSyncResult> {
   const body = toProgressPutBody(mutation);
-  const response = await fetch(`/api/reader/v2/editions/${encodeURIComponent(mutation.editionId)}/progress`, {
+  const response = await apiV2Fetch(`/api/v2/reading/editions/${encodeURIComponent(mutation.editionId)}/progress`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin',
     cache: 'no-store',
     signal,
-    body: JSON.stringify({ ...body, location: toWireLocation(body.location) })
+    body: JSON.stringify({
+      deviceId: body.clientId,
+      position: {
+        schemaVersion: body.schemaVersion,
+        mutationId: body.mutationId,
+        clientSequence: body.clientSequence,
+        contentFingerprint: body.contentFingerprint,
+        volumeId: body.volumeId,
+        location: toWireLocation(body.location)
+      },
+      percentage: Math.max(0, Math.min(1, body.percent / 100)),
+      occurredAt: new Date(mutation.updatedAt).toISOString()
+    })
   });
   const payload = await response.json().catch(() => null) as {
-    data?: { applied?: boolean };
-    error?: { message?: string };
     detail?: string;
   } | null;
-  if (response.ok) return { outcome: payload?.data?.applied === false ? 'stale' : 'accepted' };
+  if (response.ok) return { outcome: 'accepted' };
 
-  const message = payload?.error?.message ?? payload?.detail;
-  if (response.status === 409) return { outcome: 'fingerprint-conflict', message: message ?? '内容已经变化，旧进度未写入' };
+  const message = payload?.detail;
+  if (response.status === 409) return { outcome: 'stale' };
   // Authentication expiry is recoverable: keep the durable mutation so a
   // subsequent login can resume it. A 403 is an actual user/ownership mismatch.
   if (response.status === 401) throw new Error(message ?? '登录已过期，阅读进度将在重新登录后同步');

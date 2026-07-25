@@ -82,13 +82,13 @@ function clampPage(page: number, pageCount: number) {
 }
 
 function defaultPageIndexUrl(context: ReaderAdapterOpenContext) {
-  return withBasePath(`/api/volumes/${encodeURIComponent(context.source.volumeId ?? context.source.editionId)}/pages`);
+  return withBasePath(`/api/v2/reading/volumes/${encodeURIComponent(context.source.volumeId ?? context.source.editionId)}/pages`);
 }
 
 function defaultPageUrl(context: ReaderAdapterOpenContext, pageIndex: number, preferences: ReaderPreferences, retry: number) {
   const parameters = new URLSearchParams({ imageVariant: preferences.comic.imageVariant });
   if (retry > 0) parameters.set('retry', String(retry));
-  return withBasePath(`/api/volumes/${encodeURIComponent(context.source.volumeId ?? context.source.editionId)}/pages/${pageIndex}?${parameters}`);
+  return withBasePath(`/api/v2/reading/volumes/${encodeURIComponent(context.source.volumeId ?? context.source.editionId)}/pages/${pageIndex}?${parameters}`);
 }
 
 function waitForSignal<T>(request: Promise<T>, signal: AbortSignal) {
