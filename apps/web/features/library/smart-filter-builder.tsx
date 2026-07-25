@@ -93,6 +93,7 @@ function inputClassName() {
 export function SmartFilterBuilder({ fields, rules, loading = false, actions, onChange }: SmartFilterBuilderProps) {
   const { t: i18nAttribute } = useAttributeI18n();
   const fieldOptions = fields.map((field) => ({ value: field.key, label: field.label, group: field.group }));
+  const translatedFieldLabel = (field: SmartFilterField) => i18nAttribute(field.label);
 
   function addCondition() {
     onChange({ ...rules, conditions: [...rules.conditions, createSmartFilterCondition(fields)] });
@@ -135,9 +136,9 @@ export function SmartFilterBuilder({ fields, rules, loading = false, actions, on
       const type = field.type === 'date' ? 'date' : 'number';
       return (
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-          <input aria-label={i18nAttribute("{value0}起始值", { value0: field.label })} type={type} value={values[0] ?? ''} onChange={(event) => updateCondition(condition.id, { value: [event.target.value, values[1] ?? ''] })} className={inputClassName()} />
+          <input aria-label={i18nAttribute("{value0}起始值", { value0: translatedFieldLabel(field) })} type={type} value={values[0] ?? ''} onChange={(event) => updateCondition(condition.id, { value: [event.target.value, values[1] ?? ''] })} className={inputClassName()} />
           <span className="text-xs text-[#9B938D]"><I18nText>至</I18nText></span>
-          <input aria-label={i18nAttribute("{value0}结束值", { value0: field.label })} type={type} value={values[1] ?? ''} onChange={(event) => updateCondition(condition.id, { value: [values[0] ?? '', event.target.value] })} className={inputClassName()} />
+          <input aria-label={i18nAttribute("{value0}结束值", { value0: translatedFieldLabel(field) })} type={type} value={values[1] ?? ''} onChange={(event) => updateCondition(condition.id, { value: [values[0] ?? '', event.target.value] })} className={inputClassName()} />
         </div>
       );
     }
@@ -152,7 +153,7 @@ export function SmartFilterBuilder({ fields, rules, loading = false, actions, on
           }))}
           onChange={(nextValue) => updateCondition(condition.id, { value: nextValue })}
           placeholder={i18nAttribute("请选择")}
-          ariaLabel={i18nAttribute("{value0}筛选值", { value0: field.label })}
+          ariaLabel={i18nAttribute("{value0}筛选值", { value0: translatedFieldLabel(field) })}
           className="w-full min-w-0"
           triggerClassName="!h-11 !rounded-xl !border-black/[0.09] !px-3 !font-normal !text-[#34302D]"
         />
@@ -167,20 +168,20 @@ export function SmartFilterBuilder({ fields, rules, loading = false, actions, on
             label: `${option.label}${typeof option.count === 'number' ? ` · ${option.count}` : ''}`
           }))}
           onChange={(nextValue) => updateCondition(condition.id, { value: nextValue })}
-          placeholder={i18nAttribute("选择或输入{value0}", { value0: field.label })}
-          ariaLabel={i18nAttribute("{value0}筛选值", { value0: field.label })}
+          placeholder={i18nAttribute("选择或输入{value0}", { value0: translatedFieldLabel(field) })}
+          ariaLabel={i18nAttribute("{value0}筛选值", { value0: translatedFieldLabel(field) })}
         />
       );
     }
     return (
       <div className="relative">
         <input
-          aria-label={i18nAttribute("{value0}筛选值", { value0: field.label })}
+          aria-label={i18nAttribute("{value0}筛选值", { value0: translatedFieldLabel(field) })}
           type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
           value={value}
           onChange={(event) => updateCondition(condition.id, { value: event.target.value })}
           className={cn(inputClassName(), 'w-full', field.unit && 'pr-14')}
-          placeholder={i18nAttribute("填写{value0}", { value0: field.label })}
+          placeholder={i18nAttribute("填写{value0}", { value0: translatedFieldLabel(field) })}
         />
         {field.unit ? <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#938B85]">{field.unit}</span> : null}
       </div>
@@ -253,7 +254,10 @@ export function SmartFilterBuilder({ fields, rules, loading = false, actions, on
       </div>
 
       <div className="flex flex-col gap-3 border-t border-black/[0.055] bg-black/[0.018] px-4 py-3 text-xs text-[#7C756F] sm:flex-row sm:items-center sm:justify-between sm:px-5">
-        <span>{rules.conditions.length > 0 ? i18nAttribute("已启用 {value0} 条规则 · {value1}", { value0: rules.conditions.length, value1: rules.combinator === 'ALL' ? '同时满足全部条件' : '满足任意一条即可' }) : i18nAttribute("未添加组合条件，显示基础筛选结果")}</span>
+        <span>{rules.conditions.length > 0 ? i18nAttribute("已启用 {value0} 条规则 · {value1}", {
+          value0: rules.conditions.length,
+          value1: i18nAttribute(rules.combinator === 'ALL' ? '同时满足全部条件' : '满足任意一条即可')
+        }) : i18nAttribute("未添加组合条件，显示基础筛选结果")}</span>
         <button type="button" disabled={rules.conditions.length === 0} onClick={() => onChange({ combinator: 'ALL', conditions: [] })} className="inline-flex h-9 items-center gap-1.5 self-start rounded-lg px-2.5 font-medium text-[#7B746E] transition hover:bg-white hover:text-[#D74A2D] disabled:cursor-not-allowed disabled:opacity-35 sm:self-auto"><RotateCcw size={13} /><I18nText>清空组合条件</I18nText></button>
       </div>
     </section>

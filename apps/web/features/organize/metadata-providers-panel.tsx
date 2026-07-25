@@ -234,7 +234,7 @@ export function MetadataProvidersPanel() {
                 </div>
                 <Badge tone="slate">{items.filter((item) => item.enabled).length}/{items.length} <I18nText>启用</I18nText></Badge>
               </header>
-              <ol className="divide-y divide-[#EEEAE5] px-3" aria-label={i18nAttribute("{value0}数据源顺序", { value0: meta.label })}>
+              <ol className="divide-y divide-[#EEEAE5] px-3" aria-label={i18nAttribute("{value0}数据源顺序", { value0: i18nAttribute(meta.label) })}>
                 {items.map((item, index) => <li key={item.providerId} className="flex min-h-[74px] items-center gap-2 py-3">
                   <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#F5F1ED] text-[11px] tabular-nums text-[#7D766F]">{index + 1}</span>
                   <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-[#2C2926]">{item.name}</p><p className="mt-0.5 truncate text-xs text-[#918A83]">{item.enabled ? i18nAttribute("参与自动识别") : i18nAttribute("已停用")}</p></div>
@@ -242,13 +242,13 @@ export function MetadataProvidersPanel() {
                     <button type="button" aria-label={i18nAttribute("上移{value0}", { value0: item.name })} disabled={isBusy || index === 0} onClick={() => changePipeline(workType, (current) => { const next = [...current]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; return next; }, `${item.name}顺序已更新`)} className="flex h-8 w-8 items-center justify-center rounded-lg text-[#77716A] hover:bg-[#FFF0EA] hover:text-[#D94322] disabled:opacity-25"><ArrowUp size={15} /></button>
                     <button type="button" aria-label={i18nAttribute("下移{value0}", { value0: item.name })} disabled={isBusy || index === items.length - 1} onClick={() => changePipeline(workType, (current) => { const next = [...current]; [next[index], next[index + 1]] = [next[index + 1], next[index]]; return next; }, `${item.name}顺序已更新`)} className="flex h-8 w-8 items-center justify-center rounded-lg text-[#77716A] hover:bg-[#FFF0EA] hover:text-[#D94322] disabled:opacity-25"><ArrowDown size={15} /></button>
                     <Toggle checked={item.enabled} disabled={isBusy} label={`${item.enabled ? '停用' : '启用'}${item.name}`} onChange={(enabled) => changePipeline(workType, (current) => current.map((entry) => entry.providerId === item.providerId ? { ...entry, enabled } : entry), `${item.name}已${enabled ? '启用' : '停用'}`)} />
-                    <button type="button" aria-label={i18nAttribute("从{value0}移除{value1}", { value0: meta.label, value1: item.name })} disabled={isBusy} onClick={() => changePipeline(workType, (current) => current.filter((entry) => entry.providerId !== item.providerId), `${item.name}已移出${meta.label}识别`)} className="ml-1 flex h-8 w-8 items-center justify-center rounded-lg text-[#A39C95] hover:bg-red-50 hover:text-red-600 disabled:opacity-40"><Trash2 size={15} /></button>
+                    <button type="button" aria-label={i18nAttribute("从{value0}移除{value1}", { value0: i18nAttribute(meta.label), value1: item.name })} disabled={isBusy} onClick={() => changePipeline(workType, (current) => current.filter((entry) => entry.providerId !== item.providerId), `${item.name}已移出${meta.label}识别`)} className="ml-1 flex h-8 w-8 items-center justify-center rounded-lg text-[#A39C95] hover:bg-red-50 hover:text-red-600 disabled:opacity-40"><Trash2 size={15} /></button>
                   </div>
                 </li>)}
                 {items.length === 0 ? <li className="py-7 text-center text-sm text-[#918A83]"><I18nText>尚未添加数据源</I18nText></li> : null}
               </ol>
               <div className="border-t border-[#EEEAE5] p-3">
-                <Select value="" options={available.map((provider) => ({ value: provider.id, label: provider.name, translate: false }))} onChange={(value) => addProvider(workType, value)} placeholder={available.length ? i18nAttribute("添加数据源") : i18nAttribute("没有更多可添加的数据源")} ariaLabel={i18nAttribute("为{value0}添加数据源", { value0: meta.label })} disabled={isBusy || available.length === 0} className="w-full" triggerClassName="border-dashed" />
+                <Select value="" options={available.map((provider) => ({ value: provider.id, label: provider.name, translate: false }))} onChange={(value) => addProvider(workType, value)} placeholder={available.length ? i18nAttribute("添加数据源") : i18nAttribute("没有更多可添加的数据源")} ariaLabel={i18nAttribute("为{value0}添加数据源", { value0: i18nAttribute(meta.label) })} disabled={isBusy || available.length === 0} className="w-full" triggerClassName="border-dashed" />
               </div>
             </article>;
           })}

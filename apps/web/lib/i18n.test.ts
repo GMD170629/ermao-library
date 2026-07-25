@@ -52,6 +52,25 @@ test('messages translate static text, interpolated text, and surrounding JSX whi
   assert.equal(translateMessage('en-US', '创建下载任务：Example'), 'Created download task: Example');
 });
 
+test('nested application copy is translated before interpolation', () => {
+  assert.equal(
+    translateMessage('en-US', '填写{value0}', {
+      value0: translateMessage('en-US', '书名')
+    }),
+    'Enter Book name'
+  );
+  assert.equal(
+    translateMessage('en-US', '已启用 {value0} 条规则 · {value1}', {
+      value0: 1,
+      value1: translateMessage('en-US', '同时满足全部条件')
+    }),
+    '1 rule(s) enabled · All conditions'
+  );
+  assert.equal(translateMessage('en-US', '1 个音轨'), '1 track');
+  assert.equal(translateMessage('en-US', '{value0} 个音轨', { value0: 2 }), '2 tracks');
+  assert.equal(translateMessage('zh-CN', '{value0} 个音轨', { value0: 1 }), '1 个音轨');
+});
+
 test('brand metadata has a deliberate English translation', () => {
   assert.equal(translateMessage('en-US', '二毛图书'), 'Ermao Books');
   assert.equal(

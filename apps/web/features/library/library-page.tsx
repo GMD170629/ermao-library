@@ -242,6 +242,7 @@ export function LibraryPage() {
     const params = new URLSearchParams(queryBase);
     params.set('page', String(requestedPage));
     params.set('pageSize', requestPageSize);
+    if (view === 'grid') params.set('view', 'bookshelf');
     setLoading(true);
     fetch(`/api/works?${params.toString()}`)
       .then((response) => response.json() as Promise<BooksResponse>)
@@ -305,6 +306,9 @@ export function LibraryPage() {
         : '全部图书';
 
   function updateView(nextView: 'grid' | 'list') {
+    setBooks([]);
+    setPage(1);
+    setLoading(true);
     setView(nextView);
     if (nextView === 'grid') {
       setFiltersOpen(false);

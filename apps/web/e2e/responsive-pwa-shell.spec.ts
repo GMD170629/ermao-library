@@ -550,13 +550,24 @@ test('desktop book list opens details from both the cover and title', async ({ p
     gradient: 'from-orange-100 to-stone-200'
   };
   await page.route('**/api/works?**', async (route) => {
-    const requestedPageSize = new URL(route.request().url()).searchParams.get('pageSize') ?? '';
     const requestUrl = new URL(route.request().url());
+    const requestedPageSize = requestUrl.searchParams.get('pageSize') ?? '';
     const requestedSort = requestUrl.searchParams.get('sort') ?? '';
     const requestedDirection = requestUrl.searchParams.get('sortDirection') ?? '';
+    const responseBook = requestUrl.searchParams.get('view') === 'bookshelf'
+      ? {
+          id: book.id,
+          title: book.title,
+          author: book.author,
+          format: book.format,
+          gradient: book.gradient,
+          coverStatus: 'PENDING',
+          coverUrl: book.coverUrl
+        }
+      : book;
     requestedPageSizes.push(requestedPageSize);
     requestedSorts.push({ sort: requestedSort, direction: requestedDirection });
-    await route.fulfill({ json: { ok: true, data: { books: [book], total: 1, page: 1, pageSize: Number(requestedPageSize), totalPages: 1 } } });
+    await route.fulfill({ json: { ok: true, data: { books: [responseBook], total: 1, page: 1, pageSize: Number(requestedPageSize), totalPages: 1 } } });
   });
   await page.setViewportSize({ width: 1280, height: 900 });
 

@@ -40,6 +40,7 @@ import { resolveChapterReadingStates } from './chapter-reading-state';
 import { MetadataLookupModal } from './metadata-lookup-modal';
 import { KindleSendModal } from './kindle-send-modal';
 import { I18nText } from '@/i18n/provider';
+import type { MessageValues } from '@/i18n/messages';
 import {
   audioDetailProjection,
   detailTabsForBook,
@@ -209,15 +210,22 @@ function currentPositionLabel(book: WorkView) {
   return '尚未开始';
 }
 
-function editionUnitLabel(edition: WorkView['editions'][number]) {
+function editionUnitLabel(edition: WorkView['editions'][number], translate: (source: string, values?: MessageValues) => string) {
   if (!edition.readable) return '原始文件';
   if (mediaKindForEdition(edition) === 'AUDIOBOOK') {
     const duration = formatDuration(edition.durationMs);
-    return [edition.trackCount ? `${edition.trackCount} 个音轨` : `${edition.chapterCount ?? 0} 章`, duration].filter(Boolean).join(' · ');
+    return [
+      edition.trackCount
+        ? edition.trackCount === 1
+          ? translate('1 个音轨')
+          : translate('{value0} 个音轨', { value0: edition.trackCount })
+        : translate('{value0} 章', { value0: edition.chapterCount ?? 0 }),
+      duration
+    ].filter(Boolean).join(' · ');
   }
-  if (edition.formatValue === 'COMIC') return `${edition.volumes.length} 个卷册`;
-  if (edition.formatValue === 'PDF') return `${edition.pageCount ?? 0} 页`;
-  return `${edition.chapterCount ?? 0} 章`;
+  if (edition.formatValue === 'COMIC') return translate('{value0} 个卷册', { value0: edition.volumes.length });
+  if (edition.formatValue === 'PDF') return translate('{value0} 页', { value0: edition.pageCount ?? 0 });
+  return translate('{value0} 章', { value0: edition.chapterCount ?? 0 });
 }
 
 function formatTone(format: WorkView['formatValue']) {
@@ -1139,13 +1147,15 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
             ) : (
               <div data-i18n-skip className="mt-3 text-base text-stone-600" data-testid="work-detail-header-meta">{book.author}</div>
             )}
-            <p
-              data-i18n-skip={book.desc === DEFAULT_DESCRIPTION ? undefined : ''}
-              className={cn('mt-5 line-clamp-3 max-w-3xl whitespace-pre-line text-sm leading-7', book.desc === DEFAULT_DESCRIPTION ? 'text-stone-400' : 'text-stone-600')}
-              title={book.desc === DEFAULT_DESCRIPTION ? i18nAttribute("暂无简介") : book.desc}
-            >
-              {book.desc === DEFAULT_DESCRIPTION ? i18nAttribute("暂无简介") : book.desc}
-            </p>
+            {book.desc !== DEFAULT_DESCRIPTION ? (
+              <p
+                data-i18n-skip
+                className="mt-5 line-clamp-3 max-w-3xl whitespace-pre-line text-sm leading-7 text-stone-600"
+                title={book.desc}
+              >
+                {book.desc}
+              </p>
+            ) : null}
 
             {currentTab !== 'STRUCTURE' ? <div className="mt-7 max-w-3xl lg:mt-auto">
               <div className="flex items-center gap-4">
@@ -1357,7 +1367,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                     value={selectedEdition?.id ?? ''}
                     options={mediaEditions.map((edition) => ({ value: edition.id, label: edition.versionName }))}
                     onChange={selectMediaEdition}
-                    ariaLabel={i18nAttribute("选择{value0}版本", { value0: detailTabs.find((tab) => tab.key === currentTab)?.label ?? '当前媒介' })}
+                    ariaLabel={i18nAttribute("选择{value0}版本", { value0: i18nAttribute(detailTabs.find((tab) => tab.key === currentTab)?.label ?? '当前媒介') })}
                     className="min-w-[190px]"
                     triggerClassName="!rounded-xl !border-[#ead8cf] !shadow-none"
                   />
@@ -1566,7 +1576,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                       <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-medium text-stone-600">{mediaKindForEdition(edition) === 'AUDIOBOOK' ? i18nAttribute("有声书") : mediaKindForEdition(edition) === 'COMIC' ? i18nAttribute("漫画") : i18nAttribute("电子书")}</span>
                       {edition.primary || edition.id === book.primaryEditionId ? <span className="rounded-full bg-[#fff0e9] px-2 py-0.5 text-[11px] font-medium text-[#e84420]"><I18nText>媒介主版本</I18nText></span> : null}
                     </div>
-                    <div className="mt-1 text-xs text-stone-500">{edition.size} · {editionUnitLabel(edition)} · {fileName(edition.files[0]?.path)}</div>
+                    <div className="mt-1 text-xs text-stone-500">{edition.size} · {editionUnitLabel(edition, i18nAttribute)} · {fileName(edition.files[0]?.path)}</div>
                     {!edition.readable ? <div className="mt-1 text-xs text-amber-700"><I18nText>原始文件已入库，转换为 EPUB 后可阅读</I18nText></div> : null}
                     {edition.conversion ? <div className="mt-1 text-xs text-[#B45336]"><I18nText>由 </I18nText>{edition.conversion.sourceFormat} <I18nText>自动转换为 </I18nText>{edition.conversion.targetFormat}</div> : null}
                   </div>

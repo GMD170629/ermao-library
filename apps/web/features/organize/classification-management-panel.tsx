@@ -123,7 +123,7 @@ export function ClassificationManagementPanel() {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <label className="flex h-11 min-w-[260px] items-center gap-2 rounded-xl border border-black/[0.09] bg-white px-3">
-          <Search size={16} className="text-[#8A847E]" /><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); setSelectedItems([]); }} placeholder={i18nAttribute("搜索{value0}", { value0: tabs.find((tab) => tab.key === kind)?.label })} className="min-w-0 flex-1 bg-transparent text-sm outline-none" />
+          <Search size={16} className="text-[#8A847E]" /><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); setSelectedItems([]); }} placeholder={i18nAttribute("搜索{value0}", { value0: i18nAttribute(tabs.find((tab) => tab.key === kind)?.label ?? '') })} className="min-w-0 flex-1 bg-transparent text-sm outline-none" />
         </label>
         <Button icon={GitMerge} disabled={selectedItems.length < 2} onClick={openMerge}><I18nText>合并所选（</I18nText>{selectedItems.length}）</Button>
       </div>

@@ -1,9 +1,12 @@
 node_modules
 .pnpm-store
 .next
+apps/web/.next-codex/
 apps/web/public/vendor/pdfjs/
 apps/web/test-results/
 apps/web/playwright-report/
+apps/web/playwright.codex.config.ts
+apps/web/scripts/codex-bookshelf-visual-check.cjs
 dist
 .fnos-build
 .turbo
@@ -16,3 +19,8 @@ data
 !apps/web/app/settings/data/
 !apps/web/app/settings/data/page.tsx
 /books
+
+# Local visual QA and comparison outputs
+/artifacts/comic-page-190-compression/
+/artifacts/comic-page-190-original-ratios/
+/artifacts/design-qa/bookshelf-metadata/

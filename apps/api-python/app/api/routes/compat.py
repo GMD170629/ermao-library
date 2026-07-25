@@ -124,11 +124,9 @@ SLOW_REQUEST_LOG_THRESHOLD_MS = 1500
 COMIC_PAGE_DATA_SAVER_VARIANT = "data-saver"
 COMIC_PAGE_ORIGINAL_VARIANT = "original"
 COMIC_PAGE_DATA_SAVER_MEDIA_TYPE = "image/avif"
-COMIC_PAGE_DATA_SAVER_TARGET_RATIO = 0.20
-COMIC_PAGE_DATA_SAVER_MIN_QUALITY = 1
-COMIC_PAGE_DATA_SAVER_MAX_QUALITY = 80
-COMIC_PAGE_DATA_SAVER_SPEED = 6
-COMIC_PAGE_DATA_SAVER_CACHE_VERSION = 2
+COMIC_PAGE_DATA_SAVER_QUALITY = 12
+COMIC_PAGE_DATA_SAVER_SPEED = 9
+COMIC_PAGE_DATA_SAVER_CACHE_VERSION = 3
 SMALL_COVER_MAX_BYTES = 50 * 1024
 SMALL_COVER_MAX_DIMENSION = 600
 SMALL_COVER_MEDIA_TYPE = "image/webp"
@@ -1011,6 +1009,20 @@ def _reading_status(value: Any) -> str:
     if normalized == "WANT":
         return "UNREAD"
     return normalized if normalized in {"UNREAD", "READING", "FINISHED"} else "UNREAD"
+
+
+def _bookshelf_work_view(work: dict[str, Any]) -> dict[str, Any]:
+    work_type = str(work.get("workType") or "EPUB").upper()
+    labels = _labels()
+    return {
+        "id": work["id"],
+        "title": work.get("title") or "未命名作品",
+        "author": work.get("author") or "未知作者",
+        "format": labels["format"].get(work_type, "未知"),
+        "gradient": "from-slate-950 via-blue-800 to-cyan-500",
+        "coverStatus": work.get("coverStatus") or "PENDING",
+        "coverUrl": _cover_url("works", work["id"], work, size="medium"),
+    }
 
 
 def _work_view(db: Session, work: dict[str, Any], user_id: str | None = None) -> dict[str, Any]:
@@ -2504,7 +2516,7 @@ def list_series(request: Request, visibility: str = "active", limit: int = 50, m
 
 
 @router.get("/works")
-def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: str = "active", search: str | None = None, keyword: str | None = None, seriesName: str | None = None, sort: str = "updated", sortDirection: str | None = None, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: str = "active", search: str | None = None, keyword: str | None = None, seriesName: str | None = None, sort: str = "updated", sortDirection: str | None = None, view: str | None = None, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -2688,6 +2700,14 @@ def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: 
         else f"`updatedAt` {direction}"
     )
     total = _table_count(db, "LibraryWork", where_sql, params)
+    bookshelf_view = view == "bookshelf"
+    select_columns = (
+        "`LibraryWork`.`id`, `LibraryWork`.`title`, `LibraryWork`.`author`, "
+        "`LibraryWork`.`workType`, `LibraryWork`.`coverStatus`, "
+        "`LibraryWork`.`coverPath`, `LibraryWork`.`updatedAt`"
+        if bookshelf_view
+        else "`LibraryWork`.*"
+    )
     if sort == "progress" and _has_table(db, "LibraryReadingProgress"):
         # Progress shown on a card follows the reader's continuation semantics: for
         # multi-volume EPUB/comics this can differ from both MAX(percent) and the
@@ -2704,14 +2724,19 @@ def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: 
             reverse=direction == "DESC",
         )
         start = (page - 1) * page_size
-        page_views = [view for _work, view in work_views[start:start + page_size]]
+        page_items = work_views[start:start + page_size]
+        page_views = (
+            [_bookshelf_work_view(work) for work, _view in page_items]
+            if bookshelf_view
+            else [view for _work, view in page_items]
+        )
         return ok({"books": page_views, "page": page, "pageSize": page_size, "total": total, "totalPages": max(1, (total + page_size - 1) // page_size)})
     if sort == "recent_read" and _has_table(db, "LibraryReadingProgress"):
         params["recent_user_id"] = user.id
         works = _rows(
             db,
             f"""
-            SELECT `LibraryWork`.*
+            SELECT {select_columns}
             FROM `LibraryWork`
             LEFT JOIN (
                 SELECT `workId`, `updatedAt` AS `latestReadAt`, `percent` AS `recentPercent`
@@ -2731,8 +2756,13 @@ def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: 
             params,
         )
     else:
-        works = _rows(db, f"SELECT * FROM `LibraryWork` WHERE {where_sql} ORDER BY {order} LIMIT :limit OFFSET :offset", params)
-    return ok({"books": [_work_view(db, work, user.id) for work in works], "page": page, "pageSize": page_size, "total": total, "totalPages": max(1, (total + page_size - 1) // page_size)})
+        works = _rows(db, f"SELECT {select_columns} FROM `LibraryWork` WHERE {where_sql} ORDER BY {order} LIMIT :limit OFFSET :offset", params)
+    book_views = (
+        [_bookshelf_work_view(work) for work in works]
+        if bookshelf_view
+        else [_work_view(db, work, user.id) for work in works]
+    )
+    return ok({"books": book_views, "page": page, "pageSize": page_size, "total": total, "totalPages": max(1, (total + page_size - 1) // page_size)})
 
 
 @router.get("/works/{work_id}")
@@ -4501,30 +4531,15 @@ def _comic_page_avif_bytes(data: bytes) -> bytes | None:
             if getattr(source, "is_animated", False):
                 return None
             image = _comic_page_avif_image(source)
-            target_bytes = max(1, int(len(data) * COMIC_PAGE_DATA_SAVER_TARGET_RATIO))
-            lowest_quality_data: bytes | None = None
-            best_data: bytes | None = None
-            low = COMIC_PAGE_DATA_SAVER_MIN_QUALITY
-            high = COMIC_PAGE_DATA_SAVER_MAX_QUALITY
-            while low <= high:
-                quality = (low + high) // 2
-                output = io.BytesIO()
-                image.save(
-                    output,
-                    format="AVIF",
-                    quality=quality,
-                    speed=COMIC_PAGE_DATA_SAVER_SPEED,
-                )
-                candidate = output.getvalue()
-                if lowest_quality_data is None or quality == COMIC_PAGE_DATA_SAVER_MIN_QUALITY:
-                    lowest_quality_data = candidate
-                if len(candidate) <= target_bytes:
-                    best_data = candidate
-                    low = quality + 1
-                else:
-                    high = quality - 1
-            optimized = best_data or lowest_quality_data
-            return optimized if optimized is not None and len(optimized) < len(data) else None
+            output = io.BytesIO()
+            image.save(
+                output,
+                format="AVIF",
+                quality=COMIC_PAGE_DATA_SAVER_QUALITY,
+                speed=COMIC_PAGE_DATA_SAVER_SPEED,
+            )
+            optimized = output.getvalue()
+            return optimized if len(optimized) < len(data) else None
     except (OSError, ValueError, UnidentifiedImageError) as exc:
         logger.debug("skipping comic page data-saver image variant: %s", exc)
         return None
@@ -4545,7 +4560,10 @@ def _comic_page_avif_response(data: bytes, request: Request, name: str, source_m
         extra=f"extreme-avif-v{COMIC_PAGE_DATA_SAVER_CACHE_VERSION}-{variant_extra}",
     )
     response.headers["X-Comic-Image-Variant"] = COMIC_PAGE_DATA_SAVER_VARIANT
-    response.headers["X-Comic-Image-Quality"] = "avif;mode=extreme;target=20%"
+    response.headers["X-Comic-Image-Quality"] = (
+        f"avif;q={COMIC_PAGE_DATA_SAVER_QUALITY};"
+        f"speed={COMIC_PAGE_DATA_SAVER_SPEED};mode=extreme"
+    )
     if source_size > 0:
         response.headers["X-Comic-Image-Compression-Ratio"] = f"{len(data) / source_size:.3f}"
     return response
@@ -4784,8 +4802,7 @@ def _send_comic_page_file(path: Path | None, request: Request, user_id: str, set
     cache_key = (
         f"file:{path}:{stat.st_size}:{stat.st_mtime_ns}:"
         f"extreme-avif-v{COMIC_PAGE_DATA_SAVER_CACHE_VERSION}:"
-        f"target-{COMIC_PAGE_DATA_SAVER_TARGET_RATIO}:"
-        f"q{COMIC_PAGE_DATA_SAVER_MIN_QUALITY}-{COMIC_PAGE_DATA_SAVER_MAX_QUALITY}:"
+        f"q-{COMIC_PAGE_DATA_SAVER_QUALITY}:"
         f"speed-{COMIC_PAGE_DATA_SAVER_SPEED}"
     )
     cache_path = _comic_page_cache_path(settings, cache_key)
@@ -4820,8 +4837,7 @@ def _send_comic_page_zip_entry(archive_path: Path | None, entry_name: str | None
                 f"zip:{archive_path}:{archive_stat.st_size}:{archive_stat.st_mtime_ns}:"
                 f"{entry_name}:{info.file_size}:{info.CRC}:"
                 f"extreme-avif-v{COMIC_PAGE_DATA_SAVER_CACHE_VERSION}:"
-                f"target-{COMIC_PAGE_DATA_SAVER_TARGET_RATIO}:"
-                f"q{COMIC_PAGE_DATA_SAVER_MIN_QUALITY}-{COMIC_PAGE_DATA_SAVER_MAX_QUALITY}:"
+                f"q-{COMIC_PAGE_DATA_SAVER_QUALITY}:"
                 f"speed-{COMIC_PAGE_DATA_SAVER_SPEED}"
             )
             cache_path = _comic_page_cache_path(settings, cache_key)

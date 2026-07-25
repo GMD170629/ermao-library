@@ -526,7 +526,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setSearchLoading(true);
-      fetch(`/api/works?pageSize=5&visibility=active&sort=recent_read&search=${encodeURIComponent(keyword)}`, { signal: controller.signal })
+      fetch(`/api/works?pageSize=5&visibility=active&sort=recent_read&view=bookshelf&search=${encodeURIComponent(keyword)}`, { signal: controller.signal })
         .then((response) => response.json() as Promise<BooksPayload>)
         .then((payload) => {
           if (!payload.ok) throw new Error(payload.error?.message ?? '搜索书库失败');

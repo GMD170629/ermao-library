@@ -120,7 +120,7 @@ export function ShelvesPage() {
       return;
     }
     let active = true;
-    const params = new URLSearchParams({ pageSize: '16', visibility: 'active', sort: 'title', search: search.trim() });
+    const params = new URLSearchParams({ pageSize: '16', visibility: 'active', sort: 'title', view: 'bookshelf', search: search.trim() });
     setSearchLoading(true);
     fetch(`/api/works?${params}`)
       .then((response) => readPayload<BooksPayload>(response, '搜索图书失败'))

@@ -1087,7 +1087,7 @@ def test_work_detail_empty_epub_and_comic_return_reading_units_page(client, db_s
     assert [volume["id"] for volume in comic["volumeSections"]] == ["comic-detail-volume"]
 
 
-def test_works_recent_read_sort_uses_latest_user_progress_across_pages(client, db_session):
+def test_works_recent_read_sort_uses_latest_user_progress_across_pages(client, db_session, monkeypatch):
     create_worker_tables(db_session)
     _login(client, db_session)
     user_id = db_session.query(User).filter(User.email == "admin@example.com").one().id
@@ -1184,6 +1184,33 @@ def test_works_recent_read_sort_uses_latest_user_progress_across_pages(client, d
 
     maximum_page = client.get("/api/works", params={"pageSize": 999}).json()
     assert maximum_page["data"]["pageSize"] == 100
+
+    def reject_detail_serialization(*_args, **_kwargs):
+        raise AssertionError("bookshelf view must not use the detail serializer")
+
+    monkeypatch.setattr(compat, "_work_view", reject_detail_serialization)
+    bookshelf = client.get(
+        "/api/works",
+        params={
+            "visibility": "active",
+            "sort": "recent_read",
+            "sortDirection": "desc",
+            "page": 1,
+            "pageSize": 50,
+            "view": "bookshelf",
+        },
+    ).json()
+    assert bookshelf["ok"] is True
+    assert [book["id"] for book in bookshelf["data"]["books"]] == ["work-new", "work-old", "work-unread"]
+    assert set(bookshelf["data"]["books"][0]) == {
+        "id",
+        "title",
+        "author",
+        "format",
+        "gradient",
+        "coverStatus",
+        "coverUrl",
+    }
 
 
 def test_works_sortable_metadata_fields_support_both_directions(client, db_session):
@@ -5001,9 +5028,9 @@ def test_comic_page_data_saver_returns_extreme_avif_for_archive_page(client, db_
     assert data_saver.content[4:12] == b"ftypavif"
     assert data_saver.headers["content-type"].startswith("image/avif")
     assert data_saver.headers["x-comic-image-variant"] == "data-saver"
-    assert data_saver.headers["x-comic-image-quality"] == "avif;mode=extreme;target=20%"
-    assert float(data_saver.headers["x-comic-image-compression-ratio"]) <= 0.20
-    assert len(data_saver.content) <= len(source_jpeg) * 0.20
+    assert data_saver.headers["x-comic-image-quality"] == "avif;q=12;speed=9;mode=extreme"
+    assert float(data_saver.headers["x-comic-image-compression-ratio"]) < 1
+    assert len(data_saver.content) < len(source_jpeg)
     assert data_saver.headers["etag"] != original.headers["etag"]
 
     ranged = client.get(f"/api/volumes/{volume_id}/pages/1?imageVariant=data-saver", headers={"Range": "bytes=0-3"})
@@ -5048,9 +5075,9 @@ def test_comic_page_data_saver_returns_extreme_avif_for_stored_page_file(client,
     assert data_saver.content[4:12] == b"ftypavif"
     assert data_saver.headers["content-type"].startswith("image/avif")
     assert data_saver.headers["x-comic-image-variant"] == "data-saver"
-    assert data_saver.headers["x-comic-image-quality"] == "avif;mode=extreme;target=20%"
-    assert float(data_saver.headers["x-comic-image-compression-ratio"]) <= 0.20
-    assert len(data_saver.content) <= len(source_jpeg) * 0.20
+    assert data_saver.headers["x-comic-image-quality"] == "avif;q=12;speed=9;mode=extreme"
+    assert float(data_saver.headers["x-comic-image-compression-ratio"]) < 1
+    assert len(data_saver.content) < len(source_jpeg)
 
 
 def test_comic_page_data_saver_never_returns_a_larger_transcode():
@@ -5059,6 +5086,23 @@ def test_comic_page_data_saver_never_returns_a_larger_transcode():
     source = output.getvalue()
 
     assert compat._comic_page_avif_bytes(source) is None
+
+
+def test_comic_page_data_saver_uses_one_fixed_avif_encode(monkeypatch):
+    source = _comic_page_jpeg_bytes()
+    original_save = Image.Image.save
+    calls: list[dict] = []
+
+    def capture_save(image, output, format=None, **options):
+        calls.append({"format": format, **options})
+        return original_save(image, output, format=format, **options)
+
+    monkeypatch.setattr(Image.Image, "save", capture_save)
+
+    optimized = compat._comic_page_avif_bytes(source)
+
+    assert optimized is not None
+    assert calls == [{"format": "AVIF", "quality": 12, "speed": 9}]
 
 
 def test_volume_pages_rebuilds_missing_comic_page_index(client, db_session, test_settings, tmp_path):

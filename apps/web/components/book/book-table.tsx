@@ -175,7 +175,7 @@ export function BookTable({
                     <span className="mt-2 flex flex-wrap gap-1.5">
                       <Badge>{mediaLabel(book)}</Badge>
                       <Badge tone={statusTone(book)}>{statusLabel(book)}</Badge>
-                      {book.tags.slice(0, 1).map((tag) => <Badge key={tag} translate={false}>{tag}</Badge>)}
+                      {(book.tags ?? []).slice(0, 1).map((tag) => <Badge key={tag} translate={false}>{tag}</Badge>)}
                     </span>
                   </span>
                 </button>
@@ -237,7 +237,7 @@ export function BookTable({
                 <td className="truncate px-2">{mediaLabel(book)}</td>
                 <td className="overflow-hidden px-2">
                   <div className="flex gap-1 overflow-hidden">
-                    {book.tags.slice(0, 2).map((tag) => (
+                    {(book.tags ?? []).slice(0, 2).map((tag) => (
                       <Badge key={tag} translate={false}>{tag}</Badge>
                     ))}
                   </div>
