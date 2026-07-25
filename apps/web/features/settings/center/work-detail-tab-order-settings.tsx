@@ -1,6 +1,7 @@
 'use client';
 
-import { apiV2Fetch } from '@/lib/api-v2';
+import type { SettingsResponse } from '@/generated/api-v2';
+import { apiV2Request } from '@/lib/api-v2';
 
 import { ArrowDown, ArrowUp, GripVertical, RotateCcw, Save } from 'lucide-react';
 import type { DragEvent } from 'react';
@@ -21,12 +22,6 @@ import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 const settingKey = 'workDetail.tabOrder';
 
-type SettingsPayload = {
-  ok: boolean;
-  data?: { settings?: Record<string, unknown> };
-  error?: { message?: string };
-};
-
 export function WorkDetailTabOrderSettings() {
   const { t: i18nAttribute } = useAttributeI18n();
   const toast = useToast();
@@ -39,12 +34,10 @@ export function WorkDetailTabOrderSettings() {
 
   useEffect(() => {
     let active = true;
-    apiV2Fetch('/api/v2/operations/settings')
-      .then((response) => response.json() as Promise<SettingsPayload>)
+    apiV2Request<SettingsResponse>('/api/v2/operations/settings')
       .then((payload) => {
         if (!active) return;
-        if (!payload.ok) throw new Error(payload.error?.message ?? '读取选项卡顺序失败');
-        const next = normalizeWorkDetailTabOrder(payload.data?.settings?.[settingKey]);
+        const next = normalizeWorkDetailTabOrder(payload.values[settingKey]?.value);
         setOrder(next);
         setSavedOrder(next);
       })
@@ -60,13 +53,11 @@ export function WorkDetailTabOrderSettings() {
   async function saveOrder() {
     setSaving(true);
     try {
-      const response = await apiV2Fetch('/api/v2/operations/settings', {
+      await apiV2Request<SettingsResponse>('/api/v2/operations/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ settings: { [settingKey]: order } })
+        body: JSON.stringify({ values: { [settingKey]: { value: order } } })
       });
-      const payload = (await response.json()) as SettingsPayload;
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '保存选项卡顺序失败');
       setSavedOrder(order);
       window.dispatchEvent(new Event('shuku:settings-changed'));
       toast.success('详情页选项卡顺序已保存');
