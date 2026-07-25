@@ -291,7 +291,7 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
     TRIM_UID=1000 \
     TRIM_GID=1000 \
     wizard_port=3000 \
-      docker compose -f "$compose" config --services
+      docker compose -f "$compose" config --services | sort
   )"
   if [ "$services" != $'postgres\nweb' ]; then
     echo "fnOS Compose services do not match the expected topology" >&2

@@ -24,7 +24,7 @@ from appv2.platform.database.base import Base, Timestamped, UUIDPrimaryKey
 class EmailSettingsRecord(UUIDPrimaryKey, Timestamped, Base):
     __tablename__ = "email_settings"
     __table_args__ = (
-        UniqueConstraint("owner_id", name="owner"),
+        UniqueConstraint("owner_id", name="email_settings_owner"),
         {"schema": "delivery"},
     )
 
@@ -40,7 +40,7 @@ class EmailSettingsRecord(UUIDPrimaryKey, Timestamped, Base):
 class KindleSettingsRecord(UUIDPrimaryKey, Timestamped, Base):
     __tablename__ = "kindle_settings"
     __table_args__ = (
-        UniqueConstraint("owner_id", name="owner"),
+        UniqueConstraint("owner_id", name="kindle_settings_owner"),
         {"schema": "delivery"},
     )
 
