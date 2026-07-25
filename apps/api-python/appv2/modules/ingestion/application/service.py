@@ -1,0 +1,171 @@
+from __future__ import annotations
+
+import hashlib
+import uuid
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import BinaryIO
+
+from appv2.modules.ingestion.contracts import (
+    FileDiscoveryPort,
+    ImportRequest,
+    ImportResult,
+    IngestionJob,
+    IngestionUnitOfWork,
+    MonitorFolder,
+    UploadStoragePort,
+)
+
+
+class IngestionNotFound(Exception):
+    pass
+
+
+class IngestionService:
+    def __init__(
+        self,
+        *,
+        uow_factory: Callable[[], IngestionUnitOfWork],
+        discovery: FileDiscoveryPort,
+        uploads: UploadStoragePort,
+    ) -> None:
+        self._uow_factory = uow_factory
+        self._discovery = discovery
+        self._uploads = uploads
+
+    def list_jobs(
+        self, *, page: int, page_size: int, status: str | None
+    ) -> tuple[list[IngestionJob], int]:
+        with self._uow_factory() as uow:
+            return uow.ingestion.list_jobs(
+                offset=(page - 1) * page_size,
+                limit=page_size,
+                status=status,
+            )
+
+    def enqueue(
+        self,
+        *,
+        source_path: str,
+        requested_by: uuid.UUID,
+        idempotency_key: str | None,
+        move_source: bool = False,
+        kind: str = "import",
+    ) -> ImportResult:
+        key = idempotency_key or hashlib.sha256(f"{kind}\0{source_path}".encode()).hexdigest()
+        request = ImportRequest(
+            source_path=source_path,
+            requested_by=requested_by,
+            idempotency_key=key,
+            move_source=move_source,
+        )
+        with self._uow_factory() as uow:
+            result = uow.ingestion.enqueue(request, kind=kind)
+            uow.commit()
+            return result
+
+    def upload(
+        self,
+        *,
+        name: str,
+        stream: BinaryIO,
+        requested_by: uuid.UUID,
+        idempotency_key: str | None,
+    ) -> ImportResult:
+        stored_path = self._uploads.store(name, stream)
+        return self.enqueue(
+            source_path=stored_path,
+            requested_by=requested_by,
+            idempotency_key=idempotency_key,
+        )
+
+    def retry(self, job_id: uuid.UUID) -> None:
+        with self._uow_factory() as uow:
+            if not uow.ingestion.retry(job_id, datetime.now(UTC)):
+                raise IngestionNotFound
+            uow.commit()
+
+    def cancel(self, job_id: uuid.UUID) -> None:
+        with self._uow_factory() as uow:
+            if not uow.ingestion.cancel(job_id):
+                raise IngestionNotFound
+            uow.commit()
+
+    def list_folders(self) -> list[MonitorFolder]:
+        with self._uow_factory() as uow:
+            return uow.ingestion.list_folders()
+
+    def add_folder(
+        self,
+        *,
+        path: str,
+        recursive: bool,
+        move_source: bool,
+        options: dict[str, object],
+    ) -> MonitorFolder:
+        validated = self._discovery.validate_folder(path)
+        with self._uow_factory() as uow:
+            folder = uow.ingestion.add_folder(
+                path=validated,
+                recursive=recursive,
+                move_source=move_source,
+                options=options,
+            )
+            uow.commit()
+            return folder
+
+    def update_folder(
+        self,
+        folder_id: uuid.UUID,
+        *,
+        enabled: bool | None,
+        recursive: bool | None,
+        move_source: bool | None,
+        options: dict[str, object] | None,
+    ) -> MonitorFolder:
+        with self._uow_factory() as uow:
+            folder = uow.ingestion.update_folder(
+                folder_id,
+                enabled=enabled,
+                recursive=recursive,
+                move_source=move_source,
+                options=options,
+                scanned_at=None,
+            )
+            if folder is None:
+                raise IngestionNotFound
+            uow.commit()
+            return folder
+
+    def delete_folder(self, folder_id: uuid.UUID) -> None:
+        with self._uow_factory() as uow:
+            if not uow.ingestion.delete_folder(folder_id):
+                raise IngestionNotFound
+            uow.commit()
+
+    def scan_folder(self, folder_id: uuid.UUID, requested_by: uuid.UUID) -> list[ImportResult]:
+        with self._uow_factory() as uow:
+            folder = uow.ingestion.get_folder(folder_id)
+        if folder is None:
+            raise IngestionNotFound
+        paths = self._discovery.discover(folder.path, recursive=folder.recursive)
+        results = [
+            self.enqueue(
+                source_path=path,
+                requested_by=requested_by,
+                idempotency_key=hashlib.sha256(f"scan\0{path}".encode()).hexdigest(),
+                move_source=folder.move_source,
+            )
+            for path in paths
+        ]
+        with self._uow_factory() as uow:
+            uow.ingestion.update_folder(
+                folder_id,
+                enabled=None,
+                recursive=None,
+                move_source=None,
+                options=None,
+                scanned_at=datetime.now(UTC),
+            )
+            uow.commit()
+        return results

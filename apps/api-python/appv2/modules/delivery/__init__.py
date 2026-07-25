@@ -1,0 +1,1 @@
+"""SMTP and Kindle delivery."""
