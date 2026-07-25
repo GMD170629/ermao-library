@@ -9,6 +9,7 @@ from appv2.modules.accounts.application import AccountService
 from appv2.modules.accounts.infrastructure.password_reset import LocalPasswordResetNotice
 from appv2.modules.accounts.infrastructure.repositories import accounts_uow_factory
 from appv2.modules.catalog.application import CatalogReadAdapter, CatalogService
+from appv2.modules.catalog.infrastructure.covers import LocalCoverStorage
 from appv2.modules.catalog.infrastructure.repositories import catalog_uow_factory
 from appv2.modules.delivery.application import DeliveryService, DeliveryWorker
 from appv2.modules.delivery.infrastructure.crypto import SecretCipher
@@ -108,7 +109,7 @@ def build_container(settings: Settings | None = None) -> Container:
         password_reset_ttl_seconds=resolved.password_reset_ttl_seconds,
     )
     current_account = AccountDependency(accounts)
-    catalog = CatalogService(catalog_uow)
+    catalog = CatalogService(catalog_uow, LocalCoverStorage(storage.covers))
     catalog_read = CatalogReadAdapter(catalog_uow)
     catalog_ports = CatalogPorts(service=catalog, read_adapter=catalog_read)
 

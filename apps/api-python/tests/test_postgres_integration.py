@@ -6,12 +6,14 @@ import os
 import re
 import uuid
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 
 import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
+from PIL import Image
 from pydantic import SecretStr
 from sqlalchemy import create_engine, text
 
@@ -294,6 +296,27 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         assert work_update.status_code == 200, work_update.text
         assert work_update.json()["title"] == "Updated Architecture Test Book"
         assert client.get(f"/api/v2/catalog/works/{created.json()['id']}").status_code == 200
+        cover = BytesIO()
+        Image.new("RGB", (800, 1200), (255, 80, 40)).save(cover, format="PNG")
+        cover_upload = client.post(
+            f"/api/v2/catalog/works/{created.json()['id']}/cover/upload",
+            files={"cover": ("cover.png", cover.getvalue(), "image/png")},
+        )
+        assert cover_upload.status_code == 200, cover_upload.text
+        assert cover_upload.json()["coverUrl"].endswith("/cover")
+        cover_response = client.get(
+            f"/api/v2/catalog/works/{created.json()['id']}/cover?size=small"
+        )
+        assert cover_response.status_code == 200
+        assert cover_response.headers["content-type"] == "image/webp"
+        assert cover_response.headers["etag"]
+        assert (
+            client.post(
+                f"/api/v2/catalog/works/{created.json()['id']}/cover/upload",
+                files={"cover": ("invalid.txt", b"not-an-image", "text/plain")},
+            ).status_code
+            == 422
+        )
         missing_catalog_id = uuid.uuid4()
         assert client.get(f"/api/v2/catalog/works/{missing_catalog_id}").status_code == 404
         assert (
@@ -304,6 +327,14 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
             == 404
         )
         assert client.delete(f"/api/v2/catalog/works/{missing_catalog_id}").status_code == 404
+        assert client.get(f"/api/v2/catalog/works/{missing_catalog_id}/cover").status_code == 404
+        assert (
+            client.post(
+                f"/api/v2/catalog/works/{missing_catalog_id}/cover/upload",
+                files={"cover": ("cover.png", cover.getvalue(), "image/png")},
+            ).status_code
+            == 404
+        )
         series = client.get("/api/v2/catalog/series?pageSize=10")
         assert series.status_code == 200
         assert series.json()["items"][0]["name"] == "Integration Series"

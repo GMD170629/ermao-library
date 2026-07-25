@@ -27,7 +27,6 @@ import {
   Images,
   MoveRight,
   Play,
-  RefreshCw,
   Save,
   Send,
   Settings2,
@@ -914,9 +913,10 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     try {
       const formData = new FormData();
       formData.append('cover', file);
-      const response = await apiV2Fetch(`/api/v2/catalog/works/${bookId}/cover/upload`, { method: 'POST', body: formData });
-      const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
-      if (!payload.ok) throw new Error(payload.error?.message ?? '上传封面失败');
+      await apiV2Request<WorkResponse>(
+        `/api/v2/catalog/works/${bookId}/cover/upload`,
+        { method: 'POST', body: formData }
+      );
       setCoverBust(Date.now());
       await loadBook();
       toast.success('自定义封面已保存');
@@ -1224,16 +1224,6 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                         <Database size={16} /> <I18nText>元数据识别</I18nText></button>
                       <button type="button" className={menuItemClass} disabled={saving} onClick={() => { setActionsOpen(false); coverInputRef.current?.click(); }}>
                         <ImageUp size={16} /> <I18nText>上传自定义封面</I18nText></button>
-                      <button
-                        type="button"
-                        className={menuItemClass}
-                        disabled={saving}
-                        onClick={() => {
-                          setActionsOpen(false);
-                          void postAction(`/api/v2/catalog/works/${book.id}/cover/regenerate`, '封面已重新生成', { refreshCover: true, refreshBook: true, busyKey: 'regenerateCover' });
-                        }}
-                      >
-                        <RefreshCw size={16} /> <I18nText>重新生成封面</I18nText></button>
                     </> : null}
                     {currentTab !== 'AUDIOBOOK' ? (
                       <button type="button" className={menuItemClass} disabled={!selectedEdition?.id} onClick={() => { setActionsOpen(false); downloadPrimaryEdition(); }}>

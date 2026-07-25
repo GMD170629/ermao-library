@@ -45,13 +45,20 @@ class FakeUnitOfWork:
 def test_catalog_service_complete_success_and_failure_surface() -> None:
     unit = FakeUnitOfWork("catalog")
     repository = unit.catalog
-    service = CatalogService(lambda: unit)
+    covers = MagicMock()
+    service = CatalogService(lambda: unit, covers)
     work_id = uuid.uuid4()
     edition_id = uuid.uuid4()
     owner_id = uuid.uuid4()
     shelf_id = uuid.uuid4()
     category_id = uuid.uuid4()
-    work = SimpleNamespace(id=work_id, title="Book", author="Author", media_type="book")
+    work = SimpleNamespace(
+        id=work_id,
+        title="Book",
+        author="Author",
+        media_type="book",
+        cover_key=f"{work_id}/cover.webp",
+    )
     edition = SimpleNamespace(id=edition_id, work_id=work_id)
     shelf = SimpleNamespace(id=shelf_id, kind="manual")
     category = SimpleNamespace(id=category_id)
@@ -135,6 +142,30 @@ def test_catalog_service_complete_success_and_failure_surface() -> None:
     repository.get_file.return_value = None
     with pytest.raises(CatalogNotFound):
         service.get_file(uuid.uuid4())
+
+    repository.get_work.return_value = work
+    cover_resource = SimpleNamespace(path="/covers/book.webp")
+    covers.open.return_value = cover_resource
+    assert service.cover(work_id, size="small") is cover_resource
+    covers.open.side_effect = FileNotFoundError
+    with pytest.raises(CatalogNotFound):
+        service.cover(work_id, size="large")
+    covers.open.side_effect = None
+    repository.get_work.return_value = None
+    with pytest.raises(CatalogNotFound):
+        service.cover(work_id, size="medium")
+
+    repository.get_work.return_value = work
+    repository.set_cover_key.return_value = work
+    covers.store.return_value = f"{work_id}/cover.webp"
+    assert service.upload_cover(work_id, BytesIO(b"image")) is work
+    repository.set_cover_key.return_value = None
+    with pytest.raises(CatalogNotFound):
+        service.upload_cover(work_id, BytesIO(b"image"))
+    covers.delete.assert_called_with(f"{work_id}/cover.webp")
+    repository.get_work.return_value = None
+    with pytest.raises(CatalogNotFound):
+        service.upload_cover(work_id, BytesIO(b"image"))
 
     repository.update_edition.return_value = edition
     assert (

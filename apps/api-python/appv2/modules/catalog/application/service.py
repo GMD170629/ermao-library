@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
+from typing import BinaryIO
 
 from appv2.modules.catalog.contracts import (
     CatalogEdition,
@@ -11,6 +12,8 @@ from appv2.modules.catalog.contracts import (
     CatalogUnitOfWork,
     CatalogWork,
     CategoryView,
+    CoverResource,
+    CoverStoragePort,
     SeriesView,
     ShelfView,
 )
@@ -22,8 +25,13 @@ class CatalogNotFound(Exception):
 
 
 class CatalogService:
-    def __init__(self, uow_factory: Callable[[], CatalogUnitOfWork]) -> None:
+    def __init__(
+        self,
+        uow_factory: Callable[[], CatalogUnitOfWork],
+        covers: CoverStoragePort,
+    ) -> None:
         self._uow_factory = uow_factory
+        self._covers = covers
 
     def list_works(
         self,
@@ -142,6 +150,29 @@ class CatalogService:
             if file is None:
                 raise CatalogNotFound
             return file
+
+    def cover(self, work_id: uuid.UUID, *, size: str) -> CoverResource:
+        with self._uow_factory() as uow:
+            work = uow.catalog.get_work(work_id)
+        if work is None or work.cover_key is None:
+            raise CatalogNotFound
+        try:
+            return self._covers.open(work.cover_key, size)
+        except FileNotFoundError as error:
+            raise CatalogNotFound from error
+
+    def upload_cover(self, work_id: uuid.UUID, stream: BinaryIO) -> CatalogWork:
+        with self._uow_factory() as uow:
+            if uow.catalog.get_work(work_id) is None:
+                raise CatalogNotFound
+        key = self._covers.store(work_id, stream)
+        with self._uow_factory() as uow:
+            work = uow.catalog.set_cover_key(work_id, key)
+            if work is None:
+                self._covers.delete(key)
+                raise CatalogNotFound
+            uow.commit()
+            return work
 
     def update_edition(
         self,

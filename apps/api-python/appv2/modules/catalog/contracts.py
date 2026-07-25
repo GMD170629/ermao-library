@@ -3,7 +3,8 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from pathlib import Path
+from typing import BinaryIO, Protocol
 
 from appv2.platform.database.contracts import UnitOfWork
 
@@ -76,6 +77,22 @@ class CatalogImport:
     size_bytes: int
     checksum: str
     metadata: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class CoverResource:
+    path: Path
+    media_type: str
+    etag: str
+    last_modified: datetime
+
+
+class CoverStoragePort(Protocol):
+    def store(self, work_id: uuid.UUID, stream: BinaryIO) -> str: ...
+
+    def open(self, key: str, size: str) -> CoverResource: ...
+
+    def delete(self, key: str) -> None: ...
 
 
 class CatalogReadPort(Protocol):
@@ -166,6 +183,8 @@ class CatalogRepository(CatalogReadPort, CatalogImportPort, CatalogMetadataPort,
         status: str | None,
         metadata: dict[str, object] | None,
     ) -> CatalogWork | None: ...
+
+    def set_cover_key(self, work_id: uuid.UUID, cover_key: str) -> CatalogWork | None: ...
 
     def list_editions(self, work_id: uuid.UUID) -> list[CatalogEdition]: ...
 

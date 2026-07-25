@@ -6,13 +6,19 @@ import hashlib
 import json
 import uuid
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from PIL import Image
 
 from appv2.modules.accounts.infrastructure.password_reset import LocalPasswordResetNotice
+from appv2.modules.catalog.infrastructure.covers import (
+    InvalidCoverImage,
+    LocalCoverStorage,
+)
 from appv2.modules.delivery.contracts import DeliverableFile, SmtpConfiguration
 from appv2.modules.delivery.infrastructure.smtp import SmtpAdapter
 from appv2.modules.discovery.contracts import SearchResultView, SourceView
@@ -72,6 +78,51 @@ def test_local_password_reset_notice_is_atomic_localized_and_private(tmp_path: P
     notice.clear()
     assert not path.exists()
     notice.clear()
+
+
+def test_local_cover_storage_validates_and_materializes_variants(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = BytesIO()
+    Image.new("RGB", (1600, 2400), (255, 80, 40)).save(source, format="PNG")
+    source.seek(0)
+    work_id = uuid.uuid4()
+    storage = LocalCoverStorage(tmp_path / "covers")
+
+    key = storage.store(work_id, source)
+
+    assert key == f"{work_id}/cover.webp"
+    small = storage.open(key, "small")
+    assert small.media_type == "image/webp"
+    assert small.etag.startswith('"')
+    with Image.open(small.path) as generated:
+        assert generated.width <= 320
+        assert generated.height <= 480
+    assert storage.open(key, "unsupported").path.name == "cover-medium.webp"
+    with pytest.raises(ValueError, match="escapes"):
+        storage.open("../outside.webp", "small")
+    with pytest.raises(InvalidCoverImage, match="supported image"):
+        storage.store(uuid.uuid4(), BytesIO(b"not-an-image"))
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            "appv2.modules.catalog.infrastructure.covers.MAX_COVER_BYTES",
+            3,
+        )
+        with pytest.raises(InvalidCoverImage, match="20 MiB"):
+            storage.store(uuid.uuid4(), BytesIO(b"four"))
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            "appv2.modules.catalog.infrastructure.covers.MAX_COVER_PIXELS",
+            1,
+        )
+        source.seek(0)
+        with pytest.raises(InvalidCoverImage, match="pixel limit"):
+            storage.store(uuid.uuid4(), source)
+
+    storage.delete(key)
+    assert not small.path.exists()
+    storage.delete(key)
 
 
 def test_pg_backup_executor_create_open_delete_and_validation(

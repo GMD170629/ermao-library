@@ -1,9 +1,11 @@
 import uuid
 from collections.abc import Callable
 from datetime import datetime
-from typing import Annotated
+from email.utils import format_datetime
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
+from fastapi.responses import FileResponse as FastAPIFileResponse
 from pydantic import Field
 
 from appv2.modules.accounts.contracts import AccessScope, AccountView, CurrentAccount
@@ -213,6 +215,47 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
         except CatalogNotFound as error:
             raise not_found(error) from error
         return WorkResponse.from_view(item)
+
+    @router.get("/works/{work_id}/cover", response_class=FastAPIFileResponse)
+    def cover(
+        work_id: uuid.UUID,
+        actor: Actor,
+        size: Literal["small", "medium", "large", "original"] = "medium",
+    ) -> FastAPIFileResponse:
+        del actor
+        try:
+            resource = service.cover(work_id, size=size)
+        except CatalogNotFound as error:
+            raise not_found(error) from error
+        return FastAPIFileResponse(
+            resource.path,
+            media_type=resource.media_type,
+            headers={
+                "ETag": resource.etag,
+                "Last-Modified": format_datetime(resource.last_modified, usegmt=True),
+                "Cache-Control": "private, max-age=86400",
+            },
+        )
+
+    @router.post("/works/{work_id}/cover/upload", response_model=WorkResponse)
+    def upload_cover(
+        work_id: uuid.UUID,
+        cover: Annotated[UploadFile, File()],
+        actor: Writer,
+    ) -> WorkResponse:
+        del actor
+        try:
+            work = service.upload_cover(work_id, cover.file)
+        except CatalogNotFound as error:
+            raise not_found(error) from error
+        except ValueError as error:
+            raise AppProblem(
+                status=422,
+                code="INVALID_COVER_IMAGE",
+                title="Invalid cover image",
+                message_key="invalid_request",
+            ) from error
+        return WorkResponse.from_view(work)
 
     @router.delete("/works/{work_id}", status_code=status.HTTP_204_NO_CONTENT)
     def archive_work(work_id: uuid.UUID, actor: Writer) -> None:

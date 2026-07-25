@@ -473,6 +473,14 @@ class SqlCatalogRepository(CatalogRepository):
         self._session.flush()
         return _work(record)
 
+    def set_cover_key(self, work_id: uuid.UUID, cover_key: str) -> CatalogWork | None:
+        record = self._session.get(WorkRecord, work_id)
+        if record is None:
+            return None
+        record.cover_key = cover_key
+        self._session.flush()
+        return _work(record)
+
     def import_file(self, imported: CatalogImport) -> CatalogEdition:
         existing = self._session.scalar(
             select(FileRecord).where(FileRecord.checksum == imported.checksum).limit(1)

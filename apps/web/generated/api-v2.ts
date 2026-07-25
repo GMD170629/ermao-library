@@ -54,6 +54,10 @@ export type Body_upload_api_v2_ingestion_imports_upload_post = {
   file: string;
 };
 
+export type Body_upload_cover_api_v2_catalog_works__work_id__cover_upload_post = {
+  cover: string;
+};
+
 export type BookmarkRequest = {
   clientId: string;
   label?: string | null;
@@ -1012,6 +1016,12 @@ export interface ApiV2Paths {
     get: { request: never; query: never; response: WorkDetailResponse };
     patch: { request: UpdateWorkRequest; query: never; response: WorkResponse };
     delete: { request: never; query: never; response: void };
+  };
+  "/api/v2/catalog/works/{work_id}/cover": {
+    get: { request: never; query: { size?: "small" | "medium" | "large" | "original" }; response: void };
+  };
+  "/api/v2/catalog/works/{work_id}/cover/upload": {
+    post: { request: Body_upload_cover_api_v2_catalog_works__work_id__cover_upload_post; query: never; response: WorkResponse };
   };
   "/api/v2/catalog/works/{work_id}/editions/{edition_id}": {
     patch: { request: UpdateEditionRequest; query: never; response: EditionResponse };
