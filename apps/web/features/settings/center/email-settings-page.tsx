@@ -1,6 +1,6 @@
 'use client';
 
-import { apiV2Fetch } from '@/lib/api-v2';
+import { apiV2Fetch, apiV2Request } from '@/lib/api-v2';
 import type { AccountResponse } from '@/generated/api-v2';
 
 import { KeyRound, MailCheck, Save, Send, ShieldCheck, Trash2 } from 'lucide-react';
@@ -22,25 +22,33 @@ type EmailSettings = {
     security: 'starttls' | 'ssl' | 'none';
     username: string;
     fromEmail: string;
-    fromName: string;
-    maxAttachmentMb: number | null;
     passwordConfigured: boolean;
   };
   kindle: { email: string };
 };
 
-type EmailSettingsPayload = { ok: boolean; data?: EmailSettings; error?: { message: string } };
-type KindleSettingsPayload = {
-  ok: boolean;
-  data?: {
-    kindle: { email: string };
-    smtp: { configured: boolean; fromEmail: string };
-  };
-  error?: { message: string };
+type EmailSettingsResource = {
+  host: string;
+  port: number;
+  username: string | null;
+  sender: string;
+  security: 'starttls' | 'ssl' | 'none';
+  passwordSet: boolean;
+};
+
+type KindleSettingsResource = {
+  kindleEmail: string;
+  convertBeforeSend: boolean;
+  options: Record<string, unknown>;
+};
+
+type EmailStatusResource = {
+  configured: boolean;
+  sender: string | null;
 };
 
 const emptySettings: EmailSettings = {
-  smtp: { host: '', port: 587, security: 'starttls', username: '', fromEmail: '', fromName: '二毛图书', maxAttachmentMb: null, passwordConfigured: false },
+  smtp: { host: '', port: 587, security: 'starttls', username: '', fromEmail: '', passwordConfigured: false },
   kindle: { email: '' }
 };
 
@@ -77,20 +85,43 @@ export function EmailSettingsPage() {
     if (canManageSystem === null) return;
     setLoading(true);
     try {
-      const kindleResponse = await apiV2Fetch('/api/v2/delivery/kindle/settings', { cache: 'no-store' });
-      const kindlePayload = (await kindleResponse.json()) as KindleSettingsPayload;
-      if (!kindlePayload.ok || !kindlePayload.data) throw new Error(kindlePayload.error?.message ?? '读取 Kindle 设置失败');
-      setKindleEmail(kindlePayload.data.kindle.email);
+      const kindle = await apiV2Request<KindleSettingsResource | null>(
+        '/api/v2/delivery/kindle/settings',
+        { cache: 'no-store' }
+      );
+      const status = await apiV2Request<EmailStatusResource>(
+        '/api/v2/delivery/email/status',
+        { cache: 'no-store' }
+      );
+      setKindleEmail(kindle?.kindleEmail ?? '');
       if (canManageSystem) {
-        const response = await apiV2Fetch('/api/v2/delivery/email/settings', { cache: 'no-store' });
-        const payload = (await response.json()) as EmailSettingsPayload;
-        if (!payload.ok || !payload.data) throw new Error(payload.error?.message ?? '读取邮件设置失败');
-        setSettings(payload.data);
-        setSmtp({ ...payload.data.smtp, password: '' });
+        const email = await apiV2Request<EmailSettingsResource | null>(
+          '/api/v2/delivery/email/settings',
+          { cache: 'no-store' }
+        );
+        const mapped = email ? {
+          ...emptySettings,
+          smtp: {
+            ...emptySettings.smtp,
+            host: email.host,
+            port: email.port,
+            security: email.security,
+            username: email.username ?? '',
+            fromEmail: email.sender,
+            passwordConfigured: email.passwordSet
+          },
+          kindle: { email: kindle?.kindleEmail ?? '' }
+        } : { ...emptySettings, kindle: { email: kindle?.kindleEmail ?? '' } };
+        setSettings(mapped);
+        setSmtp({ ...mapped.smtp, password: '' });
       } else {
         setSettings({
           ...emptySettings,
-          smtp: { ...emptySettings.smtp, fromEmail: kindlePayload.data.smtp.fromEmail }
+          smtp: {
+            ...emptySettings.smtp,
+            fromEmail: status.sender ?? ''
+          },
+          kindle: { email: kindle?.kindleEmail ?? '' }
         });
       }
       setClearPassword(false);
@@ -117,21 +148,19 @@ export function EmailSettingsPage() {
     setBusy('save-smtp');
     try {
       const body: Record<string, unknown> = {
-        smtp: {
-          host: smtp.host,
-          port: smtp.port,
-          security: smtp.security,
-          username: smtp.username,
-          fromEmail: smtp.fromEmail,
-          fromName: smtp.fromName,
-          maxAttachmentMb: smtp.maxAttachmentMb
-        },
-        clearSmtpPassword: clearPassword
+        host: smtp.host,
+        port: smtp.port,
+        security: smtp.security,
+        username: smtp.username || null,
+        sender: smtp.fromEmail,
+        clearPassword
       };
-      if (smtp.password.trim()) (body.smtp as Record<string, unknown>).password = smtp.password;
-      const response = await apiV2Fetch('/api/v2/delivery/email/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const payload = (await response.json()) as EmailSettingsPayload;
-      if (!payload.ok || !payload.data) throw new Error(payload.error?.message ?? '保存 SMTP 设置失败');
+      if (smtp.password.trim()) body.password = smtp.password;
+      await apiV2Request<EmailSettingsResource>('/api/v2/delivery/email/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
       toast.success('SMTP 设置已保存');
       await loadSettings();
     } catch (reason) {
@@ -144,14 +173,25 @@ export function EmailSettingsPage() {
   async function testConnection() {
     setBusy('test-smtp');
     try {
-      const response = await apiV2Fetch('/api/v2/delivery/email/settings/smtp-test', {
+      await apiV2Request<EmailSettingsResource>('/api/v2/delivery/email/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          host: smtp.host,
+          port: smtp.port,
+          security: smtp.security,
+          username: smtp.username || null,
+          password: smtp.password || undefined,
+          clearPassword,
+          sender: smtp.fromEmail
+        })
+      });
+      await apiV2Request<void>('/api/v2/delivery/email/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ smtp: { ...smtp, password: smtp.password || undefined }, clearSmtpPassword: clearPassword })
+        body: JSON.stringify({ recipient: smtp.fromEmail })
       });
-      const payload = (await response.json()) as { ok: boolean; data?: { message: string }; error?: { message: string } };
-      if (!payload.ok) throw new Error(payload.error?.message ?? 'SMTP 连接失败');
-      toast.success('SMTP 测试成功', payload.data?.message);
+      toast.success('SMTP 测试成功');
     } catch (reason) {
       toast.error('SMTP 测试失败', reason instanceof Error ? reason.message : '请检查服务器设置');
     } finally {
@@ -162,10 +202,12 @@ export function EmailSettingsPage() {
   async function saveKindle() {
     setBusy('save-kindle');
     try {
-      const response = await apiV2Fetch('/api/v2/delivery/kindle/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: kindleEmail }) });
-      const payload = (await response.json()) as KindleSettingsPayload;
-      if (!payload.ok || !payload.data) throw new Error(payload.error?.message ?? '保存 Kindle 邮箱失败');
-      setKindleEmail(payload.data.kindle.email);
+      const kindle = await apiV2Request<KindleSettingsResource>('/api/v2/delivery/kindle/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kindleEmail, convertBeforeSend: false, options: {} })
+      });
+      setKindleEmail(kindle.kindleEmail);
       toast.success('Kindle 邮箱已保存');
     } catch (reason) {
       toast.error('保存失败', reason instanceof Error ? reason.message : '请稍后重试');
@@ -187,7 +229,7 @@ export function EmailSettingsPage() {
           <section className="max-w-4xl rounded-[26px] border border-[#E2DDD7] bg-white p-5 shadow-sm shadow-stone-900/[0.03] sm:p-6">
             <div className="flex items-start gap-3">
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FFF0EA] text-[#DD4729]"><MailCheck size={19} /></span>
-              <div><h3 className="text-lg font-semibold text-[#292724]"><I18nText>SMTP 发件服务</I18nText></h3><p className="mt-1 text-sm leading-6 text-[#77716A]"><I18nText>支持 STARTTLS、SSL/TLS 和不加密连接。测试连接不会发送邮件。</I18nText></p></div>
+              <div><h3 className="text-lg font-semibold text-[#292724]"><I18nText>SMTP 发件服务</I18nText></h3><p className="mt-1 text-sm leading-6 text-[#77716A]"><I18nText>支持 STARTTLS、SSL/TLS 和不加密连接。测试时会向发件邮箱发送一封测试邮件。</I18nText></p></div>
             </div>
             <div className="mt-6 grid gap-5 md:grid-cols-2">
               <label className="text-sm font-medium text-[#5E5953]"><I18nText>SMTP 主机</I18nText><input disabled={loading} value={smtp.host} onChange={(event) => setSmtp({ ...smtp, host: event.target.value })} placeholder="smtp.example.com" className={inputClassName()} /></label>
@@ -204,11 +246,9 @@ export function EmailSettingsPage() {
                   triggerClassName="h-11"
                 />
               </div>
-              <label className="text-sm font-medium text-[#5E5953]"><I18nText>附件大小上限（MB，可选）</I18nText><input disabled={loading} type="number" min={1} max={1000} value={smtp.maxAttachmentMb ?? ''} onChange={(event) => setSmtp({ ...smtp, maxAttachmentMb: event.target.value ? Number(event.target.value) : null })} placeholder={i18nAttribute("留空则由邮件服务商限制")} className={inputClassName()} /></label>
               <label className="text-sm font-medium text-[#5E5953]"><I18nText>SMTP 用户名</I18nText><input disabled={loading} value={smtp.username} onChange={(event) => setSmtp({ ...smtp, username: event.target.value })} autoComplete="username" placeholder={i18nAttribute("无需认证时留空")} className={inputClassName()} /></label>
               <label className="text-sm font-medium text-[#5E5953]"><I18nText>SMTP 密码</I18nText><input disabled={loading || clearPassword} value={smtp.password} onChange={(event) => { setSmtp({ ...smtp, password: event.target.value }); setClearPassword(false); }} type="password" autoComplete="new-password" placeholder={settings.smtp.passwordConfigured ? i18nAttribute("已配置，留空表示不修改") : i18nAttribute("无需认证时留空")} className={inputClassName()} /></label>
               <label className="text-sm font-medium text-[#5E5953]"><I18nText>发件邮箱</I18nText><input disabled={loading} value={smtp.fromEmail} onChange={(event) => setSmtp({ ...smtp, fromEmail: event.target.value })} type="email" placeholder="reader@example.com" className={inputClassName()} /></label>
-              <label className="text-sm font-medium text-[#5E5953]"><I18nText>发件名称</I18nText><input disabled={loading} value={smtp.fromName} onChange={(event) => setSmtp({ ...smtp, fromName: event.target.value })} placeholder={i18nAttribute("二毛图书")} className={inputClassName()} /></label>
             </div>
             {settings.smtp.passwordConfigured ? (
               <button type="button" onClick={() => { setClearPassword((value) => !value); setSmtp({ ...smtp, password: '' }); }} className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-[#A34A36] hover:text-[#D94322]"><Trash2 size={15} />{clearPassword ? i18nAttribute("取消清除 SMTP 密码") : i18nAttribute("保存时清除 SMTP 密码")}</button>

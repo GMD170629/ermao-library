@@ -315,7 +315,7 @@ def test_smtp_adapter_builds_test_and_attachment_messages(
         username="mailer",
         password="secret",
         sender="sender@example.com",
-        use_tls=True,
+        security="starttls",
     )
     adapter = SmtpAdapter(15)
     adapter.test(configuration, "recipient@example.com")
@@ -340,7 +340,7 @@ def test_smtp_adapter_builds_test_and_attachment_messages(
             username=None,
             password=None,
             sender="sender@example.com",
-            use_tls=False,
+            security="none",
         ),
         recipient="reader@example.com",
         subject="Book",

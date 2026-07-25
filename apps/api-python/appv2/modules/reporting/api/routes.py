@@ -2,9 +2,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from appv2.modules.accounts.contracts import AccountView, CurrentAccount
+from appv2.modules.accounts.contracts import AccessScope, AccountView, CurrentAccount
 from appv2.modules.reporting.application import ReportingService
-from appv2.platform.http import CamelModel
+from appv2.platform.http import AppProblem, CamelModel
 
 
 class DashboardResponse(CamelModel):
@@ -29,9 +29,19 @@ def create_router(service: ReportingService, current_account: CurrentAccount) ->
     router = APIRouter(prefix="/reporting")
     Actor = Annotated[AccountView, Depends(current_account)]
 
+    def require(actor: AccountView, scope: AccessScope) -> None:
+        if scope not in actor.scopes:
+            raise AppProblem(
+                status=403,
+                code="PERMISSION_DENIED",
+                title="Permission denied",
+                message_key="permission_denied",
+                params={"scope": scope.value},
+            )
+
     @router.get("/dashboard", response_model=DashboardResponse)
     def dashboard(actor: Actor) -> DashboardResponse:
-        del actor
+        require(actor, AccessScope.CATALOG_READ)
         projection = service.dashboard()
         return DashboardResponse(
             work_count=projection.work_count,
@@ -43,7 +53,7 @@ def create_router(service: ReportingService, current_account: CurrentAccount) ->
 
     @router.get("/management", response_model=ManagementResponse)
     def management(actor: Actor) -> ManagementResponse:
-        del actor
+        require(actor, AccessScope.OPERATIONS_READ)
         return ManagementResponse.model_validate(service.management())
 
     return router

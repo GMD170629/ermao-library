@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Header, Query, status
 from pydantic import Field
 from starlette.responses import StreamingResponse
 
-from appv2.modules.accounts.contracts import AccountView, CurrentAccount
+from appv2.modules.accounts.contracts import AccessScope, AccountView, CurrentAccount
 from appv2.modules.reading.application import (
     LocationClaimConflict,
     LocationClaimResult,
@@ -159,7 +159,21 @@ class EpubLocationClaimResponse(CamelModel):
 
 def create_router(service: ReadingService, current_account: CurrentAccount) -> APIRouter:
     router = APIRouter(prefix="/reading")
-    Actor = Annotated[AccountView, Depends(current_account)]
+
+    def authorized(
+        actor: Annotated[AccountView, Depends(current_account)],
+    ) -> AccountView:
+        if AccessScope.READING_WRITE not in actor.scopes:
+            raise AppProblem(
+                status=403,
+                code="PERMISSION_DENIED",
+                title="Permission denied",
+                message_key="permission_denied",
+                params={"scope": AccessScope.READING_WRITE.value},
+            )
+        return actor
+
+    Actor = Annotated[AccountView, Depends(authorized)]
 
     def missing(error: ReadingNotFound) -> AppProblem:
         return AppProblem(

@@ -180,7 +180,6 @@ def create_router(
     )
     def confirm_password_reset(
         payload: PasswordResetConfirmRequest,
-        response: Response,
     ) -> PasswordResetCompleted:
         try:
             service.confirm_password_reset(
@@ -194,7 +193,6 @@ def create_router(
                 title="Invalid password reset token",
                 message_key="invalid_request",
             ) from error
-        response.delete_cookie(SESSION_COOKIE, path=settings.cookie_path)
         return PasswordResetCompleted()
 
     @router.get("/account", response_model=AccountResponse)

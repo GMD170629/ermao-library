@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, Query, status
 from pydantic import Field
 
-from appv2.modules.accounts.contracts import AccountView, CurrentAccount
+from appv2.modules.accounts.contracts import AccessScope, AccountView, CurrentAccount
 from appv2.modules.metadata.application import MetadataNotFound, MetadataService
 from appv2.modules.metadata.contracts import (
     MetadataCandidate,
@@ -83,7 +83,21 @@ class CandidateResponse(CamelModel):
 
 def create_router(service: MetadataService, current_account: CurrentAccount) -> APIRouter:
     router = APIRouter(prefix="/metadata")
-    Actor = Annotated[AccountView, Depends(current_account)]
+
+    def authorized(
+        actor: Annotated[AccountView, Depends(current_account)],
+    ) -> AccountView:
+        if AccessScope.METADATA_WRITE not in actor.scopes:
+            raise AppProblem(
+                status=403,
+                code="PERMISSION_DENIED",
+                title="Permission denied",
+                message_key="permission_denied",
+                params={"scope": AccessScope.METADATA_WRITE.value},
+            )
+        return actor
+
+    Actor = Annotated[AccountView, Depends(authorized)]
 
     def missing(error: MetadataNotFound) -> AppProblem:
         return AppProblem(

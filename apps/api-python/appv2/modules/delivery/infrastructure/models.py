@@ -24,17 +24,23 @@ from appv2.platform.database.base import Base, Timestamped, UUIDPrimaryKey
 class EmailSettingsRecord(UUIDPrimaryKey, Timestamped, Base):
     __tablename__ = "email_settings"
     __table_args__ = (
-        UniqueConstraint("owner_id", name="email_settings_owner"),
+        CheckConstraint("scope = 'system'", name="email_settings_scope_valid"),
+        CheckConstraint(
+            "security IN ('starttls', 'ssl', 'none')",
+            name="email_settings_security_valid",
+        ),
+        UniqueConstraint("scope", name="email_settings_scope"),
         {"schema": "delivery"},
     )
 
     owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("accounts.users.id"), nullable=False)
+    scope: Mapped[str] = mapped_column(String(20), nullable=False, default="system")
     host: Mapped[str] = mapped_column(String(500), nullable=False)
     port: Mapped[int] = mapped_column(Integer, nullable=False)
     username: Mapped[str | None] = mapped_column(String(500))
     encrypted_password: Mapped[bytes | None] = mapped_column(LargeBinary)
     sender: Mapped[str] = mapped_column(String(500), nullable=False)
-    use_tls: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    security: Mapped[str] = mapped_column(String(20), nullable=False, default="starttls")
 
 
 class KindleSettingsRecord(UUIDPrimaryKey, Timestamped, Base):

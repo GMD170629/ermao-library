@@ -599,14 +599,29 @@ def test_metadata_discovery_and_delivery_services() -> None:
             port=587,
             username=None,
             password=None,
+            clear_password=False,
             sender="sender@example.com",
-            use_tls=True,
+            security="starttls",
         )
         is email_settings
     )
+    with pytest.raises(ValueError):
+        delivery.save_email_settings(
+            owner_id=owner_id,
+            host="smtp.example.com",
+            port=587,
+            username=None,
+            password=None,
+            clear_password=False,
+            sender="sender@example.com",
+            security="invalid",
+        )
     delivery_repo.smtp_configuration.return_value = email_settings
+    email_settings.sender = "sender@example.com"
+    assert delivery.email_status(owner_id) == (True, "sender@example.com")
     delivery.test_email(owner_id, "recipient@example.com")
     delivery_repo.smtp_configuration.return_value = None
+    assert delivery.email_status(owner_id) == (False, None)
     with pytest.raises(DeliveryNotFound):
         delivery.test_email(owner_id, "recipient@example.com")
     delivery_repo.get_kindle_settings.return_value = kindle_settings
@@ -662,9 +677,9 @@ def test_metadata_discovery_and_delivery_services() -> None:
     delivery_repo.cancel.return_value = False
     with pytest.raises(DeliveryNotFound):
         delivery.cancel(delivery_job.id, owner_id)
-    delivery_repo.retry.return_value = True
-    delivery.retry(delivery_job.id, owner_id)
-    delivery_repo.retry.return_value = False
+    delivery_repo.retry.return_value = delivery_job
+    assert delivery.retry(delivery_job.id, owner_id) is delivery_job
+    delivery_repo.retry.return_value = None
     with pytest.raises(DeliveryNotFound):
         delivery.retry(delivery_job.id, owner_id)
 

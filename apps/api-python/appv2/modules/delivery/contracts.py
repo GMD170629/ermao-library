@@ -34,7 +34,7 @@ class EmailSettings:
     port: int
     username: str | None
     sender: str
-    use_tls: bool
+    security: str
     password_set: bool
 
 
@@ -45,7 +45,7 @@ class SmtpConfiguration:
     username: str | None
     password: str | None
     sender: str
-    use_tls: bool
+    security: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,8 +83,9 @@ class DeliveryRepository(Protocol):
         port: int,
         username: str | None,
         password: str | None,
+        clear_password: bool,
         sender: str,
-        use_tls: bool,
+        security: str,
     ) -> EmailSettings: ...
 
     def smtp_configuration(self, owner_id: uuid.UUID) -> SmtpConfiguration | None: ...
@@ -123,7 +124,9 @@ class DeliveryRepository(Protocol):
 
     def cancel(self, job_id: uuid.UUID, owner_id: uuid.UUID) -> bool: ...
 
-    def retry(self, job_id: uuid.UUID, owner_id: uuid.UUID, now: datetime) -> bool: ...
+    def retry(
+        self, job_id: uuid.UUID, owner_id: uuid.UUID, now: datetime
+    ) -> DeliveryJob | None: ...
 
 
 class DeliveryUnitOfWork(UnitOfWork, Protocol):

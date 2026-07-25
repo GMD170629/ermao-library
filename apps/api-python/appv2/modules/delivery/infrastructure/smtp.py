@@ -50,8 +50,22 @@ class SmtpAdapter(SmtpPort):
 
     def _send_message(self, configuration: SmtpConfiguration, message: EmailMessage) -> None:
         context = ssl.create_default_context()
-        with smtplib.SMTP(configuration.host, configuration.port, timeout=self._timeout) as client:
-            if configuration.use_tls:
+        connection: smtplib.SMTP | smtplib.SMTP_SSL
+        if configuration.security == "ssl":
+            connection = smtplib.SMTP_SSL(
+                configuration.host,
+                configuration.port,
+                timeout=self._timeout,
+                context=context,
+            )
+        else:
+            connection = smtplib.SMTP(
+                configuration.host,
+                configuration.port,
+                timeout=self._timeout,
+            )
+        with connection as client:
+            if configuration.security == "starttls":
                 client.starttls(context=context)
             if configuration.username:
                 client.login(configuration.username, configuration.password or "")

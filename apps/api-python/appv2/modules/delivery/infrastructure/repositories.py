@@ -33,7 +33,7 @@ def _email(record: EmailSettingsRecord) -> EmailSettings:
         port=record.port,
         username=record.username,
         sender=record.sender,
-        use_tls=record.use_tls,
+        security=record.security,
         password_set=record.encrypted_password is not None,
     )
 
@@ -70,7 +70,8 @@ class SqlDeliveryRepository(DeliveryRepository):
         self._cipher = cipher
 
     def get_email_settings(self, owner_id: uuid.UUID) -> EmailSettings | None:
-        record = self._email_record(owner_id)
+        del owner_id
+        record = self._email_record()
         return _email(record) if record is not None else None
 
     def save_email_settings(
@@ -81,35 +82,40 @@ class SqlDeliveryRepository(DeliveryRepository):
         port: int,
         username: str | None,
         password: str | None,
+        clear_password: bool,
         sender: str,
-        use_tls: bool,
+        security: str,
     ) -> EmailSettings:
-        record = self._email_record(owner_id)
-        encrypted = self._cipher.encrypt(password) if password else None
+        record = self._email_record()
+        encrypted = self._cipher.encrypt(password) if password and not clear_password else None
         if record is None:
             record = EmailSettingsRecord(
                 owner_id=owner_id,
+                scope="system",
                 host=host,
                 port=port,
                 username=username,
                 encrypted_password=encrypted,
                 sender=sender,
-                use_tls=use_tls,
+                security=security,
             )
             self._session.add(record)
         else:
             record.host = host
             record.port = port
             record.username = username
-            if password is not None:
+            if clear_password:
+                record.encrypted_password = None
+            elif password is not None:
                 record.encrypted_password = encrypted
             record.sender = sender
-            record.use_tls = use_tls
+            record.security = security
         self._session.flush()
         return _email(record)
 
     def smtp_configuration(self, owner_id: uuid.UUID) -> SmtpConfiguration | None:
-        record = self._email_record(owner_id)
+        del owner_id
+        record = self._email_record()
         if record is None:
             return None
         return SmtpConfiguration(
@@ -122,7 +128,7 @@ class SqlDeliveryRepository(DeliveryRepository):
                 else None
             ),
             sender=record.sender,
-            use_tls=record.use_tls,
+            security=record.security,
         )
 
     def get_kindle_settings(self, owner_id: uuid.UUID) -> KindleSettings | None:
@@ -272,7 +278,7 @@ class SqlDeliveryRepository(DeliveryRepository):
         record.lease_expires_at = None
         return True
 
-    def retry(self, job_id: uuid.UUID, owner_id: uuid.UUID, now: datetime) -> bool:
+    def retry(self, job_id: uuid.UUID, owner_id: uuid.UUID, now: datetime) -> DeliveryJob | None:
         record = self._session.scalar(
             select(DeliveryJobRecord).where(
                 DeliveryJobRecord.id == job_id,
@@ -280,16 +286,17 @@ class SqlDeliveryRepository(DeliveryRepository):
             )
         )
         if record is None or record.status not in {"failed", "cancelled"}:
-            return False
+            return None
         record.status = "queued"
         record.next_attempt_at = now
         record.lease_owner = None
         record.lease_expires_at = None
-        return True
+        self._session.flush()
+        return _job(record)
 
-    def _email_record(self, owner_id: uuid.UUID) -> EmailSettingsRecord | None:
+    def _email_record(self) -> EmailSettingsRecord | None:
         return self._session.scalar(
-            select(EmailSettingsRecord).where(EmailSettingsRecord.owner_id == owner_id)
+            select(EmailSettingsRecord).where(EmailSettingsRecord.scope == "system")
         )
 
     def _required_job(self, job_id: uuid.UUID) -> DeliveryJobRecord:

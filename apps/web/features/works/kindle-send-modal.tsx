@@ -1,6 +1,6 @@
 'use client';
 
-import { apiV2Fetch } from '@/lib/api-v2';
+import { apiV2Request } from '@/lib/api-v2';
 
 import { AlertTriangle, CheckCircle2, FileText, Mail, Send, Settings, X } from 'lucide-react';
 import Link from 'next/link';
@@ -12,13 +12,15 @@ import type { WorkView } from '../../types/work';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
-type KindleSettingsPayload = {
-  ok: boolean;
-  data?: {
-    smtp: { configured: boolean; fromEmail: string };
-    kindle: { email: string };
-  };
-  error?: { message: string };
+type KindleSettingsResource = {
+  kindleEmail: string;
+  convertBeforeSend: boolean;
+  options: Record<string, unknown>;
+};
+
+type EmailStatusResource = {
+  configured: boolean;
+  sender: string | null;
 };
 
 type SendOption = {
@@ -69,13 +71,19 @@ export function KindleSendModal({ book, open, preferredEditionId, onClose }: { b
     setSelectedFileId(defaultOption?.fileId ?? '');
     setSettingsLoading(true);
     setSettingsError('');
-    apiV2Fetch('/api/v2/delivery/kindle/settings', { cache: 'no-store' })
-      .then((response) => response.json())
-      .then((payload: KindleSettingsPayload) => {
-        if (!payload.ok || !payload.data) throw new Error(payload.error?.message ?? '读取邮件设置失败');
-        const smtp = payload.data.smtp;
-        setRecipient(payload.data.kindle.email);
-        setSettingsReady(Boolean(smtp.configured && smtp.fromEmail && payload.data.kindle.email));
+    Promise.all([
+      apiV2Request<KindleSettingsResource | null>(
+        '/api/v2/delivery/kindle/settings',
+        { cache: 'no-store' }
+      ),
+      apiV2Request<EmailStatusResource>(
+        '/api/v2/delivery/email/status',
+        { cache: 'no-store' }
+      )
+    ])
+      .then(([kindle, smtp]) => {
+        setRecipient(kindle?.kindleEmail ?? '');
+        setSettingsReady(Boolean(smtp.configured && smtp.sender && kindle?.kindleEmail));
       })
       .catch((reason) => {
         setSettingsReady(false);
@@ -90,14 +98,12 @@ export function KindleSendModal({ book, open, preferredEditionId, onClose }: { b
     if (!selectedFileId) return;
     setSending(true);
     try {
-      const response = await apiV2Fetch('/api/v2/delivery/kindle/jobs', {
+      await apiV2Request('/api/v2/delivery/kindle/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workId: book.id, fileId: selectedFileId })
+        body: JSON.stringify({ fileId: selectedFileId, subject: book.title })
       });
-      const payload = (await response.json()) as { ok: boolean; data?: { alreadyQueued: boolean }; error?: { message: string } };
-      if (!payload.ok) throw new Error(payload.error?.message ?? '加入发送队列失败');
-      toast.success(payload.data?.alreadyQueued ? '该文件已在发送队列中' : '已加入 Kindle 发送队列');
+      toast.success('已加入 Kindle 发送队列');
       onClose();
     } catch (reason) {
       toast.error('发送失败', reason instanceof Error ? reason.message : '请稍后重试');

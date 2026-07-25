@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, Header, Query, status
 from pydantic import Field
 
-from appv2.modules.accounts.contracts import AccountView, CurrentAccount
+from appv2.modules.accounts.contracts import AccessScope, AccountView, CurrentAccount
 from appv2.modules.discovery.application import DiscoveryNotFound, DiscoveryService
 from appv2.modules.discovery.contracts import DownloadJob, SearchResultView, SourceView
 from appv2.platform.http import AppProblem, CamelModel, Page
@@ -80,7 +80,21 @@ class DownloadResponse(CamelModel):
 
 def create_router(service: DiscoveryService, current_account: CurrentAccount) -> APIRouter:
     router = APIRouter(prefix="/discovery")
-    Actor = Annotated[AccountView, Depends(current_account)]
+
+    def authorized(
+        actor: Annotated[AccountView, Depends(current_account)],
+    ) -> AccountView:
+        if AccessScope.DISCOVERY_WRITE not in actor.scopes:
+            raise AppProblem(
+                status=403,
+                code="PERMISSION_DENIED",
+                title="Permission denied",
+                message_key="permission_denied",
+                params={"scope": AccessScope.DISCOVERY_WRITE.value},
+            )
+        return actor
+
+    Actor = Annotated[AccountView, Depends(authorized)]
 
     def missing(error: DiscoveryNotFound) -> AppProblem:
         return AppProblem(

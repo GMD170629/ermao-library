@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, status
 from pydantic import Field
 from starlette.responses import StreamingResponse
 
-from appv2.modules.accounts.contracts import AccountView, CurrentAccount
+from appv2.modules.accounts.contracts import AccessScope, AccountView, CurrentAccount
 from appv2.modules.operations.application import OperationsNotFound, OperationsService
 from appv2.modules.operations.contracts import (
     BackupView,
@@ -96,6 +96,16 @@ def create_router(
     router = APIRouter(prefix="/operations")
     Actor = Annotated[AccountView, Depends(current_account)]
 
+    def require(actor: AccountView, scope: AccessScope) -> None:
+        if scope not in actor.scopes:
+            raise AppProblem(
+                status=403,
+                code="PERMISSION_DENIED",
+                title="Permission denied",
+                message_key="permission_denied",
+                params={"scope": scope.value},
+            )
+
     def missing(error: OperationsNotFound) -> AppProblem:
         return AppProblem(
             status=404,
@@ -118,11 +128,12 @@ def create_router(
 
     @router.get("/settings", response_model=SettingsResponse)
     def settings(actor: Actor) -> SettingsResponse:
-        del actor
+        require(actor, AccessScope.OPERATIONS_READ)
         return SettingsResponse.from_views(service.list_settings())
 
     @router.put("/settings", response_model=SettingsResponse)
     def save_settings(payload: SettingsRequest, actor: Actor) -> SettingsResponse:
+        require(actor, AccessScope.OPERATIONS_WRITE)
         return SettingsResponse.from_views(service.save_settings(payload.values, actor.id))
 
     @router.get("/events", response_model=Page[EventResponse])
@@ -132,7 +143,7 @@ def create_router(
         page_size: Annotated[int, Query(alias="pageSize", ge=1, le=200)] = 24,
         kind: str | None = None,
     ) -> Page[EventResponse]:
-        del actor
+        require(actor, AccessScope.OPERATIONS_READ)
         size = min(max(page_size, 1), 200)
         values, total = service.list_events(page=max(page, 1), page_size=size, kind=kind)
         return Page(
@@ -144,7 +155,7 @@ def create_router(
 
     @router.get("/backups", response_model=Page[BackupResponse])
     def backups(actor: Actor) -> Page[BackupResponse]:
-        del actor
+        require(actor, AccessScope.OPERATIONS_READ)
         values = service.list_backups()
         return Page(
             items=[BackupResponse.from_view(value) for value in values],
@@ -159,11 +170,12 @@ def create_router(
         status_code=status.HTTP_202_ACCEPTED,
     )
     def request_backup(actor: Actor) -> BackupResponse:
+        require(actor, AccessScope.OPERATIONS_WRITE)
         return BackupResponse.from_view(service.request_backup(actor.id))
 
     @router.get("/backups/{backup_id}", response_model=BackupResponse)
     def backup(backup_id: uuid.UUID, actor: Actor) -> BackupResponse:
-        del actor
+        require(actor, AccessScope.OPERATIONS_READ)
         try:
             value = service.get_backup(backup_id)
         except OperationsNotFound as error:
@@ -172,7 +184,7 @@ def create_router(
 
     @router.get("/backups/{backup_id}/download")
     def download_backup(backup_id: uuid.UUID, actor: Actor) -> StreamingResponse:
-        del actor
+        require(actor, AccessScope.OPERATIONS_READ)
         try:
             archive = service.download_backup(backup_id)
         except OperationsNotFound as error:
@@ -194,6 +206,7 @@ def create_router(
         status_code=status.HTTP_202_ACCEPTED,
     )
     def restore(backup_id: uuid.UUID, actor: Actor) -> RestoreAccepted:
+        require(actor, AccessScope.OPERATIONS_WRITE)
         try:
             request_id = service.request_restore(backup_id, actor.id)
         except OperationsNotFound as error:
@@ -202,7 +215,7 @@ def create_router(
 
     @router.delete("/backups/{backup_id}", status_code=status.HTTP_204_NO_CONTENT)
     def delete_backup(backup_id: uuid.UUID, actor: Actor) -> None:
-        del actor
+        require(actor, AccessScope.OPERATIONS_WRITE)
         try:
             service.delete_backup(backup_id)
         except OperationsNotFound as error:

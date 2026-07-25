@@ -5,7 +5,7 @@ from typing import Annotated, Self
 from fastapi import APIRouter, Depends, File, Header, Query, UploadFile, status
 from pydantic import Field
 
-from appv2.modules.accounts.contracts import AccountView, CurrentAccount
+from appv2.modules.accounts.contracts import AccessScope, AccountView, CurrentAccount
 from appv2.modules.ingestion.application import IngestionNotFound, IngestionService
 from appv2.modules.ingestion.contracts import (
     DirectoryNode,
@@ -127,7 +127,21 @@ class ScanDirectoryResponse(CamelModel):
 
 def create_router(service: IngestionService, current_account: CurrentAccount) -> APIRouter:
     router = APIRouter(prefix="/ingestion")
-    Actor = Annotated[AccountView, Depends(current_account)]
+
+    def authorized(
+        actor: Annotated[AccountView, Depends(current_account)],
+    ) -> AccountView:
+        if AccessScope.INGESTION_WRITE not in actor.scopes:
+            raise AppProblem(
+                status=403,
+                code="PERMISSION_DENIED",
+                title="Permission denied",
+                message_key="permission_denied",
+                params={"scope": AccessScope.INGESTION_WRITE.value},
+            )
+        return actor
+
+    Actor = Annotated[AccountView, Depends(authorized)]
 
     def missing(error: IngestionNotFound) -> AppProblem:
         return AppProblem(

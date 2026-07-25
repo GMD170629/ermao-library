@@ -213,8 +213,9 @@ export type EmailSettingsRequest = {
   port: number;
   username?: string | null;
   password?: string | null;
+  clearPassword?: boolean;
   sender: string;
-  useTls?: boolean;
+  security?: "starttls" | "ssl" | "none";
 };
 
 export type EmailSettingsResponse = {
@@ -223,8 +224,13 @@ export type EmailSettingsResponse = {
   port: number;
   username: string | null;
   sender: string;
-  useTls: boolean;
+  security: string;
   passwordSet: boolean;
+};
+
+export type EmailStatusResponse = {
+  configured: boolean;
+  sender: string | null;
 };
 
 export type EmailTestRequest = {
@@ -1019,6 +1025,9 @@ export interface ApiV2Paths {
     get: { request: never; query: never; response: EmailSettingsResponse | null };
     put: { request: EmailSettingsRequest; query: never; response: EmailSettingsResponse };
   };
+  "/api/v2/delivery/email/status": {
+    get: { request: never; query: never; response: EmailStatusResponse };
+  };
   "/api/v2/delivery/email/test": {
     post: { request: EmailTestRequest; query: never; response: void };
   };
@@ -1031,7 +1040,7 @@ export interface ApiV2Paths {
     get: { request: never; query: { page?: number; pageSize?: number; status?: string | null }; response: Page_DeliveryJobResponse_ };
   };
   "/api/v2/delivery/kindle/jobs/{job_id}/retry": {
-    post: { request: never; query: never; response: DeliveryJobResponse | null };
+    post: { request: never; query: never; response: DeliveryJobResponse };
   };
   "/api/v2/delivery/kindle/jobs/{job_id}": {
     delete: { request: never; query: never; response: void };

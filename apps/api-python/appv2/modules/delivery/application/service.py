@@ -36,6 +36,13 @@ class DeliveryService:
         with self._uow_factory() as uow:
             return uow.delivery.get_email_settings(owner_id)
 
+    def email_status(self, owner_id: uuid.UUID) -> tuple[bool, str | None]:
+        with self._uow_factory() as uow:
+            configuration = uow.delivery.smtp_configuration(owner_id)
+            if configuration is None:
+                return False, None
+            return True, configuration.sender
+
     def save_email_settings(
         self,
         *,
@@ -44,9 +51,12 @@ class DeliveryService:
         port: int,
         username: str | None,
         password: str | None,
+        clear_password: bool,
         sender: str,
-        use_tls: bool,
+        security: str,
     ) -> EmailSettings:
+        if security not in {"starttls", "ssl", "none"}:
+            raise ValueError("invalid SMTP security mode")
         with self._uow_factory() as uow:
             settings = uow.delivery.save_email_settings(
                 owner_id=owner_id,
@@ -54,8 +64,9 @@ class DeliveryService:
                 port=port,
                 username=username,
                 password=password,
+                clear_password=clear_password,
                 sender=sender,
-                use_tls=use_tls,
+                security=security,
             )
             uow.commit()
             return settings
@@ -144,8 +155,10 @@ class DeliveryService:
                 raise DeliveryNotFound
             uow.commit()
 
-    def retry(self, job_id: uuid.UUID, owner_id: uuid.UUID) -> None:
+    def retry(self, job_id: uuid.UUID, owner_id: uuid.UUID) -> DeliveryJob:
         with self._uow_factory() as uow:
-            if not uow.delivery.retry(job_id, owner_id, datetime.now(UTC)):
+            job = uow.delivery.retry(job_id, owner_id, datetime.now(UTC))
+            if job is None:
                 raise DeliveryNotFound
             uow.commit()
+            return job

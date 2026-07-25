@@ -1,11 +1,12 @@
 import uuid
+from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 from pydantic import Field
 
-from appv2.modules.accounts.contracts import AccountView, CurrentAccount
+from appv2.modules.accounts.contracts import AccessScope, AccountView, CurrentAccount
 from appv2.modules.catalog.api.schemas import (
     CreateWorkRequest,
     EditionResponse,
@@ -72,7 +73,31 @@ class ShelfDetailResponse(CamelModel):
 
 def create_router(service: CatalogService, current_account: CurrentAccount) -> APIRouter:
     router = APIRouter(prefix="/catalog")
-    Actor = Annotated[AccountView, Depends(current_account)]
+
+    def require_scope(scope: AccessScope) -> Callable[[AccountView], AccountView]:
+        def authorized(
+            actor: Annotated[AccountView, Depends(current_account)],
+        ) -> AccountView:
+            if scope not in actor.scopes:
+                raise AppProblem(
+                    status=403,
+                    code="PERMISSION_DENIED",
+                    title="Permission denied",
+                    message_key="permission_denied",
+                    params={"scope": scope.value},
+                )
+            return actor
+
+        return authorized
+
+    Actor = Annotated[
+        AccountView,
+        Depends(require_scope(AccessScope.CATALOG_READ)),
+    ]
+    Writer = Annotated[
+        AccountView,
+        Depends(require_scope(AccessScope.CATALOG_WRITE)),
+    ]
 
     def not_found(error: CatalogNotFound) -> AppProblem:
         return AppProblem(
@@ -84,7 +109,7 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
 
     @router.get("/works", response_model=Page[WorkResponse])
     def works(
-        actor: Actor,
+        actor: Writer,
         page: int = 1,
         page_size: Annotated[int, Query(alias="pageSize", ge=1, le=200)] = 24,
         query: str | None = None,
@@ -108,7 +133,7 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
         )
 
     @router.post("/works", response_model=WorkResponse, status_code=status.HTTP_201_CREATED)
-    def create_work(payload: CreateWorkRequest, actor: Actor) -> WorkResponse:
+    def create_work(payload: CreateWorkRequest, actor: Writer) -> WorkResponse:
         del actor
         work = service.create_work(
             title=payload.title,
@@ -131,7 +156,11 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
         )
 
     @router.patch("/works/{work_id}", response_model=WorkResponse)
-    def update_work(work_id: uuid.UUID, payload: UpdateWorkRequest, actor: Actor) -> WorkResponse:
+    def update_work(
+        work_id: uuid.UUID,
+        payload: UpdateWorkRequest,
+        actor: Writer,
+    ) -> WorkResponse:
         del actor
         try:
             item = service.update_work(
@@ -146,7 +175,7 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
         return WorkResponse.from_view(item)
 
     @router.delete("/works/{work_id}", status_code=status.HTTP_204_NO_CONTENT)
-    def archive_work(work_id: uuid.UUID, actor: Actor) -> None:
+    def archive_work(work_id: uuid.UUID, actor: Writer) -> None:
         del actor
         try:
             service.update_work(
@@ -170,7 +199,7 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
         )
 
     @router.post("/shelves", response_model=ShelfResponse, status_code=status.HTTP_201_CREATED)
-    def create_shelf(payload: ShelfRequest, actor: Actor) -> ShelfResponse:
+    def create_shelf(payload: ShelfRequest, actor: Writer) -> ShelfResponse:
         shelf = service.create_shelf(
             owner_id=actor.id,
             name=payload.name,
@@ -211,7 +240,7 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
 
     @router.patch("/shelves/{shelf_id}", response_model=ShelfResponse)
     def update_shelf(
-        shelf_id: uuid.UUID, payload: ShelfUpdateRequest, actor: Actor
+        shelf_id: uuid.UUID, payload: ShelfUpdateRequest, actor: Writer
     ) -> ShelfResponse:
         try:
             shelf = service.update_shelf(
@@ -228,7 +257,7 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
         return ShelfResponse.from_view(shelf)
 
     @router.delete("/shelves/{shelf_id}", status_code=status.HTTP_204_NO_CONTENT)
-    def delete_shelf(shelf_id: uuid.UUID, actor: Actor) -> None:
+    def delete_shelf(shelf_id: uuid.UUID, actor: Writer) -> None:
         try:
             service.delete_shelf(shelf_id, actor.id)
         except CatalogNotFound as error:
@@ -238,7 +267,7 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
         "/shelves/{shelf_id}/works/{work_id}",
         status_code=status.HTTP_204_NO_CONTENT,
     )
-    def add_shelf_item(shelf_id: uuid.UUID, work_id: uuid.UUID, actor: Actor) -> None:
+    def add_shelf_item(shelf_id: uuid.UUID, work_id: uuid.UUID, actor: Writer) -> None:
         try:
             service.set_shelf_item(shelf_id, actor.id, work_id, present=True)
         except CatalogNotFound as error:
@@ -248,7 +277,7 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
         "/shelves/{shelf_id}/works/{work_id}",
         status_code=status.HTTP_204_NO_CONTENT,
     )
-    def remove_shelf_item(shelf_id: uuid.UUID, work_id: uuid.UUID, actor: Actor) -> None:
+    def remove_shelf_item(shelf_id: uuid.UUID, work_id: uuid.UUID, actor: Writer) -> None:
         try:
             service.set_shelf_item(shelf_id, actor.id, work_id, present=False)
         except CatalogNotFound as error:
@@ -285,7 +314,7 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
     def rename_category(
         category_id: uuid.UUID,
         payload: CategoryUpdateRequest,
-        actor: Actor,
+        actor: Writer,
     ) -> CategoryResponse:
         del actor
         try:
@@ -297,7 +326,7 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
     @router.post("/categories/merge", response_model=CategoryResponse)
     def merge_categories(
         payload: CategoryMergeRequest,
-        actor: Actor,
+        actor: Writer,
     ) -> CategoryResponse:
         del actor
         try:
@@ -314,7 +343,7 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
         "/categories/{category_id}",
         status_code=status.HTTP_204_NO_CONTENT,
     )
-    def delete_category(category_id: uuid.UUID, actor: Actor) -> None:
+    def delete_category(category_id: uuid.UUID, actor: Writer) -> None:
         del actor
         try:
             service.delete_category(category_id)

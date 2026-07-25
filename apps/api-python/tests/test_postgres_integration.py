@@ -134,6 +134,19 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
                 },
             )
             assert member_login.status_code == 200, member_login.text
+            assert member_client.get("/api/v2/catalog/works").status_code == 200
+            assert member_client.get("/api/v2/operations/settings").status_code == 403
+            assert (
+                member_client.post(
+                    "/api/v2/catalog/works",
+                    json={
+                        "title": "Forbidden member write",
+                        "mediaType": "book",
+                    },
+                ).status_code
+                == 403
+            )
+            assert member_client.get("/api/v2/delivery/email/status").status_code == 403
             assert member_client.post("/api/v2/auth/logout").status_code == 204
             assert member_client.get("/api/v2/account").status_code == 401
 
@@ -461,11 +474,17 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
                 "username": "mailer",
                 "password": "secret",
                 "sender": "sender@example.com",
-                "useTls": True,
+                "security": "starttls",
             },
         )
         assert email_settings.status_code == 200, email_settings.text
         assert client.get("/api/v2/delivery/email/settings").status_code == 200
+        email_status = client.get("/api/v2/delivery/email/status")
+        assert email_status.status_code == 200
+        assert email_status.json() == {
+            "configured": True,
+            "sender": "sender@example.com",
+        }
         assert client.get("/api/v2/delivery/kindle/settings").status_code == 200
         kindle_job = client.post(
             "/api/v2/delivery/kindle/jobs",
@@ -484,7 +503,11 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         )
         assert (
             client.post(f"/api/v2/delivery/kindle/jobs/{kindle_job.json()['id']}/retry").status_code
-            == 404
+            == 202
+        )
+        assert (
+            client.delete(f"/api/v2/delivery/kindle/jobs/{kindle_job.json()['id']}").status_code
+            == 204
         )
 
         settings_response = client.put(
