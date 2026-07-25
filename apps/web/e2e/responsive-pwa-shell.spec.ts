@@ -417,21 +417,39 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
   await organizePage.route('**/api/v2/metadata/jobs?**', async (route) => {
     await route.fulfill({
       json: {
-        ok: true,
-        data: {
-          jobs: [{
-            id: 'mobile-job',
-            status: 'REVIEWING',
-            issueCodes: ['MISSING_AUTHOR'],
-            summary: '等待补充作者信息',
-            updatedAt: '2026-07-17T08:30:00.000Z',
-            book: mobileBook,
-            suggestions: [],
-            duplicates: []
-          }],
-          books: [mobileBook],
-          total: 1
-        }
+        items: [{
+          id: 'mobile-job',
+          workId: 'mobile-book',
+          providerId: null,
+          status: 'failed',
+          query: mobileBook.title,
+          attempt: 1,
+          nextAttemptAt: '2026-07-17T08:30:00.000Z',
+          leaseExpiresAt: null,
+          errorCode: 'MISSING_AUTHOR',
+          createdAt: '2026-07-17T08:30:00.000Z',
+          updatedAt: '2026-07-17T08:30:00.000Z'
+        }],
+        page: 1,
+        pageSize: 20,
+        total: 1
+      }
+    });
+  });
+  await organizePage.route('**/api/v2/catalog/works/mobile-book', async (route) => {
+    await route.fulfill({
+      json: {
+        id: 'mobile-book',
+        title: mobileBook.title,
+        author: mobileBook.author,
+        mediaType: 'book',
+        status: 'active',
+        coverUrl: null,
+        summary: mobileBook.desc,
+        metadata: {},
+        createdAt: mobileBook.importedAt,
+        updatedAt: mobileBook.importedAt,
+        editions: []
       }
     });
   });

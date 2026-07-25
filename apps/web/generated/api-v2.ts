@@ -36,6 +36,10 @@ export type AdminUpdateUserRequest = {
   monitorFolderIds?: Array<string> | null;
 };
 
+export type ApplyCandidateRequest = {
+  fields: Array<"coverUrl" | "title" | "author" | "publisher" | "description" | "tags" | "seriesName" | "seriesIndex" | "publishedYear">;
+};
+
 export type BackupResponse = {
   id: string;
   status: string;
@@ -91,6 +95,8 @@ export type BootstrapResponse = {
 };
 
 export type CandidateResponse = {
+  id: string;
+  jobId: string;
   providerId: string;
   externalId: string;
   title: string;
@@ -441,12 +447,14 @@ export type ManagementResponse = {
 
 export type MetadataJobRequest = {
   workId: string;
+  providerId?: string | null;
   query: string;
 };
 
 export type MetadataJobResponse = {
   id: string;
   workId: string;
+  providerId: string | null;
   status: string;
   query: string;
   attempt: number;
@@ -1123,11 +1131,21 @@ export interface ApiV2Paths {
     patch: { request: ProviderUpdate; query: never; response: ProviderResponse };
   };
   "/api/v2/metadata/jobs": {
-    get: { request: never; query: { page?: number; pageSize?: number; status?: string | null }; response: Page_MetadataJobResponse_ };
+    get: { request: never; query: { page?: number; pageSize?: number; status?: "queued" | "running" | "retry" | "completed" | "failed" | "cancelled" | null }; response: Page_MetadataJobResponse_ };
     post: { request: MetadataJobRequest; query: never; response: MetadataJobResponse };
+  };
+  "/api/v2/metadata/jobs/{job_id}": {
+    get: { request: never; query: never; response: MetadataJobResponse };
+    delete: { request: never; query: never; response: void };
+  };
+  "/api/v2/metadata/jobs/{job_id}/retry": {
+    post: { request: never; query: never; response: MetadataJobResponse };
   };
   "/api/v2/metadata/jobs/{job_id}/candidates": {
     get: { request: never; query: never; response: Page_CandidateResponse_ };
+  };
+  "/api/v2/metadata/jobs/{job_id}/candidates/{candidate_id}/apply": {
+    post: { request: ApplyCandidateRequest; query: never; response: void };
   };
   "/api/v2/reading/editions/{edition_id}/bootstrap": {
     get: { request: never; query: { volume?: string | null }; response: BootstrapResponse };

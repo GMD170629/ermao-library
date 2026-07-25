@@ -13,7 +13,11 @@ from appv2.modules.catalog.contracts import CatalogImport
 from appv2.modules.delivery.application import DeliveryNotFound, DeliveryService
 from appv2.modules.discovery.application import DiscoveryNotFound, DiscoveryService
 from appv2.modules.ingestion.application import IngestionNotFound, IngestionService
-from appv2.modules.metadata.application import MetadataNotFound, MetadataService
+from appv2.modules.metadata.application import (
+    MetadataConflict,
+    MetadataNotFound,
+    MetadataService,
+)
 from appv2.modules.metadata.contracts import MetadataCandidate, MetadataPatch
 from appv2.modules.operations.application import OperationsNotFound, OperationsService
 from appv2.modules.reading.application import (
@@ -541,12 +545,16 @@ def test_metadata_discovery_and_delivery_services() -> None:
     metadata_uow = FakeUnitOfWork("metadata")
     metadata_repo = metadata_uow.metadata
     catalog = MagicMock()
-    metadata = MetadataService(uow_factory=lambda: metadata_uow, catalog=catalog)
+    metadata = MetadataService(
+        uow_factory=lambda: metadata_uow,
+        catalog=catalog,
+        catalog_read=catalog,
+    )
     provider_id = uuid.uuid4()
     work_id = uuid.uuid4()
     job_id = uuid.uuid4()
     provider = SimpleNamespace(id=provider_id)
-    job = SimpleNamespace(id=job_id)
+    job = SimpleNamespace(id=job_id, work_id=work_id, status="queued")
     candidate = MetadataCandidate(
         provider_id=provider_id,
         external_id="external",
@@ -590,27 +598,80 @@ def test_metadata_discovery_and_delivery_services() -> None:
             config=None,
         )
     metadata_repo.enqueue_job.return_value = job
+    catalog.get_work.return_value = object()
     assert (
         metadata.enqueue(
             work_id=work_id,
+            provider_id=None,
             requested_by=uuid.uuid4(),
             query="book",
             idempotency_key=None,
         )
         is job
     )
+    metadata_repo.get_provider.return_value = SimpleNamespace(enabled=True)
+    assert (
+        metadata.enqueue(
+            work_id=work_id,
+            provider_id=provider_id,
+            requested_by=uuid.uuid4(),
+            query="provider book",
+            idempotency_key="provider-job",
+        )
+        is job
+    )
+    metadata_repo.get_provider.return_value = SimpleNamespace(enabled=False)
+    with pytest.raises(MetadataNotFound):
+        metadata.enqueue(
+            work_id=work_id,
+            provider_id=provider_id,
+            requested_by=uuid.uuid4(),
+            query="disabled provider",
+            idempotency_key=None,
+        )
+    catalog.get_work.return_value = None
+    with pytest.raises(MetadataNotFound):
+        metadata.enqueue(
+            work_id=work_id,
+            provider_id=None,
+            requested_by=uuid.uuid4(),
+            query="missing",
+            idempotency_key=None,
+        )
+    catalog.get_work.return_value = object()
     metadata_repo.list_jobs.return_value = ([job], 1)
     assert metadata.list_jobs(page=1, page_size=10, status=None) == ([job], 1)
     metadata_repo.get_job.return_value = job
+    assert metadata.get_job(job_id) is job
     metadata_repo.list_candidates.return_value = [candidate]
     assert metadata.list_candidates(job_id) == [candidate]
     metadata_repo.get_job.return_value = None
     with pytest.raises(MetadataNotFound):
+        metadata.get_job(job_id)
+    with pytest.raises(MetadataNotFound):
         metadata.list_candidates(job_id)
+    metadata_repo.retry_job.return_value = job
+    assert metadata.retry_job(job_id) is job
+    metadata_repo.retry_job.return_value = SimpleNamespace(status="running")
+    with pytest.raises(MetadataConflict):
+        metadata.retry_job(job_id)
+    metadata_repo.retry_job.return_value = None
+    with pytest.raises(MetadataNotFound):
+        metadata.retry_job(job_id)
+    metadata_repo.delete_job.return_value = "deleted"
+    metadata.delete_job(job_id)
+    metadata_repo.delete_job.return_value = "running"
+    with pytest.raises(MetadataConflict):
+        metadata.delete_job(job_id)
+    metadata_repo.delete_job.return_value = "missing"
+    with pytest.raises(MetadataNotFound):
+        metadata.delete_job(job_id)
+    metadata_repo.get_job.return_value = job
+    metadata_repo.get_candidate.return_value = candidate
     catalog.apply_metadata.return_value = object()
     metadata.apply_candidate(
-        work_id=work_id,
-        candidate=candidate,
+        job_id=job_id,
+        candidate_id=uuid.uuid4(),
         patch=MetadataPatch(
             title="Patched",
             author=None,
@@ -620,11 +681,33 @@ def test_metadata_discovery_and_delivery_services() -> None:
             extra={"language": "zh-CN"},
         ),
     )
+    applied_values = catalog.apply_metadata.call_args.args[1]
+    assert applied_values["title"] == "Patched"
+    assert "author" not in applied_values
+    assert applied_values["summary"] == "Summary"
+    assert applied_values["language"] == "zh-CN"
+    catalog.apply_metadata.return_value = object()
+    metadata.apply_candidate(
+        job_id=job_id,
+        candidate_id=uuid.uuid4(),
+        patch=MetadataPatch(extra={"publisher": "Publisher"}),
+    )
+    applied_values = catalog.apply_metadata.call_args.args[1]
+    assert "title" not in applied_values
+    assert "author" not in applied_values
+    assert applied_values["publisher"] == "Publisher"
     catalog.apply_metadata.return_value = None
     with pytest.raises(MetadataNotFound):
         metadata.apply_candidate(
-            work_id=work_id,
-            candidate=candidate,
+            job_id=job_id,
+            candidate_id=uuid.uuid4(),
+            patch=MetadataPatch(),
+        )
+    metadata_repo.get_candidate.return_value = None
+    with pytest.raises(MetadataNotFound):
+        metadata.apply_candidate(
+            job_id=job_id,
+            candidate_id=uuid.uuid4(),
             patch=MetadataPatch(),
         )
 

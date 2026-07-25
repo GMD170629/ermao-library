@@ -1,15 +1,20 @@
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Header, Query, status
+from fastapi import APIRouter, Depends, Header, Query, Response, status
 from pydantic import Field
 
 from appv2.modules.accounts.contracts import AccessScope, AccountView, CurrentAccount
-from appv2.modules.metadata.application import MetadataNotFound, MetadataService
+from appv2.modules.metadata.application import (
+    MetadataConflict,
+    MetadataNotFound,
+    MetadataService,
+)
 from appv2.modules.metadata.contracts import (
     MetadataCandidate,
     MetadataJob,
+    MetadataPatch,
     ProviderView,
 )
 from appv2.platform.http import AppProblem, CamelModel, Page
@@ -48,6 +53,7 @@ class ProviderUpdate(CamelModel):
 class MetadataJobResponse(CamelModel):
     id: uuid.UUID
     work_id: uuid.UUID
+    provider_id: uuid.UUID | None
     status: str
     query: str
     attempt: int
@@ -64,10 +70,13 @@ class MetadataJobResponse(CamelModel):
 
 class MetadataJobRequest(CamelModel):
     work_id: uuid.UUID
+    provider_id: uuid.UUID | None = None
     query: str = Field(min_length=1, max_length=1000)
 
 
 class CandidateResponse(CamelModel):
+    id: uuid.UUID
+    job_id: uuid.UUID
     provider_id: uuid.UUID
     external_id: str
     title: str
@@ -78,7 +87,58 @@ class CandidateResponse(CamelModel):
 
     @classmethod
     def from_view(cls, value: MetadataCandidate) -> "CandidateResponse":
+        if value.id is None or value.job_id is None:
+            raise RuntimeError("persisted metadata candidate has no identity")
         return cls.model_validate(value)
+
+
+MetadataField = Literal[
+    "coverUrl",
+    "title",
+    "author",
+    "publisher",
+    "description",
+    "tags",
+    "seriesName",
+    "seriesIndex",
+    "publishedYear",
+]
+MetadataJobStatus = Literal[
+    "queued",
+    "running",
+    "retry",
+    "completed",
+    "failed",
+    "cancelled",
+]
+
+
+class ApplyCandidateRequest(CamelModel):
+    fields: list[MetadataField] = Field(min_length=1)
+
+
+def _candidate_patch(
+    candidate: MetadataCandidate,
+    fields: list[MetadataField],
+) -> MetadataPatch:
+    selected = set(fields)
+    raw = candidate.raw_payload
+    extra: dict[str, object] = {}
+    for key in ("publisher", "tags", "seriesName", "seriesIndex", "publishedYear"):
+        if key in selected and key in raw:
+            extra[key] = raw[key]
+    description = raw.get("description")
+    series = raw.get("seriesName")
+    return MetadataPatch(
+        title=candidate.title if "title" in selected else None,
+        author=candidate.author if "author" in selected else None,
+        series=series if isinstance(series, str) and "seriesName" in selected else None,
+        summary=(
+            description if isinstance(description, str) and "description" in selected else None
+        ),
+        cover_url=candidate.cover_url if "coverUrl" in selected else None,
+        extra=extra,
+    )
 
 
 def create_router(service: MetadataService, current_account: CurrentAccount) -> APIRouter:
@@ -105,6 +165,14 @@ def create_router(service: MetadataService, current_account: CurrentAccount) -> 
             code="METADATA_RESOURCE_NOT_FOUND",
             title="Metadata resource not found",
             message_key="not_found",
+        )
+
+    def conflict(error: MetadataConflict) -> AppProblem:
+        return AppProblem(
+            status=409,
+            code="METADATA_JOB_RUNNING",
+            title="Metadata job is running",
+            message_key="conflict",
         )
 
     @router.get("/providers", response_model=Page[ProviderResponse])
@@ -157,7 +225,7 @@ def create_router(service: MetadataService, current_account: CurrentAccount) -> 
         actor: Actor,
         page: int = 1,
         page_size: Annotated[int, Query(alias="pageSize", ge=1, le=200)] = 24,
-        job_status: Annotated[str | None, Query(alias="status")] = None,
+        job_status: Annotated[MetadataJobStatus | None, Query(alias="status")] = None,
     ) -> Page[MetadataJobResponse]:
         del actor
         size = min(max(page_size, 1), 200)
@@ -179,14 +247,51 @@ def create_router(service: MetadataService, current_account: CurrentAccount) -> 
         actor: Actor,
         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     ) -> MetadataJobResponse:
-        return MetadataJobResponse.from_view(
-            service.enqueue(
-                work_id=payload.work_id,
-                requested_by=actor.id,
-                query=payload.query,
-                idempotency_key=idempotency_key,
+        try:
+            return MetadataJobResponse.from_view(
+                service.enqueue(
+                    work_id=payload.work_id,
+                    provider_id=payload.provider_id,
+                    requested_by=actor.id,
+                    query=payload.query,
+                    idempotency_key=idempotency_key,
+                )
             )
-        )
+        except MetadataNotFound as error:
+            raise missing(error) from error
+
+    @router.get("/jobs/{job_id}", response_model=MetadataJobResponse)
+    def job(job_id: uuid.UUID, actor: Actor) -> MetadataJobResponse:
+        del actor
+        try:
+            return MetadataJobResponse.from_view(service.get_job(job_id))
+        except MetadataNotFound as error:
+            raise missing(error) from error
+
+    @router.post(
+        "/jobs/{job_id}/retry",
+        response_model=MetadataJobResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    def retry_job(job_id: uuid.UUID, actor: Actor) -> MetadataJobResponse:
+        del actor
+        try:
+            return MetadataJobResponse.from_view(service.retry_job(job_id))
+        except MetadataNotFound as error:
+            raise missing(error) from error
+        except MetadataConflict as error:
+            raise conflict(error) from error
+
+    @router.delete("/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+    def delete_job(job_id: uuid.UUID, actor: Actor) -> Response:
+        del actor
+        try:
+            service.delete_job(job_id)
+        except MetadataNotFound as error:
+            raise missing(error) from error
+        except MetadataConflict as error:
+            raise conflict(error) from error
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @router.get("/jobs/{job_id}/candidates", response_model=Page[CandidateResponse])
     def candidates(job_id: uuid.UUID, actor: Actor) -> Page[CandidateResponse]:
@@ -201,5 +306,33 @@ def create_router(service: MetadataService, current_account: CurrentAccount) -> 
             page_size=max(len(values), 1),
             total=len(values),
         )
+
+    @router.post(
+        "/jobs/{job_id}/candidates/{candidate_id}/apply",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    def apply_candidate(
+        job_id: uuid.UUID,
+        candidate_id: uuid.UUID,
+        payload: ApplyCandidateRequest,
+        actor: Actor,
+    ) -> Response:
+        del actor
+        try:
+            candidates = service.list_candidates(job_id)
+            candidate = next(
+                (value for value in candidates if value.id == candidate_id),
+                None,
+            )
+            if candidate is None:
+                raise MetadataNotFound
+            service.apply_candidate(
+                job_id=job_id,
+                candidate_id=candidate_id,
+                patch=_candidate_patch(candidate, payload.fields),
+            )
+        except MetadataNotFound as error:
+            raise missing(error) from error
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     return router

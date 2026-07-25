@@ -1,6 +1,11 @@
 'use client';
 
-import { apiV2Fetch } from '@/lib/api-v2';
+import { apiV2Request, workResponseToView } from '@/lib/api-v2';
+import type {
+  MetadataJobResponse,
+  Page_MetadataJobResponse_,
+  WorkDetailResponse
+} from '@/generated/api-v2';
 
 import { ChevronLeft, ChevronRight, RefreshCw, RotateCcw, Search, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
@@ -46,36 +51,6 @@ export type OrganizeJobView = {
   createdAt?: string | null;
   updatedAt: string;
   book: WorkView;
-};
-
-type JobsResponse = {
-  ok: boolean;
-  data?: {
-    jobs: OrganizeJobView[];
-    books: WorkView[];
-    page: number;
-    pageSize: number;
-    total: number;
-    totalPages: number;
-    statusCounts?: Record<OrganizeStatusCategory, number>;
-  };
-  error?: { message: string };
-};
-
-type ProvidersResponse = {
-  ok: boolean;
-  data?: { providers: Array<{ id: string; name: string }> };
-};
-
-const fallbackSourceLabels: Record<string, string> = {
-  douban: '豆瓣图书',
-  bangumi: 'Bangumi',
-  ai: 'AI',
-  embedded: '内嵌元数据',
-  filename: '文件名',
-  aggregation: '自动聚合',
-  external: '外部数据源',
-  rule: '整理规则'
 };
 
 export function normalizeOrganizeJob(job: OrganizeJobView): OrganizeJobView | null {
@@ -182,7 +157,6 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
   const confirm = useConfirm();
   const toast = useToast();
   const [jobs, setJobs] = useState<OrganizeJobView[]>([]);
-  const [providerNames, setProviderNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
@@ -192,7 +166,6 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
   const [pageSize, setPageSize] = useState('20');
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
-  const [counts, setCounts] = useState<Record<OrganizeStatusCategory, number>>({ SUCCESS: 0, FAILED: 0, RECOGNIZING: 0, WAITING: 0 });
   const [busy, setBusy] = useState('');
 
   useEffect(() => {
@@ -204,25 +177,51 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
     if (!quiet) setLoading(true);
     try {
       const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
-      if (searchQuery) params.set('search', searchQuery);
-      if (statusFilter !== 'ALL') params.set('status', statusFilter);
-      const [jobsResponse, providersResponse] = await Promise.all([
-        apiV2Fetch(`/api/v2/metadata/jobs?${params.toString()}`, { cache: 'no-store' }),
-        apiV2Fetch('/api/v2/metadata/providers', { cache: 'no-store' })
-      ]);
-      const jobsPayload = (await jobsResponse.json()) as JobsResponse;
-      const providersPayload = (await providersResponse.json()) as ProvidersResponse;
-      if (!jobsPayload.ok) throw new Error(jobsPayload.error?.message ?? '读取整理记录失败');
-      setJobs((jobsPayload.data?.jobs ?? []).map(normalizeOrganizeJob).filter((job): job is OrganizeJobView => job !== null));
-      const nextTotalPages = Math.max(1, Number(jobsPayload.data?.totalPages ?? 1));
-      const nextPage = Math.min(nextTotalPages, Math.max(1, Number(jobsPayload.data?.page ?? page)));
-      setTotal(Number(jobsPayload.data?.total ?? 0));
+      const statusMap: Record<Exclude<typeof statusFilter, 'ALL'>, string> = {
+        SUCCESS: 'completed',
+        FAILED: 'failed',
+        RECOGNIZING: 'running',
+        WAITING: 'queued'
+      };
+      if (statusFilter !== 'ALL') params.set('status', statusMap[statusFilter]);
+      const jobsPayload = await apiV2Request<Page_MetadataJobResponse_>(
+        `/api/v2/metadata/jobs?${params.toString()}`,
+        { cache: 'no-store' }
+      );
+      const hydrated = await Promise.all(jobsPayload.items.map(async (job): Promise<OrganizeJobView | null> => {
+        try {
+          const work = workResponseToView(await apiV2Request<WorkDetailResponse>(
+            `/api/v2/catalog/works/${encodeURIComponent(job.workId)}`,
+            { cache: 'no-store' }
+          ));
+          return normalizeOrganizeJob({
+            id: job.id,
+            status: job.status,
+            statusCategory: organizeStatusCategory(job.status),
+            issueCodes: job.errorCode ? [job.errorCode] : [],
+            reasonCodes: ['MANUAL_RECOGNIZE'],
+            summary: job.errorCode ?? job.query,
+            errorSummary: job.errorCode,
+            createdAt: job.createdAt,
+            updatedAt: job.updatedAt,
+            book: work
+          });
+        } catch {
+          return null;
+        }
+      }));
+      const normalizedSearch = searchQuery.toLocaleLowerCase();
+      setJobs(hydrated
+        .filter((job): job is OrganizeJobView => job !== null)
+        .filter((job) => !normalizedSearch
+          || job.book.title.toLocaleLowerCase().includes(normalizedSearch)
+          || job.book.author.toLocaleLowerCase().includes(normalizedSearch)
+          || job.summary?.toLocaleLowerCase().includes(normalizedSearch)));
+      const nextTotalPages = Math.max(1, Math.ceil(jobsPayload.total / jobsPayload.pageSize));
+      const nextPage = Math.min(nextTotalPages, Math.max(1, jobsPayload.page));
+      setTotal(jobsPayload.total);
       setTotalPages(nextTotalPages);
-      if (jobsPayload.data?.statusCounts) setCounts(jobsPayload.data.statusCounts);
       if (nextPage !== page) setPage(nextPage);
-      if (providersPayload.ok) {
-        setProviderNames(Object.fromEntries((providersPayload.data?.providers ?? []).map((provider) => [provider.id, provider.name])));
-      }
       setError('');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '读取整理记录失败');
@@ -233,10 +232,6 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
 
   useEffect(() => { void loadJobs(); }, [loadJobs]);
 
-  function sourceLabel(source: string) {
-    return providerNames[source] ?? fallbackSourceLabels[source] ?? source;
-  }
-
   async function mutateJob(job: OrganizeJobView, action: 'delete' | 'recognize') {
     if (action === 'delete' && !await confirm({
       title: '删除整理记录',
@@ -246,12 +241,10 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
     })) return;
     setBusy(`${action}:${job.id}`);
     try {
-      const response = await apiV2Fetch(
-        action === 'delete' ? `/api/v2/metadata/jobs/${job.id}` : `/api/v2/metadata/jobs/${job.id}/recognize`,
+      await apiV2Request<MetadataJobResponse | void>(
+        action === 'delete' ? `/api/v2/metadata/jobs/${job.id}` : `/api/v2/metadata/jobs/${job.id}/retry`,
         { method: action === 'delete' ? 'DELETE' : 'POST' }
       );
-      const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
-      if (!payload.ok) throw new Error(payload.error?.message ?? '操作失败');
       toast.success(action === 'delete' ? '整理记录已删除' : '已加入重新识别队列');
       await loadJobs(true);
     } catch (reason) {
@@ -277,17 +270,6 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
       )}
 
       {error ? <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
-
-      {!embedded ? (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          {(['SUCCESS', 'FAILED', 'RECOGNIZING', 'WAITING'] as OrganizeStatusCategory[]).map((category) => (
-            <div key={category} className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="text-xs text-slate-500">{organizeStatusLabel(category)}</div>
-              <div className="mt-1 text-2xl font-semibold text-slate-950">{counts[category]}</div>
-            </div>
-          ))}
-        </div>
-      ) : null}
 
       <div className="rounded-[28px] border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-col gap-3 border-b border-[#EAE5DF] bg-white p-4 sm:flex-row sm:items-center">
@@ -341,7 +323,7 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
                     </button>
                     <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-slate-100 pt-4 text-sm">
                       <div><dt className="text-xs text-slate-500"><I18nText>入队原因</I18nText></dt><dd className="mt-1 flex flex-wrap gap-1">{reasons.slice(0, 2).map((reason) => <Badge key={reason} tone="slate">{reason}</Badge>)}</dd></div>
-                      <div><dt className="text-xs text-slate-500"><I18nText>数据源</I18nText></dt><dd className="mt-1 flex flex-wrap gap-1">{sources.length ? sources.slice(0, 2).map((source) => <Badge key={source} tone="blue">{sourceLabel(source)}</Badge>) : <span className="text-slate-400">—</span>}</dd></div>
+                      <div><dt className="text-xs text-slate-500"><I18nText>数据源</I18nText></dt><dd className="mt-1 flex flex-wrap gap-1">{sources.length ? sources.slice(0, 2).map((source) => <Badge key={source} tone="blue">{source}</Badge>) : <span className="text-slate-400">—</span>}</dd></div>
                       <div><dt className="text-xs text-slate-500"><I18nText>入队时间</I18nText></dt><dd className="mt-1 text-xs leading-5 text-slate-700">{time.date} {time.time}</dd></div>
                       <div className="col-span-2 flex flex-wrap justify-end gap-2">
                         <Button variant="secondary" icon={RotateCcw} className="min-h-9 px-3 py-1.5 text-xs" loading={busy === `recognize:${job.id}`} loadingText={i18nAttribute("入队中")} disabled={Boolean(busy)} onClick={() => void mutateJob(job, 'recognize')}><I18nText>重新识别</I18nText></Button>
@@ -381,7 +363,7 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
                         </td>
                         <td className="px-3 py-4 align-middle"><div className="flex min-w-0 flex-wrap gap-1">{reasons.slice(0, 2).map((reason) => <Badge key={reason} tone="slate">{reason}</Badge>)}{reasons.length > 2 ? <span className="text-xs text-slate-400">+{reasons.length - 2}</span> : null}</div></td>
                         <td className="px-3 py-4 align-middle"><StatusBadge category={category} /></td>
-                        <td className="px-3 py-4 align-middle"><div className="flex min-w-0 flex-wrap gap-1">{sources.length ? sources.slice(0, 2).map((source) => <Badge key={source} tone="blue">{sourceLabel(source)}</Badge>) : <span className="text-slate-400">—</span>}{sources.length > 2 ? <span className="text-xs text-slate-400">+{sources.length - 2}</span> : null}</div></td>
+                        <td className="px-3 py-4 align-middle"><div className="flex min-w-0 flex-wrap gap-1">{sources.length ? sources.slice(0, 2).map((source) => <Badge key={source} tone="blue">{source}</Badge>) : <span className="text-slate-400">—</span>}{sources.length > 2 ? <span className="text-xs text-slate-400">+{sources.length - 2}</span> : null}</div></td>
                         <td className="px-3 py-4 align-middle text-xs leading-5 text-slate-500"><span className="block">{time.date}</span><span className="block tabular-nums">{time.time}</span></td>
                         <td className="px-5 py-4 align-middle">
                           <div className="flex flex-wrap justify-end gap-1.5">

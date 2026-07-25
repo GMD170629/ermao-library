@@ -11,6 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 from PIL import Image
 
@@ -26,6 +27,8 @@ from appv2.modules.discovery.infrastructure.adapters import (
     HttpDownloadAdapter,
     JsonHttpSourceSearch,
 )
+from appv2.modules.metadata.contracts import ProviderView
+from appv2.modules.metadata.infrastructure.providers import ConfiguredProviderRegistry
 from appv2.modules.operations.contracts import BackupView, RestoreRequest
 from appv2.modules.operations.infrastructure.backup import (
     FileRestoreControl,
@@ -345,6 +348,85 @@ def test_json_http_search_and_download_adapters(
     destination = Path(downloader.download(downloadable))
     assert destination.read_bytes() == b"epub-content"
     stream_response.raise_for_status.assert_called_once()
+
+
+def test_bangumi_provider_uses_fixed_endpoint_and_normalizes_candidates() -> None:
+    provider_id = uuid.uuid4()
+    now = datetime.now(UTC)
+    provider = ProviderView(
+        id=provider_id,
+        slug="bangumi",
+        name="Bangumi",
+        enabled=True,
+        priority=100,
+        config={"userAgent": "Shuku integration test"},
+        created_at=now,
+        updated_at=now,
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "api.bgm.tv"
+        assert request.url.path == "/v0/search/subjects"
+        assert request.headers["user-agent"] == "Shuku integration test"
+        assert json.loads(request.content)["filter"] == {"type": [1], "nsfw": False}
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": 42,
+                        "name": "Original title",
+                        "name_cn": "中文标题",
+                        "summary": "简介",
+                        "date": "2024-06-01",
+                        "images": {"large": "https://lain.bgm.tv/pic/cover.jpg"},
+                        "infobox": [
+                            {"key": "作者", "value": [{"v": "作者甲"}, {"v": "作者乙"}]},
+                            {"key": "出版社", "value": "测试出版社"},
+                        ],
+                        "tags": [{"name": "漫画"}, {"name": "科幻"}],
+                    },
+                    {"id": "invalid", "name": "ignored"},
+                ]
+            },
+        )
+
+    registry = ConfiguredProviderRegistry(
+        5,
+        transport=httpx.MockTransport(handler),
+    )
+    candidates = registry.search_all("中文标题", [provider])
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.provider_id == provider_id
+    assert candidate.external_id == "42"
+    assert candidate.title == "中文标题"
+    assert candidate.author == "作者甲, 作者乙"
+    assert candidate.cover_url == "https://lain.bgm.tv/pic/cover.jpg"
+    assert candidate.raw_payload == {
+        "description": "简介",
+        "tags": ["漫画", "科幻"],
+        "publisher": "测试出版社",
+        "publishedYear": 2024,
+    }
+    assert (
+        registry.search_all(
+            "ignored",
+            [
+                ProviderView(
+                    id=uuid.uuid4(),
+                    slug="unknown",
+                    name="Unknown",
+                    enabled=True,
+                    priority=1,
+                    config={},
+                    created_at=now,
+                    updated_at=now,
+                )
+            ],
+        )
+        == []
+    )
 
 
 def test_smtp_adapter_builds_test_and_attachment_messages(

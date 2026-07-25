@@ -1,6 +1,13 @@
 'use client';
 
-import { apiV2Fetch } from '@/lib/api-v2';
+import { apiV2Request, workResponseToView } from '@/lib/api-v2';
+import type {
+  CandidateResponse,
+  MetadataJobResponse,
+  Page_CandidateResponse_,
+  Page_ProviderResponse_,
+  WorkDetailResponse
+} from '@/generated/api-v2';
 
 import { CheckCircle2, Search, Sparkles, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -87,7 +94,7 @@ function isCoverField(field: MetadataField) {
 
 function previewCoverUrl(value: string) {
   if (value.startsWith('/')) return withBasePath(value);
-  return withBasePath(`/api/v2/metadata/cover-proxy?url=${encodeURIComponent(value)}`);
+  return value;
 }
 
 function defaultFields(book: WorkView, candidate: MetadataCandidate | null) {
@@ -104,8 +111,35 @@ function initialSource(book: WorkView): MetadataSource {
   return book.type === 'comic' ? 'bangumi' : 'douban';
 }
 
-type MetadataProviderOption = { id: string; name: string; enabled: boolean; workTypes: string[]; mode: string };
-type MetadataProviderPipeline = { workType: string; providers: Array<{ providerId: string; enabled: boolean }> };
+type MetadataProviderOption = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  workTypes: string[];
+};
+
+function candidateFromResponse(candidate: CandidateResponse): MetadataCandidate {
+  const raw = candidate.rawPayload;
+  const stringValue = (key: string) => typeof raw[key] === 'string' ? raw[key] : null;
+  const numberValue = (key: string) => typeof raw[key] === 'number' ? raw[key] : null;
+  return {
+    id: candidate.id,
+    source: candidate.providerId,
+    title: candidate.title,
+    author: candidate.author,
+    publisher: stringValue('publisher'),
+    description: stringValue('description'),
+    tags: Array.isArray(raw.tags)
+      ? raw.tags.filter((value): value is string => typeof value === 'string')
+      : [],
+    seriesName: stringValue('seriesName'),
+    seriesIndex: numberValue('seriesIndex'),
+    publishedYear: numberValue('publishedYear'),
+    coverUrl: candidate.coverUrl,
+    confidence: candidate.confidence,
+    raw
+  };
+}
 
 function normalizedWorkType(book: WorkView) {
   return book.type === 'comic' ? 'comic' : book.type === 'audiobook' ? 'audiobook' : 'ebook';
@@ -123,6 +157,7 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
   const [error, setError] = useState('');
   const [providers, setProviders] = useState<MetadataProviderOption[]>([]);
   const [enabledProviderIds, setEnabledProviderIds] = useState<string[]>([]);
+  const [jobId, setJobId] = useState('');
 
   const selected = useMemo(() => candidates.find((candidate) => candidate.id === selectedId) ?? candidates[0] ?? null, [candidates, selectedId]);
   const options = useMemo(() => providers.map((provider) => ({
@@ -143,13 +178,20 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
     setSelectedFields([]);
     setMessage('');
     setError('');
-    apiV2Fetch('/api/v2/metadata/providers', { cache: 'no-store' })
-      .then((response) => response.json() as Promise<{ ok: boolean; data?: { providers: MetadataProviderOption[]; pipelines?: MetadataProviderPipeline[] }; error?: { message: string } }>)
+    setJobId('');
+    apiV2Request<Page_ProviderResponse_>('/api/v2/metadata/providers', { cache: 'no-store' })
       .then((payload) => {
-        if (!payload.ok) throw new Error(payload.error?.message ?? '读取元数据插件失败');
-        const nextProviders = payload.data?.providers ?? [];
-        const pipeline = (payload.data?.pipelines ?? []).find((item) => item.workType === normalizedWorkType(book));
-        const nextEnabledProviderIds = (pipeline?.providers ?? []).filter((item) => item.enabled).map((item) => item.providerId);
+        const nextProviders = payload.items.map((provider): MetadataProviderOption => ({
+          id: provider.id,
+          name: provider.name,
+          enabled: provider.enabled,
+          workTypes: Array.isArray(provider.config.workTypes)
+            ? provider.config.workTypes.filter((value): value is string => typeof value === 'string')
+            : ['ebook', 'comic', 'audiobook']
+        }));
+        const nextEnabledProviderIds = nextProviders
+          .filter((provider) => provider.enabled)
+          .map((provider) => provider.id);
         setProviders(nextProviders);
         setEnabledProviderIds(nextEnabledProviderIds);
         const applicable = nextProviders.find((provider) => nextEnabledProviderIds.includes(provider.id) && provider.workTypes.includes(normalizedWorkType(book)));
@@ -167,14 +209,33 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
     setError('');
     setMessage('');
     try {
-      const response = await apiV2Fetch(`/api/v2/catalog/works/${book.id}/metadata/search`, {
+      const job = await apiV2Request<MetadataJobResponse>('/api/v2/metadata/jobs', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source, query })
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': crypto.randomUUID()
+        },
+        body: JSON.stringify({ workId: book.id, providerId: source, query })
       });
-      const payload = (await response.json()) as { ok: boolean; data?: { candidates: MetadataCandidate[] }; error?: { message: string } };
-      if (!payload.ok) throw new Error(payload.error?.message ?? '元数据查询失败');
-      const nextCandidates = payload.data?.candidates ?? [];
+      setJobId(job.id);
+      let current = job;
+      for (let attempt = 0; attempt < 30 && ['queued', 'running', 'retry'].includes(current.status); attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 750));
+        current = await apiV2Request<MetadataJobResponse>(
+          `/api/v2/metadata/jobs/${encodeURIComponent(job.id)}`,
+          { cache: 'no-store' }
+        );
+      }
+      if (current.status === 'failed') throw new Error(current.errorCode ?? '元数据查询失败');
+      if (current.status !== 'completed') {
+        setMessage('识别任务仍在后台运行，可稍后在整理队列查看。');
+        return;
+      }
+      const payload = await apiV2Request<Page_CandidateResponse_>(
+        `/api/v2/metadata/jobs/${encodeURIComponent(job.id)}/candidates`,
+        { cache: 'no-store' }
+      );
+      const nextCandidates = payload.items.map(candidateFromResponse);
       setCandidates(nextCandidates);
       setSelectedId(nextCandidates[0]?.id ?? '');
       setMessage(nextCandidates.length ? `找到 ${nextCandidates.length} 条候选` : '没有找到候选');
@@ -186,20 +247,25 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
   }
 
   async function applySelected() {
-    if (!selected) return;
+    if (!selected || !jobId) return;
     setBusy(true);
     setError('');
     setMessage('');
     try {
-      const response = await apiV2Fetch(`/api/v2/catalog/works/${book.id}/metadata/apply`, {
+      await apiV2Request<void>(
+        `/api/v2/metadata/jobs/${encodeURIComponent(jobId)}/candidates/${encodeURIComponent(selected.id)}/apply`,
+        {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source, candidate: selected, fields: selectedFields })
-      });
-      const payload = (await response.json()) as { ok: boolean; data?: { book?: WorkView | null }; error?: { message: string } };
-      if (!payload.ok) throw new Error(payload.error?.message ?? '元数据应用失败');
+        body: JSON.stringify({ fields: selectedFields })
+        }
+      );
+      const updated = workResponseToView(await apiV2Request<WorkDetailResponse>(
+        `/api/v2/catalog/works/${encodeURIComponent(book.id)}`,
+        { cache: 'no-store' }
+      ));
       setMessage('已应用所选字段');
-      onApplied(payload.data?.book ?? null);
+      onApplied(updated);
       onClose();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '元数据应用失败');

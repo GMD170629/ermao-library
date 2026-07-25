@@ -126,10 +126,14 @@ def build_container(settings: Settings | None = None) -> Container:
         lease_seconds=resolved.worker_lease_seconds,
     )
 
-    metadata = MetadataService(uow_factory=metadata_uow, catalog=catalog_ports)
+    metadata = MetadataService(
+        uow_factory=metadata_uow,
+        catalog=catalog_ports,
+        catalog_read=catalog_ports,
+    )
     metadata_worker = MetadataWorker(
         uow_factory=metadata_uow,
-        providers=ConfiguredProviderRegistry(),
+        providers=ConfiguredProviderRegistry(resolved.external_http_timeout_seconds),
         lease_seconds=resolved.worker_lease_seconds,
     )
     allowed_resource_roots = [resolved.v2_storage_root]

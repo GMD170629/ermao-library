@@ -1,6 +1,10 @@
 'use client';
 
-import { apiV2Fetch } from '@/lib/api-v2';
+import { apiV2Request, workResponseToView } from '@/lib/api-v2';
+import type {
+  MetadataJobResponse,
+  WorkDetailResponse
+} from '@/generated/api-v2';
 
 import { ExternalLink, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -13,12 +17,6 @@ import { useI18n } from '../../i18n/provider';
 import { normalizeOrganizeJob, organizeStatusCategory, organizeStatusLabel, type OrganizeJobView } from './organize-page';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
-
-type JobResponse = {
-  ok: boolean;
-  data?: { job: OrganizeJobView };
-  error?: { message: string };
-};
 
 function valueLabel(value: unknown) {
   if (Array.isArray(value)) return value.join(', ');
@@ -49,19 +47,37 @@ export function OrganizeJobDetailPage({ jobId, embedded = false }: { jobId: stri
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const loadJob = useCallback(() => {
+  const loadJob = useCallback(async () => {
     setLoading(true);
-    apiV2Fetch(`/api/v2/metadata/jobs/${jobId}`)
-      .then((response) => response.json() as Promise<JobResponse>)
-      .then((payload) => {
-        if (!payload.ok || !payload.data?.job) throw new Error(payload.error?.message ?? '读取整理任务失败');
-        const nextJob = normalizeOrganizeJob(payload.data.job);
-        if (!nextJob) throw new Error('整理任务缺少读物信息');
-        setJob(nextJob);
-        setError('');
-      })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : '读取整理任务失败'))
-      .finally(() => setLoading(false));
+    try {
+      const metadataJob = await apiV2Request<MetadataJobResponse>(
+        `/api/v2/metadata/jobs/${encodeURIComponent(jobId)}`,
+        { cache: 'no-store' }
+      );
+      const work = workResponseToView(await apiV2Request<WorkDetailResponse>(
+        `/api/v2/catalog/works/${encodeURIComponent(metadataJob.workId)}`,
+        { cache: 'no-store' }
+      ));
+      const nextJob = normalizeOrganizeJob({
+        id: metadataJob.id,
+        status: metadataJob.status,
+        statusCategory: organizeStatusCategory(metadataJob.status),
+        issueCodes: metadataJob.errorCode ? [metadataJob.errorCode] : [],
+        reasonCodes: ['MANUAL_RECOGNIZE'],
+        summary: metadataJob.errorCode ?? metadataJob.query,
+        errorSummary: metadataJob.errorCode,
+        createdAt: metadataJob.createdAt,
+        updatedAt: metadataJob.updatedAt,
+        book: work
+      });
+      if (!nextJob) throw new Error('整理任务缺少读物信息');
+      setJob(nextJob);
+      setError('');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '读取整理任务失败');
+    } finally {
+      setLoading(false);
+    }
   }, [jobId]);
 
   useEffect(() => {

@@ -794,6 +794,13 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
             json={"workId": created.json()["id"], "query": "Architecture Test Book"},
         )
         assert metadata_job.status_code == 202, metadata_job.text
+        assert (
+            client.post(
+                "/api/v2/metadata/jobs",
+                json={"workId": str(uuid.uuid4()), "query": "Missing work"},
+            ).status_code
+            == 404
+        )
         provider_update = client.patch(
             f"/api/v2/metadata/providers/{provider.json()['id']}",
             json={"name": "Updated Integration Provider", "priority": 50},
@@ -807,10 +814,85 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
             metadata_container.close()
         metadata_jobs = client.get("/api/v2/metadata/jobs?status=completed&pageSize=10")
         assert metadata_jobs.status_code == 200
+        metadata_job_id = metadata_job.json()["id"]
+        assert client.get(f"/api/v2/metadata/jobs/{metadata_job_id}").status_code == 200
         candidates = client.get(f"/api/v2/metadata/jobs/{metadata_job.json()['id']}/candidates")
         assert candidates.status_code == 200
         assert candidates.json()["total"] == 0
         assert client.get(f"/api/v2/metadata/jobs/{uuid.uuid4()}/candidates").status_code == 404
+        candidate_id = uuid.uuid4()
+        now = datetime.now(UTC)
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO metadata.candidates (
+                        id, job_id, provider_id, external_id, title, author,
+                        confidence, cover_url, raw_payload, created_at, updated_at
+                    ) VALUES (
+                        :id, :job_id, :provider_id, :external_id, :title, :author,
+                        :confidence, NULL, CAST(:raw_payload AS jsonb), :now, :now
+                    )
+                    """
+                ),
+                {
+                    "id": candidate_id,
+                    "job_id": uuid.UUID(metadata_job_id),
+                    "provider_id": uuid.UUID(provider.json()["id"]),
+                    "external_id": "integration-candidate",
+                    "title": "Applied Candidate Title",
+                    "author": "Applied Candidate Author",
+                    "confidence": 0.95,
+                    "raw_payload": '{"publisher":"Test Publisher"}',
+                    "now": now,
+                },
+            )
+        candidates = client.get(f"/api/v2/metadata/jobs/{metadata_job_id}/candidates")
+        assert candidates.json()["items"][0]["id"] == str(candidate_id)
+        assert (
+            client.post(
+                f"/api/v2/metadata/jobs/{metadata_job_id}/candidates/{uuid.uuid4()}/apply",
+                json={"fields": ["title"]},
+            ).status_code
+            == 404
+        )
+        applied = client.post(
+            f"/api/v2/metadata/jobs/{metadata_job_id}/candidates/{candidate_id}/apply",
+            json={"fields": ["title", "author", "publisher"]},
+        )
+        assert applied.status_code == 204, applied.text
+        updated_work = client.get(f"/api/v2/catalog/works/{created.json()['id']}")
+        assert updated_work.json()["title"] == "Applied Candidate Title"
+        assert updated_work.json()["metadata"]["publisher"] == "Test Publisher"
+        retry = client.post(f"/api/v2/metadata/jobs/{metadata_job_id}/retry")
+        assert retry.status_code == 202
+        assert retry.json()["status"] == "queued"
+        assert client.delete(f"/api/v2/metadata/jobs/{metadata_job_id}").status_code == 204
+        assert client.get(f"/api/v2/metadata/jobs/{metadata_job_id}").status_code == 404
+        missing_metadata_job_id = uuid.uuid4()
+        assert (
+            client.post(f"/api/v2/metadata/jobs/{missing_metadata_job_id}/retry").status_code == 404
+        )
+        assert client.delete(f"/api/v2/metadata/jobs/{missing_metadata_job_id}").status_code == 404
+        running_job = client.post(
+            "/api/v2/metadata/jobs",
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+            json={"workId": created.json()["id"], "query": "Running metadata job"},
+        )
+        running_job_id = running_job.json()["id"]
+        with engine.begin() as connection:
+            connection.execute(
+                text("UPDATE metadata.jobs SET status = 'running' WHERE id = :id"),
+                {"id": uuid.UUID(running_job_id)},
+            )
+        assert client.post(f"/api/v2/metadata/jobs/{running_job_id}/retry").status_code == 409
+        assert client.delete(f"/api/v2/metadata/jobs/{running_job_id}").status_code == 409
+        with engine.begin() as connection:
+            connection.execute(
+                text("UPDATE metadata.jobs SET status = 'failed' WHERE id = :id"),
+                {"id": uuid.UUID(running_job_id)},
+            )
+        assert client.delete(f"/api/v2/metadata/jobs/{running_job_id}").status_code == 204
 
         source = client.post(
             "/api/v2/discovery/sources",

@@ -30,6 +30,8 @@ class MetadataWorker:
             providers = uow.metadata.list_providers()
             if job is None:
                 return False
+            if job.provider_id is not None:
+                providers = [provider for provider in providers if provider.id == job.provider_id]
             uow.commit()
         try:
             candidates = self._providers.search_all(job.query, providers)

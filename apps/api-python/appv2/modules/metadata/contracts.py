@@ -17,6 +17,8 @@ class MetadataCandidate:
     confidence: float
     cover_url: str | None
     raw_payload: dict[str, object]
+    id: uuid.UUID | None = None
+    job_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +53,7 @@ class ProviderView:
 class MetadataJob:
     id: uuid.UUID
     work_id: uuid.UUID
+    provider_id: uuid.UUID | None
     status: str
     query: str
     attempt: int
@@ -90,6 +93,7 @@ class MetadataRepository(Protocol):
         self,
         *,
         work_id: uuid.UUID,
+        provider_id: uuid.UUID | None,
         requested_by: uuid.UUID,
         query: str,
         idempotency_key: str,
@@ -103,6 +107,14 @@ class MetadataRepository(Protocol):
     def get_job(self, job_id: uuid.UUID) -> MetadataJob | None: ...
 
     def list_candidates(self, job_id: uuid.UUID) -> list[MetadataCandidate]: ...
+
+    def get_candidate(
+        self, job_id: uuid.UUID, candidate_id: uuid.UUID
+    ) -> MetadataCandidate | None: ...
+
+    def retry_job(self, job_id: uuid.UUID, *, now: datetime) -> MetadataJob | None: ...
+
+    def delete_job(self, job_id: uuid.UUID) -> str: ...
 
     def claim_next(
         self, *, worker_id: str, now: datetime, lease_until: datetime

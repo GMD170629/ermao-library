@@ -6,8 +6,11 @@ Revises:
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Sequence
+from datetime import UTC, datetime
 
+import sqlalchemy as sa
 from alembic import op
 
 from appv2.composition import models as _models  # noqa: F401
@@ -35,6 +38,25 @@ def upgrade() -> None:
     for schema in SCHEMAS:
         op.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
     Base.metadata.create_all(bind=connection, checkfirst=False)
+    now = datetime.now(UTC)
+    connection.execute(
+        sa.text(
+            """
+            INSERT INTO metadata.providers (
+                id, slug, name, enabled, priority, config, created_at, updated_at
+            ) VALUES (
+                :id, 'bangumi', 'Bangumi', false, 100,
+                CAST(:config AS jsonb), :now, :now
+            )
+            ON CONFLICT (slug) DO NOTHING
+            """
+        ),
+        {
+            "id": uuid.UUID("e80c296f-cbbb-5e45-b862-021888724423"),
+            "config": '{"workTypes":["ebook","comic"],"userAgent":""}',
+            "now": now,
+        },
+    )
 
 
 def downgrade() -> None:

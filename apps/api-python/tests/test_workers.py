@@ -88,11 +88,26 @@ def test_metadata_worker_no_job_success_and_retry_failure() -> None:
     repository.claim_next.return_value = None
     assert worker.run_once("worker") is False
 
-    job = SimpleNamespace(id=uuid.uuid4(), query="book", attempt=1)
+    job = SimpleNamespace(id=uuid.uuid4(), query="book", attempt=1, provider_id=None)
     repository.claim_next.return_value = job
     providers.search_all.return_value = ["candidate"]
     assert worker.run_once("worker") is True
     repository.save_candidates.assert_called_with(job.id, ["candidate"])
+
+    selected_provider_id = uuid.uuid4()
+    repository.list_providers.return_value = [
+        SimpleNamespace(id=uuid.uuid4()),
+        SimpleNamespace(id=selected_provider_id),
+    ]
+    selected_job = SimpleNamespace(
+        id=uuid.uuid4(),
+        query="selected book",
+        attempt=1,
+        provider_id=selected_provider_id,
+    )
+    repository.claim_next.return_value = selected_job
+    assert worker.run_once("worker") is True
+    assert providers.search_all.call_args.args[1] == [repository.list_providers.return_value[1]]
 
     providers.search_all.side_effect = RuntimeError("provider unavailable")
     assert worker.run_once("worker") is True
@@ -101,6 +116,7 @@ def test_metadata_worker_no_job_success_and_retry_failure() -> None:
         id=uuid.uuid4(),
         query="book",
         attempt=5,
+        provider_id=None,
     )
     assert worker.run_once("worker") is True
     assert repository.fail_job.call_args.kwargs["retry_at"] is None

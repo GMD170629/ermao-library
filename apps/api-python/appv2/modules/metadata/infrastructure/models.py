@@ -49,6 +49,7 @@ class MetadataJobRecord(UUIDPrimaryKey, Timestamped, Base):
     )
 
     work_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("catalog.works.id"), nullable=False)
+    provider_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("metadata.providers.id"))
     requested_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("accounts.users.id"), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
     query: Mapped[str] = mapped_column(String(1000), nullable=False)

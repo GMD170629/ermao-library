@@ -7,7 +7,7 @@ from decimal import Decimal
 from types import TracebackType
 from typing import Literal, Self
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -41,6 +41,7 @@ def _job(record: MetadataJobRecord) -> MetadataJob:
     return MetadataJob(
         id=record.id,
         work_id=record.work_id,
+        provider_id=record.provider_id,
         status=record.status,
         query=record.query,
         attempt=record.attempt,
@@ -113,6 +114,7 @@ class SqlMetadataRepository(MetadataRepository):
         self,
         *,
         work_id: uuid.UUID,
+        provider_id: uuid.UUID | None,
         requested_by: uuid.UUID,
         query: str,
         idempotency_key: str,
@@ -122,6 +124,7 @@ class SqlMetadataRepository(MetadataRepository):
             insert(MetadataJobRecord)
             .values(
                 work_id=work_id,
+                provider_id=provider_id,
                 requested_by=requested_by,
                 status="queued",
                 query=query,
@@ -179,9 +182,57 @@ class SqlMetadataRepository(MetadataRepository):
                 confidence=float(record.confidence),
                 cover_url=record.cover_url,
                 raw_payload=record.raw_payload,
+                id=record.id,
+                job_id=record.job_id,
             )
             for record in records
         ]
+
+    def get_candidate(self, job_id: uuid.UUID, candidate_id: uuid.UUID) -> MetadataCandidate | None:
+        record = self._session.scalar(
+            select(MetadataCandidateRecord).where(
+                MetadataCandidateRecord.id == candidate_id,
+                MetadataCandidateRecord.job_id == job_id,
+            )
+        )
+        if record is None:
+            return None
+        return MetadataCandidate(
+            provider_id=record.provider_id,
+            external_id=record.external_id,
+            title=record.title,
+            author=record.author,
+            confidence=float(record.confidence),
+            cover_url=record.cover_url,
+            raw_payload=record.raw_payload,
+            id=record.id,
+            job_id=record.job_id,
+        )
+
+    def retry_job(self, job_id: uuid.UUID, *, now: datetime) -> MetadataJob | None:
+        record = self._session.get(MetadataJobRecord, job_id)
+        if record is None or record.status == "running":
+            return _job(record) if record is not None else None
+        record.status = "queued"
+        record.attempt = 0
+        record.next_attempt_at = now
+        record.lease_owner = None
+        record.lease_expires_at = None
+        record.error_code = None
+        record.error_detail = None
+        self._session.flush()
+        return _job(record)
+
+    def delete_job(self, job_id: uuid.UUID) -> str:
+        status = self._session.scalar(
+            select(MetadataJobRecord.status).where(MetadataJobRecord.id == job_id)
+        )
+        if status is None:
+            return "missing"
+        if status == "running":
+            return "running"
+        self._session.execute(delete(MetadataJobRecord).where(MetadataJobRecord.id == job_id))
+        return "deleted"
 
     def claim_next(
         self, *, worker_id: str, now: datetime, lease_until: datetime
