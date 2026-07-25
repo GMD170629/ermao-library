@@ -242,6 +242,7 @@ class AccountService:
                 scopes=resolved_scopes,
                 disabled=disabled,
                 monitor_folder_ids=monitor_folder_ids,
+                include_disabled=True,
             )
             if account is None:
                 raise AccountNotFound
@@ -253,7 +254,11 @@ class AccountService:
     def set_managed_password(self, user_id: uuid.UUID, password: str) -> AccountView:
         password_hash = self._password_hasher.hash(password)
         with self._uow_factory() as uow:
-            account = uow.accounts.update_user(user_id, password_hash=password_hash)
+            account = uow.accounts.update_user(
+                user_id,
+                password_hash=password_hash,
+                include_disabled=True,
+            )
             if account is None:
                 raise AccountNotFound
             uow.sessions.revoke_user(user_id)

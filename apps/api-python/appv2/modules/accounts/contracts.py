@@ -90,6 +90,7 @@ class AccountsRepository(Protocol):
         scopes: frozenset[AccessScope] | None = None,
         disabled: bool | None = None,
         monitor_folder_ids: tuple[uuid.UUID, ...] | None = None,
+        include_disabled: bool = False,
     ) -> AccountView | None: ...
 
     def list_users(self, *, offset: int, limit: int) -> tuple[list[AccountView], int]: ...

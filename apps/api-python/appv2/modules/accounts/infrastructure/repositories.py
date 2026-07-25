@@ -104,9 +104,10 @@ class SqlAccountsRepository(AccountsRepository):
         scopes: frozenset[AccessScope] | None = None,
         disabled: bool | None = None,
         monitor_folder_ids: tuple[uuid.UUID, ...] | None = None,
+        include_disabled: bool = False,
     ) -> AccountView | None:
         record = self._session.get(UserRecord, user_id)
-        if record is None or record.disabled_at is not None:
+        if record is None or (record.disabled_at is not None and not include_disabled):
             return None
         if email is not None:
             record.email = email
