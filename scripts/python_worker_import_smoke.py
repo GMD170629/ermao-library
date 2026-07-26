@@ -1,3 +1,5 @@
+# ruff: noqa: S106
+
 from __future__ import annotations
 
 import os
@@ -5,7 +7,6 @@ import sys
 import uuid
 from pathlib import Path
 from tempfile import TemporaryDirectory
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 API_ROOT = REPO_ROOT / "apps" / "api-python"
@@ -35,7 +36,8 @@ def main() -> None:
     database_url = os.getenv("APPV2_TEST_DATABASE_URL") or os.getenv("DATABASE_URL")
     if not database_url:
         raise RuntimeError(
-            "APPV2_TEST_DATABASE_URL or DATABASE_URL must point to an isolated PostgreSQL 18 database"
+            "APPV2_TEST_DATABASE_URL or DATABASE_URL must point to "
+            "an isolated PostgreSQL 18 database"
         )
     with TemporaryDirectory(prefix="shuku-appv2-worker-import-") as temporary:
         root = Path(temporary)
@@ -66,10 +68,10 @@ def main() -> None:
             job = next(item for item in jobs if item.id == accepted.job_id)
             if job.status != "completed" or job.result_id is None:
                 raise RuntimeError(f"worker import did not complete: {job}")
-            target, _, _, _ = container.reading.bootstrap(
+            target = container.reading.bootstrap(
                 user_id=actor_id,
                 edition_id=job.result_id,
-            )
+            )[0]
             if target.format != "txt":
                 raise RuntimeError(f"unexpected imported format: {target.format}")
             print("appv2 worker import smoke ok")

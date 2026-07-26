@@ -1,3 +1,5 @@
+# ruff: noqa: S106
+
 from __future__ import annotations
 
 import os
@@ -8,7 +10,6 @@ from collections.abc import Iterable
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 API_ROOT = REPO_ROOT / "apps" / "api-python"
 sys.path.insert(0, str(API_ROOT))
@@ -17,7 +18,21 @@ from appv2.composition.container import Container, build_container  # noqa: E402
 from appv2.platform.config import Settings  # noqa: E402
 from appv2.platform.database.migrations import migrate  # noqa: E402
 
-SUPPORTED_EXTENSIONS = {".epub", ".pdf", ".cbz", ".cbr", ".txt", ".mobi", ".azw3", ".mp3", ".m4a", ".m4b", ".flac", ".ogg", ".wav"}
+SUPPORTED_EXTENSIONS = {
+    ".epub",
+    ".pdf",
+    ".cbz",
+    ".cbr",
+    ".txt",
+    ".mobi",
+    ".azw3",
+    ".mp3",
+    ".m4a",
+    ".m4b",
+    ".flac",
+    ".ogg",
+    ".wav",
+}
 
 
 def actor_id(container: Container) -> uuid.UUID:
@@ -46,8 +61,12 @@ def import_one(container: Container, user_id: uuid.UUID, path: Path) -> None:
     job = next(item for item in jobs if item.id == accepted.job_id)
     if job.status != "completed" or job.result_id is None:
         raise RuntimeError(f"sample import failed for {path.name}: {job}")
-    target, _, _, _ = container.reading.bootstrap(user_id=user_id, edition_id=job.result_id)
-    expected_format = "audio" if path.suffix.lower() in {".mp3", ".m4a", ".m4b", ".flac", ".ogg", ".wav"} else path.suffix.lower().removeprefix(".")
+    target = container.reading.bootstrap(user_id=user_id, edition_id=job.result_id)[0]
+    expected_format = (
+        "audio"
+        if path.suffix.lower() in {".mp3", ".m4a", ".m4b", ".flac", ".ogg", ".wav"}
+        else path.suffix.lower().removeprefix(".")
+    )
     if target.format != expected_format:
         raise RuntimeError(
             f"sample {path.name} resolved to {target.format}, expected {expected_format}"
@@ -92,7 +111,8 @@ def main() -> None:
     database_url = os.getenv("APPV2_TEST_DATABASE_URL") or os.getenv("DATABASE_URL")
     if not database_url:
         raise RuntimeError(
-            "APPV2_TEST_DATABASE_URL or DATABASE_URL must point to an isolated PostgreSQL 18 database"
+            "APPV2_TEST_DATABASE_URL or DATABASE_URL must point to "
+            "an isolated PostgreSQL 18 database"
         )
     with TemporaryDirectory(prefix="shuku-appv2-samples-") as temporary:
         root = Path(temporary)
