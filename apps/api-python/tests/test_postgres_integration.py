@@ -551,6 +551,30 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         monitored = monitor / "library"
         monitored.mkdir(parents=True)
         (monitored / "Monitored Book.txt").write_text("monitored content", encoding="utf-8")
+        invalid_folder = client.post(
+            "/api/v2/ingestion/folders",
+            json={
+                "path": str(tmp_path / "outside"),
+                "recursive": True,
+                "moveSource": False,
+                "options": {},
+            },
+        )
+        assert invalid_folder.status_code == 422, invalid_folder.text
+        assert invalid_folder.headers["content-type"].startswith("application/problem+json")
+        assert invalid_folder.json()["code"] == "INVALID_MONITOR_PATH"
+        invalid_tree = client.get(
+            "/api/v2/ingestion/folders/tree",
+            params={"path": str(tmp_path)},
+        )
+        assert invalid_tree.status_code == 422, invalid_tree.text
+        assert invalid_tree.json()["code"] == "INVALID_MONITOR_PATH"
+        invalid_scan = client.post(
+            "/api/v2/ingestion/imports/scan-directory",
+            json={"path": str(tmp_path)},
+        )
+        assert invalid_scan.status_code == 422, invalid_scan.text
+        assert invalid_scan.json()["code"] == "INVALID_MONITOR_PATH"
         folder = client.post(
             "/api/v2/ingestion/folders",
             json={

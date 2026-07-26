@@ -155,6 +155,14 @@ def create_router(service: IngestionService, current_account: CurrentAccount) ->
             message_key="not_found",
         )
 
+    def invalid_monitor_path() -> AppProblem:
+        return AppProblem(
+            status=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            code="INVALID_MONITOR_PATH",
+            title="Invalid monitor path",
+            message_key="invalid_request",
+        )
+
     @router.get("/imports", response_model=Page[JobResponse])
     def imports(
         actor: Actor,
@@ -250,12 +258,7 @@ def create_router(service: IngestionService, current_account: CurrentAccount) ->
         try:
             results = service.scan_directory(payload.path, actor.id)
         except ValueError as error:
-            raise AppProblem(
-                status=400,
-                code="INVALID_MONITOR_PATH",
-                title="Invalid monitor path",
-                message_key="invalid_request",
-            ) from error
+            raise invalid_monitor_path() from error
         return ScanDirectoryResponse(
             path=payload.path,
             directories_scanned=1,
@@ -291,12 +294,7 @@ def create_router(service: IngestionService, current_account: CurrentAccount) ->
         try:
             node, monitor_root = service.directory_tree(path)
         except ValueError as error:
-            raise AppProblem(
-                status=400,
-                code="INVALID_MONITOR_PATH",
-                title="Invalid monitor path",
-                message_key="invalid_request",
-            ) from error
+            raise invalid_monitor_path() from error
         return DirectoryTreeResponse(
             node=DirectoryNodeResponse.from_view(node),
             monitor_root=monitor_root,
@@ -305,14 +303,17 @@ def create_router(service: IngestionService, current_account: CurrentAccount) ->
     @router.post("/folders", response_model=FolderResponse, status_code=status.HTTP_201_CREATED)
     def add_folder(payload: FolderRequest, actor: Actor) -> FolderResponse:
         del actor
-        return FolderResponse.from_view(
-            service.add_folder(
-                path=payload.path,
-                recursive=payload.recursive,
-                move_source=payload.move_source,
-                options=payload.options,
+        try:
+            return FolderResponse.from_view(
+                service.add_folder(
+                    path=payload.path,
+                    recursive=payload.recursive,
+                    move_source=payload.move_source,
+                    options=payload.options,
+                )
             )
-        )
+        except ValueError as error:
+            raise invalid_monitor_path() from error
 
     @router.patch("/folders/{folder_id}", response_model=FolderResponse)
     def update_folder(folder_id: uuid.UUID, payload: FolderUpdate, actor: Actor) -> FolderResponse:

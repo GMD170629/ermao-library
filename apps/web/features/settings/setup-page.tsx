@@ -2,6 +2,7 @@
 
 import { apiV2Fetch } from '@/lib/api-v2';
 import type {
+  DirectoryTreeResponse,
   FolderResponse,
   ProblemDetails,
   SessionResponse,
@@ -37,13 +38,29 @@ export function SetupPage() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [folderName, setFolderName] = useState('我的书库');
-  const [folderPath, setFolderPath] = useState('/monitor');
+  const [folderPath, setFolderPath] = useState('');
   const [folderAdded, setFolderAdded] = useState(false);
   const [error, setError] = useState('');
 
   function saveProgress(progress: SetupProgress) {
     window.localStorage.setItem(setupProgressKey, JSON.stringify(progress));
   }
+
+  const loadMonitorRoot = useCallback(async (signal?: AbortSignal) => {
+    const response = await apiV2Fetch('/api/v2/ingestion/folders/tree', {
+      cache: 'no-store',
+      credentials: 'same-origin',
+      signal
+    });
+    const payload = await response.json().catch(() => null) as
+      | DirectoryTreeResponse
+      | ProblemDetails
+      | null;
+    if (!response.ok || !payload || !('monitorRoot' in payload)) {
+      return '';
+    }
+    return payload.monitorRoot;
+  }, []);
 
   const checkStatus = useCallback(async (signal?: AbortSignal) => {
     setStage('checking');
@@ -75,9 +92,10 @@ export function SetupPage() {
         try {
           const saved = JSON.parse(window.localStorage.getItem(setupProgressKey) ?? 'null') as SetupProgress | null;
           if (saved && ['folder', 'import', 'complete'].includes(saved.stage)) {
+            const monitorRoot = await loadMonitorRoot(signal);
             setEmail(saved.email);
             setFolderAdded(saved.folderAdded);
-            setFolderPath(saved.folderPath || '/monitor');
+            setFolderPath(monitorRoot || saved.folderPath || '');
             // Older in-progress sessions may still contain the removed import step.
             setStage(saved.stage === 'folder' ? 'folder' : 'complete');
             return;
@@ -92,7 +110,7 @@ export function SetupPage() {
       setError(reason instanceof Error ? reason.message : '无法连接初始化服务');
       setStage('unavailable');
     }
-  }, [router]);
+  }, [loadMonitorRoot, router]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -156,9 +174,16 @@ export function SetupPage() {
         throw new Error(payload && 'detail' in payload ? payload.detail : '账户创建失败');
       }
       const accountEmail = payload.account.email ?? normalizedEmail;
+      const monitorRoot = await loadMonitorRoot();
       setEmail(accountEmail);
+      setFolderPath(monitorRoot);
       setStage('folder');
-      saveProgress({ stage: 'folder', email: accountEmail, folderAdded: false, folderPath });
+      saveProgress({
+        stage: 'folder',
+        email: accountEmail,
+        folderAdded: false,
+        folderPath: monitorRoot
+      });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '无法连接初始化服务');
       setStage('account');
