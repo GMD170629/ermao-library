@@ -7190,7 +7190,7 @@ def list_organize_jobs(request: Request, db: Session = Depends(get_db), settings
     if status not in {"ALL", "SUCCESS", "FAILED", "RECOGNIZING", "WAITING"}:
         status = "ALL"
     if not (_has_table(db, "OrganizeJob") and _has_table(db, "LibraryWork")):
-        return ok({"jobs": [], "books": [], "page": 1, "pageSize": page_size, "total": 0, "totalPages": 1, "statusCounts": {"SUCCESS": 0, "FAILED": 0, "RECOGNIZING": 0, "WAITING": 0}})
+        return ok({"jobs": [], "books": [], "page": 1, "pageSize": page_size, "total": 0, "totalPages": 1, "statusCounts": {"SUCCESS": 0, "FAILED": 0, "RECOGNIZING": 0, "WAITING": 0}, "providerNames": {}})
 
     lookup_status_sql = (
         "COALESCE((SELECT UPPER(COALESCE(t.`status`, '')) FROM `MetadataLookupTask` t "
@@ -7319,7 +7319,25 @@ def list_organize_jobs(request: Request, db: Session = Depends(get_db), settings
         )
     )
     jobs = [view for row in rows if (view := _organize_job_view(db, row, getattr(user, "id", None))) is not None]
-    return ok({"jobs": jobs, "books": [job["book"] for job in jobs], "page": page, "pageSize": page_size, "total": total, "totalPages": total_pages, "statusCounts": status_counts})
+    referenced_provider_ids: set[str] = set()
+    for job in jobs:
+        for source in [
+            *(job.get("metadataSources") or []),
+            job.get("metadataLookupSource"),
+            *(job.get("metadataLookupProviders") or []),
+        ]:
+            if str(source or "").strip():
+                referenced_provider_ids.add(str(source).strip())
+        for execution in job.get("providerExecutions") or []:
+            provider_id = str((execution or {}).get("providerId") or "").strip()
+            if provider_id:
+                referenced_provider_ids.add(provider_id)
+    provider_names = {
+        str(provider.get("id")): str(provider.get("name"))
+        for provider in list_metadata_providers(db)
+        if str(provider.get("id") or "") in referenced_provider_ids and provider.get("name")
+    }
+    return ok({"jobs": jobs, "books": [job["book"] for job in jobs], "page": page, "pageSize": page_size, "total": total, "totalPages": total_pages, "statusCounts": status_counts, "providerNames": provider_names})
 
 
 @router.get("/organize/pending")

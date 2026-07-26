@@ -2640,6 +2640,7 @@ def test_organize_jobs_return_frontend_contract(client, db_session):
     assert list_payload["total"] == 4
     assert list_payload["totalPages"] == 1
     assert list_payload["statusCounts"] == {"SUCCESS": 1, "FAILED": 1, "RECOGNIZING": 1, "WAITING": 1}
+    assert list_payload["providerNames"] == {}
     assert job["book"]["id"] == "work-contract"
     assert job["statusCategory"] == "FAILED"
     assert job["metadataSources"] == []

@@ -56,13 +56,9 @@ type JobsResponse = {
     total: number;
     totalPages: number;
     statusCounts?: Record<OrganizeStatusCategory, number>;
+    providerNames?: Record<string, string>;
   };
   error?: { message: string };
-};
-
-type ProvidersResponse = {
-  ok: boolean;
-  data?: { providers: Array<{ id: string; name: string }> };
 };
 
 const fallbackSourceLabels: Record<string, string> = {
@@ -204,12 +200,8 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
       const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
       if (searchQuery) params.set('search', searchQuery);
       if (statusFilter !== 'ALL') params.set('status', statusFilter);
-      const [jobsResponse, providersResponse] = await Promise.all([
-        fetch(`/api/organize/jobs?${params.toString()}`, { cache: 'no-store' }),
-        fetch('/api/metadata/providers', { cache: 'no-store' })
-      ]);
+      const jobsResponse = await fetch(`/api/organize/jobs?${params.toString()}`, { cache: 'no-store' });
       const jobsPayload = (await jobsResponse.json()) as JobsResponse;
-      const providersPayload = (await providersResponse.json()) as ProvidersResponse;
       if (!jobsPayload.ok) throw new Error(jobsPayload.error?.message ?? '读取整理记录失败');
       setJobs((jobsPayload.data?.jobs ?? []).map(normalizeOrganizeJob).filter((job): job is OrganizeJobView => job !== null));
       const nextTotalPages = Math.max(1, Number(jobsPayload.data?.totalPages ?? 1));
@@ -218,9 +210,7 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
       setTotalPages(nextTotalPages);
       if (jobsPayload.data?.statusCounts) setCounts(jobsPayload.data.statusCounts);
       if (nextPage !== page) setPage(nextPage);
-      if (providersPayload.ok) {
-        setProviderNames(Object.fromEntries((providersPayload.data?.providers ?? []).map((provider) => [provider.id, provider.name])));
-      }
+      setProviderNames(jobsPayload.data?.providerNames ?? {});
       setError('');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '读取整理记录失败');

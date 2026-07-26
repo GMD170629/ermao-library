@@ -170,23 +170,15 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     else setError(payload.error?.message ?? '读取备份列表失败');
   }, []);
 
-  useEffect(() => {
-    if (active === '监控规则') setActive('监控文件夹');
-  }, [active]);
-
-  useEffect(() => {
-    if (initialSection) setActive(initialSection);
-  }, [initialSection]);
-
-  useEffect(() => {
-    if (!initialSection || initialSection === '监控文件夹') {
-      void loadPaths();
-    }
-    if (!initialSection || initialSection === '备份与恢复') void loadBackups();
-    if (initialSection === '监控文件夹' || initialSection === '备份与恢复') return;
-    fetch('/api/system-settings').then((response) => response.json()).then((payload) => {
-      if (!payload.ok) return;
-      const loaded = { ...payload.data.settings } as Record<string, unknown>;
+  const loadSystemSettings = useCallback(async () => {
+    try {
+      const response = await fetch('/api/system-settings');
+      const payload = (await response.json()) as { ok: boolean; data?: { settings?: Record<string, unknown> }; error?: { message: string } };
+      if (!payload.ok) {
+        setError(payload.error?.message ?? '');
+        return;
+      }
+      const loaded = { ...(payload.data?.settings ?? {}) };
       const secretState = Object.fromEntries(sensitiveSystemSettingKeys.flatMap((key) => {
         const legacyValue = typeof loaded[key] === 'string' ? loaded[key].trim() : '';
         const configured = loaded[`${key}Configured`] === true || loaded[`${key}Configured`] === 'true' || Boolean(legacyValue);
@@ -202,8 +194,30 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
         ...Object.fromEntries(Object.entries(loaded).map(([key, value]) => [key, typeof value === 'string' ? value : String(value ?? '')])),
         ...secretState
       }));
-    }).catch(() => undefined);
-  }, [initialSection, loadBackups, loadPaths]);
+    } catch {
+      // Keep the existing page available when the optional settings request fails.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (active === '监控规则') setActive('监控文件夹');
+  }, [active]);
+
+  useEffect(() => {
+    if (initialSection) setActive(initialSection);
+  }, [initialSection]);
+
+  useEffect(() => {
+    if (active === '监控规则') return;
+    setError('');
+    if (active === '监控文件夹') {
+      void loadPaths();
+    } else if (active === '备份与恢复') {
+      void loadBackups();
+    } else {
+      void loadSystemSettings();
+    }
+  }, [active, loadBackups, loadPaths, loadSystemSettings]);
 
   async function savePath(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

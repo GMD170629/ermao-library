@@ -1,7 +1,16 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode
+} from 'react';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import { Cover, type CoverBook } from './cover';
 
@@ -45,6 +54,131 @@ function useBookshelfColumns() {
   return { containerRef, columns };
 }
 
+const HORIZONTAL_DRAG_THRESHOLD_PX = 4;
+
+function useHorizontalDragScroll() {
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    scrollLeft: number;
+    moved: boolean;
+  } | null>(null);
+  const clickSuppressionTimerRef = useRef<number | null>(null);
+  const suppressClickRef = useRef(false);
+  const [isDragging, setIsDragging] = useState(false);
+
+  useEffect(() => () => {
+    if (clickSuppressionTimerRef.current !== null) {
+      window.clearTimeout(clickSuppressionTimerRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener('pointermove', onWindowPointerMove, { passive: false });
+    window.addEventListener('pointerup', finishPointerDrag);
+    window.addEventListener('pointercancel', finishPointerDrag);
+    return () => {
+      window.removeEventListener('pointermove', onWindowPointerMove);
+      window.removeEventListener('pointerup', finishPointerDrag);
+      window.removeEventListener('pointercancel', finishPointerDrag);
+    };
+  }, []);
+
+  function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.pointerType === 'touch' || !event.isPrimary || event.button !== 0) return;
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+
+    if (clickSuppressionTimerRef.current !== null) {
+      window.clearTimeout(clickSuppressionTimerRef.current);
+      clickSuppressionTimerRef.current = null;
+    }
+    suppressClickRef.current = false;
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      scrollLeft: scroller.scrollLeft,
+      moved: false
+    };
+  }
+
+  function onWindowPointerMove(event: PointerEvent) {
+    const drag = dragRef.current;
+    const scroller = scrollerRef.current;
+    if (!drag || !scroller || drag.pointerId !== event.pointerId) return;
+
+    const horizontalDistance = event.clientX - drag.startX;
+    const verticalDistance = event.clientY - drag.startY;
+    if (!drag.moved) {
+      if (Math.abs(verticalDistance) > HORIZONTAL_DRAG_THRESHOLD_PX && Math.abs(verticalDistance) > Math.abs(horizontalDistance)) {
+        dragRef.current = null;
+        return;
+      }
+      if (Math.abs(horizontalDistance) <= HORIZONTAL_DRAG_THRESHOLD_PX) return;
+
+      drag.moved = true;
+      setIsDragging(true);
+    }
+
+    event.preventDefault();
+    scroller.scrollLeft = drag.scrollLeft - horizontalDistance;
+  }
+
+  function finishPointerDrag(event: PointerEvent) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    dragRef.current = null;
+    if (drag.moved) {
+      suppressClickRef.current = true;
+      clickSuppressionTimerRef.current = window.setTimeout(() => {
+        suppressClickRef.current = false;
+        clickSuppressionTimerRef.current = null;
+      }, 0);
+    }
+    setIsDragging(false);
+  }
+
+  function onClickCapture(event: ReactMouseEvent<HTMLDivElement>) {
+    if (!suppressClickRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function onKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.currentTarget !== event.target) return;
+    const scroller = scrollerRef.current;
+    if (!scroller || scroller.scrollWidth <= scroller.clientWidth) return;
+
+    if (event.key === 'Home') {
+      event.preventDefault();
+      scroller.scrollLeft = 0;
+      return;
+    }
+    if (event.key === 'End') {
+      event.preventDefault();
+      scroller.scrollLeft = scroller.scrollWidth;
+      return;
+    }
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+
+    event.preventDefault();
+    const distance = Math.max(240, scroller.clientWidth * 0.75);
+    scroller.scrollBy({ left: event.key === 'ArrowLeft' ? -distance : distance });
+  }
+
+  return {
+    scrollerRef,
+    isDragging,
+    onPointerDown,
+    onClickCapture,
+    onKeyDown
+  };
+}
+
 function ShelfBook<T extends BookshelfItem>({
   book,
   onOpen,
@@ -60,6 +194,7 @@ function ShelfBook<T extends BookshelfItem>({
     <button
       type="button"
       onClick={() => onOpen(book)}
+      onDragStart={(event) => event.preventDefault()}
       aria-label={t("查看《{value0}》", { value0: book.title })}
       className="group relative z-20 flex w-full min-w-0 origin-bottom items-end justify-center rounded-md outline-none hover:z-30 focus-visible:z-30 focus-visible:ring-2 focus-visible:ring-[#F6B7A5] focus-visible:ring-offset-4 focus-visible:ring-offset-[#FBFAF8]"
     >
@@ -167,17 +302,28 @@ function ShelfLedge() {
 export function BookshelfRail<T extends BookshelfItem>({
   books,
   onOpen,
-  testId
+  testId,
+  ariaLabel
 }: {
   books: T[];
   onOpen: (book: T) => void;
   testId?: string;
+  ariaLabel?: string;
 }) {
+  const dragScroll = useHorizontalDragScroll();
+
   return (
     <div data-testid={testId} className="min-w-0">
       <div
+        ref={dragScroll.scrollerRef}
         data-testid={testId ? `${testId}-scroller` : undefined}
-        className="overflow-x-auto overscroll-x-contain px-1 pb-5 pt-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        role={ariaLabel ? 'region' : undefined}
+        aria-label={ariaLabel}
+        tabIndex={0}
+        onPointerDown={dragScroll.onPointerDown}
+        onClickCapture={dragScroll.onClickCapture}
+        onKeyDown={dragScroll.onKeyDown}
+        className={`overflow-x-auto overscroll-x-contain px-1 pb-5 pt-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${dragScroll.isDragging ? 'cursor-grabbing select-none' : 'cursor-grab'}`}
       >
         <div className="min-w-max">
           <div className="flex items-end gap-5 px-5 sm:gap-6 sm:px-7">
@@ -223,7 +369,7 @@ export function BookshelfSection<T extends BookshelfItem>({
         <h2 className="text-[22px] font-semibold tracking-tight text-[#24211F]">{title}</h2>
         {action}
       </div>
-      <BookshelfRail books={books} onOpen={onOpen} testId={testId} />
+      <BookshelfRail books={books} onOpen={onOpen} testId={testId} ariaLabel={title} />
     </section>
   );
 }

@@ -29,11 +29,6 @@ type AppConfigPayload = {
   };
 };
 
-type SessionLocalePayload = {
-  ok?: boolean;
-  data?: { user?: { locale?: unknown } };
-};
-
 export type I18nContextValue = {
   locale: AppLocale;
   setLocale: (locale: AppLocale) => void;
@@ -158,24 +153,10 @@ export function I18nProvider({
 
   useEffect(() => {
     const controller = new AbortController();
-    Promise.all([
-      fetch(withBasePath('/api/app-config'), { cache: 'no-store', signal: controller.signal })
-        .then((response) => response.json() as Promise<AppConfigPayload>)
-        .catch(() => null),
-      fetch(withBasePath('/api/auth/me'), {
-        cache: 'no-store',
-        credentials: 'same-origin',
-        signal: controller.signal
-      })
-        .then((response) => response.json() as Promise<SessionLocalePayload>)
-        .catch(() => null)
-    ])
-      .then(([configPayload, sessionPayload]) => {
-        const preferred = sessionPayload?.ok
-          ? sessionPayload.data?.user?.locale
-          : configPayload?.ok
-            ? configPayload.data?.language
-            : localeRef.current;
+    fetch(withBasePath('/api/app-config'), { cache: 'no-store', signal: controller.signal })
+      .then((response) => response.json() as Promise<AppConfigPayload>)
+      .then((configPayload) => {
+        const preferred = configPayload?.ok ? configPayload.data?.language : localeRef.current;
         const configuredLocale = normalizeLocale(preferred, localeRef.current);
         if (configuredLocale !== localeRef.current) setLocale(configuredLocale);
       })

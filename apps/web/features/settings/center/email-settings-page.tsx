@@ -1,12 +1,13 @@
 'use client';
 
 import { KeyRound, MailCheck, Save, Send, ShieldCheck, Trash2 } from 'lucide-react';
+import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
+import { useAppSession } from '../../../components/layout/app-session-context';
 import { Button } from '../../../components/ui/button';
 import { useToast } from '../../../components/ui/feedback';
 import { Select } from '../../../components/ui/select';
-import { KindleSendQueuePage } from '../../kindle/kindle-send-queue-page';
 import { SettingsCenterShell } from './settings-center-shell';
 import { SettingsTabs } from './settings-tabs';
 import { I18nText } from '@/i18n/provider';
@@ -47,6 +48,11 @@ const securityOptions = [
   { value: 'none', label: '不加密' }
 ];
 
+const KindleSendQueuePage = dynamic(
+  () => import('../../kindle/kindle-send-queue-page').then((module) => module.KindleSendQueuePage),
+  { loading: () => <div className="min-h-48" aria-busy="true" /> }
+);
+
 function inputClassName() {
   return 'mt-2 h-11 w-full rounded-xl border border-[#DCD7D1] bg-white px-4 text-sm text-[#2B2926] outline-none transition focus:border-[#EF8B73] focus:ring-4 focus:ring-[#FAD9D0]/70';
 }
@@ -56,7 +62,9 @@ export function EmailSettingsPage() {
   const searchParams = useSearchParams();
   const requested = searchParams.get('tab');
   const toast = useToast();
-  const [canManageSystem, setCanManageSystem] = useState<boolean | null>(null);
+  const session = useAppSession();
+  const canManageSystem = Boolean(session?.authorization?.canManageSystem);
+  const sessionReady = Boolean(session?.user);
   const [settings, setSettings] = useState<EmailSettings>(emptySettings);
   const [smtp, setSmtp] = useState({ ...emptySettings.smtp, password: '' });
   const [kindleEmail, setKindleEmail] = useState('');
@@ -70,26 +78,35 @@ export function EmailSettingsPage() {
       ? 'smtp'
       : 'kindle';
 
-  const loadSettings = useCallback(async () => {
-    if (canManageSystem === null) return;
+  const loadKindleSettings = useCallback(async () => {
     setLoading(true);
     try {
       const kindleResponse = await fetch('/api/kindle-settings', { cache: 'no-store' });
       const kindlePayload = (await kindleResponse.json()) as KindleSettingsPayload;
       if (!kindlePayload.ok || !kindlePayload.data) throw new Error(kindlePayload.error?.message ?? '读取 Kindle 设置失败');
-      setKindleEmail(kindlePayload.data.kindle.email);
-      if (canManageSystem) {
-        const response = await fetch('/api/email-settings', { cache: 'no-store' });
-        const payload = (await response.json()) as EmailSettingsPayload;
-        if (!payload.ok || !payload.data) throw new Error(payload.error?.message ?? '读取邮件设置失败');
-        setSettings(payload.data);
-        setSmtp({ ...payload.data.smtp, password: '' });
-      } else {
-        setSettings({
-          ...emptySettings,
-          smtp: { ...emptySettings.smtp, fromEmail: kindlePayload.data.smtp.fromEmail }
-        });
-      }
+      const kindleSettings = kindlePayload.data;
+      setKindleEmail(kindleSettings.kindle.email);
+      setSettings((currentSettings) => ({
+        ...currentSettings,
+        smtp: { ...currentSettings.smtp, fromEmail: kindleSettings.smtp.fromEmail },
+        kindle: kindleSettings.kindle
+      }));
+      setError('');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '读取 Kindle 设置失败');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadSmtpSettings = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('/api/email-settings', { cache: 'no-store' });
+      const payload = (await response.json()) as EmailSettingsPayload;
+      if (!payload.ok || !payload.data) throw new Error(payload.error?.message ?? '读取邮件设置失败');
+      setSettings(payload.data);
+      setSmtp({ ...payload.data.smtp, password: '' });
       setClearPassword(false);
       setError('');
     } catch (reason) {
@@ -97,18 +114,18 @@ export function EmailSettingsPage() {
     } finally {
       setLoading(false);
     }
-  }, [canManageSystem]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
-      .then((response) => response.json())
-      .then((payload) => setCanManageSystem(Boolean(payload?.ok && payload.data?.authorization?.canManageSystem)))
-      .catch(() => setCanManageSystem(false));
-    return () => controller.abort();
   }, []);
 
-  useEffect(() => { if (canManageSystem !== null) void loadSettings(); }, [canManageSystem, loadSettings]);
+  useEffect(() => {
+    if (!sessionReady) return;
+    if (active === 'kindle') {
+      void loadKindleSettings();
+    } else if (active === 'smtp' && canManageSystem) {
+      void loadSmtpSettings();
+    } else {
+      setLoading(false);
+    }
+  }, [active, canManageSystem, loadKindleSettings, loadSmtpSettings, sessionReady]);
 
   async function saveSmtp() {
     setBusy('save-smtp');
@@ -130,7 +147,7 @@ export function EmailSettingsPage() {
       const payload = (await response.json()) as EmailSettingsPayload;
       if (!payload.ok || !payload.data) throw new Error(payload.error?.message ?? '保存 SMTP 设置失败');
       toast.success('SMTP 设置已保存');
-      await loadSettings();
+      await loadSmtpSettings();
     } catch (reason) {
       toast.error('保存失败', reason instanceof Error ? reason.message : '请稍后重试');
     } finally {

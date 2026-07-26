@@ -10,6 +10,7 @@ import { activateReaderV2User, clearPrivateReaderV2Data, deactivateReaderV2User,
 import { withBasePath } from '../../lib/base-path';
 import { PRODUCT_NAME } from '../../lib/brand';
 import { clearCurrentUserNamespace, setCurrentUserNamespace, userDevicePreferenceKey } from '../../lib/user-preferences';
+import { useAppSession } from '../layout/app-session-context';
 import { cn } from '../ui/cn';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
@@ -63,27 +64,9 @@ export async function clearPrivatePwaStorage() {
   await Promise.all([clearPrivatePwaData(), clearPrivateReaderV2Data(runtime.storage)]);
 }
 
-async function refreshAuthenticatedReaderV2User(signal?: AbortSignal) {
-  const response = await fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin', signal });
-  const payload = await response.json().catch(() => null);
-  const userId = payload?.ok && typeof payload.data?.user?.id === 'string' ? payload.data.user.id : '';
-  if (userId) {
-    const authzVersion = Number(payload?.data?.authorization?.authzVersion ?? 1);
-    activateReaderV2User(userId);
-    setCurrentUserNamespace(userId, authzVersion);
-    navigator.serviceWorker?.controller?.postMessage({
-      type: 'SET_PRIVATE_CACHE_NAMESPACE',
-      userId,
-      authzVersion
-    });
-  } else if (response.status === 401) {
-    deactivateReaderV2User();
-    clearCurrentUserNamespace();
-  }
-}
-
 export function PwaClient() {
   const pathname = usePathname();
+  const session = useAppSession();
   const [offline, setOffline] = useState(false);
   const [recentlyRestored, setRecentlyRestored] = useState(false);
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
@@ -109,10 +92,17 @@ export function PwaClient() {
   );
 
   useEffect(() => {
-    const controller = new AbortController();
-    void refreshAuthenticatedReaderV2User(controller.signal).catch(() => undefined);
-    return () => controller.abort();
-  }, [pathname]);
+    const userId = session?.user?.id;
+    if (!userId) return;
+    const authzVersion = Number(session.authorization?.authzVersion ?? 1);
+    activateReaderV2User(userId);
+    setCurrentUserNamespace(userId, authzVersion);
+    navigator.serviceWorker?.controller?.postMessage({
+      type: 'SET_PRIVATE_CACHE_NAMESPACE',
+      userId,
+      authzVersion
+    });
+  }, [session?.authorization?.authzVersion, session?.user?.id]);
 
   useEffect(() => {
     setOffline(typeof navigator !== 'undefined' ? !navigator.onLine : false);
@@ -122,7 +112,6 @@ export function PwaClient() {
       const nextOffline = !navigator.onLine;
       setOffline(nextOffline);
       if (!nextOffline) {
-        void refreshAuthenticatedReaderV2User().catch(() => undefined);
         setRecentlyRestored(true);
         if (restoreTimerRef.current) window.clearTimeout(restoreTimerRef.current);
         restoreTimerRef.current = window.setTimeout(() => setRecentlyRestored(false), 4200);

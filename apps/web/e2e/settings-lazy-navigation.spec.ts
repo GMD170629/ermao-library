@@ -1,0 +1,226 @@
+import { expect, test, type Page } from '@playwright/test';
+
+type RequestCounts = Record<string, number>;
+
+const organizeJobs = {
+  jobs: [],
+  books: [],
+  page: 1,
+  pageSize: 20,
+  total: 0,
+  totalPages: 1,
+  statusCounts: { SUCCESS: 0, FAILED: 0, RECOGNIZING: 0, WAITING: 0 },
+  providerNames: {}
+};
+
+async function mockSettingsApi(page: Page, locale: 'zh-CN' | 'en-US' = 'zh-CN') {
+  const counts: RequestCounts = {};
+  await page.route('**/api/**', async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    counts[pathname] = (counts[pathname] ?? 0) + 1;
+
+    if (pathname.endsWith('/api/auth/me')) {
+      await route.fulfill({
+        json: {
+          ok: true,
+          data: {
+            user: { id: 'settings-user', email: 'settings@example.com', name: 'Settings user', role: 'admin', locale },
+            authorization: { isAdmin: true, canManageSystem: true, authzVersion: 1 }
+          }
+        }
+      });
+      return;
+    }
+    if (pathname.endsWith('/api/shelves')) {
+      await route.fulfill({ json: { ok: true, data: { shelves: [] } } });
+      return;
+    }
+    if (pathname.endsWith('/api/organize/jobs')) {
+      await route.fulfill({ json: { ok: true, data: organizeJobs } });
+      return;
+    }
+    if (pathname.endsWith('/api/metadata/providers')) {
+      await route.fulfill({ json: { ok: true, data: { providers: [], pipelines: [] } } });
+      return;
+    }
+    if (pathname.endsWith('/api/library/duplicates')) {
+      await route.fulfill({ json: { ok: true, data: { groups: [] } } });
+      return;
+    }
+    if (pathname.endsWith('/api/library/categories')) {
+      await route.fulfill({ json: { ok: true, data: { categories: [], page: 1, pageSize: 20, total: 0, totalPages: 1 } } });
+      return;
+    }
+    if (pathname.endsWith('/api/organize/policy')) {
+      await route.fulfill({
+        json: {
+          ok: true,
+          data: {
+            policy: {
+              id: 'default', enabled: false, scheduleMode: 'MANUAL', intervalMinutes: 60, autoRunOnNew: false,
+              autoRunOnNewSince: null, rules: { unrecognized: true, missingMetadata: true }, overwriteTitleAuthor: true,
+              lastScheduledAt: null, nextRunAt: null, updatedAt: null
+            }
+          }
+        }
+      });
+      return;
+    }
+    if (pathname.endsWith('/api/organize/candidates')) {
+      await route.fulfill({ json: { ok: true, data: { candidates: { total: 0 } } } });
+      return;
+    }
+    if (pathname.endsWith('/api/kindle-settings')) {
+      await route.fulfill({ json: { ok: true, data: { kindle: { email: '' }, smtp: { configured: false, fromEmail: '' } } } });
+      return;
+    }
+    if (pathname.endsWith('/api/email-settings')) {
+      await route.fulfill({
+        json: {
+          ok: true,
+          data: {
+            smtp: { host: '', port: 587, security: 'starttls', username: '', fromEmail: '', fromName: '', maxAttachmentMb: null, passwordConfigured: false },
+            kindle: { email: '' }
+          }
+        }
+      });
+      return;
+    }
+    if (pathname.endsWith('/api/kindle-send-tasks')) {
+      await route.fulfill({ json: { ok: true, data: { tasks: [], total: 0 } } });
+      return;
+    }
+    if (pathname.endsWith('/api/import-tasks')) {
+      await route.fulfill({ json: { ok: true, data: { tasks: [], summary: { completed: 0, failed: 0 }, page: 1, pageSize: 10, total: 0, totalPages: 1 } } });
+      return;
+    }
+    if (pathname.endsWith('/api/monitor-folders/tree')) {
+      await route.fulfill({ json: { ok: true, data: { node: { name: '/', path: '/', readable: true, children: [] } } } });
+      return;
+    }
+    if (pathname.endsWith('/api/monitor-folders')) {
+      await route.fulfill({ json: { ok: true, data: { folders: [] } } });
+      return;
+    }
+    if (pathname.endsWith('/api/system-settings')) {
+      await route.fulfill({ json: { ok: true, data: { settings: {} } } });
+      return;
+    }
+    await route.fulfill({ json: { ok: true, data: {} } });
+  });
+  return counts;
+}
+
+function requestCount(counts: RequestCounts, pathname: string) {
+  return counts[pathname] ?? 0;
+}
+
+test.beforeEach(async ({ context, page }) => {
+  await context.addCookies([{ name: 'shuku_session', value: 'settings-session', domain: '127.0.0.1', path: '/' }]);
+  await context.addInitScript(() => localStorage.setItem('shuku:pwa:install-dismissed:settings-user', '1'));
+  await mockSettingsApi(page);
+});
+
+test('settings tab starts its selected animation before the route is confirmed', async ({ page }) => {
+  await page.goto('/settings/organize?tab=queue');
+  const providersTab = page.locator('a[href="/settings/organize?tab=providers"]');
+  await expect(providersTab).toHaveCount(1);
+
+  await page.route(/\/settings\/organize(?:\?.*)?$/, async (route) => {
+    if (new URL(route.request().url()).searchParams.get('tab') === 'providers') {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    await route.continue();
+  });
+
+  await providersTab.click({ noWaitAfter: true });
+  await expect(providersTab).toHaveAttribute('data-pending-navigation', 'true');
+  await expect(providersTab).not.toHaveAttribute('aria-current', 'page');
+  await expect(page).toHaveURL(/tab=providers/);
+  await expect(providersTab).toHaveAttribute('aria-current', 'page');
+});
+
+test('settings navigation keeps session and shelves stable while tabs load on demand', async ({ page }) => {
+  const counts = await mockSettingsApi(page);
+  await page.goto('/settings/organize?tab=queue');
+  await expect.poll(() => requestCount(counts, '/api/organize/jobs')).toBeGreaterThan(0);
+  await expect.poll(() => requestCount(counts, '/api/auth/me')).toBeGreaterThan(0);
+  await expect.poll(() => requestCount(counts, '/api/shelves')).toBeGreaterThan(0);
+  await page.waitForTimeout(750);
+  const initialJobsRequests = requestCount(counts, '/api/organize/jobs');
+  const initialAuthRequests = requestCount(counts, '/api/auth/me');
+  const initialShelfRequests = requestCount(counts, '/api/shelves');
+  expect(requestCount(counts, '/api/metadata/providers')).toBe(0);
+  expect(requestCount(counts, '/api/library/duplicates')).toBe(0);
+  expect(requestCount(counts, '/api/library/categories')).toBe(0);
+  expect(requestCount(counts, '/api/organize/policy')).toBe(0);
+  expect(requestCount(counts, '/api/organize/candidates')).toBe(0);
+
+  await page.locator('a[href="/settings/organize?tab=providers"]').click();
+  await expect.poll(() => requestCount(counts, '/api/metadata/providers')).toBeGreaterThan(0);
+  await page.locator('a[href="/settings/organize?tab=duplicates"]').click();
+  await expect.poll(() => requestCount(counts, '/api/library/duplicates')).toBeGreaterThan(0);
+  await page.locator('a[href="/settings/organize?tab=categories"]').click();
+  await expect.poll(() => requestCount(counts, '/api/library/categories')).toBeGreaterThan(0);
+  await page.locator('a[href="/settings/organize?tab=recognition"]').click();
+  await expect.poll(() => requestCount(counts, '/api/organize/policy')).toBeGreaterThan(0);
+  await expect.poll(() => requestCount(counts, '/api/organize/candidates')).toBeGreaterThan(0);
+  await page.locator('a[href="/settings/organize?tab=queue"]').click();
+  await expect.poll(() => requestCount(counts, '/api/organize/jobs')).toBeGreaterThan(initialJobsRequests);
+
+  await page.locator('aside a[href="/settings/email"]').click();
+  await expect.poll(() => requestCount(counts, '/api/kindle-settings')).toBeGreaterThan(0);
+  expect(requestCount(counts, '/api/email-settings')).toBe(0);
+  expect(requestCount(counts, '/api/kindle-send-tasks')).toBe(0);
+
+  await page.locator('a[href="/settings/email?tab=smtp"]').click();
+  await expect.poll(() => requestCount(counts, '/api/email-settings')).toBeGreaterThan(0);
+  await page.locator('a[href="/settings/email?tab=queue"]').click();
+  await expect.poll(() => requestCount(counts, '/api/kindle-send-tasks')).toBeGreaterThan(0);
+
+  expect(requestCount(counts, '/api/auth/me')).toBe(initialAuthRequests);
+  expect(requestCount(counts, '/api/shelves')).toBe(initialShelfRequests);
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent('shuku:account-changed', {
+      detail: { id: 'settings-user', email: 'updated@example.com', name: 'Updated settings user' }
+    }));
+    window.dispatchEvent(new CustomEvent('shuku:shelves-changed'));
+  });
+  await expect(page.locator('aside').first().getByText('Updated settings user', { exact: true })).toBeVisible();
+  await expect.poll(() => requestCount(counts, '/api/shelves')).toBe(initialShelfRequests + 1);
+  expect(requestCount(counts, '/api/auth/me')).toBe(initialAuthRequests);
+});
+
+test('library import sections fetch only when their tab mounts and refresh after remount', async ({ page }) => {
+  const counts = await mockSettingsApi(page);
+  await page.goto('/settings/library');
+  await expect.poll(() => requestCount(counts, '/api/import-tasks')).toBeGreaterThan(0);
+  const initialImportTaskRequests = requestCount(counts, '/api/import-tasks');
+  expect(requestCount(counts, '/api/monitor-folders/tree')).toBe(0);
+  expect(requestCount(counts, '/api/monitor-folders')).toBe(0);
+  expect(requestCount(counts, '/api/system-settings')).toBe(0);
+
+  await page.getByRole('tab', { name: '文件管理' }).click();
+  await expect.poll(() => requestCount(counts, '/api/monitor-folders/tree')).toBeGreaterThan(0);
+  await page.getByRole('tab', { name: '监控文件夹' }).click();
+  await expect.poll(() => requestCount(counts, '/api/monitor-folders')).toBeGreaterThan(0);
+  await page.getByRole('tab', { name: '偏好设置' }).click();
+  await expect.poll(() => requestCount(counts, '/api/system-settings')).toBeGreaterThan(0);
+  await page.getByRole('tab', { name: '导入记录' }).click();
+  await expect.poll(() => requestCount(counts, '/api/import-tasks')).toBeGreaterThan(initialImportTaskRequests);
+});
+
+test('English settings tabs retain route-backed accessibility state', async ({ context, page }) => {
+  await context.clearCookies();
+  await context.addCookies([{ name: 'shuku_session', value: 'english-settings-session', domain: '127.0.0.1', path: '/' }]);
+  await mockSettingsApi(page, 'en-US');
+  await page.goto('/settings/organize?tab=queue');
+
+  const queueTab = page.locator('a[href="/settings/organize?tab=queue"]');
+  const providersTab = page.locator('a[href="/settings/organize?tab=providers"]');
+  await expect(queueTab).toHaveAttribute('aria-current', 'page');
+  await expect(providersTab).not.toHaveAttribute('aria-current', 'page');
+  await providersTab.press('Enter');
+  await expect(providersTab).toHaveAttribute('aria-current', 'page');
+});

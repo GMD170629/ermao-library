@@ -4,8 +4,9 @@ import { Activity, BookOpen, Database, FileText, Info, Mail, Sparkles, UserRound
 import type { LucideIcon } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { cn } from '../../../components/ui/cn';
+import { useAppSession } from '../../../components/layout/app-session-context';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 export type SettingsAccess = 'account' | 'system' | 'admin';
@@ -61,11 +62,6 @@ export function settingsItemAllowed(
   return Boolean(authorization?.canManageSystem);
 }
 
-type AuthorizationPayload = {
-  ok?: boolean;
-  data?: { authorization?: SettingsAuthorization };
-};
-
 export function isSettingsItemActive(pathname: string, href: string) {
   return href === '/settings' ? pathname === href : pathname.startsWith(href);
 }
@@ -74,7 +70,9 @@ export function SettingsSecondaryNav() {
   const { t: i18nAttribute } = useAttributeI18n();
   const pathname = usePathname();
   const router = useRouter();
-  const [authorization, setAuthorization] = useState<SettingsAuthorization | null>(null);
+  const session = useAppSession();
+  const authorization = session?.authorization ?? null;
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
   const visibleGroups = useMemo(
     () => settingsGroups
       .map((group) => ({
@@ -86,18 +84,15 @@ export function SettingsSecondaryNav() {
   );
 
   useEffect(() => {
-    const controller = new AbortController();
-    fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
-      .then((response) => response.json() as Promise<AuthorizationPayload>)
-      .then((payload) => {
-        const next = payload.ok ? payload.data?.authorization ?? null : null;
-        setAuthorization(next);
-        const currentItem = settingsItems.find((item) => isSettingsItemActive(pathname, item.href));
-        if (currentItem && !settingsItemAllowed(currentItem.access, next)) router.replace('/forbidden');
-      })
-      .catch(() => undefined);
-    return () => controller.abort();
-  }, [pathname, router]);
+    setPendingHref(null);
+    const currentItem = settingsItems.find((item) => isSettingsItemActive(pathname, item.href));
+    if (session?.user && currentItem && !settingsItemAllowed(currentItem.access, authorization)) router.replace('/forbidden');
+  }, [authorization, pathname, router, session?.user]);
+
+  function beginNavigation(event: MouseEvent<HTMLAnchorElement>, href: string) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    setPendingHref(href);
+  }
 
   return (
     <nav aria-label={i18nAttribute("设置分类")} className="border-b border-[#DEDAD4] pb-5 lg:border-b-0 lg:border-r lg:pb-0 lg:pr-7">
@@ -108,14 +103,17 @@ export function SettingsSecondaryNav() {
             <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-1">
               {group.items.map(({ href, label, icon: Icon }) => {
                 const active = isSettingsItemActive(pathname, href);
+                const selected = pendingHref ? pendingHref === href : active;
                 return (
                   <Link
                     key={href}
                     href={href}
+                    onClick={(event) => beginNavigation(event, href)}
                     aria-current={active ? 'page' : undefined}
+                    data-pending-navigation={selected && !active ? 'true' : undefined}
                     className={cn(
                       'flex min-h-11 min-w-0 items-center gap-2 rounded-xl px-3 text-[13px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5] sm:gap-3 sm:text-[15px]',
-                      active ? 'bg-[#F9DED4] text-[#EF4D2F]' : 'text-[#34312E] hover:bg-black/[0.04]'
+                      selected ? 'bg-[#F9DED4] text-[#EF4D2F]' : 'text-[#34312E] hover:bg-black/[0.04]'
                     )}
                   >
                     <Icon size={20} className="shrink-0" strokeWidth={1.75} />

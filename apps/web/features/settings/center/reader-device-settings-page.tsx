@@ -9,6 +9,7 @@ import { BookOpen, Check, FileText, Headphones, Images, Minus, MonitorSmartphone
 import { useEffect, useState, type ReactNode } from 'react';
 import { Button } from '../../../components/ui/button';
 import { useToast } from '../../../components/ui/feedback';
+import { useAppSession } from '../../../components/layout/app-session-context';
 import {
   READER_COMIC_DIRECTION_OPTIONS,
   READER_COMIC_IMAGE_FIT_OPTIONS,
@@ -260,31 +261,26 @@ function RangeField({
 export function ReaderDeviceSettingsPage() {
   const { t } = useI18n();
   const toast = useToast();
-  const [userId, setUserId] = useState('');
+  const userId = useAppSession()?.user?.id ?? '';
   const [preferences, setPreferences] = useState<ReaderPreferences>(() => normalizeReaderPreferences(DEFAULT_READER_PREFERENCES));
   const [audio, setAudio] = useState({ playbackRate: 1, volume: 1 });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const controller = new AbortController();
-    fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
-      .then((response) => response.json())
-      .then((payload) => {
-        const nextUserId = payload?.ok && typeof payload.data?.user?.id === 'string' ? payload.data.user.id : '';
-        setUserId(nextUserId);
-        if (nextUserId) {
-          setPreferences(readDeviceReaderPreferences(nextUserId, DEFAULT_READER_PREFERENCES));
-          const storedAudio = readAudioDevicePreferences(nextUserId);
-          setAudio({
-            playbackRate: Number(storedAudio.playbackRate ?? 1),
-            volume: Number(storedAudio.volume ?? 1)
-          });
-        }
-      })
-      .catch(() => undefined)
-      .finally(() => setLoading(false));
-    return () => controller.abort();
-  }, []);
+    if (!userId) {
+      setPreferences(normalizeReaderPreferences(DEFAULT_READER_PREFERENCES));
+      setAudio({ playbackRate: 1, volume: 1 });
+      setLoading(false);
+      return;
+    }
+    setPreferences(readDeviceReaderPreferences(userId, DEFAULT_READER_PREFERENCES));
+    const storedAudio = readAudioDevicePreferences(userId);
+    setAudio({
+      playbackRate: Number(storedAudio.playbackRate ?? 1),
+      volume: Number(storedAudio.volume ?? 1)
+    });
+    setLoading(false);
+  }, [userId]);
 
   function updatePreferences(nextPreferences: ReaderPreferences) {
     setPreferences(nextPreferences);

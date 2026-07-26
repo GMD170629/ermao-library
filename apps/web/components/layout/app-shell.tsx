@@ -35,7 +35,15 @@ import { clearPrivatePwaStorage, PwaClient } from '../system/pwa-client';
 import { cn } from '../ui/cn';
 import { useToast } from '../ui/feedback';
 import { useAudioPlayback } from '../../features/audio/audio-playback-provider';
-import { isSettingsItemActive, settingsGroups, settingsItemAllowed, type SettingsAuthorization } from '../../features/settings/center/settings-secondary-nav';
+import { isSettingsItemActive, settingsGroups, settingsItemAllowed } from '../../features/settings/center/settings-secondary-nav';
+import {
+  AppSessionProvider,
+  clearCachedAppSession,
+  getCachedAppSession,
+  setCachedAppSession,
+  type AppSessionAuthorization,
+  type AppSessionUser
+} from './app-session-context';
 import { MOBILE_NAVIGATION_DRAWER_ID, MobileNavigationProvider } from './mobile-navigation';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
@@ -86,8 +94,8 @@ type SessionStatus = 'checking' | 'authenticated' | 'unavailable' | 'redirecting
 type MePayload = {
   ok: boolean;
   data?: {
-    user?: { id?: string; email: string; name: string; role: string; locale?: string; avatarUrl?: string | null };
-    authorization?: SettingsAuthorization & { authzVersion?: number };
+    user?: AppSessionUser;
+    authorization?: AppSessionAuthorization;
   };
 };
 
@@ -120,8 +128,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [user, setUser] = useState<{ id?: string; email: string; name: string; role: string; avatarUrl?: string | null } | null>(null);
-  const [authorization, setAuthorization] = useState<(SettingsAuthorization & { authzVersion?: number }) | null>(null);
+  const [user, setUser] = useState<AppSessionUser | null>(() => getCachedAppSession()?.user ?? null);
+  const [authorization, setAuthorization] = useState<AppSessionAuthorization | null>(() => getCachedAppSession()?.authorization ?? null);
+  const [pendingSettingsHref, setPendingSettingsHref] = useState<string | null>(null);
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [shelves, setShelves] = useState<ShelfSummary[]>([]);
   const [librarySearch, setLibrarySearch] = useState('');
@@ -130,12 +139,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [searchTotal, setSearchTotal] = useState(0);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchActiveIndex, setSearchActiveIndex] = useState(0);
-  const [sessionStatus, setSessionStatus] = useState<SessionStatus>('checking');
+  const [sessionStatus, setSessionStatus] = useState<SessionStatus>(() => getCachedAppSession()?.user ? 'authenticated' : 'checking');
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const searchFormRef = useRef<HTMLFormElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const mobileSearchInputRef = useRef<HTMLInputElement>(null);
   const authRedirectingRef = useRef(false);
+  const redirectToLoginRef = useRef<() => void>(() => undefined);
   const appMainRef = useRef<HTMLElement>(null);
   const drawerPanelRef = useRef<HTMLElement>(null);
   const drawerCloseButtonRef = useRef<HTMLButtonElement>(null);
@@ -156,6 +166,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isProtectedPage = !isPublicAppPath(pathname);
   const currentSearchString = searchParams.toString();
   const currentSearch = useMemo(() => new URLSearchParams(currentSearchString), [currentSearchString]);
+  const appSession = useMemo(() => ({ user, authorization }), [authorization, user]);
   const shellSurface = isReader
     ? shellSurfaces.reader
     : isSetupPage
@@ -213,14 +224,24 @@ export function AppShell({ children }: { children: ReactNode }) {
     navigateFromMobileDrawer(href);
   }, [navigateFromMobileDrawer]);
 
+  const beginSettingsNavigation = useCallback((event: ReactMouseEvent<HTMLAnchorElement>, href: string) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    setPendingSettingsHref(href);
+  }, []);
+
   const redirectToLogin = useCallback(() => {
     if (!isProtectedPage || authRedirectingRef.current) return;
     authRedirectingRef.current = true;
+    clearCachedAppSession();
     setSessionStatus('redirecting');
     clearCurrentUserNamespace();
     void clearPrivatePwaStorage().catch(() => undefined);
     router.replace(buildLoginRedirectPath(pathname, currentSearchString));
   }, [currentSearchString, isProtectedPage, pathname, router]);
+
+  useEffect(() => {
+    redirectToLoginRef.current = redirectToLogin;
+  }, [redirectToLogin]);
 
   useEffect(() => installUnauthorizedFetchInterceptor(), []);
 
@@ -236,6 +257,17 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isProtectedPage) return undefined;
 
+    const cachedSession = getCachedAppSession();
+    if (cachedSession?.user) {
+      setUser(cachedSession.user);
+      setAuthorization(cachedSession.authorization);
+      setSessionStatus('authenticated');
+      if (cachedSession.user.locale === 'zh-CN' || cachedSession.user.locale === 'en-US') {
+        setLocale(cachedSession.user.locale);
+      }
+      return undefined;
+    }
+
     let active = true;
     const controller = new AbortController();
     setSessionStatus((current) => current === 'authenticated' ? current : 'checking');
@@ -248,7 +280,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         const payload = await response.json().catch(() => null) as MePayload | null;
         if (!active) return;
         if (response.status === 401) {
-          redirectToLogin();
+          redirectToLoginRef.current();
           return;
         }
         const nextUser = response.ok && payload?.ok ? payload.data?.user : null;
@@ -257,6 +289,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           setUser(nextUser);
           const nextAuthorization = payload?.data?.authorization ?? null;
           setAuthorization(nextAuthorization);
+          setCachedAppSession({ user: nextUser, authorization: nextAuthorization });
           if (nextUser.id) {
             const nextVersion = Number(nextAuthorization?.authzVersion ?? 1);
             const previousNamespace = window.sessionStorage.getItem('shuku:session:authz-namespace');
@@ -292,7 +325,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       active = false;
       controller.abort();
     };
-  }, [isProtectedPage, pathname, redirectToLogin, setLocale]);
+  }, [isProtectedPage, setLocale]);
 
   useEffect(() => {
     if (pathname !== '/login') return undefined;
@@ -388,14 +421,15 @@ export function AppShell({ children }: { children: ReactNode }) {
       setShelves(shelvesPayload?.ok ? (shelvesPayload.data?.shelves ?? []) : []);
     });
     window.addEventListener('shuku:shelves-changed', refreshShelves);
-    const refreshAccount = () => {
-      fetch('/api/auth/me')
-        .then((response) => response.json())
-        .then((payload) => {
-          if (active && payload?.ok) setUser(payload.data.user);
-          if (active && payload?.ok) setAuthorization(payload.data.authorization ?? null);
-        })
-        .catch(() => undefined);
+    const refreshAccount = (event: Event) => {
+      const nextUser = (event as CustomEvent<AppSessionUser | undefined>).detail;
+        if (active && nextUser?.email && nextUser.name) {
+          setUser((currentUser) => {
+            const mergedUser = currentUser ? { ...currentUser, ...nextUser } : nextUser;
+            setCachedAppSession({ user: mergedUser, authorization: getCachedAppSession()?.authorization ?? authorization });
+            return mergedUser;
+          });
+        }
     };
     window.addEventListener('shuku:account-changed', refreshAccount);
     return () => {
@@ -403,7 +437,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       window.removeEventListener('shuku:shelves-changed', refreshShelves);
       window.removeEventListener('shuku:account-changed', refreshAccount);
     };
-  }, [isAuthPage, isOffline, isReader, pathname, sessionStatus]);
+  }, [isAuthPage, isOffline, isReader, sessionStatus]);
+
+  useEffect(() => {
+    setPendingSettingsHref(null);
+  }, [currentSearchString, pathname]);
 
   useEffect(() => {
     setSearchFocused(false);
@@ -652,6 +690,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
+    <AppSessionProvider value={appSession}>
     <MobileNavigationProvider open={mobileDrawerOpen} openDrawer={openMobileDrawer}>
     <div className="shuku-app-shell min-h-screen bg-[var(--shuku-bg)] text-[var(--shuku-text)] [--shuku-sidebar-width:clamp(236px,16vw,264px)]">
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-[var(--shuku-sidebar-width)] flex-col border-r border-black/[0.04] bg-[#F3F0EC]/95 px-4 pb-5 pt-7 backdrop-blur-xl lg:flex">
@@ -755,14 +794,17 @@ export function AppShell({ children }: { children: ReactNode }) {
                       <div className="space-y-1">
                         {items.map(({ href, icon: Icon, label }) => {
                           const active = isSettingsItemActive(pathname, href);
+                          const selected = pendingSettingsHref ? pendingSettingsHref === href : active;
                           return (
                             <Link
                               key={href}
                               href={href}
+                              onClick={(event) => beginSettingsNavigation(event, href)}
                               aria-current={active ? 'page' : undefined}
+                              data-pending-navigation={selected && !active ? 'true' : undefined}
                               className={cn(
                                 'flex min-h-11 items-center gap-3 rounded-xl px-3 text-[15px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]',
-                                active ? 'bg-[#F9DED4] text-[#EF4D2F]' : 'text-[#34312E] hover:bg-black/[0.04]'
+                                selected ? 'bg-[#F9DED4] text-[#EF4D2F]' : 'text-[#34312E] hover:bg-black/[0.04]'
                               )}
                             >
                               <Icon size={20} strokeWidth={1.75} />
@@ -1037,5 +1079,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       <PwaClient />
     </div>
     </MobileNavigationProvider>
+    </AppSessionProvider>
   );
 }

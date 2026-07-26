@@ -1,14 +1,16 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
-import { MetadataProvidersPanel } from '../../organize/metadata-providers-panel';
-import { ClassificationManagementPanel } from '../../organize/classification-management-panel';
-import { DuplicateManagementPanel } from '../../organize/duplicate-management-panel';
+import dynamic from 'next/dynamic';
 import { OrganizePage } from '../../organize/organize-page';
-import { RecognitionSettingsPanel } from '../../organize/recognition-settings-panel';
 import { SettingsCenterShell } from './settings-center-shell';
 import { SettingsTabs } from './settings-tabs';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
+
+const DuplicateManagementPanel = dynamic(() => import('../../organize/duplicate-management-panel').then((module) => module.DuplicateManagementPanel));
+const ClassificationManagementPanel = dynamic(() => import('../../organize/classification-management-panel').then((module) => module.ClassificationManagementPanel));
+const RecognitionSettingsPanel = dynamic(() => import('../../organize/recognition-settings-panel').then((module) => module.RecognitionSettingsPanel));
+const MetadataProvidersPanel = dynamic(() => import('../../organize/metadata-providers-panel').then((module) => module.MetadataProvidersPanel));
 
 export function OrganizeSettingsPage() {
   const { t: i18nAttribute } = useAttributeI18n();

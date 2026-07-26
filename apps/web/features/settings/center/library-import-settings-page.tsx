@@ -1,14 +1,16 @@
 'use client';
 
 import { FileClock, FolderCog, FolderTree, SlidersHorizontal } from 'lucide-react';
+import dynamic from 'next/dynamic';
 import { useState } from 'react';
 import { ImportTasksPage } from '../../import-tasks/import-tasks-page';
-import { SettingsPage } from '../settings-page';
 import { cn } from '../../../components/ui/cn';
-import { ImportFileManager } from './import-file-manager';
 import { SettingsCenterShell } from './settings-center-shell';
-import { ImportPreferencesPanel } from './import-preferences-panel';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
+
+const ImportFileManager = dynamic(() => import('./import-file-manager').then((module) => module.ImportFileManager));
+const SettingsPage = dynamic(() => import('../settings-page').then((module) => module.SettingsPage));
+const ImportPreferencesPanel = dynamic(() => import('./import-preferences-panel').then((module) => module.ImportPreferencesPanel));
 
 export function LibraryImportSettingsPage() {
   const { t: i18nAttribute } = useAttributeI18n();

@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { clearPrivatePwaStorage } from '../../../components/system/pwa-client';
+import { clearCachedAppSession, useAppSession } from '../../../components/layout/app-session-context';
 import { Button } from '../../../components/ui/button';
 import { useToast } from '../../../components/ui/feedback';
 import { withBasePath } from '../../../lib/base-path';
@@ -13,7 +14,7 @@ import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type CurrentUser = {
-  id: string;
+  id?: string;
   email: string;
   name: string;
   avatarUrl?: string | null;
@@ -32,6 +33,7 @@ export function AccountPanel() {
   const { t: i18nAttribute } = useAttributeI18n();
   const router = useRouter();
   const toast = useToast();
+  const sessionUser = useAppSession()?.user;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [name, setName] = useState('');
@@ -44,21 +46,11 @@ export function AccountPanel() {
   const [avatarFailed, setAvatarFailed] = useState(false);
 
   useEffect(() => {
-    let active = true;
-    fetch('/api/auth/me')
-      .then((response) => response.json() as Promise<AuthPayload>)
-      .then((payload) => {
-        const nextUser = payload.ok ? payload.data?.user ?? null : null;
-        if (!active) return;
-        setUser(nextUser);
-        setName(nextUser?.name ?? '');
-        setEmail(nextUser?.email ?? '');
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, []);
+    const nextUser = sessionUser ?? null;
+    setUser(nextUser);
+    setName(nextUser?.name ?? '');
+    setEmail(nextUser?.email ?? '');
+  }, [sessionUser]);
 
   const avatarSrc = user?.avatarUrl && !avatarFailed ? withBasePath(user.avatarUrl) : fallbackAvatar;
 
@@ -74,6 +66,7 @@ export function AccountPanel() {
   async function logout() {
     setBusy('logout');
     await fetch('/api/auth/logout', { method: 'POST' }).catch(() => null);
+    clearCachedAppSession();
     await clearPrivatePwaStorage();
     router.replace('/login');
     router.refresh();
@@ -182,6 +175,7 @@ export function AccountPanel() {
       const payload = (await response.json()) as { ok: boolean; error?: { message?: string } };
       if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '修改密码失败');
       toast.success('密码已更新', '请使用新密码重新登录');
+      clearCachedAppSession();
       await clearPrivatePwaStorage();
       router.replace('/login');
       router.refresh();

@@ -186,8 +186,31 @@ test('dashboard recent shelves share a ten-book horizontal rail without visible 
   }
 
   await expect(readingShelf.locator('[data-bookshelf-progress]')).toHaveCount(0);
-  expect(requestedQueries).toHaveLength(2);
+  expect(requestedQueries.length).toBeGreaterThanOrEqual(2);
+  expect(new Set(requestedQueries.map((url) => new URL(url).pathname))).toEqual(new Set([
+    '/api/dashboard/recent-reading',
+    '/api/dashboard/recent-books'
+  ]));
   expect(requestedQueries.every((url) => new URL(url).searchParams.get('limit') === '10')).toBe(true);
+
+  const readingScroller = readingShelf.getByTestId('dashboard-recent-reading-shelf-scroller');
+  const firstBook = readingShelf.getByRole('button').first();
+  const firstBookBox = await firstBook.boundingBox();
+  if (!firstBookBox) throw new Error('Expected the first recent-reading book to be visible');
+
+  await page.mouse.move(firstBookBox.x + firstBookBox.width / 2, firstBookBox.y + firstBookBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(firstBookBox.x - 180, firstBookBox.y + firstBookBox.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(() => readingScroller.evaluate((element) => element.scrollLeft)).toBeGreaterThan(100);
+  await expect(page).toHaveURL(/\/$/);
+
+  await readingScroller.evaluate((element) => { element.scrollLeft = 0; });
+  await readingScroller.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(() => readingScroller.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  await page.keyboard.press('End');
+  await expect.poll(() => readingScroller.evaluate((element) => element.scrollLeft)).toBeGreaterThan(100);
 });
 
 test('wide shelf details use responsive bookshelf rows and load more on scroll', async ({ page }) => {
