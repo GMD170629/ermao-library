@@ -6,6 +6,7 @@ import os
 import shutil
 import sys
 import uuid
+import zipfile
 from collections.abc import Iterable
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -33,6 +34,68 @@ SUPPORTED_EXTENSIONS = {
     ".ogg",
     ".wav",
 }
+
+
+def built_in_samples(root: Path) -> list[Path]:
+    direct_fixtures = {
+        "sample.txt": b"Shuku Starship appv2\n",
+        "sample.pdf": b"%PDF-1.7\n% appv2 smoke\n",
+        "sample.mp3": b"ID3appv2-audio-smoke",
+    }
+    paths: list[Path] = []
+    for name, content in direct_fixtures.items():
+        path = root / name
+        path.write_bytes(content)
+        paths.append(path)
+
+    epub = root / "sample.epub"
+    with zipfile.ZipFile(epub, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            (
+                '<?xml version="1.0"?>'
+                '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" '
+                'version="1.0"><rootfiles><rootfile full-path="OEBPS/content.opf" '
+                'media-type="application/oebps-package+xml"/></rootfiles></container>'
+            ),
+        )
+        archive.writestr(
+            "OEBPS/content.opf",
+            (
+                '<?xml version="1.0"?>'
+                '<package xmlns="http://www.idpf.org/2007/opf" version="3.0">'
+                '<manifest><item id="nav" href="nav.xhtml" '
+                'media-type="application/xhtml+xml" properties="nav"/>'
+                '<item id="chapter" href="chapter.xhtml" '
+                'media-type="application/xhtml+xml"/></manifest>'
+                '<spine><itemref idref="chapter"/></spine></package>'
+            ),
+        )
+        archive.writestr(
+            "OEBPS/nav.xhtml",
+            (
+                '<html xmlns="http://www.w3.org/1999/xhtml" '
+                'xmlns:epub="http://www.idpf.org/2007/ops"><body>'
+                '<nav epub:type="toc"><ol><li><a href="chapter.xhtml">Smoke chapter</a>'
+                "</li></ol></nav></body></html>"
+            ),
+        )
+        archive.writestr(
+            "OEBPS/chapter.xhtml",
+            '<html xmlns="http://www.w3.org/1999/xhtml"><body>appv2</body></html>',
+        )
+    paths.append(epub)
+
+    comic = root / "sample.cbz"
+    with zipfile.ZipFile(comic, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("page-001.jpg", b"\xff\xd8\xff\xd9")
+    paths.append(comic)
+    return paths
 
 
 def actor_id(container: Container) -> uuid.UUID:
@@ -76,11 +139,8 @@ def import_one(container: Container, user_id: uuid.UUID, path: Path) -> None:
         edition_id=job.result_id,
         requested_range=None,
     )
-    try:
-        if b"".join(stream.iterator) != path.read_bytes():
-            raise RuntimeError(f"streamed bytes differ for {path.name}")
-    finally:
-        stream.close()
+    if b"".join(stream.body) != path.read_bytes():
+        raise RuntimeError(f"streamed bytes differ for {path.name}")
 
 
 def real_samples() -> Iterable[Path]:
@@ -120,18 +180,7 @@ def main() -> None:
         storage_root = root / "storage"
         samples_root = monitor_root / "samples"
         samples_root.mkdir(parents=True)
-        fixtures = {
-            "sample.txt": b"Shuku Starship appv2\n",
-            "sample.epub": b"PK\x03\x04appv2-epub-smoke",
-            "sample.pdf": b"%PDF-1.7\n% appv2 smoke\n",
-            "sample.cbz": b"PK\x03\x04appv2-comic-smoke",
-            "sample.mp3": b"ID3appv2-audio-smoke",
-        }
-        paths: list[Path] = []
-        for name, content in fixtures.items():
-            path = samples_root / name
-            path.write_bytes(content)
-            paths.append(path)
+        paths = built_in_samples(samples_root)
         for index, source in enumerate(real_samples()):
             destination = samples_root / f"real-{index}-{source.name}"
             shutil.copy2(source, destination)
