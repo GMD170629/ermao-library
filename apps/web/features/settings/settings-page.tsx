@@ -271,7 +271,6 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
       body: JSON.stringify({
         path: rootPath,
         recursive: true,
-        moveSource: false,
         options: {
           name,
           ignorePatterns,

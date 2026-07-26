@@ -52,6 +52,7 @@ def test_ingestion_worker_no_job_success_and_retry_failure() -> None:
         id=uuid.uuid4(),
         source_path="/monitor/book.epub",
         attempt=1,
+        max_attempts=5,
         kind="import",
         options={},
     )
@@ -77,11 +78,15 @@ def test_ingestion_worker_no_job_success_and_retry_failure() -> None:
         id=uuid.uuid4(),
         source_path="/monitor/book.txt",
         attempt=1,
+        max_attempts=5,
         kind="conversion",
         options={"sourceEditionId": str(source_edition_id)},
     )
     conversion.prepare.return_value = preparation.prepare.return_value
-    catalog.publish_conversion.return_value = SimpleNamespace(id=uuid.uuid4())
+    catalog.publish_conversion.return_value = SimpleNamespace(
+        id=uuid.uuid4(),
+        work_id=uuid.uuid4(),
+    )
     assert worker.run_once("worker") is True
     conversion.prepare.assert_called_once_with(
         "/monitor/book.txt",
@@ -99,7 +104,9 @@ def test_ingestion_worker_no_job_success_and_retry_failure() -> None:
         options={},
     )
     assert worker.run_once("worker") is True
-    assert repository.fail.call_args.kwargs["retry_at"] is not None
+    assert repository.fail.call_args.kwargs["retry_at"] is None
+    assert repository.fail.call_args.kwargs["retryable"] is False
+    assert repository.fail.call_args.kwargs["error_code"] == "INVALID_IMPORT_SOURCE"
     repository.claim_next.return_value = SimpleNamespace(
         id=uuid.uuid4(),
         source_path="/monitor/bad.epub",
@@ -286,13 +293,19 @@ def test_worker_runtime_invokes_every_queue_without_short_circuiting() -> None:
     container = MagicMock()
     container.operations.disabled_queues.return_value = frozenset()
     container.ingestion_worker.run_once.return_value = False
+    container.ingestion_outbox.run_once.return_value = False
     container.metadata_worker.run_once.return_value = True
     container.discovery_worker.run_once.return_value = False
     container.delivery_worker.run_once.return_value = True
     container.backup_worker.run_once.return_value = False
-    runtime = WorkerRuntime(container=container, worker_id="worker")
+    runtime = WorkerRuntime(
+        container=container,
+        worker_id="worker",
+        scheduler_enabled=False,
+    )
     assert runtime.run_once() is True
     container.ingestion_worker.run_once.assert_called_once_with("worker")
+    container.ingestion_outbox.run_once.assert_called_once_with()
     container.metadata_worker.run_once.assert_called_once_with("worker")
     container.discovery_worker.run_once.assert_called_once_with("worker")
     container.delivery_worker.run_once.assert_called_once_with("worker")
@@ -301,6 +314,7 @@ def test_worker_runtime_invokes_every_queue_without_short_circuiting() -> None:
     container.reset_mock()
     container.operations.disabled_queues.return_value = frozenset({"metadata", "backups"})
     container.ingestion_worker.run_once.return_value = False
+    container.ingestion_outbox.run_once.return_value = False
     container.discovery_worker.run_once.return_value = False
     container.delivery_worker.run_once.return_value = False
     assert runtime.run_once() is False

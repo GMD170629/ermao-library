@@ -30,6 +30,10 @@ class ReadingNotFound(Exception):
     pass
 
 
+class SourceFileMissing(ReadingNotFound):
+    pass
+
+
 class ProgressConflict(Exception):
     pass
 
@@ -111,7 +115,9 @@ class ReadingService:
             pages = (
                 self._resources.comic_pages(selected) if edition.format in {"cbz", "cbr"} else []
             )
-        except (FileNotFoundError, ValueError) as error:
+        except FileNotFoundError as error:
+            raise SourceFileMissing from error
+        except ValueError as error:
             raise ReadingNotFound from error
         return (
             target,
@@ -142,7 +148,9 @@ class ReadingService:
                 requested_range=requested_range,
                 stream_key=str(user_id),
             )
-        except (FileNotFoundError, ValueError) as error:
+        except FileNotFoundError as error:
+            raise SourceFileMissing from error
+        except ValueError as error:
             raise ReadingNotFound from error
 
     def file_resource(
@@ -161,7 +169,9 @@ class ReadingService:
                 requested_range=requested_range,
                 stream_key=str(user_id),
             )
-        except (FileNotFoundError, ValueError) as error:
+        except FileNotFoundError as error:
+            raise SourceFileMissing from error
+        except ValueError as error:
             raise ReadingNotFound from error
 
     def comic_pages(self, *, target_id: uuid.UUID) -> list[ComicPage]:
@@ -170,7 +180,9 @@ class ReadingService:
             raise ReadingNotFound
         try:
             return self._resources.comic_pages(file)
-        except (FileNotFoundError, ValueError) as error:
+        except FileNotFoundError as error:
+            raise SourceFileMissing from error
+        except ValueError as error:
             raise ReadingNotFound from error
 
     def comic_page(
@@ -189,7 +201,9 @@ class ReadingService:
                 page_index=page_index,
                 stream_key=str(user_id),
             )
-        except (FileNotFoundError, ValueError) as error:
+        except FileNotFoundError as error:
+            raise SourceFileMissing from error
+        except ValueError as error:
             raise ReadingNotFound from error
 
     def _comic_file(self, target_id: uuid.UUID) -> CatalogFile | None:

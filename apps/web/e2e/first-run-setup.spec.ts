@@ -30,6 +30,16 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
       }
     });
   });
+  await page.route('**/api/v2/ingestion/folders/tree', async (route) => {
+    await route.fulfill({
+      json: {
+        monitorRoot: '/monitor',
+        currentPath: '/monitor',
+        parentPath: null,
+        directories: []
+      }
+    });
+  });
   await page.route('**/api/v2/ingestion/folders', async (route) => {
     if (route.request().method() === 'GET') {
       await route.fulfill({ json: { items: [], page: 1, pageSize: 24, total: 0 } });
@@ -39,7 +49,6 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
     expect(route.request().postDataJSON()).toEqual({
       path: '/monitor',
       recursive: true,
-      moveSource: false,
       options: { name: '我的书库' }
     });
     await route.fulfill({
@@ -49,7 +58,6 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
         path: '/monitor',
         enabled: true,
         recursive: true,
-        moveSource: false,
         options: { name: '我的书库' },
         lastScanAt: null,
         createdAt: '2026-07-25T00:00:00Z'

@@ -9,10 +9,13 @@ from appv2.modules.catalog.contracts import (
     CatalogFile,
     CatalogImport,
     CatalogImportPort,
+    CatalogImportResult,
     CatalogMetadataPort,
+    CatalogOrganizationReadPort,
     CatalogReadPort,
     CatalogVolume,
     CatalogWork,
+    PreparedPublication,
 )
 from appv2.modules.delivery.contracts import (
     DeliverableFile,
@@ -21,7 +24,12 @@ from appv2.modules.delivery.contracts import (
 )
 from appv2.modules.discovery.contracts import DiscoveryUnitOfWork, ImportEnqueuePort
 from appv2.modules.ingestion.application import IngestionService
-from appv2.modules.ingestion.contracts import ImportResult, IngestionUnitOfWork
+from appv2.modules.ingestion.contracts import (
+    ImportResult,
+    IngestionOutboxEvent,
+    IngestionUnitOfWork,
+)
+from appv2.modules.metadata.application import MetadataService
 from appv2.modules.metadata.contracts import MetadataUnitOfWork
 from appv2.modules.operations.contracts import (
     OperationsUnitOfWork,
@@ -32,6 +40,7 @@ from appv2.modules.operations.contracts import (
 
 class CatalogPorts(
     CatalogReadPort,
+    CatalogOrganizationReadPort,
     CatalogImportPort,
     CatalogMetadataPort,
     DeliverableFilePort,
@@ -42,6 +51,9 @@ class CatalogPorts(
 
     def get_work(self, work_id: uuid.UUID) -> CatalogWork | None:
         return self._read.get_work(work_id)
+
+    def list_active_works(self, *, offset: int, limit: int) -> list[CatalogWork]:
+        return self._read.list_active_works(offset=offset, limit=limit)
 
     def get_edition(self, edition_id: uuid.UUID) -> CatalogEdition | None:
         return self._read.get_edition(edition_id)
@@ -63,6 +75,9 @@ class CatalogPorts(
 
     def import_file(self, imported: CatalogImport) -> CatalogEdition:
         return self._service.import_file(imported)
+
+    def import_publication(self, publication: PreparedPublication) -> CatalogImportResult:
+        return self._service.import_publication(publication)
 
     def publish_conversion(
         self,
@@ -99,6 +114,23 @@ class IngestionEnqueueAdapter(ImportEnqueuePort):
             source_path=path,
             requested_by=requested_by,
             idempotency_key=idempotency_key,
+        )
+
+
+class ImportCompletedHandler:
+    def __init__(self, metadata: MetadataService) -> None:
+        self._metadata = metadata
+
+    def handle(self, event: IngestionOutboxEvent) -> None:
+        if event.event_type != "import.completed":
+            raise ValueError(f"unsupported ingestion event: {event.event_type}")
+        job_id = event.payload.get("jobId")
+        work_id = event.payload.get("workId")
+        if not isinstance(job_id, str) or not isinstance(work_id, str):
+            raise ValueError("import.completed event payload is invalid")
+        self._metadata.handle_import_completed(
+            work_id=uuid.UUID(work_id),
+            import_job_id=uuid.UUID(job_id),
         )
 
 

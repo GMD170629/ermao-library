@@ -18,18 +18,28 @@ def main() -> None:
     configure_logging()
     container = build_container()
     worker_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
-    runtime = WorkerRuntime(container=container, worker_id=worker_id)
     try:
         with advisory_lock(
             container.database.engine, container.settings.worker_lock_id
         ) as acquired:
-            if not acquired:
-                raise RuntimeError("another appv2 scheduler owns the advisory lock")
-            logger.info("appv2 worker started as %s", worker_id)
-            while True:
-                handled = runtime.run_once()
-                if not handled:
-                    time.sleep(container.settings.worker_poll_seconds)
+            runtime = WorkerRuntime(
+                container=container,
+                worker_id=worker_id,
+                scheduler_enabled=acquired,
+            )
+            if acquired:
+                container.ingestion_watcher.start()
+                logger.info("appv2 scheduler and worker started as %s", worker_id)
+            else:
+                logger.info("appv2 consumer-only worker started as %s", worker_id)
+            try:
+                while True:
+                    handled = runtime.run_once()
+                    if not handled:
+                        time.sleep(container.settings.worker_poll_seconds)
+            finally:
+                if acquired:
+                    container.ingestion_watcher.stop()
     finally:
         container.close()
 

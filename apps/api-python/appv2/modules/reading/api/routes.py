@@ -14,6 +14,7 @@ from appv2.modules.reading.application import (
     ProgressConflict,
     ReadingNotFound,
     ReadingService,
+    SourceFileMissing,
 )
 from appv2.modules.reading.contracts import (
     BookmarkView,
@@ -261,6 +262,13 @@ def create_router(service: ReadingService, current_account: CurrentAccount) -> A
     Actor = Annotated[AccountView, Depends(authorized)]
 
     def missing(error: ReadingNotFound) -> AppProblem:
+        if isinstance(error, SourceFileMissing):
+            return AppProblem(
+                status=404,
+                code="SOURCE_FILE_MISSING",
+                title="Source file missing",
+                message_key="source_file_missing",
+            )
         return AppProblem(
             status=404,
             code="READING_RESOURCE_NOT_FOUND",

@@ -15,6 +15,7 @@ from appv2.modules.metadata.contracts import (
     MetadataCandidate,
     MetadataJob,
     MetadataPatch,
+    OrganizePolicy,
     ProviderView,
 )
 from appv2.platform.http import AppProblem, CamelModel, Page
@@ -117,6 +118,28 @@ class ApplyCandidateRequest(CamelModel):
     fields: list[MetadataField] = Field(min_length=1)
 
 
+class OrganizePolicyResponse(CamelModel):
+    schedule_mode: Literal["MANUAL", "INTERVAL"]
+    interval_minutes: int | None
+    auto_run_on_new: bool
+    provider_scope: tuple[str, ...]
+    overwrite_fields: tuple[str, ...]
+    rules: dict[str, object]
+
+    @classmethod
+    def from_view(cls, value: OrganizePolicy) -> "OrganizePolicyResponse":
+        return cls.model_validate(value)
+
+
+class OrganizePolicyRequest(CamelModel):
+    schedule_mode: Literal["MANUAL", "INTERVAL"]
+    interval_minutes: int | None = Field(default=None, ge=5)
+    auto_run_on_new: bool = False
+    provider_scope: tuple[str, ...] = ()
+    overwrite_fields: tuple[str, ...] = ()
+    rules: dict[str, object] = Field(default_factory=dict)
+
+
 def _candidate_patch(
     candidate: MetadataCandidate,
     fields: list[MetadataField],
@@ -174,6 +197,35 @@ def create_router(service: MetadataService, current_account: CurrentAccount) -> 
             title="Metadata job is running",
             message_key="conflict",
         )
+
+    @router.get("/organize-policy", response_model=OrganizePolicyResponse)
+    def organize_policy(actor: Actor) -> OrganizePolicyResponse:
+        del actor
+        return OrganizePolicyResponse.from_view(service.organize_policy())
+
+    @router.put("/organize-policy", response_model=OrganizePolicyResponse)
+    def update_organize_policy(
+        payload: OrganizePolicyRequest,
+        actor: Actor,
+    ) -> OrganizePolicyResponse:
+        del actor
+        try:
+            policy = service.update_organize_policy(
+                schedule_mode=payload.schedule_mode,
+                interval_minutes=payload.interval_minutes,
+                auto_run_on_new=payload.auto_run_on_new,
+                provider_scope=payload.provider_scope,
+                overwrite_fields=payload.overwrite_fields,
+                rules=payload.rules,
+            )
+        except ValueError as error:
+            raise AppProblem(
+                status=422,
+                code="INVALID_ORGANIZE_POLICY",
+                title="Invalid organize policy",
+                message_key="invalid_request",
+            ) from error
+        return OrganizePolicyResponse.from_view(policy)
 
     @router.get("/providers", response_model=Page[ProviderResponse])
     def providers(actor: Actor) -> Page[ProviderResponse]:

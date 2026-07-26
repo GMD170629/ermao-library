@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     password_reset_ttl_seconds: int = Field(default=30 * 60, ge=300, le=24 * 60 * 60)
     worker_poll_seconds: float = Field(default=1.0, ge=0.1, le=60)
     worker_lease_seconds: int = Field(default=300, ge=30, le=3600)
+    monitor_stability_seconds: float = Field(default=2.0, ge=0, le=300)
+    monitor_refresh_interval_ms: int = Field(default=60_000, ge=500, le=86_400_000)
     file_streams_per_user_limit: int = Field(default=8, ge=1, le=128)
     migration_lock_id: int = 830_400
     worker_lock_id: int = 830_401

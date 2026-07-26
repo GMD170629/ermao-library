@@ -12,12 +12,14 @@ from appv2.modules.catalog.contracts import (
     CatalogEdition,
     CatalogFile,
     CatalogImport,
+    CatalogImportResult,
     CatalogRepository,
     CatalogVolume,
     CatalogWork,
     CategoryView,
     DuplicateGroupView,
     LibraryOperationView,
+    PreparedPublication,
     SeriesView,
     ShelfView,
 )
@@ -520,6 +522,141 @@ class SqlCatalogRepository(CatalogRepository):
         record.cover_key = cover_key
         self._session.flush()
         return _work(record)
+
+    def import_publication(self, publication: PreparedPublication) -> CatalogImportResult:
+        checksums = [item.checksum for item in publication.files]
+        existing_file = self._session.scalar(
+            select(FileRecord).where(FileRecord.checksum.in_(checksums)).limit(1)
+        )
+        work: WorkRecord | None = None
+        edition: EditionRecord | None = None
+        if existing_file is not None:
+            edition = self._session.get(EditionRecord, existing_file.edition_id)
+            if edition is not None:
+                work = self._session.get(WorkRecord, edition.work_id)
+        if work is None:
+            work = self._session.scalar(
+                select(WorkRecord)
+                .where(
+                    WorkRecord.metadata_json["identityKey"].as_string() == publication.identity_key
+                )
+                .limit(1)
+            )
+        if work is None:
+            work = WorkRecord(
+                title=publication.title,
+                sort_title=publication.title.casefold(),
+                author=publication.author,
+                media_type=publication.media_type,
+                status="active",
+                metadata_json={
+                    **publication.metadata,
+                    "identityKey": publication.identity_key,
+                    "identifiers": list(publication.identifiers),
+                },
+            )
+            self._session.add(work)
+            self._session.flush()
+        if edition is None or edition.work_id != work.id or edition.format != publication.format:
+            edition = self._session.scalar(
+                select(EditionRecord)
+                .where(
+                    EditionRecord.work_id == work.id,
+                    EditionRecord.format == publication.format,
+                )
+                .order_by(EditionRecord.created_at)
+                .limit(1)
+            )
+        if edition is None:
+            edition = EditionRecord(
+                work_id=work.id,
+                title=publication.title,
+                format=publication.format,
+                language=publication.language,
+                is_primary=True,
+                metadata_json=publication.metadata,
+            )
+            self._session.add(edition)
+            self._session.flush()
+
+        volume_ids: dict[str, uuid.UUID] = {}
+        for volume_spec in publication.volumes:
+            volume = self._session.scalar(
+                select(VolumeRecord).where(
+                    VolumeRecord.edition_id == edition.id,
+                    VolumeRecord.title == volume_spec.title,
+                )
+            )
+            if volume is None:
+                sort_order = volume_spec.sort_order
+                occupied = self._session.scalar(
+                    select(VolumeRecord.id).where(
+                        VolumeRecord.edition_id == edition.id,
+                        VolumeRecord.sort_order == sort_order,
+                    )
+                )
+                if occupied is not None:
+                    sort_order = (
+                        int(
+                            self._session.scalar(
+                                select(func.max(VolumeRecord.sort_order)).where(
+                                    VolumeRecord.edition_id == edition.id
+                                )
+                            )
+                            or 0
+                        )
+                        + 1
+                    )
+                volume = VolumeRecord(
+                    edition_id=edition.id,
+                    title=volume_spec.title,
+                    sort_order=sort_order,
+                    page_count=volume_spec.page_count,
+                    duration_ms=volume_spec.duration_ms,
+                )
+                self._session.add(volume)
+                self._session.flush()
+            else:
+                volume.title = volume_spec.title
+                volume.page_count = volume_spec.page_count
+                volume.duration_ms = volume_spec.duration_ms
+            volume_ids[volume_spec.key] = volume.id
+
+        added = 0
+        for file_spec in publication.files:
+            existing = self._session.scalar(
+                select(FileRecord).where(
+                    FileRecord.checksum == file_spec.checksum,
+                    FileRecord.storage_path == file_spec.source_path,
+                )
+            )
+            if existing is not None:
+                continue
+            self._session.add(
+                FileRecord(
+                    edition_id=edition.id,
+                    volume_id=(
+                        volume_ids.get(file_spec.volume_key)
+                        if file_spec.volume_key is not None
+                        else None
+                    ),
+                    storage_path=file_spec.source_path,
+                    original_name=file_spec.original_name,
+                    media_type=file_spec.media_type,
+                    size_bytes=file_spec.size_bytes,
+                    checksum=file_spec.checksum,
+                    sort_order=file_spec.sort_order,
+                    duration_ms=file_spec.duration_ms,
+                )
+            )
+            added += 1
+        self._session.flush()
+        return CatalogImportResult(
+            work_id=work.id,
+            edition_id=edition.id,
+            volume_ids=tuple(volume_ids.values()),
+            duplicate=added == 0,
+        )
 
     def import_file(self, imported: CatalogImport) -> CatalogEdition:
         existing = self._session.scalar(

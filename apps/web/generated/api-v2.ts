@@ -358,7 +358,6 @@ export type EmailTestRequest = {
 
 export type EnqueueRequest = {
   sourcePath: string;
-  moveSource?: boolean;
 };
 
 export type EpubLocationClaimRequest = {
@@ -458,10 +457,22 @@ export type FindReplaceRequest = {
   startNumber?: number;
 };
 
+export type FolderCreatedResponse = {
+  id: string;
+  path: string;
+  enabled: boolean;
+  recursive: boolean;
+  options: {
+    [key: string]: unknown;
+  };
+  lastScanAt: string | null;
+  createdAt: string;
+  scanRunId: string;
+};
+
 export type FolderRequest = {
   path: string;
   recursive?: boolean;
-  moveSource?: boolean;
   options?: {
     [key: string]: unknown;
   };
@@ -472,7 +483,6 @@ export type FolderResponse = {
   path: string;
   enabled: boolean;
   recursive: boolean;
-  moveSource: boolean;
   options: {
     [key: string]: unknown;
   };
@@ -483,7 +493,6 @@ export type FolderResponse = {
 export type FolderUpdate = {
   enabled?: boolean | null;
   recursive?: boolean | null;
-  moveSource?: boolean | null;
   options?: {
     [key: string]: unknown;
   } | null;
@@ -504,23 +513,71 @@ export type HealthResponse = {
   contributors: Array<HealthItem>;
 };
 
+export type IngestionPolicyRequest = {
+  allowedExtensions?: Array<string>;
+  ignorePatterns?: Array<string>;
+  stabilityCheckEnabled?: boolean;
+  stabilityCheckSeconds?: number;
+  autoConvertToEpub?: boolean;
+};
+
+export type IngestionPolicyResponse = {
+  allowedExtensions: Array<string>;
+  ignorePatterns: Array<string>;
+  stabilityCheckEnabled: boolean;
+  stabilityCheckSeconds: number;
+  autoConvertToEpub: boolean;
+  updatedAt: string;
+};
+
 export type JobAccepted = {
   id: string;
   status: string;
   duplicate: boolean;
-  resultId: string | null;
+  workId: string | null;
+  editionId: string | null;
+  volumeIds: Array<string>;
+};
+
+export type JobDetailResponse = {
+  job: JobResponse;
+  logs: Array<JobLogResponse>;
+};
+
+export type JobLogResponse = {
+  id: string;
+  level: string;
+  messageKey: string;
+  params: {
+    [key: string]: unknown;
+  };
+  createdAt: string;
 };
 
 export type JobResponse = {
   id: string;
   kind: string;
+  origin: string;
   status: string;
+  stage: string;
+  progress: number;
   sourcePath: string;
+  requestedBy: string | null;
+  monitorFolderId: string | null;
+  triggeredBy: string;
   attempt: number;
+  maxAttempts: number;
   nextAttemptAt: string;
   leaseExpiresAt: string | null;
-  resultId: string | null;
+  cancelRequested: boolean;
+  retryable: boolean;
+  resultWorkId: string | null;
+  resultEditionId: string | null;
+  resultVolumeIds: Array<string>;
   errorCode: string | null;
+  errorDetail: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -629,6 +686,28 @@ export type MoveVolumeToRequest = {
   targetEditionId: string;
 };
 
+export type OrganizePolicyRequest = {
+  scheduleMode: "MANUAL" | "INTERVAL";
+  intervalMinutes?: number | null;
+  autoRunOnNew?: boolean;
+  providerScope?: Array<string>;
+  overwriteFields?: Array<string>;
+  rules?: {
+    [key: string]: unknown;
+  };
+};
+
+export type OrganizePolicyResponse = {
+  scheduleMode: "MANUAL" | "INTERVAL";
+  intervalMinutes: number | null;
+  autoRunOnNew: boolean;
+  providerScope: Array<string>;
+  overwriteFields: Array<string>;
+  rules: {
+    [key: string]: unknown;
+  };
+};
+
 export type Page_AccountResponse_ = {
   items: Array<AccountResponse>;
   page: number;
@@ -694,13 +773,6 @@ export type Page_EventResponse_ = {
 
 export type Page_FolderResponse_ = {
   items: Array<FolderResponse>;
-  page: number;
-  pageSize: number;
-  total: number;
-};
-
-export type Page_JobAccepted_ = {
-  items: Array<JobAccepted>;
   page: number;
   pageSize: number;
   total: number;
@@ -965,6 +1037,26 @@ export type ScanDirectoryResponse = {
   errors: Array<{
       [key: string]: string;
     }>;
+};
+
+export type ScanRunResponse = {
+  id: string;
+  trigger: string;
+  status: string;
+  monitorFolderId: string | null;
+  requestedBy: string | null;
+  directoriesScanned: number;
+  filesScanned: number;
+  candidatesFound: number;
+  queued: number;
+  ignored: number;
+  errors: Array<{
+      [key: string]: string;
+    }>;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type SearchRequest = {
@@ -1309,9 +1401,13 @@ export interface ApiV2Paths {
     post: { request: never; query: never; response: LibraryOperationResponse };
   };
   "/api/v2/ingestion/imports": {
-    get: { request: never; query: { page?: number; pageSize?: number; status?: string | null }; response: Page_JobResponse_ };
+    get: { request: never; query: { page?: number; pageSize?: number; status?: string | null; origin?: string | null; keyword?: string | null; monitorFolderId?: string | null }; response: Page_JobResponse_ };
     post: { request: EnqueueRequest; query: never; response: JobAccepted };
     delete: { request: never; query: never; response: DeletedJobsResponse };
+  };
+  "/api/v2/ingestion/policy": {
+    get: { request: never; query: never; response: IngestionPolicyResponse };
+    put: { request: IngestionPolicyRequest; query: never; response: IngestionPolicyResponse };
   };
   "/api/v2/ingestion/imports/upload": {
     post: { request: Body_upload_api_v2_ingestion_imports_upload_post; query: never; response: JobAccepted };
@@ -1319,18 +1415,25 @@ export interface ApiV2Paths {
   "/api/v2/ingestion/imports/{job_id}/retry": {
     post: { request: never; query: never; response: JobAccepted };
   };
+  "/api/v2/ingestion/imports/{job_id}/cancel": {
+    post: { request: never; query: never; response: JobResponse };
+  };
+  "/api/v2/ingestion/imports/{job_id}": {
+    get: { request: never; query: never; response: JobDetailResponse };
+    delete: { request: never; query: never; response: void };
+  };
   "/api/v2/ingestion/imports/rescan": {
-    post: { request: never; query: never; response: Page_JobAccepted_ };
+    post: { request: never; query: never; response: ScanRunResponse };
+  };
+  "/api/v2/ingestion/scans/{scan_run_id}": {
+    get: { request: never; query: never; response: ScanRunResponse };
   };
   "/api/v2/ingestion/imports/scan-directory": {
     post: { request: ScanDirectoryRequest; query: never; response: ScanDirectoryResponse };
   };
-  "/api/v2/ingestion/imports/{job_id}": {
-    delete: { request: never; query: never; response: void };
-  };
   "/api/v2/ingestion/folders": {
     get: { request: never; query: never; response: Page_FolderResponse_ };
-    post: { request: FolderRequest; query: never; response: FolderResponse };
+    post: { request: FolderRequest; query: never; response: FolderCreatedResponse };
   };
   "/api/v2/ingestion/folders/tree": {
     get: { request: never; query: { path?: string | null }; response: DirectoryTreeResponse };
@@ -1340,11 +1443,15 @@ export interface ApiV2Paths {
     delete: { request: never; query: never; response: void };
   };
   "/api/v2/ingestion/folders/{folder_id}/scan": {
-    post: { request: never; query: never; response: Page_JobAccepted_ };
+    post: { request: never; query: never; response: ScanRunResponse };
   };
   "/api/v2/ingestion/conversions": {
     get: { request: never; query: { page?: number; pageSize?: number }; response: Page_JobResponse_ };
     post: { request: ConversionRequest; query: never; response: JobAccepted };
+  };
+  "/api/v2/metadata/organize-policy": {
+    get: { request: never; query: never; response: OrganizePolicyResponse };
+    put: { request: OrganizePolicyRequest; query: never; response: OrganizePolicyResponse };
   };
   "/api/v2/metadata/providers": {
     get: { request: never; query: never; response: Page_ProviderResponse_ };

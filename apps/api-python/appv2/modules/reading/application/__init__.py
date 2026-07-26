@@ -4,6 +4,7 @@ from appv2.modules.reading.application.service import (
     ProgressConflict,
     ReadingNotFound,
     ReadingService,
+    SourceFileMissing,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "ProgressConflict",
     "ReadingNotFound",
     "ReadingService",
+    "SourceFileMissing",
 ]

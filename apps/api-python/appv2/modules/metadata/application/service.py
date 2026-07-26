@@ -5,12 +5,16 @@ import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 
-from appv2.modules.catalog.contracts import CatalogMetadataPort, CatalogReadPort
+from appv2.modules.catalog.contracts import (
+    CatalogMetadataPort,
+    CatalogOrganizationReadPort,
+)
 from appv2.modules.metadata.contracts import (
     MetadataCandidate,
     MetadataJob,
     MetadataPatch,
     MetadataUnitOfWork,
+    OrganizePolicy,
     ProviderView,
 )
 
@@ -29,7 +33,7 @@ class MetadataService:
         *,
         uow_factory: Callable[[], MetadataUnitOfWork],
         catalog: CatalogMetadataPort,
-        catalog_read: CatalogReadPort,
+        catalog_read: CatalogOrganizationReadPort,
     ) -> None:
         self._uow_factory = uow_factory
         self._catalog = catalog
@@ -38,6 +42,97 @@ class MetadataService:
     def list_providers(self) -> list[ProviderView]:
         with self._uow_factory() as uow:
             return uow.metadata.list_providers()
+
+    def organize_policy(self) -> OrganizePolicy:
+        with self._uow_factory() as uow:
+            return uow.metadata.get_organize_policy()
+
+    def update_organize_policy(
+        self,
+        *,
+        schedule_mode: str,
+        interval_minutes: int | None,
+        auto_run_on_new: bool,
+        provider_scope: tuple[str, ...],
+        overwrite_fields: tuple[str, ...],
+        rules: dict[str, object],
+    ) -> OrganizePolicy:
+        if schedule_mode not in {"MANUAL", "INTERVAL"}:
+            raise ValueError("invalid organize schedule mode")
+        if schedule_mode == "INTERVAL" and (interval_minutes is None or interval_minutes < 5):
+            raise ValueError("interval schedule requires at least five minutes")
+        with self._uow_factory() as uow:
+            policy = uow.metadata.update_organize_policy(
+                schedule_mode=schedule_mode,
+                interval_minutes=(interval_minutes if schedule_mode == "INTERVAL" else None),
+                auto_run_on_new=auto_run_on_new,
+                provider_scope=provider_scope,
+                overwrite_fields=overwrite_fields,
+                rules=rules,
+            )
+            uow.commit()
+            return policy
+
+    def handle_import_completed(
+        self,
+        *,
+        work_id: uuid.UUID,
+        import_job_id: uuid.UUID,
+    ) -> bool:
+        work = self._catalog_read.get_work(work_id)
+        if work is None:
+            raise MetadataNotFound
+        with self._uow_factory() as uow:
+            policy = uow.metadata.get_organize_policy()
+            if not policy.auto_run_on_new:
+                return False
+            created = uow.metadata.enqueue_organize_job(
+                work_id=work_id,
+                proposal={
+                    "trigger": "import.completed",
+                    "importJobId": str(import_job_id),
+                    "providerScope": list(policy.provider_scope),
+                    "overwriteFields": list(policy.overwrite_fields),
+                    "rules": policy.rules,
+                    "title": work.title,
+                    "author": work.author,
+                },
+            )
+            uow.commit()
+            return created
+
+    def schedule_interval(self) -> tuple[int, int | None]:
+        with self._uow_factory() as uow:
+            policy = uow.metadata.get_organize_policy()
+        if policy.schedule_mode != "INTERVAL" or policy.interval_minutes is None:
+            return 0, None
+        offset = 0
+        batch_size = 200
+        created = 0
+        while works := self._catalog_read.list_active_works(
+            offset=offset,
+            limit=batch_size,
+        ):
+            with self._uow_factory() as uow:
+                for work in works:
+                    created += int(
+                        uow.metadata.enqueue_organize_job(
+                            work_id=work.id,
+                            proposal={
+                                "trigger": "interval",
+                                "providerScope": list(policy.provider_scope),
+                                "overwriteFields": list(policy.overwrite_fields),
+                                "rules": policy.rules,
+                                "title": work.title,
+                                "author": work.author,
+                            },
+                        )
+                    )
+                uow.commit()
+            offset += len(works)
+            if len(works) < batch_size:
+                break
+        return created, policy.interval_minutes
 
     def add_provider(
         self,

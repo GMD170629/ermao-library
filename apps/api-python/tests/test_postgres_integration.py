@@ -6,7 +6,7 @@ import json
 import os
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 
@@ -20,7 +20,10 @@ from sqlalchemy import create_engine, text
 
 from appv2.composition.api import create_app
 from appv2.composition.container import build_container
+from appv2.modules.ingestion.contracts import ImportRequest
+from appv2.modules.ingestion.infrastructure.repositories import ingestion_uow_factory
 from appv2.platform.config import Settings, get_settings
+from appv2.platform.database import Database
 
 
 @pytest.mark.postgres
@@ -556,7 +559,6 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
             json={
                 "path": str(tmp_path / "outside"),
                 "recursive": True,
-                "moveSource": False,
                 "options": {},
             },
         )
@@ -580,7 +582,6 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
             json={
                 "path": str(monitored),
                 "recursive": True,
-                "moveSource": False,
                 "options": {"ignoreHidden": True},
             },
         )
@@ -636,7 +637,7 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
             job for job in import_jobs.json()["items"] if job["status"] == "completed"
         ]
         assert len(completed_jobs) == 2
-        edition_id = completed_jobs[0]["resultId"]
+        edition_id = completed_jobs[0]["resultEditionId"]
         assert client.get("/api/v2/ingestion/conversions").status_code == 200
         folder_update = client.patch(
             f"/api/v2/ingestion/folders/{folder.json()['id']}",
@@ -655,7 +656,8 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         bootstrap = client.get(f"/api/v2/reading/editions/{edition_id}/bootstrap")
         assert bootstrap.status_code == 200, bootstrap.text
         assert bootstrap.json()["accountId"] == account_id
-        assert len(bootstrap.json()["files"]) == 1
+        assert len(bootstrap.json()["files"]) == 2
+        assert any(file["mediaType"] == "text/plain" for file in bootstrap.json()["files"])
         missing_reading_id = uuid.uuid4()
         assert (
             client.get(f"/api/v2/reading/editions/{missing_reading_id}/bootstrap").status_code
@@ -754,50 +756,13 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
             "/api/v2/ingestion/conversions",
             json={"editionId": edition_id},
         )
-        assert conversion.status_code == 202, conversion.text
-        assert conversion.json()["duplicate"] is False
-        duplicate_conversion = client.post(
-            "/api/v2/ingestion/conversions",
-            json={"editionId": edition_id},
-        )
-        assert duplicate_conversion.status_code == 202
-        assert duplicate_conversion.json()["duplicate"] is True
+        assert conversion.status_code == 422, conversion.text
         assert (
             client.post(
                 "/api/v2/ingestion/conversions",
                 json={"editionId": str(missing_reading_id)},
             ).status_code
             == 404
-        )
-        conversion_container = build_container(settings)
-        try:
-            assert conversion_container.ingestion_worker.run_once("integration-conversion-worker")
-        finally:
-            conversion_container.close()
-        conversion_job = next(
-            job
-            for job in client.get("/api/v2/ingestion/conversions").json()["items"]
-            if job["id"] == conversion.json()["id"]
-        )
-        assert conversion_job["status"] == "completed"
-        converted_edition_id = conversion_job["resultId"]
-        converted_detail = client.get(f"/api/v2/catalog/works/{imported_work_id}").json()
-        converted_edition = next(
-            edition
-            for edition in converted_detail["editions"]
-            if edition["id"] == converted_edition_id
-        )
-        assert converted_edition["format"] == "epub"
-        assert converted_edition["metadata"]["conversion"]["sourceEditionId"] == str(edition_id)
-        converted_resource = client.get(f"/api/v2/reading/editions/{converted_edition_id}/resource")
-        assert converted_resource.status_code == 200
-        assert converted_resource.headers["content-type"] == "application/epub+zip"
-        assert (
-            client.post(
-                "/api/v2/ingestion/conversions",
-                json={"editionId": converted_edition_id},
-            ).status_code
-            == 422
         )
         secondary_edition_id = uuid.uuid4()
         first_volume_id = uuid.uuid4()
@@ -995,7 +960,7 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         )
         assert bulk_finished.status_code == 200, bulk_finished.text
         assert bulk_finished.json()["updated"] == 1
-        assert bulk_finished.json()["changedValues"] == 2
+        assert bulk_finished.json()["changedValues"] == 1
         assert len(bulk_finished.json()["skipped"]) == 2
         finished_progress = client.get(f"/api/v2/reading/editions/{edition_id}/progress")
         assert finished_progress.json()["percentage"] == 1
@@ -1006,12 +971,6 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         )
         assert finished_library.status_code == 200, finished_library.text
         assert imported_work_id in {item["id"] for item in finished_library.json()["items"]}
-        assert (
-            client.get(f"/api/v2/reading/editions/{converted_edition_id}/progress").json()[
-                "percentage"
-            ]
-            == 1
-        )
         bulk_unread = client.post(
             "/api/v2/reading/progress/bulk",
             json={
@@ -1020,11 +979,8 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
             },
         )
         assert bulk_unread.status_code == 200, bulk_unread.text
-        assert bulk_unread.json()["changedValues"] == 2
+        assert bulk_unread.json()["changedValues"] == 1
         assert client.get(f"/api/v2/reading/editions/{edition_id}/progress").json() is None
-        assert (
-            client.get(f"/api/v2/reading/editions/{converted_edition_id}/progress").json() is None
-        )
         unread_library = client.get(
             "/api/v2/reporting/library",
             params={"readingStatus": "UNREAD"},
@@ -1358,3 +1314,114 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         clear_finished = client.delete("/api/v2/ingestion/imports")
         assert clear_finished.status_code == 200
         assert clear_finished.json()["deleted"] >= 2
+
+
+@pytest.mark.postgres
+def test_ingestion_queue_skip_locked_recovery_cancellation_and_outbox(
+    tmp_path: Path,
+) -> None:
+    database_url = os.getenv("APPV2_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("APPV2_TEST_DATABASE_URL is not configured")
+    backend_root = Path(__file__).resolve().parents[1]
+    command.upgrade(Config(backend_root / "alembic-v2.ini"), "head")
+    database = Database(database_url)
+    uow_factory = ingestion_uow_factory(database.session_factory)
+    try:
+        for index in range(2):
+            with uow_factory() as uow:
+                uow.ingestion.enqueue(
+                    ImportRequest(
+                        source_path=str(tmp_path / f"queue-{index}.epub"),
+                        requested_by=None,
+                        idempotency_key=f"pg-queue-{uuid.uuid4()}",
+                        origin="watch",
+                        triggered_by="system",
+                    )
+                )
+                uow.commit()
+
+        now = datetime.now(UTC)
+        with uow_factory() as first_uow:
+            first = first_uow.ingestion.claim_next(
+                worker_id="worker-a",
+                now=now,
+                lease_until=now - timedelta(seconds=1),
+            )
+            assert first is not None
+            with uow_factory() as second_uow:
+                second = second_uow.ingestion.claim_next(
+                    worker_id="worker-b",
+                    now=now,
+                    lease_until=now + timedelta(seconds=30),
+                )
+                assert second is not None
+                assert second.id != first.id
+                second_uow.commit()
+            first_uow.commit()
+
+        with uow_factory() as recovery_uow:
+            recovered = recovery_uow.ingestion.claim_next(
+                worker_id="worker-c",
+                now=now + timedelta(seconds=1),
+                lease_until=now + timedelta(seconds=30),
+            )
+            assert recovered is not None
+            assert recovered.id == first.id
+            assert recovered.attempt == 2
+            recovery_uow.commit()
+
+        with uow_factory() as stale_uow:
+            assert not stale_uow.ingestion.complete(
+                recovered.id,
+                worker_id="worker-a",
+                work_id=uuid.uuid4(),
+                edition_id=uuid.uuid4(),
+                volume_ids=(),
+            )
+            assert stale_uow.ingestion.cancel(recovered.id)
+            assert not stale_uow.ingestion.fail(
+                recovered.id,
+                worker_id="worker-c",
+                error_code="IMPORT_FAILED",
+                error_detail="cancel won the race",
+                retryable=True,
+                retry_at=now + timedelta(seconds=5),
+            )
+            assert stale_uow.ingestion.acknowledge_cancellation(
+                recovered.id,
+                worker_id="worker-c",
+            )
+            stale_uow.commit()
+
+        work_id = uuid.uuid4()
+        edition_id = uuid.uuid4()
+        with uow_factory() as completion_uow:
+            assert completion_uow.ingestion.complete(
+                second.id,
+                worker_id="worker-b",
+                work_id=work_id,
+                edition_id=edition_id,
+                volume_ids=(),
+            )
+            completion_uow.commit()
+        with uow_factory() as verification_uow:
+            cancelled = verification_uow.ingestion.get_job(recovered.id)
+            completed = verification_uow.ingestion.get_job(second.id)
+            assert cancelled is not None and cancelled.status == "cancelled"
+            assert completed is not None and completed.status == "completed"
+        with database.engine.connect() as connection:
+            event = connection.execute(
+                text(
+                    """
+                    SELECT event_type, aggregate_id
+                    FROM ingestion.outbox
+                    WHERE idempotency_key = :idempotency_key
+                    """
+                ),
+                {"idempotency_key": f"import.completed:{second.id}"},
+            ).one()
+            assert event.event_type == "import.completed"
+            assert event.aggregate_id == work_id
+    finally:
+        database.dispose()

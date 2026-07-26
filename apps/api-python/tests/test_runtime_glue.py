@@ -190,8 +190,14 @@ def test_worker_entrypoint_lock_contention_and_shutdown(
         yield False
 
     monkeypatch.setattr(worker_entrypoint, "advisory_lock", rejected_lock)
-    with pytest.raises(RuntimeError, match="another appv2 scheduler"):
+    consumer_runtime = MagicMock()
+    consumer_runtime.run_once.side_effect = KeyboardInterrupt
+    runtime_factory = MagicMock(return_value=consumer_runtime)
+    monkeypatch.setattr(worker_entrypoint, "WorkerRuntime", runtime_factory)
+    with pytest.raises(KeyboardInterrupt):
         worker_entrypoint.main()
+    assert runtime_factory.call_args.kwargs["scheduler_enabled"] is False
+    container.ingestion_watcher.start.assert_not_called()
     container.close.assert_called_once()
 
     container.reset_mock()
@@ -203,10 +209,14 @@ def test_worker_entrypoint_lock_contention_and_shutdown(
     runtime = MagicMock()
     runtime.run_once.side_effect = [False, KeyboardInterrupt]
     monkeypatch.setattr(worker_entrypoint, "advisory_lock", acquired_lock)
-    monkeypatch.setattr(worker_entrypoint, "WorkerRuntime", lambda **_kwargs: runtime)
+    runtime_factory = MagicMock(return_value=runtime)
+    monkeypatch.setattr(worker_entrypoint, "WorkerRuntime", runtime_factory)
     sleep = MagicMock()
     monkeypatch.setattr(worker_entrypoint.time, "sleep", sleep)
     with pytest.raises(KeyboardInterrupt):
         worker_entrypoint.main()
     sleep.assert_called_once_with(0.01)
+    assert runtime_factory.call_args.kwargs["scheduler_enabled"] is True
+    container.ingestion_watcher.start.assert_called_once()
+    container.ingestion_watcher.stop.assert_called_once()
     container.close.assert_called_once()

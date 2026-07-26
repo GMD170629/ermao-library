@@ -18,7 +18,11 @@ from appv2.modules.metadata.application import (
     MetadataNotFound,
     MetadataService,
 )
-from appv2.modules.metadata.contracts import MetadataCandidate, MetadataPatch
+from appv2.modules.metadata.contracts import (
+    MetadataCandidate,
+    MetadataPatch,
+    OrganizePolicy,
+)
 from appv2.modules.operations.application import OperationsNotFound, OperationsService
 from appv2.modules.operations.contracts import QueueSnapshot
 from appv2.modules.reading.application import (
@@ -672,13 +676,15 @@ def test_ingestion_service_complete_success_and_failure_surface() -> None:
         path="/monitor/books",
         enabled=True,
         recursive=True,
-        move_source=False,
     )
     result = SimpleNamespace(job_id=job_id)
+    scan_run = SimpleNamespace(id=uuid.uuid4())
+    policy = SimpleNamespace(auto_convert_to_epub=False)
 
     repository.list_jobs.return_value = ([job], 1)
     assert service.list_jobs(page=2, page_size=5, status="queued") == ([job], 1)
     repository.enqueue.return_value = result
+    repository.get_policy.return_value = policy
     assert (
         service.enqueue(
             source_path="/monitor/book.epub",
@@ -687,6 +693,7 @@ def test_ingestion_service_complete_success_and_failure_surface() -> None:
         )
         is result
     )
+    assert repository.enqueue.call_args.args[0].options == {"autoConvertToEpub": False}
     uploads.store.return_value = "/storage/upload.epub"
     assert (
         service.upload(
@@ -749,18 +756,56 @@ def test_ingestion_service_complete_success_and_failure_surface() -> None:
 
     repository.list_folders.return_value = [folder]
     assert service.list_folders() == [folder]
+    discovery.validate_source.return_value = "/monitor/books/book.epub"
+    assert (
+        service.enqueue_monitored(
+            source_path="/monitor/books/book.epub",
+            requested_by=actor,
+            idempotency_key="manual-monitor",
+            monitor_folder_ids=(folder_id,),
+        )
+        is result
+    )
+    monitored_request = repository.enqueue.call_args.args[0]
+    assert monitored_request.monitor_folder_id == folder_id
+    assert monitored_request.source_path == "/monitor/books/book.epub"
+    assert service.policy() is policy
+    repository.update_policy.return_value = policy
+    assert (
+        service.update_policy(
+            allowed_extensions=(".PDF", ".epub"),
+            ignore_patterns=(" *.tmp ", ""),
+            stability_check_enabled=True,
+            stability_check_seconds=3,
+            auto_convert_to_epub=False,
+        )
+        is policy
+    )
+    assert repository.update_policy.call_args.kwargs["allowed_extensions"] == (
+        ".epub",
+        ".pdf",
+    )
+    with pytest.raises(ValueError, match="ingestion policy"):
+        service.update_policy(
+            allowed_extensions=(".cbr",),
+            ignore_patterns=(),
+            stability_check_enabled=True,
+            stability_check_seconds=3,
+            auto_convert_to_epub=False,
+        )
     discovery.tree.return_value = ("tree", "/monitor")
     assert service.directory_tree("/monitor") == ("tree", "/monitor")
     discovery.validate_folder.return_value = "/monitor/books"
     repository.add_folder.return_value = folder
-    assert (
-        service.add_folder(
-            path="/monitor/books",
-            recursive=True,
-            move_source=False,
-            options={},
-        )
-        is folder
+    repository.create_scan_run.return_value = scan_run
+    assert service.add_folder(
+        path="/monitor/books",
+        recursive=True,
+        options={},
+        requested_by=actor,
+    ) == (
+        folder,
+        scan_run,
     )
     repository.update_folder.return_value = folder
     assert (
@@ -768,7 +813,6 @@ def test_ingestion_service_complete_success_and_failure_surface() -> None:
             folder_id,
             enabled=False,
             recursive=None,
-            move_source=None,
             options=None,
         )
         is folder
@@ -779,7 +823,6 @@ def test_ingestion_service_complete_success_and_failure_surface() -> None:
             folder_id,
             enabled=None,
             recursive=None,
-            move_source=None,
             options=None,
         )
     repository.delete_folder.return_value = True
@@ -1166,6 +1209,59 @@ def test_metadata_discovery_and_delivery_services() -> None:
     delivery_repo.retry.return_value = None
     with pytest.raises(DeliveryNotFound):
         delivery.retry(delivery_job.id, owner_id)
+
+
+def test_metadata_organize_policy_controls_import_and_interval_scheduling() -> None:
+    metadata_uow = FakeUnitOfWork("metadata")
+    repository = metadata_uow.metadata
+    catalog = MagicMock()
+    service = MetadataService(
+        uow_factory=lambda: metadata_uow,
+        catalog=catalog,
+        catalog_read=catalog,
+    )
+    work = SimpleNamespace(
+        id=uuid.uuid4(),
+        title="Policy Book",
+        author="Author",
+    )
+    manual = OrganizePolicy(
+        schedule_mode="MANUAL",
+        interval_minutes=None,
+        auto_run_on_new=False,
+        provider_scope=(),
+        overwrite_fields=(),
+        rules={},
+    )
+    repository.get_organize_policy.return_value = manual
+    catalog.get_work.return_value = work
+    assert not service.handle_import_completed(
+        work_id=work.id,
+        import_job_id=uuid.uuid4(),
+    )
+    assert service.schedule_interval() == (0, None)
+    catalog.list_active_works.assert_not_called()
+
+    interval = OrganizePolicy(
+        schedule_mode="INTERVAL",
+        interval_minutes=5,
+        auto_run_on_new=True,
+        provider_scope=("local",),
+        overwrite_fields=("title",),
+        rules={"missingOnly": True},
+    )
+    repository.get_organize_policy.return_value = interval
+    repository.enqueue_organize_job.return_value = True
+    assert service.handle_import_completed(
+        work_id=work.id,
+        import_job_id=uuid.uuid4(),
+    )
+    catalog.list_active_works.return_value = [work]
+    assert service.schedule_interval() == (1, 5)
+    proposal = repository.enqueue_organize_job.call_args.kwargs["proposal"]
+    assert proposal["trigger"] == "interval"
+    assert proposal["providerScope"] == ["local"]
+    assert proposal["overwriteFields"] == ["title"]
 
 
 def test_operations_and_reading_services() -> None:

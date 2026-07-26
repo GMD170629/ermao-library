@@ -21,6 +21,10 @@ _MESSAGES: dict[str, dict[Locale, str]] = {
         "zh-CN": "请求的资源不存在。",
         "en-US": "The requested resource does not exist.",
     },
+    "source_file_missing": {
+        "zh-CN": "源文件已被删除或当前无法访问。",
+        "en-US": "The source file was deleted or is currently unavailable.",
+    },
     "conflict": {
         "zh-CN": "资源状态与当前操作冲突。",
         "en-US": "The resource state conflicts with this operation.",

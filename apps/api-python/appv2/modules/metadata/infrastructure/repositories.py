@@ -15,11 +15,14 @@ from appv2.modules.metadata.contracts import (
     MetadataCandidate,
     MetadataJob,
     MetadataRepository,
+    OrganizePolicy,
     ProviderView,
 )
 from appv2.modules.metadata.infrastructure.models import (
     MetadataCandidateRecord,
     MetadataJobRecord,
+    OrganizeJobRecord,
+    OrganizePolicyRecord,
     ProviderRecord,
 )
 
@@ -115,7 +118,7 @@ class SqlMetadataRepository(MetadataRepository):
         *,
         work_id: uuid.UUID,
         provider_id: uuid.UUID | None,
-        requested_by: uuid.UUID,
+        requested_by: uuid.UUID | None,
         query: str,
         idempotency_key: str,
         now: datetime,
@@ -319,6 +322,78 @@ class SqlMetadataRepository(MetadataRepository):
         job.lease_expires_at = None
         job.error_code = error_code
         job.error_detail = error_detail[:4000]
+
+    def get_organize_policy(self) -> OrganizePolicy:
+        record = self._session.scalar(
+            select(OrganizePolicyRecord).where(OrganizePolicyRecord.name == "default").limit(1)
+        )
+        if record is None:
+            return OrganizePolicy(
+                schedule_mode="MANUAL",
+                interval_minutes=None,
+                auto_run_on_new=False,
+                provider_scope=(),
+                overwrite_fields=(),
+                rules={},
+            )
+        return OrganizePolicy(
+            schedule_mode=record.schedule_mode,
+            interval_minutes=record.interval_minutes,
+            auto_run_on_new=record.auto_run_on_new,
+            provider_scope=tuple(record.provider_scope),
+            overwrite_fields=tuple(record.overwrite_fields),
+            rules=record.rules,
+        )
+
+    def update_organize_policy(
+        self,
+        *,
+        schedule_mode: str,
+        interval_minutes: int | None,
+        auto_run_on_new: bool,
+        provider_scope: tuple[str, ...],
+        overwrite_fields: tuple[str, ...],
+        rules: dict[str, object],
+    ) -> OrganizePolicy:
+        record = self._session.scalar(
+            select(OrganizePolicyRecord).where(OrganizePolicyRecord.name == "default").limit(1)
+        )
+        if record is None:
+            record = OrganizePolicyRecord(name="default")
+            self._session.add(record)
+        record.schedule_mode = schedule_mode
+        record.interval_minutes = interval_minutes
+        record.auto_run_on_new = auto_run_on_new
+        record.provider_scope = list(provider_scope)
+        record.overwrite_fields = list(overwrite_fields)
+        record.rules = rules
+        self._session.flush()
+        return self.get_organize_policy()
+
+    def enqueue_organize_job(
+        self,
+        *,
+        work_id: uuid.UUID,
+        proposal: dict[str, object],
+    ) -> bool:
+        existing = self._session.scalar(
+            select(OrganizeJobRecord.id)
+            .where(
+                OrganizeJobRecord.work_id == work_id,
+                OrganizeJobRecord.status.in_(("pending", "approved", "running")),
+            )
+            .limit(1)
+        )
+        if existing is not None:
+            return False
+        self._session.add(
+            OrganizeJobRecord(
+                work_id=work_id,
+                status="pending",
+                proposal=proposal,
+            )
+        )
+        return True
 
 
 class MetadataSqlUnitOfWork:

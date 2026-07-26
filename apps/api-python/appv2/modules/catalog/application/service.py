@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import uuid
 from collections.abc import Callable
+from io import BytesIO
 from typing import BinaryIO
 
 from appv2.modules.catalog.contracts import (
@@ -12,6 +13,7 @@ from appv2.modules.catalog.contracts import (
     CatalogEditionDetail,
     CatalogFile,
     CatalogImport,
+    CatalogImportResult,
     CatalogRepository,
     CatalogUnitOfWork,
     CatalogWork,
@@ -22,6 +24,7 @@ from appv2.modules.catalog.contracts import (
     FindReplaceItem,
     FindReplacePreview,
     LibraryOperationView,
+    PreparedPublication,
     SeriesView,
     ShelfView,
 )
@@ -413,6 +416,20 @@ class CatalogService:
             edition = uow.catalog.import_file(imported)
             uow.commit()
             return edition
+
+    def import_publication(self, publication: PreparedPublication) -> CatalogImportResult:
+        with self._uow_factory() as uow:
+            result = uow.catalog.import_publication(publication)
+            uow.commit()
+        if publication.cover_content is not None:
+            cover_key = self._covers.store(
+                result.work_id,
+                BytesIO(publication.cover_content),
+            )
+            with self._uow_factory() as uow:
+                uow.catalog.set_cover_key(result.work_id, cover_key)
+                uow.commit()
+        return result
 
     def publish_conversion(
         self,

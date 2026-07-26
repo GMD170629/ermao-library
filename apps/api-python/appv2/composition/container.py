@@ -6,6 +6,7 @@ from pathlib import Path
 from appv2.composition.adapters import (
     ApplicationQueueOverview,
     CatalogPorts,
+    ImportCompletedHandler,
     IngestionEnqueueAdapter,
 )
 from appv2.modules.accounts.api import AccountDependency
@@ -25,14 +26,20 @@ from appv2.modules.discovery.infrastructure.adapters import (
     JsonHttpSourceSearch,
 )
 from appv2.modules.discovery.infrastructure.repositories import discovery_uow_factory
-from appv2.modules.ingestion.application import IngestionService, IngestionWorker
+from appv2.modules.ingestion.application import (
+    IngestionOutboxPublisher,
+    IngestionScanner,
+    IngestionService,
+    IngestionWorker,
+)
 from appv2.modules.ingestion.infrastructure.files import (
-    LocalImportPreparation,
     LocalTextToEpubConversion,
     MonitorFileDiscovery,
     V2UploadStorage,
 )
+from appv2.modules.ingestion.infrastructure.formats import LocalPublicationPreparation
 from appv2.modules.ingestion.infrastructure.repositories import ingestion_uow_factory
+from appv2.modules.ingestion.infrastructure.watcher import MonitorWatcher
 from appv2.modules.metadata.application import MetadataService, MetadataWorker
 from appv2.modules.metadata.infrastructure.providers import ConfiguredProviderRegistry
 from appv2.modules.metadata.infrastructure.repositories import metadata_uow_factory
@@ -61,7 +68,7 @@ from appv2.platform.config import Settings, get_settings
 from appv2.platform.database import Database
 from appv2.platform.filesystem import StorageLayout
 
-ALEMBIC_REVISION = "0001_appv2_initial"
+ALEMBIC_REVISION = "0002_ingestion_pipeline"
 
 
 @dataclass(slots=True)
@@ -79,6 +86,9 @@ class Container:
     operations: OperationsService
     reporting: ReportingService
     ingestion_worker: IngestionWorker
+    ingestion_scanner: IngestionScanner
+    ingestion_watcher: MonitorWatcher
+    ingestion_outbox: IngestionOutboxPublisher
     metadata_worker: MetadataWorker
     discovery_worker: DiscoveryWorker
     delivery_worker: DeliveryWorker
@@ -127,10 +137,24 @@ def build_container(settings: Settings | None = None) -> Container:
     ingestion_queue = IngestionEnqueueAdapter(ingestion)
     ingestion_worker = IngestionWorker(
         uow_factory=ingestion_uow,
-        preparation=LocalImportPreparation(),
+        preparation=LocalPublicationPreparation(storage.conversions),
         conversion=LocalTextToEpubConversion(storage.conversions),
         catalog=catalog_ports,
         lease_seconds=resolved.worker_lease_seconds,
+    )
+    ingestion_scanner = IngestionScanner(
+        uow_factory=ingestion_uow,
+        discovery=MonitorFileDiscovery(resolved.monitor_root),
+        stability_seconds=resolved.monitor_stability_seconds,
+    )
+    ingestion_watcher = MonitorWatcher(
+        monitor_root=resolved.monitor_root,
+        folders=ingestion.list_folders,
+        request_scan=lambda folder_id: ingestion.request_scan(
+            trigger="event",
+            monitor_folder_id=folder_id,
+            requested_by=None,
+        ),
     )
 
     metadata = MetadataService(
@@ -142,6 +166,10 @@ def build_container(settings: Settings | None = None) -> Container:
         uow_factory=metadata_uow,
         providers=ConfiguredProviderRegistry(resolved.external_http_timeout_seconds),
         lease_seconds=resolved.worker_lease_seconds,
+    )
+    ingestion_outbox = IngestionOutboxPublisher(
+        uow_factory=ingestion_uow,
+        handler=ImportCompletedHandler(metadata),
     )
     allowed_resource_roots = [resolved.v2_storage_root]
     if resolved.monitor_root is not None:
@@ -235,6 +263,9 @@ def build_container(settings: Settings | None = None) -> Container:
         operations=operations,
         reporting=reporting,
         ingestion_worker=ingestion_worker,
+        ingestion_scanner=ingestion_scanner,
+        ingestion_watcher=ingestion_watcher,
+        ingestion_outbox=ingestion_outbox,
         metadata_worker=metadata_worker,
         discovery_worker=discovery_worker,
         delivery_worker=delivery_worker,

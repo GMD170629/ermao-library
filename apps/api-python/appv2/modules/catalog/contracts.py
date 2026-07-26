@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import BinaryIO, Protocol
@@ -81,6 +81,53 @@ class CatalogImport:
 
 
 @dataclass(frozen=True, slots=True)
+class PreparedCatalogFile:
+    source_path: str
+    original_name: str
+    media_type: str
+    size_bytes: int
+    checksum: str
+    sort_order: int = 0
+    volume_key: str | None = None
+    duration_ms: int | None = None
+    metadata: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedCatalogVolume:
+    key: str
+    title: str
+    sort_order: int
+    page_count: int | None = None
+    duration_ms: int | None = None
+    metadata: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedPublication:
+    identity_key: str
+    title: str
+    author: str | None
+    media_type: str
+    format: str
+    language: str | None
+    identifiers: tuple[str, ...]
+    metadata: dict[str, object]
+    volumes: tuple[PreparedCatalogVolume, ...]
+    files: tuple[PreparedCatalogFile, ...]
+    cover_content: bytes | None = None
+    cover_media_type: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogImportResult:
+    work_id: uuid.UUID
+    edition_id: uuid.UUID
+    volume_ids: tuple[uuid.UUID, ...]
+    duplicate: bool
+
+
+@dataclass(frozen=True, slots=True)
 class CoverResource:
     path: Path
     media_type: str
@@ -118,7 +165,15 @@ class CatalogReadPort(Protocol):
     def volumes_for_edition(self, edition_id: uuid.UUID) -> list[CatalogVolume]: ...
 
 
+class CatalogOrganizationReadPort(Protocol):
+    def get_work(self, work_id: uuid.UUID) -> CatalogWork | None: ...
+
+    def list_active_works(self, *, offset: int, limit: int) -> list[CatalogWork]: ...
+
+
 class CatalogImportPort(Protocol):
+    def import_publication(self, publication: PreparedPublication) -> CatalogImportResult: ...
+
     def import_file(self, imported: CatalogImport) -> CatalogEdition: ...
 
     def publish_conversion(

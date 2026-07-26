@@ -21,6 +21,20 @@ class CatalogReadAdapter(CatalogReadPort):
         with self._uow_factory() as uow:
             return uow.catalog.get_work(work_id)
 
+    def list_active_works(self, *, offset: int, limit: int) -> list[CatalogWork]:
+        with self._uow_factory() as uow:
+            works, _total = uow.catalog.list_works(
+                offset=offset,
+                limit=limit,
+                query=None,
+                media_type=None,
+                status="active",
+                series_name=None,
+                sort="recent_import",
+                sort_direction="asc",
+            )
+            return works
+
     def get_edition(self, edition_id: uuid.UUID) -> CatalogEdition | None:
         with self._uow_factory() as uow:
             return uow.catalog.get_edition(edition_id)

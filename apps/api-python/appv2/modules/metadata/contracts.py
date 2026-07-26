@@ -64,6 +64,16 @@ class MetadataJob:
     updated_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class OrganizePolicy:
+    schedule_mode: str
+    interval_minutes: int | None
+    auto_run_on_new: bool
+    provider_scope: tuple[str, ...]
+    overwrite_fields: tuple[str, ...]
+    rules: dict[str, object]
+
+
 class MetadataRepository(Protocol):
     def list_providers(self) -> list[ProviderView]: ...
 
@@ -94,7 +104,7 @@ class MetadataRepository(Protocol):
         *,
         work_id: uuid.UUID,
         provider_id: uuid.UUID | None,
-        requested_by: uuid.UUID,
+        requested_by: uuid.UUID | None,
         query: str,
         idempotency_key: str,
         now: datetime,
@@ -132,6 +142,26 @@ class MetadataRepository(Protocol):
         error_detail: str,
         retry_at: datetime | None,
     ) -> None: ...
+
+    def get_organize_policy(self) -> OrganizePolicy: ...
+
+    def update_organize_policy(
+        self,
+        *,
+        schedule_mode: str,
+        interval_minutes: int | None,
+        auto_run_on_new: bool,
+        provider_scope: tuple[str, ...],
+        overwrite_fields: tuple[str, ...],
+        rules: dict[str, object],
+    ) -> OrganizePolicy: ...
+
+    def enqueue_organize_job(
+        self,
+        *,
+        work_id: uuid.UUID,
+        proposal: dict[str, object],
+    ) -> bool: ...
 
 
 class MetadataUnitOfWork(UnitOfWork, Protocol):

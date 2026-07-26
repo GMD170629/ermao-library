@@ -50,7 +50,7 @@ class MetadataJobRecord(UUIDPrimaryKey, Timestamped, Base):
 
     work_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("catalog.works.id"), nullable=False)
     provider_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("metadata.providers.id"))
-    requested_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("accounts.users.id"), nullable=False)
+    requested_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("accounts.users.id"))
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
     query: Mapped[str] = mapped_column(String(1000), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -104,3 +104,23 @@ class OrganizeJobRecord(UUIDPrimaryKey, Timestamped, Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     proposal: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
     error_detail: Mapped[str | None] = mapped_column(Text)
+
+
+class OrganizePolicyRecord(UUIDPrimaryKey, Timestamped, Base):
+    __tablename__ = "organize_policy"
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_metadata_organize_policy_name"),
+        CheckConstraint(
+            "schedule_mode IN ('MANUAL', 'INTERVAL')",
+            name="schedule_mode_valid",
+        ),
+        {"schema": "metadata"},
+    )
+
+    name: Mapped[str] = mapped_column(String(100), nullable=False, default="default")
+    schedule_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="MANUAL")
+    interval_minutes: Mapped[int | None] = mapped_column(Integer)
+    auto_run_on_new: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    provider_scope: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    overwrite_fields: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    rules: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)

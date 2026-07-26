@@ -206,7 +206,6 @@ export function SetupPage() {
         body: JSON.stringify({
           path: folderPath.trim(),
           recursive: true,
-          moveSource: false,
           options: { name: folderName.trim() || '我的书库' }
         })
       });
