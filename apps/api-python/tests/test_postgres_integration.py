@@ -898,7 +898,7 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
                             {
                                 "field": "title",
                                 "operator": "contains",
-                                "value": "Imported",
+                                "value": imported_detail.json()["title"],
                             }
                         ],
                     }
