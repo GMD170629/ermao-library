@@ -4,6 +4,9 @@ set -eu
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
+CHILD_PIDS=""
+MANAGED_POSTGRES_CONTAINER=""
+
 cleanup() {
   trap - INT TERM EXIT
   for pid in $CHILD_PIDS; do
@@ -15,9 +18,11 @@ cleanup() {
   for pid in $CHILD_PIDS; do
     wait "$pid" 2>/dev/null || true
   done
+  if [ -n "$MANAGED_POSTGRES_CONTAINER" ]; then
+    docker stop "$MANAGED_POSTGRES_CONTAINER" >/dev/null 2>&1 || true
+  fi
 }
 trap cleanup INT TERM EXIT
-CHILD_PIDS=""
 
 if [ -f .env ]; then
   set -a
@@ -38,12 +43,11 @@ MONITOR_ROOT="${MONITOR_ROOT:-$ROOT_DIR/books}"
 STORAGE_ROOT="${STORAGE_ROOT:-$ROOT_DIR/storage}"
 SESSION_SECRET="${SESSION_SECRET:-dev-test-session-secret-change-me-at-least-32-chars}"
 DATABASE_URL="${DATABASE_URL:-${APPV2_TEST_DATABASE_URL:-}}"
-
-if [ -z "$DATABASE_URL" ]; then
-  echo "DATABASE_URL or APPV2_TEST_DATABASE_URL is required and must point to PostgreSQL 18.x." >&2
-  echo "Use docker compose for the built-in database, or export an external PostgreSQL URL." >&2
-  exit 1
-fi
+DATABASE_SOURCE="external PostgreSQL 18.x"
+DEV_POSTGRES_IMAGE="${DEV_POSTGRES_IMAGE:-postgres:18.4-alpine3.23}"
+DEV_POSTGRES_CONTAINER="${DEV_POSTGRES_CONTAINER:-shuku-appv2-dev-postgres}"
+DEV_POSTGRES_VOLUME="${DEV_POSTGRES_VOLUME:-shuku-appv2-dev-postgres-data}"
+DEV_POSTGRES_PORT="${DEV_POSTGRES_PORT:-55432}"
 
 case "$MONITOR_ROOT" in
   /*) ;;
@@ -57,9 +61,75 @@ esac
 if [ ! -d "$MONITOR_ROOT" ]; then
   mkdir -p "$MONITOR_ROOT"
 fi
-mkdir -p "$STORAGE_ROOT/v2"
+mkdir -p "$STORAGE_ROOT/v2/secrets"
 
-export DATABASE_URL MONITOR_ROOT STORAGE_ROOT SESSION_SECRET WEB_PORT
+if [ -z "$DATABASE_URL" ]; then
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "Docker is required to start the built-in PostgreSQL 18 development database." >&2
+    echo "Alternatively, export DATABASE_URL or APPV2_TEST_DATABASE_URL." >&2
+    exit 1
+  fi
+  if ! docker info >/dev/null 2>&1; then
+    echo "Docker is installed but its daemon is not running." >&2
+    echo "Start Docker, or export DATABASE_URL for an external PostgreSQL 18.x database." >&2
+    exit 1
+  fi
+  if docker container inspect "$DEV_POSTGRES_CONTAINER" >/dev/null 2>&1; then
+    echo "Docker container $DEV_POSTGRES_CONTAINER already exists." >&2
+    echo "Stop/remove that development container or export DATABASE_URL explicitly." >&2
+    exit 1
+  fi
+
+  postgres_password_file="$STORAGE_ROOT/v2/secrets/dev-postgres-password"
+  if [ ! -s "$postgres_password_file" ]; then
+    if docker volume inspect "$DEV_POSTGRES_VOLUME" >/dev/null 2>&1; then
+      echo "Development PostgreSQL volume exists but its password file is missing:" >&2
+      echo "  $postgres_password_file" >&2
+      echo "Restore the password file or remove volume $DEV_POSTGRES_VOLUME to create a new database." >&2
+      exit 1
+    fi
+    umask 077
+    openssl rand -hex 32 > "$postgres_password_file"
+  fi
+  postgres_password="$(tr -d '\r\n' < "$postgres_password_file")"
+
+  echo "Starting built-in PostgreSQL 18 development database..."
+  docker run -d --rm \
+    --name "$DEV_POSTGRES_CONTAINER" \
+    -e POSTGRES_DB=shuku_v2 \
+    -e POSTGRES_USER=shuku \
+    -e "POSTGRES_PASSWORD=$postgres_password" \
+    -e PGDATA=/var/lib/postgresql/18/docker \
+    -p "127.0.0.1:$DEV_POSTGRES_PORT:5432" \
+    -v "$DEV_POSTGRES_VOLUME:/var/lib/postgresql" \
+    --health-cmd "pg_isready -U shuku -d shuku_v2" \
+    --health-interval 2s \
+    --health-timeout 3s \
+    --health-retries 30 \
+    "$DEV_POSTGRES_IMAGE" >/dev/null
+  MANAGED_POSTGRES_CONTAINER="$DEV_POSTGRES_CONTAINER"
+
+  i=0
+  until [ "$(docker inspect --format '{{.State.Health.Status}}' "$DEV_POSTGRES_CONTAINER" 2>/dev/null || true)" = "healthy" ]; do
+    i=$((i + 1))
+    if ! docker inspect "$DEV_POSTGRES_CONTAINER" >/dev/null 2>&1; then
+      echo "Built-in PostgreSQL container exited before becoming ready." >&2
+      exit 1
+    fi
+    if [ "$i" -ge 60 ]; then
+      echo "Built-in PostgreSQL 18 did not become ready in time." >&2
+      exit 1
+    fi
+    sleep 1
+  done
+
+  DATABASE_URL="postgresql+psycopg://shuku:$postgres_password@127.0.0.1:$DEV_POSTGRES_PORT/shuku_v2"
+  DATABASE_SOURCE="built-in PostgreSQL 18.x on 127.0.0.1:$DEV_POSTGRES_PORT"
+fi
+
+ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-[\"http://localhost:$WEB_PORT\",\"http://127.0.0.1:$WEB_PORT\"]}"
+
+export ALLOWED_ORIGINS DATABASE_URL MONITOR_ROOT STORAGE_ROOT SESSION_SECRET WEB_PORT
 
 (
   cd apps/api-python
@@ -73,7 +143,7 @@ echo "  Backend:      $APPV2_API_APP"
 echo "  Worker:       $APPV2_WORKER_MODULE"
 echo "  Health check: http://localhost:$WEB_PORT$APPV2_HEALTH_PATH"
 echo "  Python API:   http://127.0.0.1:$PYTHON_API_PORT"
-echo "  Database:     PostgreSQL 18.x from DATABASE_URL"
+echo "  Database:     $DATABASE_SOURCE"
 echo "  Monitor root: $MONITOR_ROOT"
 echo "  Storage root: $STORAGE_ROOT"
 if command -v ipconfig >/dev/null 2>&1; then
