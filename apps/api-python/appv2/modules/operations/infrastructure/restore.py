@@ -17,6 +17,7 @@ from appv2.modules.operations.contracts import (
     RestoreExecutorPort,
     RestoreRequest,
 )
+from appv2.platform.database.postgres_tools import postgres_cli_connection
 
 
 class FileRestoreInbox(RestoreControlInboxPort):
@@ -71,7 +72,7 @@ class PgRestoreExecutor(RestoreExecutorPort):
         backend_root: Path,
         expected_version: str,
     ) -> None:
-        self._database_url = database_url.replace("postgresql+psycopg://", "postgresql://", 1)
+        self._database_url, self._database_env = postgres_cli_connection(database_url)
         self._backups_root = backups_root.resolve()
         self._backend_root = backend_root
         self._expected_version = expected_version
@@ -102,7 +103,11 @@ class PgRestoreExecutor(RestoreExecutorPort):
             ],
             check=True,
             timeout=60 * 60,
-            env={**os.environ, "PGAPPNAME": "shuku-appv2-restore"},
+            env={
+                **_subprocess_environment(),
+                **self._database_env,
+                "PGAPPNAME": "shuku-appv2-restore",
+            },
         )
         config = Config(self._backend_root / "alembic-v2.ini")
         command.upgrade(config, "head")
@@ -114,3 +119,11 @@ def _sha256(path: Path) -> str:
         while chunk := source.read(1024 * 1024):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _subprocess_environment() -> dict[str, str]:
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"DATABASE_URL", "APPV2_TEST_DATABASE_URL", "PGPASSWORD"}
+    }

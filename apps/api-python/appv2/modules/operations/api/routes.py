@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Path, Query, status
 from pydantic import Field
 from starlette.responses import StreamingResponse
 
@@ -14,6 +14,7 @@ from appv2.modules.operations.contracts import (
     HealthStatus,
     LogStorageView,
     QueueView,
+    RestoreStatusView,
     SettingView,
 )
 from appv2.platform.http import AppProblem, CamelModel, Page
@@ -121,6 +122,18 @@ class BackupResponse(CamelModel):
 class RestoreAccepted(CamelModel):
     request_id: str
     status: str = "requested"
+
+
+class RestoreStatusResponse(CamelModel):
+    request_id: str
+    backup_id: uuid.UUID
+    status: str
+    detail: str | None
+    updated_at: datetime
+
+    @classmethod
+    def from_view(cls, value: RestoreStatusView) -> "RestoreStatusResponse":
+        return cls.model_validate(value)
 
 
 def create_router(
@@ -307,6 +320,19 @@ def create_router(
         except OperationsNotFound as error:
             raise missing(error) from error
         return RestoreAccepted(request_id=request_id)
+
+    @router.get("/restores/{request_id}", response_model=RestoreStatusResponse)
+    def restore_status(
+        request_id: Annotated[str, Path(pattern=r"^[0-9a-f]{32}$")],
+    ) -> RestoreStatusResponse:
+        # The unguessable request id is returned only to the authorized caller.
+        # This read remains available when a restored session snapshot no longer
+        # recognizes the browser cookie that initiated the operation.
+        try:
+            value = service.restore_status(request_id)
+        except OperationsNotFound as error:
+            raise missing(error) from error
+        return RestoreStatusResponse.from_view(value)
 
     @router.delete("/backups/{backup_id}", status_code=status.HTTP_204_NO_CONTENT)
     def delete_backup(backup_id: uuid.UUID, actor: Actor) -> None:

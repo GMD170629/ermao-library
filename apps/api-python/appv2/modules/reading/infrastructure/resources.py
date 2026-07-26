@@ -2,16 +2,28 @@ from __future__ import annotations
 
 import email.utils
 import mimetypes
+import posixpath
 import re
 import threading
 import zipfile
 from collections import defaultdict
 from collections.abc import Iterable, Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from defusedxml import ElementTree
 
 from appv2.modules.catalog.contracts import CatalogFile
-from appv2.modules.reading.contracts import ComicPage, ReaderResourcePort, ResourceStream
+from appv2.modules.reading.contracts import (
+    ComicPage,
+    EpubUnit,
+    ReaderResourcePort,
+    ResourceStream,
+)
 from appv2.platform.http.ranges import ByteRange
+
+if TYPE_CHECKING:
+    from xml.etree.ElementTree import Element  # noqa: S405 - annotation only; parsing is defused
 
 
 class LocalReaderResources(ReaderResourcePort):
@@ -71,6 +83,57 @@ class LocalReaderResources(ReaderResourcePort):
                 for index, entry in enumerate(entries, start=1)
             ]
 
+    def epub_units(self, file: CatalogFile) -> list[EpubUnit]:
+        path = self._catalog_path(file)
+        with zipfile.ZipFile(path) as archive:
+            container = self._xml_member(archive, "META-INF/container.xml")
+            rootfile = next(
+                (
+                    element.attrib.get("full-path")
+                    for element in container.iter()
+                    if self._local_name(element.tag) == "rootfile"
+                    and element.attrib.get("full-path")
+                ),
+                None,
+            )
+            if not rootfile:
+                raise ValueError("EPUB container does not identify a package document")
+            package_path = self._safe_member_name(rootfile)
+            package = self._xml_member(archive, package_path)
+            manifest: dict[str, tuple[str, str, str]] = {}
+            spine_ids: list[str] = []
+            for element in package.iter():
+                name = self._local_name(element.tag)
+                if name == "item":
+                    item_id = element.attrib.get("id")
+                    href = element.attrib.get("href")
+                    if item_id and href:
+                        manifest[item_id] = (
+                            href,
+                            element.attrib.get("properties", ""),
+                            element.attrib.get("media-type", ""),
+                        )
+                elif name == "itemref" and element.attrib.get("idref"):
+                    spine_ids.append(element.attrib["idref"])
+
+            nav_item = next(
+                (item for item in manifest.values() if "nav" in item[1].split()),
+                None,
+            )
+            units = self._navigation_units(
+                archive,
+                package_path=package_path,
+                nav_href=nav_item[0] if nav_item else None,
+            )
+            if units:
+                return units
+            return [
+                EpubUnit(index=index, title=Path(href).stem, href=href)
+                for index, item_id in enumerate(spine_ids, start=1)
+                if (item := manifest.get(item_id)) is not None
+                for href in [item[0]]
+            ]
+
     def open_comic_page(
         self,
         file: CatalogFile,
@@ -106,6 +169,80 @@ class LocalReaderResources(ReaderResourcePort):
         if not zipfile.is_zipfile(path):
             raise ValueError("comic resource is not a ZIP archive")
         return path
+
+    @classmethod
+    def _navigation_units(
+        cls,
+        archive: zipfile.ZipFile,
+        *,
+        package_path: str,
+        nav_href: str | None,
+    ) -> list[EpubUnit]:
+        if not nav_href:
+            return []
+        package_directory = posixpath.dirname(package_path)
+        nav_path = cls._safe_member_name(posixpath.join(package_directory, nav_href))
+        navigation = cls._xml_member(archive, nav_path)
+        toc = next(
+            (
+                element
+                for element in navigation.iter()
+                if cls._local_name(element.tag) == "nav"
+                and "toc"
+                in (
+                    element.attrib.get("{http://www.idpf.org/2007/ops}type", "")
+                    or element.attrib.get("type", "")
+                ).split()
+            ),
+            None,
+        )
+        if toc is None:
+            return []
+        units: list[EpubUnit] = []
+        for element in toc.iter():
+            if cls._local_name(element.tag) != "li":
+                continue
+            target = next(
+                (
+                    child
+                    for child in element.iter()
+                    if child is not element and cls._local_name(child.tag) in {"a", "span"}
+                ),
+                None,
+            )
+            if target is None:
+                continue
+            title = " ".join("".join(target.itertext()).split())
+            href = target.attrib.get("href")
+            if not title or not href:
+                continue
+            units.append(EpubUnit(index=len(units) + 1, title=title, href=href))
+        return units
+
+    @staticmethod
+    def _local_name(tag: str) -> str:
+        return tag.rsplit("}", 1)[-1]
+
+    @staticmethod
+    def _safe_member_name(name: str) -> str:
+        normalized = posixpath.normpath(name.replace("\\", "/")).lstrip("/")
+        if normalized == ".." or normalized.startswith("../"):
+            raise ValueError("archive member escapes the EPUB root")
+        return normalized
+
+    @classmethod
+    def _xml_member(cls, archive: zipfile.ZipFile, name: str) -> Element:
+        safe_name = cls._safe_member_name(name)
+        try:
+            entry = archive.getinfo(safe_name)
+        except KeyError as error:
+            raise ValueError(f"EPUB member is missing: {safe_name}") from error
+        if entry.file_size > 4 * 1024 * 1024:
+            raise ValueError("EPUB metadata document exceeds safety limit")
+        try:
+            return ElementTree.fromstring(archive.read(entry))
+        except ElementTree.ParseError as error:
+            raise ValueError("EPUB metadata XML is invalid") from error
 
     @staticmethod
     def _comic_entries(archive: zipfile.ZipFile) -> list[zipfile.ZipInfo]:

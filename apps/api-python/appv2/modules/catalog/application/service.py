@@ -144,6 +144,8 @@ class CatalogService:
         media_type: str | None,
         status: str,
         series_name: str | None = None,
+        sort: str = "recent_read",
+        sort_direction: str = "desc",
     ) -> tuple[list[CatalogWork], int]:
         with self._uow_factory() as uow:
             return uow.catalog.list_works(
@@ -153,6 +155,8 @@ class CatalogService:
                 media_type=media_type,
                 status=status,
                 series_name=series_name,
+                sort=sort,
+                sort_direction=sort_direction,
             )
 
     def list_series(

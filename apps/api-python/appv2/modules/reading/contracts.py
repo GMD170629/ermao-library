@@ -185,6 +185,13 @@ class ComicPage:
     size_bytes: int
 
 
+@dataclass(frozen=True, slots=True)
+class EpubUnit:
+    index: int
+    title: str
+    href: str
+
+
 class ReaderResourcePort(Protocol):
     def open(
         self,
@@ -195,6 +202,8 @@ class ReaderResourcePort(Protocol):
     ) -> ResourceStream: ...
 
     def comic_pages(self, file: CatalogFile) -> list[ComicPage]: ...
+
+    def epub_units(self, file: CatalogFile) -> list[EpubUnit]: ...
 
     def open_comic_page(
         self,

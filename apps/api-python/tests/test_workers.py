@@ -251,9 +251,14 @@ def test_backup_and_restore_workers_cover_success_and_failure() -> None:
         checksum="checksum",
         size_bytes=1024,
     )
-    executor.create.side_effect = RuntimeError("pg_dump failed")
+    executor.create.side_effect = RuntimeError(
+        "pg_dump failed for postgresql://app:super-secret@postgres/app"
+    )
     assert backup_worker.run_once() is True
-    repository.fail_backup.assert_called_with(backup.id, "pg_dump failed")
+    repository.fail_backup.assert_called_with(
+        backup.id,
+        "pg_dump failed for postgresql://app:***@postgres/app",
+    )
 
     inbox = MagicMock()
     restore_executor = MagicMock()
@@ -269,10 +274,12 @@ def test_backup_and_restore_workers_cover_success_and_failure() -> None:
     assert restore.run_once() is True
     repository.complete_restore.assert_called_with(backup.id)
     inbox.complete.assert_called_with(request)
-    restore_executor.execute.side_effect = RuntimeError("pg_restore failed")
+    restore_executor.execute.side_effect = RuntimeError(
+        "pg_restore failed with password=super-secret"
+    )
     with pytest.raises(RuntimeError, match="pg_restore failed"):
         restore.run_once()
-    inbox.fail.assert_called_with(request, "pg_restore failed")
+    inbox.fail.assert_called_with(request, "pg_restore failed with password=***")
 
 
 def test_worker_runtime_invokes_every_queue_without_short_circuiting() -> None:

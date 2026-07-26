@@ -898,6 +898,19 @@ export class EpubReaderAdapter extends ReaderAdapterBase implements ReaderAdapte
       this.container.dataset.shukuEpubTransitionPosition = 'true';
     }
     this.container.append(placeholder);
+    if (!this.container.querySelector(':scope > style[data-shuku-epub-transition-guard="true"]')) {
+      const guard = this.container.ownerDocument.createElement('style');
+      guard.dataset.shukuEpubTransitionGuard = 'true';
+      guard.textContent = `
+        [data-shuku-epub-transition-active="true"] iframe:not([data-shuku-epub-transition-ready="true"]) {
+          opacity: 0 !important;
+        }
+      `;
+      this.container.append(guard);
+    }
+    this.container.querySelectorAll<HTMLIFrameElement>('iframe').forEach((iframe) => {
+      iframe.dataset.shukuEpubTransitionReady = 'true';
+    });
     this.container.dataset.shukuEpubTransitionActive = 'true';
     this.viewTransitionPlaceholder = placeholder;
 
@@ -947,6 +960,9 @@ export class EpubReaderAdapter extends ReaderAdapterBase implements ReaderAdapte
     clearTimeout(transition.timer);
     clearTimeout(transition.placeholderTimer);
     clearTimeout(transition.labelTimer);
+    this.container.querySelectorAll<HTMLIFrameElement>('iframe').forEach((iframe) => {
+      iframe.dataset.shukuEpubTransitionReady = 'true';
+    });
     this.hiddenTransitionFrames.forEach((iframe) => iframe.style.removeProperty('opacity'));
     this.hiddenTransitionFrames.clear();
     delete this.container.dataset.shukuEpubTransitionActive;

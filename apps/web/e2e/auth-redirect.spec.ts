@@ -4,14 +4,21 @@ async function mockExpiredSession(page: Page) {
   await page.route('**/api/v2/account', async (route) => {
     await route.fulfill({
       status: 401,
-      json: { ok: false, error: { message: 'UNAUTHORIZED' } }
+      json: {
+        type: 'https://shuku.app/problems/authentication',
+        title: 'Authentication required',
+        status: 401,
+        code: 'UNAUTHORIZED',
+        detail: '请先登录',
+        params: {}
+      }
     });
   });
 }
 
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/v2/auth/setup/status', async (route) => {
-    await route.fulfill({ json: { ok: true, data: { initialized: true } } });
+    await route.fulfill({ json: { required: false } });
   });
 });
 
@@ -23,7 +30,7 @@ test('a missing session is redirected by the server before protected content ren
 });
 
 test('an expired session cookie is verified and redirected without showing API errors', async ({ context, page }) => {
-  await context.addCookies([{ name: 'shuku_session', value: 'expired-session', domain: '127.0.0.1', path: '/' }]);
+  await context.addCookies([{ name: 'shuku_v2_session', value: 'expired-session', domain: '127.0.0.1', path: '/' }]);
   await mockExpiredSession(page);
 
   await page.goto('/library?status=READING');
@@ -34,7 +41,7 @@ test('an expired session cookie is verified and redirected without showing API e
 });
 
 test('the retired mobile URL enters the responsive web shell and keeps session validation', async ({ context, page }) => {
-  await context.addCookies([{ name: 'shuku_session', value: 'expired-session', domain: '127.0.0.1', path: '/' }]);
+  await context.addCookies([{ name: 'shuku_v2_session', value: 'expired-session', domain: '127.0.0.1', path: '/' }]);
   await mockExpiredSession(page);
 
   await page.goto('/mobile');

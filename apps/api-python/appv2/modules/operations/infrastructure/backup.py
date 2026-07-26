@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import uuid
@@ -17,12 +18,14 @@ from appv2.modules.operations.contracts import (
     BackupManifest,
     BackupView,
     RestoreControlPort,
+    RestoreStatusView,
 )
+from appv2.platform.database.postgres_tools import postgres_cli_connection
 
 
 class PgBackupExecutor(BackupExecutorPort):
     def __init__(self, *, database_url: str, backups_root: Path) -> None:
-        self._database_url = database_url.replace("postgresql+psycopg://", "postgresql://", 1)
+        self._database_url, self._database_env = postgres_cli_connection(database_url)
         self._root = backups_root
 
     def create(self, backup: BackupView) -> tuple[str, int]:
@@ -42,7 +45,11 @@ class PgBackupExecutor(BackupExecutorPort):
             ],
             check=True,
             timeout=60 * 60,
-            env={**os.environ, "PGAPPNAME": "shuku-appv2-backup"},
+            env={
+                **_subprocess_environment(),
+                **self._database_env,
+                "PGAPPNAME": "shuku-appv2-backup",
+            },
         )
         checksum = _sha256(archive)
         manifest = BackupManifest(
@@ -116,6 +123,31 @@ class FileRestoreControl(RestoreControlPort):
         temporary.replace(request_path)
         return request_id
 
+    def status(self, request_id: str) -> RestoreStatusView | None:
+        if re.fullmatch(r"[0-9a-f]{32}", request_id) is None:
+            return None
+        result_path = self._control_root / f"restore-{request_id}.result.json"
+        request_path = self._control_root / f"restore-{request_id}.request.json"
+        if result_path.is_file():
+            payload = json.loads(result_path.read_text(encoding="utf-8"))
+            return RestoreStatusView(
+                request_id=request_id,
+                backup_id=uuid.UUID(str(payload["backupId"])),
+                status=str(payload["status"]),
+                detail=str(payload["detail"]) if payload.get("detail") else None,
+                updated_at=datetime.fromisoformat(str(payload["completedAt"])),
+            )
+        if request_path.is_file():
+            payload = json.loads(request_path.read_text(encoding="utf-8"))
+            return RestoreStatusView(
+                request_id=request_id,
+                backup_id=uuid.UUID(str(payload["backupId"])),
+                status="pending",
+                detail=None,
+                updated_at=datetime.fromisoformat(str(payload["requestedAt"])),
+            )
+        return None
+
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -123,3 +155,11 @@ def _sha256(path: Path) -> str:
         while chunk := source.read(1024 * 1024):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _subprocess_environment() -> dict[str, str]:
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"DATABASE_URL", "APPV2_TEST_DATABASE_URL", "PGPASSWORD"}
+    }

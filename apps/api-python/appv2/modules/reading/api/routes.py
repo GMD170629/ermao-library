@@ -19,6 +19,7 @@ from appv2.modules.reading.contracts import (
     BookmarkView,
     BulkProgressResult,
     ComicPage,
+    EpubUnit,
     PreferenceView,
     ProgressView,
 )
@@ -175,6 +176,18 @@ class BootstrapResponse(CamelModel):
     preference: PreferenceResponse | None
     files: list[ReaderFileResponse]
     volumes: list[ReaderVolumeResponse]
+    units: list["EpubUnitResponse"]
+    pages: list["ComicPageResponse"]
+
+
+class EpubUnitResponse(CamelModel):
+    index: int
+    title: str
+    href: str
+
+    @classmethod
+    def from_view(cls, value: EpubUnit) -> "EpubUnitResponse":
+        return cls.model_validate(value)
 
 
 class ComicPageResponse(CamelModel):
@@ -262,10 +275,12 @@ def create_router(service: ReadingService, current_account: CurrentAccount) -> A
         volume_id: Annotated[uuid.UUID | None, Query(alias="volume")] = None,
     ) -> BootstrapResponse:
         try:
-            target, progress, bookmarks, preference, files, volumes = service.bootstrap(
-                user_id=actor.id,
-                edition_id=edition_id,
-                volume_id=volume_id,
+            target, progress, bookmarks, preference, files, volumes, units, pages = (
+                service.bootstrap(
+                    user_id=actor.id,
+                    edition_id=edition_id,
+                    volume_id=volume_id,
+                )
             )
         except ReadingNotFound as error:
             raise missing(error) from error
@@ -277,6 +292,8 @@ def create_router(service: ReadingService, current_account: CurrentAccount) -> A
             preference=(PreferenceResponse.from_view(preference) if preference else None),
             files=[ReaderFileResponse.from_view(value) for value in files],
             volumes=[ReaderVolumeResponse.from_view(value) for value in volumes],
+            units=[EpubUnitResponse.from_view(value) for value in units],
+            pages=[ComicPageResponse.from_view(value) for value in pages],
         )
 
     @router.get("/editions/{edition_id}/resource")

@@ -123,10 +123,12 @@ while :; do
   restore_request="$(find "$CONTROL_ROOT" -maxdepth 1 -type f -name 'restore-*.request.json' -print -quit)"
   if [ -n "$restore_request" ]; then
     stop_backend
-    (
+    if ! (
       cd "$PYTHON_API_DIR"
       python -m appv2.entrypoints.restore
-    )
+    ); then
+      echo "appv2 restore failed; restarting API and worker so the result can be inspected" >&2
+    fi
     start_backend
   fi
   sleep 2

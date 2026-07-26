@@ -136,6 +136,58 @@ def test_cbz_pages_are_naturally_sorted_and_streamed(tmp_path: Path) -> None:
         resources.open_comic_page(catalog_file, page_index=3, stream_key="reader")
 
 
+def test_epub_navigation_units_are_read_from_the_package_document(tmp_path: Path) -> None:
+    archive = tmp_path / "book.epub"
+    with zipfile.ZipFile(archive, "w") as target:
+        target.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+            <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+              <rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles>
+            </container>""",
+        )
+        target.writestr(
+            "OEBPS/content.opf",
+            """<?xml version="1.0"?>
+            <package xmlns="http://www.idpf.org/2007/opf">
+              <manifest>
+                <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml"
+                      properties="nav"/>
+                <item id="one" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+                <item id="two" href="chapter2.xhtml" media-type="application/xhtml+xml"/>
+              </manifest>
+              <spine><itemref idref="one"/><itemref idref="two"/></spine>
+            </package>""",
+        )
+        target.writestr(
+            "OEBPS/nav.xhtml",
+            """<html xmlns="http://www.w3.org/1999/xhtml"
+                     xmlns:epub="http://www.idpf.org/2007/ops">
+              <body><nav epub:type="toc"><ol>
+                <li><a href="chapter1.xhtml">第一章</a></li>
+                <li><a href="chapter2.xhtml">第二章</a></li>
+              </ol></nav></body>
+            </html>""",
+        )
+    catalog_file = CatalogFile(
+        id=uuid.uuid4(),
+        edition_id=uuid.uuid4(),
+        storage_path=str(archive),
+        original_name=archive.name,
+        media_type="application/epub+zip",
+        size_bytes=archive.stat().st_size,
+        checksum="epub123",
+    )
+    resources = LocalReaderResources(allowed_roots=(tmp_path,), streams_per_user=2)
+
+    units = resources.epub_units(catalog_file)
+
+    assert [(unit.index, unit.title, unit.href) for unit in units] == [
+        (1, "第一章", "chapter1.xhtml"),
+        (2, "第二章", "chapter2.xhtml"),
+    ]
+
+
 def test_completed_backup_archive_can_be_streamed(tmp_path: Path) -> None:
     archive = tmp_path / "backup.dump"
     archive.write_bytes(b"postgres-custom-backup")

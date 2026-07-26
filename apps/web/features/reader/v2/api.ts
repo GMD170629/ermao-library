@@ -117,17 +117,32 @@ export async function fetchReaderBootstrap(
   const resumeLocation = rawResume ? rawResume as ReaderWireLocation : null;
   const initialLocation = wireLocationToDomain(resumeLocation);
   const progressPercent = (payload.progress?.percentage ?? 0) * 100;
+  const volumes = payload.volumes.map((volume) => ({
+    id: volume.id,
+    title: volume.title,
+    index: volume.sortOrder + 1,
+    pageCount: volume.pageCount,
+    chapterCount: null
+  }));
+  const selectedFile = payload.files.find((file) => file.id === payload.target.fileId);
+  const selectedVolumeId = volumeId ?? selectedFile?.volumeId ?? null;
+  const selectedVolume = volumes.find((volume) => volume.id === selectedVolumeId)
+    ?? (readerType === 'comic' ? volumes[0] ?? null : null);
+  const totalPages = selectedVolume?.pageCount
+    ?? (payload.pages.length > 0 ? payload.pages.length : null);
   const edition: VisualReaderEdition = {
     id: payload.target.editionId,
     workId: payload.target.workId,
     format: readerType,
-    versionName: payload.target.editionTitle
+    versionName: payload.target.editionTitle,
+    pageCount: totalPages,
+    chapterCount: payload.units.length || null
   };
   const availableEditions: VisualReaderEditionOption[] = [{
     ...edition,
     progress: progressPercent,
     lastReadAt: payload.progress?.updatedAt ?? null,
-    volumes: []
+    volumes
   }];
   return {
     userId: payload.accountId,
@@ -141,11 +156,11 @@ export async function fetchReaderBootstrap(
     },
     edition,
     availableEditions,
-    selectedVolume: null,
-    volumes: [],
-    units: [],
-    pages: [],
-    totalPages: null,
+    selectedVolume,
+    volumes,
+    units: payload.units,
+    pages: payload.pages,
+    totalPages,
     fileUrl: payload.target.resourceUrl,
     capabilities: {
       canGoNext: true,
@@ -175,8 +190,8 @@ export async function fetchReaderBootstrap(
       kind: readerType,
       contentUrl: withBasePath(payload.target.resourceUrl),
       contentFingerprint: payload.target.checksum,
-      volumeId,
-      totalPages: null
+      volumeId: selectedVolume?.id ?? null,
+      totalPages
     },
     initialLocation
   };

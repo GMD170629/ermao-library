@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import uuid
@@ -886,6 +887,41 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
             },
         )
         assert progress.status_code == 200, progress.text
+        reading_library = client.get(
+            "/api/v2/reporting/library",
+            params={
+                "readingStatus": "READING",
+                "filters": json.dumps(
+                    {
+                        "combinator": "ALL",
+                        "conditions": [
+                            {
+                                "field": "title",
+                                "operator": "contains",
+                                "value": "Imported",
+                            }
+                        ],
+                    }
+                ),
+            },
+        )
+        assert reading_library.status_code == 200, reading_library.text
+        assert imported_work_id in {item["id"] for item in reading_library.json()["items"]}
+        filter_schema = client.get("/api/v2/reporting/library/filter-schema")
+        assert filter_schema.status_code == 200, filter_schema.text
+        assert {
+            "title",
+            "readingStatus",
+            "progress",
+            "shelf",
+        }.issubset({field["key"] for field in filter_schema.json()["fields"]})
+        assert (
+            client.get(
+                "/api/v2/reporting/library",
+                params={"filters": '{"combinator":"ALL","conditions":[{"field":"unknown"}]}'},
+            ).status_code
+            == 422
+        )
         bookmark = client.put(
             f"/api/v2/reading/editions/{edition_id}/bookmarks",
             json={
@@ -940,6 +976,12 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         finished_progress = client.get(f"/api/v2/reading/editions/{edition_id}/progress")
         assert finished_progress.json()["percentage"] == 1
         assert finished_progress.json()["position"] == {"kind": "completed"}
+        finished_library = client.get(
+            "/api/v2/reporting/library",
+            params={"readingStatus": "FINISHED", "sort": "recent_read"},
+        )
+        assert finished_library.status_code == 200, finished_library.text
+        assert imported_work_id in {item["id"] for item in finished_library.json()["items"]}
         assert (
             client.get(f"/api/v2/reading/editions/{converted_edition_id}/progress").json()[
                 "percentage"
@@ -959,6 +1001,12 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         assert (
             client.get(f"/api/v2/reading/editions/{converted_edition_id}/progress").json() is None
         )
+        unread_library = client.get(
+            "/api/v2/reporting/library",
+            params={"readingStatus": "UNREAD", "seriesName": "Integration Series"},
+        )
+        assert unread_library.status_code == 200, unread_library.text
+        assert imported_work_id in {item["id"] for item in unread_library.json()["items"]}
         resource = client.get(f"/api/v2/reading/editions/{edition_id}/resource")
         assert resource.status_code == 200, resource.text
         partial_resource = client.get(
@@ -1248,6 +1296,27 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         assert client.get(f"/api/v2/operations/backups/{backup_id}").status_code == 200
         assert client.get(f"/api/v2/operations/backups/{backup_id}/download").status_code == 404
         assert client.post(f"/api/v2/operations/backups/{backup_id}/restore").status_code == 404
+        restore_request_id = uuid.uuid4().hex
+        restore_backup_id = uuid.uuid4()
+        settings.control_root.mkdir(parents=True, exist_ok=True)
+        (settings.control_root / f"restore-{restore_request_id}.result.json").write_text(
+            json.dumps(
+                {
+                    "requestId": restore_request_id,
+                    "backupId": str(restore_backup_id),
+                    "status": "completed",
+                    "detail": None,
+                    "completedAt": datetime.now(UTC).isoformat(),
+                }
+            ),
+            encoding="utf-8",
+        )
+        restore_status = client.get(f"/api/v2/operations/restores/{restore_request_id}")
+        assert restore_status.status_code == 200
+        assert restore_status.json()["status"] == "completed"
+        assert restore_status.json()["backupId"] == str(restore_backup_id)
+        assert client.get(f"/api/v2/operations/restores/{uuid.uuid4().hex}").status_code == 404
+        assert client.get("/api/v2/operations/restores/not-valid").status_code == 422
         assert client.get("/api/v2/operations/events?kind=backup.requested").status_code == 200
         assert client.get("/api/v2/reporting/dashboard").status_code == 200
         assert client.get("/api/v2/reporting/management").status_code == 200

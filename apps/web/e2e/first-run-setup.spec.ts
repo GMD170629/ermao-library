@@ -2,12 +2,12 @@ import { expect, test } from '@playwright/test';
 
 test('an uninitialized installation opens the account setup wizard', async ({ page }) => {
   await page.route('**/api/v2/auth/setup/status', async (route) => {
-    await route.fulfill({ json: { ok: true, data: { initialized: false } } });
+    await route.fulfill({ json: { required: true } });
   });
   await page.route('**/api/v2/auth/setup', async (route) => {
     expect(route.request().method()).toBe('POST');
     expect(route.request().postDataJSON()).toEqual({
-      name: '二毛',
+      displayName: '二毛',
       email: 'owner@example.com',
       password: 'initial-password-123',
       locale: 'zh-CN'
@@ -15,29 +15,46 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
     await route.fulfill({
       status: 201,
       json: {
-        ok: true,
-        data: {
-          initialized: true,
-          user: { name: '二毛', email: 'owner@example.com', role: 'admin' }
-        }
+        account: {
+          id: 'owner-1',
+          displayName: '二毛',
+          email: 'owner@example.com',
+          role: 'admin',
+          locale: 'zh-CN',
+          scopes: ['catalog:read', 'operations:write'],
+          disabled: false,
+          monitorFolderIds: [],
+          createdAt: '2026-07-25T00:00:00Z'
+        },
+        expiresAt: '2026-07-26T00:00:00Z'
       }
     });
   });
   await page.route('**/api/v2/ingestion/folders', async (route) => {
     if (route.request().method() === 'GET') {
-      await route.fulfill({ json: { ok: true, data: { folders: [], monitorRoot: '/monitor' } } });
+      await route.fulfill({ json: { items: [], page: 1, pageSize: 24, total: 0 } });
       return;
     }
     expect(route.request().method()).toBe('POST');
     expect(route.request().postDataJSON()).toEqual({
-      name: '我的书库',
-      rootPath: '/monitor',
-      enabled: true,
-      ignorePatterns: '',
-      ignoreHidden: true,
-      minFileSizeBytes: 0
+      path: '/monitor',
+      recursive: true,
+      moveSource: false,
+      options: { name: '我的书库' }
     });
-    await route.fulfill({ status: 201, json: { ok: true, data: { folder: { id: 'folder-1', name: '我的书库', rootPath: '/monitor', enabled: true } } } });
+    await route.fulfill({
+      status: 201,
+      json: {
+        id: 'folder-1',
+        path: '/monitor',
+        enabled: true,
+        recursive: true,
+        moveSource: false,
+        options: { name: '我的书库' },
+        lastScanAt: null,
+        createdAt: '2026-07-25T00:00:00Z'
+      }
+    });
   });
 
   await page.goto('/login');
@@ -68,10 +85,20 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
 
 test('an initialized installation cannot reopen the setup wizard', async ({ page }) => {
   await page.route('**/api/v2/auth/setup/status', async (route) => {
-    await route.fulfill({ json: { ok: true, data: { initialized: true } } });
+    await route.fulfill({ json: { required: false } });
   });
   await page.route('**/api/v2/account', async (route) => {
-    await route.fulfill({ status: 401, json: { ok: false, error: { message: 'UNAUTHORIZED' } } });
+    await route.fulfill({
+      status: 401,
+      json: {
+        type: 'https://shuku.app/problems/authentication',
+        title: 'Authentication required',
+        status: 401,
+        code: 'UNAUTHORIZED',
+        detail: '请先登录',
+        params: {}
+      }
+    });
   });
 
   await page.goto('/setup');
@@ -90,10 +117,22 @@ test('an authenticated owner can resume unfinished library onboarding after refr
     }));
   });
   await page.route('**/api/v2/auth/setup/status', async (route) => {
-    await route.fulfill({ json: { ok: true, data: { initialized: true } } });
+    await route.fulfill({ json: { required: false } });
   });
   await page.route('**/api/v2/account', async (route) => {
-    await route.fulfill({ json: { ok: true, data: { user: { email: 'owner@example.com' } } } });
+    await route.fulfill({
+      json: {
+        id: 'owner-1',
+        displayName: '二毛',
+        email: 'owner@example.com',
+        role: 'admin',
+        locale: 'zh-CN',
+        scopes: ['catalog:read', 'operations:write'],
+        disabled: false,
+        monitorFolderIds: [],
+        createdAt: '2026-07-25T00:00:00Z'
+      }
+    });
   });
 
   await page.goto('/setup');
@@ -104,10 +143,20 @@ test('an authenticated owner can resume unfinished library onboarding after refr
 
 test('login shows password errors in the system feedback style and in Chinese', async ({ page }) => {
   await page.route('**/api/v2/auth/setup/status', async (route) => {
-    await route.fulfill({ json: { ok: true, data: { initialized: true } } });
+    await route.fulfill({ json: { required: false } });
   });
   await page.route('**/api/v2/auth/login', async (route) => {
-    await route.fulfill({ status: 401, json: { ok: false, error: { message: 'Incorrect email or password' } } });
+    await route.fulfill({
+      status: 401,
+      json: {
+        type: 'https://shuku.app/problems/authentication',
+        title: 'Authentication failed',
+        status: 401,
+        code: 'INVALID_CREDENTIALS',
+        detail: '邮箱或密码不正确',
+        params: {}
+      }
+    });
   });
 
   await page.goto('/login');
@@ -126,16 +175,33 @@ test('login recovers to setup when the initial status check was unavailable', as
   let loginAttempted = false;
   await page.route('**/api/v2/auth/setup/status', async (route) => {
     if (!loginAttempted) {
-      await route.fulfill({ status: 503, json: { ok: false, error: { message: '暂时不可用' } } });
+      await route.fulfill({
+        status: 503,
+        json: {
+          type: 'https://shuku.app/problems/unavailable',
+          title: 'Service unavailable',
+          status: 503,
+          code: 'SERVICE_UNAVAILABLE',
+          detail: '暂时不可用',
+          params: {}
+        }
+      });
       return;
     }
-    await route.fulfill({ json: { ok: true, data: { initialized: false } } });
+    await route.fulfill({ json: { required: true } });
   });
   await page.route('**/api/v2/auth/login', async (route) => {
     loginAttempted = true;
     await route.fulfill({
       status: 409,
-      json: { ok: false, error: { message: '系统尚未初始化', details: { code: 'SETUP_REQUIRED' } } }
+      json: {
+        type: 'https://shuku.app/problems/setup-required',
+        title: 'Setup required',
+        status: 409,
+        code: 'SETUP_REQUIRED',
+        detail: '系统尚未初始化',
+        params: {}
+      }
     });
   });
 

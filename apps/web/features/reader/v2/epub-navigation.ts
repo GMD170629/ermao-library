@@ -44,6 +44,10 @@ function normalizedHref(value: string) {
   return { path, fragment, full: fragment ? `${path}#${fragment}` : path };
 }
 
+function sameResourcePath(left: string, right: string) {
+  return left === right || left.endsWith(`/${right}`) || right.endsWith(`/${left}`);
+}
+
 /**
  * Resolves a real TOC target without assuming one TOC entry per spine item.
  * A resource-only location is deliberately left unresolved when that XHTML
@@ -58,12 +62,16 @@ export function resolveActiveEpubNavigationIndex(
     const current = normalizedHref(currentHref);
     const exact = items
       .map((item, index) => ({ item, index }))
-      .filter(({ item }) => item.href && normalizedHref(item.href).full === current.full);
+      .filter(({ item }) => {
+        if (!item.href) return false;
+        const candidate = normalizedHref(item.href);
+        return sameResourcePath(candidate.path, current.path) && candidate.fragment === current.fragment;
+      });
     if (exact.length === 1) return exact[0].index;
 
     const sameResource = items
       .map((item, index) => ({ item, index }))
-      .filter(({ item }) => item.href && normalizedHref(item.href).path === current.path);
+      .filter(({ item }) => item.href && sameResourcePath(normalizedHref(item.href).path, current.path));
     if (current.fragment) {
       const resourceOnly = sameResource.filter(({ item }) => item.href && !normalizedHref(item.href).fragment);
       return sameResource.length === 1 && resourceOnly.length === 1 ? resourceOnly[0].index : null;

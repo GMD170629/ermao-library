@@ -97,6 +97,8 @@ export type BootstrapResponse = {
   preference: PreferenceResponse | null;
   files: Array<ReaderFileResponse>;
   volumes: Array<ReaderVolumeResponse>;
+  units: Array<EpubUnitResponse>;
+  pages: Array<ComicPageResponse>;
 };
 
 export type BulkMetadataRequest = {
@@ -212,6 +214,12 @@ export type DashboardResponse = {
   editionCount: number;
   activeReaders: number;
   queuedJobs: number;
+  continueItem: {
+    [key: string]: unknown;
+  } | null;
+  recentReading: Array<{
+      [key: string]: unknown;
+    }>;
   recentItems: Array<{
       [key: string]: unknown;
     }>;
@@ -375,6 +383,12 @@ export type EpubLocationSaveRequest = {
   serialized: string;
 };
 
+export type EpubUnitResponse = {
+  index: number;
+  title: string;
+  href: string;
+};
+
 export type EventResponse = {
   id: string;
   actorId: string | null;
@@ -406,6 +420,19 @@ export type FileResponse = {
   checksum: string;
   sortOrder: number;
   durationMs: number | null;
+};
+
+export type FilterFieldResponse = {
+  key: string;
+  label: string;
+  group: string;
+  type: "text" | "select" | "number" | "date" | "boolean";
+  operators: Array<string>;
+  options?: Array<{
+      [key: string]: unknown;
+    }>;
+  allowCustom?: boolean;
+  unit?: string | null;
 };
 
 export type FindReplaceItemResponse = {
@@ -520,6 +547,11 @@ export type KindleSettingsResponse = {
   };
 };
 
+export type LibraryFilterSchemaResponse = {
+  fields: Array<FilterFieldResponse>;
+  maxConditions: number;
+};
+
 export type LibraryOperationResponse = {
   id: string;
   kind: string;
@@ -527,6 +559,21 @@ export type LibraryOperationResponse = {
   affectedWorks: number;
   undoAvailable: boolean;
   createdAt: string;
+};
+
+export type LibraryWorkResponse = {
+  id: string;
+  title: string;
+  author: string | null;
+  mediaType: string;
+  status: string;
+  coverUrl: string | null;
+  summary: string | null;
+  metadata: {
+    [key: string]: unknown;
+  };
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type LogSettingsRequest = {
@@ -661,6 +708,13 @@ export type Page_JobAccepted_ = {
 
 export type Page_JobResponse_ = {
   items: Array<JobResponse>;
+  page: number;
+  pageSize: number;
+  total: number;
+};
+
+export type Page_LibraryWorkResponse_ = {
+  items: Array<LibraryWorkResponse>;
   page: number;
   pageSize: number;
   total: number;
@@ -872,6 +926,14 @@ export type ReaderVolumeResponse = {
 export type RestoreAccepted = {
   requestId: string;
   status?: string;
+};
+
+export type RestoreStatusResponse = {
+  requestId: string;
+  backupId: string;
+  status: string;
+  detail: string | null;
+  updatedAt: string;
 };
 
 export type ResultResponse = {
@@ -1164,7 +1226,7 @@ export interface ApiV2Paths {
     put: { request: AdminPasswordRequest; query: never; response: void };
   };
   "/api/v2/catalog/works": {
-    get: { request: never; query: { page?: number; pageSize?: number; query?: string | null; mediaType?: string | null; visibility?: string; seriesName?: string | null }; response: Page_WorkResponse_ };
+    get: { request: never; query: { page?: number; pageSize?: number; query?: string | null; mediaType?: string | null; visibility?: string; seriesName?: string | null; sort?: "recent_read" | "recent_import" | "title" | "author" | "publisher" | "series"; sortDirection?: "asc" | "desc" }; response: Page_WorkResponse_ };
     post: { request: CreateWorkRequest; query: never; response: WorkResponse };
   };
   "/api/v2/catalog/series": {
@@ -1425,6 +1487,15 @@ export interface ApiV2Paths {
   };
   "/api/v2/operations/backups/{backup_id}/restore": {
     post: { request: never; query: never; response: RestoreAccepted };
+  };
+  "/api/v2/operations/restores/{request_id}": {
+    get: { request: never; query: never; response: RestoreStatusResponse };
+  };
+  "/api/v2/reporting/library": {
+    get: { request: never; query: { page?: number; pageSize?: number; query?: string | null; mediaType?: string | null; seriesName?: string | null; readingStatus?: string | null; filters?: string | null; sort?: "recent_read" | "recent_import" | "title" | "author" | "publisher" | "series"; sortDirection?: "asc" | "desc" }; response: Page_LibraryWorkResponse_ };
+  };
+  "/api/v2/reporting/library/filter-schema": {
+    get: { request: never; query: never; response: LibraryFilterSchemaResponse };
   };
   "/api/v2/reporting/dashboard": {
     get: { request: never; query: never; response: DashboardResponse };

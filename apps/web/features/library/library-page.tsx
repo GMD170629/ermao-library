@@ -4,7 +4,8 @@ import { apiV2Fetch, apiV2Request, workResponseToView } from '@/lib/api-v2';
 import type {
   AccountPreferences,
   AccountResponse,
-  Page_WorkResponse_
+  LibraryFilterSchemaResponse,
+  Page_LibraryWorkResponse_
 } from '@/generated/api-v2';
 
 import { BookmarkPlus, BookOpen, ChevronLeft, ChevronRight, Filter, List, Loader2, Plus, Search, Trash2, UploadCloud, X } from 'lucide-react';
@@ -157,12 +158,20 @@ export function LibraryPage() {
   const smartFilterQuery = useMemo(() => applicableSmartFilterRules.conditions.length > 0 ? JSON.stringify(serializableSmartFilterRules(applicableSmartFilterRules)) : '', [applicableSmartFilterRules]);
   const queryBase = useMemo(() => {
     const params = new URLSearchParams();
-    if (search.trim()) params.set('search', search.trim());
-    if (formatFilter !== '全部') params.set('type', formatFilter);
-    if (statusFilter !== '全部') params.set('status', statusFilter);
+    if (search.trim()) params.set('query', search.trim());
+    if (formatFilter !== '全部') {
+      params.set(
+        'mediaType',
+        formatFilter === 'COMIC'
+          ? 'comic'
+          : formatFilter === 'AUDIOBOOK'
+            ? 'audiobook'
+            : 'book'
+      );
+    }
     if (seriesNameFilter) params.set('seriesName', seriesNameFilter);
+    if (statusFilter !== '全部') params.set('readingStatus', statusFilter);
     if (smartFilterQuery) params.set('filters', smartFilterQuery);
-    params.set('visibility', 'active');
     params.set('sort', sort);
     params.set('sortDirection', sortDirection);
     return params.toString();
@@ -211,9 +220,25 @@ export function LibraryPage() {
 
   useEffect(() => {
     if (!filtersOpen || filterSchemaLoaded) return;
-    setSmartFilterFields([]);
-    setFilterSchemaLoaded(true);
-    setFilterSchemaLoading(false);
+    let active = true;
+    setFilterSchemaLoading(true);
+    apiV2Request<LibraryFilterSchemaResponse>('/api/v2/reporting/library/filter-schema')
+      .then((payload) => {
+        if (!active) return;
+        setSmartFilterFields(payload.fields as SmartFilterField[]);
+        setFilterSchemaLoaded(true);
+        setError('');
+      })
+      .catch((reason) => {
+        if (!active) return;
+        setError(reason instanceof Error ? reason.message : '读取筛选条件失败');
+      })
+      .finally(() => {
+        if (active) setFilterSchemaLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [filterSchemaLoaded, filtersOpen]);
 
   useEffect(() => {
@@ -225,24 +250,11 @@ export function LibraryPage() {
     requestedReloadKeyRef.current = reloadKey;
     if (requestedPage !== page) setPage(requestedPage);
 
-    const params = new URLSearchParams();
+    const params = new URLSearchParams(queryBase);
     params.set('page', String(requestedPage));
     params.set('pageSize', requestPageSize);
-    if (search.trim()) params.set('query', search.trim());
-    if (formatFilter !== '全部') {
-      params.set(
-        'media_type',
-        formatFilter === 'COMIC'
-          ? 'comic'
-          : formatFilter === 'AUDIOBOOK'
-            ? 'audiobook'
-            : 'book'
-      );
-    }
-    params.set('visibility', 'active');
     setLoading(true);
-    apiV2Fetch(`/api/v2/catalog/works?${params.toString()}`)
-      .then((response) => response.json() as Promise<Page_WorkResponse_>)
+    apiV2Request<Page_LibraryWorkResponse_>(`/api/v2/reporting/library?${params.toString()}`)
       .then((payload) => {
         if (!active) return;
         const totalPages = Math.max(1, Math.ceil(payload.total / payload.pageSize));

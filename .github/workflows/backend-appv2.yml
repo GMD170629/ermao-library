@@ -85,6 +85,14 @@ jobs:
       - name: Run worker runtime smoke
         run: node scripts/python-worker-runtime-smoke.mjs
 
+      - name: Run worker import smoke
+        working-directory: apps/api-python
+        run: uv run python ../../scripts/python_worker_import_smoke.py
+
+      - name: Run backend sample smoke
+        working-directory: apps/api-python
+        run: uv run python ../../scripts/python_backend_sample_smoke.py
+
       - name: Upload backend coverage
         uses: actions/upload-artifact@v4
         with:

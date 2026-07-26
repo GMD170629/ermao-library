@@ -55,9 +55,12 @@ if (Object.values(versions).some((version) => version !== '0.4.0')) {
 
 expectIncludes('apps/api-python/pyproject.toml', 'include = ["appv2*"]');
 expectIncludes('apps/api-python/Dockerfile', 'appv2.entrypoints.api:app');
-expectIncludes('apps/web/Dockerfile.prod', 'appv2.entrypoints.api:app');
+expectIncludes('apps/web/Dockerfile.prod', 'CMD ["./scripts/start-unified-app.sh"]');
+expectIncludes('scripts/start-unified-app.sh', 'appv2.entrypoints.api:app');
 expectIncludes('scripts/start-unified-app.sh', 'appv2.entrypoints.worker');
 expectIncludes('scripts/dev-test.sh', 'appv2.entrypoints.worker');
+expectIncludes('scripts/e2e-flow-check.mjs', '/api/v2/auth/setup/status');
+expectIncludes('apps/api-python/README.md', 'PostgreSQL 18');
 expectIncludes('docker-compose.yml', 'postgres:18.4-alpine3.23');
 expectIncludes('docker-compose.prod.yml', 'postgres:18.4-alpine3.23');
 expectIncludes('docker-compose.yml', 'PGDATA: /var/lib/postgresql/18/docker');
@@ -67,27 +70,36 @@ expectExcludes('apps/api-python/Dockerfile', 'COPY apps/api-python/app ');
 expectExcludes('apps/web/Dockerfile.prod', 'COPY apps/api-python/app ');
 expectExcludes('scripts/start-unified-app.sh', 'app.main:app');
 expectExcludes('scripts/dev-test.sh', 'app.main:app');
+expectExcludes('scripts/e2e-flow-check.mjs', "'/api/auth/");
+expectExcludes('apps/api-python/README.md', 'SQLite is the only database');
 expectExcludes('docker-compose.yml', 'shuku.sqlite3');
 expectExcludes('docker-compose.prod.yml', 'shuku.sqlite3');
 
-run('uv', ['run', 'ruff', 'format', '--check', 'appv2', 'tests'], { cwd: apiRoot });
-run('uv', ['run', 'ruff', 'check', 'appv2', 'tests'], { cwd: apiRoot });
-run('uv', ['run', 'mypy', 'appv2'], { cwd: apiRoot });
-run('uv', ['run', 'pytest', '-q'], { cwd: apiRoot });
-run('uv', ['run', 'alembic', '-c', 'alembic-v2.ini', 'upgrade', 'head', '--sql'], {
-  cwd: apiRoot
-});
+if (process.env.VERIFY_STATIC_ONLY !== 'true') {
+  run('uv', ['run', 'ruff', 'format', '--check', 'appv2', 'tests'], { cwd: apiRoot });
+  run('uv', ['run', 'ruff', 'check', 'appv2', 'tests'], { cwd: apiRoot });
+  run('uv', ['run', 'mypy', 'appv2'], { cwd: apiRoot });
+  run('uv', ['run', 'pytest', '-q'], { cwd: apiRoot });
+  run('uv', ['run', 'alembic', '-c', 'alembic-v2.ini', 'upgrade', 'head', '--sql'], {
+    cwd: apiRoot
+  });
+} else {
+  console.log('\nStatic appv2 runtime and v0.4.0 release contracts passed.');
+}
 
-if (process.env.APPV2_TEST_DATABASE_URL || process.env.DATABASE_URL) {
+if (
+  process.env.VERIFY_STATIC_ONLY !== 'true'
+  && (process.env.APPV2_TEST_DATABASE_URL || process.env.DATABASE_URL)
+) {
   run('node', ['scripts/python-api-runtime-smoke.mjs']);
   run('node', ['scripts/python-worker-runtime-smoke.mjs']);
   run('uv', ['run', 'python', '../../scripts/python_worker_import_smoke.py'], { cwd: apiRoot });
   run('uv', ['run', 'python', '../../scripts/python_backend_sample_smoke.py'], { cwd: apiRoot });
-} else {
+} else if (process.env.VERIFY_STATIC_ONLY !== 'true') {
   console.log('\nSkipping PostgreSQL runtime smokes; set APPV2_TEST_DATABASE_URL to an isolated PostgreSQL 18 database.');
 }
 
-if (process.env.VERIFY_DOCKER_BUILD === 'true') {
+if (process.env.VERIFY_STATIC_ONLY !== 'true' && process.env.VERIFY_DOCKER_BUILD === 'true') {
   run('docker', [
     'build',
     '-f',
@@ -98,7 +110,7 @@ if (process.env.VERIFY_DOCKER_BUILD === 'true') {
     'shuku-starship-appv2:verify',
     '.'
   ]);
-} else {
+} else if (process.env.VERIFY_STATIC_ONLY !== 'true') {
   console.log('\nSkipping Docker image build. Set VERIFY_DOCKER_BUILD=true to include it.');
 }
 

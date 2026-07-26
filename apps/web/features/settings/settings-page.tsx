@@ -1,6 +1,10 @@
 'use client';
 
-import type { DirectoryNodeResponse, DirectoryTreeResponse } from '@/generated/api-v2';
+import type {
+  DirectoryNodeResponse,
+  DirectoryTreeResponse,
+  RestoreStatusResponse
+} from '@/generated/api-v2';
 import { apiV2Fetch, apiV2Request } from '@/lib/api-v2';
 
 import { CheckCircle2, ChevronDown, ChevronRight, Database, Download, FolderOpen, RotateCcw, Save, Settings2, SlidersHorizontal, Trash2 } from 'lucide-react';
@@ -58,6 +62,38 @@ type BackupResource = {
 type DirectoryNode = DirectoryNodeResponse;
 
 type AppSettings = Record<string, string>;
+
+const restorePollIntervalMs = 2_000;
+const restorePollAttempts = 300;
+
+function wait(milliseconds: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function waitForRestore(requestId: string): Promise<RestoreStatusResponse> {
+  let lastDetail = '';
+  for (let attempt = 0; attempt < restorePollAttempts; attempt += 1) {
+    try {
+      const response = await apiV2Fetch(
+        `/api/v2/operations/restores/${encodeURIComponent(requestId)}`,
+        { cache: 'no-store' }
+      );
+      const payload = await response.json().catch(() => null) as
+        | RestoreStatusResponse
+        | { detail?: string }
+        | null;
+      if (response.ok && payload && 'status' in payload) {
+        if (payload.status === 'completed' || payload.status === 'failed') return payload;
+      } else if (payload && 'detail' in payload && typeof payload.detail === 'string') {
+        lastDetail = payload.detail;
+      }
+    } catch (reason) {
+      lastDetail = reason instanceof Error ? reason.message : '';
+    }
+    await wait(restorePollIntervalMs);
+  }
+  throw new Error(lastDetail || '等待恢复结果超时');
+}
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -361,17 +397,41 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ confirm: true, confirmText })
     });
-    const payload = (await response.json()) as { detail?: string };
-    setBackupBusy('');
+    const payload = (await response.json()) as { requestId?: string; detail?: string };
     if (!response.ok) {
+      setBackupBusy('');
       const nextError = payload.detail ?? '恢复备份失败';
       setError(nextError);
       toast.error('恢复备份失败', nextError);
       return;
     }
-    setMessage('备份已恢复，原始读物文件未被删除');
-    toast.success('备份已恢复', '原始读物文件未被删除');
-    await Promise.all([loadPaths(), loadBackups()]);
+    if (!payload.requestId) {
+      setBackupBusy('');
+      setError('恢复服务未返回任务编号');
+      toast.error('恢复备份失败', '恢复服务未返回任务编号');
+      return;
+    }
+    setMessage('恢复服务正在重启，页面会自动等待结果…');
+    try {
+      const result = await waitForRestore(payload.requestId);
+      if (result.status === 'failed') {
+        const nextError = result.detail ?? '恢复备份失败';
+        setError(nextError);
+        setMessage('');
+        toast.error('恢复备份失败', nextError);
+        return;
+      }
+      setMessage('备份已恢复，原始读物文件未被删除');
+      toast.success('备份已恢复', '原始读物文件未被删除');
+      await Promise.all([loadPaths(), loadBackups()]).catch(() => undefined);
+    } catch (reason) {
+      const nextError = reason instanceof Error ? reason.message : '等待恢复结果失败';
+      setError(nextError);
+      setMessage('');
+      toast.error('等待恢复结果失败', nextError);
+    } finally {
+      setBackupBusy('');
+    }
   }
 
   async function deleteBackup(backup: BackupItem) {

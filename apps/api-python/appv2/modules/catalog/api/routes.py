@@ -151,6 +151,15 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
         media_type: Annotated[str | None, Query(alias="mediaType")] = None,
         visibility: str = "active",
         series_name: Annotated[str | None, Query(alias="seriesName")] = None,
+        sort: Literal[
+            "recent_read",
+            "recent_import",
+            "title",
+            "author",
+            "publisher",
+            "series",
+        ] = "recent_read",
+        sort_direction: Annotated[Literal["asc", "desc"], Query(alias="sortDirection")] = "desc",
     ) -> Page[WorkResponse]:
         del actor
         size = min(max(page_size, 1), 200)
@@ -161,6 +170,8 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
             media_type=media_type,
             status=visibility,
             series_name=series_name,
+            sort=sort,
+            sort_direction=sort_direction,
         )
         return Page(
             items=[WorkResponse.from_view(item) for item in items],

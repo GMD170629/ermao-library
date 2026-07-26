@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
+from appv2.modules.operations.application.errors import safe_error_detail
 from appv2.modules.operations.contracts import BackupExecutorPort, OperationsUnitOfWork
 
 logger = logging.getLogger(__name__)
@@ -27,9 +28,10 @@ class BackupWorker:
         try:
             checksum, size_bytes = self._executor.create(backup)
         except Exception as error:
-            logger.exception("Backup %s failed", backup.id)
+            detail = safe_error_detail(error)
+            logger.error("Backup %s failed: %s", backup.id, detail)
             with self._uow_factory() as uow:
-                uow.operations.fail_backup(backup.id, str(error))
+                uow.operations.fail_backup(backup.id, detail)
                 uow.commit()
             return True
         with self._uow_factory() as uow:

@@ -8,6 +8,7 @@ import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clearPrivatePwaData } from '../../lib/pwa/progressQueue';
+import { accountAuthorizationVersion } from '../../lib/account-authorization';
 import { prepareForPwaUpdate } from '../../lib/pwa/update-coordination';
 import { activateReaderV2User, clearPrivateReaderV2Data, deactivateReaderV2User, getReaderV2Runtime, startReaderV2Runtime, stopReaderV2Runtime } from '../../lib/reader-v2';
 import { withBasePath } from '../../lib/base-path';
@@ -70,8 +71,8 @@ async function refreshAuthenticatedReaderV2User(signal?: AbortSignal) {
   const response = await apiV2Fetch('/api/v2/account', { cache: 'no-store', credentials: 'same-origin', signal });
   const payload = await response.json().catch(() => null) as AccountResponse | null;
   const userId = response.ok && typeof payload?.id === 'string' ? payload.id : '';
-  if (userId) {
-    const authzVersion = 1;
+  if (userId && payload) {
+    const authzVersion = accountAuthorizationVersion(payload);
     activateReaderV2User(userId);
     setCurrentUserNamespace(userId, authzVersion);
     navigator.serviceWorker?.controller?.postMessage({

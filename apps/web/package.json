@@ -17,6 +17,7 @@
     "pretest": "node scripts/generate-i18n-catalog.mjs",
     "test": "node scripts/run-tests.mjs",
     "test:e2e": "playwright test",
+    "test:e2e:release": "playwright test --project=chromium",
     "typecheck": "tsc --noEmit",
     "i18n:extract": "node scripts/generate-i18n-catalog.mjs --write",
     "i18n:check": "node scripts/generate-i18n-catalog.mjs",

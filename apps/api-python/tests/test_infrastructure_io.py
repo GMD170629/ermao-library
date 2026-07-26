@@ -212,7 +212,14 @@ def test_pg_backup_executor_create_open_delete_and_validation(
         lambda _name: "/usr/bin/pg_dump",
     )
 
-    def fake_run(command: list[str], **_kwargs: object) -> None:
+    seen_backup_command: list[str] = []
+    seen_backup_environment: dict[str, str] = {}
+
+    def fake_run(command: list[str], **kwargs: object) -> None:
+        seen_backup_command.extend(command)
+        environment = kwargs["env"]
+        assert isinstance(environment, dict)
+        seen_backup_environment.update(environment)
         output = next(value.split("=", 1)[1] for value in command if value.startswith("--file="))
         Path(output).write_bytes(b"postgres-custom-backup")
 
@@ -221,6 +228,9 @@ def test_pg_backup_executor_create_open_delete_and_validation(
         fake_run,
     )
     checksum, size = executor.create(backup)
+    assert "secret" not in " ".join(seen_backup_command)
+    assert seen_backup_environment["PGPASSWORD"] == "secret"
+    assert "DATABASE_URL" not in seen_backup_environment
     assert checksum == hashlib.sha256(b"postgres-custom-backup").hexdigest()
     assert size == len(b"postgres-custom-backup")
     manifest = json.loads((root / "backup.dump.json").read_text(encoding="utf-8"))
@@ -252,6 +262,12 @@ def test_restore_control_inbox_and_executor_validation(
     archive = backups / backup.archive_name
     archive.write_bytes(b"archive")
     request_id = restore_control.request(backup, uuid.uuid4())
+    pending = restore_control.status(request_id)
+    assert pending is not None
+    assert pending.status == "pending"
+    assert pending.backup_id == backup.id
+    assert restore_control.status("invalid") is None
+    assert restore_control.status(uuid.uuid4().hex) is None
     inbox = FileRestoreInbox(control)
     request = inbox.next_request()
     assert request is not None
@@ -259,6 +275,10 @@ def test_restore_control_inbox_and_executor_validation(
     inbox.fail(request, "restore failed")
     result = json.loads((control / f"restore-{request_id}.result.json").read_text(encoding="utf-8"))
     assert result["status"] == "failed"
+    failed = restore_control.status(request_id)
+    assert failed is not None
+    assert failed.status == "failed"
+    assert failed.detail == "restore failed"
     assert inbox.next_request() is None
 
     request_id = restore_control.request(backup, uuid.uuid4())
@@ -267,6 +287,9 @@ def test_restore_control_inbox_and_executor_validation(
     inbox.complete(request)
     result = json.loads((control / f"restore-{request_id}.result.json").read_text(encoding="utf-8"))
     assert result["status"] == "completed"
+    completed = restore_control.status(request_id)
+    assert completed is not None
+    assert completed.status == "completed"
 
     checksum = hashlib.sha256(b"archive").hexdigest()
     executor = PgRestoreExecutor(
@@ -320,6 +343,11 @@ def test_restore_control_inbox_and_executor_validation(
     )
     executor.execute(restore_request())
     run.assert_called_once()
+    restore_command = run.call_args.args[0]
+    restore_environment = run.call_args.kwargs["env"]
+    assert "secret" not in " ".join(restore_command)
+    assert restore_environment["PGPASSWORD"] == "secret"
+    assert "DATABASE_URL" not in restore_environment
     upgrade.assert_called_once()
 
 

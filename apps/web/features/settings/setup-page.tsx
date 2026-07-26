@@ -37,7 +37,7 @@ export function SetupPage() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [folderName, setFolderName] = useState('我的书库');
-  const [folderPath, setFolderPath] = useState('/books');
+  const [folderPath, setFolderPath] = useState('/monitor');
   const [folderAdded, setFolderAdded] = useState(false);
   const [error, setError] = useState('');
 
@@ -77,7 +77,7 @@ export function SetupPage() {
           if (saved && ['folder', 'import', 'complete'].includes(saved.stage)) {
             setEmail(saved.email);
             setFolderAdded(saved.folderAdded);
-            setFolderPath(saved.folderPath || '/books');
+            setFolderPath(saved.folderPath || '/monitor');
             // Older in-progress sessions may still contain the removed import step.
             setStage(saved.stage === 'folder' ? 'folder' : 'complete');
             return;

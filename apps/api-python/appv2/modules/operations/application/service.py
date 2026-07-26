@@ -17,6 +17,7 @@ from appv2.modules.operations.contracts import (
     QueueSnapshot,
     QueueView,
     RestoreControlPort,
+    RestoreStatusView,
     SettingView,
 )
 
@@ -298,3 +299,9 @@ class OperationsService:
             )
             uow.commit()
             return request_id
+
+    def restore_status(self, request_id: str) -> RestoreStatusView:
+        value = self._restore_control.status(request_id)
+        if value is None:
+            raise OperationsNotFound
+        return value

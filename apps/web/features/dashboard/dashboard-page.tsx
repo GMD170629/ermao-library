@@ -32,6 +32,42 @@ type ContinueItem = {
   narrator: string | null;
 } | null;
 
+function dashboardBookshelfItem(item: Record<string, unknown>): BookshelfItem | null {
+  if (typeof item.id !== 'string' || typeof item.title !== 'string') return null;
+  return {
+    id: item.id,
+    title: item.title,
+    author: typeof item.author === 'string' ? item.author : '',
+    format: typeof item.mediaType === 'string' ? item.mediaType : '',
+    coverUrl: `/api/v2/catalog/works/${encodeURIComponent(item.id)}/cover`
+  };
+}
+
+function dashboardContinueItem(item: Record<string, unknown> | null): ContinueItem {
+  if (!item || typeof item.id !== 'string' || typeof item.title !== 'string') return null;
+  const mediaType = typeof item.mediaType === 'string' ? item.mediaType : 'book';
+  const position = item.position && typeof item.position === 'object'
+    ? item.position as Record<string, unknown>
+    : {};
+  const location = position.location && typeof position.location === 'object'
+    ? position.location as Record<string, unknown>
+    : position;
+  return {
+    workId: item.id,
+    title: item.title,
+    author: typeof item.author === 'string' ? item.author : '',
+    coverUrl: `/api/v2/catalog/works/${encodeURIComponent(item.id)}/cover`,
+    mediaKind: mediaType === 'comic' ? 'COMIC' : mediaType === 'audiobook' ? 'AUDIOBOOK' : 'EBOOK',
+    resumeEditionId: typeof item.editionId === 'string' ? item.editionId : null,
+    resumeVolumeId: typeof location.volumeId === 'string' ? location.volumeId : null,
+    progress: typeof item.progress === 'number' ? item.progress : 0,
+    lastReadAt: typeof item.lastReadAt === 'string' ? item.lastReadAt : new Date(0).toISOString(),
+    chapter: typeof location.href === 'string' ? location.href : null,
+    versionName: null,
+    narrator: null
+  };
+}
+
 function shortReadTime(value: string, locale: string, t: (source: string, values?: Record<string, string>) => string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
@@ -67,19 +103,15 @@ export function DashboardPage() {
       })
       .then((dashboard) => {
         if (!active) return;
-        const books = dashboard.recentItems.flatMap((item): BookshelfItem[] => {
-          if (typeof item.id !== 'string' || typeof item.title !== 'string') return [];
-          return [{
-            id: item.id,
-            title: item.title,
-            author: typeof item.author === 'string' ? item.author : '',
-            format: typeof item.mediaType === 'string' ? item.mediaType : '',
-            coverUrl: `/api/v2/catalog/works/${encodeURIComponent(item.id)}/cover`
-          }];
-        });
-        setContinueItem(null);
-        setRecentReading([]);
-        setRecentBooks(books.slice(0, 10));
+        const recentReadingItems = dashboard.recentReading
+          .map(dashboardBookshelfItem)
+          .filter((item): item is BookshelfItem => item !== null);
+        const recentBooksItems = dashboard.recentItems
+          .map(dashboardBookshelfItem)
+          .filter((item): item is BookshelfItem => item !== null);
+        setContinueItem(dashboardContinueItem(dashboard.continueItem));
+        setRecentReading(recentReadingItems.slice(0, 10));
+        setRecentBooks(recentBooksItems.slice(0, 10));
         setError('');
       })
       .catch((reason) => {

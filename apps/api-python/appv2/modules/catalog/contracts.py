@@ -219,6 +219,8 @@ class CatalogRepository(CatalogReadPort, CatalogImportPort, CatalogMetadataPort,
         media_type: str | None,
         status: str,
         series_name: str | None,
+        sort: str,
+        sort_direction: str,
     ) -> tuple[list[CatalogWork], int]: ...
 
     def list_series(

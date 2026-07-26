@@ -33,6 +33,7 @@ import {
   type ReactNode
 } from 'react';
 import { buildLoginRedirectPath, isPublicAppPath, safePostLoginPath } from '../../lib/auth-routes';
+import { accountAuthorizationVersion } from '../../lib/account-authorization';
 import { installUnauthorizedFetchInterceptor, UNAUTHORIZED_EVENT } from '../../lib/auth-session';
 import { withBasePath } from '../../lib/base-path';
 import { DEFAULT_ACCOUNT_AVATAR_PATH, PRODUCT_NAME } from '../../lib/brand';
@@ -93,15 +94,10 @@ function accountUser(account: AccountResponse) {
 function accountAuthorization(account: AccountResponse): SettingsAuthorization & {
   authzVersion: number;
 } {
-  const authorizationKey = `${account.role}\0${[...account.scopes].sort().join('\0')}`;
-  const authzVersion = [...authorizationKey].reduce(
-    (value, character) => ((value * 31) + character.charCodeAt(0)) >>> 0,
-    1
-  );
   return {
     isAdmin: account.role === 'admin',
     canManageSystem: account.scopes.includes('operations:write'),
-    authzVersion
+    authzVersion: accountAuthorizationVersion(account)
   };
 }
 

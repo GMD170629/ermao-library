@@ -143,6 +143,8 @@ class SqlCatalogRepository(CatalogRepository):
         media_type: str | None,
         status: str,
         series_name: str | None,
+        sort: str,
+        sort_direction: str,
     ) -> tuple[list[CatalogWork], int]:
         criteria = [WorkRecord.status == status]
         if media_type:
@@ -155,10 +157,24 @@ class SqlCatalogRepository(CatalogRepository):
         total = int(
             self._session.scalar(select(func.count()).select_from(WorkRecord).where(*criteria)) or 0
         )
+        sort_expressions = {
+            "recent_read": WorkRecord.updated_at,
+            "recent_import": WorkRecord.created_at,
+            "title": func.lower(WorkRecord.title),
+            "author": func.lower(WorkRecord.author),
+            "publisher": func.lower(WorkRecord.metadata_json["publisher"].as_string()),
+            "series": func.lower(WorkRecord.metadata_json["seriesName"].as_string()),
+        }
+        sort_expression = sort_expressions.get(sort, WorkRecord.updated_at)
+        primary_order = (
+            sort_expression.asc().nulls_last()
+            if sort_direction == "asc"
+            else sort_expression.desc().nulls_last()
+        )
         records = self._session.scalars(
             select(WorkRecord)
             .where(*criteria)
-            .order_by(WorkRecord.updated_at.desc(), WorkRecord.id)
+            .order_by(primary_order, WorkRecord.id)
             .offset(offset)
             .limit(limit)
         ).all()

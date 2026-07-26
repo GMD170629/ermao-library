@@ -179,6 +179,17 @@ class BackupExecutorPort(Protocol):
 class RestoreControlPort(Protocol):
     def request(self, backup: BackupView, requested_by: uuid.UUID) -> str: ...
 
+    def status(self, request_id: str) -> RestoreStatusView | None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RestoreStatusView:
+    request_id: str
+    backup_id: uuid.UUID
+    status: str
+    detail: str | None
+    updated_at: datetime
+
 
 @dataclass(frozen=True, slots=True)
 class RestoreRequest:

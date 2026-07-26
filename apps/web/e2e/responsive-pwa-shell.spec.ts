@@ -6,40 +6,81 @@ async function mockWebAppApi(page: Page) {
     if (pathname.endsWith('/api/v2/account')) {
       await route.fulfill({
         json: {
-          ok: true,
-          data: {
-            user: { id: 'web-user', email: 'web@example.com', name: 'Web', role: 'admin' },
-            authorization: {
-              isAdmin: true,
-              canManageSystem: true,
-              allLibraryScopes: true,
-              monitorFolderIds: [],
-              canViewManualImports: true,
-              authzVersion: 1
-            }
-          }
+          id: 'web-user',
+          email: 'web@example.com',
+          displayName: 'Web',
+          role: 'admin',
+          locale: 'zh-CN',
+          scopes: ['catalog:read', 'catalog:write', 'metadata:write', 'operations:read', 'operations:write'],
+          disabled: false,
+          monitorFolderIds: [],
+          createdAt: '2026-07-17T08:30:00.000Z'
         }
       });
       return;
     }
-    if (pathname.endsWith('/api/v2/reporting/dashboard/continue-reading')) {
-      await route.fulfill({ json: { ok: true, data: { item: null } } });
+    if (pathname.endsWith('/api/v2/reporting/dashboard')) {
+      await route.fulfill({
+        json: {
+          workCount: 0,
+          editionCount: 0,
+          activeReaders: 0,
+          queuedJobs: 0,
+          continueItem: null,
+          recentReading: [],
+          recentItems: []
+        }
+      });
       return;
     }
-    if (pathname.endsWith('/api/v2/reporting/dashboard/recent-reading') || pathname.endsWith('/api/v2/reporting/dashboard/recent-books') || pathname.endsWith('/api/v2/catalog/works')) {
-      await route.fulfill({ json: { ok: true, data: { books: [], total: 0 } } });
+    if (pathname.endsWith('/api/v2/reporting/library/filter-schema')) {
+      await route.fulfill({
+        json: {
+          fields: [{
+            key: 'title',
+            label: '书名',
+            group: '作品元数据',
+            type: 'text',
+            operators: ['contains', 'equals', 'is_empty', 'is_not_empty'],
+            options: [],
+            allowCustom: false,
+            unit: null
+          }],
+          maxConditions: 30
+        }
+      });
+      return;
+    }
+    if (pathname.endsWith('/api/v2/reporting/library')) {
+      await route.fulfill({ json: { items: [], page: 1, pageSize: 24, total: 0 } });
       return;
     }
     if (pathname.endsWith('/api/v2/catalog/shelves')) {
-      await route.fulfill({ json: { ok: true, data: { shelves: [{ id: 'to-read', name: '待读' }] } } });
+      await route.fulfill({
+        json: {
+          items: [{
+            id: 'to-read',
+            ownerId: 'web-user',
+            name: '待读',
+            description: null,
+            kind: 'manual',
+            rules: {},
+            pinned: true,
+            createdAt: '2026-07-17T08:30:00.000Z'
+          }],
+          page: 1,
+          pageSize: 24,
+          total: 1
+        }
+      });
       return;
     }
-    await route.fulfill({ json: { ok: true, data: {} } });
+    await route.fulfill({ json: {} });
   });
 }
 
 test.beforeEach(async ({ context, page }) => {
-  await context.addCookies([{ name: 'shuku_session', value: 'web-session', domain: '127.0.0.1', path: '/' }]);
+  await context.addCookies([{ name: 'shuku_v2_session', value: 'web-session', domain: '127.0.0.1', path: '/' }]);
   await context.addInitScript(() => localStorage.setItem('shuku:pwa:install-dismissed:web-user', '1'));
   await mockWebAppApi(page);
 });
@@ -148,13 +189,19 @@ test('dashboard recent shelves share a ten-book horizontal rail without visible 
     title: `最近加入 ${index + 1}`
   }));
 
-  await page.route('**/api/v2/reporting/dashboard/recent-reading?**', async (route) => {
+  await page.route('**/api/v2/reporting/dashboard', async (route) => {
     requestedQueries.push(route.request().url());
-    await route.fulfill({ json: { ok: true, data: { books: recentReading } } });
-  });
-  await page.route('**/api/v2/reporting/dashboard/recent-books?**', async (route) => {
-    requestedQueries.push(route.request().url());
-    await route.fulfill({ json: { ok: true, data: { books: recentAdded } } });
+    await route.fulfill({
+      json: {
+        workCount: 24,
+        editionCount: 24,
+        activeReaders: 1,
+        queuedJobs: 0,
+        continueItem: null,
+        recentReading,
+        recentItems: recentAdded
+      }
+    });
   });
 
   await page.setViewportSize({ width: 1200, height: 900 });
@@ -186,8 +233,8 @@ test('dashboard recent shelves share a ten-book horizontal rail without visible 
   }
 
   await expect(readingShelf.locator('[data-bookshelf-progress]')).toHaveCount(0);
-  expect(requestedQueries).toHaveLength(2);
-  expect(requestedQueries.every((url) => new URL(url).searchParams.get('limit') === '10')).toBe(true);
+  expect(requestedQueries.length).toBeGreaterThanOrEqual(1);
+  expect(requestedQueries.every((url) => new URL(url).pathname.endsWith('/api/v2/reporting/dashboard'))).toBe(true);
 });
 
 test('wide shelf details use responsive bookshelf rows and load more on scroll', async ({ page }) => {
@@ -226,23 +273,32 @@ test('wide shelf details use responsive bookshelf rows and load more on scroll',
     const start = (requestedPage - 1) * requestedPageSize;
     await route.fulfill({
       json: {
-        ok: true,
-        data: {
-          shelf: {
-            id: 'wide-shelf',
-            name: '宽屏书架',
-            description: '验证书架详情布局',
-            bookCount: books.length,
-            ...(requestedPage === 1 ? { bookIds: books.map((book) => book.id) } : {}),
-            books: books.slice(start, start + requestedPageSize),
-            page: requestedPage,
-            pageSize: requestedPageSize,
-            total: books.length,
-            totalPages: Math.ceil(books.length / requestedPageSize),
-            createdAt: '2026-07-17T08:30:00.000Z',
-            updatedAt: '2026-07-17T08:30:00.000Z'
-          }
-        }
+        id: 'wide-shelf',
+        ownerId: 'web-user',
+        name: '宽屏书架',
+        description: '验证书架详情布局',
+        kind: 'manual',
+        rules: {},
+        pinned: false,
+        bookCount: books.length,
+        bookIds: requestedPage === 1 ? books.map((book) => book.id) : [],
+        books: books.slice(start, start + requestedPageSize).map((book) => ({
+          id: book.id,
+          title: book.title,
+          author: book.author,
+          mediaType: 'book',
+          status: 'active',
+          coverUrl: book.coverUrl,
+          summary: null,
+          metadata: {},
+          createdAt: '2026-07-17T08:30:00.000Z',
+          updatedAt: '2026-07-17T08:30:00.000Z'
+        })),
+        page: requestedPage,
+        pageSize: requestedPageSize,
+        total: books.length,
+        totalPages: Math.ceil(books.length / requestedPageSize),
+        createdAt: '2026-07-17T08:30:00.000Z'
       }
     });
   });
@@ -398,8 +454,29 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
     metadataQuality: 20
   };
 
-  await page.route('**/api/v2/catalog/works?**', async (route) => {
-    await route.fulfill({ json: { ok: true, data: { books: [mobileBook], total: 1, page: 1, pageSize: 24, totalPages: 1 } } });
+  await page.route('**/api/v2/reporting/library?**', async (route) => {
+    await route.fulfill({
+      json: {
+        items: [{
+          id: mobileBook.id,
+          title: mobileBook.title,
+          author: mobileBook.author,
+          mediaType: 'book',
+          status: 'active',
+          coverUrl: mobileBook.coverUrl,
+          summary: mobileBook.desc,
+          metadata: {
+            readingStatus: mobileBook.statusValue,
+            tags: mobileBook.tags
+          },
+          createdAt: mobileBook.importedAt,
+          updatedAt: mobileBook.importedAt
+        }],
+        total: 1,
+        page: 1,
+        pageSize: 24
+      }
+    });
   });
   await page.setViewportSize({ width: 390, height: 844 });
 
@@ -464,15 +541,25 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
   await logsPage.route('**/api/v2/operations/events?**', async (route) => {
     await route.fulfill({
       json: {
-        ok: true,
-        data: {
-          events: [{ id: 'mobile-event', level: 'warning', source: 'import', actorType: 'system', action: 'import.failed', message: '用于验证长日志摘要在手机上自然换行', metadata: {}, createdAt: '2026-07-17T08:30:00.000Z' }],
-          total: 1,
-          totalPages: 1,
-          storage: { sizeBytes: 0, maxBytes: 1024 },
-          facets: { sources: [], levels: [] }
-        }
+        items: [{
+          id: 'mobile-event',
+          actorId: null,
+          kind: 'import.failed',
+          severity: 'warning',
+          messageKey: '用于验证长日志摘要在手机上自然换行',
+          params: {},
+          traceId: null,
+          createdAt: '2026-07-17T08:30:00.000Z'
+        }],
+        page: 1,
+        pageSize: 40,
+        total: 1
       }
+    });
+  });
+  await logsPage.route('**/api/v2/operations/log-settings', async (route) => {
+    await route.fulfill({
+      json: { sizeBytes: 0, maxBytes: 1024, lastPrunedAt: null }
     });
   });
   await logsPage.setViewportSize({ width: 390, height: 844 });
@@ -503,7 +590,7 @@ test('all-books shelves load the next batch while scrolling down', async ({ page
     gradient: 'from-orange-100 to-stone-200'
   }));
 
-  await page.route('**/api/v2/catalog/works?**', async (route) => {
+  await page.route('**/api/v2/reporting/library?**', async (route) => {
     const url = new URL(route.request().url());
     const requestedPage = Number(url.searchParams.get('page') ?? '1');
     const requestedPageSize = Number(url.searchParams.get('pageSize') ?? '50');
@@ -511,14 +598,21 @@ test('all-books shelves load the next batch while scrolling down', async ({ page
     const start = (requestedPage - 1) * requestedPageSize;
     await route.fulfill({
       json: {
-        ok: true,
-        data: {
-          books: books.slice(start, start + requestedPageSize),
-          total: books.length,
-          page: requestedPage,
-          pageSize: requestedPageSize,
-          totalPages: Math.ceil(books.length / requestedPageSize)
-        }
+        items: books.slice(start, start + requestedPageSize).map((book) => ({
+          id: book.id,
+          title: book.title,
+          author: book.author,
+          mediaType: 'book',
+          status: 'active',
+          coverUrl: book.coverUrl,
+          summary: null,
+          metadata: {},
+          createdAt: '2026-07-17T08:30:00.000Z',
+          updatedAt: '2026-07-17T08:30:00.000Z'
+        })),
+        total: books.length,
+        page: requestedPage,
+        pageSize: requestedPageSize
       }
     });
   });
@@ -538,7 +632,7 @@ test('all-books shelves load the next batch while scrolling down', async ({ page
 test('desktop book list opens details from both the cover and title', async ({ page }) => {
   const requestedPageSizes: string[] = [];
   const requestedSorts: Array<{ sort: string; direction: string }> = [];
-  const requestedViews: string[] = [];
+  const requestedFilters: string[] = [];
   const book = {
     id: 'desktop-list-work',
     title: '桌面列表入口测试',
@@ -557,11 +651,12 @@ test('desktop book list opens details from both the cover and title', async ({ p
     coverUrl: '',
     gradient: 'from-orange-100 to-stone-200'
   };
-  await page.route('**/api/v2/catalog/works?**', async (route) => {
+  await page.route('**/api/v2/reporting/library?**', async (route) => {
     const requestUrl = new URL(route.request().url());
     const requestedPageSize = requestUrl.searchParams.get('pageSize') ?? '';
     const requestedSort = requestUrl.searchParams.get('sort') ?? '';
     const requestedDirection = requestUrl.searchParams.get('sortDirection') ?? '';
+    const requestedFilter = requestUrl.searchParams.get('filters') ?? '';
     const responseBook = requestUrl.searchParams.get('view') === 'bookshelf'
       ? {
           id: book.id,
@@ -575,8 +670,29 @@ test('desktop book list opens details from both the cover and title', async ({ p
       : book;
     requestedPageSizes.push(requestedPageSize);
     requestedSorts.push({ sort: requestedSort, direction: requestedDirection });
-    requestedViews.push(requestUrl.searchParams.get('view') ?? '');
-    await route.fulfill({ json: { ok: true, data: { books: [responseBook], total: 1, page: 1, pageSize: Number(requestedPageSize), totalPages: 1 } } });
+    requestedFilters.push(requestedFilter);
+    await route.fulfill({
+      json: {
+        items: [{
+          id: responseBook.id,
+          title: responseBook.title,
+          author: responseBook.author,
+          mediaType: 'book',
+          status: 'active',
+          coverUrl: responseBook.coverUrl,
+          summary: null,
+          metadata: {
+            publisher: book.publisher,
+            seriesName: book.seriesName
+          },
+          createdAt: book.added,
+          updatedAt: book.added
+        }],
+        total: 1,
+        page: 1,
+        pageSize: Number(requestedPageSize)
+      }
+    });
   });
   await page.setViewportSize({ width: 1280, height: 900 });
 
@@ -586,12 +702,15 @@ test('desktop book list opens details from both the cover and title', async ({ p
   await page.getByRole('button', { name: '管理图书', exact: true }).click();
   await page.getByRole('button', { name: '更多筛选' }).click();
   await expect(page.getByRole('button', { name: '保存筛选' })).toBeVisible();
+  await page.getByRole('button', { name: '添加条件' }).click();
+  await page.getByRole('textbox', { name: '书名筛选值' }).fill('列表入口');
+  await expect.poll(() => requestedFilters.at(-1)).toContain('"field":"title"');
+  await expect.poll(() => requestedFilters.at(-1)).toContain('"value":"列表入口"');
   await expect(page.getByRole('button', { name: '网格排序方式' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '每页数量' })).toContainText('20 本/页');
   await page.getByRole('button', { name: '每页数量' }).click();
   await page.getByRole('option', { name: '100 本/页' }).click();
   await expect.poll(() => requestedPageSizes.at(-1)).toBe('100');
-  await expect.poll(() => requestedViews.at(-1)).toBe('management');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await expect(page.getByRole('button', { name: '进度排序' })).toHaveCount(0);
   await expect(page.getByRole('columnheader', { name: '标题排序' })).toBeVisible();

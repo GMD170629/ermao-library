@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
+from appv2.modules.operations.application.errors import safe_error_detail
 from appv2.modules.operations.contracts import (
     OperationsUnitOfWork,
     RestoreControlInboxPort,
@@ -35,7 +36,8 @@ class RestoreService:
                 uow.commit()
             self._inbox.complete(request)
         except Exception as error:
-            logger.exception("Restore request %s failed", request.request_id)
-            self._inbox.fail(request, str(error))
+            detail = safe_error_detail(error)
+            logger.error("Restore request %s failed: %s", request.request_id, detail)
+            self._inbox.fail(request, detail)
             raise
         return True

@@ -24,6 +24,26 @@ def test_openapi_is_v2_only_and_reports_release_version(tmp_path: Path) -> None:
     assert all(path.startswith("/api/v2/") for path in schema["paths"])
     assert "/api/v2/operations/health" in schema["paths"]
     assert "/api/v2/reading/editions/{edition_id}/resource" in schema["paths"]
+    work_query = {
+        parameter["name"]: parameter
+        for parameter in schema["paths"]["/api/v2/catalog/works"]["get"]["parameters"]
+    }
+    assert work_query["sort"]["schema"]["enum"] == [
+        "recent_read",
+        "recent_import",
+        "title",
+        "author",
+        "publisher",
+        "series",
+    ]
+    assert work_query["sortDirection"]["schema"]["enum"] == ["asc", "desc"]
+    reporting_query = {
+        parameter["name"]: parameter
+        for parameter in schema["paths"]["/api/v2/reporting/library"]["get"]["parameters"]
+    }
+    assert reporting_query["readingStatus"]["schema"]["anyOf"][0]["type"] == "string"
+    assert reporting_query["filters"]["schema"]["anyOf"][0]["type"] == "string"
+    assert "/api/v2/reporting/library/filter-schema" in schema["paths"]
     app.state.container.close()
 
 

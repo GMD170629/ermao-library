@@ -14,6 +14,7 @@ from appv2.modules.reading.contracts import (
     BulkProgressResult,
     BulkProgressSkipped,
     ComicPage,
+    EpubUnit,
     PreferenceView,
     ProgressMutation,
     ProgressView,
@@ -71,6 +72,8 @@ class ReadingService:
         PreferenceView | None,
         list[CatalogFile],
         list[CatalogVolume],
+        list[EpubUnit],
+        list[ComicPage],
     ]:
         edition = self._catalog.get_edition(edition_id)
         if edition is None:
@@ -103,6 +106,13 @@ class ReadingService:
             preference = uow.reading.get_preference(
                 user_id=user_id, scope="edition", target_id=edition_id
             )
+        try:
+            units = self._resources.epub_units(selected) if edition.format == "epub" else []
+            pages = (
+                self._resources.comic_pages(selected) if edition.format in {"cbz", "cbr"} else []
+            )
+        except (FileNotFoundError, ValueError) as error:
+            raise ReadingNotFound from error
         return (
             target,
             progress,
@@ -110,6 +120,8 @@ class ReadingService:
             preference,
             files,
             self._catalog.volumes_for_edition(edition_id),
+            units,
+            pages,
         )
 
     def resource(

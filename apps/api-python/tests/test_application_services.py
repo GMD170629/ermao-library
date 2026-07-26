@@ -27,6 +27,7 @@ from appv2.modules.reading.application import (
     ReadingNotFound,
     ReadingService,
 )
+from appv2.modules.reporting.application import ReportingService
 
 
 class FakeUnitOfWork:
@@ -85,6 +86,8 @@ def test_catalog_service_complete_success_and_failure_surface() -> None:
         media_type="book",
         status="active",
         series_name=None,
+        sort="title",
+        sort_direction="asc",
     ) == ([work], 1)
     repository.list_works.assert_called_with(
         offset=10,
@@ -93,6 +96,8 @@ def test_catalog_service_complete_success_and_failure_surface() -> None:
         media_type="book",
         status="active",
         series_name=None,
+        sort="title",
+        sort_direction="asc",
     )
     repository.list_series.return_value = (["series"], 1)
     assert service.list_series(page=2, page_size=5, status="active") == (["series"], 1)
@@ -1267,6 +1272,12 @@ def test_operations_and_reading_services() -> None:
     operations_repo.mark_restoring.return_value = backup
     restore_control.request.return_value = "restore-request"
     assert operations.request_restore(backup_id, actor) == "restore-request"
+    restore_status = SimpleNamespace(request_id="restore-request", status="pending")
+    restore_control.status.return_value = restore_status
+    assert operations.restore_status("restore-request") is restore_status
+    restore_control.status.return_value = None
+    with pytest.raises(OperationsNotFound):
+        operations.restore_status("missing")
     operations_repo.mark_restoring.return_value = None
     with pytest.raises(OperationsNotFound):
         operations.request_restore(backup_id, actor)
@@ -1299,7 +1310,8 @@ def test_operations_and_reading_services() -> None:
     reading_repo.get_progress.return_value = None
     reading_repo.list_bookmarks.return_value = []
     reading_repo.get_preference.return_value = None
-    target, progress, bookmarks, preference, files, volumes = reading.bootstrap(
+    resources.epub_units.return_value = []
+    target, progress, bookmarks, preference, files, volumes, units, pages = reading.bootstrap(
         user_id=user_id,
         edition_id=edition_id,
     )
@@ -1307,6 +1319,8 @@ def test_operations_and_reading_services() -> None:
     assert (progress, bookmarks, preference) == (None, [], None)
     assert files == [file]
     assert volumes == []
+    assert units == []
+    assert pages == []
     catalog.get_edition.return_value = None
     with pytest.raises(ReadingNotFound):
         reading.bootstrap(user_id=user_id, edition_id=edition_id)
@@ -1527,3 +1541,78 @@ def test_operations_and_reading_services() -> None:
             lease_token=opaque_token,
             serialized="locations",
         )
+
+
+def test_reporting_service_validates_and_normalizes_library_filters() -> None:
+    account_id = uuid.uuid4()
+    port = MagicMock()
+    port.library.return_value = ([], 0)
+    service = ReportingService(port)
+
+    assert service.library(
+        account_id,
+        page=0,
+        page_size=500,
+        query="  architecture  ",
+        media_type="book",
+        series_name="Series",
+        reading_status="reading",
+        sort="title",
+        sort_direction="asc",
+        filters=(
+            '{"combinator":"ANY","conditions":['
+            '{"field":"title","operator":"contains","value":"clean"},'
+            '{"field":"progress","operator":"between","value":["10","90"]},'
+            '{"field":"hasCover","operator":"is_true"}]}'
+        ),
+    ) == ([], 0)
+    query = port.library.call_args.args[1]
+    assert query.page == 1
+    assert query.page_size == 200
+    assert query.query == "architecture"
+    assert query.reading_status == "READING"
+    assert query.filters.combinator == "ANY"
+    assert query.filters.conditions[1].value == ("10", "90")
+    assert query.filters.conditions[2].value is None
+
+    invalid_filters = [
+        "{",
+        "[]",
+        '{"combinator":"NONE"}',
+        '{"conditions":{}}',
+        '{"conditions":[null]}',
+        '{"conditions":[{"field":"unknown","operator":"equals","value":"x"}]}',
+        '{"conditions":[{"field":"progress","operator":"between","value":["10"]}]}',
+        '{"conditions":[{"field":"title","operator":"equals","value":""}]}',
+    ]
+    for filters in invalid_filters:
+        with pytest.raises(ValueError):
+            service.library(
+                account_id,
+                page=1,
+                page_size=24,
+                query=None,
+                media_type=None,
+                series_name=None,
+                reading_status=None,
+                sort="recent_read",
+                sort_direction="desc",
+                filters=filters,
+            )
+    with pytest.raises(ValueError):
+        service.library(
+            account_id,
+            page=1,
+            page_size=24,
+            query=None,
+            media_type=None,
+            series_name=None,
+            reading_status="abandoned",
+            sort="recent_read",
+            sort_direction="desc",
+            filters=None,
+        )
+
+    schema = object()
+    port.library_filter_schema.return_value = schema
+    assert service.library_filter_schema(account_id) is schema
