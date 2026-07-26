@@ -1,6 +1,13 @@
 'use client';
 
-import { Activity, AlertTriangle, CheckCircle2, Circle, LoaderCircle, RefreshCw, RotateCcw, SkipForward, XCircle } from 'lucide-react';
+import type {
+  HealthResponse,
+  Page_QueueResponse_,
+  QueueResponse
+} from '@/generated/api-v2';
+import { apiV2Request } from '@/lib/api-v2';
+
+import { Activity, AlertTriangle, CheckCircle2, Circle, LoaderCircle, RefreshCw, SkipForward, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/feedback';
@@ -29,8 +36,6 @@ type HealthRun = {
   items: HealthItem[];
   summary: { total: number; completed: number; ok: number; warning: number; error: number; skipped: number };
 };
-type RunPayload = { ok?: boolean; data?: { run?: HealthRun; created?: boolean }; error?: { message?: string } };
-type Operation = { id: string; status: string; messageCode?: string | null };
 
 const LABELS: Record<string, string> = {
   'health.group.storage': '目录与数据库',
@@ -53,6 +58,7 @@ const LABELS: Record<string, string> = {
   'health.item.downloadQueue': '下载队列',
   'health.item.kindleQueue': 'Kindle 发送队列',
   'health.item.metadataQueue': '元数据识别队列',
+  'health.item.backupQueue': '备份队列',
   'health.item.smtp': 'Kindle / SMTP 配置',
   'health.item.epubConversion': 'EPUB 转换能力',
   'health.item.ebookProviders': '电子书数据源',
@@ -92,14 +98,6 @@ const MESSAGES: Record<string, string> = {
   'health.unknownCheck': '未知检查项目'
 };
 
-const OPERATION_MESSAGES: Record<string, string> = {
-  'queue.restart.requested': '已提交重启请求',
-  'queue.restart.waiting': '正在等待当前导入任务结束',
-  'queue.restart.starting': '正在启动新的导入消费者',
-  'queue.restart.completed': '导入队列已安全重启',
-  'queue.restart.failed': '导入队列重启失败'
-};
-
 function statusLabel(status: CheckStatus) {
   return {
     pending: '等待中',
@@ -129,76 +127,18 @@ export function SystemHealthSettingsPage() {
   const toast = useToast();
   const [run, setRun] = useState<HealthRun | null>(null);
   const [starting, setStarting] = useState(false);
-  const [streamMode, setStreamMode] = useState<'idle' | 'sse' | 'polling'>('idle');
+  const [updatingQueue, setUpdatingQueue] = useState('');
   const [now, setNow] = useState(Date.now());
-  const [operation, setOperation] = useState<Operation | null>(null);
-  const sourceRef = useRef<EventSource | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const errorsRef = useRef(0);
   const allowNavigationRef = useRef(false);
 
   const applySnapshot = useCallback((next: HealthRun) => {
     setRun((current) => !current || next.version >= current.version ? next : current);
-    sessionStorage.setItem('shuku.activeHealthRunId', next.runId);
-    if (terminal(next)) {
-      sessionStorage.removeItem('shuku.activeHealthRunId');
-      sourceRef.current?.close();
-      sourceRef.current = null;
-      if (pollRef.current) clearInterval(pollRef.current);
-      pollRef.current = null;
-      setStreamMode('idle');
-    }
+    sessionStorage.removeItem('shuku.activeHealthRunId');
   }, []);
 
-  const loadSnapshot = useCallback(async (runId: string) => {
-    const response = await fetch(`/api/system/health/runs/${encodeURIComponent(runId)}`, { cache: 'no-store' });
-    const payload = await response.json() as RunPayload;
-    if (!payload.ok || !payload.data?.run) throw new Error(payload.error?.message ?? t('读取健康检查状态失败'));
-    applySnapshot(payload.data.run);
-    return payload.data.run;
-  }, [applySnapshot, t]);
-
-  const startPolling = useCallback((runId: string) => {
-    sourceRef.current?.close();
-    sourceRef.current = null;
-    if (pollRef.current) clearInterval(pollRef.current);
-    setStreamMode('polling');
-    pollRef.current = setInterval(() => {
-      void loadSnapshot(runId).catch(() => undefined);
-    }, 1000);
-  }, [loadSnapshot]);
-
-  const subscribe = useCallback((runId: string, after = 0) => {
-    sourceRef.current?.close();
-    errorsRef.current = 0;
-    setStreamMode('sse');
-    const source = new EventSource(`/api/system/health/runs/${encodeURIComponent(runId)}/events?after=${after}`);
-    sourceRef.current = source;
-    const receive = (event: Event) => {
-      errorsRef.current = 0;
-      const message = event as MessageEvent<string>;
-      const payload = JSON.parse(message.data) as { run: HealthRun };
-      applySnapshot(payload.run);
-    };
-    ['run.started', 'check.started', 'check.updated', 'run.completed', 'run.failed'].forEach((name) => source.addEventListener(name, receive));
-    source.onerror = () => {
-      errorsRef.current += 1;
-      if (errorsRef.current >= 3) startPolling(runId);
-    };
-  }, [applySnapshot, startPolling]);
-
   useEffect(() => {
-    const activeRunId = sessionStorage.getItem('shuku.activeHealthRunId');
-    if (activeRunId) {
-      void loadSnapshot(activeRunId)
-        .then((snapshot) => { if (!terminal(snapshot)) subscribe(snapshot.runId, snapshot.version); })
-        .catch(() => sessionStorage.removeItem('shuku.activeHealthRunId'));
-    }
-    return () => {
-      sourceRef.current?.close();
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, [loadSnapshot, subscribe]);
+    sessionStorage.removeItem('shuku.activeHealthRunId');
+  }, []);
 
   useEffect(() => {
     if (!run || terminal(run)) return;
@@ -234,11 +174,80 @@ export function SystemHealthSettingsPage() {
   async function execute() {
     setStarting(true);
     try {
-      const response = await fetch('/api/system/health/runs', { method: 'POST' });
-      const payload = await response.json() as RunPayload;
-      if (!payload.ok || !payload.data?.run) throw new Error(payload.error?.message ?? t('启动健康检查失败'));
-      applySnapshot(payload.data.run);
-      subscribe(payload.data.run.runId, 0);
+      const startedAt = Date.now();
+      const [payload, queues] = await Promise.all([
+        apiV2Request<HealthResponse>('/api/v2/operations/health'),
+        apiV2Request<Page_QueueResponse_>('/api/v2/operations/queues')
+      ]);
+      const healthItems: HealthItem[] = payload.contributors.map((contributor) => ({
+        id: contributor.name,
+        group: 'storage',
+        labelCode: contributor.name === 'database'
+          ? 'health.item.database'
+          : 'health.item.storageRoot',
+        status: contributor.status === 'healthy' ? 'ok' : 'error',
+        messageCode: contributor.status === 'healthy'
+          ? (contributor.name === 'database' ? 'health.database.ok' : 'health.directory.ok')
+          : (contributor.name === 'database' ? 'health.database.error' : 'health.check.failed'),
+        details: contributor.detail,
+        startedAt,
+        finishedAt: Date.parse(contributor.checkedAt),
+        durationMs: Math.max(0, Date.parse(contributor.checkedAt) - startedAt)
+      }));
+      const queueLabels: Record<string, string> = {
+        ingestion: 'health.item.importQueue',
+        metadata: 'health.item.metadataQueue',
+        discovery: 'health.item.downloadQueue',
+        delivery: 'health.item.kindleQueue',
+        backups: 'health.item.backupQueue'
+      };
+      const queueItems: HealthItem[] = queues.items.map((queue) => ({
+        id: `queue-${queue.name}`,
+        group: 'queues',
+        labelCode: queueLabels[queue.name] ?? 'health.item.importQueue',
+        status: queue.status === 'failed'
+          ? 'error'
+          : queue.enabled
+            ? 'ok'
+            : 'warning',
+        messageCode: queue.status === 'failed'
+          ? 'health.queue.recentError'
+          : queue.enabled
+            ? 'health.queue.ok'
+            : 'health.queue.disabled',
+        details: {
+          queueName: queue.name,
+          enabled: queue.enabled,
+          status: queue.status,
+          counts: queue.counts
+        },
+        startedAt,
+        finishedAt: Date.now(),
+        durationMs: Math.max(0, Date.now() - startedAt)
+      }));
+      const items = [...healthItems, ...queueItems];
+      const errors = items.filter((item) => item.status === 'error').length;
+      const warnings = items.filter((item) => item.status === 'warning').length;
+      applySnapshot({
+        runId: `health-${startedAt}`,
+        status: errors ? 'error' : warnings ? 'warning' : 'completed',
+        version: 1,
+        startedAt,
+        finishedAt: Date.now(),
+        groups: [
+          { id: 'storage', labelCode: 'health.group.storage' },
+          { id: 'queues', labelCode: 'health.group.queues' }
+        ],
+        items,
+        summary: {
+          total: items.length,
+          completed: items.length,
+          ok: items.length - errors - warnings,
+          warning: warnings,
+          error: errors,
+          skipped: 0
+        }
+      });
     } catch (reason) {
       toast.error('启动健康检查失败', reason instanceof Error ? reason.message : t('请稍后重试'));
     } finally {
@@ -246,28 +255,30 @@ export function SystemHealthSettingsPage() {
     }
   }
 
-  async function restartImportQueue() {
-    if (!window.confirm(t('安全重启导入队列？如果正在导入，将等待当前任务完成。'))) return;
-    const response = await fetch('/api/system/queues/import/restart', { method: 'POST' });
-    const payload = await response.json() as { ok?: boolean; data?: { operation?: Operation }; error?: { message?: string } };
-    if (!payload.ok || !payload.data?.operation) {
-      toast.error('重启导入队列失败', payload.error?.message ?? t('请稍后重试'));
-      return;
+  async function updateQueue(item: HealthItem) {
+    const queueName = item.details.queueName;
+    const enabled = item.details.enabled;
+    if (typeof queueName !== 'string' || typeof enabled !== 'boolean') return;
+    setUpdatingQueue(queueName);
+    try {
+      await apiV2Request<QueueResponse>(
+        `/api/v2/operations/queues/${encodeURIComponent(queueName)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: !enabled })
+        }
+      );
+      toast.success(enabled ? '队列已暂停' : '队列已恢复');
+      await execute();
+    } catch (reason) {
+      toast.error(
+        enabled ? '暂停队列失败' : '恢复队列失败',
+        reason instanceof Error ? reason.message : t('请稍后重试')
+      );
+    } finally {
+      setUpdatingQueue('');
     }
-    setOperation(payload.data.operation);
-    const operationId = payload.data.operation.id;
-    const timer = window.setInterval(async () => {
-      const statusResponse = await fetch(`/api/system/queue-operations/${encodeURIComponent(operationId)}`, { cache: 'no-store' });
-      const statusPayload = await statusResponse.json() as { ok?: boolean; data?: { operation?: Operation } };
-      const next = statusPayload.data?.operation;
-      if (!next) return;
-      setOperation(next);
-      if (['completed', 'failed'].includes(next.status)) {
-        window.clearInterval(timer);
-        if (next.status === 'completed') toast.success('导入队列已安全重启');
-        else toast.error('导入队列重启失败');
-      }
-    }, 1000);
   }
 
   const elapsed = run ? Math.max(0, (run.finishedAt ?? now) - run.startedAt) : 0;
@@ -299,9 +310,6 @@ export function SystemHealthSettingsPage() {
             <Button icon={RefreshCw} loading={starting || isRunning} loadingText={isRunning ? t('检查中') : t('启动中')} onClick={() => void execute()} disabled={isRunning}>
               <I18nText>运行健康检查</I18nText>
             </Button>
-            <Button variant="secondary" icon={RotateCcw} disabled={!terminal(run) || Boolean(operation && !['completed', 'failed'].includes(operation.status))} onClick={() => void restartImportQueue()}>
-              <I18nText>安全重启导入队列</I18nText>
-            </Button>
           </div>
         </div>
         {run ? (
@@ -314,11 +322,9 @@ export function SystemHealthSettingsPage() {
               <span>{t('警告 {count}', { count: run.summary.warning })}</span>
               <span>{t('错误 {count}', { count: run.summary.error })}</span>
               <span>{t('跳过 {count}', { count: run.summary.skipped })}</span>
-              {isRunning ? <span>{streamMode === 'polling' ? t('正在轮询恢复状态') : t('实时连接中')}</span> : null}
             </div>
           </>
         ) : null}
-        {operation ? <div aria-live="polite" className="mt-4 rounded-xl bg-[#F7F4F1] px-4 py-3 text-sm text-[#625D57]">{t(OPERATION_MESSAGES[operation.messageCode ?? ''] ?? operation.status)}</div> : null}
       </section>
 
       <div className="mt-6 space-y-5">
@@ -348,6 +354,17 @@ export function SystemHealthSettingsPage() {
                               <summary className="cursor-pointer font-medium"><I18nText>查看运行明细</I18nText></summary>
                               <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-white/80 p-3">{JSON.stringify(item.details, null, 2)}</pre>
                             </details>
+                          ) : null}
+                          {item.group === 'queues' ? (
+                            <Button
+                              variant="secondary"
+                              className="mt-3"
+                              loading={updatingQueue === item.details.queueName}
+                              loadingText={t('正在更新')}
+                              onClick={() => void updateQueue(item)}
+                            >
+                              {item.details.enabled === true ? t('暂停队列') : t('恢复队列')}
+                            </Button>
                           ) : null}
                         </div>
                       </div>

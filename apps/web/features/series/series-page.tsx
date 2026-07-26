@@ -1,5 +1,8 @@
 'use client';
 
+import { apiV2Request } from '@/lib/api-v2';
+import type { WorkResponse } from '@/generated/api-v2';
+
 import { ArrowLeft, BookOpen, Layers, Search } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -11,39 +14,23 @@ import { cn } from '../../components/ui/cn';
 import { PageTitle } from '../../components/ui/page-title';
 import { Select } from '../../components/ui/select';
 import type { SeriesSummary, WorkView } from '../../types/work';
+import { workResponseToView } from '../../lib/api-v2/adapters';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
-type SeriesPayload = {
-  ok: boolean;
-  data?: { series: SeriesSummary[]; total: number };
-  error?: { message: string };
+type SeriesPageResource = {
+  items: SeriesSummary[];
+  page: number;
+  pageSize: number;
+  total: number;
 };
 
-type BooksPayload = {
-  ok: boolean;
-  data?: { books: WorkView[]; total: number; page: number; pageSize: number; totalPages: number };
-  error?: { message: string };
+type WorkPageResource = {
+  items: WorkResponse[];
+  page: number;
+  pageSize: number;
+  total: number;
 };
-
-async function readApiJson<T>(response: Response, fallbackMessage: string): Promise<T> {
-  const text = await response.text();
-  let payload: unknown = null;
-  if (text) {
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      throw new Error(response.ok ? fallbackMessage : `${fallbackMessage}（HTTP ${response.status}）`);
-    }
-  }
-  if (!response.ok) {
-    const message = typeof payload === 'object' && payload && 'error' in payload
-      ? (payload as { error?: { message?: string } }).error?.message
-      : null;
-    throw new Error(message || `${fallbackMessage}（HTTP ${response.status}）`);
-  }
-  return payload as T;
-}
 
 const sortOptions = [
   { value: 'series_index', label: '卷号' },
@@ -76,13 +63,11 @@ export function SeriesPage({ initialName = '' }: { initialName?: string }) {
     setError('');
 
     if (!seriesName) {
-      fetch('/api/series?visibility=active&limit=100')
-        .then((response) => readApiJson<SeriesPayload>(response, '读取系列失败'))
+      apiV2Request<SeriesPageResource>('/api/v2/catalog/series?visibility=active&pageSize=100')
         .then((payload) => {
           if (!active) return;
-          if (!payload.ok) throw new Error(payload.error?.message ?? '读取系列失败');
-          setSeries(payload.data?.series ?? []);
-          setSeriesTotal(payload.data?.total ?? 0);
+          setSeries(payload.items);
+          setSeriesTotal(payload.total);
           setBooks([]);
           setBookTotal(0);
         })
@@ -103,13 +88,11 @@ export function SeriesPage({ initialName = '' }: { initialName?: string }) {
       seriesName,
       sort
     });
-    fetch(`/api/works?${params}`)
-      .then((response) => readApiJson<BooksPayload>(response, '读取系列图书失败'))
+    apiV2Request<WorkPageResource>(`/api/v2/catalog/works?${params}`)
       .then((payload) => {
         if (!active) return;
-        if (!payload.ok) throw new Error(payload.error?.message ?? '读取系列图书失败');
-        setBooks(payload.data?.books ?? []);
-        setBookTotal(payload.data?.total ?? 0);
+        setBooks(payload.items.map(workResponseToView));
+        setBookTotal(payload.total);
         setSeries([]);
         setSeriesTotal(0);
       })

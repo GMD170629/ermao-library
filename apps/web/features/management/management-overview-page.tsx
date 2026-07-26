@@ -1,5 +1,12 @@
 'use client';
 
+import type {
+  EventResponse,
+  LogSettingsResponse,
+  ManagementResponse
+} from '@/generated/api-v2';
+import { apiV2Request } from '@/lib/api-v2';
+
 import { AlertTriangle, Database, HardDrive, RefreshCw, Settings2 } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
@@ -20,14 +27,10 @@ type SystemEvent = {
   createdAt: string;
 };
 
-type OverviewPayload = {
-  ok: boolean;
-  data?: {
-    cards: Record<string, number>;
-    checks: Record<string, { status: string; message: string }>;
-    recentEvents: SystemEvent[];
-  };
-  error?: { message: string };
+type OverviewData = {
+  cards: Record<string, number>;
+  checks: Record<string, { status: string; message: string }>;
+  recentEvents: SystemEvent[];
 };
 
 function formatBytes(value: number) {
@@ -58,17 +61,44 @@ function eventTone(level: string): BadgeTone {
 export function ManagementOverviewPage() {
   const { t: i18nAttribute } = useAttributeI18n();
   const { locale } = useI18n();
-  const [payload, setPayload] = useState<OverviewPayload['data'] | null>(null);
+  const [payload, setPayload] = useState<OverviewData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   async function load() {
     setLoading(true);
     try {
-      const response = await fetch('/api/management/overview');
-      const data = (await response.json()) as OverviewPayload;
-      if (!data.ok) throw new Error(data.error?.message ?? '读取管理概览失败');
-      setPayload(data.data ?? null);
+      const [management, logSettings, events] = await Promise.all([
+        apiV2Request<ManagementResponse>('/api/v2/reporting/management'),
+        apiV2Request<LogSettingsResponse>('/api/v2/operations/log-settings'),
+        apiV2Request<{ items: EventResponse[]; page: number; pageSize: number; total: number }>(
+          '/api/v2/operations/events?pageSize=8'
+        )
+      ]);
+      setPayload({
+        cards: {
+          failedImports: management.failedJobs,
+          pendingOrganize: 0,
+          eventLogSizeBytes: logSettings.sizeBytes,
+          eventLogMaxBytes: logSettings.maxBytes
+        },
+        checks: {
+          accounts: { status: 'ok', message: `${management.users}` },
+          catalog: { status: 'ok', message: `${management.works}` },
+          queues: {
+            status: management.failedJobs ? 'warning' : 'ok',
+            message: `${management.queuedImports + management.queuedDownloads + management.queuedDeliveries}`
+          }
+        },
+        recentEvents: events.items.map((event) => ({
+          id: event.id,
+          level: event.severity,
+          source: event.kind.split('.', 1)[0] || 'system',
+          action: event.kind,
+          message: event.messageKey,
+          createdAt: event.createdAt
+        }))
+      });
       setError('');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '读取管理概览失败');

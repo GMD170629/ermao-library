@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { UNAUTHORIZED_EVENT } from '../../lib/auth-session';
 import { activateReaderV2User, getReaderV2Runtime, type AudioProgressLocation } from '../../lib/reader-v2';
@@ -765,7 +767,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     // A HEAD request primes authenticated file metadata without downloading
     // the next (potentially multi-gigabyte) audio payload or creating a second
     // media element.
-    void fetch(nextTrack.url, {
+    void apiV2Fetch(nextTrack.url, {
       method: 'HEAD',
       credentials: 'same-origin',
       signal: controller.signal
@@ -896,7 +898,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     }
     const cover = bootstrap.book.coverUrl
       ? withBasePath(bootstrap.book.coverUrl)
-      : withBasePath(`/api/works/${encodeURIComponent(bootstrap.book.id)}/cover?size=large`);
+      : withBasePath(`/api/v2/catalog/works/${encodeURIComponent(bootstrap.book.id)}/cover?size=large`);
     try {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: state.chapter?.title ?? state.track.title,

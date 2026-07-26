@@ -25,12 +25,12 @@ test('shared EPUB location claim is scoped by edition and volume content identit
   globalThis.fetch = async (input, init) => {
     requestUrl = String(input);
     requestInit = init;
-    return Response.json({ ok: true, data: { status: 'claimed', leaseToken: 'lease-1', leaseExpiresAt: 123 } });
+    return Response.json({ status: 'claimed', leaseToken: 'lease-1', leaseExpiresAt: 123 });
   };
   try {
     const result = await claimSharedEpubLocations(source);
     assert.equal(result.status, 'claimed');
-    assert.equal(requestUrl, '/api/reader/v2/editions/edition%2Fone/epub-locations/claim?volume=volume+one');
+    assert.equal(requestUrl, '/api/v2/reading/editions/edition%2Fone/epub-locations/claim?volume=volume+one');
     assert.equal(requestInit?.method, 'POST');
     assert.deepEqual(JSON.parse(String(requestInit?.body)), {
       cacheVersion: EPUB_LOCATION_CACHE_VERSION,
@@ -47,7 +47,7 @@ test('shared EPUB locations upload the serialized map with its generation lease'
   let requestInit: RequestInit | undefined;
   globalThis.fetch = async (_input, init) => {
     requestInit = init;
-    return Response.json({ ok: true, data: { status: 'ready', serialized: '["epubcfi(/6/2)"]' } });
+    return Response.json({ status: 'ready', serialized: '["epubcfi(/6/2)"]' });
   };
   try {
     const result = await saveSharedEpubLocations(source, 'lease-1', '["epubcfi(/6/2)"]');
@@ -79,7 +79,7 @@ test('shared EPUB location wait is bounded so an abandoned lease cannot block op
 
 test('shared EPUB location claims reject malformed success payloads instead of retrying forever', async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => Response.json({ ok: true, data: {} });
+  globalThis.fetch = async () => Response.json({});
   try {
     await assert.rejects(
       claimSharedEpubLocations(source),

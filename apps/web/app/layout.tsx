@@ -1,6 +1,5 @@
 import './globals.css';
 import type { Metadata, Viewport } from 'next';
-import Script from 'next/script';
 import { Suspense } from 'react';
 import { AppShell } from '../components/layout/app-shell';
 import { AudioMiniPlayer } from '../components/audio/audio-mini-player';
@@ -8,21 +7,8 @@ import { FeedbackProvider } from '../components/ui/feedback';
 import { AudioPlaybackProvider } from '../features/audio/audio-playback-provider';
 import { I18nProvider } from '../i18n/provider';
 import { getRequestLocale, getServerTranslator } from '../i18n/server';
-import { APP_BASE_PATH, withBasePath } from '../lib/base-path';
+import { withBasePath } from '../lib/base-path';
 import { PRODUCT_DESCRIPTION, PRODUCT_NAME } from '../lib/brand';
-
-const basePathFetchBridge = `(() => {
-  const basePath = ${JSON.stringify(APP_BASE_PATH)};
-  if (!basePath || window.__shukuBasePathFetchInstalled) return;
-  const originalFetch = window.fetch.bind(window);
-  window.fetch = (input, init) => {
-    if (typeof input === 'string' && input.startsWith('/api/')) {
-      return originalFetch(basePath + input, init);
-    }
-    return originalFetch(input, init);
-  };
-  window.__shukuBasePathFetchInstalled = true;
-})();`;
 
 export function generateMetadata(): Metadata {
   const t = getServerTranslator();
@@ -76,7 +62,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang={locale} suppressHydrationWarning>
       <head>
         <link rel="manifest" href={withBasePath('/manifest.webmanifest')} />
-        <Script id="shuku-base-path-fetch" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: basePathFetchBridge }} />
       </head>
       <body>
         <I18nProvider initialLocale={locale}>

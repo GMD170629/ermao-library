@@ -5,7 +5,6 @@ import { MetadataProvidersPanel } from '../../organize/metadata-providers-panel'
 import { ClassificationManagementPanel } from '../../organize/classification-management-panel';
 import { DuplicateManagementPanel } from '../../organize/duplicate-management-panel';
 import { OrganizePage } from '../../organize/organize-page';
-import { RecognitionSettingsPanel } from '../../organize/recognition-settings-panel';
 import { SettingsCenterShell } from './settings-center-shell';
 import { SettingsTabs } from './settings-tabs';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
@@ -14,9 +13,7 @@ export function OrganizeSettingsPage() {
   const { t: i18nAttribute } = useAttributeI18n();
   const searchParams = useSearchParams();
   const requested = searchParams.get('tab');
-  const active = requested === 'recognition' || requested === 'metadata'
-    ? 'recognition'
-    : requested === 'duplicates'
+  const active = requested === 'duplicates'
       ? 'duplicates'
       : requested === 'categories'
         ? 'categories'
@@ -32,7 +29,6 @@ export function OrganizeSettingsPage() {
           { key: 'queue', label: '整理队列', href: '/settings/organize?tab=queue' },
           { key: 'duplicates', label: '重复项', href: '/settings/organize?tab=duplicates' },
           { key: 'categories', label: '分类治理', href: '/settings/organize?tab=categories' },
-          { key: 'recognition', label: '识别设置', href: '/settings/organize?tab=recognition' },
           { key: 'providers', label: '数据源配置', href: '/settings/organize?tab=providers' }
         ]}
       />
@@ -41,9 +37,7 @@ export function OrganizeSettingsPage() {
           ? <DuplicateManagementPanel />
           : active === 'categories'
             ? <ClassificationManagementPanel />
-            : active === 'recognition'
-          ? <RecognitionSettingsPanel />
-          : active === 'providers'
+            : active === 'providers'
             ? <MetadataProvidersPanel />
             : <OrganizePage embedded jobBasePath="/settings/organize/jobs" />}
       </div>

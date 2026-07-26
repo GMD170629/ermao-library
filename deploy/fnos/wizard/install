@@ -1,26 +1,55 @@
 [
   {
-    "stepTitle": "初始化二毛图书",
+    "stepTitle": "初始化二毛图书 / Initialize Shuku Starship",
     "items": [
       {
         "type": "text",
         "field": "wizard_port",
-        "label": "Web 访问端口",
+        "label": "Web 访问端口 / Web port",
         "initValue": "3000",
         "rules": [
           {
             "required": true,
-            "message": "请输入 Web 访问端口"
+            "message": "请输入 Web 访问端口 / Enter the Web port"
           },
           {
             "pattern": "^(102[4-9]|10[3-9][0-9]|1[1-9][0-9]{2}|[2-9][0-9]{3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$",
-            "message": "请输入 1024-65535 之间的端口"
+            "message": "请输入 1024-65535 之间的端口 / Use a port from 1024 to 65535"
           }
         ]
       },
       {
+        "type": "select",
+        "field": "wizard_database_mode",
+        "label": "数据库模式 / Database mode",
+        "initValue": "embedded",
+        "options": [
+          {
+            "label": "内置 PostgreSQL 18 / Embedded PostgreSQL 18",
+            "value": "embedded"
+          },
+          {
+            "label": "外部 PostgreSQL 18 / External PostgreSQL 18",
+            "value": "external"
+          }
+        ],
+        "rules": [
+          {
+            "required": true,
+            "message": "请选择数据库模式 / Select a database mode"
+          }
+        ]
+      },
+      {
+        "type": "password",
+        "field": "wizard_external_database_url",
+        "label": "外部 DATABASE_URL / External DATABASE_URL",
+        "initValue": "",
+        "helpText": "仅外部模式填写，必须指向 PostgreSQL 18.x。Only required in external mode and must target PostgreSQL 18.x."
+      },
+      {
         "type": "tips",
-        "helpText": "fnOS 将在安装时创建“/shuku.monitor”共享数据目录，并将它挂载为应用的 /monitor 扫描目录。请把需要扫描的读物放入该共享目录。应用通过所选端口提供 Web 服务，首次打开页面时会引导创建管理账户并添加 /monitor 监控文件夹。"
+        "helpText": "fnOS 会创建 /shuku.monitor 共享数据目录并挂载到应用的 /monitor；内置模式会生成强随机密码并保存到权限受限文件；外部模式要求数据库用户拥有 appv2 schema、迁移和恢复权限。fnOS creates the /shuku.monitor shared data directory and mounts it at /monitor. Embedded mode generates a protected random password. External users need schema, migration, and restore privileges."
       }
     ]
   }

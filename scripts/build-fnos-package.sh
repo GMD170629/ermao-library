@@ -166,6 +166,23 @@ for wizard_path in (install_wizard_path, upgrade_wizard_path, config_wizard_path
     patterns = [rule.get("pattern") for rule in port_item.get("rules", []) if "pattern" in rule]
     if expected_pattern not in patterns:
         raise SystemExit(f"{wizard_path} does not constrain wizard_port to 1024-65535")
+    database_mode = next(
+        (item for item in items if item.get("field") == "wizard_database_mode"),
+        None,
+    )
+    database_values = {
+        option.get("value") for option in (database_mode or {}).get("options", [])
+    }
+    if database_mode is None or database_values != {"embedded", "external"}:
+        raise SystemExit(
+            f"{wizard_path} must offer embedded and external PostgreSQL modes"
+        )
+    external_url = next(
+        (item for item in items if item.get("field") == "wizard_external_database_url"),
+        None,
+    )
+    if external_url is None:
+        raise SystemExit(f"{wizard_path} must collect the optional external DATABASE_URL")
 
 with open(install_wizard_path, encoding="utf-8") as file:
     install_steps = json.load(file)
@@ -181,6 +198,8 @@ PY
 
 compose="$PACKAGE_DIR/app/docker/docker-compose.yaml"
 if ! grep -Fq "image: $IMAGE_REFERENCE" "$compose" || \
+   ! grep -Fq 'image: postgres:18.4-alpine3.23' "$compose" || \
+   ! grep -Fq 'PGDATA: /var/lib/postgresql/18/docker' "$compose" || \
    ! grep -Fq 'user: "${TRIM_UID}:${TRIM_GID}"' "$compose" || \
    ! grep -Fq '${TRIM_PKGVAR}/storage:/app/storage' "$compose" || \
    ! grep -Fq '${TRIM_DATA_SHARE_PATHS}:/monitor' "$compose" || \
@@ -239,14 +258,22 @@ done
 
 storage_validation_root="$BUILD_ROOT/storage-validation"
 TRIM_PKGVAR="$storage_validation_root" \
+  TRIM_APPDEST="$PACKAGE_DIR/app" \
+  wizard_database_mode=embedded \
   bash "$PACKAGE_DIR/app/docker/prepare-storage.sh"
 for storage_subdirectory in \
-  database covers indexes conversions temp/conversions logs secrets; do
+  v2/covers v2/conversions v2/temp v2/backups v2/control v2/logs v2/secrets; do
   if [ ! -d "$storage_validation_root/storage/$storage_subdirectory" ]; then
     echo "fnOS storage preparation did not create $storage_subdirectory" >&2
     exit 1
   fi
 done
+if [ ! -d "$storage_validation_root/postgres" ] || \
+   [ ! -s "$storage_validation_root/storage/v2/secrets/postgres-password" ] || \
+   [ ! -s "$PACKAGE_DIR/app/docker/.env" ]; then
+  echo "fnOS storage preparation did not create protected PostgreSQL state" >&2
+  exit 1
+fi
 for invalid_port in 0 80 1023 65536 not-a-port; do
   if wizard_port="$invalid_port" TRIM_TEMP_LOGFILE="$port_validation_log" \
     bash "$PACKAGE_DIR/app/docker/validate-port.sh"; then
@@ -264,9 +291,9 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
     TRIM_UID=1000 \
     TRIM_GID=1000 \
     wizard_port=3000 \
-      docker compose -f "$compose" config --services
+      docker compose -f "$compose" config --services | sort
   )"
-  if [ "$services" != "web" ]; then
+  if [ "$services" != $'postgres\nweb' ]; then
     echo "fnOS Compose services do not match the expected topology" >&2
     exit 1
   fi

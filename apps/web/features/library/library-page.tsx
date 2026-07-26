@@ -1,5 +1,13 @@
 'use client';
 
+import { apiV2Fetch, apiV2Request, workResponseToView } from '@/lib/api-v2';
+import type {
+  AccountPreferences,
+  AccountResponse,
+  LibraryFilterSchemaResponse,
+  Page_LibraryWorkResponse_
+} from '@/generated/api-v2';
+
 import { BookmarkPlus, BookOpen, ChevronLeft, ChevronRight, Filter, List, Loader2, Plus, Search, Trash2, UploadCloud, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -17,18 +25,6 @@ import { UploadBookDialog } from './upload-book-dialog';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import { currentUserId, saveAccountPreferences, userDevicePreferenceKey } from '../../lib/user-preferences';
-
-type BooksResponse = {
-  ok: boolean;
-  data?: { books: WorkView[]; total: number; page: number; pageSize: number; totalPages: number };
-  error?: { message: string };
-};
-
-type FilterSchemaResponse = {
-  ok: boolean;
-  data?: { fields: SmartFilterField[]; maxConditions: number };
-  error?: { message: string };
-};
 
 const sortOptions = [
   { value: 'recent_read', label: '最近阅读' },
@@ -162,12 +158,20 @@ export function LibraryPage() {
   const smartFilterQuery = useMemo(() => applicableSmartFilterRules.conditions.length > 0 ? JSON.stringify(serializableSmartFilterRules(applicableSmartFilterRules)) : '', [applicableSmartFilterRules]);
   const queryBase = useMemo(() => {
     const params = new URLSearchParams();
-    if (search.trim()) params.set('search', search.trim());
-    if (formatFilter !== '全部') params.set('type', formatFilter);
-    if (statusFilter !== '全部') params.set('status', statusFilter);
+    if (search.trim()) params.set('query', search.trim());
+    if (formatFilter !== '全部') {
+      params.set(
+        'mediaType',
+        formatFilter === 'COMIC'
+          ? 'comic'
+          : formatFilter === 'AUDIOBOOK'
+            ? 'audiobook'
+            : 'book'
+      );
+    }
     if (seriesNameFilter) params.set('seriesName', seriesNameFilter);
+    if (statusFilter !== '全部') params.set('readingStatus', statusFilter);
     if (smartFilterQuery) params.set('filters', smartFilterQuery);
-    params.set('visibility', 'active');
     params.set('sort', sort);
     params.set('sortDirection', sortDirection);
     return params.toString();
@@ -183,18 +187,22 @@ export function LibraryPage() {
   useEffect(() => {
     const controller = new AbortController();
     Promise.all([
-      fetch('/api/auth/preferences', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
+      apiV2Fetch('/api/v2/account/preferences', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
         .then((response) => response.json())
         .catch(() => null),
-      fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
+      apiV2Fetch('/api/v2/account', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
         .then((response) => response.json())
         .catch(() => null)
     ]).then(([preferencesPayload, sessionPayload]) => {
-      const accountView = preferencesPayload?.ok ? preferencesPayload.data?.preferences?.['library.view'] : null;
+      const accountView = (preferencesPayload as AccountPreferences | null)?.values?.['library.view'];
       const deviceView = window.localStorage.getItem(userDevicePreferenceKey('shuku.library.view'));
       const savedView = accountView ?? deviceView;
       if (savedView === 'grid' || savedView === 'list') setView(savedView);
-      setCanManageSystem(Boolean(sessionPayload?.ok && sessionPayload.data?.authorization?.canManageSystem));
+      setCanManageSystem(
+        Boolean(
+          (sessionPayload as AccountResponse | null)?.scopes?.includes('operations:write')
+        )
+      );
       setAuthorizationLoaded(true);
     });
     return () => controller.abort();
@@ -214,21 +222,24 @@ export function LibraryPage() {
     if (!filtersOpen || filterSchemaLoaded) return;
     let active = true;
     setFilterSchemaLoading(true);
-    fetch('/api/library/filter-schema')
-      .then((response) => response.json() as Promise<FilterSchemaResponse>)
+    apiV2Request<LibraryFilterSchemaResponse>('/api/v2/reporting/library/filter-schema')
       .then((payload) => {
         if (!active) return;
-        if (!payload.ok) throw new Error(payload.error?.message ?? '读取筛选维度失败');
-        setSmartFilterFields(payload.data?.fields ?? []);
+        setSmartFilterFields(payload.fields as SmartFilterField[]);
         setFilterSchemaLoaded(true);
+        setError('');
       })
       .catch((reason) => {
         if (!active) return;
-        toast.error('读取筛选维度失败', reason instanceof Error ? reason.message : '请稍后重试');
+        setError(reason instanceof Error ? reason.message : '读取筛选条件失败');
       })
-      .finally(() => active && setFilterSchemaLoading(false));
-    return () => { active = false; };
-  }, [filterSchemaLoaded, filtersOpen, toast]);
+      .finally(() => {
+        if (active) setFilterSchemaLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [filterSchemaLoaded, filtersOpen]);
 
   useEffect(() => {
     let active = true;
@@ -242,19 +253,16 @@ export function LibraryPage() {
     const params = new URLSearchParams(queryBase);
     params.set('page', String(requestedPage));
     params.set('pageSize', requestPageSize);
-    params.set('view', view === 'grid' ? 'bookshelf' : 'management');
     setLoading(true);
-    fetch(`/api/works?${params.toString()}`)
-      .then((response) => response.json() as Promise<BooksResponse>)
+    apiV2Request<Page_LibraryWorkResponse_>(`/api/v2/reporting/library?${params.toString()}`)
       .then((payload) => {
         if (!active) return;
-        if (!payload.ok) throw new Error(payload.error?.message ?? '读取书库失败');
-        const data = payload.data;
-        if (data && requestedPage > data.totalPages && data.totalPages > 0) {
-          setPage(data.totalPages);
+        const totalPages = Math.max(1, Math.ceil(payload.total / payload.pageSize));
+        if (requestedPage > totalPages && payload.total > 0) {
+          setPage(totalPages);
           return;
         }
-        const nextBooks = data?.books ?? [];
+        const nextBooks = payload.items.map(workResponseToView);
         setBooks((current) => {
           if (view !== 'grid' || requestedPage <= 1) return nextBooks;
           const merged = new Map(current.map((book) => [book.id, book]));
@@ -262,9 +270,9 @@ export function LibraryPage() {
           return Array.from(merged.values());
         });
         setMeta({
-          total: data?.total ?? 0,
-          pageSize: data?.pageSize ?? Number(requestPageSize),
-          totalPages: data?.totalPages ?? 1
+          total: payload.total,
+          pageSize: payload.pageSize,
+          totalPages
         });
         setError('');
       })
@@ -374,17 +382,13 @@ export function LibraryPage() {
     setError('');
     setMessage('');
     try {
-      const response = await fetch(`/api/works/${book.id}`, {
+      await apiV2Request<void>(`/api/v2/catalog/works/${book.id}?deleteSource=${deleteSource ? 'true' : 'false'}`, {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deleteSource })
+        headers: { 'Content-Type': 'application/json' }
       });
-      const payload = (await response.json()) as { ok: boolean; data?: { failedFileDeletes?: Array<{ path: string; message: string }> }; error?: { message: string } };
-      if (!payload.ok) throw new Error(payload.error?.message ?? '删除失败');
       setDeleteTarget(null);
       setMessage('已删除书库记录');
-      const failedCount = payload.data?.failedFileDeletes?.length ?? 0;
-      toast.success('已删除书库记录', failedCount > 0 ? `有 ${failedCount} 个文件未能删除，请检查系统日志` : deleteSource ? '关联的源文件已同步删除' : '来源文件已保留');
+      toast.success('已删除书库记录', deleteSource ? '来源文件已删除' : '来源文件已保留');
       setReloadKey((key) => key + 1);
     } catch (reason) {
       const nextError = reason instanceof Error ? reason.message : '删除失败';
@@ -435,9 +439,17 @@ export function LibraryPage() {
       if (statusFilter !== '全部') rules.statuses = [statusFilter];
       if (formatFilter !== '全部') rules.mediaKinds = [formatFilter === 'ebook' ? 'EBOOK' : formatFilter];
       if (applicableSmartFilterRules.conditions.length > 0) Object.assign(rules, serializableSmartFilterRules(applicableSmartFilterRules));
-      const response = await fetch('/api/shelves', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: smartShelfName.trim(), description: '由书库筛选条件自动更新', kind: 'SMART', rules, pinned: true }) });
-      const payload = await response.json() as { ok: boolean; error?: { message: string } };
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '保存智能书架失败');
+      await apiV2Request('/api/v2/catalog/shelves', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: smartShelfName.trim(),
+          description: '由书库筛选条件自动更新',
+          kind: 'smart',
+          rules,
+          pinned: true
+        })
+      });
       toast.success('智能书架已保存', '以后符合这些条件的图书会自动出现。');
       window.dispatchEvent(new Event('shuku:shelves-changed'));
       setSmartShelfOpen(false);

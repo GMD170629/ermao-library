@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import { ChevronRight, Folder, FolderOpen, RefreshCw, Search } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '../../../components/ui/button';
@@ -63,11 +65,11 @@ export function ImportFileManager() {
     setLoadingPath(key);
     setError('');
     try {
-      const response = await fetch(`/api/monitor-folders/tree${path ? `?path=${encodeURIComponent(path)}` : ''}`);
-      const payload = await response.json() as { ok: boolean; data?: { node: DirectoryNode; monitorRoot?: string | null }; error?: { message: string } };
-      if (!response.ok || !payload.ok || !payload.data?.node) throw new Error(payload.error?.message ?? '读取目录失败');
-      const node = payload.data.node;
-      setRootPath(payload.data.monitorRoot || node.path);
+      const response = await apiV2Fetch(`/api/v2/ingestion/folders/tree${path ? `?path=${encodeURIComponent(path)}` : ''}`);
+      const payload = await response.json() as { node?: DirectoryNode; monitorRoot?: string | null; detail?: string };
+      if (!response.ok || !payload.node) throw new Error(payload.detail ?? '读取目录失败');
+      const node = payload.node;
+      setRootPath(payload.monitorRoot || node.path);
       setNodes((current) => ({ ...current, [node.path]: node }));
       return node;
     } catch (reason) {
@@ -82,11 +84,19 @@ export function ImportFileManager() {
     let active = true;
     async function load() {
       try {
-        const response = await fetch('/api/monitor-folders');
-        const payload = await response.json() as { ok: boolean; data?: { folders: MonitorFolder[] }; error?: { message: string } };
+        const response = await apiV2Fetch('/api/v2/ingestion/folders');
+        const payload = await response.json() as {
+          items?: Array<{ id: string; path: string; enabled: boolean }>;
+          detail?: string;
+        };
         if (!active) return;
-        if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '读取监控文件夹失败');
-        setFolders(payload.data?.folders ?? []);
+        if (!response.ok || !payload.items) throw new Error(payload.detail ?? '读取监控文件夹失败');
+        setFolders(payload.items.map((folder) => ({
+          id: folder.id,
+          name: folder.path.split(/[\\/]/).filter(Boolean).at(-1) ?? folder.path,
+          rootPath: folder.path,
+          enabled: folder.enabled
+        })));
         const root = await loadNode();
         if (active && root) {
           setSelectedPath(root.path);
@@ -122,15 +132,15 @@ export function ImportFileManager() {
     setError('');
     setResult(null);
     try {
-      const response = await fetch('/api/import-tasks/scan-directory', {
+      const response = await apiV2Fetch('/api/v2/ingestion/imports/scan-directory', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: selectedPath })
       });
-      const payload = await response.json() as { ok: boolean; data?: ScanResult; error?: { message: string } };
-      if (!response.ok || !payload.ok || !payload.data) throw new Error(payload.error?.message ?? '识别目录失败');
-      setResult(payload.data);
-      toast.success('目录扫描完成', `新增 ${payload.data.queued} 条导入任务，跳过 ${payload.data.skipped} 项`);
+      const payload = await response.json() as (ScanResult & { detail?: string });
+      if (!response.ok || typeof payload.queued !== 'number') throw new Error(payload.detail ?? '识别目录失败');
+      setResult(payload);
+      toast.success('目录扫描完成', `新增 ${payload.queued} 条导入任务，跳过 ${payload.skipped} 项`);
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : '识别目录失败';
       setError(message);

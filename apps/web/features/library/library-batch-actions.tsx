@@ -1,5 +1,13 @@
 'use client';
 
+import type {
+  BulkMutationResponse,
+  BulkProgressResponse,
+  FindReplacePreviewResponse,
+  Page_ShelfResponse_
+} from '@/generated/api-v2';
+import { apiV2Request } from '@/lib/api-v2';
+
 import {
   BookCheck,
   Braces,
@@ -10,10 +18,7 @@ import {
   ImagePlus,
   Images,
   LibraryBig,
-  Minimize2,
   Replace,
-  RotateCcw,
-  Scissors,
   Tags,
   UserRound,
   X
@@ -31,20 +36,15 @@ import { useI18n as useAttributeI18n } from '@/i18n/provider';
 export type LibraryBatchAction = 'metadata' | 'find_replace' | 'shelves' | 'reading_status' | 'covers';
 
 type ContextPosition = { x: number; y: number };
-type ShelfOption = { id: string; name: string; kind?: 'STATIC' | 'SMART' };
-type BulkResponse = { ok: boolean; data?: { updated?: number; changedValues?: number; skipped?: Array<{ workId: string; reason: string }> }; error?: { message?: string } };
-type FindReplacePreview = {
-  changedWorks: number;
-  changedValues: number;
-  items: Array<{ workId: string; title: string; before: string | string[]; after: string | string[] }>;
-};
+type ShelfOption = Page_ShelfResponse_['items'][number];
+type FindReplacePreview = FindReplacePreviewResponse;
 
 const actions: Array<{ value: LibraryBatchAction; label: string; shortLabel: string; description: string; icon: LucideIcon }> = [
   { value: 'metadata', label: '批量更新元数据', shortLabel: '元数据', description: '作者、出版社、标签和系列', icon: Tags },
   { value: 'find_replace', label: '查找替换', shortLabel: '查找替换', description: '支持安全 Jinja 变量和递增序列', icon: Replace },
   { value: 'shelves', label: '加入或移除书架', shortLabel: '书架', description: '管理普通书架中的批量归属', icon: LibraryBig },
   { value: 'reading_status', label: '设置阅读状态', shortLabel: '阅读状态', description: '清空进度或统一设为 100%', icon: BookCheck },
-  { value: 'covers', label: '批量设置封面', shortLabel: '封面', description: '裁剪、重新生成、压缩或替换', icon: Images }
+  { value: 'covers', label: '批量替换封面', shortLabel: '封面', description: '使用同一张图片替换所选作品封面', icon: Images }
 ];
 
 const inputClass = 'h-11 w-full rounded-xl border border-black/[0.1] bg-white px-3.5 text-sm text-[#312D2A] outline-none transition placeholder:text-[#AAA49E] focus:border-[#E8A18D] focus:ring-4 focus:ring-[#FFE9E2]';
@@ -131,7 +131,7 @@ export function LibraryBatchContextMenu({
               </span>
               <span className="min-w-0">
                 <span className="block text-sm font-medium text-[#302C29]">{i18nAttribute(item.label)}</span>
-                <span className="mt-0.5 block truncate text-[11px] text-[#8B847D]">{item.description}</span>
+                <span className="mt-0.5 block truncate text-[11px] text-[#8B847D]">{i18nAttribute(item.description)}</span>
               </span>
             </button>
           );
@@ -216,10 +216,6 @@ export function LibraryBatchDialog({
   const [shelfId, setShelfId] = useState('');
   const [membership, setMembership] = useState<'ADD' | 'REMOVE'>('ADD');
   const [readingStatus, setReadingStatus] = useState<'UNREAD' | 'FINISHED'>('FINISHED');
-  const [coverAction, setCoverAction] = useState<'crop' | 'regenerate' | 'compress' | 'replace'>('crop');
-  const [coverRatio, setCoverRatio] = useState('2:3');
-  const [coverQuality, setCoverQuality] = useState('82');
-  const [coverMaxDimension, setCoverMaxDimension] = useState('1600');
   const [coverFile, setCoverFile] = useState<File | null>(null);
 
   const activeAction = actions.find((item) => item.value === action);
@@ -258,12 +254,10 @@ export function LibraryBatchDialog({
     if (action !== 'shelves' || shelves.length > 0) return;
     let active = true;
     setShelvesLoading(true);
-    fetch('/api/shelves')
-      .then((response) => response.json() as Promise<{ ok: boolean; data?: { shelves?: ShelfOption[] }; error?: { message?: string } }>)
+    apiV2Request<Page_ShelfResponse_>('/api/v2/catalog/shelves')
       .then((payload) => {
         if (!active) return;
-        if (!payload.ok) throw new Error(payload.error?.message ?? '读取书架失败');
-        const staticShelves = (payload.data?.shelves ?? []).filter((shelf) => (shelf.kind ?? 'STATIC') === 'STATIC');
+        const staticShelves = payload.items.filter((shelf) => shelf.kind === 'manual');
         setShelves(staticShelves);
         setShelfId((current) => current || staticShelves[0]?.id || '');
       })
@@ -274,24 +268,27 @@ export function LibraryBatchDialog({
 
   if (!action || typeof document === 'undefined') return null;
 
-  async function postJson(body: Record<string, unknown>) {
-    const response = await fetch('/api/works/bulk', {
+  async function postJson<T>(path: string, body: Record<string, unknown>) {
+    return apiV2Request<T>(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: selectedIds, ...body })
+      body: JSON.stringify(body)
     });
-    const payload = await response.json() as BulkResponse;
-    if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '批量操作失败');
-    return payload;
   }
 
   async function applyMetadata() {
-    const fields: Record<string, string> = {};
-    if (authorEnabled) fields.author = author;
-    if (publisherEnabled) fields.publisher = publisher;
-    if (seriesEnabled) fields.seriesName = seriesName;
-    const payload = await postJson({ action: 'update_metadata', fields, addTags: splitValues(addTags), removeTags: splitValues(removeTags) });
-    return `已更新 ${payload.data?.updated ?? selectedIds.length} 本图书的元数据`;
+    const payload = await postJson<BulkMutationResponse>(
+      '/api/v2/catalog/works/bulk/metadata',
+      {
+        workIds: selectedIds,
+        author: authorEnabled ? author : undefined,
+        publisher: publisherEnabled ? publisher : undefined,
+        seriesName: seriesEnabled ? seriesName : undefined,
+        addTags: splitValues(addTags),
+        removeTags: splitValues(removeTags)
+      }
+    );
+    return i18nAttribute('已更新 {count} 本图书的元数据', { count: payload.updated });
   }
 
   function findReplaceBody() {
@@ -310,14 +307,11 @@ export function LibraryBatchDialog({
     setPreviewing(true);
     try {
       const signature = findReplaceSignature;
-      const response = await fetch('/api/works/bulk/find-replace/preview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: selectedIds, ...findReplaceBody() })
-      });
-      const payload = await response.json() as { ok: boolean; data?: FindReplacePreview; error?: { message?: string } };
-      if (!response.ok || !payload.ok || !payload.data) throw new Error(payload.error?.message ?? '生成预览失败');
-      setPreview(payload.data);
+      const payload = await postJson<FindReplacePreview>(
+        '/api/v2/catalog/works/bulk/find-replace/preview',
+        { workIds: selectedIds, ...findReplaceBody() }
+      );
+      setPreview(payload);
       setPreviewSignature(signature);
     } catch (reason) {
       setPreview(null);
@@ -328,37 +322,48 @@ export function LibraryBatchDialog({
   }
 
   async function applyFindReplace() {
-    const payload = await postJson({ action: 'find_replace', ...findReplaceBody() });
-    return `已替换 ${payload.data?.changedValues ?? 0} 处元数据`;
+    const payload = await postJson<BulkMutationResponse>(
+      '/api/v2/catalog/works/bulk/find-replace',
+      { workIds: selectedIds, ...findReplaceBody() }
+    );
+    return i18nAttribute('已替换 {count} 处元数据', { count: payload.changedValues });
   }
 
   async function applyShelves() {
-    const payload = await postJson({ action: 'shelf_membership', membership, shelfId });
+    const payload = await postJson<BulkMutationResponse>(
+      `/api/v2/catalog/shelves/${shelfId}/works/bulk`,
+      { workIds: selectedIds, present: membership === 'ADD' }
+    );
     return membership === 'ADD'
-      ? `已将 ${payload.data?.updated ?? selectedIds.length} 本图书加入书架`
-      : `已从书架移除 ${payload.data?.updated ?? selectedIds.length} 本图书`;
+      ? i18nAttribute('已将 {count} 本图书加入书架', { count: payload.updated })
+      : i18nAttribute('已从书架移除 {count} 本图书', { count: payload.updated });
   }
 
   async function applyReadingStatus() {
-    const payload = await postJson({ action: 'reading_status', status: readingStatus });
+    const payload = await postJson<BulkProgressResponse>(
+      '/api/v2/reading/progress/bulk',
+      { workIds: selectedIds, status: readingStatus }
+    );
     return readingStatus === 'UNREAD'
-      ? `已清空 ${payload.data?.updated ?? selectedIds.length} 本图书的阅读记录`
-      : `已将 ${payload.data?.updated ?? selectedIds.length} 本图书设为已读`;
+      ? i18nAttribute('已清空 {count} 本图书的阅读进度', { count: payload.updated })
+      : i18nAttribute('已将 {count} 本图书设为已读', { count: payload.updated });
   }
 
   async function applyCovers() {
+    if (!coverFile) throw new Error(i18nAttribute('请选择替换封面'));
     const form = new FormData();
-    form.append('ids', JSON.stringify(selectedIds));
-    form.append('action', coverAction);
-    form.append('ratio', coverRatio);
-    form.append('quality', coverQuality);
-    form.append('maxDimension', coverMaxDimension);
-    if (coverFile) form.append('cover', coverFile);
-    const response = await fetch('/api/works/bulk/cover', { method: 'POST', body: form });
-    const payload = await response.json() as BulkResponse;
-    if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '批量处理封面失败');
-    const skipped = payload.data?.skipped?.length ?? 0;
-    return `已处理 ${payload.data?.updated ?? selectedIds.length} 本图书的封面${skipped ? `，跳过 ${skipped} 本` : ''}`;
+    selectedIds.forEach((id) => form.append('workIds', id));
+    form.append('cover', coverFile);
+    const payload = await apiV2Request<BulkMutationResponse>(
+      '/api/v2/catalog/works/bulk/cover',
+      { method: 'POST', body: form }
+    );
+    return payload.skipped.length
+      ? i18nAttribute('已替换 {count} 本图书的封面，跳过 {skipped} 本', {
+        count: payload.updated,
+        skipped: payload.skipped.length
+      })
+      : i18nAttribute('已替换 {count} 本图书的封面', { count: payload.updated });
   }
 
   async function submit() {
@@ -386,7 +391,7 @@ export function LibraryBatchDialog({
     || (action === 'metadata' && !metadataReady)
     || (action === 'find_replace' && (!previewCurrent || (preview?.changedWorks ?? 0) === 0))
     || (action === 'shelves' && !shelfId)
-    || (action === 'covers' && coverAction === 'replace' && !coverFile);
+    || (action === 'covers' && !coverFile);
 
   return createPortal(
     <div
@@ -398,7 +403,7 @@ export function LibraryBatchDialog({
         <header className="shrink-0 border-b border-black/[0.07] px-5 pb-4 pt-5 md:px-6">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 className="text-xl font-semibold tracking-[-0.02em] text-[#282421]">{activeAction?.label}</h2>
+              <h2 className="text-xl font-semibold tracking-[-0.02em] text-[#282421]">{activeAction ? i18nAttribute(activeAction.label) : ''}</h2>
               <p className="mt-1 text-sm text-[#817A74]"><I18nText>当前操作会应用到已选择的 </I18nText>{selectedIds.length} <I18nText>本图书。</I18nText></p>
             </div>
             <button type="button" disabled={saving} onClick={onClose} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[#77716B] transition hover:bg-black/[0.05] disabled:opacity-40" aria-label={i18nAttribute("关闭批量操作")}><X size={18} /></button>
@@ -502,7 +507,7 @@ export function LibraryBatchDialog({
                 {([['ADD', '加入书架', '保留已有书架归属'], ['REMOVE', '移除书架', '只移除指定书架归属']] as const).map(([value, label, description]) => (
                   <button key={value} type="button" onClick={() => setMembership(value)} className={cn('rounded-2xl border p-4 text-left transition', membership === value ? 'border-[#EFAE9B] bg-[#FFF3EE] ring-2 ring-[#FFE2D8]' : 'border-black/[0.08] bg-white hover:bg-black/[0.02]')}>
                     <span className="flex items-center justify-between text-sm font-semibold text-[#37322F]">{i18nAttribute(label)}{membership === value ? <Check size={16} className="text-[#EF4D2F]" /> : null}</span>
-                    <span className="mt-1.5 block text-xs leading-5 text-[#837C75]">{description}</span>
+                    <span className="mt-1.5 block text-xs leading-5 text-[#837C75]">{i18nAttribute(description)}</span>
                   </button>
                 ))}
               </div>
@@ -527,42 +532,13 @@ export function LibraryBatchDialog({
 
           {action === 'covers' ? (
             <div className="space-y-5">
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                {([
-                  ['crop', '封面裁剪', '按统一比例居中裁剪', Scissors],
-                  ['regenerate', '重新生成', '从主版本恢复封面', RotateCcw],
-                  ['compress', '封面压缩', '降低尺寸和文件体积', Minimize2],
-                  ['replace', '替换封面', '使用同一张新图片', ImagePlus]
-                ] as const).map(([value, label, description, Icon]) => (
-                  <button key={value} type="button" onClick={() => setCoverAction(value)} className={cn('rounded-2xl border p-4 text-left transition', coverAction === value ? 'border-[#EFAE9B] bg-[#FFF3EE] ring-2 ring-[#FFE2D8]' : 'border-black/[0.08] bg-white hover:bg-black/[0.02]')}>
-                    <span className="flex items-center justify-between"><Icon size={18} className={coverAction === value ? 'text-[#EF4D2F]' : 'text-[#756E68]'} />{coverAction === value ? <Check size={15} className="text-[#EF4D2F]" /> : null}</span>
-                    <span className="mt-3 block text-sm font-semibold text-[#37322F]">{i18nAttribute(label)}</span>
-                    <span className="mt-1 block text-[11px] leading-5 text-[#837C75]">{description}</span>
-                  </button>
-                ))}
-              </div>
-              {coverAction === 'crop' ? (
-                <label className="block rounded-2xl border border-black/[0.07] bg-white/70 p-4 text-sm font-medium text-[#4D4843]"><I18nText>目标比例</I18nText><Select value={coverRatio} onChange={setCoverRatio} options={[{ value: '2:3', label: '2:3 · 常用图书封面' }, { value: '3:4', label: '3:4 · 宽版封面' }, { value: '1:1', label: '1:1 · 方形封面' }]} className="mt-2 w-full" ariaLabel={i18nAttribute("封面裁剪比例")} />
-                  <span className="mt-2 block text-xs font-normal leading-5 text-[#8A837C]"><I18nText>以每张当前封面的中心为焦点裁剪，原始文件不会被改写。</I18nText></span>
-                </label>
-              ) : null}
-              {coverAction === 'replace' ? (
-                <label className={cn('flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed px-5 py-8 text-center transition', coverFile ? 'border-[#EFAE9B] bg-[#FFF5F1]' : 'border-black/[0.14] bg-white hover:border-[#EFAE9B] hover:bg-[#FFF9F6]')}>
-                  <ImagePlus size={24} className="text-[#EF4D2F]" />
-                  <span className="mt-3 text-sm font-semibold text-[#3F3A36]">{coverFile ? coverFile.name : i18nAttribute("选择一张替换封面")}</span>
-                  <span className="mt-1 text-xs leading-5 text-[#8A837C]"><I18nText>支持 JPEG、PNG、WEBP，最大 12 MB；会应用到全部已选图书。</I18nText></span>
-                  <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(event) => setCoverFile(event.target.files?.[0] ?? null)} />
-                </label>
-              ) : null}
-              {coverAction === 'compress' || coverAction === 'replace' ? (
-                <div className="grid gap-4 rounded-2xl border border-black/[0.07] bg-[#F9F7F4] p-4 sm:grid-cols-2">
-                  <label className="text-sm font-medium text-[#4D4843]"><I18nText>JPEG 质量</I18nText><div className="mt-2 flex items-center gap-3"><input type="range" min="40" max="95" value={coverQuality} onChange={(event) => setCoverQuality(event.target.value)} className="h-2 flex-1 accent-[#EF4D2F]" /><span className="w-10 text-right text-sm tabular-nums text-[#635D57]">{coverQuality}</span></div>
-                  </label>
-                  <label className="text-sm font-medium text-[#4D4843]"><I18nText>最长边</I18nText><Select value={coverMaxDimension} onChange={setCoverMaxDimension} options={[{ value: '1200', label: '1200 px · 更小体积' }, { value: '1600', label: '1600 px · 推荐' }, { value: '2400', label: '2400 px · 高清' }, { value: '3200', label: '3200 px · 原图优先' }]} className="mt-2 w-full" ariaLabel={i18nAttribute("封面最长边")} />
-                  </label>
-                </div>
-              ) : null}
-              {coverAction === 'regenerate' ? <div className="rounded-xl bg-[#F6F3EF] px-4 py-3 text-sm leading-6 text-[#706963]"><I18nText>系统会优先恢复主版本或卷册中已提取的封面；找不到可用封面时使用默认封面。上传的自定义封面会被替换。</I18nText></div> : null}
+              <label className={cn('flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed px-5 py-10 text-center transition', coverFile ? 'border-[#EFAE9B] bg-[#FFF5F1]' : 'border-black/[0.14] bg-white hover:border-[#EFAE9B] hover:bg-[#FFF9F6]')}>
+                <ImagePlus size={26} className="text-[#EF4D2F]" />
+                <span className="mt-3 text-sm font-semibold text-[#3F3A36]">{coverFile ? coverFile.name : i18nAttribute("选择一张替换封面")}</span>
+                <span className="mt-1 text-xs leading-5 text-[#8A837C]"><I18nText>支持 JPEG、PNG、WEBP，最大 20 MiB；系统会生成隔离的响应式封面版本，并应用到全部已选图书。</I18nText></span>
+                <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(event) => setCoverFile(event.target.files?.[0] ?? null)} />
+              </label>
+              <div className="rounded-xl bg-[#F6F3EF] px-4 py-3 text-sm leading-6 text-[#706963]"><I18nText>提交成功前会保留原封面；任何数据库更新失败时，新封面不会进入有效书库状态。</I18nText></div>
             </div>
           ) : null}
         </div>

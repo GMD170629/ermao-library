@@ -1,6 +1,8 @@
 'use client';
 
-import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Clock, FileArchive, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { apiV2Fetch } from '@/lib/api-v2';
+
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock, FileArchive, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '../../components/ui/badge';
 import type { BadgeTone } from '../../components/ui/badge';
@@ -45,7 +47,6 @@ type ImportTask = {
   logs: Array<{ id: string; level: string; message: string; createdAt: string }>;
 };
 
-type DeleteMode = 'record' | 'source' | 'converted';
 type StatusFilter = 'ALL' | ImportTask['status'];
 type PageSize = '10' | '20' | '50';
 
@@ -63,25 +64,81 @@ const pageSizeOptions = [
   { value: '50', label: '50 条/页' }
 ];
 
-type ImportTasksPayload = {
-  ok: boolean;
-  data?: {
-    tasks: ImportTask[];
-    summary: typeof emptySummary;
-    page: number;
-    pageSize: number;
-    total: number;
-    totalPages: number;
-  };
-  error?: { message: string };
+type ImportJobResource = {
+  id: string;
+  kind: string;
+  origin: string;
+  status: string;
+  stage: string;
+  progress: number;
+  sourcePath: string;
+  attempt: number;
+  retryable: boolean;
+  resultWorkId?: string | null;
+  resultEditionId?: string | null;
+  resultVolumeIds: string[];
+  errorCode?: string | null;
+  errorDetail?: string | null;
+  finishedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
-function normalizeImportTask(task: ImportTask): ImportTask {
+type ImportTasksPayload = {
+  items: ImportJobResource[];
+  page: number;
+  pageSize: number;
+  total: number;
+  detail?: string;
+};
+
+type ImportJobLogResource = {
+  id: string;
+  level: string;
+  messageKey: string;
+  params: Record<string, string | number | boolean | null>;
+  createdAt: string;
+};
+
+type ImportJobDetailPayload = {
+  job: ImportJobResource;
+  logs: ImportJobLogResource[];
+  detail?: string;
+};
+
+const jobLogMessages: Record<string, string> = {
+  'import.preparing': '正在准备导入文件',
+  'import.publishing': '正在发布到书库',
+  'import.completed': '导入完成',
+  'import.retry_scheduled': '导入失败，已安排重试（{code}）',
+  'import.failed': '导入失败（{code}）'
+};
+
+function normalizeImportTask(job: ImportJobResource): ImportTask {
+  const status = {
+    queued: 'PENDING',
+    retry: 'PENDING',
+    running: 'PARSING',
+    completed: 'COMPLETED',
+    failed: 'FAILED',
+    cancelled: 'FAILED'
+  }[job.status.toLowerCase()] as ImportTask['status'] | undefined;
+  const sourceName = job.sourcePath.split(/[\\/]/).filter(Boolean).at(-1) ?? job.sourcePath;
   return {
-    ...task,
-    sourcePath: task.sourcePath ?? '',
-    progress: Number.isFinite(task.progress) ? task.progress : 0,
-    logs: Array.isArray(task.logs) ? task.logs : []
+    id: job.id,
+    origin: job.origin.toUpperCase() === 'WATCH' ? 'WATCH' : job.origin.toUpperCase() === 'DOWNLOAD' ? 'DOWNLOAD' : 'MANUAL',
+    status: status ?? 'PENDING',
+    originalName: sourceName,
+    sourcePath: job.sourcePath,
+    progress: job.progress,
+    message: job.stage,
+    errorSummary: job.errorDetail,
+    errorCode: job.errorCode,
+    retryable: job.retryable,
+    createdAt: job.createdAt,
+    finishedAt: job.finishedAt,
+    book: job.resultWorkId ? { id: job.resultWorkId, title: sourceName } : null,
+    logs: []
   };
 }
 
@@ -115,14 +172,6 @@ function originLabel(origin: ImportTask['origin']) {
   return '手动上传';
 }
 
-function sourceFileAvailable(task: ImportTask) {
-  return task.sourceFileExists !== false;
-}
-
-function convertedFileAvailable(task: ImportTask) {
-  return task.convertedFileExists ?? Boolean(task.conversion?.outputPath);
-}
-
 function retryActionLabel(task: ImportTask) {
   return task.conversion ? '重试自动转换' : '重试导入';
 }
@@ -146,12 +195,13 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<'clear' | 'rescan' | ''>('');
   const [retryingTaskId, setRetryingTaskId] = useState('');
+  const [cancellingTaskId, setCancellingTaskId] = useState('');
+  const [loadingLogsTaskId, setLoadingLogsTaskId] = useState('');
+  const [expandedLogIds, setExpandedLogIds] = useState<Set<string>>(new Set());
   const [deletingTaskId, setDeletingTaskId] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<ImportTask | null>(null);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [deleteMode, setDeleteMode] = useState<DeleteMode>('record');
-  const [deleteLibraryRecord, setDeleteLibraryRecord] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const requestIdRef = useRef(0);
@@ -164,20 +214,30 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: String(targetPage), pageSize });
-      if (statusFilter !== 'ALL') params.set('status', statusFilter);
+      if (statusFilter !== 'ALL') {
+        params.set('status', {
+          PENDING: 'queued',
+          PARSING: 'running',
+          COMPLETED: 'completed',
+          FAILED: 'failed'
+        }[statusFilter]);
+      }
       if (keyword) params.set('keyword', keyword);
-      const response = await fetch(`/api/import-tasks?${params.toString()}`);
+      const response = await apiV2Fetch(`/api/v2/ingestion/imports?${params.toString()}`);
       const text = await response.text();
       const payload = text ? JSON.parse(text) as ImportTasksPayload : null;
-      if (!response.ok) throw new Error(payload?.error?.message ?? `读取导入任务失败：HTTP ${response.status}`);
+      if (!response.ok) throw new Error(payload?.detail ?? `读取导入任务失败：HTTP ${response.status}`);
       if (!payload) throw new Error('读取导入任务失败：服务暂时没有返回内容');
-      if (!payload.ok) throw new Error(payload.error?.message ?? '读取导入任务失败');
       if (requestId !== requestIdRef.current) return;
-      const nextTotalPages = Math.max(1, Number(payload.data?.totalPages ?? 1));
-      const nextPage = Math.min(nextTotalPages, Math.max(1, Number(payload.data?.page ?? targetPage)));
-      setTasks((payload.data?.tasks ?? []).map(normalizeImportTask));
-      setSummary({ ...emptySummary, ...(payload.data?.summary ?? {}) });
-      setTotal(Math.max(0, Number(payload.data?.total ?? 0)));
+      const nextTotalPages = Math.max(1, Math.ceil(payload.total / Math.max(payload.pageSize, 1)));
+      const nextPage = Math.min(nextTotalPages, Math.max(1, Number(payload.page ?? targetPage)));
+      const normalizedTasks = payload.items.map(normalizeImportTask);
+      setTasks(normalizedTasks);
+      setSummary({
+        completed: normalizedTasks.filter((task) => task.status === 'COMPLETED').length,
+        failed: normalizedTasks.filter((task) => task.status === 'FAILED').length
+      });
+      setTotal(Math.max(0, Number(payload.total ?? 0)));
       setTotalPages(nextTotalPages);
       setPage((current) => current === nextPage ? current : nextPage);
       setError('');
@@ -194,11 +254,9 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   async function requestRescan() {
     setBusy('rescan');
     try {
-      const response = await fetch('/api/import-tasks/rescan', { method: 'POST' });
-      const text = await response.text();
-      const payload = text ? JSON.parse(text) as { ok: boolean; data?: { requestedAt: string }; error?: { message: string } } : null;
-      if (!response.ok) throw new Error(payload?.error?.message ?? `请求重新识别失败：HTTP ${response.status}`);
-      if (!payload?.ok) throw new Error(payload?.error?.message ?? '请求重新识别失败');
+      const response = await apiV2Fetch('/api/v2/ingestion/imports/rescan', { method: 'POST' });
+      const payload = await response.json().catch(() => null) as { detail?: string } | null;
+      if (!response.ok) throw new Error(payload?.detail ?? `请求重新识别失败：HTTP ${response.status}`);
       setMessage('已请求重新识别监控文件夹');
       toast.success('已请求重新识别监控文件夹');
       setError('');
@@ -223,12 +281,10 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
     if (!confirmed) return;
     setBusy('clear');
     try {
-      const response = await fetch('/api/import-tasks', { method: 'DELETE' });
-      const text = await response.text();
-      const payload = text ? JSON.parse(text) as { ok: boolean; data?: { deleted: number }; error?: { message: string } } : null;
-      if (!response.ok) throw new Error(payload?.error?.message ?? `清空记录失败：HTTP ${response.status}`);
-      if (!payload?.ok) throw new Error(payload?.error?.message ?? '清空记录失败');
-      const successMessage = `已清空 ${payload.data?.deleted ?? 0} 条已结束导入记录`;
+      const response = await apiV2Fetch('/api/v2/ingestion/imports', { method: 'DELETE' });
+      const payload = await response.json().catch(() => null) as { deleted?: number; detail?: string } | null;
+      if (!response.ok) throw new Error(payload?.detail ?? `清空记录失败：HTTP ${response.status}`);
+      const successMessage = `已清空 ${payload?.deleted ?? 0} 条已结束导入记录`;
       setMessage(successMessage);
       toast.success(successMessage);
       setError('');
@@ -246,11 +302,9 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   async function retryTask(task: ImportTask) {
     setRetryingTaskId(task.id);
     try {
-      const response = await fetch(`/api/import-tasks/${encodeURIComponent(task.id)}/retry`, { method: 'POST' });
-      const text = await response.text();
-      const payload = text ? JSON.parse(text) as { ok: boolean; error?: { message: string } } : null;
-      if (!response.ok) throw new Error(payload?.error?.message ?? `重试失败：HTTP ${response.status}`);
-      if (!payload?.ok) throw new Error(payload?.error?.message ?? '重试失败');
+      const response = await apiV2Fetch(`/api/v2/ingestion/imports/${encodeURIComponent(task.id)}/retry`, { method: 'POST' });
+      const payload = await response.json().catch(() => null) as { detail?: string } | null;
+      if (!response.ok) throw new Error(payload?.detail ?? `重试失败：HTTP ${response.status}`);
       setMessage(`${task.originalName ?? task.sourcePath} 已重新加入队列`);
       setError('');
       toast.success(retryQueueMessage(task));
@@ -265,9 +319,63 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
     }
   }
 
+  async function cancelTask(task: ImportTask) {
+    setCancellingTaskId(task.id);
+    try {
+      const response = await apiV2Fetch(`/api/v2/ingestion/imports/${encodeURIComponent(task.id)}/cancel`, { method: 'POST' });
+      const payload = await response.json().catch(() => null) as { detail?: string } | null;
+      if (!response.ok) throw new Error(payload?.detail ?? `取消失败：HTTP ${response.status}`);
+      setMessage(`${task.originalName ?? task.sourcePath} 已请求取消`);
+      setError('');
+      toast.success('已请求取消导入');
+      await loadTasks(page);
+    } catch (reason) {
+      const nextError = reason instanceof Error ? reason.message : '取消失败';
+      setError(nextError);
+      toast.error('取消导入失败', nextError);
+    } finally {
+      setCancellingTaskId('');
+    }
+  }
+
+  async function toggleTaskLogs(task: ImportTask) {
+    if (expandedLogIds.has(task.id)) {
+      setExpandedLogIds((current) => {
+        const next = new Set(current);
+        next.delete(task.id);
+        return next;
+      });
+      return;
+    }
+    setLoadingLogsTaskId(task.id);
+    try {
+      const response = await apiV2Fetch(`/api/v2/ingestion/imports/${encodeURIComponent(task.id)}`);
+      const payload = await response.json().catch(() => null) as ImportJobDetailPayload | null;
+      if (!response.ok || !payload || !('job' in payload)) {
+        throw new Error(payload?.detail ?? `读取任务日志失败：HTTP ${response.status}`);
+      }
+      const localizedLogs = payload.logs.map((log) => ({
+        id: log.id,
+        level: log.level,
+        message: i18nAttribute(jobLogMessages[log.messageKey] ?? log.messageKey, log.params),
+        createdAt: log.createdAt
+      }));
+      setTasks((current) => current.map((currentTask) => (
+        currentTask.id === task.id
+          ? { ...normalizeImportTask(payload.job), logs: localizedLogs }
+          : currentTask
+      )));
+      setExpandedLogIds((current) => new Set(current).add(task.id));
+    } catch (reason) {
+      const nextError = reason instanceof Error ? reason.message : '读取任务日志失败';
+      setError(nextError);
+      toast.error('读取任务日志失败', nextError);
+    } finally {
+      setLoadingLogsTaskId('');
+    }
+  }
+
   function openDeleteTask(task: ImportTask) {
-    setDeleteMode('record');
-    setDeleteLibraryRecord(false);
     setDeleteTarget(task);
   }
 
@@ -276,33 +384,22 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
     if (targets.length === 0) return;
     setDeletingTaskId(bulkDeleteOpen ? 'bulk' : targets[0].id);
     try {
-      let deletedLibraryRecords = 0;
-      let failedFileDeletes = 0;
       for (const task of targets) {
-        const response = await fetch(`/api/import-tasks/${encodeURIComponent(task.id)}`, {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ deleteMode, deleteLibraryRecord })
+        const response = await apiV2Fetch(`/api/v2/ingestion/imports/${encodeURIComponent(task.id)}`, {
+          method: 'DELETE'
         });
-        const text = await response.text();
-        const payload = text ? JSON.parse(text) as { ok: boolean; data?: { deletedFiles?: number; deletedLibraryRecord?: boolean; failedFileDeletes?: Array<{ path: string; message: string }> }; error?: { message: string } } : null;
-        if (!response.ok) throw new Error(payload?.error?.message ?? `删除失败：HTTP ${response.status}`);
-        if (!payload?.ok) throw new Error(payload?.error?.message ?? '删除失败');
-        if (payload.data?.deletedLibraryRecord) deletedLibraryRecords += 1;
-        failedFileDeletes += payload.data?.failedFileDeletes?.length ?? 0;
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null) as { detail?: string } | null;
+          throw new Error(payload?.detail ?? `删除失败：HTTP ${response.status}`);
+        }
       }
-      const fileMessage = deleteMode === 'source'
-        ? `已删除 ${targets.length} 条导入记录和对应源文件`
-        : deleteMode === 'converted'
-          ? `已删除 ${targets.length} 条导入记录和对应转换文件`
-          : `已删除 ${targets.length} 条导入记录`;
-      const successMessage = deletedLibraryRecords > 0 ? `${fileMessage}，并清理 ${deletedLibraryRecords} 个关联卷册或版本` : fileMessage;
+      const successMessage = `已删除 ${targets.length} 条导入记录`;
       setDeleteTarget(null);
       setBulkDeleteOpen(false);
       setSelectedIds(new Set());
       setMessage(successMessage);
       setError('');
-      toast.success(successMessage, failedFileDeletes > 0 ? `有 ${failedFileDeletes} 个系统文件未能删除，请检查系统日志` : undefined);
+      toast.success(successMessage);
       await loadTasks(page);
     } catch (reason) {
       const nextError = reason instanceof Error ? reason.message : '删除失败';
@@ -325,10 +422,6 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   const selectedTasks = useMemo(() => tasks.filter((task) => selectedIds.has(task.id)), [selectedIds, tasks]);
   const allPageSelected = selectableTasks.length > 0 && selectableTasks.every((task) => selectedIds.has(task.id));
   const dialogTargets = bulkDeleteOpen ? selectedTasks : deleteTarget ? [deleteTarget] : [];
-  const canDeleteSources = dialogTargets.length > 0 && dialogTargets.every(sourceFileAvailable);
-  const canDeleteConverted = dialogTargets.length > 0 && dialogTargets.every(convertedFileAvailable);
-  const linkedBookIds = dialogTargets.flatMap((task) => task.book ? [task.book.id] : []);
-  const canDeleteLibraryRecords = linkedBookIds.length === dialogTargets.length && new Set(linkedBookIds).size === linkedBookIds.length;
 
   function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -346,8 +439,6 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   }
 
   function openBulkDelete() {
-    setDeleteMode('record');
-    setDeleteLibraryRecord(false);
     setBulkDeleteOpen(true);
   }
 
@@ -467,21 +558,27 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <div className="text-sm text-slate-500">{new Date(task.createdAt).toLocaleString(locale)}</div>
+                <Button className="min-h-9 px-3 py-1.5" variant="ghost" icon={ChevronDown} loading={loadingLogsTaskId === task.id} loadingText={i18nAttribute("读取中")} onClick={() => void toggleTaskLogs(task)}>
+                  {expandedLogIds.has(task.id) ? <I18nText>收起日志</I18nText> : <I18nText>查看日志</I18nText>}
+                </Button>
+                {task.status === 'PARSING' || task.status === 'PENDING' ? (
+                  <Button className="min-h-9 px-3 py-1.5" variant="danger" icon={X} loading={cancellingTaskId === task.id} loadingText={i18nAttribute("取消中")} onClick={() => void cancelTask(task)}><I18nText>取消任务</I18nText></Button>
+                ) : null}
                 {task.status === 'COMPLETED' || task.status === 'FAILED' ? (
                   <Button className="min-h-9 px-3 py-1.5" variant="ghost" icon={Trash2} onClick={() => openDeleteTask(task)}><I18nText>删除</I18nText></Button>
                 ) : null}
               </div>
             </div>
             {task.status === 'PARSING' || task.status === 'PENDING' ? <Progress value={task.progress} className="mt-4" /> : null}
-            {task.logs.length > 0 ? (
+            {expandedLogIds.has(task.id) && task.logs.length > 0 ? (
               <div className="mt-4 space-y-1 rounded-2xl bg-slate-50 p-3 font-mono text-xs text-slate-500">
-                {task.logs.slice(0, 5).map((log) => (
+                {task.logs.map((log) => (
                   <div key={log.id} className="break-words">
-                    <span className={log.level === 'error' ? 'text-red-600' : log.level === 'warn' ? 'text-amber-600' : 'text-slate-500'}>{log.level}</span> · {log.message}
+                    <span className={log.level === 'error' ? 'text-red-600' : log.level === 'warning' || log.level === 'warn' ? 'text-amber-600' : 'text-slate-500'}>{log.level}</span> · {log.message}
                   </div>
                 ))}
               </div>
-            ) : null}
+            ) : expandedLogIds.has(task.id) ? <div className="mt-4 rounded-2xl bg-slate-50 p-3 text-xs text-slate-500"><I18nText>暂无任务日志</I18nText></div> : null}
             {task.status === 'COMPLETED' ? <div className="mt-4 flex items-center gap-2 text-sm text-emerald-600"><CheckCircle2 size={16} /><I18nText>导入完成</I18nText></div> : null}
           </div>
         ))}
@@ -492,48 +589,16 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold text-slate-950">{bulkDeleteOpen ? i18nAttribute("批量删除 {value0} 条导入记录", { value0: dialogTargets.length }) : i18nAttribute("删除导入记录")}</h2>
-                <p className="mt-2 break-words text-sm leading-6 text-slate-600">{bulkDeleteOpen ? i18nAttribute("选择对所有已选记录执行的删除行为。") : i18nAttribute("选择“{value0}”的删除范围。", { value0: dialogTargets[0].originalName ?? dialogTargets[0].sourcePath })}</p>
+                <p className="mt-2 break-words text-sm leading-6 text-slate-600">{bulkDeleteOpen ? i18nAttribute("确认删除所有已选导入记录。") : i18nAttribute("确认删除“{value0}”的导入记录。", { value0: dialogTargets[0].originalName ?? dialogTargets[0].sourcePath })}</p>
               </div>
               <button type="button" disabled={Boolean(deletingTaskId)} onClick={() => { setDeleteTarget(null); setBulkDeleteOpen(false); }} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 disabled:opacity-50" aria-label={i18nAttribute("关闭")}><X size={18} /></button>
             </div>
-            <div className="mt-5 space-y-2" role="radiogroup" aria-label={i18nAttribute("删除范围")}>
-              {([
-                { value: 'record' as const, label: '仅删除导入记录', description: '保留源文件和转换后的文件。', available: true },
-                { value: 'source' as const, label: '同步删除源文件', description: '转换文件会保留；直接使用这些源文件的书库版本将无法继续阅读。', available: canDeleteSources },
-                { value: 'converted' as const, label: '同步删除转换后的文件', description: '源文件会保留；使用这些转换文件的书库版本将无法继续阅读。', available: canDeleteConverted }
-              ]).map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  role="radio"
-                  aria-checked={deleteMode === option.value}
-                  disabled={!option.available || Boolean(deletingTaskId)}
-                  onClick={() => setDeleteMode(option.value)}
-                  className={`w-full rounded-2xl border px-4 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-45 ${deleteMode === option.value ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
-                >
-                  <span className="flex items-center justify-between gap-3 text-sm font-semibold text-slate-900">
-                    {i18nAttribute(option.label)}
-                    {!option.available ? <span className="text-xs font-normal text-slate-400"><I18nText>文件不存在</I18nText></span> : null}
-                  </span>
-                  <span className="mt-1 block text-xs leading-5 text-slate-500">{option.description}</span>
-                </button>
-              ))}
+            <div className="mt-5 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+              <I18nText>本操作只删除导入任务记录。源文件、转换文件和书库内容都会保留。</I18nText>
             </div>
-            {canDeleteLibraryRecords ? (
-              <label className={`mt-4 flex cursor-pointer gap-3 rounded-2xl border p-4 transition ${deleteLibraryRecord ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}>
-                <input type="checkbox" checked={deleteLibraryRecord} disabled={Boolean(deletingTaskId)} onChange={(event) => setDeleteLibraryRecord(event.target.checked)} className="mt-0.5 h-4 w-4 accent-red-600" />
-                <span>
-                  <span className="block text-sm font-semibold text-slate-900"><I18nText>同步删除关联卷册或版本</I18nText></span>
-                  <span className="mt-1 block text-xs leading-5 text-slate-500"><I18nText>仅删除所选记录直接关联的卷册或版本及其阅读进度和系统生成文件；同一本书的其他卷册和版本会保留，全部清空后才删除图书记录。源文件是否删除由上方选项决定。</I18nText></span>
-                </span>
-              </label>
-            ) : (
-              <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-500">{bulkDeleteOpen ? i18nAttribute("所选记录没有一一对应的独立书库图书，本次仅处理导入记录和所选文件。") : i18nAttribute("这条导入记录没有关联的书库图书，无需同步删除书库记录。")}</div>
-            )}
-            {deleteMode !== 'record' || deleteLibraryRecord ? <div className="mt-4 flex gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800"><AlertTriangle size={16} className="mt-0.5 shrink-0" /><I18nText>已选择的文件和书库数据删除后无法恢复。</I18nText></div> : null}
             <div className="mt-6 flex justify-end gap-2">
               <Button type="button" variant="secondary" disabled={Boolean(deletingTaskId)} onClick={() => { setDeleteTarget(null); setBulkDeleteOpen(false); }}><I18nText>取消</I18nText></Button>
-              <Button type="button" variant="danger" icon={Trash2} loading={Boolean(deletingTaskId)} loadingText={i18nAttribute("删除中")} onClick={() => void deleteTasks()}>{deleteMode === 'record' && !deleteLibraryRecord ? i18nAttribute("删除记录") : i18nAttribute("确认删除")}</Button>
+              <Button type="button" variant="danger" icon={Trash2} loading={Boolean(deletingTaskId)} loadingText={i18nAttribute("删除中")} onClick={() => void deleteTasks()}><I18nText>删除记录</I18nText></Button>
             </div>
           </div>
         </div>

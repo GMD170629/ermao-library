@@ -30,6 +30,19 @@ test('allows resource and real spine fallbacks only when they are unambiguous', 
   assert.equal(resolveActiveEpubNavigationIndex([{ href: 'one.xhtml', sectionIndex: 4 }], null, 4), 0);
 });
 
+test('matches package-relative rendition paths to unique navigation suffixes', () => {
+  assert.equal(resolveActiveEpubNavigationIndex(
+    [{ href: 'chapter1.xhtml' }, { href: 'chapter2.xhtml' }],
+    'OEBPS/chapter2.xhtml',
+    1
+  ), 1);
+  assert.equal(resolveActiveEpubNavigationIndex(
+    [{ href: 'Text/chapter.xhtml' }, { href: 'Appendix/chapter.xhtml' }],
+    'chapter.xhtml',
+    null
+  ), null);
+});
+
 test('maps EPUB-authored contents and split resources to the preceding TOC interval', () => {
   const toc = [
     { href: 'text/part0000.html', sectionIndex: 0 },

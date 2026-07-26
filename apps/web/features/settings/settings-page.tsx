@@ -1,5 +1,12 @@
 'use client';
 
+import type {
+  DirectoryNodeResponse,
+  DirectoryTreeResponse,
+  RestoreStatusResponse
+} from '@/generated/api-v2';
+import { apiV2Fetch, apiV2Request } from '@/lib/api-v2';
+
 import { CheckCircle2, ChevronDown, ChevronRight, Database, Download, FolderOpen, RotateCcw, Save, Settings2, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../../components/ui/button';
@@ -44,24 +51,49 @@ type BackupItem = {
   };
 };
 
-type DirectoryNode = {
-  name: string;
-  path: string;
-  readable: boolean;
-  error?: string | null;
-  children: Array<{
-    name: string;
-    path: string;
-    readable: boolean;
-  }>;
+type BackupResource = {
+  id: string;
+  status: string;
+  archiveName: string;
+  sizeBytes?: number | null;
+  createdAt: string;
 };
 
-type DirectoryTreePayload = {
-  node: DirectoryNode;
-  monitorRoot?: string | null;
-};
+type DirectoryNode = DirectoryNodeResponse;
 
 type AppSettings = Record<string, string>;
+
+const restorePollIntervalMs = 2_000;
+const restorePollAttempts = 300;
+
+function wait(milliseconds: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function waitForRestore(requestId: string): Promise<RestoreStatusResponse> {
+  let lastDetail = '';
+  for (let attempt = 0; attempt < restorePollAttempts; attempt += 1) {
+    try {
+      const response = await apiV2Fetch(
+        `/api/v2/operations/restores/${encodeURIComponent(requestId)}`,
+        { cache: 'no-store' }
+      );
+      const payload = await response.json().catch(() => null) as
+        | RestoreStatusResponse
+        | { detail?: string }
+        | null;
+      if (response.ok && payload && 'status' in payload) {
+        if (payload.status === 'completed' || payload.status === 'failed') return payload;
+      } else if (payload && 'detail' in payload && typeof payload.detail === 'string') {
+        lastDetail = payload.detail;
+      }
+    } catch (reason) {
+      lastDetail = reason instanceof Error ? reason.message : '';
+    }
+    await wait(restorePollIntervalMs);
+  }
+  throw new Error(lastDetail || '等待恢复结果超时');
+}
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -153,21 +185,41 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   const toast = useToast();
 
   const loadPaths = useCallback(async () => {
-    const response = await fetch('/api/monitor-folders');
-    const payload = (await response.json()) as { ok: boolean; data?: MonitorFoldersPayload; error?: { message: string } };
-    if (payload.ok) {
-      setFolders(payload.data?.folders ?? []);
-      setRootPath((current) => payload.data?.monitorRoot && current === '/books' ? payload.data.monitorRoot : current);
+    const response = await apiV2Fetch('/api/v2/ingestion/folders');
+    const payload = (await response.json()) as {
+      items?: Array<{ id: string; path: string; enabled: boolean; options: Record<string, unknown> }>;
+      detail?: string;
+    };
+    if (response.ok && payload.items) {
+      setFolders(payload.items.map((folder) => ({
+        id: folder.id,
+        name: typeof folder.options.name === 'string'
+          ? folder.options.name
+          : folder.path.split(/[\\/]/).filter(Boolean).at(-1) ?? folder.path,
+        rootPath: folder.path,
+        enabled: folder.enabled,
+        ignorePatterns: typeof folder.options.ignorePatterns === 'string' ? folder.options.ignorePatterns : '',
+        ignoreHidden: folder.options.ignoreHidden !== false,
+        minFileSizeBytes: typeof folder.options.minFileSizeBytes === 'number' ? folder.options.minFileSizeBytes : 0,
+        description: typeof folder.options.description === 'string' ? folder.options.description : null
+      })));
     } else {
-      setError(payload.error?.message ?? '读取监控文件夹失败');
+      setError(payload.detail ?? '读取监控文件夹失败');
     }
   }, []);
 
   const loadBackups = useCallback(async () => {
-    const response = await fetch('/api/backups');
-    const payload = (await response.json()) as { ok: boolean; data?: { backups: BackupItem[] }; error?: { message: string } };
-    if (payload.ok) setBackups(payload.data?.backups ?? []);
-    else setError(payload.error?.message ?? '读取备份列表失败');
+    const response = await apiV2Fetch('/api/v2/operations/backups');
+    const payload = (await response.json()) as { items?: BackupResource[]; detail?: string };
+    if (response.ok && payload.items) {
+      setBackups(payload.items.map((backup) => ({
+        id: backup.id,
+        kind: 'unknown',
+        filename: backup.archiveName,
+        sizeBytes: backup.sizeBytes ?? 0,
+        createdAt: backup.createdAt
+      })));
+    } else setError(payload.detail ?? '读取备份列表失败');
   }, []);
 
   useEffect(() => {
@@ -184,9 +236,12 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     }
     if (!initialSection || initialSection === '备份与恢复') void loadBackups();
     if (initialSection === '监控文件夹' || initialSection === '备份与恢复') return;
-    fetch('/api/system-settings').then((response) => response.json()).then((payload) => {
-      if (!payload.ok) return;
-      const loaded = { ...payload.data.settings } as Record<string, unknown>;
+    apiV2Fetch('/api/v2/operations/settings').then((response) => response.json()).then((payload) => {
+      if (!payload.values) return;
+      const loaded = Object.fromEntries(
+        Object.entries(payload.values as Record<string, Record<string, unknown>>)
+          .map(([key, value]) => [key, value.value])
+      ) as Record<string, unknown>;
       const secretState = Object.fromEntries(sensitiveSystemSettingKeys.flatMap((key) => {
         const legacyValue = typeof loaded[key] === 'string' ? loaded[key].trim() : '';
         const configured = loaded[`${key}Configured`] === true || loaded[`${key}Configured`] === 'true' || Boolean(legacyValue);
@@ -210,14 +265,23 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     setError('');
     setMessage('');
     setPathBusy('create');
-    const response = await fetch('/api/monitor-folders', {
+    const response = await apiV2Fetch('/api/v2/ingestion/folders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, rootPath, enabled: true, ignorePatterns, ignoreHidden, minFileSizeBytes: Math.max(0, Math.round(Number(minFileSizeKb || 0) * 1024)) })
+      body: JSON.stringify({
+        path: rootPath,
+        recursive: true,
+        options: {
+          name,
+          ignorePatterns,
+          ignoreHidden,
+          minFileSizeBytes: Math.max(0, Math.round(Number(minFileSizeKb || 0) * 1024))
+        }
+      })
     });
-    const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
-    if (!payload.ok) {
-      const nextError = payload.error?.message ?? '保存失败';
+    const payload = (await response.json()) as { detail?: string };
+    if (!response.ok) {
+      const nextError = payload.detail ?? '保存失败';
       setError(nextError);
       toast.error('保存失败', nextError);
       setPathBusy('');
@@ -233,8 +297,8 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
 
   async function togglePath(path: MonitorFolder) {
     setPathBusy(`toggle:${path.id}`);
-    await fetch(`/api/monitor-folders/${path.id}`, {
-      method: 'PUT',
+    await apiV2Fetch(`/api/v2/ingestion/folders/${path.id}`, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: !path.enabled })
     });
@@ -252,7 +316,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     });
     if (!confirmed) return;
     setPathBusy(`delete:${path.id}`);
-    await fetch(`/api/monitor-folders/${path.id}`, { method: 'DELETE' });
+    await apiV2Fetch(`/api/v2/ingestion/folders/${path.id}`, { method: 'DELETE' });
     await loadPaths();
     toast.success('监控文件夹已删除');
     setPathBusy('');
@@ -262,14 +326,21 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     setError('');
     setMessage('');
     setRuleBusy(path.id);
-    const response = await fetch(`/api/monitor-folders/${path.id}`, {
-      method: 'PUT',
+    const response = await apiV2Fetch(`/api/v2/ingestion/folders/${path.id}`, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates)
+      body: JSON.stringify({
+        options: {
+          name: updates.name,
+          ignorePatterns: updates.ignorePatterns,
+          ignoreHidden: updates.ignoreHidden,
+          minFileSizeBytes: updates.minFileSizeBytes
+        }
+      })
     });
-    const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
-    if (!payload.ok) {
-      const nextError = payload.error?.message ?? '保存监控文件夹设置失败';
+    const payload = (await response.json()) as { detail?: string };
+    if (!response.ok) {
+      const nextError = payload.detail ?? '保存监控文件夹设置失败';
       setError(nextError);
       toast.error('保存监控文件夹设置失败', nextError);
       setRuleBusy('');
@@ -285,11 +356,11 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     setError('');
     setMessage('');
     setBackupBusy('create');
-    const response = await fetch('/api/backups', { method: 'POST' });
-    const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
+    const response = await apiV2Fetch('/api/v2/operations/backups', { method: 'POST' });
+    const payload = (await response.json()) as { detail?: string };
     setBackupBusy('');
-    if (!payload.ok) {
-      const nextError = payload.error?.message ?? '创建备份失败';
+    if (!response.ok) {
+      const nextError = payload.detail ?? '创建备份失败';
       setError(nextError);
       toast.error('创建备份失败', nextError);
       return;
@@ -300,7 +371,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   }
 
   function downloadBackup(backup: BackupItem) {
-    window.location.href = withBasePath(`/api/backups/${backup.id}/download`);
+    window.location.href = withBasePath(`/api/v2/operations/backups/${backup.id}/download`);
   }
 
   async function restoreBackup(backup: BackupItem) {
@@ -320,22 +391,46 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     setError('');
     setMessage('');
     setBackupBusy(`restore:${backup.id}`);
-    const response = await fetch(`/api/backups/${backup.id}/restore`, {
+    const response = await apiV2Fetch(`/api/v2/operations/backups/${backup.id}/restore`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ confirm: true, confirmText })
     });
-    const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
-    setBackupBusy('');
-    if (!payload.ok) {
-      const nextError = payload.error?.message ?? '恢复备份失败';
+    const payload = (await response.json()) as { requestId?: string; detail?: string };
+    if (!response.ok) {
+      setBackupBusy('');
+      const nextError = payload.detail ?? '恢复备份失败';
       setError(nextError);
       toast.error('恢复备份失败', nextError);
       return;
     }
-    setMessage('备份已恢复，原始读物文件未被删除');
-    toast.success('备份已恢复', '原始读物文件未被删除');
-    await Promise.all([loadPaths(), loadBackups()]);
+    if (!payload.requestId) {
+      setBackupBusy('');
+      setError('恢复服务未返回任务编号');
+      toast.error('恢复备份失败', '恢复服务未返回任务编号');
+      return;
+    }
+    setMessage('恢复服务正在重启，页面会自动等待结果…');
+    try {
+      const result = await waitForRestore(payload.requestId);
+      if (result.status === 'failed') {
+        const nextError = result.detail ?? '恢复备份失败';
+        setError(nextError);
+        setMessage('');
+        toast.error('恢复备份失败', nextError);
+        return;
+      }
+      setMessage('备份已恢复，原始读物文件未被删除');
+      toast.success('备份已恢复', '原始读物文件未被删除');
+      await Promise.all([loadPaths(), loadBackups()]).catch(() => undefined);
+    } catch (reason) {
+      const nextError = reason instanceof Error ? reason.message : '等待恢复结果失败';
+      setError(nextError);
+      setMessage('');
+      toast.error('等待恢复结果失败', nextError);
+    } finally {
+      setBackupBusy('');
+    }
   }
 
   async function deleteBackup(backup: BackupItem) {
@@ -349,11 +444,11 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     setError('');
     setMessage('');
     setBackupBusy(`delete:${backup.id}`);
-    const response = await fetch(`/api/backups/${backup.id}`, { method: 'DELETE' });
-    const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
+    const response = await apiV2Fetch(`/api/v2/operations/backups/${backup.id}`, { method: 'DELETE' });
     setBackupBusy('');
-    if (!payload.ok) {
-      const nextError = payload.error?.message ?? '删除备份失败';
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { detail?: string } | null;
+      const nextError = payload?.detail ?? '删除备份失败';
       setError(nextError);
       toast.error('删除备份失败', nextError);
       return;
@@ -369,15 +464,19 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     setSettingsBusy(true);
     const settingsToSave = settingsForSave(settings);
     const clearSensitiveKeys = [...pendingSecretClears];
-    const response = await fetch('/api/system-settings', {
+    const response = await apiV2Fetch('/api/v2/operations/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ settings: settingsToSave, clearSensitiveKeys })
+      body: JSON.stringify({
+        values: Object.fromEntries(
+          Object.entries(settingsToSave).map(([key, value]) => [key, { value }])
+        )
+      })
     });
-    const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
+    const payload = (await response.json()) as { detail?: string };
     setSettingsBusy(false);
-    if (!payload.ok) {
-      const nextError = payload.error?.message ?? '保存设置失败';
+    if (!response.ok) {
+      const nextError = payload.detail ?? '保存设置失败';
       setError(nextError);
       toast.error('保存设置失败', nextError);
     } else {
@@ -671,18 +770,15 @@ function DirectoryPathPicker({ value, onChange, compact = false }: { value: stri
     setTreeError('');
     try {
       const query = path ? `?path=${encodeURIComponent(path)}` : '';
-      const response = await fetch(`/api/monitor-folders/tree${query}`);
-      const payload = (await response.json()) as { ok: boolean; data?: DirectoryTreePayload; error?: { message: string } };
-      if (!payload.ok || !payload.data?.node) {
-        setTreeError(payload.error?.message ?? '读取目录树失败');
-        return null;
-      }
-      const node = payload.data.node;
-      setMonitorRoot(payload.data.monitorRoot || node.path);
+      const payload = await apiV2Request<DirectoryTreeResponse>(
+        `/api/v2/ingestion/folders/tree${query}`
+      );
+      const node = payload.node;
+      setMonitorRoot(payload.monitorRoot || node.path);
       setNodes((current) => ({ ...current, [node.path]: node }));
       return node;
-    } catch {
-      setTreeError('读取目录树失败');
+    } catch (reason) {
+      setTreeError(reason instanceof Error ? reason.message : '读取目录树失败');
       return null;
     } finally {
       setLoadingPath('');

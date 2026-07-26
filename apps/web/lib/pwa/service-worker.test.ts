@@ -15,7 +15,7 @@ test('reader fonts and large reader payloads bypass caches', () => {
   assert.match(source, /function isReaderFont/);
   assert.match(source, /if \(isReaderFont\(url\.pathname\)\) return true/);
   assert.match(source, /isLargeReaderPayload\(url\.pathname\)/);
-  assert.match(source, /withoutBasePath\(url\.pathname\)\.startsWith\('\/api\/reader\/v2\/'\)/);
+  assert.match(source, /withoutBasePath\(url\.pathname\)\.startsWith\('\/api\/v2\/reading\/'\)/);
   assert.match(source, /if \(isLocalDevelopmentHost\(url\.hostname\)\) return true/);
   assert.match(source, /m4b\|m4a\|mp3\|aac\|ogg\|opus\|flac\|wav/);
   assert.match(source, /files\\\/\[\^\/\]\+\(\?:\\\/\(stream\|audio\)\)\?\$/);
@@ -24,7 +24,7 @@ test('reader fonts and large reader payloads bypass caches', () => {
 test('service worker scopes shell and API handling to the configured application base path', () => {
   assert.match(source, /const BASE_PATH = new URL\(self\.registration\.scope\)/);
   assert.match(source, /\]\.map\(withBasePath\)/);
-  assert.match(source, /withoutBasePath\(url\.pathname\)\.startsWith\('\/api\/'\)/);
+  assert.match(source, /withoutBasePath\(url\.pathname\)\.startsWith\('\/api\/v2\/'\)/);
   assert.match(source, /cache\.match\(withBasePath\('\/offline'\)\)/);
 });
 
@@ -32,7 +32,7 @@ test('service worker caches the shared web shell without a dedicated mobile entr
   assert.match(source, /'\/login'/);
   assert.match(source, /'\/setup'/);
   assert.doesNotMatch(source, /'\/mobile/);
-  assert.match(source, /const VERSION = 'shuku-pwa-v2\.4\.0'/);
+  assert.match(source, /const VERSION = 'shuku-pwa-v0\.4\.0'/);
 });
 
 test('localized web manifest is never pinned in a service-worker cache', () => {

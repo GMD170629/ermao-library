@@ -1,0 +1,60 @@
+from __future__ import annotations
+
+import uuid
+from collections.abc import Callable
+
+from appv2.modules.catalog.contracts import (
+    CatalogEdition,
+    CatalogFile,
+    CatalogReadPort,
+    CatalogUnitOfWork,
+    CatalogVolume,
+    CatalogWork,
+)
+
+
+class CatalogReadAdapter(CatalogReadPort):
+    def __init__(self, uow_factory: Callable[[], CatalogUnitOfWork]) -> None:
+        self._uow_factory = uow_factory
+
+    def get_work(self, work_id: uuid.UUID) -> CatalogWork | None:
+        with self._uow_factory() as uow:
+            return uow.catalog.get_work(work_id)
+
+    def list_active_works(self, *, offset: int, limit: int) -> list[CatalogWork]:
+        with self._uow_factory() as uow:
+            works, _total = uow.catalog.list_works(
+                offset=offset,
+                limit=limit,
+                query=None,
+                media_type=None,
+                status="active",
+                series_name=None,
+                sort="recent_import",
+                sort_direction="asc",
+            )
+            return works
+
+    def get_edition(self, edition_id: uuid.UUID) -> CatalogEdition | None:
+        with self._uow_factory() as uow:
+            return uow.catalog.get_edition(edition_id)
+
+    def editions_for_work(self, work_id: uuid.UUID) -> list[CatalogEdition]:
+        with self._uow_factory() as uow:
+            return uow.catalog.list_editions(work_id)
+
+    def get_file(self, file_id: uuid.UUID) -> CatalogFile | None:
+        with self._uow_factory() as uow:
+            return uow.catalog.get_file(file_id)
+
+    def get_volume(self, volume_id: uuid.UUID) -> CatalogVolume | None:
+        with self._uow_factory() as uow:
+            return uow.catalog.get_volume(volume_id)
+
+    def files_for_edition(self, edition_id: uuid.UUID) -> list[CatalogFile]:
+        with self._uow_factory() as uow:
+            return uow.catalog.files_for_edition(edition_id)
+
+    def volumes_for_edition(self, edition_id: uuid.UUID) -> list[CatalogVolume]:
+        with self._uow_factory() as uow:
+            return uow.catalog.volumes_for_edition(edition_id)

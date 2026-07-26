@@ -1,17 +1,40 @@
 name: shuku-starship
 
 services:
+  postgres:
+    image: postgres:18.4-alpine3.23
+    container_name: shuku-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: shuku_v2
+      POSTGRES_USER: shuku
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in a protected .env file}"
+      PGDATA: /var/lib/postgresql/18/docker
+    volumes:
+      - ${POSTGRES_DATA_PATH:-./data/postgres}:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shuku -d shuku_v2"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
   web:
     image: gamersgu/shuku-starship-web:prod
     pull_policy: always
-    container_name: shuku-prod-web
+    container_name: shuku-web
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
+      DATABASE_URL: "postgresql+psycopg://shuku:${POSTGRES_PASSWORD}@postgres:5432/shuku_v2"
       STORAGE_ROOT: /app/storage
       MONITOR_ROOT: /monitor
       PORT: 3000
       HOSTNAME: 0.0.0.0
+      APP_VERSION: 0.4.0
     ports:
       - "${WEB_PORT:-3000}:3000"
     volumes:
@@ -19,18 +42,19 @@ services:
       - ${MONITOR_HOST_PATH:-./monitor}:/monitor
     command: ["./scripts/start-unified-app.sh"]
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/v2/operations/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 60s
+
   manga-downloader:
     image: yxb900211/komga-manga-downloader:1.1.9
     container_name: komga-manga-downloader
     ports:
       - "45458:8080"
     environment:
-      LICENSE_CODE: '$$Yxb=900211'
+      LICENSE_CODE: "$$Yxb=900211"
       AUTH_USERNAME: admin
       AUTH_PASSWORD: 123456
       JWT_SECRET: 4C99392CE4CBA06B547495462F4387CC

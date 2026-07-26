@@ -1,26 +1,45 @@
 [
   {
-    "stepTitle": "升级二毛图书",
+    "stepTitle": "升级到 v0.4.0 / Upgrade to v0.4.0",
     "items": [
       {
         "type": "text",
         "field": "wizard_port",
-        "label": "Web 访问端口",
+        "label": "Web 访问端口 / Web port",
         "initValue": "3000",
         "rules": [
           {
             "required": true,
-            "message": "请输入 Web 访问端口"
+            "message": "请输入 Web 访问端口 / Enter the Web port"
           },
           {
             "pattern": "^(102[4-9]|10[3-9][0-9]|1[1-9][0-9]{2}|[2-9][0-9]{3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$",
-            "message": "请输入 1024-65535 之间的端口"
+            "message": "请输入 1024-65535 之间的端口 / Use a port from 1024 to 65535"
           }
         ]
       },
       {
-        "type": "tips",
-        "helpText": "共享数据目录“/shuku.monitor”会挂载为应用的 /monitor 扫描目录。升级后请使用所选独立端口访问应用。"
+        "type": "select",
+        "field": "wizard_database_mode",
+        "label": "数据库模式 / Database mode",
+        "initValue": "embedded",
+        "options": [
+          {
+            "label": "内置 PostgreSQL 18 / Embedded PostgreSQL 18",
+            "value": "embedded"
+          },
+          {
+            "label": "外部 PostgreSQL 18 / External PostgreSQL 18",
+            "value": "external"
+          }
+        ]
+      },
+      {
+        "type": "password",
+        "field": "wizard_external_database_url",
+        "label": "外部 DATABASE_URL / External DATABASE_URL",
+        "initValue": "",
+        "helpText": "v0.4.0 使用全新 PostgreSQL 数据库，不会读取或迁移旧 SQLite。v0.4.0 starts a new PostgreSQL database and never reads or migrates legacy SQLite."
       }
     ]
   }

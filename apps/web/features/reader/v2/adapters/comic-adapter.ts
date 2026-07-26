@@ -8,6 +8,7 @@ import type {
   ReaderCommandAck,
   ReaderPreferences
 } from '@shuku/reader-core';
+import type { ComicPageIndexResponse } from '@/generated/api-v2';
 import { withBasePath } from '../../../../lib/base-path';
 import { readerThemeSurfaces } from '../../reader-theme';
 import { isReaderControlTarget } from '../input-router';
@@ -48,14 +49,6 @@ export type ComicViewModel = {
   error?: string;
 };
 
-type ComicPageIndexPayload = {
-  ok?: boolean;
-  data?: { pageCount?: number; pages?: ComicPageMeta[] };
-  pageCount?: number;
-  pages?: ComicPageMeta[];
-  error?: { message?: string };
-};
-
 type CachedComicPage = {
   url?: string;
   objectUrl?: string;
@@ -82,13 +75,13 @@ function clampPage(page: number, pageCount: number) {
 }
 
 function defaultPageIndexUrl(context: ReaderAdapterOpenContext) {
-  return withBasePath(`/api/volumes/${encodeURIComponent(context.source.volumeId ?? context.source.editionId)}/pages`);
+  return withBasePath(`/api/v2/reading/volumes/${encodeURIComponent(context.source.volumeId ?? context.source.editionId)}/pages`);
 }
 
 function defaultPageUrl(context: ReaderAdapterOpenContext, pageIndex: number, preferences: ReaderPreferences, retry: number) {
   const parameters = new URLSearchParams({ imageVariant: preferences.comic.imageVariant });
   if (retry > 0) parameters.set('retry', String(retry));
-  return withBasePath(`/api/volumes/${encodeURIComponent(context.source.volumeId ?? context.source.editionId)}/pages/${pageIndex}?${parameters}`);
+  return withBasePath(`/api/v2/reading/volumes/${encodeURIComponent(context.source.volumeId ?? context.source.editionId)}/pages/${pageIndex}?${parameters}`);
 }
 
 function waitForSignal<T>(request: Promise<T>, signal: AbortSignal) {
@@ -315,11 +308,9 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
       if (!pages?.length && pageCount <= 0) {
         const response = await this.fetcher(this.pageIndexUrl(context), { signal });
         if (!response.ok) throw new Error(`漫画页面索引加载失败 (${response.status})`);
-        const payload = await response.json() as ComicPageIndexPayload;
-        if (payload.ok === false) throw new Error(payload.error?.message ?? '漫画页面索引加载失败');
-        const data = payload.data ?? payload;
-        pages = data.pages;
-        pageCount = data.pageCount ?? pages?.length ?? 0;
+        const payload = await response.json() as ComicPageIndexResponse;
+        pages = payload.pages;
+        pageCount = payload.pageCount || pages.length;
       }
       this.assertActive(generation, signal);
       if (pages?.length) {

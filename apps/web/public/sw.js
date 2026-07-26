@@ -1,4 +1,4 @@
-const VERSION = 'shuku-pwa-v2.4.0';
+const VERSION = 'shuku-pwa-v0.4.0';
 const SHELL_CACHE = `${VERSION}-app-shell`;
 const STATIC_CACHE = `${VERSION}-static`;
 const PRIVATE_CACHE_PREFIX = `${VERSION}-private-`;
@@ -19,6 +19,10 @@ function withoutBasePath(pathname) {
   if (!BASE_PATH) return pathname;
   if (pathname === BASE_PATH) return '/';
   return pathname.startsWith(`${BASE_PATH}/`) ? pathname.slice(BASE_PATH.length) : pathname;
+}
+
+function networkFetch(request, init) {
+  return fetch(request, init);
 }
 
 const SHELL_URLS = [
@@ -76,18 +80,17 @@ function isLocalDevelopmentHost(hostname) {
 
 function isSensitiveApi(pathname) {
   pathname = withoutBasePath(pathname);
-  return pathname.startsWith('/api/auth/')
-    || pathname === '/api/auth/me'
+  return pathname.startsWith('/api/v2/auth/')
+    || pathname === '/api/v2/account'
     || pathname.includes('/permissions')
     || pathname.includes('/token');
 }
 
 function isLargeReaderPayload(pathname) {
   pathname = withoutBasePath(pathname);
-  return /\/api\/editions\/[^/]+\/file$/.test(pathname)
-    || /\/api\/files\/[^/]+(?:\/(stream|audio))?$/.test(pathname)
-    || /\/api\/audio\/[^/]+/.test(pathname)
-    || /\/api\/volumes\/[^/]+\/pages\/[^/]+$/.test(pathname)
+  return /\/api\/v2\/reading\/editions\/[^/]+\/resource$/.test(pathname)
+    || /\/api\/v2\/reading\/files\/[^/]+(?:\/(stream|audio))?$/.test(pathname)
+    || /\/api\/v2\/reading\/volumes\/[^/]+\/pages\/[^/]+$/.test(pathname)
     || /\.(cbz|zip|epub|pdf|m4b|m4a|mp3|aac|ogg|opus|flac|wav)$/i.test(pathname);
 }
 
@@ -105,9 +108,9 @@ function isReaderFont(pathname) {
 
 function isCoverRequest(pathname) {
   pathname = withoutBasePath(pathname);
-  return /\/api\/works\/[^/]+\/cover(\/|$)/.test(pathname)
-    || /\/api\/editions\/[^/]+\/cover(\/|$)/.test(pathname)
-    || /\/api\/volumes\/[^/]+\/cover(\/|$)/.test(pathname);
+  return /\/api\/v2\/catalog\/works\/[^/]+\/cover(\/|$)/.test(pathname)
+    || /\/api\/v2\/catalog\/editions\/[^/]+\/cover(\/|$)/.test(pathname)
+    || /\/api\/v2\/catalog\/volumes\/[^/]+\/cover(\/|$)/.test(pathname);
 }
 
 function shouldBypass(request) {
@@ -119,7 +122,7 @@ function shouldBypass(request) {
   // an old reader bundle and make source fixes appear to have no effect.
   if (isLocalDevelopmentHost(url.hostname)) return true;
   if (isSensitiveApi(url.pathname)) return true;
-  if (withoutBasePath(url.pathname).startsWith('/api/reader/v2/')) return true;
+  if (withoutBasePath(url.pathname).startsWith('/api/v2/reading/')) return true;
   if (isLargeReaderPayload(url.pathname)) return true;
   if (isReaderFont(url.pathname)) return true;
   if (/\.(cbz|zip|epub|pdf|m4b|m4a|mp3|aac|ogg|opus|flac|wav)$/i.test(url.pathname)) return true;
@@ -127,9 +130,19 @@ function shouldBypass(request) {
 }
 
 function offlineApiResponse() {
-  return new Response(JSON.stringify({ ok: false, error: { code: 'OFFLINE', message: '当前网络不可用' } }), {
+  return new Response(JSON.stringify({
+    type: 'https://shuku.app/problems/offline',
+    title: 'Network unavailable',
     status: 503,
-    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }
+    code: 'OFFLINE',
+    detail: '当前网络不可用',
+    params: {}
+  }), {
+    status: 503,
+    headers: {
+      'Content-Type': 'application/problem+json; charset=utf-8',
+      'Cache-Control': 'no-store'
+    }
   });
 }
 
@@ -146,7 +159,7 @@ async function cacheFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
   const cached = await cache.match(request);
   if (cached) return cached;
-  const response = await fetch(request);
+  const response = await networkFetch(request);
   if (response.ok) {
     await cache.put(request, response.clone());
     await trimCache(cacheName, 'static');
@@ -157,7 +170,7 @@ async function cacheFirst(request, cacheName) {
 async function networkFirstPage(request) {
   const cache = await caches.open(SHELL_CACHE);
   try {
-    return await fetch(request);
+    return await networkFetch(request);
   } catch {
     const url = new URL(request.url);
     return (await cache.match(request)) || (await cache.match(url.pathname)) || (await cache.match(withBasePath('/offline'))) || Response.error();
@@ -166,10 +179,10 @@ async function networkFirstPage(request) {
 
 async function networkFirstApi(request) {
   const cacheName = privateCacheName('api');
-  if (!cacheName) return fetch(request).catch(() => offlineApiResponse());
+  if (!cacheName) return networkFetch(request).catch(() => offlineApiResponse());
   const cache = await caches.open(cacheName);
   try {
-    const response = await fetch(request);
+    const response = await networkFetch(request);
     if (response.ok) {
       const url = new URL(request.url);
       if (!isSensitiveApi(url.pathname) && !isLargeReaderPayload(url.pathname)) {
@@ -184,10 +197,10 @@ async function networkFirstApi(request) {
 }
 
 async function staleWhileRevalidate(request, cacheName) {
-  if (!cacheName) return fetch(request);
+  if (!cacheName) return networkFetch(request);
   const cache = await caches.open(cacheName);
   const cached = await cache.match(request);
-  const refresh = fetch(request).then(async (response) => {
+  const refresh = networkFetch(request).then(async (response) => {
     if (response.ok) {
       await cache.put(request, response.clone());
       await trimCache(cacheName, 'cover');
@@ -247,7 +260,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(staleWhileRevalidate(event.request, privateCacheName('cover')));
     return;
   }
-  if (withoutBasePath(url.pathname).startsWith('/api/')) {
+  if (withoutBasePath(url.pathname).startsWith('/api/v2/')) {
     event.respondWith(networkFirstApi(event.request));
     return;
   }

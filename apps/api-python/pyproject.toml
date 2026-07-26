@@ -4,13 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "shuku-starship-api-python"
-version = "0.3.3"
+version = "0.4.0"
 description = "Python FastAPI backend for 二毛图书"
 requires-python = "==3.11.*"
 dependencies = [
   "fastapi>=0.115.0",
   "uvicorn[standard]>=0.30.0",
   "sqlalchemy>=2.0.30",
+  "psycopg[binary]>=3.2.9",
+  "alembic>=1.16.4",
   "pydantic>=2.8.0",
   "pydantic-settings>=2.4.0",
   "email-validator>=2.2.0",
@@ -21,23 +23,46 @@ dependencies = [
   "mutagen>=1.47.0",
   "pypdfium2>=4.30.0",
   "watchdog>=4.0.0",
-  "python-multipart>=0.0.20"
+  "python-multipart>=0.0.20",
+  "httpx>=0.27.0",
+  "cryptography>=45.0.5",
+  "defusedxml>=0.7.1"
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest>=8.3.0",
-  "httpx>=0.27.0"
+  "pytest-cov>=6.2.1",
+  "mypy>=1.17.0",
+  "ruff>=0.12.4",
+  "types-defusedxml>=0.7.0.20240218"
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["app*"]
-
-[tool.setuptools.package-data]
-"app.db" = ["schema.sql"]
+include = ["appv2*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "--capture=tee-sys"
+addopts = "--capture=tee-sys --strict-markers"
+markers = [
+  "postgres: requires a real isolated PostgreSQL 18 database"
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = ["legacy_tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "S", "SIM"]
+ignore = ["S101"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["appv2"]
+exclude = ["legacy_tests"]
+plugins = ["pydantic.mypy", "sqlalchemy.ext.mypy.plugin"]
+warn_unused_configs = true

@@ -1,5 +1,17 @@
 'use client';
 
+import { apiV2Request } from '@/lib/api-v2';
+import type {
+  AccountResponse,
+  EditionResponse,
+  JobAccepted,
+  PreferenceResponse,
+  SplitEditionResponse,
+  VolumeTransferResponse,
+  WorkDetailResponse,
+  WorkResponse
+} from '@/generated/api-v2';
+
 import {
   BarChart3,
   BookOpen,
@@ -17,7 +29,6 @@ import {
   Images,
   MoveRight,
   Play,
-  RefreshCw,
   Save,
   Send,
   Settings2,
@@ -34,6 +45,7 @@ import { useToast } from '../../components/ui/feedback';
 import { Select } from '../../components/ui/select';
 import { VolumeSelect } from '../../components/ui/volume-select';
 import { withBasePath } from '../../lib/base-path';
+import { workResponseToView } from '../../lib/api-v2/adapters';
 import type { MediaKind, ReadingStatus, WorkDetailTabKey, WorkView } from '../../types/work';
 import { useAudioPlayback } from '../audio/audio-playback-provider';
 import { resolveChapterReadingStates } from './chapter-reading-state';
@@ -143,7 +155,7 @@ type ActiveWorkMedia = {
 };
 
 type PageMeta = { page: number; pageSize: number; total: number; totalPages: number };
-type WorksResponse = { ok: boolean; data?: { books: WorkView[]; total?: number }; error?: { message: string } };
+type WorksResponse = { items: WorkResponse[]; total: number; page: number; pageSize: number };
 type StructureVolume = Pick<WorkView['volumes'][number], 'id' | 'editionId' | 'title'>;
 
 const emptyReadingUnitsPage: PageMeta = {
@@ -360,9 +372,11 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
-      .then((response) => response.json())
-      .then((payload) => setCanManageSystem(Boolean(payload?.ok && payload.data?.authorization?.canManageSystem)))
+    apiV2Request<AccountResponse>('/api/v2/account', {
+      cache: 'no-store',
+      signal: controller.signal
+    })
+      .then((account) => setCanManageSystem(account.scopes.includes('operations:write')))
       .catch(() => undefined);
     return () => controller.abort();
   }, []);
@@ -382,32 +396,31 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     if (selectedVolumeId) params.set('volumeId', selectedVolumeId);
     setChapterLoading(true);
     setError('');
-    return fetch(`/api/works/${bookId}?${params.toString()}`, { signal: controller.signal })
-      .then((response) => response.json() as Promise<{
-        ok: boolean;
-        data?: {
-          book: WorkView;
-          readingUnits?: ReadingUnitView[];
-          readingUnitsPage?: PageMeta;
-          volumeSections?: VolumeSectionView[];
-          activeMedia?: ActiveWorkMedia | null;
-        };
-        error?: { message: string };
-      }>)
+    return apiV2Request<WorkDetailResponse>(
+      `/api/v2/catalog/works/${bookId}?${params.toString()}`,
+      { signal: controller.signal }
+    )
       .then((payload) => {
-        if (!payload.ok || !payload.data?.book) throw new Error(payload.error?.message ?? '读取读物失败');
-        const nextBook = payload.data.book;
+        const nextBook = workResponseToView(payload);
         const rememberedTab = storedDetailTab(bookId);
         const nextTab = resolvedDetailTab(nextBook, activeTab ?? rememberedTab);
-        const responseMedia = payload.data.activeMedia ?? null;
-        const nextReadingUnits = responseMedia?.units ?? payload.data.readingUnits ?? [];
-        const nextVolumeSections = payload.data.volumeSections ?? responseMedia?.volumes ?? [];
+        const responseMedia = null;
+        const nextReadingUnits: ReadingUnitView[] = [];
+        const nextVolumeSections: VolumeSectionView[] = nextBook.volumes.map((volume) => ({
+          id: volume.id,
+          editionId: volume.editionId,
+          title: volume.title,
+          index: volume.sortOrder,
+          pageCount: volume.pageCount,
+          coverUrl: '',
+          durationMs: volume.durationMs ?? null
+        }));
         const nextActiveMedia = responseMedia ?? legacyActiveMedia(nextBook, nextTab, selectedEditionId, nextReadingUnits, nextVolumeSections);
         setBook(nextBook);
         setActiveTab(nextTab);
         setActiveMedia(nextActiveMedia);
         setReadingUnits(nextReadingUnits);
-        setReadingUnitsPage(payload.data.readingUnitsPage ?? emptyReadingUnitsPage);
+        setReadingUnitsPage(emptyReadingUnitsPage);
         setVolumeSections(nextVolumeSections);
         if (nextActiveMedia?.selectedEditionId && nextActiveMedia.selectedEditionId !== selectedEditionId) {
           setSelectedEditionId(nextActiveMedia.selectedEditionId);
@@ -504,13 +517,11 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       sort: 'series_index'
     });
     setSeriesLoading(true);
-    fetch(`/api/works?${params.toString()}`)
-      .then((response) => response.json() as Promise<WorksResponse>)
+    apiV2Request<WorksResponse>(`/api/v2/catalog/works?${params.toString()}`)
       .then((payload) => {
         if (!active) return;
-        if (!payload.ok) throw new Error(payload.error?.message ?? '读取系列读物失败');
-        setSeriesBooks(payload.data?.books ?? []);
-        setSeriesTotal(payload.data?.total ?? payload.data?.books.length ?? 0);
+        setSeriesBooks(payload.items.map(workResponseToView));
+        setSeriesTotal(payload.total);
       })
       .catch(() => {
         if (!active) return;
@@ -595,12 +606,10 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       setTargetBooksLoading(true);
       const params = new URLSearchParams({ visibility: 'active', pageSize: '12', page: '1' });
       if (targetSearch.trim()) params.set('search', targetSearch.trim());
-      fetch(`/api/works?${params.toString()}`)
-        .then((response) => response.json() as Promise<WorksResponse>)
+      apiV2Request<WorksResponse>(`/api/v2/catalog/works?${params.toString()}`)
         .then((payload) => {
           if (!active) return;
-          if (!payload.ok) throw new Error(payload.error?.message ?? '搜索目标读物失败');
-          setTargetBooks((payload.data?.books ?? []).filter((item) => item.id !== bookId));
+          setTargetBooks(payload.items.map(workResponseToView).filter((item) => item.id !== bookId));
         })
         .catch((reason) => {
           if (!active) return;
@@ -632,29 +641,22 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setError('');
     setMessage('');
     try {
-      const response = await fetch(`/api/works/${bookId}`, {
+      await apiV2Request<WorkResponse>(`/api/v2/catalog/works/${bookId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: form.title,
-          author: form.author,
-          description: form.description,
-          seriesName: form.seriesName,
-          seriesIndex: form.seriesIndex,
-          publishedYear: form.publishedYear,
-          ...(activeMedia ? {
-            status: form.status,
-            mediaKind: activeMedia.key,
-            editionId: activeMedia.selectedEditionId ?? selectedEditionId,
-            volumeId: selectedVolumeId
-          } : {}),
-          tags: form.tags.split(/[,，\n]/).map((tag) => tag.trim()).filter(Boolean),
-          organized: true
+          author: form.author || null,
+          summary: form.description,
+          metadata: {
+            seriesName: form.seriesName || null,
+            seriesIndex: form.seriesIndex ? Number(form.seriesIndex) : null,
+            publishedYear: form.publishedYear ? Number(form.publishedYear) : null,
+            tags: form.tags.split(/[,，\n]/).map((tag) => tag.trim()).filter(Boolean)
+          }
         })
       });
-      const payload = (await response.json()) as { ok: boolean; data?: { book: WorkView }; error?: { message: string } };
-      if (!payload.ok || !payload.data?.book) throw new Error(payload.error?.message ?? '保存失败');
-      setBook(payload.data.book);
+      await loadBook();
       setEditing(false);
       setMessage('图书信息已保存');
       toast.success('图书信息已保存');
@@ -684,10 +686,15 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setSaving(true);
     setBusyAction('saveEditionMetadata');
     try {
-      const response = await fetch(`/api/works/${bookId}/editions/${editingEditionId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(editionForm) });
-      const payload = await response.json() as { ok: boolean; data?: { book: WorkView }; error?: { message: string } };
-      if (!response.ok || !payload.ok || !payload.data?.book) throw new Error(payload.error?.message ?? '保存版本信息失败');
-      setBook(payload.data.book);
+      await apiV2Request<EditionResponse>(
+        `/api/v2/catalog/works/${bookId}/editions/${editingEditionId}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(editionForm)
+        }
+      );
+      await loadBook();
       setEditing(false);
       toast.success('版本信息已保存');
     } catch (reason) {
@@ -700,9 +707,14 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setSaving(true);
     setBusyAction(`split:${splitTarget.id}`);
     try {
-      const response = await fetch(`/api/works/${bookId}/editions/${splitTarget.id}/split`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(splitForm) });
-      const payload = await response.json() as { ok: boolean; data?: { newWorkId: string }; error?: { message: string } };
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '拆分版本失败');
+      await apiV2Request<SplitEditionResponse>(
+        `/api/v2/catalog/works/${bookId}/editions/${splitTarget.id}/split`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(splitForm)
+        }
+      );
       setSplitTarget(null);
       toast.success('版本已拆分为独立作品');
       void loadBook();
@@ -715,19 +727,19 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setBusyAction('status');
     setError('');
     try {
-      const response = await fetch(`/api/works/${bookId}`, {
+      await apiV2Request<WorkResponse>(`/api/v2/catalog/works/${bookId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          status,
-          mediaKind: activeMedia?.key,
-          editionId: activeMedia?.selectedEditionId ?? selectedEditionId,
-          volumeId: selectedVolumeId
+          metadata: {
+            readingStatus: status,
+            readingMediaKind: activeMedia?.key,
+            readingEditionId: activeMedia?.selectedEditionId ?? selectedEditionId,
+            readingVolumeId: selectedVolumeId
+          }
         })
       });
-      const payload = (await response.json()) as { ok: boolean; data?: { book: WorkView }; error?: { message: string } };
-      if (!payload.ok || !payload.data?.book) throw new Error(payload.error?.message ?? '阅读状态更新失败');
-      setBook(payload.data.book);
+      await loadBook();
       setActiveMedia((current) => current ? { ...current, status: status as ReadingStatus } : current);
       setForm((current) => ({ ...current, status }));
       toast.success(activeMedia?.key === 'AUDIOBOOK' ? '收听状态已更新' : '阅读状态已更新');
@@ -746,10 +758,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setError('');
     setMessage('');
     try {
-      const response = await fetch(path, { method: 'POST' });
-      const payload = (await response.json()) as { ok: boolean; data?: { book?: WorkView }; error?: { message: string } };
-      if (!payload.ok) throw new Error(payload.error?.message ?? '操作失败');
-      if (payload.data?.book) setBook(payload.data.book);
+      await apiV2Request<void>(path, { method: 'POST' });
       if (options.refreshBook) await loadBook();
       if (options.refreshCover) setCoverBust(Date.now());
       setMessage(successMessage);
@@ -770,9 +779,11 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setBusyAction(busyKey);
     setError('');
     try {
-      const response = await fetch(`/api/works/${bookId}/editions/${edition.id}/convert`, { method: 'POST' });
-      const payload = (await response.json()) as { ok: boolean; data?: { task?: { id: string } }; error?: { message: string } };
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '加入转换队列失败');
+      await apiV2Request<JobAccepted>('/api/v2/ingestion/conversions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ editionId: edition.id })
+      });
       toast.success('已加入转换队列', '转换完成后会生成可阅读的 EPUB 版本。');
       await loadBook();
     } catch (reason) {
@@ -790,13 +801,11 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setBusyAction(`move:${volumeId}:${direction}`);
     setError('');
     try {
-      const response = await fetch(`/api/works/${bookId}/volumes/${volumeId}/move`, {
+      await apiV2Request<void>(`/api/v2/catalog/works/${bookId}/volumes/${volumeId}/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ direction })
       });
-      const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
-      if (!payload.ok) throw new Error(payload.error?.message ?? '卷册顺序更新失败');
       await loadBook();
       toast.success('卷册顺序已更新');
     } catch (reason) {
@@ -824,19 +833,20 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setBusyAction(`move-to:${movingVolume.id}`);
     setError('');
     try {
-      const response = await fetch(`/api/works/${bookId}/volumes/${movingVolume.id}/move-to`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetEditionId })
-      });
-      const payload = (await response.json()) as { ok: boolean; data?: { transferMode?: 'MERGED_VOLUME' | 'ADDED_MEDIA' | 'ADDED_BACKUP_EDITION' }; error?: { message: string } };
-      if (!payload.ok) throw new Error(payload.error?.message ?? '内容转移失败');
+      const payload = await apiV2Request<VolumeTransferResponse>(
+        `/api/v2/catalog/works/${bookId}/volumes/${movingVolume.id}/move-to`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetEditionId })
+        }
+      );
       setMoveTargetOpen(false);
       setMovingVolume(null);
       await loadBook();
-      const successMessage = payload.data?.transferMode === 'MERGED_VOLUME'
+      const successMessage = payload.transferMode === 'MERGED_VOLUME'
         ? '卷册已合并到目标主版本'
-        : payload.data?.transferMode === 'ADDED_MEDIA'
+        : payload.transferMode === 'ADDED_MEDIA'
           ? '源版本已作为新媒介转入目标图书'
           : '源版本已作为后备版本转入目标图书';
       toast.success(successMessage);
@@ -855,14 +865,12 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setBusyAction('ignored');
     setError('');
     try {
-      const response = await fetch(`/api/works/${bookId}`, {
+      await apiV2Request<WorkResponse>(`/api/v2/catalog/works/${bookId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ignored })
+        body: JSON.stringify({ status: ignored ? 'archived' : 'active' })
       });
-      const payload = (await response.json()) as { ok: boolean; data?: { book: WorkView }; error?: { message: string } };
-      if (!payload.ok || !payload.data?.book) throw new Error(payload.error?.message ?? '操作失败');
-      setBook(payload.data.book);
+      await loadBook();
       toast.success(ignored ? '图书已隐藏' : '图书已恢复显示');
     } catch (reason) {
       const nextError = reason instanceof Error ? reason.message : '操作失败';
@@ -880,21 +888,13 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setBusyAction('delete');
     setError('');
     try {
-      const response = await fetch(`/api/works/${bookId}`, {
+      await apiV2Request<void>(`/api/v2/catalog/works/${bookId}`, {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deleteSource })
+        headers: { 'Content-Type': 'application/json' }
       });
-      const payload = (await response.json()) as { ok: boolean; data?: { deletedSourceFiles?: number; failedFileDeletes?: Array<{ path: string; message: string }> }; error?: { message: string } };
-      if (!payload.ok) throw new Error(payload.error?.message ?? '删除失败');
-      const failedCount = payload.data?.failedFileDeletes?.length ?? 0;
       toast.success(
         '已删除图书记录',
-        failedCount > 0
-          ? `有 ${failedCount} 个文件未能删除，请检查系统日志`
-          : deleteSource
-            ? '关联的源文件已同步删除'
-            : '源文件已保留'
+        '源文件已保留'
       );
       window.setTimeout(() => router.push('/library'), 500);
     } catch (reason) {
@@ -908,7 +908,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
 
   function downloadPrimaryEdition() {
     const editionId = activeMedia?.selectedEditionId ?? selectedEditionId ?? book?.editionId ?? book?.primaryEditionId ?? null;
-    if (editionId) window.location.href = withBasePath(`/api/editions/${editionId}/file`);
+    if (editionId) window.location.href = withBasePath(`/api/v2/reading/editions/${editionId}/resource`);
   }
 
   async function uploadCover(file: File | null) {
@@ -919,9 +919,10 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     try {
       const formData = new FormData();
       formData.append('cover', file);
-      const response = await fetch(`/api/works/${bookId}/cover/upload`, { method: 'POST', body: formData });
-      const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
-      if (!payload.ok) throw new Error(payload.error?.message ?? '上传封面失败');
+      await apiV2Request<WorkResponse>(
+        `/api/v2/catalog/works/${bookId}/cover/upload`,
+        { method: 'POST', body: formData }
+      );
       setCoverBust(Date.now());
       await loadBook();
       toast.success('自定义封面已保存');
@@ -1028,16 +1029,16 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     preferenceRequestRef.current?.abort();
     const controller = new AbortController();
     preferenceRequestRef.current = controller;
-    void fetch(`/api/works/${bookId}/detail-preference`, {
+    void apiV2Request<PreferenceResponse>('/api/v2/reading/preferences', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ selectedTab: tab }),
+      body: JSON.stringify({
+        scope: 'work',
+        targetId: bookId,
+        values: { selectedTab: tab }
+      }),
       signal: controller.signal,
       keepalive: true
-    }).then(async (response) => {
-      if (response.status === 404 || response.status === 405) return;
-      const payload = (await response.json()) as { ok: boolean; error?: { message?: string } };
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '记忆选项卡失败');
     }).catch((reason) => {
       if (reason instanceof DOMException && reason.name === 'AbortError') return;
       toast.error('没有保存详情页偏好', reason instanceof Error ? reason.message : '下次打开时可能不会恢复此选项卡');
@@ -1229,16 +1230,6 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                         <Database size={16} /> <I18nText>元数据识别</I18nText></button>
                       <button type="button" className={menuItemClass} disabled={saving} onClick={() => { setActionsOpen(false); coverInputRef.current?.click(); }}>
                         <ImageUp size={16} /> <I18nText>上传自定义封面</I18nText></button>
-                      <button
-                        type="button"
-                        className={menuItemClass}
-                        disabled={saving}
-                        onClick={() => {
-                          setActionsOpen(false);
-                          void postAction(`/api/works/${book.id}/cover/regenerate`, '封面已重新生成', { refreshCover: true, refreshBook: true, busyKey: 'regenerateCover' });
-                        }}
-                      >
-                        <RefreshCw size={16} /> <I18nText>重新生成封面</I18nText></button>
                     </> : null}
                     {currentTab !== 'AUDIOBOOK' ? (
                       <button type="button" className={menuItemClass} disabled={!selectedEdition?.id} onClick={() => { setActionsOpen(false); downloadPrimaryEdition(); }}>
@@ -1592,7 +1583,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                     {edition.readable ? <Button variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => openEdition(edition)}>{mediaKindForEdition(edition) === 'AUDIOBOOK' ? i18nAttribute("收听") : mediaKindForEdition(edition) === 'COMIC' ? i18nAttribute("查看") : i18nAttribute("阅读")}</Button> : canManageSystem && edition.conversionAvailable ? <Button loading={busyAction === `convert:${edition.id}`} disabled={saving && busyAction !== `convert:${edition.id}`} variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => void convertEdition(edition)}><I18nText>转换为 EPUB</I18nText></Button> : <Button disabled variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5"><I18nText>暂不支持阅读</I18nText></Button>}
                     {manageStructure ? <Button variant="ghost" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => editEdition(edition)}><I18nText>编辑版本</I18nText></Button> : null}
                     {manageStructure && !edition.primary && edition.id !== book.primaryEditionId ? (
-                      <Button loading={busyAction === `primary:${edition.id}`} disabled={saving && busyAction !== `primary:${edition.id}`} variant="ghost" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => void postAction(`/api/works/${book.id}/editions/${edition.id}/primary`, '已设为主版本', { refreshBook: true, busyKey: `primary:${edition.id}` })}>
+                      <Button loading={busyAction === `primary:${edition.id}`} disabled={saving && busyAction !== `primary:${edition.id}`} variant="ghost" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => void postAction(`/api/v2/catalog/works/${book.id}/editions/${edition.id}/primary`, '已设为主版本', { refreshBook: true, busyKey: `primary:${edition.id}` })}>
                         <I18nText>设为主版本</I18nText></Button>
                     ) : null}
                     {manageStructure && book.editions.length > 1 ? <Button variant="ghost" className="!min-h-9 !rounded-xl !px-3 !py-1.5" onClick={() => { setSplitTarget(edition); setSplitForm({ title: `${book.title}（${edition.versionName}）`, author: book.author === '未知作者' ? '' : book.author, copyShelves: true }); }}><I18nText>拆分为作品</I18nText></Button> : null}

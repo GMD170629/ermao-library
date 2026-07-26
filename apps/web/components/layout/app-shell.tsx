@@ -1,5 +1,12 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+import type {
+  AccountResponse,
+  Page_ShelfResponse_,
+  Page_WorkResponse_
+} from '@/generated/api-v2';
+
 import {
   ArrowLeft,
   BookOpen,
@@ -26,6 +33,7 @@ import {
   type ReactNode
 } from 'react';
 import { buildLoginRedirectPath, isPublicAppPath, safePostLoginPath } from '../../lib/auth-routes';
+import { accountAuthorizationVersion } from '../../lib/account-authorization';
 import { installUnauthorizedFetchInterceptor, UNAUTHORIZED_EVENT } from '../../lib/auth-session';
 import { withBasePath } from '../../lib/base-path';
 import { DEFAULT_ACCOUNT_AVATAR_PATH, PRODUCT_NAME } from '../../lib/brand';
@@ -57,12 +65,6 @@ const shellSurfaces = {
   offline: { background: '#020617', colorScheme: 'dark', statusBarStyle: 'black-translucent' }
 } satisfies Record<string, { background: string; colorScheme: 'light' | 'dark'; statusBarStyle: 'default' | 'black-translucent' }>;
 
-type BooksPayload = {
-  ok: boolean;
-  data?: { books: BookSearchItem[]; total: number };
-  error?: { message: string };
-};
-
 type BookSearchItem = {
   id: string;
   title: string;
@@ -76,20 +78,28 @@ type ShelfSummary = {
   name: string;
 };
 
-type ShelvesPayload = {
-  ok: boolean;
-  data?: { shelves?: ShelfSummary[] };
-};
-
 type SessionStatus = 'checking' | 'authenticated' | 'unavailable' | 'redirecting';
 
-type MePayload = {
-  ok: boolean;
-  data?: {
-    user?: { id?: string; email: string; name: string; role: string; locale?: string; avatarUrl?: string | null };
-    authorization?: SettingsAuthorization & { authzVersion?: number };
+function accountUser(account: AccountResponse) {
+  return {
+    id: account.id,
+    email: account.email,
+    name: account.displayName,
+    role: account.role,
+    locale: account.locale,
+    avatarUrl: null
   };
-};
+}
+
+function accountAuthorization(account: AccountResponse): SettingsAuthorization & {
+  authzVersion: number;
+} {
+  return {
+    isAdmin: account.role === 'admin',
+    canManageSystem: account.scopes.includes('operations:write'),
+    authzVersion: accountAuthorizationVersion(account)
+  };
+}
 
 function ensureMeta(name: string) {
   const existing = document.querySelector<HTMLMetaElement>(`meta[name="${name}"]`);
@@ -239,23 +249,23 @@ export function AppShell({ children }: { children: ReactNode }) {
     let active = true;
     const controller = new AbortController();
     setSessionStatus((current) => current === 'authenticated' ? current : 'checking');
-    fetch('/api/auth/me', {
+    apiV2Fetch('/api/v2/account', {
       cache: 'no-store',
       credentials: 'same-origin',
       signal: controller.signal
     })
       .then(async (response) => {
-        const payload = await response.json().catch(() => null) as MePayload | null;
+        const payload = await response.json().catch(() => null) as AccountResponse | null;
         if (!active) return;
         if (response.status === 401) {
           redirectToLogin();
           return;
         }
-        const nextUser = response.ok && payload?.ok ? payload.data?.user : null;
-        if (nextUser) {
+        if (response.ok && payload?.id) {
+          const nextUser = accountUser(payload);
           authRedirectingRef.current = false;
           setUser(nextUser);
-          const nextAuthorization = payload?.data?.authorization ?? null;
+          const nextAuthorization = accountAuthorization(payload);
           setAuthorization(nextAuthorization);
           if (nextUser.id) {
             const nextVersion = Number(nextAuthorization?.authzVersion ?? 1);
@@ -298,15 +308,15 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (pathname !== '/login') return undefined;
     let active = true;
     const controller = new AbortController();
-    fetch('/api/auth/me', {
+    apiV2Fetch('/api/v2/account', {
       cache: 'no-store',
       credentials: 'same-origin',
       signal: controller.signal
     })
       .then(async (response) => {
-        const payload = await response.json().catch(() => null) as MePayload | null;
+        const payload = await response.json().catch(() => null) as AccountResponse | null;
         if (!active) return;
-        if (response.ok && payload?.ok && payload.data?.user) {
+        if (response.ok && payload?.id) {
           router.replace(safePostLoginPath(new URLSearchParams(currentSearchString).get('next')));
         } else if (response.status === 401) {
           void clearPrivatePwaStorage().catch(() => undefined);
@@ -376,24 +386,24 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (isReader || isAuthPage || isOffline || sessionStatus === 'checking' || sessionStatus === 'redirecting') return;
     let active = true;
     const refreshShelves = () => {
-      fetch('/api/shelves')
-        .then((response) => response.json() as Promise<ShelvesPayload>)
+      apiV2Fetch('/api/v2/catalog/shelves')
+        .then((response) => response.json() as Promise<Page_ShelfResponse_>)
         .then((payload) => {
-          if (active) setShelves(payload?.ok ? (payload.data?.shelves ?? []) : []);
+          if (active) setShelves(payload.items.map(({ id, name }) => ({ id, name })));
         })
         .catch(() => undefined);
     };
-    fetch('/api/shelves').then((response) => response.json() as Promise<ShelvesPayload>).catch(() => null).then((shelvesPayload) => {
+    apiV2Fetch('/api/v2/catalog/shelves').then((response) => response.json() as Promise<Page_ShelfResponse_>).catch(() => null).then((shelvesPayload) => {
       if (!active) return;
-      setShelves(shelvesPayload?.ok ? (shelvesPayload.data?.shelves ?? []) : []);
+      setShelves(shelvesPayload?.items.map(({ id, name }) => ({ id, name })) ?? []);
     });
     window.addEventListener('shuku:shelves-changed', refreshShelves);
     const refreshAccount = () => {
-      fetch('/api/auth/me')
+      apiV2Fetch('/api/v2/account')
         .then((response) => response.json())
-        .then((payload) => {
-          if (active && payload?.ok) setUser(payload.data.user);
-          if (active && payload?.ok) setAuthorization(payload.data.authorization ?? null);
+        .then((payload: AccountResponse) => {
+          if (active && payload.id) setUser(accountUser(payload));
+          if (active && payload.id) setAuthorization(accountAuthorization(payload));
         })
         .catch(() => undefined);
     };
@@ -533,12 +543,17 @@ export function AppShell({ children }: { children: ReactNode }) {
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setSearchLoading(true);
-      fetch(`/api/works?pageSize=5&visibility=active&sort=recent_read&view=search&search=${encodeURIComponent(keyword)}`, { signal: controller.signal })
-        .then((response) => response.json() as Promise<BooksPayload>)
+      apiV2Fetch(`/api/v2/catalog/works?pageSize=5&visibility=active&query=${encodeURIComponent(keyword)}`, { signal: controller.signal })
+        .then((response) => response.json() as Promise<Page_WorkResponse_>)
         .then((payload) => {
-          if (!payload.ok) throw new Error(payload.error?.message ?? '搜索书库失败');
-          setSearchBooks(payload.data?.books ?? []);
-          setSearchTotal(payload.data?.total ?? 0);
+          setSearchBooks(payload.items.map((work) => ({
+            id: work.id,
+            title: work.title,
+            author: work.author ?? '',
+            coverUrl: '',
+            format: work.mediaType
+          })));
+          setSearchTotal(payload.total);
           setSearchActiveIndex(0);
         })
         .catch((reason) => {

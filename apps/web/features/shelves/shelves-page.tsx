@@ -1,5 +1,8 @@
 'use client';
 
+import { apiV2Fetch, workResponseToView } from '@/lib/api-v2';
+import type { ShelfDetailResponse, ShelfResponse, WorkResponse } from '../../generated/api-v2';
+
 import { ArrowLeft, BookOpen, Check, Edit3, Loader2, Plus, Save, Search, Trash2, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -35,30 +38,41 @@ type ShelfView = {
   pinned?: boolean;
 };
 
-type ShelvesPayload = {
-  ok: boolean;
-  data?: { shelves: ShelfView[] };
-  error?: { message: string };
-};
-
-type ShelfPayload = {
-  ok: boolean;
-  data?: { shelf: ShelfView };
-  error?: { message: string };
-};
-
-type BooksPayload = {
-  ok: boolean;
-  data?: { books: BookSearchItem[] };
-  error?: { message: string };
-};
-
 const emptyForm = { name: '', description: '' };
 
-async function readPayload<T extends { ok: boolean; error?: { message: string } }>(response: Response, fallback: string): Promise<T> {
+async function readPayload<T>(response: Response, fallback: string): Promise<T> {
   const payload = (await response.json().catch(() => null)) as T | null;
-  if (!response.ok || !payload?.ok) throw new Error(payload?.error?.message ?? fallback);
-  return payload;
+  if (!response.ok) {
+    throw new Error((payload as { detail?: string } | null)?.detail ?? fallback);
+  }
+  return payload as T;
+}
+
+function shelfResourceToView(shelf: ShelfResponse): ShelfView {
+  return {
+    id: shelf.id,
+    name: shelf.name,
+    description: shelf.description,
+    bookCount: 0,
+    createdAt: shelf.createdAt,
+    updatedAt: shelf.createdAt,
+    kind: shelf.kind === 'smart' ? 'SMART' : 'STATIC',
+    rules: shelf.rules as SmartShelfRules,
+    pinned: shelf.pinned
+  };
+}
+
+function shelfDetailToView(shelf: ShelfDetailResponse): ShelfView {
+  return {
+    ...shelfResourceToView(shelf),
+    bookCount: shelf.bookCount,
+    bookIds: shelf.bookIds,
+    books: shelf.books.map((work) => workResponseToView(work) as BookshelfItem),
+    page: shelf.page,
+    pageSize: shelf.pageSize,
+    total: shelf.total,
+    totalPages: shelf.totalPages
+  };
 }
 
 export function ShelvesPage() {
@@ -120,12 +134,12 @@ export function ShelvesPage() {
       return;
     }
     let active = true;
-    const params = new URLSearchParams({ pageSize: '16', visibility: 'active', sort: 'title', view: 'search', search: search.trim() });
+    const params = new URLSearchParams({ pageSize: '16', visibility: 'active', query: search.trim() });
     setSearchLoading(true);
-    fetch(`/api/works?${params}`)
-      .then((response) => readPayload<BooksPayload>(response, '搜索图书失败'))
+    apiV2Fetch(`/api/v2/catalog/works?${params}`)
+      .then((response) => readPayload<{ items: WorkResponse[] }>(response, '搜索图书失败'))
       .then((payload) => {
-        if (active) setSearchBooks(payload.data?.books ?? []);
+        if (active) setSearchBooks(payload.items.map((work) => workResponseToView(work) as BookSearchItem));
       })
       .catch((reason) => {
         if (active) setError(reason instanceof Error ? reason.message : '搜索图书失败');
@@ -171,8 +185,8 @@ export function ShelvesPage() {
     setLoading(true);
     setError('');
     try {
-      const payload = await readPayload<ShelvesPayload>(await fetch('/api/shelves'), '读取书架失败');
-      setShelves(payload.data?.shelves ?? []);
+      const payload = await readPayload<{ items: ShelfResponse[] }>(await apiV2Fetch('/api/v2/catalog/shelves'), '读取书架失败');
+      setShelves(payload.items.map(shelfResourceToView));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '读取书架失败');
     } finally {
@@ -193,9 +207,9 @@ export function ShelvesPage() {
         pageSize: '24',
         includeBookIds: page === 1 ? 'true' : 'false'
       });
-      const payload = await readPayload<ShelfPayload>(await fetch(`/api/shelves/${id}?${params}`), '读取书架详情失败');
-      if (requestId !== openRequestRef.current || !payload.data) return;
-      const shelf = payload.data.shelf;
+      const payload = await readPayload<ShelfDetailResponse>(await apiV2Fetch(`/api/v2/catalog/shelves/${id}?${params}`), '读取书架详情失败');
+      if (requestId !== openRequestRef.current) return;
+      const shelf = shelfDetailToView(payload);
       setActiveShelf((current) => {
         if (!append || !current || current.id !== shelf.id) return shelf;
         const books = new Map((current.books ?? []).map((book) => [book.id, book]));
@@ -258,7 +272,7 @@ export function ShelvesPage() {
     setSaving(true);
     setError('');
     try {
-      const response = await fetch(activeIsNew ? '/api/shelves' : `/api/shelves/${activeId}`, {
+      const response = await apiV2Fetch(activeIsNew ? '/api/v2/catalog/shelves' : `/api/v2/catalog/shelves/${activeId}`, {
         method: activeIsNew ? 'POST' : 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -267,14 +281,14 @@ export function ShelvesPage() {
           ...(!activeIsSmart ? { bookIds: selectedBookIds } : {})
         })
       });
-      const payload = await readPayload<ShelfPayload>(response, '保存书架失败');
-      if (!payload.data) throw new Error('保存书架失败');
-      const saved = payload.data.shelf;
+      const payload = await readPayload<ShelfResponse>(response, '保存书架失败');
+      const saved = shelfResourceToView(payload);
       setActiveShelf(saved);
       setActiveId(saved.id);
       setForm({ name: saved.name, description: saved.description ?? '' });
       setSelectedBookIds(saved.bookIds ?? (saved.books ?? []).map((book) => book.id));
       await loadShelves();
+      await openShelf(saved.id);
       window.dispatchEvent(new Event('shuku:shelves-changed'));
       toast.success(activeIsNew ? '书架已创建' : '书架更改已保存');
       router.replace(`/shelves?shelf=${encodeURIComponent(saved.id)}`, { scroll: false });
@@ -301,7 +315,11 @@ export function ShelvesPage() {
     setSaving(true);
     setError('');
     try {
-      await readPayload(await fetch(`/api/shelves/${activeShelf.id}`, { method: 'DELETE' }), '删除书架失败');
+      const response = await apiV2Fetch(`/api/v2/catalog/shelves/${activeShelf.id}`, { method: 'DELETE' });
+      if (!response.ok) {
+        const problem = await response.json().catch(() => null) as { detail?: string } | null;
+        throw new Error(problem?.detail ?? '删除书架失败');
+      }
       await loadShelves();
       window.dispatchEvent(new Event('shuku:shelves-changed'));
       toast.success('书架已删除');

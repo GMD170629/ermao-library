@@ -1,53 +1,50 @@
 'use client';
 
-import { AlertTriangle, Ban, BookOpen, Clock3, Mail, RefreshCw, RotateCcw, Send, Server, Trash2 } from 'lucide-react';
-import Link from 'next/link';
+import { apiV2Request } from '@/lib/api-v2';
+
+import { AlertTriangle, Ban, Clock3, Mail, RefreshCw, RotateCcw, Send, Server } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Badge, type BadgeTone } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
-import { useConfirm, useToast } from '../../components/ui/feedback';
+import { useToast } from '../../components/ui/feedback';
 import { useI18n } from '../../i18n/provider';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 export type KindleSendTask = {
   id: string;
-  workId: string | null;
-  editionId: string | null;
-  volumeId: string | null;
-  fileId: string | null;
-  bookTitle: string;
-  editionName: string | null;
-  volumeTitle: string | null;
-  fileName: string;
-  format: string;
-  mimeType: string;
-  sizeBytes: number;
-  senderEmail: string | null;
-  recipientEmail: string;
+  fileId: string;
   subject: string;
-  smtpHost: string | null;
-  smtpPort: number | null;
-  smtpSecurity: string | null;
-  smtpUsername: string | null;
-  messageId: string | null;
+  recipientEmail: string;
   status: 'queued' | 'sending' | 'sent' | 'failed' | 'cancelled' | 'unknown';
   attemptCount: number;
-  nextAttemptAt: string | null;
-  errorMessage: string | null;
-  startedAt: string | null;
-  sentAt: string | null;
+  nextAttemptAt: string;
+  errorCode: string | null;
   createdAt: string;
   updatedAt: string;
   canCancel: boolean;
   canRetry: boolean;
-  canDelete: boolean;
 };
 
-type TasksPayload = {
-  ok: boolean;
-  data?: { tasks: KindleSendTask[]; total: number };
-  error?: { message: string };
+type DeliveryJobResource = {
+  id: string;
+  fileId: string;
+  kind: string;
+  recipient: string;
+  subject: string;
+  status: string;
+  attempt: number;
+  nextAttemptAt: string;
+  errorCode: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type JobPage = {
+  items: DeliveryJobResource[];
+  page: number;
+  pageSize: number;
+  total: number;
 };
 
 const statusOrder: KindleSendTask['status'][] = ['sending', 'queued', 'failed', 'unknown', 'sent', 'cancelled'];
@@ -67,33 +64,42 @@ function statusTone(status: KindleSendTask['status']): BadgeTone {
   return status === 'sending' ? 'blue' : 'slate';
 }
 
-function formatBytes(value: number) {
-  if (!Number.isFinite(value) || value <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let size = value;
-  let index = 0;
-  while (size >= 1024 && index < units.length - 1) {
-    size /= 1024;
-    index += 1;
-  }
-  return `${index === 0 ? Math.round(size) : size.toFixed(1)} ${units[index]}`;
-}
-
 function dateLabel(value: string | null, locale: string) {
   if (!value) return '—';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString(locale);
 }
 
-function securityLabel(value: string | null) {
-  return { starttls: 'STARTTLS', ssl: 'SSL/TLS', none: '无加密' }[value ?? ''] ?? value ?? '未记录';
+function taskStatus(value: string): KindleSendTask['status'] {
+  if (value === 'running') return 'sending';
+  if (value === 'completed') return 'sent';
+  if (value === 'queued' || value === 'retry') return 'queued';
+  if (value === 'failed' || value === 'cancelled') return value;
+  return 'unknown';
+}
+
+function toTask(job: DeliveryJobResource): KindleSendTask {
+  const status = taskStatus(job.status);
+  return {
+    id: job.id,
+    fileId: job.fileId,
+    subject: job.subject,
+    recipientEmail: job.recipient,
+    status,
+    attemptCount: job.attempt,
+    nextAttemptAt: job.nextAttemptAt,
+    errorCode: job.errorCode,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    canCancel: status === 'queued' || status === 'sending',
+    canRetry: status === 'failed' || status === 'cancelled'
+  };
 }
 
 export function KindleSendQueuePage({ embedded = false }: { embedded?: boolean }) {
   const { t: i18nAttribute } = useAttributeI18n();
   const { locale } = useI18n();
   const toast = useToast();
-  const confirm = useConfirm();
   const [tasks, setTasks] = useState<KindleSendTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -102,10 +108,11 @@ export function KindleSendQueuePage({ embedded = false }: { embedded?: boolean }
   const loadTasks = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
     try {
-      const response = await fetch('/api/kindle-send-tasks?pageSize=200', { cache: 'no-store' });
-      const payload = (await response.json()) as TasksPayload;
-      if (!payload.ok) throw new Error(payload.error?.message ?? '读取发送队列失败');
-      setTasks(payload.data?.tasks ?? []);
+      const page = await apiV2Request<JobPage>(
+        '/api/v2/delivery/kindle/jobs?pageSize=200',
+        { cache: 'no-store' }
+      );
+      setTasks(page.items.map(toTask));
       setError('');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '读取发送队列失败');
@@ -125,17 +132,16 @@ export function KindleSendQueuePage({ embedded = false }: { embedded?: boolean }
     tasks: tasks.filter((task) => task.status === status)
   })).filter((group) => group.tasks.length > 0), [tasks]);
 
-  async function mutate(task: KindleSendTask, action: 'cancel' | 'retry' | 'delete') {
-    if (action === 'delete' && !await confirm({ title: '删除发送记录', description: `删除《${task.bookTitle}》的发送记录？`, confirmLabel: '删除', tone: 'danger' })) return;
+  async function mutate(task: KindleSendTask, action: 'cancel' | 'retry') {
     setBusy(`${action}:${task.id}`);
     try {
-      const response = await fetch(
-        action === 'delete' ? `/api/kindle-send-tasks/${task.id}` : `/api/kindle-send-tasks/${task.id}/${action}`,
-        { method: action === 'delete' ? 'DELETE' : 'POST' }
+      await apiV2Request<void>(
+        action === 'cancel'
+          ? `/api/v2/delivery/kindle/jobs/${task.id}`
+          : `/api/v2/delivery/kindle/jobs/${task.id}/retry`,
+        { method: action === 'cancel' ? 'DELETE' : 'POST' }
       );
-      const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
-      if (!payload.ok) throw new Error(payload.error?.message ?? '操作失败');
-      toast.success(action === 'cancel' ? '已取消发送' : action === 'retry' ? '已重新排队' : '发送记录已删除');
+      toast.success(action === 'cancel' ? '已取消发送' : '已重新排队');
       await loadTasks(true);
     } catch (reason) {
       toast.error('操作失败', reason instanceof Error ? reason.message : '请稍后重试');
@@ -184,32 +190,25 @@ export function KindleSendQueuePage({ embedded = false }: { embedded?: boolean }
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         {task.status === 'sending' ? <Send size={18} className="text-[#ED4D2D]" /> : <Mail size={18} className="text-[#766F68]" />}
-                        <h5 className="break-words font-semibold text-[#242220]">{task.bookTitle}</h5>
+                        <h5 className="break-words font-semibold text-[#242220]">{task.subject}</h5>
                         <Badge tone={statusTone(task.status)}>{statusLabels[task.status]}</Badge>
-                        <Badge>{task.format}</Badge>
+                        <Badge>Kindle</Badge>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2 text-xs text-[#6F6962]">
-                        <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1">{task.editionName ?? i18nAttribute("默认版本")}{task.volumeTitle ? ` · ${task.volumeTitle}` : ''}</span>
-                        <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1">{task.fileName}</span>
-                        <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1">{formatBytes(task.sizeBytes)}</span>
+                        <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1"><I18nText>文件</I18nText> {task.fileId}</span>
                         <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1"><I18nText>尝试 </I18nText>{task.attemptCount} <I18nText>次</I18nText></span>
                       </div>
                       <dl className="mt-4 grid gap-3 rounded-2xl bg-[#F8F6F3] p-4 text-xs text-[#655F58] sm:grid-cols-2 xl:grid-cols-3">
                         <div><dt className="text-[#9A938B]"><I18nText>收件邮箱</I18nText></dt><dd className="mt-1 break-all font-medium text-[#433F3B]">{task.recipientEmail}</dd></div>
-                        <div><dt className="text-[#9A938B]"><I18nText>发件邮箱</I18nText></dt><dd className="mt-1 break-all font-medium text-[#433F3B]">{task.senderEmail ?? i18nAttribute("等待发送时确定")}</dd></div>
-                        <div><dt className="text-[#9A938B]">SMTP</dt><dd className="mt-1 font-medium text-[#433F3B]">{task.smtpHost ? `${task.smtpHost}:${task.smtpPort ?? ''} · ${securityLabel(task.smtpSecurity)}` : i18nAttribute("等待发送时确定")}</dd></div>
                         <div><dt className="text-[#9A938B]"><I18nText>创建时间</I18nText></dt><dd className="mt-1 font-medium text-[#433F3B]">{dateLabel(task.createdAt, locale)}</dd></div>
-                        <div><dt className="text-[#9A938B]"><I18nText>提交时间</I18nText></dt><dd className="mt-1 font-medium text-[#433F3B]">{dateLabel(task.sentAt, locale)}</dd></div>
-                        <div><dt className="text-[#9A938B]">Message-ID</dt><dd className="mt-1 truncate font-medium text-[#433F3B]" title={task.messageId ?? ''}>{task.messageId ?? '—'}</dd></div>
+                        <div><dt className="text-[#9A938B]"><I18nText>更新时间</I18nText></dt><dd className="mt-1 font-medium text-[#433F3B]">{dateLabel(task.updatedAt, locale)}</dd></div>
                       </dl>
-                      {task.nextAttemptAt ? <div className="mt-3 flex items-center gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-700"><Clock3 size={16} /><I18nText>下次尝试：</I18nText>{dateLabel(task.nextAttemptAt, locale)}</div> : null}
-                      {task.errorMessage ? <div className="mt-3 flex gap-2 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700"><AlertTriangle size={16} className="mt-0.5 shrink-0" /><span className="break-words">{task.errorMessage}</span></div> : null}
+                      {task.status === 'queued' ? <div className="mt-3 flex items-center gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-700"><Clock3 size={16} /><I18nText>下次尝试：</I18nText>{dateLabel(task.nextAttemptAt, locale)}</div> : null}
+                      {task.errorCode ? <div className="mt-3 flex gap-2 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700"><AlertTriangle size={16} className="mt-0.5 shrink-0" /><span className="break-words">{task.errorCode}</span></div> : null}
                     </div>
                     <div className="flex shrink-0 flex-wrap gap-2">
-                      {task.workId ? <Link href={`/works/${task.workId}`} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#DED8D1] bg-white px-4 py-2.5 text-sm font-medium text-[#4F4B47] transition hover:border-[#F2B7A6] hover:bg-[#FFF5F1] hover:text-[#D94322]"><BookOpen size={16} /><I18nText>查看图书</I18nText></Link> : null}
                       {task.canCancel ? <Button variant="secondary" icon={Ban} loading={busy === `cancel:${task.id}`} loadingText={i18nAttribute("取消中")} onClick={() => void mutate(task, 'cancel')}><I18nText>取消</I18nText></Button> : null}
                       {task.canRetry ? <Button variant="secondary" icon={RotateCcw} loading={busy === `retry:${task.id}`} loadingText={i18nAttribute("排队中")} onClick={() => void mutate(task, 'retry')}><I18nText>重试</I18nText></Button> : null}
-                      {task.canDelete ? <Button variant="danger" icon={Trash2} loading={busy === `delete:${task.id}`} loadingText={i18nAttribute("删除中")} onClick={() => void mutate(task, 'delete')}><I18nText>删除</I18nText></Button> : null}
                     </div>
                   </div>
                 </article>

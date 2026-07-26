@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import {
   createContext,
   useCallback,
@@ -10,7 +12,7 @@ import {
   useState,
   type ReactNode
 } from 'react';
-import { APP_BASE_PATH, withBasePath } from '../lib/base-path';
+import { APP_BASE_PATH } from '../lib/base-path';
 import {
   DEFAULT_LOCALE,
   LOCALE_COOKIE_MAX_AGE_SECONDS,
@@ -20,19 +22,7 @@ import {
   type AppLocale
 } from './config';
 import { translateMessage, type MessageValues } from './messages';
-
-type AppConfigPayload = {
-  ok?: boolean;
-  data?: {
-    language?: unknown;
-    supportedLocales?: unknown;
-  };
-};
-
-type SessionLocalePayload = {
-  ok?: boolean;
-  data?: { user?: { locale?: unknown } };
-};
+import type { AccountResponse } from '../generated/api-v2';
 
 export type I18nContextValue = {
   locale: AppLocale;
@@ -158,25 +148,15 @@ export function I18nProvider({
 
   useEffect(() => {
     const controller = new AbortController();
-    Promise.all([
-      fetch(withBasePath('/api/app-config'), { cache: 'no-store', signal: controller.signal })
-        .then((response) => response.json() as Promise<AppConfigPayload>)
-        .catch(() => null),
-      fetch(withBasePath('/api/auth/me'), {
+    apiV2Fetch('/api/v2/account', {
         cache: 'no-store',
         credentials: 'same-origin',
         signal: controller.signal
       })
-        .then((response) => response.json() as Promise<SessionLocalePayload>)
+        .then((response) => response.ok ? response.json() as Promise<AccountResponse> : null)
         .catch(() => null)
-    ])
-      .then(([configPayload, sessionPayload]) => {
-        const preferred = sessionPayload?.ok
-          ? sessionPayload.data?.user?.locale
-          : configPayload?.ok
-            ? configPayload.data?.language
-            : localeRef.current;
-        const configuredLocale = normalizeLocale(preferred, localeRef.current);
+      .then((account) => {
+        const configuredLocale = normalizeLocale(account?.locale, localeRef.current);
         if (configuredLocale !== localeRef.current) setLocale(configuredLocale);
       })
       .catch(() => undefined);

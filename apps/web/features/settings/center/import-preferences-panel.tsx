@@ -1,5 +1,8 @@
 'use client';
 
+import type { SettingsResponse } from '@/generated/api-v2';
+import { apiV2Request } from '@/lib/api-v2';
+
 import { Check, RotateCcw, Save } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../../../components/ui/button';
@@ -39,12 +42,6 @@ const defaultPreferences: ImportPreferences = {
   ignorePatterns: ''
 };
 
-type SettingsPayload = {
-  ok: boolean;
-  data?: { settings?: Record<string, unknown> };
-  error?: { message?: string };
-};
-
 function booleanSetting(value: unknown, fallback: boolean) {
   if (typeof value === 'boolean') return value;
   if (value === 'true') return true;
@@ -65,6 +62,12 @@ function normalizePreferences(settings: Record<string, unknown> | undefined): Im
     allowedExtensions: extensions,
     ignorePatterns: typeof settings?.[settingKeys.ignorePatterns] === 'string' ? settings[settingKeys.ignorePatterns] as string : ''
   };
+}
+
+function settingValues(payload: SettingsResponse): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(payload.values).map(([key, entry]) => [key, entry.value])
+  );
 }
 
 function Switch({ checked, onChange, label, disabled = false }: { checked: boolean; onChange: (checked: boolean) => void; label: string; disabled?: boolean }) {
@@ -98,12 +101,10 @@ export function ImportPreferencesPanel() {
 
   useEffect(() => {
     let active = true;
-    fetch('/api/system-settings')
-      .then((response) => response.json() as Promise<SettingsPayload>)
+    apiV2Request<SettingsResponse>('/api/v2/operations/settings')
       .then((payload) => {
-        if (!payload.ok) throw new Error(payload.error?.message ?? '读取导入偏好失败');
         if (!active) return;
-        const next = normalizePreferences(payload.data?.settings);
+        const next = normalizePreferences(settingValues(payload));
         setPreferences(next);
         setSaved(next);
       })
@@ -128,21 +129,19 @@ export function ImportPreferencesPanel() {
   async function savePreferences() {
     setSaving(true);
     try {
-      const response = await fetch('/api/system-settings', {
+      await apiV2Request<SettingsResponse>('/api/v2/operations/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          settings: {
-            [settingKeys.stabilityEnabled]: preferences.stabilityEnabled,
-            [settingKeys.stabilitySeconds]: preferences.stabilitySeconds,
-            [settingKeys.autoConvert]: preferences.autoConvert,
-            [settingKeys.allowedExtensions]: preferences.allowedExtensions,
-            [settingKeys.ignorePatterns]: preferences.ignorePatterns
+          values: {
+            [settingKeys.stabilityEnabled]: { value: preferences.stabilityEnabled },
+            [settingKeys.stabilitySeconds]: { value: preferences.stabilitySeconds },
+            [settingKeys.autoConvert]: { value: preferences.autoConvert },
+            [settingKeys.allowedExtensions]: { value: preferences.allowedExtensions },
+            [settingKeys.ignorePatterns]: { value: preferences.ignorePatterns }
           }
         })
       });
-      const payload = (await response.json()) as SettingsPayload;
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '保存导入偏好失败');
       const next = normalizePreferences({
         [settingKeys.stabilityEnabled]: preferences.stabilityEnabled,
         [settingKeys.stabilitySeconds]: preferences.stabilitySeconds,

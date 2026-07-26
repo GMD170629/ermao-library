@@ -1,0 +1,112 @@
+name: Appv2 release acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'apps/api-python/**'
+      - 'apps/web/**'
+      - 'packages/**'
+      - 'deploy/fnos/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'turbo.json'
+      - 'docker-compose*.yml'
+      - '.github/workflows/appv2-release-acceptance.yml'
+  push:
+    branches:
+      - main
+      - prod
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    name: Web types, i18n, tests, build, and Chromium E2E
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable locked pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.12.2 --activate
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: apps/api-python/.python-version
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install locked dependencies
+        run: |
+          pnpm install --frozen-lockfile
+          cd apps/api-python
+          uv sync --extra dev --locked
+
+      - name: Validate v0.4.0 runtime contracts
+        env:
+          VERIFY_STATIC_ONLY: 'true'
+        run: pnpm verify:python-backend
+
+      - name: Regenerate the only API v2 TypeScript contract
+        run: |
+          pnpm --filter @shuku/web generate:api-v2
+          git diff --exit-code -- apps/web/generated/api-v2.ts
+
+      - name: Validate Web types, locales, and unit tests
+        run: |
+          pnpm --filter @shuku/web typecheck
+          pnpm --filter @shuku/web i18n:check
+          pnpm --filter @shuku/web test -- --run
+
+      - name: Build the production Web application
+        run: pnpm --filter @shuku/web build
+
+      - name: Install Chromium
+        run: pnpm --filter @shuku/web exec playwright install --with-deps chromium
+
+      - name: Run Web end-to-end tests
+        run: pnpm --filter @shuku/web test:e2e:release
+
+  image:
+    name: Compose and amd64/arm64 unified image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate built-in and external database Compose
+        env:
+          POSTGRES_PASSWORD: appv2-compose-validation-password
+          DATABASE_URL: postgresql+psycopg://appv2:external-validation@postgres.example:5432/shuku_v2
+        run: |
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.prod.yml config --quiet
+          docker compose -f docker-compose.external-db.yml config --quiet
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the unified appv2 image for both architectures
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile.prod
+          platforms: linux/amd64,linux/arm64
+          push: false
+          cache-from: type=gha,scope=appv2-unified
+          cache-to: type=gha,mode=max,scope=appv2-unified

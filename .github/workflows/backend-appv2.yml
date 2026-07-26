@@ -1,0 +1,101 @@
+name: Backend appv2 quality
+
+on:
+  pull_request:
+    paths:
+      - 'apps/api-python/appv2/**'
+      - 'apps/api-python/migrations-v2/**'
+      - 'apps/api-python/tests/**'
+      - 'apps/api-python/alembic-v2.ini'
+      - 'apps/api-python/pyproject.toml'
+      - 'apps/api-python/uv.lock'
+      - 'scripts/python-*-smoke.*'
+      - '.github/workflows/backend-appv2.yml'
+  push:
+    branches:
+      - main
+      - prod
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: PostgreSQL 18, architecture, typing, and tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.4-alpine3.23
+        env:
+          POSTGRES_DB: shuku_v2_test
+          POSTGRES_USER: shuku_test
+          POSTGRES_PASSWORD: appv2-integration-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U shuku_test -d shuku_v2_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      APPV2_TEST_DATABASE_URL: postgresql+psycopg://shuku_test:appv2-integration-password@127.0.0.1:5432/shuku_v2_test
+      DATABASE_URL: postgresql+psycopg://shuku_test:appv2-integration-password@127.0.0.1:5432/shuku_v2_test
+      SESSION_SECRET: appv2-ci-session-secret-at-least-32-characters
+      STORAGE_ROOT: ${{ github.workspace }}/.tmp/appv2-storage
+      MONITOR_ROOT: ${{ github.workspace }}/.tmp/appv2-monitor
+      ENVIRONMENT: test
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: apps/api-python/.python-version
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install locked dependencies
+        working-directory: apps/api-python
+        run: uv sync --extra dev --locked
+
+      - name: Validate formatting and lint
+        working-directory: apps/api-python
+        run: |
+          uv run ruff format --check appv2 tests
+          uv run ruff check appv2 tests
+
+      - name: Validate strict typing
+        working-directory: apps/api-python
+        run: uv run mypy appv2
+
+      - name: Apply appv2 migration
+        working-directory: apps/api-python
+        run: uv run python -m appv2.entrypoints.migrate
+
+      - name: Run PostgreSQL and architecture test suite
+        working-directory: apps/api-python
+        run: uv run pytest --cov=appv2 --cov-branch --cov-report=term-missing --cov-report=xml --cov-fail-under=90
+
+      - name: Run API runtime smoke
+        run: node scripts/python-api-runtime-smoke.mjs
+
+      - name: Run worker runtime smoke
+        run: node scripts/python-worker-runtime-smoke.mjs
+
+      - name: Run worker import smoke
+        working-directory: apps/api-python
+        run: uv run python ../../scripts/python_worker_import_smoke.py
+
+      - name: Run backend sample smoke
+        working-directory: apps/api-python
+        run: uv run python ../../scripts/python_backend_sample_smoke.py
+
+      - name: Upload backend coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: appv2-coverage
+          path: apps/api-python/coverage.xml
+          if-no-files-found: error

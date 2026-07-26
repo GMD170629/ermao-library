@@ -30,8 +30,8 @@ const bootstrap = normalizeAudioBootstrap({
     { id: 'volume-2', title: '第二卷', index: 1, chapterCount: 1, durationMs: 20_000 }
   ],
   tracks: [
-    { fileId: 'file-2', title: '下', url: '/api/files/file-2', mimeType: 'audio/mp4', durationMs: 20_000, sortOrder: 2 },
-    { fileId: 'file-1', title: '上', url: '/api/files/file-1', mimeType: 'audio/mpeg', durationMs: 10_000, sortOrder: 1 }
+    { fileId: 'file-2', title: '下', url: '/api/v2/reading/files/file-2', mimeType: 'audio/mp4', durationMs: 20_000, sortOrder: 2 },
+    { fileId: 'file-1', title: '上', url: '/api/v2/reading/files/file-1', mimeType: 'audio/mpeg', durationMs: 10_000, sortOrder: 1 }
   ],
   chapters: [
     { id: 'chapter-2', title: '第二章', fileId: 'file-1', startMs: 5_000, endMs: 10_000, sortOrder: 2 },

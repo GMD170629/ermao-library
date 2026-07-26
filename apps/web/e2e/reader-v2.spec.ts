@@ -20,45 +20,76 @@ function bootstrap(kind: 'epub' | 'comic' | 'pdf', epubUnitCount = 2) {
   const pageCount = kind === 'comic' ? 3 : kind === 'pdf' ? 7 : null;
   const volumes = volumeId ? [{ id: volumeId, title: '第一卷', index: 1, pageCount: 3, chapterCount: null }] : [];
   return {
-    ok: true,
-    data: {
-      schemaVersion: 2,
-      userId: 'user-e2e',
-      readerType: kind,
-      contentFingerprint: `${kind}-fixture-v1`,
-      book: { id: `work-${kind}`, title: `${kind.toUpperCase()} 测试读物`, author: 'Test', coverUrl: null },
-      edition: { id: editionId, workId: `work-${kind}`, format: kind, versionName: '默认版本', pageCount, chapterCount: kind === 'epub' ? 2 : null },
-      availableEditions: [{ id: editionId, workId: `work-${kind}`, format: kind, versionName: '默认版本', pageCount, chapterCount: kind === 'epub' ? 2 : null, progress: 0, lastReadAt: null, volumes }],
-      selectedVolume: volumes[0] ?? null,
-      volumes,
-      units: kind === 'epub' ? Array.from({ length: epubUnitCount }, (_, index) => ({
-        index: index + 1,
-        title: index === 0 ? '第一章' : index === 1 ? '第二章' : `第 ${index + 1} 章`,
-        href: index === 0 ? 'chapter1.xhtml' : index === 1 ? 'chapter2.xhtml' : `chapter${index + 1}.xhtml`
-      })) : [],
-      pages: kind === 'comic' ? [1, 2, 3].map((pageIndex) => ({ pageIndex, title: `第 ${pageIndex} 页`, mimeType: 'image/svg+xml', width: 600, height: 900, size: 100 })) : [],
-      totalPages: pageCount,
-      fileUrl: `/api/editions/${editionId}/file`,
-      capabilities: {
-        canGoNext: true,
-        canGoPrevious: false,
-        canJumpToProgress: true,
-        canJumpToHref: kind === 'epub',
-        canJumpToIndex: true,
-        canZoom: kind !== 'epub',
-        canSelectText: kind !== 'comic',
-        supportsPagination: true,
-        supportsScrolling: kind === 'epub',
-        supportsSpreads: kind !== 'pdf',
-        readingDirection: 'ltr'
-      },
-      serverPreferences: { schemaVersion: 3, settings: defaultPreferences, updatedAt: null },
-      resumeLocation: kind === 'epub' ? { type: 'epub', progression: 0 } : kind === 'comic' ? { type: 'comic', volumeId: 'comic-volume', pageIndex: 1 } : { type: 'pdf', pageNumber: 1 },
-      resumeFingerprintMismatch: false,
-      resumeDiscardedReason: null,
-      progressPercent: 0
-    }
+    accountId: 'user-e2e',
+    target: {
+      workId: `work-${kind}`,
+      workTitle: `${kind.toUpperCase()} 测试读物`,
+      workAuthor: 'Test',
+      editionId,
+      editionTitle: '默认版本',
+      fileId: `${kind}-file`,
+      format: kind,
+      mediaType: kind === 'pdf' ? 'application/pdf' : kind === 'epub' ? 'application/epub+zip' : 'application/vnd.comicbook+zip',
+      resourceUrl: `/api/v2/reading/editions/${editionId}/resource`,
+      checksum: `${kind}-fixture-v1`
+    },
+    progress: null,
+    bookmarks: [],
+    preference: {
+      scope: 'reader',
+      targetId: null,
+      values: defaultPreferences,
+      updatedAt: '2026-07-25T00:00:00Z'
+    },
+    files: [{
+      id: `${kind}-file`,
+      editionId,
+      volumeId,
+      name: `${editionId}.${kind === 'comic' ? 'cbz' : kind}`,
+      mediaType: kind === 'pdf' ? 'application/pdf' : kind === 'epub' ? 'application/epub+zip' : 'application/vnd.comicbook+zip',
+      sizeBytes: 100,
+      sortOrder: 0,
+      durationMs: null,
+      url: `/api/v2/reading/editions/${editionId}/resource`
+    }],
+    volumes: volumes.map((volume) => ({
+      id: volume.id,
+      editionId,
+      title: volume.title,
+      sortOrder: volume.index - 1,
+      pageCount: volume.pageCount,
+      durationMs: null
+    })),
+    units: kind === 'epub' ? Array.from({ length: epubUnitCount }, (_, index) => ({
+      index: index + 1,
+      title: index === 0 ? '第一章' : index === 1 ? '第二章' : `第 ${index + 1} 章`,
+      href: index === 0 ? 'chapter1.xhtml' : index === 1 ? 'chapter2.xhtml' : `chapter${index + 1}.xhtml`
+    })) : [],
+    pages: kind === 'comic' ? [1, 2, 3].map((pageIndex) => ({
+      pageIndex,
+      title: `第 ${pageIndex} 页`,
+      mimeType: 'image/svg+xml',
+      size: 100
+    })) : []
   };
+}
+
+function progressLocation(body: Record<string, any>) {
+  return body.position?.location as Record<string, any> | undefined;
+}
+
+async function readerProgressOutbox(page: Page) {
+  return page.evaluate(async () => new Promise<Array<Record<string, unknown>>>((resolve, reject) => {
+    const request = indexedDB.open('shuku-reader-v2');
+    request.onerror = () => reject(request.error ?? new Error('Reader database open failed'));
+    request.onsuccess = () => {
+      const database = request.result;
+      const transaction = database.transaction('progress-outbox', 'readonly');
+      const entries = transaction.objectStore('progress-outbox').getAll();
+      entries.onerror = () => reject(entries.error ?? new Error('Reader outbox read failed'));
+      entries.onsuccess = () => resolve(entries.result as Array<Record<string, unknown>>);
+    };
+  }));
 }
 
 async function mockReaderApi(
@@ -73,49 +104,75 @@ async function mockReaderApi(
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (url.pathname.includes('/api/reader/v2/editions/') && url.pathname.endsWith('/bootstrap')) {
+    if (url.pathname.includes('/api/v2/reading/editions/') && url.pathname.endsWith('/bootstrap')) {
       if (options.bootstrapDelayMs) await new Promise((resolve) => setTimeout(resolve, options.bootstrapDelayMs));
       await route.fulfill({ json: bootstrap(kind, options.epubUnitCount) });
       return;
     }
     if (kind === 'epub' && url.pathname.endsWith('/epub-locations/claim')) {
       await route.fulfill({
-        json: {
-          ok: true,
-          data: sharedEpubLocations
-            ? { status: 'ready', serialized: sharedEpubLocations }
-            : { status: 'claimed', leaseToken: 'e2e-epub-locations', leaseExpiresAt: Date.now() + 30_000 }
-        }
+        json: sharedEpubLocations
+          ? { status: 'ready', serialized: sharedEpubLocations }
+          : { status: 'claimed', leaseToken: 'e2e-epub-locations', leaseExpiresAt: Date.now() + 30_000 }
       });
       return;
     }
     if (kind === 'epub' && url.pathname.endsWith('/epub-locations') && request.method() === 'PUT') {
       sharedEpubLocations = request.postDataJSON().serialized;
-      await route.fulfill({ json: { ok: true, data: { status: 'ready', serialized: sharedEpubLocations } } });
+      await route.fulfill({ json: { status: 'ready', serialized: sharedEpubLocations } });
       return;
     }
-    if (url.pathname.includes('/api/reader/v2/editions/') && url.pathname.endsWith('/progress')) {
+    if (url.pathname.includes('/api/v2/reading/editions/') && url.pathname.endsWith('/progress')) {
       const body = request.postDataJSON();
       progressBodies.push(body);
       if (options.progressStatus && options.progressStatus >= 400) {
         await route.fulfill({
           status: options.progressStatus,
-          json: { ok: false, error: { message: '测试中的离线进度暂未同步' } }
+          json: {
+            type: 'https://shuku.app/problems/unavailable',
+            title: 'Service unavailable',
+            status: options.progressStatus,
+            code: 'SERVICE_UNAVAILABLE',
+            detail: '测试中的离线进度暂未同步',
+            params: {}
+          }
         });
         return;
       }
-      await route.fulfill({ json: { ok: true, data: { mutationId: body.mutationId, applied: true, progress: { ...body, readerType: kind, workId: `work-${kind}`, editionId: `${kind}-edition`, updatedAt: new Date().toISOString() } } } });
+      await route.fulfill({
+        json: {
+          editionId: `${kind}-edition`,
+          position: body.position,
+          percentage: body.percentage,
+          version: 1,
+          updatedAt: new Date().toISOString()
+        }
+      });
       return;
     }
-    if (url.pathname.endsWith('/file') && pdf) {
+    if (url.pathname.endsWith('/resource') && pdf) {
       await route.fulfill({ status: 200, contentType: 'application/pdf', body: pdf });
       return;
     }
-    if (url.pathname.endsWith('/file') && epub) {
+    if (url.pathname.endsWith('/resource') && epub) {
       await route.fulfill({ status: 200, contentType: 'application/epub+zip', body: epub });
       return;
     }
-    if (/\/api\/volumes\/[^/]+\/pages\/\d+$/.test(url.pathname)) {
+    if (/\/api\/v2\/reading\/volumes\/[^/]+\/pages$/.test(url.pathname)) {
+      await route.fulfill({
+        json: {
+          pageCount: 3,
+          pages: [1, 2, 3].map((pageIndex) => ({
+            pageIndex,
+            title: `第 ${pageIndex} 页`,
+            mimeType: 'image/svg+xml',
+            size: 100
+          }))
+        }
+      });
+      return;
+    }
+    if (/\/api\/v2\/reading\/volumes\/[^/]+\/pages\/\d+$/.test(url.pathname)) {
       const pageNumber = Number(url.pathname.split('/').at(-1));
       const variant = url.searchParams.get('imageVariant') ?? 'original';
       if (variant === 'data-saver') await new Promise((resolve) => setTimeout(resolve, 180));
@@ -126,26 +183,46 @@ async function mockReaderApi(
       });
       return;
     }
-    if (url.pathname === '/api/auth/me') {
+    if (url.pathname === '/api/v2/account') {
       await route.fulfill({
         json: {
-          ok: true,
-          data: {
-            user: { id: 'user-e2e', email: 'e2e@example.com', name: 'E2E', role: 'admin' },
-            authorization: {
-              isAdmin: true,
-              canManageSystem: true,
-              allLibraryScopes: true,
-              monitorFolderIds: [],
-              canViewManualImports: true,
-              authzVersion: 1
-            }
-          }
+          id: 'user-e2e',
+          email: 'e2e@example.com',
+          displayName: 'E2E',
+          role: 'admin',
+          locale: 'zh-CN',
+          scopes: ['catalog:read', 'reading:write', 'operations:write'],
+          disabled: false,
+          monitorFolderIds: [],
+          createdAt: '2026-07-25T00:00:00Z'
         }
       });
       return;
     }
-    await route.fulfill({ json: { ok: true, data: {} } });
+    if (url.pathname.endsWith('/bookmarks')) {
+      if (request.method() === 'GET') {
+        await route.fulfill({ json: { items: [], page: 1, pageSize: 24, total: 0 } });
+        return;
+      }
+      await route.fulfill({
+        json: {
+          id: 'bookmark-e2e',
+          editionId: `${kind}-edition`,
+          clientId: request.postDataJSON().clientId,
+          label: request.postDataJSON().label ?? null,
+          position: request.postDataJSON().position,
+          excerpt: null,
+          createdAt: '2026-07-25T00:00:00Z',
+          updatedAt: '2026-07-25T00:00:00Z'
+        }
+      });
+      return;
+    }
+    if (url.pathname.includes('/bookmarks/') && request.method() === 'DELETE') {
+      await route.fulfill({ status: 204 });
+      return;
+    }
+    await route.fulfill({ json: {} });
   });
 }
 
@@ -216,7 +293,7 @@ async function waitForReaderReady(page: Page) {
 }
 
 test.beforeEach(async ({ context }) => {
-  await context.addCookies([{ name: 'shuku_session', value: 'e2e-session', domain: '127.0.0.1', path: '/' }]);
+  await context.addCookies([{ name: 'shuku_v2_session', value: 'e2e-session', domain: '127.0.0.1', path: '/' }]);
   await context.addInitScript(() => localStorage.setItem('shuku:pwa:install-dismissed:user-e2e', '1'));
 });
 
@@ -616,10 +693,10 @@ test('comic navigation, local theme persistence, reset, and V2 progress transpor
   await page.keyboard.press('ArrowRight');
   await expect(page.getByText('第 2 页 / 共 3 页').first()).toBeVisible();
   await expect.poll(() => progressBodies.some((body) => (
-    body.userId === 'user-e2e'
-    && body.location?.type === 'comic'
-    && body.location.volumeId === 'comic-volume'
-    && body.location.pageIndex === 2
+    body.position?.contentFingerprint === 'comic-fixture-v1'
+    && progressLocation(body)?.type === 'comic'
+    && progressLocation(body)?.volumeId === 'comic-volume'
+    && progressLocation(body)?.pageIndex === 2
   )), { timeout: 8_000 }).toBe(true);
 
   await showReaderControls(page);
@@ -747,18 +824,20 @@ test('EPUB reload restores the pending local CFI while an explicit href still wi
 
   await page.keyboard.press('ArrowRight');
   await expect.poll(() => progressBodies.some((body) => (
-    body.location?.type === 'epub'
-    && typeof body.location.href === 'string'
-    && body.location.href.endsWith('chapter2.xhtml')
+    progressLocation(body)?.type === 'epub'
+    && typeof progressLocation(body)?.href === 'string'
+    && progressLocation(body)!.href.endsWith('chapter2.xhtml')
   )), { timeout: 8_000 }).toBe(true);
   await expect.poll(() => progressBodies.some((body) => (
-    body.location?.type === 'epub'
-    && typeof body.location.cfi === 'string'
-    && body.location.cfi.startsWith('epubcfi(')
+    progressLocation(body)?.type === 'epub'
+    && typeof progressLocation(body)?.cfi === 'string'
+    && progressLocation(body)!.cfi.startsWith('epubcfi(')
   )), { timeout: 8_000 }).toBe(true);
+  await expect.poll(async () => (await readerProgressOutbox(page)).length).toBeGreaterThan(0);
 
   await page.reload();
   await waitForReaderReady(page);
+  await expect.poll(async () => (await readerProgressOutbox(page)).length).toBeGreaterThan(0);
   await showReaderControls(page);
   await page.getByRole('button', { name: '目录' }).click();
   const restoredDirectory = page.getByRole('dialog', { name: '目录' });
@@ -820,9 +899,9 @@ test('EPUB cross-spine paging uses one EPUB.js step without a custom track or an
     }));
   });
   await expect.poll(() => progressBodies.some((body) => (
-    body.location?.type === 'epub'
-    && typeof body.location.href === 'string'
-    && body.location.href.endsWith('chapter2.xhtml')
+    progressLocation(body)?.type === 'epub'
+    && typeof progressLocation(body)?.href === 'string'
+    && progressLocation(body)!.href.endsWith('chapter2.xhtml')
   )), { timeout: 8_000 }).toBe(true);
   await expect(page.locator('[data-epub-continuous-track], [data-epub-default-track]')).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => (
@@ -851,9 +930,9 @@ test('EPUB swipe submits one navigation command without a visual paging track', 
     }));
   });
   await expect.poll(() => progressBodies.some((body) => (
-    body.location?.type === 'epub'
-    && typeof body.location.href === 'string'
-    && body.location.href.endsWith('chapter2.xhtml')
+    progressLocation(body)?.type === 'epub'
+    && typeof progressLocation(body)?.href === 'string'
+    && progressLocation(body)!.href.endsWith('chapter2.xhtml')
   )), { timeout: 8_000 }).toBe(true);
   await expect(page.locator('[data-epub-continuous-track], [data-epub-default-track]')).toHaveCount(0);
 });
@@ -940,9 +1019,9 @@ test('EPUB pointer tap navigates only when its click is emitted', async ({ page 
     window as typeof window & { __epubNavigationStarts?: number }
   ).__epubNavigationStarts ?? 0)).toBe(1);
   await expect.poll(() => progressBodies.some((body) => (
-    body.location?.type === 'epub'
-    && typeof body.location.href === 'string'
-    && body.location.href.endsWith('chapter2.xhtml')
+    progressLocation(body)?.type === 'epub'
+    && typeof progressLocation(body)?.href === 'string'
+    && progressLocation(body)!.href.endsWith('chapter2.xhtml')
   )), { timeout: 8_000 }).toBe(true);
   await expect(page.locator('[data-shuku-epub-transition-placeholder="true"]')).toHaveCount(0);
   const currentFrame = await currentEpubIframe(page);

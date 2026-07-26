@@ -1,5 +1,7 @@
 'use client';
 
+import { apiV2Fetch } from '@/lib/api-v2';
+
 import { ChevronDown, ChevronRight, FolderOpen, RotateCcw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { cn } from '../ui/cn';
@@ -30,11 +32,15 @@ type DirectoryTreePayload = {
   monitorRoot?: string | null;
 };
 
+type MonitorFolderResource = {
+  id: string;
+  path: string;
+  enabled: boolean;
+};
+
 type MonitorFoldersPayload = {
-  folders: MonitorFolder[];
-  monitorRoot?: string | null;
-  lastUploadTargetPath?: string | null;
-  lastDownloadTargetPath?: string | null;
+  items: MonitorFolderResource[];
+  detail?: string;
 };
 
 export type TargetDirectoryStatus = {
@@ -92,14 +98,14 @@ export function TargetDirectoryPicker({
     setTreeError('');
     try {
       const query = path ? `?path=${encodeURIComponent(path)}` : '';
-      const response = await fetch(`/api/monitor-folders/tree${query}`);
-      const payload = (await response.json()) as { ok: boolean; data?: DirectoryTreePayload; error?: { message: string } };
-      if (!payload.ok || !payload.data?.node) {
-        setTreeError(payload.error?.message ?? '读取目录树失败');
+      const response = await apiV2Fetch(`/api/v2/ingestion/folders/tree${query}`);
+      const payload = (await response.json()) as DirectoryTreePayload & { detail?: string };
+      if (!response.ok || !payload.node) {
+        setTreeError(payload.detail ?? '读取目录树失败');
         return null;
       }
-      const node = payload.data.node;
-      setMonitorRoot(payload.data.monitorRoot || node.path);
+      const node = payload.node;
+      setMonitorRoot(payload.monitorRoot || node.path);
       setNodes((current) => ({ ...current, [node.path]: node }));
       return node;
     } catch {
@@ -114,23 +120,22 @@ export function TargetDirectoryPicker({
     let active = true;
     async function loadInitialState() {
       try {
-        const response = await fetch('/api/monitor-folders');
-        const payload = (await response.json()) as { ok: boolean; data?: MonitorFoldersPayload; error?: { message: string } };
+        const response = await apiV2Fetch('/api/v2/ingestion/folders');
+        const payload = (await response.json()) as MonitorFoldersPayload;
         if (!active) return;
-        if (payload.ok) {
-          const nextFolders = payload.data?.folders ?? [];
+        if (response.ok) {
+          const nextFolders = payload.items.map((folder) => ({
+            id: folder.id,
+            name: folder.path.split(/[\\/]/).filter(Boolean).at(-1) ?? folder.path,
+            rootPath: folder.path,
+            enabled: folder.enabled
+          }));
           setFolders(nextFolders);
-          const lastPath = memory === 'upload' ? payload.data?.lastUploadTargetPath : payload.data?.lastDownloadTargetPath;
           const rootNode = await loadNode();
           if (!active) return;
-          if (lastPath) {
-            const lastNode = await loadNode(lastPath);
-            if (active && lastNode) onChange(lastNode.path);
-          } else if (rootNode) {
-            setMonitorRoot(payload.data?.monitorRoot || rootNode.path);
-          }
+          if (rootNode) setMonitorRoot(rootNode.path);
         } else {
-          setTreeError(payload.error?.message ?? '读取目录失败');
+          setTreeError(payload.detail ?? '读取目录失败');
         }
       } catch {
         if (active) setTreeError('读取目录失败');
