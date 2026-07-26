@@ -30,13 +30,17 @@ PYTHON_API_PORT="8000"
 WEB_PORT="${WEB_PORT:-3000}"
 WEB_HOST="${WEB_HOST:-0.0.0.0}"
 WEB_MODE="${WEB_MODE:-dev}"
+APPV2_MIGRATE_MODULE="appv2.entrypoints.migrate"
+APPV2_API_APP="appv2.entrypoints.api:app"
+APPV2_WORKER_MODULE="appv2.entrypoints.worker"
+APPV2_HEALTH_PATH="/api/v2/operations/health"
 MONITOR_ROOT="${MONITOR_ROOT:-$ROOT_DIR/books}"
 STORAGE_ROOT="${STORAGE_ROOT:-$ROOT_DIR/storage}"
 SESSION_SECRET="${SESSION_SECRET:-dev-test-session-secret-change-me-at-least-32-chars}"
-DATABASE_URL="${DATABASE_URL:-}"
+DATABASE_URL="${DATABASE_URL:-${APPV2_TEST_DATABASE_URL:-}}"
 
 if [ -z "$DATABASE_URL" ]; then
-  echo "DATABASE_URL is required and must point to PostgreSQL 18.x." >&2
+  echo "DATABASE_URL or APPV2_TEST_DATABASE_URL is required and must point to PostgreSQL 18.x." >&2
   echo "Use docker compose for the built-in database, or export an external PostgreSQL URL." >&2
   exit 1
 fi
@@ -59,13 +63,15 @@ export DATABASE_URL MONITOR_ROOT STORAGE_ROOT SESSION_SECRET WEB_PORT
 
 (
   cd apps/api-python
-  uv run python -m appv2.entrypoints.migrate
+  uv run python -m "$APPV2_MIGRATE_MODULE"
 )
 
-echo "Starting test service:"
+echo "Starting appv2 test service:"
 echo "  Web:          http://localhost:$WEB_PORT"
 echo "  Web mode:     $WEB_MODE"
-echo "  Health check: http://localhost:$WEB_PORT/api/v2/operations/health"
+echo "  Backend:      $APPV2_API_APP"
+echo "  Worker:       $APPV2_WORKER_MODULE"
+echo "  Health check: http://localhost:$WEB_PORT$APPV2_HEALTH_PATH"
 echo "  Python API:   http://127.0.0.1:$PYTHON_API_PORT"
 echo "  Database:     PostgreSQL 18.x from DATABASE_URL"
 echo "  Monitor root: $MONITOR_ROOT"
@@ -84,13 +90,13 @@ fi
     STORAGE_ROOT="$STORAGE_ROOT" \
     SESSION_SECRET="$SESSION_SECRET" \
     DATABASE_URL="$DATABASE_URL" \
-    uv run --extra dev uvicorn appv2.entrypoints.api:app --host 127.0.0.1 --port "$PYTHON_API_PORT"
+    uv run --extra dev uvicorn "$APPV2_API_APP" --host 127.0.0.1 --port "$PYTHON_API_PORT"
 ) &
 CHILD_PIDS="$CHILD_PIDS $!"
 
 echo "Waiting for Python API..."
 i=0
-until node -e "fetch(process.argv[1]).then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))" "http://127.0.0.1:$PYTHON_API_PORT/api/v2/operations/health"; do
+until node -e "fetch(process.argv[1]).then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))" "http://127.0.0.1:$PYTHON_API_PORT$APPV2_HEALTH_PATH"; do
   i=$((i + 1))
   if [ "$i" -ge 60 ]; then
     echo "Python API did not become ready in time." >&2
@@ -107,7 +113,7 @@ done
     SESSION_SECRET="$SESSION_SECRET" \
     DATABASE_URL="$DATABASE_URL" \
     MONITOR_REFRESH_INTERVAL_MS="${MONITOR_REFRESH_INTERVAL_MS:-10000}" \
-    uv run --extra dev python -m appv2.entrypoints.worker
+    uv run --extra dev python -m "$APPV2_WORKER_MODULE"
 ) &
 CHILD_PIDS="$CHILD_PIDS $!"
 
