@@ -1003,10 +1003,16 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         )
         unread_library = client.get(
             "/api/v2/reporting/library",
-            params={"readingStatus": "UNREAD", "seriesName": "Integration Series"},
+            params={"readingStatus": "UNREAD"},
         )
         assert unread_library.status_code == 200, unread_library.text
         assert imported_work_id in {item["id"] for item in unread_library.json()["items"]}
+        series_library = client.get(
+            "/api/v2/reporting/library",
+            params={"seriesName": "Bulk Integration Series"},
+        )
+        assert series_library.status_code == 200, series_library.text
+        assert created.json()["id"] in {item["id"] for item in series_library.json()["items"]}
         resource = client.get(f"/api/v2/reading/editions/{edition_id}/resource")
         assert resource.status_code == 200, resource.text
         partial_resource = client.get(
