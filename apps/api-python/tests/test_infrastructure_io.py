@@ -40,6 +40,11 @@ from appv2.modules.operations.infrastructure.restore import (
     FileRestoreInbox,
     PgRestoreExecutor,
 )
+from appv2.modules.reporting.contracts import LibraryFilterCondition
+from appv2.modules.reporting.infrastructure.library_filters import (
+    condition_clause,
+    option,
+)
 
 
 def backup_view(
@@ -63,6 +68,91 @@ def backup_view(
         created_at=now,
         updated_at=now,
     )
+
+
+def test_reporting_filter_compiler_covers_supported_field_and_operator_matrix() -> None:
+    def compile_filter(
+        field: str,
+        operator: str,
+        value: str | tuple[str, str] | None = "Value",
+    ) -> tuple[str, dict[str, object]]:
+        params: dict[str, object] = {}
+        clause = condition_clause(
+            LibraryFilterCondition(field=field, operator=operator, value=value),
+            3,
+            params,
+        )
+        return clause, params
+
+    text_expectations = {
+        "is_empty": "= ''",
+        "is_not_empty": "<> ''",
+        "contains": "LIKE",
+        "not_contains": "NOT",
+        "starts_with": "LIKE",
+        "ends_with": "LIKE",
+        "equals": "=",
+        "not_equals": "NOT",
+    }
+    for operator, marker in text_expectations.items():
+        clause, _ = compile_filter("author", operator)
+        assert marker in clause
+
+    for operator in ("equals", "not_equals", "is_empty", "is_not_empty"):
+        clause, _ = compile_filter("language", operator, "en-US")
+        assert "catalog.editions" in clause
+    assert "filter_edition.format" in compile_filter("format", "equals", "epub")[0]
+
+    assert compile_filter("readingStatus", "is_empty", None)[0] == "FALSE"
+    assert compile_filter("readingStatus", "is_not_empty", None)[0] == "TRUE"
+    assert "NOT" in compile_filter("readingStatus", "not_equals", "FINISHED")[0]
+    assert "cover_key IS NOT NULL" in compile_filter("hasCover", "is_true", None)[0]
+    assert "NOT" in compile_filter("hasCover", "is_false", None)[0]
+    assert "catalog.shelves" in compile_filter("shelf", "equals", str(uuid.uuid4()))[0]
+
+    numeric_operators = {
+        "is_empty": None,
+        "is_not_empty": None,
+        "between": ("10", "20"),
+        "equals": "10",
+        "not_equals": "10",
+        "greater_than": "10",
+        "greater_or_equal": "10",
+        "less_than": "10",
+        "less_or_equal": "10",
+    }
+    for operator, value in numeric_operators.items():
+        clause, params = compile_filter("fileSize", operator, value)
+        assert "filter_file.size_bytes" in clause
+        if operator == "between":
+            assert params == {"filter_3_from": 10.0, "filter_3_to": 20.0}
+    for field, marker in {
+        "pageCount": "page_count",
+        "duration": "duration_ms",
+        "versionCount": "count(*)",
+        "progress": "percentage",
+    }.items():
+        assert marker in compile_filter(field, "equals", "1")[0]
+
+    date_operators = {
+        "is_empty": None,
+        "is_not_empty": None,
+        "between": ("2026-01-01", "2026-01-31"),
+        "equals": "2026-01-01",
+        "not_equals": "2026-01-01",
+        "after": "2026-01-01",
+        "on_or_after": "2026-01-01",
+        "before": "2026-01-01",
+        "on_or_before": "2026-01-01",
+    }
+    for operator, value in date_operators.items():
+        clause, _ = compile_filter("lastReadAt", operator, value)
+        assert "filter_progress.updated_at" in clause
+    assert "w.created_at" in compile_filter("createdAt", "equals", "2026-01-01")[0]
+    assert "w.updated_at" in compile_filter("updatedAt", "equals", "2026-01-01")[0]
+
+    assert option("epub", "EPUB") == {"value": "epub", "label": "EPUB"}
+    assert option("epub", "EPUB", 2)["count"] == 2
 
 
 def test_local_password_reset_notice_is_atomic_localized_and_private(tmp_path: Path) -> None:
