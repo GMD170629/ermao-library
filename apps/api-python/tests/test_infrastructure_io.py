@@ -21,6 +21,7 @@ from appv2.modules.catalog.infrastructure.covers import (
     InvalidCoverImage,
     LocalCoverStorage,
 )
+from appv2.modules.catalog.infrastructure.files import LocalCatalogFileStorage
 from appv2.modules.delivery.contracts import DeliverableFile, SmtpConfiguration
 from appv2.modules.delivery.infrastructure.smtp import SmtpAdapter
 from appv2.modules.discovery.contracts import SearchResultView, SourceView
@@ -226,6 +227,47 @@ def test_local_cover_storage_validates_and_materializes_variants(
     storage.delete(keys[work_id])
     storage.delete(keys[second_work_id])
     storage.delete(key)
+
+
+def test_catalog_file_deletion_separates_generated_and_source_files(
+    tmp_path: Path,
+) -> None:
+    storage_root = tmp_path / "storage"
+    conversions_root = storage_root / "conversions"
+    monitor_root = tmp_path / "monitor"
+    conversions_root.mkdir(parents=True)
+    monitor_root.mkdir()
+    generated = conversions_root / "generated.epub"
+    managed_source = storage_root / "temp" / "upload.epub"
+    monitored_source = monitor_root / "book.epub"
+    outside = tmp_path / "outside.epub"
+    managed_source.parent.mkdir()
+    for path in (generated, managed_source, monitored_source, outside):
+        path.write_bytes(b"book")
+    storage = LocalCatalogFileStorage(
+        storage_root=storage_root,
+        conversions_root=conversions_root,
+        monitor_root=monitor_root,
+    )
+
+    storage.delete(
+        tuple(str(path) for path in (generated, managed_source, monitored_source, outside)),
+        include_sources=False,
+    )
+
+    assert not generated.exists()
+    assert managed_source.exists()
+    assert monitored_source.exists()
+    assert outside.exists()
+
+    storage.delete(
+        tuple(str(path) for path in (managed_source, monitored_source, outside)),
+        include_sources=True,
+    )
+
+    assert not managed_source.exists()
+    assert not monitored_source.exists()
+    assert outside.exists()
 
 
 def test_text_conversion_creates_a_safe_reusable_epub(tmp_path: Path) -> None:

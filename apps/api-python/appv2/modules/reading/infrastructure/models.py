@@ -29,7 +29,9 @@ class ProgressRecord(UUIDPrimaryKey, Timestamped, Base):
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("accounts.users.id"), nullable=False)
-    edition_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("catalog.editions.id"), nullable=False)
+    edition_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("catalog.editions.id", ondelete="CASCADE"), nullable=False
+    )
     device_id: Mapped[str] = mapped_column(String(200), nullable=False)
     position: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
     percentage: Mapped[Decimal] = mapped_column(Numeric(7, 6), nullable=False, default=0)
@@ -50,7 +52,9 @@ class BookmarkRecord(UUIDPrimaryKey, Timestamped, Base):
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("accounts.users.id"), nullable=False)
-    edition_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("catalog.editions.id"), nullable=False)
+    edition_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("catalog.editions.id", ondelete="CASCADE"), nullable=False
+    )
     client_id: Mapped[str] = mapped_column(String(200), nullable=False)
     label: Mapped[str | None] = mapped_column(String(500))
     position: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
@@ -77,7 +81,9 @@ class LocationClaimRecord(UUIDPrimaryKey, Base):
         {"schema": "reading"},
     )
 
-    edition_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("catalog.editions.id"), nullable=False)
+    edition_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("catalog.editions.id", ondelete="CASCADE"), nullable=False
+    )
     content_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False)
     cache_version: Mapped[int] = mapped_column(Integer, nullable=False)
     break_size: Mapped[int] = mapped_column(Integer, nullable=False)

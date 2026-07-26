@@ -11,12 +11,10 @@ import tempfile
 import zipfile
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
-from typing import Any
 from xml.etree.ElementTree import Element
 
 import pypdfium2 as pdfium  # type: ignore[import-untyped]
 from defusedxml import ElementTree
-from mutagen import File as MutagenFile
 
 from appv2.modules.catalog.contracts import (
     PreparedCatalogFile,
@@ -24,6 +22,10 @@ from appv2.modules.catalog.contracts import (
     PreparedPublication,
 )
 from appv2.modules.ingestion.contracts import ImportPreparationPort
+from appv2.modules.ingestion.infrastructure.audio_metadata import (
+    AudioFileMetadata,
+    parse_audio_metadata,
+)
 
 ARCHIVE_MAX_ENTRIES = 20_000
 ARCHIVE_MAX_UNCOMPRESSED_BYTES = 4 * 1024 * 1024 * 1024
@@ -537,34 +539,83 @@ class LocalPublicationPreparation(ImportPreparationPort):
         )
         if not members:
             raise UnsafePublication("audio bundle contains no supported tracks")
+        tracks: list[AudioFileMetadata] = []
+        for member in members:
+            try:
+                tracks.append(parse_audio_metadata(member))
+            except ValueError as error:
+                raise UnsafePublication(str(error)) from error
         files: list[PreparedCatalogFile] = []
         total_duration = 0
-        tagged_title: str | None = None
+        album: str | None = None
+        track_title: str | None = None
         author: str | None = None
+        narrator: str | None = None
         cover: bytes | None = None
-        for index, member in enumerate(members):
-            audio = MutagenFile(member)
-            if audio is None or audio.info is None:
-                raise UnsafePublication(f"audio codec is not recognized: {member.name}")
-            duration_ms = max(int(float(audio.info.length) * 1000), 0)
-            total_duration += duration_ms
-            tags = audio.tags
-            tagged_title = tagged_title or self._tag_value(tags, ("album", "\xa9alb", "TALB"))
-            author = author or self._tag_value(tags, ("albumartist", "artist", "\xa9ART", "TPE1"))
-            cover = cover or self._audio_cover(tags)
+        cover_media_type: str | None = None
+        encoding_repairs: list[dict[str, object]] = []
+        for index, track in enumerate(tracks):
+            total_duration += track.duration_ms
+            album = album or track.album
+            track_title = track_title or track.title
+            author = author or track.author
+            narrator = narrator or track.narrator
+            if cover is None and track.cover_data:
+                cover = track.cover_data
+                cover_media_type = (
+                    "image/png" if track.cover_extension == ".png" else "image/jpeg"
+                )
+            if isinstance(track.raw_tags, dict):
+                mutagen_raw = track.raw_tags.get("mutagen")
+                if isinstance(mutagen_raw, dict):
+                    repairs = mutagen_raw.get("encodingRepairs")
+                    if isinstance(repairs, list):
+                        encoding_repairs.extend(
+                            {"track": track.path.name, **item}
+                            for item in repairs
+                            if isinstance(item, dict)
+                        )
+                nested_repairs = track.raw_tags.get("encodingRepairs")
+                if isinstance(nested_repairs, list):
+                    encoding_repairs.extend(
+                        {"track": track.path.name, **item}
+                        for item in nested_repairs
+                        if isinstance(item, dict)
+                    )
             files.append(
                 PreparedCatalogFile(
-                    source_path=str(member),
-                    original_name=member.name,
-                    media_type=mimetypes.guess_type(member.name)[0] or "audio/mpeg",
-                    size_bytes=member.stat().st_size,
-                    checksum=_checksum(member),
+                    source_path=str(track.path),
+                    original_name=track.path.name,
+                    media_type=mimetypes.guess_type(track.path.name)[0] or "audio/mpeg",
+                    size_bytes=track.path.stat().st_size,
+                    checksum=_checksum(track.path),
                     sort_order=index,
                     volume_key="main",
-                    duration_ms=duration_ms,
-                    metadata={"codec": type(audio.info).__name__},
+                    duration_ms=track.duration_ms,
+                    metadata={
+                        "codec": track.codec,
+                        "title": track.title,
+                        "album": track.album,
+                        "author": track.author,
+                        "narrator": track.narrator,
+                        "discNumber": track.disc_number,
+                        "trackNumber": track.track_number,
+                        "bitrate": track.bitrate,
+                        "sampleRate": track.sample_rate,
+                        "channels": track.channels,
+                        "chapters": [
+                            {
+                                "title": chapter.title,
+                                "startMs": chapter.start_ms,
+                                "endMs": chapter.end_ms,
+                            }
+                            for chapter in track.chapters
+                        ],
+                    },
                 )
             )
+        # Match v1 identity selection: prefer album/book title over track title.
+        tagged_title = album or track_title
         bundle_title = path.parent.name or tagged_title or path.stem
         if len(members) == 1 and tagged_title:
             bundle_title = tagged_title
@@ -586,11 +637,65 @@ class LocalPublicationPreparation(ImportPreparationPort):
         else:
             title = tagged_title or bundle_title
             volume_order = 0
-        title = self._repair_tag_text(title)
-        bundle_title = self._repair_tag_text(bundle_title)
-        author = self._repair_tag_text(author) if author else None
-        identity_key, identifiers = _identity(title=title, author=None)
+        identity_key, identifiers = _identity(title=title, author=author)
         volume_key = hashlib.sha256(str(path.parent).encode()).hexdigest()
+        publication_metadata: dict[str, object] = {
+            "trackCount": len(files),
+            "durationMs": total_duration,
+            "bundlePath": str(path.parent),
+        }
+        if narrator:
+            publication_metadata["narrator"] = narrator
+        if encoding_repairs:
+            publication_metadata["encodingRepairs"] = encoding_repairs
+        # #region agent log
+        try:
+            import json as _json
+            import urllib.request as _urlreq
+
+            _payload = _json.dumps(
+                {
+                    "sessionId": "de8447",
+                    "runId": "post-fix",
+                    "hypothesisId": "H1",
+                    "location": "formats.py:_audio_bundle",
+                    "message": "audio bundle prepared with v1 metadata port",
+                    "data": {
+                        "source": path.name,
+                        "title": title,
+                        "album": album,
+                        "trackTitle": track_title,
+                        "author": author,
+                        "narrator": narrator,
+                        "chapterCount": sum(len(track.chapters) for track in tracks),
+                        "encodingRepairCount": len(encoding_repairs),
+                        "encodingRepairs": [
+                            {
+                                "tag": item.get("tag"),
+                                "declaredEncoding": item.get("declaredEncoding"),
+                                "detectedEncoding": item.get("detectedEncoding"),
+                                "repaired": item.get("repaired"),
+                            }
+                            for item in encoding_repairs[:8]
+                        ],
+                        "codecs": [track.codec for track in tracks],
+                    },
+                    "timestamp": int(__import__("time").time() * 1000),
+                }
+            ).encode()
+            _req = _urlreq.Request(
+                "http://127.0.0.1:7277/ingest/37cbb0f6-b560-4540-a58d-0c1c4c637b9c",
+                data=_payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Debug-Session-Id": "de8447",
+                },
+                method="POST",
+            )
+            _urlreq.urlopen(_req, timeout=1).read()
+        except Exception:
+            pass
+        # #endregion
         return PreparedPublication(
             identity_key=identity_key,
             title=title,
@@ -599,11 +704,7 @@ class LocalPublicationPreparation(ImportPreparationPort):
             format="audio",
             language=None,
             identifiers=identifiers,
-            metadata={
-                "trackCount": len(files),
-                "durationMs": total_duration,
-                "bundlePath": str(path.parent),
-            },
+            metadata=publication_metadata,
             volumes=(
                 PreparedCatalogVolume(
                     key=volume_key,
@@ -627,7 +728,7 @@ class LocalPublicationPreparation(ImportPreparationPort):
                 for item in files
             ),
             cover_content=cover,
-            cover_media_type="image/jpeg" if cover else None,
+            cover_media_type=cover_media_type,
         )
 
     def _write_text_epub(
@@ -680,47 +781,3 @@ class LocalPublicationPreparation(ImportPreparationPort):
             except UnicodeDecodeError:
                 continue
         raise UnsafePublication("text encoding is not supported")
-
-    @staticmethod
-    def _tag_value(tags: Any, keys: tuple[str, ...]) -> str | None:
-        if tags is None:
-            return None
-        for key in keys:
-            value = tags.get(key)
-            if value is None:
-                continue
-            if isinstance(value, list):
-                value = value[0] if value else None
-            if value is not None:
-                text = str(value).strip()
-                if text:
-                    return text
-        return None
-
-    @staticmethod
-    def _audio_cover(tags: Any) -> bytes | None:
-        if tags is None:
-            return None
-        pictures = getattr(tags, "pictures", None)
-        if pictures:
-            return bytes(pictures[0].data)
-        for key in ("APIC:", "covr"):
-            value = tags.get(key)
-            if value is None:
-                continue
-            if isinstance(value, list):
-                value = value[0] if value else None
-            data = getattr(value, "data", value)
-            if isinstance(data, bytes):
-                return data
-        return None
-
-    @staticmethod
-    def _repair_tag_text(value: str) -> str:
-        if not any(character in value for character in "¡¢£¤¥¦§¨©ª«¬®¯°±²³´µ¶·"):
-            return value
-        try:
-            repaired = value.encode("latin-1").decode("gb18030")
-        except (UnicodeEncodeError, UnicodeDecodeError):
-            return value
-        return repaired if repaired.isprintable() else value

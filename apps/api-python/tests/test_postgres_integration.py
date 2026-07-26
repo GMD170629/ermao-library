@@ -638,6 +638,71 @@ def test_setup_login_catalog_and_health_on_postgresql_18(
         ]
         assert len(completed_jobs) == 2
         edition_id = completed_jobs[0]["resultEditionId"]
+        delete_regression_source = monitored / "Delete Regression.txt"
+        delete_regression_source.write_text("delete regression", encoding="utf-8")
+        delete_regression_import = client.post(
+            "/api/v2/ingestion/imports",
+            json={"sourcePath": str(delete_regression_source)},
+            headers={"Idempotency-Key": f"integration-delete-{uuid.uuid4().hex}"},
+        )
+        assert delete_regression_import.status_code == 202, delete_regression_import.text
+        delete_regression_container = build_container(settings)
+        try:
+            assert delete_regression_container.ingestion_worker.run_once(
+                "integration-delete-worker"
+            )
+        finally:
+            delete_regression_container.close()
+        delete_regression_job = client.get(
+            f"/api/v2/ingestion/imports/{delete_regression_import.json()['id']}"
+        )
+        assert delete_regression_job.status_code == 200, delete_regression_job.text
+        deleted_work_id = delete_regression_job.json()["job"]["resultWorkId"]
+        assert deleted_work_id
+        assert (
+            client.delete(f"/api/v2/catalog/works/{deleted_work_id}").status_code
+            == 204
+        )
+        assert delete_regression_source.exists()
+        assert client.get(f"/api/v2/catalog/works/{deleted_work_id}").status_code == 404
+        deleted_job_history = client.get(
+            f"/api/v2/ingestion/imports/{delete_regression_import.json()['id']}"
+        )
+        assert deleted_job_history.json()["job"]["status"] == "completed"
+        assert deleted_job_history.json()["job"]["resultWorkId"] is None
+        reimport = client.post(
+            "/api/v2/ingestion/imports",
+            json={"sourcePath": str(delete_regression_source)},
+            headers={"Idempotency-Key": f"integration-reimport-{uuid.uuid4().hex}"},
+        )
+        assert reimport.status_code == 202, reimport.text
+        reimport_container = build_container(settings)
+        try:
+            assert reimport_container.ingestion_worker.run_once(
+                "integration-reimport-worker"
+            )
+        finally:
+            reimport_container.close()
+        reimported_job = client.get(f"/api/v2/ingestion/imports/{reimport.json()['id']}")
+        assert reimported_job.status_code == 200, reimported_job.text
+        assert reimported_job.json()["job"]["status"] == "completed"
+        reimported_work_id = reimported_job.json()["job"]["resultWorkId"]
+        assert reimported_work_id and reimported_work_id != deleted_work_id
+        restored_library = client.get(
+            "/api/v2/reporting/library",
+            params={"query": "Delete Regression"},
+        )
+        assert reimported_work_id in {
+            item["id"] for item in restored_library.json()["items"]
+        }
+        assert (
+            client.delete(
+                f"/api/v2/catalog/works/{reimported_work_id}",
+                params={"deleteSource": "true"},
+            ).status_code
+            == 204
+        )
+        assert not delete_regression_source.exists()
         assert client.get("/api/v2/ingestion/conversions").status_code == 200
         folder_update = client.patch(
             f"/api/v2/ingestion/folders/{folder.json()['id']}",

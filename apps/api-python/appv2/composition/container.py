@@ -15,6 +15,7 @@ from appv2.modules.accounts.infrastructure.password_reset import LocalPasswordRe
 from appv2.modules.accounts.infrastructure.repositories import accounts_uow_factory
 from appv2.modules.catalog.application import CatalogReadAdapter, CatalogService
 from appv2.modules.catalog.infrastructure.covers import LocalCoverStorage
+from appv2.modules.catalog.infrastructure.files import LocalCatalogFileStorage
 from appv2.modules.catalog.infrastructure.repositories import catalog_uow_factory
 from appv2.modules.delivery.application import DeliveryService, DeliveryWorker
 from appv2.modules.delivery.infrastructure.crypto import SecretCipher
@@ -68,7 +69,7 @@ from appv2.platform.config import Settings, get_settings
 from appv2.platform.database import Database
 from appv2.platform.filesystem import StorageLayout
 
-ALEMBIC_REVISION = "0002_ingestion_pipeline"
+ALEMBIC_REVISION = "0003_catalog_work_deletion"
 
 
 @dataclass(slots=True)
@@ -124,7 +125,15 @@ def build_container(settings: Settings | None = None) -> Container:
         password_reset_ttl_seconds=resolved.password_reset_ttl_seconds,
     )
     current_account = AccountDependency(accounts)
-    catalog = CatalogService(catalog_uow, LocalCoverStorage(storage.covers))
+    catalog = CatalogService(
+        catalog_uow,
+        LocalCoverStorage(storage.covers),
+        LocalCatalogFileStorage(
+            storage_root=storage.root,
+            conversions_root=storage.conversions,
+            monitor_root=resolved.monitor_root,
+        ),
+    )
     catalog_read = CatalogReadAdapter(catalog_uow)
     catalog_ports = CatalogPorts(service=catalog, read_adapter=catalog_read)
 

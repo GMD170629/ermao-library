@@ -69,7 +69,9 @@ class DeliveryJobRecord(UUIDPrimaryKey, Timestamped, Base):
     )
 
     requested_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("accounts.users.id"), nullable=False)
-    file_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("catalog.files.id"), nullable=False)
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("catalog.files.id", ondelete="CASCADE"), nullable=False
+    )
     kind: Mapped[str] = mapped_column(String(30), nullable=False)
     recipient: Mapped[str] = mapped_column(String(500), nullable=False)
     subject: Mapped[str] = mapped_column(String(1000), nullable=False)

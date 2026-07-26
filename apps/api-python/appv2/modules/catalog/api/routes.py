@@ -380,17 +380,14 @@ def create_router(service: CatalogService, current_account: CurrentAccount) -> A
         return WorkResponse.from_view(work)
 
     @router.delete("/works/{work_id}", status_code=status.HTTP_204_NO_CONTENT)
-    def archive_work(work_id: uuid.UUID, actor: Writer) -> None:
+    def delete_work(
+        work_id: uuid.UUID,
+        actor: Writer,
+        delete_source: Annotated[bool, Query(alias="deleteSource")] = False,
+    ) -> None:
         del actor
         try:
-            service.update_work(
-                work_id,
-                title=None,
-                author=None,
-                summary=None,
-                status="archived",
-                metadata=None,
-            )
+            service.delete_work(work_id, delete_source=delete_source)
         except CatalogNotFound as error:
             raise not_found(error) from error
 

@@ -54,7 +54,9 @@ class EditionRecord(UUIDPrimaryKey, Timestamped, Base):
         {"schema": "catalog"},
     )
 
-    work_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("catalog.works.id"), nullable=False)
+    work_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("catalog.works.id", ondelete="CASCADE"), nullable=False
+    )
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     format: Mapped[str] = mapped_column(String(20), nullable=False)
     language: Mapped[str | None] = mapped_column(String(20))

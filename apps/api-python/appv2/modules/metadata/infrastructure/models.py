@@ -48,7 +48,9 @@ class MetadataJobRecord(UUIDPrimaryKey, Timestamped, Base):
         {"schema": "metadata"},
     )
 
-    work_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("catalog.works.id"), nullable=False)
+    work_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("catalog.works.id", ondelete="CASCADE"), nullable=False
+    )
     provider_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("metadata.providers.id"))
     requested_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("accounts.users.id"))
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
@@ -100,7 +102,9 @@ class OrganizeJobRecord(UUIDPrimaryKey, Timestamped, Base):
         {"schema": "metadata"},
     )
 
-    work_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("catalog.works.id"), nullable=False)
+    work_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("catalog.works.id", ondelete="CASCADE"), nullable=False
+    )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     proposal: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
     error_detail: Mapped[str | None] = mapped_column(Text)

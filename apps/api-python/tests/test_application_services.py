@@ -56,7 +56,8 @@ def test_catalog_service_complete_success_and_failure_surface() -> None:
     unit = FakeUnitOfWork("catalog")
     repository = unit.catalog
     covers = MagicMock()
-    service = CatalogService(lambda: unit, covers)
+    files = MagicMock()
+    service = CatalogService(lambda: unit, covers, files)
     work_id = uuid.uuid4()
     edition_id = uuid.uuid4()
     owner_id = uuid.uuid4()
@@ -153,6 +154,19 @@ def test_catalog_service_complete_success_and_failure_surface() -> None:
             summary=None,
             status=None,
         )
+    repository.delete_work.return_value = SimpleNamespace(
+        cover_key=f"{work_id}/cover.webp",
+        storage_paths=("/monitor/book.epub", "/storage/conversions/book.epub"),
+    )
+    service.delete_work(work_id, delete_source=False)
+    covers.delete.assert_called_with(f"{work_id}/cover.webp")
+    files.delete.assert_called_with(
+        ("/monitor/book.epub", "/storage/conversions/book.epub"),
+        include_sources=False,
+    )
+    repository.delete_work.return_value = None
+    with pytest.raises(CatalogNotFound):
+        service.delete_work(work_id, delete_source=True)
 
     repository.get_edition.return_value = edition
     repository.list_files.return_value = ["file"]

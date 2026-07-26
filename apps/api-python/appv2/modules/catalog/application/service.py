@@ -12,6 +12,7 @@ from appv2.modules.catalog.contracts import (
     CatalogEdition,
     CatalogEditionDetail,
     CatalogFile,
+    CatalogFileStoragePort,
     CatalogImport,
     CatalogImportResult,
     CatalogRepository,
@@ -134,9 +135,11 @@ class CatalogService:
         self,
         uow_factory: Callable[[], CatalogUnitOfWork],
         covers: CoverStoragePort,
+        files: CatalogFileStoragePort,
     ) -> None:
         self._uow_factory = uow_factory
         self._covers = covers
+        self._files = files
 
     def list_works(
         self,
@@ -218,6 +221,19 @@ class CatalogService:
             )
             uow.commit()
             return created
+
+    def delete_work(self, work_id: uuid.UUID, *, delete_source: bool) -> None:
+        with self._uow_factory() as uow:
+            deletion = uow.catalog.delete_work(work_id)
+            if deletion is None:
+                raise CatalogNotFound
+            uow.commit()
+        if deletion.cover_key:
+            self._covers.delete(deletion.cover_key)
+        self._files.delete(
+            deletion.storage_paths,
+            include_sources=delete_source,
+        )
 
     def update_work(
         self,

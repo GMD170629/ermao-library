@@ -382,13 +382,13 @@ export function LibraryPage() {
     setError('');
     setMessage('');
     try {
-      await apiV2Request<void>(`/api/v2/catalog/works/${book.id}`, {
+      await apiV2Request<void>(`/api/v2/catalog/works/${book.id}?deleteSource=${deleteSource ? 'true' : 'false'}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' }
       });
       setDeleteTarget(null);
       setMessage('已删除书库记录');
-      toast.success('已删除书库记录', '来源文件已保留');
+      toast.success('已删除书库记录', deleteSource ? '来源文件已删除' : '来源文件已保留');
       setReloadKey((key) => key + 1);
     } catch (reason) {
       const nextError = reason instanceof Error ? reason.message : '删除失败';

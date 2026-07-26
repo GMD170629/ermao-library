@@ -5,10 +5,11 @@ from collections.abc import Callable
 from types import TracebackType
 from typing import Literal, Self
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from appv2.modules.catalog.contracts import (
+    CatalogDeletion,
     CatalogEdition,
     CatalogFile,
     CatalogImport,
@@ -34,6 +35,7 @@ from appv2.modules.catalog.infrastructure.models import (
     WorkCategoryRecord,
     WorkRecord,
 )
+from appv2.modules.reading.infrastructure.models import ReaderPreferenceRecord
 
 
 def _work(record: WorkRecord) -> CatalogWork:
@@ -515,6 +517,49 @@ class SqlCatalogRepository(CatalogRepository):
         self._session.flush()
         return _work(record)
 
+    def delete_work(self, work_id: uuid.UUID) -> CatalogDeletion | None:
+        record = self._session.get(WorkRecord, work_id)
+        if record is None:
+            return None
+        edition_ids = tuple(
+            self._session.scalars(
+                select(EditionRecord.id).where(EditionRecord.work_id == work_id)
+            ).all()
+        )
+        volume_ids = tuple(
+            self._session.scalars(
+                select(VolumeRecord.id).where(VolumeRecord.edition_id.in_(edition_ids))
+            ).all()
+        ) if edition_ids else ()
+        storage_paths = tuple(
+            self._session.scalars(
+                select(FileRecord.storage_path).where(FileRecord.edition_id.in_(edition_ids))
+            ).all()
+        ) if edition_ids else ()
+        target_ids = (work_id, *edition_ids, *volume_ids)
+        if target_ids:
+            self._session.execute(
+                delete(ReaderPreferenceRecord).where(
+                    ReaderPreferenceRecord.target_id.in_(target_ids)
+                )
+            )
+        self._session.execute(
+            text(
+                "UPDATE ingestion.jobs SET result_work_id = NULL, "
+                "result_edition_id = NULL, result_volume_ids = CAST('[]' AS jsonb) "
+                "WHERE result_work_id = :work_id"
+            ),
+            {"work_id": work_id},
+        )
+        deletion = CatalogDeletion(
+            work_id=work_id,
+            cover_key=record.cover_key,
+            storage_paths=storage_paths,
+        )
+        self._session.delete(record)
+        self._session.flush()
+        return deletion
+
     def set_cover_key(self, work_id: uuid.UUID, cover_key: str) -> CatalogWork | None:
         record = self._session.get(WorkRecord, work_id)
         if record is None:
@@ -557,6 +602,12 @@ class SqlCatalogRepository(CatalogRepository):
             )
             self._session.add(work)
             self._session.flush()
+        elif work.status == "archived":
+            # Re-importing a publication is an explicit request to put it back
+            # in the library. Keeping the reused work archived would let the
+            # ingestion job complete successfully while every library query
+            # continues to hide its result.
+            work.status = "active"
         if edition is None or edition.work_id != work.id or edition.format != publication.format:
             edition = self._session.scalar(
                 select(EditionRecord)

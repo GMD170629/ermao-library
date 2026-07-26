@@ -128,6 +128,13 @@ class CatalogImportResult:
 
 
 @dataclass(frozen=True, slots=True)
+class CatalogDeletion:
+    work_id: uuid.UUID
+    cover_key: str | None
+    storage_paths: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class CoverResource:
     path: Path
     media_type: str
@@ -147,6 +154,10 @@ class CoverStoragePort(Protocol):
     def open(self, key: str, size: str) -> CoverResource: ...
 
     def delete(self, key: str) -> None: ...
+
+
+class CatalogFileStoragePort(Protocol):
+    def delete(self, paths: tuple[str, ...], *, include_sources: bool) -> None: ...
 
 
 class CatalogReadPort(Protocol):
@@ -301,6 +312,8 @@ class CatalogRepository(CatalogReadPort, CatalogImportPort, CatalogMetadataPort,
         status: str | None,
         metadata: dict[str, object] | None,
     ) -> CatalogWork | None: ...
+
+    def delete_work(self, work_id: uuid.UUID) -> CatalogDeletion | None: ...
 
     def set_cover_key(self, work_id: uuid.UUID, cover_key: str) -> CatalogWork | None: ...
 
