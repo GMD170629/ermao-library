@@ -9,7 +9,7 @@ Refactor the backend in behavior-preserving increments. Treat API compatibility,
 
 ## Start With Evidence
 
-1. Read the repository `AGENTS.md` and any nearer instructions.
+1. Read the repository `AGENTS.md`, `docs/business-code-layering-and-refactoring.md`, and the matching files under `.cursor/rules/` (especially `architecture.mdc`, `python-backend.mdc`, `python-orm-migrations.mdc`, `refactoring.mdc`).
 2. Read `apps/api-python/pyproject.toml`, the affected modules, and their tests.
 3. Run `python scripts/quality_snapshot.py` from this skill directory for a read-only hotspot snapshot.
 4. Read [references/project-map.md](references/project-map.md) when choosing module boundaries.

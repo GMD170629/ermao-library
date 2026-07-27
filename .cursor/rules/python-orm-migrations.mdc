@@ -1,0 +1,35 @@
+---
+description: SQLAlchemy ORM-only 持久化与 schema 迁移禁手写 SQL。
+globs: apps/api-python/**/*.{py}
+alwaysApply: false
+---
+
+# ORM 与迁移
+
+应用与迁移代码一律禁止手写 SQL。遗留 raw SQL 是迁移债，不是可复制风格。
+
+## 禁止
+
+- SQL 字符串、`sqlalchemy.text()`、文本 `execute()`、`exec_driver_sql()`、`sqlite3`、裸 cursor
+- 字符串形式的 WHERE/JOIN/ORDER BY/列名/表名片段
+- 把 raw-SQL helper 复制进新模块
+- 迁移导入运行期 application/service
+
+## 要求
+
+- 表与关系用 SQLAlchemy 2.x `Mapped[...]` / `mapped_column()`
+- 读：`select()`、relationship、loader options、`Session.scalars()`、类型化投影
+- 写：映射实体，或确需集合操作时用 `insert()`/`update()`/`delete()` 表达式
+- Repository/Query 按聚合或用例命名，不按表集合命名
+- 返回领域对象或显式 DTO；ORM 实体不得泄漏到 HTTP/React/无关能力
+- 分页必须有确定排序与文档化最大页大小
+- Repository 可 `flush()`，不得隐藏 `commit()`/`rollback()`；用例拥有事务
+- 写操作用 `with session.begin():` 或等价显式 UoW
+- 触及 raw SQL 行为时：先补表征测试，再在同一能力内迁到 ORM；不安全则不擅自增改 raw SQL
+
+## Schema 迁移
+
+- 用 SQLAlchemy schema 对象与迁移框架操作，不用手写 `CREATE`/`ALTER`/`INSERT...SELECT`/PRAGMA
+- 每个迁移有序、确定、可重启判断；发布后语义不可变，修复用新版本
+- schema 变更与昂贵 backfill 分离；backfill 用 ORM/表达式、有界批次、可重启
+- 测：空库、每条支持升级路径、重复执行、部分完成、失败恢复

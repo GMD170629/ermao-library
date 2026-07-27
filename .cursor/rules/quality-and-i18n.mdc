@@ -1,0 +1,43 @@
+---
+description: 事务副作用、错误处理、安全、i18n、测试、质量门禁与完成定义。
+alwaysApply: true
+---
+
+# 质量、安全与完成定义
+
+## 写用例副作用顺序（须可测）
+
+校验授权 → 读当前态 → 领域决策 → DB/文件临时写 → commit → 事件/队列/文件发布 → 补偿/重试/可恢复失败态。
+
+禁止隐藏 commit、fire-and-forget promise、无主后台任务。
+
+## 错误与安全
+
+- 能力内小错误分类；翻译基础设施失败时保留 `cause`
+- 不向用户暴露密钥、内部路径、SQL、堆栈
+- 空 catch、吞错当成功禁止
+- 外部输入边界校验；查询在 DB 层按 actor 范围过滤
+- 保持 not-found/forbidden 防枚举语义
+- 不信任客户端提供的归属、角色、路径、MIME、文件名、长度
+- 路径相对配置根解析并防穿越/符号链接逃逸
+
+## i18n（zh-CN + en-US）
+
+用户可见文案走 `apps/web/i18n`；错误码/事件类型 locale-neutral；用户内容（书名等）不翻译。完成前跑 `pnpm i18n:check`（在 `apps/web`）。
+
+## 测试
+
+域单测无框架；应用测用 fake ports；仓储集成用真 SQLite+ORM；API 契约测 path/status/envelope/code/角色；缺陷修复先写失败回归，并按功能面审计相邻交互变体。禁止新增 skip/flaky/静默削弱测试。
+
+## 门禁（目标）
+
+```bash
+# Python: ruff format/check, mypy app, pytest --cov=app
+# Web: pnpm lint && pnpm typecheck && pnpm test && pnpm i18n:check
+```
+
+不得为过关降低严格度或加全局 ignore/`noqa`/`type: ignore`/大范围 eslint-disable。
+
+## Definition of Done
+
+能力与不变量明确；落在目标能力与层；依赖方向合法；无手写 SQL；事务与失败恢复明确；契约兼容（除非用户明确要求变更）；稳定边界有校验类型；双语完整；适用门禁通过；无无主双实现或临时兼容层。

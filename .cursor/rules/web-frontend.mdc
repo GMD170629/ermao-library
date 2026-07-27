@@ -1,0 +1,40 @@
+---
+description: Web feature 分层、API transport、状态所有权与 TypeScript 严格边界。
+globs: apps/web/**/*.{ts,tsx}, packages/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Web / TypeScript 实现
+
+目标：`apps/web/features/<capability>/{api,model,application,ui,public.ts}`；`app/` 仅薄路由装配。
+
+## Feature 边界
+
+- 外部只能通过 `public.ts` 导入 feature 内部。
+- `model`：框架无关的类型、纯规则、reducer、selector。
+- `application`：API、mutation、服务端状态、乐观更新、用例 hook。
+- `ui`：渲染模型并发出用户意图；不解析 envelope、不实现持久化规则。
+- `app` route 不是业务模块，不直接拼复杂请求，不作 feature 间共享目录。
+
+## API
+
+- 直接 `fetch()` 仅允许在 `shared/api` transport 与 feature `api/client.ts`。
+- 组件、页面、Provider、reducer、model 禁止直接 `fetch`。
+- shared transport：base path、credentials、取消、content-type、envelope、会话过期、归一化传输错误。
+- feature api：端点级运行时校验，wire DTO → feature model。
+- UI 处理命名应用结果，不分支原始 status 或后端本地化 message。
+- 异步 effect 在视图可变更/卸载时支持取消或拒绝过期结果。
+
+## 类型与状态
+
+- 保持 `strict`；业务代码禁止 `any`、宽断言、非空断言、`@ts-ignore`、未校验 JSON 强转。
+- 网络/storage/URL/postMessage 输入先当 `unknown`，边界校验后再入领域类型。
+- API DTO、领域模型、view model、表单 state 分开；生成物只读。
+- 状态单一所有者：可分享导航→URL；服务端事实→application/cache；瞬时视觉→局部组件；跨页会话→显式 store/runtime。
+- 禁止用 effect 镜像 props/服务端状态，除非外部同步契约要求。
+- `useEffect` 只同步外部系统；多阶段流程用 reducer/状态机。
+- 不得关闭 `react-hooks/exhaustive-deps` 强行定 timing。
+
+## 共享代码
+
+共享须已有 ≥2 真实消费者且语义稳定、业务中立。禁止把 `shared` 当收容区。

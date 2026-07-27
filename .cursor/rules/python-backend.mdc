@@ -1,0 +1,40 @@
+---
+description: Python 后端分层、用例、FastAPI 薄适配与 Worker 边界。
+globs: apps/api-python/**/*.py
+alwaysApply: false
+---
+
+# Python 后端实现
+
+目标布局：`app/modules/<capability>/{domain,application,infrastructure,presentation,public.py}`。仅在有真实代码时建目录。
+
+## 分层职责
+
+| 层 | 做 | 不做 |
+| --- | --- | --- |
+| domain | 实体、值对象、不变量、策略、领域错误 | FastAPI/SQLAlchemy/Session/文件系统/网络/环境变量 |
+| application | 命名用例编排、授权、事务、副作用顺序 | Request/Response、具体 ORM、隐藏 commit |
+| infrastructure | 端口实现：ORM、文件、第三方 | 导入 route/page；隐藏事务提交 |
+| presentation | 校验输入、取 actor、调一个用例、映射 HTTP/Worker 契约 | SQL、业务决策、媒体解析、跨 service 编排 |
+
+## 用例形态
+
+- 一个入口 = 一个业务意图（如 `ImportBook`），不是表 CRUD。
+- 不可变 dataclass / 校验值对象作领域输入；Pydantic 仅在外部边界。
+- 稳定边界禁止 `Any`；动态边界用 `object`/`unknown`，立即校验并映射。
+- 纯行为用纯函数；类仅用于持有注入依赖或生命周期。
+- 禁止布尔 mode 旗标把无关流程塞进同一函数。
+
+## FastAPI / Worker
+
+Route 只做：解析校验 → 取依赖 → 调一个 command/query → 映射结果/命名错误。
+
+- 稳定 JSON 端点用显式 Pydantic 模型，不返回任意 dict。
+- 分支用稳定错误码/类型，不用本地化文案。
+- 资源级授权在用例内校验，不能只靠中间件前缀。
+- HTTP 与 Worker 共用同一应用用例，互不导入对方 presentation。
+- `except Exception` 仅允许在进程/任务兜底边界，且必须记录上下文并明确重试/隔离/终止。
+
+## 文件与集成
+
+外部系统、转换器、时钟、随机 ID 放在端口后面。文件发布：临时路径 → 校验 → 原子替换。跨 DB/文件系统必须有可恢复中间态与幂等键。

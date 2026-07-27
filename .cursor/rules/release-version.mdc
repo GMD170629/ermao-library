@@ -1,0 +1,19 @@
+---
+description: 版本发布须 Web/后端/包/标签/产物版本一致，并填写 Release 说明。
+globs: package.json, apps/web/package.json, apps/api-python/pyproject.toml, apps/api-python/app/core/config.py, **/release*, **/.github/workflows/**
+alwaysApply: false
+---
+
+# 发布版本一致性
+
+一次发布只用一个语义化版本，覆盖 GitHub tag、Release 标题、Docker/包产物、Web、后端。
+
+发版前同步至少：
+
+- 根 `package.json`（权威版本，About 页展示）
+- `apps/web/package.json`
+- `apps/api-python/pyproject.toml`
+- `apps/api-python/app/core/config.py` 运行时默认
+- 相关 lockfile（`pnpm-lock.yaml`、`uv.lock`）元数据
+
+校验：About 页与后端版本响应为同一版本；tag 为 `v<version>` 且与根 `package.json` 一致。Release 描述须有简明用户可见变更摘要，禁止空描述或仅自动变更列表。

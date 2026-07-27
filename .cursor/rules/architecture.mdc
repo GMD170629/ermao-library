@@ -1,0 +1,37 @@
+---
+description: 业务能力优先分层、依赖方向与权威文档指针。所有新代码与触及存量能力时必须遵守。
+alwaysApply: true
+---
+
+# 架构与依赖方向
+
+权威实现政策：`AGENTS.md`。详细理由与分期迁移：`docs/business-code-layering-and-refactoring.md`。
+
+存量遗留不是新代码的先例。新代码必须符合目标架构；改遗留时，把触及的能力迁向目标，行为保持兼容、范围限于请求的能力。若合规会显著扩大风险范围，停下来说明冲突，不要继续堆积架构债。
+
+## 依赖方向（唯一允许）
+
+```text
+delivery/presentation -> application -> domain
+infrastructure -> application ports / domain types
+composition root -> 各层（仅装配）
+```
+
+## 禁止
+
+- domain → 框架 / ORM / HTTP / 文件系统 / 队列 / 环境变量 / 第三方 SDK
+- application → FastAPI Request/Response、React、Next.js、具体 SQLAlchemy 实现、浏览器全局
+- infrastructure → route / page / component
+- module/feature → 另一 module/feature 的私有文件
+- 数据库迁移 → 运行期 application/service
+- 新模块 → `compat.py` 或兼容层私有 helper
+- 顶层万能 `utils` / `helpers` / `managers` / 通用 `services`
+- 空目录脚手架；仅在迁入真实代码时建目录
+
+跨能力协作只能走对方 `public` 入口、应用端口或稳定契约。禁止深层导入、循环导入、运行时 import 技巧。
+
+## 代理默认行为
+
+1. 先识别业务能力，再按能力内分层落代码。
+2. 不把一次改动混入架构迁移、产品改版、依赖升级和无关格式化。
+3. 临时兼容代码必须有 owner、保护测试和明确退出条件。

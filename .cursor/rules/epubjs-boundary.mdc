@@ -1,0 +1,12 @@
+---
+description: EPUB.js 为不可变第三方依赖；缺陷优先查本仓库适配与集成。
+globs: apps/web/**/reader/**/*.{ts,tsx}, packages/reader-core/**/*.{ts,tsx}, **/epub*/**/*.{ts,tsx,js}
+alwaysApply: false
+---
+
+# EPUB.js 依赖边界
+
+1. 使用官方 npm 最新发布，不修改其源码。
+2. 禁止编辑 `node_modules/epubjs`、vendor 改过的源码、或改变 EPUB.js 行为的 package patch。
+3. 除非有匹配的上游 GitHub issue/讨论/修复提交/发行说明作为证据，否则不把缺陷归因于 EPUB.js；默认视为本仓库集成、配置、生命周期或 API 用法问题。
+4. 只通过 EPUB.js 公开 API 与本仓库 adapter / controller / presentation / input 修复阅读器行为。
