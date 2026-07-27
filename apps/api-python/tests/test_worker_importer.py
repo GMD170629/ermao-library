@@ -19,68 +19,68 @@ from app.worker.watcher import MonitorFolderConfig, import_watched_file, monitor
 
 def create_worker_tables(db):
     statements = [
-        """CREATE TABLE LibraryWork (
+        """CREATE TABLE IF NOT EXISTS LibraryWork (
             id TEXT PRIMARY KEY, monitorFolderId TEXT, origin TEXT, title TEXT, normalizedTitle TEXT, author TEXT,
             normalizedAuthor TEXT, description TEXT, workType TEXT, status TEXT, publicationStatus TEXT,
             trackingStatus TEXT, tags TEXT, metadataQuality INTEGER, organizeStatus TEXT, coverPath TEXT,
             coverStatus TEXT, hidden BOOLEAN, organized BOOLEAN, primaryEditionId TEXT, mergeKey TEXT,
             createdAt TEXT, updatedAt TEXT
         )""",
-        """CREATE TABLE LibraryEdition (
+        """CREATE TABLE IF NOT EXISTS LibraryEdition (
             id TEXT PRIMARY KEY, workId TEXT, monitorFolderId TEXT, origin TEXT, format TEXT, versionName TEXT,
             versionKey TEXT, sourceGroupKey TEXT, description TEXT, language TEXT, publisher TEXT, publishedAt TEXT,
             identifier TEXT, isbn TEXT, importStatus TEXT, importError TEXT, sizeBytes INTEGER DEFAULT 0,
             pageCount INTEGER, chapterCount INTEGER, coverPath TEXT, coverStatus TEXT, "primary" BOOLEAN,
             hidden BOOLEAN, createdAt TEXT, updatedAt TEXT
         )""",
-        """CREATE TABLE LibraryVolume (
+        """CREATE TABLE IF NOT EXISTS LibraryVolume (
             id TEXT PRIMARY KEY, editionId TEXT, title TEXT, volumeIndex REAL, sortOrder INTEGER,
             pageCount INTEGER, chapterCount INTEGER, coverPath TEXT, createdAt TEXT, updatedAt TEXT
         )""",
-        """CREATE TABLE LibraryFile (
+        """CREATE TABLE IF NOT EXISTS LibraryFile (
             id TEXT PRIMARY KEY, editionId TEXT, volumeId TEXT, path TEXT, filePathHash TEXT, fingerprint TEXT,
             fullHash TEXT, hashStatus TEXT, mtimeMs INTEGER, kind TEXT, mimeType TEXT, sizeBytes INTEGER,
             sortOrder INTEGER, createdAt TEXT, updatedAt TEXT
         )""",
-        """CREATE TABLE LibraryReadingUnit (
+        """CREATE TABLE IF NOT EXISTS LibraryReadingUnit (
             id TEXT PRIMARY KEY, editionId TEXT, volumeId TEXT, fileId TEXT, unitType TEXT, title TEXT, href TEXT,
             mediaType TEXT, sortOrder INTEGER, width INTEGER, height INTEGER, size INTEGER, metadataJson TEXT,
             createdAt TEXT, updatedAt TEXT
         )""",
-        """CREATE TABLE LibraryMetadata (
+        """CREATE TABLE IF NOT EXISTS LibraryMetadata (
             id TEXT PRIMARY KEY, editionId TEXT, source TEXT, rawJson TEXT, createdAt TEXT, updatedAt TEXT
         )""",
-        """CREATE TABLE ImportTask (
+        """CREATE TABLE IF NOT EXISTS ImportTask (
             id TEXT PRIMARY KEY, monitorFolderId TEXT, workId TEXT, editionId TEXT, volumeId TEXT, origin TEXT,
             status TEXT, originalName TEXT, sourcePath TEXT, contentHash TEXT,
             progress INTEGER, duplicate BOOLEAN, duration INTEGER, errorSummary TEXT, errorCode TEXT,
             retryable BOOLEAN DEFAULT 0, attempts INTEGER DEFAULT 0, leaseOwner TEXT, leaseExpiresAt TEXT, message TEXT,
             startedAt TEXT, finishedAt TEXT, createdAt TEXT, updatedAt TEXT
         )""",
-        """CREATE TABLE BookConversionTask (
+        """CREATE TABLE IF NOT EXISTS BookConversionTask (
             id TEXT PRIMARY KEY, importTaskId TEXT UNIQUE, mode TEXT, sourceFormat TEXT, targetFormat TEXT,
             sourcePath TEXT, outputPath TEXT, sourceHash TEXT, converter TEXT, converterVersion TEXT,
             optionsJson TEXT, status TEXT, progress INTEGER, attempts INTEGER, retryable BOOLEAN,
             errorCode TEXT, errorSummary TEXT, startedAt TEXT, finishedAt TEXT, createdAt TEXT, updatedAt TEXT
         )""",
-        """CREATE TABLE ImportLog (
+        """CREATE TABLE IF NOT EXISTS ImportLog (
             id TEXT PRIMARY KEY, importTaskId TEXT, level TEXT, message TEXT, createdAt TEXT
         )""",
-        """CREATE TABLE OrganizeJob (
+        """CREATE TABLE IF NOT EXISTS OrganizeJob (
             id TEXT PRIMARY KEY, workId TEXT, editionId TEXT, importTaskId TEXT, status TEXT, issueCodes TEXT,
             summary TEXT, errorSummary TEXT, createdAt TEXT, updatedAt TEXT
         )""",
-        """CREATE TABLE LibraryFacet (
+        """CREATE TABLE IF NOT EXISTS LibraryFacet (
             id TEXT PRIMARY KEY, kind TEXT, name TEXT, normalizedName TEXT, aliases TEXT, createdAt TEXT, updatedAt TEXT,
             UNIQUE(kind, normalizedName)
         )""",
-        """CREATE TABLE LibraryWorkFacet (
+        """CREATE TABLE IF NOT EXISTS LibraryWorkFacet (
             facetId TEXT, workId TEXT, sortOrder INTEGER, createdAt TEXT, PRIMARY KEY(facetId, workId)
         )""",
-        """CREATE TABLE LibraryEditionFacet (
+        """CREATE TABLE IF NOT EXISTS LibraryEditionFacet (
             facetId TEXT, editionId TEXT, createdAt TEXT, PRIMARY KEY(facetId, editionId)
         )""",
-        """CREATE TABLE MetadataLookupTask (
+        """CREATE TABLE IF NOT EXISTS MetadataLookupTask (
             id TEXT PRIMARY KEY, workId TEXT, editionId TEXT, importTaskId TEXT UNIQUE, organizeJobId TEXT,
             status TEXT, providerOrder TEXT, attempts INTEGER, nextAttemptAt TEXT, resultSource TEXT,
             candidateRawJson TEXT, appliedFields TEXT, errorSummary TEXT, startedAt TEXT, finishedAt TEXT,
@@ -95,7 +95,7 @@ def create_worker_tables(db):
 def create_metadata_provider_tables(db):
     db.execute(
         text(
-            """CREATE TABLE MetadataSuggestion (
+            """CREATE TABLE IF NOT EXISTS MetadataSuggestion (
                 id TEXT PRIMARY KEY, jobId TEXT, field TEXT, currentValue TEXT, suggestedValue TEXT,
                 source TEXT, confidence REAL, reason TEXT, status TEXT, createdAt TEXT, updatedAt TEXT
             )"""
@@ -646,8 +646,8 @@ def test_watch_epub_prefers_filename_when_opf_title_conflicts(db_session, test_s
 def test_watched_import_adds_new_and_previously_imported_work_to_target_shelf(db_session, test_settings, tmp_path, monkeypatch):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
-    db_session.execute(text("CREATE TABLE Shelf (id TEXT PRIMARY KEY, name TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)"))
-    db_session.execute(text("CREATE TABLE ShelfWork (shelfId TEXT NOT NULL, workId TEXT NOT NULL, createdAt TEXT NOT NULL, PRIMARY KEY (shelfId, workId))"))
+    db_session.execute(text("CREATE TABLE IF NOT EXISTS Shelf (id TEXT PRIMARY KEY, name TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)"))
+    db_session.execute(text("CREATE TABLE IF NOT EXISTS ShelfWork (shelfId TEXT NOT NULL, workId TEXT NOT NULL, createdAt TEXT NOT NULL, PRIMARY KEY (shelfId, workId))"))
     db_session.execute(text("INSERT INTO Shelf (id, name, createdAt, updatedAt) VALUES ('target-shelf', '自动收录', 'now', 'now')"))
     db_session.execute(text("INSERT INTO MonitorFolder (id, name, rootPath, shelfId, enabled, ignoreHidden, minFileSizeBytes, createdAt, updatedAt) VALUES ('folder-1', '测试目录', :root_path, 'target-shelf', 1, 1, 1, 'now', 'now')"), {"root_path": str(tmp_path)})
     db_session.commit()

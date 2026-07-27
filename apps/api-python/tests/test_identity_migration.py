@@ -36,14 +36,14 @@ def test_identity_backfill_selects_earliest_visible_canonical_without_merging_re
     db_session.execute(
         text(
             """
-            CREATE TABLE DuplicateCandidate (
+            CREATE TABLE IF NOT EXISTS DuplicateCandidate (
                 id TEXT PRIMARY KEY, jobId TEXT, targetWorkId TEXT, reasons TEXT, confidence REAL,
                 suggestedAction TEXT, status TEXT, createdAt TEXT, updatedAt TEXT
             )
             """
         )
     )
-    db_session.execute(text("CREATE TABLE LibraryReadingProgress (id TEXT PRIMARY KEY, workId TEXT, position TEXT)"))
+    db_session.execute(text("CREATE TABLE IF NOT EXISTS LibraryReadingProgress (id TEXT PRIMARY KEY, workId TEXT, position TEXT)"))
     desired = identity_merge_key("同一本书", "同一作者")
     _insert_work(db_session, "hidden-oldest", "同一本书", "同一作者", "ebook:legacy-hidden", "2020-01-01", hidden=1)
     _insert_work(db_session, "visible-canonical", "同一本书", "同一作者", "ebook:legacy-visible", "2021-01-01")

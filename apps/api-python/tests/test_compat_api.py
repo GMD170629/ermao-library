@@ -136,7 +136,7 @@ def _comic_page_jpeg_bytes() -> bytes:
 def create_source_tables(db_session):
     db_session.execute(
         text(
-            """CREATE TABLE Source (
+            """CREATE TABLE IF NOT EXISTS Source (
                 id TEXT PRIMARY KEY, name TEXT, kind TEXT, providerType TEXT, enabled BOOLEAN, priority INTEGER,
                 config TEXT, credentialsKey TEXT, capabilities TEXT, rateLimit TEXT, lastTestAt TEXT,
                 lastTestStatus TEXT, lastError TEXT, createdAt TEXT, updatedAt TEXT
@@ -145,7 +145,7 @@ def create_source_tables(db_session):
     )
     db_session.execute(
         text(
-            """CREATE TABLE SourceSearchRecord (
+            """CREATE TABLE IF NOT EXISTS SourceSearchRecord (
                 id TEXT PRIMARY KEY, sourceId TEXT, providerType TEXT, externalId TEXT, title TEXT,
                 subtitle TEXT, author TEXT, description TEXT, coverUrl TEXT, externalUrl TEXT, format TEXT,
                 size TEXT, language TEXT, publishedAt TEXT, downloadAvailable BOOLEAN, downloadMeta TEXT,
@@ -159,7 +159,7 @@ def create_source_tables(db_session):
 def create_download_tables(db_session):
     db_session.execute(
         text(
-            """CREATE TABLE DownloadTask (
+            """CREATE TABLE IF NOT EXISTS DownloadTask (
                 id TEXT PRIMARY KEY, sourceId TEXT, searchRecordId TEXT, bookId TEXT, type TEXT, status TEXT,
                 displayName TEXT, remoteRef TEXT, savePath TEXT, filePath TEXT, errorMessage TEXT,
                 progress INTEGER, createdAt TEXT, updatedAt TEXT
@@ -186,7 +186,7 @@ def set_default_download_folder(db_session, root_path):
 def create_organize_detail_tables(db_session):
     db_session.execute(
         text(
-            """CREATE TABLE MetadataSuggestion (
+            """CREATE TABLE IF NOT EXISTS MetadataSuggestion (
                 id TEXT PRIMARY KEY, jobId TEXT, field TEXT, currentValue TEXT, suggestedValue TEXT,
                 source TEXT, confidence REAL, reason TEXT, status TEXT, createdAt TEXT, updatedAt TEXT
             )"""
@@ -194,7 +194,7 @@ def create_organize_detail_tables(db_session):
     )
     db_session.execute(
         text(
-            """CREATE TABLE DuplicateCandidate (
+            """CREATE TABLE IF NOT EXISTS DuplicateCandidate (
                 id TEXT PRIMARY KEY, jobId TEXT, targetWorkId TEXT, reasons TEXT, confidence REAL,
                 suggestedAction TEXT, status TEXT, createdAt TEXT, updatedAt TEXT
             )"""
@@ -683,9 +683,9 @@ def test_core_compat_endpoints_return_envelopes(client, db_session, test_setting
 
 
 def test_shelf_list_is_summary_and_detail_is_lightweight_paginated(client, db_session):
-    db_session.execute(text("CREATE TABLE Shelf (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)"))
-    db_session.execute(text("CREATE TABLE ShelfWork (shelfId TEXT NOT NULL, workId TEXT NOT NULL, createdAt TEXT NOT NULL, PRIMARY KEY (shelfId, workId))"))
-    db_session.execute(text("CREATE TABLE LibraryWork (id TEXT PRIMARY KEY, title TEXT NOT NULL, author TEXT, hidden BOOLEAN, createdAt TEXT, updatedAt TEXT)"))
+    db_session.execute(text("CREATE TABLE IF NOT EXISTS Shelf (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)"))
+    db_session.execute(text("CREATE TABLE IF NOT EXISTS ShelfWork (shelfId TEXT NOT NULL, workId TEXT NOT NULL, createdAt TEXT NOT NULL, PRIMARY KEY (shelfId, workId))"))
+    db_session.execute(text("CREATE TABLE IF NOT EXISTS LibraryWork (id TEXT PRIMARY KEY, title TEXT NOT NULL, author TEXT, hidden BOOLEAN, createdAt TEXT, updatedAt TEXT)"))
     for index in range(25):
         db_session.execute(
             text(
@@ -1540,10 +1540,10 @@ def _create_bulk_management_fixture(db_session):
         "ALTER TABLE LibraryEdition ADD COLUMN durationMs INTEGER",
     ]:
         db_session.execute(text(statement))
-    db_session.execute(text("CREATE TABLE Shelf (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, kind TEXT DEFAULT 'STATIC', rulesJson TEXT DEFAULT '{}', pinned INTEGER DEFAULT 0, createdAt TEXT, updatedAt TEXT)"))
-    db_session.execute(text("CREATE TABLE ShelfWork (shelfId TEXT NOT NULL, workId TEXT NOT NULL, createdAt TEXT, PRIMARY KEY (shelfId, workId))"))
-    db_session.execute(text("CREATE TABLE LibraryConsumptionState (id TEXT PRIMARY KEY, userId TEXT, workId TEXT, mediaKind TEXT, status TEXT, lastEditionId TEXT, lastVolumeId TEXT, lastUnitId TEXT, createdAt TEXT, updatedAt TEXT)"))
-    db_session.execute(text("CREATE TABLE LibraryReadingProgress (id TEXT PRIMARY KEY, userId TEXT, workId TEXT, editionId TEXT, volumeId TEXT, readerType TEXT, position TEXT, page INTEGER, percent REAL, extra TEXT, schemaVersion INTEGER, createdAt TEXT, updatedAt TEXT)"))
+    db_session.execute(text("CREATE TABLE IF NOT EXISTS Shelf (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, kind TEXT DEFAULT 'STATIC', rulesJson TEXT DEFAULT '{}', pinned INTEGER DEFAULT 0, createdAt TEXT, updatedAt TEXT)"))
+    db_session.execute(text("CREATE TABLE IF NOT EXISTS ShelfWork (shelfId TEXT NOT NULL, workId TEXT NOT NULL, createdAt TEXT, PRIMARY KEY (shelfId, workId))"))
+    db_session.execute(text("CREATE TABLE IF NOT EXISTS LibraryConsumptionState (id TEXT PRIMARY KEY, userId TEXT, workId TEXT, mediaKind TEXT, status TEXT, lastEditionId TEXT, lastVolumeId TEXT, lastUnitId TEXT, createdAt TEXT, updatedAt TEXT)"))
+    db_session.execute(text("CREATE TABLE IF NOT EXISTS LibraryReadingProgress (id TEXT PRIMARY KEY, userId TEXT, workId TEXT, editionId TEXT, volumeId TEXT, readerType TEXT, position TEXT, page INTEGER, percent REAL, extra TEXT, schemaVersion INTEGER, createdAt TEXT, updatedAt TEXT)"))
     db_session.execute(text("INSERT INTO Shelf (id, name, kind, createdAt, updatedAt) VALUES ('bulk-shelf', '批量书架', 'STATIC', 'now', 'now')"))
     for index, work_id in enumerate(("bulk-manage-1", "bulk-manage-2"), start=1):
         db_session.execute(
@@ -2383,7 +2383,7 @@ def test_move_content_applies_volume_media_and_backup_rules(client, db_session):
     user_id = db_session.query(User).filter(User.email == "admin@example.com").one().id
     db_session.execute(
         text(
-            """CREATE TABLE LibraryReadingProgress (
+            """CREATE TABLE IF NOT EXISTS LibraryReadingProgress (
                 id TEXT PRIMARY KEY, userId TEXT, workId TEXT, editionId TEXT, volumeId TEXT, readerType TEXT,
                 position TEXT, page INTEGER, percent REAL, extra TEXT, createdAt TEXT, updatedAt TEXT
             )"""
@@ -2878,7 +2878,7 @@ def test_monitor_folder_and_system_settings_mutations(client, db_session, test_s
     (test_settings.resolved_monitor_root / "alpha" / "nested").mkdir()
     second_root = test_settings.resolved_monitor_root.parent / "second-inbox"
     second_root.mkdir(parents=True)
-    db_session.execute(text("CREATE TABLE Shelf (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)"))
+    db_session.execute(text("CREATE TABLE IF NOT EXISTS Shelf (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)"))
     db_session.execute(text("INSERT INTO Shelf (id, name, createdAt, updatedAt) VALUES ('auto-shelf', '自动收录', 'now', 'now')"))
     db_session.commit()
     _login(client, db_session)
@@ -4694,7 +4694,7 @@ def test_multi_volume_comic_progress_is_volume_scoped_and_bootstrap_opens_next_t
     db_session.execute(
         text(
             """
-            CREATE TABLE LibraryReadingProgress (
+            CREATE TABLE IF NOT EXISTS LibraryReadingProgress (
                 id TEXT PRIMARY KEY, userId TEXT, workId TEXT, editionId TEXT, volumeId TEXT,
                 readerType TEXT, position TEXT, page INTEGER, percent REAL, extra TEXT,
                 createdAt TEXT, updatedAt TEXT
@@ -4820,7 +4820,7 @@ def test_multi_volume_epub_detail_returns_selected_volume_chapters_and_scoped_pr
     db_session.execute(
         text(
             """
-            CREATE TABLE LibraryReadingProgress (
+            CREATE TABLE IF NOT EXISTS LibraryReadingProgress (
                 id TEXT PRIMARY KEY, userId TEXT, workId TEXT, editionId TEXT, volumeId TEXT,
                 readerType TEXT, position TEXT, page INTEGER, percent REAL, extra TEXT,
                 createdAt TEXT, updatedAt TEXT
@@ -4992,7 +4992,7 @@ def test_imported_pdf_supports_stream_bootstrap_and_v2_progress(client, db_sessi
     db_session.execute(
         text(
             """
-            CREATE TABLE LibraryReadingProgress (
+            CREATE TABLE IF NOT EXISTS LibraryReadingProgress (
                 id TEXT PRIMARY KEY, userId TEXT, workId TEXT, editionId TEXT, volumeId TEXT,
                 readerType TEXT, position TEXT, page INTEGER, percent REAL, extra TEXT,
                 createdAt TEXT, updatedAt TEXT
@@ -5003,7 +5003,7 @@ def test_imported_pdf_supports_stream_bootstrap_and_v2_progress(client, db_sessi
     db_session.execute(
         text(
             """
-            CREATE TABLE ReaderPreference (
+            CREATE TABLE IF NOT EXISTS ReaderPreference (
                 id TEXT PRIMARY KEY, userId TEXT, readerType TEXT, settings TEXT,
                 createdAt TEXT, updatedAt TEXT
             )

@@ -90,7 +90,7 @@ def _reader_tables(db_session) -> None:
     create_worker_tables(db_session)
     db_session.execute(
         text(
-            """CREATE TABLE ReaderPreference (
+            """CREATE TABLE IF NOT EXISTS ReaderPreference (
                 id TEXT PRIMARY KEY, userId TEXT, readerType TEXT, settings TEXT,
                 createdAt TEXT, updatedAt TEXT
             )"""
@@ -98,7 +98,7 @@ def _reader_tables(db_session) -> None:
     )
     db_session.execute(
         text(
-            """CREATE TABLE LibraryReadingProgress (
+            """CREATE TABLE IF NOT EXISTS LibraryReadingProgress (
                 id TEXT PRIMARY KEY, userId TEXT, workId TEXT, editionId TEXT, volumeId TEXT,
                 readerType TEXT, position TEXT, page INTEGER, percent REAL, extra TEXT,
                 schemaVersion INTEGER DEFAULT 1, locationType TEXT, locationJson TEXT,
@@ -109,7 +109,7 @@ def _reader_tables(db_session) -> None:
     )
     db_session.execute(
         text(
-            """CREATE TABLE LibraryConsumptionState (
+            """CREATE TABLE IF NOT EXISTS LibraryConsumptionState (
                 id TEXT PRIMARY KEY, userId TEXT NOT NULL, workId TEXT NOT NULL,
                 mediaKind TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'UNREAD',
                 lastEditionId TEXT, lastVolumeId TEXT, lastUnitId TEXT,
@@ -739,7 +739,7 @@ def test_progress_cursor_atomically_rejects_concurrent_duplicate_sequence(tmp_pa
     with engine.begin() as connection:
         connection.execute(
             text(
-                """CREATE TABLE ReaderProgressCursor (
+                """CREATE TABLE IF NOT EXISTS ReaderProgressCursor (
                     id TEXT PRIMARY KEY, userId TEXT NOT NULL, workId TEXT NOT NULL, clientId TEXT NOT NULL,
                     highWater INTEGER NOT NULL, lastMutationId TEXT, createdAt TEXT, updatedAt TEXT,
                     UNIQUE(userId, workId, clientId)

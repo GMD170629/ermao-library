@@ -277,7 +277,7 @@ def test_lookup_keeps_existing_identity_when_overwrite_is_disabled_and_fills_oth
     task = _insert_lookup_fixture(db_session, title="鹰峰同学请穿上衣服", author="柊裕一")
     db_session.execute(
         text(
-            "CREATE TABLE OrganizePolicy (id TEXT PRIMARY KEY, overwriteTitleAuthor INTEGER NOT NULL DEFAULT 1)"
+            "CREATE TABLE IF NOT EXISTS OrganizePolicy (id TEXT PRIMARY KEY, overwriteTitleAuthor INTEGER NOT NULL DEFAULT 1)"
         )
     )
     db_session.execute(text("INSERT INTO OrganizePolicy (id, overwriteTitleAuthor) VALUES ('default', 0)"))
@@ -390,7 +390,7 @@ def test_external_metadata_cache_only_saves_successful_non_empty_results(db_sess
     db_session.execute(
         text(
             """
-            CREATE TABLE ExternalMetadataCache (
+            CREATE TABLE IF NOT EXISTS ExternalMetadataCache (
                 id TEXT PRIMARY KEY, provider TEXT, queryKey TEXT, rawJson TEXT, expiresAt TEXT,
                 createdAt TEXT, updatedAt TEXT, UNIQUE(provider, queryKey)
             )
@@ -423,7 +423,7 @@ def test_ai_metadata_cache_reuses_only_non_empty_successes(db_session, monkeypat
     db_session.execute(
         text(
             """
-            CREATE TABLE ExternalMetadataCache (
+            CREATE TABLE IF NOT EXISTS ExternalMetadataCache (
                 id TEXT PRIMARY KEY, provider TEXT, queryKey TEXT, rawJson TEXT, expiresAt TEXT,
                 createdAt TEXT, updatedAt TEXT, UNIQUE(provider, queryKey)
             )

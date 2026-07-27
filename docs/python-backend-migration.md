@@ -7,7 +7,7 @@ Shuku Starship now uses Python as the backend runtime. The Next.js app is only t
 - Frontend: `apps/web` renders pages and calls `/api/...`.
 - API: `apps/api-python/app/main.py` serves all public API routes through FastAPI.
 - Worker: `apps/api-python/app/worker` handles monitor-folder importing.
-- Database schema initialization is owned by Python API startup; there is no separate migrator container.
+- Database schema initialization is owned by Python API/Worker startup via Alembic; there is no separate migrator container.
 - Next.js API route handlers under `apps/web/app/api` have been removed.
 - TypeScript scanner/import/organize backend code under `packages/scanner` has been removed.
 
@@ -21,6 +21,19 @@ flowchart LR
   Worker --> Storage
   Worker --> Monitor["/monitor"]
 ```
+
+## SQLite schema migrations (Alembic)
+
+- Authority: Alembic revisions under `apps/api-python/app/db/alembic/versions/`. The squashed baseline is `28bd57c8f2a9` (`baseline_v14`), matching the former `PRAGMA user_version = 14` target schema.
+- Startup path (`app/db/bootstrap.py` → `app/db/runner.py`):
+  - empty DB → `alembic upgrade head`
+  - existing DB with `alembic_version` → `upgrade head`
+  - pre-Alembic DB with `user_version == 14` → stamp head (no DDL replay)
+  - pre-Alembic DB with `user_version < 14` → frozen `legacy_bridge` upgrades to 14, then stamp
+- Data backfills remain in `app/db/seed.py` (keyed by `SystemSetting`), separate from schema revisions.
+- Timestamp normalization triggers are ensured after every schema apply (`app/db/timestamp_triggers.py`). Table and column discovery uses SQLAlchemy Inspector. SQLite has no SQLAlchemy schema construct for triggers, so the final `CREATE/DROP TRIGGER` DDL is a narrow dialect-specific exception owned by DB bootstrap; remove it once every non-legacy timestamp writer uses typed SQLAlchemy ORM/expression APIs.
+- Exit condition for `legacy_bridge.py`: drop once no supported deploy path still upgrades from pre-v14 databases.
+- CLI: `python -m app.db.bootstrap` (same entry as before); Alembic config at `app/db/alembic.ini`.
 
 ## Verification
 
