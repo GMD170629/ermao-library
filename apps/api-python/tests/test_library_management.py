@@ -8,7 +8,6 @@ from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
 from app.services.library_filters import compile_filter_rules, library_filter_schema
 from app.services.library_management import (
-    backfill_library_facets,
     count_categories,
     delete_category,
     duplicate_groups,
@@ -17,6 +16,7 @@ from app.services.library_management import (
     merge_works,
     rename_category,
     smart_shelf_work_ids,
+    sync_work_facets,
     undo_operation,
 )
 
@@ -46,6 +46,7 @@ def _insert_work(db: Session, work_id: str, title: str, author: str, tags: list[
     )
     db.execute(text("UPDATE `LibraryWork` SET `primaryEditionId` = :edition_id WHERE `id` = :work_id"), {"edition_id": f"edition-{work_id}", "work_id": work_id})
     db.commit()
+    sync_work_facets(db, work_id)
 
 
 def test_duplicates_smart_shelf_merge_and_undo_use_persisted_v9_data(tmp_path) -> None:
@@ -56,8 +57,6 @@ def test_duplicates_smart_shelf_merge_and_undo_use_persisted_v9_data(tmp_path) -
         with Session(engine) as db:
             _insert_work(db, "work-a", "星海列车", "林川", ["科幻", "收藏"])
             _insert_work(db, "work-b", "星海列车", "林川", ["科幻小说"])
-            backfill_library_facets(db)
-
             assert len(duplicate_groups(db)) == 1
             assert smart_shelf_work_ids(db, {"search": "星海", "tags": ["科幻"]}) == ["work-a"]
             assert {item["name"] for item in list_categories(db, "TAG")} == {"科幻", "收藏", "科幻小说"}
@@ -82,8 +81,6 @@ def test_category_listing_supports_count_search_and_stable_pagination(tmp_path) 
         with Session(engine) as db:
             for index in range(1, 26):
                 _insert_work(db, f"work-{index:02d}", f"作品 {index:02d}", f"作者 {index:02d}", [f"标签 {index:02d}"])
-            backfill_library_facets(db)
-
             assert count_categories(db, "AUTHOR") == 25
             first_page = list_categories(db, "AUTHOR", limit=10, offset=0)
             third_page = list_categories(db, "AUTHOR", limit=10, offset=20)
@@ -104,7 +101,6 @@ def test_category_merge_rename_and_undo_restore_legacy_metadata(tmp_path) -> Non
         with Session(engine) as db:
             _insert_work(db, "work-a", "边界", "林川", ["科幻"])
             _insert_work(db, "work-b", "远航", "周禾", ["科幻小说"])
-            backfill_library_facets(db)
             tags = {item["name"]: item for item in list_categories(db, "TAG")}
 
             merged = merge_categories(db, "TAG", [tags["科幻小说"]["id"]], tags["科幻"]["id"], None)
@@ -135,7 +131,7 @@ def test_category_delete_clears_all_metadata_kinds_and_supports_undo(tmp_path) -
                 )
             )
             db.commit()
-            backfill_library_facets(db)
+            sync_work_facets(db, "work-a")
 
             for kind, name in (
                 ("TAG", "科幻"),
@@ -178,7 +174,6 @@ def test_deleting_a_work_only_author_uses_unknown_author_fallback(tmp_path) -> N
         bootstrap_database(engine, settings)
         with Session(engine) as db:
             _insert_work(db, "work-a", "边界", "林川", [])
-            backfill_library_facets(db)
             author = next(item for item in list_categories(db, "AUTHOR") if item["name"] == "林川")
 
             delete_category(db, author["id"], None)
@@ -220,8 +215,6 @@ def test_dynamic_filters_cover_metadata_files_shelves_folders_and_free_combinati
             db.execute(text("INSERT INTO `Shelf` (`id`, `name`, `updatedAt`) VALUES ('shelf-a', '科幻收藏', '2026-07-22T00:00:00')"))
             db.execute(text("INSERT INTO `ShelfWork` (`shelfId`, `workId`, `createdAt`) VALUES ('shelf-a', 'work-a', '2026-07-22T00:00:00')"))
             db.commit()
-            backfill_library_facets(db)
-
             all_rules = {
                 "combinator": "ALL",
                 "conditions": [

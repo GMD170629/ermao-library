@@ -6,10 +6,20 @@ from pathlib import Path
 from sqlalchemy import text
 
 from app.core.auth import hash_password
+from app.db.base import Base
 from app.db.bootstrap import apply_schema
 from app.models.auth import User
 from app.services import email_settings, kindle_queue
-from app.services.kindle_queue import process_next_kindle_send_task, recover_interrupted_tasks
+from app.services.kindle_queue import (
+    process_next_kindle_send_task,
+    recover_interrupted_tasks,
+)
+
+
+def _apply_full_schema(db_session) -> None:
+    db_session.rollback()
+    Base.metadata.create_all(db_session.get_bind())
+    apply_schema(db_session.get_bind())
 
 
 def _login(client, db_session) -> None:
@@ -21,7 +31,7 @@ def _login(client, db_session) -> None:
 
 
 def _prepare(client, db_session, test_settings, *, max_attachment_mb: float | None = None) -> Path:
-    apply_schema(db_session.get_bind())
+    _apply_full_schema(db_session)
     _login(client, db_session)
     smtp = {
         "host": "smtp.example.com",
@@ -94,7 +104,7 @@ class FakeSmtp:
 
 
 def test_email_settings_mask_password_test_connection_and_clear(client, db_session, monkeypatch):
-    apply_schema(db_session.get_bind())
+    _apply_full_schema(db_session)
     _login(client, db_session)
     saved = client.put(
         "/api/email-settings",

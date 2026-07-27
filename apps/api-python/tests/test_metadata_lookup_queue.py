@@ -3,9 +3,11 @@ import json
 import pytest
 from sqlalchemy import text
 
-from app.db.bootstrap import reconcile_metadata_lookup_organize_statuses, requeue_metadata_no_match_tasks_for_title_aliases
 from app.services import metadata_lookup_queue as queue
-from app.services.metadata_lookup_queue import process_metadata_lookup_task, recover_stale_metadata_lookup_tasks
+from app.services.metadata_lookup_queue import (
+    process_metadata_lookup_task,
+    recover_stale_metadata_lookup_tasks,
+)
 from app.services.organize_service import (
     external_metadata_cache_get,
     external_metadata_cache_put,
@@ -309,58 +311,6 @@ def test_lookup_keeps_existing_identity_when_overwrite_is_disabled_and_fills_oth
     assert json.loads(lookup) == ["description"]
     assert db_session.execute(text("SELECT status FROM OrganizeJob WHERE id = 'job-lookup'")).scalar() == "APPLIED"
     assert db_session.execute(text("SELECT COUNT(*) FROM LibraryMetadata WHERE editionId = 'edition-lookup'")).scalar() == 1
-
-
-def test_startup_reconciles_completed_lookup_out_of_pending_organize(db_session):
-    create_worker_tables(db_session)
-    _insert_lookup_fixture(db_session)
-    db_session.execute(text("UPDATE MetadataLookupTask SET status = 'COMPLETED', resultSource = 'douban' WHERE id = 'lookup-1'"))
-    db_session.commit()
-
-    reconcile_metadata_lookup_organize_statuses(db_session)
-
-    work = db_session.execute(text("SELECT organized, organizeStatus FROM LibraryWork WHERE id = 'work-lookup'")).mappings().one()
-    assert work["organized"] == 1
-    assert work["organizeStatus"] == "APPLIED"
-    assert db_session.execute(text("SELECT status FROM OrganizeJob WHERE id = 'job-lookup'")).scalar() == "APPLIED"
-
-
-def test_startup_keeps_no_match_job_failed_when_work_was_already_organized(db_session):
-    create_worker_tables(db_session)
-    _insert_lookup_fixture(db_session)
-    db_session.execute(
-        text("UPDATE LibraryWork SET organized = 1, organizeStatus = 'APPLIED' WHERE id = 'work-lookup'")
-    )
-    db_session.execute(text("UPDATE MetadataLookupTask SET status = 'NO_MATCH' WHERE id = 'lookup-1'"))
-    db_session.execute(text("UPDATE OrganizeJob SET status = 'APPLIED' WHERE id = 'job-lookup'"))
-    db_session.commit()
-
-    reconcile_metadata_lookup_organize_statuses(db_session)
-
-    work = db_session.execute(
-        text("SELECT organized, organizeStatus FROM LibraryWork WHERE id = 'work-lookup'")
-    ).mappings().one()
-    assert dict(work) == {"organized": 1, "organizeStatus": "APPLIED"}
-    job = db_session.execute(
-        text("SELECT status, summary FROM OrganizeJob WHERE id = 'job-lookup'")
-    ).mappings().one()
-    assert job["status"] == "FAILED"
-    assert job["summary"] == "未找到唯一确定的精确匹配"
-
-
-def test_startup_requeues_legacy_no_match_tasks_only_once(db_session):
-    create_worker_tables(db_session)
-    _insert_lookup_fixture(db_session)
-    db_session.execute(text("CREATE TABLE IF NOT EXISTS SystemSetting (`key` TEXT PRIMARY KEY, `value` TEXT, `createdAt` TEXT, `updatedAt` TEXT)"))
-    db_session.execute(text("UPDATE MetadataLookupTask SET status = 'NO_MATCH', attempts = 2, finishedAt = 'now' WHERE id = 'lookup-1'"))
-
-    assert requeue_metadata_no_match_tasks_for_title_aliases(db_session) == 1
-    task = db_session.execute(text("SELECT status, attempts, finishedAt FROM MetadataLookupTask WHERE id = 'lookup-1'")).mappings().one()
-    assert dict(task) == {"status": "PENDING", "attempts": 0, "finishedAt": None}
-
-    db_session.execute(text("UPDATE MetadataLookupTask SET status = 'NO_MATCH' WHERE id = 'lookup-1'"))
-    assert requeue_metadata_no_match_tasks_for_title_aliases(db_session) == 0
-    assert db_session.execute(text("SELECT status FROM MetadataLookupTask WHERE id = 'lookup-1'")).scalar() == "NO_MATCH"
 
 
 def test_stale_running_lookup_is_recovered(db_session):

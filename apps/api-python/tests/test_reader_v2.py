@@ -1,6 +1,6 @@
+import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-import json
 from threading import Barrier
 
 from sqlalchemy import create_engine, text
@@ -8,7 +8,6 @@ from sqlalchemy.orm import sessionmaker
 
 from app.api.routes.reader_v2 import _claim_client_sequence
 from app.core.auth import hash_password
-from app.db.bootstrap import seed_reader_progress_cursors
 from app.models.auth import User
 from app.schemas.reader_v2 import ReaderPreferences, ReaderServerPreferences
 from tests.test_worker_importer import create_worker_tables, write_comic_fixture
@@ -837,45 +836,6 @@ def test_progress_cursor_lazily_backfills_visible_legacy_client_sequence(client,
     assert cursor == 4
     progress = db_session.execute(text("SELECT mutationId, position FROM LibraryReadingProgress")).mappings().one()
     assert dict(progress) == {"mutationId": "legacy-mutation", "position": "legacy-cfi"}
-
-
-def test_database_bootstrap_backfills_cursor_without_lowering_existing_watermark(client, db_session):
-    _reader_tables(db_session)
-    user_id = _login(client, db_session)
-    _epub_fixture(db_session)
-    db_session.execute(
-        text(
-            """INSERT INTO LibraryReadingProgress (
-                id, userId, workId, editionId, volumeId, readerType, position, percent, extra,
-                clientId, clientSequence, mutationId, createdAt, updatedAt
-            ) VALUES (
-                'bootstrap-progress', :user_id, 'work-v2', 'edition-v2', 'volume-v2', 'epub',
-                'cfi-4', 40, '{}', 'bootstrap-client', 4, 'mutation-4', '2026-07-09', '2026-07-09'
-            )"""
-        ),
-        {"user_id": user_id},
-    )
-    db_session.commit()
-
-    seed_reader_progress_cursors(db_session)
-    db_session.commit()
-    assert db_session.execute(text("SELECT highWater FROM ReaderProgressCursor")).scalar() == 4
-
-    db_session.execute(
-        text("UPDATE LibraryReadingProgress SET clientSequence = 3, mutationId = 'mutation-3'")
-    )
-    seed_reader_progress_cursors(db_session)
-    db_session.commit()
-    cursor = db_session.execute(text("SELECT highWater, lastMutationId FROM ReaderProgressCursor")).mappings().one()
-    assert dict(cursor) == {"highWater": 4, "lastMutationId": "mutation-4"}
-
-    db_session.execute(
-        text("UPDATE LibraryReadingProgress SET clientSequence = 6, mutationId = 'mutation-6'")
-    )
-    seed_reader_progress_cursors(db_session)
-    db_session.commit()
-    cursor = db_session.execute(text("SELECT highWater, lastMutationId FROM ReaderProgressCursor")).mappings().one()
-    assert dict(cursor) == {"highWater": 6, "lastMutationId": "mutation-6"}
 
 
 def test_all_reader_v1_preferences_bootstrap_and_progress_protocols_are_gone(client, db_session):

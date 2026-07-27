@@ -1,4 +1,4 @@
-"""Alembic-backed schema migration runner with legacy user_version bridging."""
+"""Alembic-backed schema migration runner for fresh, v14, and Alembic databases."""
 
 from __future__ import annotations
 
@@ -13,14 +13,13 @@ from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy.engine import Engine
 
-from app.core.config import Settings
-from app.db.base import Base
-from app.db.legacy_bridge import CURRENT_SCHEMA_VERSION, upgrade_user_version_to_current
-from app.db.timestamp_triggers import ensure_timestamp_triggers
 import app.models  # noqa: F401 — ensure metadata is complete
+from app.core.config import Settings
+from app.db.timestamp_triggers import ensure_timestamp_triggers
 
 LOGGER = logging.getLogger(__name__)
 SCHEMA_LOCK_RETRY_SECONDS = 60.0
+BASELINE_USER_VERSION = 14
 
 
 def alembic_config_for_engine(engine: Engine) -> Config:
@@ -28,18 +27,24 @@ def alembic_config_for_engine(engine: Engine) -> Config:
 
     ini_path = Path(__file__).resolve().parent / "alembic.ini"
     config = Config(str(ini_path))
-    config.set_main_option("script_location", str(Path(__file__).resolve().parent / "alembic"))
+    config.set_main_option(
+        "script_location", str(Path(__file__).resolve().parent / "alembic")
+    )
     database = engine.url.database
     if database:
         config.set_main_option("sqlalchemy.url", f"sqlite+pysqlite:///{database}")
     else:
         # :memory: — URL alone is not enough; callers must pass connection via attributes.
-        config.set_main_option("sqlalchemy.url", engine.url.render_as_string(hide_password=False))
+        config.set_main_option(
+            "sqlalchemy.url", engine.url.render_as_string(hide_password=False)
+        )
     return config
 
 
 def head_revision(engine: Engine | None = None) -> str:
-    config = alembic_config_for_engine(engine) if engine is not None else _default_config()
+    config = (
+        alembic_config_for_engine(engine) if engine is not None else _default_config()
+    )
     script = ScriptDirectory.from_config(config)
     heads = script.get_heads()
     if len(heads) != 1:
@@ -50,7 +55,9 @@ def head_revision(engine: Engine | None = None) -> str:
 def _default_config() -> Config:
     ini_path = Path(__file__).resolve().parent / "alembic.ini"
     config = Config(str(ini_path))
-    config.set_main_option("script_location", str(Path(__file__).resolve().parent / "alembic"))
+    config.set_main_option(
+        "script_location", str(Path(__file__).resolve().parent / "alembic")
+    )
     return config
 
 
@@ -69,7 +76,9 @@ def _alembic_version(connection: sqlite3.Connection) -> str | None:
     ).fetchone()
     if row is None:
         return None
-    version_row = connection.execute("SELECT version_num FROM alembic_version LIMIT 1").fetchone()
+    version_row = connection.execute(
+        "SELECT version_num FROM alembic_version LIMIT 1"
+    ).fetchone()
     if version_row is None:
         return None
     return str(version_row[0])
@@ -103,7 +112,9 @@ def _looks_like_baseline_schema(connection: sqlite3.Connection) -> bool:
     return True
 
 
-def _backup_before_migration(connection: sqlite3.Connection, settings: Settings, label: str) -> None:
+def _backup_before_migration(
+    connection: sqlite3.Connection, settings: Settings, label: str
+) -> None:
     backup_dir = settings.database_path.parent / "migrations"
     backup_dir.mkdir(parents=True, exist_ok=True)
     backup_path = backup_dir / f"shuku-before-alembic-{label}.sqlite3"
@@ -147,36 +158,36 @@ def _apply_schema_once(engine: Engine, settings: Settings | None = None) -> None
             raw_connection = None
             _upgrade_head(engine)
         elif not has_tables:
-            if settings is not None and engine.url.database not in (None, "", ":memory:"):
+            if settings is not None and engine.url.database not in (
+                None,
+                "",
+                ":memory:",
+            ):
                 _backup_before_migration(driver_connection, settings, head)
             raw_connection.close()
             raw_connection = None
             _upgrade_head(engine)
-        elif user_version == CURRENT_SCHEMA_VERSION or (
+        elif user_version == BASELINE_USER_VERSION or (
             user_version == 0 and _looks_like_baseline_schema(driver_connection)
         ):
-            # Stamp: pre-Alembic v14 DBs, or test/create_all DBs that already match baseline.
-            if settings is not None and engine.url.database not in (None, "", ":memory:"):
+            # Stamp trusted v14 DBs, or test/create_all DBs that already match baseline.
+            if settings is not None and engine.url.database not in (
+                None,
+                "",
+                ":memory:",
+            ):
                 _backup_before_migration(driver_connection, settings, f"stamp-{head}")
             raw_connection.close()
             raw_connection = None
             _stamp_head(engine)
-        elif user_version < CURRENT_SCHEMA_VERSION:
-            if settings is not None and engine.url.database not in (None, "", ":memory:"):
-                _backup_before_migration(driver_connection, settings, f"legacy-{CURRENT_SCHEMA_VERSION}")
-            upgrade_user_version_to_current(driver_connection, settings)
-            actual = _user_version(driver_connection)
-            if actual != CURRENT_SCHEMA_VERSION:
-                raise RuntimeError(
-                    f"legacy bridge did not reach schema version {CURRENT_SCHEMA_VERSION}: got {actual}"
-                )
-            raw_connection.close()
-            raw_connection = None
-            Base.metadata.create_all(engine, checkfirst=True)
-            _stamp_head(engine)
+        elif user_version < BASELINE_USER_VERSION:
+            raise RuntimeError(
+                f"不支持 pre-v14 数据库（user_version={user_version}）；"
+                "请先使用支持旧版本迁移的应用升级到 v14"
+            )
         else:
             raise RuntimeError(
-                f"数据库版本 {user_version} 高于当前应用支持的版本 {CURRENT_SCHEMA_VERSION}，请升级应用"
+                f"数据库版本 {user_version} 高于当前应用支持的版本 {BASELINE_USER_VERSION}，请升级应用"
             )
     finally:
         if raw_connection is not None:
@@ -190,7 +201,7 @@ def _apply_schema_once(engine: Engine, settings: Settings | None = None) -> None
 
 
 def apply_schema(engine: Engine, settings: Settings | None = None) -> None:
-    """Apply Alembic migrations (with legacy user_version bridge) and timestamp triggers."""
+    """Apply Alembic migrations for supported databases and timestamp triggers."""
 
     deadline = time.monotonic() + SCHEMA_LOCK_RETRY_SECONDS
     retry_delay = 0.25

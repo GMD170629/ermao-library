@@ -15,17 +15,28 @@ import app.services.audio_metadata as audio_metadata_module
 import app.worker.importer as importer_module
 import app.worker.watcher as watcher_module
 from app.core.auth import hash_password
+from app.db.base import Base
 from app.db.bootstrap import apply_schema
 from app.models.auth import User
-from app.services.audio_metadata import AudioChapterMetadata, AudioFileMetadata, parse_audio_metadata
+from app.services.audio_metadata import (
+    AudioChapterMetadata,
+    AudioFileMetadata,
+    parse_audio_metadata,
+)
 from app.worker.importer import ImportOptions, import_managed_book
 from app.worker.persistent_import_queue import enqueue_import_task, process_import_task
-from app.worker.watcher import MonitorFolderConfig, WatchState, WorkerManager, scan_directory_for_imports
+from app.worker.watcher import (
+    MonitorFolderConfig,
+    WatchState,
+    WorkerManager,
+    scan_directory_for_imports,
+)
 from tests.test_worker_importer import write_epub_metadata_fixture
 
 
 def _initialize_schema(db_session) -> None:
     db_session.rollback()
+    Base.metadata.create_all(db_session.get_bind())
     apply_schema(db_session.get_bind())
     db_session.expire_all()
 

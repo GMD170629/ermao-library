@@ -1,25 +1,40 @@
+import json
+import zipfile
 from functools import partial
-from http.server import BaseHTTPRequestHandler, SimpleHTTPRequestHandler, ThreadingHTTPServer
+from http.server import (
+    BaseHTTPRequestHandler,
+    SimpleHTTPRequestHandler,
+    ThreadingHTTPServer,
+)
 from io import BytesIO
 from itertools import count
-import json
 from pathlib import Path
 from threading import Thread
 from urllib.parse import parse_qs, quote, urlparse
-import zipfile
 
-from PIL import Image, ImageDraw
 import pytest
+from PIL import Image, ImageDraw
 from sqlalchemy import event, text
 
 from app.api.routes import compat
 from app.core.auth import hash_password
+from app.db.base import Base
+from app.db.runner import apply_schema
 from app.models.auth import User
-from app.services.organize_service import bangumi_candidates, douban_candidates, system_settings
 from app.services.download_queue import process_next_download_task
+from app.services.organize_service import (
+    bangumi_candidates,
+    douban_candidates,
+    system_settings,
+)
 from app.worker.importer import ImportOptions, import_managed_book
 from app.worker.persistent_import_queue import process_import_task
-from tests.test_worker_importer import create_worker_tables, write_comic_fixture, write_epub_fixture, write_pdf_fixture
+from tests.test_worker_importer import (
+    create_worker_tables,
+    write_comic_fixture,
+    write_epub_fixture,
+    write_pdf_fixture,
+)
 
 
 def _login(client, db_session):
@@ -4344,6 +4359,8 @@ def test_ebook_metadata_search_and_apply_can_use_bangumi_without_suggestion_refr
 
 def test_backup_create_download_and_restore_database_export(client, db_session, test_settings):
     create_worker_tables(db_session)
+    Base.metadata.create_all(db_session.get_bind())
+    apply_schema(db_session.get_bind())
     test_settings.resolved_storage_root.mkdir(parents=True)
     _login(client, db_session)
     stored_file = test_settings.resolved_storage_root / "books" / "backup-work" / "edition-1" / "book.epub"

@@ -30,7 +30,7 @@
 | --- | --- | --- |
 | P0 | `app/api/routes/compat.py` 约 8,036 行、310 个函数，包含 HTTP、授权、SQL、映射、文件处理和业务编排 | 任意功能调整都可能跨越多个隐含边界；复用 route 私有函数会继续扩大耦合 |
 | P0 | `app/worker/importer.py` 约 3,207 行，串联校验、解析、转换、持久化、封面和事件 | 事务、文件发布、失败恢复和幂等行为集中在单一流程中，难以独立验证 |
-| P0 | `app/db/seed.py` 仍反向导入 service 做回填（schema 已迁 Alembic） | 数据 backfill 依赖运行期业务层，旧库回填行为可能随业务实现漂移 |
+| P0 | ~~`app/db/seed.py` 仍反向导入 service 做回填~~（已清：seed 仅用 ORM/typed expressions 插入缺失默认记录；历史 backfill、启动 repair 与 migration marker 已删除） | 数据 backfill 曾依赖运行期业务层 |
 | P1 | `reader_v2.py` 仍从 `compat.py` 导入私有实现 | 新边界依赖旧兼容路由，阻碍 `compat.py` 退场 |
 | P1 | 后端约有 81 个 `except Exception`、813 处 `Any` | 部分稳定边界缺少错误分类和明确数据契约；需要按风险逐步收窄，不能机械清零 |
 | P1 | Web 有约 39 个文件直接调用 `fetch`，分布在页面、Provider、组件和 feature 中 | 鉴权失效、错误 envelope、取消请求、响应校验和重试策略容易不一致 |
@@ -472,9 +472,9 @@ eligibility/identity
 
 ### 阶段 D：迁移数据库启动逻辑
 
-**已完成（压扁历史）**：schema 迁移已切换到 Alembic；权威目标态为单条 baseline revision（原 `user_version=14`）。`PRAGMA user_version` 增量历史冻结在 `app/db/legacy_bridge.py`，仅用于升级到 baseline 后 stamp。后续 schema 变更只新增 Alembic revision。`legacy_bridge` 退出条件：发布不再支持 pre-v14 库升级。数据 backfill 仍与 schema 分离（`app/db/seed.py`）。
+**已完成（v14-only）**：schema 迁移已切换到 Alembic；权威目标态为单条 baseline revision（原 `user_version=14`）。启动仅支持空库、完整 v14 库、已有 Alembic 库及与 baseline 等价的 `create_all` 测试库；pre-v14 库明确拒绝。后续 schema 变更只新增 Alembic revision。`app/db/seed.py` 只插入缺失默认记录，不执行历史 backfill 或业务状态 repair。
 
-识别现有支持的 SQLite 升级矩阵，为新旧版本建立 fixture；随后将 schema migration、数据 backfill、启动校验分开。禁止在没有升级测试时移动或重写已发布的 Alembic revision（修复用新版本）。
+升级测试覆盖空库、v14 stamp、已有 Alembic 和 baseline-equivalent 测试库，并验证 pre-v14 在任何修复或 stamp 前失败。禁止在没有升级测试时移动或重写已发布的 Alembic revision（修复用新版本）。
 
 ### 阶段 E：拆分 Web 大型页面
 

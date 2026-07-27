@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from datetime import datetime, timezone
 from importlib import metadata as importlib_metadata
 from typing import Any, Protocol
@@ -12,10 +12,15 @@ from urllib.request import urlopen
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
+from app.modules.metadata.public import (
+    BUILTIN_MANIFESTS,
+    METADATA_SOURCE_KIND,
+    ProviderManifest,
+    ensure_metadata_sources,
+)
 
 LOGGER = logging.getLogger(__name__)
 ENTRY_POINT_GROUP = "shuku_starship.metadata_providers"
-METADATA_SOURCE_KIND = "metadata"
 METADATA_WORK_TYPES = ("ebook", "comic", "audiobook")
 
 
@@ -60,32 +65,6 @@ def _row(db: Session, sql: str, params: dict[str, Any] | None = None) -> dict[st
 
 def _rows(db: Session, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     return [dict(item) for item in db.execute(text(sql), params or {}).mappings().all()]
-
-
-@dataclass(frozen=True)
-class ProviderConfigField:
-    key: str
-    label: str
-    kind: str = "text"
-    required: bool = False
-    secret: bool = False
-    placeholder: str | None = None
-    help: str | None = None
-    default: Any = None
-
-
-@dataclass(frozen=True)
-class ProviderManifest:
-    id: str
-    name: str
-    version: str
-    description: str
-    mode: str
-    work_types: tuple[str, ...]
-    fields: tuple[str, ...]
-    capabilities: tuple[str, ...]
-    config_fields: tuple[ProviderConfigField, ...]
-    default_priority: int
 
 
 class MetadataProviderPlugin(Protocol):
@@ -161,67 +140,6 @@ class BuiltinMetadataProvider:
         with urlopen(request, timeout=10) as response:
             status = int(getattr(response, "status", 200) or 200)
         return {"ok": 200 <= status < 400, "message": "连接正常" if status < 400 else f"服务返回 HTTP {status}"}
-
-
-BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
-    ProviderManifest(
-        id="douban",
-        name="豆瓣图书",
-        version="builtin",
-        description="用于电子书和有声书，通过豆瓣读书网页获取图书信息。",
-        mode="search",
-        work_types=("ebook", "audiobook"),
-        fields=("title", "author", "publisher", "description", "tags", "seriesName", "publishedYear", "coverUrl"),
-        capabilities=("automatic", "manual-search", "cover"),
-        config_fields=(
-            ProviderConfigField(
-                key="userAgent",
-                label="User-Agent",
-                required=True,
-                default="ShukuStarship/0.1 (+https://github.com/GMD170629/ermao-library)",
-                help="豆瓣网页请求使用的客户端标识。",
-            ),
-        ),
-        default_priority=100,
-    ),
-    ProviderManifest(
-        id="bangumi",
-        name="Bangumi 漫画",
-        version="builtin",
-        description="用于电子书和漫画，通过 Bangumi 官方 API 获取条目与别名。",
-        mode="search",
-        work_types=("ebook", "comic"),
-        fields=("title", "author", "publisher", "description", "tags", "seriesName", "publishedYear", "coverUrl"),
-        capabilities=("automatic", "manual-search", "cover", "aliases"),
-        config_fields=(
-            ProviderConfigField(key="baseUrl", label="API 地址", required=True, default="https://api.bgm.tv"),
-            ProviderConfigField(
-                key="userAgent",
-                label="User-Agent",
-                required=True,
-                default="ShukuStarship/0.1 (https://github.com/GMD170629/ermao-library)",
-            ),
-            ProviderConfigField(key="accessToken", label="Access Token", kind="password", secret=True, help="可选；用于提高 API 可用性。"),
-        ),
-        default_priority=110,
-    ),
-    ProviderManifest(
-        id="ai",
-        name="AI 元数据识别",
-        version="builtin",
-        description="使用 OpenAI-compatible Chat Completions 推断缺失元数据。",
-        mode="infer",
-        work_types=("ebook", "comic", "audiobook"),
-        fields=("title", "author", "description", "tags", "seriesName", "seriesIndex", "publishedYear"),
-        capabilities=("automatic", "manual-search", "fallback"),
-        config_fields=(
-            ProviderConfigField(key="baseUrl", label="API 地址", required=True, placeholder="https://api.openai.com/v1"),
-            ProviderConfigField(key="model", label="模型", required=True, placeholder="gpt-4.1-mini"),
-            ProviderConfigField(key="apiKey", label="API Key", kind="password", required=True, secret=True),
-        ),
-        default_priority=900,
-    ),
-)
 
 
 class MetadataProviderRegistry:
@@ -304,44 +222,13 @@ def ensure_metadata_provider_sources(db: Session) -> list[dict[str, Any]]:
     if not _has_table(db, "Source"):
         return []
     registry = metadata_provider_registry()
-    legacy = _legacy_values(db)
-    existing = {
-        str(item.get("providerType")): item
-        for item in _rows(db, "SELECT * FROM `Source` WHERE `kind` = :kind", {"kind": METADATA_SOURCE_KIND})
-    }
-    now = _now()
-    for plugin in registry.all():
-        manifest = plugin.manifest
-        if manifest.id in existing:
-            continue
-        enabled = _bool(legacy.get(f"metadata.{manifest.id}.enabled"), False)
-        config = _legacy_provider_config(manifest.id, legacy, manifest)
-        source_id = f"metadata-provider-{manifest.id}"
-        db.execute(
-            text(
-                """
-                INSERT INTO `Source`
-                    (`id`, `name`, `kind`, `providerType`, `enabled`, `priority`, `config`, `capabilities`, `rateLimit`, `createdAt`, `updatedAt`)
-                VALUES
-                    (:id, :name, :kind, :provider_type, :enabled, :priority, :config, :capabilities, :rate_limit, :now, :now)
-                ON CONFLICT (`id`) DO NOTHING
-                """
-            ),
-            {
-                "id": source_id,
-                "name": manifest.name,
-                "kind": METADATA_SOURCE_KIND,
-                "provider_type": manifest.id,
-                "enabled": enabled,
-                "priority": manifest.default_priority,
-                "config": _json_text(config),
-                "capabilities": _json_text(list(manifest.capabilities)),
-                "rate_limit": _json_text({}),
-                "now": now,
-            },
-        )
+    ensure_metadata_sources(db, (plugin.manifest for plugin in registry.all()))
     db.commit()
-    return _rows(db, "SELECT * FROM `Source` WHERE `kind` = :kind ORDER BY `priority`, `createdAt`", {"kind": METADATA_SOURCE_KIND})
+    return _rows(
+        db,
+        "SELECT * FROM `Source` WHERE `kind` = :kind ORDER BY `priority`, `createdAt`",
+        {"kind": METADATA_SOURCE_KIND},
+    )
 
 
 def ensure_metadata_provider_pipelines(db: Session) -> None:

@@ -5,14 +5,16 @@ import json
 from sqlalchemy import text
 
 from app.core.auth import hash_password
+from app.db.base import Base
 from app.db.bootstrap import apply_schema
 from app.models.auth import User
-
 
 PASSWORD = "starshipnas"
 
 
 def _prepare_schema(db_session) -> User:
+    db_session.rollback()
+    Base.metadata.create_all(db_session.get_bind())
     apply_schema(db_session.get_bind())
     admin = User(
         email="admin@example.com",

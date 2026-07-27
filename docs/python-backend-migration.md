@@ -29,10 +29,12 @@ flowchart LR
   - empty DB → `alembic upgrade head`
   - existing DB with `alembic_version` → `upgrade head`
   - pre-Alembic DB with `user_version == 14` → stamp head (no DDL replay)
-  - pre-Alembic DB with `user_version < 14` → frozen `legacy_bridge` upgrades to 14, then stamp
-- Data backfills remain in `app/db/seed.py` (keyed by `SystemSetting`), separate from schema revisions.
+  - complete test DB created from `Base.metadata` → stamp head
+  - any other populated DB, including `user_version < 14` → reject as unsupported
+- `app/db/seed.py` only inserts missing baseline records: `systemName`, `language`, `workDetail.tabOrder`, and the three built-in metadata Sources. It never overwrites existing records, runs historical backfills, repairs business state, or writes migration markers.
 - Timestamp normalization triggers are ensured after every schema apply (`app/db/timestamp_triggers.py`). Table and column discovery uses SQLAlchemy Inspector. SQLite has no SQLAlchemy schema construct for triggers, so the final `CREATE/DROP TRIGGER` DDL is a narrow dialect-specific exception owned by DB bootstrap; remove it once every non-legacy timestamp writer uses typed SQLAlchemy ORM/expression APIs.
-- Exit condition for `legacy_bridge.py`: drop once no supported deploy path still upgrades from pre-v14 databases.
+- Backup archives remain format version 2 and include `databaseRevision`. Restore is allowed only when that value equals the current Alembic head; archives without the field and archives from another revision remain listable/downloadable but fail before clearing data with `BACKUP_DATABASE_REVISION_UNSUPPORTED`.
+- The minimum supported pre-Alembic database is v14. Databases older than v14 must first be upgraded with an older application release.
 - CLI: `python -m app.db.bootstrap` (same entry as before); Alembic config at `app/db/alembic.ini`.
 
 ## Verification

@@ -9,13 +9,13 @@ from pathlib import Path
 from secrets import token_hex
 from typing import Any
 
+from alembic.migration import MigrationContext
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.db.bootstrap import backfill_library_consumption_states
-
+from app.db.runner import head_revision
 
 BACKUP_TABLES: list[tuple[str, str]] = [
     ("users", "User"),
@@ -168,6 +168,13 @@ def counts_for_export(database_export: dict[str, list[dict[str, Any]]]) -> dict[
     }
 
 
+def current_database_revision(db: Session) -> str:
+    revision = MigrationContext.configure(db.connection()).get_current_revision()
+    if revision is None:
+        raise RuntimeError("database has no Alembic revision")
+    return revision
+
+
 def create_backup(db: Session, settings: Settings, kind: str = "manual") -> BackupResult:
     if kind != "manual":
         raise ValueError("BACKUP_KIND_UNSUPPORTED")
@@ -185,6 +192,7 @@ def create_backup(db: Session, settings: Settings, kind: str = "manual") -> Back
         "kind": kind,
         "app": "shuku-starship",
         "version": 2,
+        "databaseRevision": current_database_revision(db),
         "createdAt": created_at.isoformat(),
         "format": "zip",
         "contents": ["metadata.json", "database-export.json", "settings.json"],
@@ -259,25 +267,7 @@ def insert_records(db: Session, table: str, records: list[dict[str, Any]]) -> in
         return 0
     allowed = set(columns(db, table))
     inserted = 0
-    normalized_records = records
-    if table == "LibraryEdition":
-        normalized_records = []
-        visible_primary_keys: set[tuple[str, str]] = set()
-        for source in records:
-            record = dict(source)
-            fmt = str(record.get("format") or "").upper()
-            media_kind = str(record.get("mediaKind") or "").upper()
-            if media_kind not in {"EBOOK", "COMIC", "AUDIOBOOK"}:
-                media_kind = "COMIC" if fmt == "COMIC" else "AUDIOBOOK" if fmt == "AUDIO" else "EBOOK"
-            record["mediaKind"] = media_kind
-            primary_key = (str(record.get("workId") or ""), media_kind)
-            if bool(record.get("primary")) and not bool(record.get("hidden")):
-                if primary_key in visible_primary_keys:
-                    record["primary"] = 0
-                else:
-                    visible_primary_keys.add(primary_key)
-            normalized_records.append(record)
-    for record in normalized_records:
+    for record in records:
         filtered = {key: value for key, value in record.items() if key in allowed}
         if not filtered:
             continue
@@ -332,25 +322,17 @@ def restore_backup(db: Session, settings: Settings, backup_id_value: str) -> dic
     if not path.exists():
         raise FileNotFoundError("备份不存在")
     metadata, database_export = parse_backup(path)
+    supported_revision = head_revision(db.connection().engine)
+    if (
+        metadata.get("databaseRevision") != supported_revision
+        or current_database_revision(db) != supported_revision
+    ):
+        raise ValueError("BACKUP_DATABASE_REVISION_UNSUPPORTED")
     for table in RESTORE_ORDER:
         clear_table_if_present(db, table)
     restored: dict[str, int] = {}
     for export_key, table in BACKUP_TABLES:
         restored[export_key] = upsert_user_records(db, database_export.get(export_key, [])) if table == "User" else insert_records(db, table, database_export.get(export_key, []))
-    if "LibraryEdition" in table_names(db) and "mediaKind" in columns(db, "LibraryEdition"):
-        db.execute(
-            text(
-                "UPDATE `LibraryEdition` SET `mediaKind` = CASE "
-                "WHEN UPPER(`format`) = 'COMIC' THEN 'COMIC' "
-                "WHEN UPPER(`format`) = 'AUDIO' THEN 'AUDIOBOOK' "
-                "ELSE 'EBOOK' END"
-            )
-        )
-        db.commit()
-    # A pre-v4 export has neither per-media state nor detail preferences. Build
-    # the same idempotent compatibility projection used by database bootstrap.
-    backfill_library_consumption_states(db)
-    db.commit()
     restored["libraryFiles"] = 0
     actual_counts = {export_key: len(fetch_table(db, table)) for export_key, table in BACKUP_TABLES}
     return {"id": backup_id_value, "restored": True, "restoredAt": datetime.now(timezone.utc).isoformat(), "counts": metadata.get("counts"), "restoredCounts": restored, "actualCounts": actual_counts}

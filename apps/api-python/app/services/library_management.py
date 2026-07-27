@@ -1,21 +1,39 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from hashlib import sha1
 import json
 import re
+from collections.abc import Iterable
+from datetime import datetime, timedelta, timezone
+from hashlib import sha1
 from time import time_ns
-from typing import Any, Iterable
+from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import delete, select, text
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app.core.authorization import authorization_context, edition_visibility_sql, work_visibility_sql
+from app.core.authorization import (
+    authorization_context,
+    edition_visibility_sql,
+    work_visibility_sql,
+)
 from app.core.time import now_timestamp_ms, timestamp_ms_to_iso, to_timestamp_ms
 from app.models.auth import User
-from app.services.book_identity import UNKNOWN_AUTHOR, identity_merge_key, normalize_identity_part
+from app.models.common import db_timestamp
+from app.models.library import (
+    LibraryEdition,
+    LibraryEditionFacet,
+    LibraryFacet,
+    LibraryWork,
+    LibraryWorkFacet,
+)
+from app.services.book_identity import (
+    UNKNOWN_AUTHOR,
+    identity_merge_key,
+    normalize_identity_part,
+)
 from app.services.library_filters import compile_filter_rules
-
 
 FACET_KINDS = {"AUTHOR", "TAG", "SERIES", "PUBLISHER"}
 STATUS_RANK = {"UNREAD": 0, "READING": 1, "FINISHED": 2}
@@ -88,7 +106,7 @@ def split_authors(value: Any) -> list[str]:
     text_value = str(value or "").strip()
     if not text_value or text_value == UNKNOWN_AUTHOR:
         return []
-    return _unique_names(re.split(r"\s*(?:,|，|;|；|、|/|&|\band\b)\s*", text_value, flags=re.I))
+    return _unique_names(re.split(r"\s*(?:,|，|;|；|、|/|&|\band\b)\s*", text_value, flags=re.IGNORECASE))
 
 
 def _work_tags(value: Any) -> list[str]:
@@ -99,7 +117,7 @@ def _work_tags(value: Any) -> list[str]:
 
 
 def _facet_id(kind: str, normalized_name: str) -> str:
-    digest = sha1(f"{kind}\0{normalized_name}".encode("utf-8")).hexdigest()[:24]
+    digest = sha1(f"{kind}\0{normalized_name}".encode()).hexdigest()[:24]
     return f"facet_{digest}"
 
 
@@ -107,89 +125,117 @@ def _ensure_facet(db: Session, kind: str, name: str) -> str:
     normalized = _normalized_name(name)
     if kind not in FACET_KINDS or not normalized:
         raise ValueError("分类名称无效")
-    existing = _row(
-        db,
-        "SELECT `id` FROM `LibraryFacet` WHERE `kind` = :kind AND `normalizedName` = :normalized",
-        {"kind": kind, "normalized": normalized},
-    )
-    if existing:
-        return str(existing["id"])
     facet_id = _facet_id(kind, normalized)
-    now = _now()
+    now = db_timestamp()
     db.execute(
-        text(
-            "INSERT OR IGNORE INTO `LibraryFacet` "
-            "(`id`, `kind`, `name`, `normalizedName`, `aliases`, `createdAt`, `updatedAt`) "
-            "VALUES (:id, :kind, :name, :normalized, '[]', :now, :now)"
-        ),
-        {"id": facet_id, "kind": kind, "name": name, "normalized": normalized, "now": now},
+        sqlite_insert(LibraryFacet)
+        .values(
+            id=facet_id,
+            kind=kind,
+            name=name,
+            normalized_name=normalized,
+            aliases="[]",
+            created_at=now,
+            updated_at=now,
+        )
+        .on_conflict_do_nothing(index_elements=[LibraryFacet.kind, LibraryFacet.normalized_name])
     )
-    return facet_id
+    existing = db.execute(
+        select(LibraryFacet.id).where(
+            LibraryFacet.kind == kind,
+            LibraryFacet.normalized_name == normalized,
+        )
+    ).scalar_one()
+    return str(existing)
+
+
+def _optional_scalar(db: Session, statement: Any) -> Any:
+    """Read an optional fixture column without aborting the surrounding transaction."""
+
+    try:
+        with db.begin_nested():
+            return db.execute(statement).scalar_one_or_none()
+    except OperationalError:
+        return None
 
 
 def sync_work_facets(db: Session, work_id: str, *, commit: bool = True) -> None:
-    if not {"LibraryWork", "LibraryEdition", "LibraryFacet", "LibraryWorkFacet", "LibraryEditionFacet"}.issubset(
-        {table for table in ("LibraryWork", "LibraryEdition", "LibraryFacet", "LibraryWorkFacet", "LibraryEditionFacet") if _table_exists(db, table)}
-    ):
+    """Synchronize persisted facets for one work after a runtime library change."""
+
+    try:
+        with db.begin_nested():
+            work = db.execute(
+                select(
+                    LibraryWork.id,
+                    LibraryWork.author,
+                    LibraryWork.tags,
+                ).where(LibraryWork.id == work_id)
+            ).one_or_none()
+    except OperationalError:
         return
-    work = _row(db, "SELECT * FROM `LibraryWork` WHERE `id` = :id", {"id": work_id})
-    if not work:
+    if work is None:
         return
-    now = _now()
-    db.execute(text("DELETE FROM `LibraryWorkFacet` WHERE `workId` = :work_id"), {"work_id": work_id})
+
+    series_name = _optional_scalar(
+        db,
+        select(LibraryWork.series_name).where(LibraryWork.id == work_id),
+    )
+    now = db_timestamp()
+    db.execute(delete(LibraryWorkFacet).where(LibraryWorkFacet.work_id == work_id))
     work_values = {
-        "AUTHOR": split_authors(work.get("author")),
-        "TAG": _work_tags(work.get("tags")),
-        "SERIES": _unique_names([work.get("seriesName")]),
+        "AUTHOR": split_authors(work.author),
+        "TAG": _work_tags(work.tags),
+        "SERIES": _unique_names([series_name]),
     }
     for kind, names in work_values.items():
         for sort_order, name in enumerate(names):
             facet_id = _ensure_facet(db, kind, name)
             db.execute(
-                text(
-                    "INSERT OR IGNORE INTO `LibraryWorkFacet` (`facetId`, `workId`, `sortOrder`, `createdAt`) "
-                    "VALUES (:facet_id, :work_id, :sort_order, :now)"
-                ),
-                {"facet_id": facet_id, "work_id": work_id, "sort_order": sort_order, "now": now},
+                sqlite_insert(LibraryWorkFacet)
+                .values(
+                    facet_id=facet_id,
+                    work_id=work_id,
+                    sort_order=sort_order,
+                    created_at=now,
+                )
+                .on_conflict_do_nothing(
+                    index_elements=[LibraryWorkFacet.facet_id, LibraryWorkFacet.work_id]
+                )
             )
 
-    editions = _rows(
-        db,
-        "SELECT `id`, `publisher` FROM `LibraryEdition` WHERE `workId` = :work_id",
-        {"work_id": work_id},
-    )
+    try:
+        with db.begin_nested():
+            editions = db.execute(
+                select(LibraryEdition.id, LibraryEdition.publisher).where(
+                    LibraryEdition.work_id == work_id
+                )
+            ).all()
+    except OperationalError:
+        editions = [
+            (edition_id, None)
+            for edition_id in db.execute(
+                select(LibraryEdition.id).where(LibraryEdition.work_id == work_id)
+            ).scalars()
+        ]
     for edition in editions:
-        edition_id = str(edition["id"])
-        db.execute(text("DELETE FROM `LibraryEditionFacet` WHERE `editionId` = :edition_id"), {"edition_id": edition_id})
-        for publisher in _unique_names([edition.get("publisher")]):
-            facet_id = _ensure_facet(db, "PUBLISHER", publisher)
+        edition_id = str(edition.id if hasattr(edition, "id") else edition[0])
+        publisher = edition.publisher if hasattr(edition, "publisher") else edition[1]
+        db.execute(delete(LibraryEditionFacet).where(LibraryEditionFacet.edition_id == edition_id))
+        for publisher_name in _unique_names([publisher]):
+            facet_id = _ensure_facet(db, "PUBLISHER", publisher_name)
             db.execute(
-                text(
-                    "INSERT OR IGNORE INTO `LibraryEditionFacet` (`facetId`, `editionId`, `createdAt`) "
-                    "VALUES (:facet_id, :edition_id, :now)"
-                ),
-                {"facet_id": facet_id, "edition_id": edition_id, "now": now},
+                sqlite_insert(LibraryEditionFacet)
+                .values(
+                    facet_id=facet_id,
+                    edition_id=edition_id,
+                    created_at=now,
+                )
+                .on_conflict_do_nothing(
+                    index_elements=[LibraryEditionFacet.facet_id, LibraryEditionFacet.edition_id]
+                )
             )
     if commit:
         db.commit()
-
-
-def backfill_library_facets(db: Session) -> int:
-    if not {"LibraryWork", "LibraryEdition", "LibraryFacet", "LibraryWorkFacet", "LibraryEditionFacet"}.issubset(
-        {table for table in ("LibraryWork", "LibraryEdition", "LibraryFacet", "LibraryWorkFacet", "LibraryEditionFacet") if _table_exists(db, table)}
-    ):
-        return 0
-    work_ids = [str(row["id"]) for row in _rows(db, "SELECT `id` FROM `LibraryWork`")] 
-    for work_id in work_ids:
-        sync_work_facets(db, work_id, commit=False)
-    db.execute(
-        text(
-            "DELETE FROM `LibraryFacet` WHERE `id` NOT IN "
-            "(SELECT `facetId` FROM `LibraryWorkFacet` UNION SELECT `facetId` FROM `LibraryEditionFacet`)"
-        )
-    )
-    db.commit()
-    return len(work_ids)
 
 
 def count_categories(db: Session, kind: str, search: str = "") -> int:

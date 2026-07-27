@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 
-
 UNKNOWN_AUTHOR = "未知作者"
 IDENTITY_PARSER_VERSION = 5
 
