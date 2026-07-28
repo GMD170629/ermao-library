@@ -17,9 +17,14 @@ from app.modules.imports.application.dto import (
     ImportRuntimeConfig,
     SeriesVolumeInfo,
 )
+from app.modules.imports.application.identity_resolution import (
+    EmbeddedIdentityMetadata,
+    resolve_import_identity,
+)
 from app.modules.imports.application.import_support import (
     _attrs,
     _decode_xml_text,
+    _ensure_work,
     _extract_isbn,
     _file_version_key,
     _finalize_work_primary,
@@ -36,7 +41,6 @@ from app.modules.imports.application.import_support import (
     _source_group_key,
     _texts,
     _title_from_file,
-    _ensure_work,
     _work_merge_key,
 )
 from app.modules.imports.application.ports import (
@@ -58,6 +62,28 @@ def _import_epub(
     identity: BookIdentityDTO,
 ) -> ImportResult:
     metadata = parse_epub_metadata(options.source_file_path)
+    raw_metadata = metadata.get("rawMetadata")
+    opf_title = (
+        next(iter(raw_metadata.get("dc:title") or []), None)
+        if isinstance(raw_metadata, dict)
+        else None
+    )
+    opf_author = (
+        next(iter(raw_metadata.get("dc:creator") or []), None)
+        if isinstance(raw_metadata, dict)
+        else None
+    )
+    identity = resolve_import_identity(
+        identity,
+        embedded=EmbeddedIdentityMetadata(
+            title=str(opf_title or "").strip() or None,
+            author=str(opf_author or "").strip() or None,
+            source="epub_opf",
+            confidence=0.95,
+        ),
+        requested_title=options.requested_title,
+        requested_author=options.requested_author,
+    )
     volume_info = (
         SeriesVolumeInfo(
             identity.title,
@@ -564,7 +590,7 @@ def _parse_ncx(
         return []
     entries = []
     for index, block in enumerate(
-        re.findall(r"<navPoint\b[\s\S]*?</navPoint>", xml, re.I), start=1
+        re.findall(r"<navPoint\b[\s\S]*?</navPoint>", xml, re.IGNORECASE), start=1
     ):
         title = _first_text(block, "text") or ""
         src = (_attrs(block, "content")[0] if _attrs(block, "content") else {}).get(
@@ -582,20 +608,20 @@ def _parse_nav(
     if not xml:
         return []
     entries = []
-    nav_blocks = list(re.finditer(r"<nav\b([^>]*)>([\s\S]*?)</nav>", xml, re.I))
+    nav_blocks = list(re.finditer(r"<nav\b([^>]*)>([\s\S]*?)</nav>", xml, re.IGNORECASE))
     toc_block = next(
         (
             match.group(2)
             for match in nav_blocks
             if re.search(
-                r"\b(?:epub:)?type\s*=\s*['\"][^'\"]*\btoc\b", match.group(1), re.I
+                r"\b(?:epub:)?type\s*=\s*['\"][^'\"]*\btoc\b", match.group(1), re.IGNORECASE
             )
-            or re.search(r"\brole\s*=\s*['\"]doc-toc['\"]", match.group(1), re.I)
+            or re.search(r"\brole\s*=\s*['\"]doc-toc['\"]", match.group(1), re.IGNORECASE)
         ),
         nav_blocks[0].group(2) if nav_blocks else xml,
     )
     for index, match in enumerate(
-        re.finditer(r"<a\b([^>]*)>([\s\S]*?)</a>", toc_block, re.I), start=1
+        re.finditer(r"<a\b([^>]*)>([\s\S]*?)</a>", toc_block, re.IGNORECASE), start=1
     ):
         title = _decode_xml_text(match.group(2))
         href = (
@@ -673,7 +699,7 @@ def _epub_cover(manifest: list[dict[str, str]], opf_xml: str) -> dict[str, str] 
                 for item in manifest
                 if "image" in str(item.get("mediaType") or "")
                 and re.search(
-                    r"(cover|front|folder|封面)", str(item.get("href") or ""), re.I
+                    r"(cover|front|folder|封面)", str(item.get("href") or ""), re.IGNORECASE
                 )
             ),
             None,

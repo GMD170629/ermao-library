@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.settings import MonitorFolder
 from app.modules.imports.application.dto import ImportTaskDTO, StageImportCommand
 from app.modules.imports.infrastructure import tasks as task_rows
 from app.modules.imports.infrastructure.task_mapper import import_task_dto_from_row
@@ -95,6 +97,16 @@ class SqlAlchemyImportTaskStore:
                 "finishedAt": now,
             },
             prune=True,
+        )
+
+    def monitor_folder_exists(self, monitor_folder_id: str) -> bool:
+        return (
+            self._db.scalar(
+                select(MonitorFolder.id)
+                .where(MonitorFolder.id == monitor_folder_id)
+                .limit(1)
+            )
+            is not None
         )
 
     def link_work_to_monitor_shelf(

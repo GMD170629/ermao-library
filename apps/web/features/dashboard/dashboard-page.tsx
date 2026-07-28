@@ -10,7 +10,7 @@ import { MobileNavigationTrigger } from '../../components/layout/mobile-navigati
 import { Progress } from '../../components/ui/progress';
 import { useI18n } from '../../i18n/provider';
 import { useAudioPlayback } from '../audio/audio-playback-provider';
-import { UploadBookDialog } from '../library/upload-book-dialog';
+import { UploadBookDialog } from '../library/public';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 

@@ -157,11 +157,11 @@ export function TargetDirectoryPicker({
     onStatusChange({
       autoImport,
       label: value
-        ? processingMode === 'queue'
-          ? '上传文件会由后台自动处理并导入书库'
-          : autoImport
-            ? '该目录会自动入库'
-            : '该目录未启用监控，仅保存文件'
+          ? processingMode === 'queue'
+            ? '上传文件会由后台自动处理并导入书库'
+            : autoImport
+            ? '已启用监控，保存后会自动识别'
+            : '该目录未启用监控，文件将只保存不入库'
         : requiredMessage
     });
   }, [folders, onStatusChange, processingMode, requiredMessage, value]);
@@ -203,8 +203,8 @@ export function TargetDirectoryPicker({
           ? processingMode === 'queue'
             ? i18nExpression("上传文件会由后台自动处理并导入书库")
             : selectedAutoImport
-              ? i18nExpression("该目录会自动入库")
-              : i18nExpression("该目录未启用监控，仅保存文件")
+              ? i18nExpression("已启用监控，保存后会自动识别")
+              : i18nExpression("该目录未启用监控，文件将只保存不入库")
           : requiredMessage}
       </div>
       {open ? (

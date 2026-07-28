@@ -16,10 +16,15 @@ from app.modules.imports.application.dto import (
     ImportResult,
     ImportRuntimeConfig,
 )
+from app.modules.imports.application.identity_resolution import (
+    EmbeddedIdentityMetadata,
+    resolve_import_identity,
+)
 from app.modules.imports.application.import_support import (
     IMAGE_EXTS,
     _bracketed_folder_metadata,
     _clean_title_part,
+    _ensure_work,
     _file_version_key,
     _finalize_work_primary,
     _first_text,
@@ -37,7 +42,6 @@ from app.modules.imports.application.import_support import (
     _source_group_key,
     _split_tags,
     _title_from_file,
-    _ensure_work,
     _work_merge_key,
 )
 from app.modules.imports.application.ports import (
@@ -61,6 +65,24 @@ def _import_comic(
     identity: BookIdentityDTO,
 ) -> ImportResult:
     parsed = parse_comic_archive(options.source_file_path, options.original_name)
+    comic_info = (
+        parsed.get("comicInfo") if isinstance(parsed.get("comicInfo"), dict) else None
+    )
+    identity = resolve_import_identity(
+        identity,
+        embedded=(
+            EmbeddedIdentityMetadata(
+                title=str(parsed.get("title") or "").strip() or None,
+                author=str(parsed.get("author") or "").strip() or None,
+                source="comic_info",
+                confidence=0.9,
+            )
+            if comic_info is not None
+            else None
+        ),
+        requested_title=options.requested_title,
+        requested_author=options.requested_author,
+    )
     volume_info = (
         {
             "seriesName": identity.title,
@@ -310,7 +332,7 @@ def parse_comic_archive(path: Path, original_name: str | None = None) -> dict[st
                     page
                     for page in pages
                     if re.search(
-                        r"(cover|folder|front|封面)", Path(page["entryPath"]).name, re.I
+                        r"(cover|folder|front|封面)", Path(page["entryPath"]).name, re.IGNORECASE
                     )
                 ),
                 pages[0],
@@ -354,7 +376,7 @@ def parse_comic_volume_from_name(
         r"^v\s*(\d+(?:\.\d+)?)$",
         r"^(?:第\s*)?(\d+(?:\.\d+)?)\s*(?:卷|冊|册|集)$",
     ]:
-        match = re.match(pattern, base.strip(), re.I)
+        match = re.match(pattern, base.strip(), re.IGNORECASE)
         if match and parent:
             index = float(match.group(1))
             author = _comic_parent_author(path)
@@ -372,7 +394,7 @@ def parse_comic_volume_from_name(
         r"^(.+?)\s*(?:vol\.?|volume)\s*(\d+(?:\.\d+)?)\s*$",
         r"^(.+?)\s+v(\d+(?:\.\d+)?)\s*$",
     ]:
-        match = re.match(pattern, base, re.I)
+        match = re.match(pattern, base, re.IGNORECASE)
         if match:
             series = _clean_title_part(match.group(1))
             index = float(match.group(2))
@@ -424,7 +446,7 @@ def _parse_comic_info(xml: str) -> dict[str, Any]:
     cover_match = re.search(
         r"<Page\b[^>]*(?:Type|type)=['\"](?:FrontCover|Cover)['\"][^>]*(?:Image|image)=['\"](\d+)['\"]",
         xml,
-        re.I,
+        re.IGNORECASE,
     )
     return {
         "title": raw.get("Title"),

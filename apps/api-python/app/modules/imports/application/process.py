@@ -10,11 +10,24 @@ from app.modules.imports.application.dto import (
     ImportRuntimeConfig,
     ImportTaskDTO,
 )
+from app.modules.imports.application.errors import (
+    MonitorFolderDeletedDuringImportError,
+)
 from app.modules.imports.application.ports import (
     ImportPipeline,
     ImportTaskStore,
     ImportUnitOfWork,
 )
+
+
+def _ensure_monitor_folder_exists(
+    store: ImportTaskStore,
+    monitor_folder_id: str | None,
+) -> None:
+    if monitor_folder_id is not None and not store.monitor_folder_exists(
+        monitor_folder_id
+    ):
+        raise MonitorFolderDeletedDuringImportError
 
 
 def process_import_task(
@@ -27,6 +40,7 @@ def process_import_task(
     now: int,
 ) -> ImportResult:
     try:
+        _ensure_monitor_folder_exists(store, task.monitor_folder_id)
         result = pipeline.import_managed_book(
             settings,
             ImportOptions(
@@ -41,6 +55,7 @@ def process_import_task(
                 expected_lease_owner=task.lease_owner,
             ),
         )
+        _ensure_monitor_folder_exists(store, task.monitor_folder_id)
         store.link_work_to_monitor_shelf(
             task.monitor_folder_id,
             result.work_id,

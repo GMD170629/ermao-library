@@ -6,6 +6,11 @@ import json
 import time
 from dataclasses import replace
 
+from app.modules.imports.application.audio_types import (
+    SUPPORTED_AUDIO_EXTS,
+    AudioBundleStructure,
+    AudioFileMetadata,
+)
 from app.modules.imports.application.commands import (
     commit_import_checkpoint,
     reset_failed_import_checkpoint,
@@ -21,16 +26,24 @@ from app.modules.imports.application.identity import (
     _existing_series_volume_identity,
     _record_identity_system_events,
 )
+from app.modules.imports.application.identity_resolution import (
+    resolve_import_identity,
+)
 from app.modules.imports.application.import_audio import _audio_identity, _import_audio
 from app.modules.imports.application.import_comic import _import_comic
 from app.modules.imports.application.import_epub import _import_epub
 from app.modules.imports.application.import_pdf import _import_pdf
+from app.modules.imports.application.import_policy import (
+    CONVERTIBLE_TEXT_EXTS,
+    extension_is_allowed,
+    matches_ignore_patterns,
+)
 from app.modules.imports.application.import_support import (
     SUPPORTED_EXTS,
     _content_hash,
+    _ensure_import_task,
     _existing_audio_bundle_result,
     _existing_file_result,
-    _ensure_import_task,
     _hash_text,
     _id,
     _log_import,
@@ -46,16 +59,6 @@ from app.modules.imports.application.ports import (
     ImportOrchestrationServices,
     ImportUnitOfWork,
     LibraryImportStore,
-)
-from app.modules.imports.application.audio_types import (
-    AudioBundleStructure,
-    AudioFileMetadata,
-    SUPPORTED_AUDIO_EXTS,
-)
-from app.modules.imports.application.import_policy import (
-    CONVERTIBLE_TEXT_EXTS,
-    extension_is_allowed,
-    matches_ignore_patterns,
 )
 
 
@@ -111,20 +114,22 @@ def import_managed_book(
                 "当前版本仅支持 EPUB、MOBI、AZW、AZW3、PRC、FB2、TXT、CBZ、ZIP、PDF、M4B、M4A、MP3 格式。"
             )
         _log_import(store, task_id, "info", f"import started: {source}")
-        services.stage_system_event(ImportSystemEvent(
-            source="import",
-            action="import.started",
-            target_type="importTask",
-            target_id=task_id,
-            message=f"开始导入文件：{options.original_name or source.name}",
-            metadata={
-                "sourcePath": str(original_source),
-                "originalName": options.original_name or source.name,
-                "origin": options.origin,
-                "monitorFolderId": options.monitor_folder_id,
-                "format": source_ext.removeprefix("."),
-            },
-        ))
+        services.stage_system_event(
+            ImportSystemEvent(
+                source="import",
+                action="import.started",
+                target_type="importTask",
+                target_id=task_id,
+                message=f"开始导入文件：{options.original_name or source.name}",
+                metadata={
+                    "sourcePath": str(original_source),
+                    "originalName": options.original_name or source.name,
+                    "origin": options.origin,
+                    "monitorFolderId": options.monitor_folder_id,
+                    "format": source_ext.removeprefix("."),
+                },
+            )
+        )
         commit_import_checkpoint(unit_of_work)
         import_preferences = services.load_preferences()
         preference_sources = audio_sources if audio_sources else [original_source]
@@ -204,21 +209,23 @@ def import_managed_book(
             _log_import(
                 store, task_id, "info", f"import skipped existing path: {source}"
             )
-            services.stage_system_event(ImportSystemEvent(
-                source="import",
-                action="import.skipped",
-                target_type="importTask",
-                target_id=task_id,
-                message=f"跳过已导入文件：{options.original_name or source.name}",
-                metadata={
-                    "sourcePath": str(original_source),
-                    "reason": "existing_path",
-                    "workId": existing_file.work_id,
-                    "editionId": existing_file.edition_id,
-                    "volumeId": existing_file.volume_id,
-                },
-                prune=True,
-            ))
+            services.stage_system_event(
+                ImportSystemEvent(
+                    source="import",
+                    action="import.skipped",
+                    target_type="importTask",
+                    target_id=task_id,
+                    message=f"跳过已导入文件：{options.original_name or source.name}",
+                    metadata={
+                        "sourcePath": str(original_source),
+                        "reason": "existing_path",
+                        "workId": existing_file.work_id,
+                        "editionId": existing_file.edition_id,
+                        "volumeId": existing_file.volume_id,
+                    },
+                    prune=True,
+                )
+            )
             return existing_file
 
         audio_metadata: list[AudioFileMetadata] = []
@@ -249,8 +256,11 @@ def import_managed_book(
         else:
             identity = _existing_series_volume_identity(
                 queries, services, settings, effective_options
-            ) or services.recognize_identity(
-                original_source, options.original_name
+            ) or services.recognize_identity(original_source, options.original_name)
+            identity = resolve_import_identity(
+                identity,
+                requested_title=options.requested_title,
+                requested_author=options.requested_author,
             )
         if options.requested_work_id:
             identity = replace(identity, reused_work_id=options.requested_work_id)
@@ -262,9 +272,14 @@ def import_managed_book(
             if identity.source == "existing_work"
             else "识别缓存"
             if identity.cache_hit
-            else "AI"
-            if identity.source == "ai"
-            else "正则规则"
+            else {
+                "ai": "AI",
+                "regex": "正则规则",
+                "requested": "用户输入",
+                "epub_opf": "EPUB 元数据",
+                "pdf_metadata": "PDF 元数据",
+                "comic_info": "ComicInfo 元数据",
+            }.get(identity.source, "多来源裁决")
         )
         store.update_import_task(
             task_id,
@@ -411,34 +426,36 @@ def import_managed_book(
         )
         _log_import(store, task_id, "info", f"import completed: {result.book_id}")
         duration_ms = int((time.time() - started) * 1000)
-        services.stage_system_event(ImportSystemEvent(
-            source="import",
-            action="import.skipped" if result.duplicate else "import.completed",
-            target_type="importTask",
-            target_id=task_id,
-            message=(
-                f"读物已存在，跳过重复导入：{result.title}"
-                if result.duplicate
-                else f"导入完成：{result.title}"
-            ),
-            metadata={
-                "sourcePath": str(original_source),
-                "workId": result.work_id,
-                "editionId": result.edition_id,
-                "volumeId": result.volume_id,
-                "title": result.title,
-                "format": result.format,
-                "sourceFormat": converted.source_format
-                if converted
-                else ext.removeprefix(".").upper(),
-                "totalUnits": result.total_units,
-                "duplicate": result.duplicate,
-                "merged": result.merged,
-                "mergeReason": result.merge_reason,
-                "durationMs": duration_ms,
-            },
-            prune=True,
-        ))
+        services.stage_system_event(
+            ImportSystemEvent(
+                source="import",
+                action="import.skipped" if result.duplicate else "import.completed",
+                target_type="importTask",
+                target_id=task_id,
+                message=(
+                    f"读物已存在，跳过重复导入：{result.title}"
+                    if result.duplicate
+                    else f"导入完成：{result.title}"
+                ),
+                metadata={
+                    "sourcePath": str(original_source),
+                    "workId": result.work_id,
+                    "editionId": result.edition_id,
+                    "volumeId": result.volume_id,
+                    "title": result.title,
+                    "format": result.format,
+                    "sourceFormat": converted.source_format
+                    if converted
+                    else ext.removeprefix(".").upper(),
+                    "totalUnits": result.total_units,
+                    "duplicate": result.duplicate,
+                    "merged": result.merged,
+                    "mergeReason": result.merge_reason,
+                    "durationMs": duration_ms,
+                },
+                prune=True,
+            )
+        )
         return result
     except Exception:
         reset_failed_import_checkpoint(unit_of_work)

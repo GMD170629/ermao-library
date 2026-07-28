@@ -7,7 +7,6 @@ from pydantic import Field
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.http_errors import HttpContractError
-from app.contracts.imports import ImportTaskContract
 
 
 class MonitorFolder(HttpContractModel):
@@ -212,26 +211,19 @@ DeletedImportTasksResponse = SuccessEnvelope[DeletedImportTasksPayload]
 RescanImportTasksResponse = SuccessEnvelope[RescanImportTasksPayload]
 
 
-class UploadedImportResult(HttpContractModel):
+class SavedUploadResult(HttpContractModel):
     source_path: str = Field(alias="sourcePath")
     file: str
-    import_task_id: str = Field(alias="importTaskId")
-    import_status: Literal["pending"] = Field(alias="importStatus")
-    auto_import: Literal[True] = Field(alias="autoImport")
-    message: str
+    size_bytes: int = Field(alias="sizeBytes")
+    monitoring_status: Literal["WATCHING", "NOT_MONITORED"] = Field(
+        alias="monitoringStatus"
+    )
 
 
 class ImportUploadPayload(HttpContractModel):
-    tasks: list[ImportTaskContract]
-    results: list[UploadedImportResult]
-    queued: int
+    results: list[SavedUploadResult]
     saved: int
-    imported: int
-    auto_import: Literal[True] = Field(alias="autoImport")
-    task_kind: str = Field(alias="taskKind")
-    bundle_key: str | None = Field(alias="bundleKey")
-    asset_count: int = Field(alias="assetCount")
-    processed_asset_count: int = Field(alias="processedAssetCount")
+    auto_import: bool = Field(alias="autoImport")
 
 
 class ImportDeleteFailure(HttpContractModel):

@@ -13,7 +13,12 @@ from app.modules.imports.application.dto import (
     ImportResult,
     ImportRuntimeConfig,
 )
+from app.modules.imports.application.identity_resolution import (
+    EmbeddedIdentityMetadata,
+    resolve_import_identity,
+)
 from app.modules.imports.application.import_support import (
+    _ensure_work,
     _file_version_key,
     _finalize_work_primary,
     _hash_text,
@@ -25,7 +30,6 @@ from app.modules.imports.application.import_support import (
     _should_be_media_primary,
     _split_tags,
     _title_from_file,
-    _ensure_work,
     _work_merge_key,
 )
 from app.modules.imports.application.ports import (
@@ -47,6 +51,26 @@ def _import_pdf(
     identity: BookIdentityDTO,
 ) -> ImportResult:
     metadata = parse_pdf_metadata(options.source_file_path, options.original_name)
+    raw_metadata = metadata.get("rawMetadata")
+    identity = resolve_import_identity(
+        identity,
+        embedded=EmbeddedIdentityMetadata(
+            title=(
+                str(raw_metadata.get("Title") or "").strip() or None
+                if isinstance(raw_metadata, dict)
+                else None
+            ),
+            author=(
+                str(raw_metadata.get("Author") or "").strip() or None
+                if isinstance(raw_metadata, dict)
+                else None
+            ),
+            source="pdf_metadata",
+            confidence=0.9,
+        ),
+        requested_title=options.requested_title,
+        requested_author=options.requested_author,
+    )
     merge_key = _work_merge_key("pdf", identity.title, identity.author)
     work, created = _ensure_work(
         store,
@@ -236,7 +260,7 @@ def _pdf_inline_metadata(path: Path) -> dict[str, str]:
     metadata: dict[str, str] = {}
     for key in ["Title", "Author", "Subject", "Keywords"]:
         match = re.search(
-            rb"/" + key.encode("ascii") + rb"\s*\(([^()]*)\)", content, re.S
+            rb"/" + key.encode("ascii") + rb"\s*\(([^()]*)\)", content, re.DOTALL
         )
         if not match:
             continue

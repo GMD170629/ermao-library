@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
+
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -12,15 +13,15 @@ from app.core.time import now_timestamp_ms
 from app.modules.imports.application.claim import (
     claim_next_import_task as claim_next_import_task_command,
 )
+from app.modules.imports.application.deletion import (
+    FileCleanupResult,
+    execute_import_deletion,
+)
 from app.modules.imports.application.dto import (
     ImportOptions,
     ImportResult,
     ImportRuntimeConfig,
     ImportTaskDTO,
-)
-from app.modules.imports.application.deletion import (
-    FileCleanupResult,
-    execute_import_deletion,
 )
 from app.modules.imports.application.enqueue import (
     enqueue_import_path,
@@ -35,10 +36,16 @@ from app.modules.imports.application.process import (
 from app.modules.imports.application.recover import (
     recover_stale_import_tasks as recover_stale_import_tasks_command,
 )
+from app.modules.imports.application.save_uploaded_files import (
+    SavedUploadFile,
+    SaveUploadedFiles,
+    SaveUploadedFilesCommand,
+)
 from app.modules.imports.infrastructure import import_http as import_http_store
 from app.modules.imports.infrastructure import library_queries as library_repository
 from app.modules.imports.infrastructure import monitor as monitor_repository
 from app.modules.imports.infrastructure import tasks as task_repository
+from app.modules.imports.infrastructure.deletion_files import LocalImportDeletionFiles
 from app.modules.imports.infrastructure.directory_scan import (
     MonitorFolderConfig,
     ScanSummary,
@@ -48,11 +55,13 @@ from app.modules.imports.infrastructure.directory_scan import (
     should_ignore_file,
     should_ignore_path,
 )
-from app.modules.imports.infrastructure.deletion_files import LocalImportDeletionFiles
 from app.modules.imports.infrastructure.managed_pipeline import SessionImportPipeline
+from app.modules.imports.infrastructure.source_probe import LocalImportSourceProbe
 from app.modules.imports.infrastructure.task_store import SqlAlchemyImportTaskStore
 from app.modules.imports.infrastructure.uow import SqlAlchemyImportUnitOfWork
-from app.modules.imports.infrastructure.source_probe import LocalImportSourceProbe
+from app.modules.imports.infrastructure.uploaded_file_publication import (
+    AtomicUploadedFilePublisher,
+)
 
 
 def import_managed_book(
@@ -63,6 +72,14 @@ def import_managed_book(
     return SessionImportPipeline(db, settings).import_managed_book(
         _runtime_config(settings), options
     )
+
+
+def save_uploaded_files(
+    command: SaveUploadedFilesCommand,
+) -> tuple[SavedUploadFile, ...]:
+    """Compose the browser-upload save use case with local atomic publication."""
+
+    return SaveUploadedFiles(AtomicUploadedFilePublisher()).execute(command)
 
 
 def _runtime_config(settings: Settings) -> ImportRuntimeConfig:
@@ -231,6 +248,7 @@ def fail_claimed_import_task(
         source_probe=LocalImportSourceProbe(),
     )
 
+
 class ImportWorkerRuntime:
     """Session-owning facade used by the thin persistent import worker loop."""
 
@@ -283,6 +301,7 @@ __all__ = [
     "process_import_task",
     "recover_interrupted_import_deletions",
     "recover_stale_import_tasks",
+    "save_uploaded_files",
     "scan_directory_for_imports",
     "should_ignore_file",
     "should_ignore_path",

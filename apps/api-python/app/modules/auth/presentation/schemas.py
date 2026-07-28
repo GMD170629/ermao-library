@@ -4,20 +4,20 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import EmailStr, Field
 from fastapi.responses import FileResponse
+from pydantic import EmailStr, Field
 
 from app.contracts.http import HttpContractModel, MessageError, SuccessEnvelope
 from app.contracts.http_errors import (
-    BasicBadRequestError,
-    BasicConflictError,
-    BasicForbiddenError,
-    BasicInternalError,
-    BasicNotFoundError,
-    BasicUnauthorizedError,
+    BasicBadRequestError as BasicBadRequestError,
+    BasicConflictError as BasicConflictError,
+    BasicForbiddenError as BasicForbiddenError,
+    BasicInternalError as BasicInternalError,
+    BasicNotFoundError as BasicNotFoundError,
+    BasicUnauthorizedError as BasicUnauthorizedError,
     HttpContractError,
-    PayloadTooLargeError,
-    SessionUnauthorizedError,
+    PayloadTooLargeError as PayloadTooLargeError,
+    SessionUnauthorizedError as SessionUnauthorizedError,
 )
 
 
@@ -51,6 +51,26 @@ class UserPreferences(HttpContractModel):
     library_view: Literal["grid", "list"] | None = Field(
         default=None,
         alias="library.view",
+        exclude_if=lambda value: value is None,
+    )
+    library_sort: (
+        Literal[
+            "recent_read",
+            "recent_import",
+            "title",
+            "author",
+            "publisher",
+            "series",
+        ]
+        | None
+    ) = Field(
+        default=None,
+        alias="library.sort",
+        exclude_if=lambda value: value is None,
+    )
+    library_sort_direction: Literal["asc", "desc"] | None = Field(
+        default=None,
+        alias="library.sortDirection",
         exclude_if=lambda value: value is None,
     )
     audio_playback_rate: float | None = Field(

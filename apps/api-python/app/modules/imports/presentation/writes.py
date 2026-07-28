@@ -4,18 +4,15 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import re
-import shutil
 from datetime import UTC, datetime
 from pathlib import Path
-from time import time_ns
 from typing import Annotated, Any, Never
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
+from starlette.datastructures import UploadFile
 
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
@@ -26,8 +23,8 @@ from app.bootstrap.imports import (
     import_http_store,
     load_known_import_paths,
     monitor_folder_config,
+    save_uploaded_files,
     scan_directory_for_imports,
-    stage_import_task,
 )
 from app.bootstrap.system import record_system_event, upsert_setting
 from app.contracts.http_errors import ErrorResponses
@@ -35,8 +32,10 @@ from app.core.authorization import authorization_context, can_access_monitor_fol
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
-from app.modules.imports.presentation.mappers import (
-    import_task_dto_view,
+from app.modules.imports.public import (
+    UploadFileTooLargeError,
+    UploadPublicationError,
+    safe_upload_filename,
 )
 from app.modules.imports.presentation.mappers import (
     import_task_view as _import_task_view,
@@ -68,7 +67,8 @@ from app.modules.imports.presentation.schemas import (
 )
 from app.modules.imports.public import (
     ImportFileQuarantineError,
-    ImportTaskDTO,
+    SaveUploadedFilesCommand,
+    UploadSource,
     execute_import_checkpoint,
     is_supported_import_filename,
 )
@@ -227,91 +227,26 @@ async def _request_json_or_empty(request: Request) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def _safe_upload_name(value: str | None) -> str:
-    name = Path(value or "upload").name
-    sanitized = re.sub(r"[^A-Za-z0-9._()（）\-\u4e00-\u9fff]+", "_", name).strip("._")
-    return sanitized or "upload"
-
-
-def _audio_bundle_upload_title(
-    file_names: list[str], requested_title: Any = None
-) -> str:
-    explicit = re.sub(r"\s+", " ", str(requested_title or "")).strip()
-    if explicit:
-        return _safe_upload_name(explicit)
-    stems = [Path(_safe_upload_name(name)).stem for name in file_names]
-    common = os.path.commonprefix(stems).rstrip(" ._-(（[")
-    common = re.sub(
-        r"(?:cd|disc|disk|track|音轨)?\s*\d+\s*$", "", common, flags=re.IGNORECASE
-    ).rstrip(" ._-")
-    if len(common) >= 2 and not common.isdigit():
-        return _safe_upload_name(common)
-    first = re.sub(
-        r"^(?:(?:cd|disc|disk)\s*\d+[ ._-]*)?(?:track\s*)?\d+[ ._-]*",
-        "",
-        stems[0],
-        flags=re.IGNORECASE,
-    ).strip()
-    if re.fullmatch(
-        r"(?:序章|前言|尾声|正文|第?\s*\d+\s*[章节集部])", first, re.IGNORECASE
-    ):
-        first = "未命名有声书"
-    return _safe_upload_name(first or "未命名有声书")
-
-
-def _copy_upload_stream(source: Any, target: Path, max_bytes: int | None = None) -> int:
-    copied = 0
-    with target.open("xb") as handle:
-        while True:
-            chunk = source.read(1024 * 1024)
-            if not chunk:
-                break
-            copied += len(chunk)
-            if max_bytes is not None and copied > max_bytes:
-                raise ValueError(f"上传内容超过上限 {max_bytes} bytes")
-            handle.write(chunk)
-        handle.flush()
-        os.fsync(handle.fileno())
-    return copied
-
-
-def _unique_file_in_directory(directory: Path, filename: str) -> Path:
-    directory = directory.expanduser().resolve()
-    directory.mkdir(parents=True, exist_ok=True)
-    safe_name = _safe_upload_name(filename)
-    parsed = Path(safe_name)
-    stem = parsed.stem or "upload"
-    suffix = parsed.suffix
-    index = 0
-    while True:
-        candidate = (
-            directory / safe_name
-            if index == 0
-            else directory / f"{stem}-{index}{suffix}"
-        )
-        resolved = candidate.resolve()
-        if directory != resolved and directory not in resolved.parents:
-            raise ValueError("目标路径越界")
-        if not resolved.exists():
-            return resolved
-        index += 1
-
-
 @router.post("/works/import")
 async def import_work(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Annotated[ImportUploadResponse, ErrorResponses(ImportBadRequestError, ImportNotFoundError, ImportInternalError)]:
+) -> Annotated[
+    ImportUploadResponse,
+    ErrorResponses(ImportBadRequestError, ImportNotFoundError, ImportInternalError),
+]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     form = await request.form()
-    files = [value for _key, value in form.multi_items() if hasattr(value, "filename")]
+    files = [
+        value for _key, value in form.multi_items() if isinstance(value, UploadFile)
+    ]
     if not files:
         _raise_import_error("请选择要导入的文件", status_code=400)
     upload_file_names = [
-        _safe_upload_name(getattr(upload, "filename", None)) for upload in files
+        safe_upload_filename(upload.filename or "upload") for upload in files
     ]
     unsupported = [
         name for name in upload_file_names if not is_supported_import_filename(name)
@@ -361,219 +296,66 @@ async def import_work(
             status_code=404,
             code="MONITOR_FOLDER_NOT_FOUND",
         )
-    auto_import = True
-    tasks: list[ImportTaskDTO] = []
-    results: list[dict[str, Any]] = []
-    audio_uploads = [
-        upload
-        for upload in files
-        if is_supported_audio_file(_safe_upload_name(getattr(upload, "filename", None)))
-    ]
-    explicit_requested_title = (
-        re.sub(r"\s+", " ", str(form.get("bookTitle") or "")).strip()[:500] or None
-    )
-    explicit_requested_author = (
-        re.sub(
-            r"\s+", " ", str(form.get("bookAuthor") or form.get("author") or "")
-        ).strip()[:500]
-        or None
-    )
-    audio_bundle_dir: Path | None = None
-    audio_bundle_staging_dir: Path | None = None
-    if len(audio_uploads) > 1:
-        bundle_directory_title = _audio_bundle_upload_title(
-            [
-                _safe_upload_name(getattr(upload, "filename", None))
-                for upload in audio_uploads
-            ],
-            explicit_requested_title,
-        )
-        audio_bundle_dir = _unique_file_in_directory(
-            upload_dir, f"{bundle_directory_title}-有声书"
-        )
-        audio_bundle_staging_dir = upload_dir / f".upload-{time_ns()}.part"
-        audio_bundle_staging_dir.mkdir(parents=False, exist_ok=False)
-    known_audio_sizes = [
-        int(size)
-        for upload in audio_uploads
-        if (size := getattr(upload, "size", None)) is not None
-    ]
-    if any(size > settings.audiobook_max_file_bytes for size in known_audio_sizes):
-        if audio_bundle_staging_dir is not None:
-            audio_bundle_staging_dir.rmdir()
-        _raise_import_error(
-            f"音频文件超过单文件上限 {settings.audiobook_max_file_bytes} bytes",
-            status_code=400,
-        )
-    if sum(known_audio_sizes) > settings.audiobook_max_bundle_bytes:
-        if audio_bundle_staging_dir is not None:
-            audio_bundle_staging_dir.rmdir()
-        _raise_import_error(
-            f"有声书文件总量超过上限 {settings.audiobook_max_bundle_bytes} bytes",
-            status_code=400,
-        )
-    staged_uploads: list[tuple[str, Path, bool, Path]] = []
-    finalized_paths: list[Path] = []
-    remaining_audio_bytes = settings.audiobook_max_bundle_bytes
-    try:
-        for upload in files:
-            file_name = _safe_upload_name(getattr(upload, "filename", None))
-            is_bundle_asset = audio_bundle_dir is not None and is_supported_audio_file(
-                file_name
-            )
-            if is_bundle_asset:
-                assert audio_bundle_staging_dir is not None
-                staged_target = _unique_file_in_directory(
-                    audio_bundle_staging_dir, file_name
-                )
-                target = audio_bundle_dir / staged_target.name
-            else:
-                target = _unique_file_in_directory(upload_dir, file_name)
-                staged_target = target.with_name(f".{target.name}.{time_ns()}.part")
-            is_audio_asset = is_supported_audio_file(file_name)
-            max_bytes = (
-                min(settings.audiobook_max_file_bytes, remaining_audio_bytes)
-                if is_audio_asset
+    sources = tuple(
+        UploadSource(
+            filename=file_name,
+            stream=upload.file,
+            is_audio=is_supported_audio_file(file_name),
+            max_bytes=(
+                settings.audiobook_max_file_bytes
+                if is_supported_audio_file(file_name)
                 else None
-            )
-            staged_uploads.append((file_name, target, is_bundle_asset, staged_target))
-            copied = _copy_upload_stream(
-                upload.file, staged_target, max_bytes=max_bytes
-            )
-            if is_audio_asset:
-                remaining_audio_bytes -= copied
-
-        if audio_bundle_dir is not None and audio_bundle_staging_dir is not None:
-            audio_bundle_staging_dir.rename(audio_bundle_dir)
-            finalized_paths.append(audio_bundle_dir)
-        for _file_name, target, is_bundle_asset, staged_target in staged_uploads:
-            if is_bundle_asset:
-                continue
-            staged_target.rename(target)
-            finalized_paths.append(target)
-    except Exception as exc:
-        for _file_name, _target, _is_bundle_asset, staged_target in staged_uploads:
-            staged_target.unlink(missing_ok=True)
-        if audio_bundle_staging_dir is not None and audio_bundle_staging_dir.exists():
-            shutil.rmtree(audio_bundle_staging_dir)
-        for path in reversed(finalized_paths):
-            if path.is_dir():
-                shutil.rmtree(path)
-            else:
-                path.unlink(missing_ok=True)
-        _raise_import_error(
-            f"保存上传文件失败：{exc}",
-            status_code=400 if isinstance(exc, ValueError) else 500,
+            ),
         )
-
-    saved_uploads: list[tuple[str, Path, bool]] = [
-        (file_name, target, is_bundle_asset)
-        for file_name, target, is_bundle_asset, _staged_target in staged_uploads
-    ]
-
-    queue_items: list[tuple[str, Path, list[tuple[str, Path, bool]]]] = [
-        (file_name, target, [(file_name, target, is_bundle_asset)])
-        for file_name, target, is_bundle_asset in saved_uploads
-        if not is_bundle_asset
-    ]
-    if audio_bundle_dir is not None:
-        queue_items.append(
-            (
-                audio_bundle_dir.name,
-                audio_bundle_dir,
-                [item for item in saved_uploads if item[2]],
-            )
-        )
-
-    def stage_upload_records() -> None:
-        for original_name, source_path, grouped_uploads in queue_items:
-            is_audio_queue = all(
-                is_supported_audio_file(file_name)
-                for file_name, _target, _asset in grouped_uploads
-            )
-            task, _created = stage_import_task(
-                db,
-                source_path,
-                origin="MANUAL",
-                original_name=original_name,
-                requested_title=explicit_requested_title
-                if is_audio_queue
-                else None,
-                requested_author=explicit_requested_author
-                if is_audio_queue
-                else None,
-                monitor_folder_id=monitor_folder.get("id")
-                if monitor_folder
-                else None,
-                message="有声书分轨已合并，等待后台处理"
-                if len(grouped_uploads) > 1
-                else "已保存到所选目录，等待后台处理",
-            )
-            tasks.append(task)
-            for file_name, target, _is_bundle_asset in grouped_uploads:
-                _stage_system_event(
-                    db,
-                    level="info",
-                    source="import",
-                    actor_type="admin",
-                    actor_id=user.id,
-                    action="uploaded",
-                    target_type="importTask",
-                    target_id=task.id,
-                    message=f"上传到所选目录：{file_name}",
-                    metadata={
-                        "file": file_name,
-                        "sourcePath": str(target),
-                        "bundleSourcePath": str(source_path),
-                        "autoImport": True,
-                    },
-                )
-                results.append(
-                    {
-                        "sourcePath": str(target),
-                        "file": file_name,
-                        "importTaskId": task.id,
-                        "importStatus": "pending",
-                        "autoImport": True,
-                        "message": "已合并为一个有声书任务"
-                        if len(grouped_uploads) > 1
-                        else "已加入后台导入队列",
-                    }
-                )
-        _save_system_setting(db, "library.lastUploadTargetPath", str(upload_dir))
-
-    try:
-        execute_import_checkpoint(db, stage_upload_records)
-    except Exception:
-        for path in reversed(finalized_paths):
-            if path.is_dir():
-                shutil.rmtree(path, ignore_errors=True)
-            else:
-                path.unlink(missing_ok=True)
-        logger.exception("failed to persist uploaded import batch")
-        _raise_import_error("创建导入任务失败", status_code=500)
-
-    task_kind = (
-        tasks[0].task_kind if len(tasks) == 1 else "MULTI_FILE"
+        for upload, file_name in zip(files, upload_file_names, strict=True)
     )
-    asset_count = sum(task.asset_count for task in tasks)
-    serialized_tasks = [import_task_dto_view(task) for task in tasks]
+    execute_import_checkpoint(
+        db,
+        lambda: _save_system_setting(
+            db, "library.lastUploadTargetPath", str(upload_dir)
+        ),
+    )
+    try:
+        saved_uploads = save_uploaded_files(
+            SaveUploadedFilesCommand(
+                target_directory=upload_dir,
+                sources=sources,
+                audio_bundle_max_bytes=settings.audiobook_max_bundle_bytes,
+            )
+        )
+    except UploadFileTooLargeError:
+        _raise_import_error("上传文件超过允许的大小", status_code=400)
+    except UploadPublicationError:
+        logger.exception(
+            "upload.files_save_failed",
+            extra={"actor_id": user.id, "target_directory": str(upload_dir)},
+        )
+        _raise_import_error("保存上传文件失败", status_code=500)
+
+    auto_import = monitor_folder is not None
+    monitoring_status = "WATCHING" if auto_import else "NOT_MONITORED"
+    logger.info(
+        "upload.files_saved",
+        extra={
+            "actor_id": user.id,
+            "target_directory": str(upload_dir),
+            "file_count": len(saved_uploads),
+            "monitoring_status": monitoring_status,
+        },
+    )
     return ImportUploadResponse(
         data={
-            "tasks": serialized_tasks,
-            "results": results,
-            "queued": len(tasks),
-            "saved": len(files),
-            "imported": 0,
+            "results": [
+                {
+                    "sourcePath": str(saved.path),
+                    "file": saved.filename,
+                    "sizeBytes": saved.size_bytes,
+                    "monitoringStatus": monitoring_status,
+                }
+                for saved in saved_uploads
+            ],
+            "saved": len(saved_uploads),
             "autoImport": auto_import,
-            "taskKind": task_kind,
-            "bundleKey": serialized_tasks[0].get("bundleKey")
-            if len(serialized_tasks) == 1
-            else None,
-            "assetCount": asset_count,
-            "processedAssetCount": sum(
-                int(task.get("processedAssetCount") or 0) for task in serialized_tasks
-            ),
         }
     )
 
@@ -583,7 +365,10 @@ async def scan_import_directory(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Annotated[ImportDirectoryScanResponse, ErrorResponses(ImportBadRequestError, ImportForbiddenError, ImportNotFoundError)]:
+) -> Annotated[
+    ImportDirectoryScanResponse,
+    ErrorResponses(ImportBadRequestError, ImportForbiddenError, ImportNotFoundError),
+]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -609,7 +394,9 @@ async def scan_import_directory(
         )
     _folder_path, folder = max(matching_folders, key=lambda item: len(item[0].parts))
     if not can_access_monitor_folder(db, user, str(folder.get("id"))):
-        _raise_import_error("目录不可用", status_code=404, code="MONITOR_FOLDER_NOT_FOUND")
+        _raise_import_error(
+            "目录不可用", status_code=404, code="MONITOR_FOLDER_NOT_FOUND"
+        )
     folder_config = monitor_folder_config(
         folder, preferences=load_import_preferences(db)
     )
@@ -698,7 +485,15 @@ async def delete_import_task(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Annotated[ImportDeletionResponse, ErrorResponses(ImportBadRequestError, ImportNotFoundError, ImportConflictError, ImportInternalError)]:
+) -> Annotated[
+    ImportDeletionResponse,
+    ErrorResponses(
+        ImportBadRequestError,
+        ImportNotFoundError,
+        ImportConflictError,
+        ImportInternalError,
+    ),
+]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -706,7 +501,9 @@ async def delete_import_task(
     if not task:
         _raise_import_error("导入记录不存在", status_code=404)
     if task.get("status") not in {"COMPLETED", "FAILED"}:
-        _raise_import_error("导入任务仍在处理中，完成或失败后才能删除记录", status_code=409)
+        _raise_import_error(
+            "导入任务仍在处理中，完成或失败后才能删除记录", status_code=409
+        )
 
     payload = await _request_json_or_empty(request)
     delete_mode = str(payload.get("deleteMode") or "record").strip().lower()
@@ -723,7 +520,9 @@ async def delete_import_task(
     if delete_mode == "source":
         source_path = _source_delete_path(task.get("sourcePath"), db, settings)
         if not source_path:
-            _raise_import_error("源文件路径不在允许删除的书库或监控目录中", status_code=400)
+            _raise_import_error(
+                "源文件路径不在允许删除的书库或监控目录中", status_code=400
+            )
         selected_paths = [source_path]
     elif delete_mode == "converted":
         selected_paths = _conversion_output_paths(conversion, settings)
@@ -743,6 +542,7 @@ async def delete_import_task(
     ]
     if settings.resolved_monitor_root is not None:
         monitor_roots.append(settings.resolved_monitor_root)
+
     def delete_database_records() -> tuple[bool, dict[str, Any]]:
         library_cleanup = (
             _delete_import_linked_library_scope(db, task, settings)
@@ -773,9 +573,7 @@ async def delete_import_task(
                     "deleteMode": delete_mode,
                     "deleteLibraryRecord": delete_library_record,
                     "deletedLibraryRecord": bool(library_cleanup.get("deleted")),
-                    "deletedWorkRecord": bool(
-                        library_cleanup.get("deletedWorkRecord")
-                    ),
+                    "deletedWorkRecord": bool(library_cleanup.get("deletedWorkRecord")),
                     "deletedLibraryDatabaseRecords": int(
                         library_cleanup.get("deletedDatabaseRecords") or 0
                     ),
@@ -807,8 +605,7 @@ async def delete_import_task(
             ),
         )
     failed_file_deletes = [
-        {"path": item.path, "message": item.message}
-        for item in file_cleanup.failures
+        {"path": item.path, "message": item.message} for item in file_cleanup.failures
     ]
     return ImportDeletionResponse(
         data={
@@ -888,7 +685,9 @@ def retry_import_task(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Annotated[ImportTaskResponse, ErrorResponses(ImportBadRequestError, ImportNotFoundError)]:
+) -> Annotated[
+    ImportTaskResponse, ErrorResponses(ImportBadRequestError, ImportNotFoundError)
+]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error

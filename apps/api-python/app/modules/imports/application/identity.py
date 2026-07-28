@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
 
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
@@ -131,48 +130,63 @@ def _record_identity_system_events(
         "reusedWorkId": identity.reused_work_id,
     }
     if identity.source == "existing_work":
-        services.stage_system_event(ImportSystemEvent(
-            source="import",
-            action="identity.existing_work.reused",
-            target_type="importTask",
-            target_id=task_id,
-            message=f"识别为现有作品的新卷册：{source_path.name} → 《{identity.title}》第 {identity.volume_index:g} 卷",
-            metadata=metadata,
-        ))
+        services.stage_system_event(
+            ImportSystemEvent(
+                source="import",
+                action="identity.existing_work.reused",
+                target_type="importTask",
+                target_id=task_id,
+                message=f"识别为现有作品的新卷册：{source_path.name} → 《{identity.title}》第 {identity.volume_index:g} 卷",
+                metadata=metadata,
+            )
+        )
         return
     if identity.cache_hit:
-        services.stage_system_event(ImportSystemEvent(
-            source="import",
-            action="identity.cache.hit",
-            target_type="importTask",
-            target_id=task_id,
-            message=f"应用路径识别缓存：{source_path.name} → 《{identity.title}》 / {identity.author}",
-            metadata=metadata,
-        ))
+        services.stage_system_event(
+            ImportSystemEvent(
+                source="import",
+                action="identity.cache.hit",
+                target_type="importTask",
+                target_id=task_id,
+                message=f"应用路径识别缓存：{source_path.name} → 《{identity.title}》 / {identity.author}",
+                metadata=metadata,
+            )
+        )
         return
     if identity.fallback_reason:
         ai_failed = identity.fallback_reason.startswith(
             "AI identity recognition failed:"
         )
-        services.stage_system_event(ImportSystemEvent(
+        services.stage_system_event(
+            ImportSystemEvent(
+                source="import",
+                action="identity.ai.failed" if ai_failed else "identity.ai.unavailable",
+                level="warning",
+                target_type="importTask",
+                target_id=task_id,
+                message=(
+                    f"正则结果不完整，AI 兜底识别失败，已保留正则结果：{source_path.name}"
+                    if ai_failed
+                    else f"正则结果不完整，AI 识别配置不可用，已保留正则结果：{source_path.name}"
+                ),
+                metadata=metadata,
+            )
+        )
+    method_label = {
+        "ai": "AI",
+        "regex": "正则匹配",
+        "requested": "用户输入",
+        "epub_opf": "EPUB 元数据",
+        "pdf_metadata": "PDF 元数据",
+        "comic_info": "ComicInfo 元数据",
+    }.get(identity.source, "多来源裁决")
+    services.stage_system_event(
+        ImportSystemEvent(
             source="import",
-            action="identity.ai.failed" if ai_failed else "identity.ai.unavailable",
-            level="warning",
+            action=f"identity.{identity.source}.completed",
             target_type="importTask",
             target_id=task_id,
-            message=(
-                f"正则结果不完整，AI 兜底识别失败，已保留正则结果：{source_path.name}"
-                if ai_failed
-                else f"正则结果不完整，AI 识别配置不可用，已保留正则结果：{source_path.name}"
-            ),
+            message=f"{method_label}识别文件信息：{source_path.name} → 《{identity.title}》 / {identity.author}",
             metadata=metadata,
-        ))
-    method_label = "AI" if identity.source == "ai" else "正则匹配"
-    services.stage_system_event(ImportSystemEvent(
-        source="import",
-        action=f"identity.{identity.source}.completed",
-        target_type="importTask",
-        target_id=task_id,
-        message=f"{method_label}识别文件信息：{source_path.name} → 《{identity.title}》 / {identity.author}",
-        metadata=metadata,
-    ))
+        )
+    )

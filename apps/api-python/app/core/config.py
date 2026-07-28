@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "二毛图书 API"
-    app_version: str = "0.3.3"
+    app_version: str = "0.4.0"
     session_secret: str | None = None
     monitor_root: str | None = "/monitor"
     storage_root: str = "/app/storage"
@@ -21,9 +21,15 @@ class Settings(BaseSettings):
     libmobi_bin: str = "mobitool"
     ebook_conversion_enabled: bool = True
     ebook_conversion_timeout_seconds: int = Field(default=600, ge=10, le=3600)
-    ebook_conversion_max_output_bytes: int = Field(default=768 * 1024 * 1024, ge=1024 * 1024)
-    audiobook_max_file_bytes: int = Field(default=8 * 1024 * 1024 * 1024, ge=1024 * 1024)
-    audiobook_max_bundle_bytes: int = Field(default=8 * 1024 * 1024 * 1024, ge=1024 * 1024)
+    ebook_conversion_max_output_bytes: int = Field(
+        default=768 * 1024 * 1024, ge=1024 * 1024
+    )
+    audiobook_max_file_bytes: int = Field(
+        default=8 * 1024 * 1024 * 1024, ge=1024 * 1024
+    )
+    audiobook_max_bundle_bytes: int = Field(
+        default=8 * 1024 * 1024 * 1024, ge=1024 * 1024
+    )
     file_streams_per_user_limit: int = Field(default=8, ge=0, le=128)
     qbittorrent_url: str | None = None
     qbittorrent_username: str | None = None

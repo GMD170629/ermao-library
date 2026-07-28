@@ -2,9 +2,28 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Mapping
+from typing import Literal
+
+IdentitySource = Literal[
+    "ai",
+    "regex",
+    "existing_work",
+    "requested",
+    "epub_opf",
+    "pdf_metadata",
+    "comic_info",
+]
+
+
+@dataclass(frozen=True)
+class IdentityEvidenceDTO:
+    source: IdentitySource
+    title: str | None
+    author: str | None
+    confidence: float
 
 
 @dataclass(frozen=True)
@@ -34,12 +53,14 @@ class BookIdentityDTO:
     title: str
     author: str
     volume_index: float | None
-    source: Literal["ai", "regex", "existing_work"]
+    source: IdentitySource
     confidence: float
     logical_path: str
     fallback_reason: str | None = None
     cache_hit: bool = False
     reused_work_id: str | None = None
+    selection_reason: str | None = None
+    evidence: tuple[IdentityEvidenceDTO, ...] = ()
 
     def raw_metadata(self) -> dict[str, object]:
         return {
@@ -60,6 +81,16 @@ class BookIdentityDTO:
             "fallbackReason": self.fallback_reason,
             "cacheHit": self.cache_hit,
             "reusedWorkId": self.reused_work_id,
+            "selectionReason": self.selection_reason,
+            "evidence": [
+                {
+                    "source": item.source,
+                    "title": item.title,
+                    "author": item.author,
+                    "confidence": item.confidence,
+                }
+                for item in self.evidence
+            ],
         }
 
 
@@ -114,6 +145,7 @@ class ImportTaskDTO:
     attempts: int = 0
     lease_owner: str | None = None
     message: str | None = None
+
 
 @dataclass(frozen=True)
 class StageImportCommand:

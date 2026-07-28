@@ -10,20 +10,25 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.typed_route import TypedContractRoute
-from app.contracts.http_errors import ErrorResponses
-from app.core.auth import get_current_user, hash_password
-from app.core.authorization import authorization_context, is_admin, read_user_preferences, write_user_preference
-from app.core.config import Settings, get_settings
-from app.core.i18n import configured_locale
-from app.db.session import get_db
-from app.models.auth import Session as UserSession
-from app.models.auth import User, cuid, db_timestamp
 from app.bootstrap.auth import (
     delete_personal_user_data,
     list_monitor_folder_ids,
     replace_monitor_folder_access,
     validate_monitor_folder_ids,
 )
+from app.contracts.http_errors import ErrorResponses
+from app.core.auth import get_current_user, hash_password
+from app.core.authorization import (
+    authorization_context,
+    is_admin,
+    read_user_preferences,
+    write_user_preference,
+)
+from app.core.config import Settings, get_settings
+from app.core.i18n import configured_locale
+from app.db.session import get_db
+from app.models.auth import Session as UserSession
+from app.models.auth import User, cuid, db_timestamp
 from app.modules.auth.presentation.requests import (
     AdminCreateUserRequest,
     AdminDeleteUserRequest,
@@ -49,9 +54,9 @@ from app.modules.auth.presentation.user_schemas import (
     UserDeletedResponse,
     UserForbiddenError,
     UserNotFoundError,
-    UserUnauthorizedError,
     UsersPayload,
     UsersResponse,
+    UserUnauthorizedError,
 )
 from app.services.system_events import record_system_event
 
@@ -62,6 +67,8 @@ EMAIL_ADAPTER = TypeAdapter(EmailStr)
 ALLOWED_PREFERENCE_KEYS = {
     "locale",
     "library.view",
+    "library.sort",
+    "library.sortDirection",
     "audio.playbackRate",
     "kindle.email",
 }
@@ -136,8 +143,27 @@ def _validate_preference(key: str, value: object) -> object:
         if value not in {"grid", "list"}:
             raise ValueError("不支持的书库视图")
         return value
+    if key == "library.sort":
+        if value not in {
+            "recent_read",
+            "recent_import",
+            "title",
+            "author",
+            "publisher",
+            "series",
+        }:
+            raise ValueError("不支持的书库排序方式")
+        return value
+    if key == "library.sortDirection":
+        if value not in {"asc", "desc"}:
+            raise ValueError("不支持的书库排序方向")
+        return value
     if key == "audio.playbackRate":
-        if not isinstance(value, (int, float)) or isinstance(value, bool) or not 0.5 <= float(value) <= 3:
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not 0.5 <= float(value) <= 3
+        ):
             raise ValueError("音频播放速度必须在 0.5 到 3 之间")
         return round(float(value), 2)
     if key == "kindle.email":
@@ -181,7 +207,9 @@ def _audit_user_change(
     )
 
 
-def _delete_personal_user_data(db: Session, user_id: str, anonymous_user_id: str) -> None:
+def _delete_personal_user_data(
+    db: Session, user_id: str, anonymous_user_id: str
+) -> None:
     delete_personal_user_data(db, user_id, anonymous_user_id)
 
 
@@ -198,10 +226,7 @@ def list_users(
     users = db.query(User).order_by(User.created_at.asc(), User.id.asc()).all()
     return UsersResponse(
         data=UsersPayload(
-            users=[
-                AdminUser.model_validate(_user_view(db, user))
-                for user in users
-            ]
+            users=[AdminUser.model_validate(_user_view(db, user)) for user in users]
         )
     )
 
@@ -227,9 +252,7 @@ def get_user(
             CodedMessageBody(message="用户不存在", code="USER_NOT_FOUND")
         )
     return AdminUserResponse(
-        data=AdminUserPayload(
-            user=AdminUser.model_validate(_user_view(db, user))
-        )
+        data=AdminUserPayload(user=AdminUser.model_validate(_user_view(db, user)))
     )
 
 
@@ -255,7 +278,11 @@ def create_user(
             CodedMessageBody(message="该邮箱已被使用", code="EMAIL_IN_USE")
         )
     try:
-        folder_ids = [] if payload.role == "admin" else _validate_folder_ids(db, payload.monitor_folder_ids)
+        folder_ids = (
+            []
+            if payload.role == "admin"
+            else _validate_folder_ids(db, payload.monitor_folder_ids)
+        )
     except ValueError as exc:
         raise UserBadRequestError(
             CodedMessageBody(
@@ -270,8 +297,12 @@ def create_user(
         password_hash=hash_password(payload.password),
         role=payload.role,
         status="active",
-        can_manage_system=payload.can_manage_system if payload.role == "member" else False,
-        can_view_manual_imports=payload.can_view_manual_imports if payload.role == "member" else False,
+        can_manage_system=payload.can_manage_system
+        if payload.role == "member"
+        else False,
+        can_view_manual_imports=payload.can_view_manual_imports
+        if payload.role == "member"
+        else False,
         authz_version=1,
     )
     db.add(user)
@@ -328,8 +359,10 @@ def update_user(
     fields_set = payload.model_fields_set
     next_role = payload.role if "role" in fields_set else user.role
     next_status = payload.status if "status" in fields_set else user.status
-    removing_active_admin = user.role == "admin" and user.status == "active" and (
-        next_role != "admin" or next_status != "active"
+    removing_active_admin = (
+        user.role == "admin"
+        and user.status == "active"
+        and (next_role != "admin" or next_status != "active")
     )
     if actor is not None and actor.id == user.id and removing_active_admin:
         raise UserBadRequestError(
@@ -347,7 +380,11 @@ def update_user(
         )
     if "email" in fields_set and payload.email is not None:
         email = str(payload.email).strip().lower()
-        duplicate = db.query(User.id).filter(func.lower(User.email) == email, User.id != user.id).first()
+        duplicate = (
+            db.query(User.id)
+            .filter(func.lower(User.email) == email, User.id != user.id)
+            .first()
+        )
         if duplicate is not None:
             raise UserConflictError(
                 CodedMessageBody(message="该邮箱已被使用", code="EMAIL_IN_USE")
@@ -364,11 +401,19 @@ def update_user(
     else:
         if "can_manage_system" in fields_set and payload.can_manage_system is not None:
             user.can_manage_system = payload.can_manage_system
-        if "can_view_manual_imports" in fields_set and payload.can_view_manual_imports is not None:
+        if (
+            "can_view_manual_imports" in fields_set
+            and payload.can_view_manual_imports is not None
+        ):
             user.can_view_manual_imports = payload.can_view_manual_imports
-        if "monitor_folder_ids" in fields_set and payload.monitor_folder_ids is not None:
+        if (
+            "monitor_folder_ids" in fields_set
+            and payload.monitor_folder_ids is not None
+        ):
             try:
-                _replace_folder_access(db, user.id, _validate_folder_ids(db, payload.monitor_folder_ids))
+                _replace_folder_access(
+                    db, user.id, _validate_folder_ids(db, payload.monitor_folder_ids)
+                )
             except ValueError as exc:
                 db.rollback()
                 raise UserBadRequestError(
@@ -383,7 +428,9 @@ def update_user(
     user.updated_at = db_timestamp()
     db.add(user)
     if next_status == "disabled":
-        db.query(UserSession).filter(UserSession.user_id == user.id).delete(synchronize_session=False)
+        db.query(UserSession).filter(UserSession.user_id == user.id).delete(
+            synchronize_session=False
+        )
     _audit_user_change(
         db,
         actor,
@@ -406,9 +453,7 @@ def update_user(
         )
     db.refresh(user)
     return AdminUserResponse(
-        data=AdminUserPayload(
-            user=AdminUser.model_validate(_user_view(db, user))
-        )
+        data=AdminUserPayload(user=AdminUser.model_validate(_user_view(db, user)))
     )
 
 
@@ -436,8 +481,12 @@ def set_user_password(
     user.password_hash = hash_password(payload.password)
     user.updated_at = db_timestamp()
     db.add(user)
-    db.query(UserSession).filter(UserSession.user_id == user.id).delete(synchronize_session=False)
-    _audit_user_change(db, actor, "user.password.reset", user.id, "管理员重置了用户密码并撤销会话")
+    db.query(UserSession).filter(UserSession.user_id == user.id).delete(
+        synchronize_session=False
+    )
+    _audit_user_change(
+        db, actor, "user.password.reset", user.id, "管理员重置了用户密码并撤销会话"
+    )
     db.commit()
     return AdminPasswordChangedResponse(data=AdminPasswordChangedPayload())
 
@@ -479,7 +528,11 @@ def delete_user(
                 code="DELETE_CONFIRMATION_MISMATCH",
             )
         )
-    if user.role == "admin" and user.status == "active" and _active_admin_count(db, exclude_user_id=user.id) == 0:
+    if (
+        user.role == "admin"
+        and user.status == "active"
+        and _active_admin_count(db, exclude_user_id=user.id) == 0
+    ):
         raise UserConflictError(
             CodedMessageBody(
                 message="系统必须至少保留一个有效管理员",
@@ -487,7 +540,9 @@ def delete_user(
             )
         )
     deleted_user_id = user.id
-    anonymous_target = hashlib.sha256(f"deleted-user:{user.id}".encode("utf-8")).hexdigest()[:24]
+    anonymous_target = hashlib.sha256(
+        f"deleted-user:{user.id}".encode()
+    ).hexdigest()[:24]
     avatar_path = None
     if user.avatar_path:
         candidate = (settings.resolved_storage_root / user.avatar_path).resolve()

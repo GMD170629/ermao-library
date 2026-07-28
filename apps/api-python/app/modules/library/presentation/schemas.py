@@ -566,7 +566,10 @@ class BulkUpdatePayload(HttpContractModel):
 class BulkDeletePayload(HttpContractModel):
     updated: int
     deleted: int
+    delete_source: bool = Field(alias="deleteSource")
     deleted_files: int = Field(alias="deletedFiles")
+    deleted_source_files: int = Field(alias="deletedSourceFiles")
+    missing_source_files: list[str] = Field(alias="missingSourceFiles")
     failed_file_deletes: list[DeletedPathFailure] = Field(alias="failedFileDeletes")
     ids: list[str]
 

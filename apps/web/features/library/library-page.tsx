@@ -12,11 +12,22 @@ import { useToast } from '../../components/ui/feedback';
 import { Select } from '../../components/ui/select';
 import type { WorkView } from '../../types/work';
 import { LibraryBatchContextMenu, LibraryBatchDialog, type LibraryBatchAction } from './library-batch-actions';
+import { canUseLibraryBatchAction } from './model/library-batch-action';
 import { SmartFilterBuilder, type SmartFilterField, type SmartFilterRules } from './smart-filter-builder';
 import { UploadBookDialog } from './upload-book-dialog';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import { currentUserId, saveAccountPreferences, userDevicePreferenceKey } from '../../lib/user-preferences';
+import {
+  DEFAULT_LIBRARY_SORT_PREFERENCE,
+  defaultLibrarySortDirection,
+  librarySortPreferenceFromRoute,
+  parseLibrarySortPreference,
+  parseLibrarySortPreferenceValue,
+  resolveLibrarySortPreference,
+  type LibrarySort,
+  type LibrarySortDirection
+} from './model/library-sort-preference';
 
 type BooksResponse = {
   ok: boolean;
@@ -29,17 +40,6 @@ type FilterSchemaResponse = {
   data?: { fields: SmartFilterField[]; maxConditions: number };
   error?: { message: string };
 };
-
-const sortOptions = [
-  { value: 'recent_read', label: '最近阅读' },
-  { value: 'recent_import', label: '最近加入' },
-  { value: 'title', label: '标题' },
-  { value: 'author', label: '作者' },
-  { value: 'publisher', label: '出版社' },
-  { value: 'series', label: '系列' }
-];
-
-type SortDirection = 'asc' | 'desc';
 
 const formatOptions = [
   { value: '全部', label: '全部' },
@@ -62,25 +62,13 @@ const pageSizeOptions = [
 ];
 
 const validStatuses = new Set(statusOptions.map((option) => option.value));
-const validSorts = new Set(sortOptions.map((option) => option.value));
 const DEFAULT_LIBRARY_PAGE_SIZE = 20;
 const BROWSE_LIBRARY_PAGE_SIZE = 50;
+const LIBRARY_SORT_DEVICE_PREFERENCE_KEY = 'shuku.library.sort:v1';
 
 function routeStatus(value: string | null) {
   if (value === 'WANT') return 'UNREAD';
   return value && validStatuses.has(value) ? value : '全部';
-}
-
-function routeSort(value: string | null) {
-  return value && validSorts.has(value) ? value : 'recent_read';
-}
-
-function defaultSortDirection(sort: string): SortDirection {
-  return sort === 'recent_read' || sort === 'recent_import' ? 'desc' : 'asc';
-}
-
-function routeSortDirection(value: string | null, sort: string): SortDirection {
-  return value === 'asc' || value === 'desc' ? value : defaultSortDirection(sort);
 }
 
 function parseSmartFilterRules(value: string | null): SmartFilterRules {
@@ -121,9 +109,11 @@ export function LibraryPage() {
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [formatFilter, setFormatFilter] = useState('全部');
   const [statusFilter, setStatusFilter] = useState(() => routeStatus(searchParams.get('status')));
-  const initialSort = routeSort(searchParams.get('sort'));
-  const [sort, setSort] = useState(initialSort);
-  const [sortDirection, setSortDirection] = useState<SortDirection>(() => routeSortDirection(searchParams.get('sortDirection'), initialSort));
+  const initialRouteSort = librarySortPreferenceFromRoute(searchParams.get('sort'), searchParams.get('sortDirection'));
+  const initialSortPreference = initialRouteSort ?? DEFAULT_LIBRARY_SORT_PREFERENCE;
+  const [sort, setSort] = useState<LibrarySort>(initialSortPreference.sort);
+  const [sortDirection, setSortDirection] = useState<LibrarySortDirection>(initialSortPreference.direction);
+  const [sortPreferenceLoaded, setSortPreferenceLoaded] = useState(initialRouteSort !== null);
   const [search, setSearch] = useState(() => searchParams.get('search') ?? '');
   const [smartFilterRules, setSmartFilterRules] = useState<SmartFilterRules>(() => parseSmartFilterRules(searchParams.get('filters')));
   const [smartFilterFields, setSmartFilterFields] = useState<SmartFilterField[]>([]);
@@ -153,6 +143,7 @@ export function LibraryPage() {
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const requestedScopeRef = useRef('');
   const requestedReloadKeyRef = useRef(reloadKey);
+  const rememberedSortPreferenceRef = useRef(initialSortPreference);
   const toast = useToast();
   const applicableSmartFilterRules = useMemo<SmartFilterRules>(() => ({
     combinator: smartFilterRules.combinator,
@@ -190,10 +181,41 @@ export function LibraryPage() {
         .then((response) => response.json())
         .catch(() => null)
     ]).then(([preferencesPayload, sessionPayload]) => {
-      const accountView = preferencesPayload?.ok ? preferencesPayload.data?.preferences?.['library.view'] : null;
-      const deviceView = window.localStorage.getItem(userDevicePreferenceKey('shuku.library.view'));
+      const accountPreferences = preferencesPayload?.ok ? preferencesPayload.data?.preferences : null;
+      const accountView = accountPreferences?.['library.view'];
+      let deviceView = null;
+      try {
+        deviceView = window.localStorage.getItem(userDevicePreferenceKey('shuku.library.view'));
+      } catch {
+        deviceView = null;
+      }
       const savedView = accountView ?? deviceView;
       if (savedView === 'grid' || savedView === 'list') setView(savedView);
+      let deviceSortPreference = null;
+      try {
+        const stored = window.localStorage.getItem(userDevicePreferenceKey(LIBRARY_SORT_DEVICE_PREFERENCE_KEY));
+        deviceSortPreference = stored ? parseLibrarySortPreferenceValue(JSON.parse(stored) as unknown) : null;
+      } catch {
+        deviceSortPreference = null;
+      }
+      const currentRouteParameters = new URLSearchParams(window.location.search);
+      const routePreference = librarySortPreferenceFromRoute(
+        currentRouteParameters.get('sort'),
+        currentRouteParameters.get('sortDirection')
+      );
+      const rememberedSortPreference = resolveLibrarySortPreference({
+        route: null,
+        account: parseLibrarySortPreference(
+          accountPreferences?.['library.sort'],
+          accountPreferences?.['library.sortDirection']
+        ),
+        device: deviceSortPreference
+      });
+      rememberedSortPreferenceRef.current = rememberedSortPreference;
+      const activeSortPreference = routePreference ?? rememberedSortPreference;
+      setSort(activeSortPreference.sort);
+      setSortDirection(activeSortPreference.direction);
+      setSortPreferenceLoaded(true);
       setCanManageSystem(Boolean(sessionPayload?.ok && sessionPayload.data?.authorization?.canManageSystem));
       setAuthorizationLoaded(true);
     });
@@ -203,9 +225,10 @@ export function LibraryPage() {
   useEffect(() => {
     const routeParams = new URLSearchParams(searchParamString);
     setStatusFilter(routeStatus(routeParams.get('status')));
-    const nextSort = routeSort(routeParams.get('sort'));
-    setSort(nextSort);
-    setSortDirection(routeSortDirection(routeParams.get('sortDirection'), nextSort));
+    const activeSortPreference = librarySortPreferenceFromRoute(routeParams.get('sort'), routeParams.get('sortDirection'))
+      ?? rememberedSortPreferenceRef.current;
+    setSort(activeSortPreference.sort);
+    setSortDirection(activeSortPreference.direction);
     setSearch(routeParams.get('search') ?? '');
     setUploadDialogOpen(authorizationLoaded && canManageSystem && routeParams.get('upload') === '1');
   }, [authorizationLoaded, canManageSystem, searchParamString]);
@@ -231,6 +254,7 @@ export function LibraryPage() {
   }, [filterSchemaLoaded, filtersOpen, toast]);
 
   useEffect(() => {
+    if (!sortPreferenceLoaded) return;
     let active = true;
     const scopeChanged = requestedScopeRef.current !== requestScope;
     const reloadChanged = requestedReloadKeyRef.current !== reloadKey;
@@ -276,7 +300,7 @@ export function LibraryPage() {
     return () => {
       active = false;
     };
-  }, [page, queryBase, reloadKey, requestPageSize, requestScope, view]);
+  }, [page, queryBase, reloadKey, requestPageSize, requestScope, sortPreferenceLoaded, view]);
 
   useEffect(() => {
     const sentinel = loadMoreRef.current;
@@ -336,13 +360,28 @@ export function LibraryPage() {
     });
   }
 
-  function updateSort(nextSort: string, nextDirection: SortDirection) {
-    setSort(nextSort);
-    setSortDirection(nextDirection);
+  function updateSort(nextSort: string, nextDirection: LibrarySortDirection) {
+    const nextPreference = parseLibrarySortPreference(nextSort, nextDirection);
+    if (!nextPreference) return;
+    rememberedSortPreferenceRef.current = nextPreference;
+    setSort(nextPreference.sort);
+    setSortDirection(nextPreference.direction);
+    try {
+      window.localStorage.setItem(
+        userDevicePreferenceKey(LIBRARY_SORT_DEVICE_PREFERENCE_KEY, currentUserId()),
+        JSON.stringify(nextPreference)
+      );
+    } catch {
+      // Account persistence still preserves the preference when device storage is unavailable.
+    }
+    void saveAccountPreferences({
+      'library.sort': nextPreference.sort,
+      'library.sortDirection': nextPreference.direction
+    }).catch(() => undefined);
     replaceRoute((params) => {
-      if (nextSort === 'recent_read') params.delete('sort');
+      if (nextSort === DEFAULT_LIBRARY_SORT_PREFERENCE.sort) params.delete('sort');
       else params.set('sort', nextSort);
-      if (nextDirection === defaultSortDirection(nextSort)) params.delete('sortDirection');
+      if (nextDirection === defaultLibrarySortDirection(nextPreference.sort)) params.delete('sortDirection');
       else params.set('sortDirection', nextDirection);
     });
   }
@@ -414,7 +453,7 @@ export function LibraryPage() {
   }
 
   function openBatchAction(action: LibraryBatchAction) {
-    if (!canManageSystem && action !== 'shelves' && action !== 'reading_status') return;
+    if (!canUseLibraryBatchAction(action, canManageSystem)) return;
     setBatchContextPosition(null);
     setBatchDialogAction(action);
   }

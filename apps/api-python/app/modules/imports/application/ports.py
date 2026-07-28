@@ -5,10 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
+from app.modules.imports.application.audio_types import (
+    AudioBundleStructure,
+    AudioFileMetadata,
+)
 from app.modules.imports.application.dto import (
-    ImportOptions,
     BookIdentityDTO,
     ConversionArtifactDTO,
+    ImportOptions,
     ImportPreferencesDTO,
     ImportResult,
     ImportRuntimeConfig,
@@ -16,10 +20,8 @@ from app.modules.imports.application.dto import (
     ImportTaskDTO,
     StageImportCommand,
 )
-from app.modules.imports.application.query_ports import ImportLibraryQueries
-from app.modules.imports.application.audio_types import (
-    AudioBundleStructure,
-    AudioFileMetadata,
+from app.modules.imports.application.query_ports import (
+    ImportLibraryQueries as ImportLibraryQueries,
 )
 
 
@@ -64,6 +66,8 @@ class ImportTaskStore(Protocol):
         error_summary: str,
         now: int,
     ) -> None: ...
+
+    def monitor_folder_exists(self, monitor_folder_id: str) -> bool: ...
 
     def link_work_to_monitor_shelf(
         self,
@@ -214,9 +218,7 @@ class ImportOrchestrationServices(Protocol):
         self, path: Path, original_name: str | None
     ) -> BookIdentityDTO: ...
 
-    def logical_import_path(
-        self, path: Path, original_name: str | None
-    ) -> str: ...
+    def logical_import_path(self, path: Path, original_name: str | None) -> str: ...
 
     def sync_work_facets(self, work_id: str) -> None: ...
 

@@ -28,7 +28,9 @@ def _prepare_schema(db_session) -> User:
 
 
 def _login(client, email: str, password: str = PASSWORD) -> None:
-    response = client.post("/api/auth/login", json={"email": email, "password": password})
+    response = client.post(
+        "/api/auth/login", json={"email": email, "password": password}
+    )
     assert response.status_code == 200, response.text
 
 
@@ -169,14 +171,20 @@ def test_admin_user_lifecycle_and_last_active_admin_guard(client, db_session) ->
     assert member["authorization"]["canManageSystem"] is True
     assert member["locale"] == "en-US"
 
-    self_demotion = client.patch(f"/api/admin/users/{admin.id}", json={"role": "member"})
+    self_demotion = client.patch(
+        f"/api/admin/users/{admin.id}", json={"role": "member"}
+    )
     assert self_demotion.status_code == 400
     assert self_demotion.json()["error"]["code"] == "CANNOT_CHANGE_SELF_ADMIN"
 
     second_admin = _create_user(client, email="admin2@example.com", role="admin")
-    demoted = client.patch(f"/api/admin/users/{second_admin['id']}", json={"role": "member"})
+    demoted = client.patch(
+        f"/api/admin/users/{second_admin['id']}", json={"role": "member"}
+    )
     assert demoted.status_code == 200
-    last_admin_disable = client.patch(f"/api/admin/users/{admin.id}", json={"status": "disabled"})
+    last_admin_disable = client.patch(
+        f"/api/admin/users/{admin.id}", json={"status": "disabled"}
+    )
     assert last_admin_disable.status_code == 400
 
     reset = client.put(
@@ -186,7 +194,9 @@ def test_admin_user_lifecycle_and_last_active_admin_guard(client, db_session) ->
     assert reset.status_code == 200
     assert reset.json()["data"]["sessionsRevoked"] is True
 
-    disabled = client.patch(f"/api/admin/users/{member['id']}", json={"status": "disabled"})
+    disabled = client.patch(
+        f"/api/admin/users/{member['id']}", json={"status": "disabled"}
+    )
     assert disabled.status_code == 200
     _logout(client)
     rejected = client.post(
@@ -202,14 +212,22 @@ def test_admin_user_lifecycle_and_last_active_admin_guard(client, db_session) ->
         json={"confirmation": member["email"]},
     )
     assert deleted.status_code == 200
-    assert db_session.execute(
-        text("SELECT COUNT(*) FROM `UserPreference` WHERE `userId` = :user_id"),
-        {"user_id": member["id"]},
-    ).scalar() == 0
-    assert db_session.execute(
-        text("SELECT COUNT(*) FROM `UserMonitorFolderAccess` WHERE `userId` = :user_id"),
-        {"user_id": member["id"]},
-    ).scalar() == 0
+    assert (
+        db_session.execute(
+            text("SELECT COUNT(*) FROM `UserPreference` WHERE `userId` = :user_id"),
+            {"user_id": member["id"]},
+        ).scalar()
+        == 0
+    )
+    assert (
+        db_session.execute(
+            text(
+                "SELECT COUNT(*) FROM `UserMonitorFolderAccess` WHERE `userId` = :user_id"
+            ),
+            {"user_id": member["id"]},
+        ).scalar()
+        == 0
+    )
     deletion_audit_target = db_session.execute(
         text(
             "SELECT `targetId` FROM `SystemEvent` "
@@ -218,16 +236,21 @@ def test_admin_user_lifecycle_and_last_active_admin_guard(client, db_session) ->
     ).scalar()
     assert deletion_audit_target
     assert deletion_audit_target != member["id"]
-    assert db_session.execute(
-        text(
-            "SELECT COUNT(*) FROM `SystemEvent` "
-            "WHERE `actorId` = :user_id OR `targetId` = :user_id"
-        ),
-        {"user_id": member["id"]},
-    ).scalar() == 0
+    assert (
+        db_session.execute(
+            text(
+                "SELECT COUNT(*) FROM `SystemEvent` "
+                "WHERE `actorId` = :user_id OR `targetId` = :user_id"
+            ),
+            {"user_id": member["id"]},
+        ).scalar()
+        == 0
+    )
 
 
-def test_folder_scope_system_manager_boundary_and_atomic_bulk_rejection(client, db_session) -> None:
+def test_folder_scope_system_manager_boundary_and_atomic_bulk_rejection(
+    client, db_session
+) -> None:
     admin = _prepare_schema(db_session)
     _seed_library(db_session)
     _login(client, admin.email)
@@ -243,7 +266,10 @@ def test_folder_scope_system_manager_boundary_and_atomic_bulk_rejection(client, 
     _login(client, manager["email"])
     works = client.get("/api/works?pageSize=100")
     assert works.status_code == 200
-    assert {item["id"] for item in works.json()["data"]["books"]} == {"work-a", "work-merged"}
+    assert {item["id"] for item in works.json()["data"]["books"]} == {
+        "work-a",
+        "work-merged",
+    }
 
     db_session.execute(
         text(
@@ -268,14 +294,17 @@ def test_folder_scope_system_manager_boundary_and_atomic_bulk_rejection(client, 
         },
     )
     assert publisher_sorted.status_code == 200
-    assert [
-        item["id"] for item in publisher_sorted.json()["data"]["books"]
-    ] == ["work-a", "work-merged"]
+    assert [item["id"] for item in publisher_sorted.json()["data"]["books"]] == [
+        "work-a",
+        "work-merged",
+    ]
 
     merged = client.get("/api/works/work-merged")
     assert merged.status_code == 200
     merged_payload = merged.json()["data"]["book"]
-    assert {edition["id"] for edition in merged_payload["editions"]} == {"edition-merged-a"}
+    assert {edition["id"] for edition in merged_payload["editions"]} == {
+        "edition-merged-a"
+    }
     assert "folder-b" not in json.dumps(merged_payload)
 
     assert client.get("/api/works/work-b").status_code == 404
@@ -289,7 +318,9 @@ def test_folder_scope_system_manager_boundary_and_atomic_bulk_rejection(client, 
     assert rescan.status_code == 200
     rescan_request = json.loads(
         db_session.execute(
-            text("SELECT `value` FROM `SystemSetting` WHERE `key` = 'monitor.rescanRequestedAt'")
+            text(
+                "SELECT `value` FROM `SystemSetting` WHERE `key` = 'monitor.rescanRequestedAt'"
+            )
         ).scalar()
     )
     assert rescan_request["monitorFolderIds"] == ["folder-a"]
@@ -307,9 +338,12 @@ def test_folder_scope_system_manager_boundary_and_atomic_bulk_rejection(client, 
         },
     )
     assert atomic_bulk.status_code in {403, 404}
-    assert db_session.execute(
-        text("SELECT `author` FROM `LibraryWork` WHERE `id` = 'work-a'")
-    ).scalar() == "新作者"
+    assert (
+        db_session.execute(
+            text("SELECT `author` FROM `LibraryWork` WHERE `id` = 'work-a'")
+        ).scalar()
+        == "新作者"
+    )
     _logout(client)
 
     _login(client, member["email"])
@@ -320,20 +354,29 @@ def test_folder_scope_system_manager_boundary_and_atomic_bulk_rejection(client, 
     assert kindle_tasks.status_code == 200
     assert kindle_tasks.json()["data"]["tasks"] == []
     assert client.get("/api/email-settings").status_code == 403
-    assert client.patch("/api/works/work-a", json={"author": "普通用户"}).status_code == 403
+    assert (
+        client.patch("/api/works/work-a", json={"author": "普通用户"}).status_code
+        == 403
+    )
     personal_status = client.patch("/api/works/work-a", json={"status": "FINISHED"})
     assert personal_status.status_code == 200
-    assert db_session.execute(
-        text("SELECT `status` FROM `LibraryWork` WHERE `id` = 'work-a'")
-    ).scalar() == "UNREAD"
+    assert (
+        db_session.execute(
+            text("SELECT `status` FROM `LibraryWork` WHERE `id` = 'work-a'")
+        ).scalar()
+        == "UNREAD"
+    )
     bulk_status = client.post(
         "/api/works/bulk",
         json={"ids": ["work-a"], "action": "set_status", "status": "FINISHED"},
     )
     assert bulk_status.status_code == 200
-    assert db_session.execute(
-        text("SELECT `status` FROM `LibraryWork` WHERE `id` = 'work-a'")
-    ).scalar() == "UNREAD"
+    assert (
+        db_session.execute(
+            text("SELECT `status` FROM `LibraryWork` WHERE `id` = 'work-a'")
+        ).scalar()
+        == "UNREAD"
+    )
     finished_shelf = client.post(
         "/api/shelves",
         json={"name": "已读", "kind": "SMART", "rules": {"statuses": ["FINISHED"]}},
@@ -347,7 +390,11 @@ def test_folder_scope_system_manager_boundary_and_atomic_bulk_rejection(client, 
             "kind": "SMART",
             "rules": {
                 "conditions": [
-                    {"field": "monitorFolder", "operator": "equals", "value": "folder-b"}
+                    {
+                        "field": "monitorFolder",
+                        "operator": "equals",
+                        "value": "folder-b",
+                    }
                 ]
             },
         },
@@ -356,21 +403,39 @@ def test_folder_scope_system_manager_boundary_and_atomic_bulk_rejection(client, 
     assert inaccessible_source_shelf.json()["data"]["shelf"]["bookIds"] == []
 
 
-def test_preferences_progress_bookmarks_and_shelves_are_isolated(client, db_session) -> None:
+def test_preferences_progress_bookmarks_and_shelves_are_isolated(
+    client, db_session
+) -> None:
     admin = _prepare_schema(db_session)
     _seed_library(db_session)
     _login(client, admin.email)
-    first = _create_user(client, email="first@example.com", folder_ids=["folder-a"], locale="en-US")
-    second = _create_user(client, email="second@example.com", folder_ids=["folder-a"], locale="zh-CN")
+    first = _create_user(
+        client, email="first@example.com", folder_ids=["folder-a"], locale="en-US"
+    )
+    second = _create_user(
+        client, email="second@example.com", folder_ids=["folder-a"], locale="zh-CN"
+    )
     _logout(client)
 
     _login(client, first["email"])
     preferences = client.patch(
         "/api/auth/preferences",
-        json={"preferences": {"locale": "en-US", "library.view": "list", "audio.playbackRate": 1.5}},
+        json={
+            "preferences": {
+                "locale": "en-US",
+                "library.view": "list",
+                "library.sort": "title",
+                "library.sortDirection": "desc",
+                "audio.playbackRate": 1.5,
+            }
+        },
     )
     assert preferences.status_code == 200
-    shelf = client.post("/api/shelves", json={"name": "First shelf", "bookIds": ["work-a"]})
+    assert preferences.json()["data"]["preferences"]["library.sort"] == "title"
+    assert preferences.json()["data"]["preferences"]["library.sortDirection"] == "desc"
+    shelf = client.post(
+        "/api/shelves", json={"name": "First shelf", "bookIds": ["work-a"]}
+    )
     assert shelf.status_code == 201
     bookmark = client.put(
         "/api/reader/v2/editions/edition-a/bookmarks",
@@ -409,9 +474,13 @@ def test_preferences_progress_bookmarks_and_shelves_are_isolated(client, db_sess
     _logout(client)
 
     _login(client, second["email"])
-    second_preferences = client.get("/api/auth/preferences").json()["data"]["preferences"]
+    second_preferences = client.get("/api/auth/preferences").json()["data"][
+        "preferences"
+    ]
     assert second_preferences["locale"] == "zh-CN"
     assert "library.view" not in second_preferences
+    assert "library.sort" not in second_preferences
+    assert "library.sortDirection" not in second_preferences
     assert client.get("/api/shelves").json()["data"]["shelves"] == []
     second_bookmarks = client.get(
         "/api/reader/v2/editions/edition-a/bookmarks?contentFingerprint=sha256%3Atest"

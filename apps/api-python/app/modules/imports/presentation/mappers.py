@@ -11,10 +11,10 @@ from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.bootstrap.imports import import_http_store
-from app.contracts.imports import ImportTaskContract
-from app.modules.imports.application.dto import ImportTaskDTO
 from app.bootstrap.library import library_works
+from app.contracts.imports import ImportTaskContract
 from app.core.time import timestamp_ms_to_iso
+from app.modules.imports.application.dto import ImportTaskDTO
 from app.modules.imports.application.monitor_paths import (
     is_inside_path,
     monitor_directory_tree_node,
@@ -35,15 +35,21 @@ def _dt(value: Any) -> str | None:
     return timestamp_ms_to_iso(value) or str(value)
 
 
-def _parse_json(value: Any, fallback: Any) -> Any:
-    if value is None:
-        return fallback
-    if isinstance(value, (dict, list)):
-        return value
-    try:
-        return json.loads(str(value))
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return fallback
+def _conversion_options_view(value: object) -> dict[str, bool]:
+    """Map stored conversion details to the public conversion-options contract."""
+
+    parsed_value: object = value
+    if isinstance(value, str):
+        try:
+            parsed_value = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    if not isinstance(parsed_value, dict):
+        return {}
+    preserve_original = parsed_value.get("preserveOriginal")
+    if not isinstance(preserve_original, bool):
+        return {}
+    return {"preserveOriginal": preserve_original}
 
 
 def friendly_import_error(
@@ -51,6 +57,8 @@ def friendly_import_error(
 ) -> str | None:
     text_value = message or ""
     code = (error_code or "").upper()
+    if code == "MONITOR_FOLDER_NOT_FOUND":
+        return "监控文件夹已被删除，本次导入任务已结束。"
     if code == "SOURCE_NOT_FOUND":
         return "文件不存在：可能已被移动、删除，或监控目录配置已变化。"
     if code == "IMPORT_WORKER_FAILED":
@@ -69,13 +77,13 @@ def friendly_import_error(
         return (
             "转换结果无法在保留章节锚点和链接的前提下安全拆分。原文件已保留，可以重试。"
         )
-    if re.search(r"EACCES|permission|权限", text_value, re.I):
+    if re.search(r"EACCES|permission|权限", text_value, re.IGNORECASE):
         return "权限不足：请确认容器用户可以读取该目录和文件。"
-    if re.search(r"ENOENT|not found|不存在", text_value, re.I):
+    if re.search(r"ENOENT|not found|不存在", text_value, re.IGNORECASE):
         return "文件不存在：可能已被移动、删除，或监控目录配置已变化。"
-    if re.search(r"unsupported|format|格式", text_value, re.I):
+    if re.search(r"unsupported|format|格式", text_value, re.IGNORECASE):
         return "格式暂不支持：请确认文件属于当前支持的图书格式。"
-    if re.search(r"zip|archive|corrupt|invalid|损坏", text_value, re.I):
+    if re.search(r"zip|archive|corrupt|invalid|损坏", text_value, re.IGNORECASE):
         return "压缩包可能损坏：请重新复制文件或用本地工具测试压缩包。"
     return "导入失败：请检查文件完整性和格式。" if text_value else None
 
@@ -127,7 +135,7 @@ def import_task_view(
             **conversion,
             "sourcePath": display_path_name(conversion.get("sourcePath")),
             "outputPath": display_path_name(conversion.get("outputPath")),
-            "options": _parse_json(conversion.get("optionsJson"), {}),
+            "options": _conversion_options_view(conversion.get("optionsJson")),
             "startedAt": _dt(conversion.get("startedAt")),
             "finishedAt": _dt(conversion.get("finishedAt")),
             "createdAt": _dt(conversion.get("createdAt")),
@@ -167,5 +175,7 @@ __all__ = [
     "normalize_monitor_root_path",
     "serialize_import_log",
 ]
+
+
 def import_task_dto_view(task: ImportTaskDTO) -> dict[str, object]:
     return ImportTaskContract.from_dto(task).to_wire()

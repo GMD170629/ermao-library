@@ -10,9 +10,10 @@ import shutil
 import subprocess
 import time
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import unquote, urlsplit
 from xml.etree import ElementTree
 
@@ -41,7 +42,6 @@ from app.services.internal_epub_conversion import (
     convert_txt_to_epub,
 )
 
-
 CONVERTIBLE_TEXT_EXTS = {".mobi", ".azw", ".azw3", ".prc", ".fb2", ".txt"}
 TEXT_EBOOK_EXTS = {".epub", *CONVERTIBLE_TEXT_EXTS}
 INTERNAL_SOURCE_FORMATS = {"FB2", "TXT"}
@@ -57,10 +57,14 @@ MAX_LOG_CHARS = 16_000
 
 
 class ConversionFailure(RuntimeError):
-    def __init__(self, code: str, message: str, *, retryable: bool | None = None) -> None:
+    def __init__(
+        self, code: str, message: str, *, retryable: bool | None = None
+    ) -> None:
         super().__init__(message)
         self.code = code
-        self.retryable = code in RETRYABLE_CONVERSION_ERRORS if retryable is None else retryable
+        self.retryable = (
+            code in RETRYABLE_CONVERSION_ERRORS if retryable is None else retryable
+        )
 
 
 @dataclass(frozen=True)
@@ -72,6 +76,13 @@ class ConversionArtifact:
     converter: str
     converter_version: str
     cached: bool
+
+
+@dataclass(frozen=True)
+class _EpubPackageInspection:
+    rootfile: str
+    spine_count: int
+    documents: tuple[str, ...]
 
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
@@ -117,7 +128,9 @@ def detect_txt_encoding(path: Path) -> str:
     if sample.startswith(codecs.BOM_UTF16_BE):
         return "utf-16-be"
     if b"\x00" in sample:
-        raise ConversionFailure("TEXT_ENCODING_UNCERTAIN", "无法可靠识别 TXT 编码", retryable=False)
+        raise ConversionFailure(
+            "TEXT_ENCODING_UNCERTAIN", "无法可靠识别 TXT 编码", retryable=False
+        )
     try:
         sample.decode("utf-8", errors="strict")
         return "utf-8"
@@ -126,35 +139,47 @@ def detect_txt_encoding(path: Path) -> str:
     try:
         decoded = sample.decode("gb18030", errors="strict")
     except UnicodeDecodeError as exc:
-        raise ConversionFailure("TEXT_ENCODING_UNCERTAIN", "无法可靠识别 TXT 编码", retryable=False) from exc
+        raise ConversionFailure(
+            "TEXT_ENCODING_UNCERTAIN", "无法可靠识别 TXT 编码", retryable=False
+        ) from exc
     replacement_ratio = decoded.count("�") / max(1, len(decoded))
     if replacement_ratio > 0.001:
-        raise ConversionFailure("TEXT_ENCODING_UNCERTAIN", "无法可靠识别 TXT 编码", retryable=False)
+        raise ConversionFailure(
+            "TEXT_ENCODING_UNCERTAIN", "无法可靠识别 TXT 编码", retryable=False
+        )
     return "gb18030"
 
 
 def probe_text_source(path: Path) -> dict[str, Any]:
     fmt = source_format(path)
     if fmt is None or path.suffix.lower() not in CONVERTIBLE_TEXT_EXTS:
-        raise ConversionFailure("UNSUPPORTED_FORMAT", "当前文件不是受支持的文本电子书格式", retryable=False)
+        raise ConversionFailure(
+            "UNSUPPORTED_FORMAT", "当前文件不是受支持的文本电子书格式", retryable=False
+        )
     if not path.is_file() or path.stat().st_size <= 0:
-        raise ConversionFailure("CONVERSION_FAILED", "文件为空或不存在", retryable=False)
+        raise ConversionFailure(
+            "CONVERSION_FAILED", "文件为空或不存在", retryable=False
+        )
     options: dict[str, Any] = {}
     if path.suffix.lower() == ".txt":
         options["inputEncoding"] = detect_txt_encoding(path)
         options["formattingType"] = "heuristic"
     if path.suffix.lower() == ".fb2":
-        prefix = path.read_bytes()[:64 * 1024]
+        prefix = path.read_bytes()[: 64 * 1024]
         if prefix.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
             marker_source = prefix.decode("utf-16", errors="ignore")
         else:
             marker_source = prefix.decode("utf-8-sig", errors="ignore")
         if "FictionBook" not in marker_source:
-            raise ConversionFailure("UNSUPPORTED_FORMAT", "FB2 文件结构无效", retryable=False)
+            raise ConversionFailure(
+                "UNSUPPORTED_FORMAT", "FB2 文件结构无效", retryable=False
+            )
     return {"sourceFormat": fmt, "options": options}
 
 
-def validate_epub(path: Path, *, max_bytes: int | None = None) -> dict[str, Any]:
+def _validate_epub_package(
+    path: Path, *, max_bytes: int | None = None
+) -> _EpubPackageInspection:
     if not path.is_file() or path.stat().st_size <= 0:
         raise ConversionFailure("INVALID_EPUB_OUTPUT", "转换结果为空")
     if max_bytes is not None and path.stat().st_size > max_bytes:
@@ -163,50 +188,120 @@ def validate_epub(path: Path, *, max_bytes: int | None = None) -> dict[str, Any]
         with zipfile.ZipFile(path) as archive:
             names = set(archive.namelist())
             if "META-INF/container.xml" not in names:
-                raise ConversionFailure("INVALID_EPUB_OUTPUT", "EPUB 缺少 container.xml")
-            mimetype = archive.read("mimetype").decode("ascii", errors="ignore").strip() if "mimetype" in names else ""
+                raise ConversionFailure(
+                    "INVALID_EPUB_OUTPUT", "EPUB 缺少 container.xml"
+                )
+            mimetype = (
+                archive.read("mimetype").decode("ascii", errors="ignore").strip()
+                if "mimetype" in names
+                else ""
+            )
             if mimetype != "application/epub+zip":
                 raise ConversionFailure("INVALID_EPUB_OUTPUT", "EPUB mimetype 无效")
             container = ElementTree.fromstring(archive.read("META-INF/container.xml"))
-            rootfile = next((node.attrib.get("full-path") for node in container.iter() if node.tag.endswith("rootfile")), None)
+            rootfile = next(
+                (
+                    node.attrib.get("full-path")
+                    for node in container.iter()
+                    if node.tag.endswith("rootfile")
+                ),
+                None,
+            )
             if not rootfile or rootfile not in names:
                 raise ConversionFailure("INVALID_EPUB_OUTPUT", "EPUB 缺少 OPF 文件")
             package = ElementTree.fromstring(archive.read(rootfile))
-            spine_items = [node for node in package.iter() if node.tag.endswith("itemref")]
+            spine_items = [
+                node for node in package.iter() if node.tag.endswith("itemref")
+            ]
             if not spine_items:
                 raise ConversionFailure("INVALID_EPUB_OUTPUT", "EPUB 不包含可阅读章节")
-            manifest_items = [node for node in package.iter() if node.tag.endswith("item")]
+            manifest_items = [
+                node for node in package.iter() if node.tag.endswith("item")
+            ]
             package_directory = posixpath.dirname(rootfile)
             documents: list[str] = []
             for item in manifest_items:
                 href = str(item.attrib.get("href") or "").strip()
                 if not href:
                     continue
-                target = posixpath.normpath(posixpath.join(package_directory, unquote(urlsplit(href).path)))
+                target = posixpath.normpath(
+                    posixpath.join(package_directory, unquote(urlsplit(href).path))
+                )
                 if target not in names:
-                    raise ConversionFailure("INVALID_EPUB_OUTPUT", f"EPUB 资源引用不存在：{href}")
+                    raise ConversionFailure(
+                        "INVALID_EPUB_OUTPUT", f"EPUB 资源引用不存在：{href}"
+                    )
                 if item.attrib.get("media-type") == "application/xhtml+xml":
                     documents.append(target)
-            for document_name in documents:
+            return _EpubPackageInspection(
+                rootfile=rootfile,
+                spine_count=len(spine_items),
+                documents=tuple(documents),
+            )
+    except ConversionFailure:
+        raise
+    except (
+        OSError,
+        ValueError,
+        zipfile.BadZipFile,
+        KeyError,
+        ElementTree.ParseError,
+    ) as exc:
+        raise ConversionFailure(
+            "INVALID_EPUB_OUTPUT", "转换结果不是有效的 EPUB"
+        ) from exc
+
+
+def validate_epub(path: Path, *, max_bytes: int | None = None) -> dict[str, Any]:
+    package = _validate_epub_package(path, max_bytes=max_bytes)
+    try:
+        with zipfile.ZipFile(path) as archive:
+            names = set(archive.namelist())
+            for document_name in package.documents:
                 document = ElementTree.fromstring(archive.read(document_name))
                 for node in document.iter():
                     for attribute, raw_value in node.attrib.items():
-                        if attribute.rsplit("}", 1)[-1].lower() not in {"href", "src", "poster"}:
+                        if attribute.rsplit("}", 1)[-1].lower() not in {
+                            "href",
+                            "src",
+                            "poster",
+                        }:
                             continue
                         value = str(raw_value).strip()
                         parsed = urlsplit(value)
-                        if not value or value.startswith("#") or parsed.scheme or value.startswith("//"):
+                        if (
+                            not value
+                            or value.startswith("#")
+                            or parsed.scheme
+                            or value.startswith("//")
+                        ):
                             continue
                         reference = posixpath.normpath(
-                            posixpath.join(posixpath.dirname(document_name), unquote(parsed.path))
+                            posixpath.join(
+                                posixpath.dirname(document_name), unquote(parsed.path)
+                            )
                         )
                         if parsed.path and reference not in names:
-                            raise ConversionFailure("INVALID_EPUB_OUTPUT", f"EPUB 文档引用不存在：{value}")
-            return {"rootfile": rootfile, "spineCount": len(spine_items), "sizeBytes": path.stat().st_size}
+                            raise ConversionFailure(
+                                "INVALID_EPUB_OUTPUT", f"EPUB 文档引用不存在：{value}"
+                            )
+            return {
+                "rootfile": package.rootfile,
+                "spineCount": package.spine_count,
+                "sizeBytes": path.stat().st_size,
+            }
     except ConversionFailure:
         raise
-    except (OSError, ValueError, zipfile.BadZipFile, KeyError, ElementTree.ParseError) as exc:
-        raise ConversionFailure("INVALID_EPUB_OUTPUT", "转换结果不是有效的 EPUB") from exc
+    except (
+        OSError,
+        ValueError,
+        zipfile.BadZipFile,
+        KeyError,
+        ElementTree.ParseError,
+    ) as exc:
+        raise ConversionFailure(
+            "INVALID_EPUB_OUTPUT", "转换结果不是有效的 EPUB"
+        ) from exc
 
 
 def _command_runner(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -218,17 +313,23 @@ def _converter_for_format(fmt: str) -> str:
         return "shuku-internal"
     if fmt in LIBMOBI_SOURCE_FORMATS:
         return "libmobi"
-    raise ConversionFailure("UNSUPPORTED_FORMAT", "当前文件不是受支持的文本电子书格式", retryable=False)
+    raise ConversionFailure(
+        "UNSUPPORTED_FORMAT", "当前文件不是受支持的文本电子书格式", retryable=False
+    )
 
 
-def converter_version(settings: Settings, fmt: str, runner: CommandRunner | None = None) -> str:
+def converter_version(
+    settings: Settings, fmt: str, runner: CommandRunner | None = None
+) -> str:
     command_runner = runner or _command_runner
     if not settings.ebook_conversion_enabled:
         raise ConversionFailure("CONVERTER_UNAVAILABLE", "电子书转换功能未启用")
     if fmt in INTERNAL_SOURCE_FORMATS:
         return INTERNAL_CONVERTER_VERSION
     if fmt not in LIBMOBI_SOURCE_FORMATS:
-        raise ConversionFailure("UNSUPPORTED_FORMAT", "当前文件不是受支持的文本电子书格式", retryable=False)
+        raise ConversionFailure(
+            "UNSUPPORTED_FORMAT", "当前文件不是受支持的文本电子书格式", retryable=False
+        )
     try:
         result = command_runner(
             [settings.libmobi_bin, "-v"],
@@ -238,7 +339,9 @@ def converter_version(settings: Settings, fmt: str, runner: CommandRunner | None
             check=False,
         )
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
-        raise ConversionFailure("CONVERTER_UNAVAILABLE", "电子书转换服务不可用") from exc
+        raise ConversionFailure(
+            "CONVERTER_UNAVAILABLE", "电子书转换服务不可用"
+        ) from exc
     output = (result.stdout or result.stderr or "").strip()
     if result.returncode != 0 or not output:
         raise ConversionFailure("CONVERTER_UNAVAILABLE", "电子书转换服务不可用")
@@ -246,7 +349,9 @@ def converter_version(settings: Settings, fmt: str, runner: CommandRunner | None
     return " | ".join(version_lines)[:191]
 
 
-def converter_capability(settings: Settings, runner: CommandRunner | None = None) -> dict[str, Any]:
+def converter_capability(
+    settings: Settings, runner: CommandRunner | None = None
+) -> dict[str, Any]:
     internal = {
         "available": settings.ebook_conversion_enabled,
         "converter": "shuku-internal",
@@ -327,9 +432,15 @@ def _ensure_conversion_task(
 
 
 def _failure_from_process(stderr: str, stdout: str) -> ConversionFailure:
-    detail = "\n".join(item for item in [stderr.strip(), stdout.strip()] if item).strip()
-    if re.search(r"\bdrm\b|encrypted|encryption|locked book|版权保护|加密", detail, re.I):
-        return ConversionFailure("DRM_PROTECTED", "文件可能受 DRM 保护，无法转换", retryable=False)
+    detail = "\n".join(
+        item for item in [stderr.strip(), stdout.strip()] if item
+    ).strip()
+    if re.search(
+        r"\bdrm\b|encrypted|encryption|locked book|版权保护|加密", detail, re.IGNORECASE
+    ):
+        return ConversionFailure(
+            "DRM_PROTECTED", "文件可能受 DRM 保护，无法转换", retryable=False
+        )
     message = "电子书转换失败"
     if detail:
         message = f"{message}：{detail[-800:]}"
@@ -355,28 +466,54 @@ def _run_libmobi_conversion(
         raise _failure_from_process(result.stderr or "", result.stdout or "")
     candidates = sorted(path for path in temp_dir.glob("*.epub") if path != output_path)
     expected = temp_dir / f"{source.stem}.epub"
-    generated = expected if expected in candidates else candidates[0] if len(candidates) == 1 else None
+    generated = (
+        expected
+        if expected in candidates
+        else candidates[0]
+        if len(candidates) == 1
+        else None
+    )
     if generated is None:
-        detail = "\n".join(item for item in [result.stderr or "", result.stdout or ""] if item).strip()
-        classified_failure = _failure_from_process(result.stderr or "", result.stdout or "")
+        detail = "\n".join(
+            item for item in [result.stderr or "", result.stdout or ""] if item
+        ).strip()
+        classified_failure = _failure_from_process(
+            result.stderr or "", result.stdout or ""
+        )
         if classified_failure.code == "DRM_PROTECTED":
             raise classified_failure
-        if re.search(r"print replica|azw4|can't create epub|cannot create epub", detail, re.I):
-            raise ConversionFailure("UNSUPPORTED_FORMAT", "当前 Kindle 文件类型无法转换为 EPUB", retryable=False)
+        if re.search(
+            r"print replica|azw4|can't create epub|cannot create epub", detail, re.IGNORECASE
+        ):
+            raise ConversionFailure(
+                "UNSUPPORTED_FORMAT",
+                "当前 Kindle 文件类型无法转换为 EPUB",
+                retryable=False,
+            )
         raise ConversionFailure("CONVERSION_FAILED", "libmobi 未生成 EPUB 文件")
     os.replace(generated, output_path)
 
 
-def _run_internal_conversion(fmt: str, source: Path, output_path: Path, options: dict[str, Any]) -> dict[str, Any]:
+def _run_internal_conversion(
+    fmt: str, source: Path, output_path: Path, options: dict[str, Any]
+) -> dict[str, Any]:
     try:
         if fmt == "TXT":
-            result = convert_txt_to_epub(source, output_path, encoding=str(options["inputEncoding"]))
+            result = convert_txt_to_epub(
+                source, output_path, encoding=str(options["inputEncoding"])
+            )
         elif fmt == "FB2":
             result = convert_fb2_to_epub(source, output_path)
         else:
-            raise ConversionFailure("UNSUPPORTED_FORMAT", "当前文件不是受支持的文本电子书格式", retryable=False)
+            raise ConversionFailure(
+                "UNSUPPORTED_FORMAT",
+                "当前文件不是受支持的文本电子书格式",
+                retryable=False,
+            )
     except InternalConversionError as exc:
-        raise ConversionFailure("CONVERSION_FAILED", f"电子书转换失败：{str(exc)}") from exc
+        raise ConversionFailure(
+            "CONVERSION_FAILED", f"电子书转换失败：{exc!s}"
+        ) from exc
     return {
         **options,
         "detectedTitle": result.title,
@@ -391,24 +528,33 @@ def _libmobi_pipeline_version(converter_version_value: str) -> str:
     return f"{converter_version_value}; {EPUB_NORMALIZER_VERSION}"
 
 
-def _cached_normalization_options(final_path: Path, inspection: EpubInspection) -> dict[str, Any]:
+def _cached_normalization_options(
+    final_path: Path, inspection: EpubInspection
+) -> dict[str, Any]:
     metadata_path = final_path.with_name("normalization.json")
     try:
         payload = json.loads(metadata_path.read_text(encoding="utf-8"))
     except (OSError, ValueError, json.JSONDecodeError):
         payload = None
-    if isinstance(payload, dict) and payload.get("normalizerVersion") == EPUB_NORMALIZER_VERSION:
+    if (
+        isinstance(payload, dict)
+        and payload.get("normalizerVersion") == EPUB_NORMALIZER_VERSION
+    ):
         return payload
     return {
         "normalizerVersion": EPUB_NORMALIZER_VERSION,
-        "normalizationApplied": any("-shuku-" in section.href for section in inspection.sections),
+        "normalizationApplied": any(
+            "-shuku-" in section.href for section in inspection.sections
+        ),
         "normalizationReasons": [],
         "normalizationBefore": inspection.metrics(),
         "normalizationAfter": inspection.metrics(),
     }
 
 
-def _write_normalization_options(final_path: Path, result: EpubNormalizationResult) -> None:
+def _write_normalization_options(
+    final_path: Path, result: EpubNormalizationResult
+) -> None:
     metadata_path = final_path.with_name("normalization.json")
     temporary_path = metadata_path.with_suffix(".json.part")
     temporary_path.write_text(
@@ -456,9 +602,18 @@ def convert_to_epub(
     except ConversionFailure as exc:
         _record_failure(db, import_task_id, exc)
         raise
-    version = _libmobi_pipeline_version(engine_version) if converter == "libmobi" else engine_version
+    version = (
+        _libmobi_pipeline_version(engine_version)
+        if converter == "libmobi"
+        else engine_version
+    )
     cache_signature = json.dumps(
-        {"converter": converter, "converterVersion": version, "sourceFormat": fmt, "options": options},
+        {
+            "converter": converter,
+            "converterVersion": version,
+            "sourceFormat": fmt,
+            "options": options,
+        },
         ensure_ascii=False,
         sort_keys=True,
     )
@@ -466,8 +621,12 @@ def convert_to_epub(
     final_path = settings.conversion_root / source_hash / cache_key / "book.epub"
     if final_path.is_file():
         try:
-            validate_epub(final_path, max_bytes=settings.ebook_conversion_max_output_bytes)
-            normalized_inspection = validate_normalized_epub(final_path) if converter == "libmobi" else None
+            validate_epub(
+                final_path, max_bytes=settings.ebook_conversion_max_output_bytes
+            )
+            normalized_inspection = (
+                validate_normalized_epub(final_path) if converter == "libmobi" else None
+            )
         except ConversionFailure:
             final_path.unlink(missing_ok=True)
             final_path.with_name("normalization.json").unlink(missing_ok=True)
@@ -476,7 +635,9 @@ def convert_to_epub(
             final_path.with_name("normalization.json").unlink(missing_ok=True)
         else:
             if normalized_inspection is not None:
-                options.update(_cached_normalization_options(final_path, normalized_inspection))
+                options.update(
+                    _cached_normalization_options(final_path, normalized_inspection)
+                )
             _update_stage(
                 db,
                 import_task_id,
@@ -487,14 +648,18 @@ def convert_to_epub(
                     "sourceHash": source_hash,
                     "outputPath": str(final_path),
                     "converterVersion": version,
-                    "optionsJson": json.dumps(options, ensure_ascii=False, sort_keys=True),
+                    "optionsJson": json.dumps(
+                        options, ensure_ascii=False, sort_keys=True
+                    ),
                     "errorCode": None,
                     "errorSummary": None,
                     "retryable": 0,
                     "finishedAt": _now(),
                 },
             )
-            return ConversionArtifact(source, final_path, fmt, source_hash, converter, version, True)
+            return ConversionArtifact(
+                source, final_path, fmt, source_hash, converter, version, True
+            )
 
     temp_dir = settings.conversion_temp_root / import_task_id
     if temp_dir.exists():
@@ -523,8 +688,12 @@ def convert_to_epub(
         normalization_result: EpubNormalizationResult | None = None
         if converter == "libmobi":
             raw_output_path = temp_dir / "book.libmobi.epub"
-            _run_libmobi_conversion(settings, command_runner, source, temp_dir, raw_output_path)
-            validate_epub(raw_output_path, max_bytes=settings.ebook_conversion_max_output_bytes)
+            _run_libmobi_conversion(
+                settings, command_runner, source, temp_dir, raw_output_path
+            )
+            _validate_epub_package(
+                raw_output_path, max_bytes=settings.ebook_conversion_max_output_bytes
+            )
             try:
                 inspection = inspect_libmobi_epub(raw_output_path)
                 if inspection.requires_normalization:
@@ -548,10 +717,14 @@ def convert_to_epub(
                             )
                         },
                     )
-                    normalization_result = normalize_libmobi_epub(raw_output_path, output_path, inspection)
+                    normalization_result = normalize_libmobi_epub(
+                        raw_output_path, output_path, inspection
+                    )
                 else:
                     os.replace(raw_output_path, output_path)
-                    normalization_result = EpubNormalizationResult(False, (), inspection, inspection)
+                    normalization_result = EpubNormalizationResult(
+                        False, (), inspection, inspection
+                    )
                 options.update(normalization_result.options())
             except EpubNormalizationError as exc:
                 raise ConversionFailure(
@@ -566,9 +739,19 @@ def convert_to_epub(
                 status="CONVERTING",
                 progress=65,
                 message="已识别章节与书内资源，正在封装 EPUB",
-                conversion_values={"optionsJson": json.dumps(options, ensure_ascii=False, sort_keys=True)},
+                conversion_values={
+                    "optionsJson": json.dumps(
+                        options, ensure_ascii=False, sort_keys=True
+                    )
+                },
             )
-        _update_stage(db, import_task_id, status="VALIDATING", progress=72, message="正在检查章节与书内资源")
+        _update_stage(
+            db,
+            import_task_id,
+            status="VALIDATING",
+            progress=72,
+            message="正在检查章节与书内资源",
+        )
         validate_epub(output_path, max_bytes=settings.ebook_conversion_max_output_bytes)
         if converter == "libmobi":
             try:
@@ -601,16 +784,22 @@ def convert_to_epub(
                 "finishedAt": _now(),
             },
         )
-        return ConversionArtifact(source, final_path, fmt, source_hash, converter, version, False)
+        return ConversionArtifact(
+            source, final_path, fmt, source_hash, converter, version, False
+        )
     except subprocess.TimeoutExpired as exc:
-        failure = ConversionFailure("CONVERSION_TIMEOUT", "电子书转换超时，原文件已保留")
+        failure = ConversionFailure(
+            "CONVERSION_TIMEOUT", "电子书转换超时，原文件已保留"
+        )
         _record_failure(db, import_task_id, failure)
         raise failure from exc
     except ConversionFailure as exc:
         _record_failure(db, import_task_id, exc)
         raise
     except (OSError, ValueError) as exc:
-        failure = ConversionFailure("CONVERSION_FAILED", f"电子书转换失败：{str(exc)[:800]}")
+        failure = ConversionFailure(
+            "CONVERSION_FAILED", f"电子书转换失败：{str(exc)[:800]}"
+        )
         _record_failure(db, import_task_id, failure)
         raise failure from exc
     finally:
@@ -620,7 +809,9 @@ def convert_to_epub(
             shutil.rmtree(temp_dir, ignore_errors=True)
 
 
-def _record_failure(db: Session, import_task_id: str, failure: ConversionFailure) -> None:
+def _record_failure(
+    db: Session, import_task_id: str, failure: ConversionFailure
+) -> None:
     record_conversion_failure(
         db,
         import_task_id,

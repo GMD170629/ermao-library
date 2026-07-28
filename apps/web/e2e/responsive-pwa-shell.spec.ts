@@ -619,6 +619,18 @@ test('desktop book list opens details from both the cover and title', async ({ p
   await expect.poll(() => requestedSorts.at(-1)).toEqual({ sort: 'recent_import', direction: 'desc' });
   await page.getByRole('button', { name: '加入时间排序，当前倒序' }).click();
   await expect.poll(() => requestedSorts.at(-1)).toEqual({ sort: 'recent_import', direction: 'asc' });
+
+  const managedBookRow = page.locator('[data-work-id="desktop-list-work"]');
+  await managedBookRow.getByRole('checkbox').check();
+  await page.getByRole('button', { name: '批量操作', exact: true }).click();
+  const batchDialog = page.getByRole('dialog', { name: '批量更新元数据' });
+  await expect(batchDialog.getByRole('button', { name: '删除', exact: true })).toBeVisible();
+  await batchDialog.getByRole('button', { name: '关闭批量操作' }).click();
+  await managedBookRow.click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: /批量删除图书/ })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: '清空', exact: true }).click();
+
   await page.getByRole('button', { name: '查看《桌面列表入口测试》封面' }).click();
   await expect(page).toHaveURL(/\/works\/desktop-list-work$/);
 

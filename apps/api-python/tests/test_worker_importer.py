@@ -1,27 +1,24 @@
 import json
 import zipfile
-from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from threading import Thread
 
 import pytest
 from sqlalchemy import text
 
-import app.modules.imports.application.import_audio as importer_module
 from app import models as _models  # noqa: F401
-from app.db.base import Base
-from app.services.book_identity import BookIdentity
-from app.services.default_cover import DEFAULT_COVER_ASSET_PATH
-from app.services.import_preferences import SUPPORTED_IMPORT_EXTENSIONS, load_import_preferences
-from app.modules.imports.infrastructure.orchestration_services import (
-    SessionImportOrchestrationServices,
-)
 from app.bootstrap.imports import (
     fail_claimed_import_task,
     import_managed_book,
     process_import_task,
 )
-from app.modules.imports.application.dto import ImportOptions, ImportTaskDTO
+from app.db.base import Base
+from app.modules.imports.application.dto import (
+    BookIdentityDTO,
+    ImportOptions,
+    ImportTaskDTO,
+)
 from app.modules.imports.application.import_comic import parse_comic_volume_from_name
 from app.modules.imports.application.import_epub import parse_epub_metadata
 from app.modules.imports.application.import_pdf import parse_pdf_metadata
@@ -29,9 +26,27 @@ from app.modules.imports.application.import_support import (
     _work_merge_key,
     parse_series_volume_info,
 )
+from app.modules.imports.infrastructure.orchestration_services import (
+    SessionImportOrchestrationServices,
+)
 from app.modules.imports.infrastructure.task_mapper import import_task_dto_from_row
-from app.worker.path_security import PathSecurityError, PathSecurityService, normalize_configured_path
-from app.worker.watcher import MonitorFolderConfig, import_watched_file, monitor_folder_config, scan_directory_with_logging, should_ignore_file
+from app.services.default_cover import DEFAULT_COVER_ASSET_PATH
+from app.services.import_preferences import (
+    SUPPORTED_IMPORT_EXTENSIONS,
+    load_import_preferences,
+)
+from app.worker.path_security import (
+    PathSecurityError,
+    PathSecurityService,
+    normalize_configured_path,
+)
+from app.worker.watcher import (
+    MonitorFolderConfig,
+    import_watched_file,
+    monitor_folder_config,
+    scan_directory_with_logging,
+    should_ignore_file,
+)
 
 
 def create_worker_tables(db):
@@ -48,12 +63,21 @@ def create_metadata_provider_tables(db):
             )"""
         )
     )
-    db.execute(text("CREATE TABLE IF NOT EXISTS SystemSetting (`key` TEXT PRIMARY KEY, `value` TEXT, `createdAt` TEXT, `updatedAt` TEXT)"))
+    db.execute(
+        text(
+            "CREATE TABLE IF NOT EXISTS SystemSetting (`key` TEXT PRIMARY KEY, `value` TEXT, `createdAt` TEXT, `updatedAt` TEXT)"
+        )
+    )
     db.commit()
 
 
 def set_system_setting(db, key: str, value: str):
-    db.execute(text("INSERT INTO SystemSetting (`key`, `value`, `createdAt`, `updatedAt`) VALUES (:key, :value, 'now', 'now')"), {"key": key, "value": value})
+    db.execute(
+        text(
+            "INSERT INTO SystemSetting (`key`, `value`, `createdAt`, `updatedAt`) VALUES (:key, :value, 'now', 'now')"
+        ),
+        {"key": key, "value": value},
+    )
     db.commit()
 
 
@@ -74,7 +98,9 @@ def serve_import_metadata_gateways():
 
         def do_GET(self):
             requests.append({"method": "GET", "path": self.path})
-            if self.path.startswith("/v2/book/search") or self.path.startswith("/v2/book/isbn/"):
+            if self.path.startswith("/v2/book/search") or self.path.startswith(
+                "/v2/book/isbn/"
+            ):
                 self.json_response({"books": []})
                 return
             self.send_response(404)
@@ -137,13 +163,22 @@ def write_epub_fixture(path: Path):
             <item id="cover" href="cover.jpg" media-type="image/jpeg" properties="cover-image"/>
             </manifest><spine><itemref idref="c1"/><itemref idref="c2"/></spine></package>""",
         )
-        archive.writestr("OEBPS/nav.xhtml", '<html><body><nav epub:type="toc"><a href="one.xhtml">第一节</a><a href="two.xhtml">第二节</a></nav></body></html>')
-        archive.writestr("OEBPS/one.xhtml", "<html><body><h1>fallback</h1></body></html>")
-        archive.writestr("OEBPS/two.xhtml", "<html><body><h1>fallback</h1></body></html>")
+        archive.writestr(
+            "OEBPS/nav.xhtml",
+            '<html><body><nav epub:type="toc"><a href="one.xhtml">第一节</a><a href="two.xhtml">第二节</a></nav></body></html>',
+        )
+        archive.writestr(
+            "OEBPS/one.xhtml", "<html><body><h1>fallback</h1></body></html>"
+        )
+        archive.writestr(
+            "OEBPS/two.xhtml", "<html><body><h1>fallback</h1></body></html>"
+        )
         archive.writestr("OEBPS/cover.jpg", b"fake-jpeg")
 
 
-def write_epub_cover_reference_fixture(path: Path, cover_href: str, cover_entry: str | None = None):
+def write_epub_cover_reference_fixture(
+    path: Path, cover_href: str, cover_entry: str | None = None
+):
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("mimetype", "application/epub+zip")
         archive.writestr(
@@ -164,8 +199,13 @@ def write_epub_cover_reference_fixture(path: Path, cover_href: str, cover_entry:
             archive.writestr(cover_entry, b"optional-cover")
 
 
-def write_epub_metadata_fixture(path: Path, title: str, author: str, identifiers: list[str] | None = None):
-    identifier_xml = "\n".join(f"<dc:identifier>{identifier}</dc:identifier>" for identifier in identifiers or [])
+def write_epub_metadata_fixture(
+    path: Path, title: str, author: str, identifiers: list[str] | None = None
+):
+    identifier_xml = "\n".join(
+        f"<dc:identifier>{identifier}</dc:identifier>"
+        for identifier in identifiers or []
+    )
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("mimetype", "application/epub+zip")
         archive.writestr(
@@ -210,8 +250,14 @@ def write_epub_nav_fixture(path: Path):
             <nav epub:type="toc"><ol><li><a href="chapters/one.xhtml">第一节</a></li><li><a href="chapters/two.xhtml#p2">第二节</a></li></ol></nav>
             </body></html>""",
         )
-        archive.writestr("OEBPS/chapters/one.xhtml", "<html><body><h1>fallback one</h1></body></html>")
-        archive.writestr("OEBPS/chapters/two.xhtml", "<html><body><h1>fallback two</h1></body></html>")
+        archive.writestr(
+            "OEBPS/chapters/one.xhtml",
+            "<html><body><h1>fallback one</h1></body></html>",
+        )
+        archive.writestr(
+            "OEBPS/chapters/two.xhtml",
+            "<html><body><h1>fallback two</h1></body></html>",
+        )
         archive.writestr("OEBPS/cover.jpg", b"fake-jpeg")
 
 
@@ -239,8 +285,14 @@ def write_epub_ncx_fixture(path: Path):
             <navPoint><navLabel><text>食人树</text></navLabel><content src="Text/chapter02.xhtml"/></navPoint>
             </navMap></ncx>""",
         )
-        archive.writestr("OEBPS/Text/chapter01.xhtml", "<html><body><h1>不应优先使用</h1></body></html>")
-        archive.writestr("OEBPS/Text/chapter02.xhtml", "<html><body><h1>不应优先使用</h1></body></html>")
+        archive.writestr(
+            "OEBPS/Text/chapter01.xhtml",
+            "<html><body><h1>不应优先使用</h1></body></html>",
+        )
+        archive.writestr(
+            "OEBPS/Text/chapter02.xhtml",
+            "<html><body><h1>不应优先使用</h1></body></html>",
+        )
 
 
 def write_epub_without_toc_fixture(path: Path, one_body: str, two_body: str):
@@ -293,7 +345,7 @@ def write_pdf_metadata_fixture(path: Path):
             "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >> endobj\n"
             f"4 0 obj << {info} >> endobj\n"
             "trailer << /Root 1 0 R /Info 4 0 R >>\n%%EOF\n"
-        ).encode("utf-8")
+        ).encode()
     )
 
 
@@ -323,15 +375,31 @@ def test_path_security_accepts_monitor_root_child(test_settings):
 
 def test_normalize_configured_path_uses_workspace_root():
     workspace_root = Path(__file__).resolve().parents[3]
-    assert normalize_configured_path("books") == str((workspace_root / "books").resolve())
-
+    assert normalize_configured_path("books") == str(
+        (workspace_root / "books").resolve()
+    )
 
 
 def test_work_merge_key_uses_only_nfkc_title_and_author():
     expected = "斯泰尔斯庄园奇案午夜文库:阿加莎克里斯蒂"
-    assert _work_merge_key("epub", "斯泰尔斯庄园奇案 (午夜文库)", "阿加莎·克里斯蒂", "B00T238N28", "9787111111115") == expected
-    assert _work_merge_key("pdf", "斯泰尔斯庄园奇案 (午夜文库)", "阿加莎·克里斯蒂") == expected
-    assert _work_merge_key("cbz", "斯泰尔斯庄园奇案 (午夜文库)", "阿加莎·克里斯蒂") == expected
+    assert (
+        _work_merge_key(
+            "epub",
+            "斯泰尔斯庄园奇案 (午夜文库)",
+            "阿加莎·克里斯蒂",
+            "B00T238N28",
+            "9787111111115",
+        )
+        == expected
+    )
+    assert (
+        _work_merge_key("pdf", "斯泰尔斯庄园奇案 (午夜文库)", "阿加莎·克里斯蒂")
+        == expected
+    )
+    assert (
+        _work_merge_key("cbz", "斯泰尔斯庄园奇案 (午夜文库)", "阿加莎·克里斯蒂")
+        == expected
+    )
 
 
 def test_import_epub_creates_library_records(db_session, test_settings, tmp_path):
@@ -340,7 +408,13 @@ def test_import_epub_creates_library_records(db_session, test_settings, tmp_path
     epub = tmp_path / "book.epub"
     write_epub_fixture(epub)
 
-    result = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=epub, origin="MANUAL", original_name="book.epub"))
+    result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=epub, origin="MANUAL", original_name="book.epub"
+        ),
+    )
 
     assert result.import_status == "completed"
     assert result.type == "ebook"
@@ -349,13 +423,30 @@ def test_import_epub_creates_library_records(db_session, test_settings, tmp_path
     assert _count(db_session, "LibraryReadingUnit") == 2
     assert _count(db_session, "ImportTask") == 1
     assert _count(db_session, "OrganizeJob") == 0
-    assert db_session.execute(text("SELECT organizeStatus FROM LibraryWork")).scalar() == "UNASSESSED"
+    assert (
+        db_session.execute(text("SELECT organizeStatus FROM LibraryWork")).scalar()
+        == "UNASSESSED"
+    )
     assert _count(db_session, "MetadataLookupTask") == 0
-    assert "epub" in {row[0] for row in db_session.execute(text("SELECT name FROM LibraryFacet"))}
+    assert "epub" in {
+        row[0] for row in db_session.execute(text("SELECT name FROM LibraryFacet"))
+    }
     assert _count(db_session, "LibraryWorkFacet") >= 1
 
-    events = db_session.execute(text("SELECT action, targetType, targetId, metadata FROM SystemEvent ORDER BY createdAt")).mappings().all()
-    assert [event["action"] for event in events] == ["import.started", "identity.regex.completed", "import.completed"]
+    events = (
+        db_session.execute(
+            text(
+                "SELECT action, targetType, targetId, metadata FROM SystemEvent ORDER BY createdAt"
+            )
+        )
+        .mappings()
+        .all()
+    )
+    assert [event["action"] for event in events] == [
+        "import.started",
+        "identity.regex.completed",
+        "import.completed",
+    ]
     identity_event = events[1]
     identity_metadata = json.loads(identity_event["metadata"])
     assert identity_event["targetType"] == "importTask"
@@ -365,7 +456,9 @@ def test_import_epub_creates_library_records(db_session, test_settings, tmp_path
     assert identity_metadata["author"] == "未知作者"
 
 
-def test_import_records_ai_identity_and_result(db_session, test_settings, tmp_path, monkeypatch):
+def test_import_records_ai_identity_and_result(
+    db_session, test_settings, tmp_path, monkeypatch
+):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
     epub = tmp_path / "ai-book.epub"
@@ -374,7 +467,7 @@ def test_import_records_ai_identity_and_result(db_session, test_settings, tmp_pa
     monkeypatch.setattr(
         SessionImportOrchestrationServices,
         "recognize_identity",
-        lambda *_args, **_kwargs: BookIdentity(
+        lambda *_args, **_kwargs: BookIdentityDTO(
             title="AI 识别书名",
             author="AI 识别作者",
             volume_index=None,
@@ -384,10 +477,22 @@ def test_import_records_ai_identity_and_result(db_session, test_settings, tmp_pa
         ),
     )
 
-    result = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=epub, origin="MANUAL", original_name=epub.name))
+    result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(source_file_path=epub, origin="MANUAL", original_name=epub.name),
+    )
 
     assert result.title == "AI 识别书名"
-    event = db_session.execute(text("SELECT message, metadata FROM SystemEvent WHERE action = 'identity.ai.completed'")).mappings().one()
+    event = (
+        db_session.execute(
+            text(
+                "SELECT message, metadata FROM SystemEvent WHERE action = 'identity.ai.completed'"
+            )
+        )
+        .mappings()
+        .one()
+    )
     metadata = json.loads(event["metadata"])
     assert "AI 识别书名" in event["message"]
     assert metadata["title"] == "AI 识别书名"
@@ -395,7 +500,9 @@ def test_import_records_ai_identity_and_result(db_session, test_settings, tmp_pa
     assert metadata["confidence"] == 0.96
 
 
-def test_import_records_path_identity_cache_hit(db_session, test_settings, tmp_path, monkeypatch):
+def test_import_records_path_identity_cache_hit(
+    db_session, test_settings, tmp_path, monkeypatch
+):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
     epub = tmp_path / "cached-book.epub"
@@ -404,7 +511,7 @@ def test_import_records_path_identity_cache_hit(db_session, test_settings, tmp_p
     monkeypatch.setattr(
         SessionImportOrchestrationServices,
         "recognize_identity",
-        lambda *_args, **_kwargs: BookIdentity(
+        lambda *_args, **_kwargs: BookIdentityDTO(
             title="缓存书名",
             author="缓存作者",
             volume_index=None,
@@ -415,17 +522,35 @@ def test_import_records_path_identity_cache_hit(db_session, test_settings, tmp_p
         ),
     )
 
-    result = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=epub, origin="MANUAL", original_name=epub.name))
+    result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(source_file_path=epub, origin="MANUAL", original_name=epub.name),
+    )
 
     assert result.title == "缓存书名"
-    events = db_session.execute(text("SELECT action, metadata FROM SystemEvent ORDER BY createdAt")).mappings().all()
-    assert [event["action"] for event in events] == ["import.started", "identity.cache.hit", "import.completed"]
+    events = (
+        db_session.execute(
+            text("SELECT action, metadata FROM SystemEvent ORDER BY createdAt")
+        )
+        .mappings()
+        .all()
+    )
+    assert [event["action"] for event in events] == [
+        "import.started",
+        "identity.cache.hit",
+        "import.completed",
+    ]
     assert json.loads(events[1]["metadata"])["cacheHit"] is True
-    raw_metadata = db_session.execute(text("SELECT rawJson FROM LibraryMetadata WHERE source = 'identity_ai'")).scalar()
+    raw_metadata = db_session.execute(
+        text("SELECT rawJson FROM LibraryMetadata WHERE source = 'identity_ai'")
+    ).scalar()
     assert json.loads(raw_metadata)["cacheHit"] is True
 
 
-def test_import_records_ai_failure_and_regex_fallback(db_session, test_settings, tmp_path, monkeypatch):
+def test_import_records_ai_failure_and_regex_fallback(
+    db_session, test_settings, tmp_path, monkeypatch
+):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
     epub = tmp_path / "[回退书名][回退作者].epub"
@@ -434,7 +559,7 @@ def test_import_records_ai_failure_and_regex_fallback(db_session, test_settings,
     monkeypatch.setattr(
         SessionImportOrchestrationServices,
         "recognize_identity",
-        lambda *_args, **_kwargs: BookIdentity(
+        lambda *_args, **_kwargs: BookIdentityDTO(
             title="回退书名",
             author="回退作者",
             volume_index=None,
@@ -445,9 +570,19 @@ def test_import_records_ai_failure_and_regex_fallback(db_session, test_settings,
         ),
     )
 
-    import_managed_book(db_session, test_settings, ImportOptions(source_file_path=epub, origin="MANUAL", original_name=epub.name))
+    import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(source_file_path=epub, origin="MANUAL", original_name=epub.name),
+    )
 
-    events = db_session.execute(text("SELECT action, level FROM SystemEvent ORDER BY createdAt")).mappings().all()
+    events = (
+        db_session.execute(
+            text("SELECT action, level FROM SystemEvent ORDER BY createdAt")
+        )
+        .mappings()
+        .all()
+    )
     assert [event["action"] for event in events] == [
         "import.started",
         "identity.ai.failed",
@@ -457,7 +592,9 @@ def test_import_records_ai_failure_and_regex_fallback(db_session, test_settings,
     assert events[1]["level"] == "warning"
 
 
-def test_structural_parse_failure_rolls_back_all_library_records(db_session, test_settings, tmp_path):
+def test_structural_parse_failure_rolls_back_all_library_records(
+    db_session, test_settings, tmp_path
+):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
     broken = tmp_path / "[损坏图书][测试作者].epub"
@@ -465,7 +602,13 @@ def test_structural_parse_failure_rolls_back_all_library_records(db_session, tes
         archive.writestr("mimetype", "application/epub+zip")
 
     with pytest.raises(Exception) as captured:
-        import_managed_book(db_session, test_settings, ImportOptions(source_file_path=broken, origin="MANUAL", original_name=broken.name))
+        import_managed_book(
+            db_session,
+            test_settings,
+            ImportOptions(
+                source_file_path=broken, origin="MANUAL", original_name=broken.name
+            ),
+        )
 
     assert _count(db_session, "LibraryWork") == 0
     assert _count(db_session, "LibraryEdition") == 0
@@ -481,17 +624,29 @@ def test_structural_parse_failure_rolls_back_all_library_records(db_session, tes
         import_task_dto_from_row(task_row),
         captured.value,
     )
-    task = db_session.execute(
-        text("SELECT status, errorSummary FROM ImportTask")
-    ).mappings().one()
+    task = (
+        db_session.execute(text("SELECT status, errorSummary FROM ImportTask"))
+        .mappings()
+        .one()
+    )
     assert task["status"] == "FAILED"
     assert task["errorSummary"]
-    failed_event = db_session.execute(text("SELECT level, metadata FROM SystemEvent WHERE action = 'import.failed'")).mappings().one()
+    failed_event = (
+        db_session.execute(
+            text(
+                "SELECT level, metadata FROM SystemEvent WHERE action = 'import.failed'"
+            )
+        )
+        .mappings()
+        .one()
+    )
     assert failed_event["level"] == "error"
     assert json.loads(failed_event["metadata"])["error"]
 
 
-def test_deleted_source_fails_and_finishes_claimed_import_task(db_session, test_settings, tmp_path):
+def test_deleted_source_fails_and_finishes_claimed_import_task(
+    db_session, test_settings, tmp_path
+):
     create_worker_tables(db_session)
     source = tmp_path / "deleted-before-import.epub"
     source.write_bytes(b"queued")
@@ -525,13 +680,17 @@ def test_deleted_source_fails_and_finishes_claimed_import_task(db_session, test_
         process_import_task(db_session, test_settings, task)
     assert fail_claimed_import_task(db_session, task, captured.value)
 
-    stored = db_session.execute(
-        text(
-            "SELECT status, progress, errorCode, retryable, message, errorSummary, "
-            "leaseOwner, leaseExpiresAt, finishedAt FROM ImportTask WHERE id = :id"
-        ),
-        {"id": task.id},
-    ).mappings().one()
+    stored = (
+        db_session.execute(
+            text(
+                "SELECT status, progress, errorCode, retryable, message, errorSummary, "
+                "leaseOwner, leaseExpiresAt, finishedAt FROM ImportTask WHERE id = :id"
+            ),
+            {"id": task.id},
+        )
+        .mappings()
+        .one()
+    )
     assert stored["status"] == "FAILED"
     assert stored["progress"] == 100
     assert stored["errorCode"] == "SOURCE_NOT_FOUND"
@@ -543,7 +702,9 @@ def test_deleted_source_fails_and_finishes_claimed_import_task(db_session, test_
     assert stored["finishedAt"] is not None
 
 
-def test_worker_fallback_forces_unhandled_claimed_task_to_terminal_failure(db_session, tmp_path):
+def test_worker_fallback_forces_unhandled_claimed_task_to_terminal_failure(
+    db_session, tmp_path
+):
     create_worker_tables(db_session)
     missing_source = tmp_path / "worker-crashed.epub"
     task = ImportTaskDTO(
@@ -564,15 +725,24 @@ def test_worker_fallback_forces_unhandled_claimed_task_to_terminal_failure(db_se
     )
     db_session.commit()
 
-    assert fail_claimed_import_task(db_session, task, RuntimeError("unexpected worker failure")) is True
+    assert (
+        fail_claimed_import_task(
+            db_session, task, RuntimeError("unexpected worker failure")
+        )
+        is True
+    )
 
-    stored = db_session.execute(
-        text(
-            "SELECT status, progress, errorCode, retryable, leaseOwner, leaseExpiresAt, finishedAt "
-            "FROM ImportTask WHERE id = :id"
-        ),
-        {"id": task.id},
-    ).mappings().one()
+    stored = (
+        db_session.execute(
+            text(
+                "SELECT status, progress, errorCode, retryable, leaseOwner, leaseExpiresAt, finishedAt "
+                "FROM ImportTask WHERE id = :id"
+            ),
+            {"id": task.id},
+        )
+        .mappings()
+        .one()
+    )
     assert stored["status"] == "FAILED"
     assert stored["progress"] == 100
     assert stored["errorCode"] == "SOURCE_NOT_FOUND"
@@ -582,38 +752,122 @@ def test_worker_fallback_forces_unhandled_claimed_task_to_terminal_failure(db_se
     assert stored["finishedAt"] is not None
 
 
-def test_watch_epub_prefers_filename_when_opf_title_conflicts(db_session, test_settings, tmp_path):
+def test_watch_epub_prefers_filename_when_opf_title_conflicts(
+    db_session, test_settings, tmp_path
+):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
     source_name = "斯泰尔斯庄园奇案_阿加莎·克里 - (英)阿加莎·克里斯蒂.epub"
     epub = tmp_path / source_name
-    write_epub_metadata_fixture(epub, "岛田庄司精选作品合集共14册（日本推理小说之神，新本格派导师岛田庄司）", "岛田庄司")
+    write_epub_metadata_fixture(
+        epub,
+        "岛田庄司精选作品合集共14册（日本推理小说之神，新本格派导师岛田庄司）",
+        "岛田庄司",
+    )
 
     result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(source_file_path=epub, origin="WATCH", original_name=source_name, monitor_folder_id="folder-1"),
+        ImportOptions(
+            source_file_path=epub,
+            origin="WATCH",
+            original_name=source_name,
+            monitor_folder_id="folder-1",
+        ),
     )
 
     assert result.duplicate is False
-    work = db_session.execute(text("SELECT title, author FROM LibraryWork")).mappings().first()
+    work = (
+        db_session.execute(text("SELECT title, author FROM LibraryWork"))
+        .mappings()
+        .first()
+    )
     assert work["title"] == "斯泰尔斯庄园奇案"
     assert work["author"] == "阿加莎·克里斯蒂"
-    raw = json.loads(db_session.execute(text("SELECT rawJson FROM LibraryMetadata WHERE source = 'epub_opf'")).scalar())
+    raw = json.loads(
+        db_session.execute(
+            text("SELECT rawJson FROM LibraryMetadata WHERE source = 'epub_opf'")
+        ).scalar()
+    )
     assert raw["dc:title"][0].startswith("岛田庄司精选作品合集共14册")
 
 
-def test_watched_import_adds_new_and_previously_imported_work_to_target_shelf(db_session, test_settings, tmp_path, monkeypatch):
+def test_watch_epub_uses_opf_when_sanitized_filename_identity_is_incomplete(
+    db_session, test_settings, tmp_path
+):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
-    db_session.execute(text("CREATE TABLE IF NOT EXISTS Shelf (id TEXT PRIMARY KEY, name TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)"))
-    db_session.execute(text("CREATE TABLE IF NOT EXISTS ShelfWork (shelfId TEXT NOT NULL, workId TEXT NOT NULL, createdAt TEXT NOT NULL, PRIMARY KEY (shelfId, workId))"))
-    db_session.execute(text("INSERT INTO Shelf (id, name, createdAt, updatedAt) VALUES ('target-shelf', '自动收录', 'now', 'now')"))
-    db_session.execute(text("INSERT INTO MonitorFolder (id, name, rootPath, shelfId, enabled, ignoreHidden, minFileSizeBytes, createdAt, updatedAt) VALUES ('folder-1', '测试目录', :root_path, 'target-shelf', 1, 1, 1, 'now', 'now')"), {"root_path": str(tmp_path)})
+    source_name = "白夜行_(东野圭吾)_(z-library.sk_1lib.sk_z-lib.sk).epub"
+    epub = tmp_path / source_name
+    write_epub_metadata_fixture(epub, "白夜行", "(日)东野圭吾")
+
+    result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=epub,
+            origin="WATCH",
+            original_name=source_name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+
+    assert result.duplicate is False
+    work = (
+        db_session.execute(text("SELECT title, author FROM LibraryWork"))
+        .mappings()
+        .one()
+    )
+    assert dict(work) == {"title": "白夜行", "author": "(日)东野圭吾"}
+    identity_raw = json.loads(
+        db_session.execute(
+            text(
+                "SELECT rawJson FROM LibraryMetadata WHERE source = 'identity_epub_opf'"
+            )
+        ).scalar_one()
+    )
+    assert identity_raw["selectionReason"] == ("embedded_metadata_over_incomplete_path")
+    assert [item["source"] for item in identity_raw["evidence"]] == [
+        "regex",
+        "epub_opf",
+    ]
+
+
+def test_watched_import_adds_new_and_previously_imported_work_to_target_shelf(
+    db_session, test_settings, tmp_path, monkeypatch
+):
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    db_session.execute(
+        text(
+            "CREATE TABLE IF NOT EXISTS Shelf (id TEXT PRIMARY KEY, name TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)"
+        )
+    )
+    db_session.execute(
+        text(
+            "CREATE TABLE IF NOT EXISTS ShelfWork (shelfId TEXT NOT NULL, workId TEXT NOT NULL, createdAt TEXT NOT NULL, PRIMARY KEY (shelfId, workId))"
+        )
+    )
+    db_session.execute(
+        text(
+            "INSERT INTO Shelf (id, name, createdAt, updatedAt) VALUES ('target-shelf', '自动收录', 'now', 'now')"
+        )
+    )
+    db_session.execute(
+        text(
+            "INSERT INTO MonitorFolder (id, name, rootPath, shelfId, enabled, ignoreHidden, minFileSizeBytes, createdAt, updatedAt) VALUES ('folder-1', '测试目录', :root_path, 'target-shelf', 1, 1, 1, 'now', 'now')"
+        ),
+        {"root_path": str(tmp_path)},
+    )
     db_session.commit()
     epub = tmp_path / "[星海列车][林川].epub"
     write_epub_metadata_fixture(epub, "星海列车", "林川")
-    folder = MonitorFolderConfig(id="folder-1", root_path=str(tmp_path), shelf_id="target-shelf", min_file_size_bytes=1)
+    folder = MonitorFolderConfig(
+        id="folder-1",
+        root_path=str(tmp_path),
+        shelf_id="target-shelf",
+        min_file_size_bytes=1,
+    )
     monkeypatch.setenv("MONITOR_FILE_STABLE_DELAY_MS", "0")
 
     import_watched_file(db_session, test_settings, epub, folder)
@@ -627,31 +881,46 @@ def test_watched_import_adds_new_and_previously_imported_work_to_target_shelf(db
         )
     )
     process_import_task(db_session, test_settings, pending)
-    first = db_session.execute(text("SELECT shelfId, workId FROM ShelfWork")).mappings().all()
+    first = (
+        db_session.execute(text("SELECT shelfId, workId FROM ShelfWork"))
+        .mappings()
+        .all()
+    )
     assert len(first) == 1
     assert first[0]["shelfId"] == "target-shelf"
 
     db_session.execute(text("DELETE FROM ShelfWork"))
     db_session.commit()
     import_watched_file(db_session, test_settings, epub, folder)
-    restored = db_session.execute(text("SELECT shelfId, workId FROM ShelfWork")).mappings().all()
+    restored = (
+        db_session.execute(text("SELECT shelfId, workId FROM ShelfWork"))
+        .mappings()
+        .all()
+    )
     assert [dict(row) for row in restored] == [dict(first[0])]
 
 
 def test_parse_series_volume_info_from_real_watch_layout():
-    path = Path("/monitor/[辣妹因为惩罚游戏才向我这个边缘人告白，但显然是真心爱上我了][結石][Vol.01-Vol.10]/辣妹因为惩罚游戏才向我这个边缘人告白，但显然是真心爱上我了 10.epub")
+    path = Path(
+        "/monitor/[辣妹因为惩罚游戏才向我这个边缘人告白，但显然是真心爱上我了][結石][Vol.01-Vol.10]/辣妹因为惩罚游戏才向我这个边缘人告白，但显然是真心爱上我了 10.epub"
+    )
 
     parsed = parse_series_volume_info(path, path.name, "WATCH")
 
     assert parsed is not None
-    assert parsed.series_name == "辣妹因为惩罚游戏才向我这个边缘人告白，但显然是真心爱上我了"
+    assert (
+        parsed.series_name
+        == "辣妹因为惩罚游戏才向我这个边缘人告白，但显然是真心爱上我了"
+    )
     assert parsed.author == "結石"
     assert parsed.series_index == 10
     assert parsed.title == "第 10 卷"
 
 
 def test_parse_series_volume_info_from_bracketed_folder_and_volume_filename():
-    path = Path("/books/comic/[DRAWING 最強漫畫家利用繪畫技能在異世界開無雙 ！][金光铉]/Vol.09.epub")
+    path = Path(
+        "/books/comic/[DRAWING 最強漫畫家利用繪畫技能在異世界開無雙 ！][金光铉]/Vol.09.epub"
+    )
 
     parsed = parse_series_volume_info(path, path.name, "WATCH")
 
@@ -684,14 +953,18 @@ def test_parse_series_volume_info_from_bracketed_folder_and_volume_filename():
             8,
         ),
         (
-            Path("/monitor/comic/[Chainsaw Man][电锯人][藤本タツキ][Vol.01-Vol.11]/VOL11.zip"),
+            Path(
+                "/monitor/comic/[Chainsaw Man][电锯人][藤本タツキ][Vol.01-Vol.11]/VOL11.zip"
+            ),
             "电锯人",
             "藤本タツキ",
             11,
         ),
     ],
 )
-def test_parse_series_volume_info_supports_author_first_tagged_directories(path, expected_title, expected_author, expected_volume):
+def test_parse_series_volume_info_supports_author_first_tagged_directories(
+    path, expected_title, expected_author, expected_volume
+):
     parsed = parse_series_volume_info(path, path.name, "WATCH")
 
     assert parsed is not None
@@ -701,21 +974,62 @@ def test_parse_series_volume_info_supports_author_first_tagged_directories(path,
     assert parsed.title == f"第 {expected_volume} 卷"
 
 
-def test_watch_epub_import_merges_series_volumes_from_folder_layout(db_session, test_settings, tmp_path):
+def test_watch_epub_import_merges_series_volumes_from_folder_layout(
+    db_session, test_settings, tmp_path
+):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
-    series_dir = tmp_path / "[辣妹因为惩罚游戏才向我这个边缘人告白，但显然是真心爱上我了][結石][Vol.01-Vol.10]"
+    series_dir = (
+        tmp_path
+        / "[辣妹因为惩罚游戏才向我这个边缘人告白，但显然是真心爱上我了][結石][Vol.01-Vol.10]"
+    )
     series_dir.mkdir()
-    first = series_dir / "辣妹因为惩罚游戏才向我这个边缘人告白，但显然是真心爱上我了 01.epub"
-    tenth = series_dir / "辣妹因为惩罚游戏才向我这个边缘人告白，但显然是真心爱上我了 10.epub"
-    duplicate_tenth = series_dir / "辣妹因为惩罚游戏才向我这个边缘人告白，但显然是真心爱上我了 10 copy.epub"
+    first = (
+        series_dir
+        / "辣妹因为惩罚游戏才向我这个边缘人告白，但显然是真心爱上我了 01.epub"
+    )
+    tenth = (
+        series_dir
+        / "辣妹因为惩罚游戏才向我这个边缘人告白，但显然是真心爱上我了 10.epub"
+    )
+    duplicate_tenth = (
+        series_dir
+        / "辣妹因为惩罚游戏才向我这个边缘人告白，但显然是真心爱上我了 10 copy.epub"
+    )
     write_epub_metadata_fixture(first, "第 1 卷", "封面作者")
     write_epub_metadata_fixture(tenth, "第 10 卷", "封面作者")
     write_epub_metadata_fixture(duplicate_tenth, "第 10 卷", "封面作者")
 
-    first_result = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=first, origin="WATCH", original_name=first.name, monitor_folder_id="folder-1"))
-    tenth_result = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=tenth, origin="WATCH", original_name=tenth.name, monitor_folder_id="folder-1"))
-    duplicate_result = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=duplicate_tenth, origin="WATCH", original_name=tenth.name, monitor_folder_id="folder-1"))
+    first_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=first,
+            origin="WATCH",
+            original_name=first.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+    tenth_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=tenth,
+            origin="WATCH",
+            original_name=tenth.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+    duplicate_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=duplicate_tenth,
+            origin="WATCH",
+            original_name=tenth.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
 
     assert first_result.work_id == tenth_result.work_id == duplicate_result.work_id
     assert first_result.edition_id == tenth_result.edition_id
@@ -724,25 +1038,49 @@ def test_watch_epub_import_merges_series_volumes_from_folder_layout(db_session, 
     assert _count(db_session, "LibraryWork") == 1
     assert _count(db_session, "LibraryEdition") == 2
     assert _count(db_session, "LibraryVolume") == 3
-    work = db_session.execute(text("SELECT title, author FROM LibraryWork")).mappings().first()
+    work = (
+        db_session.execute(text("SELECT title, author FROM LibraryWork"))
+        .mappings()
+        .first()
+    )
     assert work["title"] == "辣妹因为惩罚游戏才向我这个边缘人告白，但显然是真心爱上我了"
     assert work["author"] == "結石"
-    edition = db_session.execute(text("SELECT chapterCount, sizeBytes FROM LibraryEdition WHERE id = :id"), {"id": first_result.edition_id}).mappings().first()
+    edition = (
+        db_session.execute(
+            text("SELECT chapterCount, sizeBytes FROM LibraryEdition WHERE id = :id"),
+            {"id": first_result.edition_id},
+        )
+        .mappings()
+        .first()
+    )
     assert edition["chapterCount"] == 2
     assert edition["sizeBytes"] > 0
-    volumes = db_session.execute(text("SELECT title, volumeIndex, sortOrder, chapterCount FROM LibraryVolume WHERE editionId = :id ORDER BY sortOrder"), {"id": first_result.edition_id}).mappings().all()
+    volumes = (
+        db_session.execute(
+            text(
+                "SELECT title, volumeIndex, sortOrder, chapterCount FROM LibraryVolume WHERE editionId = :id ORDER BY sortOrder"
+            ),
+            {"id": first_result.edition_id},
+        )
+        .mappings()
+        .all()
+    )
     assert [dict(volume) for volume in volumes] == [
         {"title": "第 1 卷", "volumeIndex": 1, "sortOrder": 1000, "chapterCount": 1},
         {"title": "第 10 卷", "volumeIndex": 10, "sortOrder": 10000, "chapterCount": 1},
     ]
 
 
-def test_explicit_series_directory_reuses_existing_work_without_recognition(db_session, test_settings, tmp_path, monkeypatch):
+def test_explicit_series_directory_reuses_existing_work_without_recognition(
+    db_session, test_settings, tmp_path, monkeypatch
+):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
     series_title = "失格纹的最强贤者～世界最强的贤者为了变得更强而转生了~"
     series_author = "进行诸岛×風花風花×肝匠&馮昊"
-    series_dir = tmp_path / f"[{series_title}][{series_author}][Vol.01-Vol.33][未完][bili]"
+    series_dir = (
+        tmp_path / f"[{series_title}][{series_author}][Vol.01-Vol.33][未完][bili]"
+    )
     series_dir.mkdir()
     volume_26 = series_dir / f"{series_title} Vol.26.zip"
     volume_30 = series_dir / f"{series_title} Vol.30.zip"
@@ -753,8 +1091,10 @@ def test_explicit_series_directory_reuses_existing_work_without_recognition(db_s
     def recognize_once(_services, source, _original_name):
         recognition_calls.append(source.name)
         if len(recognition_calls) > 1:
-            raise AssertionError("a later volume in an established series must not be recognized again")
-        return BookIdentity(
+            raise AssertionError(
+                "a later volume in an established series must not be recognized again"
+            )
+        return BookIdentityDTO(
             title=series_title,
             author=series_author,
             volume_index=26,
@@ -767,30 +1107,64 @@ def test_explicit_series_directory_reuses_existing_work_without_recognition(db_s
         SessionImportOrchestrationServices, "recognize_identity", recognize_once
     )
 
-    first = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=volume_26, origin="WATCH", original_name=volume_26.name))
-    second = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=volume_30, origin="WATCH", original_name=volume_30.name))
+    first = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=volume_26, origin="WATCH", original_name=volume_26.name
+        ),
+    )
+    second = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=volume_30, origin="WATCH", original_name=volume_30.name
+        ),
+    )
 
     assert recognition_calls == [volume_26.name]
     assert first.work_id == second.work_id
     assert first.edition_id == second.edition_id
-    assert db_session.execute(text("SELECT volumeIndex FROM LibraryVolume ORDER BY volumeIndex")).scalars().all() == [26, 30]
-    assert db_session.execute(text("SELECT source FROM LibraryMetadata WHERE source LIKE 'identity_%' ORDER BY createdAt")).scalars().all() == [
+    assert db_session.execute(
+        text("SELECT volumeIndex FROM LibraryVolume ORDER BY volumeIndex")
+    ).scalars().all() == [26, 30]
+    assert db_session.execute(
+        text(
+            "SELECT source FROM LibraryMetadata WHERE source LIKE 'identity_%' ORDER BY createdAt"
+        )
+    ).scalars().all() == [
         "identity_ai",
         "identity_existing_work",
     ]
-    assert db_session.execute(text("SELECT COUNT(*) FROM MetadataLookupTask")).scalar() == 0
-    assert db_session.execute(text("SELECT COUNT(*) FROM SystemEvent WHERE action = 'identity.existing_work.reused'")).scalar() == 1
+    assert (
+        db_session.execute(text("SELECT COUNT(*) FROM MetadataLookupTask")).scalar()
+        == 0
+    )
+    assert (
+        db_session.execute(
+            text(
+                "SELECT COUNT(*) FROM SystemEvent WHERE action = 'identity.existing_work.reused'"
+            )
+        ).scalar()
+        == 1
+    )
 
 
-def test_author_first_tagged_directory_imports_later_file_as_new_volume_without_recognition(db_session, test_settings, tmp_path, monkeypatch):
+def test_author_first_tagged_directory_imports_later_file_as_new_volume_without_recognition(
+    db_session, test_settings, tmp_path, monkeypatch
+):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
     series_title = "鹰峰同学请穿上衣服"
     series_author = "柊裕一"
     series_dir = tmp_path / f"[{series_author}][{series_title}][東立][Zero有水印][8未]"
     series_dir.mkdir()
-    volume_8 = series_dir / f"{series_title} [{series_author}][东立][扫图][繁中] Vol.08.zip"
-    volume_5 = series_dir / f"{series_title} [{series_author}][东立][扫图][繁中] Vol.05.zip"
+    volume_8 = (
+        series_dir / f"{series_title} [{series_author}][东立][扫图][繁中] Vol.08.zip"
+    )
+    volume_5 = (
+        series_dir / f"{series_title} [{series_author}][东立][扫图][繁中] Vol.05.zip"
+    )
     write_comic_fixture(volume_8, volume=8)
     write_comic_fixture(volume_5, volume=5)
     recognition_calls = []
@@ -798,8 +1172,10 @@ def test_author_first_tagged_directory_imports_later_file_as_new_volume_without_
     def recognize_first(_services, source, _original_name):
         recognition_calls.append(source.name)
         if len(recognition_calls) > 1:
-            raise AssertionError("a later volume in the corroborated directory must reuse the existing work")
-        return BookIdentity(
+            raise AssertionError(
+                "a later volume in the corroborated directory must reuse the existing work"
+            )
+        return BookIdentityDTO(
             title=series_title,
             author=series_author,
             volume_index=8,
@@ -812,16 +1188,32 @@ def test_author_first_tagged_directory_imports_later_file_as_new_volume_without_
         SessionImportOrchestrationServices, "recognize_identity", recognize_first
     )
 
-    first = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=volume_8, origin="WATCH", original_name=volume_8.name))
-    second = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=volume_5, origin="WATCH", original_name=volume_5.name))
+    first = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=volume_8, origin="WATCH", original_name=volume_8.name
+        ),
+    )
+    second = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=volume_5, origin="WATCH", original_name=volume_5.name
+        ),
+    )
 
     assert recognition_calls == [volume_8.name]
     assert first.work_id == second.work_id
     assert first.edition_id == second.edition_id
-    assert db_session.execute(text("SELECT volumeIndex FROM LibraryVolume ORDER BY volumeIndex")).scalars().all() == [5, 8]
+    assert db_session.execute(
+        text("SELECT volumeIndex FROM LibraryVolume ORDER BY volumeIndex")
+    ).scalars().all() == [5, 8]
 
 
-def test_filename_alias_reuses_existing_work_for_later_volume_in_same_directory(db_session, test_settings, tmp_path, monkeypatch):
+def test_filename_alias_reuses_existing_work_for_later_volume_in_same_directory(
+    db_session, test_settings, tmp_path, monkeypatch
+):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
     series_title = "超自然武装当哒当"
@@ -837,8 +1229,10 @@ def test_filename_alias_reuses_existing_work_for_later_volume_in_same_directory(
     def recognize_first(_services, source, _original_name):
         recognition_calls.append(source.name)
         if len(recognition_calls) > 1:
-            raise AssertionError("a matching filename alias in the same directory must reuse the established work")
-        return BookIdentity(
+            raise AssertionError(
+                "a matching filename alias in the same directory must reuse the established work"
+            )
+        return BookIdentityDTO(
             title=series_title,
             author=series_author,
             volume_index=14,
@@ -851,16 +1245,32 @@ def test_filename_alias_reuses_existing_work_for_later_volume_in_same_directory(
         SessionImportOrchestrationServices, "recognize_identity", recognize_first
     )
 
-    first = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=volume_14, origin="WATCH", original_name=volume_14.name))
-    second = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=volume_16, origin="WATCH", original_name=volume_16.name))
+    first = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=volume_14, origin="WATCH", original_name=volume_14.name
+        ),
+    )
+    second = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=volume_16, origin="WATCH", original_name=volume_16.name
+        ),
+    )
 
     assert recognition_calls == [volume_14.name]
     assert first.work_id == second.work_id
     assert first.edition_id == second.edition_id
-    assert db_session.execute(text("SELECT volumeIndex FROM LibraryVolume ORDER BY volumeIndex")).scalars().all() == [14, 16]
+    assert db_session.execute(
+        text("SELECT volumeIndex FROM LibraryVolume ORDER BY volumeIndex")
+    ).scalars().all() == [14, 16]
 
 
-def test_ambiguous_bracket_directory_keeps_different_filename_series_separate(db_session, test_settings, tmp_path, monkeypatch):
+def test_ambiguous_bracket_directory_keeps_different_filename_series_separate(
+    db_session, test_settings, tmp_path, monkeypatch
+):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
     collection_dir = tmp_path / "[合集][扫描][未完]"
@@ -874,7 +1284,7 @@ def test_ambiguous_bracket_directory_keeps_different_filename_series_separate(db
     def recognize_each(_services, source, _original_name):
         recognition_calls.append(source.name)
         title = "作品甲" if source == first_file else "作品乙"
-        return BookIdentity(
+        return BookIdentityDTO(
             title=title,
             author="作者甲",
             volume_index=1,
@@ -887,15 +1297,29 @@ def test_ambiguous_bracket_directory_keeps_different_filename_series_separate(db
         SessionImportOrchestrationServices, "recognize_identity", recognize_each
     )
 
-    first = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=first_file, origin="WATCH", original_name=first_file.name))
-    second = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=second_file, origin="WATCH", original_name=second_file.name))
+    first = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=first_file, origin="WATCH", original_name=first_file.name
+        ),
+    )
+    second = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=second_file, origin="WATCH", original_name=second_file.name
+        ),
+    )
 
     assert recognition_calls == [first_file.name, second_file.name]
     assert first.work_id != second.work_id
     assert _count(db_session, "LibraryWork") == 2
 
 
-def test_plain_author_directory_keeps_different_files_as_separate_works(db_session, test_settings, tmp_path, monkeypatch):
+def test_plain_author_directory_keeps_different_files_as_separate_works(
+    db_session, test_settings, tmp_path, monkeypatch
+):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
     author_dir = tmp_path / "作者xxx"
@@ -908,7 +1332,7 @@ def test_plain_author_directory_keeps_different_files_as_separate_works(db_sessi
 
     def recognize_each(_services, source, _original_name):
         recognition_calls.append(source.name)
-        return BookIdentity(
+        return BookIdentityDTO(
             title="作品甲" if source.name == "a.epub" else "作品乙",
             author="作者xxx",
             volume_index=None,
@@ -921,16 +1345,35 @@ def test_plain_author_directory_keeps_different_files_as_separate_works(db_sessi
         SessionImportOrchestrationServices, "recognize_identity", recognize_each
     )
 
-    first = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=first_file, origin="WATCH", original_name=first_file.name))
-    second = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=second_file, origin="WATCH", original_name=second_file.name))
+    first = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=first_file, origin="WATCH", original_name=first_file.name
+        ),
+    )
+    second = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=second_file, origin="WATCH", original_name=second_file.name
+        ),
+    )
 
     assert recognition_calls == ["a.epub", "b.epub"]
     assert first.work_id != second.work_id
-    assert db_session.execute(text("SELECT title FROM LibraryWork ORDER BY title")).scalars().all() == ["作品乙", "作品甲"]
-    assert db_session.execute(text("SELECT COUNT(*) FROM MetadataLookupTask")).scalar() == 0
+    assert db_session.execute(
+        text("SELECT title FROM LibraryWork ORDER BY title")
+    ).scalars().all() == ["作品乙", "作品甲"]
+    assert (
+        db_session.execute(text("SELECT COUNT(*) FROM MetadataLookupTask")).scalar()
+        == 0
+    )
 
 
-def test_watch_epub_import_uses_bracketed_folder_for_volume_filename(db_session, test_settings, tmp_path):
+def test_watch_epub_import_uses_bracketed_folder_for_volume_filename(
+    db_session, test_settings, tmp_path
+):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
     series_dir = tmp_path / "[DRAWING 最強漫畫家利用繪畫技能在異世界開無雙 ！][金光铉]"
@@ -938,22 +1381,45 @@ def test_watch_epub_import_uses_bracketed_folder_for_volume_filename(db_session,
     epub = series_dir / "Vol.09.epub"
     write_epub_metadata_fixture(epub, "Vol.09", "封面作者")
 
-    result = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=epub, origin="WATCH", original_name=epub.name, monitor_folder_id="folder-1"))
+    result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=epub,
+            origin="WATCH",
+            original_name=epub.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
 
     assert result.duplicate is False
     assert result.volume_id is not None
-    work = db_session.execute(text("SELECT title, author FROM LibraryWork")).mappings().first()
+    work = (
+        db_session.execute(text("SELECT title, author FROM LibraryWork"))
+        .mappings()
+        .first()
+    )
     assert work["title"] == "DRAWING 最強漫畫家利用繪畫技能在異世界開無雙 ！"
     assert work["author"] == "金光铉"
-    volume = db_session.execute(text("SELECT title, volumeIndex, sortOrder FROM LibraryVolume")).mappings().first()
+    volume = (
+        db_session.execute(
+            text("SELECT title, volumeIndex, sortOrder FROM LibraryVolume")
+        )
+        .mappings()
+        .first()
+    )
     assert dict(volume) == {"title": "第 9 卷", "volumeIndex": 9, "sortOrder": 9000}
-    raw = json.loads(db_session.execute(text("SELECT rawJson FROM LibraryMetadata")).scalar())
+    raw = json.loads(
+        db_session.execute(text("SELECT rawJson FROM LibraryMetadata")).scalar()
+    )
     assert raw["sourceSeriesTitle"] == "DRAWING 最強漫畫家利用繪畫技能在異世界開無雙 ！"
     assert raw["sourceSeriesAuthor"] == "金光铉"
     assert raw["sourceVolumeIndex"] == 9
 
 
-def test_import_epub_merges_same_title_author_despite_different_identifiers(db_session, test_settings, tmp_path):
+def test_import_epub_merges_same_title_author_despite_different_identifiers(
+    db_session, test_settings, tmp_path
+):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
     first_dir = tmp_path / "version-a"
@@ -962,21 +1428,42 @@ def test_import_epub_merges_same_title_author_despite_different_identifiers(db_s
     second_dir.mkdir()
     first = first_dir / "[斯泰尔斯庄园奇案][阿加莎·克里斯蒂].epub"
     second = second_dir / "[斯泰尔斯庄园奇案][阿加莎·克里斯蒂].epub"
-    write_epub_metadata_fixture(first, "斯泰尔斯庄园奇案", "阿加莎·克里斯蒂", ["B00T238N28"])
-    write_epub_metadata_fixture(second, "斯泰尔斯庄园奇案", "阿加莎·克里斯蒂", ["B00DIFFERENT"])
+    write_epub_metadata_fixture(
+        first, "斯泰尔斯庄园奇案", "阿加莎·克里斯蒂", ["B00T238N28"]
+    )
+    write_epub_metadata_fixture(
+        second, "斯泰尔斯庄园奇案", "阿加莎·克里斯蒂", ["B00DIFFERENT"]
+    )
 
-    first_result = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=first, origin="MANUAL", original_name=first.name))
-    second_result = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=second, origin="MANUAL", original_name=second.name))
+    first_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=first, origin="MANUAL", original_name=first.name
+        ),
+    )
+    second_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=second, origin="MANUAL", original_name=second.name
+        ),
+    )
 
     assert first_result.duplicate is False
     assert second_result.duplicate is False
     assert first_result.work_id == second_result.work_id
     assert _count(db_session, "LibraryWork") == 1
     assert _count(db_session, "LibraryEdition") == 2
-    assert db_session.execute(text("SELECT mergeKey FROM LibraryWork")).scalar() == "斯泰尔斯庄园奇案:阿加莎克里斯蒂"
+    assert (
+        db_session.execute(text("SELECT mergeKey FROM LibraryWork")).scalar()
+        == "斯泰尔斯庄园奇案:阿加莎克里斯蒂"
+    )
 
 
-def test_same_path_identity_groups_epub_pdf_and_comic_as_distinct_editions(db_session, test_settings, tmp_path):
+def test_same_path_identity_groups_epub_pdf_and_comic_as_distinct_editions(
+    db_session, test_settings, tmp_path
+):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
     epub_dir = tmp_path / "epub"
@@ -991,20 +1478,48 @@ def test_same_path_identity_groups_epub_pdf_and_comic_as_distinct_editions(db_se
     write_pdf_fixture(pdf)
     write_comic_fixture(comic)
 
-    epub_result = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=epub, origin="MANUAL", original_name=epub.name))
-    pdf_result = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=pdf, origin="MANUAL", original_name=pdf.name))
-    comic_result = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=comic, origin="MANUAL", original_name=comic.name))
+    epub_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(source_file_path=epub, origin="MANUAL", original_name=epub.name),
+    )
+    pdf_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(source_file_path=pdf, origin="MANUAL", original_name=pdf.name),
+    )
+    comic_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=comic, origin="MANUAL", original_name=comic.name
+        ),
+    )
 
     assert epub_result.work_id == pdf_result.work_id == comic_result.work_id
-    assert len({epub_result.edition_id, pdf_result.edition_id, comic_result.edition_id}) == 3
+    assert (
+        len({epub_result.edition_id, pdf_result.edition_id, comic_result.edition_id})
+        == 3
+    )
     assert _count(db_session, "LibraryWork") == 1
-    assert db_session.execute(text("SELECT title FROM LibraryWork")).scalar() == "跨格式作品"
-    assert db_session.execute(text("SELECT author FROM LibraryWork")).scalar() == "作者甲"
-    assert set(db_session.execute(text("SELECT format FROM LibraryEdition")).scalars()) == {"EPUB", "PDF", "COMIC"}
-    assert db_session.execute(text("SELECT workType FROM LibraryWork")).scalar() == "EPUB"
+    assert (
+        db_session.execute(text("SELECT title FROM LibraryWork")).scalar()
+        == "跨格式作品"
+    )
+    assert (
+        db_session.execute(text("SELECT author FROM LibraryWork")).scalar() == "作者甲"
+    )
+    assert set(
+        db_session.execute(text("SELECT format FROM LibraryEdition")).scalars()
+    ) == {"EPUB", "PDF", "COMIC"}
+    assert (
+        db_session.execute(text("SELECT workType FROM LibraryWork")).scalar() == "EPUB"
+    )
 
 
-def test_import_epub_leaves_metadata_queue_to_organizer_without_blocking_on_external_services(db_session, test_settings, tmp_path):
+def test_import_epub_leaves_metadata_queue_to_organizer_without_blocking_on_external_services(
+    db_session, test_settings, tmp_path
+):
     create_worker_tables(db_session)
     create_metadata_provider_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
@@ -1020,14 +1535,36 @@ def test_import_epub_leaves_metadata_queue_to_organizer_without_blocking_on_exte
         epub = tmp_path / "fallback.epub"
         write_epub_fixture(epub)
 
-        result = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=epub, origin="MANUAL", original_name="fallback.epub"))
+        result = import_managed_book(
+            db_session,
+            test_settings,
+            ImportOptions(
+                source_file_path=epub, origin="MANUAL", original_name="fallback.epub"
+            ),
+        )
 
         assert result.import_status == "completed"
         assert gateway.requests == []
-        assert db_session.execute(text("SELECT COUNT(*) FROM MetadataLookupTask")).scalar() == 0
-        assert db_session.execute(text("SELECT COUNT(*) FROM OrganizeJob")).scalar() == 0
-        assert db_session.execute(text("SELECT organizeStatus FROM LibraryWork WHERE id = :id"), {"id": result.work_id}).scalar() == "UNASSESSED"
-        assert db_session.execute(text("SELECT status FROM ImportTask ORDER BY createdAt DESC LIMIT 1")).scalar() == "COMPLETED"
+        assert (
+            db_session.execute(text("SELECT COUNT(*) FROM MetadataLookupTask")).scalar()
+            == 0
+        )
+        assert (
+            db_session.execute(text("SELECT COUNT(*) FROM OrganizeJob")).scalar() == 0
+        )
+        assert (
+            db_session.execute(
+                text("SELECT organizeStatus FROM LibraryWork WHERE id = :id"),
+                {"id": result.work_id},
+            ).scalar()
+            == "UNASSESSED"
+        )
+        assert (
+            db_session.execute(
+                text("SELECT status FROM ImportTask ORDER BY createdAt DESC LIMIT 1")
+            ).scalar()
+            == "COMPLETED"
+        )
     finally:
         gateway.shutdown()
 
@@ -1039,8 +1576,20 @@ def test_parse_epub_nav_uses_toc_block_and_preserves_raw_opf_metadata(tmp_path):
     metadata = parse_epub_metadata(epub)
 
     assert metadata["chapters"] == [
-        {"title": "第一节", "href": "chapters/one.xhtml", "idref": "c1", "mediaType": "application/xhtml+xml", "sortOrder": 1},
-        {"title": "第二节", "href": "chapters/two.xhtml#p2", "idref": "c2", "mediaType": "application/xhtml+xml", "sortOrder": 2},
+        {
+            "title": "第一节",
+            "href": "chapters/one.xhtml",
+            "idref": "c1",
+            "mediaType": "application/xhtml+xml",
+            "sortOrder": 1,
+        },
+        {
+            "title": "第二节",
+            "href": "chapters/two.xhtml#p2",
+            "idref": "c2",
+            "mediaType": "application/xhtml+xml",
+            "sortOrder": 2,
+        },
     ]
     assert metadata["isbn"] == "9787111111115"
     assert metadata["publisher"] == "测试出版社"
@@ -1083,8 +1632,20 @@ def test_parse_epub_ncx_titles_take_priority_over_headings(tmp_path):
     metadata = parse_epub_metadata(epub)
 
     assert metadata["chapters"] == [
-        {"title": "序幕 苏格兰", "href": "Text/chapter01.xhtml#start", "idref": "c1", "mediaType": "application/xhtml+xml", "sortOrder": 1},
-        {"title": "食人树", "href": "Text/chapter02.xhtml", "idref": "c2", "mediaType": "application/xhtml+xml", "sortOrder": 2},
+        {
+            "title": "序幕 苏格兰",
+            "href": "Text/chapter01.xhtml#start",
+            "idref": "c1",
+            "mediaType": "application/xhtml+xml",
+            "sortOrder": 1,
+        },
+        {
+            "title": "食人树",
+            "href": "Text/chapter02.xhtml",
+            "idref": "c2",
+            "mediaType": "application/xhtml+xml",
+            "sortOrder": 2,
+        },
     ]
 
 
@@ -1092,58 +1653,118 @@ def test_parse_epub_without_toc_uses_headings_then_numbered_titles(tmp_path):
     headed = tmp_path / "headed.epub"
     write_epub_without_toc_fixture(headed, "<h1>第一节</h1>", "<h2>第二节</h2>")
     headed_metadata = parse_epub_metadata(headed)
-    assert [chapter["title"] for chapter in headed_metadata["chapters"]] == ["第一节", "第二节"]
+    assert [chapter["title"] for chapter in headed_metadata["chapters"]] == [
+        "第一节",
+        "第二节",
+    ]
 
     untitled = tmp_path / "untitled.epub"
     write_epub_without_toc_fixture(untitled, "<p>content</p>", "<p>content</p>")
     untitled_metadata = parse_epub_metadata(untitled)
-    assert [chapter["title"] for chapter in untitled_metadata["chapters"]] == ["第 1 章", "第 2 章"]
+    assert [chapter["title"] for chapter in untitled_metadata["chapters"]] == [
+        "第 1 章",
+        "第 2 章",
+    ]
 
 
-def test_import_epub_with_missing_declared_cover_persists_default_cover(db_session, test_settings, tmp_path):
+def test_import_epub_with_missing_declared_cover_persists_default_cover(
+    db_session, test_settings, tmp_path
+):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
     epub = tmp_path / "missing-cover.epub"
     write_epub_cover_reference_fixture(epub, "Images/coverpage.jpg")
-    previous_default = test_settings.resolved_storage_root / "covers/default-book-cover-v1.png"
+    previous_default = (
+        test_settings.resolved_storage_root / "covers/default-book-cover-v1.png"
+    )
     previous_default.parent.mkdir(parents=True)
     previous_default.write_bytes(b"previous generated default")
 
-    result = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=epub, origin="MANUAL", original_name=epub.name))
+    result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(source_file_path=epub, origin="MANUAL", original_name=epub.name),
+    )
 
     assert result.import_status == "completed"
     assert result.total_units == 1
-    edition = db_session.execute(text("SELECT importStatus, coverPath, coverStatus FROM LibraryEdition")).mappings().one()
-    assert dict(edition) == {"importStatus": "COMPLETED", "coverPath": "covers/default-book-cover-v1.png", "coverStatus": "DEFAULT"}
-    assert db_session.execute(text("SELECT coverPath FROM LibraryVolume")).scalar() == "covers/default-book-cover-v1.png"
-    work = db_session.execute(text("SELECT coverPath, coverStatus FROM LibraryWork")).mappings().one()
-    assert dict(work) == {"coverPath": "covers/default-book-cover-v1.png", "coverStatus": "DEFAULT"}
+    edition = (
+        db_session.execute(
+            text("SELECT importStatus, coverPath, coverStatus FROM LibraryEdition")
+        )
+        .mappings()
+        .one()
+    )
+    assert dict(edition) == {
+        "importStatus": "COMPLETED",
+        "coverPath": "covers/default-book-cover-v1.png",
+        "coverStatus": "DEFAULT",
+    }
+    assert (
+        db_session.execute(text("SELECT coverPath FROM LibraryVolume")).scalar()
+        == "covers/default-book-cover-v1.png"
+    )
+    work = (
+        db_session.execute(text("SELECT coverPath, coverStatus FROM LibraryWork"))
+        .mappings()
+        .one()
+    )
+    assert dict(work) == {
+        "coverPath": "covers/default-book-cover-v1.png",
+        "coverStatus": "DEFAULT",
+    }
     stored_default = test_settings.resolved_storage_root / edition["coverPath"]
     assert stored_default.read_bytes() == DEFAULT_COVER_ASSET_PATH.read_bytes()
 
 
-def test_import_epub_resolves_cover_path_case_and_url_encoding(db_session, test_settings, tmp_path):
+def test_import_epub_resolves_cover_path_case_and_url_encoding(
+    db_session, test_settings, tmp_path
+):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
     epub = tmp_path / "case-insensitive-cover.epub"
-    write_epub_cover_reference_fixture(epub, "images/cover%20page.jpg", "OEBPS/Images/Cover Page.JPG")
+    write_epub_cover_reference_fixture(
+        epub, "images/cover%20page.jpg", "OEBPS/Images/Cover Page.JPG"
+    )
 
-    result = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=epub, origin="MANUAL", original_name=epub.name))
+    result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(source_file_path=epub, origin="MANUAL", original_name=epub.name),
+    )
 
     assert result.import_status == "completed"
-    edition = db_session.execute(text("SELECT coverPath, coverStatus FROM LibraryEdition")).mappings().one()
+    edition = (
+        db_session.execute(text("SELECT coverPath, coverStatus FROM LibraryEdition"))
+        .mappings()
+        .one()
+    )
     assert edition["coverStatus"] == "READY"
     assert Path(edition["coverPath"]).read_bytes() == b"optional-cover"
 
 
-def test_import_comic_defers_page_units_and_detects_duplicate(db_session, test_settings, tmp_path):
+def test_import_comic_defers_page_units_and_detects_duplicate(
+    db_session, test_settings, tmp_path
+):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
     comic = tmp_path / "星舰漫画 Vol.1.zip"
     write_comic_fixture(comic)
 
-    first = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=comic, origin="MANUAL", original_name=comic.name))
-    second = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=comic, origin="MANUAL", original_name=comic.name))
+    first = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=comic, origin="MANUAL", original_name=comic.name
+        ),
+    )
+    second = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=comic, origin="MANUAL", original_name=comic.name
+        ),
+    )
 
     assert first.type == "comic"
     assert first.total_units == 2
@@ -1151,31 +1772,67 @@ def test_import_comic_defers_page_units_and_detects_duplicate(db_session, test_s
     assert _count(db_session, "LibraryWork") == 1
     assert _count(db_session, "LibraryVolume") == 1
     assert _count(db_session, "LibraryReadingUnit") == 0
-    assert db_session.execute(text("SELECT contentHash FROM ImportTask WHERE duplicate = 0")).scalar() is None
-    file_row = db_session.execute(text("SELECT fullHash, hashStatus FROM LibraryFile")).mappings().first()
+    assert (
+        db_session.execute(
+            text("SELECT contentHash FROM ImportTask WHERE duplicate = 0")
+        ).scalar()
+        is None
+    )
+    file_row = (
+        db_session.execute(text("SELECT fullHash, hashStatus FROM LibraryFile"))
+        .mappings()
+        .first()
+    )
     assert file_row["fullHash"] is None
     assert file_row["hashStatus"] == "PARTIAL_PENDING"
-    work = db_session.execute(text("SELECT title, author, description, tags FROM LibraryWork")).mappings().first()
+    work = (
+        db_session.execute(
+            text("SELECT title, author, description, tags FROM LibraryWork")
+        )
+        .mappings()
+        .first()
+    )
     assert work["title"] == "星舰漫画"
     assert work["author"] == "未知作者"
     assert work["description"] is None
     assert json.loads(work["tags"]) == ["comic", "zip"]
-    edition = db_session.execute(text("SELECT publisher, pageCount, coverPath, coverStatus FROM LibraryEdition")).mappings().first()
+    edition = (
+        db_session.execute(
+            text(
+                "SELECT publisher, pageCount, coverPath, coverStatus FROM LibraryEdition"
+            )
+        )
+        .mappings()
+        .first()
+    )
     assert edition["publisher"] == "星舰出版社"
     assert edition["pageCount"] == 2
     assert edition["coverPath"]
     assert Path(edition["coverPath"]).read_bytes() == b"one"
     assert edition["coverStatus"] == "READY"
-    volume = db_session.execute(text("SELECT title, volumeIndex FROM LibraryVolume")).mappings().first()
+    volume = (
+        db_session.execute(text("SELECT title, volumeIndex FROM LibraryVolume"))
+        .mappings()
+        .first()
+    )
     assert volume["title"] == "第 1 卷"
     assert volume["volumeIndex"] == 1
-    raw_metadata = json.loads(db_session.execute(text("SELECT rawJson FROM LibraryMetadata WHERE source = 'comic_info'")).scalar())
+    raw_metadata = json.loads(
+        db_session.execute(
+            text("SELECT rawJson FROM LibraryMetadata WHERE source = 'comic_info'")
+        ).scalar()
+    )
     assert raw_metadata["comicInfo"]["Publisher"] == "星舰出版社"
     assert raw_metadata["comicInfo"]["Tags"] == "manga,space"
-    assert db_session.execute(text("SELECT COUNT(*) FROM MetadataLookupTask")).scalar() == 0
+    assert (
+        db_session.execute(text("SELECT COUNT(*) FROM MetadataLookupTask")).scalar()
+        == 0
+    )
 
 
-def test_import_comic_updates_generated_work_cover_to_first_volume(db_session, test_settings, tmp_path):
+def test_import_comic_updates_generated_work_cover_to_first_volume(
+    db_session, test_settings, tmp_path
+):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
     volume_2 = tmp_path / "星舰漫画 Vol.2.zip"
@@ -1183,14 +1840,35 @@ def test_import_comic_updates_generated_work_cover_to_first_volume(db_session, t
     write_comic_fixture(volume_2, volume=2, cover_bytes=b"volume-two-cover")
     write_comic_fixture(volume_1, volume=1, cover_bytes=b"volume-one-cover")
 
-    first_import = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=volume_2, origin="MANUAL", original_name=volume_2.name))
-    second_import = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=volume_1, origin="MANUAL", original_name=volume_1.name))
+    first_import = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=volume_2, origin="MANUAL", original_name=volume_2.name
+        ),
+    )
+    second_import = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=volume_1, origin="MANUAL", original_name=volume_1.name
+        ),
+    )
 
     assert first_import.work_id == second_import.work_id
-    work_cover = db_session.execute(text("SELECT coverPath FROM LibraryWork WHERE id = :work_id"), {"work_id": first_import.work_id}).scalar()
+    work_cover = db_session.execute(
+        text("SELECT coverPath FROM LibraryWork WHERE id = :work_id"),
+        {"work_id": first_import.work_id},
+    ).scalar()
     assert work_cover is not None
     assert Path(work_cover).read_bytes() == b"volume-one-cover"
-    assert db_session.execute(text("SELECT volumeIndex FROM LibraryVolume WHERE coverPath = :cover_path"), {"cover_path": work_cover}).scalar() == 1
+    assert (
+        db_session.execute(
+            text("SELECT volumeIndex FROM LibraryVolume WHERE coverPath = :cover_path"),
+            {"cover_path": work_cover},
+        ).scalar()
+        == 1
+    )
 
 
 def test_import_pdf_creates_library_records(db_session, test_settings, tmp_path):
@@ -1199,22 +1877,47 @@ def test_import_pdf_creates_library_records(db_session, test_settings, tmp_path)
     pdf = tmp_path / "manual.pdf"
     write_pdf_fixture(pdf)
 
-    result = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=pdf, origin="MANUAL", original_name="Manual PDF.pdf"))
+    result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=pdf, origin="MANUAL", original_name="Manual PDF.pdf"
+        ),
+    )
 
     assert result.import_status == "completed"
     assert result.type == "ebook"
     assert result.format == "pdf"
     assert result.total_units == 1
     assert _count(db_session, "LibraryWork") == 1
-    edition = db_session.execute(text("SELECT format, coverPath, coverStatus FROM LibraryEdition")).mappings().first()
+    edition = (
+        db_session.execute(
+            text("SELECT format, coverPath, coverStatus FROM LibraryEdition")
+        )
+        .mappings()
+        .first()
+    )
     assert edition["format"] == "PDF"
     assert edition["coverStatus"] == "READY"
     assert edition["coverPath"]
     assert Path(edition["coverPath"]).read_bytes().startswith(b"\xff\xd8")
-    assert db_session.execute(text("SELECT coverPath FROM LibraryWork")).scalar() == edition["coverPath"]
-    assert db_session.execute(text("SELECT coverPath FROM LibraryVolume")).scalar() == edition["coverPath"]
-    assert db_session.execute(text("SELECT mimeType FROM LibraryFile")).scalar() == "application/pdf"
-    raw_metadata = json.loads(db_session.execute(text("SELECT rawJson FROM LibraryMetadata WHERE source = 'pdf'")).scalar())
+    assert (
+        db_session.execute(text("SELECT coverPath FROM LibraryWork")).scalar()
+        == edition["coverPath"]
+    )
+    assert (
+        db_session.execute(text("SELECT coverPath FROM LibraryVolume")).scalar()
+        == edition["coverPath"]
+    )
+    assert (
+        db_session.execute(text("SELECT mimeType FROM LibraryFile")).scalar()
+        == "application/pdf"
+    )
+    raw_metadata = json.loads(
+        db_session.execute(
+            text("SELECT rawJson FROM LibraryMetadata WHERE source = 'pdf'")
+        ).scalar()
+    )
     assert raw_metadata["coverRenderedFromPage"] == 1
     assert _count(db_session, "LibraryReadingUnit") == 1
 
@@ -1231,23 +1934,45 @@ def test_import_pdf_maps_subject_keywords_metadata(db_session, test_settings, tm
     assert parsed["description"] == "PDF 简介"
     assert parsed["tags"] == ["space", "manual", "science"]
 
-    result = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=pdf, origin="MANUAL", original_name="fallback.pdf"))
+    result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=pdf, origin="MANUAL", original_name="fallback.pdf"
+        ),
+    )
 
     assert result.import_status == "completed"
-    work = db_session.execute(text("SELECT title, author, description, tags FROM LibraryWork")).mappings().first()
-    assert work["title"] == "fallback"
-    assert work["author"] == "未知作者"
+    work = (
+        db_session.execute(
+            text("SELECT title, author, description, tags FROM LibraryWork")
+        )
+        .mappings()
+        .first()
+    )
+    assert work["title"] == "星舰手册"
+    assert work["author"] == "作者甲"
     assert work["description"] is None
     assert json.loads(work["tags"]) == ["pdf"]
-    edition = db_session.execute(text("SELECT description FROM LibraryEdition")).mappings().first()
+    edition = (
+        db_session.execute(text("SELECT description FROM LibraryEdition"))
+        .mappings()
+        .first()
+    )
     assert edition["description"] == "PDF 简介"
-    raw_metadata = json.loads(db_session.execute(text("SELECT rawJson FROM LibraryMetadata WHERE source = 'pdf'")).scalar())
+    raw_metadata = json.loads(
+        db_session.execute(
+            text("SELECT rawJson FROM LibraryMetadata WHERE source = 'pdf'")
+        ).scalar()
+    )
     assert raw_metadata["Subject"] == "PDF 简介"
     assert raw_metadata["Keywords"] == "space,manual,science"
 
 
 def test_monitor_ignore_rules():
-    folder = MonitorFolderConfig(id="1", root_path="/tmp", ignore_patterns="*.tmp\nskip", min_file_size_bytes=1)
+    folder = MonitorFolderConfig(
+        id="1", root_path="/tmp", ignore_patterns="*.tmp\nskip", min_file_size_bytes=1
+    )
     assert should_ignore_file(Path("/tmp/.hidden/book.epub"), folder)
     assert should_ignore_file(Path("/tmp/book.tmp"), folder)
     assert should_ignore_file(Path("/tmp/readme.md"), folder)
@@ -1270,8 +1995,12 @@ def test_monitor_folder_config_preserves_zero_minimum_file_size():
     assert folder.min_file_size_bytes == 0
 
 
-def test_global_import_preferences_filter_extensions_conversion_and_patterns(db_session):
-    set_system_setting(db_session, "import.allowedExtensions", json.dumps([".epub", ".pdf", ".txt"]))
+def test_global_import_preferences_filter_extensions_conversion_and_patterns(
+    db_session,
+):
+    set_system_setting(
+        db_session, "import.allowedExtensions", json.dumps([".epub", ".pdf", ".txt"])
+    )
     set_system_setting(db_session, "import.autoConvertToEpub", "false")
     set_system_setting(db_session, "import.stabilityCheck.enabled", "false")
     set_system_setting(db_session, "import.stabilityCheck.seconds", "999")
@@ -1304,25 +2033,42 @@ def test_missing_import_preferences_keep_every_supported_extension_enabled(db_se
     assert preferences.auto_convert_to_epub
 
 
-def test_text_file_imports_raw_when_auto_conversion_is_disabled_and_can_convert_later(db_session, test_settings, tmp_path):
+def test_text_file_imports_raw_when_auto_conversion_is_disabled_and_can_convert_later(
+    db_session, test_settings, tmp_path
+):
     create_worker_tables(db_session)
     set_system_setting(db_session, "import.autoConvertToEpub", "false")
     source = tmp_path / "稍后转换.txt"
-    source.write_text("第一章\n这是一段用于验证后置转换流程的正文。\n\n第二章\n转换完成后应当可以阅读。", encoding="utf-8")
+    source.write_text(
+        "第一章\n这是一段用于验证后置转换流程的正文。\n\n第二章\n转换完成后应当可以阅读。",
+        encoding="utf-8",
+    )
 
     raw_result = import_managed_book(
         db_session,
         test_settings,
-        ImportOptions(source_file_path=source, origin="MANUAL", original_name=source.name),
+        ImportOptions(
+            source_file_path=source, origin="MANUAL", original_name=source.name
+        ),
     )
-    raw_edition = db_session.execute(
-        text("SELECT format, hidden, chapterCount FROM LibraryEdition WHERE id = :id"),
-        {"id": raw_result.edition_id},
-    ).mappings().one()
-    raw_file = db_session.execute(
-        text("SELECT path, kind FROM LibraryFile WHERE editionId = :id"),
-        {"id": raw_result.edition_id},
-    ).mappings().one()
+    raw_edition = (
+        db_session.execute(
+            text(
+                "SELECT format, hidden, chapterCount FROM LibraryEdition WHERE id = :id"
+            ),
+            {"id": raw_result.edition_id},
+        )
+        .mappings()
+        .one()
+    )
+    raw_file = (
+        db_session.execute(
+            text("SELECT path, kind FROM LibraryFile WHERE editionId = :id"),
+            {"id": raw_result.edition_id},
+        )
+        .mappings()
+        .one()
+    )
     assert raw_edition["format"] == "TXT"
     assert not raw_edition["hidden"]
     assert raw_edition["chapterCount"] == 0
@@ -1339,22 +2085,39 @@ def test_text_file_imports_raw_when_auto_conversion_is_disabled_and_can_convert_
             requested_work_id=raw_result.work_id,
         ),
     )
-    visible_editions = db_session.execute(
-        text("SELECT id, format, hidden FROM LibraryEdition WHERE workId = :work_id ORDER BY createdAt"),
-        {"work_id": raw_result.work_id},
-    ).mappings().all()
-    work = db_session.execute(
-        text("SELECT primaryEditionId, workType FROM LibraryWork WHERE id = :work_id"),
-        {"work_id": raw_result.work_id},
-    ).mappings().one()
+    visible_editions = (
+        db_session.execute(
+            text(
+                "SELECT id, format, hidden FROM LibraryEdition WHERE workId = :work_id ORDER BY createdAt"
+            ),
+            {"work_id": raw_result.work_id},
+        )
+        .mappings()
+        .all()
+    )
+    work = (
+        db_session.execute(
+            text(
+                "SELECT primaryEditionId, workType FROM LibraryWork WHERE id = :work_id"
+            ),
+            {"work_id": raw_result.work_id},
+        )
+        .mappings()
+        .one()
+    )
     assert converted_result.work_id == raw_result.work_id
-    assert [(row["format"], bool(row["hidden"])) for row in visible_editions] == [("TXT", True), ("EPUB", False)]
+    assert [(row["format"], bool(row["hidden"])) for row in visible_editions] == [
+        ("TXT", True),
+        ("EPUB", False),
+    ]
     assert work["primaryEditionId"] == converted_result.edition_id
     assert work["workType"] == "EPUB"
     assert source.exists()
 
 
-def test_directory_scan_records_candidates_and_summary_in_system_log(db_session, tmp_path):
+def test_directory_scan_records_candidates_and_summary_in_system_log(
+    db_session, tmp_path
+):
     create_worker_tables(db_session)
     root = tmp_path / "scan-root"
     nested = root / "nested"
@@ -1365,7 +2128,9 @@ def test_directory_scan_records_candidates_and_summary_in_system_log(db_session,
     (root / "notes.txt").write_text("ignored", encoding="utf-8")
     (nested / "second.pdf").write_bytes(b"pdf")
     (hidden / "hidden.cbz").write_bytes(b"hidden")
-    folder = MonitorFolderConfig(id="folder-scan", root_path=str(root), min_file_size_bytes=1)
+    folder = MonitorFolderConfig(
+        id="folder-scan", root_path=str(root), min_file_size_bytes=1
+    )
 
     class CollectingQueue:
         def __init__(self):
@@ -1376,14 +2141,31 @@ def test_directory_scan_records_candidates_and_summary_in_system_log(db_session,
 
     import_queue = CollectingQueue()
 
-    summary = scan_directory_with_logging(db_session, root, folder, import_queue, trigger="manual_rescan", requested_at="2026-07-17T10:00:00Z")
+    summary = scan_directory_with_logging(
+        db_session,
+        root,
+        folder,
+        import_queue,
+        trigger="manual_rescan",
+        requested_at="2026-07-17T10:00:00Z",
+    )
 
     assert summary.directories_scanned == 2
     assert summary.files_scanned == 3
     assert summary.candidates_found == 3
     assert summary.ignored_files == 0
-    assert {path.name for path in import_queue.paths} == {"first.epub", "notes.txt", "second.pdf"}
-    events = db_session.execute(text("SELECT action, message, metadata FROM SystemEvent ORDER BY createdAt")).mappings().all()
+    assert {path.name for path in import_queue.paths} == {
+        "first.epub",
+        "notes.txt",
+        "second.pdf",
+    }
+    events = (
+        db_session.execute(
+            text("SELECT action, message, metadata FROM SystemEvent ORDER BY createdAt")
+        )
+        .mappings()
+        .all()
+    )
     assert [event["action"] for event in events] == [
         "scan.started",
         "scan.file.detected",
@@ -1398,7 +2180,9 @@ def test_directory_scan_records_candidates_and_summary_in_system_log(db_session,
     assert completed["requestedAt"] == "2026-07-17T10:00:00Z"
 
 
-def test_directory_scan_only_queues_files_without_existing_import_records(db_session, tmp_path):
+def test_directory_scan_only_queues_files_without_existing_import_records(
+    db_session, tmp_path
+):
     create_worker_tables(db_session)
     root = tmp_path / "scan-cache-root"
     root.mkdir()
@@ -1414,7 +2198,9 @@ def test_directory_scan_only_queues_files_without_existing_import_records(db_ses
         {"source_path": str(cached.resolve())},
     )
     db_session.commit()
-    folder = MonitorFolderConfig(id="folder-cache", root_path=str(root), min_file_size_bytes=1)
+    folder = MonitorFolderConfig(
+        id="folder-cache", root_path=str(root), min_file_size_bytes=1
+    )
 
     class CollectingQueue:
         def __init__(self):
@@ -1425,18 +2211,29 @@ def test_directory_scan_only_queues_files_without_existing_import_records(db_ses
 
     import_queue = CollectingQueue()
 
-    summary = scan_directory_with_logging(db_session, root, folder, import_queue, trigger="watcher_started")
+    summary = scan_directory_with_logging(
+        db_session, root, folder, import_queue, trigger="watcher_started"
+    )
 
     assert summary.files_scanned == 2
     assert summary.candidates_found == 1
     assert summary.cached_files == 1
     assert import_queue.paths == [added]
     completed = db_session.execute(
-        text("SELECT metadata FROM SystemEvent WHERE action = 'scan.completed' ORDER BY createdAt DESC LIMIT 1")
+        text(
+            "SELECT metadata FROM SystemEvent WHERE action = 'scan.completed' ORDER BY createdAt DESC LIMIT 1"
+        )
     ).scalar_one()
     assert json.loads(completed)["cachedFiles"] == 1
 
 
 def test_parse_comic_volume_from_name_uses_parent_folder():
-    parsed = parse_comic_volume_from_name(Path("/monitor/[齐木楠雄的灾难][麻生周一]/Vol.05.cbz"), "Vol.05.cbz")
-    assert parsed == {"seriesName": "齐木楠雄的灾难", "seriesIndex": 5.0, "title": "齐木楠雄的灾难 (5)", "author": "麻生周一"}
+    parsed = parse_comic_volume_from_name(
+        Path("/monitor/[齐木楠雄的灾难][麻生周一]/Vol.05.cbz"), "Vol.05.cbz"
+    )
+    assert parsed == {
+        "seriesName": "齐木楠雄的灾难",
+        "seriesIndex": 5.0,
+        "title": "齐木楠雄的灾难 (5)",
+        "author": "麻生周一",
+    }

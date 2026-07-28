@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,6 +11,10 @@ from app.modules.imports.application.dto import (
     ImportRuntimeConfig,
     ImportTaskDTO,
 )
+from app.modules.imports.application.errors import (
+    MonitorFolderDeletedDuringImportError,
+)
+from app.modules.imports.application.fail import fail_claimed_import_task
 from app.modules.imports.application.process import process_import_task
 
 
@@ -32,6 +37,11 @@ class RecordingStore:
     def __init__(self, *, fail_at: str | None = None) -> None:
         self.fail_at = fail_at
         self.calls: list[str] = []
+        self.monitor_folder_available = True
+
+    def monitor_folder_exists(self, monitor_folder_id: str) -> bool:
+        self.calls.append("monitor")
+        return self.monitor_folder_available
 
     def link_work_to_monitor_shelf(
         self,
@@ -57,8 +67,15 @@ class RecordingStore:
 
 
 class RecordingPipeline:
-    def __init__(self, *, fail: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fail: bool = False,
+        after_import: Callable[[], None] | None = None,
+    ) -> None:
         self.fail = fail
+        self.after_import = after_import
+        self.imports = 0
         self.finalized = 0
         self.rolled_back = 0
 
@@ -67,8 +84,11 @@ class RecordingPipeline:
         settings: object,
         options: object,
     ) -> ImportResult:
+        self.imports += 1
         if self.fail:
             raise RuntimeError("final import synchronization failed")
+        if self.after_import is not None:
+            self.after_import()
         return ImportResult(
             book_id="work-1",
             work_id="work-1",
@@ -120,7 +140,7 @@ def test_process_import_commits_final_writes_once_after_post_success_hooks() -> 
     )
 
     assert result.work_id == "work-1"
-    assert store.calls == ["shelf", "download"]
+    assert store.calls == ["monitor", "monitor", "shelf", "download"]
     assert unit_of_work.commits == 1
     assert unit_of_work.rollbacks == 0
     assert pipeline.finalized == 1
@@ -152,6 +172,125 @@ def test_process_import_rolls_back_all_final_writes_when_post_hook_fails(
     assert unit_of_work.commits == 0
     assert unit_of_work.rollbacks == 1
     assert pipeline.rolled_back == 1
+
+
+def test_process_import_stops_before_pipeline_when_monitor_folder_was_deleted() -> None:
+    unit_of_work = RecordingUnitOfWork()
+    store = RecordingStore()
+    store.monitor_folder_available = False
+    pipeline = RecordingPipeline()
+
+    with pytest.raises(MonitorFolderDeletedDuringImportError):
+        process_import_task(
+            store,
+            unit_of_work,
+            pipeline,
+            ImportRuntimeConfig(
+                storage_root=Path("/tmp"),
+                monitor_root=None,
+                audiobook_max_file_bytes=1,
+            ),
+            _task(),
+            now=123,
+        )
+
+    assert pipeline.imports == 0
+    assert unit_of_work.rollbacks == 1
+    assert pipeline.rolled_back == 1
+
+
+def test_process_import_rolls_back_when_monitor_folder_is_deleted_during_pipeline() -> (
+    None
+):
+    unit_of_work = RecordingUnitOfWork()
+    store = RecordingStore()
+    pipeline = RecordingPipeline(
+        after_import=lambda: setattr(store, "monitor_folder_available", False)
+    )
+
+    with pytest.raises(MonitorFolderDeletedDuringImportError):
+        process_import_task(
+            store,
+            unit_of_work,
+            pipeline,
+            ImportRuntimeConfig(
+                storage_root=Path("/tmp"),
+                monitor_root=None,
+                audiobook_max_file_bytes=1,
+            ),
+            _task(),
+            now=123,
+        )
+
+    assert store.calls == ["monitor", "monitor"]
+    assert unit_of_work.commits == 0
+    assert unit_of_work.rollbacks == 1
+    assert pipeline.rolled_back == 1
+
+
+class FailureRecordingStore:
+    def __init__(self) -> None:
+        self.failure: dict[str, object] | None = None
+        self.event_staged = False
+
+    def monitor_folder_exists(self, monitor_folder_id: str) -> bool:
+        return False
+
+    def fail_claimed(
+        self,
+        task: ImportTaskDTO,
+        *,
+        error_code: str,
+        error_summary: str,
+        message: str,
+        retryable: bool,
+        now: int,
+    ) -> bool:
+        self.failure = {
+            "error_code": error_code,
+            "error_summary": error_summary,
+            "message": message,
+            "retryable": retryable,
+        }
+        return True
+
+    def stage_failure_event(
+        self,
+        task: ImportTaskDTO,
+        *,
+        error_summary: str,
+        now: int,
+    ) -> None:
+        self.event_staged = True
+
+
+class ExistingSourceProbe:
+    def exists(self, path: Path) -> bool:
+        return True
+
+
+def test_fail_claimed_import_is_terminal_when_monitor_folder_was_deleted() -> None:
+    store = FailureRecordingStore()
+    unit_of_work = RecordingUnitOfWork()
+
+    failed = fail_claimed_import_task(
+        store,
+        unit_of_work,
+        _task(),
+        MonitorFolderDeletedDuringImportError(),
+        now=123,
+        source_probe=ExistingSourceProbe(),
+    )
+
+    assert failed is True
+    assert store.failure == {
+        "error_code": "MONITOR_FOLDER_NOT_FOUND",
+        "error_summary": "监控文件夹已在导入期间被删除",
+        "message": "监控文件夹已被删除，本次导入任务已结束",
+        "retryable": False,
+    }
+    assert store.event_staged is True
+    assert unit_of_work.commits == 1
 
 
 def test_process_import_rolls_back_publications_when_final_commit_fails() -> None:

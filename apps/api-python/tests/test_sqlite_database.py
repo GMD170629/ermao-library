@@ -309,7 +309,7 @@ def test_seed_is_insert_only_and_safe_across_concurrent_sessions(tmp_path) -> No
         engine.dispose()
 
 
-def test_bootstrap_stamps_v14_without_repairing_business_data(tmp_path) -> None:
+def test_bootstrap_accepts_v14_database_at_current_schema_revision(tmp_path) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
     try:
@@ -347,7 +347,9 @@ def test_bootstrap_stamps_v14_without_repairing_business_data(tmp_path) -> None:
                     "'[]', 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
                 )
             )
-            _drop_alembic_version(connection)
+            connection.exec_driver_sql(
+                "UPDATE alembic_version SET version_num = '0001_current_schema'"
+            )
             connection.exec_driver_sql("PRAGMA user_version = 14")
 
         bootstrap_database(engine, settings)
