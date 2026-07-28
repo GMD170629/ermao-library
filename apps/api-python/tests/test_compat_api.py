@@ -28,8 +28,10 @@ from app.services.organize_service import (
     douban_candidates,
     system_settings,
 )
-from app.worker.importer import ImportOptions, import_managed_book
-from app.worker.persistent_import_queue import process_import_task
+from app.bootstrap.imports import import_managed_book, process_import_task
+from app.contracts.imports import ImportTaskContract
+from app.modules.imports.application.dto import ImportOptions
+from app.modules.imports.infrastructure.task_mapper import import_task_dto_from_row
 from tests.test_worker_importer import (
     create_worker_tables,
     write_comic_fixture,
@@ -3132,7 +3134,11 @@ def test_raw_text_detail_exposes_deferred_epub_conversion(client, db_session, te
     queued = client.post(f"/api/works/{imported.work_id}/editions/{imported.edition_id}/convert")
     assert queued.status_code == 202
     queued_task = queued.json()["data"]["task"]
-    completed = process_import_task(db_session, test_settings, queued_task)
+    completed = process_import_task(
+        db_session,
+        test_settings,
+        ImportTaskContract.model_validate(queued_task).to_dto(),
+    )
 
     converted_detail = client.get(f"/api/works/{imported.work_id}").json()["data"]["book"]
     assert [(edition["formatValue"], edition["readable"]) for edition in converted_detail["editions"]] == [("EPUB", True)]
@@ -3797,7 +3803,11 @@ def test_download_queue_worker_downloads_and_uses_the_unified_importer(client, d
         task = db_session.execute(text("SELECT * FROM DownloadTask WHERE id = :id"), {"id": task_id}).mappings().first()
         assert task["status"] == "importing"
         pending = dict(db_session.execute(text("SELECT * FROM ImportTask WHERE origin = 'DOWNLOAD'")).mappings().one())
-        process_import_task(db_session, test_settings, pending)
+        process_import_task(
+            db_session,
+            test_settings,
+            import_task_dto_from_row(pending),
+        )
         task = db_session.execute(text("SELECT * FROM DownloadTask WHERE id = :id"), {"id": task_id}).mappings().first()
         assert task["status"] == "completed"
         assert task["bookId"] is not None

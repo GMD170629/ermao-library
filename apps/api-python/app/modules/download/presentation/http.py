@@ -12,6 +12,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
+from app.api.typed_route import TypedContractRoute
 from app.bootstrap.download import (
     create_download_task as create_download_task_command,
     delete_download_task as delete_download_task_command,
@@ -23,13 +24,18 @@ from app.bootstrap.system import record_system_event, upsert_setting
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.modules.download.presentation.sources import router as sources_router
+from app.modules.download.presentation.schemas import (
+    DeletedDownloadTaskResponse,
+    DownloadTaskResponse,
+    DownloadTasksResponse,
+)
 from app.modules.download.public import CreateDownloadTask, UpdateDownloadTask
 from app.modules.imports.public import target_directory_from_path as _target_directory_from_path
 from app.bootstrap.imports import import_http_store
 from app.schemas.responses import fail, ok
 from app.services.download_executor import execute_download_task
 
-router = APIRouter(tags=["download"])
+router = APIRouter(tags=["download"], route_class=TypedContractRoute)
 router.include_router(sources_router)
 
 
@@ -114,7 +120,7 @@ def _record_system_event(
 
 
 @router.get("/download-tasks")
-def list_download_tasks(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def list_download_tasks(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> DownloadTasksResponse:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -133,7 +139,7 @@ def list_download_tasks(request: Request, db: Session = Depends(get_db), setting
 
 
 @router.post("/download-tasks")
-async def create_download_task(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+async def create_download_task(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> DownloadTaskResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -167,7 +173,7 @@ async def create_download_task(request: Request, db: Session = Depends(get_db), 
 
 
 @router.get("/download-tasks/{task_id}")
-def get_download_task(task_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def get_download_task(task_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> DownloadTaskResponse:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -179,7 +185,7 @@ def get_download_task(task_id: str, request: Request, db: Session = Depends(get_
 
 
 @router.delete("/download-tasks/{task_id}")
-def delete_download_task(task_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def delete_download_task(task_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> DeletedDownloadTaskResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -192,7 +198,7 @@ def delete_download_task(task_id: str, request: Request, db: Session = Depends(g
 
 
 @router.put("/download-tasks/{task_id}")
-async def update_download_task(task_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+async def update_download_task(task_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> DownloadTaskResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -227,7 +233,7 @@ async def update_download_task(task_id: str, request: Request, db: Session = Dep
 @router.post("/download-tasks/{task_id}/retry")
 @router.post("/download-tasks/{task_id}/cancel")
 @router.post("/download-tasks/{task_id}/import")
-def mutate_download_task(task_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def mutate_download_task(task_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> DownloadTaskResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -271,5 +277,3 @@ def mutate_download_task(task_id: str, request: Request, db: Session = Depends(g
         _record_system_event(db, level="warning", source="download", actor_type="admin", actor_id=user.id, action="cancelled", target_type="downloadTask", target_id=task_id, message=f"取消下载任务：{task.get('displayName')}", metadata={"status": task.get("status")})
         return ok({"task": task, "action": action})
     return fail("下载文件会由监控文件夹自动识别入库，无需手动导入", status_code=400)
-
-

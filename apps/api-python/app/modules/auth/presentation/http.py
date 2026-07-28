@@ -6,14 +6,18 @@ import logging
 import os
 from pathlib import Path
 from secrets import token_hex, token_urlsafe
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.typed_route import TypedContractRoute
+from app.contracts.http import MessageError
+from app.contracts.http_errors import ErrorResponses
 from app.core.auth import (
     clear_session_cookie,
     create_session,
@@ -29,7 +33,7 @@ from app.core.config import Settings, get_settings
 from app.core.i18n import configured_locale
 from app.db.session import get_db
 from app.models.auth import PasswordResetToken, Session as UserSession, User, cuid, db_timestamp
-from app.schemas.auth import (
+from app.modules.auth.presentation.requests import (
     LoginRequest,
     PasswordResetConfirmRequest,
     PasswordResetRequest,
@@ -38,10 +42,44 @@ from app.schemas.auth import (
     UpdateNameRequest,
     UpdatePasswordRequest,
 )
-from app.schemas.responses import fail, ok
+from app.modules.auth.presentation.schemas import (
+    AccountDisabledBody,
+    AccountDisabledError,
+    AuthUser,
+    AvatarFileResponse,
+    BasicBadRequestError,
+    BasicConflictError,
+    BasicForbiddenError,
+    BasicInternalError,
+    BasicNotFoundError,
+    BasicUnauthorizedError,
+    CapabilitiesPayload,
+    CapabilitiesResponse,
+    LoggedOutPayload,
+    LoggedOutResponse,
+    PasswordChangedPayload,
+    PasswordChangedResponse,
+    PasswordResetPayload,
+    PasswordResetRequestPayload,
+    PasswordResetRequestResponse,
+    PasswordResetResponse,
+    PayloadTooLargeError,
+    SessionPayload,
+    SessionResponse,
+    SessionUnauthorizedError,
+    SetupPayload,
+    SetupRequiredBody,
+    SetupRequiredDetails,
+    SetupRequiredError,
+    SetupResponse,
+    SetupStatusPayload,
+    SetupStatusResponse,
+    UserPayload,
+    UserResponse,
+)
 from app.services.password_reset_file import password_reset_file_path, password_reset_url, write_password_reset_file
 
-router = APIRouter()
+router = APIRouter(route_class=TypedContractRoute)
 LOGGER = logging.getLogger(__name__)
 
 MAX_AVATAR_BYTES = 5 * 1024 * 1024
@@ -135,21 +173,42 @@ def _process_avatar(data: bytes) -> Image.Image:
 
 
 @router.get("/capabilities")
-def capabilities(settings: Settings = Depends(get_settings)):
-    return ok({"localPasswordReset": True, "passwordResetFilePath": str(password_reset_file_path(settings))})
+def capabilities(
+    settings: Settings = Depends(get_settings),
+) -> CapabilitiesResponse:
+    return CapabilitiesResponse(
+        data=CapabilitiesPayload(
+            localPasswordReset=True,
+            passwordResetFilePath=str(password_reset_file_path(settings)),
+        )
+    )
 
 
 @router.get("/setup/status")
-def setup_status(db: Session = Depends(get_db)):
-    response = ok({"initialized": db.query(User.id).first() is not None})
+def setup_status(
+    response: Response,
+    db: Session = Depends(get_db),
+) -> SetupStatusResponse:
     response.headers["Cache-Control"] = "no-store"
-    return response
+    return SetupStatusResponse(
+        data=SetupStatusPayload(initialized=db.query(User.id).first() is not None)
+    )
 
 
 @router.post("/setup", status_code=201)
-def setup(payload: SetupRequest, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def setup(
+    payload: SetupRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    SetupResponse,
+    ErrorResponses(BasicConflictError, BasicInternalError),
+]:
     if db.query(User.id).first() is not None:
-        return fail("系统已经完成初始化，请直接登录", status_code=409)
+        raise BasicConflictError(
+            MessageError(message="系统已经完成初始化，请直接登录")
+        )
     email = _normalized_email(payload.email)
     user_id = cuid()
     now = db_timestamp()
@@ -169,13 +228,14 @@ def setup(payload: SetupRequest, db: Session = Depends(get_db), settings: Settin
         db.commit()
     except IntegrityError:
         db.rollback()
-        return fail("系统已经完成初始化，请直接登录", status_code=409)
+        raise BasicConflictError(
+            MessageError(message="系统已经完成初始化，请直接登录")
+        )
     user = db.get(User, user_id)
     if user is None:
-        return fail("账户创建失败", status_code=500)
+        raise BasicInternalError(MessageError(message="账户创建失败"))
 
     user_session, token = create_session(db, user.id)
-    response = ok({"initialized": True, **_session_payload(db, user)}, status_code=201)
     response.headers["Cache-Control"] = "no-store"
     response.set_cookie(
         "shuku_locale",
@@ -186,37 +246,68 @@ def setup(payload: SetupRequest, db: Session = Depends(get_db), settings: Settin
         secure=settings.secure_cookies,
     )
     set_session_cookie(response, token, user_session.expires_at, settings)
-    return response
+    return SetupResponse(
+        data=SetupPayload.model_validate(
+            {"initialized": True, **_session_payload(db, user)}
+        )
+    )
 
 
 @router.post("/login")
-def login(payload: LoginRequest, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def login(
+    payload: LoginRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    SessionResponse,
+    ErrorResponses(
+        SetupRequiredError,
+        BasicUnauthorizedError,
+        AccountDisabledError,
+    ),
+]:
     email = _normalized_email(payload.email)
     user = db.query(User).filter(func.lower(User.email) == email).one_or_none()
     if user is None and db.query(User.id).first() is None:
-        return fail("系统尚未初始化", status_code=409, details={"code": "SETUP_REQUIRED"})
+        raise SetupRequiredError(
+            SetupRequiredBody(
+                message="系统尚未初始化",
+                details=SetupRequiredDetails(),
+            )
+        )
     if user is None or not verify_password(payload.password, user.password_hash):
-        return fail("邮箱或密码不正确", status_code=401)
+        raise BasicUnauthorizedError(MessageError(message="邮箱或密码不正确"))
     if user.status != "active":
-        return fail("账户已停用，请联系管理员", status_code=403, code="ACCOUNT_DISABLED")
+        raise AccountDisabledError(
+            AccountDisabledBody(message="账户已停用，请联系管理员")
+        )
 
     user_session, token = create_session(db, user.id)
-    response = ok(_session_payload(db, user))
     set_session_cookie(response, token, user_session.expires_at, settings)
-    return response
+    return SessionResponse(
+        data=SessionPayload.model_validate(_session_payload(db, user))
+    )
 
 
 @router.get("/me")
-def me(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def me(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    SessionResponse,
+    ErrorResponses(SessionUnauthorizedError),
+]:
     user, token, refreshed_expires_at = get_current_user(db, request, settings)
     if user is None:
-        response = fail("UNAUTHORIZED", status_code=401)
-        delete_session_cookie(response, settings)
-        return response
-    response = ok(_session_payload(db, user))
+        raise SessionUnauthorizedError(MessageError(message="UNAUTHORIZED"))
     if token is not None and refreshed_expires_at is not None:
         set_session_cookie(response, token, refreshed_expires_at, settings)
-    return response
+    return SessionResponse(
+        data=SessionPayload.model_validate(_session_payload(db, user))
+    )
 
 
 @router.patch("/account/email")
@@ -225,17 +316,24 @@ def update_email(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
+) -> Annotated[
+    UserResponse,
+    ErrorResponses(
+        BasicUnauthorizedError,
+        BasicBadRequestError,
+        BasicConflictError,
+    ),
+]:
     user = _authenticated_user(db, request, settings)
     if user is None:
-        return fail("UNAUTHORIZED", status_code=401)
+        raise BasicUnauthorizedError(MessageError(message="UNAUTHORIZED"))
     if not verify_password(payload.current_password, user.password_hash):
-        return fail("当前密码不正确", status_code=400)
+        raise BasicBadRequestError(MessageError(message="当前密码不正确"))
 
     email = _normalized_email(payload.email)
     duplicate = db.query(User).filter(func.lower(User.email) == email, User.id != user.id).first()
     if duplicate is not None:
-        return fail("该邮箱已被使用", status_code=409)
+        raise BasicConflictError(MessageError(message="该邮箱已被使用"))
 
     user.email = email
     user.updated_at = db_timestamp()
@@ -244,9 +342,11 @@ def update_email(
         db.commit()
     except IntegrityError:
         db.rollback()
-        return fail("该邮箱已被使用", status_code=409)
+        raise BasicConflictError(MessageError(message="该邮箱已被使用"))
     db.refresh(user)
-    return ok({"user": user.to_auth_view()})
+    return UserResponse(
+        data=UserPayload(user=AuthUser.model_validate(user.to_auth_view()))
+    )
 
 
 @router.patch("/account/name")
@@ -255,42 +355,52 @@ def update_name(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
+) -> Annotated[
+    UserResponse,
+    ErrorResponses(BasicUnauthorizedError),
+]:
     user = _authenticated_user(db, request, settings)
     if user is None:
-        return fail("UNAUTHORIZED", status_code=401)
+        raise BasicUnauthorizedError(MessageError(message="UNAUTHORIZED"))
 
     user.name = payload.name
     user.updated_at = db_timestamp()
     db.add(user)
     db.commit()
     db.refresh(user)
-    return ok({"user": user.to_auth_view()})
+    return UserResponse(
+        data=UserPayload(user=AuthUser.model_validate(user.to_auth_view()))
+    )
 
 
 @router.patch("/account/password")
 def update_password(
     payload: UpdatePasswordRequest,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
+) -> Annotated[
+    PasswordChangedResponse,
+    ErrorResponses(BasicUnauthorizedError, BasicBadRequestError),
+]:
     user = _authenticated_user(db, request, settings)
     if user is None:
-        return fail("UNAUTHORIZED", status_code=401)
+        raise BasicUnauthorizedError(MessageError(message="UNAUTHORIZED"))
     if not verify_password(payload.current_password, user.password_hash):
-        return fail("当前密码不正确", status_code=400)
+        raise BasicBadRequestError(MessageError(message="当前密码不正确"))
     if verify_password(payload.new_password, user.password_hash):
-        return fail("新密码不能与当前密码相同", status_code=400)
+        raise BasicBadRequestError(
+            MessageError(message="新密码不能与当前密码相同")
+        )
 
     user.password_hash = hash_password(payload.new_password)
     user.updated_at = db_timestamp()
     db.add(user)
     db.query(UserSession).filter(UserSession.user_id == user.id).delete(synchronize_session=False)
     db.commit()
-    response = ok({"passwordChanged": True, "requiresLogin": True})
     delete_session_cookie(response, settings)
-    return response
+    return PasswordChangedResponse(data=PasswordChangedPayload())
 
 
 @router.post("/avatar")
@@ -299,25 +409,34 @@ async def upload_avatar(
     avatar: UploadFile = File(...),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
+) -> Annotated[
+    UserResponse,
+    ErrorResponses(
+        BasicUnauthorizedError,
+        BasicBadRequestError,
+        PayloadTooLargeError,
+    ),
+]:
     user = _authenticated_user(db, request, settings)
     if user is None:
-        return fail("UNAUTHORIZED", status_code=401)
+        raise BasicUnauthorizedError(MessageError(message="UNAUTHORIZED"))
     if (avatar.content_type or "").lower() not in ALLOWED_AVATAR_CONTENT_TYPES:
-        return fail("仅支持 JPEG、PNG 或 WebP 头像", status_code=400)
+        raise BasicBadRequestError(
+            MessageError(message="仅支持 JPEG、PNG 或 WebP 头像")
+        )
 
     try:
         data = await avatar.read(MAX_AVATAR_BYTES + 1)
     finally:
         await avatar.close()
     if not data:
-        return fail("头像文件为空", status_code=400)
+        raise BasicBadRequestError(MessageError(message="头像文件为空"))
     if len(data) > MAX_AVATAR_BYTES:
-        return fail("头像不能超过 5 MB", status_code=413)
+        raise PayloadTooLargeError(MessageError(message="头像不能超过 5 MB"))
     try:
         processed = _process_avatar(data)
     except ValueError as exc:
-        return fail(str(exc), status_code=400)
+        raise BasicBadRequestError(MessageError(message=str(exc))) from exc
 
     target_dir = settings.resolved_storage_root / "profiles" / user.id
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -335,28 +454,44 @@ async def upload_avatar(
     db.add(user)
     db.commit()
     db.refresh(user)
-    return ok({"user": user.to_auth_view()})
+    return UserResponse(
+        data=UserPayload(user=AuthUser.model_validate(user.to_auth_view()))
+    )
 
 
-@router.get("/avatar")
-def get_avatar(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+@router.get("/avatar", response_class=AvatarFileResponse)
+def get_avatar(
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    AvatarFileResponse,
+    ErrorResponses(BasicUnauthorizedError, BasicNotFoundError),
+]:
     user = _authenticated_user(db, request, settings)
     if user is None:
-        return fail("UNAUTHORIZED", status_code=401)
+        raise BasicUnauthorizedError(MessageError(message="UNAUTHORIZED"))
     path = _resolved_avatar_path(user, settings)
     if path is None or not path.is_file():
-        return fail("头像不存在", status_code=404)
-    response = FileResponse(path, media_type="image/webp")
+        raise BasicNotFoundError(MessageError(message="头像不存在"))
+    response = AvatarFileResponse(path, media_type="image/webp")
     response.headers["Cache-Control"] = "private, max-age=3600"
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
 
 
 @router.delete("/avatar")
-def delete_avatar(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def delete_avatar(
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    UserResponse,
+    ErrorResponses(BasicUnauthorizedError),
+]:
     user = _authenticated_user(db, request, settings)
     if user is None:
-        return fail("UNAUTHORIZED", status_code=401)
+        raise BasicUnauthorizedError(MessageError(message="UNAUTHORIZED"))
     path = _resolved_avatar_path(user, settings)
     if path is not None:
         path.unlink(missing_ok=True)
@@ -365,7 +500,9 @@ def delete_avatar(request: Request, db: Session = Depends(get_db), settings: Set
     db.add(user)
     db.commit()
     db.refresh(user)
-    return ok({"user": user.to_auth_view()})
+    return UserResponse(
+        data=UserPayload(user=AuthUser.model_validate(user.to_auth_view()))
+    )
 
 
 @router.post("/password-reset/request", status_code=202)
@@ -374,7 +511,10 @@ def request_password_reset(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
+) -> Annotated[
+    PasswordResetRequestResponse,
+    ErrorResponses(BasicInternalError),
+]:
     email = _normalized_email(payload.email)
     user = db.query(User).filter(func.lower(User.email) == email).one_or_none()
     if user is not None:
@@ -409,31 +549,36 @@ def request_password_reset(
                 LOGGER.exception("failed to write local password reset file")
                 db.delete(reset_token)
                 db.commit()
-                return fail("无法在本地目录创建密码重置文件", status_code=500)
-    return ok(
-        {
-            "accepted": True,
-            "message": RESET_REQUEST_MESSAGE,
-            "filePath": str(password_reset_file_path(settings)),
-        },
-        status_code=202,
+                raise BasicInternalError(
+                    MessageError(message="无法在本地目录创建密码重置文件")
+                )
+    return PasswordResetRequestResponse(
+        data=PasswordResetRequestPayload(
+            accepted=True,
+            message=RESET_REQUEST_MESSAGE,
+            filePath=str(password_reset_file_path(settings)),
+        )
     )
 
 
 @router.post("/password-reset/confirm")
 def confirm_password_reset(
     payload: PasswordResetConfirmRequest,
+    response: Response,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
+) -> Annotated[
+    PasswordResetResponse,
+    ErrorResponses(BasicBadRequestError),
+]:
     now = db_timestamp()
     reset_token = db.query(PasswordResetToken).filter(PasswordResetToken.token_hash == hash_token(payload.token)).one_or_none()
     if reset_token is None or reset_token.used_at is not None or reset_token.expires_at <= now:
-        return fail("重置链接无效或已过期", status_code=400)
+        raise BasicBadRequestError(MessageError(message="重置链接无效或已过期"))
 
     user = db.query(User).filter(User.id == reset_token.user_id).one_or_none()
     if user is None:
-        return fail("重置链接无效或已过期", status_code=400)
+        raise BasicBadRequestError(MessageError(message="重置链接无效或已过期"))
     user.password_hash = hash_password(payload.new_password)
     user.updated_at = now
     db.add(user)
@@ -450,14 +595,17 @@ def confirm_password_reset(
         password_reset_file_path(settings).unlink(missing_ok=True)
     except OSError:
         LOGGER.warning("failed to remove used local password reset file", exc_info=True)
-    response = ok({"passwordReset": True})
     delete_session_cookie(response, settings)
-    return response
+    return PasswordResetResponse(data=PasswordResetPayload())
 
 
 @router.post("/logout")
-def logout(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def logout(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> LoggedOutResponse:
     clear_session_cookie(db, request, settings)
-    response = ok({"loggedOut": True})
     delete_session_cookie(response, settings)
-    return response
+    return LoggedOutResponse(data=LoggedOutPayload())

@@ -16,8 +16,8 @@ from app.modules.download.infrastructure.tasks import (
     next_queued_download_task,
 )
 from app.services.download_executor import execute_download_task, has_table
-from app.worker.importer import is_supported_import_file
-from app.worker.persistent_import_queue import enqueue_import_task
+from app.bootstrap.imports import enqueue_import_task
+from app.modules.imports.public import is_supported_import_filename
 from app.services.queue_runtime import QueueHeartbeatPump
 
 
@@ -93,7 +93,7 @@ def process_next_download_task(db: Session, settings: Settings) -> bool:
     result = execute_download_task(db, settings, str(task["id"]))
     if result.task.get("status") == "downloaded":
         downloaded_path = Path(str(result.task.get("filePath") or "")).expanduser()
-        if downloaded_path.is_file() and is_supported_import_file(downloaded_path):
+        if downloaded_path.is_file() and is_supported_import_filename(downloaded_path):
             try:
                 import_task, _created = enqueue_import_task(
                     db,
@@ -105,7 +105,7 @@ def process_next_download_task(db: Session, settings: Settings) -> bool:
                 )
                 mark_download_task_importing(db, str(task["id"]))
                 db.commit()
-                print(f"[download-queue] downloaded {task['id']} and queued import {import_task.get('id')}", flush=True)
+                print(f"[download-queue] downloaded {task['id']} and queued import {import_task.id}", flush=True)
             except Exception as exc:
                 db.rollback()
                 print(f"[download-queue] downloaded {task['id']} but import enqueue failed: {exc}", flush=True)

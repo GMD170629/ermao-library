@@ -13,8 +13,12 @@ from app.models.auth import User
 from app.services.download_executor import assert_allowed_extension
 from app.services.epub_normalizer import EPUB_NORMALIZER_VERSION
 from app.services.text_conversion import ConversionFailure, convert_to_epub, detect_txt_encoding, source_format, validate_epub
-from app.worker.importer import ImportOptions, import_managed_book
-from app.worker.persistent_import_queue import claim_next_import_task, recover_stale_import_tasks
+from app.bootstrap.imports import (
+    claim_next_import_task,
+    import_managed_book,
+    recover_stale_import_tasks,
+)
+from app.modules.imports.application.dto import ImportOptions
 from tests.test_worker_importer import create_worker_tables
 
 
@@ -393,9 +397,9 @@ def test_single_import_worker_recovers_interrupted_task_without_waiting_for_leas
     assert recover_stale_import_tasks(db_session) == 1
     claimed = claim_next_import_task(db_session, "worker-new", 900)
     assert claimed is not None
-    assert claimed["id"] == "task-stale"
-    assert claimed["status"] == "PARSING"
-    assert claimed["attempts"] == 1
+    assert claimed.id == "task-stale"
+    assert claimed.status == "PARSING"
+    assert claimed.attempts == 1
     assert claim_next_import_task(db_session, "worker-other", 900) is None
 
 
@@ -416,7 +420,7 @@ def test_persistent_queue_claims_by_created_timestamp_then_id(db_session, tmp_pa
     for index in range(3):
         claimed = claim_next_import_task(db_session, f"worker-{index}", 900)
         assert claimed is not None
-        claimed_ids.append(claimed["id"])
+        claimed_ids.append(claimed.id)
 
     assert claimed_ids == ["task-a", "task-b", "task-c"]
 

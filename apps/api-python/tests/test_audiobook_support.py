@@ -10,21 +10,31 @@ import pytest
 from PIL import Image
 from sqlalchemy import text
 
+import app.modules.imports.application.import_audio as import_audio_module
 import app.modules.imports.presentation.writes as import_writes_module
 import app.services.audio_metadata as audio_metadata_module
-import app.worker.importer as importer_module
+import app.modules.imports.application.import_audio as importer_module
+import app.modules.imports.infrastructure.audio_cover as audio_cover_module
 import app.worker.watcher as watcher_module
 from app.core.auth import hash_password
 from app.db.base import Base
 from app.db.bootstrap import apply_schema
 from app.models.auth import User
+from app.modules.imports.infrastructure.orchestration_services import (
+    SessionImportOrchestrationServices,
+)
+from app.modules.imports.infrastructure.task_mapper import import_task_dto_from_row
 from app.services.audio_metadata import (
     AudioChapterMetadata,
     AudioFileMetadata,
     parse_audio_metadata,
 )
-from app.worker.importer import ImportOptions, import_managed_book
-from app.worker.persistent_import_queue import enqueue_import_task, process_import_task
+from app.bootstrap.imports import (
+    enqueue_import_task,
+    import_managed_book,
+    process_import_task,
+)
+from app.modules.imports.application.dto import ImportOptions
 from app.worker.watcher import (
     MonitorFolderConfig,
     WatchState,
@@ -127,7 +137,11 @@ def _import_audio_fixture(db_session, test_settings, monkeypatch, tmp_path: Path
     # purpose; import must honor disc/track metadata.
     (audio_dir / "10.mp3").write_bytes(b"track-ten-0123456789")
     (audio_dir / "02.mp3").write_bytes(b"track-two-abcdefghij")
-    monkeypatch.setattr(importer_module, "parse_audio_metadata", _fake_audio_metadata)
+    monkeypatch.setattr(
+        SessionImportOrchestrationServices,
+        "parse_audio_metadata",
+        lambda _services, path: _fake_audio_metadata(path),
+    )
     result = import_managed_book(
         db_session,
         test_settings,
@@ -354,11 +368,13 @@ def test_audio_parser_falls_back_when_mutagen_fails_and_caps_probe_output(tmp_pa
 def test_audio_cover_validation_rejects_unknown_oversized_and_high_pixel_images(monkeypatch) -> None:
     output = io.BytesIO()
     Image.new("RGB", (16, 16), "navy").save(output, format="PNG")
-    valid = importer_module._validated_audio_cover(output.getvalue())
+    valid = audio_cover_module.validated_audio_cover(output.getvalue())
     assert valid is not None
     assert valid[1] == ".png"
-    assert importer_module._validated_audio_cover(b"not-an-image") is None
-    assert importer_module._validated_audio_cover(b"x" * (importer_module.MAX_AUDIO_COVER_BYTES + 1)) is None
+    assert audio_cover_module.validated_audio_cover(b"not-an-image") is None
+    assert audio_cover_module.validated_audio_cover(
+        b"x" * (audio_cover_module.MAX_AUDIO_COVER_BYTES + 1)
+    ) is None
 
     class HugeImage:
         format = "PNG"
@@ -373,8 +389,8 @@ def test_audio_cover_validation_rejects_unknown_oversized_and_high_pixel_images(
         def verify(self):
             raise AssertionError("pixel bound must be checked before decode")
 
-    monkeypatch.setattr(importer_module.Image, "open", lambda _source: HugeImage())
-    assert importer_module._validated_audio_cover(output.getvalue()) is None
+    monkeypatch.setattr(audio_cover_module.Image, "open", lambda _source: HugeImage())
+    assert audio_cover_module.validated_audio_cover(output.getvalue()) is None
 
 
 def test_audio_bundle_import_merges_with_existing_epub_and_orders_tracks(db_session, test_settings, monkeypatch, tmp_path) -> None:
@@ -427,7 +443,7 @@ def test_audio_content_dedup_is_lazy_on_first_import_and_reuses_moved_files(
         hashed_paths.append(path)
         return real_content_hash(path)
 
-    monkeypatch.setattr(importer_module, "_content_hash", tracked_content_hash)
+    monkeypatch.setattr(import_audio_module, "_content_hash", tracked_content_hash)
     first, original_dir = _import_audio_fixture(db_session, test_settings, monkeypatch, tmp_path)
     assert hashed_paths == []
     initial_hashes = db_session.execute(
@@ -475,7 +491,11 @@ def test_audio_sample_collision_uses_full_hash_and_does_not_false_deduplicate(
     first_path.write_bytes(b"H" * sample_size + b"A" * sample_size + b"T" * sample_size)
     second_path.write_bytes(b"H" * sample_size + b"B" * sample_size + b"T" * sample_size)
     assert importer_module._sample_fingerprint(first_path) == importer_module._sample_fingerprint(second_path)
-    monkeypatch.setattr(importer_module, "parse_audio_metadata", _fake_audio_metadata)
+    monkeypatch.setattr(
+        SessionImportOrchestrationServices,
+        "parse_audio_metadata",
+        lambda _services, path: _fake_audio_metadata(path),
+    )
 
     first = import_managed_book(
         db_session,
@@ -513,7 +533,11 @@ def test_audio_bundle_keeps_byte_identical_tracks_as_distinct_chapters(db_sessio
     payload = b"the-same-track-bytes"
     (folder / "01.mp3").write_bytes(payload)
     (folder / "02.mp3").write_bytes(payload)
-    monkeypatch.setattr(importer_module, "parse_audio_metadata", _fake_audio_metadata)
+    monkeypatch.setattr(
+        SessionImportOrchestrationServices,
+        "parse_audio_metadata",
+        lambda _services, path: _fake_audio_metadata(path),
+    )
 
     result = import_managed_book(
         db_session,
@@ -559,7 +583,11 @@ def test_file_import_does_not_apply_browser_upload_bundle_byte_limit(
         }
     )
     assert sum(path.stat().st_size for path in folder.iterdir()) > local_settings.audiobook_max_bundle_bytes
-    monkeypatch.setattr(importer_module, "parse_audio_metadata", _fake_audio_metadata)
+    monkeypatch.setattr(
+        SessionImportOrchestrationServices,
+        "parse_audio_metadata",
+        lambda _services, path: _fake_audio_metadata(path),
+    )
 
     result = import_managed_book(
         db_session,
@@ -583,7 +611,11 @@ def test_two_single_file_audio_editions_in_one_folder_have_distinct_version_keys
     second_path = folder / "second.mp3"
     first_path.write_bytes(b"first-distinct-audio")
     second_path.write_bytes(b"second-distinct-audio")
-    monkeypatch.setattr(importer_module, "parse_audio_metadata", _fake_audio_metadata)
+    monkeypatch.setattr(
+        SessionImportOrchestrationServices,
+        "parse_audio_metadata",
+        lambda _services, path: _fake_audio_metadata(path),
+    )
     first = import_managed_book(
         db_session,
         test_settings,
@@ -941,8 +973,16 @@ def test_manual_multi_audio_upload_creates_one_bundle_task_and_assets(client, db
     assert {row["status"] for row in assets} == {"PENDING"}
     assert all(Path(row["sourcePath"]).parent.name.startswith("上传有声书-有声书") for row in assets)
 
-    monkeypatch.setattr(importer_module, "parse_audio_metadata", _fake_audio_metadata)
-    imported = process_import_task(db_session, test_settings, dict(task))
+    monkeypatch.setattr(
+        SessionImportOrchestrationServices,
+        "parse_audio_metadata",
+        lambda _services, path: _fake_audio_metadata(path),
+    )
+    imported = process_import_task(
+        db_session,
+        test_settings,
+        import_task_dto_from_row(dict(task)),
+    )
     work = db_session.execute(
         text("SELECT `title`, `author` FROM `LibraryWork` WHERE `id` = :work_id"),
         {"work_id": imported.work_id},
@@ -1016,25 +1056,25 @@ def test_failed_audio_bundle_can_be_retried_and_resets_all_assets(client, db_ses
             "UPDATE `ImportTask` SET `status` = 'FAILED', `retryable` = 1, `progress` = 100, "
             "`processedAssetCount` = 1, `errorCode` = 'AUDIO_IMPORT_FAILED', `errorSummary` = 'bad tags' WHERE `id` = :id"
         ),
-        {"id": task["id"]},
+        {"id": task.id},
     )
     db_session.execute(
         text(
             "UPDATE `ImportAsset` SET `status` = 'FAILED', `errorCode` = 'AUDIO_IMPORT_FAILED', "
             "`errorSummary` = 'bad tags' WHERE `importTaskId` = :id"
         ),
-        {"id": task["id"]},
+        {"id": task.id},
     )
     db_session.commit()
 
-    response = client.post(f"/api/import-tasks/{task['id']}/retry")
+    response = client.post(f"/api/import-tasks/{task.id}/retry")
     assert response.status_code == 200
     reset_task = db_session.execute(
         text(
             "SELECT `status`, `retryable`, `progress`, `processedAssetCount`, `errorCode`, `errorSummary` "
             "FROM `ImportTask` WHERE `id` = :id"
         ),
-        {"id": task["id"]},
+        {"id": task.id},
     ).mappings().one()
     assert dict(reset_task) == {
         "status": "PENDING",
@@ -1046,7 +1086,7 @@ def test_failed_audio_bundle_can_be_retried_and_resets_all_assets(client, db_ses
     }
     assets = db_session.execute(
         text("SELECT `status`, `fileId`, `errorCode`, `errorSummary` FROM `ImportAsset` WHERE `importTaskId` = :id"),
-        {"id": task["id"]},
+        {"id": task.id},
     ).mappings().all()
     assert len(assets) == 2
     assert all(dict(row) == {"status": "PENDING", "fileId": None, "errorCode": None, "errorSummary": None} for row in assets)
@@ -1063,7 +1103,7 @@ def test_completed_directory_bundle_can_enqueue_again_after_a_new_episode(
     assert first_created is True
     db_session.execute(
         text("UPDATE `ImportTask` SET `status` = 'COMPLETED' WHERE `id` = :id"),
-        {"id": first["id"]},
+        {"id": first.id},
     )
     db_session.commit()
 
@@ -1077,11 +1117,11 @@ def test_completed_directory_bundle_can_enqueue_again_after_a_new_episode(
     )
 
     assert second_created is True
-    assert second["id"] != first["id"]
-    assert second["assetCount"] == 2
+    assert second.id != first.id
+    assert second.asset_count == 2
     assert db_session.execute(
         text("SELECT COUNT(*) FROM `ImportAsset` WHERE `importTaskId` = :id"),
-        {"id": second["id"]},
+        {"id": second.id},
     ).scalar() == 2
 
 
@@ -1121,7 +1161,11 @@ def test_nested_author_directory_is_not_used_as_audiobook_author(
     assert summary.candidates_found == 1
     assert queue.paths == [book_dir.resolve()]
 
-    monkeypatch.setattr(importer_module, "parse_audio_metadata", _emby_audio_metadata)
+    monkeypatch.setattr(
+        SessionImportOrchestrationServices,
+        "parse_audio_metadata",
+        lambda _services, path: _emby_audio_metadata(path),
+    )
     result = import_managed_book(
         db_session,
         test_settings,
@@ -1188,7 +1232,11 @@ def test_multivolume_directory_uses_embedded_identity_and_filters_reader_bootstr
     )
     assert queue.paths == [book_dir.resolve()]
 
-    monkeypatch.setattr(importer_module, "parse_audio_metadata", _emby_audio_metadata)
+    monkeypatch.setattr(
+        SessionImportOrchestrationServices,
+        "parse_audio_metadata",
+        lambda _services, path: _emby_audio_metadata(path),
+    )
     result = import_managed_book(
         db_session,
         test_settings,
@@ -1286,7 +1334,11 @@ def test_emby_flat_layout_appends_strictly_named_chapters_to_one_edition(
     ]
     for index, path in enumerate(paths, start=1):
         path.write_bytes((f"flat-track-{index}-" * index).encode())
-    monkeypatch.setattr(importer_module, "parse_audio_metadata", _emby_audio_metadata)
+    monkeypatch.setattr(
+        SessionImportOrchestrationServices,
+        "parse_audio_metadata",
+        lambda _services, path: _emby_audio_metadata(path),
+    )
 
     results = [
         import_managed_book(
@@ -1411,7 +1463,11 @@ def test_directory_first_episode_bundle_imports_as_one_ordered_audiobook(
     ]
     for index, name in enumerate(names, start=1):
         (book_dir / name).write_bytes((f"episode-{index}-" * index).encode())
-    monkeypatch.setattr(importer_module, "parse_audio_metadata", _episode_audio_metadata)
+    monkeypatch.setattr(
+        SessionImportOrchestrationServices,
+        "parse_audio_metadata",
+        lambda _services, path: _episode_audio_metadata(path),
+    )
 
     result = import_managed_book(
         db_session,
@@ -1467,7 +1523,11 @@ def test_rescan_reconciles_tracks_split_across_versions_and_preserves_progress(
     paths = [book_dir / f"《我当阴阳先生那几年》第{number}集.m4a" for number in [3, 1, 2]]
     for index, path in enumerate(paths, start=1):
         path.write_bytes((f"legacy-episode-{index}-" * index).encode())
-    monkeypatch.setattr(importer_module, "parse_audio_metadata", _episode_audio_metadata)
+    monkeypatch.setattr(
+        SessionImportOrchestrationServices,
+        "parse_audio_metadata",
+        lambda _services, path: _episode_audio_metadata(path),
+    )
 
     legacy_results = [
         import_managed_book(
@@ -1492,7 +1552,7 @@ def test_rescan_reconciles_tracks_split_across_versions_and_preserves_progress(
     assert failed_bundle_created is True
     db_session.execute(
         text("UPDATE `ImportTask` SET `status` = 'FAILED' WHERE `id` = :id"),
-        {"id": failed_bundle_task["id"]},
+        {"id": failed_bundle_task.id},
     )
     db_session.commit()
     known_paths = watcher_module.load_known_import_paths(db_session)

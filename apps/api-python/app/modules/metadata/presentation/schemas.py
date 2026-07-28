@@ -1,0 +1,82 @@
+"""Typed HTTP contracts for metadata provider administration."""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from pydantic import Field
+
+from app.contracts.http import HttpContractModel, SuccessEnvelope
+
+
+ProviderConfigValue = str | bool | int | float | list[str] | None
+
+
+class ProviderConfigField(HttpContractModel):
+    key: str
+    label: str
+    kind: str
+    required: bool
+    secret: bool
+    placeholder: str | None
+    help: str | None
+    default: ProviderConfigValue
+
+
+class MetadataProvider(HttpContractModel):
+    id: str
+    source_id: str | None = Field(alias="sourceId")
+    name: str
+    version: str
+    description: str
+    mode: str
+    work_types: list[str] = Field(alias="workTypes")
+    fields: list[str]
+    capabilities: list[str]
+    config_fields: list[ProviderConfigField] = Field(alias="configFields")
+    config: dict[str, ProviderConfigValue]
+    configured_secrets: dict[str, bool] = Field(alias="configuredSecrets")
+    enabled: bool
+    priority: int
+    last_test_at: datetime | None = Field(alias="lastTestAt")
+    last_test_status: str | None = Field(alias="lastTestStatus")
+    last_error: str | None = Field(alias="lastError")
+
+
+class PipelineProvider(HttpContractModel):
+    provider_id: str = Field(alias="providerId")
+    name: str
+    description: str
+    enabled: bool
+    position: int
+    last_test_status: str | None = Field(alias="lastTestStatus")
+    last_error: str | None = Field(alias="lastError")
+
+
+class MetadataPipeline(HttpContractModel):
+    work_type: str = Field(alias="workType")
+    providers: list[PipelineProvider]
+
+
+class ProvidersPayload(HttpContractModel):
+    providers: list[MetadataProvider]
+    pipelines: list[MetadataPipeline]
+
+
+class ProviderPayload(HttpContractModel):
+    provider: MetadataProvider
+
+
+class ProviderTestResult(HttpContractModel):
+    ok: bool
+    message: str
+
+
+class ProviderTestPayload(HttpContractModel):
+    result: ProviderTestResult
+    provider: MetadataProvider
+
+
+ProvidersResponse = SuccessEnvelope[ProvidersPayload]
+ProviderResponse = SuccessEnvelope[ProviderPayload]
+ProviderTestResponse = SuccessEnvelope[ProviderTestPayload]

@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
+from app.api.typed_route import TypedContractRoute
 from app.bootstrap.imports import import_http_store
 from app.bootstrap.library import library_dashboard
+from app.bootstrap.media import media_streaming
 from app.bootstrap.system import (
     delete_settings,
     list_event_level_facets,
@@ -36,6 +36,18 @@ from app.modules.system.application.queries import (
     prepare_system_settings_update,
     system_settings_payload,
 )
+from app.modules.system.presentation.schemas import (
+    AppConfigResponse,
+    BackupArchiveResponse,
+    BackupDeleteResponse,
+    BackupResponse,
+    BackupRestoreResponse,
+    BackupsResponse,
+    ClearedEventsResponse,
+    DashboardSystemStatusResponse,
+    ManagementEventsResponse,
+    SystemSettingsResponse,
+)
 from app.modules.system.public import execute_system_transaction
 from app.schemas.responses import fail, ok
 from app.services.backup_service import create_backup as create_backup_archive
@@ -45,9 +57,8 @@ from app.services.import_preferences import (
     IMPORT_PREFERENCE_KEYS,
     normalize_import_setting_value,
 )
-from app.bootstrap.media import media_streaming
 
-router = APIRouter(tags=["system"])
+router = APIRouter(tags=["system"], route_class=TypedContractRoute)
 
 
 def _has_table(db: Session, table: str) -> bool:
@@ -62,7 +73,7 @@ def _auth(db: Session, request: Request, settings: Settings):
 
 
 @router.get("/app-config")
-def get_public_app_config(db: Session = Depends(get_db)) -> Response:
+def get_public_app_config(db: Session = Depends(get_db)) -> AppConfigResponse:
     return ok(app_config_payload(db))
 
 
@@ -71,7 +82,7 @@ def get_system_settings(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
+) -> SystemSettingsResponse:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -84,7 +95,7 @@ async def update_system_settings(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
+) -> SystemSettingsResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -143,15 +154,15 @@ def dashboard_system_status(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
+) -> DashboardSystemStatusResponse:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     health = run_system_health_checks(db, settings)
     enabled = import_http_store.list_enabled_monitor_folder_rows(db)
     current_task, latest_task, failed_count = import_http_store.import_status_snapshot(db)
-    return ok(
-        dashboard_system_status_payload(
+    return DashboardSystemStatusResponse(
+        data=dashboard_system_status_payload(
             health=health,
             enabled_monitor_folders=enabled,
             current_import_task=current_task,
@@ -174,14 +185,16 @@ def list_system_events(
     dateTo: str | None = None,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
+) -> ManagementEventsResponse:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     page = max(1, page)
     page_size = min(100, max(1, pageSize))
     if not _has_table(db, "SystemEvent"):
-        return ok(management_events_empty_page(page, page_size))
+        return ManagementEventsResponse(
+            data=management_events_empty_page(page, page_size)
+        )
     storage = prune_system_events(db, commit=True)
     date_from_ms, date_to_ms = parse_event_date_bounds(dateFrom, dateTo)
     events, total = library_dashboard.list_system_events_page(
@@ -197,8 +210,8 @@ def list_system_events(
     )
     sources = list_event_source_facets(db)
     levels = list_event_level_facets(db)
-    return ok(
-        management_events_payload(
+    return ManagementEventsResponse(
+        data=management_events_payload(
             events=events,
             total=total,
             page=page,
@@ -215,12 +228,12 @@ def clear_system_events(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
+) -> ClearedEventsResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     if not _has_table(db, "SystemEvent"):
-        return ok({"deleted": 0})
+        return ClearedEventsResponse(data={"deleted": 0})
     deleted = library_dashboard.clear_info_warning_events(db)
     db.commit()
     record_system_event(
@@ -236,7 +249,9 @@ def clear_system_events(
         commit=True,
         prune=True,
     )
-    return ok({"deleted": deleted, "storage": prune_system_events(db, commit=True)})
+    return ClearedEventsResponse(
+        data={"deleted": deleted, "storage": prune_system_events(db, commit=True)}
+    )
 
 
 @router.get("/backups")
@@ -244,7 +259,7 @@ def list_backups(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
+) -> BackupsResponse:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -257,7 +272,7 @@ def get_backup(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
+) -> BackupResponse:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -272,7 +287,7 @@ def create_backup(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
+) -> BackupResponse:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -286,7 +301,7 @@ def restore_backup(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
+) -> BackupRestoreResponse:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -306,7 +321,7 @@ def delete_backup(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
+) -> BackupDeleteResponse:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -317,7 +332,10 @@ def delete_backup(
     return ok({"deleted": False, "id": backup_id})
 
 
-@router.get("/backups/{backup_id}/download")
+@router.get(
+    "/backups/{backup_id}/download",
+    response_class=BackupArchiveResponse,
+)
 def download_backup(
     backup_id: str,
     request: Request,

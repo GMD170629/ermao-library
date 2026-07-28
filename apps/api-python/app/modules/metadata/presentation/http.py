@@ -2,15 +2,33 @@
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
+from app.api.typed_route import TypedContractRoute
+from app.contracts.http import MessageError
+from app.contracts.http_errors import (
+    BasicBadRequestError,
+    BasicNotFoundError,
+    BasicUnauthorizedError,
+    ErrorResponses,
+)
 from app.bootstrap.system import record_system_event
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
-from app.schemas.responses import fail, ok
+from app.modules.metadata.presentation.schemas import (
+    MetadataPipeline,
+    MetadataProvider,
+    ProviderPayload,
+    ProviderResponse,
+    ProvidersPayload,
+    ProvidersResponse,
+    ProviderTestPayload,
+    ProviderTestResponse,
+)
 from app.services.metadata_provider_registry import (
     get_metadata_provider,
     list_metadata_provider_pipelines,
@@ -20,11 +38,14 @@ from app.services.metadata_provider_registry import (
     update_metadata_provider_pipeline,
 )
 
-router = APIRouter(tags=["metadata"])
+router = APIRouter(tags=["metadata"], route_class=TypedContractRoute)
 
 
 def _auth(db: Session, request: Request, settings: Settings):
-    return require_user(db, request, settings)
+    user, auth_error = require_user(db, request, settings)
+    if auth_error is not None or user is None:
+        raise BasicUnauthorizedError(MessageError(message="UNAUTHORIZED"))
+    return user
 
 
 @router.get("/metadata/providers")
@@ -32,15 +53,18 @@ def list_registered_metadata_providers(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
-    _user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    return ok(
-        {
-            "providers": list_metadata_providers(db),
-            "pipelines": list_metadata_provider_pipelines(db),
-        }
+) -> Annotated[
+    ProvidersResponse,
+    ErrorResponses(BasicUnauthorizedError),
+]:
+    _auth(db, request, settings)
+    return ProvidersResponse(
+        data=ProvidersPayload.model_validate(
+            {
+                "providers": list_metadata_providers(db),
+                "pipelines": list_metadata_provider_pipelines(db),
+            }
+        )
     )
 
 
@@ -50,16 +74,17 @@ async def update_registered_metadata_provider_pipeline(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
+) -> Annotated[
+    ProvidersResponse,
+    ErrorResponses(BasicUnauthorizedError, BasicBadRequestError),
+]:
+    user = _auth(db, request, settings)
     payload = await request.json()
     items = payload.get("items") if isinstance(payload, dict) else None
     try:
         pipelines = update_metadata_provider_pipeline(db, work_type, items)
     except ValueError as exc:
-        return fail(str(exc), status_code=400)
+        raise BasicBadRequestError(MessageError(message=str(exc))) from exc
     record_system_event(
         db,
         level="warning",
@@ -74,7 +99,14 @@ async def update_registered_metadata_provider_pipeline(
         commit=True,
         prune=True,
     )
-    return ok({"pipelines": pipelines, "providers": list_metadata_providers(db)})
+    return ProvidersResponse(
+        data=ProvidersPayload.model_validate(
+            {
+                "pipelines": pipelines,
+                "providers": list_metadata_providers(db),
+            }
+        )
+    )
 
 
 @router.get("/metadata/providers/{provider_id}")
@@ -83,14 +115,19 @@ def get_registered_metadata_provider(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
-    _user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
+) -> Annotated[
+    ProviderResponse,
+    ErrorResponses(BasicUnauthorizedError, BasicNotFoundError),
+]:
+    _auth(db, request, settings)
     provider = get_metadata_provider(db, provider_id)
     if not provider:
-        return fail("元数据插件不存在", status_code=404)
-    return ok({"provider": provider})
+        raise BasicNotFoundError(MessageError(message="元数据插件不存在"))
+    return ProviderResponse(
+        data=ProviderPayload(
+            provider=MetadataProvider.model_validate(provider)
+        )
+    )
 
 
 @router.patch("/metadata/providers/{provider_id}")
@@ -100,17 +137,23 @@ async def update_registered_metadata_provider(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
+) -> Annotated[
+    ProviderResponse,
+    ErrorResponses(
+        BasicUnauthorizedError,
+        BasicBadRequestError,
+        BasicNotFoundError,
+    ),
+]:
+    user = _auth(db, request, settings)
     payload = await request.json()
     if not isinstance(payload, dict):
-        return fail("插件配置格式不正确", status_code=400)
+        raise BasicBadRequestError(MessageError(message="插件配置格式不正确"))
     try:
         provider = update_metadata_provider(db, provider_id, payload)
     except ValueError as exc:
-        return fail(str(exc), status_code=404 if "不存在" in str(exc) else 400)
+        error_type = BasicNotFoundError if "不存在" in str(exc) else BasicBadRequestError
+        raise error_type(MessageError(message=str(exc))) from exc
     record_system_event(
         db,
         level="warning",
@@ -125,7 +168,11 @@ async def update_registered_metadata_provider(
         commit=True,
         prune=True,
     )
-    return ok({"provider": provider})
+    return ProviderResponse(
+        data=ProviderPayload(
+            provider=MetadataProvider.model_validate(provider)
+        )
+    )
 
 
 @router.post("/metadata/providers/{provider_id}/test")
@@ -134,12 +181,22 @@ def test_registered_metadata_provider(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
-    _user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
+) -> Annotated[
+    ProviderTestResponse,
+    ErrorResponses(
+        BasicUnauthorizedError,
+        BasicBadRequestError,
+        BasicNotFoundError,
+    ),
+]:
+    _auth(db, request, settings)
     try:
         result, provider = test_metadata_provider(db, provider_id)
     except ValueError as exc:
-        return fail(str(exc), status_code=404 if "不存在" in str(exc) else 400)
-    return ok({"result": result, "provider": provider})
+        error_type = BasicNotFoundError if "不存在" in str(exc) else BasicBadRequestError
+        raise error_type(MessageError(message=str(exc))) from exc
+    return ProviderTestResponse(
+        data=ProviderTestPayload.model_validate(
+            {"result": result, "provider": provider}
+        )
+    )

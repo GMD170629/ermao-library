@@ -7,14 +7,29 @@ from threading import Thread
 import pytest
 from sqlalchemy import text
 
-import app.worker.importer as importer_module
+import app.modules.imports.application.import_audio as importer_module
 from app import models as _models  # noqa: F401
 from app.db.base import Base
 from app.services.book_identity import BookIdentity
 from app.services.default_cover import DEFAULT_COVER_ASSET_PATH
 from app.services.import_preferences import SUPPORTED_IMPORT_EXTENSIONS, load_import_preferences
-from app.worker.importer import ImportOptions, _work_merge_key, import_managed_book, parse_comic_volume_from_name, parse_epub_metadata, parse_pdf_metadata, parse_series_volume_info
-from app.worker.persistent_import_queue import fail_claimed_import_task, process_import_task
+from app.modules.imports.infrastructure.orchestration_services import (
+    SessionImportOrchestrationServices,
+)
+from app.bootstrap.imports import (
+    fail_claimed_import_task,
+    import_managed_book,
+    process_import_task,
+)
+from app.modules.imports.application.dto import ImportOptions, ImportTaskDTO
+from app.modules.imports.application.import_comic import parse_comic_volume_from_name
+from app.modules.imports.application.import_epub import parse_epub_metadata
+from app.modules.imports.application.import_pdf import parse_pdf_metadata
+from app.modules.imports.application.import_support import (
+    _work_merge_key,
+    parse_series_volume_info,
+)
+from app.modules.imports.infrastructure.task_mapper import import_task_dto_from_row
 from app.worker.path_security import PathSecurityError, PathSecurityService, normalize_configured_path
 from app.worker.watcher import MonitorFolderConfig, import_watched_file, monitor_folder_config, scan_directory_with_logging, should_ignore_file
 
@@ -357,8 +372,8 @@ def test_import_records_ai_identity_and_result(db_session, test_settings, tmp_pa
     write_epub_fixture(epub)
 
     monkeypatch.setattr(
-        importer_module,
-        "recognize_book_identity",
+        SessionImportOrchestrationServices,
+        "recognize_identity",
         lambda *_args, **_kwargs: BookIdentity(
             title="AI 识别书名",
             author="AI 识别作者",
@@ -387,8 +402,8 @@ def test_import_records_path_identity_cache_hit(db_session, test_settings, tmp_p
     write_epub_fixture(epub)
 
     monkeypatch.setattr(
-        importer_module,
-        "recognize_book_identity",
+        SessionImportOrchestrationServices,
+        "recognize_identity",
         lambda *_args, **_kwargs: BookIdentity(
             title="缓存书名",
             author="缓存作者",
@@ -417,8 +432,8 @@ def test_import_records_ai_failure_and_regex_fallback(db_session, test_settings,
     write_epub_fixture(epub)
 
     monkeypatch.setattr(
-        importer_module,
-        "recognize_book_identity",
+        SessionImportOrchestrationServices,
+        "recognize_identity",
         lambda *_args, **_kwargs: BookIdentity(
             title="回退书名",
             author="回退作者",
@@ -449,7 +464,7 @@ def test_structural_parse_failure_rolls_back_all_library_records(db_session, tes
     with zipfile.ZipFile(broken, "w") as archive:
         archive.writestr("mimetype", "application/epub+zip")
 
-    with pytest.raises(Exception):
+    with pytest.raises(Exception) as captured:
         import_managed_book(db_session, test_settings, ImportOptions(source_file_path=broken, origin="MANUAL", original_name=broken.name))
 
     assert _count(db_session, "LibraryWork") == 0
@@ -457,7 +472,18 @@ def test_structural_parse_failure_rolls_back_all_library_records(db_session, tes
     assert _count(db_session, "LibraryVolume") == 0
     assert _count(db_session, "LibraryFile") == 0
     assert _count(db_session, "LibraryReadingUnit") == 0
-    task = db_session.execute(text("SELECT status, errorSummary FROM ImportTask")).mappings().first()
+    task_row = dict(
+        db_session.execute(text("SELECT * FROM ImportTask")).mappings().one()
+    )
+    assert task_row["status"] == "PARSING"
+    assert fail_claimed_import_task(
+        db_session,
+        import_task_dto_from_row(task_row),
+        captured.value,
+    )
+    task = db_session.execute(
+        text("SELECT status, errorSummary FROM ImportTask")
+    ).mappings().one()
     assert task["status"] == "FAILED"
     assert task["errorSummary"]
     failed_event = db_session.execute(text("SELECT level, metadata FROM SystemEvent WHERE action = 'import.failed'")).mappings().one()
@@ -469,13 +495,13 @@ def test_deleted_source_fails_and_finishes_claimed_import_task(db_session, test_
     create_worker_tables(db_session)
     source = tmp_path / "deleted-before-import.epub"
     source.write_bytes(b"queued")
-    task = {
-        "id": "deleted-source-task",
-        "origin": "WATCH",
-        "status": "PARSING",
-        "originalName": source.name,
-        "sourcePath": str(source),
-    }
+    task = ImportTaskDTO(
+        id="deleted-source-task",
+        origin="WATCH",
+        status="PARSING",
+        original_name=source.name,
+        source_path=str(source),
+    )
     db_session.execute(
         text(
             "INSERT INTO ImportTask "
@@ -485,25 +511,26 @@ def test_deleted_source_fails_and_finishes_claimed_import_task(db_session, test_
             "'worker-old', 9999999999999, '正在准备导入', 1, 1)"
         ),
         {
-            "id": task["id"],
-            "origin": task["origin"],
-            "status": task["status"],
-            "original_name": task["originalName"],
-            "source_path": task["sourcePath"],
+            "id": task.id,
+            "origin": task.origin,
+            "status": task.status,
+            "original_name": task.original_name,
+            "source_path": task.source_path,
         },
     )
     db_session.commit()
     source.unlink()
 
-    with pytest.raises(FileNotFoundError, match="导入源已不存在"):
+    with pytest.raises(FileNotFoundError, match="导入源已不存在") as captured:
         process_import_task(db_session, test_settings, task)
+    assert fail_claimed_import_task(db_session, task, captured.value)
 
     stored = db_session.execute(
         text(
             "SELECT status, progress, errorCode, retryable, message, errorSummary, "
             "leaseOwner, leaseExpiresAt, finishedAt FROM ImportTask WHERE id = :id"
         ),
-        {"id": task["id"]},
+        {"id": task.id},
     ).mappings().one()
     assert stored["status"] == "FAILED"
     assert stored["progress"] == 100
@@ -519,11 +546,12 @@ def test_deleted_source_fails_and_finishes_claimed_import_task(db_session, test_
 def test_worker_fallback_forces_unhandled_claimed_task_to_terminal_failure(db_session, tmp_path):
     create_worker_tables(db_session)
     missing_source = tmp_path / "worker-crashed.epub"
-    task = {
-        "id": "worker-fallback-task",
-        "status": "PARSING",
-        "sourcePath": str(missing_source),
-    }
+    task = ImportTaskDTO(
+        id="worker-fallback-task",
+        origin="WATCH",
+        status="PARSING",
+        source_path=str(missing_source),
+    )
     db_session.execute(
         text(
             "INSERT INTO ImportTask "
@@ -532,7 +560,7 @@ def test_worker_fallback_forces_unhandled_claimed_task_to_terminal_failure(db_se
             "VALUES (:id, 'WATCH', 'PARSING', 'worker-crashed.epub', :source_path, 5, 0, 0, 0, 1, "
             "'worker-old', 9999999999999, '正在准备导入', 1, 1)"
         ),
-        {"id": task["id"], "source_path": task["sourcePath"]},
+        {"id": task.id, "source_path": task.source_path},
     )
     db_session.commit()
 
@@ -543,7 +571,7 @@ def test_worker_fallback_forces_unhandled_claimed_task_to_terminal_failure(db_se
             "SELECT status, progress, errorCode, retryable, leaseOwner, leaseExpiresAt, finishedAt "
             "FROM ImportTask WHERE id = :id"
         ),
-        {"id": task["id"]},
+        {"id": task.id},
     ).mappings().one()
     assert stored["status"] == "FAILED"
     assert stored["progress"] == 100
@@ -589,7 +617,15 @@ def test_watched_import_adds_new_and_previously_imported_work_to_target_shelf(db
     monkeypatch.setenv("MONITOR_FILE_STABLE_DELAY_MS", "0")
 
     import_watched_file(db_session, test_settings, epub, folder)
-    pending = dict(db_session.execute(text("SELECT * FROM ImportTask WHERE status = 'PENDING'")).mappings().one())
+    pending = import_task_dto_from_row(
+        dict(
+            db_session.execute(
+                text("SELECT * FROM ImportTask WHERE status = 'PENDING'")
+            )
+            .mappings()
+            .one()
+        )
+    )
     process_import_task(db_session, test_settings, pending)
     first = db_session.execute(text("SELECT shelfId, workId FROM ShelfWork")).mappings().all()
     assert len(first) == 1
@@ -714,7 +750,7 @@ def test_explicit_series_directory_reuses_existing_work_without_recognition(db_s
     write_comic_fixture(volume_30, volume=30)
     recognition_calls = []
 
-    def recognize_once(_db, _settings, source, _original_name):
+    def recognize_once(_services, source, _original_name):
         recognition_calls.append(source.name)
         if len(recognition_calls) > 1:
             raise AssertionError("a later volume in an established series must not be recognized again")
@@ -727,7 +763,9 @@ def test_explicit_series_directory_reuses_existing_work_without_recognition(db_s
             logical_path=f"{series_dir.name}/{source.name}",
         )
 
-    monkeypatch.setattr(importer_module, "recognize_book_identity", recognize_once)
+    monkeypatch.setattr(
+        SessionImportOrchestrationServices, "recognize_identity", recognize_once
+    )
 
     first = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=volume_26, origin="WATCH", original_name=volume_26.name))
     second = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=volume_30, origin="WATCH", original_name=volume_30.name))
@@ -757,7 +795,7 @@ def test_author_first_tagged_directory_imports_later_file_as_new_volume_without_
     write_comic_fixture(volume_5, volume=5)
     recognition_calls = []
 
-    def recognize_first(_db, _settings, source, _original_name):
+    def recognize_first(_services, source, _original_name):
         recognition_calls.append(source.name)
         if len(recognition_calls) > 1:
             raise AssertionError("a later volume in the corroborated directory must reuse the existing work")
@@ -770,7 +808,9 @@ def test_author_first_tagged_directory_imports_later_file_as_new_volume_without_
             logical_path=f"{series_dir.name}/{source.name}",
         )
 
-    monkeypatch.setattr(importer_module, "recognize_book_identity", recognize_first)
+    monkeypatch.setattr(
+        SessionImportOrchestrationServices, "recognize_identity", recognize_first
+    )
 
     first = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=volume_8, origin="WATCH", original_name=volume_8.name))
     second = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=volume_5, origin="WATCH", original_name=volume_5.name))
@@ -794,7 +834,7 @@ def test_filename_alias_reuses_existing_work_for_later_volume_in_same_directory(
     write_comic_fixture(volume_16, volume=16)
     recognition_calls = []
 
-    def recognize_first(_db, _settings, source, _original_name):
+    def recognize_first(_services, source, _original_name):
         recognition_calls.append(source.name)
         if len(recognition_calls) > 1:
             raise AssertionError("a matching filename alias in the same directory must reuse the established work")
@@ -807,7 +847,9 @@ def test_filename_alias_reuses_existing_work_for_later_volume_in_same_directory(
             logical_path=f"{series_dir.name}/{source.name}",
         )
 
-    monkeypatch.setattr(importer_module, "recognize_book_identity", recognize_first)
+    monkeypatch.setattr(
+        SessionImportOrchestrationServices, "recognize_identity", recognize_first
+    )
 
     first = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=volume_14, origin="WATCH", original_name=volume_14.name))
     second = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=volume_16, origin="WATCH", original_name=volume_16.name))
@@ -829,7 +871,7 @@ def test_ambiguous_bracket_directory_keeps_different_filename_series_separate(db
     write_comic_fixture(second_file, volume=1)
     recognition_calls = []
 
-    def recognize_each(_db, _settings, source, _original_name):
+    def recognize_each(_services, source, _original_name):
         recognition_calls.append(source.name)
         title = "作品甲" if source == first_file else "作品乙"
         return BookIdentity(
@@ -841,7 +883,9 @@ def test_ambiguous_bracket_directory_keeps_different_filename_series_separate(db
             logical_path=f"{collection_dir.name}/{source.name}",
         )
 
-    monkeypatch.setattr(importer_module, "recognize_book_identity", recognize_each)
+    monkeypatch.setattr(
+        SessionImportOrchestrationServices, "recognize_identity", recognize_each
+    )
 
     first = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=first_file, origin="WATCH", original_name=first_file.name))
     second = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=second_file, origin="WATCH", original_name=second_file.name))
@@ -862,7 +906,7 @@ def test_plain_author_directory_keeps_different_files_as_separate_works(db_sessi
     write_epub_fixture(second_file)
     recognition_calls = []
 
-    def recognize_each(_db, _settings, source, _original_name):
+    def recognize_each(_services, source, _original_name):
         recognition_calls.append(source.name)
         return BookIdentity(
             title="作品甲" if source.name == "a.epub" else "作品乙",
@@ -873,7 +917,9 @@ def test_plain_author_directory_keeps_different_files_as_separate_works(db_sessi
             logical_path=f"作者xxx/{source.name}",
         )
 
-    monkeypatch.setattr(importer_module, "recognize_book_identity", recognize_each)
+    monkeypatch.setattr(
+        SessionImportOrchestrationServices, "recognize_identity", recognize_each
+    )
 
     first = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=first_file, origin="WATCH", original_name=first_file.name))
     second = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=second_file, origin="WATCH", original_name=second_file.name))

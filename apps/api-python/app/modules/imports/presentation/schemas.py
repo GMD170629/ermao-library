@@ -1,0 +1,296 @@
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Literal
+
+from pydantic import Field
+
+from app.contracts.http import HttpContractModel, SuccessEnvelope
+from app.contracts.http_errors import HttpContractError
+from app.contracts.imports import ImportTaskContract
+
+
+class MonitorFolder(HttpContractModel):
+    id: str
+    name: str
+    root_path: str = Field(alias="rootPath")
+    shelf_id: str | None = Field(default=None, alias="shelfId")
+    enabled: bool
+    ignore_patterns: str | None = Field(default=None, alias="ignorePatterns")
+    ignore_hidden: bool = Field(alias="ignoreHidden")
+    min_file_size_bytes: int = Field(alias="minFileSizeBytes")
+    description: str | None
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+
+
+class MonitorFoldersPayload(HttpContractModel):
+    folders: list[MonitorFolder]
+    monitor_root: str | None = Field(alias="monitorRoot")
+    last_upload_target_path: str | None = Field(alias="lastUploadTargetPath")
+    last_download_target_path: str | None = Field(alias="lastDownloadTargetPath")
+
+
+class MonitorFolderPayload(HttpContractModel):
+    folder: MonitorFolder
+
+
+class MonitorDirectoryChild(HttpContractModel):
+    name: str
+    path: str
+    readable: bool
+
+
+class MonitorDirectoryNode(MonitorDirectoryChild):
+    error: str | None
+    children: list[MonitorDirectoryChild]
+
+
+class MonitorDirectoryPayload(HttpContractModel):
+    node: MonitorDirectoryNode
+    monitor_root: str | None = Field(alias="monitorRoot")
+
+
+class DeletedMonitorFolderPayload(HttpContractModel):
+    deleted: bool
+    id: str
+
+
+class ParsedReleaseTitle(HttpContractModel):
+    title: str
+    volume: float | None
+    chapter: float | None
+
+
+class ParsedReleaseTitlePayload(HttpContractModel):
+    parsed: ParsedReleaseTitle
+
+
+MonitorFoldersResponse = SuccessEnvelope[MonitorFoldersPayload]
+MonitorFolderResponse = SuccessEnvelope[MonitorFolderPayload]
+MonitorDirectoryResponse = SuccessEnvelope[MonitorDirectoryPayload]
+DeletedMonitorFolderResponse = SuccessEnvelope[DeletedMonitorFolderPayload]
+ParsedReleaseTitleResponse = SuccessEnvelope[ParsedReleaseTitlePayload]
+
+
+class ImportLog(HttpContractModel):
+    id: str
+    level: str
+    message: str
+    created_at: datetime | None = Field(alias="createdAt")
+
+
+class ImportedBook(HttpContractModel):
+    id: str
+    title: str
+
+
+class ConversionOptions(HttpContractModel):
+    preserve_original: bool | None = Field(default=None, alias="preserveOriginal")
+
+
+class ImportConversion(HttpContractModel):
+    id: str
+    import_task_id: str = Field(alias="importTaskId")
+    mode: str
+    source_format: str = Field(alias="sourceFormat")
+    target_format: str = Field(alias="targetFormat")
+    source_path: str = Field(alias="sourcePath")
+    output_path: str | None = Field(alias="outputPath")
+    source_hash: str | None = Field(alias="sourceHash")
+    converter: str
+    converter_version: str | None = Field(alias="converterVersion")
+    status: str
+    progress: int
+    attempts: int
+    retryable: bool
+    error_code: str | None = Field(alias="errorCode")
+    error_summary: str | None = Field(alias="errorSummary")
+    started_at: datetime | None = Field(alias="startedAt")
+    finished_at: datetime | None = Field(alias="finishedAt")
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+    options: ConversionOptions
+
+
+class ImportTask(HttpContractModel):
+    id: str
+    monitor_folder_id: str | None = Field(alias="monitorFolderId")
+    work_id: str | None = Field(alias="workId")
+    edition_id: str | None = Field(alias="editionId")
+    volume_id: str | None = Field(alias="volumeId")
+    origin: str
+    status: str
+    original_name: str | None = Field(alias="originalName")
+    requested_title: str | None = Field(alias="requestedTitle")
+    requested_author: str | None = Field(alias="requestedAuthor")
+    source_path: str = Field(alias="sourcePath")
+    content_hash: str | None = Field(alias="contentHash")
+    task_kind: str = Field(alias="taskKind")
+    bundle_key: str | None = Field(alias="bundleKey")
+    asset_count: int = Field(alias="assetCount")
+    processed_asset_count: int = Field(alias="processedAssetCount")
+    progress: int
+    duration: int
+    error_summary: str | None = Field(alias="errorSummary")
+    error_code: str | None = Field(alias="errorCode")
+    retryable: bool
+    attempts: int
+    lease_owner: str | None = Field(alias="leaseOwner")
+    lease_expires_at: datetime | None = Field(alias="leaseExpiresAt")
+    message: str | None
+    started_at: datetime | None = Field(alias="startedAt")
+    finished_at: datetime | None = Field(alias="finishedAt")
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+    source_file_exists: bool = Field(alias="sourceFileExists")
+    converted_file_exists: bool = Field(alias="convertedFileExists")
+    friendly_error: str | None = Field(alias="friendlyError")
+    monitor_folder: MonitorFolder | None = Field(alias="monitorFolder")
+    book: ImportedBook | None
+    logs: list[ImportLog]
+    conversion: ImportConversion | None
+
+
+class ImportTaskSummary(HttpContractModel):
+    completed: int
+    failed: int
+
+
+class ImportTasksPayload(HttpContractModel):
+    tasks: list[ImportTask]
+    summary: ImportTaskSummary
+    page: int
+    page_size: int = Field(alias="pageSize")
+    total: int
+    total_pages: int = Field(alias="totalPages")
+
+
+class ImportTaskPayload(HttpContractModel):
+    task: ImportTask
+
+
+class ImportLogsPayload(HttpContractModel):
+    logs: list[ImportLog]
+    page: int
+    page_size: int = Field(alias="pageSize")
+    total: int
+    total_pages: int = Field(alias="totalPages")
+
+
+class ScanError(HttpContractModel):
+    path: str
+    error: str
+
+
+class ImportDirectoryScanPayload(HttpContractModel):
+    path: str
+    monitor_folder_id: str = Field(alias="monitorFolderId")
+    monitor_folder_name: str | None = Field(alias="monitorFolderName")
+    directories_scanned: int = Field(alias="directoriesScanned")
+    files_scanned: int = Field(alias="filesScanned")
+    candidates_found: int = Field(alias="candidatesFound")
+    queued: int
+    skipped: int
+    errors: list[ScanError]
+
+
+class DeletedImportTasksPayload(HttpContractModel):
+    deleted: int
+
+
+class RescanImportTasksPayload(HttpContractModel):
+    requested_at: datetime = Field(alias="requestedAt")
+    monitor_folder_ids: list[str] | None = Field(alias="monitorFolderIds")
+
+
+ImportTasksResponse = SuccessEnvelope[ImportTasksPayload]
+ImportTaskResponse = SuccessEnvelope[ImportTaskPayload]
+ImportLogsResponse = SuccessEnvelope[ImportLogsPayload]
+ImportDirectoryScanResponse = SuccessEnvelope[ImportDirectoryScanPayload]
+DeletedImportTasksResponse = SuccessEnvelope[DeletedImportTasksPayload]
+RescanImportTasksResponse = SuccessEnvelope[RescanImportTasksPayload]
+
+
+class UploadedImportResult(HttpContractModel):
+    source_path: str = Field(alias="sourcePath")
+    file: str
+    import_task_id: str = Field(alias="importTaskId")
+    import_status: Literal["pending"] = Field(alias="importStatus")
+    auto_import: Literal[True] = Field(alias="autoImport")
+    message: str
+
+
+class ImportUploadPayload(HttpContractModel):
+    tasks: list[ImportTaskContract]
+    results: list[UploadedImportResult]
+    queued: int
+    saved: int
+    imported: int
+    auto_import: Literal[True] = Field(alias="autoImport")
+    task_kind: str = Field(alias="taskKind")
+    bundle_key: str | None = Field(alias="bundleKey")
+    asset_count: int = Field(alias="assetCount")
+    processed_asset_count: int = Field(alias="processedAssetCount")
+
+
+class ImportDeleteFailure(HttpContractModel):
+    path: str
+    message: str
+
+
+class ImportDeletionPayload(HttpContractModel):
+    deleted: bool
+    id: str
+    delete_mode: Literal["record", "source", "converted"] = Field(alias="deleteMode")
+    delete_library_record: bool = Field(alias="deleteLibraryRecord")
+    deleted_library_record: bool = Field(alias="deletedLibraryRecord")
+    deleted_work_record: bool = Field(alias="deletedWorkRecord")
+    deleted_library_database_records: int = Field(alias="deletedLibraryDatabaseRecords")
+    library_record_id: str | None = Field(alias="libraryRecordId")
+    deleted_files: int = Field(alias="deletedFiles")
+    missing_files: list[str] = Field(alias="missingFiles")
+    failed_file_deletes: list[ImportDeleteFailure] = Field(alias="failedFileDeletes")
+
+
+ImportUploadResponse = SuccessEnvelope[ImportUploadPayload]
+ImportDeletionResponse = SuccessEnvelope[ImportDeletionPayload]
+
+
+class ImportFileListDetails(HttpContractModel):
+    files: list[str]
+
+
+class ImportDeletionFailureDetails(HttpContractModel):
+    failed_file_deletes: list[ImportDeleteFailure] = Field(alias="failedFileDeletes")
+
+
+class ImportErrorBody(HttpContractModel):
+    message: str
+    code: str | None = None
+    details: ImportFileListDetails | ImportDeletionFailureDetails | None = None
+
+
+class ImportBadRequestError(HttpContractError[ImportErrorBody]):
+    status_code = 400
+    body_model = ImportErrorBody
+
+
+class ImportForbiddenError(HttpContractError[ImportErrorBody]):
+    status_code = 403
+    body_model = ImportErrorBody
+
+
+class ImportNotFoundError(HttpContractError[ImportErrorBody]):
+    status_code = 404
+    body_model = ImportErrorBody
+
+
+class ImportConflictError(HttpContractError[ImportErrorBody]):
+    status_code = 409
+    body_model = ImportErrorBody
+
+
+class ImportInternalError(HttpContractError[ImportErrorBody]):
+    status_code = 500
+    body_model = ImportErrorBody

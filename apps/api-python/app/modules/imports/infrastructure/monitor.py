@@ -23,11 +23,15 @@ from app.services.audio_metadata import collect_audio_bundle_files
 
 
 def list_enabled_monitor_folders(db: Session) -> list[dict[str, Any]]:
-    rows = db.execute(
-        select(MonitorFolder.__table__)
-        .where(MonitorFolder.enabled.is_(True))
-        .order_by(MonitorFolder.created_at.desc())
-    ).mappings().all()
+    rows = (
+        db.execute(
+            select(MonitorFolder.__table__)
+            .where(MonitorFolder.enabled.is_(True))
+            .order_by(MonitorFolder.created_at.desc())
+        )
+        .mappings()
+        .all()
+    )
     return [dict(row) for row in rows]
 
 
@@ -41,7 +45,9 @@ def upsert_system_setting(db: Session, key: str, value: str) -> None:
     now = db_timestamp()
     if existing is not None:
         db.execute(
-            update(SystemSetting).where(SystemSetting.key == key).values(value=value, updated_at=now)
+            update(SystemSetting)
+            .where(SystemSetting.key == key)
+            .values(value=value, updated_at=now)
         )
         return
     db.add(SystemSetting(key=key, value=value, created_at=now, updated_at=now))
@@ -60,7 +66,9 @@ def add_work_to_target_shelf(
     touch_shelf_updated_at(db, shelf_id, updated_at=now)
 
 
-def get_completed_import_task_work_id(db: Session, source_path: str) -> dict[str, Any] | None:
+def get_completed_import_task_work_id(
+    db: Session, source_path: str
+) -> dict[str, Any] | None:
     return get_completed_import_task_for_source(db, source_path)
 
 
@@ -74,9 +82,13 @@ def load_known_import_paths(db: Session) -> set[Path]:
     for source_path, task_kind in task_rows:
         candidate = Path(str(source_path)).expanduser().resolve()
         directory_task = str(task_kind or "").upper() == "AUDIO_BUNDLE"
-        if directory_task and candidate.is_dir() and not audio_bundle_fully_imported(
-            db,
-            [str(item.resolve()) for item in collect_audio_bundle_files(candidate)],
+        if (
+            directory_task
+            and candidate.is_dir()
+            and not audio_bundle_fully_imported(
+                db,
+                [str(item.resolve()) for item in collect_audio_bundle_files(candidate)],
+            )
         ):
             continue
         rows.append(str(candidate))
@@ -87,4 +99,6 @@ def load_known_import_paths(db: Session) -> set[Path]:
         ).all()
         if value
     )
-    return {Path(source_path).expanduser().resolve() for source_path in rows if source_path}
+    return {
+        Path(source_path).expanduser().resolve() for source_path in rows if source_path
+    }

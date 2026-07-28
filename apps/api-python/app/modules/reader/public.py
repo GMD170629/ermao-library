@@ -1,5 +1,10 @@
 """Stable reader capability contracts."""
 
+from app.modules.reader.application.progress import (
+    ClaimClientSequence,
+    ClaimClientSequenceCommand,
+    ReaderProgressCursorPort,
+)
 from app.modules.reader.domain.progress import (
     choose_continue_volume,
     continue_progress_for_edition,
@@ -18,6 +23,9 @@ from app.modules.reader.domain.progress import (
 )
 
 __all__ = [
+    "ClaimClientSequence",
+    "ClaimClientSequenceCommand",
+    "ReaderProgressCursorPort",
     "choose_continue_volume",
     "continue_progress_for_edition",
     "display_progress_percent",

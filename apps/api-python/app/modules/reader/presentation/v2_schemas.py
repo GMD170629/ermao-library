@@ -5,6 +5,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.contracts.http_errors import HttpContractError
+
 
 class ReaderWireModel(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -282,3 +284,112 @@ class ReaderProgressData(ReaderWireModel):
 class ReaderProgressResponse(ReaderWireModel):
     ok: Literal[True] = True
     data: ReaderProgressData
+
+
+class ReaderBookmarkLocation(ReaderWireModel):
+    kind: Literal["epub", "comic", "pdf", "audio"]
+    href: str | None = None
+    spine_index: int | None = Field(default=None, alias="spineIndex", ge=0)
+    progression: float | None = Field(default=None, ge=0, le=1)
+    page_index: int | None = Field(default=None, alias="pageIndex", ge=1)
+    page_number: int | None = Field(default=None, alias="pageNumber", ge=1)
+    volume_id: str | None = Field(default=None, alias="volumeId")
+    file_id: str | None = Field(default=None, alias="fileId")
+    chapter_id: str | None = Field(default=None, alias="chapterId")
+    position_ms: int | None = Field(default=None, alias="positionMs", ge=0)
+
+
+class ReaderBookmark(ReaderWireModel):
+    id: str = Field(min_length=1, max_length=2000)
+    location: ReaderBookmarkLocation
+    label: str = Field(max_length=500)
+    percent: float = Field(ge=0, le=100)
+    created_at: datetime = Field(alias="createdAt")
+
+
+class ReaderBookmarksReplaceRequest(ReaderWireModel):
+    content_fingerprint: str = Field(alias="contentFingerprint", min_length=1, max_length=191)
+    bookmarks: list[ReaderBookmark] = Field(max_length=500)
+
+
+class ReaderBookmarksData(ReaderWireModel):
+    bookmarks: list[ReaderBookmark]
+
+
+class ReaderBookmarksResponse(ReaderWireModel):
+    ok: Literal[True] = True
+    data: ReaderBookmarksData
+
+
+class EpubLocationsReady(ReaderWireModel):
+    status: Literal["ready"]
+    serialized: str
+
+
+class EpubLocationsGenerating(ReaderWireModel):
+    status: Literal["generating"]
+    lease_expires_at: int = Field(alias="leaseExpiresAt")
+    retry_after_ms: int = Field(alias="retryAfterMs")
+
+
+class EpubLocationsClaimed(ReaderWireModel):
+    status: Literal["claimed"]
+    lease_token: str = Field(alias="leaseToken")
+    lease_expires_at: int = Field(alias="leaseExpiresAt")
+
+
+EpubLocationsResult = Annotated[
+    EpubLocationsReady | EpubLocationsGenerating | EpubLocationsClaimed,
+    Field(discriminator="status"),
+]
+
+
+class EpubLocationsResponse(ReaderWireModel):
+    ok: Literal[True] = True
+    data: EpubLocationsResult
+
+
+class ReaderErrorDetails(ReaderWireModel):
+    expected_content_fingerprint: str = Field(alias="expectedContentFingerprint")
+    received_content_fingerprint: str = Field(alias="receivedContentFingerprint")
+    edition_id: str = Field(alias="editionId")
+    volume_id: str | None = Field(alias="volumeId")
+
+
+class ReaderErrorBody(ReaderWireModel):
+    message: str
+    code: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    details: ReaderErrorDetails | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+
+
+class ReaderUnauthorizedError(HttpContractError[ReaderErrorBody]):
+    status_code = 401
+    body_model = ReaderErrorBody
+
+
+class ReaderForbiddenError(HttpContractError[ReaderErrorBody]):
+    status_code = 403
+    body_model = ReaderErrorBody
+
+
+class ReaderNotFoundError(HttpContractError[ReaderErrorBody]):
+    status_code = 404
+    body_model = ReaderErrorBody
+
+
+class ReaderConflictError(HttpContractError[ReaderErrorBody]):
+    status_code = 409
+    body_model = ReaderErrorBody
+
+
+class ReaderValidationError(HttpContractError[ReaderErrorBody]):
+    status_code = 422
+    body_model = ReaderErrorBody
+
+
+class ReaderUnavailableError(HttpContractError[ReaderErrorBody]):
+    status_code = 503
+    body_model = ReaderErrorBody

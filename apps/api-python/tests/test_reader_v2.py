@@ -6,10 +6,14 @@ from threading import Barrier
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-from app.api.routes.reader_v2 import _claim_client_sequence
 from app.core.auth import hash_password
 from app.models.auth import User
-from app.schemas.reader_v2 import ReaderPreferences, ReaderServerPreferences
+from app.bootstrap.reader import SqlAlchemyReaderProgressCursor
+from app.modules.reader.public import ClaimClientSequence, ClaimClientSequenceCommand
+from app.modules.reader.presentation.v2_schemas import (
+    ReaderPreferences,
+    ReaderServerPreferences,
+)
 from tests.test_worker_importer import create_worker_tables, write_comic_fixture
 
 
@@ -751,14 +755,15 @@ def test_progress_cursor_atomically_rejects_concurrent_duplicate_sequence(tmp_pa
     def claim(mutation_id: str):
         with factory() as db:
             barrier.wait()
-            accepted = _claim_client_sequence(
-                db,
-                user_id="user-1",
-                work_id="work-1",
-                client_id="client-1",
-                client_sequence=11,
-                mutation_id=mutation_id,
-                now=datetime.now(timezone.utc),
+            accepted = ClaimClientSequence(SqlAlchemyReaderProgressCursor(db)).execute(
+                ClaimClientSequenceCommand(
+                    user_id="user-1",
+                    work_id="work-1",
+                    client_id="client-1",
+                    client_sequence=11,
+                    mutation_id=mutation_id,
+                    now=datetime.now(timezone.utc),
+                )
             )
             db.commit()
             return mutation_id, accepted
@@ -773,14 +778,15 @@ def test_progress_cursor_atomically_rejects_concurrent_duplicate_sequence(tmp_pa
             cursor = db.execute(text("SELECT highWater, lastMutationId FROM ReaderProgressCursor")).mappings().one()
             assert dict(cursor) == {"highWater": 11, "lastMutationId": winner}
 
-            assert _claim_client_sequence(
-                db,
-                user_id="user-1",
-                work_id="work-1",
-                client_id="client-1",
-                client_sequence=12,
-                mutation_id="rolled-back",
-                now=datetime.now(timezone.utc),
+            assert ClaimClientSequence(SqlAlchemyReaderProgressCursor(db)).execute(
+                ClaimClientSequenceCommand(
+                    user_id="user-1",
+                    work_id="work-1",
+                    client_id="client-1",
+                    client_sequence=12,
+                    mutation_id="rolled-back",
+                    now=datetime.now(timezone.utc),
+                )
             ) is True
             db.rollback()
             assert db.execute(text("SELECT highWater FROM ReaderProgressCursor")).scalar() == 11

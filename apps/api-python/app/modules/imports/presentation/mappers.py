@@ -11,6 +11,8 @@ from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.bootstrap.imports import import_http_store
+from app.contracts.imports import ImportTaskContract
+from app.modules.imports.application.dto import ImportTaskDTO
 from app.bootstrap.library import library_works
 from app.core.time import timestamp_ms_to_iso
 from app.modules.imports.application.monitor_paths import (
@@ -44,7 +46,9 @@ def _parse_json(value: Any, fallback: Any) -> Any:
         return fallback
 
 
-def friendly_import_error(message: str | None, error_code: str | None = None) -> str | None:
+def friendly_import_error(
+    message: str | None, error_code: str | None = None
+) -> str | None:
     text_value = message or ""
     code = (error_code or "").upper()
     if code == "SOURCE_NOT_FOUND":
@@ -62,7 +66,9 @@ def friendly_import_error(message: str | None, error_code: str | None = None) ->
     if code == "INVALID_EPUB_OUTPUT":
         return "转换结果未通过 EPUB 完整性检查。原文件已保留，可以重试。"
     if code == "EPUB_NORMALIZATION_FAILED":
-        return "转换结果无法在保留章节锚点和链接的前提下安全拆分。原文件已保留，可以重试。"
+        return (
+            "转换结果无法在保留章节锚点和链接的前提下安全拆分。原文件已保留，可以重试。"
+        )
     if re.search(r"EACCES|permission|权限", text_value, re.I):
         return "权限不足：请确认容器用户可以读取该目录和文件。"
     if re.search(r"ENOENT|not found|不存在", text_value, re.I):
@@ -89,16 +95,22 @@ def serialize_import_log(log: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def import_task_view(db: Session, task: dict[str, Any], log_limit: int = 20) -> dict[str, Any]:
+def import_task_view(
+    db: Session, task: dict[str, Any], log_limit: int = 20
+) -> dict[str, Any]:
     monitor_folder = None
     if task.get("monitorFolderId") and _has_table(db, "MonitorFolder"):
-        monitor_folder = import_http_store.get_monitor_folder(db, str(task.get("monitorFolderId")))
+        monitor_folder = import_http_store.get_monitor_folder(
+            db, str(task.get("monitorFolderId"))
+        )
     book = None
     if task.get("workId") and _has_table(db, "LibraryWork"):
         work = library_works.get_work(db, str(task.get("workId")))
         if work:
             book = {"id": work.get("id"), "title": work.get("title") or "未命名作品"}
-    logs = import_http_store.list_import_logs(db, str(task.get("id") or ""), limit=log_limit)[0]
+    logs = import_http_store.list_import_logs(
+        db, str(task.get("id") or ""), limit=log_limit
+    )[0]
     conversion = (
         import_http_store.get_conversion_for_import(db, str(task.get("id") or ""))
         if _has_table(db, "BookConversionTask")
@@ -106,7 +118,9 @@ def import_task_view(db: Session, task: dict[str, Any], log_limit: int = 20) -> 
     )
     source_file_exists = Path(str(task.get("sourcePath") or "")).is_file()
     converted_file_exists = bool(
-        conversion and conversion.get("outputPath") and Path(str(conversion.get("outputPath"))).is_file()
+        conversion
+        and conversion.get("outputPath")
+        and Path(str(conversion.get("outputPath"))).is_file()
     )
     if conversion:
         conversion = {
@@ -128,7 +142,9 @@ def import_task_view(db: Session, task: dict[str, Any], log_limit: int = 20) -> 
             "sourceFileExists": source_file_exists,
             "convertedFileExists": converted_file_exists,
             "progress": task.get("progress") or 0,
-            "friendlyError": friendly_import_error(task.get("errorSummary"), task.get("errorCode")),
+            "friendlyError": friendly_import_error(
+                task.get("errorSummary"), task.get("errorCode")
+            ),
             "retryable": bool(task.get("retryable")),
             "createdAt": _dt(task.get("createdAt")),
             "finishedAt": _dt(task.get("finishedAt")),
@@ -151,3 +167,5 @@ __all__ = [
     "normalize_monitor_root_path",
     "serialize_import_log",
 ]
+def import_task_dto_view(task: ImportTaskDTO) -> dict[str, object]:
+    return ImportTaskContract.from_dto(task).to_wire()

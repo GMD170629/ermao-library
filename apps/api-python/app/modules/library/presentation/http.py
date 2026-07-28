@@ -6,11 +6,11 @@ import io
 import json
 import logging
 import re
-from datetime import datetime, timezone
+import shutil
+from datetime import UTC, datetime
 from pathlib import Path
 from time import time_ns
-from typing import Any
-from urllib.parse import quote
+from typing import Annotated, Any, Never
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile
 from fastapi.responses import Response
@@ -19,7 +19,8 @@ from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_system_manager, require_user
-from app.bootstrap.imports import import_http_store
+from app.api.typed_route import TypedContractRoute
+from app.bootstrap.imports import enqueue_import_task, import_http_store
 from app.bootstrap.library import (
     library_dashboard,
     library_deletion,
@@ -29,14 +30,17 @@ from app.bootstrap.library import (
     library_projections,
     library_storage,
     library_works,
-    list_works as list_library_works,
     move_volume_to_work,
     reorder_volume,
 )
+from app.bootstrap.library import (
+    list_works as list_library_works,
+)
 from app.bootstrap.media import media_streaming
-from app.bootstrap.organize import organize_jobs
 from app.bootstrap.shelf import shelf_store
-from app.bootstrap.system import get_setting, prune_system_events, record_system_event
+from app.bootstrap.system import prune_system_events, record_system_event
+from app.contracts.http_errors import AdditionalStatusCodes, ErrorResponses
+from app.contracts.imports import ImportTaskContract
 from app.core.authorization import (
     authorization_context,
     can_access_edition,
@@ -45,22 +49,52 @@ from app.core.authorization import (
     can_manage_system,
 )
 from app.core.config import Settings, get_settings
-from app.core.time import to_timestamp_ms
 from app.db.session import get_db
 from app.models.auth import User
+from app.modules.library.presentation.schemas import (
+    BulkMutationResponse,
+    CategoriesResponse,
+    CategoryMutationResponse,
+    ContinueReadingResponse,
+    ConversionResponse,
+    CoverMutationResponse,
+    DashboardSummaryResponse,
+    DeletedWorkResponse,
+    DetailPreferenceResponse,
+    DuplicatesResponse,
+    EditionMutationResponse,
+    FacetsResponse,
+    FilterSchemaResponse,
+    FindReplacePreviewResponse,
+    LibraryBadRequestError,
+    LibraryConflictError,
+    LibraryErrorBody,
+    LibraryForbiddenError,
+    LibraryNotFoundError,
+    LibraryUnavailableError,
+    LibraryUnprocessableError,
+    ManagementFoldersResponse,
+    ManagementOverviewResponse,
+    MergeDuplicatesResponse,
+    MetadataSearchResponse,
+    OperationsResponse,
+    SeriesResponse,
+    UndoOperationResponse,
+    WorkDetailResponse,
+    WorkResponse,
+    WorksResponse,
+    WorkStructureMutationResponse,
+    WorkSummariesResponse,
+)
 from app.modules.library.presentation.views import (
-    DETAIL_TAB_LABELS,
     _active_media_view,
     _apply_remote_cover,
     _book_search_item_view,
     _bookshelf_item_view,
-    _bookshelf_work_view,
     _coerce_int,
-    _cover_url,
     _edition_media_kind,
     _finish_metadata_organize_work,
     _get_work,
-    _labels,
     _management_work_views,
     _metadata_context_for_work,
     _metadata_field_patch,
@@ -77,15 +111,25 @@ from app.modules.library.presentation.work_ops import (
     _path_tree,
     _source_folder_preview,
 )
-from app.modules.library.public import WorkListQuery, execute_library_write, parse_media_kinds
-from app.modules.shelf.public import execute_shelf_write
-from app.modules.system.presentation.mappers import serialize_system_event as _serialize_system_event
+from app.modules.library.public import (
+    WorkListQuery,
+    parse_media_kinds,
+)
+from app.modules.system.presentation.mappers import (
+    serialize_system_event as _serialize_system_event,
+)
 from app.modules.system.public import DETAIL_TAB_KEYS
-from app.schemas.responses import fail, ok
-from app.services.book_identity import UNKNOWN_AUTHOR, identity_merge_key, normalize_identity_part
-from app.services.default_cover import cover_status, ensure_default_cover, is_default_cover_path
+from app.services.book_identity import (
+    UNKNOWN_AUTHOR,
+    identity_merge_key,
+    normalize_identity_part,
+)
+from app.services.default_cover import (
+    cover_status,
+    ensure_default_cover,
+)
 from app.services.health import run_system_health_checks
-from app.services.library_filters import library_filter_schema, normalize_filter_rules
+from app.services.library_filters import library_filter_schema
 from app.services.library_management import (
     count_categories,
     delete_category,
@@ -103,17 +147,35 @@ from app.services.metadata_provider_registry import (
     metadata_provider_registry,
     search_with_metadata_provider,
 )
-from app.services.organize_service import context_for_job, ensure_organize_job_for_work
 from app.services.text_conversion import CONVERTIBLE_TEXT_EXTS
-from app.worker.persistent_import_queue import enqueue_import_task
 
-router = APIRouter(tags=["library"])
+router = APIRouter(tags=["library"], route_class=TypedContractRoute)
+
+
+def _raise_library_error(
+    message: str,
+    status_code: int = 400,
+    *,
+    code: str | None = None,
+) -> Never:
+    body = LibraryErrorBody(message=message, code=code)
+    if status_code == 403:
+        raise LibraryForbiddenError(body)
+    if status_code == 404:
+        raise LibraryNotFoundError(body)
+    if status_code == 409:
+        raise LibraryConflictError(body)
+    if status_code == 422:
+        raise LibraryUnprocessableError(body)
+    if status_code == 503:
+        raise LibraryUnavailableError(body)
+    raise LibraryBadRequestError(body)
 logger = logging.getLogger(__name__)
 _stored_path = media_streaming.stored_path
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _auth(db: Session, request: Request, settings: Settings):
@@ -240,14 +302,14 @@ def _dt(value: Any) -> str | None:
 
 
 @router.get("/dashboard/summary")
-def dashboard_summary(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def dashboard_summary(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> DashboardSummaryResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     context = authorization_context(db, user)
     summary = library_dashboard.dashboard_summary(db, context, user.id)
-    return ok(
-        {
+    return DashboardSummaryResponse(
+        data={
             "totalBooks": summary["totalBooks"],
             "comicBooks": summary["comicBooks"],
             "novelBooks": summary["novelBooks"],
@@ -260,29 +322,33 @@ def dashboard_summary(request: Request, db: Session = Depends(get_db), settings:
 
 
 @router.get("/dashboard/recent-books")
-def dashboard_recent_books(request: Request, limit: int = 5, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def dashboard_recent_books(request: Request, limit: int = 5, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> WorkSummariesResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     take = min(24, max(1, limit))
     context = authorization_context(db, user)
     works = library_dashboard.recent_books(db, context, limit=take)
-    return ok({"books": [_bookshelf_item_view(work) for work in works]})
+    return WorkSummariesResponse(
+        data={"books": [_bookshelf_item_view(work) for work in works]}
+    )
 
 
 @router.get("/dashboard/recent-reading")
-def dashboard_recent_reading(request: Request, limit: int = 10, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def dashboard_recent_reading(request: Request, limit: int = 10, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> WorkSummariesResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     take = min(24, max(1, limit))
     context = authorization_context(db, user)
     works = library_dashboard.recent_reading(db, context, user.id, limit=take)
-    return ok({"books": [_bookshelf_item_view(work) for work in works]})
+    return WorkSummariesResponse(
+        data={"books": [_bookshelf_item_view(work) for work in works]}
+    )
 
 
 @router.get("/dashboard/continue-reading")
-def dashboard_continue_reading(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def dashboard_continue_reading(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> ContinueReadingResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -291,10 +357,10 @@ def dashboard_continue_reading(request: Request, db: Session = Depends(get_db), 
         context = authorization_context(db, user)
         progress = library_dashboard.continue_reading_progress(db, context, user.id)
     if not progress:
-        return ok({"item": None})
+        return ContinueReadingResponse(data={"item": None})
     work = _get_work(db, progress["workId"])
     if not work or work.get("hidden"):
-        return ok({"item": None})
+        return ContinueReadingResponse(data={"item": None})
     book = _work_view(db, work, user.id)
     recent_edition_id = book.get("recentEditionId")
     media_group = next(
@@ -339,8 +405,8 @@ def dashboard_continue_reading(request: Request, db: Session = Depends(get_db), 
     chapter = book.get("chapter")
     if chapter == "未开始":
         chapter = None
-    return ok(
-        {
+    return ContinueReadingResponse(
+        data={
             "item": {
                 "workId": book.get("id"),
                 "title": book.get("title"),
@@ -360,7 +426,7 @@ def dashboard_continue_reading(request: Request, db: Session = Depends(get_db), 
 
 
 @router.get("/management/overview")
-def management_overview(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def management_overview(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> ManagementOverviewResponse:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -385,8 +451,8 @@ def management_overview(request: Request, db: Session = Depends(get_db), setting
     checks = {item["name"]: item for item in health["checks"]}
     recent_events = library_dashboard.recent_system_events(db, limit=8)
     storage = cards["managedStorageBytes"]
-    return ok(
-        {
+    return ManagementOverviewResponse(
+        data={
             "cards": {
                 "failedImports": failed_imports,
                 "failedDownloads": failed_downloads,
@@ -407,7 +473,7 @@ def management_overview(request: Request, db: Session = Depends(get_db), setting
 
 
 @router.get("/management/folders")
-def management_folders(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def management_folders(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> ManagementFoldersResponse:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -417,6 +483,7 @@ def management_folders(request: Request, db: Session = Depends(get_db), settings
     editions = []
     if _has_table(db, "LibraryEdition"):
         from sqlalchemy import func, select
+
         from app.models.library import LibraryEdition
         editions = [
             {
@@ -472,8 +539,8 @@ def management_folders(request: Request, db: Session = Depends(get_db), settings
             managed_paths.append(str(resolved.relative_to(storage_root.resolve())))
         except Exception:
             managed_paths.append(path_value)
-    return ok(
-        {
+    return ManagementFoldersResponse(
+        data={
             "logical": {
                 "series": grouped_series(),
                 "authors": grouped("author", "未知作者"),
@@ -490,12 +557,12 @@ def management_folders(request: Request, db: Session = Depends(get_db), settings
 
 
 @router.get("/series")
-def list_series(request: Request, visibility: str = "active", limit: int = 50, minBooks: int = 2, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def list_series(request: Request, visibility: str = "active", limit: int = 50, minBooks: int = 2, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> SeriesResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     if not _has_table(db, "LibraryWork") or not _has_column(db, "LibraryWork", "seriesName"):
-        return ok({"series": [], "total": 0})
+        return SeriesResponse(data={"series": [], "total": 0})
 
     take = min(100, max(1, limit))
     min_books = max(1, minBooks)
@@ -506,7 +573,7 @@ def list_series(request: Request, visibility: str = "active", limit: int = 50, m
         limit=take,
         min_books=min_books,
     )
-    return ok({
+    return SeriesResponse(data={
         "series": [
             {
                 "name": row.get("name"),
@@ -520,7 +587,7 @@ def list_series(request: Request, visibility: str = "active", limit: int = 50, m
 
 
 @router.get("/works")
-def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: str = "active", search: str | None = None, keyword: str | None = None, seriesName: str | None = None, sort: str = "updated", sortDirection: str | None = None, view: str | None = None, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: str = "active", search: str | None = None, keyword: str | None = None, seriesName: str | None = None, sort: str = "updated", sortDirection: str | None = None, view: str | None = None, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[WorksResponse, ErrorResponses(LibraryBadRequestError)]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -532,7 +599,7 @@ def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: 
         try:
             filter_rules = json.loads(raw_filters)
         except json.JSONDecodeError:
-            return fail("筛选规则格式不正确", status_code=400)
+            _raise_library_error("筛选规则格式不正确", status_code=400)
     status = (request.query_params.get("status") or "").strip().upper()
     if status == "WANT":
         status = "UNREAD"
@@ -560,7 +627,7 @@ def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: 
     try:
         result = list_library_works(db, user, query)
     except ValueError as exc:
-        return fail(str(exc), status_code=400)
+        _raise_library_error(str(exc), status_code=400)
     bookshelf_view = view == "bookshelf"
     search_view = view == "search"
     management_view = view == "management"
@@ -599,8 +666,8 @@ def list_works(request: Request, page: int = 1, pageSize: int = 24, visibility: 
             if management_view
             else [_work_view(db, work, user.id) for work in works]
         )
-    return ok(
-        {
+    return WorksResponse(
+        data={
             "books": book_views,
             "page": result.page,
             "pageSize": result.page_size,
@@ -622,13 +689,13 @@ def get_work(
     chapterPageSize: int = 120,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
+) -> Annotated[WorkDetailResponse, ErrorResponses(LibraryNotFoundError)]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     work = _visible_work_or_none(db, user, work_id)
     if not work:
-        return fail("作品不存在", status_code=404)
+        _raise_library_error("作品不存在", status_code=404)
     book = _work_view(db, work, user.id)
     selected_tab = _resolve_detail_tab(db, user.id, work_id, book.get("detailTabs", []), detailTab)
     book["selectedDetailTab"] = selected_tab
@@ -642,7 +709,9 @@ def get_work(
         unitPage if unitPage is not None else chapterPage,
         chapterPageSize,
     )
-    return ok({"book": book, "activeMedia": active_media, **navigation})
+    return WorkDetailResponse(
+        data={"book": book, "activeMedia": active_media, **navigation}
+    )
 
 
 @router.put("/works/{work_id}/detail-preference")
@@ -651,25 +720,25 @@ async def save_work_detail_preference(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
+) -> Annotated[DetailPreferenceResponse, ErrorResponses(LibraryBadRequestError, LibraryNotFoundError, LibraryConflictError, LibraryUnavailableError)]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     work = _visible_work_or_none(db, user, work_id)
     if not work:
-        return fail("作品不存在", status_code=404)
+        _raise_library_error("作品不存在", status_code=404)
     payload = await request.json()
     requested = str(payload.get("selectedTab") or "").strip().upper()
     book = _work_view(db, work, user.id)
     tabs = book.get("detailTabs", [])
     visible = {str(item.get("key")) for item in tabs}
     if requested not in DETAIL_TAB_KEYS:
-        return fail("详情选项卡无效", status_code=400)
+        _raise_library_error("详情选项卡无效", status_code=400)
     if requested not in visible:
-        return fail("该作品没有对应的媒介版本", status_code=409)
+        _raise_library_error("该作品没有对应的媒介版本", status_code=409)
     now = _now()
     if not _has_table(db, "WorkDetailPreference"):
-        return fail("详情偏好表尚未初始化", status_code=503)
+        _raise_library_error("详情偏好表尚未初始化", status_code=503)
     library_projections.save_detail_preference(
         db,
         user_id=user.id,
@@ -678,34 +747,36 @@ async def save_work_detail_preference(
         now=now,
     )
     db.commit()
-    return ok({"selectedDetailTab": requested, "detailTabs": tabs})
+    return DetailPreferenceResponse(
+        data={"selectedDetailTab": requested, "detailTabs": tabs}
+    )
 
 
 @router.patch("/works/{work_id}")
-async def update_work(work_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+async def update_work(work_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[WorkResponse, ErrorResponses(LibraryBadRequestError, LibraryForbiddenError, LibraryNotFoundError, LibraryConflictError, LibraryUnprocessableError)]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     payload = await request.json()
     existing_work = _visible_work_or_none(db, user, work_id)
     if not existing_work:
-        return fail("作品不存在", status_code=404)
+        _raise_library_error("作品不存在", status_code=404)
     allowed = {"title", "author", "description", "status", "publicationStatus", "trackingStatus", "tags", "seriesName", "seriesIndex", "publishedYear", "hidden", "organized", "metadataQuality"}
     values = {key: (_json_text(value) if key == "tags" and isinstance(value, list) else value) for key, value in payload.items() if key in allowed}
     global_fields = set(values) - {"status"}
     if "ignored" in payload:
         global_fields.add("hidden")
     if global_fields and not can_manage_system(user):
-        return fail("需要系统管理权限", status_code=403, code="SYSTEM_MANAGER_REQUIRED")
+        _raise_library_error("需要系统管理权限", status_code=403, code="SYSTEM_MANAGER_REQUIRED")
     media_kind = str(payload.get("mediaKind") or "").strip().upper()
     if media_kind and media_kind not in {"EBOOK", "COMIC", "AUDIOBOOK"}:
-        return fail("媒介类型无效", status_code=400)
+        _raise_library_error("媒介类型无效", status_code=400)
     if "status" in values:
         status = str(values["status"] or "").strip().upper()
         if status == "WANT":
             status = "UNREAD"
         if status not in {"UNREAD", "READING", "FINISHED"}:
-            return fail("阅读状态无效", status_code=400)
+            _raise_library_error("阅读状态无效", status_code=400)
         book_before_update = _work_view(db, existing_work, user.id)
         available = {
             str(item)
@@ -713,13 +784,13 @@ async def update_work(work_id: str, request: Request, db: Session = Depends(get_
         }
         target_media_kinds = [media_kind] if media_kind else sorted(available)
         if not target_media_kinds or any(kind not in available for kind in target_media_kinds):
-            return fail("该作品没有对应的媒介版本", status_code=409)
+            _raise_library_error("该作品没有对应的媒介版本", status_code=409)
         requested_edition_id = str(payload.get("editionId") or "").strip() or None
         requested_volume_id = str(payload.get("volumeId") or "").strip() or None
         if requested_edition_id and not can_access_edition(db, user, requested_edition_id):
-            return fail("作品不存在", status_code=404, code="WORK_NOT_FOUND")
+            _raise_library_error("作品不存在", status_code=404, code="WORK_NOT_FOUND")
         if requested_volume_id and not can_access_volume(db, user, requested_volume_id):
-            return fail("作品不存在", status_code=404, code="WORK_NOT_FOUND")
+            _raise_library_error("作品不存在", status_code=404, code="WORK_NOT_FOUND")
         for target_media_kind in target_media_kinds:
             target, target_error = _resolve_consumption_target(
                 db,
@@ -730,7 +801,7 @@ async def update_work(work_id: str, request: Request, db: Session = Depends(get_
                 unit_id=str(payload.get("unitId") or "").strip() or None,
             )
             if target_error:
-                return fail(target_error, status_code=422)
+                _raise_library_error(target_error, status_code=422)
             _set_consumption_status(
                 db,
                 user.id,
@@ -750,12 +821,12 @@ async def update_work(work_id: str, request: Request, db: Session = Depends(get_
         if "publishedYear" in values:
             values["publishedYear"] = _nullable_int(values["publishedYear"], "出版年")
     except ValueError as exc:
-        return fail(str(exc), status_code=400)
+        _raise_library_error(str(exc), status_code=400)
     if "title" in values or "author" in values:
         title = str(values.get("title", existing_work.get("title")) or "").strip()
         author = str(values.get("author", existing_work.get("author")) or "").strip() or UNKNOWN_AUTHOR
         if not title:
-            return fail("标题不能为空", status_code=400)
+            _raise_library_error("标题不能为空", status_code=400)
         merge_key = identity_merge_key(title, author)
         values.update(
             {
@@ -768,17 +839,17 @@ async def update_work(work_id: str, request: Request, db: Session = Depends(get_
         )
     if not values:
         db.commit()
-        return ok({"book": _work_view(db, existing_work, user.id)})
+        return WorkResponse(data={"book": _work_view(db, existing_work, user.id)})
     work = library_works.update_work_fields(db, work_id, values)
     if not work:
-        return fail("作品不存在", status_code=404)
+        _raise_library_error("作品不存在", status_code=404)
     sync_work_facets(db, work_id)
     work = _get_work(db, work_id) or work
-    return ok({"book": _work_view(db, work, user.id)})
+    return WorkResponse(data={"book": _work_view(db, work, user.id)})
 
 
 @router.delete("/works/{work_id}")
-async def delete_work(work_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+async def delete_work(work_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> DeletedWorkResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -802,7 +873,7 @@ async def delete_work(work_id: str, request: Request, db: Session = Depends(get_
             message=f"删除书库记录：{(work or {}).get('title') or work_id}",
             metadata={"workTitle": (work or {}).get("title"), "deleteSource": delete_source, "deletedFiles": result.get("deletedFiles"), "deletedSourceFiles": result.get("deletedSourceFiles"), "failedFileDeletes": result.get("failedFileDeletes")},
         )
-    return ok(result)
+    return DeletedWorkResponse(data=result)
 
 
 _BULK_TEXT_FIELDS: dict[str, tuple[str, str]] = {
@@ -1040,7 +1111,7 @@ def _apply_bulk_reading_status(db: Session, user: User, work_ids: list[str], sta
 
 
 @router.post("/works/bulk")
-async def bulk_works(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+async def bulk_works(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[BulkMutationResponse, ErrorResponses(LibraryBadRequestError, LibraryForbiddenError, LibraryNotFoundError)]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -1060,10 +1131,10 @@ async def bulk_works(request: Request, db: Session = Depends(get_db), settings: 
             if not can_access_work(db, user, work_id)
         ]
         if inaccessible:
-            return fail("作品不存在", status_code=404, code="WORK_NOT_FOUND")
+            _raise_library_error("作品不存在", status_code=404, code="WORK_NOT_FOUND")
     personal_actions = {"set_status", "reading_status", "shelf_membership", "add_to_shelf", "remove_from_shelf"}
     if action not in personal_actions and not can_manage_system(user):
-        return fail("需要系统管理权限", status_code=403, code="SYSTEM_MANAGER_REQUIRED")
+        _raise_library_error("需要系统管理权限", status_code=403, code="SYSTEM_MANAGER_REQUIRED")
     if _has_table(db, "LibraryWork") and ids and action in {"delete", "delete_records"}:
         deleted_files = 0
         failed_file_deletes: list[dict[str, str]] = []
@@ -1075,7 +1146,7 @@ async def bulk_works(request: Request, db: Session = Depends(get_db), settings: 
                 failed_file_deletes.extend(result.get("failedFileDeletes") or [])
         if updated:
             _record_system_event(db, level="error", source="library", actor_type="admin", actor_id=user.id, action="bulk.deleted", target_type="work", message=f"批量删除书库记录 {updated} 个", metadata={"ids": ids, "deletedFiles": deleted_files, "failedFileDeletes": failed_file_deletes})
-        return ok({"updated": updated, "deleted": updated, "deletedFiles": deleted_files, "failedFileDeletes": failed_file_deletes, "ids": ids})
+        return BulkMutationResponse(data={"updated": updated, "deleted": updated, "deletedFiles": deleted_files, "failedFileDeletes": failed_file_deletes, "ids": ids})
     if _has_table(db, "LibraryWork") and ids and action in {"hide", "ignore", "restore", "unignore", "mark_organized"}:
         hidden = action in {"hide", "ignore"}
         organized = action == "mark_organized"
@@ -1090,36 +1161,36 @@ async def bulk_works(request: Request, db: Session = Depends(get_db), settings: 
         tags = [str(item).strip() for item in payload.get("tags") or [] if str(item).strip()]
         status = str(payload.get("status") or "").strip().upper()
         if action == "set_status" and status not in {"UNREAD", "READING", "FINISHED"}:
-            return fail("阅读状态无效", status_code=400)
+            _raise_library_error("阅读状态无效", status_code=400)
         if action == "reading_status" and status not in {"UNREAD", "FINISHED"}:
-            return fail("批量阅读状态仅支持未读或已读", status_code=400)
+            _raise_library_error("批量阅读状态仅支持未读或已读", status_code=400)
         shelf_id = str(payload.get("shelfId") or "").strip()
         membership = str(payload.get("membership") or ("REMOVE" if action == "remove_from_shelf" else "ADD")).strip().upper()
         if action in {"add_to_shelf", "remove_from_shelf", "shelf_membership"}:
             shelf = _owned_shelf(db, shelf_id, user.id) if shelf_id else None
             if not shelf or str(shelf.get("kind") or "STATIC").upper() != "STATIC":
-                return fail("请选择普通书架", status_code=400)
+                _raise_library_error("请选择普通书架", status_code=400)
             if membership not in {"ADD", "REMOVE"}:
-                return fail("书架操作无效", status_code=400)
+                _raise_library_error("书架操作无效", status_code=400)
         editable = {"author", "description", "publicationStatus", "trackingStatus", "seriesName", "seriesIndex", "publishedYear"}
         raw_fields = payload.get("fields") if isinstance(payload.get("fields"), dict) else {}
         fields = {key: value for key, value in raw_fields.items() if key in editable}
         if action == "find_replace":
             replacements, replace_error = _bulk_find_replace_rows(db, payload)
             if replace_error:
-                return fail(replace_error, status_code=400)
+                _raise_library_error(replace_error, status_code=400)
             changed_work_ids: set[str] = set()
             now = _now()
             for replacement in replacements:
                 if replacement["column"] == "versionName" and not str(replacement["after"] or "").strip():
-                    return fail("版本名称替换后不能为空", status_code=400)
+                    _raise_library_error("版本名称替换后不能为空", status_code=400)
                 value = _json_text(replacement["after"]) if replacement["column"] == "tags" else replacement["after"] or None
                 if replacement["column"] in {"title", "author"}:
                     work = _get_work(db, replacement["workId"]) or {}
                     title_value = str(value if replacement["column"] == "title" else work.get("title") or "").strip()
                     author_value = str(value if replacement["column"] == "author" else work.get("author") or "").strip() or UNKNOWN_AUTHOR
                     if not title_value:
-                        return fail("查找替换后的标题不能为空", status_code=400)
+                        _raise_library_error("查找替换后的标题不能为空", status_code=400)
                     library_works.update_work_fields(
                         db,
                         str(replacement["workId"]),
@@ -1156,12 +1227,12 @@ async def bulk_works(request: Request, db: Session = Depends(get_db), settings: 
             updated = len(changed_work_ids)
             if updated:
                 _record_system_event(db, level="info", source="library", actor_type="admin", actor_id=user.id, action="bulk.find_replace", target_type="work", message=f"批量查找替换 {updated} 本图书", metadata={"ids": normalized_ids, "field": payload.get("field"), "changedValues": len(replacements)})
-            return ok({"updated": updated, "changedValues": len(replacements), "ids": normalized_ids})
+            return BulkMutationResponse(data={"updated": updated, "changedValues": len(replacements), "ids": normalized_ids})
         if action in {"set_status", "reading_status"}:
             updated = _apply_bulk_reading_status(db, user, normalized_ids, status)
             if updated:
                 _record_system_event(db, level="info", source="library", actor_type="user", actor_id=user.id, action=f"bulk.reading_status.{status.lower()}", target_type="work", message=f"批量设置阅读状态 {updated} 本图书", metadata={"ids": normalized_ids, "status": status})
-            return ok({"updated": updated, "ids": normalized_ids, "status": status})
+            return BulkMutationResponse(data={"updated": updated, "ids": normalized_ids, "status": status})
         metadata_fields = payload.get("fields") if action == "update_metadata" and isinstance(payload.get("fields"), dict) else {}
         add_tags = [str(item).strip() for item in payload.get("addTags") or [] if str(item).strip()]
         remove_tags = [str(item).strip() for item in payload.get("removeTags") or [] if str(item).strip()]
@@ -1230,22 +1301,22 @@ async def bulk_works(request: Request, db: Session = Depends(get_db), settings: 
             updated += 1
         if updated:
             _record_system_event(db, level="info", source="library", actor_type="admin", actor_id=user.id, action=f"bulk.{action}", target_type="work", message=f"批量更新作品 {updated} 个", metadata={"ids": normalized_ids, "action": action})
-    return ok({"updated": updated, "ids": ids})
+    return BulkMutationResponse(data={"updated": updated, "ids": ids})
 
 
 @router.post("/works/bulk/find-replace/preview")
-async def preview_bulk_find_replace(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+async def preview_bulk_find_replace(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[FindReplacePreviewResponse, ErrorResponses(LibraryBadRequestError, LibraryNotFoundError)]:
     user, auth_error = _system_auth(db, request, settings)
     if auth_error:
         return auth_error
     payload = await request.json()
     for work_id in _bulk_work_ids(payload.get("ids") or payload.get("bookIds") or []):
         if not can_access_work(db, user, work_id):
-            return fail("作品不存在", status_code=404, code="WORK_NOT_FOUND")
+            _raise_library_error("作品不存在", status_code=404, code="WORK_NOT_FOUND")
     replacements, replace_error = _bulk_find_replace_rows(db, payload)
     if replace_error:
-        return fail(replace_error, status_code=400)
-    return ok({"changedWorks": len({item["workId"] for item in replacements}), "changedValues": len(replacements), "items": replacements[:30]})
+        _raise_library_error(replace_error, status_code=400)
+    return FindReplacePreviewResponse(data={"changedWorks": len({item["workId"] for item in replacements}), "changedValues": len(replacements), "items": replacements[:30]})
 
 
 def _prepare_cover_image(image: Image.Image, *, ratio: str | None, max_dimension: int, quality: int) -> tuple[Image.Image, int]:
@@ -1269,7 +1340,7 @@ def _prepare_cover_image(image: Image.Image, *, ratio: str | None, max_dimension
 
 
 @router.post("/works/bulk/cover")
-async def bulk_work_covers(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+async def bulk_work_covers(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[BulkMutationResponse, ErrorResponses(LibraryBadRequestError, LibraryNotFoundError)]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -1277,33 +1348,33 @@ async def bulk_work_covers(request: Request, db: Session = Depends(get_db), sett
     try:
         raw_ids = json.loads(str(form.get("ids") or "[]"))
     except json.JSONDecodeError:
-        return fail("图书选择无效", status_code=400)
+        _raise_library_error("图书选择无效", status_code=400)
     work_ids = _bulk_work_ids(raw_ids)
     action = str(form.get("action") or "").strip().lower()
     if not work_ids:
-        return fail("请选择至少一本图书", status_code=400)
+        _raise_library_error("请选择至少一本图书", status_code=400)
     if any(not can_access_work(db, user, work_id) for work_id in work_ids):
-        return fail("作品不存在", status_code=404, code="WORK_NOT_FOUND")
+        _raise_library_error("作品不存在", status_code=404, code="WORK_NOT_FOUND")
     if action not in {"crop", "regenerate", "compress", "replace"}:
-        return fail("封面操作无效", status_code=400)
+        _raise_library_error("封面操作无效", status_code=400)
     ratio = str(form.get("ratio") or "2:3")
     if action == "crop" and ratio not in {"2:3", "3:4", "1:1"}:
-        return fail("封面裁剪比例无效", status_code=400)
+        _raise_library_error("封面裁剪比例无效", status_code=400)
     quality = max(40, min(95, _coerce_int(form.get("quality"), 82)))
     max_dimension = max(600, min(3200, _coerce_int(form.get("maxDimension"), 1600)))
     upload = form.get("cover")
     uploaded_image: Image.Image | None = None
     if action == "replace":
         if not upload or not hasattr(upload, "read"):
-            return fail("请选择替换封面", status_code=400)
+            _raise_library_error("请选择替换封面", status_code=400)
         raw_image = await upload.read()
         if not raw_image or len(raw_image) > 12 * 1024 * 1024:
-            return fail("封面文件为空或超过 12 MB", status_code=400)
+            _raise_library_error("封面文件为空或超过 12 MB", status_code=400)
         try:
             uploaded_image = Image.open(io.BytesIO(raw_image))
             uploaded_image.load()
         except (UnidentifiedImageError, OSError):
-            return fail("封面文件不是可识别的图片", status_code=400)
+            _raise_library_error("封面文件不是可识别的图片", status_code=400)
 
     target_dir = settings.resolved_storage_root / "covers" / "bulk"
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -1380,12 +1451,12 @@ async def bulk_work_covers(request: Request, db: Session = Depends(get_db), sett
             message=f"批量处理封面 {updated} 本图书",
             metadata={"ids": work_ids, "action": action, "ratio": ratio if action == "crop" else None, "quality": quality, "maxDimension": max_dimension, "skipped": skipped},
         )
-    return ok({"updated": updated, "ids": [item[0] for item in pending_updates], "skipped": skipped})
+    return BulkMutationResponse(data={"updated": updated, "ids": [item[0] for item in pending_updates], "skipped": skipped})
 
 
 
 @router.post("/works/{work_id}/cover/upload")
-async def upload_cover(work_id: str, request: Request, cover: UploadFile = File(...), db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+async def upload_cover(work_id: str, request: Request, cover: UploadFile = File(...), db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> CoverMutationResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -1407,11 +1478,11 @@ async def upload_cover(work_id: str, request: Request, cover: UploadFile = File(
         now=_now(),
     )
     db.commit()
-    return ok({"bookId": work_id, "coverUrl": f"/api/works/{work_id}/cover?size=medium&v={int(_now().timestamp())}"})
+    return CoverMutationResponse(data={"bookId": work_id, "coverUrl": f"/api/works/{work_id}/cover?size=medium&v={int(_now().timestamp())}"})
 
 
 @router.post("/works/{work_id}/cover/regenerate")
-def regenerate_cover(work_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def regenerate_cover(work_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[CoverMutationResponse, ErrorResponses(LibraryNotFoundError)]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -1420,7 +1491,7 @@ def regenerate_cover(work_id: str, request: Request, db: Session = Depends(get_d
         return permission_error
     work = _get_work(db, work_id)
     if not work:
-        return fail("作品不存在", status_code=404)
+        _raise_library_error("作品不存在", status_code=404)
     cover_path = _preferred_work_cover_path(db, work_id) or ensure_default_cover(settings)
     if _stored_path(cover_path, settings) is None or not _stored_path(cover_path, settings).is_file():
         cover_path = ensure_default_cover(settings)
@@ -1432,12 +1503,12 @@ def regenerate_cover(work_id: str, request: Request, db: Session = Depends(get_d
         now=_now(),
     )
     db.commit()
-    return ok({"bookId": work_id, "coverUrl": f"/api/works/{work_id}/cover?size=medium&v={int(_now().timestamp())}"})
+    return CoverMutationResponse(data={"bookId": work_id, "coverUrl": f"/api/works/{work_id}/cover?size=medium&v={int(_now().timestamp())}"})
 
 
 
 @router.get("/library/facets")
-def library_facets(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def library_facets(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> FacetsResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -1450,7 +1521,7 @@ def library_facets(request: Request, db: Session = Depends(get_db), settings: Se
         status_counts[status] = status_counts.get(status, 0) + 1
     status_rows = [{"value": value, "count": count} for value, count in sorted(status_counts.items())]
     media_rows = library_facet_queries.media_kind_counts(db, context)
-    return ok({"facets": facets, "statuses": status_rows, "mediaKinds": media_rows})
+    return FacetsResponse(data={"facets": facets, "statuses": status_rows, "mediaKinds": media_rows})
 
 
 def _visible_categories(db: Session, user: User, kind: str) -> list[dict[str, Any]]:
@@ -1563,15 +1634,15 @@ def _scoped_filter_schema(db: Session, user: User) -> dict[str, Any]:
 
 
 @router.get("/library/filter-schema")
-def library_filter_options(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def library_filter_options(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> FilterSchemaResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    return ok(_scoped_filter_schema(db, user))
+    return FilterSchemaResponse(data=_scoped_filter_schema(db, user))
 
 
 @router.get("/library/categories")
-def library_categories(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def library_categories(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[CategoriesResponse, ErrorResponses(LibraryBadRequestError)]:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -1585,12 +1656,12 @@ def library_categories(request: Request, db: Session = Depends(get_db), settings
         page = min(page, total_pages)
         items = list_categories(db, kind, search, limit=page_size, offset=(page - 1) * page_size)
     except ValueError as exc:
-        return fail(str(exc), status_code=400)
-    return ok({"categories": items, "page": page, "pageSize": page_size, "total": total, "totalPages": total_pages})
+        _raise_library_error(str(exc), status_code=400)
+    return CategoriesResponse(data={"categories": items, "page": page, "pageSize": page_size, "total": total, "totalPages": total_pages})
 
 
 @router.patch("/library/categories/{facet_id}")
-async def update_library_category(facet_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+async def update_library_category(facet_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[CategoryMutationResponse, ErrorResponses(LibraryBadRequestError)]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -1598,24 +1669,24 @@ async def update_library_category(facet_id: str, request: Request, db: Session =
     try:
         result = rename_category(db, facet_id, str(payload.get("name") or ""), user.id)
     except ValueError as exc:
-        return fail(str(exc), status_code=400)
-    return ok(result)
+        _raise_library_error(str(exc), status_code=400)
+    return CategoryMutationResponse(data=result)
 
 
 @router.delete("/library/categories/{facet_id}")
-def delete_library_category(facet_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def delete_library_category(facet_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[CategoryMutationResponse, ErrorResponses(LibraryBadRequestError)]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     try:
         result = delete_category(db, facet_id, user.id)
     except ValueError as exc:
-        return fail(str(exc), status_code=400)
-    return ok(result)
+        _raise_library_error(str(exc), status_code=400)
+    return CategoryMutationResponse(data=result)
 
 
 @router.post("/library/categories/merge")
-async def merge_library_categories(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+async def merge_library_categories(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[CategoryMutationResponse, ErrorResponses(LibraryBadRequestError)]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -1629,23 +1700,23 @@ async def merge_library_categories(request: Request, db: Session = Depends(get_d
             user.id,
         )
     except ValueError as exc:
-        return fail(str(exc), status_code=400)
-    return ok(result)
+        _raise_library_error(str(exc), status_code=400)
+    return CategoryMutationResponse(data=result)
 
 
 @router.get("/library/duplicates")
-def library_duplicates(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def library_duplicates(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> DuplicatesResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     groups = duplicate_groups(db)
     for group in groups:
         group["works"] = [_work_view(db, work, user.id) for work in group.get("works") or []]
-    return ok({"groups": groups, "total": len(groups)})
+    return DuplicatesResponse(data={"groups": groups, "total": len(groups)})
 
 
 @router.post("/library/duplicates/merge")
-async def merge_library_duplicates(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+async def merge_library_duplicates(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[MergeDuplicatesResponse, ErrorResponses(LibraryBadRequestError)]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -1658,34 +1729,34 @@ async def merge_library_duplicates(request: Request, db: Session = Depends(get_d
             user.id,
         )
     except ValueError as exc:
-        return fail(str(exc), status_code=400)
-    return ok(result)
+        _raise_library_error(str(exc), status_code=400)
+    return MergeDuplicatesResponse(data=result)
 
 
 @router.get("/library/operations")
-def library_operations(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def library_operations(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> OperationsResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     operations = library_operation_store.list_operations_for_user(db, user.id)
-    return ok({"operations": [operation_view(item) for item in operations]})
+    return OperationsResponse(data={"operations": [operation_view(item) for item in operations]})
 
 
 @router.post("/library/operations/{operation_id}/undo")
-def undo_library_operation(operation_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def undo_library_operation(operation_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[UndoOperationResponse, ErrorResponses(LibraryBadRequestError)]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     try:
         result = undo_operation(db, operation_id, user.id)
     except ValueError as exc:
-        return fail(str(exc), status_code=400)
-    return ok(result)
+        _raise_library_error(str(exc), status_code=400)
+    return UndoOperationResponse(data=result)
 
 
 
 @router.post("/works/{work_id}/metadata/search")
-async def metadata_search(work_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+async def metadata_search(work_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[MetadataSearchResponse, ErrorResponses(LibraryBadRequestError, LibraryNotFoundError)]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -1695,21 +1766,21 @@ async def metadata_search(work_id: str, request: Request, db: Session = Depends(
     payload = await request.json()
     source = str(payload.get("providerId") or payload.get("source") or "bangumi")
     if source not in metadata_provider_registry().ids():
-        return fail("不支持的元数据来源", status_code=400)
+        _raise_library_error("不支持的元数据来源", status_code=400)
     job, context = _metadata_context_for_work(db, work_id)
     if not job or not context:
-        return fail("读物不存在或无权访问", status_code=404)
+        _raise_library_error("读物不存在或无权访问", status_code=404)
     query = str(payload.get("query") or "").strip() or None
     try:
         result = search_with_metadata_provider(db, context, source, query)
     except Exception as exc:
-        return fail(str(exc), status_code=400)
+        _raise_library_error(str(exc), status_code=400)
     candidates = result.get("candidates") or []
-    return ok({"candidates": candidates, "results": candidates, "query": query or context["work"].get("title"), "source": source, "message": result.get("message")})
+    return MetadataSearchResponse(data={"candidates": candidates, "results": candidates, "query": query or context["work"].get("title"), "source": source, "message": result.get("message")})
 
 
 @router.patch("/works/{work_id}/editions/{edition_id}")
-async def update_work_edition(work_id: str, edition_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+async def update_work_edition(work_id: str, edition_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[EditionMutationResponse, ErrorResponses(LibraryNotFoundError)]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -1717,7 +1788,7 @@ async def update_work_edition(work_id: str, edition_id: str, request: Request, d
     if permission_error is not None:
         return permission_error
     if not can_access_edition(db, user, edition_id):
-        return fail("版本不存在或不属于该作品", status_code=404, code="EDITION_NOT_FOUND")
+        _raise_library_error("版本不存在或不属于该作品", status_code=404, code="EDITION_NOT_FOUND")
     edition = (
         library_works.get_visible_edition_for_work(
             db,
@@ -1728,7 +1799,7 @@ async def update_work_edition(work_id: str, edition_id: str, request: Request, d
         else None
     )
     if not edition:
-        return fail("版本不存在或不属于该作品", status_code=404)
+        _raise_library_error("版本不存在或不属于该作品", status_code=404)
     payload = await request.json()
     allowed = {"versionName", "description", "publisher", "publishedAt", "language", "identifier", "isbn", "narrator", "abridged"}
     values = {key: payload.get(key) for key in allowed if key in payload}
@@ -1740,11 +1811,11 @@ async def update_work_edition(work_id: str, edition_id: str, request: Request, d
     sync_work_facets(db, work_id, commit=False)
     db.commit()
     work = _get_work(db, work_id)
-    return ok({"edition": updated, "book": _work_view(db, work, user.id) if work else None})
+    return EditionMutationResponse(data={"edition": updated, "book": _work_view(db, work, user.id) if work else None})
 
 
 @router.post("/works/{work_id}/editions/{edition_id}/convert")
-def convert_work_edition(work_id: str, edition_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def convert_work_edition(work_id: str, edition_id: str, request: Request, response: Response, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[ConversionResponse, AdditionalStatusCodes(202), ErrorResponses(LibraryBadRequestError, LibraryNotFoundError, LibraryConflictError)]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -1752,7 +1823,7 @@ def convert_work_edition(work_id: str, edition_id: str, request: Request, db: Se
     if permission_error is not None:
         return permission_error
     if not can_access_edition(db, user, edition_id):
-        return fail("版本不存在或不属于该作品", status_code=404, code="EDITION_NOT_FOUND")
+        _raise_library_error("版本不存在或不属于该作品", status_code=404, code="EDITION_NOT_FOUND")
     work = _get_work(db, work_id)
     edition = library_deletion.get_edition_for_work(
         db,
@@ -1762,17 +1833,17 @@ def convert_work_edition(work_id: str, edition_id: str, request: Request, db: Se
     if edition and bool(edition.get("hidden")):
         edition = None
     if not work or not edition:
-        return fail("版本不存在或不属于该作品", status_code=404)
+        _raise_library_error("版本不存在或不属于该作品", status_code=404)
     source_format = str(edition.get("format") or "").strip().lower()
     if f".{source_format}" not in CONVERTIBLE_TEXT_EXTS:
-        return fail("该版本不支持转换为 EPUB", status_code=400)
+        _raise_library_error("该版本不支持转换为 EPUB", status_code=400)
     source_file = library_storage.first_file_for_edition(
         db,
         edition_id=edition_id,
     )
     source_path = Path(str((source_file or {}).get("path") or "")).expanduser()
     if not source_file or not source_path.is_file():
-        return fail("原始文件不存在，无法转换", status_code=409)
+        _raise_library_error("原始文件不存在，无法转换", status_code=409)
     task, created = enqueue_import_task(
         db,
         source_path,
@@ -1793,11 +1864,14 @@ def convert_work_edition(work_id: str, edition_id: str, request: Request, db: Se
         actor_id=user.id,
         action="conversion.queued",
         target_type="importTask",
-        target_id=task.get("id"),
+        target_id=task.id,
         message=f"加入后置转换队列：{source_path.name}",
         metadata={"workId": work_id, "editionId": edition_id, "sourceFormat": source_format.upper()},
     )
-    return ok({"task": task, "created": created}, status_code=202)
+    response.status_code = 202
+    return ConversionResponse(
+        data={"task": ImportTaskContract.from_dto(task).to_wire(), "created": created}
+    )
 
 
 @router.post("/works/{work_id}/metadata/apply")
@@ -1805,7 +1879,7 @@ def convert_work_edition(work_id: str, edition_id: str, request: Request, db: Se
 @router.post("/works/{work_id}/editions/{edition_id}/split")
 @router.post("/works/{work_id}/volumes/{volume_id}/move-to")
 @router.post("/works/{work_id}/volumes/{volume_id}/move")
-async def compatible_work_action(work_id: str, request: Request, edition_id: str | None = None, volume_id: str | None = None, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+async def compatible_work_action(work_id: str, request: Request, edition_id: str | None = None, volume_id: str | None = None, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[WorkStructureMutationResponse, ErrorResponses(LibraryBadRequestError, LibraryNotFoundError)]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -1813,18 +1887,18 @@ async def compatible_work_action(work_id: str, request: Request, edition_id: str
     if permission_error is not None:
         return permission_error
     if edition_id and not can_access_edition(db, user, edition_id):
-        return fail("版本不存在或不属于该作品", status_code=404, code="EDITION_NOT_FOUND")
+        _raise_library_error("版本不存在或不属于该作品", status_code=404, code="EDITION_NOT_FOUND")
     if volume_id and not can_access_volume(db, user, volume_id):
-        return fail("卷不存在或不属于该作品", status_code=404, code="VOLUME_NOT_FOUND")
+        _raise_library_error("卷不存在或不属于该作品", status_code=404, code="VOLUME_NOT_FOUND")
     if request.url.path.endswith("/metadata/apply"):
         payload = await request.json()
         candidate = payload.get("candidate") if isinstance(payload.get("candidate"), dict) else {}
         fields = [str(field) for field in payload.get("fields") or []]
         if not candidate or not fields:
-            return fail("请选择要应用的元数据字段", status_code=400)
+            _raise_library_error("请选择要应用的元数据字段", status_code=400)
         existing_work = _get_work(db, work_id)
         if not existing_work:
-            return fail("作品不存在", status_code=404)
+            _raise_library_error("作品不存在", status_code=404)
         patch = _metadata_field_patch(candidate, fields)
         if "title" in patch or "author" in patch:
             title = str(patch.get("title", existing_work.get("title")) or "").strip()
@@ -1846,11 +1920,11 @@ async def compatible_work_action(work_id: str, request: Request, edition_id: str
             except Exception as exc:
                 logger.warning("failed to apply remote cover work=%s url=%s error=%s", work_id, candidate.get("coverUrl"), exc)
         if not patch and not publisher:
-            return fail("候选中没有可应用的字段", status_code=400)
+            _raise_library_error("候选中没有可应用的字段", status_code=400)
         patch.update({"organized": True, "organizeStatus": "APPLIED", "metadataQuality": 85, "updatedAt": _now()})
         work = library_works.update_work_fields(db, work_id, patch)
         if not work:
-            return fail("作品不存在", status_code=404)
+            _raise_library_error("作品不存在", status_code=404)
         if publisher and _has_table(db, "LibraryEdition"):
             primary_edition_id = str(work.get("primaryEditionId") or "")
             if not primary_edition_id:
@@ -1870,7 +1944,7 @@ async def compatible_work_action(work_id: str, request: Request, edition_id: str
         sync_work_facets(db, work_id, commit=False)
         finished_job_ids = _finish_metadata_organize_work(db, work_id)
         db.commit()
-        return ok({"book": _work_view(db, work, user.id), "appliedFields": fields, "finishedOrganizeJobIds": finished_job_ids})
+        return WorkStructureMutationResponse(data={"book": _work_view(db, work, user.id), "appliedFields": fields, "finishedOrganizeJobIds": finished_job_ids})
     if request.url.path.endswith("/split"):
         payload = await request.json()
         try:
@@ -1884,8 +1958,8 @@ async def compatible_work_action(work_id: str, request: Request, edition_id: str
                 user_id=user.id,
             )
         except ValueError as exc:
-            return fail(str(exc), status_code=400)
-        return ok(result)
+            _raise_library_error(str(exc), status_code=400)
+        return WorkStructureMutationResponse(data=result)
     if request.url.path.endswith("/primary") and edition_id:
         edition = (
             library_projections.get_edition(db, edition_id)
@@ -1897,9 +1971,9 @@ async def compatible_work_action(work_id: str, request: Request, edition_id: str
         ):
             edition = None
         if not edition:
-            return fail("版本不存在或不属于该作品", status_code=404)
+            _raise_library_error("版本不存在或不属于该作品", status_code=404)
         if not _get_work(db, work_id):
-            return fail("作品不存在", status_code=404)
+            _raise_library_error("作品不存在", status_code=404)
         now = _now()
         media_kind = _edition_media_kind(edition)
         has_media_kind = _has_column(db, "LibraryEdition", "mediaKind")
@@ -1933,21 +2007,21 @@ async def compatible_work_action(work_id: str, request: Request, edition_id: str
             metadata={"workId": work_id, "editionId": edition_id},
         )
         work = _get_work(db, work_id)
-        return ok({"book": _work_view(db, work, user.id) if work else None, "workId": work_id, "editionId": edition_id})
+        return WorkStructureMutationResponse(data={"book": _work_view(db, work, user.id) if work else None, "workId": work_id, "editionId": edition_id})
     if request.url.path.endswith("/move-to") and volume_id:
         payload = await request.json()
         target_edition_id = str(payload.get("targetEditionId") or "").strip()
         if not target_edition_id:
-            return fail("请选择目标版本", status_code=400)
+            _raise_library_error("请选择目标版本", status_code=400)
         source = library_join_queries.get_volume_for_work(db, volume_id=volume_id, work_id=work_id)
         if not source:
-            return fail("卷册不存在或不属于该作品", status_code=404)
+            _raise_library_error("卷册不存在或不属于该作品", status_code=404)
         target = library_join_queries.get_edition_with_work_title(db, target_edition_id)
         if not target:
-            return fail("目标版本不存在", status_code=404)
+            _raise_library_error("目标版本不存在", status_code=404)
         target_work_id = target.get("workId")
         if target_work_id == work_id:
-            return fail("请选择另一部目标图书", status_code=400)
+            _raise_library_error("请选择另一部目标图书", status_code=400)
         result = move_volume_to_work(
             db,
             source_work_id=work_id,
@@ -1970,7 +2044,7 @@ async def compatible_work_action(work_id: str, request: Request, edition_id: str
         )
         source_work = _get_work(db, work_id)
         target_work = _get_work(db, target_work_id) if target_work_id else None
-        return ok({
+        return WorkStructureMutationResponse(data={
             "book": _work_view(db, source_work, user.id) if source_work else None,
             "targetBook": _work_view(db, target_work, user.id) if target_work else None,
             "workId": work_id,
@@ -1983,10 +2057,10 @@ async def compatible_work_action(work_id: str, request: Request, edition_id: str
         payload = await request.json()
         direction = str(payload.get("direction") or "").lower()
         if direction not in {"up", "down"}:
-            return fail("请选择上移或下移", status_code=400)
+            _raise_library_error("请选择上移或下移", status_code=400)
         volume = library_join_queries.get_volume_belonging_to_work(db, volume_id=volume_id, work_id=work_id)
         if not volume:
-            return fail("卷册不存在或不属于该作品", status_code=404)
+            _raise_library_error("卷册不存在或不属于该作品", status_code=404)
         changed = reorder_volume(
             db,
             volume_id=volume_id,
@@ -1996,11 +2070,9 @@ async def compatible_work_action(work_id: str, request: Request, edition_id: str
         )
         if not changed:
             work = _get_work(db, work_id)
-            return ok({"book": _work_view(db, work, user.id) if work else None, "workId": work_id, "volumeId": volume_id})
+            return WorkStructureMutationResponse(data={"book": _work_view(db, work, user.id) if work else None, "workId": work_id, "volumeId": volume_id})
         db.commit()
         work = _get_work(db, work_id)
-        return ok({"book": _work_view(db, work, user.id) if work else None, "workId": work_id, "volumeId": volume_id})
+        return WorkStructureMutationResponse(data={"book": _work_view(db, work, user.id) if work else None, "workId": work_id, "volumeId": volume_id})
     work = _get_work(db, work_id)
-    return ok({"book": _work_view(db, work, user.id) if work else None, "workId": work_id, "editionId": edition_id, "volumeId": volume_id})
-
-
+    return WorkStructureMutationResponse(data={"book": _work_view(db, work, user.id) if work else None, "workId": work_id, "editionId": edition_id, "volumeId": volume_id})

@@ -28,7 +28,7 @@ from app.models.library import (
     LibraryReadingUnit,
     LibraryVolume,
 )
-from app.worker.importer import parse_comic_archive
+from app.modules.imports.application.import_comic import parse_comic_archive
 
 logger = logging.getLogger(__name__)
 

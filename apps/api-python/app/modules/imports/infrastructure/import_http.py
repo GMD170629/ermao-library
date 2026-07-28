@@ -7,18 +7,28 @@ from typing import Any
 from sqlalchemy import delete, exists, func, or_, select, update
 from sqlalchemy.orm import Session
 
-from app.core.authorization import AuthorizationContext, monitor_folder_visibility_predicate
+from app.core.authorization import (
+    AuthorizationContext,
+    monitor_folder_visibility_predicate,
+)
 from app.models.auth import User, UserMonitorFolderAccess
-from app.models.import_pipeline import BookConversionTask, ImportAsset, ImportLog, ImportTask
+from app.models.import_pipeline import (
+    BookConversionTask,
+    ImportAsset,
+    ImportLog,
+    ImportTask,
+)
 from app.models.library import LibraryWork
 from app.models.settings import MonitorFolder
 from app.modules.imports.infrastructure.monitor import upsert_system_setting
 
 
 def get_import_task(db: Session, task_id: str) -> dict[str, Any] | None:
-    row = db.execute(
-        select(ImportTask.__table__).where(ImportTask.id == task_id)
-    ).mappings().first()
+    row = (
+        db.execute(select(ImportTask.__table__).where(ImportTask.id == task_id))
+        .mappings()
+        .first()
+    )
     return dict(row) if row else None
 
 
@@ -31,7 +41,9 @@ def list_import_tasks_page(
     status: str | None = None,
     keyword: str | None = None,
 ) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
-    filters: list[Any] = [monitor_folder_visibility_predicate(context, ImportTask.monitor_folder_id)]
+    filters: list[Any] = [
+        monitor_folder_visibility_predicate(context, ImportTask.monitor_folder_id)
+    ]
     normalized_status = str(status or "").strip().upper()
     if normalized_status and normalized_status != "ALL":
         filters.append(ImportTask.status == normalized_status)
@@ -55,16 +67,22 @@ def list_import_tasks_page(
             )
         )
 
-    total = int(db.scalar(select(func.count()).select_from(ImportTask).where(*filters)) or 0)
+    total = int(
+        db.scalar(select(func.count()).select_from(ImportTask).where(*filters)) or 0
+    )
     total_pages = max(1, (total + page_size - 1) // page_size)
     page = min(max(1, page), total_pages)
-    rows = db.execute(
-        select(ImportTask.__table__)
-        .where(*filters)
-        .order_by(ImportTask.created_at.desc(), ImportTask.id.desc())
-        .limit(page_size)
-        .offset((page - 1) * page_size)
-    ).mappings().all()
+    rows = (
+        db.execute(
+            select(ImportTask.__table__)
+            .where(*filters)
+            .order_by(ImportTask.created_at.desc(), ImportTask.id.desc())
+            .limit(page_size)
+            .offset((page - 1) * page_size)
+        )
+        .mappings()
+        .all()
+    )
     tasks = [dict(row) for row in rows]
 
     scope = monitor_folder_visibility_predicate(context, ImportTask.monitor_folder_id)
@@ -95,7 +113,11 @@ def clear_terminal_import_tasks(db: Session, context: AuthorizationContext) -> i
         ImportTask.status.in_(("COMPLETED", "FAILED")),
         scope,
     )
-    db.execute(delete(BookConversionTask).where(BookConversionTask.import_task_id.in_(terminal)))
+    db.execute(
+        delete(BookConversionTask).where(
+            BookConversionTask.import_task_id.in_(terminal)
+        )
+    )
     result = db.execute(
         delete(ImportTask).where(
             ImportTask.status.in_(("COMPLETED", "FAILED")),
@@ -106,21 +128,29 @@ def clear_terminal_import_tasks(db: Session, context: AuthorizationContext) -> i
 
 
 def delete_import_task_row(db: Session, task_id: str) -> bool:
-    db.execute(delete(BookConversionTask).where(BookConversionTask.import_task_id == task_id))
+    db.execute(
+        delete(BookConversionTask).where(BookConversionTask.import_task_id == task_id)
+    )
     result = db.execute(delete(ImportTask).where(ImportTask.id == task_id))
     return bool(result.rowcount)
 
 
 def get_conversion_for_import(db: Session, task_id: str) -> dict[str, Any] | None:
-    row = db.execute(
-        select(BookConversionTask.__table__)
-        .where(BookConversionTask.import_task_id == task_id)
-        .limit(1)
-    ).mappings().first()
+    row = (
+        db.execute(
+            select(BookConversionTask.__table__)
+            .where(BookConversionTask.import_task_id == task_id)
+            .limit(1)
+        )
+        .mappings()
+        .first()
+    )
     return dict(row) if row else None
 
 
-def reset_import_assets_for_retry(db: Session, task_id: str, *, updated_at: Any) -> None:
+def reset_import_assets_for_retry(
+    db: Session, task_id: str, *, updated_at: Any
+) -> None:
     db.execute(
         update(ImportAsset)
         .where(ImportAsset.import_task_id == task_id)
@@ -145,14 +175,20 @@ def list_import_logs(
     filters: list[Any] = [ImportLog.import_task_id == task_id]
     if level:
         filters.append(ImportLog.level == level.lower())
-    total = int(db.scalar(select(func.count()).select_from(ImportLog).where(*filters)) or 0)
-    rows = db.execute(
-        select(ImportLog.__table__)
-        .where(*filters)
-        .order_by(ImportLog.created_at.desc(), ImportLog.id.desc())
-        .limit(limit)
-        .offset(offset)
-    ).mappings().all()
+    total = int(
+        db.scalar(select(func.count()).select_from(ImportLog).where(*filters)) or 0
+    )
+    rows = (
+        db.execute(
+            select(ImportLog.__table__)
+            .where(*filters)
+            .order_by(ImportLog.created_at.desc(), ImportLog.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        .mappings()
+        .all()
+    )
     logs = [dict(row) for row in rows]
     return logs, total
 
@@ -163,18 +199,26 @@ def request_monitor_rescan(db: Session, requested_value: str) -> None:
 
 
 def list_monitor_folders(db: Session) -> list[dict[str, Any]]:
-    rows = db.execute(
-        select(MonitorFolder.__table__).order_by(MonitorFolder.created_at.desc())
-    ).mappings().all()
+    rows = (
+        db.execute(
+            select(MonitorFolder.__table__).order_by(MonitorFolder.created_at.desc())
+        )
+        .mappings()
+        .all()
+    )
     return [dict(row) for row in rows]
 
 
 def list_enabled_monitor_folder_rows(db: Session) -> list[dict[str, Any]]:
-    rows = db.execute(
-        select(MonitorFolder.__table__)
-        .where(MonitorFolder.enabled.is_(True))
-        .order_by(MonitorFolder.created_at.desc(), MonitorFolder.id.desc())
-    ).mappings().all()
+    rows = (
+        db.execute(
+            select(MonitorFolder.__table__)
+            .where(MonitorFolder.enabled.is_(True))
+            .order_by(MonitorFolder.created_at.desc(), MonitorFolder.id.desc())
+        )
+        .mappings()
+        .all()
+    )
     return [dict(row) for row in rows]
 
 
@@ -235,9 +279,15 @@ def import_status_snapshot(
 
 
 def get_monitor_folder(db: Session, folder_id: str) -> dict[str, Any] | None:
-    row = db.execute(
-        select(MonitorFolder.__table__).where(MonitorFolder.id == folder_id).limit(1)
-    ).mappings().first()
+    row = (
+        db.execute(
+            select(MonitorFolder.__table__)
+            .where(MonitorFolder.id == folder_id)
+            .limit(1)
+        )
+        .mappings()
+        .first()
+    )
     return dict(row) if row else None
 
 
@@ -250,9 +300,11 @@ def get_monitor_folder_by_root_path(
     filters = [MonitorFolder.root_path == root_path]
     if exclude_id is not None:
         filters.append(MonitorFolder.id != exclude_id)
-    row = db.execute(
-        select(MonitorFolder.__table__).where(*filters).limit(1)
-    ).mappings().first()
+    row = (
+        db.execute(select(MonitorFolder.__table__).where(*filters).limit(1))
+        .mappings()
+        .first()
+    )
     return dict(row) if row else None
 
 
@@ -263,10 +315,14 @@ def create_monitor_folder(db: Session, values: dict[str, Any]) -> dict[str, Any]
         root_path=str(values["rootPath"]),
         shelf_id=str(values["shelfId"]) if values.get("shelfId") is not None else None,
         enabled=bool(values.get("enabled", True)),
-        ignore_patterns=str(values["ignorePatterns"]) if values.get("ignorePatterns") is not None else None,
+        ignore_patterns=str(values["ignorePatterns"])
+        if values.get("ignorePatterns") is not None
+        else None,
         ignore_hidden=bool(values.get("ignoreHidden", True)),
         min_file_size_bytes=int(values.get("minFileSizeBytes", 10240)),
-        description=str(values["description"]) if values.get("description") is not None else None,
+        description=str(values["description"])
+        if values.get("description") is not None
+        else None,
         created_at=values["createdAt"],
         updated_at=values["updatedAt"],
     )
@@ -275,7 +331,9 @@ def create_monitor_folder(db: Session, values: dict[str, Any]) -> dict[str, Any]
     return get_monitor_folder(db, folder.id) or dict(values)
 
 
-def update_monitor_folder(db: Session, folder_id: str, values: dict[str, Any]) -> dict[str, Any] | None:
+def update_monitor_folder(
+    db: Session, folder_id: str, values: dict[str, Any]
+) -> dict[str, Any] | None:
     folder = db.get(MonitorFolder, folder_id)
     if folder is None:
         return None
@@ -334,9 +392,7 @@ def reset_conversion_for_retry(
     updated_at: Any,
 ) -> dict[str, Any] | None:
     conversion = db.scalar(
-        select(BookConversionTask).where(
-            BookConversionTask.import_task_id == task_id
-        )
+        select(BookConversionTask).where(BookConversionTask.import_task_id == task_id)
     )
     if conversion is None:
         return None
@@ -353,7 +409,9 @@ def reset_conversion_for_retry(
     return previous
 
 
-def delete_monitor_folder(db: Session, folder_id: str, *, updated_at: Any) -> tuple[bool, list[str]]:
+def delete_monitor_folder(
+    db: Session, folder_id: str, *, updated_at: Any
+) -> tuple[bool, list[str]]:
     affected_user_ids = [
         str(item)
         for item in db.scalars(

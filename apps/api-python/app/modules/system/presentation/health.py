@@ -1,10 +1,13 @@
 import asyncio
 import json
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.api.typed_route import TypedContractRoute
+from app.contracts.http_errors import AdditionalStatusCodes, ErrorResponses
 from app.core.auth import get_current_user
 from app.core.authorization import can_manage_system
 from app.core.config import Settings, get_settings
@@ -25,50 +28,98 @@ from app.bootstrap.system import (
     system_event_storage_view,
 )
 from app.modules.system.public import MAX_MAX_EVENT_BYTES, MIN_MAX_EVENT_BYTES
-from app.schemas.responses import fail, ok
+from app.modules.system.presentation.health_schemas import (
+    DatabasePingPayload,
+    DatabasePingResponse,
+    HealthRunActiveBody,
+    HealthRunActiveError,
+    HealthRunNotFoundBody,
+    HealthRunNotFoundError,
+    HealthRunPayload,
+    HealthRunResponse,
+    HealthEventStreamResponse,
+    ImportQueueOfflineBody,
+    ImportQueueOfflineError,
+    InvalidLogMaxBytesBody,
+    InvalidLogMaxBytesError,
+    LogSettingsPayload,
+    LogSettingsResponse,
+    QueueOperationNotFoundBody,
+    QueueOperationNotFoundError,
+    QueueOperationPayload,
+    QueueOperationResponse,
+    ServiceHealthPayload,
+    ServiceHealthResponse,
+    SystemHealthPayload,
+    SystemHealthResponse,
+    SystemManagerRequiredBody,
+    SystemManagerRequiredError,
+    UnauthorizedBody,
+    UnauthorizedError,
+)
 
-router = APIRouter(tags=["health"])
+router = APIRouter(tags=["health"], route_class=TypedContractRoute)
 
 
 @router.get("/health")
-def health(db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def health(
+    response: Response,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[ServiceHealthResponse, AdditionalStatusCodes(503)]:
     health_status = run_system_health_checks(db, settings)
-    status_code = status.HTTP_200_OK if health_status["status"] == "ok" else status.HTTP_503_SERVICE_UNAVAILABLE
-    return ok(
-        {"service": "shuku-starship", "status": health_status["status"]},
-        status_code=status_code,
+    response.status_code = (
+        status.HTTP_200_OK
+        if health_status["status"] == "ok"
+        else status.HTTP_503_SERVICE_UNAVAILABLE
+    )
+    return ServiceHealthResponse(
+        data=ServiceHealthPayload(
+            service="shuku-starship",
+            status=str(health_status["status"]),
+        )
     )
 
 
 @router.get("/system/health")
-def system_health(db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    return ok(run_system_health_checks(db, settings))
+def system_health(
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> SystemHealthResponse:
+    return SystemHealthResponse(
+        data=SystemHealthPayload.model_validate(run_system_health_checks(db, settings))
+    )
 
 
 @router.get("/__db-ping")
-def db_ping(db: Session = Depends(get_db)):
+def db_ping(db: Session = Depends(get_db)) -> DatabasePingResponse:
     probe_database(db)
-    return ok({"database": "ok"})
+    return DatabasePingResponse(data=DatabasePingPayload(database="ok"))
 
 
 def _system_manager(db: Session, request: Request, settings: Settings):
     user, _token, _refresh = get_current_user(db, request, settings)
     if user is None:
-        return None, fail("UNAUTHORIZED", status_code=401, code="UNAUTHORIZED")
+        raise UnauthorizedError(UnauthorizedBody())
     if not can_manage_system(user):
-        return None, fail("需要系统管理权限", status_code=403, code="SYSTEM_MANAGER_REQUIRED")
-    return user, None
+        raise SystemManagerRequiredError(
+            SystemManagerRequiredBody(message="需要系统管理权限")
+        )
+    return user
 
 
 @router.post("/system/health/runs")
 def create_health_run(
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
-    user, auth_error = _system_manager(db, request, settings)
-    if auth_error:
-        return auth_error
+) -> Annotated[
+    HealthRunResponse,
+    AdditionalStatusCodes(201),
+    ErrorResponses(UnauthorizedError, SystemManagerRequiredError),
+]:
+    user = _system_manager(db, request, settings)
     prune_old_health_runs(db)
     snapshot, created = create_or_reuse_health_run(db, settings, user.id)
     start_health_run(
@@ -77,10 +128,9 @@ def create_health_run(
         settings,
         str(snapshot["runId"]),
     )
-    return ok(
-        {"run": snapshot, "created": created},
-        status_code=201 if created else 200,
-        normalize_timestamps=False,
+    response.status_code = 201 if created else 200
+    return HealthRunResponse(
+        data=HealthRunPayload.model_validate({"run": snapshot, "created": created})
     )
 
 
@@ -90,30 +140,45 @@ def get_health_run(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
-    _user, auth_error = _system_manager(db, request, settings)
-    if auth_error:
-        return auth_error
+) -> Annotated[
+    HealthRunResponse,
+    ErrorResponses(
+        UnauthorizedError,
+        SystemManagerRequiredError,
+        HealthRunNotFoundError,
+    ),
+]:
+    _system_manager(db, request, settings)
     snapshot = health_run_snapshot(db, run_id)
-    return (
-        ok({"run": snapshot}, normalize_timestamps=False)
-        if snapshot
-        else fail("健康检查记录不存在", status_code=404, code="HEALTH_RUN_NOT_FOUND")
-    )
+    if snapshot is None:
+        raise HealthRunNotFoundError(
+            HealthRunNotFoundBody(message="健康检查记录不存在")
+        )
+    return HealthRunResponse(data=HealthRunPayload.model_validate({"run": snapshot}))
 
 
-@router.get("/system/health/runs/{run_id}/events")
+@router.get(
+    "/system/health/runs/{run_id}/events",
+    response_class=HealthEventStreamResponse,
+)
 def stream_health_run(
     run_id: str,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
-    _user, auth_error = _system_manager(db, request, settings)
-    if auth_error:
-        return auth_error
+) -> Annotated[
+    HealthEventStreamResponse,
+    ErrorResponses(
+        UnauthorizedError,
+        SystemManagerRequiredError,
+        HealthRunNotFoundError,
+    ),
+]:
+    _system_manager(db, request, settings)
     if health_run_snapshot(db, run_id) is None:
-        return fail("健康检查记录不存在", status_code=404, code="HEALTH_RUN_NOT_FOUND")
+        raise HealthRunNotFoundError(
+            HealthRunNotFoundBody(message="健康检查记录不存在")
+        )
     raw_last_id = request.headers.get("last-event-id") or request.query_params.get("after") or "0"
     try:
         initial_version = max(0, int(raw_last_id))
@@ -163,29 +228,43 @@ def stream_health_run(
                     idle_ticks = 0
             await asyncio.sleep(1)
 
-    return StreamingResponse(
+    return HealthEventStreamResponse(
         events(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
     )
 
 
-@router.post("/system/queues/import/restart")
+@router.post("/system/queues/import/restart", status_code=202)
 def restart_import_queue(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
-    user, auth_error = _system_manager(db, request, settings)
-    if auth_error:
-        return auth_error
+) -> Annotated[
+    QueueOperationResponse,
+    ErrorResponses(
+        UnauthorizedError,
+        SystemManagerRequiredError,
+        HealthRunActiveError,
+        ImportQueueOfflineError,
+    ),
+]:
+    user = _system_manager(db, request, settings)
     if active_health_run_id(db):
-        return fail("健康检查运行期间不能重启导入队列", status_code=409, code="HEALTH_RUN_ACTIVE")
+        raise HealthRunActiveError(
+            HealthRunActiveBody(message="健康检查运行期间不能重启导入队列")
+        )
     runtime = queue_runtime_view(db, "import")
     if runtime is None or runtime.get("stale") or runtime.get("status") != "running":
-        return fail("导入工作进程当前不可用", status_code=409, code="IMPORT_QUEUE_OFFLINE")
+        raise ImportQueueOfflineError(
+            ImportQueueOfflineBody(message="导入工作进程当前不可用")
+        )
     operation, created = create_restart_operation(db, user.id)
-    return ok({"operation": operation, "created": created}, status_code=202)
+    return QueueOperationResponse(
+        data=QueueOperationPayload.model_validate(
+            {"operation": operation, "created": created}
+        )
+    )
 
 
 @router.get("/system/queue-operations/{operation_id}")
@@ -194,12 +273,23 @@ def get_queue_operation(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
-    _user, auth_error = _system_manager(db, request, settings)
-    if auth_error:
-        return auth_error
+) -> Annotated[
+    QueueOperationResponse,
+    ErrorResponses(
+        UnauthorizedError,
+        SystemManagerRequiredError,
+        QueueOperationNotFoundError,
+    ),
+]:
+    _system_manager(db, request, settings)
     operation = queue_operation_view(db, operation_id)
-    return ok({"operation": operation}) if operation else fail("队列操作不存在", status_code=404, code="QUEUE_OPERATION_NOT_FOUND")
+    if operation is None:
+        raise QueueOperationNotFoundError(
+            QueueOperationNotFoundBody(message="队列操作不存在")
+        )
+    return QueueOperationResponse(
+        data=QueueOperationPayload.model_validate({"operation": operation})
+    )
 
 
 @router.get("/system/log-settings")
@@ -207,11 +297,20 @@ def get_log_settings(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
-    _user, auth_error = _system_manager(db, request, settings)
-    if auth_error:
-        return auth_error
-    return ok({"storage": system_event_storage_view(db), "minBytes": MIN_MAX_EVENT_BYTES, "maxBytes": MAX_MAX_EVENT_BYTES})
+) -> Annotated[
+    LogSettingsResponse,
+    ErrorResponses(UnauthorizedError, SystemManagerRequiredError),
+]:
+    _system_manager(db, request, settings)
+    return LogSettingsResponse(
+        data=LogSettingsPayload.model_validate(
+            {
+                "storage": system_event_storage_view(db),
+                "minBytes": MIN_MAX_EVENT_BYTES,
+                "maxBytes": MAX_MAX_EVENT_BYTES,
+            }
+        )
+    )
 
 
 @router.put("/system/log-settings")
@@ -219,16 +318,23 @@ async def update_log_settings(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
-    user, auth_error = _system_manager(db, request, settings)
-    if auth_error:
-        return auth_error
+) -> Annotated[
+    LogSettingsResponse,
+    ErrorResponses(
+        UnauthorizedError,
+        SystemManagerRequiredError,
+        InvalidLogMaxBytesError,
+    ),
+]:
+    user = _system_manager(db, request, settings)
     try:
         payload = await request.json()
         max_bytes = int(payload.get("maxBytes"))
         set_max_event_bytes(db, max_bytes)
     except (AttributeError, TypeError, ValueError):
-        return fail("日志容量上限必须在 1 MB 到 100 MB 之间", status_code=400, code="INVALID_LOG_MAX_BYTES")
+        raise InvalidLogMaxBytesError(
+            InvalidLogMaxBytesBody(message="日志容量上限必须在 1 MB 到 100 MB 之间")
+        )
     record_system_event(
         db,
         source="system",
@@ -241,4 +347,8 @@ async def update_log_settings(
         metadata={"key": "system.logs.maxBytes", "maxBytes": max_bytes},
         commit=True,
     )
-    return ok({"storage": system_event_storage_view(db)})
+    return LogSettingsResponse(
+        data=LogSettingsPayload.model_validate(
+            {"storage": system_event_storage_view(db)}
+        )
+    )

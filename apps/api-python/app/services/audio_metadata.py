@@ -8,7 +8,6 @@ import shutil
 import subprocess
 import time
 import unicodedata
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -17,13 +16,21 @@ from app.services.book_identity import (
     normalize_identity_part,
     recognize_book_identity_with_regex,
 )
+from app.modules.imports.application.audio_types import (
+    DISC_DIRECTORY_PATTERN,
+    MAX_AUDIO_CHAPTERS,
+    SUPPORTED_AUDIO_EXTS,
+    AudioBundleStructure,
+    AudioChapterMetadata,
+    AudioFileMetadata,
+    AudioVolumeDirectory,
+    is_supported_audio_file,
+)
 
 
-SUPPORTED_AUDIO_EXTS = {".m4b", ".m4a", ".mp3"}
 SUPPORTED_AUDIO_CODECS = {"aac", "mp3"}
 AAC_RFC6381_OBJECT_TYPES = {2, 5, 29}
 MAX_AUDIO_BUNDLE_TRACKS = 1000
-MAX_AUDIO_CHAPTERS = 10_000
 MAX_EMBEDDED_COVER_BYTES = 20 * 1024 * 1024
 MAX_FFPROBE_STDOUT_BYTES = 16 * 1024 * 1024
 MAX_FFPROBE_STDERR_BYTES = 256 * 1024
@@ -34,68 +41,6 @@ MUTAGEN_TEXT_ENCODINGS = {
     2: "utf-16-be",
     3: "utf-8",
 }
-DISC_DIRECTORY_PATTERN = re.compile(
-    r"^(?:cd|disc|disk|碟|盘)\s*[-_. ]*\d+(?:\s*(?:of|/|[-–—])\s*\d+)?$",
-    re.I,
-)
-
-
-@dataclass(frozen=True)
-class AudioChapterMetadata:
-    title: str
-    start_ms: int
-    end_ms: int
-
-
-@dataclass(frozen=True)
-class AudioFileMetadata:
-    path: Path
-    title: str | None
-    album: str | None
-    author: str | None
-    narrator: str | None
-    duration_ms: int
-    codec: str
-    bitrate: int | None
-    sample_rate: int | None
-    channels: int | None
-    disc_number: int | None
-    track_number: int | None
-    chapters: tuple[AudioChapterMetadata, ...] = ()
-    raw_tags: dict[str, Any] = field(default_factory=dict)
-    cover_data: bytes | None = None
-    cover_extension: str | None = None
-
-
-@dataclass(frozen=True)
-class AudioVolumeDirectory:
-    path: Path
-    title: str
-    volume_index: float | None
-    author: str | None
-    files: tuple[Path, ...]
-
-
-@dataclass(frozen=True)
-class AudioBundleStructure:
-    root: Path
-    title: str
-    author: str | None
-    volumes: tuple[AudioVolumeDirectory, ...]
-
-    @property
-    def files(self) -> tuple[Path, ...]:
-        return tuple(path for volume in self.volumes for path in volume.files)
-
-    @property
-    def is_multi_volume(self) -> bool:
-        return len(self.volumes) > 1 or bool(self.volumes and self.volumes[0].path != self.root)
-
-
-def is_supported_audio_file(path: str | Path) -> bool:
-    return Path(path).suffix.lower() in SUPPORTED_AUDIO_EXTS
-
-
 def read_audio_group_identity(path: str | Path) -> tuple[str | None, str | None]:
     """Read only the tags needed by the watcher to prove bundle membership.
 

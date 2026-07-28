@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
+from app.api.typed_route import TypedContractRoute
 from app.api.deps import require_user
 from app.bootstrap.library import library_storage
 from app.bootstrap.media import media_page_index, media_streaming
@@ -33,10 +34,16 @@ from app.modules.media.application.cover_proxy import (
     configured_cover_origins,
     validate_cover_url,
 )
+from app.modules.media.presentation.schemas import (
+    MediaFileResponse,
+    MediaImageResponse,
+    VolumePagesPayload,
+    VolumePagesResponse,
+)
 from app.schemas.responses import fail, ok
 from app.services.default_cover import ensure_default_cover, is_default_cover_path
 
-router = APIRouter(tags=["media"])
+router = APIRouter(tags=["media"], route_class=TypedContractRoute)
 logger = logging.getLogger(__name__)
 
 _METADATA_PROVIDER_BASE_URL_KEYS = (
@@ -82,8 +89,8 @@ def _parse_json(value: Any, fallback: Any) -> Any:
         return fallback
 
 
-@router.get("/files/{file_id}")
-@router.head("/files/{file_id}")
+@router.get("/files/{file_id}", response_class=MediaFileResponse)
+@router.head("/files/{file_id}", response_class=MediaFileResponse)
 def get_file(
     file_id: str,
     request: Request,
@@ -107,7 +114,7 @@ def get_file(
     )
 
 
-@router.get("/editions/{edition_id}/file")
+@router.get("/editions/{edition_id}/file", response_class=MediaFileResponse)
 def get_edition_file(
     edition_id: str,
     request: Request,
@@ -144,9 +151,9 @@ def get_edition_file(
     )
 
 
-@router.get("/works/{work_id}/cover")
-@router.get("/editions/{edition_id}/cover")
-@router.get("/volumes/{volume_id}/cover")
+@router.get("/works/{work_id}/cover", response_class=MediaImageResponse)
+@router.get("/editions/{edition_id}/cover", response_class=MediaImageResponse)
+@router.get("/volumes/{volume_id}/cover", response_class=MediaImageResponse)
 def get_cover(
     request: Request,
     work_id: str | None = None,
@@ -196,7 +203,7 @@ def get_cover(
     )
 
 
-@router.get("/metadata/cover-proxy")
+@router.get("/metadata/cover-proxy", response_class=MediaImageResponse)
 def metadata_cover_proxy(
     url: str,
     request: Request,
@@ -241,7 +248,7 @@ def list_volume_pages(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
+) -> VolumePagesResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -251,10 +258,15 @@ def list_volume_pages(
     if not units:
         media_page_index.ensure_volume_page_index(db, settings, volume_id)
         units = media_page_index.list_page_units_for_volume(db, volume_id)
-    return ok({"pages": units, "total": len(units)})
+    return VolumePagesResponse(
+        data=VolumePagesPayload.model_validate({"pages": units, "total": len(units)})
+    )
 
 
-@router.get("/volumes/{volume_id}/pages/{page_index}")
+@router.get(
+    "/volumes/{volume_id}/pages/{page_index}",
+    response_class=MediaImageResponse,
+)
 def get_volume_page(
     volume_id: str,
     page_index: int,

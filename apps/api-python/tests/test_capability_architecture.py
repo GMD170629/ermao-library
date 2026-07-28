@@ -2,8 +2,10 @@ from pathlib import Path
 
 APP_ROOT = Path(__file__).parents[1] / "app"
 CAPABILITIES = (
+    "auth",
     "download",
     "imports",
+    "kindle",
     "library",
     "media",
     "metadata",
@@ -50,15 +52,45 @@ def test_new_library_query_path_contains_no_textual_sql() -> None:
 def test_capability_repositories_do_not_own_transactions() -> None:
     for root in (APP_ROOT / "modules").glob("*/infrastructure"):
         for path in root.glob("*.py"):
+            if path.name == "uow.py":
+                continue
             source = path.read_text(encoding="utf-8")
             assert ".commit(" not in source, path.name
             assert ".rollback(" not in source, path.name
 
 
-def test_reader_v2_route_does_not_import_compat_privately() -> None:
-    source = (APP_ROOT / "api" / "routes" / "reader_v2.py").read_text(encoding="utf-8")
-    assert "from app.api.routes.compat" not in source
-    assert "import compat" not in source
+def test_legacy_route_package_has_been_removed() -> None:
+    assert not (APP_ROOT / "api" / "routes").exists()
+
+
+def test_api_router_registers_capability_presentations_only() -> None:
+    source = (APP_ROOT / "api" / "router.py").read_text(encoding="utf-8")
+    assert "app.api.routes" not in source
+    for capability in ("auth", "kindle", "reader", "system"):
+        assert f"app.modules.{capability}.presentation" in source
+
+
+def test_capability_presentations_do_not_import_legacy_routes_or_infrastructure() -> None:
+    for capability in CAPABILITIES:
+        presentation = APP_ROOT / "modules" / capability / "presentation"
+        if not presentation.exists():
+            continue
+        for path in presentation.rglob("*.py"):
+            source = path.read_text(encoding="utf-8")
+            assert "app.api.routes" not in source, path
+            assert f"app.modules.{capability}.infrastructure" not in source, path
+
+
+def test_migrated_route_schemas_are_capability_owned() -> None:
+    retired = (
+        "auth.py",
+        "auth_responses.py",
+        "user_responses.py",
+        "kindle_responses.py",
+        "reader_v2.py",
+    )
+    for filename in retired:
+        assert not (APP_ROOT / "schemas" / filename).exists(), filename
 
 
 def test_reader_presentation_does_not_import_compat_or_infrastructure() -> None:
@@ -69,21 +101,9 @@ def test_reader_presentation_does_not_import_compat_or_infrastructure() -> None:
         assert ".infrastructure" not in source, path.name
 
 
-def test_compat_does_not_define_reader_progress_helpers() -> None:
-    source = (APP_ROOT / "api" / "routes" / "compat.py").read_text(encoding="utf-8")
-    forbidden = (
-        "def _progress_navigation(",
-        "def _progress_percent_with_navigation(",
-        "def _raw_progress_percent(",
-        "def _reader_v1_retired(",
-        '@router.get("/reader/preferences"',
-        '@router.get("/editions/{edition_id}/progress"',
-    )
-    for token in forbidden:
-        assert token not in source, token
-
-
-def test_system_and_metadata_presentation_do_not_import_compat_or_infrastructure() -> None:
+def test_system_and_metadata_presentation_do_not_import_compat_or_infrastructure() -> (
+    None
+):
     for capability in ("system", "metadata"):
         presentation = APP_ROOT / "modules" / capability / "presentation"
         if not presentation.exists():
@@ -92,27 +112,6 @@ def test_system_and_metadata_presentation_do_not_import_compat_or_infrastructure
             source = path.read_text(encoding="utf-8")
             assert "from app.api.routes.compat" not in source, path.name
             assert ".infrastructure" not in source, path.name
-
-
-def test_compat_no_longer_owns_system_settings_or_events_routes() -> None:
-    source = (APP_ROOT / "api" / "routes" / "compat.py").read_text(encoding="utf-8")
-    forbidden = (
-        '@router.get("/app-config")',
-        '@router.get("/system-settings")',
-        '@router.get("/management/events")',
-        '@router.get("/dashboard/system-status")',
-        '@router.get("/metadata/providers")',
-        '@router.get("/backups")\n',
-        "def _public_system_settings(",
-        "def _normalize_detail_tab_order(",
-        '@router.get("/monitor-folders")',
-        "def list_import_tasks(",
-        "def get_import_task(",
-        "def _import_task_view(",
-        "def _monitor_directory_tree_node(",
-    )
-    for token in forbidden:
-        assert token not in source, repr(token)
 
 
 def test_imports_presentation_does_not_import_compat_or_infrastructure() -> None:
@@ -128,9 +127,9 @@ def test_imports_presentation_does_not_import_compat_or_infrastructure() -> None
 
 
 def test_media_get_routes_do_not_commit_database_transactions() -> None:
-    source = (
-        APP_ROOT / "modules" / "media" / "presentation" / "http.py"
-    ).read_text(encoding="utf-8")
+    source = (APP_ROOT / "modules" / "media" / "presentation" / "http.py").read_text(
+        encoding="utf-8"
+    )
     assert "db.commit(" not in source
     assert "db.rollback(" not in source
 
@@ -143,20 +142,6 @@ def test_media_presentation_does_not_import_compat_or_infrastructure() -> None:
         assert ".infrastructure" not in source, path.name
 
 
-def test_compat_no_longer_owns_media_file_routes() -> None:
-    source = (APP_ROOT / "api" / "routes" / "compat.py").read_text(encoding="utf-8")
-    forbidden = (
-        '@router.get("/files/{file_id}")',
-        '@router.get("/volumes/{volume_id}/pages")',
-        '@router.get("/metadata/cover-proxy")',
-        "def _send_file(",
-        "def _file_response(",
-        "def _stored_path(",
-    )
-    for token in forbidden:
-        assert token not in source, repr(token)
-
-
 def test_library_presentation_does_not_import_compat_or_infrastructure() -> None:
     presentation = APP_ROOT / "modules" / "library" / "presentation"
     for path in presentation.rglob("*.py"):
@@ -165,23 +150,9 @@ def test_library_presentation_does_not_import_compat_or_infrastructure() -> None
         assert ".infrastructure" not in source, path.name
 
 
-def test_compat_no_longer_owns_library_catalog_routes() -> None:
-    source = (APP_ROOT / "api" / "routes" / "compat.py").read_text(encoding="utf-8")
-    forbidden = (
-        '@router.get("/dashboard/summary")',
-        '@router.get("/works")',
-        '@router.get("/library/facets")',
-        '@router.get("/series")',
-        '@router.get("/management/overview")',
-        "def _work_view(",
-        "def _cover_url(",
-        "def _management_work_views(",
-    )
-    for token in forbidden:
-        assert token not in source, repr(token)
-
-
-def test_download_shelf_organize_presentation_do_not_import_compat_or_infrastructure() -> None:
+def test_download_shelf_organize_presentation_do_not_import_compat_or_infrastructure() -> (
+    None
+):
     for capability in ("download", "shelf", "organize"):
         presentation = APP_ROOT / "modules" / capability / "presentation"
         assert presentation.exists(), capability
@@ -189,27 +160,6 @@ def test_download_shelf_organize_presentation_do_not_import_compat_or_infrastruc
             source = path.read_text(encoding="utf-8")
             assert "from app.api.routes.compat" not in source, path.name
             assert ".infrastructure" not in source, path.name
-
-
-def test_compat_router_is_empty_after_capability_migration() -> None:
-    source = (APP_ROOT / "api" / "routes" / "compat.py").read_text(encoding="utf-8")
-    forbidden = (
-        '@router.get(',
-        '@router.post(',
-        '@router.put(',
-        '@router.patch(',
-        '@router.delete(',
-        '@router.head(',
-        '@router.get("/sources")',
-        '@router.get("/download-tasks")',
-        '@router.get("/shelves")',
-        '@router.get("/organize/policy")',
-        '@router.post("/works/import")',
-        '@router.get("/tracking/release-title-parser")',
-        '@router.get("/backups/{backup_id}/download")',
-    )
-    for token in forbidden:
-        assert token not in source, repr(token)
 
 
 def test_media_page_index_contains_no_textual_sql() -> None:
@@ -304,47 +254,14 @@ def test_compatibility_composition_adapter_has_been_removed() -> None:
 
 def test_queue_heartbeat_does_not_change_busy_timeout_at_runtime() -> None:
     source = (
-        APP_ROOT
-        / "modules"
-        / "system"
-        / "infrastructure"
-        / "queue_runtime.py"
+        APP_ROOT / "modules" / "system" / "infrastructure" / "queue_runtime.py"
     ).read_text(encoding="utf-8")
     assert "PRAGMA" not in source
     assert "_set_busy_timeout" not in source
 
 
-def test_compat_route_has_no_legacy_database_bridge() -> None:
-    source = (APP_ROOT / "api" / "routes" / "compat.py").read_text(encoding="utf-8")
-    assert ".infrastructure" not in source
-    forbidden = (
-        "def _row(",
-        "def _rows(",
-        "def _scalar(",
-        "def _table_count(",
-        "def _insert(",
-        "def _update(",
-        "def _update_where(",
-        "def _delete(",
-        "def _list_table_response(",
-        "select_compat",
-        "SELECT ",
-        "INSERT ",
-        "UPDATE ",
-        "DELETE ",
-    )
-    for token in forbidden:
-        assert token not in source, token
-
-
 def test_select_compat_adapter_has_been_removed() -> None:
-    path = (
-        APP_ROOT
-        / "modules"
-        / "library"
-        / "infrastructure"
-        / "select_compat.py"
-    )
+    path = APP_ROOT / "modules" / "library" / "infrastructure" / "select_compat.py"
     assert not path.exists()
 
 
@@ -352,6 +269,7 @@ def test_import_legacy_persistence_and_schema_adapters_have_been_removed() -> No
     infrastructure = APP_ROOT / "modules" / "imports" / "infrastructure"
     assert not (infrastructure / "legacy_persistence.py").exists()
     assert not (infrastructure / "schema.py").exists()
+    assert not (infrastructure / "import_records.py").exists()
 
     roots = (
         APP_ROOT / "modules" / "imports",
@@ -361,6 +279,7 @@ def test_import_legacy_persistence_and_schema_adapters_have_been_removed() -> No
     )
     forbidden = (
         "legacy_persistence",
+        "import_records",
         "TABLE_MODELS",
         "model_for_table",
         "mapped_table(",
@@ -373,13 +292,85 @@ def test_import_legacy_persistence_and_schema_adapters_have_been_removed() -> No
                 assert token not in source, f"{path}: {token}"
 
 
+def test_persistent_import_worker_does_not_touch_session_orm_or_field_dicts() -> None:
+    path = APP_ROOT / "worker" / "persistent_import_queue.py"
+    source = path.read_text(encoding="utf-8")
+    forbidden = (
+        "sqlalchemy",
+        "from sqlalchemy",
+        "orm.Session",
+        "dict[str, Any]",
+        "task_repository",
+        "library_repository",
+        "import_records",
+        ".infrastructure",
+    )
+    for token in forbidden:
+        assert token not in source, f"{path.name}: {token}"
+
+
+def test_worker_importer_compatibility_shim_has_been_removed() -> None:
+    path = APP_ROOT / "worker" / "importer.py"
+    assert not path.exists()
+
+
+def test_import_application_has_no_framework_or_concrete_adapter_dependencies() -> None:
+    application = APP_ROOT / "modules" / "imports" / "application"
+    forbidden = (
+        "from sqlalchemy",
+        "import sqlalchemy",
+        "from fastapi",
+        "import fastapi",
+        "from PIL",
+        "app.core.config",
+        "app.services",
+        ".infrastructure",
+    )
+    for path in application.rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        for token in forbidden:
+            assert token not in source, f"{path.name}: {token}"
+
+
+def test_import_legacy_query_and_task_compatibility_are_removed() -> None:
+    infrastructure = APP_ROOT / "modules" / "imports" / "infrastructure"
+    assert not (infrastructure / "library_query_gateway.py").exists()
+
+    query_port = (
+        APP_ROOT / "modules" / "imports" / "application" / "query_ports.py"
+    ).read_text(encoding="utf-8")
+    assert "__getattr__" not in query_port
+    assert "Callable[..., Any]" not in query_port
+
+    dto = (APP_ROOT / "modules" / "imports" / "application" / "dto.py").read_text(
+        encoding="utf-8"
+    )
+    for token in ("to_legacy_dict", "def __getitem__", "def get("):
+        assert token not in dto
+
+    bootstrap = (APP_ROOT / "bootstrap" / "imports.py").read_text(encoding="utf-8")
+    assert "_coerce_import_task" not in bootstrap
+    assert "ImportTaskDTO | dict" not in bootstrap
+
+
+def test_persistent_import_worker_does_not_reexport_commands() -> None:
+    source = (
+        APP_ROOT / "worker" / "persistent_import_queue.py"
+    ).read_text(encoding="utf-8")
+    for command in (
+        "claim_next_import_task",
+        "enqueue_import_task",
+        "fail_claimed_import_task",
+        "process_import_task",
+        "recover_stale_import_tasks",
+        "stage_import_task",
+    ):
+        assert command not in source
+
+
 def test_retired_source_http_persistence_has_been_removed() -> None:
     assert not (
-        APP_ROOT
-        / "modules"
-        / "metadata"
-        / "infrastructure"
-        / "sources_http.py"
+        APP_ROOT / "modules" / "metadata" / "infrastructure" / "sources_http.py"
     ).exists()
 
 

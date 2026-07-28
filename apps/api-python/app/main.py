@@ -5,6 +5,13 @@ from fastapi import FastAPI
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.router import api_router
+from fastapi.exceptions import RequestValidationError
+
+from app.api.error_handlers import (
+    request_validation_error_handler,
+    typed_http_error_handler,
+)
+from app.contracts.http_errors import HttpContractError
 from app.core.auth import get_current_user
 from app.core.authorization import can_manage_system
 from app.core.config import Settings, get_settings
@@ -110,6 +117,8 @@ def create_app(settings_override: Settings | None = None, session_factory: Calla
             log_maintenance_worker.stop()
 
     app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
+    app.add_exception_handler(HttpContractError, typed_http_error_handler)
+    app.add_exception_handler(RequestValidationError, request_validation_error_handler)
     app.state.session_factory = runtime_factory
     app.state.close_factory_sessions = True
 

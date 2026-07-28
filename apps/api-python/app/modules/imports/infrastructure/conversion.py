@@ -8,7 +8,9 @@ from sqlalchemy import insert, update
 from sqlalchemy.orm import Session
 
 from app.models.import_pipeline import BookConversionTask, ImportTask
-from app.modules.imports.infrastructure.library_queries import get_conversion_by_import_task_id
+from app.modules.imports.infrastructure.library_queries import (
+    get_conversion_by_import_task_id,
+)
 
 
 def get_conversion_row(db: Session, import_task_id: str) -> dict[str, Any] | None:
@@ -30,7 +32,12 @@ def update_conversion_stage(
         .where(ImportTask.id == import_task_id)
         .values(status="PARSING", progress=progress, message=message, updated_at=now)
     )
-    values = {"status": status, "progress": progress, "updatedAt": now, **(conversion_values or {})}
+    values = {
+        "status": status,
+        "progress": progress,
+        "updatedAt": now,
+        **(conversion_values or {}),
+    }
     db.execute(
         update(BookConversionTask.__table__)
         .where(BookConversionTask.import_task_id == import_task_id)

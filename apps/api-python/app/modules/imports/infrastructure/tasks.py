@@ -27,16 +27,24 @@ def find_existing_import_task(
     *,
     allow_terminal_requeue: bool,
 ) -> dict[str, Any] | None:
-    statuses = ("PENDING", "PARSING") if allow_terminal_requeue else ("PENDING", "PARSING", "COMPLETED", "FAILED")
-    row = db.execute(
-        select(ImportTask.__table__)
-        .where(
-            ImportTask.source_path == source_path,
-            ImportTask.status.in_(statuses),
+    statuses = (
+        ("PENDING", "PARSING")
+        if allow_terminal_requeue
+        else ("PENDING", "PARSING", "COMPLETED", "FAILED")
+    )
+    row = (
+        db.execute(
+            select(ImportTask.__table__)
+            .where(
+                ImportTask.source_path == source_path,
+                ImportTask.status.in_(statuses),
+            )
+            .order_by(cast(ImportTask.created_at, Integer).desc(), ImportTask.id.desc())
+            .limit(1)
         )
-        .order_by(cast(ImportTask.created_at, Integer).desc(), ImportTask.id.desc())
-        .limit(1)
-    ).mappings().first()
+        .mappings()
+        .first()
+    )
     return dict(row) if row else None
 
 
@@ -133,12 +141,16 @@ def claim_next_import_task(
     now: Any,
 ) -> dict[str, Any] | None:
     lease_expires = now + lease_seconds * 1000
-    pending_row = db.execute(
-        select(ImportTask.__table__)
-        .where(ImportTask.status == "PENDING")
-        .order_by(cast(ImportTask.created_at, Integer).asc(), ImportTask.id.asc())
-        .limit(1)
-    ).mappings().first()
+    pending_row = (
+        db.execute(
+            select(ImportTask.__table__)
+            .where(ImportTask.status == "PENDING")
+            .order_by(cast(ImportTask.created_at, Integer).asc(), ImportTask.id.asc())
+            .limit(1)
+        )
+        .mappings()
+        .first()
+    )
     pending = dict(pending_row) if pending_row else None
     if pending is None:
         return None
@@ -162,7 +174,7 @@ def claim_next_import_task(
 
 def fail_claimed_import_task_row(
     db: Session,
-    task: dict[str, Any],
+    task_id: str,
     *,
     error_code: str,
     error_summary: str,
@@ -186,7 +198,7 @@ def fail_claimed_import_task_row(
     result = db.execute(
         update(table)
         .where(
-            table.c.id == task["id"],
+            table.c.id == task_id,
             table.c.status.in_(("PENDING", "PARSING")),
         )
         .values(values)
@@ -194,7 +206,7 @@ def fail_claimed_import_task_row(
     if result.rowcount:
         fail_import_assets_for_task(
             db,
-            task_id=str(task["id"]),
+            task_id=task_id,
             error_code=error_code,
             error_summary=error_summary,
             updated_at=now,

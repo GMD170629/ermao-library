@@ -14,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
+from app.api.typed_route import TypedContractRoute
 from app.bootstrap.imports import import_http_store
 from app.bootstrap.system import get_setting, record_system_event
 from app.core.authorization import authorization_context, can_access_monitor_folder
@@ -21,6 +22,16 @@ from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
 from app.modules.imports.presentation.writes import router as writes_router
+from app.modules.imports.presentation.schemas import (
+    DeletedMonitorFolderResponse,
+    MonitorDirectoryResponse,
+    MonitorFolderResponse,
+    MonitorFoldersResponse,
+    ParsedReleaseTitleResponse,
+    ImportLogsResponse,
+    ImportTaskResponse,
+    ImportTasksResponse,
+)
 from app.modules.imports.presentation.mappers import (
     import_task_view,
     monitor_directory_tree_node,
@@ -32,7 +43,7 @@ from app.modules.imports.public import (
 )
 from app.schemas.responses import fail, ok
 
-router = APIRouter(tags=["imports"])
+router = APIRouter(tags=["imports"], route_class=TypedContractRoute)
 router.include_router(writes_router)
 
 
@@ -40,7 +51,9 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _auth(db: Session, request: Request, settings: Settings) -> tuple[User | None, Response | None]:
+def _auth(
+    db: Session, request: Request, settings: Settings
+) -> tuple[User | None, Response | None]:
     return require_user(db, request, settings)
 
 
@@ -49,9 +62,13 @@ def _system_setting_value(db: Session, key: str) -> str | None:
     return str(parsed).strip() if parsed is not None and str(parsed).strip() else None
 
 
-def _visible_import_task_or_none(db: Session, user: User, task_id: str) -> dict[str, Any] | None:
+def _visible_import_task_or_none(
+    db: Session, user: User, task_id: str
+) -> dict[str, Any] | None:
     task = import_http_store.get_import_task(db, task_id)
-    if task is None or not can_access_monitor_folder(db, user, task.get("monitorFolderId")):
+    if task is None or not can_access_monitor_folder(
+        db, user, task.get("monitorFolderId")
+    ):
         return None
     return task
 
@@ -61,7 +78,7 @@ def list_monitor_folders(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
+) -> MonitorFoldersResponse:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -69,9 +86,15 @@ def list_monitor_folders(
     return ok(
         {
             "folders": folders,
-            "monitorRoot": str(settings.resolved_monitor_root.resolve()) if settings.resolved_monitor_root else None,
-            "lastUploadTargetPath": _system_setting_value(db, "library.lastUploadTargetPath"),
-            "lastDownloadTargetPath": _system_setting_value(db, "library.lastDownloadTargetPath"),
+            "monitorRoot": str(settings.resolved_monitor_root.resolve())
+            if settings.resolved_monitor_root
+            else None,
+            "lastUploadTargetPath": _system_setting_value(
+                db, "library.lastUploadTargetPath"
+            ),
+            "lastDownloadTargetPath": _system_setting_value(
+                db, "library.lastDownloadTargetPath"
+            ),
         }
     )
 
@@ -82,7 +105,7 @@ def monitor_folder_tree(
     path: str | None = None,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
+) -> MonitorDirectoryResponse:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -92,7 +115,9 @@ def monitor_folder_tree(
     return ok(
         {
             "node": node,
-            "monitorRoot": str(settings.resolved_monitor_root.resolve()) if settings.resolved_monitor_root else None,
+            "monitorRoot": str(settings.resolved_monitor_root.resolve())
+            if settings.resolved_monitor_root
+            else None,
         }
     )
 
@@ -102,7 +127,7 @@ async def create_monitor_folder(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
+) -> MonitorFolderResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -111,7 +136,9 @@ async def create_monitor_folder(
     if not root_path:
         return fail("请填写监控文件夹路径", status_code=400)
     if import_http_store.get_monitor_folder_by_root_path(db, root_path):
-        return fail("监控文件夹路径已存在", status_code=409, details={"rootPath": root_path})
+        return fail(
+            "监控文件夹路径已存在", status_code=409, details={"rootPath": root_path}
+        )
     if payload.get("shelfId"):
         return fail(
             "监控文件夹不再绑定全局书架，请创建个人来源文件夹智能书架",
@@ -120,7 +147,9 @@ async def create_monitor_folder(
         )
     raw_min_file_size = payload.get("minFileSizeBytes")
     try:
-        min_file_size_bytes = int(10240 if raw_min_file_size is None else raw_min_file_size)
+        min_file_size_bytes = int(
+            10240 if raw_min_file_size is None else raw_min_file_size
+        )
     except (TypeError, ValueError):
         return fail("最小文件大小必须是非负整数", status_code=400)
     if min_file_size_bytes < 0:
@@ -144,7 +173,9 @@ async def create_monitor_folder(
         )
     except IntegrityError:
         reset_failed_import_checkpoint(db)
-        return fail("监控文件夹路径已存在", status_code=409, details={"rootPath": root_path})
+        return fail(
+            "监控文件夹路径已存在", status_code=409, details={"rootPath": root_path}
+        )
     record_system_event(
         db,
         level="info",
@@ -169,7 +200,7 @@ async def update_monitor_folder(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
+) -> MonitorFolderResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -197,8 +228,12 @@ async def update_monitor_folder(
         root_path = normalize_monitor_root_path(values["rootPath"])
         if not root_path:
             return fail("请填写监控文件夹路径", status_code=400)
-        if import_http_store.get_monitor_folder_by_root_path(db, root_path, exclude_id=folder_id):
-            return fail("监控文件夹路径已存在", status_code=409, details={"rootPath": root_path})
+        if import_http_store.get_monitor_folder_by_root_path(
+            db, root_path, exclude_id=folder_id
+        ):
+            return fail(
+                "监控文件夹路径已存在", status_code=409, details={"rootPath": root_path}
+            )
         values["rootPath"] = root_path
     if "minFileSizeBytes" in values:
         try:
@@ -213,7 +248,11 @@ async def update_monitor_folder(
         folder = import_http_store.update_monitor_folder(db, folder_id, values)
     except IntegrityError:
         reset_failed_import_checkpoint(db)
-        return fail("监控文件夹路径已存在", status_code=409, details={"rootPath": values.get("rootPath")})
+        return fail(
+            "监控文件夹路径已存在",
+            status_code=409,
+            details={"rootPath": values.get("rootPath")},
+        )
     if values:
         record_system_event(
             db,
@@ -225,7 +264,10 @@ async def update_monitor_folder(
             target_type="monitorFolder",
             target_id=folder_id,
             message=f"更新来源目录：{(folder or existing).get('name')}",
-            metadata={"changes": values, "rootPath": (folder or existing).get("rootPath")},
+            metadata={
+                "changes": values,
+                "rootPath": (folder or existing).get("rootPath"),
+            },
             commit=True,
             prune=True,
         )
@@ -238,12 +280,14 @@ def delete_monitor_folder(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
+) -> DeletedMonitorFolderResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     existing = import_http_store.get_monitor_folder(db, folder_id)
-    deleted, affected_user_ids = import_http_store.delete_monitor_folder(db, folder_id, updated_at=_now())
+    deleted, affected_user_ids = import_http_store.delete_monitor_folder(
+        db, folder_id, updated_at=_now()
+    )
     if deleted:
         record_system_event(
             db,
@@ -274,7 +318,7 @@ def list_import_tasks(
     keyword: str | None = None,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
+) -> ImportTasksResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -314,7 +358,7 @@ def get_import_task(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
+) -> ImportTaskResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -333,7 +377,7 @@ def get_import_logs(
     level: str | None = None,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
+) -> ImportLogsResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -359,23 +403,58 @@ def get_import_logs(
             "totalPages": max(1, (total + page_size - 1) // page_size),
         }
     )
+
+
 @router.get("/tracking/release-title-parser")
-def release_title_parser_get(request: Request, title: str = "", db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def release_title_parser_get(
+    request: Request,
+    title: str = "",
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> ParsedReleaseTitleResponse:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     volume_info = parse_release_title(title)
-    chapter = re.search(r"(?:ch(?:apter)?\.?|第)\s*(\d+(?:\.\d+)?)\s*(?:话|章|ch)?", title, flags=re.IGNORECASE)
-    return ok({"parsed": {"title": title, "volume": volume_info.series_index if volume_info else None, "chapter": float(chapter.group(1)) if chapter else None}})
+    chapter = re.search(
+        r"(?:ch(?:apter)?\.?|第)\s*(\d+(?:\.\d+)?)\s*(?:话|章|ch)?",
+        title,
+        flags=re.IGNORECASE,
+    )
+    return ok(
+        {
+            "parsed": {
+                "title": title,
+                "volume": volume_info.series_index if volume_info else None,
+                "chapter": float(chapter.group(1)) if chapter else None,
+            }
+        }
+    )
 
 
 @router.post("/tracking/release-title-parser")
-async def release_title_parser(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+async def release_title_parser(
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> ParsedReleaseTitleResponse:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     payload = await request.json()
     title = str(payload.get("title") or "")
     volume_info = parse_release_title(title)
-    chapter = re.search(r"(?:ch(?:apter)?\.?|第)\s*(\d+(?:\.\d+)?)\s*(?:话|章|ch)?", title, flags=re.IGNORECASE)
-    return ok({"parsed": {"title": title, "volume": volume_info.series_index if volume_info else None, "chapter": float(chapter.group(1)) if chapter else None}})
+    chapter = re.search(
+        r"(?:ch(?:apter)?\.?|第)\s*(\d+(?:\.\d+)?)\s*(?:话|章|ch)?",
+        title,
+        flags=re.IGNORECASE,
+    )
+    return ok(
+        {
+            "parsed": {
+                "title": title,
+                "volume": volume_info.series_index if volume_info else None,
+                "chapter": float(chapter.group(1)) if chapter else None,
+            }
+        }
+    )

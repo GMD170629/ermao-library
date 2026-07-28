@@ -22,7 +22,11 @@ sys.path.insert(0, str(API_ROOT))
 from app.core.config import Settings  # noqa: E402
 from app.db.bootstrap import bootstrap_database  # noqa: E402
 from app.db.sqlite import create_sqlite_engine  # noqa: E402
-from app.worker.importer import ImportOptions, import_managed_book  # noqa: E402
+from app.bootstrap.imports import (  # noqa: E402
+    claim_next_import_task,
+    enqueue_import_task,
+    process_import_task,
+)
 from tests.test_worker_importer import write_comic_fixture, write_epub_fixture, write_pdf_fixture  # noqa: E402
 
 SUPPORTED_EXTS = {".epub", ".pdf", ".cbz", ".zip"}
@@ -64,7 +68,15 @@ def import_sample(path: Path, settings: Settings) -> dict:
     engine = create_sqlite_engine(settings.database_path)
     try:
         with Session(engine) as db:
-            result = import_managed_book(db, settings, ImportOptions(source_file_path=path, original_name=path.name, origin="MANUAL"))
+            enqueue_import_task(
+                db,
+                path,
+                origin="MANUAL",
+                original_name=path.name,
+            )
+            task = claim_next_import_task(db, "sample-smoke", 900)
+            assert task is not None
+            result = process_import_task(db, settings, task)
         return {
             "editionId": result.edition_id,
             "volumeId": result.volume_id,

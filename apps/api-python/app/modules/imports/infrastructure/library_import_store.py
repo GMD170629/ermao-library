@@ -1,0 +1,214 @@
+"""Named ORM writes for import media persistence.
+
+Replaces the transitional model-CRUD helper. Call sites pass
+explicit column maps built at the application boundary; this adapter never owns
+transactions.
+"""
+
+from __future__ import annotations
+
+from sqlalchemy import delete, insert, select, update
+from sqlalchemy.orm import Session
+
+from app.models.import_pipeline import ImportAsset, ImportLog, ImportTask
+from app.models.library import (
+    LibraryConsumptionState,
+    LibraryEdition,
+    LibraryFile,
+    LibraryMetadata,
+    LibraryReadingProgress,
+    LibraryReadingUnit,
+    LibraryVolume,
+    LibraryWork,
+)
+from app.models.organize import MetadataLookupTask, OrganizeJob
+
+
+class SqlAlchemyLibraryImportStore:
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def insert_import_task(self, *, columns: dict[str, object]) -> dict[str, object]:
+        self._db.execute(insert(ImportTask.__table__).values(columns))
+        self._db.flush()
+        return dict(columns)
+
+    def update_import_task(self, task_id: str, *, columns: dict[str, object]) -> None:
+        if not columns:
+            return
+        self._db.execute(
+            update(ImportTask.__table__).where(ImportTask.id == task_id).values(columns)
+        )
+
+    def insert_import_asset(self, *, columns: dict[str, object]) -> dict[str, object]:
+        self._db.execute(insert(ImportAsset.__table__).values(columns))
+        self._db.flush()
+        return dict(columns)
+
+    def update_import_asset(self, asset_id: str, *, columns: dict[str, object]) -> None:
+        self._db.execute(
+            update(ImportAsset.__table__)
+            .where(ImportAsset.id == asset_id)
+            .values(columns)
+        )
+
+    def insert_import_log(self, *, columns: dict[str, object]) -> dict[str, object]:
+        self._db.execute(insert(ImportLog.__table__).values(columns))
+        self._db.flush()
+        return dict(columns)
+
+    def insert_library_work(self, *, columns: dict[str, object]) -> dict[str, object]:
+        self._db.execute(insert(LibraryWork.__table__).values(columns))
+        self._db.flush()
+        return dict(columns)
+
+    def update_library_work(self, work_id: str, *, columns: dict[str, object]) -> None:
+        self._db.execute(
+            update(LibraryWork.__table__)
+            .where(LibraryWork.id == work_id)
+            .values(columns)
+        )
+
+    def insert_library_edition(
+        self, *, columns: dict[str, object]
+    ) -> dict[str, object]:
+        self._db.execute(insert(LibraryEdition.__table__).values(columns))
+        self._db.flush()
+        return dict(columns)
+
+    def update_library_edition(
+        self, edition_id: str, *, columns: dict[str, object]
+    ) -> None:
+        self._db.execute(
+            update(LibraryEdition.__table__)
+            .where(LibraryEdition.id == edition_id)
+            .values(columns)
+        )
+
+    def insert_library_volume(self, *, columns: dict[str, object]) -> dict[str, object]:
+        self._db.execute(insert(LibraryVolume.__table__).values(columns))
+        self._db.flush()
+        return dict(columns)
+
+    def update_library_volume(
+        self, volume_id: str, *, columns: dict[str, object]
+    ) -> None:
+        self._db.execute(
+            update(LibraryVolume.__table__)
+            .where(LibraryVolume.id == volume_id)
+            .values(columns)
+        )
+
+    def insert_library_file(self, *, columns: dict[str, object]) -> dict[str, object]:
+        self._db.execute(insert(LibraryFile.__table__).values(columns))
+        self._db.flush()
+        return dict(columns)
+
+    def update_library_file(self, file_id: str, *, columns: dict[str, object]) -> None:
+        self._db.execute(
+            update(LibraryFile.__table__)
+            .where(LibraryFile.id == file_id)
+            .values(columns)
+        )
+
+    def get_library_file(self, file_id: str) -> dict[str, object] | None:
+        row = (
+            self._db.execute(
+                select(LibraryFile.__table__).where(LibraryFile.id == file_id)
+            )
+            .mappings()
+            .first()
+        )
+        return dict(row) if row else None
+
+    def insert_library_reading_unit(
+        self, *, columns: dict[str, object]
+    ) -> dict[str, object]:
+        self._db.execute(insert(LibraryReadingUnit.__table__).values(columns))
+        self._db.flush()
+        return dict(columns)
+
+    def update_library_reading_unit(
+        self, unit_id: str, *, columns: dict[str, object]
+    ) -> None:
+        self._db.execute(
+            update(LibraryReadingUnit.__table__)
+            .where(LibraryReadingUnit.id == unit_id)
+            .values(columns)
+        )
+
+    def get_library_reading_unit(self, unit_id: str) -> dict[str, object] | None:
+        row = (
+            self._db.execute(
+                select(LibraryReadingUnit.__table__).where(
+                    LibraryReadingUnit.id == unit_id
+                )
+            )
+            .mappings()
+            .first()
+        )
+        return dict(row) if row else None
+
+    def delete_library_reading_unit(self, unit_id: str) -> None:
+        self._db.execute(
+            delete(LibraryReadingUnit).where(LibraryReadingUnit.id == unit_id)
+        )
+
+    def insert_library_metadata(
+        self, *, columns: dict[str, object]
+    ) -> dict[str, object]:
+        self._db.execute(insert(LibraryMetadata.__table__).values(columns))
+        self._db.flush()
+        return dict(columns)
+
+    def update_library_reading_progress(
+        self,
+        progress_id: str,
+        *,
+        columns: dict[str, object],
+    ) -> None:
+        self._db.execute(
+            update(LibraryReadingProgress.__table__)
+            .where(LibraryReadingProgress.id == progress_id)
+            .values(columns)
+        )
+
+    def update_library_consumption_state(
+        self,
+        state_id: str,
+        *,
+        columns: dict[str, object],
+    ) -> None:
+        self._db.execute(
+            update(LibraryConsumptionState.__table__)
+            .where(LibraryConsumptionState.id == state_id)
+            .values(columns)
+        )
+
+    def insert_organize_job(self, *, columns: dict[str, object]) -> dict[str, object]:
+        self._db.execute(insert(OrganizeJob.__table__).values(columns))
+        self._db.flush()
+        return dict(columns)
+
+    def update_organize_job(self, job_id: str, *, columns: dict[str, object]) -> None:
+        self._db.execute(
+            update(OrganizeJob.__table__)
+            .where(OrganizeJob.id == job_id)
+            .values(columns)
+        )
+
+    def insert_metadata_lookup_task(
+        self, *, columns: dict[str, object]
+    ) -> dict[str, object]:
+        self._db.execute(insert(MetadataLookupTask.__table__).values(columns))
+        self._db.flush()
+        return dict(columns)
+
+    def update_metadata_lookup_task(
+        self, task_id: str, *, columns: dict[str, object]
+    ) -> None:
+        self._db.execute(
+            update(MetadataLookupTask.__table__)
+            .where(MetadataLookupTask.id == task_id)
+            .values(columns)
+        )

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import EmailStr, TypeAdapter, ValidationError
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.typed_route import TypedContractRoute
+from app.contracts.http_errors import ErrorResponses
 from app.core.auth import get_current_user, hash_password
 from app.core.authorization import authorization_context, is_admin, read_user_preferences, write_user_preference
 from app.core.config import Settings, get_settings
@@ -22,18 +24,39 @@ from app.bootstrap.auth import (
     replace_monitor_folder_access,
     validate_monitor_folder_ids,
 )
-from app.schemas.auth import (
+from app.modules.auth.presentation.requests import (
     AdminCreateUserRequest,
     AdminDeleteUserRequest,
     AdminSetPasswordRequest,
     AdminUpdateUserRequest,
     UpdateUserPreferencesRequest,
 )
-from app.schemas.responses import fail, ok
+from app.modules.auth.presentation.user_schemas import (
+    AdminPasswordChangedPayload,
+    AdminPasswordChangedResponse,
+    AdminUser,
+    AdminUserPayload,
+    AdminUserResponse,
+    CodedMessageBody,
+    PreferencesPayload,
+    PreferencesResponse,
+    UnsupportedPreferenceBody,
+    UnsupportedPreferenceDetails,
+    UnsupportedPreferenceError,
+    UserBadRequestError,
+    UserConflictError,
+    UserDeletedPayload,
+    UserDeletedResponse,
+    UserForbiddenError,
+    UserNotFoundError,
+    UserUnauthorizedError,
+    UsersPayload,
+    UsersResponse,
+)
 from app.services.system_events import record_system_event
 
-router = APIRouter()
-preferences_router = APIRouter()
+router = APIRouter(route_class=TypedContractRoute)
+preferences_router = APIRouter(route_class=TypedContractRoute)
 EMAIL_ADAPTER = TypeAdapter(EmailStr)
 
 ALLOWED_PREFERENCE_KEYS = {
@@ -48,24 +71,29 @@ def _current_user(
     db: Session,
     request: Request,
     settings: Settings,
-) -> tuple[User | None, Any | None]:
+) -> User:
     user, _token, _refresh = get_current_user(db, request, settings)
     if user is None:
-        return None, fail("UNAUTHORIZED", status_code=401, code="UNAUTHORIZED")
-    return user, None
+        raise UserUnauthorizedError(
+            CodedMessageBody(message="UNAUTHORIZED", code="UNAUTHORIZED")
+        )
+    return user
 
 
 def _admin_user(
     db: Session,
     request: Request,
     settings: Settings,
-) -> tuple[User | None, Any | None]:
-    user, error = _current_user(db, request, settings)
-    if error is not None:
-        return None, error
-    if user is None or not is_admin(user):
-        return None, fail("仅管理员可以管理用户与权限", status_code=403, code="ADMIN_REQUIRED")
-    return user, None
+) -> User:
+    user = _current_user(db, request, settings)
+    if not is_admin(user):
+        raise UserForbiddenError(
+            CodedMessageBody(
+                message="仅管理员可以管理用户与权限",
+                code="ADMIN_REQUIRED",
+            )
+        )
+    return user
 
 
 def _folder_ids(db: Session, user_id: str) -> list[str]:
@@ -162,12 +190,20 @@ def list_users(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
-    _actor, error = _admin_user(db, request, settings)
-    if error is not None:
-        return error
+) -> Annotated[
+    UsersResponse,
+    ErrorResponses(UserUnauthorizedError, UserForbiddenError),
+]:
+    _admin_user(db, request, settings)
     users = db.query(User).order_by(User.created_at.asc(), User.id.asc()).all()
-    return ok({"users": [_user_view(db, user) for user in users]})
+    return UsersResponse(
+        data=UsersPayload(
+            users=[
+                AdminUser.model_validate(_user_view(db, user))
+                for user in users
+            ]
+        )
+    )
 
 
 @router.get("/users/{user_id}")
@@ -176,14 +212,25 @@ def get_user(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
-    _actor, error = _admin_user(db, request, settings)
-    if error is not None:
-        return error
+) -> Annotated[
+    AdminUserResponse,
+    ErrorResponses(
+        UserUnauthorizedError,
+        UserForbiddenError,
+        UserNotFoundError,
+    ),
+]:
+    _admin_user(db, request, settings)
     user = db.get(User, user_id)
     if user is None:
-        return fail("用户不存在", status_code=404, code="USER_NOT_FOUND")
-    return ok({"user": _user_view(db, user)})
+        raise UserNotFoundError(
+            CodedMessageBody(message="用户不存在", code="USER_NOT_FOUND")
+        )
+    return AdminUserResponse(
+        data=AdminUserPayload(
+            user=AdminUser.model_validate(_user_view(db, user))
+        )
+    )
 
 
 @router.post("/users", status_code=201)
@@ -192,17 +239,30 @@ def create_user(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
-    actor, error = _admin_user(db, request, settings)
-    if error is not None:
-        return error
+) -> Annotated[
+    AdminUserResponse,
+    ErrorResponses(
+        UserUnauthorizedError,
+        UserForbiddenError,
+        UserBadRequestError,
+        UserConflictError,
+    ),
+]:
+    actor = _admin_user(db, request, settings)
     email = str(payload.email).strip().lower()
     if db.query(User.id).filter(func.lower(User.email) == email).first() is not None:
-        return fail("该邮箱已被使用", status_code=409, code="EMAIL_IN_USE")
+        raise UserConflictError(
+            CodedMessageBody(message="该邮箱已被使用", code="EMAIL_IN_USE")
+        )
     try:
         folder_ids = [] if payload.role == "admin" else _validate_folder_ids(db, payload.monitor_folder_ids)
     except ValueError as exc:
-        return fail(str(exc), status_code=400, code="INVALID_FOLDER_ACCESS")
+        raise UserBadRequestError(
+            CodedMessageBody(
+                message=str(exc),
+                code="INVALID_FOLDER_ACCESS",
+            )
+        ) from exc
     user = User(
         id=cuid(),
         email=email,
@@ -230,9 +290,16 @@ def create_user(
         db.commit()
     except IntegrityError:
         db.rollback()
-        return fail("该邮箱已被使用", status_code=409, code="EMAIL_IN_USE")
+        raise UserConflictError(
+            CodedMessageBody(message="该邮箱已被使用", code="EMAIL_IN_USE")
+        )
     db.refresh(user)
-    return ok({"user": _user_view(db, user), "createdBy": actor.id if actor else None}, status_code=201)
+    return AdminUserResponse(
+        data=AdminUserPayload(
+            user=AdminUser.model_validate(_user_view(db, user)),
+            createdBy=actor.id,
+        )
+    )
 
 
 @router.patch("/users/{user_id}")
@@ -242,13 +309,22 @@ def update_user(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
-    actor, error = _admin_user(db, request, settings)
-    if error is not None:
-        return error
+) -> Annotated[
+    AdminUserResponse,
+    ErrorResponses(
+        UserUnauthorizedError,
+        UserForbiddenError,
+        UserNotFoundError,
+        UserBadRequestError,
+        UserConflictError,
+    ),
+]:
+    actor = _admin_user(db, request, settings)
     user = db.get(User, user_id)
     if user is None:
-        return fail("用户不存在", status_code=404, code="USER_NOT_FOUND")
+        raise UserNotFoundError(
+            CodedMessageBody(message="用户不存在", code="USER_NOT_FOUND")
+        )
     fields_set = payload.model_fields_set
     next_role = payload.role if "role" in fields_set else user.role
     next_status = payload.status if "status" in fields_set else user.status
@@ -256,14 +332,26 @@ def update_user(
         next_role != "admin" or next_status != "active"
     )
     if actor is not None and actor.id == user.id and removing_active_admin:
-        return fail("不能停用或降级当前登录的管理员", status_code=400, code="CANNOT_CHANGE_SELF_ADMIN")
+        raise UserBadRequestError(
+            CodedMessageBody(
+                message="不能停用或降级当前登录的管理员",
+                code="CANNOT_CHANGE_SELF_ADMIN",
+            )
+        )
     if removing_active_admin and _active_admin_count(db, exclude_user_id=user.id) == 0:
-        return fail("系统必须至少保留一个有效管理员", status_code=409, code="LAST_ADMIN_REQUIRED")
+        raise UserConflictError(
+            CodedMessageBody(
+                message="系统必须至少保留一个有效管理员",
+                code="LAST_ADMIN_REQUIRED",
+            )
+        )
     if "email" in fields_set and payload.email is not None:
         email = str(payload.email).strip().lower()
         duplicate = db.query(User.id).filter(func.lower(User.email) == email, User.id != user.id).first()
         if duplicate is not None:
-            return fail("该邮箱已被使用", status_code=409, code="EMAIL_IN_USE")
+            raise UserConflictError(
+                CodedMessageBody(message="该邮箱已被使用", code="EMAIL_IN_USE")
+            )
         user.email = email
     if "name" in fields_set and payload.name is not None:
         user.name = payload.name
@@ -283,7 +371,12 @@ def update_user(
                 _replace_folder_access(db, user.id, _validate_folder_ids(db, payload.monitor_folder_ids))
             except ValueError as exc:
                 db.rollback()
-                return fail(str(exc), status_code=400, code="INVALID_FOLDER_ACCESS")
+                raise UserBadRequestError(
+                    CodedMessageBody(
+                        message=str(exc),
+                        code="INVALID_FOLDER_ACCESS",
+                    )
+                ) from exc
     if "locale" in fields_set and payload.locale is not None:
         _save_preference(db, user.id, "locale", payload.locale)
     user.authz_version = int(user.authz_version or 1) + 1
@@ -308,9 +401,15 @@ def update_user(
         db.commit()
     except IntegrityError:
         db.rollback()
-        return fail("该邮箱已被使用", status_code=409, code="EMAIL_IN_USE")
+        raise UserConflictError(
+            CodedMessageBody(message="该邮箱已被使用", code="EMAIL_IN_USE")
+        )
     db.refresh(user)
-    return ok({"user": _user_view(db, user)})
+    return AdminUserResponse(
+        data=AdminUserPayload(
+            user=AdminUser.model_validate(_user_view(db, user))
+        )
+    )
 
 
 @router.put("/users/{user_id}/password")
@@ -320,20 +419,27 @@ def set_user_password(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
-    actor, error = _admin_user(db, request, settings)
-    if error is not None:
-        return error
+) -> Annotated[
+    AdminPasswordChangedResponse,
+    ErrorResponses(
+        UserUnauthorizedError,
+        UserForbiddenError,
+        UserNotFoundError,
+    ),
+]:
+    actor = _admin_user(db, request, settings)
     user = db.get(User, user_id)
     if user is None:
-        return fail("用户不存在", status_code=404, code="USER_NOT_FOUND")
+        raise UserNotFoundError(
+            CodedMessageBody(message="用户不存在", code="USER_NOT_FOUND")
+        )
     user.password_hash = hash_password(payload.password)
     user.updated_at = db_timestamp()
     db.add(user)
     db.query(UserSession).filter(UserSession.user_id == user.id).delete(synchronize_session=False)
     _audit_user_change(db, actor, "user.password.reset", user.id, "管理员重置了用户密码并撤销会话")
     db.commit()
-    return ok({"passwordChanged": True, "sessionsRevoked": True})
+    return AdminPasswordChangedResponse(data=AdminPasswordChangedPayload())
 
 
 @router.delete("/users/{user_id}")
@@ -343,19 +449,43 @@ def delete_user(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
-    actor, error = _admin_user(db, request, settings)
-    if error is not None:
-        return error
+) -> Annotated[
+    UserDeletedResponse,
+    ErrorResponses(
+        UserUnauthorizedError,
+        UserForbiddenError,
+        UserNotFoundError,
+        UserBadRequestError,
+        UserConflictError,
+    ),
+]:
+    actor = _admin_user(db, request, settings)
     user = db.get(User, user_id)
     if user is None:
-        return fail("用户不存在", status_code=404, code="USER_NOT_FOUND")
+        raise UserNotFoundError(
+            CodedMessageBody(message="用户不存在", code="USER_NOT_FOUND")
+        )
     if actor is not None and actor.id == user.id:
-        return fail("不能删除当前登录的管理员", status_code=400, code="CANNOT_DELETE_SELF")
+        raise UserBadRequestError(
+            CodedMessageBody(
+                message="不能删除当前登录的管理员",
+                code="CANNOT_DELETE_SELF",
+            )
+        )
     if payload.confirmation.strip().lower() != user.email.lower():
-        return fail("确认邮箱不匹配", status_code=400, code="DELETE_CONFIRMATION_MISMATCH")
+        raise UserBadRequestError(
+            CodedMessageBody(
+                message="确认邮箱不匹配",
+                code="DELETE_CONFIRMATION_MISMATCH",
+            )
+        )
     if user.role == "admin" and user.status == "active" and _active_admin_count(db, exclude_user_id=user.id) == 0:
-        return fail("系统必须至少保留一个有效管理员", status_code=409, code="LAST_ADMIN_REQUIRED")
+        raise UserConflictError(
+            CodedMessageBody(
+                message="系统必须至少保留一个有效管理员",
+                code="LAST_ADMIN_REQUIRED",
+            )
+        )
     deleted_user_id = user.id
     anonymous_target = hashlib.sha256(f"deleted-user:{user.id}".encode("utf-8")).hexdigest()[:24]
     avatar_path = None
@@ -383,7 +513,9 @@ def delete_user(
             avatar_path.parent.rmdir()
         except OSError:
             pass
-    return ok({"deleted": True, "userId": deleted_user_id})
+    return UserDeletedResponse(
+        data=UserDeletedPayload(deleted=True, userId=deleted_user_id)
+    )
 
 
 @preferences_router.get("/preferences")
@@ -391,33 +523,42 @@ def get_preferences(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
-    user, error = _current_user(db, request, settings)
-    if error is not None:
-        return error
+) -> Annotated[
+    PreferencesResponse,
+    ErrorResponses(UserUnauthorizedError),
+]:
+    user = _current_user(db, request, settings)
     preferences = read_user_preferences(db, user.id)
     if preferences.get("locale") not in {"zh-CN", "en-US"}:
         preferences["locale"] = configured_locale(db)
-    return ok({"preferences": preferences})
+    return PreferencesResponse(
+        data=PreferencesPayload.model_validate({"preferences": preferences})
+    )
 
 
 @preferences_router.patch("/preferences")
 def update_preferences(
     payload: UpdateUserPreferencesRequest,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
-    user, error = _current_user(db, request, settings)
-    if error is not None:
-        return error
+) -> Annotated[
+    PreferencesResponse,
+    ErrorResponses(
+        UserUnauthorizedError,
+        UnsupportedPreferenceError,
+        UserBadRequestError,
+    ),
+]:
+    user = _current_user(db, request, settings)
     unsupported = sorted(set(payload.preferences) - ALLOWED_PREFERENCE_KEYS)
     if unsupported:
-        return fail(
-            "包含不支持的用户偏好",
-            status_code=400,
-            code="UNSUPPORTED_USER_PREFERENCE",
-            details={"keys": unsupported},
+        raise UnsupportedPreferenceError(
+            UnsupportedPreferenceBody(
+                message="包含不支持的用户偏好",
+                details=UnsupportedPreferenceDetails(keys=unsupported),
+            )
         )
     try:
         normalized = {
@@ -425,11 +566,15 @@ def update_preferences(
             for key, value in payload.preferences.items()
         }
     except ValueError as exc:
-        return fail(str(exc), status_code=400, code="INVALID_USER_PREFERENCE")
+        raise UserBadRequestError(
+            CodedMessageBody(
+                message=str(exc),
+                code="INVALID_USER_PREFERENCE",
+            )
+        ) from exc
     for key, value in normalized.items():
         _save_preference(db, user.id, key, value)
     db.commit()
-    response = ok({"preferences": read_user_preferences(db, user.id)})
     locale = normalized.get("locale")
     if isinstance(locale, str):
         response.set_cookie(
@@ -440,4 +585,9 @@ def update_preferences(
             samesite="lax",
             secure=settings.secure_cookies,
         )
-    return response
+    preferences = read_user_preferences(db, user.id)
+    if preferences.get("locale") not in {"zh-CN", "en-US"}:
+        preferences["locale"] = configured_locale(db)
+    return PreferencesResponse(
+        data=PreferencesPayload.model_validate({"preferences": preferences})
+    )

@@ -1,5 +1,8 @@
 import re
+from collections import Counter
 from pathlib import Path
+
+from fastapi.routing import APIRoute
 
 from app.main import create_app
 
@@ -38,3 +41,54 @@ def test_python_api_covers_next_api_route_contracts():
 
     missing = sorted(expected - actual)
     assert missing == []
+
+
+def test_registered_api_endpoints_are_owned_by_capability_presentations() -> None:
+    app = create_app()
+    api_routes = [
+        route
+        for route in app.routes
+        if isinstance(route, APIRoute) and route.path.startswith("/api")
+    ]
+
+    assert len(api_routes) == 178
+    legacy = [
+        (next(iter(route.methods or ())), route.path, route.endpoint.__module__)
+        for route in api_routes
+        if route.endpoint.__module__.startswith("app.api.routes")
+    ]
+    assert legacy == []
+
+
+def test_migrated_endpoint_sources_match_capability_ownership() -> None:
+    app = create_app()
+    migrated_modules = {
+        "app.modules.auth.presentation.http": 14,
+        "app.modules.auth.presentation.users": 8,
+        "app.modules.kindle.presentation.http": 10,
+        "app.modules.reader.presentation.v2": 6,
+        "app.modules.system.presentation.health": 10,
+    }
+    counts = Counter(
+        route.endpoint.__module__
+        for route in app.routes
+        if isinstance(route, APIRoute)
+        and route.endpoint.__module__ in migrated_modules
+    )
+
+    assert counts == migrated_modules
+    assert sum(counts.values()) == 48
+
+
+def test_registered_api_method_path_pairs_are_unique() -> None:
+    app = create_app()
+    pairs = [
+        (method, route.path)
+        for route in app.routes
+        if isinstance(route, APIRoute) and route.path.startswith("/api")
+        for method in route.methods or ()
+        if method in HTTP_METHODS
+    ]
+
+    assert len(pairs) == 177
+    assert len(pairs) == len(set(pairs))

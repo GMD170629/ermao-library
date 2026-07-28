@@ -12,6 +12,7 @@ from pydantic import EmailStr, TypeAdapter, ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.typed_route import TypedContractRoute
 from app.core.auth import get_current_user
 from app.core.authorization import can_access_file, read_user_preferences, write_user_preference
 from app.core.config import Settings, get_settings
@@ -30,6 +31,14 @@ from app.bootstrap.kindle import (
     retry_kindle_task,
 )
 from app.schemas.responses import fail, ok
+from app.modules.kindle.presentation.schemas import (
+    DeletedKindleTaskResponse,
+    EmailSettingsResponse,
+    KindleSettingsResponse,
+    KindleTaskResponse,
+    KindleTasksResponse,
+    SmtpTestResponse,
+)
 from app.services.email_settings import (
     EmailSettingsError,
     candidate_email_settings,
@@ -43,7 +52,7 @@ from app.services.kindle_queue import SUPPORTED_EXTENSIONS, SUPPORTED_FORMATS, T
 from app.services.system_events import record_system_event
 
 
-router = APIRouter()
+router = APIRouter(route_class=TypedContractRoute)
 EMAIL_ADAPTER = TypeAdapter(EmailStr)
 
 
@@ -107,7 +116,7 @@ def _event(
 
 
 @router.get("/email-settings")
-def read_email_settings(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def read_email_settings(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> EmailSettingsResponse:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -118,7 +127,7 @@ def read_email_settings(request: Request, db: Session = Depends(get_db), setting
 
 
 @router.put("/email-settings")
-async def update_email_settings(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+async def update_email_settings(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> EmailSettingsResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -149,7 +158,7 @@ async def update_email_settings(request: Request, db: Session = Depends(get_db),
 
 
 @router.post("/email-settings/smtp-test")
-async def smtp_test(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+async def smtp_test(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> SmtpTestResponse:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -169,7 +178,7 @@ async def smtp_test(request: Request, db: Session = Depends(get_db), settings: S
 
 
 @router.get("/kindle-settings")
-def read_kindle_settings(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def read_kindle_settings(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> KindleSettingsResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -189,7 +198,7 @@ def read_kindle_settings(request: Request, db: Session = Depends(get_db), settin
 
 
 @router.put("/kindle-settings")
-async def update_kindle_settings(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+async def update_kindle_settings(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> KindleSettingsResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -215,7 +224,7 @@ def list_kindle_send_tasks(
     pageSize: int = 100,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
+) -> KindleTasksResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -247,7 +256,7 @@ def list_kindle_send_tasks(
 
 
 @router.post("/kindle-send-tasks")
-async def create_kindle_send_task(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+async def create_kindle_send_task(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> KindleTaskResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -342,7 +351,7 @@ async def create_kindle_send_task(request: Request, db: Session = Depends(get_db
 
 
 @router.post("/kindle-send-tasks/{task_id}/cancel")
-def cancel_kindle_send_task(task_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def cancel_kindle_send_task(task_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> KindleTaskResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -363,7 +372,7 @@ def cancel_kindle_send_task(task_id: str, request: Request, db: Session = Depend
 
 
 @router.post("/kindle-send-tasks/{task_id}/retry")
-def retry_kindle_send_task(task_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def retry_kindle_send_task(task_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> KindleTaskResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -390,7 +399,7 @@ def retry_kindle_send_task(task_id: str, request: Request, db: Session = Depends
 
 
 @router.delete("/kindle-send-tasks/{task_id}")
-def delete_kindle_send_task(task_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def delete_kindle_send_task(task_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> DeletedKindleTaskResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error

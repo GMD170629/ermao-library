@@ -74,8 +74,7 @@ def monitor_folder_config(
 
 def should_ignore_path(path: Path, folder: MonitorFolderConfig) -> bool:
     if any(
-        part.endswith(".part") or part.startswith(".upload-")
-        for part in path.parts
+        part.endswith(".part") or part.startswith(".upload-") for part in path.parts
     ):
         return True
     if folder.ignore_hidden and any(
@@ -93,7 +92,8 @@ def should_ignore_file(path: Path, folder: MonitorFolderConfig) -> bool:
         return True
     if not (
         is_supported_import_filename(path)
-        or path.is_dir() and bool(collect_audio_bundle_files(path))
+        or path.is_dir()
+        and bool(collect_audio_bundle_files(path))
     ):
         return True
     if path.suffix and path.suffix.lower() not in folder.allowed_extensions:
@@ -116,9 +116,7 @@ def is_proven_audio_bundle_directory(
     files: list[Path] | None = None,
 ) -> bool:
     try:
-        candidates = (
-            files if files is not None else collect_audio_bundle_files(path)
-        )
+        candidates = files if files is not None else collect_audio_bundle_files(path)
     except (OSError, ValueError):
         return False
     if len(candidates) < 2:
@@ -135,8 +133,7 @@ def is_proven_audio_bundle_directory(
     if not has_sibling_book:
         return True
     return all(
-        _TRACK_FILE_PATTERN.match(item.name)
-        or _EPISODE_FILE_PATTERN.search(item.stem)
+        _TRACK_FILE_PATTERN.match(item.name) or _EPISODE_FILE_PATTERN.search(item.stem)
         for item in candidates
     )
 
@@ -187,8 +184,7 @@ def scan_directory_for_imports(
         try:
             if entry.is_dir():
                 if is_bundle and any(
-                    entry.resolve() in item.parents
-                    for item in handled_bundle_files
+                    entry.resolve() in item.parents for item in handled_bundle_files
                 ):
                     continue
                 if not should_ignore_path(entry, folder):

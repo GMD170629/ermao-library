@@ -13,6 +13,7 @@ from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
+from app.api.typed_route import TypedContractRoute
 from app.bootstrap.shelf import shelf_store
 from app.core.authorization import authorization_context, can_access_work
 from app.core.config import Settings, get_settings
@@ -20,11 +21,16 @@ from app.db.session import get_db
 from app.models.auth import User
 from app.modules.library.public import bookshelf_item_view, get_work
 from app.modules.shelf.public import execute_shelf_write
+from app.modules.shelf.presentation.schemas import (
+    DeletedShelfResponse,
+    ShelfResponse,
+    ShelvesResponse,
+)
 from app.schemas.responses import fail, ok
 from app.services.library_filters import normalize_filter_rules
 from app.services.library_management import smart_shelf_work_ids
 
-router = APIRouter(tags=["shelf"])
+router = APIRouter(tags=["shelf"], route_class=TypedContractRoute)
 
 
 def _now() -> datetime:
@@ -65,7 +71,7 @@ def _get_work(db: Session, work_id: str) -> dict[str, Any] | None:
     return get_work(db, work_id)
 
 @router.get("/shelves")
-def list_shelves(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def list_shelves(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> ShelvesResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -217,7 +223,7 @@ def get_shelf(
     includeBookIds: bool = True,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
+) -> ShelfResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -237,7 +243,7 @@ def get_shelf(
 
 
 @router.post("/shelves")
-async def create_shelf(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+async def create_shelf(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> ShelfResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -279,7 +285,7 @@ async def create_shelf(request: Request, db: Session = Depends(get_db), settings
 
 
 @router.patch("/shelves/{shelf_id}")
-async def update_shelf(shelf_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+async def update_shelf(shelf_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> ShelfResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -328,7 +334,7 @@ async def update_shelf(shelf_id: str, request: Request, db: Session = Depends(ge
 
 
 @router.delete("/shelves/{shelf_id}")
-def delete_shelf(shelf_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def delete_shelf(shelf_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> DeletedShelfResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -341,5 +347,3 @@ def delete_shelf(shelf_id: str, request: Request, db: Session = Depends(get_db),
 
     deleted = execute_shelf_write(db, delete_operation)
     return ok({"deleted": deleted, "id": shelf_id})
-
-

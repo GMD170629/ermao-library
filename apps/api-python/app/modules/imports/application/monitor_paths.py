@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from app.core.config import Settings
+from app.modules.imports.application.dto import ImportRuntimeConfig
 
 
 def normalize_monitor_root_path(value: Any) -> str:
@@ -25,7 +25,7 @@ def is_inside_path(root: Path, target: Path) -> bool:
 
 
 def monitor_directory_tree_node(
-    settings: Settings,
+    settings: ImportRuntimeConfig,
     requested_path: str | None,
 ) -> tuple[dict[str, Any] | None, str | None, int]:
     monitor_root = settings.resolved_monitor_root
@@ -66,12 +66,17 @@ def monitor_directory_tree_node(
     error: str | None = None
     if readable:
         try:
-            for child in sorted(real_target.iterdir(), key=lambda item: item.name.lower()):
+            for child in sorted(
+                real_target.iterdir(), key=lambda item: item.name.lower()
+            ):
                 try:
                     real_child = child.resolve()
                 except OSError:
                     continue
-                if not is_inside_path(real_monitor_root, real_child) or not real_child.is_dir():
+                if (
+                    not is_inside_path(real_monitor_root, real_child)
+                    or not real_child.is_dir()
+                ):
                     continue
                 children.append(
                     {
@@ -99,7 +104,9 @@ def monitor_directory_tree_node(
     )
 
 
-def target_directory_from_path(settings: Settings, target_path: Any, action_label: str) -> Path:
+def target_directory_from_path(
+    settings: ImportRuntimeConfig, target_path: Any, action_label: str
+) -> Path:
     raw_path = str(target_path or "").strip()
     if not raw_path:
         raise ValueError(f"请选择{action_label}目录")
@@ -117,7 +124,10 @@ def target_directory_from_path(settings: Settings, target_path: Any, action_labe
         real_target = target.resolve()
     except OSError:
         raise ValueError(f"所选{action_label}目录不存在或不可读")
-    if not (real_monitor_root == real_target or is_inside_path(real_monitor_root, real_target)):
+    if not (
+        real_monitor_root == real_target
+        or is_inside_path(real_monitor_root, real_target)
+    ):
         raise ValueError(f"请选择监控根目录内的{action_label}目录")
     if not real_target.exists() or not real_target.is_dir():
         raise ValueError(f"所选{action_label}目录不存在或不可读")

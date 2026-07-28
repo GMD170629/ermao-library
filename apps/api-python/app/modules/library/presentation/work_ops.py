@@ -301,16 +301,69 @@ def _delete_import_linked_library_scope(
             cover_status=cover_status(cover_path, settings),
             now=_now(),
         )
-        db.commit()
-
-    storage_cleanup = _delete_storage_paths(list(dict.fromkeys(managed_paths)), settings)
     return {
         "deleted": True,
         "deletedWorkRecord": deleted_work,
         "deletedDatabaseRecords": deleted_records,
-        "deletedFiles": storage_cleanup["deletedFiles"],
-        "failedFileDeletes": storage_cleanup["failedFileDeletes"],
+        "deletedFiles": 0,
+        "failedFileDeletes": [],
     }
+
+
+def _collect_import_linked_library_scope_paths(
+    db: Session,
+    task: dict[str, Any],
+    settings: Settings,
+) -> list[Path]:
+    """Collect files removed by ``_delete_import_linked_library_scope``.
+
+    This read-only projection runs before any database mutation so callers can
+    quarantine the files and restore them if the transaction fails.
+    """
+
+    work_id = str(task.get("workId") or "").strip()
+    edition_id = str(task.get("editionId") or "").strip()
+    volume_id = str(task.get("volumeId") or "").strip()
+    if not work_id or not edition_id:
+        return []
+    edition = library_deletion.get_edition_for_work(
+        db, edition_id=edition_id, work_id=work_id
+    )
+    if not edition:
+        return []
+
+    paths: list[Path] = []
+
+    def add_path(value: Any) -> None:
+        path = _storage_managed_path(str(value), settings) if value else None
+        if path:
+            paths.append(path)
+
+    if volume_id:
+        volume = library_deletion.get_volume_for_edition(
+            db, volume_id=volume_id, edition_id=edition_id
+        )
+        if not volume:
+            return []
+        files = library_deletion.list_files_for_volume(db, volume_id)
+        add_path(volume.get("coverPath"))
+        for item in files:
+            add_path(item.get("path"))
+        edition_file_count = library_deletion.count_files_for_edition(db, edition_id)
+        volume_count = library_deletion.count_volumes_for_edition(db, edition_id)
+        if volume_count == 1 and edition_file_count == len(files):
+            add_path(edition.get("coverPath"))
+            for item in library_deletion.list_files_for_edition(db, edition_id):
+                add_path(item.get("path"))
+            for item in library_deletion.list_volume_covers_for_edition(db, edition_id):
+                add_path(item.get("coverPath"))
+    else:
+        add_path(edition.get("coverPath"))
+        for item in library_deletion.list_files_for_edition(db, edition_id):
+            add_path(item.get("path"))
+        for item in library_deletion.list_volume_covers_for_edition(db, edition_id):
+            add_path(item.get("coverPath"))
+    return list(dict.fromkeys(paths))
 
 
 def _path_tree(paths: list[str], root_label: str) -> dict[str, Any]:
@@ -348,5 +401,4 @@ def _source_folder_preview(root_path: str) -> dict[str, Any]:
         except OSError:
             readable = False
     return {"readable": readable, "writable": writable, "children": children}
-
 

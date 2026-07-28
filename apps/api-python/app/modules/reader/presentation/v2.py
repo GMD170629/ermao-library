@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from time import time_ns
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -16,6 +16,8 @@ from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.typed_route import TypedContractRoute
+from app.contracts.http_errors import ErrorResponses
 from app.core.auth import get_current_user
 from app.core.authorization import (
     authorization_context,
@@ -26,8 +28,9 @@ from app.core.config import Settings, get_settings
 from app.core.time import timestamp_ms_to_datetime
 from app.db.session import get_db
 from app.bootstrap.media import ensure_volume_page_index
-from app.bootstrap.reader import reader_queries
-from app.schemas.reader_v2 import (
+from app.bootstrap.reader import SqlAlchemyReaderProgressCursor, reader_queries
+from app.modules.reader.public import ClaimClientSequence, ClaimClientSequenceCommand
+from app.modules.reader.presentation.v2_schemas import (
     AudioChapterSummary,
     AudioLocation,
     AudioTrackSummary,
@@ -39,6 +42,9 @@ from app.schemas.reader_v2 import (
     ReaderBookSummary,
     ReaderBootstrapData,
     ReaderBootstrapResponse,
+    ReaderBookmarksData,
+    ReaderBookmarksReplaceRequest,
+    ReaderBookmarksResponse,
     ReaderCapabilities,
     ReaderEditionOption,
     ReaderEditionSummary,
@@ -48,15 +54,21 @@ from app.schemas.reader_v2 import (
     ReaderProgressPut,
     ReaderProgressRecord,
     ReaderProgressResponse,
+    ReaderConflictError,
+    ReaderNotFoundError,
+    ReaderUnauthorizedError,
+    ReaderUnavailableError,
+    ReaderValidationError,
     ReaderServerPreferences,
     ReaderUnitSummary,
     ReaderVolumeSummary,
+    EpubLocationsResponse,
 )
 from app.schemas.responses import fail
 from app.services.epub_location_cache import claim_epub_locations, save_epub_locations
 
 
-router = APIRouter(prefix="/reader/v2", tags=["reader-v2"])
+router = APIRouter(prefix="/reader/v2", tags=["reader-v2"], route_class=TypedContractRoute)
 
 
 def _now() -> datetime:
@@ -761,30 +773,49 @@ def list_reader_bookmarks(
     content_fingerprint: str = Query(alias="contentFingerprint", min_length=1, max_length=191),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
+) -> Annotated[
+    ReaderBookmarksResponse,
+    ErrorResponses(
+        ReaderUnauthorizedError,
+        ReaderNotFoundError,
+    ),
+]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     if not can_access_edition(db, user, edition_id):
         return fail("版本不存在", status_code=404, code="EDITION_NOT_FOUND")
     if "ReaderBookmark" not in _tables(db):
-        return {"ok": True, "data": {"bookmarks": []}}
+        return ReaderBookmarksResponse(data=ReaderBookmarksData(bookmarks=[]))
     rows = reader_queries.list_bookmarks(
         db,
         user_id=user.id,
         edition_id=edition_id,
         content_fingerprint=content_fingerprint,
     )
-    return {"ok": True, "data": {"bookmarks": [_bookmark_view(row) for row in rows]}}
+    return ReaderBookmarksResponse(
+        data=ReaderBookmarksData.model_validate(
+            {"bookmarks": [_bookmark_view(row) for row in rows]}
+        )
+    )
 
 
 @router.put("/editions/{edition_id}/bookmarks")
 async def replace_reader_bookmarks(
     edition_id: str,
+    payload: ReaderBookmarksReplaceRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
+) -> Annotated[
+    ReaderBookmarksResponse,
+    ErrorResponses(
+        ReaderUnauthorizedError,
+        ReaderNotFoundError,
+        ReaderValidationError,
+        ReaderUnavailableError,
+    ),
+]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -796,46 +827,17 @@ async def replace_reader_bookmarks(
     if not work_id:
         return fail("版本不存在", status_code=404, code="EDITION_NOT_FOUND")
     edition = {"workId": work_id}
-    payload = await request.json()
-    fingerprint = str(payload.get("contentFingerprint") or "").strip()
-    raw_bookmarks = payload.get("bookmarks")
-    if not fingerprint or len(fingerprint) > 191:
-        return fail("书签内容指纹无效", status_code=422, code="INVALID_BOOKMARK_FINGERPRINT")
-    if not isinstance(raw_bookmarks, list) or len(raw_bookmarks) > 500:
-        return fail("书签列表格式无效或数量超过 500", status_code=422, code="INVALID_BOOKMARKS")
-    normalized: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for raw in raw_bookmarks:
-        if not isinstance(raw, dict):
-            return fail("书签列表格式无效", status_code=422, code="INVALID_BOOKMARKS")
-        bookmark_id = str(raw.get("id") or "").strip()
-        location = raw.get("location")
-        label = str(raw.get("label") or "").strip()
-        created_at = str(raw.get("createdAt") or "").strip()
-        try:
-            percent = float(raw.get("percent") or 0)
-        except (TypeError, ValueError):
-            return fail("书签进度无效", status_code=422, code="INVALID_BOOKMARKS")
-        if (
-            not bookmark_id
-            or len(bookmark_id) > 2000
-            or bookmark_id in seen
-            or not isinstance(location, dict)
-            or len(label) > 500
-            or not created_at
-            or not 0 <= percent <= 100
-        ):
-            return fail("书签列表格式无效", status_code=422, code="INVALID_BOOKMARKS")
-        seen.add(bookmark_id)
-        normalized.append(
-            {
-                "bookmark_id": bookmark_id,
-                "location": location,
-                "label": label,
-                "percent": percent,
-                "created_at": created_at,
-            }
-        )
+    fingerprint = payload.content_fingerprint
+    normalized = [
+        {
+            "bookmark_id": bookmark.id,
+            "location": bookmark.location.model_dump(by_alias=True, exclude_none=True),
+            "label": bookmark.label,
+            "percent": bookmark.percent,
+            "created_at": bookmark.created_at,
+        }
+        for bookmark in payload.bookmarks
+    ]
     now = _now()
     reader_queries.replace_bookmarks(
         db,
@@ -850,20 +852,31 @@ async def replace_reader_bookmarks(
                 "location_json": _json_text(bookmark["location"]),
                 "label": bookmark["label"],
                 "percent": bookmark["percent"],
-                "bookmark_created_at": bookmark["created_at"],
+                "bookmark_created_at": bookmark["created_at"].isoformat().replace("+00:00", "Z"),
             }
             for index, bookmark in enumerate(normalized)
         ],
         now=now,
     )
     db.commit()
-    return {"ok": True, "data": {"bookmarks": [_bookmark_view({
-        "bookmarkId": item["bookmark_id"],
-        "locationJson": _json_text(item["location"]),
-        "label": item["label"],
-        "percent": item["percent"],
-        "bookmarkCreatedAt": item["created_at"],
-    }) for item in normalized]}}
+    return ReaderBookmarksResponse(
+        data=ReaderBookmarksData.model_validate(
+            {
+                "bookmarks": [
+                    _bookmark_view(
+                        {
+                            "bookmarkId": item["bookmark_id"],
+                            "locationJson": _json_text(item["location"]),
+                            "label": item["label"],
+                            "percent": item["percent"],
+                            "bookmarkCreatedAt": item["created_at"],
+                        }
+                    )
+                    for item in normalized
+                ]
+            }
+        )
+    )
 
 
 def _epub_location_target(
@@ -892,7 +905,16 @@ def claim_reader_epub_locations(
     volume: str | None = Query(default=None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
+) -> Annotated[
+    EpubLocationsResponse,
+    ErrorResponses(
+        ReaderUnauthorizedError,
+        ReaderNotFoundError,
+        ReaderConflictError,
+        ReaderValidationError,
+        ReaderUnavailableError,
+    ),
+]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -918,7 +940,7 @@ def claim_reader_epub_locations(
         payload.break_size,
         payload.cache_version,
     )
-    return {"ok": True, "data": result}
+    return EpubLocationsResponse.model_validate({"data": result})
 
 
 @router.put("/editions/{edition_id}/epub-locations")
@@ -929,7 +951,16 @@ def save_reader_epub_locations(
     volume: str | None = Query(default=None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-):
+) -> Annotated[
+    EpubLocationsResponse,
+    ErrorResponses(
+        ReaderUnauthorizedError,
+        ReaderNotFoundError,
+        ReaderConflictError,
+        ReaderValidationError,
+        ReaderUnavailableError,
+    ),
+]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -953,7 +984,7 @@ def save_reader_epub_locations(
         return fail("EPUB 位置索引格式无效", status_code=422)
     except PermissionError:
         return fail("EPUB_LOCATION_LEASE_MISMATCH", status_code=409)
-    return {"ok": True, "data": result}
+    return EpubLocationsResponse.model_validate({"data": result})
 
 
 def _legacy_projection(location, volume_id: str | None) -> tuple[str, int | None, dict[str, Any]]:
@@ -1019,33 +1050,6 @@ def _audio_progress_percent(
     # from the media `ended` event; all ordinary seeks remain below 100.
     percent = min(99.999, max(0.0, (elapsed / total) * 100))
     return percent, at_final_end, None
-
-
-def _claim_client_sequence(
-    db: Session,
-    *,
-    user_id: str,
-    work_id: str,
-    client_id: str,
-    client_sequence: int,
-    mutation_id: str,
-    now: datetime,
-) -> bool:
-    """Atomically advance one client's durable high-water mark.
-
-    The caller must keep this transaction open until the corresponding progress
-    row is written. The conditional UPDATE owns the row lock, so a lower or
-    duplicate sequence cannot commit after a newer mutation.
-    """
-    return reader_queries.claim_client_sequence(
-        db,
-        user_id=user_id,
-        work_id=work_id,
-        client_id=client_id,
-        client_sequence=client_sequence,
-        mutation_id=mutation_id,
-        now=now,
-    )
 
 
 @router.put(
@@ -1140,14 +1144,15 @@ def save_progress_v2(
         "updatedAt": now,
     }
     allowed = _columns(db, "LibraryReadingProgress")
-    claimed = _claim_client_sequence(
-        db,
-        user_id=user.id,
-        work_id=str(edition["workId"]),
-        client_id=payload.client_id,
-        client_sequence=payload.client_sequence,
-        mutation_id=payload.mutation_id,
-        now=now,
+    claimed = ClaimClientSequence(SqlAlchemyReaderProgressCursor(db)).execute(
+        ClaimClientSequenceCommand(
+            user_id=user.id,
+            work_id=str(edition["workId"]),
+            client_id=payload.client_id,
+            client_sequence=payload.client_sequence,
+            mutation_id=payload.mutation_id,
+            now=now,
+        )
     )
     if not claimed:
         # Persist a lazily seeded cursor for upgraded databases even when the

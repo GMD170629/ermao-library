@@ -2,147 +2,152 @@
 
 from __future__ import annotations
 
+from typing import Annotated, Never
+
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
+from app.api.typed_route import TypedContractRoute
+from app.contracts.http import MessageError
+from app.contracts.http_errors import (
+    BasicBadRequestError,
+    BasicNotFoundError,
+    BasicUnauthorizedError,
+    ErrorResponses,
+)
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
-from app.schemas.responses import fail, ok
+from app.modules.download.presentation.source_schemas import (
+    EmptySourceRecordsPayload,
+    EmptySourceRecordsResponse,
+    EmptySourcesPayload,
+    EmptySourcesResponse,
+)
 
-router = APIRouter(tags=["download-sources"])
+
+class SourceRetiredError(BasicNotFoundError):
+    status_code = 410
+
+router = APIRouter(tags=["download-sources"], route_class=TypedContractRoute)
 
 
 def _auth(db: Session, request: Request, settings: Settings):
-    return require_user(db, request, settings)
+    user, auth_error = require_user(db, request, settings)
+    if auth_error is not None or user is None:
+        raise BasicUnauthorizedError(MessageError(message="UNAUTHORIZED"))
+    return user
 
 @router.get("/sources")
-def list_sources(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    return ok({"sources": []})
+def list_sources(
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    EmptySourcesResponse,
+    ErrorResponses(BasicUnauthorizedError),
+]:
+    _auth(db, request, settings)
+    return EmptySourcesResponse(data=EmptySourcesPayload(sources=()))
 
 
 @router.post("/sources")
-async def create_source(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    return fail("外部资源功能已移除", status_code=410)
+async def create_source(
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    Never,
+    ErrorResponses(BasicUnauthorizedError, SourceRetiredError),
+]:
+    _auth(db, request, settings)
+    raise SourceRetiredError(MessageError(message="外部资源功能已移除"))
 
 
 @router.put("/sources/{source_id}")
 @router.patch("/sources/{source_id}")
-async def update_source(source_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
+async def update_source(source_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[Never, ErrorResponses(BasicUnauthorizedError, BasicNotFoundError)]:
+    _auth(db, request, settings)
     await request.json()
-    return fail("来源不存在", status_code=404)
+    raise BasicNotFoundError(MessageError(message="来源不存在"))
 
 
 @router.get("/sources/{source_id}")
-def get_source(source_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    return fail("来源不存在", status_code=404)
+def get_source(source_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[Never, ErrorResponses(BasicUnauthorizedError, BasicNotFoundError)]:
+    _auth(db, request, settings)
+    raise BasicNotFoundError(MessageError(message="来源不存在"))
 
 
 @router.delete("/sources/{source_id}")
-def delete_source(source_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    return fail("来源不存在", status_code=404)
+def delete_source(source_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[Never, ErrorResponses(BasicUnauthorizedError, BasicNotFoundError)]:
+    _auth(db, request, settings)
+    raise BasicNotFoundError(MessageError(message="来源不存在"))
 
 
 @router.post("/sources/{source_id}/test")
-def test_source(source_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    return fail("源不存在", status_code=404)
+def test_source(source_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[Never, ErrorResponses(BasicUnauthorizedError, BasicNotFoundError)]:
+    _auth(db, request, settings)
+    raise BasicNotFoundError(MessageError(message="源不存在"))
 
 
 @router.post("/sources/{source_id}/search")
-async def search_source(source_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
+async def search_source(source_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[Never, ErrorResponses(BasicUnauthorizedError, BasicBadRequestError, BasicNotFoundError)]:
+    _auth(db, request, settings)
     payload = await request.json()
     keyword = str(payload.get("keyword") or payload.get("query") or "").strip()
     if not keyword:
-        return fail("请输入搜索关键词", status_code=400)
-    return fail("源不存在", status_code=404)
+        raise BasicBadRequestError(MessageError(message="请输入搜索关键词"))
+    raise BasicNotFoundError(MessageError(message="源不存在"))
 
 
 @router.get("/source-search-records")
-def list_source_records(request: Request, sourceId: str | None = None, status: str | None = None, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    return ok({"records": [], "total": 0})
+def list_source_records(request: Request, sourceId: str | None = None, status: str | None = None, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[EmptySourceRecordsResponse, ErrorResponses(BasicUnauthorizedError)]:
+    _auth(db, request, settings)
+    return EmptySourceRecordsResponse(
+        data=EmptySourceRecordsPayload(records=(), total=0)
+    )
 
 
 @router.post("/source-search-records")
-async def create_source_record(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
+async def create_source_record(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[Never, ErrorResponses(BasicUnauthorizedError, BasicNotFoundError)]:
+    _auth(db, request, settings)
     await request.json()
-    return fail("源不存在", status_code=404)
+    raise BasicNotFoundError(MessageError(message="源不存在"))
 
 
 @router.post("/source-search-records/create-download-task")
-async def create_download_from_search_result(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
+async def create_download_from_search_result(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[Never, ErrorResponses(BasicUnauthorizedError, BasicNotFoundError)]:
+    _auth(db, request, settings)
     await request.json()
-    return fail("源不存在", status_code=404)
+    raise BasicNotFoundError(MessageError(message="源不存在"))
 
 
 @router.get("/source-search-records/{record_id}")
-def get_source_record(record_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    return fail("搜索记录不存在", status_code=404)
+def get_source_record(record_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[Never, ErrorResponses(BasicUnauthorizedError, BasicNotFoundError)]:
+    _auth(db, request, settings)
+    raise BasicNotFoundError(MessageError(message="搜索记录不存在"))
 
 
 @router.delete("/source-search-records/{record_id}")
-def delete_source_record(record_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    return fail("搜索记录不存在", status_code=404)
+def delete_source_record(record_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[Never, ErrorResponses(BasicUnauthorizedError, BasicNotFoundError)]:
+    _auth(db, request, settings)
+    raise BasicNotFoundError(MessageError(message="搜索记录不存在"))
 
 
 @router.put("/source-search-records/{record_id}")
-async def update_source_record(record_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    return fail("搜索记录不存在", status_code=404)
+async def update_source_record(record_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[Never, ErrorResponses(BasicUnauthorizedError, BasicNotFoundError)]:
+    _auth(db, request, settings)
+    raise BasicNotFoundError(MessageError(message="搜索记录不存在"))
 
 
 @router.post("/source-search-records/{record_id}/ignore")
 @router.post("/source-search-records/{record_id}/save")
-def mark_source_record(record_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    return fail("搜索记录不存在", status_code=404)
+def mark_source_record(record_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[Never, ErrorResponses(BasicUnauthorizedError, BasicNotFoundError)]:
+    _auth(db, request, settings)
+    raise BasicNotFoundError(MessageError(message="搜索记录不存在"))
 
 
 @router.post("/source-search-records/{record_id}/create-download-task")
-async def create_download_from_record(record_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    _user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    return fail("搜索记录不存在", status_code=404)
-
-
+async def create_download_from_record(record_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[Never, ErrorResponses(BasicUnauthorizedError, BasicNotFoundError)]:
+    _auth(db, request, settings)
+    raise BasicNotFoundError(MessageError(message="搜索记录不存在"))
