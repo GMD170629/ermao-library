@@ -4,29 +4,40 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from functools import wraps
 from hashlib import sha1
 from time import time_ns
-from typing import Any, Callable, Concatenate, ParamSpec, TypeVar
+from typing import Any, Concatenate, ParamSpec, TypeVar
 
 from sqlalchemy.orm import Session
 
 from app.bootstrap.library import smart_shelf_work_ids as _query_smart_shelf_work_ids
 from app.core.time import now_timestamp_ms, timestamp_ms_to_iso, to_timestamp_ms
+from app.modules.library.application.commands import execute_library_write
 from app.modules.library.infrastructure import categories as library_categories
 from app.modules.library.infrastructure import operations as library_operations
 from app.modules.library.infrastructure import works as library_works
-from app.modules.library.application.commands import execute_library_write
 from app.modules.library.infrastructure.facets import (
     FACET_KINDS,
     count_categories,
     list_categories,
-    normalized_name as _normalized_name,
-    parse_json as _parse_json,
     split_authors,
+)
+from app.modules.library.infrastructure.facets import (
+    normalized_name as _normalized_name,
+)
+from app.modules.library.infrastructure.facets import (
+    parse_json as _parse_json,
+)
+from app.modules.library.infrastructure.facets import (
     sync_work_facets as _sync_work_facets,
+)
+from app.modules.library.infrastructure.facets import (
     unique_names as _unique_names,
+)
+from app.modules.library.infrastructure.facets import (
     work_tags as _work_tags,
 )
 from app.services.book_identity import (
@@ -55,7 +66,7 @@ def _transactional_write(
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _json(value: Any) -> str:
@@ -723,13 +734,27 @@ def undo_operation(db: Session, operation_id: str, user_id: str | None) -> dict[
         raise ValueError("该操作不支持撤销")
     now = _now()
     library_operations.mark_operation_undone(db, operation_id=operation_id, now=now)
-    return {"id": operation_id, "status": "UNDONE", "undoneAt": timestamp_ms_to_iso(now), "userId": user_id}
+    updated_operation = {
+        **operation,
+        "status": "UNDONE",
+        "undoneAt": timestamp_ms_to_iso(now),
+        "updatedAt": timestamp_ms_to_iso(now),
+    }
+    return {"operation": operation_view(updated_operation), "restored": True}
 
 
 def operation_view(operation: dict[str, Any]) -> dict[str, Any]:
     return {
-        **operation,
-        "payload": _parse_json(operation.get("payloadJson"), {}),
+        "id": str(operation.get("id") or ""),
+        "action": str(operation.get("action") or ""),
+        "status": str(operation.get("status") or ""),
+        "summary": str(operation.get("summary") or ""),
+        "targetType": operation.get("targetType"),
+        "targetId": operation.get("targetId"),
+        "expiresAt": operation.get("expiresAt"),
+        "undoneAt": operation.get("undoneAt"),
+        "createdAt": operation.get("createdAt"),
+        "updatedAt": operation.get("updatedAt"),
         "undoAvailable": operation.get("status") == "COMPLETED" and (
             not operation.get("expiresAt") or (to_timestamp_ms(operation.get("expiresAt")) or 0) >= now_timestamp_ms()
         ),

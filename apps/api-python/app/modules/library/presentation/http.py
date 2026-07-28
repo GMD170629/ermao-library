@@ -54,11 +54,11 @@ from app.models.auth import User
 from app.modules.library.presentation.schemas import (
     BulkMutationResponse,
     CategoriesResponse,
-    CategoryMutationResponse,
     ContinueReadingResponse,
     ConversionResponse,
     CoverMutationResponse,
     DashboardSummaryResponse,
+    DeleteCategoryResponse,
     DeletedWorkResponse,
     DetailPreferenceResponse,
     DuplicatesResponse,
@@ -75,9 +75,11 @@ from app.modules.library.presentation.schemas import (
     LibraryUnprocessableError,
     ManagementFoldersResponse,
     ManagementOverviewResponse,
+    MergeCategoriesResponse,
     MergeDuplicatesResponse,
     MetadataSearchResponse,
     OperationsResponse,
+    RenameCategoryResponse,
     SeriesResponse,
     UndoOperationResponse,
     WorkDetailResponse,
@@ -1519,8 +1521,14 @@ def library_facets(request: Request, db: Session = Depends(get_db), settings: Se
     for work in visible_works:
         status = str(_work_view(db, work, user.id).get("status") or "UNREAD")
         status_counts[status] = status_counts.get(status, 0) + 1
-    status_rows = [{"value": value, "count": count} for value, count in sorted(status_counts.items())]
-    media_rows = library_facet_queries.media_kind_counts(db, context)
+    status_rows = [
+        {"value": value, "label": value, "count": count}
+        for value, count in sorted(status_counts.items())
+    ]
+    media_rows = [
+        {**row, "label": str(row.get("value") or "")}
+        for row in library_facet_queries.media_kind_counts(db, context)
+    ]
     return FacetsResponse(data={"facets": facets, "statuses": status_rows, "mediaKinds": media_rows})
 
 
@@ -1661,7 +1669,7 @@ def library_categories(request: Request, db: Session = Depends(get_db), settings
 
 
 @router.patch("/library/categories/{facet_id}")
-async def update_library_category(facet_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[CategoryMutationResponse, ErrorResponses(LibraryBadRequestError)]:
+async def update_library_category(facet_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[RenameCategoryResponse, ErrorResponses(LibraryBadRequestError)]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -1670,11 +1678,11 @@ async def update_library_category(facet_id: str, request: Request, db: Session =
         result = rename_category(db, facet_id, str(payload.get("name") or ""), user.id)
     except ValueError as exc:
         _raise_library_error(str(exc), status_code=400)
-    return CategoryMutationResponse(data=result)
+    return RenameCategoryResponse(data=result)
 
 
 @router.delete("/library/categories/{facet_id}")
-def delete_library_category(facet_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[CategoryMutationResponse, ErrorResponses(LibraryBadRequestError)]:
+def delete_library_category(facet_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[DeleteCategoryResponse, ErrorResponses(LibraryBadRequestError)]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -1682,11 +1690,11 @@ def delete_library_category(facet_id: str, request: Request, db: Session = Depen
         result = delete_category(db, facet_id, user.id)
     except ValueError as exc:
         _raise_library_error(str(exc), status_code=400)
-    return CategoryMutationResponse(data=result)
+    return DeleteCategoryResponse(data=result)
 
 
 @router.post("/library/categories/merge")
-async def merge_library_categories(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[CategoryMutationResponse, ErrorResponses(LibraryBadRequestError)]:
+async def merge_library_categories(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Annotated[MergeCategoriesResponse, ErrorResponses(LibraryBadRequestError)]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -1701,7 +1709,7 @@ async def merge_library_categories(request: Request, db: Session = Depends(get_d
         )
     except ValueError as exc:
         _raise_library_error(str(exc), status_code=400)
-    return CategoryMutationResponse(data=result)
+    return MergeCategoriesResponse(data=result)
 
 
 @router.get("/library/duplicates")
@@ -1807,11 +1815,22 @@ async def update_work_edition(work_id: str, edition_id: str, request: Request, d
         if key in values:
             values[key] = str(values[key] or "").strip() or None
     values["updatedAt"] = _now()
-    updated = library_works.update_edition_fields(db, edition_id, values)
+    library_works.update_edition_fields(db, edition_id, values)
     sync_work_facets(db, work_id, commit=False)
     db.commit()
     work = _get_work(db, work_id)
-    return EditionMutationResponse(data={"edition": updated, "book": _work_view(db, work, user.id) if work else None})
+    book = _work_view(db, work, user.id) if work else None
+    updated_edition = next(
+        (
+            item
+            for item in (book or {}).get("editions", [])
+            if str(item.get("id")) == edition_id
+        ),
+        None,
+    )
+    if updated_edition is None:
+        _raise_library_error("版本不存在或不属于该作品", status_code=404)
+    return EditionMutationResponse(data={"edition": updated_edition, "book": book})
 
 
 @router.post("/works/{work_id}/editions/{edition_id}/convert")

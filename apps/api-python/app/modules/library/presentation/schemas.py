@@ -601,24 +601,10 @@ class CoverMutationPayload(HttpContractModel):
     cover_url: str = Field(alias="coverUrl")
 
 
-class FacetCount(HttpContractModel):
-    id: str
-    kind: str
-    name: str
-    normalized_name: str | None = Field(default=None, alias="normalizedName")
-    count: int
-
-
 class NamedCount(HttpContractModel):
     value: str
     label: str
     count: int
-
-
-class FacetsPayload(HttpContractModel):
-    facets: list[FacetCount]
-    statuses: list[NamedCount]
-    media_kinds: list[NamedCount] = Field(alias="mediaKinds")
 
 
 class FilterCondition(HttpContractModel):
@@ -657,10 +643,23 @@ class LibraryCategory(HttpContractModel):
     kind: str
     name: str
     normalized_name: str = Field(alias="normalizedName")
+    aliases: list[str]
     created_at: datetime | None = Field(default=None, alias="createdAt")
     updated_at: datetime | None = Field(default=None, alias="updatedAt")
-    work_count: int = Field(alias="workCount")
-    edition_count: int = Field(alias="editionCount")
+    book_count: int = Field(alias="bookCount")
+
+
+class FacetGroups(HttpContractModel):
+    author: list[LibraryCategory]
+    tag: list[LibraryCategory]
+    series: list[LibraryCategory]
+    publisher: list[LibraryCategory]
+
+
+class FacetsPayload(HttpContractModel):
+    facets: FacetGroups
+    statuses: list[NamedCount]
+    media_kinds: list[NamedCount] = Field(alias="mediaKinds")
 
 
 class CategoriesPayload(HttpContractModel):
@@ -671,28 +670,45 @@ class CategoriesPayload(HttpContractModel):
     total_pages: int = Field(alias="totalPages")
 
 
-class CategoryMutationPayload(HttpContractModel):
-    category: LibraryCategory | None = None
-    deleted: bool | None = None
-    id: str | None = None
-    source_id: str | None = Field(default=None, alias="sourceId")
-    target_id: str | None = Field(default=None, alias="targetId")
-    moved_work_count: int | None = Field(default=None, alias="movedWorkCount")
-    moved_edition_count: int | None = Field(default=None, alias="movedEditionCount")
-
-
-class DuplicateWork(HttpContractModel):
+class LibraryOperationSummary(HttpContractModel):
     id: str
-    title: str
-    author: str
-    cover_url: str = Field(alias="coverUrl")
+    action: str
+    status: str
+    summary: str
+    target_type: str | None = Field(default=None, alias="targetType")
+    target_id: str | None = Field(default=None, alias="targetId")
+    expires_at: datetime | None = Field(default=None, alias="expiresAt")
+    undone_at: datetime | None = Field(default=None, alias="undoneAt")
+    created_at: datetime | None = Field(default=None, alias="createdAt")
+    updated_at: datetime | None = Field(default=None, alias="updatedAt")
+    undo_available: bool = Field(alias="undoAvailable")
+
+
+class RenameCategoryPayload(HttpContractModel):
+    facet_id: str = Field(alias="facetId")
+    name: str
+    operation: LibraryOperationSummary
+
+
+class MergeCategoriesPayload(HttpContractModel):
+    target_id: str = Field(alias="targetId")
+    merged_ids: list[str] = Field(alias="mergedIds")
+    operation: LibraryOperationSummary
+
+
+class DeleteCategoryPayload(HttpContractModel):
+    facet_id: str = Field(alias="facetId")
+    kind: str
+    name: str
+    affected_book_count: int = Field(alias="affectedBookCount")
+    operation: LibraryOperationSummary
 
 
 class DuplicateGroup(HttpContractModel):
-    key: str
+    id: str
     confidence: float
-    reason: str
-    works: list[DuplicateWork]
+    reasons: list[str]
+    works: list[WorkView]
 
 
 class DuplicatesPayload(HttpContractModel):
@@ -701,45 +717,17 @@ class DuplicatesPayload(HttpContractModel):
 
 
 class MergeDuplicatesPayload(HttpContractModel):
-    merged: bool
     target_work_id: str = Field(alias="targetWorkId")
     source_work_ids: list[str] = Field(alias="sourceWorkIds")
-    book: WorkView | None = None
-
-
-class OperationSnapshotValue(HttpContractModel):
-    title: str | None = None
-    author: str | None = None
-    publisher: str | None = None
-    series_name: str | None = Field(default=None, alias="seriesName")
-    series_index: float | None = Field(default=None, alias="seriesIndex")
-    published_year: int | None = Field(default=None, alias="publishedYear")
-    status: str | None = None
-    hidden: bool | None = None
-    cover_path: str | None = Field(default=None, alias="coverPath")
-    cover_status: str | None = Field(default=None, alias="coverStatus")
-
-
-class LibraryOperation(HttpContractModel):
-    id: str
-    action: str
-    status: str
-    actor_user_id: str | None = Field(alias="actorUserId")
-    target_ids: list[str] = Field(alias="targetIds")
-    before: dict[str, OperationSnapshotValue]
-    after: dict[str, OperationSnapshotValue]
-    expires_at: datetime | None = Field(alias="expiresAt")
-    created_at: datetime = Field(alias="createdAt")
-    updated_at: datetime = Field(alias="updatedAt")
-    can_undo: bool = Field(alias="canUndo")
+    operation: LibraryOperationSummary
 
 
 class OperationsPayload(HttpContractModel):
-    operations: list[LibraryOperation]
+    operations: list[LibraryOperationSummary]
 
 
 class UndoOperationPayload(HttpContractModel):
-    operation: LibraryOperation
+    operation: LibraryOperationSummary
     restored: bool
 
 
@@ -910,7 +898,9 @@ CoverMutationResponse = SuccessEnvelope[CoverMutationPayload]
 FacetsResponse = SuccessEnvelope[FacetsPayload]
 FilterSchemaResponse = SuccessEnvelope[FilterSchemaPayload]
 CategoriesResponse = SuccessEnvelope[CategoriesPayload]
-CategoryMutationResponse = SuccessEnvelope[CategoryMutationPayload]
+RenameCategoryResponse = SuccessEnvelope[RenameCategoryPayload]
+MergeCategoriesResponse = SuccessEnvelope[MergeCategoriesPayload]
+DeleteCategoryResponse = SuccessEnvelope[DeleteCategoryPayload]
 DuplicatesResponse = SuccessEnvelope[DuplicatesPayload]
 MergeDuplicatesResponse = SuccessEnvelope[MergeDuplicatesPayload]
 OperationsResponse = SuccessEnvelope[OperationsPayload]

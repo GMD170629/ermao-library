@@ -1,0 +1,272 @@
+[
+  {
+    "module": "auth",
+    "method": "GET",
+    "path": "/api/auth/setup/status",
+    "status_code": 200,
+    "ok": true,
+    "note": "读取初始化状态",
+    "writes": {}
+  },
+  {
+    "module": "auth",
+    "method": "POST",
+    "path": "/api/auth/setup",
+    "status_code": 201,
+    "ok": true,
+    "note": "首次安装创建管理员并自动登录",
+    "writes": {
+      "users": 1,
+      "preferences": 1,
+      "sessions": 1
+    }
+  },
+  {
+    "module": "auth",
+    "method": "GET",
+    "path": "/api/auth/capabilities",
+    "status_code": 200,
+    "ok": true,
+    "note": "读取密码重置能力配置",
+    "writes": {}
+  },
+  {
+    "module": "auth",
+    "method": "GET",
+    "path": "/api/auth/me",
+    "status_code": 200,
+    "ok": true,
+    "note": "读取当前会话",
+    "writes": {}
+  },
+  {
+    "module": "auth",
+    "method": "PATCH",
+    "path": "/api/auth/account/name",
+    "status_code": 200,
+    "ok": true,
+    "note": "修改当前用户名",
+    "writes": {}
+  },
+  {
+    "module": "auth",
+    "method": "PATCH",
+    "path": "/api/auth/account/email",
+    "status_code": 200,
+    "ok": true,
+    "note": "修改当前邮箱",
+    "writes": {}
+  },
+  {
+    "module": "auth",
+    "method": "PATCH",
+    "path": "/api/auth/account/password",
+    "status_code": 200,
+    "ok": true,
+    "note": "修改密码并撤销全部会话",
+    "writes": {
+      "sessions_after_revoke": 0
+    }
+  },
+  {
+    "module": "auth",
+    "method": "POST",
+    "path": "/api/auth/login",
+    "status_code": 200,
+    "ok": true,
+    "note": "新密码登录",
+    "writes": {}
+  },
+  {
+    "module": "auth",
+    "method": "POST",
+    "path": "/api/auth/logout",
+    "status_code": 200,
+    "ok": true,
+    "note": "注销当前会话",
+    "writes": {}
+  },
+  {
+    "module": "system",
+    "method": "GET",
+    "path": "/api/health",
+    "status_code": 200,
+    "ok": true,
+    "note": "系统健康摘要",
+    "writes": {}
+  },
+  {
+    "module": "system",
+    "method": "GET",
+    "path": "/api/system/health",
+    "status_code": 200,
+    "ok": true,
+    "note": "系统健康详情",
+    "writes": {}
+  },
+  {
+    "module": "system",
+    "method": "GET",
+    "path": "/api/__db-ping",
+    "status_code": 200,
+    "ok": true,
+    "note": "数据库存活探测",
+    "writes": {}
+  },
+  {
+    "module": "system",
+    "method": "POST",
+    "path": "/api/system/health/runs",
+    "status_code": 201,
+    "ok": true,
+    "note": "创建健康检查运行",
+    "writes": {}
+  },
+  {
+    "module": "system",
+    "method": "GET",
+    "path": "/api/system/health/runs/{run_id}",
+    "status_code": 200,
+    "ok": true,
+    "note": "查询健康检查运行",
+    "writes": {}
+  },
+  {
+    "module": "system",
+    "method": "GET",
+    "path": "/api/system/health/runs/{run_id}/events",
+    "status_code": 200,
+    "ok": true,
+    "note": "消费健康检查 SSE",
+    "writes": {}
+  },
+  {
+    "module": "system",
+    "method": "PUT",
+    "path": "/api/system/log-settings",
+    "status_code": 200,
+    "ok": true,
+    "note": "修改系统日志容量",
+    "writes": {
+      "max_bytes_setting": "2097152",
+      "settings_updated_events": 1
+    }
+  },
+  {
+    "module": "reader",
+    "method": "GET",
+    "path": "/api/reader/preferences",
+    "status_code": 410,
+    "ok": true,
+    "note": "Reader V1 偏好接口退役",
+    "writes": {}
+  },
+  {
+    "module": "reader",
+    "method": "GET",
+    "path": "/api/reader/v2/editions/{edition_id}/bootstrap",
+    "status_code": 200,
+    "ok": true,
+    "note": "获取 EPUB bootstrap",
+    "writes": {}
+  },
+  {
+    "module": "reader",
+    "method": "PUT",
+    "path": "/api/reader/v2/editions/{edition_id}/bookmarks",
+    "status_code": 200,
+    "ok": true,
+    "note": "写入书签",
+    "writes": {
+      "bookmark_rows": 1
+    }
+  },
+  {
+    "module": "reader",
+    "method": "POST",
+    "path": "/api/reader/v2/editions/{edition_id}/epub-locations/claim",
+    "status_code": 200,
+    "ok": true,
+    "note": "申请 EPUB 位置索引 lease",
+    "writes": {}
+  },
+  {
+    "module": "reader",
+    "method": "PUT",
+    "path": "/api/reader/v2/editions/{edition_id}/progress",
+    "status_code": 200,
+    "ok": true,
+    "note": "写入 Reader V2 进度",
+    "writes": {
+      "progress_rows": 1,
+      "cursor_rows": 1
+    }
+  },
+  {
+    "module": "kindle",
+    "method": "PUT",
+    "path": "/api/email-settings",
+    "status_code": 200,
+    "ok": true,
+    "note": "保存系统 SMTP 设置",
+    "writes": {}
+  },
+  {
+    "module": "kindle",
+    "method": "GET",
+    "path": "/api/email-settings",
+    "status_code": 200,
+    "ok": true,
+    "note": "读取系统 SMTP 设置",
+    "writes": {}
+  },
+  {
+    "module": "kindle",
+    "method": "PUT",
+    "path": "/api/kindle-settings",
+    "status_code": 200,
+    "ok": true,
+    "note": "保存个人 Kindle 邮箱",
+    "writes": {
+      "kindle_email_preference": "\"reader_123@kindle.com\""
+    }
+  },
+  {
+    "module": "kindle",
+    "method": "POST",
+    "path": "/api/kindle-send-tasks",
+    "status_code": 201,
+    "ok": true,
+    "note": "创建 Kindle 发送任务",
+    "writes": {
+      "task_rows": 1
+    }
+  },
+  {
+    "module": "kindle",
+    "method": "GET",
+    "path": "/api/kindle-send-tasks",
+    "status_code": 200,
+    "ok": true,
+    "note": "读取 Kindle 发送任务列表",
+    "writes": {}
+  },
+  {
+    "module": "kindle",
+    "method": "POST",
+    "path": "/api/kindle-send-tasks/{task_id}/cancel",
+    "status_code": 200,
+    "ok": true,
+    "note": "取消 Kindle 发送任务",
+    "writes": {}
+  },
+  {
+    "module": "kindle",
+    "method": "POST",
+    "path": "/api/kindle-send-tasks/{task_id}/retry",
+    "status_code": 200,
+    "ok": true,
+    "note": "重试 Kindle 发送任务",
+    "writes": {}
+  }
+]

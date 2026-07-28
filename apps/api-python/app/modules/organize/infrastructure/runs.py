@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import func, inspect, select, update
 from sqlalchemy.orm import Session
 
 from app.models.organize import OrganizeJob, OrganizeRun
+from app.modules.organize.infrastructure.policy import DEFAULT_RULES
 
 ACTIVE_RUN_STATUSES = ("QUEUED", "RUNNING")
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def has_run_table(db: Session) -> bool:
@@ -79,10 +80,32 @@ def _json_dict(value: Any, fallback: dict[str, Any]) -> dict[str, Any]:
 
 
 def run_view(row: dict[str, Any]) -> dict[str, Any]:
+    stored_scope = _json_dict(row.get("scopeJson"), {})
+    stored_work_ids = stored_scope.get("workIds")
+    work_ids = (
+        [str(work_id).strip() for work_id in stored_work_ids if str(work_id).strip()]
+        if isinstance(stored_work_ids, list)
+        else []
+    )
+    stored_rules = stored_scope.get("rules")
+    rules = stored_rules if isinstance(stored_rules, dict) else {}
     return {
         "id": row.get("id"),
         "trigger": row.get("trigger"),
-        "scope": _json_dict(row.get("scopeJson"), {}),
+        "scope": {
+            "workIds": work_ids,
+            "rules": {
+                "unrecognized": bool(
+                    rules.get("unrecognized", DEFAULT_RULES["unrecognized"])
+                ),
+                "missingMetadata": bool(
+                    rules.get(
+                        "missingMetadata",
+                        DEFAULT_RULES["missingMetadata"],
+                    )
+                ),
+            },
+        },
         "status": row.get("status"),
         "queuedCount": int(row.get("queuedCount") or 0),
         "completedCount": int(row.get("completedCount") or 0),

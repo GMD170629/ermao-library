@@ -1,0 +1,4378 @@
+[
+  {
+    "module": "auth",
+    "method": "GET",
+    "path_template": "/api/auth/capabilities",
+    "request_path": "/api/auth/capabilities",
+    "operation_id": "capabilities_api_auth_capabilities_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "读取密码重置能力",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"localPasswordReset\":true,\"passwordResetFilePath\":\"/private/tmp/shuku-openapi-audit.9VobLW/monitor/reset-password.html\"}}"
+  },
+  {
+    "module": "auth",
+    "method": "GET",
+    "path_template": "/api/auth/setup/status",
+    "request_path": "/api/auth/setup/status",
+    "operation_id": "setup_status_api_auth_setup_status_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "已初始化状态",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"initialized\":true}}"
+  },
+  {
+    "module": "auth",
+    "method": "POST",
+    "path_template": "/api/auth/setup",
+    "request_path": "/api/auth/setup",
+    "operation_id": "setup_api_auth_setup_post",
+    "expected_statuses": [
+      409
+    ],
+    "status_code": 409,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "已初始化系统拒绝重复 setup（首次 201 已在隔离实例初始化时验证）",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"系统已经完成初始化，请直接登录\"}}"
+  },
+  {
+    "module": "auth",
+    "method": "POST",
+    "path_template": "/api/auth/login",
+    "request_path": "/api/auth/login",
+    "operation_id": "login_api_auth_login_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "Session": {
+        "rowsBefore": 2,
+        "rowsAfter": 3,
+        "contentChanged": true
+      }
+    },
+    "note": "管理员登录并创建会话",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"user\":{\"id\":\"py_d481037a4027469eb608c23e99d89c95\",\"email\":\"audit@example.com\",\"name\":\"OpenAPI 审计管理员\",\"role\":\"admin\",\"status\":\"active\",\"canManageSystem\":false,\"canViewManualImports\":false,\"authzVersion\":1,\"avatarUrl\":null,\"locale\":\"zh-CN\"},\"authorization\":{\"isAdmin\":true,\"canManageSystem\":true,\"allLibraryScopes\":true,\"monitorFolderIds\":[],\"canViewManualImports\":true,\"authzVersion\":1},\"preferences\":{\"locale\":\"zh-CN\"}}}"
+  },
+  {
+    "module": "auth",
+    "method": "GET",
+    "path_template": "/api/auth/me",
+    "request_path": "/api/auth/me",
+    "operation_id": "me_api_auth_me_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "读取当前会话",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"user\":{\"id\":\"py_d481037a4027469eb608c23e99d89c95\",\"email\":\"audit@example.com\",\"name\":\"OpenAPI 审计管理员\",\"role\":\"admin\",\"status\":\"active\",\"canManageSystem\":false,\"canViewManualImports\":false,\"authzVersion\":1,\"avatarUrl\":null,\"locale\":\"zh-CN\"},\"authorization\":{\"isAdmin\":true,\"canManageSystem\":true,\"allLibraryScopes\":true,\"monitorFolderIds\":[],\"canViewManualImports\":true,\"authzVersion\":1},\"preferences\":{\"locale\":\"zh-CN\"}}}"
+  },
+  {
+    "module": "auth",
+    "method": "PATCH",
+    "path_template": "/api/auth/account/email",
+    "request_path": "/api/auth/account/email",
+    "operation_id": "update_email_api_auth_account_email_patch",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 422,
+    "passed": false,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "修改账户邮箱",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"code\":\"REQUEST_VALIDATION_ERROR\",\"message\":\"请求参数校验失败\",\"details\":[{\"loc\":[\"body\",\"currentPassword\"],\"message\":\"Field required\",\"type\":\"missing\",\"input\":{\"kind\":\"object\",\"value\":null,\"length\":2,\"keys\":[\"email\",\"password\"]}}]}}"
+  },
+  {
+    "module": "auth",
+    "method": "PATCH",
+    "path_template": "/api/auth/account/name",
+    "request_path": "/api/auth/account/name",
+    "operation_id": "update_name_api_auth_account_name_patch",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "User": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      }
+    },
+    "note": "修改账户名称",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"user\":{\"id\":\"py_d481037a4027469eb608c23e99d89c95\",\"email\":\"audit@example.com\",\"name\":\"OpenAPI 审计员\",\"role\":\"admin\",\"status\":\"active\",\"canManageSystem\":false,\"canViewManualImports\":false,\"authzVersion\":1,\"avatarUrl\":null}}}"
+  },
+  {
+    "module": "auth",
+    "method": "PATCH",
+    "path_template": "/api/auth/account/password",
+    "request_path": "/api/auth/account/password",
+    "operation_id": "update_password_api_auth_account_password_patch",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "Session": {
+        "rowsBefore": 3,
+        "rowsAfter": 0,
+        "contentChanged": true
+      },
+      "User": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      }
+    },
+    "note": "修改密码并撤销会话",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"passwordChanged\":true,\"requiresLogin\":true}}"
+  },
+  {
+    "module": "auth",
+    "method": "PATCH",
+    "path_template": "/api/auth/account/email",
+    "request_path": "/api/auth/account/email",
+    "operation_id": "update_email_api_auth_account_email_patch",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "User": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      }
+    },
+    "note": "修改账户邮箱（有效 currentPassword）",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"user\":{\"id\":\"py_d481037a4027469eb608c23e99d89c95\",\"email\":\"audit2@example.com\",\"name\":\"OpenAPI 审计员\",\"role\":\"admin\",\"status\":\"active\",\"canManageSystem\":false,\"canViewManualImports\":false,\"authzVersion\":1,\"avatarUrl\":null}}}"
+  },
+  {
+    "module": "auth",
+    "method": "POST",
+    "path_template": "/api/auth/avatar",
+    "request_path": "/api/auth/avatar",
+    "operation_id": "upload_avatar_api_auth_avatar_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "User": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      }
+    },
+    "note": "上传 PNG 头像并写入用户记录/文件",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"user\":{\"id\":\"py_d481037a4027469eb608c23e99d89c95\",\"email\":\"audit2@example.com\",\"name\":\"OpenAPI 审计员\",\"role\":\"admin\",\"status\":\"active\",\"canManageSystem\":false,\"canViewManualImports\":false,\"authzVersion\":1,\"avatarUrl\":\"/api/auth/avatar?v=1785232223\"}}}"
+  },
+  {
+    "module": "auth",
+    "method": "GET",
+    "path_template": "/api/auth/avatar",
+    "request_path": "/api/auth/avatar",
+    "operation_id": "get_avatar_api_auth_avatar_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "image/webp",
+    "documented_response": true,
+    "response_shape_ok": null,
+    "database_changes": {},
+    "note": "读取已上传头像",
+    "response_excerpt": "<binary 28654 bytes>"
+  },
+  {
+    "module": "auth",
+    "method": "DELETE",
+    "path_template": "/api/auth/avatar",
+    "request_path": "/api/auth/avatar",
+    "operation_id": "delete_avatar_api_auth_avatar_delete",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "User": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      }
+    },
+    "note": "删除头像记录与文件",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"user\":{\"id\":\"py_d481037a4027469eb608c23e99d89c95\",\"email\":\"audit2@example.com\",\"name\":\"OpenAPI 审计员\",\"role\":\"admin\",\"status\":\"active\",\"canManageSystem\":false,\"canViewManualImports\":false,\"authzVersion\":1,\"avatarUrl\":null}}}"
+  },
+  {
+    "module": "auth",
+    "method": "POST",
+    "path_template": "/api/auth/password-reset/request",
+    "request_path": "/api/auth/password-reset/request",
+    "operation_id": "request_password_reset_api_auth_password_reset_request_post",
+    "expected_statuses": [
+      202
+    ],
+    "status_code": 202,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "PasswordResetToken": {
+        "rowsBefore": 0,
+        "rowsAfter": 1,
+        "contentChanged": true
+      }
+    },
+    "note": "创建密码重置令牌及本地重置文件",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"accepted\":true,\"message\":\"如果该邮箱已绑定账户，密码重置文件已在本地目录创建。\",\"filePath\":\"/private/tmp/shuku-openapi-audit.9VobLW/monitor/reset-password.html\"}}"
+  },
+  {
+    "module": "auth",
+    "method": "POST",
+    "path_template": "/api/auth/password-reset/confirm",
+    "request_path": "/api/auth/password-reset/confirm",
+    "operation_id": "confirm_password_reset_api_auth_password_reset_confirm_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "PasswordResetToken": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "Session": {
+        "rowsBefore": 3,
+        "rowsAfter": 0,
+        "contentChanged": true
+      },
+      "User": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      }
+    },
+    "note": "消费重置令牌、修改密码并撤销会话",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"passwordReset\":true}}"
+  },
+  {
+    "module": "users",
+    "method": "POST",
+    "path_template": "/api/admin/users",
+    "request_path": "/api/admin/users",
+    "operation_id": "create_user_api_admin_users_post",
+    "expected_statuses": [
+      201
+    ],
+    "status_code": 201,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "SystemEvent": {
+        "rowsBefore": 0,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "User": {
+        "rowsBefore": 1,
+        "rowsAfter": 2,
+        "contentChanged": true
+      },
+      "UserPreference": {
+        "rowsBefore": 1,
+        "rowsAfter": 2,
+        "contentChanged": true
+      }
+    },
+    "note": "创建普通用户、locale 偏好与审计事件",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"user\":{\"id\":\"py_0cc25de5d67e4542911cf727ef529db1\",\"email\":\"member@example.com\",\"name\":\"接口审计成员\",\"role\":\"member\",\"status\":\"active\",\"canManageSystem\":true,\"canViewManualImports\":true,\"authzVersion\":1,\"avatarUrl\":null,\"locale\":\"en-US\",\"monitorFolderIds\":[],\"authorization\":{\"isAdmin\":false,\"canManageSystem\":true,\"allLibraryScopes\":false,\"monitorFolderIds\":[],\"canViewManualImports\":true,\"authzVersion\":1},\"createdAt\":\"2026-07-28T09:51:33.293000Z\",\"updatedAt\":\"2026-07-28T09:51:33.293000Z\"},\"createdBy\":\"py_d481037a4027469eb608c23e99d89c95\"}}"
+  },
+  {
+    "module": "users",
+    "method": "GET",
+    "path_template": "/api/admin/users",
+    "request_path": "/api/admin/users",
+    "operation_id": "list_users_api_admin_users_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "列出用户",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"users\":[{\"id\":\"py_d481037a4027469eb608c23e99d89c95\",\"email\":\"audit2@example.com\",\"name\":\"OpenAPI 审计员\",\"role\":\"admin\",\"status\":\"active\",\"canManageSystem\":false,\"canViewManualImports\":false,\"authzVersion\":1,\"avatarUrl\":null,\"locale\":\"zh-CN\",\"monitorFolderIds\":[],\"authorization\":{\"isAdmin\":true,\"canManageSystem\":true,\"allLibraryScopes\":true,\"monitorFolderIds\":[],\"canViewManualImports\":true,\"authzVersion\":1},\"createdAt\":\"2026-07-28T09:46:33.173000Z\",\"updatedAt\":\"2026-07-28T09:51:33.156000Z\"},{\"id\":\"py_0cc25de5d67e4542911cf727ef529db1\",\"email\":\"member@example.com\",\"name\":\"接口审计成员\",\"role\":\"member\",\"status\":\"active\",\"canManageSystem\":true,\"canViewManualImports\":true,\"authzVersion\":1,\"avatarUrl\":null,\"locale\":\"en-US\",\"monitorFolderIds\":[],\"authorization\":{\"isAdmin\":false,\"canManageSystem\":true,\"allLibraryScopes\":false,\"monitorFolderIds\":[],\"canViewManualImports\":true,\"authzVersion\":1},\"createdAt\":\"2026-07-28T09:51:33.293000Z\",\"updatedAt\":\"2026-07-28T09:51:33.293000Z\"}]}}"
+  },
+  {
+    "module": "users",
+    "method": "GET",
+    "path_template": "/api/admin/users/{user_id}",
+    "request_path": "/api/admin/users/py_0cc25de5d67e4542911cf727ef529db1",
+    "operation_id": "get_user_api_admin_users__user_id__get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "读取指定用户",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"user\":{\"id\":\"py_0cc25de5d67e4542911cf727ef529db1\",\"email\":\"member@example.com\",\"name\":\"接口审计成员\",\"role\":\"member\",\"status\":\"active\",\"canManageSystem\":true,\"canViewManualImports\":true,\"authzVersion\":1,\"avatarUrl\":null,\"locale\":\"en-US\",\"monitorFolderIds\":[],\"authorization\":{\"isAdmin\":false,\"canManageSystem\":true,\"allLibraryScopes\":false,\"monitorFolderIds\":[],\"canViewManualImports\":true,\"authzVersion\":1},\"createdAt\":\"2026-07-28T09:51:33.293000Z\",\"updatedAt\":\"2026-07-28T09:51:33.293000Z\"},\"createdBy\":null}}"
+  },
+  {
+    "module": "users",
+    "method": "PATCH",
+    "path_template": "/api/admin/users/{user_id}",
+    "request_path": "/api/admin/users/py_0cc25de5d67e4542911cf727ef529db1",
+    "operation_id": "update_user_api_admin_users__user_id__patch",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "SystemEvent": {
+        "rowsBefore": 1,
+        "rowsAfter": 2,
+        "contentChanged": true
+      },
+      "User": {
+        "rowsBefore": 2,
+        "rowsAfter": 2,
+        "contentChanged": true
+      },
+      "UserPreference": {
+        "rowsBefore": 2,
+        "rowsAfter": 2,
+        "contentChanged": true
+      }
+    },
+    "note": "更新用户权限和名称",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"user\":{\"id\":\"py_0cc25de5d67e4542911cf727ef529db1\",\"email\":\"member@example.com\",\"name\":\"接口审计成员二\",\"role\":\"member\",\"status\":\"active\",\"canManageSystem\":false,\"canViewManualImports\":true,\"authzVersion\":2,\"avatarUrl\":null,\"locale\":\"zh-CN\",\"monitorFolderIds\":[],\"authorization\":{\"isAdmin\":false,\"canManageSystem\":false,\"allLibraryScopes\":false,\"monitorFolderIds\":[],\"canViewManualImports\":true,\"authzVersion\":2},\"createdAt\":\"2026-07-28T09:51:33.293000Z\",\"updatedAt\":\"2026-07-28T09:51:33.552000Z\"},\"createdBy\":null}}"
+  },
+  {
+    "module": "users",
+    "method": "PUT",
+    "path_template": "/api/admin/users/{user_id}/password",
+    "request_path": "/api/admin/users/py_0cc25de5d67e4542911cf727ef529db1/password",
+    "operation_id": "set_user_password_api_admin_users__user_id__password_put",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "SystemEvent": {
+        "rowsBefore": 2,
+        "rowsAfter": 3,
+        "contentChanged": true
+      },
+      "User": {
+        "rowsBefore": 2,
+        "rowsAfter": 2,
+        "contentChanged": true
+      }
+    },
+    "note": "管理员重置用户密码并撤销其会话",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"passwordChanged\":true,\"sessionsRevoked\":true}}"
+  },
+  {
+    "module": "preferences",
+    "method": "GET",
+    "path_template": "/api/auth/preferences",
+    "request_path": "/api/auth/preferences",
+    "operation_id": "get_preferences_api_auth_preferences_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "读取当前用户偏好",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"preferences\":{\"locale\":\"zh-CN\"}}}"
+  },
+  {
+    "module": "preferences",
+    "method": "PATCH",
+    "path_template": "/api/auth/preferences",
+    "request_path": "/api/auth/preferences",
+    "operation_id": "update_preferences_api_auth_preferences_patch",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 400,
+    "passed": false,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "更新 locale/theme 偏好",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"包含不支持的用户偏好\",\"code\":\"UNSUPPORTED_USER_PREFERENCE\",\"details\":{\"keys\":[\"theme\"]}}}"
+  },
+  {
+    "module": "users",
+    "method": "DELETE",
+    "path_template": "/api/admin/users/{user_id}",
+    "request_path": "/api/admin/users/py_0cc25de5d67e4542911cf727ef529db1",
+    "operation_id": "delete_user_api_admin_users__user_id__delete",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "SystemEvent": {
+        "rowsBefore": 3,
+        "rowsAfter": 4,
+        "contentChanged": true
+      },
+      "User": {
+        "rowsBefore": 2,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "UserPreference": {
+        "rowsBefore": 2,
+        "rowsAfter": 1,
+        "contentChanged": true
+      }
+    },
+    "note": "按邮箱确认删除用户",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"deleted\":true,\"userId\":\"py_0cc25de5d67e4542911cf727ef529db1\"}}"
+  },
+  {
+    "module": "auth",
+    "method": "POST",
+    "path_template": "/api/auth/logout",
+    "request_path": "/api/auth/logout",
+    "operation_id": "logout_api_auth_logout_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "Session": {
+        "rowsBefore": 1,
+        "rowsAfter": 0,
+        "contentChanged": true
+      }
+    },
+    "note": "删除当前会话并清理 cookie",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"loggedOut\":true}}"
+  },
+  {
+    "module": "auth",
+    "method": "POST",
+    "path_template": "/api/auth/login",
+    "request_path": "/api/auth/login",
+    "operation_id": "login_api_auth_login_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "Session": {
+        "rowsBefore": 0,
+        "rowsAfter": 1,
+        "contentChanged": true
+      }
+    },
+    "note": "用重置后的密码重新登录",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"user\":{\"id\":\"py_d481037a4027469eb608c23e99d89c95\",\"email\":\"audit2@example.com\",\"name\":\"OpenAPI 审计员\",\"role\":\"admin\",\"status\":\"active\",\"canManageSystem\":false,\"canViewManualImports\":false,\"authzVersion\":1,\"avatarUrl\":null,\"locale\":\"zh-CN\"},\"authorization\":{\"isAdmin\":true,\"canManageSystem\":true,\"allLibraryScopes\":true,\"monitorFolderIds\":[],\"canViewManualImports\":true,\"authzVersion\":1},\"preferences\":{\"locale\":\"zh-CN\"}}}"
+  },
+  {
+    "module": "preferences",
+    "method": "PATCH",
+    "path_template": "/api/auth/preferences",
+    "request_path": "/api/auth/preferences",
+    "operation_id": "update_preferences_api_auth_preferences_patch",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "UserPreference": {
+        "rowsBefore": 1,
+        "rowsAfter": 3,
+        "contentChanged": true
+      }
+    },
+    "note": "更新 locale/library.view/audio.playbackRate 偏好（有效键）",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"preferences\":{\"locale\":\"zh-CN\",\"library.view\":\"list\",\"audio.playbackRate\":1.25}}}"
+  },
+  {
+    "module": "system",
+    "method": "GET",
+    "path_template": "/api/app-config",
+    "request_path": "/api/app-config",
+    "operation_id": "get_public_app_config_api_app_config_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "公开应用配置",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"language\":\"zh-CN\",\"supportedLocales\":[\"zh-CN\",\"en-US\"]}}"
+  },
+  {
+    "module": "system",
+    "method": "GET",
+    "path_template": "/api/system-settings",
+    "request_path": "/api/system-settings",
+    "operation_id": "get_system_settings_api_system_settings_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "读取系统设置",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"settings\":{\"email.smtp.passwordConfigured\":false,\"metadata.ai.apiKeyConfigured\":false,\"metadata.bangumi.accessTokenConfigured\":false,\"language\":\"zh-CN\",\"workDetail.tabOrder\":[\"EBOOK\",\"COMIC\",\"AUDIOBOOK\",\"STRUCTURE\"]}}}"
+  },
+  {
+    "module": "system",
+    "method": "PUT",
+    "path_template": "/api/system-settings",
+    "request_path": "/api/system-settings",
+    "operation_id": "update_system_settings_api_system_settings_put",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "SystemEvent": {
+        "rowsBefore": 4,
+        "rowsAfter": 5,
+        "contentChanged": true
+      },
+      "SystemSetting": {
+        "rowsBefore": 3,
+        "rowsAfter": 5,
+        "contentChanged": true
+      }
+    },
+    "note": "PUT 写入 locale 与导入设置并记录事件",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"settings\":{\"email.smtp.passwordConfigured\":false,\"metadata.ai.apiKeyConfigured\":false,\"metadata.bangumi.accessTokenConfigured\":false,\"locale\":\"en-US\",\"imports.manual.autoOrganize\":false}}}"
+  },
+  {
+    "module": "system",
+    "method": "PATCH",
+    "path_template": "/api/system-settings",
+    "request_path": "/api/system-settings",
+    "operation_id": "update_system_settings_api_system_settings_patch",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "SystemEvent": {
+        "rowsBefore": 5,
+        "rowsAfter": 6,
+        "contentChanged": true
+      },
+      "SystemSetting": {
+        "rowsBefore": 5,
+        "rowsAfter": 5,
+        "contentChanged": true
+      }
+    },
+    "note": "PATCH 更新 locale 并记录事件",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"settings\":{\"email.smtp.passwordConfigured\":false,\"metadata.ai.apiKeyConfigured\":false,\"metadata.bangumi.accessTokenConfigured\":false,\"locale\":\"zh-CN\"}}}"
+  },
+  {
+    "module": "system",
+    "method": "GET",
+    "path_template": "/api/dashboard/system-status",
+    "request_path": "/api/dashboard/system-status",
+    "operation_id": "dashboard_system_status_api_dashboard_system_status_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "管理端系统状态聚合",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"database\":{\"name\":\"database\",\"status\":\"ok\",\"message\":\"数据库可连接\"},\"worker\":{\"name\":null,\"status\":\"unknown\",\"message\":\"未启用监控文件夹\"},\"enabledMonitorFolders\":[],\"currentImportTask\":null,\"latestImportTask\":null,\"errorFileCount\":0,\"monitorRootReadable\":{\"name\":\"monitorRootReadable\",\"status\":\"ok\",\"message\":\"监控文件夹可读\"},\"storageWritable\":{\"name\":\"storageWritable\",\"status\":\"ok\",\"message\":\"书库文件夹可写\"}}}"
+  },
+  {
+    "module": "system",
+    "method": "GET",
+    "path_template": "/api/management/events",
+    "request_path": "/api/management/events",
+    "operation_id": "list_system_events_api_management_events_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 500,
+    "passed": false,
+    "content_type": "text/plain; charset=utf-8",
+    "documented_response": false,
+    "response_shape_ok": null,
+    "database_changes": {},
+    "note": "结构化事件列表与分页",
+    "response_excerpt": "Internal Server Error"
+  },
+  {
+    "module": "health",
+    "method": "GET",
+    "path_template": "/api/health",
+    "request_path": "/api/health",
+    "operation_id": "health_api_health_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "基础健康摘要",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"service\":\"shuku-starship\",\"status\":\"ok\"}}"
+  },
+  {
+    "module": "health",
+    "method": "GET",
+    "path_template": "/api/system/health",
+    "request_path": "/api/system/health",
+    "operation_id": "system_health_api_system_health_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "详细健康检查",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"status\":\"ok\",\"checks\":[{\"name\":\"SESSION_SECRET\",\"status\":\"ok\",\"message\":\"已配置\",\"details\":null},{\"name\":\"MONITOR_ROOT\",\"status\":\"ok\",\"message\":\"已配置\",\"details\":null},{\"name\":\"database\",\"status\":\"ok\",\"message\":\"数据库可连接\",\"details\":null},{\"name\":\"monitorRootReadable\",\"status\":\"ok\",\"message\":\"监控文件夹可读\",\"details\":null},{\"name\":\"storageWritable\",\"status\":\"ok\",\"message\":\"书库文件夹可写\",\"details\":null},{\"name\":\"ebookConversion\",\"status\":\"unknown\",\"message\":\"TXT/FB2 可用，libmobi 暂不可用\",\"details\":{\"available\":false,\"converter\":\"libmobi+shuku-internal\",\"version\":\"unavailable; shuku-epub-normalizer/1; shuku-internal-epub/2\",\"engines\":[{\"available\":true,\"converter\":\"shuku-internal\",\"version\":\"shuku-internal-epub/2\",\"formats\":[\"FB2\",\"TXT\"],\"normalizerVersion\":null,\"errorCode\":null,\"message\":null},{\"available\":false,\"converter\":\"libmobi\",\"version\":null,\"formats\":[\"AZW\",\"AZW3\",\"MOBI\",\"PRC\"],\"normalizerVersion\":\"shuku-epub-normalizer/1\",\"errorCode\":\"CONVERTER_UNAVAILABLE\",\"message\":\"电子书转换服务不可用\"}]"
+  },
+  {
+    "module": "health",
+    "method": "GET",
+    "path_template": "/api/__db-ping",
+    "request_path": "/api/__db-ping",
+    "operation_id": "db_ping_api___db_ping_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "数据库探针",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"database\":\"ok\"}}"
+  },
+  {
+    "module": "health",
+    "method": "POST",
+    "path_template": "/api/system/health/runs",
+    "request_path": "/api/system/health/runs",
+    "operation_id": "create_health_run_api_system_health_runs_post",
+    "expected_statuses": [
+      200,
+      201
+    ],
+    "status_code": 201,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "SystemHealthRun": {
+        "rowsBefore": 0,
+        "rowsAfter": 1,
+        "contentChanged": true
+      }
+    },
+    "note": "创建或复用健康检查运行",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"run\":{\"runId\":\"health_9deff9183f394f0ca40e0204949f8622\",\"status\":\"running\",\"version\":1,\"startedAt\":1785232362046,\"finishedAt\":null,\"groups\":[{\"id\":\"storage\",\"labelCode\":\"health.group.storage\"},{\"id\":\"queues\",\"labelCode\":\"health.group.queues\"},{\"id\":\"configuration\",\"labelCode\":\"health.group.configuration\"}],\"items\":[{\"id\":\"database\",\"group\":\"storage\",\"labelCode\":\"health.item.database\",\"kind\":\"database\",\"options\":{},\"status\":\"pending\",\"messageCode\":\"health.pending\",\"messageParams\":{},\"details\":{},\"startedAt\":null,\"finishedAt\":null,\"durationMs\":null},{\"id\":\"monitor-root\",\"group\":\"storage\",\"labelCode\":\"health.item.monitorRoot\",\"kind\":\"directory\",\"options\":{\"path\":\"/private/tmp/shuku-openapi-audit.9VobLW/monitor\",\"writable\":false,\"name\":null},\"status\":\"pending\",\"messageCode\":\"health.pending\",\"messageParams\":{},\"details\":{},\"startedAt\":null,\"finishedAt\":null,\"durationMs\":null},{\"id\":\"storage-root\",\"group\":\"storage\",\"labelCode\":\"health.item.storageRoot\",\"kind\":\"directory\","
+  },
+  {
+    "module": "health",
+    "method": "GET",
+    "path_template": "/api/system/health/runs/{run_id}",
+    "request_path": "/api/system/health/runs/health_9deff9183f394f0ca40e0204949f8622",
+    "operation_id": "get_health_run_api_system_health_runs__run_id__get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "读取健康检查运行结果",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"run\":{\"runId\":\"health_9deff9183f394f0ca40e0204949f8622\",\"status\":\"error\",\"version\":44,\"startedAt\":1785232362046,\"finishedAt\":1785232362094,\"groups\":[{\"id\":\"storage\",\"labelCode\":\"health.group.storage\"},{\"id\":\"queues\",\"labelCode\":\"health.group.queues\"},{\"id\":\"configuration\",\"labelCode\":\"health.group.configuration\"}],\"items\":[{\"id\":\"database\",\"group\":\"storage\",\"labelCode\":\"health.item.database\",\"kind\":\"database\",\"options\":{},\"status\":\"ok\",\"messageCode\":\"health.database.ok\",\"messageParams\":{},\"details\":{},\"startedAt\":1785232362049,\"finishedAt\":1785232362051,\"durationMs\":2},{\"id\":\"monitor-root\",\"group\":\"storage\",\"labelCode\":\"health.item.monitorRoot\",\"kind\":\"directory\",\"options\":{\"path\":\"/private/tmp/shuku-openapi-audit.9VobLW/monitor\",\"writable\":false,\"name\":null},\"status\":\"ok\",\"messageCode\":\"health.directory.ok\",\"messageParams\":{},\"details\":{\"path\":\"/private/tmp/shuku-openapi-audit.9VobLW/monitor\",\"writableRequired\":false,\"name\":null,\"error\":null},\"startedAt\":1785232362"
+  },
+  {
+    "module": "health",
+    "method": "GET",
+    "path_template": "/api/system/health/runs/{run_id}/events",
+    "request_path": "/api/system/health/runs/health_9deff9183f394f0ca40e0204949f8622/events",
+    "operation_id": "stream_health_run_api_system_health_runs__run_id__events_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "text/event-stream; charset=utf-8",
+    "documented_response": true,
+    "response_shape_ok": null,
+    "database_changes": {},
+    "note": "读取健康检查 SSE 直至终态",
+    "response_excerpt": "id: 44\\nevent: run.completed\\ndata: {\"run\": {\"runId\": \"health_9deff9183f394f0ca40e0204949f8622\", \"status\": \"error\", \"version\": 44, \"startedAt\": 1785232362046, \"finishedAt\": 1785232362094, \"groups\": [{\"id\": \"storage\", \"labelCode\": \"health.group.storage\"}, {\"id\": \"queues\", \"labelCode\": \"health.group.queues\"}, {\"id\": \"configuration\", \"labelCode\": \"health.group.configuration\"}], \"items\": [{\"id\": \"database\", \"group\": \"storage\", \"labelCode\": \"health.item.database\", \"kind\": \"database\", \"options\": {}, \"status\": \"ok\", \"messageCode\": \"health.database.ok\", \"messageParams\": {}, \"details\": {}, \"startedAt\": 1785232362049, \"finishedAt\": 1785232362051, \"durationMs\": 2}, {\"id\": \"monitor-root\", \"group\": \"storage\", \"labelCode\": \"health.item.monitorRoot\", \"kind\": \"directory\", \"options\": {\"path\": \"/private/tmp/shuku-openapi-audit.9VobLW/monitor\", \"writable\": false}, \"status\": \"ok\", \"messageCode\": \"health.directory.ok\", \"messageParams\": {}, \"details\": {\"path\": \"/private/tmp/shuku-openapi-audit.9VobLW/monito"
+  },
+  {
+    "module": "health",
+    "method": "POST",
+    "path_template": "/api/system/queues/import/restart",
+    "request_path": "/api/system/queues/import/restart",
+    "operation_id": "restart_import_queue_api_system_queues_import_restart_post",
+    "expected_statuses": [
+      202
+    ],
+    "status_code": 202,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "QueueControlOperation": {
+        "rowsBefore": 0,
+        "rowsAfter": 1,
+        "contentChanged": true
+      }
+    },
+    "note": "创建导入队列重启控制操作",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"operation\":{\"id\":\"queue_04254716b4a546179d6a04fe9abe07c7\",\"queueName\":\"import\",\"action\":\"restart\",\"status\":\"requested\",\"actorUserId\":\"py_d481037a4027469eb608c23e99d89c95\",\"messageCode\":\"queue.restart.requested\",\"requestedAt\":\"2026-07-28T09:53:16.337000Z\",\"startedAt\":null,\"finishedAt\":null,\"updatedAt\":\"2026-07-28T09:53:16.337000Z\"},\"created\":true}}"
+  },
+  {
+    "module": "health",
+    "method": "GET",
+    "path_template": "/api/system/queue-operations/{operation_id}",
+    "request_path": "/api/system/queue-operations/queue_04254716b4a546179d6a04fe9abe07c7",
+    "operation_id": "get_queue_operation_api_system_queue_operations__operation_id__get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "读取队列控制操作",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"operation\":{\"id\":\"queue_04254716b4a546179d6a04fe9abe07c7\",\"queueName\":\"import\",\"action\":\"restart\",\"status\":\"requested\",\"actorUserId\":\"py_d481037a4027469eb608c23e99d89c95\",\"messageCode\":\"queue.restart.requested\",\"requestedAt\":\"2026-07-28T09:53:16.337000Z\",\"startedAt\":null,\"finishedAt\":null,\"updatedAt\":\"2026-07-28T09:53:16.337000Z\"},\"created\":null}}"
+  },
+  {
+    "module": "health",
+    "method": "GET",
+    "path_template": "/api/system/log-settings",
+    "request_path": "/api/system/log-settings",
+    "operation_id": "get_log_settings_api_system_log_settings_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "读取日志容量设置",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"storage\":{\"sizeBytes\":1360,\"maxBytes\":5242880,\"lastPrunedAt\":null},\"minBytes\":1048576,\"maxBytes\":104857600}}"
+  },
+  {
+    "module": "health",
+    "method": "PUT",
+    "path_template": "/api/system/log-settings",
+    "request_path": "/api/system/log-settings",
+    "operation_id": "update_log_settings_api_system_log_settings_put",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "SystemEvent": {
+        "rowsBefore": 7,
+        "rowsAfter": 8,
+        "contentChanged": true
+      },
+      "SystemSetting": {
+        "rowsBefore": 5,
+        "rowsAfter": 6,
+        "contentChanged": true
+      }
+    },
+    "note": "更新日志容量并写 SystemSetting/SystemEvent",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"storage\":{\"sizeBytes\":1534,\"maxBytes\":2097152,\"lastPrunedAt\":null},\"minBytes\":null,\"maxBytes\":null}}"
+  },
+  {
+    "module": "system",
+    "method": "POST",
+    "path_template": "/api/backups",
+    "request_path": "/api/backups",
+    "operation_id": "create_backup_api_backups_post",
+    "expected_statuses": [
+      201
+    ],
+    "status_code": 201,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": false,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "创建包含 SQLite 与设置的备份归档",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"backup\":{\"id\":\"manual-20260728-095316-3114d8\",\"name\":\"manual-20260728-095316-3114d8.zip\",\"filename\":\"manual-20260728-095316-3114d8.zip\",\"sizeBytes\":2232,\"createdAt\":\"2026-07-28T09:53:16.792000Z\",\"counts\":{\"users\":1,\"userPreferences\":3,\"monitorFolders\":0,\"userMonitorFolderAccess\":0,\"works\":0,\"editions\":0,\"volumes\":0,\"files\":0,\"readingUnits\":0,\"metadataItems\":0,\"shelves\":0,\"shelfWorks\":0,\"readingProgresses\":0,\"consumptionStates\":0,\"workDetailPreferences\":0,\"importTasks\":0,\"importAssets\":0,\"bookConversionTasks\":0,\"importLogs\":0,\"readerPreferences\":0,\"readerBookPreferences\":0,\"readerProgressCursors\":0,\"readerBookmarks\":0,\"systemSettings\":6,\"coverIndexEntries\":0,\"libraryFiles\":0}}}}"
+  },
+  {
+    "module": "system",
+    "method": "GET",
+    "path_template": "/api/backups",
+    "request_path": "/api/backups",
+    "operation_id": "list_backups_api_backups_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "列出备份归档",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"backups\":[{\"id\":\"manual-20260728-095316-3114d8\",\"kind\":\"manual\",\"name\":\"manual-20260728-095316-3114d8.zip\",\"filename\":\"manual-20260728-095316-3114d8.zip\",\"sizeBytes\":2232,\"createdAt\":\"2026-07-28T09:53:16.792000Z\",\"counts\":{\"users\":1,\"userPreferences\":3,\"monitorFolders\":0,\"userMonitorFolderAccess\":0,\"works\":0,\"editions\":0,\"volumes\":0,\"files\":0,\"readingUnits\":0,\"metadataItems\":0,\"shelves\":0,\"shelfWorks\":0,\"readingProgresses\":0,\"consumptionStates\":0,\"workDetailPreferences\":0,\"importTasks\":0,\"importAssets\":0,\"bookConversionTasks\":0,\"importLogs\":0,\"readerPreferences\":0,\"readerBookPreferences\":0,\"readerProgressCursors\":0,\"readerBookmarks\":0,\"systemSettings\":6,\"coverIndexEntries\":0,\"libraryFiles\":0}}]}}"
+  },
+  {
+    "module": "system",
+    "method": "GET",
+    "path_template": "/api/backups/{backup_id}",
+    "request_path": "/api/backups/manual-20260728-095316-3114d8",
+    "operation_id": "get_backup_api_backups__backup_id__get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "读取备份详情",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"backup\":{\"id\":\"manual-20260728-095316-3114d8\",\"kind\":\"manual\",\"name\":\"manual-20260728-095316-3114d8.zip\",\"filename\":\"manual-20260728-095316-3114d8.zip\",\"sizeBytes\":2232,\"createdAt\":\"2026-07-28T09:53:16.792000Z\",\"counts\":{\"users\":1,\"userPreferences\":3,\"monitorFolders\":0,\"userMonitorFolderAccess\":0,\"works\":0,\"editions\":0,\"volumes\":0,\"files\":0,\"readingUnits\":0,\"metadataItems\":0,\"shelves\":0,\"shelfWorks\":0,\"readingProgresses\":0,\"consumptionStates\":0,\"workDetailPreferences\":0,\"importTasks\":0,\"importAssets\":0,\"bookConversionTasks\":0,\"importLogs\":0,\"readerPreferences\":0,\"readerBookPreferences\":0,\"readerProgressCursors\":0,\"readerBookmarks\":0,\"systemSettings\":6,\"coverIndexEntries\":0,\"libraryFiles\":0}}}}"
+  },
+  {
+    "module": "system",
+    "method": "GET",
+    "path_template": "/api/backups/{backup_id}/download",
+    "request_path": "/api/backups/manual-20260728-095316-3114d8/download",
+    "operation_id": "download_backup_api_backups__backup_id__download_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/zip",
+    "documented_response": true,
+    "response_shape_ok": null,
+    "database_changes": {},
+    "note": "下载备份 ZIP",
+    "response_excerpt": "<binary 2232 bytes>"
+  },
+  {
+    "module": "system",
+    "method": "PATCH",
+    "path_template": "/api/system-settings",
+    "request_path": "/api/system-settings",
+    "operation_id": "update_system_settings_api_system_settings_patch",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "SystemEvent": {
+        "rowsBefore": 8,
+        "rowsAfter": 9,
+        "contentChanged": true
+      },
+      "SystemSetting": {
+        "rowsBefore": 6,
+        "rowsAfter": 6,
+        "contentChanged": true
+      }
+    },
+    "note": "恢复前制造数据库差异",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"settings\":{\"email.smtp.passwordConfigured\":false,\"metadata.ai.apiKeyConfigured\":false,\"metadata.bangumi.accessTokenConfigured\":false,\"locale\":\"en-US\"}}}"
+  },
+  {
+    "module": "system",
+    "method": "POST",
+    "path_template": "/api/backups/{backup_id}/restore",
+    "request_path": "/api/backups/manual-20260728-095316-3114d8/restore",
+    "operation_id": "restore_backup_api_backups__backup_id__restore_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "SystemSetting": {
+        "rowsBefore": 6,
+        "rowsAfter": 6,
+        "contentChanged": true
+      }
+    },
+    "note": "从 ZIP 恢复 SQLite 数据",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"id\":\"manual-20260728-095316-3114d8\",\"restored\":true,\"restoredAt\":\"2026-07-28T09:53:17.378000Z\",\"counts\":{\"users\":1,\"userPreferences\":3,\"monitorFolders\":0,\"userMonitorFolderAccess\":0,\"works\":0,\"editions\":0,\"volumes\":0,\"files\":0,\"readingUnits\":0,\"metadataItems\":0,\"shelves\":0,\"shelfWorks\":0,\"readingProgresses\":0,\"consumptionStates\":0,\"workDetailPreferences\":0,\"importTasks\":0,\"importAssets\":0,\"bookConversionTasks\":0,\"importLogs\":0,\"readerPreferences\":0,\"readerBookPreferences\":0,\"readerProgressCursors\":0,\"readerBookmarks\":0,\"systemSettings\":6,\"coverIndexEntries\":0,\"libraryFiles\":0},\"restoredCounts\":{\"users\":1,\"userPreferences\":3,\"shelves\":0,\"monitorFolders\":0,\"userMonitorFolderAccess\":0,\"works\":0,\"editions\":0,\"volumes\":0,\"files\":0,\"readingUnits\":0,\"metadataItems\":0,\"shelfWorks\":0,\"readingProgresses\":0,\"consumptionStates\":0,\"workDetailPreferences\":0,\"importTasks\":0,\"importAssets\":0,\"bookConversionTasks\":0,\"importLogs\":0,\"organizeJobs\":0,\"metadataSuggestions\":0,\"duplicateC"
+  },
+  {
+    "module": "system",
+    "method": "DELETE",
+    "path_template": "/api/management/events",
+    "request_path": "/api/management/events",
+    "operation_id": "clear_system_events_api_management_events_delete",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "SystemEvent": {
+        "rowsBefore": 9,
+        "rowsAfter": 1,
+        "contentChanged": true
+      }
+    },
+    "note": "清理 info/warning 事件并保留审计事件",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"deleted\":9,\"storage\":{\"deleted\":0,\"sizeBytes\":130,\"maxBytes\":2097152}}}"
+  },
+  {
+    "module": "system",
+    "method": "DELETE",
+    "path_template": "/api/backups/{backup_id}",
+    "request_path": "/api/backups/manual-20260728-095316-3114d8",
+    "operation_id": "delete_backup_api_backups__backup_id__delete",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "删除备份归档",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"deleted\":true,\"id\":\"manual-20260728-095316-3114d8\"}}"
+  },
+  {
+    "module": "metadata",
+    "method": "GET",
+    "path_template": "/api/metadata/providers",
+    "request_path": "/api/metadata/providers",
+    "operation_id": "list_registered_metadata_providers_api_metadata_providers_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "列出内置元数据提供方及流水线",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"providers\":[{\"id\":\"douban\",\"sourceId\":\"metadata-provider-douban\",\"name\":\"豆瓣图书\",\"version\":\"builtin\",\"description\":\"用于电子书和有声书，通过豆瓣读书网页获取图书信息。\",\"mode\":\"search\",\"workTypes\":[\"ebook\",\"audiobook\"],\"fields\":[\"title\",\"author\",\"publisher\",\"description\",\"tags\",\"seriesName\",\"publishedYear\",\"coverUrl\"],\"capabilities\":[\"automatic\",\"manual-search\",\"cover\"],\"configFields\":[{\"key\":\"userAgent\",\"label\":\"User-Agent\",\"kind\":\"text\",\"required\":true,\"secret\":false,\"placeholder\":null,\"help\":\"豆瓣网页请求使用的客户端标识。\",\"default\":\"ShukuStarship/0.1 (+https://github.com/GMD170629/ermao-library)\"}],\"config\":{\"userAgent\":\"ShukuStarship/0.1 (+https://github.com/GMD170629/ermao-library)\"},\"configuredSecrets\":{},\"enabled\":false,\"priority\":100,\"lastTestAt\":null,\"lastTestStatus\":null,\"lastError\":null},{\"id\":\"bangumi\",\"sourceId\":\"metadata-provider-bangumi\",\"name\":\"Bangumi 漫画\",\"version\":\"builtin\",\"description\":\"用于电子书和漫画，通过 Bangumi 官方 API 获取条目与别名。\",\"mode\":\"search\",\"workTypes\":[\"ebook\",\"comic\"],\"fields\":[\"title\","
+  },
+  {
+    "module": "metadata",
+    "method": "PUT",
+    "path_template": "/api/metadata/provider-pipelines/{work_type}",
+    "request_path": "/api/metadata/provider-pipelines/ebook",
+    "operation_id": "update_registered_metadata_provider_pipeline_api_metadata_provider_pipelines__work_type__put",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "MetadataProviderPipeline": {
+        "rowsBefore": 7,
+        "rowsAfter": 7,
+        "contentChanged": true
+      },
+      "Source": {
+        "rowsBefore": 3,
+        "rowsAfter": 3,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 1,
+        "rowsAfter": 2,
+        "contentChanged": true
+      },
+      "SystemSetting": {
+        "rowsBefore": 6,
+        "rowsAfter": 13,
+        "contentChanged": true
+      }
+    },
+    "note": "更新 ebook 提供方顺序（保持禁用避免外部依赖）",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"providers\":[{\"id\":\"douban\",\"sourceId\":\"metadata-provider-douban\",\"name\":\"豆瓣图书\",\"version\":\"builtin\",\"description\":\"用于电子书和有声书，通过豆瓣读书网页获取图书信息。\",\"mode\":\"search\",\"workTypes\":[\"ebook\",\"audiobook\"],\"fields\":[\"title\",\"author\",\"publisher\",\"description\",\"tags\",\"seriesName\",\"publishedYear\",\"coverUrl\"],\"capabilities\":[\"automatic\",\"manual-search\",\"cover\"],\"configFields\":[{\"key\":\"userAgent\",\"label\":\"User-Agent\",\"kind\":\"text\",\"required\":true,\"secret\":false,\"placeholder\":null,\"help\":\"豆瓣网页请求使用的客户端标识。\",\"default\":\"ShukuStarship/0.1 (+https://github.com/GMD170629/ermao-library)\"}],\"config\":{\"userAgent\":\"ShukuStarship/0.1 (+https://github.com/GMD170629/ermao-library)\"},\"configuredSecrets\":{},\"enabled\":false,\"priority\":100,\"lastTestAt\":null,\"lastTestStatus\":null,\"lastError\":null},{\"id\":\"bangumi\",\"sourceId\":\"metadata-provider-bangumi\",\"name\":\"Bangumi 漫画\",\"version\":\"builtin\",\"description\":\"用于电子书和漫画，通过 Bangumi 官方 API 获取条目与别名。\",\"mode\":\"search\",\"workTypes\":[\"ebook\",\"comic\"],\"fields\":[\"title\","
+  },
+  {
+    "module": "metadata",
+    "method": "GET",
+    "path_template": "/api/metadata/providers/{provider_id}",
+    "request_path": "/api/metadata/providers/douban",
+    "operation_id": "get_registered_metadata_provider_api_metadata_providers__provider_id__get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "读取豆瓣提供方",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"provider\":{\"id\":\"douban\",\"sourceId\":\"metadata-provider-douban\",\"name\":\"豆瓣图书\",\"version\":\"builtin\",\"description\":\"用于电子书和有声书，通过豆瓣读书网页获取图书信息。\",\"mode\":\"search\",\"workTypes\":[\"ebook\",\"audiobook\"],\"fields\":[\"title\",\"author\",\"publisher\",\"description\",\"tags\",\"seriesName\",\"publishedYear\",\"coverUrl\"],\"capabilities\":[\"automatic\",\"manual-search\",\"cover\"],\"configFields\":[{\"key\":\"userAgent\",\"label\":\"User-Agent\",\"kind\":\"text\",\"required\":true,\"secret\":false,\"placeholder\":null,\"help\":\"豆瓣网页请求使用的客户端标识。\",\"default\":\"ShukuStarship/0.1 (+https://github.com/GMD170629/ermao-library)\"}],\"config\":{\"userAgent\":\"ShukuStarship/0.1 (+https://github.com/GMD170629/ermao-library)\"},\"configuredSecrets\":{},\"enabled\":false,\"priority\":100,\"lastTestAt\":null,\"lastTestStatus\":null,\"lastError\":null}}}"
+  },
+  {
+    "module": "metadata",
+    "method": "PUT",
+    "path_template": "/api/metadata/providers/{provider_id}",
+    "request_path": "/api/metadata/providers/douban",
+    "operation_id": "update_registered_metadata_provider_api_metadata_providers__provider_id__put",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "MetadataProviderPipeline": {
+        "rowsBefore": 7,
+        "rowsAfter": 7,
+        "contentChanged": true
+      },
+      "Source": {
+        "rowsBefore": 3,
+        "rowsAfter": 3,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 2,
+        "rowsAfter": 3,
+        "contentChanged": true
+      },
+      "SystemSetting": {
+        "rowsBefore": 13,
+        "rowsAfter": 13,
+        "contentChanged": true
+      }
+    },
+    "note": "PUT 更新豆瓣配置和优先级",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"provider\":{\"id\":\"douban\",\"sourceId\":\"metadata-provider-douban\",\"name\":\"豆瓣图书\",\"version\":\"builtin\",\"description\":\"用于电子书和有声书，通过豆瓣读书网页获取图书信息。\",\"mode\":\"search\",\"workTypes\":[\"ebook\",\"audiobook\"],\"fields\":[\"title\",\"author\",\"publisher\",\"description\",\"tags\",\"seriesName\",\"publishedYear\",\"coverUrl\"],\"capabilities\":[\"automatic\",\"manual-search\",\"cover\"],\"configFields\":[{\"key\":\"userAgent\",\"label\":\"User-Agent\",\"kind\":\"text\",\"required\":true,\"secret\":false,\"placeholder\":null,\"help\":\"豆瓣网页请求使用的客户端标识。\",\"default\":\"ShukuStarship/0.1 (+https://github.com/GMD170629/ermao-library)\"}],\"config\":{\"userAgent\":\"ShukuOpenAPIAudit/1.0\"},\"configuredSecrets\":{},\"enabled\":false,\"priority\":100,\"lastTestAt\":null,\"lastTestStatus\":null,\"lastError\":null}}}"
+  },
+  {
+    "module": "metadata",
+    "method": "PATCH",
+    "path_template": "/api/metadata/providers/{provider_id}",
+    "request_path": "/api/metadata/providers/douban",
+    "operation_id": "update_registered_metadata_provider_api_metadata_providers__provider_id__patch",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "Source": {
+        "rowsBefore": 3,
+        "rowsAfter": 3,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 3,
+        "rowsAfter": 4,
+        "contentChanged": true
+      },
+      "SystemSetting": {
+        "rowsBefore": 13,
+        "rowsAfter": 13,
+        "contentChanged": true
+      }
+    },
+    "note": "PATCH 更新豆瓣优先级",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"provider\":{\"id\":\"douban\",\"sourceId\":\"metadata-provider-douban\",\"name\":\"豆瓣图书\",\"version\":\"builtin\",\"description\":\"用于电子书和有声书，通过豆瓣读书网页获取图书信息。\",\"mode\":\"search\",\"workTypes\":[\"ebook\",\"audiobook\"],\"fields\":[\"title\",\"author\",\"publisher\",\"description\",\"tags\",\"seriesName\",\"publishedYear\",\"coverUrl\"],\"capabilities\":[\"automatic\",\"manual-search\",\"cover\"],\"configFields\":[{\"key\":\"userAgent\",\"label\":\"User-Agent\",\"kind\":\"text\",\"required\":true,\"secret\":false,\"placeholder\":null,\"help\":\"豆瓣网页请求使用的客户端标识。\",\"default\":\"ShukuStarship/0.1 (+https://github.com/GMD170629/ermao-library)\"}],\"config\":{\"userAgent\":\"ShukuOpenAPIAudit/1.0\"},\"configuredSecrets\":{},\"enabled\":false,\"priority\":130,\"lastTestAt\":null,\"lastTestStatus\":null,\"lastError\":null}}}"
+  },
+  {
+    "module": "metadata",
+    "method": "POST",
+    "path_template": "/api/metadata/providers/{provider_id}/test",
+    "request_path": "/api/metadata/providers/douban/test",
+    "operation_id": "test_registered_metadata_provider_api_metadata_providers__provider_id__test_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "Source": {
+        "rowsBefore": 3,
+        "rowsAfter": 3,
+        "contentChanged": true
+      }
+    },
+    "note": "实际连接测试；HTTP 200，result.ok 反映外网可达性",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"result\":{\"ok\":true,\"message\":\"连接正常\"},\"provider\":{\"id\":\"douban\",\"sourceId\":\"metadata-provider-douban\",\"name\":\"豆瓣图书\",\"version\":\"builtin\",\"description\":\"用于电子书和有声书，通过豆瓣读书网页获取图书信息。\",\"mode\":\"search\",\"workTypes\":[\"ebook\",\"audiobook\"],\"fields\":[\"title\",\"author\",\"publisher\",\"description\",\"tags\",\"seriesName\",\"publishedYear\",\"coverUrl\"],\"capabilities\":[\"automatic\",\"manual-search\",\"cover\"],\"configFields\":[{\"key\":\"userAgent\",\"label\":\"User-Agent\",\"kind\":\"text\",\"required\":true,\"secret\":false,\"placeholder\":null,\"help\":\"豆瓣网页请求使用的客户端标识。\",\"default\":\"ShukuStarship/0.1 (+https://github.com/GMD170629/ermao-library)\"}],\"config\":{\"userAgent\":\"ShukuOpenAPIAudit/1.0\"},\"configuredSecrets\":{},\"enabled\":false,\"priority\":130,\"lastTestAt\":\"2026-07-28T09:54:19.703000Z\",\"lastTestStatus\":\"ok\",\"lastError\":null}}}"
+  },
+  {
+    "module": "imports",
+    "method": "POST",
+    "path_template": "/api/monitor-folders",
+    "request_path": "/api/monitor-folders",
+    "operation_id": "create_monitor_folder_api_monitor_folders_post",
+    "expected_statuses": [
+      201
+    ],
+    "status_code": 201,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": false,
+    "response_shape_ok": true,
+    "database_changes": {
+      "MonitorFolder": {
+        "rowsBefore": 0,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 4,
+        "rowsAfter": 5,
+        "contentChanged": true
+      }
+    },
+    "note": "创建监控文件夹并记录系统事件",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"folder\":{\"id\":\"py_1785232514047186000\",\"name\":\"OpenAPI 审计目录\",\"rootPath\":\"/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"shelfId\":null,\"enabled\":true,\"ignorePatterns\":null,\"ignoreHidden\":true,\"minFileSizeBytes\":0,\"description\":null,\"createdAt\":\"2026-07-28T09:55:14.047000Z\",\"updatedAt\":\"2026-07-28T09:55:14.047000Z\"}}}"
+  },
+  {
+    "module": "imports",
+    "method": "GET",
+    "path_template": "/api/monitor-folders",
+    "request_path": "/api/monitor-folders",
+    "operation_id": "list_monitor_folders_api_monitor_folders_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "列出监控文件夹",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"folders\":[{\"id\":\"py_1785232514047186000\",\"name\":\"OpenAPI 审计目录\",\"rootPath\":\"/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"shelfId\":null,\"enabled\":true,\"ignorePatterns\":null,\"ignoreHidden\":true,\"minFileSizeBytes\":0,\"description\":null,\"createdAt\":\"2026-07-28T09:55:14.047000Z\",\"updatedAt\":\"2026-07-28T09:55:14.047000Z\"}],\"monitorRoot\":\"/private/tmp/shuku-openapi-audit.9VobLW/monitor\",\"lastUploadTargetPath\":null,\"lastDownloadTargetPath\":null}}"
+  },
+  {
+    "module": "imports",
+    "method": "GET",
+    "path_template": "/api/monitor-folders/tree",
+    "request_path": "/api/monitor-folders/tree",
+    "operation_id": "monitor_folder_tree_api_monitor_folders_tree_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "读取监控根目录树",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"node\":{\"name\":\"audit-books\",\"path\":\"/private/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"readable\":true,\"error\":null,\"children\":[]},\"monitorRoot\":\"/private/tmp/shuku-openapi-audit.9VobLW/monitor\"}}"
+  },
+  {
+    "module": "imports",
+    "method": "PATCH",
+    "path_template": "/api/monitor-folders/{folder_id}",
+    "request_path": "/api/monitor-folders/py_1785232514047186000",
+    "operation_id": "update_monitor_folder_api_monitor_folders__folder_id__patch",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "MonitorFolder": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 5,
+        "rowsAfter": 6,
+        "contentChanged": true
+      }
+    },
+    "note": "PATCH 更新名称/说明",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"folder\":{\"id\":\"py_1785232514047186000\",\"name\":\"OpenAPI 审计目录 PATCH\",\"rootPath\":\"/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"shelfId\":null,\"enabled\":true,\"ignorePatterns\":null,\"ignoreHidden\":true,\"minFileSizeBytes\":0,\"description\":\"逐接口检查\",\"createdAt\":\"2026-07-28T09:55:14.047000Z\",\"updatedAt\":\"2026-07-28T09:55:14.358000Z\"}}}"
+  },
+  {
+    "module": "imports",
+    "method": "PUT",
+    "path_template": "/api/monitor-folders/{folder_id}",
+    "request_path": "/api/monitor-folders/py_1785232514047186000",
+    "operation_id": "update_monitor_folder_api_monitor_folders__folder_id__put",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "MonitorFolder": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 6,
+        "rowsAfter": 7,
+        "contentChanged": true
+      }
+    },
+    "note": "PUT 更新启用状态和最小文件大小",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"folder\":{\"id\":\"py_1785232514047186000\",\"name\":\"OpenAPI 审计目录 PATCH\",\"rootPath\":\"/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"shelfId\":null,\"enabled\":true,\"ignorePatterns\":null,\"ignoreHidden\":true,\"minFileSizeBytes\":0,\"description\":\"逐接口检查\",\"createdAt\":\"2026-07-28T09:55:14.047000Z\",\"updatedAt\":\"2026-07-28T09:55:14.482000Z\"}}}"
+  },
+  {
+    "module": "imports",
+    "method": "POST",
+    "path_template": "/api/works/import",
+    "request_path": "/api/works/import",
+    "operation_id": "import_work_api_works_import_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "ImportTask": {
+        "rowsBefore": 0,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 7,
+        "rowsAfter": 8,
+        "contentChanged": true
+      },
+      "SystemSetting": {
+        "rowsBefore": 13,
+        "rowsAfter": 14,
+        "contentChanged": true
+      }
+    },
+    "note": "multipart 上传 TXT，原子保存并创建 ImportTask/SystemEvent/SystemSetting",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"tasks\":[{\"id\":\"py_1785232514568654000\",\"sourcePath\":\"/private/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books/upload-sample.txt\",\"origin\":\"MANUAL\",\"status\":\"PENDING\",\"originalName\":\"upload-sample.txt\",\"requestedTitle\":null,\"requestedAuthor\":null,\"monitorFolderId\":\"py_1785232514047186000\",\"workId\":null,\"editionId\":null,\"volumeId\":null,\"taskKind\":\"FILE\",\"bundleKey\":null,\"assetCount\":1,\"processedAssetCount\":0,\"progress\":0,\"duplicate\":false,\"duration\":0,\"errorSummary\":null,\"errorCode\":null,\"retryable\":false,\"attempts\":0,\"leaseOwner\":null,\"message\":\"已保存到所选目录，等待后台处理\"}],\"results\":[{\"sourcePath\":\"/private/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books/upload-sample.txt\",\"file\":\"upload-sample.txt\",\"importTaskId\":\"py_1785232514568654000\",\"importStatus\":\"pending\",\"autoImport\":true,\"message\":\"已加入后台导入队列\"}],\"queued\":1,\"saved\":1,\"imported\":0,\"autoImport\":true,\"taskKind\":\"FILE\",\"bundleKey\":null,\"assetCount\":1,\"processedAssetCount\":0}}"
+  },
+  {
+    "module": "imports",
+    "method": "GET",
+    "path_template": "/api/import-tasks",
+    "request_path": "/api/import-tasks",
+    "operation_id": "list_import_tasks_api_import_tasks_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "分页列出导入任务",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"tasks\":[{\"id\":\"py_1785232514568654000\",\"monitorFolderId\":\"py_1785232514047186000\",\"workId\":null,\"editionId\":null,\"volumeId\":null,\"origin\":\"MANUAL\",\"status\":\"PENDING\",\"originalName\":\"upload-sample.txt\",\"requestedTitle\":null,\"requestedAuthor\":null,\"sourcePath\":\"upload-sample.txt\",\"contentHash\":null,\"taskKind\":\"FILE\",\"bundleKey\":null,\"assetCount\":1,\"processedAssetCount\":0,\"progress\":0,\"duration\":0,\"errorSummary\":null,\"errorCode\":null,\"retryable\":false,\"attempts\":0,\"leaseOwner\":null,\"leaseExpiresAt\":null,\"message\":\"已保存到所选目录，等待后台处理\",\"startedAt\":null,\"finishedAt\":null,\"createdAt\":\"2026-07-28T09:55:14.568000Z\",\"updatedAt\":\"2026-07-28T09:55:14.568000Z\",\"sourceFileExists\":true,\"convertedFileExists\":false,\"friendlyError\":null,\"monitorFolder\":{\"id\":\"py_1785232514047186000\",\"name\":\"OpenAPI 审计目录 PATCH\",\"rootPath\":\"/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"shelfId\":null,\"enabled\":true,\"ignorePatterns\":null,\"ignoreHidden\":true,\"minFileSizeBytes\":0,\"description\":\"逐接口检查\""
+  },
+  {
+    "module": "imports",
+    "method": "GET",
+    "path_template": "/api/import-tasks/{task_id}",
+    "request_path": "/api/import-tasks/py_1785232514568654000",
+    "operation_id": "get_import_task_api_import_tasks__task_id__get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "读取上传任务详情",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"task\":{\"id\":\"py_1785232514568654000\",\"monitorFolderId\":\"py_1785232514047186000\",\"workId\":null,\"editionId\":null,\"volumeId\":null,\"origin\":\"MANUAL\",\"status\":\"PENDING\",\"originalName\":\"upload-sample.txt\",\"requestedTitle\":null,\"requestedAuthor\":null,\"sourcePath\":\"upload-sample.txt\",\"contentHash\":null,\"taskKind\":\"FILE\",\"bundleKey\":null,\"assetCount\":1,\"processedAssetCount\":0,\"progress\":0,\"duration\":0,\"errorSummary\":null,\"errorCode\":null,\"retryable\":false,\"attempts\":0,\"leaseOwner\":null,\"leaseExpiresAt\":null,\"message\":\"已保存到所选目录，等待后台处理\",\"startedAt\":null,\"finishedAt\":null,\"createdAt\":\"2026-07-28T09:55:14.568000Z\",\"updatedAt\":\"2026-07-28T09:55:14.568000Z\",\"sourceFileExists\":true,\"convertedFileExists\":false,\"friendlyError\":null,\"monitorFolder\":{\"id\":\"py_1785232514047186000\",\"name\":\"OpenAPI 审计目录 PATCH\",\"rootPath\":\"/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"shelfId\":null,\"enabled\":true,\"ignorePatterns\":null,\"ignoreHidden\":true,\"minFileSizeBytes\":0,\"description\":\"逐接口检查\",\""
+  },
+  {
+    "module": "imports",
+    "method": "GET",
+    "path_template": "/api/import-tasks/{task_id}/logs",
+    "request_path": "/api/import-tasks/py_1785232514568654000/logs",
+    "operation_id": "get_import_logs_api_import_tasks__task_id__logs_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "读取任务日志分页",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"logs\":[],\"page\":1,\"pageSize\":100,\"total\":0,\"totalPages\":1}}"
+  },
+  {
+    "module": "imports",
+    "method": "POST",
+    "path_template": "/api/import-tasks/scan-directory",
+    "request_path": "/api/import-tasks/scan-directory",
+    "operation_id": "scan_import_directory_api_import_tasks_scan_directory_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "ImportTask": {
+        "rowsBefore": 1,
+        "rowsAfter": 2,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 8,
+        "rowsAfter": 9,
+        "contentChanged": true
+      }
+    },
+    "note": "扫描受管目录并把候选文件写入持久队列",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"path\":\"/private/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"monitorFolderId\":\"py_1785232514047186000\",\"monitorFolderName\":\"OpenAPI 审计目录 PATCH\",\"directoriesScanned\":1,\"filesScanned\":2,\"candidatesFound\":1,\"queued\":1,\"skipped\":1,\"errors\":[]}}"
+  },
+  {
+    "module": "imports",
+    "method": "GET",
+    "path_template": "/api/tracking/release-title-parser",
+    "request_path": "/api/tracking/release-title-parser",
+    "operation_id": "release_title_parser_get_api_tracking_release_title_parser_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "GET 解析卷/章节标题",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"parsed\":{\"title\":\"星海列车 第2卷 第10章\",\"volume\":null,\"chapter\":2.0}}}"
+  },
+  {
+    "module": "imports",
+    "method": "POST",
+    "path_template": "/api/tracking/release-title-parser",
+    "request_path": "/api/tracking/release-title-parser",
+    "operation_id": "release_title_parser_api_tracking_release_title_parser_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "POST 解析卷/章节标题",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"parsed\":{\"title\":\"星海列车 Vol.3 Ch.12\",\"volume\":null,\"chapter\":12.0}}}"
+  },
+  {
+    "module": "imports",
+    "method": "POST",
+    "path_template": "/api/import-tasks/rescan",
+    "request_path": "/api/import-tasks/rescan",
+    "operation_id": "rescan_import_tasks_api_import_tasks_rescan_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "SystemEvent": {
+        "rowsBefore": 9,
+        "rowsAfter": 10,
+        "contentChanged": true
+      },
+      "SystemSetting": {
+        "rowsBefore": 14,
+        "rowsAfter": 15,
+        "contentChanged": true
+      }
+    },
+    "note": "记录全局重新扫描请求",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"requestedAt\":\"2026-07-28T09:55:15.458000Z\",\"monitorFolderIds\":null}}"
+  },
+  {
+    "module": "imports",
+    "method": "POST",
+    "path_template": "/api/import-tasks/{task_id}/retry",
+    "request_path": "/api/import-tasks/py_1785232514568654000/retry",
+    "operation_id": "retry_import_task_api_import_tasks__task_id__retry_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "ImportTask": {
+        "rowsBefore": 2,
+        "rowsAfter": 2,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 10,
+        "rowsAfter": 11,
+        "contentChanged": true
+      }
+    },
+    "note": "失败且源文件存在的任务重置为待处理",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"task\":{\"id\":\"py_1785232514568654000\",\"monitorFolderId\":\"py_1785232514047186000\",\"workId\":null,\"editionId\":null,\"volumeId\":null,\"origin\":\"MANUAL\",\"status\":\"PENDING\",\"originalName\":\"upload-sample.txt\",\"requestedTitle\":null,\"requestedAuthor\":null,\"sourcePath\":\"upload-sample.txt\",\"contentHash\":null,\"taskKind\":\"FILE\",\"bundleKey\":null,\"assetCount\":1,\"processedAssetCount\":0,\"progress\":0,\"duration\":0,\"errorSummary\":null,\"errorCode\":null,\"retryable\":false,\"attempts\":0,\"leaseOwner\":null,\"leaseExpiresAt\":null,\"message\":\"已重新加入后台队列\",\"startedAt\":null,\"finishedAt\":null,\"createdAt\":\"2026-07-28T09:55:14.568000Z\",\"updatedAt\":\"2026-07-28T09:55:15.549000Z\",\"sourceFileExists\":true,\"convertedFileExists\":false,\"friendlyError\":null,\"monitorFolder\":{\"id\":\"py_1785232514047186000\",\"name\":\"OpenAPI 审计目录 PATCH\",\"rootPath\":\"/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"shelfId\":null,\"enabled\":true,\"ignorePatterns\":null,\"ignoreHidden\":true,\"minFileSizeBytes\":0,\"description\":\"逐接口检查\",\"create"
+  },
+  {
+    "module": "imports",
+    "method": "DELETE",
+    "path_template": "/api/import-tasks/{task_id}",
+    "request_path": "/api/import-tasks/py_1785232514568654000",
+    "operation_id": "delete_import_task_api_import_tasks__task_id__delete",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "ImportTask": {
+        "rowsBefore": 2,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 11,
+        "rowsAfter": 12,
+        "contentChanged": true
+      }
+    },
+    "note": "仅删除终态导入记录，保留源文件",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"deleted\":true,\"id\":\"py_1785232514568654000\",\"deleteMode\":\"record\",\"deleteLibraryRecord\":false,\"deletedLibraryRecord\":false,\"deletedWorkRecord\":false,\"deletedLibraryDatabaseRecords\":0,\"libraryRecordId\":null,\"deletedFiles\":0,\"missingFiles\":[],\"failedFileDeletes\":[]}}"
+  },
+  {
+    "module": "imports",
+    "method": "DELETE",
+    "path_template": "/api/import-tasks",
+    "request_path": "/api/import-tasks",
+    "operation_id": "clear_import_tasks_api_import_tasks_delete",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "ImportTask": {
+        "rowsBefore": 1,
+        "rowsAfter": 0,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 12,
+        "rowsAfter": 13,
+        "contentChanged": true
+      }
+    },
+    "note": "清空终态导入记录",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"deleted\":1}}"
+  },
+  {
+    "module": "imports",
+    "method": "DELETE",
+    "path_template": "/api/monitor-folders/{folder_id}",
+    "request_path": "/api/monitor-folders/py_1785232514047186000",
+    "operation_id": "delete_monitor_folder_api_monitor_folders__folder_id__delete",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "MonitorFolder": {
+        "rowsBefore": 1,
+        "rowsAfter": 0,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 13,
+        "rowsAfter": 14,
+        "contentChanged": true
+      }
+    },
+    "note": "删除监控文件夹并记录授权失效范围",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"deleted\":true,\"id\":\"py_1785232514047186000\"}}"
+  },
+  {
+    "module": "media",
+    "method": "GET",
+    "path_template": "/api/files/{file_id}",
+    "request_path": "/api/files/audit-file-epub",
+    "operation_id": "get_file_api_files__file_id__get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/epub+zip",
+    "documented_response": true,
+    "response_shape_ok": null,
+    "database_changes": {},
+    "note": "流式读取 EPUB 文件",
+    "response_excerpt": "<binary 1220 bytes>"
+  },
+  {
+    "module": "media",
+    "method": "HEAD",
+    "path_template": "/api/files/{file_id}",
+    "request_path": "/api/files/audit-file-epub",
+    "operation_id": "get_file_api_files__file_id__head",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/epub+zip",
+    "documented_response": true,
+    "response_shape_ok": null,
+    "database_changes": {},
+    "note": "HEAD 获取文件响应头",
+    "response_excerpt": "<binary 0 bytes>"
+  },
+  {
+    "module": "media",
+    "method": "GET",
+    "path_template": "/api/editions/{edition_id}/file",
+    "request_path": "/api/editions/audit-edition-epub/file",
+    "operation_id": "get_edition_file_api_editions__edition_id__file_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/epub+zip",
+    "documented_response": true,
+    "response_shape_ok": null,
+    "database_changes": {},
+    "note": "按版本读取主文件",
+    "response_excerpt": "<binary 1220 bytes>"
+  },
+  {
+    "module": "media",
+    "method": "GET",
+    "path_template": "/api/works/{work_id}/cover",
+    "request_path": "/api/works/audit-work-a/cover",
+    "operation_id": "get_cover_api_works__work_id__cover_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "image/png",
+    "documented_response": true,
+    "response_shape_ok": null,
+    "database_changes": {},
+    "note": "读取作品封面",
+    "response_excerpt": "<binary 2839716 bytes>"
+  },
+  {
+    "module": "media",
+    "method": "GET",
+    "path_template": "/api/editions/{edition_id}/cover",
+    "request_path": "/api/editions/audit-edition-epub/cover",
+    "operation_id": "get_cover_api_editions__edition_id__cover_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "image/png",
+    "documented_response": true,
+    "response_shape_ok": null,
+    "database_changes": {},
+    "note": "读取版本封面",
+    "response_excerpt": "<binary 2839716 bytes>"
+  },
+  {
+    "module": "media",
+    "method": "GET",
+    "path_template": "/api/volumes/{volume_id}/cover",
+    "request_path": "/api/volumes/audit-volume-comic/cover",
+    "operation_id": "get_cover_api_volumes__volume_id__cover_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "image/png",
+    "documented_response": true,
+    "response_shape_ok": null,
+    "database_changes": {},
+    "note": "读取卷册封面（回退到版本/作品封面）",
+    "response_excerpt": "<binary 2839716 bytes>"
+  },
+  {
+    "module": "media",
+    "method": "GET",
+    "path_template": "/api/metadata/cover-proxy",
+    "request_path": "/api/metadata/cover-proxy",
+    "operation_id": "metadata_cover_proxy_api_metadata_cover_proxy_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 400,
+    "passed": false,
+    "content_type": "application/json",
+    "documented_response": false,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "代理公网图片并校验 MIME/大小",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"封面地址不支持\"}}"
+  },
+  {
+    "module": "media",
+    "method": "GET",
+    "path_template": "/api/volumes/{volume_id}/pages",
+    "request_path": "/api/volumes/audit-volume-comic/pages",
+    "operation_id": "list_volume_pages_api_volumes__volume_id__pages_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "列出 CBZ 页索引",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"pages\":[{\"id\":\"audit-page-1\",\"editionId\":\"audit-edition-comic\",\"volumeId\":\"audit-volume-comic\",\"fileId\":\"audit-file-comic\",\"unitType\":\"page\",\"title\":\"第 1 页\",\"href\":\"001.png\",\"mediaType\":\"image/png\",\"sortOrder\":1,\"width\":600,\"height\":900,\"size\":2839716,\"metadataJson\":\"{}\",\"createdAt\":\"2026-07-28T09:57:50.471000Z\",\"updatedAt\":\"2026-07-28T09:57:50.471000Z\"},{\"id\":\"audit-page-2\",\"editionId\":\"audit-edition-comic\",\"volumeId\":\"audit-volume-comic\",\"fileId\":\"audit-file-comic\",\"unitType\":\"page\",\"title\":\"第 2 页\",\"href\":\"002.png\",\"mediaType\":\"image/png\",\"sortOrder\":2,\"width\":600,\"height\":900,\"size\":2839716,\"metadataJson\":\"{}\",\"createdAt\":\"2026-07-28T09:57:50.471000Z\",\"updatedAt\":\"2026-07-28T09:57:50.471000Z\"}],\"total\":2}}"
+  },
+  {
+    "module": "media",
+    "method": "GET",
+    "path_template": "/api/volumes/{volume_id}/pages/{page_index}",
+    "request_path": "/api/volumes/audit-volume-comic/pages/1",
+    "operation_id": "get_volume_page_api_volumes__volume_id__pages__page_index__get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "image/png",
+    "documented_response": true,
+    "response_shape_ok": null,
+    "database_changes": {},
+    "note": "从 CBZ 实际解压并返回第 1 页",
+    "response_excerpt": "<binary 2839716 bytes>"
+  },
+  {
+    "module": "reader",
+    "method": "GET",
+    "path_template": "/api/reader/preferences",
+    "request_path": "/api/reader/preferences",
+    "operation_id": "list_reader_preferences_api_reader_preferences_get",
+    "expected_statuses": [
+      410
+    ],
+    "status_code": 410,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "Reader V1 已明确退役",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"READER_V1_RETIRED\",\"details\":{\"replacement\":\"Reader V2 stores per-work client preferences locally\"}}}"
+  },
+  {
+    "module": "reader",
+    "method": "PUT",
+    "path_template": "/api/reader/preferences",
+    "request_path": "/api/reader/preferences",
+    "operation_id": "save_reader_preferences_api_reader_preferences_put",
+    "expected_statuses": [
+      410
+    ],
+    "status_code": 410,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "Reader V1 已明确退役",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"READER_V1_RETIRED\",\"details\":{\"replacement\":\"Reader V2 stores per-work client preferences locally\"}}}"
+  },
+  {
+    "module": "reader",
+    "method": "GET",
+    "path_template": "/api/reader/preferences/{reader_type}",
+    "request_path": "/api/reader/preferences/epub",
+    "operation_id": "get_reader_preference_api_reader_preferences__reader_type__get",
+    "expected_statuses": [
+      410
+    ],
+    "status_code": 410,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "Reader V1 已明确退役",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"READER_V1_RETIRED\",\"details\":{\"replacement\":\"Reader V2 stores per-work client preferences locally\"}}}"
+  },
+  {
+    "module": "reader",
+    "method": "PATCH",
+    "path_template": "/api/reader/preferences/{reader_type}",
+    "request_path": "/api/reader/preferences/epub",
+    "operation_id": "save_reader_preference_api_reader_preferences__reader_type__patch",
+    "expected_statuses": [
+      410
+    ],
+    "status_code": 410,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "Reader V1 已明确退役",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"READER_V1_RETIRED\",\"details\":{\"replacement\":\"Reader V2 stores per-work client preferences locally\"}}}"
+  },
+  {
+    "module": "reader",
+    "method": "PUT",
+    "path_template": "/api/reader/preferences/{reader_type}",
+    "request_path": "/api/reader/preferences/epub",
+    "operation_id": "save_reader_preference_api_reader_preferences__reader_type__put",
+    "expected_statuses": [
+      410
+    ],
+    "status_code": 410,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "Reader V1 已明确退役",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"READER_V1_RETIRED\",\"details\":{\"replacement\":\"Reader V2 stores per-work client preferences locally\"}}}"
+  },
+  {
+    "module": "reader",
+    "method": "GET",
+    "path_template": "/api/reader/{edition_id}/bootstrap",
+    "request_path": "/api/reader/audit-edition-epub/bootstrap",
+    "operation_id": "reader_bootstrap_api_reader__edition_id__bootstrap_get",
+    "expected_statuses": [
+      410
+    ],
+    "status_code": 410,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "Reader V1 bootstrap 已退役",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"READER_V1_RETIRED\",\"details\":{\"replacement\":\"/api/reader/v2/editions/audit-edition-epub/bootstrap\"}}}"
+  },
+  {
+    "module": "reader",
+    "method": "GET",
+    "path_template": "/api/editions/{edition_id}/progress",
+    "request_path": "/api/editions/audit-edition-epub/progress",
+    "operation_id": "get_progress_api_editions__edition_id__progress_get",
+    "expected_statuses": [
+      410
+    ],
+    "status_code": 410,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "Reader V1 progress 已退役",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"READER_V1_RETIRED\",\"details\":{\"replacement\":\"/api/reader/v2/editions/audit-edition-epub/progress\"}}}"
+  },
+  {
+    "module": "reader",
+    "method": "PATCH",
+    "path_template": "/api/editions/{edition_id}/progress",
+    "request_path": "/api/editions/audit-edition-epub/progress",
+    "operation_id": "save_progress_api_editions__edition_id__progress_patch",
+    "expected_statuses": [
+      410
+    ],
+    "status_code": 410,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "Reader V1 progress 写入已退役",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"READER_V1_RETIRED\",\"details\":{\"replacement\":\"/api/reader/v2/editions/audit-edition-epub/progress\"}}}"
+  },
+  {
+    "module": "reader",
+    "method": "PUT",
+    "path_template": "/api/editions/{edition_id}/progress",
+    "request_path": "/api/editions/audit-edition-epub/progress",
+    "operation_id": "save_progress_api_editions__edition_id__progress_put",
+    "expected_statuses": [
+      410
+    ],
+    "status_code": 410,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "Reader V1 progress 写入已退役",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"READER_V1_RETIRED\",\"details\":{\"replacement\":\"/api/reader/v2/editions/audit-edition-epub/progress\"}}}"
+  },
+  {
+    "module": "reader",
+    "method": "POST",
+    "path_template": "/api/editions/{edition_id}/progress",
+    "request_path": "/api/editions/audit-edition-epub/progress",
+    "operation_id": "save_progress_api_editions__edition_id__progress_post",
+    "expected_statuses": [
+      410
+    ],
+    "status_code": 410,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "Reader V1 progress 写入已退役",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"READER_V1_RETIRED\",\"details\":{\"replacement\":\"/api/reader/v2/editions/audit-edition-epub/progress\"}}}"
+  },
+  {
+    "module": "reader",
+    "method": "GET",
+    "path_template": "/api/reader/v2/editions/{edition_id}/bootstrap",
+    "request_path": "/api/reader/v2/editions/audit-edition-epub/bootstrap",
+    "operation_id": "reader_bootstrap_v2_api_reader_v2_editions__edition_id__bootstrap_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "LibraryConsumptionState": {
+        "rowsBefore": 0,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "ReaderBookPreference": {
+        "rowsBefore": 0,
+        "rowsAfter": 1,
+        "contentChanged": true
+      }
+    },
+    "note": "Reader V2 EPUB bootstrap",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"schemaVersion\":2,\"userId\":\"py_d481037a4027469eb608c23e99d89c95\",\"readerType\":\"epub\",\"contentFingerprint\":\"sha256:fbd68f28551f55f374f66ff38578993045812e4048384fd9aca4f5173383da4d\",\"book\":{\"id\":\"audit-work-a\",\"title\":\"星海列车 审计\",\"author\":\"林川\",\"coverUrl\":\"/api/works/audit-work-a/cover?size=large\"},\"edition\":{\"id\":\"audit-edition-epub\",\"workId\":\"audit-work-a\",\"format\":\"epub\",\"versionName\":\"EPUB 主版本\",\"pageCount\":null,\"chapterCount\":1,\"mediaKind\":\"EBOOK\",\"durationMs\":null,\"trackCount\":null,\"narrator\":null},\"availableEditions\":[{\"id\":\"audit-edition-epub\",\"workId\":\"audit-work-a\",\"format\":\"epub\",\"versionName\":\"EPUB 主版本\",\"pageCount\":null,\"chapterCount\":1,\"mediaKind\":\"EBOOK\",\"durationMs\":null,\"trackCount\":null,\"narrator\":null,\"progress\":0.0,\"lastReadAt\":null,\"volumes\":[{\"id\":\"audit-volume-epub\",\"title\":\"第一卷\",\"index\":1.0,\"pageCount\":null,\"chapterCount\":1,\"durationMs\":null}]},{\"id\":\"audit-edition-split\",\"workId\":\"audit-work-a\",\"format\":\"epub\",\"versionName\":\"待拆分版本\",\"pageCount\":null,"
+  },
+  {
+    "module": "reader",
+    "method": "GET",
+    "path_template": "/api/reader/v2/editions/{edition_id}/bookmarks",
+    "request_path": "/api/reader/v2/editions/audit-edition-epub/bookmarks",
+    "operation_id": "list_reader_bookmarks_api_reader_v2_editions__edition_id__bookmarks_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "读取空书签列表",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"bookmarks\":[]}}"
+  },
+  {
+    "module": "reader",
+    "method": "PUT",
+    "path_template": "/api/reader/v2/editions/{edition_id}/bookmarks",
+    "request_path": "/api/reader/v2/editions/audit-edition-epub/bookmarks",
+    "operation_id": "replace_reader_bookmarks_api_reader_v2_editions__edition_id__bookmarks_put",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 422,
+    "passed": false,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "替换书签集合并写 ReaderBookmark",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"code\":\"REQUEST_VALIDATION_ERROR\",\"message\":\"请求参数校验失败\",\"details\":[{\"loc\":[\"body\",\"bookmarks\",0,\"location\",\"kind\"],\"message\":\"Field required\",\"type\":\"missing\",\"input\":{\"kind\":\"object\",\"value\":null,\"length\":3,\"keys\":[\"href\",\"progression\",\"type\"]}},{\"loc\":[\"body\",\"bookmarks\",0,\"location\",\"type\"],\"message\":\"Extra inputs are not permitted\",\"type\":\"extra_forbidden\",\"input\":{\"kind\":\"string\",\"value\":\"epub\",\"length\":4,\"keys\":null}}]}}"
+  },
+  {
+    "module": "reader",
+    "method": "POST",
+    "path_template": "/api/reader/v2/editions/{edition_id}/epub-locations/claim",
+    "request_path": "/api/reader/v2/editions/audit-edition-epub/epub-locations/claim",
+    "operation_id": "claim_reader_epub_locations_api_reader_v2_editions__edition_id__epub_locations_claim_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "申请 EPUB locations 生成租约",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"status\":\"claimed\",\"leaseToken\":\"aa41c197946245d88b274a4e6b4ff613\",\"leaseExpiresAt\":1785233033}}"
+  },
+  {
+    "module": "reader",
+    "method": "PUT",
+    "path_template": "/api/reader/v2/editions/{edition_id}/epub-locations",
+    "request_path": "/api/reader/v2/editions/audit-edition-epub/epub-locations",
+    "operation_id": "save_reader_epub_locations_api_reader_v2_editions__edition_id__epub_locations_put",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "用租约保存 EPUB locations 缓存",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"status\":\"ready\",\"serialized\":\"[\\\"epubcfi(/6/2)\\\"]\"}}"
+  },
+  {
+    "module": "reader",
+    "method": "PUT",
+    "path_template": "/api/reader/v2/editions/{edition_id}/progress",
+    "request_path": "/api/reader/v2/editions/audit-edition-epub/progress",
+    "operation_id": "save_progress_v2_api_reader_v2_editions__edition_id__progress_put",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "LibraryConsumptionState": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "LibraryReadingProgress": {
+        "rowsBefore": 0,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "ReaderProgressCursor": {
+        "rowsBefore": 0,
+        "rowsAfter": 1,
+        "contentChanged": true
+      }
+    },
+    "note": "保存单调进度并写 progress/cursor/consumption state",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"mutationId\":\"audit-mutation-1\",\"applied\":true,\"progress\":{\"schemaVersion\":2,\"mutationId\":\"audit-mutation-1\",\"clientId\":\"openapi-audit\",\"clientSequence\":1,\"contentFingerprint\":\"sha256:fbd68f28551f55f374f66ff38578993045812e4048384fd9aca4f5173383da4d\",\"readerType\":\"epub\",\"workId\":\"audit-work-a\",\"editionId\":\"audit-edition-epub\",\"volumeId\":\"audit-volume-epub\",\"location\":{\"type\":\"epub\",\"cfi\":null,\"href\":\"OEBPS/one.xhtml\",\"spineIndex\":null,\"progression\":0.5},\"percent\":50.0,\"updatedAt\":\"2026-07-28T09:58:54.219867Z\"}}}"
+  },
+  {
+    "module": "media",
+    "method": "GET",
+    "path_template": "/api/metadata/cover-proxy",
+    "request_path": "/api/metadata/cover-proxy",
+    "operation_id": "metadata_cover_proxy_api_metadata_cover_proxy_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 400,
+    "passed": false,
+    "content_type": "application/json",
+    "documented_response": false,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "代理 Wikimedia 公网图片并校验 MIME/大小",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"封面地址不支持\"}}"
+  },
+  {
+    "module": "reader",
+    "method": "PUT",
+    "path_template": "/api/reader/v2/editions/{edition_id}/bookmarks",
+    "request_path": "/api/reader/v2/editions/audit-edition-epub/bookmarks",
+    "operation_id": "replace_reader_bookmarks_api_reader_v2_editions__edition_id__bookmarks_put",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "ReaderBookmark": {
+        "rowsBefore": 0,
+        "rowsAfter": 1,
+        "contentChanged": true
+      }
+    },
+    "note": "替换书签集合并写 ReaderBookmark（按 OpenAPI kind 字段）",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"bookmarks\":[{\"id\":\"audit-bookmark-1\",\"location\":{\"kind\":\"epub\",\"href\":\"OEBPS/one.xhtml\",\"spineIndex\":null,\"progression\":0.2,\"pageIndex\":null,\"pageNumber\":null,\"volumeId\":null,\"fileId\":null,\"chapterId\":null,\"positionMs\":null},\"label\":\"第一章\",\"percent\":20.0,\"createdAt\":\"2026-07-28T10:00:00Z\"}]}}"
+  },
+  {
+    "module": "media",
+    "method": "GET",
+    "path_template": "/api/metadata/cover-proxy",
+    "request_path": "/api/metadata/cover-proxy",
+    "operation_id": "metadata_cover_proxy_api_metadata_cover_proxy_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 400,
+    "passed": false,
+    "content_type": "application/json",
+    "documented_response": false,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "代理已显式配置的元数据提供方私网测试源图片",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"封面地址不支持\"}}"
+  },
+  {
+    "module": "media",
+    "method": "GET",
+    "path_template": "/api/metadata/cover-proxy",
+    "request_path": "/api/metadata/cover-proxy",
+    "operation_id": "metadata_cover_proxy_api_metadata_cover_proxy_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 400,
+    "passed": false,
+    "content_type": "application/json",
+    "documented_response": false,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "代理已显式配置的豆瓣测试源图片",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"封面地址不支持\"}}"
+  },
+  {
+    "module": "media",
+    "method": "GET",
+    "path_template": "/api/metadata/cover-proxy",
+    "request_path": "/api/metadata/cover-proxy",
+    "operation_id": "metadata_cover_proxy_api_metadata_cover_proxy_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "image/png",
+    "documented_response": true,
+    "response_shape_ok": null,
+    "database_changes": {},
+    "note": "代理已显式配置的 Bangumi 测试源图片",
+    "response_excerpt": "<binary 2839716 bytes>"
+  },
+  {
+    "module": "library",
+    "method": "GET",
+    "path_template": "/api/dashboard/summary",
+    "request_path": "/api/dashboard/summary",
+    "operation_id": "dashboard_summary_api_dashboard_summary_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "书库摘要",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"totalBooks\":3,\"comicBooks\":0,\"novelBooks\":2,\"storageUsedBytes\":5684535,\"monitorFolderCount\":0,\"lastImportAt\":null,\"latestSyncAt\":\"2026-07-28T09:58:54.219000Z\"}}"
+  },
+  {
+    "module": "library",
+    "method": "GET",
+    "path_template": "/api/dashboard/recent-books",
+    "request_path": "/api/dashboard/recent-books",
+    "operation_id": "dashboard_recent_books_api_dashboard_recent_books_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "最近入库",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"books\":[{\"id\":\"audit-work-c\",\"title\":\"目标作品\",\"author\":\"另一作者\",\"coverUrl\":\"/api/works/audit-work-c/cover?size=medium&v=8a99340bda8d\"},{\"id\":\"audit-work-b\",\"title\":\"星海列车 审计\",\"author\":\"林川\",\"coverUrl\":\"/api/works/audit-work-b/cover?size=medium&v=8a99340bda8d\"},{\"id\":\"audit-work-a\",\"title\":\"星海列车 审计\",\"author\":\"林川\",\"coverUrl\":\"/api/works/audit-work-a/cover?size=medium&v=8a99340bda8d\"}]}}"
+  },
+  {
+    "module": "library",
+    "method": "GET",
+    "path_template": "/api/dashboard/recent-reading",
+    "request_path": "/api/dashboard/recent-reading",
+    "operation_id": "dashboard_recent_reading_api_dashboard_recent_reading_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "最近阅读",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"books\":[{\"id\":\"audit-work-a\",\"title\":\"星海列车 审计\",\"author\":\"林川\",\"coverUrl\":\"/api/works/audit-work-a/cover?size=medium&v=8a99340bda8d\"}]}}"
+  },
+  {
+    "module": "library",
+    "method": "GET",
+    "path_template": "/api/dashboard/continue-reading",
+    "request_path": "/api/dashboard/continue-reading",
+    "operation_id": "dashboard_continue_reading_api_dashboard_continue_reading_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "继续阅读聚合",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"item\":{\"workId\":\"audit-work-a\",\"title\":\"星海列车 审计\",\"author\":\"林川\",\"coverUrl\":\"/api/works/audit-work-a/cover?size=medium&v=d0c17763e719\",\"mediaKind\":\"EBOOK\",\"resumeEditionId\":\"audit-edition-epub\",\"resumeVolumeId\":\"audit-volume-epub\",\"progress\":50.0,\"chapter\":null,\"lastReadAt\":\"2026-07-28T09:58:54.219000Z\",\"versionName\":\"EPUB 主版本\",\"narrator\":null}}}"
+  },
+  {
+    "module": "library",
+    "method": "GET",
+    "path_template": "/api/management/overview",
+    "request_path": "/api/management/overview",
+    "operation_id": "management_overview_api_management_overview_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 500,
+    "passed": false,
+    "content_type": "text/plain; charset=utf-8",
+    "documented_response": false,
+    "response_shape_ok": null,
+    "database_changes": {},
+    "note": "管理概览",
+    "response_excerpt": "Internal Server Error"
+  },
+  {
+    "module": "library",
+    "method": "GET",
+    "path_template": "/api/management/folders",
+    "request_path": "/api/management/folders",
+    "operation_id": "management_folders_api_management_folders_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "目录存储概览",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"logical\":{\"series\":[{\"name\":\"星海列车\",\"count\":2,\"sizeBytes\":5683315,\"items\":[{\"id\":\"audit-work-b\",\"title\":\"星海列车 审计\",\"author\":\"林川\",\"monitorFolderId\":null,\"workType\":\"CBZ\",\"seriesName\":\"星海列车\",\"organizeStatus\":\"REVIEWING\",\"hidden\":false,\"updatedAt\":\"2026-07-28T09:57:50.454000Z\",\"sizeBytes\":5679634,\"editionCount\":1},{\"id\":\"audit-work-a\",\"title\":\"星海列车 审计\",\"author\":\"林川\",\"monitorFolderId\":null,\"workType\":\"EPUB\",\"seriesName\":\"星海列车\",\"organizeStatus\":\"REVIEWING\",\"hidden\":false,\"updatedAt\":\"2026-07-28T09:57:50.454000Z\",\"sizeBytes\":3681,\"editionCount\":4}]}],\"authors\":[{\"name\":\"另一作者\",\"count\":1,\"sizeBytes\":1220,\"items\":[{\"id\":\"audit-work-c\",\"title\":\"目标作品\",\"author\":\"另一作者\",\"monitorFolderId\":null,\"workType\":\"EPUB\",\"seriesName\":null,\"organizeStatus\":\"APPLIED\",\"hidden\":false,\"updatedAt\":\"2026-07-28T09:57:50.454000Z\",\"sizeBytes\":1220,\"editionCount\":1}]},{\"name\":\"林川\",\"count\":2,\"sizeBytes\":5683315,\"items\":[{\"id\":\"audit-work-b\",\"title\":\"星海列车 审计\",\"author\":\"林川\",\"monitorFolderId\":null,\"workType"
+  },
+  {
+    "module": "library",
+    "method": "GET",
+    "path_template": "/api/series",
+    "request_path": "/api/series",
+    "operation_id": "list_series_api_series_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "系列聚合",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"series\":[{\"name\":\"星海列车\",\"bookCount\":2,\"latestUpdatedAt\":\"2026-07-28T09:57:50.454000Z\"}],\"total\":1}}"
+  },
+  {
+    "module": "library",
+    "method": "GET",
+    "path_template": "/api/works",
+    "request_path": "/api/works",
+    "operation_id": "list_works_api_works_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "作品分页/筛选",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"books\":[{\"id\":\"audit-work-c\",\"workId\":\"audit-work-c\",\"editionId\":\"audit-edition-target\",\"monitorFolderId\":null,\"title\":\"目标作品\",\"author\":\"另一作者\",\"publisher\":null,\"type\":\"ebook\",\"formatValue\":\"EPUB\",\"format\":\"EPUB\",\"size\":\"1.2 KB\",\"progress\":0.0,\"progressExtra\":{\"cfi\":null,\"progression\":null,\"fileId\":null,\"chapterId\":null,\"positionMs\":null,\"volumeId\":null,\"pageIndex\":null,\"chapterHref\":null,\"currentHref\":null,\"chapterSectionIndex\":null,\"sectionIndex\":null,\"chapterIndex\":null,\"chapterSortOrder\":null,\"chapterTitle\":null,\"sectionPage\":null,\"sectionTotalPages\":null},\"cfi\":null,\"currentHref\":null,\"currentSectionIndex\":null,\"currentChapterTitle\":null,\"currentChapterSortOrder\":null,\"statusValue\":\"UNREAD\",\"status\":\"未读\",\"publicationStatusValue\":\"UNKNOWN\",\"publicationStatus\":\"未知\",\"trackingStatusValue\":\"NOT_TRACKING\",\"trackingStatus\":\"未追踪\",\"localLatestVolume\":null,\"localLatestChapter\":null,\"localLatestTitle\":null,\"localLatestAt\":null,\"ignored\":false,\"organized\":true,\"organizeStatu"
+  },
+  {
+    "module": "library",
+    "method": "GET",
+    "path_template": "/api/works/{work_id}",
+    "request_path": "/api/works/audit-work-a",
+    "operation_id": "get_work_api_works__work_id__get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "作品详情及媒介导航",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"book\":{\"id\":\"audit-work-a\",\"workId\":\"audit-work-a\",\"editionId\":\"audit-edition-epub\",\"monitorFolderId\":null,\"title\":\"星海列车 审计\",\"author\":\"林川\",\"publisher\":null,\"type\":\"ebook\",\"formatValue\":\"EPUB\",\"format\":\"EPUB\",\"size\":\"3.6 KB\",\"progress\":50.0,\"progressExtra\":{\"cfi\":null,\"progression\":0.5,\"fileId\":null,\"chapterId\":null,\"positionMs\":null,\"volumeId\":\"audit-volume-epub\",\"pageIndex\":null,\"chapterHref\":null,\"currentHref\":\"OEBPS/one.xhtml\",\"chapterSectionIndex\":null,\"sectionIndex\":null,\"chapterIndex\":null,\"chapterSortOrder\":null,\"chapterTitle\":null,\"sectionPage\":null,\"sectionTotalPages\":null},\"cfi\":null,\"currentHref\":\"OEBPS/one.xhtml\",\"currentSectionIndex\":null,\"currentChapterTitle\":\"第一章\",\"currentChapterSortOrder\":1,\"statusValue\":\"READING\",\"status\":\"在读\",\"publicationStatusValue\":\"UNKNOWN\",\"publicationStatus\":\"未知\",\"trackingStatusValue\":\"NOT_TRACKING\",\"trackingStatus\":\"未追踪\",\"localLatestVolume\":null,\"localLatestChapter\":null,\"localLatestTitle\":null,\"localLatestAt\":null,\"ignored\":"
+  },
+  {
+    "module": "library",
+    "method": "PUT",
+    "path_template": "/api/works/{work_id}/detail-preference",
+    "request_path": "/api/works/audit-work-a/detail-preference",
+    "operation_id": "save_work_detail_preference_api_works__work_id__detail_preference_put",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "WorkDetailPreference": {
+        "rowsBefore": 0,
+        "rowsAfter": 1,
+        "contentChanged": true
+      }
+    },
+    "note": "保存用户详情页媒介选项",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"selectedDetailTab\":\"EBOOK\",\"detailTabs\":[{\"key\":\"EBOOK\",\"label\":\"电子书\",\"sortOrder\":0},{\"key\":\"STRUCTURE\",\"label\":\"内容结构\",\"sortOrder\":3}]}}"
+  },
+  {
+    "module": "library",
+    "method": "PATCH",
+    "path_template": "/api/works/{work_id}",
+    "request_path": "/api/works/audit-work-a",
+    "operation_id": "update_work_api_works__work_id__patch",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "LibraryConsumptionState": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "LibraryFacet": {
+        "rowsBefore": 3,
+        "rowsAfter": 6,
+        "contentChanged": true
+      },
+      "LibraryWork": {
+        "rowsBefore": 3,
+        "rowsAfter": 3,
+        "contentChanged": true
+      },
+      "LibraryWorkFacet": {
+        "rowsBefore": 3,
+        "rowsAfter": 6,
+        "contentChanged": true
+      }
+    },
+    "note": "更新作品元数据并同步 facet",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"book\":{\"id\":\"audit-work-a\",\"workId\":\"audit-work-a\",\"editionId\":\"audit-edition-epub\",\"monitorFolderId\":null,\"title\":\"星海列车 审计\",\"author\":\"林川\",\"publisher\":null,\"type\":\"ebook\",\"formatValue\":\"EPUB\",\"format\":\"EPUB\",\"size\":\"3.6 KB\",\"progress\":50.0,\"progressExtra\":{\"cfi\":null,\"progression\":0.5,\"fileId\":null,\"chapterId\":null,\"positionMs\":null,\"volumeId\":\"audit-volume-epub\",\"pageIndex\":null,\"chapterHref\":null,\"currentHref\":\"OEBPS/one.xhtml\",\"chapterSectionIndex\":null,\"sectionIndex\":null,\"chapterIndex\":null,\"chapterSortOrder\":null,\"chapterTitle\":null,\"sectionPage\":null,\"sectionTotalPages\":null},\"cfi\":null,\"currentHref\":\"OEBPS/one.xhtml\",\"currentSectionIndex\":null,\"currentChapterTitle\":\"第一章\",\"currentChapterSortOrder\":1,\"statusValue\":\"READING\",\"status\":\"在读\",\"publicationStatusValue\":\"UNKNOWN\",\"publicationStatus\":\"未知\",\"trackingStatusValue\":\"NOT_TRACKING\",\"trackingStatus\":\"未追踪\",\"localLatestVolume\":null,\"localLatestChapter\":null,\"localLatestTitle\":null,\"localLatestAt\":null,\"ignored\":"
+  },
+  {
+    "module": "library",
+    "method": "POST",
+    "path_template": "/api/works/bulk/find-replace/preview",
+    "request_path": "/api/works/bulk/find-replace/preview",
+    "operation_id": "preview_bulk_find_replace_api_works_bulk_find_replace_preview_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "预览批量查找替换",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"changedWorks\":1,\"changedValues\":1,\"items\":[{\"workId\":\"audit-work-a\",\"title\":\"星海列车 审计\",\"targetId\":\"audit-work-a\",\"table\":\"LibraryWork\",\"column\":\"title\",\"before\":\"星海列车 审计\",\"after\":\"星海列车 检查\"}]}}"
+  },
+  {
+    "module": "library",
+    "method": "POST",
+    "path_template": "/api/works/bulk",
+    "request_path": "/api/works/bulk",
+    "operation_id": "bulk_works_api_works_bulk_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "LibraryFacet": {
+        "rowsBefore": 6,
+        "rowsAfter": 8,
+        "contentChanged": true
+      },
+      "LibraryWork": {
+        "rowsBefore": 3,
+        "rowsAfter": 3,
+        "contentChanged": true
+      },
+      "LibraryWorkFacet": {
+        "rowsBefore": 6,
+        "rowsAfter": 8,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 16,
+        "rowsAfter": 17,
+        "contentChanged": true
+      }
+    },
+    "note": "批量添加标签并同步 facet",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"updated\":2,\"ids\":[\"audit-work-a\",\"audit-work-c\"],\"changedValues\":null,\"status\":null}}"
+  },
+  {
+    "module": "library",
+    "method": "POST",
+    "path_template": "/api/works/bulk/cover",
+    "request_path": "/api/works/bulk/cover",
+    "operation_id": "bulk_work_covers_api_works_bulk_cover_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "LibraryWork": {
+        "rowsBefore": 3,
+        "rowsAfter": 3,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 17,
+        "rowsAfter": 18,
+        "contentChanged": true
+      }
+    },
+    "note": "批量重建封面引用",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"updated\":2,\"ids\":[\"audit-work-a\",\"audit-work-c\"],\"skipped\":[]}}"
+  },
+  {
+    "module": "library",
+    "method": "POST",
+    "path_template": "/api/works/{work_id}/cover/upload",
+    "request_path": "/api/works/audit-work-a/cover/upload",
+    "operation_id": "upload_cover_api_works__work_id__cover_upload_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "LibraryWork": {
+        "rowsBefore": 3,
+        "rowsAfter": 3,
+        "contentChanged": true
+      }
+    },
+    "note": "上传作品封面并写文件/数据库",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"bookId\":\"audit-work-a\",\"coverUrl\":\"/api/works/audit-work-a/cover?size=medium&v=1785232911\"}}"
+  },
+  {
+    "module": "library",
+    "method": "POST",
+    "path_template": "/api/works/{work_id}/cover/regenerate",
+    "request_path": "/api/works/audit-work-a/cover/regenerate",
+    "operation_id": "regenerate_cover_api_works__work_id__cover_regenerate_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "LibraryWork": {
+        "rowsBefore": 3,
+        "rowsAfter": 3,
+        "contentChanged": true
+      }
+    },
+    "note": "重新选择作品默认/版本封面",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"bookId\":\"audit-work-a\",\"coverUrl\":\"/api/works/audit-work-a/cover?size=medium&v=1785232911\"}}"
+  },
+  {
+    "module": "library",
+    "method": "GET",
+    "path_template": "/api/library/facets",
+    "request_path": "/api/library/facets",
+    "operation_id": "library_facets_api_library_facets_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 500,
+    "passed": false,
+    "content_type": "text/plain; charset=utf-8",
+    "documented_response": false,
+    "response_shape_ok": null,
+    "database_changes": {},
+    "note": "读取可见 facets、阅读状态和媒介计数",
+    "response_excerpt": "Internal Server Error"
+  },
+  {
+    "module": "library",
+    "method": "GET",
+    "path_template": "/api/library/filter-schema",
+    "request_path": "/api/library/filter-schema",
+    "operation_id": "library_filter_options_api_library_filter_schema_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "读取动态筛选字段/options",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"fields\":[{\"key\":\"title\",\"label\":\"书名\",\"group\":\"作品元数据\",\"type\":\"text\",\"operators\":[\"contains\",\"not_contains\",\"equals\",\"not_equals\",\"starts_with\",\"ends_with\",\"is_empty\",\"is_not_empty\"],\"optionSource\":null,\"allowCustom\":null,\"unit\":null,\"valueScale\":null,\"options\":[]},{\"key\":\"author\",\"label\":\"作者\",\"group\":\"作品元数据\",\"type\":\"select\",\"operators\":[\"equals\",\"not_equals\",\"is_empty\",\"is_not_empty\"],\"optionSource\":\"authors\",\"allowCustom\":true,\"unit\":null,\"valueScale\":null,\"options\":[{\"value\":\"另一作者\",\"label\":\"另一作者\",\"count\":null,\"rootPath\":null},{\"value\":\"林川\",\"label\":\"林川\",\"count\":null,\"rootPath\":null}]},{\"key\":\"tag\",\"label\":\"标签\",\"group\":\"作品元数据\",\"type\":\"select\",\"operators\":[\"equals\",\"not_equals\",\"is_empty\",\"is_not_empty\"],\"optionSource\":\"tags\",\"allowCustom\":true,\"unit\":null,\"valueScale\":null,\"options\":[{\"value\":\"OpenAPI\",\"label\":\"OpenAPI\",\"count\":null,\"rootPath\":null},{\"value\":\"太空\",\"label\":\"太空\",\"count\":null,\"rootPath\":null},{\"value\":\"审计\",\"label\":\"审计\",\"count\":null,\"rootPath\":null},{\"val"
+  },
+  {
+    "module": "library",
+    "method": "GET",
+    "path_template": "/api/library/categories",
+    "request_path": "/api/library/categories",
+    "operation_id": "library_categories_api_library_categories_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 500,
+    "passed": false,
+    "content_type": "text/plain; charset=utf-8",
+    "documented_response": false,
+    "response_shape_ok": null,
+    "database_changes": {},
+    "note": "分类分页",
+    "response_excerpt": "Internal Server Error"
+  },
+  {
+    "module": "library",
+    "method": "PATCH",
+    "path_template": "/api/library/categories/{facet_id}",
+    "request_path": "/api/library/categories/audit-facet-1",
+    "operation_id": "update_library_category_api_library_categories__facet_id__patch",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 500,
+    "passed": false,
+    "content_type": "text/plain; charset=utf-8",
+    "documented_response": false,
+    "response_shape_ok": null,
+    "database_changes": {
+      "LibraryFacet": {
+        "rowsBefore": 8,
+        "rowsAfter": 8,
+        "contentChanged": true
+      },
+      "LibraryOperation": {
+        "rowsBefore": 0,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "LibraryWork": {
+        "rowsBefore": 3,
+        "rowsAfter": 3,
+        "contentChanged": true
+      },
+      "LibraryWorkFacet": {
+        "rowsBefore": 8,
+        "rowsAfter": 8,
+        "contentChanged": true
+      }
+    },
+    "note": "重命名分类并同步关联作品",
+    "response_excerpt": "Internal Server Error"
+  },
+  {
+    "module": "library",
+    "method": "POST",
+    "path_template": "/api/library/categories/merge",
+    "request_path": "/api/library/categories/merge",
+    "operation_id": "merge_library_categories_api_library_categories_merge_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 500,
+    "passed": false,
+    "content_type": "text/plain; charset=utf-8",
+    "documented_response": false,
+    "response_shape_ok": null,
+    "database_changes": {
+      "LibraryFacet": {
+        "rowsBefore": 8,
+        "rowsAfter": 8,
+        "contentChanged": true
+      },
+      "LibraryOperation": {
+        "rowsBefore": 1,
+        "rowsAfter": 2,
+        "contentChanged": true
+      },
+      "LibraryWork": {
+        "rowsBefore": 3,
+        "rowsAfter": 3,
+        "contentChanged": true
+      },
+      "LibraryWorkFacet": {
+        "rowsBefore": 8,
+        "rowsAfter": 11,
+        "contentChanged": true
+      }
+    },
+    "note": "合并两个标签分类",
+    "response_excerpt": "Internal Server Error"
+  },
+  {
+    "module": "library",
+    "method": "DELETE",
+    "path_template": "/api/library/categories/{facet_id}",
+    "request_path": "/api/library/categories/audit-facet-3",
+    "operation_id": "delete_library_category_api_library_categories__facet_id__delete",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 500,
+    "passed": false,
+    "content_type": "text/plain; charset=utf-8",
+    "documented_response": false,
+    "response_shape_ok": null,
+    "database_changes": {
+      "LibraryFacet": {
+        "rowsBefore": 8,
+        "rowsAfter": 7,
+        "contentChanged": true
+      },
+      "LibraryOperation": {
+        "rowsBefore": 2,
+        "rowsAfter": 3,
+        "contentChanged": true
+      }
+    },
+    "note": "删除分类及关联并写可撤销操作",
+    "response_excerpt": "Internal Server Error"
+  },
+  {
+    "module": "library",
+    "method": "GET",
+    "path_template": "/api/library/operations",
+    "request_path": "/api/library/operations",
+    "operation_id": "library_operations_api_library_operations_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 500,
+    "passed": false,
+    "content_type": "text/plain; charset=utf-8",
+    "documented_response": false,
+    "response_shape_ok": null,
+    "database_changes": {},
+    "note": "列出当前用户可撤销操作",
+    "response_excerpt": "Internal Server Error"
+  },
+  {
+    "module": "library",
+    "method": "POST",
+    "path_template": "/api/library/operations/{operation_id}/undo",
+    "request_path": "/api/library/operations/op_1785232911918511000/undo",
+    "operation_id": "undo_library_operation_api_library_operations__operation_id__undo_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 500,
+    "passed": false,
+    "content_type": "text/plain; charset=utf-8",
+    "documented_response": false,
+    "response_shape_ok": null,
+    "database_changes": {
+      "LibraryFacet": {
+        "rowsBefore": 7,
+        "rowsAfter": 8,
+        "contentChanged": true
+      },
+      "LibraryOperation": {
+        "rowsBefore": 3,
+        "rowsAfter": 3,
+        "contentChanged": true
+      }
+    },
+    "note": "撤销最近分类操作并恢复数据库状态",
+    "response_excerpt": "Internal Server Error"
+  },
+  {
+    "module": "library",
+    "method": "PATCH",
+    "path_template": "/api/works/{work_id}/editions/{edition_id}",
+    "request_path": "/api/works/audit-work-a/editions/audit-edition-epub",
+    "operation_id": "update_work_edition_api_works__work_id__editions__edition_id__patch",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 500,
+    "passed": false,
+    "content_type": "text/plain; charset=utf-8",
+    "documented_response": false,
+    "response_shape_ok": null,
+    "database_changes": {
+      "LibraryEdition": {
+        "rowsBefore": 6,
+        "rowsAfter": 6,
+        "contentChanged": true
+      },
+      "LibraryEditionFacet": {
+        "rowsBefore": 0,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "LibraryFacet": {
+        "rowsBefore": 8,
+        "rowsAfter": 9,
+        "contentChanged": true
+      },
+      "LibraryWorkFacet": {
+        "rowsBefore": 11,
+        "rowsAfter": 11,
+        "contentChanged": true
+      }
+    },
+    "note": "更新版本名称/出版信息",
+    "response_excerpt": "Internal Server Error"
+  },
+  {
+    "module": "library",
+    "method": "POST",
+    "path_template": "/api/works/{work_id}/editions/{edition_id}/convert",
+    "request_path": "/api/works/audit-work-a/editions/audit-edition-txt/convert",
+    "operation_id": "convert_work_edition_api_works__work_id__editions__edition_id__convert_post",
+    "expected_statuses": [
+      202
+    ],
+    "status_code": 409,
+    "passed": false,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "把 TXT 源加入延迟 EPUB 转换队列",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"原始文件不存在，无法转换\",\"code\":null}}"
+  },
+  {
+    "module": "library",
+    "method": "POST",
+    "path_template": "/api/works/{work_id}/metadata/apply",
+    "request_path": "/api/works/audit-work-a/metadata/apply",
+    "operation_id": "compatible_work_action_api_works__work_id__metadata_apply_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "LibraryEdition": {
+        "rowsBefore": 6,
+        "rowsAfter": 6,
+        "contentChanged": true
+      },
+      "LibraryEditionFacet": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "LibraryFacet": {
+        "rowsBefore": 9,
+        "rowsAfter": 11,
+        "contentChanged": true
+      },
+      "LibraryWork": {
+        "rowsBefore": 3,
+        "rowsAfter": 3,
+        "contentChanged": true
+      },
+      "LibraryWorkFacet": {
+        "rowsBefore": 11,
+        "rowsAfter": 10,
+        "contentChanged": true
+      },
+      "OrganizeJob": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      }
+    },
+    "note": "应用选择的元数据字段并完成整理状态",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"book\":{\"id\":\"audit-work-a\",\"workId\":\"audit-work-a\",\"editionId\":\"audit-edition-epub\",\"monitorFolderId\":null,\"title\":\"星海列车 OpenAPI\",\"author\":\"林川\",\"publisher\":\"接口出版社\",\"type\":\"ebook\",\"formatValue\":\"EPUB\",\"format\":\"EPUB\",\"size\":\"3.6 KB\",\"progress\":50.0,\"progressExtra\":{\"cfi\":null,\"progression\":0.5,\"fileId\":null,\"chapterId\":null,\"positionMs\":null,\"volumeId\":\"audit-volume-epub\",\"pageIndex\":null,\"chapterHref\":null,\"currentHref\":\"OEBPS/one.xhtml\",\"chapterSectionIndex\":null,\"sectionIndex\":null,\"chapterIndex\":null,\"chapterSortOrder\":null,\"chapterTitle\":null,\"sectionPage\":null,\"sectionTotalPages\":null},\"cfi\":null,\"currentHref\":\"OEBPS/one.xhtml\",\"currentSectionIndex\":null,\"currentChapterTitle\":\"第一章\",\"currentChapterSortOrder\":1,\"statusValue\":\"READING\",\"status\":\"在读\",\"publicationStatusValue\":\"UNKNOWN\",\"publicationStatus\":\"未知\",\"trackingStatusValue\":\"NOT_TRACKING\",\"trackingStatus\":\"未追踪\",\"localLatestVolume\":null,\"localLatestChapter\":null,\"localLatestTitle\":null,\"localLatestAt\":null,\"i"
+  },
+  {
+    "module": "library",
+    "method": "POST",
+    "path_template": "/api/works/{work_id}/editions/{edition_id}/primary",
+    "request_path": "/api/works/audit-work-a/editions/audit-edition-epub/primary",
+    "operation_id": "compatible_work_action_api_works__work_id__editions__edition_id__primary_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "LibraryEdition": {
+        "rowsBefore": 6,
+        "rowsAfter": 6,
+        "contentChanged": true
+      },
+      "LibraryWork": {
+        "rowsBefore": 3,
+        "rowsAfter": 3,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 18,
+        "rowsAfter": 19,
+        "contentChanged": true
+      }
+    },
+    "note": "设置同媒介主版本",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"book\":{\"id\":\"audit-work-a\",\"workId\":\"audit-work-a\",\"editionId\":\"audit-edition-epub\",\"monitorFolderId\":null,\"title\":\"星海列车 OpenAPI\",\"author\":\"林川\",\"publisher\":\"接口出版社\",\"type\":\"ebook\",\"formatValue\":\"EPUB\",\"format\":\"EPUB\",\"size\":\"3.6 KB\",\"progress\":50.0,\"progressExtra\":{\"cfi\":null,\"progression\":0.5,\"fileId\":null,\"chapterId\":null,\"positionMs\":null,\"volumeId\":\"audit-volume-epub\",\"pageIndex\":null,\"chapterHref\":null,\"currentHref\":\"OEBPS/one.xhtml\",\"chapterSectionIndex\":null,\"sectionIndex\":null,\"chapterIndex\":null,\"chapterSortOrder\":null,\"chapterTitle\":null,\"sectionPage\":null,\"sectionTotalPages\":null},\"cfi\":null,\"currentHref\":\"OEBPS/one.xhtml\",\"currentSectionIndex\":null,\"currentChapterTitle\":\"第一章\",\"currentChapterSortOrder\":1,\"statusValue\":\"READING\",\"status\":\"在读\",\"publicationStatusValue\":\"UNKNOWN\",\"publicationStatus\":\"未知\",\"trackingStatusValue\":\"NOT_TRACKING\",\"trackingStatus\":\"未追踪\",\"localLatestVolume\":null,\"localLatestChapter\":null,\"localLatestTitle\":null,\"localLatestAt\":null,\"i"
+  },
+  {
+    "module": "library",
+    "method": "POST",
+    "path_template": "/api/works/{work_id}/volumes/{volume_id}/move",
+    "request_path": "/api/works/audit-work-a/volumes/audit-volume-epub/move",
+    "operation_id": "compatible_work_action_api_works__work_id__volumes__volume_id__move_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "卷册顺序上移（边界位置保持不变）",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"book\":{\"id\":\"audit-work-a\",\"workId\":\"audit-work-a\",\"editionId\":\"audit-edition-epub\",\"monitorFolderId\":null,\"title\":\"星海列车 OpenAPI\",\"author\":\"林川\",\"publisher\":\"接口出版社\",\"type\":\"ebook\",\"formatValue\":\"EPUB\",\"format\":\"EPUB\",\"size\":\"3.6 KB\",\"progress\":50.0,\"progressExtra\":{\"cfi\":null,\"progression\":0.5,\"fileId\":null,\"chapterId\":null,\"positionMs\":null,\"volumeId\":\"audit-volume-epub\",\"pageIndex\":null,\"chapterHref\":null,\"currentHref\":\"OEBPS/one.xhtml\",\"chapterSectionIndex\":null,\"sectionIndex\":null,\"chapterIndex\":null,\"chapterSortOrder\":null,\"chapterTitle\":null,\"sectionPage\":null,\"sectionTotalPages\":null},\"cfi\":null,\"currentHref\":\"OEBPS/one.xhtml\",\"currentSectionIndex\":null,\"currentChapterTitle\":\"第一章\",\"currentChapterSortOrder\":1,\"statusValue\":\"READING\",\"status\":\"在读\",\"publicationStatusValue\":\"UNKNOWN\",\"publicationStatus\":\"未知\",\"trackingStatusValue\":\"NOT_TRACKING\",\"trackingStatus\":\"未追踪\",\"localLatestVolume\":null,\"localLatestChapter\":null,\"localLatestTitle\":null,\"localLatestAt\":null,\"i"
+  },
+  {
+    "module": "library",
+    "method": "POST",
+    "path_template": "/api/works/{work_id}/volumes/{volume_id}/move-to",
+    "request_path": "/api/works/audit-work-a/volumes/audit-volume-move/move-to",
+    "operation_id": "compatible_work_action_api_works__work_id__volumes__volume_id__move_to_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "LibraryEdition": {
+        "rowsBefore": 6,
+        "rowsAfter": 6,
+        "contentChanged": true
+      },
+      "LibraryFile": {
+        "rowsBefore": 6,
+        "rowsAfter": 6,
+        "contentChanged": true
+      },
+      "LibraryVolume": {
+        "rowsBefore": 5,
+        "rowsAfter": 5,
+        "contentChanged": true
+      },
+      "LibraryWork": {
+        "rowsBefore": 3,
+        "rowsAfter": 3,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 19,
+        "rowsAfter": 20,
+        "contentChanged": true
+      }
+    },
+    "note": "把版本/卷册转移到另一作品",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"book\":{\"id\":\"audit-work-a\",\"workId\":\"audit-work-a\",\"editionId\":\"audit-edition-epub\",\"monitorFolderId\":null,\"title\":\"星海列车 OpenAPI\",\"author\":\"林川\",\"publisher\":\"接口出版社\",\"type\":\"ebook\",\"formatValue\":\"EPUB\",\"format\":\"EPUB\",\"size\":\"2.4 KB\",\"progress\":50.0,\"progressExtra\":{\"cfi\":null,\"progression\":0.5,\"fileId\":null,\"chapterId\":null,\"positionMs\":null,\"volumeId\":\"audit-volume-epub\",\"pageIndex\":null,\"chapterHref\":null,\"currentHref\":\"OEBPS/one.xhtml\",\"chapterSectionIndex\":null,\"sectionIndex\":null,\"chapterIndex\":null,\"chapterSortOrder\":null,\"chapterTitle\":null,\"sectionPage\":null,\"sectionTotalPages\":null},\"cfi\":null,\"currentHref\":\"OEBPS/one.xhtml\",\"currentSectionIndex\":null,\"currentChapterTitle\":\"第一章\",\"currentChapterSortOrder\":1,\"statusValue\":\"READING\",\"status\":\"在读\",\"publicationStatusValue\":\"UNKNOWN\",\"publicationStatus\":\"未知\",\"trackingStatusValue\":\"NOT_TRACKING\",\"trackingStatus\":\"未追踪\",\"localLatestVolume\":null,\"localLatestChapter\":null,\"localLatestTitle\":null,\"localLatestAt\":null,\"i"
+  },
+  {
+    "module": "library",
+    "method": "POST",
+    "path_template": "/api/works/{work_id}/editions/{edition_id}/split",
+    "request_path": "/api/works/audit-work-a/editions/audit-edition-split/split",
+    "operation_id": "compatible_work_action_api_works__work_id__editions__edition_id__split_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "LibraryEdition": {
+        "rowsBefore": 6,
+        "rowsAfter": 6,
+        "contentChanged": true
+      },
+      "LibraryEditionFacet": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "LibraryOperation": {
+        "rowsBefore": 3,
+        "rowsAfter": 4,
+        "contentChanged": true
+      },
+      "LibraryWork": {
+        "rowsBefore": 3,
+        "rowsAfter": 4,
+        "contentChanged": true
+      },
+      "LibraryWorkFacet": {
+        "rowsBefore": 10,
+        "rowsAfter": 14,
+        "contentChanged": true
+      }
+    },
+    "note": "把版本拆分为独立作品",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"sourceWorkId\":\"audit-work-a\",\"newWorkId\":\"work_1785232913026852000\",\"editionId\":\"audit-edition-split\",\"operation\":{\"id\":\"op_1785232913029507000\",\"action\":\"SPLIT_EDITION\",\"status\":\"COMPLETED\",\"summary\":\"已将版本拆分为《拆分出的审计作品》\",\"expiresAt\":\"2026-08-04T10:01:53.026851Z\",\"undoAvailable\":true}}}"
+  },
+  {
+    "module": "library",
+    "method": "GET",
+    "path_template": "/api/library/duplicates",
+    "request_path": "/api/library/duplicates",
+    "operation_id": "library_duplicates_api_library_duplicates_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "计算重复作品组",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"groups\":[],\"total\":0}}"
+  },
+  {
+    "module": "library",
+    "method": "POST",
+    "path_template": "/api/library/duplicates/merge",
+    "request_path": "/api/library/duplicates/merge",
+    "operation_id": "merge_library_duplicates_api_library_duplicates_merge_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 500,
+    "passed": false,
+    "content_type": "text/plain; charset=utf-8",
+    "documented_response": false,
+    "response_shape_ok": null,
+    "database_changes": {
+      "LibraryEdition": {
+        "rowsBefore": 6,
+        "rowsAfter": 6,
+        "contentChanged": true
+      },
+      "LibraryEditionFacet": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "LibraryOperation": {
+        "rowsBefore": 4,
+        "rowsAfter": 5,
+        "contentChanged": true
+      },
+      "LibraryWork": {
+        "rowsBefore": 4,
+        "rowsAfter": 4,
+        "contentChanged": true
+      },
+      "LibraryWorkFacet": {
+        "rowsBefore": 14,
+        "rowsAfter": 16,
+        "contentChanged": true
+      }
+    },
+    "note": "合并重复作品并迁移版本/关联",
+    "response_excerpt": "Internal Server Error"
+  },
+  {
+    "module": "library",
+    "method": "DELETE",
+    "path_template": "/api/works/{work_id}",
+    "request_path": "/api/works/work_1785232913026852000",
+    "operation_id": "delete_work_api_works__work_id__delete",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "LibraryEdition": {
+        "rowsBefore": 6,
+        "rowsAfter": 5,
+        "contentChanged": true
+      },
+      "LibraryFile": {
+        "rowsBefore": 6,
+        "rowsAfter": 5,
+        "contentChanged": true
+      },
+      "LibraryVolume": {
+        "rowsBefore": 5,
+        "rowsAfter": 4,
+        "contentChanged": true
+      },
+      "LibraryWork": {
+        "rowsBefore": 4,
+        "rowsAfter": 3,
+        "contentChanged": true
+      },
+      "LibraryWorkFacet": {
+        "rowsBefore": 16,
+        "rowsAfter": 12,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 20,
+        "rowsAfter": 21,
+        "contentChanged": true
+      }
+    },
+    "note": "删除拆分出的测试作品及数据库关联",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"deleted\":true,\"id\":\"work_1785232913026852000\",\"deleteSource\":false,\"deletedDatabaseRecords\":4,\"deletedFiles\":2,\"deletedSourceFiles\":0,\"missingSourceFiles\":[],\"failedFileDeletes\":[]}}"
+  },
+  {
+    "module": "library",
+    "method": "POST",
+    "path_template": "/api/works/{work_id}/editions/{edition_id}/convert",
+    "request_path": "/api/works/audit-work-a/editions/audit-edition-txt/convert",
+    "operation_id": "convert_work_edition_api_works__work_id__editions__edition_id__convert_post",
+    "expected_statuses": [
+      202
+    ],
+    "status_code": 202,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "ImportTask": {
+        "rowsBefore": 0,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 21,
+        "rowsAfter": 22,
+        "contentChanged": true
+      }
+    },
+    "note": "修正为运行期预期的绝对源路径后加入 EPUB 转换队列",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"task\":{\"id\":\"py_1785232952120213000\",\"sourcePath\":\"/private/tmp/shuku-openapi-audit.9VobLW/storage/books/openapi-audit/convert.txt\",\"origin\":\"DEFERRED_CONVERSION\",\"status\":\"PENDING\",\"originalName\":\"convert.txt\",\"requestedTitle\":\"星海列车 OpenAPI\",\"requestedAuthor\":\"林川\",\"monitorFolderId\":null,\"workId\":\"audit-work-a\",\"editionId\":null,\"volumeId\":null,\"taskKind\":\"FILE\",\"bundleKey\":null,\"assetCount\":1,\"processedAssetCount\":0,\"progress\":0,\"duplicate\":false,\"duration\":0,\"errorSummary\":null,\"errorCode\":null,\"retryable\":false,\"attempts\":0,\"leaseOwner\":null,\"message\":\"已加入 EPUB 转换队列\"},\"created\":true}}"
+  },
+  {
+    "module": "library",
+    "method": "POST",
+    "path_template": "/api/works/{work_id}/metadata/search",
+    "request_path": "/api/works/audit-work-a/metadata/search",
+    "operation_id": "metadata_search_api_works__work_id__metadata_search_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "OrganizeJob": {
+        "rowsBefore": 1,
+        "rowsAfter": 2,
+        "contentChanged": true
+      }
+    },
+    "note": "调用已注册但禁用的 Bangumi provider，返回稳定空候选/禁用消息",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"candidates\":[],\"results\":[],\"query\":\"星海列车\",\"source\":\"bangumi\",\"message\":\"Bangumi 漫画未在当前读物类型中启用\"}}"
+  },
+  {
+    "module": "shelf",
+    "method": "GET",
+    "path_template": "/api/shelves",
+    "request_path": "/api/shelves",
+    "operation_id": "list_shelves_api_shelves_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "列出个人书架",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"shelves\":[]}}"
+  },
+  {
+    "module": "shelf",
+    "method": "POST",
+    "path_template": "/api/shelves",
+    "request_path": "/api/shelves",
+    "operation_id": "create_shelf_api_shelves_post",
+    "expected_statuses": [
+      201
+    ],
+    "status_code": 201,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": false,
+    "response_shape_ok": true,
+    "database_changes": {
+      "Shelf": {
+        "rowsBefore": 0,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "ShelfWork": {
+        "rowsBefore": 0,
+        "rowsAfter": 2,
+        "contentChanged": true
+      }
+    },
+    "note": "创建静态书架并加入两本作品",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"shelf\":{\"id\":\"py_1785233001853180000\",\"ownerUserId\":\"py_d481037a4027469eb608c23e99d89c95\",\"name\":\"OpenAPI 审计书架\",\"description\":\"实际请求\",\"kind\":\"STATIC\",\"rulesJson\":\"{}\",\"pinned\":true,\"createdAt\":\"2026-07-28T10:03:21.853000Z\",\"updatedAt\":\"2026-07-28T10:03:21.853000Z\",\"rules\":{},\"bookCount\":2,\"books\":[{\"id\":\"audit-work-a\",\"title\":\"星海列车 OpenAPI\",\"author\":\"林川\",\"coverUrl\":\"/api/works/audit-work-a/cover?size=medium\"},{\"id\":\"audit-work-c\",\"title\":\"目标作品\",\"author\":\"另一作者\",\"coverUrl\":\"/api/works/audit-work-c/cover?size=medium\"}],\"page\":1,\"pageSize\":24,\"total\":2,\"totalPages\":1,\"bookIds\":[\"audit-work-a\",\"audit-work-c\"]}}}"
+  },
+  {
+    "module": "shelf",
+    "method": "GET",
+    "path_template": "/api/shelves/{shelf_id}",
+    "request_path": "/api/shelves/py_1785233001853180000",
+    "operation_id": "get_shelf_api_shelves__shelf_id__get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "读取书架详情和分页作品",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"shelf\":{\"id\":\"py_1785233001853180000\",\"ownerUserId\":\"py_d481037a4027469eb608c23e99d89c95\",\"name\":\"OpenAPI 审计书架\",\"description\":\"实际请求\",\"kind\":\"STATIC\",\"rulesJson\":\"{}\",\"pinned\":true,\"createdAt\":\"2026-07-28T10:03:21.853000Z\",\"updatedAt\":\"2026-07-28T10:03:21.853000Z\",\"rules\":{},\"bookCount\":2,\"books\":[{\"id\":\"audit-work-a\",\"title\":\"星海列车 OpenAPI\",\"author\":\"林川\",\"coverUrl\":\"/api/works/audit-work-a/cover?size=medium\"},{\"id\":\"audit-work-c\",\"title\":\"目标作品\",\"author\":\"另一作者\",\"coverUrl\":\"/api/works/audit-work-c/cover?size=medium\"}],\"page\":1,\"pageSize\":24,\"total\":2,\"totalPages\":1,\"bookIds\":[\"audit-work-a\",\"audit-work-c\"]}}}"
+  },
+  {
+    "module": "shelf",
+    "method": "PATCH",
+    "path_template": "/api/shelves/{shelf_id}",
+    "request_path": "/api/shelves/py_1785233001853180000",
+    "operation_id": "update_shelf_api_shelves__shelf_id__patch",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "Shelf": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "ShelfWork": {
+        "rowsBefore": 2,
+        "rowsAfter": 1,
+        "contentChanged": true
+      }
+    },
+    "note": "更新书架名称、说明和成员",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"shelf\":{\"id\":\"py_1785233001853180000\",\"ownerUserId\":\"py_d481037a4027469eb608c23e99d89c95\",\"name\":\"OpenAPI 审计书架二\",\"description\":\"已更新\",\"kind\":\"STATIC\",\"rulesJson\":\"{}\",\"pinned\":false,\"createdAt\":\"2026-07-28T10:03:21.853000Z\",\"updatedAt\":\"2026-07-28T10:03:22.044000Z\",\"rules\":{},\"bookCount\":1,\"books\":[{\"id\":\"audit-work-a\",\"title\":\"星海列车 OpenAPI\",\"author\":\"林川\",\"coverUrl\":\"/api/works/audit-work-a/cover?size=medium\"}],\"page\":1,\"pageSize\":24,\"total\":1,\"totalPages\":1,\"bookIds\":[\"audit-work-a\"]}}}"
+  },
+  {
+    "module": "shelf",
+    "method": "DELETE",
+    "path_template": "/api/shelves/{shelf_id}",
+    "request_path": "/api/shelves/py_1785233001853180000",
+    "operation_id": "delete_shelf_api_shelves__shelf_id__delete",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "Shelf": {
+        "rowsBefore": 1,
+        "rowsAfter": 0,
+        "contentChanged": true
+      },
+      "ShelfWork": {
+        "rowsBefore": 1,
+        "rowsAfter": 0,
+        "contentChanged": true
+      }
+    },
+    "note": "删除书架并级联成员关系",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"deleted\":true,\"id\":\"py_1785233001853180000\"}}"
+  },
+  {
+    "module": "organize",
+    "method": "GET",
+    "path_template": "/api/organize/policy",
+    "request_path": "/api/organize/policy",
+    "operation_id": "get_organize_policy_route_api_organize_policy_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "读取整理调度策略",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"policy\":{\"id\":\"default\",\"enabled\":false,\"scheduleMode\":\"MANUAL\",\"intervalMinutes\":60,\"autoRunOnNew\":false,\"autoRunOnNewSince\":null,\"rules\":{\"unrecognized\":true,\"missingMetadata\":true},\"overwriteTitleAuthor\":true,\"lastScheduledAt\":null,\"nextRunAt\":null,\"updatedAt\":\"2026-07-28T10:04:01.339000Z\"}}}"
+  },
+  {
+    "module": "organize",
+    "method": "PUT",
+    "path_template": "/api/organize/policy",
+    "request_path": "/api/organize/policy",
+    "operation_id": "update_organize_policy_route_api_organize_policy_put",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "OrganizePolicy": {
+        "rowsBefore": 0,
+        "rowsAfter": 1,
+        "contentChanged": true
+      }
+    },
+    "note": "更新手动整理策略",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"policy\":{\"id\":\"default\",\"enabled\":false,\"scheduleMode\":\"MANUAL\",\"intervalMinutes\":60,\"autoRunOnNew\":false,\"autoRunOnNewSince\":null,\"rules\":{\"unrecognized\":true,\"missingMetadata\":true},\"overwriteTitleAuthor\":true,\"lastScheduledAt\":null,\"nextRunAt\":null,\"updatedAt\":\"2026-07-28T10:04:01.427000Z\"}}}"
+  },
+  {
+    "module": "organize",
+    "method": "GET",
+    "path_template": "/api/organize/candidates",
+    "request_path": "/api/organize/candidates",
+    "operation_id": "get_organize_candidates_route_api_organize_candidates_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "统计待整理候选",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"candidates\":{\"total\":0,\"reasonCounts\":{},\"works\":[]}}}"
+  },
+  {
+    "module": "organize",
+    "method": "GET",
+    "path_template": "/api/organize/runs",
+    "request_path": "/api/organize/runs",
+    "operation_id": "list_organize_runs_route_api_organize_runs_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 500,
+    "passed": false,
+    "content_type": "text/plain; charset=utf-8",
+    "documented_response": false,
+    "response_shape_ok": null,
+    "database_changes": {},
+    "note": "列出整理运行",
+    "response_excerpt": "Internal Server Error"
+  },
+  {
+    "module": "organize",
+    "method": "GET",
+    "path_template": "/api/organize/jobs",
+    "request_path": "/api/organize/jobs",
+    "operation_id": "list_organize_jobs_api_organize_jobs_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "分页列出整理任务",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"jobs\":[{\"id\":\"audit-organize-job-2\",\"runId\":\"audit-organize-run-2\",\"trigger\":\"MANUAL\",\"status\":\"REVIEWING\",\"statusCategory\":\"FAILED\",\"issueCodes\":[\"MISSING_METADATA\"],\"reasonCodes\":[],\"summary\":\"第二个审计任务\",\"errorSummary\":null,\"metadataLookupStatus\":null,\"metadataLookupSource\":null,\"metadataLookupProviders\":[],\"metadataSources\":[],\"metadataLookupError\":null,\"providerExecutions\":[],\"startedAt\":null,\"finishedAt\":null,\"createdAt\":\"2026-07-28T10:04:01.089000Z\",\"updatedAt\":\"2026-07-28T10:04:01.089000Z\",\"book\":{\"id\":\"audit-work-c\",\"workId\":\"audit-work-c\",\"editionId\":\"audit-edition-target\",\"monitorFolderId\":null,\"title\":\"目标作品\",\"author\":\"另一作者\",\"publisher\":null,\"type\":\"ebook\",\"formatValue\":\"EPUB\",\"format\":\"EPUB\",\"size\":\"2.4 KB\",\"progress\":0.0,\"progressExtra\":{\"cfi\":null,\"progression\":null,\"fileId\":null,\"chapterId\":null,\"positionMs\":null,\"volumeId\":null,\"pageIndex\":null,\"chapterHref\":null,\"currentHref\":null,\"chapterSectionIndex\":null,\"sectionIndex\":null,\"chapterIndex\":null,\"chap"
+  },
+  {
+    "module": "organize",
+    "method": "GET",
+    "path_template": "/api/organize/pending",
+    "request_path": "/api/organize/pending",
+    "operation_id": "list_pending_organize_api_organize_pending_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "列出待处理整理任务",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"jobs\":[{\"id\":\"audit-organize-job-2\",\"runId\":\"audit-organize-run-2\",\"trigger\":\"MANUAL\",\"status\":\"REVIEWING\",\"statusCategory\":\"FAILED\",\"issueCodes\":[\"MISSING_METADATA\"],\"reasonCodes\":[],\"summary\":\"第二个审计任务\",\"errorSummary\":null,\"metadataLookupStatus\":null,\"metadataLookupSource\":null,\"metadataLookupProviders\":[],\"metadataSources\":[],\"metadataLookupError\":null,\"providerExecutions\":[],\"startedAt\":null,\"finishedAt\":null,\"createdAt\":\"2026-07-28T10:04:01.089000Z\",\"updatedAt\":\"2026-07-28T10:04:01.089000Z\",\"book\":{\"id\":\"audit-work-c\",\"workId\":\"audit-work-c\",\"editionId\":\"audit-edition-target\",\"monitorFolderId\":null,\"title\":\"目标作品\",\"author\":\"另一作者\",\"publisher\":null,\"type\":\"ebook\",\"formatValue\":\"EPUB\",\"format\":\"EPUB\",\"size\":\"2.4 KB\",\"progress\":0.0,\"progressExtra\":{\"cfi\":null,\"progression\":null,\"fileId\":null,\"chapterId\":null,\"positionMs\":null,\"volumeId\":null,\"pageIndex\":null,\"chapterHref\":null,\"currentHref\":null,\"chapterSectionIndex\":null,\"sectionIndex\":null,\"chapterIndex\":null,\"chap"
+  },
+  {
+    "module": "organize",
+    "method": "GET",
+    "path_template": "/api/organize/jobs/{job_id}",
+    "request_path": "/api/organize/jobs/audit-organize-job-2",
+    "operation_id": "get_organize_job_api_organize_jobs__job_id__get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "读取整理任务详情",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"job\":{\"id\":\"audit-organize-job-2\",\"runId\":\"audit-organize-run-2\",\"trigger\":\"MANUAL\",\"status\":\"REVIEWING\",\"statusCategory\":\"FAILED\",\"issueCodes\":[\"MISSING_METADATA\"],\"reasonCodes\":[],\"summary\":\"第二个审计任务\",\"errorSummary\":null,\"metadataLookupStatus\":null,\"metadataLookupSource\":null,\"metadataLookupProviders\":[],\"metadataSources\":[],\"metadataLookupError\":null,\"providerExecutions\":[],\"startedAt\":null,\"finishedAt\":null,\"createdAt\":\"2026-07-28T10:04:01.089000Z\",\"updatedAt\":\"2026-07-28T10:04:01.089000Z\",\"book\":{\"id\":\"audit-work-c\",\"workId\":\"audit-work-c\",\"editionId\":\"audit-edition-target\",\"monitorFolderId\":null,\"title\":\"目标作品\",\"author\":\"另一作者\",\"publisher\":null,\"type\":\"ebook\",\"formatValue\":\"EPUB\",\"format\":\"EPUB\",\"size\":\"2.4 KB\",\"progress\":0.0,\"progressExtra\":{\"cfi\":null,\"progression\":null,\"fileId\":null,\"chapterId\":null,\"positionMs\":null,\"volumeId\":null,\"pageIndex\":null,\"chapterHref\":null,\"currentHref\":null,\"chapterSectionIndex\":null,\"sectionIndex\":null,\"chapterIndex\":null,\"chapte"
+  },
+  {
+    "module": "organize",
+    "method": "POST",
+    "path_template": "/api/organize/jobs/{job_id}/recognize",
+    "request_path": "/api/organize/jobs/audit-organize-job-2/recognize",
+    "operation_id": "recognize_organize_job_route_api_organize_jobs__job_id__recognize_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "LibraryWork": {
+        "rowsBefore": 3,
+        "rowsAfter": 3,
+        "contentChanged": true
+      },
+      "MetadataLookupTask": {
+        "rowsBefore": 0,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "OrganizeJob": {
+        "rowsBefore": 3,
+        "rowsAfter": 3,
+        "contentChanged": true
+      },
+      "OrganizeRun": {
+        "rowsBefore": 2,
+        "rowsAfter": 2,
+        "contentChanged": true
+      }
+    },
+    "note": "清理旧识别产物并创建 MetadataLookupTask",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"job\":{\"id\":\"audit-organize-job-2\",\"runId\":\"audit-organize-run-2\",\"trigger\":\"MANUAL\",\"status\":\"LOOKUP_PENDING\",\"statusCategory\":\"WAITING\",\"issueCodes\":[\"MISSING_METADATA\"],\"reasonCodes\":[\"MANUAL_RECOGNIZE\"],\"summary\":\"等待重新识别\",\"errorSummary\":null,\"metadataLookupStatus\":\"PENDING\",\"metadataLookupSource\":null,\"metadataLookupProviders\":[],\"metadataSources\":[],\"metadataLookupError\":null,\"providerExecutions\":[],\"startedAt\":null,\"finishedAt\":null,\"createdAt\":\"2026-07-28T10:04:01.089000Z\",\"updatedAt\":\"2026-07-28T10:04:02.032000Z\",\"book\":{\"id\":\"audit-work-c\",\"workId\":\"audit-work-c\",\"editionId\":\"audit-edition-target\",\"monitorFolderId\":null,\"title\":\"目标作品\",\"author\":\"另一作者\",\"publisher\":null,\"type\":\"ebook\",\"formatValue\":\"EPUB\",\"format\":\"EPUB\",\"size\":\"2.4 KB\",\"progress\":0.0,\"progressExtra\":{\"cfi\":null,\"progression\":null,\"fileId\":null,\"chapterId\":null,\"positionMs\":null,\"volumeId\":null,\"pageIndex\":null,\"chapterHref\":null,\"currentHref\":null,\"chapterSectionIndex\":null,\"sectionIndex\":null"
+  },
+  {
+    "module": "organize",
+    "method": "DELETE",
+    "path_template": "/api/organize/jobs/{job_id}",
+    "request_path": "/api/organize/jobs/audit-organize-job-2",
+    "operation_id": "delete_organize_job_route_api_organize_jobs__job_id__delete",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "LibraryWork": {
+        "rowsBefore": 3,
+        "rowsAfter": 3,
+        "contentChanged": true
+      },
+      "MetadataLookupTask": {
+        "rowsBefore": 1,
+        "rowsAfter": 0,
+        "contentChanged": true
+      },
+      "OrganizeJob": {
+        "rowsBefore": 3,
+        "rowsAfter": 2,
+        "contentChanged": true
+      },
+      "OrganizeRun": {
+        "rowsBefore": 2,
+        "rowsAfter": 2,
+        "contentChanged": true
+      }
+    },
+    "note": "删除整理任务图并刷新作品/运行状态",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"id\":\"audit-organize-job-2\",\"workId\":\"audit-work-c\",\"deleted\":true}}"
+  },
+  {
+    "module": "download-sources",
+    "method": "GET",
+    "path_template": "/api/sources",
+    "request_path": "/api/sources",
+    "operation_id": "list_sources_api_sources_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "退役能力列表应为空；只读。",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"sources\":[]}}"
+  },
+  {
+    "module": "download-sources",
+    "method": "POST",
+    "path_template": "/api/sources",
+    "request_path": "/api/sources",
+    "operation_id": "create_source_api_sources_post",
+    "expected_statuses": [
+      410
+    ],
+    "status_code": 410,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "退役能力创建应明确返回 410。",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"外部资源功能已移除\"}}"
+  },
+  {
+    "module": "download-sources",
+    "method": "PUT",
+    "path_template": "/api/sources/{source_id}",
+    "request_path": "/api/sources/missing-source",
+    "operation_id": "update_source_api_sources__source_id__put",
+    "expected_statuses": [
+      404
+    ],
+    "status_code": 404,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "不存在的退役来源应返回 404。",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"来源不存在\"}}"
+  },
+  {
+    "module": "download-sources",
+    "method": "PATCH",
+    "path_template": "/api/sources/{source_id}",
+    "request_path": "/api/sources/missing-source",
+    "operation_id": "update_source_api_sources__source_id__patch",
+    "expected_statuses": [
+      404
+    ],
+    "status_code": 404,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "不存在的退役来源应返回 404。",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"来源不存在\"}}"
+  },
+  {
+    "module": "download-sources",
+    "method": "GET",
+    "path_template": "/api/sources/{source_id}",
+    "request_path": "/api/sources/missing-source",
+    "operation_id": "get_source_api_sources__source_id__get",
+    "expected_statuses": [
+      404
+    ],
+    "status_code": 404,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "不存在来源。",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"来源不存在\"}}"
+  },
+  {
+    "module": "download-sources",
+    "method": "DELETE",
+    "path_template": "/api/sources/{source_id}",
+    "request_path": "/api/sources/missing-source",
+    "operation_id": "delete_source_api_sources__source_id__delete",
+    "expected_statuses": [
+      404
+    ],
+    "status_code": 404,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "不存在来源。",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"来源不存在\"}}"
+  },
+  {
+    "module": "download-sources",
+    "method": "POST",
+    "path_template": "/api/sources/{source_id}/test",
+    "request_path": "/api/sources/missing-source/test",
+    "operation_id": "test_source_api_sources__source_id__test_post",
+    "expected_statuses": [
+      404
+    ],
+    "status_code": 404,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "退役来源测试不可用。",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"源不存在\"}}"
+  },
+  {
+    "module": "download-sources",
+    "method": "POST",
+    "path_template": "/api/sources/{source_id}/search",
+    "request_path": "/api/sources/missing-source/search",
+    "operation_id": "search_source_api_sources__source_id__search_post",
+    "expected_statuses": [
+      404
+    ],
+    "status_code": 404,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "有效关键词下来源不存在。",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"源不存在\"}}"
+  },
+  {
+    "module": "download-sources",
+    "method": "GET",
+    "path_template": "/api/source-search-records",
+    "request_path": "/api/source-search-records",
+    "operation_id": "list_source_records_api_source_search_records_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "退役能力记录列表应为空。",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"records\":[],\"total\":0}}"
+  },
+  {
+    "module": "download-sources",
+    "method": "POST",
+    "path_template": "/api/source-search-records",
+    "request_path": "/api/source-search-records",
+    "operation_id": "create_source_record_api_source_search_records_post",
+    "expected_statuses": [
+      404
+    ],
+    "status_code": 404,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "退役来源记录不可创建。",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"源不存在\"}}"
+  },
+  {
+    "module": "download-sources",
+    "method": "POST",
+    "path_template": "/api/source-search-records/create-download-task",
+    "request_path": "/api/source-search-records/create-download-task",
+    "operation_id": "create_download_from_search_result_api_source_search_records_create_download_task_post",
+    "expected_statuses": [
+      404
+    ],
+    "status_code": 404,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "退役搜索结果不可创建下载任务。",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"源不存在\"}}"
+  },
+  {
+    "module": "download-sources",
+    "method": "GET",
+    "path_template": "/api/source-search-records/{record_id}",
+    "request_path": "/api/source-search-records/missing-record",
+    "operation_id": "get_source_record_api_source_search_records__record_id__get",
+    "expected_statuses": [
+      404
+    ],
+    "status_code": 404,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "不存在记录。",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"搜索记录不存在\"}}"
+  },
+  {
+    "module": "download-sources",
+    "method": "DELETE",
+    "path_template": "/api/source-search-records/{record_id}",
+    "request_path": "/api/source-search-records/missing-record",
+    "operation_id": "delete_source_record_api_source_search_records__record_id__delete",
+    "expected_statuses": [
+      404
+    ],
+    "status_code": 404,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "不存在记录。",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"搜索记录不存在\"}}"
+  },
+  {
+    "module": "download-sources",
+    "method": "PUT",
+    "path_template": "/api/source-search-records/{record_id}",
+    "request_path": "/api/source-search-records/missing-record",
+    "operation_id": "update_source_record_api_source_search_records__record_id__put",
+    "expected_statuses": [
+      404
+    ],
+    "status_code": 404,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "不存在记录。",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"搜索记录不存在\"}}"
+  },
+  {
+    "module": "download-sources",
+    "method": "POST",
+    "path_template": "/api/source-search-records/{record_id}/ignore",
+    "request_path": "/api/source-search-records/missing-record/ignore",
+    "operation_id": "mark_source_record_api_source_search_records__record_id__ignore_post",
+    "expected_statuses": [
+      404
+    ],
+    "status_code": 404,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "不存在记录。",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"搜索记录不存在\"}}"
+  },
+  {
+    "module": "download-sources",
+    "method": "POST",
+    "path_template": "/api/source-search-records/{record_id}/save",
+    "request_path": "/api/source-search-records/missing-record/save",
+    "operation_id": "mark_source_record_api_source_search_records__record_id__save_post",
+    "expected_statuses": [
+      404
+    ],
+    "status_code": 404,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "不存在记录。",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"搜索记录不存在\"}}"
+  },
+  {
+    "module": "download-sources",
+    "method": "POST",
+    "path_template": "/api/source-search-records/{record_id}/create-download-task",
+    "request_path": "/api/source-search-records/missing-record/create-download-task",
+    "operation_id": "create_download_from_record_api_source_search_records__record_id__create_download_task_post",
+    "expected_statuses": [
+      404
+    ],
+    "status_code": 404,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "不存在记录。",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"搜索记录不存在\"}}"
+  },
+  {
+    "module": "download",
+    "method": "POST",
+    "path_template": "/api/download-tasks",
+    "request_path": "/api/download-tasks",
+    "operation_id": "create_download_task_api_download_tasks_post",
+    "expected_statuses": [
+      201
+    ],
+    "status_code": 201,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": false,
+    "response_shape_ok": true,
+    "database_changes": {
+      "DownloadTask": {
+        "rowsBefore": 0,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 22,
+        "rowsAfter": 23,
+        "contentChanged": true
+      },
+      "SystemSetting": {
+        "rowsBefore": 16,
+        "rowsAfter": 17,
+        "contentChanged": true
+      }
+    },
+    "note": "创建真实 HTTP 下载任务；应写任务、最近目标设置和审计事件。",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"task\":{\"id\":\"py_1785233371665169000\",\"sourceId\":null,\"searchRecordId\":null,\"bookId\":null,\"type\":\"http\",\"status\":\"queued\",\"displayName\":\"audit-download.epub\",\"remoteRef\":\"{\\\"downloadUrl\\\": \\\"http://127.0.0.1:19090/audit.epub\\\"}\",\"savePath\":\"/private/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"filePath\":null,\"errorMessage\":null,\"progress\":0.0,\"createdAt\":\"2026-07-28T10:09:31.667000Z\",\"updatedAt\":\"2026-07-28T10:09:31.667000Z\"},\"autoImport\":false}}"
+  },
+  {
+    "module": "download",
+    "method": "GET",
+    "path_template": "/api/download-tasks",
+    "request_path": "/api/download-tasks",
+    "operation_id": "list_download_tasks_api_download_tasks_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "任务列表只读。",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"tasks\":[{\"id\":\"py_1785233371665169000\",\"sourceId\":null,\"searchRecordId\":null,\"bookId\":null,\"type\":\"http\",\"status\":\"queued\",\"displayName\":\"audit-download.epub\",\"remoteRef\":{\"downloadUrl\":\"http://127.0.0.1:19090/audit.epub\"},\"savePath\":\"/private/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"filePath\":null,\"errorMessage\":null,\"progress\":0.0,\"createdAt\":\"2026-07-28T10:09:31.667000Z\",\"updatedAt\":\"2026-07-28T10:09:31.667000Z\",\"sourceName\":null,\"autoImport\":false}]}}"
+  },
+  {
+    "module": "download",
+    "method": "GET",
+    "path_template": "/api/download-tasks/{task_id}",
+    "request_path": "/api/download-tasks/py_1785233371665169000",
+    "operation_id": "get_download_task_api_download_tasks__task_id__get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "任务详情只读。",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"task\":{\"id\":\"py_1785233371665169000\",\"sourceId\":null,\"searchRecordId\":null,\"bookId\":null,\"type\":\"http\",\"status\":\"queued\",\"displayName\":\"audit-download.epub\",\"remoteRef\":\"{\\\"downloadUrl\\\": \\\"http://127.0.0.1:19090/audit.epub\\\"}\",\"savePath\":\"/private/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"filePath\":null,\"errorMessage\":null,\"progress\":0.0,\"createdAt\":\"2026-07-28T10:09:31.667000Z\",\"updatedAt\":\"2026-07-28T10:09:31.667000Z\"}}}"
+  },
+  {
+    "module": "download",
+    "method": "PUT",
+    "path_template": "/api/download-tasks/{task_id}",
+    "request_path": "/api/download-tasks/py_1785233371665169000",
+    "operation_id": "update_download_task_api_download_tasks__task_id__put",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "DownloadTask": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 23,
+        "rowsAfter": 24,
+        "contentChanged": true
+      }
+    },
+    "note": "把任务置为 failed 以验证重试链路。",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"task\":{\"id\":\"py_1785233371665169000\",\"sourceId\":null,\"searchRecordId\":null,\"bookId\":null,\"type\":\"http\",\"status\":\"failed\",\"displayName\":\"audit-download.epub\",\"remoteRef\":\"{\\\"downloadUrl\\\": \\\"http://127.0.0.1:19090/audit.epub\\\"}\",\"savePath\":\"/private/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"filePath\":null,\"errorMessage\":\"audit precondition\",\"progress\":12.0,\"createdAt\":\"2026-07-28T10:09:31.667000Z\",\"updatedAt\":\"2026-07-28T10:09:31.988000Z\"}}}"
+  },
+  {
+    "module": "download",
+    "method": "POST",
+    "path_template": "/api/download-tasks/{task_id}/retry",
+    "request_path": "/api/download-tasks/py_1785233371665169000/retry",
+    "operation_id": "mutate_download_task_api_download_tasks__task_id__retry_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "DownloadTask": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 24,
+        "rowsAfter": 25,
+        "contentChanged": true
+      }
+    },
+    "note": "失败任务重新排队。",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"task\":{\"id\":\"py_1785233371665169000\",\"sourceId\":null,\"searchRecordId\":null,\"bookId\":null,\"type\":\"http\",\"status\":\"queued\",\"displayName\":\"audit-download.epub\",\"remoteRef\":\"{\\\"downloadUrl\\\": \\\"http://127.0.0.1:19090/audit.epub\\\"}\",\"savePath\":\"/private/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"filePath\":null,\"errorMessage\":null,\"progress\":0,\"createdAt\":\"2026-07-28T10:09:31.667000Z\",\"updatedAt\":\"2026-07-28T10:09:32.146000Z\"},\"action\":\"retry\"}}"
+  },
+  {
+    "module": "download",
+    "method": "POST",
+    "path_template": "/api/download-tasks/{task_id}/cancel",
+    "request_path": "/api/download-tasks/py_1785233371665169000/cancel",
+    "operation_id": "mutate_download_task_api_download_tasks__task_id__cancel_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "DownloadTask": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 25,
+        "rowsAfter": 26,
+        "contentChanged": true
+      }
+    },
+    "note": "取消排队任务。",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"task\":{\"id\":\"py_1785233371665169000\",\"sourceId\":null,\"searchRecordId\":null,\"bookId\":null,\"type\":\"http\",\"status\":\"cancelled\",\"displayName\":\"audit-download.epub\",\"remoteRef\":\"{\\\"downloadUrl\\\": \\\"http://127.0.0.1:19090/audit.epub\\\"}\",\"savePath\":\"/private/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"filePath\":null,\"errorMessage\":null,\"progress\":0.0,\"createdAt\":\"2026-07-28T10:09:31.667000Z\",\"updatedAt\":\"2026-07-28T10:09:32.231000Z\"},\"action\":\"cancel\"}}"
+  },
+  {
+    "module": "download",
+    "method": "PUT",
+    "path_template": "/api/download-tasks/{task_id}",
+    "request_path": "/api/download-tasks/py_1785233371665169000",
+    "operation_id": "update_download_task_api_download_tasks__task_id__put",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "DownloadTask": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 26,
+        "rowsAfter": 27,
+        "contentChanged": true
+      }
+    },
+    "note": "恢复 queued 以执行真实下载。",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"task\":{\"id\":\"py_1785233371665169000\",\"sourceId\":null,\"searchRecordId\":null,\"bookId\":null,\"type\":\"http\",\"status\":\"queued\",\"displayName\":\"audit-download.epub\",\"remoteRef\":\"{\\\"downloadUrl\\\": \\\"http://127.0.0.1:19090/audit.epub\\\"}\",\"savePath\":\"/private/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"filePath\":null,\"errorMessage\":null,\"progress\":0.0,\"createdAt\":\"2026-07-28T10:09:31.667000Z\",\"updatedAt\":\"2026-07-28T10:09:32.382000Z\"}}}"
+  },
+  {
+    "module": "download",
+    "method": "POST",
+    "path_template": "/api/download-tasks/{task_id}/start",
+    "request_path": "/api/download-tasks/py_1785233371665169000/start",
+    "operation_id": "mutate_download_task_api_download_tasks__task_id__start_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "DownloadTask": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 27,
+        "rowsAfter": 28,
+        "contentChanged": true
+      }
+    },
+    "note": "从本地 HTTP 服务实际下载 EPUB 到监控目录，并更新任务。",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"task\":{\"id\":\"py_1785233371665169000\",\"sourceId\":null,\"searchRecordId\":null,\"bookId\":null,\"type\":\"http\",\"status\":\"downloaded\",\"displayName\":\"audit-download.epub\",\"remoteRef\":\"{\\\"downloadUrl\\\": \\\"http://127.0.0.1:19090/audit.epub\\\"}\",\"savePath\":\"/private/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"filePath\":\"/private/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books/audit.epub\",\"errorMessage\":null,\"progress\":100,\"createdAt\":\"2026-07-28T10:09:31.667000Z\",\"updatedAt\":\"2026-07-28T10:09:32.479000Z\"},\"action\":\"start\"}}"
+  },
+  {
+    "module": "download",
+    "method": "POST",
+    "path_template": "/api/download-tasks/{task_id}/import",
+    "request_path": "/api/download-tasks/py_1785233371665169000/import",
+    "operation_id": "mutate_download_task_api_download_tasks__task_id__import_post",
+    "expected_statuses": [
+      400
+    ],
+    "status_code": 400,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": false,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "该接口已退役，实际返回“由监控文件夹自动识别”。",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"下载文件会由监控文件夹自动识别入库，无需手动导入\"}}"
+  },
+  {
+    "module": "download",
+    "method": "DELETE",
+    "path_template": "/api/download-tasks/{task_id}",
+    "request_path": "/api/download-tasks/py_1785233371665169000",
+    "operation_id": "delete_download_task_api_download_tasks__task_id__delete",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "DownloadTask": {
+        "rowsBefore": 1,
+        "rowsAfter": 0,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 28,
+        "rowsAfter": 29,
+        "contentChanged": true
+      }
+    },
+    "note": "删除下载任务并记录审计事件。",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"deleted\":true,\"id\":\"py_1785233371665169000\"}}"
+  },
+  {
+    "module": "kindle",
+    "method": "GET",
+    "path_template": "/api/email-settings",
+    "request_path": "/api/email-settings",
+    "operation_id": "read_email_settings_api_email_settings_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "读取邮件设置。",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"smtp\":{\"host\":\"\",\"port\":587,\"security\":\"starttls\",\"username\":\"\",\"fromEmail\":\"\",\"fromName\":\"二毛图书\",\"maxAttachmentMb\":null,\"passwordConfigured\":false},\"kindle\":{\"email\":\"\"}}}"
+  },
+  {
+    "module": "kindle",
+    "method": "PUT",
+    "path_template": "/api/email-settings",
+    "request_path": "/api/email-settings",
+    "operation_id": "update_email_settings_api_email_settings_put",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "SystemEvent": {
+        "rowsBefore": 29,
+        "rowsAfter": 30,
+        "contentChanged": true
+      },
+      "SystemSetting": {
+        "rowsBefore": 17,
+        "rowsAfter": 25,
+        "contentChanged": true
+      }
+    },
+    "note": "保存 SMTP 配置；密码不得出现在响应/事件。",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"smtp\":{\"host\":\"127.0.0.1\",\"port\":9,\"security\":\"none\",\"username\":\"sender@example.com\",\"fromEmail\":\"sender@example.com\",\"fromName\":\"OpenAPI Audit\",\"maxAttachmentMb\":25.0,\"passwordConfigured\":true},\"kindle\":{\"email\":\"\"}}}"
+  },
+  {
+    "module": "kindle",
+    "method": "POST",
+    "path_template": "/api/email-settings/smtp-test",
+    "request_path": "/api/email-settings/smtp-test",
+    "operation_id": "smtp_test_api_email_settings_smtp_test_post",
+    "expected_statuses": [
+      400
+    ],
+    "status_code": 400,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": false,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "实际连接本机关闭端口，预期安全失败，不伪造 SMTP 成功。",
+    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"[Errno 61] Connection refused\"}}"
+  },
+  {
+    "module": "kindle",
+    "method": "GET",
+    "path_template": "/api/kindle-settings",
+    "request_path": "/api/kindle-settings",
+    "operation_id": "read_kindle_settings_api_kindle_settings_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "读取当前用户 Kindle 设置。",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"kindle\":{\"email\":\"\"},\"smtp\":{\"configured\":true,\"fromEmail\":\"sender@example.com\"}}}"
+  },
+  {
+    "module": "kindle",
+    "method": "PUT",
+    "path_template": "/api/kindle-settings",
+    "request_path": "/api/kindle-settings",
+    "operation_id": "update_kindle_settings_api_kindle_settings_put",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "UserPreference": {
+        "rowsBefore": 3,
+        "rowsAfter": 4,
+        "contentChanged": true
+      }
+    },
+    "note": "保存当前用户 Kindle 邮箱。",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"kindle\":{\"email\":\"audit_reader@kindle.com\"}}}"
+  },
+  {
+    "module": "kindle",
+    "method": "GET",
+    "path_template": "/api/kindle-send-tasks",
+    "request_path": "/api/kindle-send-tasks",
+    "operation_id": "list_kindle_send_tasks_api_kindle_send_tasks_get",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {},
+    "note": "读取当前用户发送任务列表。",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"tasks\":[],\"total\":0,\"page\":1,\"pageSize\":100,\"totalPages\":1}}"
+  },
+  {
+    "module": "kindle",
+    "method": "POST",
+    "path_template": "/api/kindle-send-tasks",
+    "request_path": "/api/kindle-send-tasks",
+    "operation_id": "create_kindle_send_task_api_kindle_send_tasks_post",
+    "expected_statuses": [
+      201
+    ],
+    "status_code": 201,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": false,
+    "response_shape_ok": true,
+    "database_changes": {
+      "KindleSendTask": {
+        "rowsBefore": 0,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 30,
+        "rowsAfter": 31,
+        "contentChanged": true
+      }
+    },
+    "note": "基于真实库内 EPUB 文件创建个人 Kindle 发送任务。",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"task\":{\"id\":\"kindle_1785233373587111000\",\"userId\":\"py_d481037a4027469eb608c23e99d89c95\",\"workId\":\"audit-work-a\",\"editionId\":\"audit-edition-epub\",\"volumeId\":\"audit-volume-epub\",\"fileId\":\"audit-file-epub\",\"bookTitle\":\"星海列车 OpenAPI\",\"editionName\":\"EPUB 审计版\",\"volumeTitle\":\"第一卷\",\"fileName\":\"audit.epub\",\"format\":\"EPUB\",\"mimeType\":\"application/epub+zip\",\"sizeBytes\":1220,\"senderEmail\":\"sender@example.com\",\"recipientEmail\":\"audit_reader@kindle.com\",\"subject\":\"星海列车 OpenAPI\",\"smtpHost\":\"127.0.0.1\",\"smtpPort\":9,\"smtpSecurity\":\"none\",\"smtpUsername\":\"sender@example.com\",\"messageId\":null,\"status\":\"queued\",\"attemptCount\":0,\"nextAttemptAt\":null,\"errorMessage\":null,\"startedAt\":null,\"sentAt\":null,\"createdAt\":\"2026-07-28T10:09:33.587000Z\",\"updatedAt\":\"2026-07-28T10:09:33.587000Z\",\"canCancel\":true,\"canRetry\":false,\"canDelete\":false},\"alreadyQueued\":false}}"
+  },
+  {
+    "module": "kindle",
+    "method": "POST",
+    "path_template": "/api/kindle-send-tasks/{task_id}/cancel",
+    "request_path": "/api/kindle-send-tasks/kindle_1785233373587111000/cancel",
+    "operation_id": "cancel_kindle_send_task_api_kindle_send_tasks__task_id__cancel_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "KindleSendTask": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 31,
+        "rowsAfter": 32,
+        "contentChanged": true
+      }
+    },
+    "note": "取消 queued 任务。",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"task\":{\"id\":\"kindle_1785233373587111000\",\"userId\":\"py_d481037a4027469eb608c23e99d89c95\",\"workId\":\"audit-work-a\",\"editionId\":\"audit-edition-epub\",\"volumeId\":\"audit-volume-epub\",\"fileId\":\"audit-file-epub\",\"bookTitle\":\"星海列车 OpenAPI\",\"editionName\":\"EPUB 审计版\",\"volumeTitle\":\"第一卷\",\"fileName\":\"audit.epub\",\"format\":\"EPUB\",\"mimeType\":\"application/epub+zip\",\"sizeBytes\":1220,\"senderEmail\":\"sender@example.com\",\"recipientEmail\":\"audit_reader@kindle.com\",\"subject\":\"星海列车 OpenAPI\",\"smtpHost\":\"127.0.0.1\",\"smtpPort\":9,\"smtpSecurity\":\"none\",\"smtpUsername\":\"sender@example.com\",\"messageId\":null,\"status\":\"cancelled\",\"attemptCount\":0,\"nextAttemptAt\":null,\"errorMessage\":null,\"startedAt\":null,\"sentAt\":null,\"createdAt\":\"2026-07-28T10:09:33.587000Z\",\"updatedAt\":\"2026-07-28T10:09:33.759000Z\",\"canCancel\":false,\"canRetry\":true,\"canDelete\":true}}}"
+  },
+  {
+    "module": "kindle",
+    "method": "POST",
+    "path_template": "/api/kindle-send-tasks/{task_id}/retry",
+    "request_path": "/api/kindle-send-tasks/kindle_1785233373587111000/retry",
+    "operation_id": "retry_kindle_send_task_api_kindle_send_tasks__task_id__retry_post",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "KindleSendTask": {
+        "rowsBefore": 1,
+        "rowsAfter": 1,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 32,
+        "rowsAfter": 33,
+        "contentChanged": true
+      }
+    },
+    "note": "把 cancelled 任务重新排队。",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"task\":{\"id\":\"kindle_1785233373587111000\",\"userId\":\"py_d481037a4027469eb608c23e99d89c95\",\"workId\":\"audit-work-a\",\"editionId\":\"audit-edition-epub\",\"volumeId\":\"audit-volume-epub\",\"fileId\":\"audit-file-epub\",\"bookTitle\":\"星海列车 OpenAPI\",\"editionName\":\"EPUB 审计版\",\"volumeTitle\":\"第一卷\",\"fileName\":\"audit.epub\",\"format\":\"EPUB\",\"mimeType\":\"application/epub+zip\",\"sizeBytes\":1220,\"senderEmail\":\"sender@example.com\",\"recipientEmail\":\"audit_reader@kindle.com\",\"subject\":\"星海列车 OpenAPI\",\"smtpHost\":\"127.0.0.1\",\"smtpPort\":9,\"smtpSecurity\":\"none\",\"smtpUsername\":\"sender@example.com\",\"messageId\":null,\"status\":\"queued\",\"attemptCount\":0,\"nextAttemptAt\":null,\"errorMessage\":null,\"startedAt\":null,\"sentAt\":null,\"createdAt\":\"2026-07-28T10:09:33.587000Z\",\"updatedAt\":\"2026-07-28T10:09:33.845000Z\",\"canCancel\":true,\"canRetry\":false,\"canDelete\":false}}}"
+  },
+  {
+    "module": "kindle",
+    "method": "DELETE",
+    "path_template": "/api/kindle-send-tasks/{task_id}",
+    "request_path": "/api/kindle-send-tasks/kindle_1785233373587111000",
+    "operation_id": "delete_kindle_send_task_api_kindle_send_tasks__task_id__delete",
+    "expected_statuses": [
+      200
+    ],
+    "status_code": 200,
+    "passed": true,
+    "content_type": "application/json",
+    "documented_response": true,
+    "response_shape_ok": true,
+    "database_changes": {
+      "KindleSendTask": {
+        "rowsBefore": 1,
+        "rowsAfter": 0,
+        "contentChanged": true
+      },
+      "SystemEvent": {
+        "rowsBefore": 34,
+        "rowsAfter": 35,
+        "contentChanged": true
+      }
+    },
+    "note": "删除已取消的终态发送记录。",
+    "response_excerpt": "{\"ok\":true,\"data\":{\"deleted\":true,\"id\":\"kindle_1785233373587111000\"}}"
+  }
+]
