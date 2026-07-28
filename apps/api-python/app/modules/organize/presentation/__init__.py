@@ -1,0 +1,1 @@
+"""Organize HTTP adapters."""

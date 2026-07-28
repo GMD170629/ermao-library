@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import (
+    Boolean,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    column,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.time import TimestampMilliseconds
@@ -81,7 +91,8 @@ class LibraryEdition(Base):
             "workId",
             "mediaKind",
             unique=True,
-            sqlite_where=text("`primary` = 1 AND `hidden` = 0"),
+            sqlite_where=column("primary", Boolean).is_(True)
+            & column("hidden", Boolean).is_(False),
         ),
         Index("LibraryEdition_workId_primary_idx", "workId", "primary"),
         Index("LibraryEdition_format_idx", "format"),

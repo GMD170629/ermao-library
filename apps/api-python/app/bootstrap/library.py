@@ -17,6 +17,14 @@ from app.modules.library.infrastructure.structural_operations import (
     reorder_volume as _reorder_volume,
 )
 from app.modules.library.infrastructure.work_list import list_works as _list_works
+from app.modules.library.infrastructure import dashboard as library_dashboard
+from app.modules.library.infrastructure import deletion as library_deletion
+from app.modules.library.infrastructure import facet_queries as library_facet_queries
+from app.modules.library.infrastructure import join_queries as library_join_queries
+from app.modules.library.infrastructure import operations as library_operation_store
+from app.modules.library.infrastructure import projections as library_projections
+from app.modules.library.infrastructure import storage as library_storage
+from app.modules.library.infrastructure import works as library_works
 
 
 def smart_shelf_work_ids(

@@ -5,10 +5,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import MetaData, Table, delete, func, inspect as sa_inspect, or_, select, update
+from sqlalchemy import Table, delete, func, inspect as sa_inspect, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.core.time import timestamp_ms_to_datetime
+from app.db.base import Base
 from app.models.import_pipeline import KindleSendTask
 from app.models.library import LibraryEdition, LibraryFile, LibraryVolume, LibraryWork
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
@@ -22,8 +23,7 @@ def _legacy_column_to_attr(model: type) -> dict[str, str]:
 def _legacy_table(db: Session, table_name: str) -> Table | None:
     if not has_table(db, table_name):
         return None
-    metadata = MetaData()
-    return Table(table_name, metadata, autoload_with=db.connection())
+    return Base.metadata.tables.get(table_name)
 
 
 def has_table(db: Session, table: str) -> bool:

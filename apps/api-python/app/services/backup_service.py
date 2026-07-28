@@ -18,7 +18,6 @@ from app.modules.backup.infrastructure.persistence import (
     clear_table_if_present,
     fetch_table,
     insert_records,
-    table_names,
     upsert_user_records,
 )
 
@@ -261,11 +260,23 @@ def restore_backup(db: Session, settings: Settings, backup_id_value: str) -> dic
         or current_database_revision(db) != supported_revision
     ):
         raise ValueError("BACKUP_DATABASE_REVISION_UNSUPPORTED")
-    for table in RESTORE_ORDER:
-        clear_table_if_present(db, table)
-    restored: dict[str, int] = {}
-    for export_key, table in BACKUP_TABLES:
-        restored[export_key] = upsert_user_records(db, database_export.get(export_key, [])) if table == "User" else insert_records(db, table, database_export.get(export_key, []))
-    restored["libraryFiles"] = 0
-    actual_counts = {export_key: len(fetch_table(db, table)) for export_key, table in BACKUP_TABLES}
+    try:
+        for table in RESTORE_ORDER:
+            clear_table_if_present(db, table)
+        restored: dict[str, int] = {}
+        for export_key, table in BACKUP_TABLES:
+            restored[export_key] = (
+                upsert_user_records(db, database_export.get(export_key, []))
+                if table == "User"
+                else insert_records(db, table, database_export.get(export_key, []))
+            )
+        restored["libraryFiles"] = 0
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    actual_counts = {
+        export_key: len(fetch_table(db, table))
+        for export_key, table in BACKUP_TABLES
+    }
     return {"id": backup_id_value, "restored": True, "restoredAt": datetime.now(timezone.utc).isoformat(), "counts": metadata.get("counts"), "restoredCounts": restored, "actualCounts": actual_counts}

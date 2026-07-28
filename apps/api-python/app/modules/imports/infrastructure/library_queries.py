@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Integer, case, cast, delete, func, inspect as sa_inspect, or_, select, update
+from sqlalchemy import Integer, case, cast, delete, func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
@@ -24,36 +24,194 @@ from app.models.organize import MetadataLookupTask, OrganizeJob
 from app.models.settings import MonitorFolder
 from app.models.shelf import Shelf, ShelfWork
 from app.models.common import db_timestamp
-from app.modules.imports.infrastructure.legacy_persistence import (
-    count_entities,
-    get_entity,
-    legacy_get_by_id,
-    list_entities,
-    scalar_select,
-)
-from app.modules.imports.infrastructure.schema import entity_as_legacy_dict, has_table, reflected_table, table_columns
+
+
+def _records(
+    db: Session,
+    statement: Any,
+) -> list[dict[str, Any]]:
+    return [dict(row) for row in db.execute(statement).mappings().all()]
+
+
+def _first_record(db: Session, statement: Any) -> dict[str, Any] | None:
+    row = db.execute(statement.limit(1)).mappings().first()
+    return dict(row) if row else None
+
+
+def _list_library_files(
+    db: Session,
+    *filters: Any,
+    order_by: tuple[Any, ...] | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    statement = select(LibraryFile.__table__).where(*filters)
+    if order_by:
+        statement = statement.order_by(*order_by)
+    if limit is not None:
+        statement = statement.limit(limit)
+    return _records(db, statement)
+
+
+def _list_reading_units(
+    db: Session,
+    *filters: Any,
+    order_by: tuple[Any, ...] | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    statement = select(LibraryReadingUnit.__table__).where(*filters)
+    if order_by:
+        statement = statement.order_by(*order_by)
+    if limit is not None:
+        statement = statement.limit(limit)
+    return _records(db, statement)
+
+
+def _list_reading_progress(
+    db: Session,
+    *filters: Any,
+    order_by: tuple[Any, ...] | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    statement = select(LibraryReadingProgress.__table__).where(*filters)
+    if order_by:
+        statement = statement.order_by(*order_by)
+    if limit is not None:
+        statement = statement.limit(limit)
+    return _records(db, statement)
+
+
+def _list_consumption_states(
+    db: Session,
+    *filters: Any,
+    order_by: tuple[Any, ...] | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    statement = select(LibraryConsumptionState.__table__).where(*filters)
+    if order_by:
+        statement = statement.order_by(*order_by)
+    if limit is not None:
+        statement = statement.limit(limit)
+    return _records(db, statement)
+
+
+def _list_editions(
+    db: Session,
+    *filters: Any,
+    order_by: tuple[Any, ...] | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    statement = select(LibraryEdition.__table__).where(*filters)
+    if order_by:
+        statement = statement.order_by(*order_by)
+    if limit is not None:
+        statement = statement.limit(limit)
+    return _records(db, statement)
+
+
+def _list_volumes(
+    db: Session,
+    *filters: Any,
+    order_by: tuple[Any, ...] | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    statement = select(LibraryVolume.__table__).where(*filters)
+    if order_by:
+        statement = statement.order_by(*order_by)
+    if limit is not None:
+        statement = statement.limit(limit)
+    return _records(db, statement)
+
+
+def _get_import_task(db: Session, *filters: Any, order_by: tuple[Any, ...] | None = None) -> dict[str, Any] | None:
+    statement = select(ImportTask.__table__).where(*filters)
+    if order_by:
+        statement = statement.order_by(*order_by)
+    return _first_record(db, statement)
+
+
+def _get_import_asset(db: Session, *filters: Any) -> dict[str, Any] | None:
+    return _first_record(db, select(ImportAsset.__table__).where(*filters))
+
+
+def _get_conversion(db: Session, *filters: Any) -> dict[str, Any] | None:
+    return _first_record(db, select(BookConversionTask.__table__).where(*filters))
+
+
+def _get_work(db: Session, *filters: Any) -> dict[str, Any] | None:
+    return _first_record(db, select(LibraryWork.__table__).where(*filters))
+
+
+def _get_edition(db: Session, *filters: Any, order_by: tuple[Any, ...] | None = None) -> dict[str, Any] | None:
+    statement = select(LibraryEdition.__table__).where(*filters)
+    if order_by:
+        statement = statement.order_by(*order_by)
+    return _first_record(db, statement)
+
+
+def _get_volume(db: Session, *filters: Any, order_by: tuple[Any, ...] | None = None) -> dict[str, Any] | None:
+    statement = select(LibraryVolume.__table__).where(*filters)
+    if order_by:
+        statement = statement.order_by(*order_by)
+    return _first_record(db, statement)
+
+
+def _get_organize_job(db: Session, *filters: Any) -> dict[str, Any] | None:
+    return _first_record(db, select(OrganizeJob.__table__).where(*filters))
+
+
+def _count_editions(db: Session, *filters: Any) -> int:
+    return int(
+        db.scalar(select(func.count()).select_from(LibraryEdition).where(*filters))
+        or 0
+    )
+
+
+def _count_files(db: Session, *filters: Any) -> int:
+    return int(
+        db.scalar(select(func.count()).select_from(LibraryFile).where(*filters))
+        or 0
+    )
+
+
+def _count_reading_units(db: Session, *filters: Any) -> int:
+    return int(
+        db.scalar(
+            select(func.count()).select_from(LibraryReadingUnit).where(*filters)
+        )
+        or 0
+    )
+
+
+def _count_volumes(db: Session, *filters: Any) -> int:
+    return int(
+        db.scalar(select(func.count()).select_from(LibraryVolume).where(*filters))
+        or 0
+    )
+
+
+def _scalar_value(db: Session, statement: Any, default: Any = None) -> Any:
+    value = db.scalar(statement)
+    return default if value is None else value
 
 
 def get_conversion_by_import_task_id(db: Session, import_task_id: str) -> dict[str, Any] | None:
-    if not has_table(db, "BookConversionTask"):
-        return None
-    return get_entity(db, "BookConversionTask", BookConversionTask.import_task_id == import_task_id)
+    return _get_conversion(db, BookConversionTask.import_task_id == import_task_id)
 
 
 def get_import_task_by_id(db: Session, task_id: str) -> dict[str, Any] | None:
-    return legacy_get_by_id(db, "ImportTask", task_id)
+    return _get_import_task(db, ImportTask.id == task_id)
 
 
 def get_work_by_id(db: Session, work_id: str) -> dict[str, Any] | None:
-    return legacy_get_by_id(db, "LibraryWork", work_id)
+    return _get_work(db, LibraryWork.id == work_id)
 
 
 def get_work_by_merge_key(db: Session, merge_key: str) -> dict[str, Any] | None:
-    return get_entity(db, "LibraryWork", LibraryWork.merge_key == merge_key)
+    return _get_work(db, LibraryWork.merge_key == merge_key)
 
 
 def get_edition_by_id(db: Session, edition_id: str) -> dict[str, Any] | None:
-    return legacy_get_by_id(db, "LibraryEdition", edition_id)
+    return _get_edition(db, LibraryEdition.id == edition_id)
 
 
 def get_edition_format(db: Session, edition_id: str) -> dict[str, Any] | None:
@@ -71,17 +229,13 @@ def get_edition_cover_path(db: Session, edition_id: str) -> dict[str, Any] | Non
 
 
 def get_organize_job_for_work_edition(db: Session, work_id: str, edition_id: str) -> dict[str, Any] | None:
-    return get_entity(
-        db,
-        "OrganizeJob",
+    return _get_organize_job(db,
         OrganizeJob.work_id == work_id,
         OrganizeJob.edition_id == edition_id,
     )
 
 
 def get_metadata_lookup_task_id_by_import(db: Session, import_task_id: str) -> dict[str, Any] | None:
-    if not has_table(db, "MetadataLookupTask"):
-        return None
     task = db.scalar(
         select(MetadataLookupTask.id).where(MetadataLookupTask.import_task_id == import_task_id)
     )
@@ -93,20 +247,14 @@ def get_import_asset_by_task_and_path(
     task_id: str,
     source_path: str,
 ) -> dict[str, Any] | None:
-    if not has_table(db, "ImportAsset"):
-        return None
-    return get_entity(
-        db,
-        "ImportAsset",
+    return _get_import_asset(db,
         ImportAsset.import_task_id == task_id,
         ImportAsset.source_path == source_path,
     )
 
 
 def get_pending_import_task_for_source(db: Session, source_path: str) -> dict[str, Any] | None:
-    return get_entity(
-        db,
-        "ImportTask",
+    return _get_import_task(db,
         ImportTask.source_path == source_path,
         ImportTask.status == "PENDING",
         order_by=(cast(ImportTask.created_at, Integer).asc(), ImportTask.id.asc()),
@@ -114,9 +262,7 @@ def get_pending_import_task_for_source(db: Session, source_path: str) -> dict[st
 
 
 def get_completed_import_task_for_source(db: Session, source_path: str) -> dict[str, Any] | None:
-    return get_entity(
-        db,
-        "ImportTask",
+    return _get_import_task(db,
         ImportTask.source_path == source_path,
         ImportTask.status == "COMPLETED",
     )
@@ -130,8 +276,6 @@ def fail_import_assets_for_task(
     error_summary: str,
     updated_at: Any,
 ) -> None:
-    if not has_table(db, "ImportAsset"):
-        return
     db.execute(
         update(ImportAsset)
         .where(
@@ -149,7 +293,7 @@ def fail_import_assets_for_task(
 
 def sum_file_size_bytes_for_edition(db: Session, edition_id: str) -> int:
     return int(
-        scalar_select(
+        _scalar_value(
             db,
             select(func.coalesce(func.sum(LibraryFile.size_bytes), 0)).where(
                 LibraryFile.edition_id == edition_id
@@ -161,7 +305,7 @@ def sum_file_size_bytes_for_edition(db: Session, edition_id: str) -> int:
 
 def sum_volume_chapter_count_for_edition(db: Session, edition_id: str) -> int:
     return int(
-        scalar_select(
+        _scalar_value(
             db,
             select(func.coalesce(func.sum(LibraryVolume.chapter_count), 0)).where(
                 LibraryVolume.edition_id == edition_id
@@ -173,7 +317,7 @@ def sum_volume_chapter_count_for_edition(db: Session, edition_id: str) -> int:
 
 def sum_volume_page_count_for_edition(db: Session, edition_id: str) -> int:
     return int(
-        scalar_select(
+        _scalar_value(
             db,
             select(func.coalesce(func.sum(LibraryVolume.page_count), 0)).where(
                 LibraryVolume.edition_id == edition_id
@@ -184,7 +328,7 @@ def sum_volume_page_count_for_edition(db: Session, edition_id: str) -> int:
 
 
 def count_volumes_for_edition(db: Session, edition_id: str) -> int:
-    return count_entities(db, "LibraryVolume", LibraryVolume.edition_id == edition_id)
+    return _count_volumes(db, LibraryVolume.edition_id == edition_id)
 
 
 def count_editions_for_work(
@@ -194,17 +338,13 @@ def count_editions_for_work(
     media_kind: str | None = None,
 ) -> int:
     filters: list[Any] = [LibraryEdition.work_id == work_id]
-    if media_kind and has_table(db, "LibraryEdition"):
-        columns = {column["name"] for column in sa_inspect(db.connection()).get_columns("LibraryEdition")}
-        if "mediaKind" in columns:
-            filters.append(LibraryEdition.media_kind == media_kind)
-    return count_entities(db, "LibraryEdition", *filters)
+    if media_kind:
+        filters.append(LibraryEdition.media_kind == media_kind)
+    return _count_editions(db, *filters)
 
 
 def count_visible_editions_for_work(db: Session, work_id: str) -> int:
-    return count_entities(
-        db,
-        "LibraryEdition",
+    return _count_editions(db,
         LibraryEdition.work_id == work_id,
         func.coalesce(LibraryEdition.hidden, False).is_(False),
     )
@@ -216,9 +356,7 @@ def count_primary_audiobook_editions_for_work(
     *,
     exclude_edition_id: str,
 ) -> int:
-    return count_entities(
-        db,
-        "LibraryEdition",
+    return _count_editions(db,
         LibraryEdition.work_id == work_id,
         LibraryEdition.media_kind == "AUDIOBOOK",
         LibraryEdition.id != exclude_edition_id,
@@ -228,9 +366,7 @@ def count_primary_audiobook_editions_for_work(
 
 
 def count_audiobook_media_kind_editions(db: Session, work_id: str, media_kind: str) -> int:
-    return count_entities(
-        db,
-        "LibraryEdition",
+    return _count_editions(db,
         LibraryEdition.work_id == work_id,
         LibraryEdition.media_kind == media_kind,
         func.coalesce(LibraryEdition.hidden, 0) == 0,
@@ -239,7 +375,7 @@ def count_audiobook_media_kind_editions(db: Session, work_id: str, media_kind: s
 
 def sum_audio_file_size_for_edition(db: Session, edition_id: str) -> int:
     return int(
-        scalar_select(
+        _scalar_value(
             db,
             select(func.coalesce(func.sum(LibraryFile.size_bytes), 0)).where(
                 LibraryFile.edition_id == edition_id,
@@ -252,7 +388,7 @@ def sum_audio_file_size_for_edition(db: Session, edition_id: str) -> int:
 
 def sum_audio_duration_for_edition(db: Session, edition_id: str) -> int:
     return int(
-        scalar_select(
+        _scalar_value(
             db,
             select(func.coalesce(func.sum(LibraryFile.duration_ms), 0)).where(
                 LibraryFile.edition_id == edition_id,
@@ -264,27 +400,21 @@ def sum_audio_duration_for_edition(db: Session, edition_id: str) -> int:
 
 
 def count_audio_files_for_edition(db: Session, edition_id: str) -> int:
-    return count_entities(
-        db,
-        "LibraryFile",
+    return _count_files(db,
         LibraryFile.edition_id == edition_id,
         func.upper(LibraryFile.kind) == "AUDIO",
     )
 
 
 def count_audio_chapters_for_edition(db: Session, edition_id: str) -> int:
-    return count_entities(
-        db,
-        "LibraryReadingUnit",
+    return _count_reading_units(db,
         LibraryReadingUnit.edition_id == edition_id,
         LibraryReadingUnit.unit_type == "audio_chapter",
     )
 
 
 def count_audio_chapters_for_volume(db: Session, volume_id: str) -> int:
-    return count_entities(
-        db,
-        "LibraryReadingUnit",
+    return _count_reading_units(db,
         LibraryReadingUnit.volume_id == volume_id,
         LibraryReadingUnit.unit_type == "audio_chapter",
     )
@@ -292,7 +422,7 @@ def count_audio_chapters_for_volume(db: Session, volume_id: str) -> int:
 
 def sum_audio_duration_for_volume(db: Session, volume_id: str) -> int:
     return int(
-        scalar_select(
+        _scalar_value(
             db,
             select(func.coalesce(func.sum(LibraryFile.duration_ms), 0)).where(
                 LibraryFile.volume_id == volume_id,
@@ -304,7 +434,7 @@ def sum_audio_duration_for_volume(db: Session, volume_id: str) -> int:
 
 
 def list_library_files_by_paths(db: Session, paths: list[str]) -> list[dict[str, Any]]:
-    if not paths or not has_table(db, "LibraryFile"):
+    if not paths:
         return []
     expanded: list[str] = []
     for path in paths:
@@ -317,7 +447,7 @@ def list_library_files_by_paths(db: Session, paths: list[str]) -> list[dict[str,
     found: list[dict[str, Any]] = []
     for offset in range(0, len(unique_paths), 400):
         chunk = unique_paths[offset : offset + 400]
-        rows = list_entities(db, "LibraryFile", LibraryFile.path.in_(chunk))
+        rows = _list_library_files(db, LibraryFile.path.in_(chunk))
         found.extend(rows)
     deduped: dict[str, dict[str, Any]] = {}
     for row in found:
@@ -326,9 +456,7 @@ def list_library_files_by_paths(db: Session, paths: list[str]) -> list[dict[str,
 
 
 def list_audio_files_for_edition(db: Session, edition_id: str) -> list[dict[str, Any]]:
-    return list_entities(
-        db,
-        "LibraryFile",
+    return _list_library_files(db,
         LibraryFile.edition_id == edition_id,
         func.upper(LibraryFile.kind) == "AUDIO",
         order_by=(LibraryFile.sort_order.asc(), LibraryFile.id.asc()),
@@ -336,9 +464,7 @@ def list_audio_files_for_edition(db: Session, edition_id: str) -> list[dict[str,
 
 
 def list_audio_files_for_volume(db: Session, edition_id: str, volume_id: str) -> list[dict[str, Any]]:
-    return list_entities(
-        db,
-        "LibraryFile",
+    return _list_library_files(db,
         LibraryFile.edition_id == edition_id,
         LibraryFile.volume_id == volume_id,
         func.upper(LibraryFile.kind) == "AUDIO",
@@ -347,9 +473,7 @@ def list_audio_files_for_volume(db: Session, edition_id: str, volume_id: str) ->
 
 
 def list_audio_chapters_for_edition(db: Session, edition_id: str) -> list[dict[str, Any]]:
-    return list_entities(
-        db,
-        "LibraryReadingUnit",
+    return _list_reading_units(db,
         LibraryReadingUnit.edition_id == edition_id,
         LibraryReadingUnit.unit_type == "audio_chapter",
         order_by=(LibraryReadingUnit.sort_order.asc(), LibraryReadingUnit.id.asc()),
@@ -357,9 +481,7 @@ def list_audio_chapters_for_edition(db: Session, edition_id: str) -> list[dict[s
 
 
 def list_audio_chapters_for_file(db: Session, file_id: str) -> list[dict[str, Any]]:
-    return list_entities(
-        db,
-        "LibraryReadingUnit",
+    return _list_reading_units(db,
         LibraryReadingUnit.file_id == file_id,
         LibraryReadingUnit.unit_type == "audio_chapter",
         order_by=(
@@ -371,9 +493,7 @@ def list_audio_chapters_for_file(db: Session, file_id: str) -> list[dict[str, An
 
 
 def list_audio_chapter_units_for_file_ordered(db: Session, file_id: str) -> list[dict[str, Any]]:
-    return list_entities(
-        db,
-        "LibraryReadingUnit",
+    return _list_reading_units(db,
         LibraryReadingUnit.file_id == file_id,
         LibraryReadingUnit.unit_type == "audio_chapter",
         order_by=(
@@ -386,9 +506,7 @@ def list_audio_chapter_units_for_file_ordered(db: Session, file_id: str) -> list
 
 
 def list_unassigned_audio_chapters_for_edition(db: Session, edition_id: str) -> list[dict[str, Any]]:
-    return list_entities(
-        db,
-        "LibraryReadingUnit",
+    return _list_reading_units(db,
         LibraryReadingUnit.edition_id == edition_id,
         LibraryReadingUnit.volume_id.is_(None),
         order_by=(
@@ -400,11 +518,7 @@ def list_unassigned_audio_chapters_for_edition(db: Session, edition_id: str) -> 
 
 
 def list_reading_progress_for_edition(db: Session, edition_id: str) -> list[dict[str, Any]]:
-    if not has_table(db, "LibraryReadingProgress"):
-        return []
-    return list_entities(
-        db,
-        "LibraryReadingProgress",
+    return _list_reading_progress(db,
         LibraryReadingProgress.edition_id == edition_id,
     )
 
@@ -413,11 +527,9 @@ def list_reading_progress_for_editions(
     db: Session,
     edition_ids: list[str],
 ) -> list[dict[str, Any]]:
-    if not edition_ids or not has_table(db, "LibraryReadingProgress"):
+    if not edition_ids:
         return []
-    return list_entities(
-        db,
-        "LibraryReadingProgress",
+    return _list_reading_progress(db,
         LibraryReadingProgress.edition_id.in_(edition_ids),
         order_by=(
             LibraryReadingProgress.updated_at.asc(),
@@ -431,11 +543,9 @@ def list_audiobook_consumption_for_works(
     db: Session,
     work_ids: list[str],
 ) -> list[dict[str, Any]]:
-    if not work_ids or not has_table(db, "LibraryConsumptionState"):
+    if not work_ids:
         return []
-    return list_entities(
-        db,
-        "LibraryConsumptionState",
+    return _list_consumption_states(db,
         LibraryConsumptionState.work_id.in_(work_ids),
         func.upper(LibraryConsumptionState.media_kind) == "AUDIOBOOK",
         order_by=(
@@ -449,7 +559,7 @@ def list_audiobook_consumption_for_works(
 def list_editions_by_ids(db: Session, edition_ids: list[str]) -> list[dict[str, Any]]:
     if not edition_ids:
         return []
-    return list_entities(db, "LibraryEdition", LibraryEdition.id.in_(edition_ids))
+    return _list_editions(db, LibraryEdition.id.in_(edition_ids))
 
 
 def list_visible_editions_for_work_and_format(
@@ -457,9 +567,7 @@ def list_visible_editions_for_work_and_format(
     work_id: str,
     fmt: str,
 ) -> list[dict[str, Any]]:
-    return list_entities(
-        db,
-        "LibraryEdition",
+    return _list_editions(db,
         LibraryEdition.work_id == work_id,
         LibraryEdition.format == fmt,
         func.coalesce(LibraryEdition.hidden, 0) == 0,
@@ -468,9 +576,7 @@ def list_visible_editions_for_work_and_format(
 
 
 def get_first_volume_for_edition(db: Session, edition_id: str) -> dict[str, Any] | None:
-    return get_entity(
-        db,
-        "LibraryVolume",
+    return _get_volume(db,
         LibraryVolume.edition_id == edition_id,
         order_by=(
             LibraryVolume.sort_order.asc(),
@@ -487,24 +593,18 @@ def find_volume_conflict(
     volume_title: str,
 ) -> dict[str, Any] | None:
     if volume_index is not None:
-        return get_entity(
-            db,
-            "LibraryVolume",
+        return _get_volume(db,
             LibraryVolume.edition_id == edition_id,
             LibraryVolume.volume_index == volume_index,
         )
-    return get_entity(
-        db,
-        "LibraryVolume",
+    return _get_volume(db,
         LibraryVolume.edition_id == edition_id,
         LibraryVolume.title == volume_title,
     )
 
 
 def find_audio_edition_by_version_key(db: Session, version_key: str) -> dict[str, Any] | None:
-    return get_entity(
-        db,
-        "LibraryEdition",
+    return _get_edition(db,
         LibraryEdition.version_key == version_key,
         func.upper(LibraryEdition.media_kind) == "AUDIOBOOK",
         func.coalesce(LibraryEdition.hidden, 0) == 0,
@@ -518,9 +618,7 @@ def find_edition_version_key_conflict(
     version_key: str,
     exclude_edition_id: str,
 ) -> dict[str, Any] | None:
-    return get_entity(
-        db,
-        "LibraryEdition",
+    return _get_edition(db,
         LibraryEdition.work_id == work_id,
         LibraryEdition.version_key == version_key,
         LibraryEdition.id != exclude_edition_id,
@@ -528,9 +626,7 @@ def find_edition_version_key_conflict(
 
 
 def list_volume_cover_paths_for_edition(db: Session, edition_id: str) -> list[dict[str, Any]]:
-    return list_entities(
-        db,
-        "LibraryVolume",
+    return _list_volumes(db,
         LibraryVolume.edition_id == edition_id,
         LibraryVolume.cover_path.is_not(None),
         LibraryVolume.cover_path != "",
@@ -623,7 +719,7 @@ def detach_audio_chapters_for_edition_or_files(
 
 
 def copy_shelf_links_to_work(db: Session, source_work_ids: list[str], target_work_id: str) -> None:
-    if not source_work_ids or not has_table(db, "ShelfWork"):
+    if not source_work_ids:
         return
     source_links = db.scalars(
         select(ShelfWork.shelf_id).where(ShelfWork.work_id.in_(source_work_ids))
@@ -693,8 +789,6 @@ def list_edition_file_paths_for_work(
 
 
 def existing_file_import_snapshot(db: Session, path: Path) -> dict[str, Any] | None:
-    if not all(has_table(db, table) for table in ("LibraryFile", "LibraryEdition", "LibraryWork")):
-        return None
     row = db.execute(
         select(
             LibraryFile.volume_id,
@@ -738,9 +832,7 @@ def list_audio_files_by_fingerprint(
     size_bytes: int,
     fingerprint: str,
 ) -> list[dict[str, Any]]:
-    return list_entities(
-        db,
-        "LibraryFile",
+    return _list_library_files(db,
         LibraryFile.size_bytes == size_bytes,
         LibraryFile.fingerprint == fingerprint,
         func.upper(LibraryFile.kind) == "AUDIO",
@@ -764,16 +856,12 @@ def audio_bundle_fully_imported(db: Session, paths: list[str]) -> bool:
 
 
 def get_monitor_folder_shelf_id(db: Session, monitor_folder_id: str) -> str | None:
-    if not has_table(db, "MonitorFolder"):
-        return None
     return db.scalar(
         select(MonitorFolder.shelf_id).where(MonitorFolder.id == monitor_folder_id)
     )
 
 
 def shelf_exists(db: Session, shelf_id: str) -> bool:
-    if not has_table(db, "Shelf"):
-        return False
     return db.scalar(select(Shelf.id).where(Shelf.id == shelf_id)) is not None
 
 
@@ -786,12 +874,11 @@ def add_work_to_shelf(db: Session, shelf_id: str, work_id: str, *, created_at: A
 
 
 def touch_shelf_updated_at(db: Session, shelf_id: str, *, updated_at: Any) -> None:
-    if not has_table(db, "Shelf"):
-        return
-    if "updatedAt" not in table_columns(db, "Shelf"):
-        return
-    table = reflected_table(db, "Shelf")
-    db.execute(update(table).where(table.c.id == shelf_id).values({"updatedAt": updated_at}))
+    db.execute(
+        update(Shelf)
+        .where(Shelf.id == shelf_id)
+        .values(updated_at=updated_at)
+    )
 
 
 def complete_download_task_for_source(
@@ -801,8 +888,6 @@ def complete_download_task_for_source(
     book_id: str,
     updated_at: Any,
 ) -> None:
-    if not has_table(db, "DownloadTask"):
-        return
     db.execute(
         update(DownloadTask)
         .where(DownloadTask.file_path == source_path)

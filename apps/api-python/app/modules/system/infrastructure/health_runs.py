@@ -25,7 +25,10 @@ from app.modules.system.domain.health import (
     normalize_health_run_snapshot,
     summarize_health_items,
 )
-from app.modules.system.application.commands import execute_system_transaction
+from app.modules.system.application.commands import (
+    execute_system_transaction,
+    reset_failed_system_transaction,
+)
 from app.modules.system.infrastructure.events import record_system_event
 from app.modules.system.infrastructure.health import probe_database
 from app.modules.system.infrastructure.queue_runtime import queue_runtime_view
@@ -331,7 +334,7 @@ def _database_result(db: Session) -> tuple[str, str, dict[str, Any]]:
         probe_database(db)
         return "ok", "health.database.ok", {}
     except Exception as exc:
-        db.rollback()
+        reset_failed_system_transaction(db)
         return "error", "health.database.error", {"error": safe_error_message(exc)}
 
 
@@ -493,7 +496,7 @@ def run_health_checks(factory: SessionFactory, close_sessions: bool, settings: S
                     },
                 )
             except Exception as exc:
-                db.rollback()
+                reset_failed_system_transaction(db)
                 finished = now_timestamp_ms()
                 _commit_snapshot_update(
                     db,
@@ -535,21 +538,31 @@ def run_health_checks(factory: SessionFactory, close_sessions: bool, settings: S
                 else "completed"
             )
             final = _commit_snapshot_update(db, run_id, None, run_status=final_status)
-            record_system_event(
+            execute_system_transaction(
                 db,
-                source="system",
-                action="health.completed",
-                message="系统健康检查已完成",
-                level="warning" if final_status in {"warning", "error"} else "info",
-                actor_type="admin",
-                actor_id=actor_user_id,
-                target_type="healthRun",
-                target_id=run_id,
-                metadata={
-                    "durationMs": max(0, int(final.get("finishedAt") or 0) - int(final.get("startedAt") or 0)),
-                    "summary": final.get("summary"),
-                },
-                commit=True,
+                lambda: record_system_event(
+                    db,
+                    source="system",
+                    action="health.completed",
+                    message="系统健康检查已完成",
+                    level=(
+                        "warning"
+                        if final_status in {"warning", "error"}
+                        else "info"
+                    ),
+                    actor_type="admin",
+                    actor_id=actor_user_id,
+                    target_type="healthRun",
+                    target_id=run_id,
+                    metadata={
+                        "durationMs": max(
+                            0,
+                            int(final.get("finishedAt") or 0)
+                            - int(final.get("startedAt") or 0),
+                        ),
+                        "summary": final.get("summary"),
+                    },
+                ),
             )
         finally:
             _close(db, close_sessions)

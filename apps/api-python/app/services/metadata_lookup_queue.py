@@ -18,7 +18,10 @@ from app.modules.metadata.infrastructure import lookup_queue as lookup_persist
 from app.services.book_identity import UNKNOWN_AUTHOR, identity_merge_key, normalize_identity_part
 from app.services.library_management import sync_work_facets
 from app.services.metadata_provider_registry import metadata_provider_registry, search_with_metadata_provider
-from app.services.organize_service import context_for_job, metadata_candidate_title_exact_match, metadata_search_candidates
+from app.services.organize_service import (
+    context_for_job,
+    metadata_candidate_title_exact_match,
+)
 from app.services.queue_runtime import QueueHeartbeatPump
 
 
@@ -55,10 +58,6 @@ def _provider_order(task: dict[str, Any]) -> list[str]:
 
 
 def _search_provider(db: Session, context: dict[str, Any], provider: str, query: str) -> dict[str, Any]:
-    # Lightweight worker unit tests and one-release legacy databases may not
-    # have Source yet. Keep the old call boundary in that compatibility path.
-    if not lookup_persist.source_table_ready(db):
-        return metadata_search_candidates(db, context, provider, query, force=False, use_cache=True)
     return search_with_metadata_provider(db, context, provider, query, force=False, use_cache=True)
 
 

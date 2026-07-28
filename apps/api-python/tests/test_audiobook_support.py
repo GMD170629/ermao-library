@@ -10,7 +10,7 @@ import pytest
 from PIL import Image
 from sqlalchemy import text
 
-import app.api.routes.compat as compat_module
+import app.modules.imports.presentation.writes as import_writes_module
 import app.services.audio_metadata as audio_metadata_module
 import app.worker.importer as importer_module
 import app.worker.watcher as watcher_module
@@ -984,7 +984,7 @@ def test_failed_audio_upload_removes_staging_files_and_never_queues(client, db_s
         staged_target.write_bytes(b"partial")
         raise OSError("simulated interrupted copy")
 
-    monkeypatch.setattr(compat_module, "_copy_upload_stream", fail_after_partial_write)
+    monkeypatch.setattr(import_writes_module, "_copy_upload_stream", fail_after_partial_write)
     response = client.post(
         "/api/works/import",
         data={"targetPath": str(target), "bookTitle": "不能落盘"},

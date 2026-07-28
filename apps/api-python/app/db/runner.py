@@ -11,6 +11,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.engine import Engine
 
 import app.models  # noqa: F401 — ensure metadata is complete
@@ -70,46 +71,23 @@ def _run_alembic(engine: Engine, fn) -> None:
         fn(config)
 
 
-def _alembic_version(connection: sqlite3.Connection) -> str | None:
-    row = connection.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'alembic_version' LIMIT 1"
-    ).fetchone()
-    if row is None:
-        return None
-    version_row = connection.execute(
-        "SELECT version_num FROM alembic_version LIMIT 1"
-    ).fetchone()
-    if version_row is None:
-        return None
-    return str(version_row[0])
-
-
 def _user_version(connection: sqlite3.Connection) -> int:
     return int(connection.execute("PRAGMA user_version").fetchone()[0])
 
 
-def _has_application_tables(connection: sqlite3.Connection) -> bool:
-    return (
-        connection.execute(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' "
-            "AND name != 'alembic_version' LIMIT 1"
-        ).fetchone()
-        is not None
-    )
-
-
-def _looks_like_baseline_schema(connection: sqlite3.Connection) -> bool:
-    """True when the DB already has the squashed baseline tables (e.g. from create_all)."""
+def _looks_like_baseline_schema(table_names: set[str]) -> bool:
+    """True when declared squashed-baseline tables are already present."""
 
     required = ("User", "LibraryWork", "SystemHealthRun", "QueueControlOperation")
-    for table in required:
-        row = connection.execute(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
-            (table,),
-        ).fetchone()
-        if row is None:
-            return False
-    return True
+    return set(required).issubset(table_names)
+
+
+def _schema_state(engine: Engine) -> tuple[str | None, set[str]]:
+    with engine.connect() as connection:
+        revision = MigrationContext.configure(connection).get_current_revision()
+        table_names = set(sa_inspect(connection).get_table_names())
+    table_names.discard("alembic_version")
+    return revision, table_names
 
 
 def _backup_before_migration(
@@ -139,6 +117,7 @@ def _upgrade_head(engine: Engine) -> None:
 
 
 def _apply_schema_once(engine: Engine, settings: Settings | None = None) -> None:
+    current_alembic, application_tables = _schema_state(engine)
     raw_connection = engine.raw_connection()
     try:
         driver_connection: sqlite3.Connection = raw_connection.driver_connection
@@ -148,9 +127,8 @@ def _apply_schema_once(engine: Engine, settings: Settings | None = None) -> None
             # :memory: with some pool configs may reject WAL; ignore.
             pass
 
-        current_alembic = _alembic_version(driver_connection)
         user_version = _user_version(driver_connection)
-        has_tables = _has_application_tables(driver_connection)
+        has_tables = bool(application_tables)
         head = head_revision(engine)
 
         if current_alembic is not None:
@@ -168,7 +146,7 @@ def _apply_schema_once(engine: Engine, settings: Settings | None = None) -> None
             raw_connection = None
             _upgrade_head(engine)
         elif user_version == BASELINE_USER_VERSION or (
-            user_version == 0 and _looks_like_baseline_schema(driver_connection)
+            user_version == 0 and _looks_like_baseline_schema(application_tables)
         ):
             # Stamp trusted v14 DBs, or test/create_all DBs that already match baseline.
             if settings is not None and engine.url.database not in (

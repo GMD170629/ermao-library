@@ -1,75 +1,73 @@
-"""ORM persistence for personal shelves and shelf-work links."""
+"""SQLAlchemy persistence for personal shelves and shelf-work links."""
 
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import MetaData, Table, delete, func, insert, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, delete, exists, func, or_, select, update
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.orm import Session, aliased
 
-from app.core.authorization import AuthorizationContext
-from app.modules.imports.infrastructure.schema import has_table, reflected_table
-
-
-def _has_table(db: Session, table: str) -> bool:
-    return has_table(db, table)
-
-
-def _has_column(db: Session, table: str, column: str) -> bool:
-    if not _has_table(db, table):
-        return False
-    from app.modules.imports.infrastructure.schema import table_columns
-
-    return column in table_columns(db, table)
+from app.core.authorization import (
+    AuthorizationContext,
+    monitor_folder_visibility_predicate,
+)
+from app.models.library import LibraryEdition, LibraryWork
+from app.models.settings import MonitorFolder
+from app.models.shelf import Shelf, ShelfWork
 
 
-def _legacy_table(db: Session, table: str) -> Table | None:
-    if not _has_table(db, table):
-        return None
-    return reflected_table(db, table)
+def _entity_record(entity: object) -> dict[str, Any]:
+    mapper = sa_inspect(entity).mapper
+    return {
+        prop.columns[0].name: getattr(entity, prop.key)
+        for prop in mapper.column_attrs
+    }
 
 
 def list_shelves_for_user(db: Session, user_id: str) -> list[dict[str, Any]]:
-    table = _legacy_table(db, "Shelf")
-    if table is None:
+    if not sa_inspect(db.get_bind()).has_table(Shelf.__tablename__):
         return []
-    stmt = select(table)
-    if "ownerUserId" in table.c:
-        stmt = stmt.where(table.c.ownerUserId == user_id)
-    order_by = [table.c.updatedAt.desc()]
-    if "pinned" in table.c:
-        order_by = [func.coalesce(table.c.pinned, False).desc(), *order_by]
-    rows = db.execute(stmt.order_by(*order_by)).mappings().all()
-    return [dict(row) for row in rows]
+    rows = db.scalars(
+        select(Shelf)
+        .where(Shelf.owner_user_id == user_id)
+        .order_by(
+            func.coalesce(Shelf.pinned, False).desc(),
+            Shelf.updated_at.desc(),
+        )
+    ).all()
+    return [_entity_record(row) for row in rows]
 
 
-def get_owned_shelf(db: Session, shelf_id: str, user_id: str) -> dict[str, Any] | None:
-    table = _legacy_table(db, "Shelf")
-    if table is None:
+def get_owned_shelf(
+    db: Session,
+    shelf_id: str,
+    user_id: str,
+) -> dict[str, Any] | None:
+    if not sa_inspect(db.get_bind()).has_table(Shelf.__tablename__):
         return None
-    filters = [table.c.id == shelf_id]
-    if "ownerUserId" in table.c:
-        filters.append(table.c.ownerUserId == user_id)
-    row = db.execute(select(table).where(*filters)).mappings().first()
-    return dict(row) if row else None
+    row = db.scalar(
+        select(Shelf).where(
+            Shelf.id == shelf_id,
+            Shelf.owner_user_id == user_id,
+        )
+    )
+    return _entity_record(row) if row else None
 
 
 def shelf_exists(db: Session, shelf_id: str) -> bool:
-    table = _legacy_table(db, "Shelf")
-    if table is None:
-        return False
-    return db.scalar(select(table.c.id).where(table.c.id == shelf_id)) is not None
+    return db.scalar(select(Shelf.id).where(Shelf.id == shelf_id)) is not None
 
 
 def list_static_shelf_work_ids(db: Session, shelf_id: str) -> list[str]:
-    table = _legacy_table(db, "ShelfWork")
-    if table is None:
-        return []
-    rows = db.execute(
-        select(table.c.workId).where(table.c.shelfId == shelf_id).order_by(table.c.createdAt.asc())
-    ).all()
-    return [str(row.workId) for row in rows]
+    return list(
+        db.scalars(
+            select(ShelfWork.work_id)
+            .where(ShelfWork.shelf_id == shelf_id)
+            .order_by(ShelfWork.created_at.asc())
+        ).all()
+    )
 
 
 def filter_visible_work_ids(
@@ -79,96 +77,115 @@ def filter_visible_work_ids(
 ) -> list[str]:
     if not work_ids:
         return []
-    table = _legacy_table(db, "LibraryWork")
-    if table is None:
-        return []
     visible: set[str] = set()
     for chunk_start in range(0, len(work_ids), 400):
         chunk = work_ids[chunk_start : chunk_start + 400]
-        stmt = select(table.c.id).where(table.c.id.in_(chunk))
+        stmt = select(LibraryWork.id).where(LibraryWork.id.in_(chunk))
         if not context.is_admin:
-            # Prefer edition-scoped visibility when editions exist; fall back to origin folder.
-            from app.core.authorization import monitor_folder_visibility_predicate
-            from sqlalchemy import exists, or_, and_
-            from sqlalchemy.orm import aliased
-            from app.models.library import LibraryEdition
-
             accessible_edition = aliased(LibraryEdition)
             any_visible_edition = aliased(LibraryEdition)
             has_accessible = exists(
                 select(accessible_edition.id).where(
-                    accessible_edition.work_id == table.c.id,
+                    accessible_edition.work_id == LibraryWork.id,
                     accessible_edition.hidden.is_(False),
                     monitor_folder_visibility_predicate(
-                        context, accessible_edition.monitor_folder_id
+                        context,
+                        accessible_edition.monitor_folder_id,
                     ),
                 )
             )
             has_any = exists(
                 select(any_visible_edition.id).where(
-                    any_visible_edition.work_id == table.c.id,
+                    any_visible_edition.work_id == LibraryWork.id,
                     any_visible_edition.hidden.is_(False),
                 )
             )
-            if "monitorFolderId" in table.c:
-                stmt = stmt.where(
-                    or_(
-                        has_accessible,
-                        and_(
-                            ~has_any,
-                            monitor_folder_visibility_predicate(context, table.c.monitorFolderId),
+            stmt = stmt.where(
+                or_(
+                    has_accessible,
+                    and_(
+                        ~has_any,
+                        monitor_folder_visibility_predicate(
+                            context,
+                            LibraryWork.monitor_folder_id,
                         ),
-                    )
+                    ),
                 )
-            else:
-                stmt = stmt.where(or_(has_accessible, ~has_any))
-        rows = db.execute(stmt).all()
-        visible.update(str(row.id) for row in rows)
-    return [str(work_id) for work_id in work_ids if str(work_id) in visible]
+            )
+        visible.update(str(row) for row in db.scalars(stmt).all())
+    return [
+        str(work_id)
+        for work_id in work_ids
+        if str(work_id) in visible
+    ]
 
 
-def list_work_cards(db: Session, work_ids: list[str]) -> list[dict[str, Any]]:
-    table = _legacy_table(db, "LibraryWork")
-    if not work_ids or table is None:
+def list_work_cards(
+    db: Session,
+    work_ids: list[str],
+) -> list[dict[str, Any]]:
+    if not work_ids:
         return []
-    cols = [table.c.id]
-    if "title" in table.c:
-        cols.append(table.c.title)
-    if "author" in table.c:
-        cols.append(table.c.author)
-    rows = db.execute(select(*cols).where(table.c.id.in_(work_ids))).mappings().all()
+    rows = db.execute(
+        select(
+            LibraryWork.id,
+            LibraryWork.title,
+            LibraryWork.author,
+        ).where(LibraryWork.id.in_(work_ids))
+    ).mappings().all()
     by_id = {
         str(row["id"]): {
             "id": row["id"],
-            "title": row.get("title"),
-            "author": row.get("author"),
+            "title": row["title"],
+            "author": row["author"],
         }
         for row in rows
     }
-    return [by_id[str(work_id)] for work_id in work_ids if str(work_id) in by_id]
+    return [
+        by_id[str(work_id)]
+        for work_id in work_ids
+        if str(work_id) in by_id
+    ]
 
 
 def create_shelf(db: Session, values: dict[str, Any]) -> dict[str, Any]:
-    table = _legacy_table(db, "Shelf")
-    if table is None:
-        raise RuntimeError("Shelf table is not available")
-    payload = {key: value for key, value in values.items() if key in table.c}
-    db.execute(insert(table).values(**payload))
+    shelf = Shelf(
+        id=str(values["id"]),
+        owner_user_id=str(values["ownerUserId"]),
+        name=str(values["name"]),
+        description=values.get("description"),
+        kind=str(values["kind"]),
+        rules_json=str(values["rulesJson"]),
+        pinned=bool(values["pinned"]),
+        created_at=values["createdAt"],
+        updated_at=values["updatedAt"],
+    )
+    db.add(shelf)
     db.flush()
-    row = db.execute(select(table).where(table.c.id == payload["id"])).mappings().first()
-    return dict(row) if row else payload
+    return _entity_record(shelf)
 
 
-def update_shelf(db: Session, shelf_id: str, values: dict[str, Any]) -> dict[str, Any] | None:
-    table = _legacy_table(db, "Shelf")
-    if table is None:
+def update_shelf(
+    db: Session,
+    shelf_id: str,
+    values: dict[str, Any],
+) -> dict[str, Any] | None:
+    shelf = db.get(Shelf, shelf_id)
+    if shelf is None:
         return None
-    payload = {key: value for key, value in values.items() if key in table.c}
-    if payload:
-        db.execute(update(table).where(table.c.id == shelf_id).values(**payload))
-        db.flush()
-    row = db.execute(select(table).where(table.c.id == shelf_id)).mappings().first()
-    return dict(row) if row else None
+    field_map = {
+        "name": "name",
+        "description": "description",
+        "pinned": "pinned",
+        "kind": "kind",
+        "rulesJson": "rules_json",
+        "updatedAt": "updated_at",
+    }
+    for external_name, attribute_name in field_map.items():
+        if external_name in values:
+            setattr(shelf, attribute_name, values[external_name])
+    db.flush()
+    return _entity_record(shelf)
 
 
 def replace_shelf_works(
@@ -177,60 +194,69 @@ def replace_shelf_works(
     work_ids: list[str],
     *,
     now: datetime,
-    commit: bool = True,
 ) -> None:
-    table = _legacy_table(db, "ShelfWork")
-    if table is None:
+    db.execute(delete(ShelfWork).where(ShelfWork.shelf_id == shelf_id))
+    db.add_all(
+        [
+            ShelfWork(
+                shelf_id=shelf_id,
+                work_id=work_id,
+                created_at=now,
+            )
+            for work_id in work_ids
+        ]
+    )
+    db.flush()
+
+
+def add_shelf_work(
+    db: Session,
+    *,
+    shelf_id: str,
+    work_id: str,
+    now: datetime,
+) -> None:
+    if db.get(ShelfWork, (shelf_id, work_id)) is not None:
         return
-    db.execute(delete(table).where(table.c.shelfId == shelf_id))
-    for work_id in work_ids:
-        db.execute(
-            insert(table).values(shelfId=shelf_id, workId=work_id, createdAt=now)
+    db.add(
+        ShelfWork(
+            shelf_id=shelf_id,
+            work_id=work_id,
+            created_at=now,
         )
-    if commit:
-        db.commit()
+    )
+    db.flush()
 
 
-def add_shelf_work(db: Session, *, shelf_id: str, work_id: str, now: datetime) -> None:
-    table = _legacy_table(db, "ShelfWork")
-    if table is None:
-        return
-    existing = db.execute(
-        select(table.c.shelfId).where(
-            table.c.shelfId == shelf_id, table.c.workId == work_id
-        )
-    ).first()
-    if existing:
-        return
-    db.execute(insert(table).values(shelfId=shelf_id, workId=work_id, createdAt=now))
-
-
-def remove_shelf_work(db: Session, *, shelf_id: str, work_id: str) -> None:
-    table = _legacy_table(db, "ShelfWork")
-    if table is None:
-        return
+def remove_shelf_work(
+    db: Session,
+    *,
+    shelf_id: str,
+    work_id: str,
+) -> None:
     db.execute(
-        delete(table).where(table.c.shelfId == shelf_id, table.c.workId == work_id)
+        delete(ShelfWork).where(
+            ShelfWork.shelf_id == shelf_id,
+            ShelfWork.work_id == work_id,
+        )
     )
 
 
 def delete_shelf(db: Session, shelf_id: str) -> bool:
-    works = _legacy_table(db, "ShelfWork")
-    if works is not None:
-        db.execute(delete(works).where(works.c.shelfId == shelf_id))
-    table = _legacy_table(db, "Shelf")
-    if table is None:
-        return False
-    result = db.execute(delete(table).where(table.c.id == shelf_id))
-    db.commit()
+    db.execute(delete(ShelfWork).where(ShelfWork.shelf_id == shelf_id))
+    result = db.execute(delete(Shelf).where(Shelf.id == shelf_id))
+    db.flush()
     return bool(result.rowcount)
 
 
-def clear_monitor_folder_shelf_links(db: Session, shelf_id: str, *, now: datetime) -> None:
-    table = _legacy_table(db, "MonitorFolder")
-    if table is None or "shelfId" not in table.c:
-        return
-    values: dict[str, Any] = {"shelfId": None}
-    if "updatedAt" in table.c:
-        values["updatedAt"] = now
-    db.execute(update(table).where(table.c.shelfId == shelf_id).values(**values))
+def clear_monitor_folder_shelf_links(
+    db: Session,
+    shelf_id: str,
+    *,
+    now: datetime,
+) -> None:
+    db.execute(
+        update(MonitorFolder)
+        .where(MonitorFolder.shelf_id == shelf_id)
+        .values(shelf_id=None, updated_at=now)
+    )

@@ -1,0 +1,1 @@
+"""Shelf HTTP adapters."""

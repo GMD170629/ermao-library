@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import (
+    Boolean,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    column,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.time import TimestampMilliseconds
@@ -60,8 +70,16 @@ class OrganizeJob(Base):
             "OrganizeJob_unresolved_workId_key",
             "workId",
             unique=True,
-            sqlite_where=text(
-                "status IN ('LOOKUP_PENDING', 'PENDING', 'QUEUED', 'RUNNING', 'RETRY_WAIT', 'REVIEWING', 'FAILED')"
+            sqlite_where=column("status", String).in_(
+                (
+                    "LOOKUP_PENDING",
+                    "PENDING",
+                    "QUEUED",
+                    "RUNNING",
+                    "RETRY_WAIT",
+                    "REVIEWING",
+                    "FAILED",
+                )
             ),
         ),
         Index("OrganizeJob_runId_status_idx", "runId", "status"),

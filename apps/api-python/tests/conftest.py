@@ -10,29 +10,10 @@ from app.core.config import Settings, get_settings
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import create_app
-from app.models import auth, settings as settings_models  # noqa: F401
+from app import models as _models  # noqa: F401
 
 
-# API/unit fixtures only need auth + settings tables. Full-schema coverage uses
-# file-backed bootstrap / apply_schema in dedicated migration and feature tests.
-_TEST_ORM_TABLES = [
-    auth.User.__table__,
-    auth.Session.__table__,
-    auth.PasswordResetToken.__table__,
-    auth.UserMonitorFolderAccess.__table__,
-    auth.UserPreference.__table__,
-    auth.ReaderBookmark.__table__,
-    settings_models.MonitorFolder.__table__,
-    settings_models.SystemSetting.__table__,
-    settings_models.BookIdentityCache.__table__,
-    settings_models.SystemEvent.__table__,
-    settings_models.SystemHealthRun.__table__,
-    settings_models.QueueRuntimeState.__table__,
-    settings_models.QueueControlOperation.__table__,
-    settings_models.ReaderPreference.__table__,
-    settings_models.ReaderBookPreference.__table__,
-    settings_models.ReaderProgressCursor.__table__,
-]
+_TEST_ORM_TABLES = list(Base.metadata.sorted_tables)
 
 
 @pytest.fixture()

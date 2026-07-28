@@ -87,6 +87,8 @@ def _status_predicate(
     status: str,
 ) -> ColumnElement[bool] | None:
     normalized = status.upper()
+    if normalized == "WANT":
+        return LibraryWork.status == "WANT"
     if normalized not in {"UNREAD", "READING", "FINISHED"}:
         return None
     if not (

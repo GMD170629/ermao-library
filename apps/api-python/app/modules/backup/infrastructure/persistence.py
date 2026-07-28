@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import MetaData, Table, delete, inspect as sa_inspect, select
+from sqlalchemy import delete, inspect as sa_inspect, select
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -39,9 +39,6 @@ from app.models import (
     UserPreference,
     WorkDetailPreference,
 )
-from app.modules.library.infrastructure.works import entity_as_legacy_dict
-
-
 def _legacy_column_to_attr(model: type) -> dict[str, str]:
     mapper = sa_inspect(model)
     return {prop.columns[0].name: prop.key for prop in mapper.column_attrs}
@@ -80,23 +77,30 @@ TABLE_MODELS: dict[str, type] = {
 }
 
 
-def table_names(db: Session) -> set[str]:
-    return set(sa_inspect(db.get_bind()).get_table_names())
-
-
 def model_columns(model: type) -> set[str]:
     return {column.name for column in model.__table__.columns}
 
 
+def _entity_to_export_record(entity: object) -> dict[str, Any]:
+    mapper = sa_inspect(entity).mapper
+    return {
+        prop.columns[0].name: getattr(entity, prop.key)
+        for prop in mapper.column_attrs
+    }
+
+
 def fetch_table(db: Session, table: str) -> list[dict[str, Any]]:
-    if table not in table_names(db):
+    model = TABLE_MODELS.get(table)
+    if model is None:
         return []
-    metadata = MetaData()
-    reflected = Table(table, metadata, autoload_with=db.get_bind())
-    stmt = select(reflected)
-    if "createdAt" in reflected.c:
-        stmt = stmt.order_by(reflected.c.createdAt.asc())
-    return [dict(row) for row in db.execute(stmt).mappings().all()]
+    stmt = select(model)
+    created_at = getattr(model, "created_at", None)
+    if created_at is not None:
+        stmt = stmt.order_by(created_at.asc())
+    return [
+        _entity_to_export_record(entity)
+        for entity in db.scalars(stmt).all()
+    ]
 
 
 def _legacy_to_model_values(model: type, record: dict[str, Any]) -> dict[str, Any]:
@@ -110,23 +114,22 @@ def _legacy_to_model_values(model: type, record: dict[str, Any]) -> dict[str, An
 
 
 def insert_records(db: Session, table: str, records: list[dict[str, Any]]) -> int:
-    if not records or table not in table_names(db):
+    model = TABLE_MODELS.get(table)
+    if not records or model is None:
         return 0
-    reflected = Table(table, MetaData(), autoload_with=db.get_bind())
-    allowed = {column.name for column in reflected.columns}
     inserted = 0
     for record in records:
-        filtered = {key: value for key, value in record.items() if key in allowed}
-        if not filtered:
+        values = _legacy_to_model_values(model, record)
+        if not values:
             continue
-        db.execute(reflected.insert().values(**filtered))
+        db.add(model(**values))
         inserted += 1
-    db.commit()
+    db.flush()
     return inserted
 
 
 def upsert_user_records(db: Session, records: list[dict[str, Any]]) -> int:
-    if not records or "User" not in table_names(db):
+    if not records:
         return 0
     restored = 0
     for record in records:
@@ -148,16 +151,12 @@ def upsert_user_records(db: Session, records: list[dict[str, Any]]) -> int:
             continue
         db.add(User(**values))
         restored += 1
-    db.commit()
+    db.flush()
     return restored
 
 
 def clear_table_if_present(db: Session, table: str) -> None:
     model = TABLE_MODELS.get(table)
-    if model is None or table not in table_names(db):
+    if model is None:
         return
-    try:
-        db.execute(delete(model))
-        db.commit()
-    except SQLAlchemyError:
-        db.rollback()
+    db.execute(delete(model))

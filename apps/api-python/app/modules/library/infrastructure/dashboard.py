@@ -17,7 +17,7 @@ from app.core.time import to_timestamp_ms
 from app.models.import_pipeline import DownloadTask, ImportTask
 from app.models.library import LibraryEdition, LibraryFile, LibraryReadingProgress, LibraryWork
 from app.models.settings import MonitorFolder, SystemEvent
-from app.modules.imports.infrastructure.schema import entity_as_legacy_dict, has_table, reflected_table
+from app.modules.library.infrastructure.works import entity_as_legacy_dict
 
 
 def dashboard_summary(db: Session, context: AuthorizationContext, user_id: str) -> dict[str, Any]:
@@ -29,7 +29,7 @@ def dashboard_summary(db: Session, context: AuthorizationContext, user_id: str) 
             .where(LibraryWork.hidden.is_(False), work_visible)
         )
         or 0
-    ) if has_table(db, "LibraryWork") else 0
+    )
     comic_books = int(
         db.scalar(
             select(func.count())
@@ -41,7 +41,7 @@ def dashboard_summary(db: Session, context: AuthorizationContext, user_id: str) 
             )
         )
         or 0
-    ) if has_table(db, "LibraryWork") else 0
+    )
     novel_books = int(
         db.scalar(
             select(func.count())
@@ -53,42 +53,37 @@ def dashboard_summary(db: Session, context: AuthorizationContext, user_id: str) 
             )
         )
         or 0
-    ) if has_table(db, "LibraryWork") else 0
+    )
 
-    storage = 0
-    if has_table(db, "LibraryEdition"):
-        storage = int(
-            db.scalar(
-                select(func.coalesce(func.sum(LibraryEdition.size_bytes), 0)).where(
-                    LibraryEdition.hidden.is_(False),
-                    edition_visibility_predicate(context),
-                )
+    storage = int(
+        db.scalar(
+            select(func.coalesce(func.sum(LibraryEdition.size_bytes), 0)).where(
+                LibraryEdition.hidden.is_(False),
+                edition_visibility_predicate(context),
             )
-            or 0
         )
+        or 0
+    )
 
     last_import: dict[str, Any] | None = None
-    if has_table(db, "ImportTask"):
-        row = db.execute(
-            select(ImportTask.finished_at, ImportTask.updated_at)
-            .where(
-                ImportTask.status == "COMPLETED",
-                monitor_folder_visibility_predicate(context, ImportTask.monitor_folder_id),
-            )
-            .order_by(ImportTask.finished_at.desc(), ImportTask.id.desc())
-            .limit(1)
-        ).first()
-        if row is not None:
-            last_import = {"finishedAt": row.finished_at, "updatedAt": row.updated_at}
-
-    latest_progress_at = None
-    if has_table(db, "LibraryReadingProgress"):
-        latest_progress_at = db.scalar(
-            select(LibraryReadingProgress.updated_at)
-            .where(LibraryReadingProgress.user_id == user_id)
-            .order_by(LibraryReadingProgress.updated_at.desc())
-            .limit(1)
+    row = db.execute(
+        select(ImportTask.finished_at, ImportTask.updated_at)
+        .where(
+            ImportTask.status == "COMPLETED",
+            monitor_folder_visibility_predicate(context, ImportTask.monitor_folder_id),
         )
+        .order_by(ImportTask.finished_at.desc(), ImportTask.id.desc())
+        .limit(1)
+    ).first()
+    if row is not None:
+        last_import = {"finishedAt": row.finished_at, "updatedAt": row.updated_at}
+
+    latest_progress_at = db.scalar(
+        select(LibraryReadingProgress.updated_at)
+        .where(LibraryReadingProgress.user_id == user_id)
+        .order_by(LibraryReadingProgress.updated_at.desc())
+        .limit(1)
+    )
 
     monitor_folder_count = (
         int(
@@ -97,7 +92,7 @@ def dashboard_summary(db: Session, context: AuthorizationContext, user_id: str) 
             )
             or 0
         )
-        if context.is_admin and has_table(db, "MonitorFolder")
+        if context.is_admin
         else len(context.monitor_folder_ids)
     )
 
@@ -113,8 +108,6 @@ def dashboard_summary(db: Session, context: AuthorizationContext, user_id: str) 
 
 
 def recent_books(db: Session, context: AuthorizationContext, *, limit: int) -> list[dict[str, Any]]:
-    if not has_table(db, "LibraryWork"):
-        return []
     rows = db.execute(
         select(
             LibraryWork.id,
@@ -142,8 +135,6 @@ def recent_books(db: Session, context: AuthorizationContext, *, limit: int) -> l
 
 
 def recent_reading(db: Session, context: AuthorizationContext, user_id: str, *, limit: int) -> list[dict[str, Any]]:
-    if not all(has_table(db, name) for name in ("LibraryWork", "LibraryEdition", "LibraryReadingProgress")):
-        return []
     recent_edition = aliased(LibraryEdition)
     latest_read_at = func.max(LibraryReadingProgress.updated_at).label("lastReadAt")
     rows = db.execute(
@@ -190,64 +181,67 @@ def recent_reading(db: Session, context: AuthorizationContext, user_id: str, *, 
 def continue_reading_progress(
     db: Session, context: AuthorizationContext, user_id: str
 ) -> dict[str, Any] | None:
-    if not all(has_table(db, name) for name in ("LibraryReadingProgress", "LibraryWork", "LibraryEdition")):
-        return None
-    progress = reflected_table(db, "LibraryReadingProgress")
-    work = reflected_table(db, "LibraryWork")
-    edition = reflected_table(db, "LibraryEdition")
     filters = [
-        progress.c.userId == user_id,
-        progress.c.percent > 0,
-        progress.c.percent < 100,
-        work.c.hidden.is_(False),
-        func.coalesce(edition.c.hidden, False).is_(False),
+        LibraryReadingProgress.user_id == user_id,
+        LibraryReadingProgress.percent > 0,
+        LibraryReadingProgress.percent < 100,
+        LibraryWork.hidden.is_(False),
+        func.coalesce(LibraryEdition.hidden, False).is_(False),
     ]
-    if not context.is_admin and "monitorFolderId" in edition.c:
-        filters.append(monitor_folder_visibility_predicate(context, edition.c.monitorFolderId))
-    row = db.execute(
-        select(progress)
-        .select_from(
-            progress.join(work, work.c.id == progress.c.workId).join(
-                edition, edition.c.id == progress.c.editionId
+    if not context.is_admin:
+        filters.append(
+            monitor_folder_visibility_predicate(
+                context,
+                LibraryEdition.monitor_folder_id,
             )
         )
+    row = db.scalar(
+        select(LibraryReadingProgress)
+        .select_from(
+            LibraryReadingProgress
+        )
+        .join(LibraryWork, LibraryWork.id == LibraryReadingProgress.work_id)
+        .join(
+            LibraryEdition,
+            LibraryEdition.id == LibraryReadingProgress.edition_id,
+        )
         .where(*filters)
-        .order_by(progress.c.updatedAt.desc())
+        .order_by(LibraryReadingProgress.updated_at.desc())
         .limit(1)
-    ).mappings().first()
-    return dict(row) if row else None
+    )
+    return entity_as_legacy_dict(row) if row else None
 
 
 def management_card_counts(db: Session) -> dict[str, int]:
-    failed_imports = (
-        int(db.scalar(select(func.count()).select_from(ImportTask).where(ImportTask.status == "FAILED")) or 0)
-        if has_table(db, "ImportTask")
-        else 0
-    )
-    failed_downloads = (
-        int(db.scalar(select(func.count()).select_from(DownloadTask).where(DownloadTask.status == "failed")) or 0)
-        if has_table(db, "DownloadTask")
-        else 0
-    )
-    pending_organize = (
-        int(
-            db.scalar(
-                select(func.count())
-                .select_from(LibraryWork)
-                .where(
-                    LibraryWork.hidden.is_(False),
-                    LibraryWork.organize_status.in_(("PENDING", "REVIEWING")),
-                )
-            )
-            or 0
+    failed_imports = int(
+        db.scalar(
+            select(func.count())
+            .select_from(ImportTask)
+            .where(ImportTask.status == "FAILED")
         )
-        if has_table(db, "LibraryWork")
-        else 0
+        or 0
     )
-    storage = (
-        int(db.scalar(select(func.coalesce(func.sum(LibraryFile.size_bytes), 0))) or 0)
-        if has_table(db, "LibraryFile")
-        else 0
+    failed_downloads = int(
+        db.scalar(
+            select(func.count())
+            .select_from(DownloadTask)
+            .where(DownloadTask.status == "failed")
+        )
+        or 0
+    )
+    pending_organize = int(
+        db.scalar(
+            select(func.count())
+            .select_from(LibraryWork)
+            .where(
+                LibraryWork.hidden.is_(False),
+                LibraryWork.organize_status.in_(("PENDING", "REVIEWING")),
+            )
+        )
+        or 0
+    )
+    storage = int(
+        db.scalar(select(func.coalesce(func.sum(LibraryFile.size_bytes), 0))) or 0
     )
     return {
         "failedImports": failed_imports,
@@ -258,8 +252,6 @@ def management_card_counts(db: Session) -> dict[str, int]:
 
 
 def list_library_file_paths(db: Session) -> set[str]:
-    if not has_table(db, "LibraryFile"):
-        return set()
     return {
         str(path)
         for path in db.scalars(select(LibraryFile.path).where(LibraryFile.path.is_not(None))).all()
@@ -268,8 +260,6 @@ def list_library_file_paths(db: Session) -> set[str]:
 
 
 def list_management_works(db: Session, *, limit: int = 300) -> list[dict[str, Any]]:
-    if not has_table(db, "LibraryWork"):
-        return []
     rows = db.execute(
         select(
             LibraryWork.id,
@@ -307,8 +297,6 @@ def list_management_file_rows(
     *,
     limit: int = 2000,
 ) -> list[dict[str, Any]]:
-    if not has_table(db, "LibraryFile"):
-        return []
     rows = db.execute(
         select(LibraryFile.path, LibraryFile.size_bytes)
         .order_by(LibraryFile.path.asc(), LibraryFile.id.asc())
@@ -321,8 +309,6 @@ def list_management_file_rows(
 
 
 def recent_system_events(db: Session, *, limit: int = 8) -> list[dict[str, Any]]:
-    if not has_table(db, "SystemEvent"):
-        return []
     rows = db.scalars(select(SystemEvent).order_by(SystemEvent.created_at.desc()).limit(limit)).all()
     return [entity_as_legacy_dict(row) for row in rows]
 
@@ -339,8 +325,6 @@ def list_system_events_page(
     date_from_ms: int | None = None,
     date_to_ms: int | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
-    if not has_table(db, "SystemEvent"):
-        return [], 0
     filters: list[Any] = []
     if level:
         filters.append(SystemEvent.level == ("warning" if level == "warn" else level))
@@ -382,8 +366,6 @@ def list_system_events_page(
 
 
 def clear_info_warning_events(db: Session) -> int:
-    if not has_table(db, "SystemEvent"):
-        return 0
     from sqlalchemy import delete
 
     result = db.execute(delete(SystemEvent).where(SystemEvent.level.in_(("info", "warning"))))

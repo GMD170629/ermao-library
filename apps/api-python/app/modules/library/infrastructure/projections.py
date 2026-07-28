@@ -5,10 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import uuid4
 
-from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import func, inspect as sa_inspect, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -24,43 +23,6 @@ from app.models.library import (
 )
 from app.models.organize import MetadataLookupTask
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
-from app.modules.imports.infrastructure.schema import has_table, table_columns
-
-
-def select_existing_rows(
-    db: Session,
-    model: type,
-    table_name: str,
-    *,
-    filters: Sequence[ColumnElement[bool]] = (),
-    order_by: Sequence[ColumnElement[Any]] = (),
-    limit: int | None = None,
-    offset: int | None = None,
-) -> list[dict[str, object]]:
-    if not has_table(db, table_name):
-        return []
-    column_attrs = [
-        prop
-        for prop in sa_inspect(model).mapper.column_attrs
-        if prop.columns[0].name in table_columns(db, table_name)
-    ]
-    statement = select(*(getattr(model, prop.key) for prop in column_attrs)).where(
-        *filters
-    )
-    if order_by:
-        statement = statement.order_by(*order_by)
-    if limit is not None:
-        statement = statement.limit(limit)
-    if offset is not None:
-        statement = statement.offset(offset)
-    rows = db.execute(statement).all()
-    return [
-        {
-            column_attrs[index].columns[0].name: value
-            for index, value in enumerate(row)
-        }
-        for row in rows
-    ]
 
 
 def get_detail_preference(
@@ -170,14 +132,8 @@ def save_consumption_state(
 
 
 def get_edition(db: Session, edition_id: str) -> dict[str, object] | None:
-    rows = select_existing_rows(
-        db,
-        LibraryEdition,
-        "LibraryEdition",
-        filters=(LibraryEdition.id == edition_id,),
-        limit=1,
-    )
-    return rows[0] if rows else None
+    edition = db.get(LibraryEdition, edition_id)
+    return entity_as_legacy_dict(edition) if edition is not None else None
 
 
 def list_consumption_states(
@@ -205,44 +161,40 @@ def list_files_for_edition(
     db: Session,
     edition_id: str,
 ) -> list[dict[str, object]]:
-    return select_existing_rows(
-        db,
-        LibraryFile,
-        "LibraryFile",
-        filters=(LibraryFile.edition_id == edition_id,),
-        order_by=(LibraryFile.sort_order.asc(), LibraryFile.id.asc()),
-    )
+    rows = db.scalars(
+        select(LibraryFile)
+        .where(LibraryFile.edition_id == edition_id)
+        .order_by(LibraryFile.sort_order.asc(), LibraryFile.id.asc())
+    ).all()
+    return [entity_as_legacy_dict(row) for row in rows]
 
 
 def list_volumes_for_edition(
     db: Session,
     edition_id: str,
 ) -> list[dict[str, object]]:
-    return select_existing_rows(
-        db,
-        LibraryVolume,
-        "LibraryVolume",
-        filters=(LibraryVolume.edition_id == edition_id,),
-        order_by=(LibraryVolume.sort_order.asc(), LibraryVolume.id.asc()),
-    )
+    rows = db.scalars(
+        select(LibraryVolume)
+        .where(LibraryVolume.edition_id == edition_id)
+        .order_by(LibraryVolume.sort_order.asc(), LibraryVolume.id.asc())
+    ).all()
+    return [entity_as_legacy_dict(row) for row in rows]
 
 
 def latest_conversion_metadata(
     db: Session,
     edition_id: str,
 ) -> dict[str, object] | None:
-    rows = select_existing_rows(
-        db,
-        LibraryMetadata,
-        "LibraryMetadata",
-        filters=(
+    row = db.scalar(
+        select(LibraryMetadata)
+        .where(
             LibraryMetadata.edition_id == edition_id,
             LibraryMetadata.source == "conversion",
-        ),
-        order_by=(LibraryMetadata.created_at.desc(), LibraryMetadata.id.desc()),
-        limit=1,
+        )
+        .order_by(LibraryMetadata.created_at.desc(), LibraryMetadata.id.desc())
+        .limit(1)
     )
-    return rows[0] if rows else None
+    return entity_as_legacy_dict(row) if row is not None else None
 
 
 def list_progress_for_edition(
@@ -251,19 +203,18 @@ def list_progress_for_edition(
     edition_id: str,
     user_id: str,
 ) -> list[dict[str, object]]:
-    return select_existing_rows(
-        db,
-        LibraryReadingProgress,
-        "LibraryReadingProgress",
-        filters=(
+    rows = db.scalars(
+        select(LibraryReadingProgress)
+        .where(
             LibraryReadingProgress.edition_id == edition_id,
             LibraryReadingProgress.user_id == user_id,
-        ),
-        order_by=(
+        )
+        .order_by(
             LibraryReadingProgress.updated_at.desc(),
             LibraryReadingProgress.id.desc(),
-        ),
-    )
+        )
+    ).all()
+    return [entity_as_legacy_dict(row) for row in rows]
 
 
 def list_reading_units(
@@ -277,16 +228,15 @@ def list_reading_units(
     ]
     if volume_id is not None:
         filters.append(LibraryReadingUnit.volume_id == volume_id)
-    return select_existing_rows(
-        db,
-        LibraryReadingUnit,
-        "LibraryReadingUnit",
-        filters=filters,
-        order_by=(
+    rows = db.scalars(
+        select(LibraryReadingUnit)
+        .where(*filters)
+        .order_by(
             LibraryReadingUnit.sort_order.asc(),
             LibraryReadingUnit.id.asc(),
-        ),
-    )
+        )
+    ).all()
+    return [entity_as_legacy_dict(row) for row in rows]
 
 
 def reading_units_page(
@@ -297,8 +247,6 @@ def reading_units_page(
     limit: int,
     offset: int,
 ) -> tuple[list[dict[str, object]], int]:
-    if not has_table(db, "LibraryReadingUnit"):
-        return [], 0
     filters: list[ColumnElement[bool]] = [
         LibraryReadingUnit.edition_id == edition_id
     ]
@@ -310,34 +258,30 @@ def reading_units_page(
         )
         or 0
     )
-    rows = select_existing_rows(
-        db,
-        LibraryReadingUnit,
-        "LibraryReadingUnit",
-        filters=filters,
-        order_by=(
+    rows = db.scalars(
+        select(LibraryReadingUnit)
+        .where(*filters)
+        .order_by(
             LibraryReadingUnit.sort_order.asc(),
             LibraryReadingUnit.id.asc(),
-        ),
-        limit=limit,
-        offset=offset,
-    )
-    return rows, total
+        )
+        .limit(limit)
+        .offset(offset)
+    ).all()
+    return [entity_as_legacy_dict(row) for row in rows], total
 
 
 def latest_metadata_lookup_for_work(
     db: Session,
     work_id: str,
 ) -> dict[str, object] | None:
-    rows = select_existing_rows(
-        db,
-        MetadataLookupTask,
-        "MetadataLookupTask",
-        filters=(MetadataLookupTask.work_id == work_id,),
-        order_by=(
+    row = db.scalar(
+        select(MetadataLookupTask)
+        .where(MetadataLookupTask.work_id == work_id)
+        .order_by(
             MetadataLookupTask.created_at.desc(),
             MetadataLookupTask.id.desc(),
-        ),
-        limit=1,
+        )
+        .limit(1)
     )
-    return rows[0] if rows else None
+    return entity_as_legacy_dict(row) if row is not None else None

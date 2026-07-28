@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import delete, exists, func, inspect as sa_inspect, or_, select, update
+from sqlalchemy import delete, exists, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.core.authorization import AuthorizationContext, monitor_folder_visibility_predicate
@@ -12,37 +12,14 @@ from app.models.auth import User, UserMonitorFolderAccess
 from app.models.import_pipeline import BookConversionTask, ImportAsset, ImportLog, ImportTask
 from app.models.library import LibraryWork
 from app.models.settings import MonitorFolder
-from app.modules.imports.infrastructure.legacy_persistence import (
-    get_entity,
-    list_entities,
-)
-from app.modules.imports.infrastructure.schema import (
-    entity_as_legacy_dict,
-    has_table,
-    table_columns,
-)
 from app.modules.imports.infrastructure.monitor import upsert_system_setting
 
 
 def get_import_task(db: Session, task_id: str) -> dict[str, Any] | None:
-    if not has_table(db, "ImportTask"):
-        return None
-    column_attrs = [
-        prop
-        for prop in sa_inspect(ImportTask).mapper.column_attrs
-        if prop.columns[0].name in table_columns(db, "ImportTask")
-    ]
     row = db.execute(
-        select(*(getattr(ImportTask, prop.key) for prop in column_attrs)).where(
-            ImportTask.id == task_id
-        )
-    ).first()
-    if row is None:
-        return None
-    return {
-        column_attrs[index].columns[0].name: value
-        for index, value in enumerate(row)
-    }
+        select(ImportTask.__table__).where(ImportTask.id == task_id)
+    ).mappings().first()
+    return dict(row) if row else None
 
 
 def list_import_tasks_page(
@@ -54,9 +31,6 @@ def list_import_tasks_page(
     status: str | None = None,
     keyword: str | None = None,
 ) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
-    if not has_table(db, "ImportTask"):
-        return [], 0, {"completed": 0, "failed": 0}
-
     filters: list[Any] = [monitor_folder_visibility_predicate(context, ImportTask.monitor_folder_id)]
     normalized_status = str(status or "").strip().upper()
     if normalized_status and normalized_status != "ALL":
@@ -84,25 +58,14 @@ def list_import_tasks_page(
     total = int(db.scalar(select(func.count()).select_from(ImportTask).where(*filters)) or 0)
     total_pages = max(1, (total + page_size - 1) // page_size)
     page = min(max(1, page), total_pages)
-    from sqlalchemy import inspect as sa_inspect
-
-    column_attrs = [
-        prop
-        for prop in sa_inspect(ImportTask).mapper.column_attrs
-        if prop.columns[0].name in table_columns(db, "ImportTask")
-    ]
-    columns = [getattr(ImportTask, prop.key) for prop in column_attrs]
     rows = db.execute(
-        select(*columns)
+        select(ImportTask.__table__)
         .where(*filters)
         .order_by(ImportTask.created_at.desc(), ImportTask.id.desc())
         .limit(page_size)
         .offset((page - 1) * page_size)
-    ).all()
-    tasks = [
-        {column_attrs[index].columns[0].name: value for index, value in enumerate(row)}
-        for row in rows
-    ]
+    ).mappings().all()
+    tasks = [dict(row) for row in rows]
 
     scope = monitor_folder_visibility_predicate(context, ImportTask.monitor_folder_id)
     summary = {
@@ -127,15 +90,12 @@ def list_import_tasks_page(
 
 
 def clear_terminal_import_tasks(db: Session, context: AuthorizationContext) -> int:
-    if not has_table(db, "ImportTask"):
-        return 0
     scope = monitor_folder_visibility_predicate(context, ImportTask.monitor_folder_id)
     terminal = select(ImportTask.id).where(
         ImportTask.status.in_(("COMPLETED", "FAILED")),
         scope,
     )
-    if has_table(db, "BookConversionTask"):
-        db.execute(delete(BookConversionTask).where(BookConversionTask.import_task_id.in_(terminal)))
+    db.execute(delete(BookConversionTask).where(BookConversionTask.import_task_id.in_(terminal)))
     result = db.execute(
         delete(ImportTask).where(
             ImportTask.status.in_(("COMPLETED", "FAILED")),
@@ -146,21 +106,21 @@ def clear_terminal_import_tasks(db: Session, context: AuthorizationContext) -> i
 
 
 def delete_import_task_row(db: Session, task_id: str) -> bool:
-    if has_table(db, "BookConversionTask"):
-        db.execute(delete(BookConversionTask).where(BookConversionTask.import_task_id == task_id))
-    if not has_table(db, "ImportTask"):
-        return False
+    db.execute(delete(BookConversionTask).where(BookConversionTask.import_task_id == task_id))
     result = db.execute(delete(ImportTask).where(ImportTask.id == task_id))
     return bool(result.rowcount)
 
 
 def get_conversion_for_import(db: Session, task_id: str) -> dict[str, Any] | None:
-    return get_entity(db, "BookConversionTask", BookConversionTask.import_task_id == task_id)
+    row = db.execute(
+        select(BookConversionTask.__table__)
+        .where(BookConversionTask.import_task_id == task_id)
+        .limit(1)
+    ).mappings().first()
+    return dict(row) if row else None
 
 
 def reset_import_assets_for_retry(db: Session, task_id: str, *, updated_at: Any) -> None:
-    if not has_table(db, "ImportAsset"):
-        return
     db.execute(
         update(ImportAsset)
         .where(ImportAsset.import_task_id == task_id)
@@ -182,31 +142,18 @@ def list_import_logs(
     offset: int = 0,
     level: str | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
-    if not has_table(db, "ImportLog"):
-        return [], 0
     filters: list[Any] = [ImportLog.import_task_id == task_id]
     if level:
         filters.append(ImportLog.level == level.lower())
     total = int(db.scalar(select(func.count()).select_from(ImportLog).where(*filters)) or 0)
-    from sqlalchemy import inspect as sa_inspect
-
-    column_attrs = [
-        prop
-        for prop in sa_inspect(ImportLog).mapper.column_attrs
-        if prop.columns[0].name in table_columns(db, "ImportLog")
-    ]
-    columns = [getattr(ImportLog, prop.key) for prop in column_attrs]
     rows = db.execute(
-        select(*columns)
+        select(ImportLog.__table__)
         .where(*filters)
         .order_by(ImportLog.created_at.desc(), ImportLog.id.desc())
         .limit(limit)
         .offset(offset)
-    ).all()
-    logs = [
-        {column_attrs[index].columns[0].name: value for index, value in enumerate(row)}
-        for row in rows
-    ]
+    ).mappings().all()
+    logs = [dict(row) for row in rows]
     return logs, total
 
 
@@ -216,40 +163,22 @@ def request_monitor_rescan(db: Session, requested_value: str) -> None:
 
 
 def list_monitor_folders(db: Session) -> list[dict[str, Any]]:
-    if not has_table(db, "MonitorFolder"):
-        return []
-    return list_entities(
-        db,
-        "MonitorFolder",
-        order_by=(MonitorFolder.created_at.desc(),),
-    )
+    rows = db.execute(
+        select(MonitorFolder.__table__).order_by(MonitorFolder.created_at.desc())
+    ).mappings().all()
+    return [dict(row) for row in rows]
 
 
 def list_enabled_monitor_folder_rows(db: Session) -> list[dict[str, Any]]:
-    if not has_table(db, "MonitorFolder"):
-        return []
-    column_attrs = [
-        prop
-        for prop in sa_inspect(MonitorFolder).mapper.column_attrs
-        if prop.columns[0].name in table_columns(db, "MonitorFolder")
-    ]
     rows = db.execute(
-        select(*(getattr(MonitorFolder, prop.key) for prop in column_attrs))
+        select(MonitorFolder.__table__)
         .where(MonitorFolder.enabled.is_(True))
         .order_by(MonitorFolder.created_at.desc(), MonitorFolder.id.desc())
-    ).all()
-    return [
-        {
-            column_attrs[index].columns[0].name: value
-            for index, value in enumerate(row)
-        }
-        for row in rows
-    ]
+    ).mappings().all()
+    return [dict(row) for row in rows]
 
 
 def list_monitor_root_paths(db: Session) -> list[str]:
-    if not has_table(db, "MonitorFolder"):
-        return []
     return [
         str(path)
         for path in db.scalars(
@@ -262,8 +191,6 @@ def list_monitor_root_paths(db: Session) -> list[str]:
 
 
 def list_import_source_paths_for_work(db: Session, work_id: str) -> list[str]:
-    if not has_table(db, "ImportTask"):
-        return []
     return [
         str(path)
         for path in db.scalars(
@@ -281,8 +208,6 @@ def list_import_source_paths_for_work(db: Session, work_id: str) -> list[str]:
 def import_status_snapshot(
     db: Session,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, int]:
-    if not has_table(db, "ImportTask"):
-        return None, None, 0
     current_id = db.scalar(
         select(ImportTask.id)
         .where(ImportTask.status.in_(("PENDING", "PARSING")))
@@ -310,7 +235,10 @@ def import_status_snapshot(
 
 
 def get_monitor_folder(db: Session, folder_id: str) -> dict[str, Any] | None:
-    return get_entity(db, "MonitorFolder", MonitorFolder.id == folder_id)
+    row = db.execute(
+        select(MonitorFolder.__table__).where(MonitorFolder.id == folder_id).limit(1)
+    ).mappings().first()
+    return dict(row) if row else None
 
 
 def get_monitor_folder_by_root_path(
@@ -322,7 +250,10 @@ def get_monitor_folder_by_root_path(
     filters = [MonitorFolder.root_path == root_path]
     if exclude_id is not None:
         filters.append(MonitorFolder.id != exclude_id)
-    return get_entity(db, "MonitorFolder", *filters)
+    row = db.execute(
+        select(MonitorFolder.__table__).where(*filters).limit(1)
+    ).mappings().first()
+    return dict(row) if row else None
 
 
 def create_monitor_folder(db: Session, values: dict[str, Any]) -> dict[str, Any]:
@@ -341,7 +272,7 @@ def create_monitor_folder(db: Session, values: dict[str, Any]) -> dict[str, Any]
     )
     db.add(folder)
     db.flush()
-    return entity_as_legacy_dict(folder)
+    return get_monitor_folder(db, folder.id) or dict(values)
 
 
 def update_monitor_folder(db: Session, folder_id: str, values: dict[str, Any]) -> dict[str, Any] | None:
@@ -364,7 +295,7 @@ def update_monitor_folder(db: Session, folder_id: str, values: dict[str, Any]) -
         if attribute is not None:
             setattr(folder, attribute, value)
     db.flush()
-    return entity_as_legacy_dict(folder)
+    return get_monitor_folder(db, folder.id)
 
 
 def reset_import_task_for_retry(
@@ -375,30 +306,23 @@ def reset_import_task_for_retry(
 ) -> dict[str, Any] | None:
     if get_import_task(db, task_id) is None:
         return None
-    available_columns = table_columns(db, "ImportTask")
-    values_by_column = {
-        "status": ("status", "PENDING"),
-        "progress": ("progress", 0),
-        "processedAssetCount": ("processed_asset_count", 0),
-        "message": ("message", "已重新加入后台队列"),
-        "errorCode": ("error_code", None),
-        "errorSummary": ("error_summary", None),
-        "retryable": ("retryable", False),
-        "startedAt": ("started_at", None),
-        "finishedAt": ("finished_at", None),
-        "leaseOwner": ("lease_owner", None),
-        "leaseExpiresAt": ("lease_expires_at", None),
-        "updatedAt": ("updated_at", updated_at),
-    }
-    values = {
-        attribute: value
-        for column, (attribute, value) in values_by_column.items()
-        if column in available_columns
-    }
     db.execute(
         update(ImportTask)
         .where(ImportTask.id == task_id)
-        .values(**values)
+        .values(
+            status="PENDING",
+            progress=0,
+            processed_asset_count=0,
+            message="已重新加入后台队列",
+            error_code=None,
+            error_summary=None,
+            retryable=False,
+            started_at=None,
+            finished_at=None,
+            lease_owner=None,
+            lease_expires_at=None,
+            updated_at=updated_at,
+        )
     )
     return get_import_task(db, task_id)
 
@@ -416,7 +340,7 @@ def reset_conversion_for_retry(
     )
     if conversion is None:
         return None
-    previous = entity_as_legacy_dict(conversion)
+    previous = get_conversion_for_import(db, task_id)
     conversion.status = "QUEUED"
     conversion.progress = 0
     conversion.retryable = False
@@ -430,18 +354,14 @@ def reset_conversion_for_retry(
 
 
 def delete_monitor_folder(db: Session, folder_id: str, *, updated_at: Any) -> tuple[bool, list[str]]:
-    if not has_table(db, "MonitorFolder"):
-        return False, []
-    affected_user_ids: list[str] = []
-    if has_table(db, "UserMonitorFolderAccess"):
-        affected_user_ids = [
-            str(item)
-            for item in db.scalars(
-                select(UserMonitorFolderAccess.user_id).where(
-                    UserMonitorFolderAccess.monitor_folder_id == folder_id
-                )
-            ).all()
-        ]
+    affected_user_ids = [
+        str(item)
+        for item in db.scalars(
+            select(UserMonitorFolderAccess.user_id).where(
+                UserMonitorFolderAccess.monitor_folder_id == folder_id
+            )
+        ).all()
+    ]
     result = db.execute(delete(MonitorFolder).where(MonitorFolder.id == folder_id))
     deleted = bool(result.rowcount)
     if deleted and affected_user_ids:

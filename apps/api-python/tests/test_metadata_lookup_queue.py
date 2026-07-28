@@ -118,7 +118,7 @@ def test_lookup_applies_exact_candidate_without_overwriting_identity_or_local_co
         "publishedYear": 2024,
         "coverUrl": "https://example.invalid/cover.jpg",
     }
-    monkeypatch.setattr(queue, "metadata_search_candidates", lambda *_args, **_kwargs: {"enabled": True, "cacheHit": False, "candidates": [candidate]})
+    monkeypatch.setattr(queue, "search_with_metadata_provider", lambda *_args, **_kwargs: {"enabled": True, "cacheHit": False, "candidates": [candidate]})
     monkeypatch.setattr(queue, "_download_remote_cover", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("local cover must win")))
 
     assert process_metadata_lookup_task(db_session, test_settings, task) == "COMPLETED"
@@ -146,7 +146,7 @@ def test_single_exact_title_match_completes_organizing_with_unknown_author(db_se
     create_worker_tables(db_session)
     task = _insert_lookup_fixture(db_session, author="未知作者")
     candidate = {"id": "douban-unknown-author", "source": "douban", "title": "黑暗坡食人树", "author": "岛田庄司"}
-    monkeypatch.setattr(queue, "metadata_search_candidates", lambda *_args, **_kwargs: {"enabled": True, "candidates": [candidate]})
+    monkeypatch.setattr(queue, "search_with_metadata_provider", lambda *_args, **_kwargs: {"enabled": True, "candidates": [candidate]})
 
     assert process_metadata_lookup_task(db_session, test_settings, task) == "COMPLETED"
     state = db_session.execute(text("SELECT author, organized, organizeStatus FROM LibraryWork WHERE id = 'work-lookup'")).mappings().one()
@@ -171,7 +171,7 @@ def test_lookup_applies_bangumi_candidate_when_local_title_is_an_exact_alias(db_
             "infobox": [{"key": "别名", "value": [{"k": "非官方", "v": "鹰峰同学请穿上衣服"}]}],
         },
     }
-    monkeypatch.setattr(queue, "metadata_search_candidates", lambda *_args, **_kwargs: {"enabled": True, "candidates": [candidate]})
+    monkeypatch.setattr(queue, "search_with_metadata_provider", lambda *_args, **_kwargs: {"enabled": True, "candidates": [candidate]})
 
     assert process_metadata_lookup_task(db_session, test_settings, task) == "COMPLETED"
     work = db_session.execute(text("SELECT title, description, organized, organizeStatus FROM LibraryWork WHERE id = 'work-lookup'")).mappings().one()
@@ -211,7 +211,7 @@ def test_lookup_uses_provider_order_and_author_to_disambiguate(db_session, test_
             ],
         }
 
-    monkeypatch.setattr(queue, "metadata_search_candidates", search)
+    monkeypatch.setattr(queue, "search_with_metadata_provider", search)
 
     assert process_metadata_lookup_task(db_session, test_settings, task) == "COMPLETED"
     assert calls == ["douban", "bangumi"]
@@ -226,7 +226,7 @@ def test_lookup_keeps_ambiguous_exact_candidates_for_review(db_session, test_set
         {"id": "a", "title": "黑暗坡食人树", "author": "甲"},
         {"id": "b", "title": "黑暗坡食人树", "author": "乙"},
     ]
-    monkeypatch.setattr(queue, "metadata_search_candidates", lambda *_args, **_kwargs: {"enabled": True, "candidates": ambiguous})
+    monkeypatch.setattr(queue, "search_with_metadata_provider", lambda *_args, **_kwargs: {"enabled": True, "candidates": ambiguous})
 
     assert process_metadata_lookup_task(db_session, test_settings, task) == "NO_MATCH"
     assert db_session.execute(text("SELECT status FROM MetadataLookupTask WHERE id = 'lookup-1'")).scalar() == "NO_MATCH"
@@ -268,7 +268,7 @@ def test_cancelled_lookup_and_parent_cannot_be_reopened_by_stale_worker(db_sessi
 def test_lookup_uses_three_retry_delays_then_fails(db_session, test_settings, monkeypatch):
     create_worker_tables(db_session)
     task = _insert_lookup_fixture(db_session)
-    monkeypatch.setattr(queue, "metadata_search_candidates", lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError("gateway timeout")))
+    monkeypatch.setattr(queue, "search_with_metadata_provider", lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError("gateway timeout")))
 
     expected = ["PENDING", "PENDING", "PENDING", "FAILED"]
     for expected_status in expected:
@@ -291,7 +291,13 @@ def test_lookup_keeps_existing_identity_when_overwrite_is_disabled_and_fills_oth
             "CREATE TABLE IF NOT EXISTS OrganizePolicy (id TEXT PRIMARY KEY, overwriteTitleAuthor INTEGER NOT NULL DEFAULT 1)"
         )
     )
-    db_session.execute(text("INSERT INTO OrganizePolicy (id, overwriteTitleAuthor) VALUES ('default', 0)"))
+    db_session.execute(
+        text(
+            "INSERT INTO OrganizePolicy "
+            "(id, overwriteTitleAuthor, createdAt, updatedAt) "
+            "VALUES ('default', 0, 'now', 'now')"
+        )
+    )
     db_session.commit()
     candidate = {
         "id": "douban-auto-apply-off",
@@ -304,7 +310,7 @@ def test_lookup_keeps_existing_identity_when_overwrite_is_disabled_and_fills_oth
             "infobox": [{"key": "别名", "value": [{"k": "非官方", "v": "鹰峰同学请穿上衣服"}]}],
         },
     }
-    monkeypatch.setattr(queue, "metadata_search_candidates", lambda *_args, **_kwargs: {"enabled": True, "candidates": [candidate]})
+    monkeypatch.setattr(queue, "search_with_metadata_provider", lambda *_args, **_kwargs: {"enabled": True, "candidates": [candidate]})
 
     assert process_metadata_lookup_task(db_session, test_settings, task) == "COMPLETED"
 

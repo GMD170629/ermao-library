@@ -9,9 +9,11 @@ from app.modules.system.application.commands import execute_system_transaction
 from app.modules.system.domain.health import HealthRunSnapshot
 from app.modules.system.infrastructure.events import (
     configured_max_event_bytes,
-    prune_system_events,
-    record_system_event,
-    set_max_event_bytes,
+    list_event_level_facets,
+    list_event_source_facets,
+    prune_system_events as _prune_system_events,
+    record_system_event as _record_system_event,
+    set_max_event_bytes as _set_max_event_bytes,
     system_event_size_bytes,
     system_event_storage_view,
 )
@@ -45,6 +47,54 @@ from app.modules.system.infrastructure.settings import (
     upsert_setting,
     upsert_settings,
 )
+
+
+def prune_system_events(
+    db: Session,
+    max_bytes: int | None = None,
+    *,
+    commit: bool = False,
+) -> dict[str, int]:
+    operation = lambda: _prune_system_events(db, max_bytes)
+    return execute_system_transaction(db, operation) if commit else operation()
+
+
+def set_max_event_bytes(db: Session, max_bytes: int) -> dict[str, Any]:
+    return execute_system_transaction(
+        db,
+        lambda: _set_max_event_bytes(db, max_bytes),
+    )
+
+
+def record_system_event(
+    db: Session,
+    *,
+    source: str,
+    action: str,
+    message: str,
+    level: str = "info",
+    actor_type: str = "system",
+    actor_id: str | None = None,
+    target_type: str | None = None,
+    target_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    commit: bool = False,
+    prune: bool = False,
+) -> str | None:
+    operation = lambda: _record_system_event(
+        db,
+        source=source,
+        action=action,
+        message=message,
+        level=level,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        target_type=target_type,
+        target_id=target_id,
+        metadata=metadata,
+        prune=prune,
+    )
+    return execute_system_transaction(db, operation) if commit else operation()
 
 
 def create_or_reuse_health_run(
@@ -143,6 +193,8 @@ __all__ = [
     "get_setting",
     "get_setting_raw",
     "health_run_snapshot",
+    "list_event_level_facets",
+    "list_event_source_facets",
     "list_settings",
     "mark_queue_stopped",
     "parse_setting_value",

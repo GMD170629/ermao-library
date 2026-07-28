@@ -6,7 +6,7 @@ import hashlib
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import MetaData, Table, delete, func, inspect as sa_inspect, insert, select, update
+from sqlalchemy import Table, delete, func, inspect as sa_inspect, insert, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,7 @@ from app.core.authorization import (
     edition_visibility_predicate,
     monitor_folder_visibility_predicate,
 )
+from app.db.base import Base
 from app.models.auth import ReaderBookmark
 from app.models.library import (
     LibraryConsumptionState,
@@ -49,27 +50,35 @@ def has_table(db: Session, table: str) -> bool:
 
 
 def table_columns(db: Session, table: str) -> set[str]:
-    if not has_table(db, table):
+    inspector = sa_inspect(db.connection())
+    if not inspector.has_table(table):
         return set()
-    return {column["name"] for column in sa_inspect(db.connection()).get_columns(table)}
+    return {
+        str(column["name"])
+        for column in inspector.get_columns(table)
+    }
 
 
 def _legacy_table(db: Session, table: str) -> Table | None:
     if not has_table(db, table):
         return None
-    metadata = MetaData()
-    return Table(table, metadata, autoload_with=db.connection())
+    return Base.metadata.tables.get(table)
 
 
 def _legacy_rows(stmt) -> list[dict[str, Any]]:
     return [dict(row) for row in stmt.mappings().all()]
 
 
+def _select_existing(db: Session, table: Table):
+    existing = table_columns(db, table.name)
+    return select(*(column for column in table.c if column.name in existing))
+
+
 def get_edition(db: Session, edition_id: str) -> dict[str, Any] | None:
     table = _legacy_table(db, "LibraryEdition")
     if table is None:
         return None
-    row = db.execute(select(table).where(table.c.id == edition_id)).mappings().first()
+    row = db.execute(_select_existing(db, table).where(table.c.id == edition_id)).mappings().first()
     return dict(row) if row else None
 
 
@@ -77,7 +86,7 @@ def get_work(db: Session, work_id: str) -> dict[str, Any] | None:
     table = _legacy_table(db, "LibraryWork")
     if table is None:
         return None
-    row = db.execute(select(table).where(table.c.id == work_id)).mappings().first()
+    row = db.execute(_select_existing(db, table).where(table.c.id == work_id)).mappings().first()
     return dict(row) if row else None
 
 
@@ -85,7 +94,7 @@ def get_volume(db: Session, volume_id: str) -> dict[str, Any] | None:
     table = _legacy_table(db, "LibraryVolume")
     if table is None:
         return None
-    row = db.execute(select(table).where(table.c.id == volume_id)).mappings().first()
+    row = db.execute(_select_existing(db, table).where(table.c.id == volume_id)).mappings().first()
     return dict(row) if row else None
 
 
@@ -114,7 +123,7 @@ def list_volumes_for_edition(db: Session, edition_id: str) -> list[dict[str, Any
         return []
     return _legacy_rows(
         db.execute(
-            select(table)
+            _select_existing(db, table)
             .where(table.c.editionId == edition_id)
             .order_by(table.c.sortOrder, table.c.id)
         )
@@ -127,7 +136,7 @@ def list_progress_for_user_work(db: Session, user_id: str, work_id: str) -> list
         return []
     return _legacy_rows(
         db.execute(
-            select(table)
+            _select_existing(db, table)
             .where(table.c.userId == user_id, table.c.workId == work_id)
             .order_by(table.c.updatedAt.desc(), table.c.id.desc())
         )
@@ -147,7 +156,7 @@ def list_units_for_edition(
     if volume_id:
         filters.append(table.c.volumeId == volume_id)
     return _legacy_rows(
-        db.execute(select(table).where(*filters).order_by(table.c.sortOrder, table.c.id))
+        db.execute(_select_existing(db, table).where(*filters).order_by(table.c.sortOrder, table.c.id))
     )
 
 
@@ -163,7 +172,7 @@ def list_files_for_edition(
     if volume_id:
         filters.append(table.c.volumeId == volume_id)
     return _legacy_rows(
-        db.execute(select(table).where(*filters).order_by(table.c.sortOrder, table.c.id))
+        db.execute(_select_existing(db, table).where(*filters).order_by(table.c.sortOrder, table.c.id))
     )
 
 
@@ -184,7 +193,7 @@ def list_reader_preferences(db: Session, user_id: str) -> list[dict[str, Any]]:
     table = _legacy_table(db, "ReaderPreference")
     if table is None:
         return []
-    return _legacy_rows(db.execute(select(table).where(table.c.userId == user_id)))
+    return _legacy_rows(db.execute(_select_existing(db, table).where(table.c.userId == user_id)))
 
 
 def get_book_preference(db: Session, user_id: str, work_id: str) -> dict[str, Any] | None:
@@ -192,7 +201,7 @@ def get_book_preference(db: Session, user_id: str, work_id: str) -> dict[str, An
     if table is None:
         return None
     row = db.execute(
-        select(table).where(table.c.userId == user_id, table.c.workId == work_id)
+        _select_existing(db, table).where(table.c.userId == user_id, table.c.workId == work_id)
     ).mappings().first()
     return dict(row) if row else None
 
@@ -203,6 +212,7 @@ def update_book_preference(
     *,
     schema_version: int,
     preferences: str,
+    updated_at: object,
 ) -> None:
     table = _legacy_table(db, "ReaderBookPreference")
     if table is None:
@@ -210,7 +220,15 @@ def update_book_preference(
     db.execute(
         update(table)
         .where(table.c.id == preference_id)
-        .values(schemaVersion=schema_version, preferences=preferences)
+        .values(
+            schemaVersion=schema_version,
+            preferences=preferences,
+            # Canonicalizing an already stored payload is a compatibility repair,
+            # not a user preference change. Supplying the current value prevents
+            # the mapped column's on-update timestamp from changing observable
+            # reader state.
+            updatedAt=updated_at,
+        )
     )
 
 
@@ -235,7 +253,7 @@ def get_consumption_state(
     if table is None:
         return None
     row = db.execute(
-        select(table).where(
+        _select_existing(db, table).where(
             table.c.userId == user_id,
             table.c.workId == work_id,
             table.c.mediaKind == media_kind,
@@ -317,7 +335,7 @@ def list_bookmarks(
         return []
     return _legacy_rows(
         db.execute(
-            select(table)
+            _select_existing(db, table)
             .where(
                 table.c.userId == user_id,
                 table.c.editionId == edition_id,
@@ -494,7 +512,7 @@ def get_reading_progress(
         filters.append(table.c.volumeId == volume_id)
     else:
         filters.append(table.c.volumeId.is_(None))
-    row = db.execute(select(table).where(*filters)).mappings().first()
+    row = db.execute(_select_existing(db, table).where(*filters)).mappings().first()
     return dict(row) if row else None
 
 

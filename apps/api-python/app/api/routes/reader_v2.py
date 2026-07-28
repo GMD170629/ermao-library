@@ -25,8 +25,8 @@ from app.core.authorization import (
 from app.core.config import Settings, get_settings
 from app.core.time import timestamp_ms_to_datetime
 from app.db.session import get_db
-from app.modules.media.infrastructure.page_index import ensure_volume_page_index
-from app.modules.reader.infrastructure import queries as reader_queries
+from app.bootstrap.media import ensure_volume_page_index
+from app.bootstrap.reader import reader_queries
 from app.schemas.reader_v2 import (
     AudioChapterSummary,
     AudioLocation,
@@ -307,6 +307,7 @@ def _book_preferences(db: Session, user_id: str, work_id: str, reader_format: st
                 str(existing["id"]),
                 schema_version=3,
                 preferences=_json_text(canonical_preferences),
+                updated_at=existing.get("updatedAt"),
             )
             db.commit()
         return preferences, _datetime(existing.get("updatedAt"))

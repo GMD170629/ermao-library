@@ -1,4 +1,4 @@
-from app.api.routes.compat import _progress_navigation, _progress_percent_with_navigation
+from app.modules.reader.public import progress_navigation, progress_percent_with_navigation
 
 
 ANCHORED_UNITS = [
@@ -11,7 +11,7 @@ ANCHORED_UNITS = [
 def test_progress_navigation_preserves_exact_fragment_for_shared_xhtml_resource():
     progress = {"percent": 12, "extra": '{"currentHref":"text/all.xhtml#chapter-2"}'}
 
-    navigation = _progress_navigation(progress, ANCHORED_UNITS)
+    navigation = progress_navigation(progress, ANCHORED_UNITS)
 
     assert navigation["currentHref"] == "Text/all.xhtml#chapter-2"
     assert navigation["currentChapterTitle"] == "第二章"
@@ -21,9 +21,9 @@ def test_progress_navigation_preserves_exact_fragment_for_shared_xhtml_resource(
 def test_progress_navigation_does_not_guess_ambiguous_resource_only_href():
     progress = {"percent": 0, "extra": '{"currentHref":"Text/all.xhtml","sectionIndex":0}'}
 
-    navigation = _progress_navigation(progress, ANCHORED_UNITS)
+    navigation = progress_navigation(progress, ANCHORED_UNITS)
 
     assert navigation["currentHref"] == "Text/all.xhtml"
     assert navigation["currentChapterTitle"] is None
     assert navigation["currentChapterSortOrder"] is None
-    assert _progress_percent_with_navigation(progress, ANCHORED_UNITS) == 0
+    assert progress_percent_with_navigation(progress, ANCHORED_UNITS) == 0

@@ -138,20 +138,17 @@ class QueueHeartbeatPump:
         with self._write_lock:
             try:
                 with self._session_factory() as db:
-                    try:
-                        execute_system_transaction(
+                    execute_system_transaction(
+                        db,
+                        lambda: record_queue_heartbeat(
                             db,
-                            lambda: record_queue_heartbeat(
-                                db,
-                                queue_name=self._queue_name,
-                                instance_id=self._instance_id,
-                                poll_interval_seconds=self._poll_interval_seconds,
-                                processed=processed,
-                                error=error,
-                            ),
-                        )
-                    finally:
-                        db.rollback()
+                            queue_name=self._queue_name,
+                            instance_id=self._instance_id,
+                            poll_interval_seconds=self._poll_interval_seconds,
+                            processed=processed,
+                            error=error,
+                        ),
+                    )
             except Exception as exc:
                 now = monotonic()
                 if now - self._last_write_warning_at >= 30:
@@ -169,17 +166,14 @@ class QueueHeartbeatPump:
         with self._write_lock:
             try:
                 with self._session_factory() as db:
-                    try:
-                        execute_system_transaction(
+                    execute_system_transaction(
+                        db,
+                        lambda: mark_queue_stopped(
                             db,
-                            lambda: mark_queue_stopped(
-                                db,
-                                queue_name=self._queue_name,
-                                instance_id=self._instance_id,
-                            ),
-                        )
-                    finally:
-                        db.rollback()
+                            queue_name=self._queue_name,
+                            instance_id=self._instance_id,
+                        ),
+                    )
             except Exception as exc:
                 LOGGER.warning(
                     "queue stopped state write deferred queue=%s error=%s",

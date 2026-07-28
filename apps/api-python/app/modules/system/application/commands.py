@@ -25,3 +25,9 @@ def execute_system_transaction(
         unit_of_work.rollback()
         raise
     return result
+
+
+def reset_failed_system_transaction(unit_of_work: SystemUnitOfWork) -> None:
+    """Reset a failed probe/checkpoint before recording its error state."""
+
+    unit_of_work.rollback()

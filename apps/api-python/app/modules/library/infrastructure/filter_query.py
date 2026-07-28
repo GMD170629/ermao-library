@@ -231,6 +231,22 @@ def _reading_status_predicate(
         )
         .correlate(LibraryWork)
     )
+    has_state = exists(
+        select(state.id)
+        .join(
+            edition,
+            and_(
+                edition.work_id == state.work_id,
+                inferred_media_kind(edition) == state.media_kind,
+            ),
+        )
+        .where(
+            state.user_id == user_id,
+            state.work_id == LibraryWork.id,
+            visible_edition,
+        )
+        .correlate(LibraryWork)
+    )
     has_visible = exists(
         select(edition.id).where(visible_edition).correlate(LibraryWork)
     )
@@ -249,11 +265,23 @@ def _reading_status_predicate(
     )
     status = str(condition.value or "UNREAD").upper()
     if status == "FINISHED":
-        predicate = and_(has_visible, ~unfinished_visible)
+        predicate = or_(
+            and_(has_visible, ~unfinished_visible),
+            and_(~has_state, LibraryWork.status == "FINISHED"),
+        )
     elif status == "READING":
-        predicate = and_(has_started, unfinished_visible)
+        predicate = or_(
+            and_(has_started, unfinished_visible),
+            and_(~has_state, LibraryWork.status == "READING"),
+        )
     else:
-        predicate = ~has_started
+        predicate = and_(
+            ~has_started,
+            or_(
+                has_state,
+                LibraryWork.status.in_(("UNREAD", "WANT")),
+            ),
+        )
     return not_(predicate) if condition.operator == "not_equals" else predicate
 
 

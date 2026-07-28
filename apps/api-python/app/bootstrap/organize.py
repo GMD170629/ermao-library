@@ -1,5 +1,8 @@
 """Organize capability composition root."""
 
+from app.modules.organize.infrastructure import job_queries as organize_job_queries
+from app.modules.organize.infrastructure import jobs as organize_jobs
+from app.modules.organize.infrastructure import runs as organize_runs
 from app.modules.organize.infrastructure.policy import (
     DEFAULT_INTERVAL_MINUTES,
     DEFAULT_POLICY_ID,
@@ -28,6 +31,9 @@ __all__ = [
     "DEFAULT_RULES",
     "MAX_INTERVAL_MINUTES",
     "MIN_INTERVAL_MINUTES",
+    "organize_job_queries",
+    "organize_jobs",
+    "organize_runs",
     "count_jobs_for_run",
     "ensure_organize_policy",
     "get_job_row",

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import threading
-import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -11,66 +10,29 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.core.time import now_timestamp_ms
-from app.modules.imports.infrastructure.library_queries import get_import_task_by_id
-from app.modules.imports.infrastructure.tasks import (
-    build_import_task_values,
-    claim_next_import_task as claim_next_import_task_row,
-    fail_claimed_import_task_row,
-    find_existing_import_task,
-    insert_import_task_with_assets,
-    link_imported_work_to_monitor_shelf,
-    mark_download_task_completed_for_import,
-    recover_stale_import_tasks as recover_stale_import_tasks_rows,
+from app.bootstrap.imports import (
+    enqueue_import_task,
+    library_repository,
+    task_repository,
+)
+from app.modules.imports.public import (
+    commit_import_checkpoint,
+    reset_failed_import_checkpoint,
 )
 from app.services.queue_runtime import QueueHeartbeatPump
 from app.worker.importer import ImportOptions, ImportResult, import_managed_book
 
+claim_next_import_task_row = task_repository.claim_next_import_task
+fail_claimed_import_task_row = task_repository.fail_claimed_import_task_row
+link_imported_work_to_monitor_shelf = task_repository.link_imported_work_to_monitor_shelf
+mark_download_task_completed_for_import = (
+    task_repository.mark_download_task_completed_for_import
+)
+recover_stale_import_tasks_rows = task_repository.recover_stale_import_tasks
+
 
 def _now() -> int:
     return now_timestamp_ms()
-
-
-def _id() -> str:
-    return f"py_{time.time_ns()}"
-
-
-def enqueue_import_task(
-    db: Session,
-    source_path: str | Path,
-    *,
-    origin: str,
-    original_name: str | None = None,
-    requested_title: str | None = None,
-    requested_author: str | None = None,
-    work_id: str | None = None,
-    monitor_folder_id: str | None = None,
-    message: str = "等待后台处理",
-    allow_terminal_requeue: bool = False,
-) -> tuple[dict[str, Any], bool]:
-    source = Path(source_path).expanduser().resolve()
-    existing = find_existing_import_task(
-        db,
-        str(source),
-        allow_terminal_requeue=allow_terminal_requeue,
-    )
-    if existing:
-        return existing, False
-    now = _now()
-    values, bundle_files = build_import_task_values(
-        task_id=_id(),
-        source=source,
-        origin=origin,
-        original_name=original_name,
-        requested_title=requested_title,
-        requested_author=requested_author,
-        work_id=work_id,
-        monitor_folder_id=monitor_folder_id,
-        message=message,
-        now=now,
-    )
-    task = insert_import_task_with_assets(db, values, bundle_files=bundle_files, now=now)
-    db.commit()
-    return get_import_task_by_id(db, str(task["id"])) or task, True
 
 
 def recover_stale_import_tasks(db: Session) -> int:
@@ -79,7 +41,7 @@ def recover_stale_import_tasks(db: Session) -> int:
         now=_now(),
         message="后台任务恢复后重新排队",
     )
-    db.commit()
+    commit_import_checkpoint(db)
     return recovered
 
 
@@ -90,7 +52,7 @@ def claim_next_import_task(db: Session, worker_id: str, lease_seconds: int) -> d
         lease_seconds=lease_seconds,
         now=now_timestamp_ms(),
     )
-    db.commit()
+    commit_import_checkpoint(db)
     return task
 
 
@@ -101,7 +63,7 @@ def _add_work_to_shelf(db: Session, monitor_folder_id: str | None, work_id: str)
         work_id,
         created_at=_now(),
     )
-    db.commit()
+    commit_import_checkpoint(db)
 
 
 def process_import_task(db: Session, settings: Settings, task: dict[str, Any]) -> ImportResult:
@@ -126,14 +88,14 @@ def process_import_task(db: Session, settings: Settings, task: dict[str, Any]) -
         book_id=result.work_id,
         updated_at=_now(),
     )
-    db.commit()
+    commit_import_checkpoint(db)
     return result
 
 
 def fail_claimed_import_task(db: Session, task: dict[str, Any], error: Exception) -> bool:
     """Force an already claimed task into a terminal state after an unexpected worker error."""
 
-    db.rollback()
+    reset_failed_import_checkpoint(db)
     source = Path(str(task.get("sourcePath") or ""))
     source_missing = not source.exists()
     error_code = "SOURCE_NOT_FOUND" if source_missing else "IMPORT_WORKER_FAILED"
@@ -152,7 +114,7 @@ def fail_claimed_import_task(db: Session, task: dict[str, Any], error: Exception
         retryable=not source_missing,
         now=now,
     )
-    db.commit()
+    commit_import_checkpoint(db)
     return failed
 
 

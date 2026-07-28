@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import ColumnElement, and_, exists, false, or_, select, text
+from sqlalchemy import ColumnElement, and_, exists, false, or_, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, aliased
 

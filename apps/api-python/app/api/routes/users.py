@@ -16,7 +16,7 @@ from app.core.i18n import configured_locale
 from app.db.session import get_db
 from app.models.auth import Session as UserSession
 from app.models.auth import User, cuid, db_timestamp
-from app.modules.auth.infrastructure.user_data import (
+from app.bootstrap.auth import (
     delete_personal_user_data,
     list_monitor_folder_ids,
     replace_monitor_folder_access,

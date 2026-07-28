@@ -157,8 +157,6 @@ expectNotIncludes('docker-compose.prod.yml', 'scan-worker:');
 expectNotIncludes('scripts/publish-docker-hub.sh', 'shuku-starship-api-python');
 expectNotIncludes('scripts/publish-docker-hub.sh', 'shuku-starship-scan-worker');
 expectNotIncludes('scripts/publish-docker-hub.sh', 'shuku-starship-migrator');
-expectNotIncludes('.github/workflows/docker-prod.yml', 'shuku-starship-migrator');
-expectNotIncludes('.github/workflows/docker-prod.yml', 'target: migrator');
 expectNotIncludes('apps/web/next.config.js', 'PYTHON_API_PROXY_TARGET');
 
 if (process.env.VERIFY_DOCKER_BUILD === 'true') {

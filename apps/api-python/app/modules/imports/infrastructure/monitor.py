@@ -18,18 +18,17 @@ from app.modules.imports.infrastructure.library_queries import (
     shelf_exists,
     touch_shelf_updated_at,
 )
-from app.modules.imports.infrastructure.schema import entity_as_legacy_dict, has_table, table_columns
 from app.models.common import db_timestamp
 from app.services.audio_metadata import collect_audio_bundle_files
 
 
 def list_enabled_monitor_folders(db: Session) -> list[dict[str, Any]]:
-    rows = db.scalars(
-        select(MonitorFolder)
+    rows = db.execute(
+        select(MonitorFolder.__table__)
         .where(MonitorFolder.enabled.is_(True))
         .order_by(MonitorFolder.created_at.desc())
-    ).all()
-    return [entity_as_legacy_dict(row) for row in rows]
+    ).mappings().all()
+    return [dict(row) for row in rows]
 
 
 def get_system_settings(db: Session, keys: tuple[str, ...]) -> dict[str, str]:
@@ -66,41 +65,26 @@ def get_completed_import_task_work_id(db: Session, source_path: str) -> dict[str
 
 
 def load_known_import_paths(db: Session) -> set[Path]:
-    try:
-        rows: list[str] = []
-        if has_table(db, "ImportTask"):
-            task_columns = table_columns(db, "ImportTask")
-            if "taskKind" in task_columns:
-                task_rows = db.execute(
-                    select(ImportTask.source_path, ImportTask.task_kind).where(
-                        ImportTask.source_path.is_not(None)
-                    )
-                ).all()
-                for source_path, task_kind in task_rows:
-                    candidate = Path(str(source_path)).expanduser().resolve()
-                    directory_task = str(task_kind or "").upper() == "AUDIO_BUNDLE"
-                    if directory_task and candidate.is_dir() and not audio_bundle_fully_imported(
-                        db,
-                        [str(item.resolve()) for item in collect_audio_bundle_files(candidate)],
-                    ):
-                        continue
-                    rows.append(str(candidate))
-            else:
-                rows.extend(
-                    str(value)
-                    for value in db.scalars(
-                        select(ImportTask.source_path).where(ImportTask.source_path.is_not(None))
-                    ).all()
-                    if value
-                )
-        if has_table(db, "LibraryFile"):
-            rows.extend(
-                str(value)
-                for value in db.scalars(
-                    select(LibraryFile.path).where(LibraryFile.path.is_not(None))
-                ).all()
-                if value
-            )
-    except Exception:
-        return set()
+    rows: list[str] = []
+    task_rows = db.execute(
+        select(ImportTask.source_path, ImportTask.task_kind).where(
+            ImportTask.source_path.is_not(None)
+        )
+    ).all()
+    for source_path, task_kind in task_rows:
+        candidate = Path(str(source_path)).expanduser().resolve()
+        directory_task = str(task_kind or "").upper() == "AUDIO_BUNDLE"
+        if directory_task and candidate.is_dir() and not audio_bundle_fully_imported(
+            db,
+            [str(item.resolve()) for item in collect_audio_bundle_files(candidate)],
+        ):
+            continue
+        rows.append(str(candidate))
+    rows.extend(
+        str(value)
+        for value in db.scalars(
+            select(LibraryFile.path).where(LibraryFile.path.is_not(None))
+        ).all()
+        if value
+    )
     return {Path(source_path).expanduser().resolve() for source_path in rows if source_path}

@@ -19,13 +19,10 @@ from app.models.library import (
     LibraryWork,
     LibraryWorkFacet,
 )
-from app.modules.imports.infrastructure.schema import has_table
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
 
 
 def list_visible_works(db: Session, context: AuthorizationContext) -> list[dict[str, Any]]:
-    if not has_table(db, "LibraryWork"):
-        return []
     rows = db.scalars(
         select(LibraryWork).where(
             func.coalesce(LibraryWork.hidden, False).is_(False),
@@ -36,8 +33,6 @@ def list_visible_works(db: Session, context: AuthorizationContext) -> list[dict[
 
 
 def media_kind_counts(db: Session, context: AuthorizationContext) -> list[dict[str, Any]]:
-    if not has_table(db, "LibraryEdition"):
-        return []
     rows = db.execute(
         select(
             LibraryEdition.media_kind.label("value"),
@@ -101,8 +96,6 @@ def visible_categories(
 
 
 def visible_work_option_rows(db: Session, context: AuthorizationContext) -> list[dict[str, Any]]:
-    if not has_table(db, "LibraryWork"):
-        return []
     rows = db.execute(
         select(
             LibraryWork.author,
@@ -126,8 +119,6 @@ def visible_work_option_rows(db: Session, context: AuthorizationContext) -> list
 
 
 def visible_edition_option_rows(db: Session, context: AuthorizationContext) -> list[dict[str, Any]]:
-    if not has_table(db, "LibraryEdition"):
-        return []
     rows = db.execute(
         select(
             LibraryEdition.publisher,
@@ -162,8 +153,6 @@ def list_series_groups(
     limit: int,
     min_books: int,
 ) -> tuple[list[dict[str, Any]], int]:
-    if not has_table(db, "LibraryWork"):
-        return [], 0
     filters = [
         LibraryWork.series_name.is_not(None),
         func.trim(LibraryWork.series_name) != "",

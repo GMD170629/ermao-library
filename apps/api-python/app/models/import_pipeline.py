@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import (
+    Boolean,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    column,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.time import TimestampMilliseconds
@@ -118,7 +128,7 @@ class KindleSendTask(Base):
             "fileId",
             "recipientEmail",
             unique=True,
-            sqlite_where=text("status IN ('queued', 'sending')"),
+            sqlite_where=column("status", String).in_(("queued", "sending")),
         ),
     )
 

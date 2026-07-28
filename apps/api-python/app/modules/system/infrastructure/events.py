@@ -65,16 +65,13 @@ def system_event_storage_view(db: Session) -> dict[str, Any]:
 def set_max_event_bytes(db: Session, max_bytes: int) -> dict[str, Any]:
     size = validate_log_max_bytes(max_bytes)
     setting_store.upsert_setting(db, LOG_MAX_BYTES_SETTING, size)
-    db.commit()
-    result = prune_system_events(db, size, commit=True)
+    result = prune_system_events(db, size)
     return {**result, "lastPrunedAt": system_event_storage_view(db).get("lastPrunedAt")}
 
 
 def prune_system_events(
     db: Session,
     max_bytes: int | None = None,
-    *,
-    commit: bool = False,
 ) -> dict[str, int]:
     max_bytes = configured_max_event_bytes(db) if max_bytes is None else int(max_bytes)
     deleted = 0
@@ -103,8 +100,6 @@ def prune_system_events(
     size_bytes = system_event_size_bytes(db)
     if deleted:
         setting_store.upsert_setting(db, LAST_PRUNED_AT_SETTING, datetime.now(timezone.utc).isoformat())
-    if commit:
-        db.commit()
     return {"deleted": deleted, "sizeBytes": size_bytes, "maxBytes": max_bytes}
 
 
@@ -120,7 +115,6 @@ def record_system_event(
     target_type: str | None = None,
     target_id: str | None = None,
     metadata: dict[str, Any] | None = None,
-    commit: bool = False,
     prune: bool = False,
 ) -> str | None:
     event_id = f"py_{uuid4().hex}"
@@ -140,8 +134,28 @@ def record_system_event(
         )
     )
     db.flush()
-    if commit or prune:
+    if prune:
         prune_system_events(db)
-    if commit:
-        db.commit()
     return event_id
+
+
+def list_event_source_facets(db: Session) -> list[dict[str, Any]]:
+    return [
+        {"source": row.source, "count": int(row.count or 0)}
+        for row in db.execute(
+            select(SystemEvent.source, func.count().label("count"))
+            .group_by(SystemEvent.source)
+            .order_by(SystemEvent.source.asc())
+        ).all()
+    ]
+
+
+def list_event_level_facets(db: Session) -> list[dict[str, Any]]:
+    return [
+        {"level": row.level, "count": int(row.count or 0)}
+        for row in db.execute(
+            select(SystemEvent.level, func.count().label("count"))
+            .group_by(SystemEvent.level)
+            .order_by(SystemEvent.level.asc())
+        ).all()
+    ]

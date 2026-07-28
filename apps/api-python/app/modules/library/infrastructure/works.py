@@ -306,19 +306,8 @@ def transfer_source_work_side_effects(
 
 
 def get_work(db: Session, work_id: str) -> dict[str, Any] | None:
-    """Load a work row using only columns present in the live schema.
-
-    Slim characterization databases may omit newer ORM columns such as
-    ``monitorFolderId``; reflecting avoids selecting missing columns.
-    """
-
-    from app.modules.imports.infrastructure.schema import has_table, reflected_table
-
-    if not has_table(db, "LibraryWork"):
-        return None
-    table = reflected_table(db, "LibraryWork")
-    row = db.execute(select(table).where(table.c.id == work_id)).mappings().first()
-    return dict(row) if row else None
+    work = db.get(LibraryWork, work_id)
+    return entity_as_legacy_dict(work) if work is not None else None
 
 
 def update_work_fields(
@@ -497,30 +486,27 @@ def clear_primary_for_media_kind(
     now: datetime,
     has_media_kind_column: bool,
 ) -> None:
-    table = None
-    from sqlalchemy import MetaData, Table, inspect as sa_inspect, update as sa_update
-
-    if not sa_inspect(db.connection()).has_table("LibraryEdition"):
-        return
-    metadata = MetaData()
-    table = Table("LibraryEdition", metadata, autoload_with=db.connection(), resolve_fks=False)
-    filters = [table.c.workId == work_id]
-    if has_media_kind_column and "mediaKind" in table.c:
+    filters = [LibraryEdition.work_id == work_id]
+    if has_media_kind_column:
         # Match COALESCE(NULLIF(TRIM(mediaKind), ''), CASE format ...) = media_kind
-        from sqlalchemy import case, func as sa_func
+        from sqlalchemy import case
 
-        derived = sa_func.coalesce(
-            sa_func.nullif(sa_func.trim(table.c.mediaKind), ""),
+        derived = func.coalesce(
+            func.nullif(func.trim(LibraryEdition.media_kind), ""),
             case(
-                (sa_func.upper(table.c.format) == "COMIC", "COMIC"),
-                (sa_func.upper(table.c.format) == "AUDIO", "AUDIOBOOK"),
+                (func.upper(LibraryEdition.format) == "COMIC", "COMIC"),
+                (func.upper(LibraryEdition.format) == "AUDIO", "AUDIOBOOK"),
                 else_="EBOOK",
             ),
         )
         filters.append(derived == media_kind)
     elif formats:
-        filters.append(table.c.format.in_(list(formats)))
-    db.execute(sa_update(table).where(*filters).values(primary=False, updatedAt=now))
+        filters.append(LibraryEdition.format.in_(formats))
+    db.execute(
+        update(LibraryEdition)
+        .where(*filters)
+        .values(is_primary=False, updated_at=now)
+    )
 
 
 def mark_edition_primary_for_work(
@@ -531,25 +517,23 @@ def mark_edition_primary_for_work(
     work_type: str,
     now: datetime,
 ) -> None:
-    from sqlalchemy import MetaData, Table, inspect as sa_inspect, update as sa_update
-
-    if not sa_inspect(db.connection()).has_table("LibraryEdition"):
-        return
-    metadata = MetaData()
-    edition_table = Table("LibraryEdition", metadata, autoload_with=db.connection(), resolve_fks=False)
     db.execute(
-        sa_update(edition_table)
-        .where(edition_table.c.id == edition_id, edition_table.c.workId == work_id)
-        .values(primary=True, updatedAt=now)
+        update(LibraryEdition)
+        .where(
+            LibraryEdition.id == edition_id,
+            LibraryEdition.work_id == work_id,
+        )
+        .values(is_primary=True, updated_at=now)
     )
-    if sa_inspect(db.connection()).has_table("LibraryWork"):
-        work_table = Table("LibraryWork", MetaData(), autoload_with=db.connection(), resolve_fks=False)
-        values = {"updatedAt": now}
-        if "primaryEditionId" in work_table.c:
-            values["primaryEditionId"] = edition_id
-        if "workType" in work_table.c:
-            values["workType"] = work_type
-        db.execute(sa_update(work_table).where(work_table.c.id == work_id).values(**values))
+    db.execute(
+        update(LibraryWork)
+        .where(LibraryWork.id == work_id)
+        .values(
+            primary_edition_id=edition_id,
+            work_type=work_type,
+            updated_at=now,
+        )
+    )
 
 
 def count_visible_editions(db: Session, work_id: str) -> int:

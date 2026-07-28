@@ -6,11 +6,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Integer, cast, update
+from sqlalchemy import Integer, cast, insert, select, update
 from sqlalchemy.orm import Session
 
-from app.models.import_pipeline import ImportTask
-from app.modules.imports.infrastructure.legacy_persistence import get_entity, legacy_insert
+from app.models.import_pipeline import ImportAsset, ImportTask
+from app.core.time import now_timestamp_ms
 from app.modules.imports.infrastructure.library_queries import (
     add_work_to_shelf,
     complete_download_task_for_source,
@@ -18,7 +18,6 @@ from app.modules.imports.infrastructure.library_queries import (
     get_import_task_by_id,
     get_monitor_folder_shelf_id,
 )
-from app.modules.imports.infrastructure.schema import has_table, reflected_table, table_columns
 from app.services.audio_metadata import collect_audio_bundle_files
 
 
@@ -28,21 +27,17 @@ def find_existing_import_task(
     *,
     allow_terminal_requeue: bool,
 ) -> dict[str, Any] | None:
-    if not has_table(db, "ImportTask"):
-        return None
     statuses = ("PENDING", "PARSING") if allow_terminal_requeue else ("PENDING", "PARSING", "COMPLETED", "FAILED")
-    return get_entity(
-        db,
-        "ImportTask",
-        ImportTask.source_path == source_path,
-        ImportTask.status.in_(statuses),
-        order_by=(cast(ImportTask.created_at, Integer).desc(), ImportTask.id.desc()),
-    )
-
-
-def _filter_import_task_values(db: Session, values: dict[str, Any]) -> dict[str, Any]:
-    columns = table_columns(db, "ImportTask")
-    return {key: value for key, value in values.items() if key in columns}
+    row = db.execute(
+        select(ImportTask.__table__)
+        .where(
+            ImportTask.source_path == source_path,
+            ImportTask.status.in_(statuses),
+        )
+        .order_by(cast(ImportTask.created_at, Integer).desc(), ImportTask.id.desc())
+        .limit(1)
+    ).mappings().first()
+    return dict(row) if row else None
 
 
 def insert_import_task_with_assets(
@@ -52,46 +47,80 @@ def insert_import_task_with_assets(
     bundle_files: list[Path],
     now: Any,
 ) -> dict[str, Any]:
-    columns = table_columns(db, "ImportTask")
-    filtered = {key: value for key, value in values.items() if key in columns}
-    task = legacy_insert(db, "ImportTask", filtered)
-    if bundle_files and has_table(db, "ImportAsset"):
-        asset_columns = table_columns(db, "ImportAsset")
+    db.execute(insert(ImportTask.__table__).values(values))
+    db.flush()
+    task = dict(values)
+    if bundle_files:
         for index, asset_path in enumerate(bundle_files):
             asset_values = {
-                key: value
-                for key, value in {
-                    "id": f"py_{time.time_ns()}",
-                    "importTaskId": task["id"],
-                    "sourcePath": str(asset_path),
-                    "status": "PENDING",
-                    "sortOrder": index,
-                    "createdAt": now,
-                    "updatedAt": now,
-                }.items()
-                if key in asset_columns
+                "id": f"py_{time.time_ns()}",
+                "importTaskId": task["id"],
+                "sourcePath": str(asset_path),
+                "status": "PENDING",
+                "sortOrder": index,
+                "createdAt": now,
+                "updatedAt": now,
             }
-            legacy_insert(db, "ImportAsset", asset_values)
+            db.execute(insert(ImportAsset.__table__).values(asset_values))
+        db.flush()
     return get_import_task_by_id(db, str(task["id"])) or task
 
 
-def recover_stale_import_tasks(db: Session, *, now: Any, message: str) -> int:
-    if not has_table(db, "ImportTask"):
-        return 0
-    table = reflected_table(db, "ImportTask")
-    values = _filter_import_task_values(
+def stage_import_task(
+    db: Session,
+    source_path: str | Path,
+    *,
+    origin: str,
+    original_name: str | None = None,
+    requested_title: str | None = None,
+    requested_author: str | None = None,
+    work_id: str | None = None,
+    monitor_folder_id: str | None = None,
+    message: str = "等待后台处理",
+    allow_terminal_requeue: bool = False,
+) -> tuple[dict[str, Any], bool]:
+    """Stage one fixed-model import task without owning the transaction."""
+
+    source = Path(source_path).expanduser().resolve()
+    existing = find_existing_import_task(
         db,
-        {
-            "status": "PENDING",
-            "progress": 0,
-            "message": message,
-            "updatedAt": now,
-            "leaseOwner": None,
-            "leaseExpiresAt": None,
-        },
+        str(source),
+        allow_terminal_requeue=allow_terminal_requeue,
     )
-    if not values:
-        return 0
+    if existing:
+        return existing, False
+    now = now_timestamp_ms()
+    values, bundle_files = build_import_task_values(
+        task_id=f"py_{time.time_ns()}",
+        source=source,
+        origin=origin,
+        original_name=original_name,
+        requested_title=requested_title,
+        requested_author=requested_author,
+        work_id=work_id,
+        monitor_folder_id=monitor_folder_id,
+        message=message,
+        now=now,
+    )
+    task = insert_import_task_with_assets(
+        db,
+        values,
+        bundle_files=bundle_files,
+        now=now,
+    )
+    return get_import_task_by_id(db, str(task["id"])) or task, True
+
+
+def recover_stale_import_tasks(db: Session, *, now: Any, message: str) -> int:
+    table = ImportTask.__table__
+    values = {
+        "status": "PENDING",
+        "progress": 0,
+        "message": message,
+        "updatedAt": now,
+        "leaseOwner": None,
+        "leaseExpiresAt": None,
+    }
     result = db.execute(update(table).where(table.c.status == "PARSING").values(values))
     return int(result.rowcount or 0)
 
@@ -103,46 +132,31 @@ def claim_next_import_task(
     lease_seconds: int,
     now: Any,
 ) -> dict[str, Any] | None:
-    if not has_table(db, "ImportTask"):
-        return None
-    columns = table_columns(db, "ImportTask")
     lease_expires = now + lease_seconds * 1000
-    pending = get_entity(
-        db,
-        "ImportTask",
-        ImportTask.status == "PENDING",
-        order_by=(cast(ImportTask.created_at, Integer).asc(), ImportTask.id.asc()),
-    )
+    pending_row = db.execute(
+        select(ImportTask.__table__)
+        .where(ImportTask.status == "PENDING")
+        .order_by(cast(ImportTask.created_at, Integer).asc(), ImportTask.id.asc())
+        .limit(1)
+    ).mappings().first()
+    pending = dict(pending_row) if pending_row else None
     if pending is None:
         return None
-    if {"leaseOwner", "leaseExpiresAt", "attempts"}.issubset(columns):
-        table = reflected_table(db, "ImportTask")
-        claim_values = _filter_import_task_values(
-            db,
-            {
-                "status": "PARSING",
-                "leaseOwner": worker_id,
-                "leaseExpiresAt": lease_expires,
-                "attempts": int(pending.get("attempts") or 0) + 1,
-                "message": "正在准备导入",
-                "updatedAt": now,
-            },
-        )
-        result = db.execute(
-            update(table)
-            .where(table.c.id == pending["id"], table.c.status == "PENDING")
-            .values(claim_values)
-        )
-        if not result.rowcount:
-            return None
-        return get_import_task_by_id(db, str(pending["id"]))
-
-    table = reflected_table(db, "ImportTask")
-    db.execute(
+    table = ImportTask.__table__
+    result = db.execute(
         update(table)
-        .where(table.c.id == pending["id"])
-        .values(_filter_import_task_values(db, {"status": "PARSING"}))
+        .where(table.c.id == pending["id"], table.c.status == "PENDING")
+        .values(
+            status="PARSING",
+            leaseOwner=worker_id,
+            leaseExpiresAt=lease_expires,
+            attempts=int(pending.get("attempts") or 0) + 1,
+            message="正在准备导入",
+            updatedAt=now,
+        )
     )
+    if not result.rowcount:
+        return None
     return get_import_task_by_id(db, str(pending["id"]))
 
 
@@ -156,22 +170,19 @@ def fail_claimed_import_task_row(
     retryable: bool,
     now: Any,
 ) -> bool:
-    table = reflected_table(db, "ImportTask")
-    values = _filter_import_task_values(
-        db,
-        {
-            "status": "FAILED",
-            "progress": 100,
-            "errorCode": error_code,
-            "retryable": retryable,
-            "errorSummary": error_summary,
-            "message": message,
-            "leaseOwner": None,
-            "leaseExpiresAt": None,
-            "finishedAt": now,
-            "updatedAt": now,
-        },
-    )
+    table = ImportTask.__table__
+    values = {
+        "status": "FAILED",
+        "progress": 100,
+        "errorCode": error_code,
+        "retryable": retryable,
+        "errorSummary": error_summary,
+        "message": message,
+        "leaseOwner": None,
+        "leaseExpiresAt": None,
+        "finishedAt": now,
+        "updatedAt": now,
+    }
     result = db.execute(
         update(table)
         .where(
@@ -198,7 +209,7 @@ def link_imported_work_to_monitor_shelf(
     *,
     created_at: Any,
 ) -> None:
-    if not monitor_folder_id or not has_table(db, "ShelfWork") or not has_table(db, "MonitorFolder"):
+    if not monitor_folder_id:
         return
     shelf_id = get_monitor_folder_shelf_id(db, monitor_folder_id)
     if not shelf_id:

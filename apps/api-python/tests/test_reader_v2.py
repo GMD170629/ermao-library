@@ -389,7 +389,7 @@ def test_bootstrap_normalizes_and_rewrites_stored_v2_preferences(client, db_sess
     assert rewritten["epub"]["spreadMode"] == "single"
     assert rewritten["epub"]["pageTurnAnimation"] == "slide"
     assert rewritten["comic"]["pageTurnAnimation"] == "slide"
-    assert stored["updatedAt"] == "2026-07-02T01:00:00"
+    assert stored["updatedAt"] == 1782954000000
 
 
 def test_bootstrap_preserves_valid_fields_in_partially_invalid_stored_preferences(client, db_session):
@@ -457,7 +457,7 @@ def test_bootstrap_preserves_valid_fields_in_partially_invalid_stored_preference
     assert "futureRoot" not in rewritten
     assert "futureAppearance" not in rewritten["appearance"]
     assert "futureEpub" not in rewritten["epub"]
-    assert stored["updatedAt"] == "2026-07-03T01:00:00"
+    assert stored["updatedAt"] == 1783040400000
 
 
 def test_bootstrap_returns_each_edition_latest_progress_for_version_navigation(client, db_session):

@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import json
 import queue
-import re
 import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -15,48 +13,35 @@ from watchdog.events import FileMovedEvent, FileSystemEvent, FileSystemEventHand
 from watchdog.observers import Observer
 
 from app.core.config import Settings
-from app.modules.imports.infrastructure.library_queries import audio_bundle_fully_imported
-from app.modules.imports.infrastructure.monitor import (
-    add_work_to_target_shelf,
-    get_completed_import_task_work_id,
-    get_system_settings,
-    list_enabled_monitor_folders,
-    load_known_import_paths as load_known_import_paths_from_db,
-    upsert_system_setting,
+from app.bootstrap.imports import (
+    MonitorFolderConfig,
+    ScanSummary,
+    enqueue_import_task,
+    is_proven_audio_bundle_directory,
+    library_repository,
+    load_known_import_paths,
+    monitor_folder_config,
+    monitor_repository,
+    scan_directory_for_imports,
+    should_ignore_file,
 )
+from app.modules.imports.public import commit_import_checkpoint
 from app.services.system_events import record_system_event
-from app.services.import_preferences import (
-    ImportPreferences,
-    SUPPORTED_IMPORT_EXTENSIONS,
-    load_import_preferences,
-    matches_ignore_patterns,
-)
-from app.worker.importer import is_supported_import_file
+from app.services.import_preferences import load_import_preferences
 from app.services.audio_metadata import audio_bundle_root, collect_audio_bundle_files, is_supported_audio_file
-from app.worker.persistent_import_queue import enqueue_import_task
 from app.worker.path_security import PathSecurityService
+
+audio_bundle_fully_imported = library_repository.audio_bundle_fully_imported
+add_work_to_target_shelf = monitor_repository.add_work_to_target_shelf
+get_completed_import_task_work_id = (
+    monitor_repository.get_completed_import_task_work_id
+)
+get_system_settings = monitor_repository.get_system_settings
+list_enabled_monitor_folders = monitor_repository.list_enabled_monitor_folders
+upsert_system_setting = monitor_repository.upsert_system_setting
 
 RESCAN_REQUESTED_AT_KEY = "monitor.rescanRequestedAt"
 RESCAN_HANDLED_AT_KEY = "monitor.rescanHandledAt"
-
-
-@dataclass(frozen=True)
-class MonitorFolderConfig:
-    id: str
-    root_path: str
-    shelf_id: str | None = None
-    ignore_hidden: bool = True
-    ignore_patterns: str | None = None
-    min_file_size_bytes: int = 10240
-    global_ignore_patterns: str = ""
-    allowed_extensions: tuple[str, ...] = SUPPORTED_IMPORT_EXTENSIONS
-    stability_check_enabled: bool = True
-    stability_check_seconds: float = 2.0
-    auto_convert_to_epub: bool = True
-
-
-class ImportQueueProtocol(Protocol):
-    def enqueue(self, path: Path, folder: MonitorFolderConfig) -> None: ...
 
 
 @dataclass
@@ -65,16 +50,6 @@ class WatchState:
     root_path: Path
     config_signature: str
     timers: dict[Path, threading.Timer] = field(default_factory=dict)
-
-
-@dataclass
-class ScanSummary:
-    directories_scanned: int = 0
-    files_scanned: int = 0
-    candidates_found: int = 0
-    cached_files: int = 0
-    ignored_files: int = 0
-    errors: list[dict[str, str]] = field(default_factory=list)
 
 
 class ImportQueue:
@@ -283,7 +258,7 @@ class WorkerManager:
                 possible_root
                 if possible_root.is_dir()
                 and possible_root.resolve() != state.root_path.resolve()
-                and _is_proven_audio_bundle_directory(possible_root)
+                and is_proven_audio_bundle_directory(possible_root)
                 else path
             )
         if candidate.is_dir():
@@ -341,40 +316,6 @@ def enabled_monitor_folders(db: Session) -> list[MonitorFolderConfig]:
     return [monitor_folder_config(row, preferences=preferences) for row in rows]
 
 
-def monitor_folder_config(row: Any, *, preferences: ImportPreferences | None = None) -> MonitorFolderConfig:
-    preferences = preferences or ImportPreferences()
-    raw_min_file_size = row.get("minFileSizeBytes")
-    return MonitorFolderConfig(
-        id=str(row["id"]),
-        root_path=str(row["rootPath"]),
-        shelf_id=str(row.get("shelfId")) if row.get("shelfId") else None,
-        ignore_hidden=bool(row.get("ignoreHidden", True)),
-        ignore_patterns=row.get("ignorePatterns"),
-        min_file_size_bytes=int(10240 if raw_min_file_size is None else raw_min_file_size),
-        global_ignore_patterns=preferences.ignore_patterns,
-        allowed_extensions=preferences.allowed_extensions,
-        stability_check_enabled=preferences.stability_check_enabled,
-        stability_check_seconds=preferences.stability_check_seconds,
-        auto_convert_to_epub=preferences.auto_convert_to_epub,
-    )
-
-
-def should_ignore_path(path: Path, folder: MonitorFolderConfig) -> bool:
-    if any(part.endswith(".part") or part.startswith(".upload-") for part in path.parts):
-        return True
-    if folder.ignore_hidden and any(part.startswith(".") and len(part) > 1 for part in path.parts):
-        return True
-    return matches_ignore_patterns(path, folder.global_ignore_patterns) or matches_ignore_patterns(path, folder.ignore_patterns)
-
-
-def should_ignore_file(path: Path, folder: MonitorFolderConfig) -> bool:
-    if should_ignore_path(path, folder) or not is_supported_import_file(path):
-        return True
-    if path.suffix and path.suffix.lower() not in folder.allowed_extensions:
-        return True
-    return False
-
-
 def config_signature(folder: MonitorFolderConfig) -> str:
     return "|".join([
         folder.root_path,
@@ -388,45 +329,6 @@ def config_signature(folder: MonitorFolderConfig) -> str:
         str(folder.stability_check_seconds),
         str(folder.auto_convert_to_epub),
     ])
-
-
-_TRACK_FILE_PATTERN = re.compile(
-    r"^(?:(?:cd|disc|disk)\s*\d+[ ._-]*)?(?:(?:track|chapter|chap|ch|第)\s*)?[\[(]?\d{1,6}[\])]?(?:\s*[章回集节])?(?:[ ._-]+|$)",
-    re.I,
-)
-_EPISODE_FILE_PATTERN = re.compile(r"第\s*\d{1,6}\s*[章回集节]", re.I)
-
-
-def _is_proven_audio_bundle_directory(path: Path, files: list[Path] | None = None) -> bool:
-    """Apply directory-first audiobook grouping below a monitor root.
-
-    A user-created directory is the strongest grouping boundary. Track
-    numbers can occur after a book title (for example ``《书名》第153集``),
-    so filename-prefix heuristics must not split such a directory into one
-    edition per file. A mixed directory that also contains another supported
-    book format remains conservative and keeps its audio files independent.
-    """
-
-    try:
-        candidates = files if files is not None else collect_audio_bundle_files(path)
-    except (OSError, ValueError):
-        return False
-    if len(candidates) < 2:
-        return False
-    try:
-        has_sibling_book = any(
-            child.is_file()
-            and not is_supported_audio_file(child)
-            and is_supported_import_file(child)
-            for child in path.iterdir()
-        )
-    except OSError:
-        return False
-    if not has_sibling_book:
-        return True
-    # In a mixed-media folder, retain the older explicit-prefix safeguard so
-    # a split audiobook plus its PDF appendix still imports as two media items.
-    return all(_TRACK_FILE_PATTERN.match(item.name) or _EPISODE_FILE_PATTERN.search(item.stem) for item in candidates)
 
 
 def _audio_bundle_is_fully_imported(db: Session, path: Path) -> bool:
@@ -486,7 +388,7 @@ def _add_work_to_target_shelf(db: Session, folder: MonitorFolderConfig, work_id:
     if not folder.shelf_id or not work_id:
         return
     add_work_to_target_shelf(db, shelf_id=folder.shelf_id, work_id=work_id)
-    db.commit()
+    commit_import_checkpoint(db)
 
 
 def import_watched_file(db: Session, settings: Settings, path: Path, folder: MonitorFolderConfig) -> bool:
@@ -554,80 +456,6 @@ def import_source_meets_minimum_size(path: Path, min_file_size_bytes: int) -> bo
         return bool(files) and all(item.stat().st_size >= min_file_size_bytes for item in files)
     except (OSError, ValueError):
         return False
-
-
-def load_known_import_paths(db: Session) -> set[Path]:
-    return load_known_import_paths_from_db(db)
-
-
-def scan_directory_for_imports(
-    root_path: Path,
-    folder: MonitorFolderConfig,
-    import_queue: ImportQueueProtocol,
-    *,
-    summary: ScanSummary | None = None,
-    known_paths: set[Path] | None = None,
-) -> ScanSummary:
-    summary = summary or ScanSummary()
-    monitor_root = Path(folder.root_path).expanduser().resolve()
-    summary.directories_scanned += 1
-    try:
-        bundle_files = collect_audio_bundle_files(root_path)
-    except ValueError as exc:
-        summary.errors.append({"path": str(root_path), "error": str(exc)})
-        return summary
-    is_bundle = (
-        bool(bundle_files)
-        # The configured monitor root is the collection boundary. A selected
-        # child directory must retain the same grouping semantics whether it
-        # is reached by a full monitor scan or chosen directly in file
-        # management.
-        and root_path.resolve() != monitor_root
-        and _is_proven_audio_bundle_directory(root_path, bundle_files)
-    )
-    handled_bundle_files: set[Path] = set()
-    if is_bundle:
-        summary.files_scanned += len(bundle_files)
-        resolved_root = root_path.resolve()
-        handled_bundle_files = {item.resolve() for item in bundle_files}
-        if should_ignore_path(root_path, folder):
-            summary.ignored_files += len(bundle_files)
-        elif known_paths is not None and resolved_root in known_paths and handled_bundle_files.issubset(known_paths):
-            summary.cached_files += len(bundle_files)
-        else:
-            summary.candidates_found += 1
-            import_queue.enqueue(root_path, folder)
-    try:
-        entries = list(root_path.iterdir())
-    except OSError as exc:
-        print(f"[import-worker] rescan directory failed {root_path}: {exc}", flush=True)
-        summary.errors.append({"path": str(root_path), "error": str(exc)})
-        return summary
-    for entry in entries:
-        try:
-            if entry.is_dir():
-                if is_bundle and any(entry.resolve() in item.parents for item in handled_bundle_files):
-                    # CD/Disc child tracks are represented by the parent bundle.
-                    continue
-                if not should_ignore_path(entry, folder):
-                    scan_directory_for_imports(entry, folder, import_queue, summary=summary, known_paths=known_paths)
-                continue
-            if not entry.is_file():
-                continue
-            if entry.resolve() in handled_bundle_files:
-                continue
-            summary.files_scanned += 1
-            if should_ignore_file(entry, folder):
-                summary.ignored_files += 1
-                continue
-            if known_paths is not None and entry.resolve() in known_paths:
-                summary.cached_files += 1
-                continue
-            summary.candidates_found += 1
-            import_queue.enqueue(entry, folder)
-        except OSError as exc:
-            summary.errors.append({"path": str(entry), "error": str(exc)})
-    return summary
 
 
 def scan_directory_with_logging(
@@ -703,7 +531,7 @@ def scan_directory_with_logging(
         },
         prune=True,
     )
-    db.commit()
+    commit_import_checkpoint(db)
     for path, queued_folder in candidates:
         import_queue.enqueue(path, queued_folder)
     return summary

@@ -1,0 +1,1 @@
+"""Reader domain rules."""

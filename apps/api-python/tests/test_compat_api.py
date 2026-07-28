@@ -16,7 +16,8 @@ import pytest
 from PIL import Image, ImageDraw
 from sqlalchemy import event, text
 
-from app.api.routes import compat
+from app.core.config import get_settings
+from app.modules.media.infrastructure import http_streaming as media_streaming
 from app.core.auth import hash_password
 from app.db.base import Base
 from app.db.runner import apply_schema
@@ -698,14 +699,15 @@ def test_core_compat_endpoints_return_envelopes(client, db_session, test_setting
 
 
 def test_shelf_list_is_summary_and_detail_is_lightweight_paginated(client, db_session):
-    db_session.execute(text("CREATE TABLE IF NOT EXISTS Shelf (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)"))
+    db_session.execute(text("CREATE TABLE IF NOT EXISTS Shelf (id TEXT PRIMARY KEY, ownerUserId TEXT, name TEXT NOT NULL, description TEXT, kind TEXT NOT NULL DEFAULT 'STATIC', rulesJson TEXT NOT NULL DEFAULT '{}', pinned INTEGER NOT NULL DEFAULT 0, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)"))
     db_session.execute(text("CREATE TABLE IF NOT EXISTS ShelfWork (shelfId TEXT NOT NULL, workId TEXT NOT NULL, createdAt TEXT NOT NULL, PRIMARY KEY (shelfId, workId))"))
     db_session.execute(text("CREATE TABLE IF NOT EXISTS LibraryWork (id TEXT PRIMARY KEY, title TEXT NOT NULL, author TEXT, hidden BOOLEAN, createdAt TEXT, updatedAt TEXT)"))
     for index in range(25):
         db_session.execute(
             text(
-                "INSERT INTO LibraryWork (id, title, author, hidden, createdAt, updatedAt) "
-                "VALUES (:id, :title, '林川', 0, 'now', 'now')"
+                "INSERT INTO LibraryWork "
+                "(id, title, normalizedTitle, author, normalizedAuthor, workType, tags, hidden, createdAt, updatedAt) "
+                "VALUES (:id, :title, :title, '林川', '林川', 'EPUB', '[]', 0, 'now', 'now')"
             ),
             {"id": f"work-{index + 1:02d}", "title": f"星海列车 {index + 1:02d}"},
         )
@@ -947,12 +949,12 @@ def test_works_library_filters_cover_type_status_tags_and_import_state(client, d
     db_session.execute(
         text(
             """INSERT INTO LibraryEdition (
-                id, workId, origin, format, importStatus, sizeBytes, "primary", hidden, createdAt, updatedAt
+                id, workId, origin, mediaKind, format, versionName, versionKey, importStatus, sizeBytes, "primary", hidden, createdAt, updatedAt
             ) VALUES
-                ('comic-ready-edition', 'comic-ready', 'MANUAL', 'COMIC', 'IMPORTED', 10, 1, 0, 'now', 'now'),
-                ('comic-new-edition', 'comic-new', 'MANUAL', 'COMIC', 'IMPORTED', 10, 1, 0, 'now', 'now'),
-                ('epub-ready-edition', 'epub-ready', 'MANUAL', 'EPUB', 'IMPORTED', 10, 1, 0, 'now', 'now'),
-                ('pdf-ready-edition', 'pdf-ready', 'MANUAL', 'PDF', 'IMPORTED', 10, 1, 0, 'now', 'now')
+                ('comic-ready-edition', 'comic-ready', 'MANUAL', 'COMIC', 'COMIC', 'COMIC', 'test:comic-ready', 'IMPORTED', 10, 1, 0, 'now', 'now'),
+                ('comic-new-edition', 'comic-new', 'MANUAL', 'COMIC', 'COMIC', 'COMIC', 'test:comic-new', 'IMPORTED', 10, 1, 0, 'now', 'now'),
+                ('epub-ready-edition', 'epub-ready', 'MANUAL', 'EBOOK', 'EPUB', 'EPUB', 'test:epub-ready', 'IMPORTED', 10, 1, 0, 'now', 'now'),
+                ('pdf-ready-edition', 'pdf-ready', 'MANUAL', 'EBOOK', 'PDF', 'PDF', 'test:pdf-ready', 'IMPORTED', 10, 1, 0, 'now', 'now')
             """
         )
     )
@@ -986,7 +988,7 @@ def test_works_library_filters_cover_type_status_tags_and_import_state(client, d
         assert response.status_code == 200
         payload = response.json()
         assert payload["ok"] is True
-        assert [book["id"] for book in payload["data"]["books"]] == expected_ids
+        assert [book["id"] for book in payload["data"]["books"]] == expected_ids, params
 
     unread = client.get("/api/works/comic-new").json()["data"]["book"]
     assert unread["statusValue"] == "UNREAD"
@@ -1121,6 +1123,8 @@ def test_works_recent_read_sort_uses_latest_user_progress_across_pages(client, d
             CREATE TABLE IF NOT EXISTS LibraryReadingProgress (
                 id TEXT PRIMARY KEY, userId TEXT, workId TEXT, editionId TEXT, volumeId TEXT,
                 readerType TEXT, position TEXT, page INTEGER, percent REAL, extra TEXT,
+                schemaVersion INTEGER DEFAULT 1, locationType TEXT, locationJson TEXT,
+                contentFingerprint TEXT, mutationId TEXT, clientId TEXT, clientSequence INTEGER,
                 createdAt TEXT, updatedAt TEXT
             )
             """
@@ -1155,8 +1159,8 @@ def test_works_recent_read_sort_uses_latest_user_progress_across_pages(client, d
         db_session.execute(
             text(
                 """INSERT INTO LibraryEdition (
-                    id, workId, origin, format, importStatus, sizeBytes, "primary", hidden, createdAt, updatedAt
-                ) VALUES (:id, :work_id, 'MANUAL', 'EPUB', 'IMPORTED', 10, 1, 0, 'now', 'now')"""
+                    id, workId, origin, format, versionName, versionKey, importStatus, sizeBytes, "primary", hidden, createdAt, updatedAt
+                ) VALUES (:id, :work_id, 'MANUAL', 'EPUB', 'EPUB', :id, 'IMPORTED', 10, 1, 0, 'now', 'now')"""
             ),
             {"id": f"{work_id}-edition", "work_id": work_id},
         )
@@ -1212,7 +1216,10 @@ def test_works_recent_read_sort_uses_latest_user_progress_across_pages(client, d
     def reject_detail_serialization(*_args, **_kwargs):
         raise AssertionError("summary views must not use the detail serializer")
 
-    monkeypatch.setattr(compat, "_work_view", reject_detail_serialization)
+    monkeypatch.setattr(
+        "app.modules.library.presentation.http._work_view",
+        reject_detail_serialization,
+    )
     bookshelf = client.get(
         "/api/works",
         params={
@@ -1353,9 +1360,9 @@ def test_works_sortable_metadata_fields_support_both_directions(client, db_sessi
         db_session.execute(
             text(
                 """INSERT INTO LibraryEdition (
-                    id, workId, origin, format, publisher, importStatus, sizeBytes, "primary", hidden, createdAt, updatedAt
+                    id, workId, origin, format, versionName, versionKey, publisher, importStatus, sizeBytes, "primary", hidden, createdAt, updatedAt
                 ) VALUES (
-                    :id, :work_id, 'MANUAL', 'EPUB', :publisher, 'IMPORTED', 10, 1, 0, 'now', 'now'
+                    :id, :work_id, 'MANUAL', 'EPUB', 'EPUB', :id, :publisher, 'IMPORTED', 10, 1, 0, 'now', 'now'
                 )"""
             ),
             {"id": f"{work_id}-edition", "work_id": work_id, "publisher": publisher},
@@ -1407,8 +1414,8 @@ def test_primary_edition_is_scoped_and_unique_and_can_be_split(client, db_sessio
             db_session.execute(
                 text(
                     """INSERT INTO LibraryEdition (
-                        id, workId, origin, format, importStatus, sizeBytes, "primary", hidden, createdAt, updatedAt
-                    ) VALUES (:id, :work_id, 'MANUAL', :format, 'IMPORTED', 10, :primary, 0, 'now', 'now')"""
+                        id, workId, origin, format, versionName, versionKey, importStatus, sizeBytes, "primary", hidden, createdAt, updatedAt
+                    ) VALUES (:id, :work_id, 'MANUAL', :format, :format, :id, 'IMPORTED', 10, :primary, 0, 'now', 'now')"""
                 ),
                 {
                     "id": f"{work_id}-edition-{edition_number}",
@@ -1570,10 +1577,10 @@ def _create_bulk_management_fixture(db_session):
     ]:
         if column not in edition_columns:
             db_session.execute(text(statement))
-    db_session.execute(text("CREATE TABLE IF NOT EXISTS Shelf (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, kind TEXT DEFAULT 'STATIC', rulesJson TEXT DEFAULT '{}', pinned INTEGER DEFAULT 0, createdAt TEXT, updatedAt TEXT)"))
+    db_session.execute(text("CREATE TABLE IF NOT EXISTS Shelf (id TEXT PRIMARY KEY, ownerUserId TEXT, name TEXT NOT NULL, description TEXT, kind TEXT NOT NULL DEFAULT 'STATIC', rulesJson TEXT NOT NULL DEFAULT '{}', pinned INTEGER NOT NULL DEFAULT 0, createdAt TEXT, updatedAt TEXT)"))
     db_session.execute(text("CREATE TABLE IF NOT EXISTS ShelfWork (shelfId TEXT NOT NULL, workId TEXT NOT NULL, createdAt TEXT, PRIMARY KEY (shelfId, workId))"))
     db_session.execute(text("CREATE TABLE IF NOT EXISTS LibraryConsumptionState (id TEXT PRIMARY KEY, userId TEXT, workId TEXT, mediaKind TEXT, status TEXT, lastEditionId TEXT, lastVolumeId TEXT, lastUnitId TEXT, createdAt TEXT, updatedAt TEXT)"))
-    db_session.execute(text("CREATE TABLE IF NOT EXISTS LibraryReadingProgress (id TEXT PRIMARY KEY, userId TEXT, workId TEXT, editionId TEXT, volumeId TEXT, readerType TEXT, position TEXT, page INTEGER, percent REAL, extra TEXT, schemaVersion INTEGER, createdAt TEXT, updatedAt TEXT)"))
+    db_session.execute(text("CREATE TABLE IF NOT EXISTS LibraryReadingProgress (id TEXT PRIMARY KEY, userId TEXT, workId TEXT, editionId TEXT, volumeId TEXT, readerType TEXT, position TEXT, page INTEGER, percent REAL, extra TEXT, schemaVersion INTEGER, locationType TEXT, locationJson TEXT, contentFingerprint TEXT, mutationId TEXT, clientId TEXT, clientSequence INTEGER, createdAt TEXT, updatedAt TEXT)"))
     db_session.execute(text("INSERT INTO Shelf (id, name, kind, createdAt, updatedAt) VALUES ('bulk-shelf', '批量书架', 'STATIC', 'now', 'now')"))
     for index, work_id in enumerate(("bulk-manage-1", "bulk-manage-2"), start=1):
         db_session.execute(
@@ -1615,6 +1622,12 @@ def _create_bulk_management_fixture(db_session):
 def test_bulk_management_updates_metadata_shelves_and_find_replace(client, db_session):
     _create_bulk_management_fixture(db_session)
     _login(client, db_session)
+    owner_id = db_session.query(User).filter(User.email == "admin@example.com").one().id
+    db_session.execute(
+        text("UPDATE Shelf SET ownerUserId = :owner_id WHERE id = 'bulk-shelf'"),
+        {"owner_id": owner_id},
+    )
+    db_session.commit()
     ids = ["bulk-manage-1", "bulk-manage-2"]
 
     metadata = client.post(
@@ -2240,7 +2253,7 @@ def test_regenerate_cover_uses_primary_edition_first_volume(client, db_session, 
     assert after_cover_url != before_cover_url
 
 
-def test_cover_endpoints_persist_and_serve_default_for_existing_entries(client, db_session, test_settings):
+def test_cover_endpoints_serve_default_without_mutating_existing_entries(client, db_session, test_settings):
     create_worker_tables(db_session)
     _login(client, db_session)
     db_session.execute(
@@ -2286,11 +2299,11 @@ def test_cover_endpoints_persist_and_serve_default_for_existing_entries(client, 
         assert response.headers["content-type"] == "image/png"
 
     default_path = "covers/default-book-cover-v1.png"
-    assert db_session.execute(text("SELECT coverPath FROM LibraryWork WHERE id = 'work-default'")).scalar() == default_path
-    assert db_session.execute(text("SELECT coverStatus FROM LibraryWork WHERE id = 'work-default'")).scalar() == "DEFAULT"
-    assert db_session.execute(text("SELECT coverPath FROM LibraryEdition WHERE id = 'edition-default'")).scalar() == default_path
-    assert db_session.execute(text("SELECT coverStatus FROM LibraryEdition WHERE id = 'edition-default'")).scalar() == "DEFAULT"
-    assert db_session.execute(text("SELECT coverPath FROM LibraryVolume WHERE id = 'volume-default'")).scalar() == default_path
+    assert db_session.execute(text("SELECT coverPath FROM LibraryWork WHERE id = 'work-default'")).scalar() is None
+    assert db_session.execute(text("SELECT coverStatus FROM LibraryWork WHERE id = 'work-default'")).scalar() == "PENDING"
+    assert db_session.execute(text("SELECT coverPath FROM LibraryEdition WHERE id = 'edition-default'")).scalar() is None
+    assert db_session.execute(text("SELECT coverStatus FROM LibraryEdition WHERE id = 'edition-default'")).scalar() == "PENDING"
+    assert db_session.execute(text("SELECT coverPath FROM LibraryVolume WHERE id = 'volume-default'")).scalar() is None
     assert (test_settings.resolved_storage_root / default_path).is_file()
 
     for url in (
@@ -2375,7 +2388,7 @@ def test_small_cover_endpoints_compress_cache_and_preserve_other_variants(client
         with Image.open(BytesIO(response.content)) as image:
             assert image.format == "WEBP"
             assert image.width * 3 == image.height * 2
-            assert max(image.size) <= compat.SMALL_COVER_MAX_DIMENSION
+            assert max(image.size) <= media_streaming.SMALL_COVER_MAX_DIMENSION
         etag = etag or response.headers["etag"]
 
     cache_files = list((test_settings.resolved_storage_root / "cache" / "covers").rglob("*.webp"))
@@ -2417,7 +2430,10 @@ def test_move_content_applies_volume_media_and_backup_rules(client, db_session):
         text(
             """CREATE TABLE IF NOT EXISTS LibraryReadingProgress (
                 id TEXT PRIMARY KEY, userId TEXT, workId TEXT, editionId TEXT, volumeId TEXT, readerType TEXT,
-                position TEXT, page INTEGER, percent REAL, extra TEXT, createdAt TEXT, updatedAt TEXT
+                position TEXT, page INTEGER, percent REAL, extra TEXT,
+                schemaVersion INTEGER DEFAULT 1, locationType TEXT, locationJson TEXT,
+                contentFingerprint TEXT, mutationId TEXT, clientId TEXT, clientSequence INTEGER,
+                createdAt TEXT, updatedAt TEXT
             )"""
         )
     )
@@ -2910,7 +2926,7 @@ def test_monitor_folder_and_system_settings_mutations(client, db_session, test_s
     (test_settings.resolved_monitor_root / "alpha" / "nested").mkdir()
     second_root = test_settings.resolved_monitor_root.parent / "second-inbox"
     second_root.mkdir(parents=True)
-    db_session.execute(text("CREATE TABLE IF NOT EXISTS Shelf (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)"))
+    db_session.execute(text("CREATE TABLE IF NOT EXISTS Shelf (id TEXT PRIMARY KEY, ownerUserId TEXT, name TEXT NOT NULL, description TEXT, kind TEXT NOT NULL DEFAULT 'STATIC', rulesJson TEXT NOT NULL DEFAULT '{}', pinned INTEGER NOT NULL DEFAULT 0, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)"))
     db_session.execute(text("INSERT INTO Shelf (id, name, createdAt, updatedAt) VALUES ('auto-shelf', '自动收录', 'now', 'now')"))
     db_session.commit()
     _login(client, db_session)
@@ -2983,6 +2999,41 @@ def test_monitor_folder_and_system_settings_mutations(client, db_session, test_s
     assert settings.json()["data"]["settings"]["readerTheme"] == "dark"
 
 
+def test_monitor_folder_delete_rolls_back_when_audit_event_fails(
+    client,
+    db_session,
+    test_settings,
+    monkeypatch,
+):
+    from sqlalchemy import select
+
+    from app.models.settings import MonitorFolder
+    from app.bootstrap import system as system_bootstrap
+
+    test_settings.resolved_monitor_root.mkdir(parents=True)
+    _login(client, db_session)
+    created = client.post(
+        "/api/monitor-folders",
+        json={
+            "name": "Rollback Inbox",
+            "rootPath": str(test_settings.resolved_monitor_root),
+            "enabled": True,
+        },
+    )
+    folder_id = created.json()["data"]["folder"]["id"]
+
+    def fail_event(*_args, **_kwargs):
+        raise RuntimeError("injected audit failure")
+
+    monkeypatch.setattr(system_bootstrap, "_record_system_event", fail_event)
+    with pytest.raises(RuntimeError, match="injected audit failure"):
+        client.delete(f"/api/monitor-folders/{folder_id}")
+
+    assert db_session.scalar(
+        select(MonitorFolder.id).where(MonitorFolder.id == folder_id)
+    ) == folder_id
+
+
 def test_import_preferences_are_normalized_and_persisted(client, db_session):
     _login(client, db_session)
     response = client.put(
@@ -3008,6 +3059,26 @@ def test_import_preferences_are_normalized_and_persisted(client, db_session):
     loaded = client.get("/api/system-settings").json()["data"]["settings"]
     assert loaded["import.allowedExtensions"] == [".epub", ".pdf"]
     assert loaded["import.ignorePatterns"] == "*.tmp\n草稿*"
+
+
+def test_system_settings_roll_back_when_audit_event_fails(
+    client,
+    db_session,
+    monkeypatch,
+):
+    from app.modules.system.infrastructure.settings import get_setting
+    from app.modules.system.presentation import http as system_http
+
+    _login(client, db_session)
+
+    def fail_event(*_args, **_kwargs):
+        raise RuntimeError("injected audit failure")
+
+    monkeypatch.setattr(system_http, "record_system_event", fail_event)
+    with pytest.raises(RuntimeError, match="injected audit failure"):
+        client.put("/api/system-settings", json={"settings": {"readerTheme": "dark"}})
+
+    assert get_setting(db_session, "readerTheme") is None
 
 
 def test_application_locale_is_public_validated_and_persisted(client, db_session):
@@ -3298,9 +3369,15 @@ def test_management_overview_events_and_folders(client, db_session, test_setting
 
 
 def test_monitor_folder_create_ignores_retired_import_mode(client, db_session, test_settings, monkeypatch):
+    import app.modules.imports.application.monitor_paths as monitor_paths
+
     test_settings.resolved_monitor_root.mkdir(parents=True)
     _login(client, db_session)
-    monkeypatch.setattr(compat.os, "access", lambda _path, mode: False if mode == compat.os.W_OK else True)
+    monkeypatch.setattr(
+        monitor_paths.os,
+        "access",
+        lambda _path, mode: False if mode == monitor_paths.os.W_OK else True,
+    )
 
     created = client.post(
         "/api/monitor-folders",
@@ -4076,8 +4153,8 @@ def test_removed_work_metadata_refresh_does_not_generate_ai_suggestions(client, 
         db_session.execute(
             text(
                 """INSERT INTO LibraryEdition (
-                    id, workId, origin, format, importStatus, sizeBytes, "primary", hidden, createdAt, updatedAt
-                ) VALUES ('edition-ai', 'work-ai', 'MANUAL', 'EPUB', 'IMPORTED', 10, 1, 0, 'now', 'now')"""
+                    id, workId, origin, format, versionName, versionKey, importStatus, sizeBytes, "primary", hidden, createdAt, updatedAt
+                ) VALUES ('edition-ai', 'work-ai', 'MANUAL', 'EPUB', 'EPUB', 'test:edition-ai', 'IMPORTED', 10, 1, 0, 'now', 'now')"""
             )
         )
         db_session.execute(
@@ -4131,8 +4208,8 @@ def test_removed_work_metadata_refresh_does_not_generate_douban_suggestions(clie
         db_session.execute(
             text(
                 """INSERT INTO LibraryEdition (
-                    id, workId, origin, format, importStatus, identifier, isbn, sizeBytes, "primary", hidden, createdAt, updatedAt
-                ) VALUES ('edition-douban', 'work-douban', 'MANUAL', 'EPUB', 'IMPORTED', NULL, '9787111111111', 10, 1, 0, 'now', 'now')"""
+                    id, workId, origin, format, versionName, versionKey, importStatus, identifier, isbn, sizeBytes, "primary", hidden, createdAt, updatedAt
+                ) VALUES ('edition-douban', 'work-douban', 'MANUAL', 'EPUB', 'EPUB', 'test:edition-douban', 'IMPORTED', NULL, '9787111111111', 10, 1, 0, 'now', 'now')"""
             )
         )
         db_session.commit()
@@ -4179,8 +4256,8 @@ def test_removed_work_metadata_refresh_does_not_run_douban_crawler(client, db_se
         db_session.execute(
             text(
                 """INSERT INTO LibraryEdition (
-                    id, workId, origin, format, importStatus, sizeBytes, "primary", hidden, createdAt, updatedAt
-                ) VALUES ('edition-douban-crawler', 'work-douban-crawler', 'MANUAL', 'EPUB', 'IMPORTED', 10, 1, 0, 'now', 'now')"""
+                    id, workId, origin, format, versionName, versionKey, importStatus, sizeBytes, "primary", hidden, createdAt, updatedAt
+                ) VALUES ('edition-douban-crawler', 'work-douban-crawler', 'MANUAL', 'EPUB', 'EPUB', 'test:edition-douban-crawler', 'IMPORTED', 10, 1, 0, 'now', 'now')"""
             )
         )
         db_session.commit()
@@ -4226,8 +4303,8 @@ def test_ebook_metadata_search_returns_all_douban_crawler_candidates_and_proxy_c
         db_session.execute(
             text(
                 """INSERT INTO LibraryEdition (
-                    id, workId, origin, format, importStatus, sizeBytes, "primary", hidden, createdAt, updatedAt
-                ) VALUES ('edition-douban-search', 'work-douban-search', 'MANUAL', 'EPUB', 'IMPORTED', 10, 1, 0, 'now', 'now')"""
+                    id, workId, origin, format, versionName, versionKey, importStatus, sizeBytes, "primary", hidden, createdAt, updatedAt
+                ) VALUES ('edition-douban-search', 'work-douban-search', 'MANUAL', 'EPUB', 'EPUB', 'test:edition-douban-search', 'IMPORTED', 10, 1, 0, 'now', 'now')"""
             )
         )
         db_session.commit()
@@ -4249,6 +4326,18 @@ def test_ebook_metadata_search_returns_all_douban_crawler_candidates_and_proxy_c
         assert proxied.content == b"\xff\xd8\xff\xd9"
     finally:
         douban.shutdown()
+
+
+def test_metadata_cover_proxy_rejects_unconfigured_private_network_targets(client, db_session):
+    _login(client, db_session)
+
+    response = client.get(
+        "/api/metadata/cover-proxy",
+        params={"url": "http://127.0.0.1:8080/internal-cover.jpg"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["ok"] is False
 
 
 def test_removed_work_metadata_refresh_does_not_generate_bangumi_suggestions(client, db_session):
@@ -4283,8 +4372,8 @@ def test_removed_work_metadata_refresh_does_not_generate_bangumi_suggestions(cli
         db_session.execute(
             text(
                 """INSERT INTO LibraryEdition (
-                    id, workId, origin, format, importStatus, sizeBytes, "primary", hidden, createdAt, updatedAt
-                ) VALUES ('edition-bangumi', 'work-bangumi', 'MANUAL', 'CBZ', 'IMPORTED', 10, 1, 0, 'now', 'now')"""
+                    id, workId, origin, format, versionName, versionKey, importStatus, sizeBytes, "primary", hidden, createdAt, updatedAt
+                ) VALUES ('edition-bangumi', 'work-bangumi', 'MANUAL', 'CBZ', 'CBZ', 'test:edition-bangumi', 'IMPORTED', 10, 1, 0, 'now', 'now')"""
             )
         )
         db_session.commit()
@@ -4329,8 +4418,8 @@ def test_ebook_metadata_search_and_apply_can_use_bangumi_without_suggestion_refr
         db_session.execute(
             text(
                 """INSERT INTO LibraryEdition (
-                    id, workId, origin, format, importStatus, sizeBytes, "primary", hidden, createdAt, updatedAt
-                ) VALUES ('edition-ebook-bangumi', 'work-ebook-bangumi', 'MANUAL', 'EPUB', 'IMPORTED', 10, 1, 0, 'now', 'now')"""
+                    id, workId, origin, format, versionName, versionKey, importStatus, sizeBytes, "primary", hidden, createdAt, updatedAt
+                ) VALUES ('edition-ebook-bangumi', 'work-ebook-bangumi', 'MANUAL', 'EPUB', 'EPUB', 'test:edition-ebook-bangumi', 'IMPORTED', 10, 1, 0, 'now', 'now')"""
             )
         )
         db_session.commit()
@@ -4375,8 +4464,8 @@ def test_ebook_metadata_search_and_apply_can_use_bangumi_without_suggestion_refr
 
 
 def test_backup_create_download_and_restore_database_export(client, db_session, test_settings):
-    create_worker_tables(db_session)
     Base.metadata.create_all(db_session.get_bind())
+    create_worker_tables(db_session)
     apply_schema(db_session.get_bind())
     test_settings.resolved_storage_root.mkdir(parents=True)
     _login(client, db_session)
@@ -4398,10 +4487,10 @@ def test_backup_create_download_and_restore_database_export(client, db_session, 
     db_session.execute(
         text(
             """INSERT INTO LibraryEdition (
-                id, workId, origin, format, versionName, importStatus, sizeBytes, chapterCount,
+                id, workId, origin, format, versionName, versionKey, importStatus, sizeBytes, chapterCount,
                 coverStatus, "primary", hidden, createdAt, updatedAt
             ) VALUES (
-                'backup-edition', 'backup-work', 'MANUAL', 'EPUB', 'EPUB 1', 'COMPLETED', 19, 1,
+                'backup-edition', 'backup-work', 'MANUAL', 'EPUB', 'EPUB 1', 'backup-v1', 'COMPLETED', 19, 1,
                 'PENDING', 1, 0, 'now', 'now'
             )"""
         )
@@ -4553,6 +4642,52 @@ def test_manual_epub_upload_saves_to_selected_monitor_directory(client, db_sessi
     works = client.get("/api/works")
     assert works.status_code == 200
     assert works.json()["data"]["total"] == 0
+
+
+def test_manual_multi_file_upload_rolls_back_tasks_and_files_on_queue_failure(
+    client,
+    db_session,
+    test_settings,
+    tmp_path,
+    monkeypatch,
+):
+    from sqlalchemy import func, select
+
+    from app.models.import_pipeline import ImportTask
+    from app.modules.imports.presentation import writes
+
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    _login(client, db_session)
+    first = tmp_path / "first.epub"
+    second = tmp_path / "second.epub"
+    write_epub_fixture(first)
+    write_epub_fixture(second)
+    upload_dir = _managed_fixture_dir(test_settings, "atomic-uploads")
+    original_stage = writes.stage_import_task
+    call_count = 0
+
+    def fail_second_task(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            raise RuntimeError("injected queue failure")
+        return original_stage(*args, **kwargs)
+
+    monkeypatch.setattr(writes, "stage_import_task", fail_second_task)
+    with first.open("rb") as first_handle, second.open("rb") as second_handle:
+        response = client.post(
+            "/api/works/import",
+            data={"targetPath": str(upload_dir)},
+            files=[
+                ("file", ("first.epub", first_handle, "application/epub+zip")),
+                ("file", ("second.epub", second_handle, "application/epub+zip")),
+            ],
+        )
+
+    assert response.status_code == 500
+    assert db_session.scalar(select(func.count()).select_from(ImportTask)) == 0
+    assert list(upload_dir.iterdir()) == []
 
 
 def test_epub_volume_file_and_bootstrap_use_requested_volume(client, db_session, test_settings, tmp_path):
@@ -4731,6 +4866,8 @@ def test_multi_volume_comic_progress_is_volume_scoped_and_bootstrap_opens_next_t
             CREATE TABLE IF NOT EXISTS LibraryReadingProgress (
                 id TEXT PRIMARY KEY, userId TEXT, workId TEXT, editionId TEXT, volumeId TEXT,
                 readerType TEXT, position TEXT, page INTEGER, percent REAL, extra TEXT,
+                schemaVersion INTEGER DEFAULT 1, locationType TEXT, locationJson TEXT,
+                contentFingerprint TEXT, mutationId TEXT, clientId TEXT, clientSequence INTEGER,
                 createdAt TEXT, updatedAt TEXT
             )
             """
@@ -4857,6 +4994,8 @@ def test_multi_volume_epub_detail_returns_selected_volume_chapters_and_scoped_pr
             CREATE TABLE IF NOT EXISTS LibraryReadingProgress (
                 id TEXT PRIMARY KEY, userId TEXT, workId TEXT, editionId TEXT, volumeId TEXT,
                 readerType TEXT, position TEXT, page INTEGER, percent REAL, extra TEXT,
+                schemaVersion INTEGER DEFAULT 1, locationType TEXT, locationJson TEXT,
+                contentFingerprint TEXT, mutationId TEXT, clientId TEXT, clientSequence INTEGER,
                 createdAt TEXT, updatedAt TEXT
             )
             """
@@ -4993,16 +5132,16 @@ def test_file_streams_are_limited_per_user(client, db_session, test_settings, tm
     imported = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=epub, origin="MANUAL", original_name=epub.name))
     edition_id = imported.edition_id
     user_id = db_session.execute(text("SELECT id FROM User WHERE email = 'admin@example.com'")).scalar()
-    monkeypatch.setattr(compat, "STREAMS_PER_USER_LIMIT", 1)
-    with compat._active_file_streams_lock:
-        compat._active_file_streams_by_user[user_id] = 1
+    monkeypatch.setattr(media_streaming, "STREAMS_PER_USER_LIMIT", 1)
+    with media_streaming._active_file_streams_lock:
+        media_streaming._active_file_streams_by_user[user_id] = 1
     try:
         limited = client.get(f"/api/editions/{edition_id}/file")
         assert limited.status_code == 429
         assert limited.json()["error"]["message"] == "同时文件流请求过多，请稍后重试"
     finally:
-        with compat._active_file_streams_lock:
-            compat._active_file_streams_by_user.pop(user_id, None)
+        with media_streaming._active_file_streams_lock:
+            media_streaming._active_file_streams_by_user.pop(user_id, None)
 
 
 def test_file_streams_log_slow_requests(client, db_session, test_settings, tmp_path, monkeypatch, caplog):
@@ -5013,8 +5152,8 @@ def test_file_streams_log_slow_requests(client, db_session, test_settings, tmp_p
     write_epub_fixture(epub)
     imported = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=epub, origin="MANUAL", original_name=epub.name))
     edition_id = imported.edition_id
-    monkeypatch.setattr(compat, "SLOW_REQUEST_LOG_THRESHOLD_MS", 0)
-    with caplog.at_level("WARNING", logger="app.api.routes.compat"):
+    monkeypatch.setattr(media_streaming, "SLOW_REQUEST_LOG_THRESHOLD_MS", 0)
+    with caplog.at_level("WARNING", logger="app.modules.media.infrastructure.http_streaming"):
         streamed = client.get(f"/api/editions/{edition_id}/file", headers={"Range": "bytes=0-3"})
 
     assert streamed.status_code == 206
@@ -5029,6 +5168,8 @@ def test_imported_pdf_supports_stream_bootstrap_and_v2_progress(client, db_sessi
             CREATE TABLE IF NOT EXISTS LibraryReadingProgress (
                 id TEXT PRIMARY KEY, userId TEXT, workId TEXT, editionId TEXT, volumeId TEXT,
                 readerType TEXT, position TEXT, page INTEGER, percent REAL, extra TEXT,
+                schemaVersion INTEGER DEFAULT 1, locationType TEXT, locationJson TEXT,
+                contentFingerprint TEXT, mutationId TEXT, clientId TEXT, clientSequence INTEGER,
                 createdAt TEXT, updatedAt TEXT
             )
             """
@@ -5209,7 +5350,7 @@ def test_comic_page_data_saver_never_returns_a_larger_transcode():
     Image.new("L", (1, 1), "white").save(output, format="PNG", optimize=True)
     source = output.getvalue()
 
-    assert compat._comic_page_avif_bytes(source) is None
+    assert media_streaming._comic_page_avif_bytes(source) is None
 
 
 def test_comic_page_data_saver_uses_one_fixed_avif_encode(monkeypatch):
@@ -5223,7 +5364,7 @@ def test_comic_page_data_saver_uses_one_fixed_avif_encode(monkeypatch):
 
     monkeypatch.setattr(Image.Image, "save", capture_save)
 
-    optimized = compat._comic_page_avif_bytes(source)
+    optimized = media_streaming._comic_page_avif_bytes(source)
 
     assert optimized is not None
     assert calls == [{"format": "AVIF", "quality": 12, "speed": 9}]
@@ -5254,48 +5395,48 @@ def test_volume_pages_rebuilds_missing_comic_page_index(client, db_session, test
 
 def test_file_stream_limit_zero_disables_slot_rejection(monkeypatch):
     user_id = "limit-disabled-user"
-    monkeypatch.setattr(compat, "STREAMS_PER_USER_LIMIT", 0)
-    with compat._active_file_streams_lock:
-        compat._active_file_streams_by_user[user_id] = 999
+    monkeypatch.setattr(media_streaming, "STREAMS_PER_USER_LIMIT", 0)
+    with media_streaming._active_file_streams_lock:
+        media_streaming._active_file_streams_by_user[user_id] = 999
     try:
-        release = compat._acquire_file_stream_slot(user_id)
+        release = media_streaming._acquire_file_stream_slot(user_id)
         assert release is not None
         release()
-        with compat._active_file_streams_lock:
-            assert compat._active_file_streams_by_user[user_id] == 999
+        with media_streaming._active_file_streams_lock:
+            assert media_streaming._active_file_streams_by_user[user_id] == 999
     finally:
-        with compat._active_file_streams_lock:
-            compat._active_file_streams_by_user.pop(user_id, None)
+        with media_streaming._active_file_streams_lock:
+            media_streaming._active_file_streams_by_user.pop(user_id, None)
 
-    monkeypatch.setattr(compat, "STREAMS_PER_USER_LIMIT", 1)
-    release = compat._acquire_file_stream_slot(user_id)
+    monkeypatch.setattr(media_streaming, "STREAMS_PER_USER_LIMIT", 1)
+    release = media_streaming._acquire_file_stream_slot(user_id)
     try:
         assert release is not None
-        assert compat._acquire_file_stream_slot(user_id) is None
+        assert media_streaming._acquire_file_stream_slot(user_id) is None
     finally:
         release()
-        with compat._active_file_streams_lock:
-            compat._active_file_streams_by_user.pop(user_id, None)
+        with media_streaming._active_file_streams_lock:
+            media_streaming._active_file_streams_by_user.pop(user_id, None)
 
 
 def test_file_stream_limit_has_safe_configured_default(monkeypatch):
-    monkeypatch.setattr(compat, "STREAMS_PER_USER_LIMIT", None)
-    settings = compat.get_settings()
+    monkeypatch.setattr(media_streaming, "STREAMS_PER_USER_LIMIT", None)
+    settings = get_settings()
     assert settings.file_streams_per_user_limit > 0
 
     user_id = "configured-default-limit-user"
     releases = []
     try:
         for _ in range(settings.file_streams_per_user_limit):
-            release = compat._acquire_file_stream_slot(user_id)
+            release = media_streaming._acquire_file_stream_slot(user_id)
             assert release is not None
             releases.append(release)
-        assert compat._acquire_file_stream_slot(user_id) is None
+        assert media_streaming._acquire_file_stream_slot(user_id) is None
     finally:
         for release in releases:
             release()
-        with compat._active_file_streams_lock:
-            compat._active_file_streams_by_user.pop(user_id, None)
+        with media_streaming._active_file_streams_lock:
+            media_streaming._active_file_streams_by_user.pop(user_id, None)
 
 
 def test_archive_page_streams_are_limited_and_logged(client, db_session, test_settings, tmp_path, monkeypatch, caplog):
@@ -5307,18 +5448,18 @@ def test_archive_page_streams_are_limited_and_logged(client, db_session, test_se
     imported = import_managed_book(db_session, test_settings, ImportOptions(source_file_path=comic, origin="MANUAL", original_name=comic.name))
     volume_id = imported.volume_id
     user_id = db_session.execute(text("SELECT id FROM User WHERE email = 'admin@example.com'")).scalar()
-    monkeypatch.setattr(compat, "STREAMS_PER_USER_LIMIT", 1)
-    with compat._active_file_streams_lock:
-        compat._active_file_streams_by_user[user_id] = 1
+    monkeypatch.setattr(media_streaming, "STREAMS_PER_USER_LIMIT", 1)
+    with media_streaming._active_file_streams_lock:
+        media_streaming._active_file_streams_by_user[user_id] = 1
     try:
         limited = client.get(f"/api/volumes/{volume_id}/pages/1")
         assert limited.status_code == 429
     finally:
-        with compat._active_file_streams_lock:
-            compat._active_file_streams_by_user.pop(user_id, None)
+        with media_streaming._active_file_streams_lock:
+            media_streaming._active_file_streams_by_user.pop(user_id, None)
 
-    monkeypatch.setattr(compat, "SLOW_REQUEST_LOG_THRESHOLD_MS", 0)
-    with caplog.at_level("WARNING", logger="app.api.routes.compat"):
+    monkeypatch.setattr(media_streaming, "SLOW_REQUEST_LOG_THRESHOLD_MS", 0)
+    with caplog.at_level("WARNING", logger="app.modules.media.infrastructure.http_streaming"):
         streamed = client.get(f"/api/volumes/{volume_id}/pages/1", headers={"Range": "bytes=0-1"})
 
     assert streamed.status_code == 206

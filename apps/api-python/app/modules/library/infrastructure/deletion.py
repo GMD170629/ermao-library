@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import MetaData, Table, delete, func, inspect as sa_inspect, or_, select, update
+from sqlalchemy import Table, delete, func, inspect as sa_inspect, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.models.import_pipeline import DownloadTask, ImportAsset, ImportTask, KindleSendTask
+from app.db.base import Base
 from app.models.library import (
     LibraryConsumptionState,
     LibraryEdition,
@@ -37,17 +38,14 @@ def _has_table(db: Session, table: str) -> bool:
 def _legacy_table(db: Session, table: str) -> Table | None:
     if not _has_table(db, table):
         return None
-    metadata = MetaData()
-    return Table(table, metadata, autoload_with=db.connection(), resolve_fks=False)
+    return Base.metadata.tables.get(table)
 
 
 def _has_column(db: Session, table: str, column: str) -> bool:
     if not _has_table(db, table):
         return False
-    return any(
-        item.get("name") == column
-        for item in sa_inspect(db.connection()).get_columns(table)
-    )
+    declared = Base.metadata.tables.get(table)
+    return declared is not None and column in declared.c
 
 
 def _edition_ids_subquery(work_id: str):

@@ -18,7 +18,7 @@ from app.core.config import Settings, get_settings
 from app.core.i18n import configured_locale
 from app.db.session import get_db
 from app.models.auth import User
-from app.modules.kindle.infrastructure.tasks import (
+from app.bootstrap.kindle import (
     cancel_queued_kindle_task,
     create_kindle_send_task as persist_kindle_send_task,
     delete_kindle_send_task as delete_kindle_send_task_record,

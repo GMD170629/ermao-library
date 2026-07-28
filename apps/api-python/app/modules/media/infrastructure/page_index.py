@@ -11,17 +11,23 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from time import time_ns
 from typing import Any
 
-from sqlalchemy import MetaData, Table, func, insert, select, update
-from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.models.library import (
+    LibraryEdition,
+    LibraryFile,
+    LibraryReadingUnit,
+    LibraryVolume,
+)
 from app.worker.importer import parse_comic_archive
 
 logger = logging.getLogger(__name__)
@@ -29,17 +35,6 @@ logger = logging.getLogger(__name__)
 
 def _now() -> datetime:
     return datetime.now(UTC)
-
-
-def _has_table(db: Session, table: str) -> bool:
-    return sa_inspect(db.connection()).has_table(table)
-
-
-def _legacy_table(db: Session, table: str) -> Table | None:
-    if not _has_table(db, table):
-        return None
-    metadata = MetaData()
-    return Table(table, metadata, autoload_with=db.connection(), resolve_fks=False)
 
 
 def _json_text(value: Any) -> str:
@@ -68,168 +63,229 @@ def _stored_path(path_value: str | None, settings: Settings) -> Path | None:
 
 
 def list_page_units_for_volume(db: Session, volume_id: str) -> list[dict[str, Any]]:
-    table = _legacy_table(db, "LibraryReadingUnit")
-    if table is None:
-        return []
     rows = db.execute(
-        select(table)
-        .where(table.c.volumeId == volume_id, func.lower(table.c.unitType) == "page")
-        .order_by(table.c.sortOrder)
+        select(
+            LibraryReadingUnit.id,
+            LibraryReadingUnit.edition_id.label("editionId"),
+            LibraryReadingUnit.volume_id.label("volumeId"),
+            LibraryReadingUnit.file_id.label("fileId"),
+            LibraryReadingUnit.unit_type.label("unitType"),
+            LibraryReadingUnit.title,
+            LibraryReadingUnit.href,
+            LibraryReadingUnit.media_type.label("mediaType"),
+            LibraryReadingUnit.sort_order.label("sortOrder"),
+            LibraryReadingUnit.width,
+            LibraryReadingUnit.height,
+            LibraryReadingUnit.size,
+            LibraryReadingUnit.metadata_json.label("metadataJson"),
+            LibraryReadingUnit.created_at.label("createdAt"),
+            LibraryReadingUnit.updated_at.label("updatedAt"),
+        )
+        .where(
+            LibraryReadingUnit.volume_id == volume_id,
+            func.lower(LibraryReadingUnit.unit_type) == "page",
+        )
+        .order_by(LibraryReadingUnit.sort_order)
     ).mappings().all()
     return [dict(row) for row in rows]
 
 
 def get_page_unit(db: Session, volume_id: str, page_index: int) -> dict[str, Any] | None:
-    table = _legacy_table(db, "LibraryReadingUnit")
-    if table is None:
-        return None
-    row = (
-        db.execute(
-            select(table).where(
-                table.c.volumeId == volume_id,
-                func.lower(table.c.unitType) == "page",
-                table.c.sortOrder == page_index,
-            )
+    row = db.execute(
+        select(
+            LibraryReadingUnit.id,
+            LibraryReadingUnit.edition_id.label("editionId"),
+            LibraryReadingUnit.volume_id.label("volumeId"),
+            LibraryReadingUnit.file_id.label("fileId"),
+            LibraryReadingUnit.unit_type.label("unitType"),
+            LibraryReadingUnit.title,
+            LibraryReadingUnit.href,
+            LibraryReadingUnit.media_type.label("mediaType"),
+            LibraryReadingUnit.sort_order.label("sortOrder"),
+            LibraryReadingUnit.width,
+            LibraryReadingUnit.height,
+            LibraryReadingUnit.size,
+            LibraryReadingUnit.metadata_json.label("metadataJson"),
+            LibraryReadingUnit.created_at.label("createdAt"),
+            LibraryReadingUnit.updated_at.label("updatedAt"),
+        ).where(
+            LibraryReadingUnit.volume_id == volume_id,
+            func.lower(LibraryReadingUnit.unit_type) == "page",
+            LibraryReadingUnit.sort_order == page_index,
         )
-        .mappings()
-        .first()
-    )
+    ).mappings().first()
     return dict(row) if row else None
 
 
 def get_library_file(db: Session, file_id: str) -> dict[str, Any] | None:
-    table = _legacy_table(db, "LibraryFile")
-    if table is None:
-        return None
-    row = db.execute(select(table).where(table.c.id == file_id)).mappings().first()
+    row = db.execute(
+        select(
+            LibraryFile.id,
+            LibraryFile.edition_id.label("editionId"),
+            LibraryFile.volume_id.label("volumeId"),
+            LibraryFile.path,
+            LibraryFile.kind,
+            LibraryFile.mime_type.label("mimeType"),
+            LibraryFile.size_bytes.label("sizeBytes"),
+            LibraryFile.sort_order.label("sortOrder"),
+        ).where(LibraryFile.id == file_id)
+    ).mappings().first()
     return dict(row) if row else None
 
 
-def _get_volume(db: Session, volume_table: Table, volume_id: str) -> dict[str, Any] | None:
-    row = db.execute(select(volume_table).where(volume_table.c.id == volume_id)).mappings().first()
-    return dict(row) if row else None
+@dataclass(frozen=True)
+class _VolumeProjection:
+    id: str
+    edition_id: str
+    volume_index: float | None
 
 
-def _get_comic_file_for_volume(db: Session, file_table: Table, volume: dict[str, Any], volume_id: str) -> dict[str, Any] | None:
-    row = (
-        db.execute(
-            select(file_table)
-            .where(file_table.c.volumeId == volume_id, file_table.c.kind == "COMIC")
-            .order_by(file_table.c.sortOrder)
-            .limit(1)
+@dataclass(frozen=True)
+class _FileProjection:
+    id: str
+    edition_id: str
+    path: str
+
+
+def _get_comic_file_for_volume(
+    db: Session,
+    volume: _VolumeProjection,
+) -> _FileProjection | None:
+    row = db.execute(
+        select(
+            LibraryFile.id,
+            LibraryFile.edition_id,
+            LibraryFile.path,
         )
-        .mappings()
-        .first()
-    )
+        .where(
+            LibraryFile.volume_id == volume.id,
+            LibraryFile.kind == "COMIC",
+        )
+        .order_by(LibraryFile.sort_order)
+        .limit(1)
+    ).one_or_none()
     if row is not None:
-        return dict(row)
-    edition_id = volume.get("editionId")
-    if not edition_id:
-        return None
-    row = (
-        db.execute(
-            select(file_table)
-            .where(file_table.c.editionId == edition_id, file_table.c.kind == "COMIC")
-            .order_by(file_table.c.sortOrder)
-            .limit(1)
+        return _FileProjection(*row)
+    row = db.execute(
+        select(
+            LibraryFile.id,
+            LibraryFile.edition_id,
+            LibraryFile.path,
         )
-        .mappings()
-        .first()
-    )
-    return dict(row) if row else None
+        .where(
+            LibraryFile.edition_id == volume.edition_id,
+            LibraryFile.kind == "COMIC",
+        )
+        .order_by(LibraryFile.sort_order)
+        .limit(1)
+    ).one_or_none()
+    return _FileProjection(*row) if row is not None else None
 
 
-def _count_page_units(db: Session, unit_table: Table, volume_id: str) -> int:
+def _count_page_units(db: Session, volume_id: str) -> int:
     count = db.scalar(
         select(func.count())
-        .select_from(unit_table)
-        .where(unit_table.c.volumeId == volume_id, func.lower(unit_table.c.unitType) == "page")
+        .select_from(LibraryReadingUnit)
+        .where(
+            LibraryReadingUnit.volume_id == volume_id,
+            func.lower(LibraryReadingUnit.unit_type) == "page",
+        )
     )
     return int(count or 0)
 
 
 def ensure_volume_page_index(db: Session, settings: Settings, volume_id: str) -> int:
-    unit_table = _legacy_table(db, "LibraryReadingUnit")
-    volume_table = _legacy_table(db, "LibraryVolume")
-    file_table = _legacy_table(db, "LibraryFile")
-    edition_table = _legacy_table(db, "LibraryEdition")
-    if unit_table is None or volume_table is None or file_table is None:
-        return 0
-
-    existing = _count_page_units(db, unit_table, volume_id)
+    existing = _count_page_units(db, volume_id)
     if existing:
         return existing
 
-    volume = _get_volume(db, volume_table, volume_id)
-    if not volume:
+    volume_row = db.execute(
+        select(
+            LibraryVolume.id,
+            LibraryVolume.edition_id,
+            LibraryVolume.volume_index,
+        ).where(LibraryVolume.id == volume_id)
+    ).one_or_none()
+    if volume_row is None:
         return 0
-    file = _get_comic_file_for_volume(db, file_table, volume, volume_id)
-    archive_path = _stored_path((file or {}).get("path"), settings)
+    volume = _VolumeProjection(*volume_row)
+    file = _get_comic_file_for_volume(db, volume)
+    archive_path = _stored_path(file.path if file else None, settings)
     if not file or not archive_path:
         return 0
 
     try:
-        parsed = parse_comic_archive(archive_path, Path(file.get("path") or archive_path).name)
+        parsed = parse_comic_archive(
+            archive_path,
+            Path(file.path or archive_path).name,
+        )
     except Exception as exc:
         logger.warning(
             "failed to rebuild comic page index volume=%s file=%s error=%s",
             volume_id,
-            file.get("id"),
+            file.id,
             exc,
         )
         return 0
 
     now = _now()
-    rows = [
+    unit_values = [
         {
             "id": f"py_{time_ns()}_{page['index']}",
-            "editionId": volume.get("editionId"),
-            "volumeId": volume_id,
-            "fileId": file.get("id"),
-            "unitType": "page",
+            "edition_id": volume.edition_id,
+            "volume_id": volume_id,
+            "file_id": file.id,
+            "unit_type": "page",
             "title": page["title"],
             "href": page["entryPath"],
-            "mediaType": page["mediaType"],
-            "sortOrder": page["index"],
+            "media_type": page["mediaType"],
+            "sort_order": page["index"],
             "size": page.get("size"),
-            "metadataJson": _json_text(
+            "metadata_json": _json_text(
                 {
                     "zipEntryName": page["entryPath"],
                     "originalName": Path(page["entryPath"]).name,
                     "pageInVolume": page["index"],
                     "pageInSection": page["index"],
-                    "volumeIndex": volume.get("volumeIndex"),
-                    "sourceFileName": Path(file.get("path") or archive_path).name,
+                    "volumeIndex": volume.volume_index,
+                    "sourceFileName": Path(file.path or archive_path).name,
                 }
             ),
-            "createdAt": now,
-            "updatedAt": now,
+            "created_at": now,
+            "updated_at": now,
         }
         for page in parsed["pages"]
     ]
-    if rows:
+    if unit_values:
         try:
-            db.execute(insert(unit_table), rows)
-            db.commit()
+            with db.begin_nested():
+                db.execute(insert(LibraryReadingUnit), unit_values)
+                db.flush()
         except IntegrityError:
-            db.rollback()
-            existing = _count_page_units(db, unit_table, volume_id)
+            existing = _count_page_units(db, volume_id)
             if existing:
                 return existing
             raise
 
     count = len(parsed["pages"])
-    db.execute(update(volume_table).where(volume_table.c.id == volume_id).values(pageCount=count, updatedAt=now))
-    db.commit()
-    edition_id = volume.get("editionId")
-    if edition_id and edition_table is not None:
+    db.execute(
+        update(LibraryVolume)
+        .where(LibraryVolume.id == volume_id)
+        .values(page_count=count, updated_at=now)
+    )
+    if volume.edition_id:
         total = db.scalar(
-            select(func.coalesce(func.sum(volume_table.c.pageCount), count)).where(volume_table.c.editionId == edition_id)
+            select(func.coalesce(func.sum(LibraryVolume.page_count), count)).where(
+                LibraryVolume.edition_id == volume.edition_id
+            )
         )
         db.execute(
-            update(edition_table)
-            .where(edition_table.c.id == edition_id)
-            .values(pageCount=int(total if total is not None else count), updatedAt=now)
+            update(LibraryEdition)
+            .where(LibraryEdition.id == volume.edition_id)
+            .values(
+                page_count=int(total if total is not None else count),
+                updated_at=now,
+            )
         )
-        db.commit()
+    db.flush()
     return count

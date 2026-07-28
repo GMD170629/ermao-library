@@ -13,18 +13,12 @@ from app.models.library import (
     LibraryVolume,
     LibraryWork,
 )
-from app.modules.library.infrastructure import projections
+from app.modules.library.infrastructure.works import entity_as_legacy_dict
 
 
 def get_file(db: Session, file_id: str) -> dict[str, object] | None:
-    rows = projections.select_existing_rows(
-        db,
-        LibraryFile,
-        "LibraryFile",
-        filters=(LibraryFile.id == file_id,),
-        limit=1,
-    )
-    return rows[0] if rows else None
+    row = db.get(LibraryFile, file_id)
+    return entity_as_legacy_dict(row) if row is not None else None
 
 
 def first_file_for_edition(
@@ -36,19 +30,17 @@ def first_file_for_edition(
     filters = [LibraryFile.edition_id == edition_id]
     if volume_id is not None:
         filters.append(LibraryFile.volume_id == volume_id)
-    rows = projections.select_existing_rows(
-        db,
-        LibraryFile,
-        "LibraryFile",
-        filters=filters,
-        order_by=(
+    row = db.scalar(
+        select(LibraryFile)
+        .where(*filters)
+        .order_by(
             LibraryFile.sort_order.asc(),
             LibraryFile.created_at.asc(),
             LibraryFile.id.asc(),
-        ),
-        limit=1,
+        )
+        .limit(1)
     )
-    return rows[0] if rows else None
+    return entity_as_legacy_dict(row) if row is not None else None
 
 
 def get_cover_record(
@@ -59,32 +51,14 @@ def get_cover_record(
     volume_id: str | None = None,
 ) -> dict[str, object] | None:
     if work_id is not None:
-        rows = projections.select_existing_rows(
-            db,
-            LibraryWork,
-            "LibraryWork",
-            filters=(LibraryWork.id == work_id,),
-            limit=1,
-        )
+        row = db.get(LibraryWork, work_id)
     elif edition_id is not None:
-        rows = projections.select_existing_rows(
-            db,
-            LibraryEdition,
-            "LibraryEdition",
-            filters=(LibraryEdition.id == edition_id,),
-            limit=1,
-        )
+        row = db.get(LibraryEdition, edition_id)
     elif volume_id is not None:
-        rows = projections.select_existing_rows(
-            db,
-            LibraryVolume,
-            "LibraryVolume",
-            filters=(LibraryVolume.id == volume_id,),
-            limit=1,
-        )
+        row = db.get(LibraryVolume, volume_id)
     else:
-        rows = []
-    return rows[0] if rows else None
+        row = None
+    return entity_as_legacy_dict(row) if row is not None else None
 
 
 def update_cover_record(
@@ -203,26 +177,25 @@ def collect_storage_values(
     work_cover = db.scalar(
         select(LibraryWork.cover_path).where(LibraryWork.id == work_id)
     )
-    editions = projections.select_existing_rows(
-        db,
-        LibraryEdition,
-        "LibraryEdition",
-        filters=(LibraryEdition.work_id == work_id,),
-        order_by=(LibraryEdition.created_at.asc(), LibraryEdition.id.asc()),
-    )
+    edition_rows = db.scalars(
+        select(LibraryEdition)
+        .where(LibraryEdition.work_id == work_id)
+        .order_by(LibraryEdition.created_at.asc(), LibraryEdition.id.asc())
+    ).all()
+    editions = [entity_as_legacy_dict(row) for row in edition_rows]
     edition_ids = [str(edition["id"]) for edition in editions]
     if not edition_ids:
         return work_cover, editions, [], []
-    volumes = projections.select_existing_rows(
-        db,
-        LibraryVolume,
-        "LibraryVolume",
-        filters=(LibraryVolume.edition_id.in_(edition_ids),),
-    )
-    files = projections.select_existing_rows(
-        db,
-        LibraryFile,
-        "LibraryFile",
-        filters=(LibraryFile.edition_id.in_(edition_ids),),
-    )
+    volumes = [
+        entity_as_legacy_dict(row)
+        for row in db.scalars(
+            select(LibraryVolume).where(LibraryVolume.edition_id.in_(edition_ids))
+        ).all()
+    ]
+    files = [
+        entity_as_legacy_dict(row)
+        for row in db.scalars(
+            select(LibraryFile).where(LibraryFile.edition_id.in_(edition_ids))
+        ).all()
+    ]
     return work_cover, editions, volumes, files

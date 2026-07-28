@@ -1,0 +1,1 @@
+"""Download HTTP adapters."""
