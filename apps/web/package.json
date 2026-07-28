@@ -28,7 +28,6 @@
   "dependencies": {
     "@shuku/reader-core": "workspace:*",
     "epubjs": "0.3.93",
-    "framer-motion": "^11.3.24",
     "lucide-react": "^0.451.0",
     "next": "14.2.15",
     "pdfjs-dist": "6.1.200",

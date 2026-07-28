@@ -394,7 +394,7 @@ export function BookshelfCollection<T extends BookshelfItem>({
             className="grid items-end gap-4 px-5 sm:gap-5 sm:px-7"
             style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
           >
-            {row.map((book, index) => (
+            {row.map((book) => (
               <ShelfBook
                 key={book.id}
                 book={book}

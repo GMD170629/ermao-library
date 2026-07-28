@@ -1,7 +1,6 @@
 import { emitReaderDebug } from './debug';
 import {
   READER_PROGRESS_DEBOUNCE_MS,
-  type ProgressMutation,
   type ProgressMutationInput,
   type ProgressSyncTransport
 } from './model';

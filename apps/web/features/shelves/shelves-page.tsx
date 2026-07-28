@@ -10,7 +10,6 @@ import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { useConfirm, useToast } from '../../components/ui/feedback';
 import { PageTitle } from '../../components/ui/page-title';
-import type { WorkView } from '../../types/work';
 import { summarizeSmartShelfRules, type SmartShelfRules } from './smart-shelf-rules';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';

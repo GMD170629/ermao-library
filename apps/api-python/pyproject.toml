@@ -15,7 +15,6 @@ dependencies = [
   "pydantic>=2.8.0",
   "pydantic-settings>=2.4.0",
   "email-validator>=2.2.0",
-  "aiofiles>=24.1.0",
   "Pillow>=11.3.0",
   "ebooklib>=0.18",
   "lxml>=5.2.0",

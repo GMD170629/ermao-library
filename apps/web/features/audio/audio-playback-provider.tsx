@@ -25,7 +25,6 @@ import {
 } from './audio-model';
 import type {
   AudioBootstrap,
-  AudioChapter,
   AudioLaunchSummary,
   AudioPlaybackContextValue,
   AudioPlaybackState,
