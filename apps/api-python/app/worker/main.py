@@ -8,7 +8,7 @@ from pathlib import Path
 
 from app.core.config import get_settings
 from app.db.bootstrap import bootstrap_database
-from app.db.session import SessionLocal, engine
+from app.db.session import HeartbeatSessionLocal, SessionLocal, engine
 from app.services.metadata_lookup_queue import MetadataLookupWorker
 from app.services.organize_scheduler import OrganizerScheduler
 from app.worker.watcher import WorkerManager
@@ -33,8 +33,16 @@ def main() -> None:
     settings = get_settings()
     bootstrap_database(engine, settings)
     manager = WorkerManager(SessionLocal, settings)
-    persistent_import_worker = start_persistent_import_worker(SessionLocal, settings)
-    metadata_worker = MetadataLookupWorker(SessionLocal, settings)
+    persistent_import_worker = start_persistent_import_worker(
+        SessionLocal,
+        settings,
+        HeartbeatSessionLocal,
+    )
+    metadata_worker = MetadataLookupWorker(
+        SessionLocal,
+        settings,
+        heartbeat_db_factory=HeartbeatSessionLocal,
+    )
     organizer_scheduler = OrganizerScheduler(SessionLocal)
     stopping = False
     stop_event = threading.Event()
@@ -77,7 +85,11 @@ def main() -> None:
                     update_restart_operation(db, restart_operation_id, "waiting", "queue.restart.waiting")
                 if restart_operation_id and not persistent_import_worker.is_alive():
                     update_restart_operation(db, restart_operation_id, "running", "queue.restart.starting")
-                    persistent_import_worker = start_persistent_import_worker(SessionLocal, settings)
+                    persistent_import_worker = start_persistent_import_worker(
+                        SessionLocal,
+                        settings,
+                        HeartbeatSessionLocal,
+                    )
                     update_restart_operation(db, restart_operation_id, "completed", "queue.restart.completed")
                     record_system_event(
                         db,

@@ -13,10 +13,16 @@ from urllib.parse import urlencode
 from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
 
-from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.modules.download.infrastructure.tasks import (
+    find_active_download_task as find_active_download_task_row,
+    get_download_task,
+    has_table,
+    system_setting_value,
+    update_download_task,
+)
 from app.services.text_conversion import CONVERTIBLE_TEXT_EXTS
 ALLOWED_EXTENSIONS = {".epub", ".pdf", ".cbz", ".zip", ".rar", ".7z", ".torrent", ".m4b", ".m4a", ".mp3", *CONVERTIBLE_TEXT_EXTS}
 BLOCKED_EXTENSIONS = {".exe", ".sh", ".bat", ".cmd", ".js", ".php", ".msi", ".com", ".scr", ".ps1", ".vbs"}
@@ -42,30 +48,6 @@ def now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def has_table(db: Session, table: str) -> bool:
-    return table in inspect(db.get_bind()).get_table_names()
-
-
-def row(db: Session, sql: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
-    result = db.execute(text(sql), params or {}).mappings().first()
-    return dict(result) if result else None
-
-
-def rows(db: Session, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    return [dict(item) for item in db.execute(text(sql), params or {}).mappings().all()]
-
-
-def update_row(db: Session, table: str, row_id: str, values: dict[str, Any]) -> dict[str, Any] | None:
-    columns = {column["name"] for column in inspect(db.get_bind()).get_columns(table)}
-    values = {key: value for key, value in values.items() if key in columns}
-    if values:
-        params = {**values, "row_id": row_id}
-        assignments = ", ".join(f"`{key}` = :{key}" for key in values)
-        db.execute(text(f"UPDATE `{table}` SET {assignments} WHERE `id` = :row_id"), params)
-        db.commit()
-    return row(db, f"SELECT * FROM `{table}` WHERE `id` = :id", {"id": row_id})
-
-
 def remote_ref(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -83,10 +65,7 @@ def string_value(value: Any) -> str:
 
 
 def system_setting(db: Session, key: str) -> str | None:
-    if not has_table(db, "SystemSetting"):
-        return None
-    item = row(db, "SELECT `value` FROM `SystemSetting` WHERE `key` = :key", {"key": key})
-    value = (item or {}).get("value")
+    value = system_setting_value(db, key)
     if value is None:
         return None
     try:
@@ -355,31 +334,43 @@ def error_summary(error: Exception) -> str:
 
 
 def execute_download_task(db: Session, settings: Settings, task_id: str) -> DownloadExecutionResult:
-    task = row(db, "SELECT * FROM `DownloadTask` WHERE `id` = :id", {"id": task_id}) if has_table(db, "DownloadTask") else None
+    task = get_download_task(db, task_id)
     if not task:
         raise ValueError("下载任务不存在")
     if task.get("status") not in {"queued", "failed", "PENDING", "FAILED"}:
         return DownloadExecutionResult(task)
 
-    update_row(db, "DownloadTask", task_id, {"status": "downloading", "progress": 1, "errorMessage": None, "updatedAt": now()})
+    update_download_task(
+        db,
+        task_id,
+        {"status": "downloading", "progress": 1, "errorMessage": None, "updatedAt": now()},
+    )
+    db.commit()
     try:
         file_path = run_task(db, settings, {**task, "status": "downloading"})
-        updated = update_row(
+        updated = update_download_task(
             db,
-            "DownloadTask",
             task_id,
-            {"status": "downloaded", "progress": 100, "filePath": str(file_path), "savePath": str(file_path.parent), "errorMessage": None, "updatedAt": now()},
+            {
+                "status": "downloaded",
+                "progress": 100,
+                "filePath": str(file_path),
+                "savePath": str(file_path.parent),
+                "errorMessage": None,
+                "updatedAt": now(),
+            },
         )
+        db.commit()
         return DownloadExecutionResult(updated or task)
     except Exception as exc:
-        updated = update_row(db, "DownloadTask", task_id, {"status": "failed", "errorMessage": error_summary(exc), "updatedAt": now()})
+        updated = update_download_task(
+            db,
+            task_id,
+            {"status": "failed", "errorMessage": error_summary(exc), "updatedAt": now()},
+        )
+        db.commit()
         return DownloadExecutionResult(updated or task)
 
 
 def find_active_download_task(db: Session, record_id: str) -> dict[str, Any] | None:
-    if not has_table(db, "DownloadTask"):
-        return None
-    placeholders = ", ".join(f":status_{index}" for index, _ in enumerate(ACTIVE_DOWNLOAD_STATUSES))
-    params = {f"status_{index}": status for index, status in enumerate(ACTIVE_DOWNLOAD_STATUSES)}
-    params["record_id"] = record_id
-    return row(db, f"SELECT * FROM `DownloadTask` WHERE `searchRecordId` = :record_id AND `status` IN ({placeholders}) ORDER BY `createdAt` DESC LIMIT 1", params)
+    return find_active_download_task_row(db, record_id)

@@ -4,10 +4,10 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine, URL
 
 
-def create_sqlite_engine(database_path: Path) -> Engine:
+def create_sqlite_engine(database_path: Path, *, timeout_seconds: float = 10) -> Engine:
     engine = create_engine(
         URL.create("sqlite+pysqlite", database=str(database_path)),
-        connect_args={"timeout": 10},
+        connect_args={"timeout": timeout_seconds},
         pool_pre_ping=True,
     )
 
@@ -16,7 +16,7 @@ def create_sqlite_engine(database_path: Path) -> Engine:
         cursor = dbapi_connection.cursor()
         try:
             cursor.execute("PRAGMA foreign_keys = ON")
-            cursor.execute("PRAGMA busy_timeout = 10000")
+            cursor.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
             cursor.execute("PRAGMA synchronous = NORMAL")
         finally:
             cursor.close()

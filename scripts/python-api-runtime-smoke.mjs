@@ -84,11 +84,8 @@ async function main() {
     });
 
     const health = await waitForHealth(`http://127.0.0.1:${port}/api/health`, child);
-    const checkNames = new Set(health.data.checks.map((check) => check.name));
-    for (const expected of ['SESSION_SECRET', 'MONITOR_ROOT', 'database', 'monitorRootReadable', 'storageWritable']) {
-      if (!checkNames.has(expected)) {
-        throw new Error(`health response missing check ${expected}`);
-      }
+    if (health?.data?.service !== 'shuku-starship' || !['ok', 'error'].includes(health?.data?.status)) {
+      throw new Error('/api/health returned an invalid public health envelope');
     }
     const ping = await fetch(`http://127.0.0.1:${port}/api/__db-ping`);
     if (!ping.ok) throw new Error(`/api/__db-ping returned ${ping.status}`);

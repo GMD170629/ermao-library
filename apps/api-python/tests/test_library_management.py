@@ -1,8 +1,11 @@
 import json
 
-from sqlalchemy import text
+import pytest
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+import app.services.library_management as library_management
+from app.models.library import LibraryWork
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
@@ -16,6 +19,7 @@ from app.services.library_management import (
     merge_works,
     rename_category,
     smart_shelf_work_ids,
+    split_edition,
     sync_work_facets,
     undo_operation,
 )
@@ -184,6 +188,138 @@ def test_deleting_a_work_only_author_uses_unknown_author_fallback(tmp_path) -> N
         engine.dispose()
 
 
+def test_library_writes_rollback_when_facet_sync_fails(tmp_path, monkeypatch) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            _insert_work(db, "work-a", "星海列车", "林川", ["科幻"])
+            _insert_work(db, "work-b", "远航日志", "周禾", ["旅行"])
+            original_sync = library_management.sync_work_facets
+
+            def fail_sync(*_args, **_kwargs) -> None:
+                raise RuntimeError("facet sync failed")
+
+            monkeypatch.setattr(library_management, "sync_work_facets", fail_sync)
+            with pytest.raises(RuntimeError, match="facet sync failed"):
+                merge_works(db, "work-a", ["work-b"], None)
+            assert db.execute(
+                text("SELECT `hidden` FROM `LibraryWork` WHERE `id` = 'work-b'")
+            ).scalar() == 0
+            assert db.execute(
+                text("SELECT `workId` FROM `LibraryEdition` WHERE `id` = 'edition-work-b'")
+            ).scalar() == "work-b"
+            assert db.execute(text("SELECT COUNT(*) FROM `LibraryOperation`")).scalar() == 0
+
+            monkeypatch.setattr(library_management, "sync_work_facets", original_sync)
+            merged = merge_works(db, "work-a", ["work-b"], None)
+            operation_id = str(merged["operation"]["id"])
+            monkeypatch.setattr(library_management, "sync_work_facets", fail_sync)
+            with pytest.raises(RuntimeError, match="facet sync failed"):
+                undo_operation(db, operation_id, None)
+            assert db.execute(
+                text("SELECT `hidden` FROM `LibraryWork` WHERE `id` = 'work-b'")
+            ).scalar() == 1
+            assert db.execute(
+                text("SELECT `workId` FROM `LibraryEdition` WHERE `id` = 'edition-work-b'")
+            ).scalar() == "work-a"
+            assert db.execute(
+                text("SELECT `status` FROM `LibraryOperation` WHERE `id` = :operation_id"),
+                {"operation_id": operation_id},
+            ).scalar() == "COMPLETED"
+    finally:
+        engine.dispose()
+
+
+def test_category_write_rolls_back_and_success_commits_once(tmp_path, monkeypatch) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            _insert_work(db, "work-a", "边界", "林川", ["科幻"])
+            tag = next(item for item in list_categories(db, "TAG") if item["name"] == "科幻")
+            original_commit = db.commit
+            commit_count = 0
+
+            def count_commit() -> None:
+                nonlocal commit_count
+                commit_count += 1
+                original_commit()
+
+            monkeypatch.setattr(db, "commit", count_commit)
+            rename_category(db, str(tag["id"]), "科学幻想", None)
+            assert commit_count == 1
+
+            def fail_sync(*_args, **_kwargs) -> None:
+                raise RuntimeError("facet sync failed")
+
+            monkeypatch.setattr(library_management, "sync_work_facets", fail_sync)
+            renamed_tag = next(
+                item for item in list_categories(db, "TAG") if item["name"] == "科学幻想"
+            )
+            with pytest.raises(RuntimeError, match="facet sync failed"):
+                delete_category(db, str(renamed_tag["id"]), None)
+            assert json.loads(
+                db.execute(
+                    text("SELECT `tags` FROM `LibraryWork` WHERE `id` = 'work-a'")
+                ).scalar()
+            ) == ["科学幻想"]
+            assert next(
+                item for item in list_categories(db, "TAG") if item["name"] == "科学幻想"
+            )
+    finally:
+        engine.dispose()
+
+
+def test_split_rolls_back_when_facet_sync_fails(tmp_path, monkeypatch) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            _insert_work(db, "work-a", "边界", "林川", ["科幻"])
+            db.execute(
+                text(
+                    "INSERT INTO `LibraryEdition` "
+                    "(`id`, `workId`, `format`, `mediaKind`, `versionName`, `versionKey`, "
+                    "`importStatus`, `primary`, `hidden`, `updatedAt`) "
+                    "VALUES ('edition-work-a-second', 'work-a', 'EPUB', 'EBOOK', "
+                    "'第二版', 'key-work-a-second', 'IMPORTED', 0, 0, "
+                    "'2026-07-22T00:00:00')"
+                )
+            )
+            db.commit()
+
+            def fail_sync(*_args, **_kwargs) -> None:
+                raise RuntimeError("facet sync failed")
+
+            monkeypatch.setattr(library_management, "sync_work_facets", fail_sync)
+            with pytest.raises(RuntimeError, match="facet sync failed"):
+                split_edition(
+                    db,
+                    "work-a",
+                    "edition-work-a-second",
+                    title="拆分作品",
+                    author="林川",
+                    copy_shelves=False,
+                    user_id=None,
+                )
+            assert db.execute(
+                text(
+                    "SELECT `workId` FROM `LibraryEdition` "
+                    "WHERE `id` = 'edition-work-a-second'"
+                )
+            ).scalar() == "work-a"
+            assert db.execute(
+                text("SELECT COUNT(*) FROM `LibraryWork` WHERE `title` = '拆分作品'")
+            ).scalar() == 0
+            assert db.execute(text("SELECT COUNT(*) FROM `LibraryOperation`")).scalar() == 0
+    finally:
+        engine.dispose()
+
+
 def test_dynamic_filters_cover_metadata_files_shelves_folders_and_free_combinations(tmp_path) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
@@ -228,10 +364,12 @@ def test_dynamic_filters_cover_metadata_files_shelves_folders_and_free_combinati
                     {"field": "createdAt", "operator": "on_or_after", "value": "2026-07-01"},
                 ],
             }
-            clause, params, error = compile_filter_rules(db, all_rules, alias="w")
+            predicate, _params, error = compile_filter_rules(db, all_rules, alias="w")
             assert error is None
-            assert clause is not None
-            matched = db.execute(text(f"SELECT w.`id` FROM `LibraryWork` w WHERE {clause} ORDER BY w.`id`"), params).scalars().all()
+            assert predicate is not None
+            matched = db.scalars(
+                select(LibraryWork.id).where(predicate).order_by(LibraryWork.id)
+            ).all()
             assert matched == ["work-a"]
             assert smart_shelf_work_ids(db, all_rules) == ["work-a"]
 

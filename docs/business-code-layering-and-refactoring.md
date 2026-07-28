@@ -31,7 +31,7 @@
 | P0 | `app/api/routes/compat.py` 约 8,036 行、310 个函数，包含 HTTP、授权、SQL、映射、文件处理和业务编排 | 任意功能调整都可能跨越多个隐含边界；复用 route 私有函数会继续扩大耦合 |
 | P0 | `app/worker/importer.py` 约 3,207 行，串联校验、解析、转换、持久化、封面和事件 | 事务、文件发布、失败恢复和幂等行为集中在单一流程中，难以独立验证 |
 | P0 | ~~`app/db/seed.py` 仍反向导入 service 做回填~~（已清：seed 仅用 ORM/typed expressions 插入缺失默认记录；历史 backfill、启动 repair 与 migration marker 已删除） | 数据 backfill 曾依赖运行期业务层 |
-| P1 | `reader_v2.py` 仍从 `compat.py` 导入私有实现 | 新边界依赖旧兼容路由，阻碍 `compat.py` 退场 |
+| P1 | ~~`reader_v2.py` 仍从 `compat.py` 导入私有实现~~（已清：页面索引走 `modules/media`） | 新边界曾依赖旧兼容路由，阻碍 `compat.py` 退场 |
 | P1 | 后端约有 81 个 `except Exception`、813 处 `Any` | 部分稳定边界缺少错误分类和明确数据契约；需要按风险逐步收窄，不能机械清零 |
 | P1 | Web 有约 39 个文件直接调用 `fetch`，分布在页面、Provider、组件和 feature 中 | 鉴权失效、错误 envelope、取消请求、响应校验和重试策略容易不一致 |
 | P1 | `book-detail-page.tsx`、`reader-shell.tsx`、`app-shell.tsx` 等模块超过千行 | 展示、状态、请求和业务决策混合，局部修改容易触发大范围重新渲染或状态竞态 |
@@ -446,14 +446,18 @@ packages/
 
 按业务能力从 `compat.py` 迁出，而不是按函数数量平均拆分：
 
-1. system health / settings 等读取面；
-2. metadata / sources；
-3. library 查询与 facets；
-4. organize；
-5. upload / imports / monitor folders；
-6. files / media streaming。
+1. system health / settings 等读取面；**已完成（B-1）**：`app/modules/system/` 承接 SystemSetting KV、SystemEvent、健康检查/运行记录与队列运行时 ORM；旧 `services/health*.py` / `system_events.py` / `queue_runtime.py` 为兼容 re-export。
+2. metadata / sources；**已完成核心（B-2）**：Source 外部来源能力已退役并保持空列表/410/404 兼容契约，不再读取历史来源数据；provider registry、lookup queue 持久化均在 `app/modules/metadata/infrastructure/`（ORM）。
+3. library 查询与 facets；**已完成核心（B-3）**：facets、merge/rename/split/delete/undo/duplicate_groups、`smart_shelf_work_ids`、作品投影、文件/封面/存储、普通写操作与结构操作已迁入命名 ORM adapter；compat 通用数据库 helper 与 `select_compat.py` 已删除。
+4. organize；**进行中（B-4 评审面已迁）**：`OrganizePolicy`、scheduler 入队/cancel/recognize/delete，以及 `organize_service` 的 suggestion/duplicate apply、merge、external cache、job/work context 持久化均已迁入 `app/modules/organize/infrastructure/`（及 metadata `external_cache`）；compat organize jobs list/detail 已走 `job_queries` ORM。
+5. upload / imports / monitor folders；**已完成核心（B-5）**：worker 与 compat import-tasks/monitor-folders HTTP 已走 `app/modules/imports/infrastructure/` ORM（含 `import_http`）。
+6. files / media streaming；**已完成核心（B-6）**：页面索引已下沉 `app/modules/media/`，`reader_v2` 不再依赖 compat 私有符号。
 
-每一批保留原 URL 和 envelope。`reader_v2.py` 依赖的页面索引能力应先下沉到 reader 或 media application service，消除对 `compat.py` 私有函数的反向依赖。
+另：书架 CRUD 已迁入 `app/modules/shelf/`；download HTTP 已接入 application DTO、repository port 与 composition root；source HTTP 保留已退役契约；`app/`（排除 migrations）目标为无运行时 `execute(text)`。
+
+后续能力顺序（仍按文档）：reader → downloads → kindle → users/auth → backup。
+
+每一批保留原 URL 和 envelope。页面索引已下沉 media 模块，`reader_v2` 对 `compat.py` 私有函数的反向依赖已消除；compat 内原 `_row/_rows/_scalar/_table_count/_insert/_update/_update_where/_delete/_list_table_response` 调用已清零，反射 SELECT 兼容桥已删除。
 
 ### 阶段 C：拆解导入流水线
 

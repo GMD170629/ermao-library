@@ -3,19 +3,18 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from time import time_ns
+from datetime import datetime, timedelta
 from typing import Any, Callable
 from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
 from uuid import uuid4
 
-from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.core.time import now_timestamp_ms, to_timestamp_ms
+from app.models.common import db_timestamp
+from app.modules.metadata.application.commands import execute_metadata_transaction
+from app.modules.metadata.infrastructure import lookup_queue as lookup_persist
 from app.services.book_identity import UNKNOWN_AUTHOR, identity_merge_key, normalize_identity_part
 from app.services.library_management import sync_work_facets
 from app.services.metadata_provider_registry import metadata_provider_registry, search_with_metadata_provider
@@ -25,130 +24,25 @@ from app.services.queue_runtime import QueueHeartbeatPump
 
 LOGGER = logging.getLogger(__name__)
 RETRY_DELAYS_SECONDS = (60, 300, 1800)
-STALE_RUNNING_MINUTES = 10
+STALE_RUNNING_MINUTES = lookup_persist.STALE_RUNNING_MINUTES
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _timestamp_sql(column: str) -> str:
-    value = f"CAST({column} AS TEXT)"
-    return (
-        f"CASE WHEN {value} GLOB '*[^0-9]*' "
-        f"THEN CAST(ROUND((julianday({column}) - 2440587.5) * 86400000) AS INTEGER) "
-        f"ELSE CAST({column} AS INTEGER) END"
-    )
-
-
-def _row(db: Session, sql: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
-    item = db.execute(text(sql), params or {}).mappings().first()
-    return dict(item) if item else None
-
-
-def _rows(db: Session, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    return [dict(item) for item in db.execute(text(sql), params or {}).mappings().all()]
-
-
-def _has_table(db: Session, table: str) -> bool:
-    return table in inspect(db.connection()).get_table_names()
-
-
-def _has_column(db: Session, table: str, column: str) -> bool:
-    return _has_table(db, table) and any(item.get("name") == column for item in inspect(db.connection()).get_columns(table))
-
-
-def _lookup_task_is_active(db: Session, task_id: str) -> bool:
-    if not _has_table(db, "MetadataLookupTask"):
-        return False
-    return _row(
-        db,
-        "SELECT `id` FROM `MetadataLookupTask` WHERE `id` = :id AND `status` IN ('PENDING', 'RUNNING')",
-        {"id": task_id},
-    ) is not None
-
-
-def _overwrite_title_author_enabled(db: Session) -> bool:
-    if not _has_table(db, "OrganizePolicy") or not _has_column(db, "OrganizePolicy", "overwriteTitleAuthor"):
-        return True
-    policy = _row(db, "SELECT `overwriteTitleAuthor` FROM `OrganizePolicy` WHERE `id` = 'default'")
-    return True if policy is None else bool(policy.get("overwriteTitleAuthor"))
-
-
-def _update_task(db: Session, task_id: str, **values: Any) -> None:
-    values["updatedAt"] = _now()
-    params = {**values, "task_id": task_id}
-    assignments = ", ".join(f"`{key}` = :{key}" for key in values)
-    db.execute(
-        text(
-            f"UPDATE `MetadataLookupTask` SET {assignments} "
-            "WHERE `id` = :task_id AND `status` != 'CANCELLED'"
-        ),
-        params,
-    )
+    return db_timestamp()
 
 
 def recover_stale_metadata_lookup_tasks(db: Session) -> int:
-    if not _has_table(db, "MetadataLookupTask"):
-        return 0
-    cutoff = _now() - timedelta(minutes=STALE_RUNNING_MINUTES)
-    result = db.execute(
-        text(
-            """
-            UPDATE `MetadataLookupTask`
-            SET `status` = 'PENDING', `nextAttemptAt` = :now, `startedAt` = NULL,
-                `errorSummary` = '任务进程中断，已自动恢复', `updatedAt` = :now
-            WHERE `status` = 'RUNNING' AND """ + _timestamp_sql("`startedAt`") + """ < :cutoff
-            """
-        ),
-        {"now": now_timestamp_ms(), "cutoff": to_timestamp_ms(cutoff)},
+    return execute_metadata_transaction(
+        db,
+        lambda: lookup_persist.recover_stale_lookup_tasks(db),
     )
-    db.commit()
-    return int(result.rowcount or 0)
 
 
 def claim_next_metadata_lookup_task(db: Session) -> dict[str, Any] | None:
-    if not _has_table(db, "MetadataLookupTask"):
-        return None
-    task = _row(
+    return execute_metadata_transaction(
         db,
-        """
-        SELECT * FROM `MetadataLookupTask`
-        WHERE `status` = 'PENDING'
-          AND (`nextAttemptAt` IS NULL OR """ + _timestamp_sql("`nextAttemptAt`") + """ <= :now)
-        ORDER BY """ + _timestamp_sql("`createdAt`") + """ ASC, `id` ASC
-        LIMIT 1
-        """,
-        {"now": now_timestamp_ms()},
+        lambda: lookup_persist.claim_next_lookup_task(db),
     )
-    if not task:
-        return None
-    started_at = _now()
-    result = db.execute(
-        text(
-            """
-            UPDATE `MetadataLookupTask`
-            SET `status` = 'RUNNING', `startedAt` = :started_at, `updatedAt` = :started_at
-            WHERE `id` = :task_id AND `status` = 'PENDING'
-            """
-        ),
-        {"task_id": task["id"], "started_at": started_at},
-    )
-    if result.rowcount and task.get("organizeJobId") and _has_table(db, "OrganizeJob"):
-        started_assignment = ", `startedAt` = COALESCE(`startedAt`, :started_at)" if _has_column(db, "OrganizeJob", "startedAt") else ""
-        db.execute(
-            text(
-                f"UPDATE `OrganizeJob` SET `status` = 'RUNNING', `summary` = '正在调用元数据插件', "
-                f"`updatedAt` = :started_at{started_assignment} WHERE `id` = :job_id"
-            ),
-            {"job_id": task["organizeJobId"], "started_at": started_at},
-        )
-    db.commit()
-    if not result.rowcount:
-        return None
-    task["status"] = "RUNNING"
-    task["startedAt"] = started_at
-    return task
 
 
 def _provider_order(task: dict[str, Any]) -> list[str]:
@@ -163,37 +57,16 @@ def _provider_order(task: dict[str, Any]) -> list[str]:
 def _search_provider(db: Session, context: dict[str, Any], provider: str, query: str) -> dict[str, Any]:
     # Lightweight worker unit tests and one-release legacy databases may not
     # have Source yet. Keep the old call boundary in that compatibility path.
-    if not _has_table(db, "Source"):
+    if not lookup_persist.source_table_ready(db):
         return metadata_search_candidates(db, context, provider, query, force=False, use_cache=True)
     return search_with_metadata_provider(db, context, provider, query, force=False, use_cache=True)
 
 
 def _start_provider_execution(db: Session, task: dict[str, Any], provider: str) -> str | None:
-    if not _has_table(db, "MetadataProviderExecution"):
-        return None
-    execution_id = f"py_{time_ns()}"
-    now = _now()
-    db.execute(
-        text(
-            """
-            INSERT INTO `MetadataProviderExecution`
-                (`id`, `jobId`, `lookupTaskId`, `providerId`, `status`, `attempts`,
-                 `startedAt`, `createdAt`, `updatedAt`)
-            VALUES
-                (:id, :job_id, :task_id, :provider, 'RUNNING', :attempts, :now, :now, :now)
-            """
-        ),
-        {
-            "id": execution_id,
-            "job_id": task.get("organizeJobId"),
-            "task_id": task.get("id"),
-            "provider": provider,
-            "attempts": int(task.get("attempts") or 0) + 1,
-            "now": now,
-        },
+    return execute_metadata_transaction(
+        db,
+        lambda: lookup_persist.start_provider_execution(db, task, provider),
     )
-    db.commit()
-    return execution_id
 
 
 def _finish_provider_execution(
@@ -204,26 +77,16 @@ def _finish_provider_execution(
     result: Any = None,
     error: str | None = None,
 ) -> None:
-    if not execution_id or not _has_table(db, "MetadataProviderExecution"):
-        return
-    db.execute(
-        text(
-            """
-            UPDATE `MetadataProviderExecution`
-            SET `status` = :status, `rawResultJson` = :result, `errorSummary` = :error,
-                `finishedAt` = :now, `updatedAt` = :now
-            WHERE `id` = :id
-            """
+    execute_metadata_transaction(
+        db,
+        lambda: lookup_persist.finish_provider_execution(
+            db,
+            execution_id,
+            status=status,
+            result=result,
+            error=error,
         ),
-        {
-            "id": execution_id,
-            "status": status,
-            "result": json.dumps(result, ensure_ascii=False) if result is not None else None,
-            "error": error,
-            "now": _now(),
-        },
     )
-    db.commit()
 
 
 def _choose_exact_candidate(candidates: list[dict[str, Any]], title: str, author: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
@@ -255,15 +118,10 @@ def _local_cover_exists(db: Session, work: dict[str, Any], edition_id: str | Non
         return True
     if not edition_id:
         return False
-    edition = _row(db, "SELECT `coverPath` FROM `LibraryEdition` WHERE `id` = :id", {"id": edition_id})
+    edition = lookup_persist.get_edition(db, edition_id)
     if str((edition or {}).get("coverPath") or "").strip():
         return True
-    volume = _row(
-        db,
-        "SELECT `id` FROM `LibraryVolume` WHERE `editionId` = :edition_id AND `coverPath` IS NOT NULL AND `coverPath` != '' LIMIT 1",
-        {"edition_id": edition_id},
-    )
-    return volume is not None
+    return lookup_persist.edition_has_volume_cover(db, edition_id)
 
 
 def _download_remote_cover(work_id: str, cover_url: str, settings: Settings) -> str | None:
@@ -293,16 +151,16 @@ def _apply_candidate(
     provider: str,
     candidate: dict[str, Any],
 ) -> list[str]:
-    work = _row(db, "SELECT * FROM `LibraryWork` WHERE `id` = :id", {"id": task["workId"]})
+    work = lookup_persist.get_work(db, str(task["workId"]))
     if not work:
         raise ValueError("作品已不存在")
     edition_id = str(work.get("primaryEditionId") or task.get("editionId") or "") or None
-    edition = _row(db, "SELECT * FROM `LibraryEdition` WHERE `id` = :id", {"id": edition_id}) if edition_id else None
+    edition = lookup_persist.get_edition(db, edition_id) if edition_id else None
     work_patch: dict[str, Any] = {}
     edition_patch: dict[str, Any] = {}
     applied: list[str] = []
 
-    overwrite_title_author = _overwrite_title_author_enabled(db)
+    overwrite_title_author = lookup_persist.overwrite_title_author_enabled(db)
     candidate_title = str(candidate.get("title") or "").strip()
     candidate_author = str(candidate.get("author") or "").strip()
     current_title = str(work.get("title") or "").strip()
@@ -327,7 +185,7 @@ def _apply_candidate(
     if not str(work.get("seriesName") or "").strip() and str(candidate.get("seriesName") or "").strip():
         work_patch["seriesName"] = str(candidate["seriesName"]).strip()
         applied.append("seriesName")
-    if _has_column(db, "LibraryWork", "seriesIndex") and work.get("seriesIndex") is None and candidate.get("seriesIndex") is not None:
+    if work.get("seriesIndex") is None and candidate.get("seriesIndex") is not None:
         try:
             work_patch["seriesIndex"] = float(candidate["seriesIndex"])
             applied.append("seriesIndex")
@@ -371,52 +229,32 @@ def _apply_candidate(
             "updatedAt": _now(),
         }
     )
-    work_assignments = ", ".join(f"`{key}` = :{key}" for key in work_patch)
-    db.execute(text(f"UPDATE `LibraryWork` SET {work_assignments} WHERE `id` = :work_id"), {**work_patch, "work_id": work["id"]})
+    lookup_persist.update_work(db, str(work["id"]), work_patch)
     if edition and edition_patch:
         edition_patch["updatedAt"] = _now()
-        assignments = ", ".join(f"`{key}` = :{key}" for key in edition_patch)
-        db.execute(text(f"UPDATE `LibraryEdition` SET {assignments} WHERE `id` = :edition_id"), {**edition_patch, "edition_id": edition["id"]})
+        lookup_persist.update_edition(db, str(edition["id"]), edition_patch)
     sync_work_facets(db, str(work["id"]), commit=False)
 
     job_id = task.get("organizeJobId")
-    if job_id and _has_table(db, "OrganizeJob"):
-        finished_assignment = ", `finishedAt` = :now" if _has_column(db, "OrganizeJob", "finishedAt") else ""
-        db.execute(
-            text(
-                f"""
-                UPDATE `OrganizeJob`
-                SET `status` = :status, `summary` = :summary, `errorSummary` = NULL, `updatedAt` = :now
-                    {finished_assignment}
-                WHERE `id` = :job_id
-                """
+    if job_id:
+        lookup_persist.finish_organize_job(
+            db,
+            str(job_id),
+            status="APPLIED" if applied else "COMPLETED",
+            summary=(
+                f"已从 {provider} 自动应用 {len(applied)} 项元数据"
+                if applied
+                else f"已从 {provider} 完成识别，现有元数据无需更新"
             ),
-            {
-                "status": "APPLIED" if applied else "COMPLETED",
-                "summary": (
-                    f"已从 {provider} 自动应用 {len(applied)} 项元数据"
-                    if applied
-                    else f"已从 {provider} 完成识别，现有元数据无需更新"
-                ),
-                "now": _now(),
-                "job_id": job_id,
-            },
+            error_summary=None,
+            set_finished_at=True,
         )
-    if edition_id and _has_table(db, "LibraryMetadata"):
-        db.execute(
-            text(
-                """
-                INSERT INTO `LibraryMetadata` (`id`, `editionId`, `source`, `rawJson`, `createdAt`, `updatedAt`)
-                VALUES (:id, :edition_id, :source, :raw_json, :now, :now)
-                """
-            ),
-            {
-                "id": f"py_{time_ns()}",
-                "edition_id": edition_id,
-                "source": provider,
-                "raw_json": json.dumps({"candidate": candidate, "appliedFields": applied}, ensure_ascii=False),
-                "now": _now(),
-            },
+    if edition_id:
+        lookup_persist.insert_library_metadata(
+            db,
+            edition_id=edition_id,
+            source=provider,
+            raw_json=json.dumps({"candidate": candidate, "appliedFields": applied}, ensure_ascii=False),
         )
     return applied
 
@@ -424,29 +262,24 @@ def _apply_candidate(
 def _mark_organize_lookup_unresolved(db: Session, task: dict[str, Any], message: str, *, failed: bool = False) -> None:
     """Expose a lookup in the organize queue only after it has no usable match."""
 
-    work = _row(db, "SELECT `organized`, `organizeStatus` FROM `LibraryWork` WHERE `id` = :id", {"id": task.get("workId")})
+    work = lookup_persist.get_work_organize_state(db, task.get("workId"))
     already_organized = bool((work or {}).get("organized")) or (work or {}).get("organizeStatus") == "APPLIED"
-    if work and not already_organized:
-        db.execute(
-            text("UPDATE `LibraryWork` SET `organized` = 0, `organizeStatus` = 'REVIEWING', `updatedAt` = :now WHERE `id` = :id"),
-            {"now": _now(), "id": task.get("workId")},
+    if work and not already_organized and task.get("workId"):
+        lookup_persist.mark_work_reviewing(db, str(task["workId"]))
+    if task.get("organizeJobId"):
+        lookup_persist.finish_organize_job(
+            db,
+            str(task["organizeJobId"]),
+            status="FAILED",
+            summary=message,
+            error_summary=message if failed else None,
+            set_finished_at=True,
+            only_if_not_cancelled=True,
         )
-    if task.get("organizeJobId") and _has_table(db, "OrganizeJob"):
-        finished_assignment = ", `finishedAt` = :now" if _has_column(db, "OrganizeJob", "finishedAt") else ""
-        db.execute(
-            text(
-                "UPDATE `OrganizeJob` SET `status` = :status, `summary` = :summary, "
-                f"`errorSummary` = :error, `updatedAt` = :now{finished_assignment} "
-                "WHERE `id` = :id AND `status` != 'CANCELLED'"
-            ),
-            {
-                "status": "FAILED",
-                "summary": message,
-                "error": message if failed else None,
-                "now": _now(),
-                "id": task["organizeJobId"],
-            },
-        )
+
+
+def _update_task(db: Session, task_id: str, **values: Any) -> None:
+    lookup_persist.update_lookup_task(db, task_id, **values)
 
 
 def _finish_without_match(db: Session, task: dict[str, Any], status: str, candidates: list[dict[str, Any]], message: str) -> None:
@@ -488,28 +321,22 @@ def _schedule_retry(db: Session, task: dict[str, Any], message: str, candidates:
             errorSummary=message,
             startedAt=None,
         )
-        if task.get("organizeJobId") and _has_table(db, "OrganizeJob"):
-            db.execute(
-                text(
-                    "UPDATE `OrganizeJob` SET `status` = 'LOOKUP_PENDING', `summary` = :summary, "
-                    "`errorSummary` = :error, `updatedAt` = :now WHERE `id` = :id"
-                ),
-                {
-                    "id": task["organizeJobId"],
-                    "summary": f"识别暂时失败，将进行第 {attempts + 1} 次尝试",
-                    "error": message,
-                    "now": _now(),
-                },
+        if task.get("organizeJobId"):
+            lookup_persist.mark_organize_job_retry_wait(
+                db,
+                str(task["organizeJobId"]),
+                summary=f"识别暂时失败，将进行第 {attempts + 1} 次尝试",
+                error=message,
             )
     db.commit()
 
 
 def process_metadata_lookup_task(db: Session, settings: Settings, task: dict[str, Any]) -> str:
-    import_task = _row(db, "SELECT `status` FROM `ImportTask` WHERE `id` = :id", {"id": task.get("importTaskId")}) if task.get("importTaskId") else None
-    if import_task and import_task.get("status") != "COMPLETED":
+    import_status = lookup_persist.get_import_task_status(db, task.get("importTaskId"))
+    if import_status is not None and import_status != "COMPLETED":
         _schedule_retry(db, task, "等待本地导入任务完成", [])
         return "PENDING"
-    work = _row(db, "SELECT * FROM `LibraryWork` WHERE `id` = :id", {"id": task.get("workId")})
+    work = lookup_persist.get_work(db, task.get("workId"))
     if not work:
         _finish_without_match(db, task, "FAILED", [], "作品已不存在")
         return "FAILED"
@@ -539,7 +366,7 @@ def process_metadata_lookup_task(db: Session, settings: Settings, task: dict[str
         if not candidate:
             _finish_provider_execution(db, execution_id, status="NO_MATCH", result=result)
             continue
-        if not _lookup_task_is_active(db, str(task["id"])):
+        if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
             return "CANCELLED"
         try:
             applied = _apply_candidate(db, settings, task, provider, candidate)
@@ -564,17 +391,17 @@ def process_metadata_lookup_task(db: Session, settings: Settings, task: dict[str
             errors.append(f"{provider} apply: {exc}")
 
     if enabled_providers == 0 and not errors:
-        if not _lookup_task_is_active(db, str(task["id"])):
+        if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
             return "CANCELLED"
         _finish_without_match(db, task, "NO_PROVIDER", inspected, "所有适用的元数据插件均未启用")
         return "NO_PROVIDER"
     if errors:
-        if not _lookup_task_is_active(db, str(task["id"])):
+        if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
             return "CANCELLED"
         _schedule_retry(db, task, "；".join(errors), inspected)
-        refreshed = _row(db, "SELECT `status` FROM `MetadataLookupTask` WHERE `id` = :id", {"id": task["id"]})
-        return str((refreshed or {}).get("status") or "FAILED")
-    if not _lookup_task_is_active(db, str(task["id"])):
+        refreshed_status = lookup_persist.get_lookup_task_status(db, str(task["id"]))
+        return str(refreshed_status or "FAILED")
+    if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
         return "CANCELLED"
     _finish_without_match(db, task, "NO_MATCH", inspected, "未找到可唯一确定的标题精确候选")
     return "NO_MATCH"
@@ -589,7 +416,13 @@ def process_next_metadata_lookup_task(db: Session, settings: Settings) -> bool:
 
 
 class MetadataLookupWorker:
-    def __init__(self, db_factory: Callable[[], Session], settings: Settings, poll_seconds: float = 2.0) -> None:
+    def __init__(
+        self,
+        db_factory: Callable[[], Session],
+        settings: Settings,
+        poll_seconds: float = 2.0,
+        heartbeat_db_factory: Callable[[], Session] | None = None,
+    ) -> None:
         self._db_factory = db_factory
         self._settings = settings
         self._poll_seconds = poll_seconds
@@ -597,7 +430,7 @@ class MetadataLookupWorker:
         self._thread = threading.Thread(target=self._run, name="metadata-lookup-worker", daemon=True)
         self._instance_id = f"metadata-{uuid4().hex}"
         self._heartbeat = QueueHeartbeatPump(
-            db_factory,
+            heartbeat_db_factory or db_factory,
             queue_name="metadata",
             instance_id=self._instance_id,
             poll_interval_seconds=poll_seconds,

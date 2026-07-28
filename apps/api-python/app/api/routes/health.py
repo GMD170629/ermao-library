@@ -3,33 +3,29 @@ import json
 
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.authorization import can_manage_system
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
-from app.services.health_runs import (
+from app.bootstrap.system import (
+    active_health_run_id,
     create_or_reuse_health_run,
-    health_run_snapshot,
-    prune_old_health_runs,
-    start_health_run,
-)
-from app.services.queue_runtime import (
     create_restart_operation,
+    health_run_snapshot,
+    probe_database,
+    prune_old_health_runs,
     queue_operation_view,
     queue_runtime_view,
-)
-from app.services.system_events import (
-    MAX_MAX_EVENT_BYTES,
-    MIN_MAX_EVENT_BYTES,
+    record_system_event,
+    run_system_health_checks,
     set_max_event_bytes,
+    start_health_run,
     system_event_storage_view,
 )
-from app.schemas.responses import ok
-from app.services.health import run_system_health_checks
-from app.schemas.responses import fail
+from app.modules.system.public import MAX_MAX_EVENT_BYTES, MIN_MAX_EVENT_BYTES
+from app.schemas.responses import fail, ok
 
 router = APIRouter(tags=["health"])
 
@@ -51,7 +47,7 @@ def system_health(db: Session = Depends(get_db), settings: Settings = Depends(ge
 
 @router.get("/__db-ping")
 def db_ping(db: Session = Depends(get_db)):
-    db.execute(text("SELECT 1"))
+    probe_database(db)
     return ok({"database": "ok"})
 
 
@@ -81,7 +77,11 @@ def create_health_run(
         settings,
         str(snapshot["runId"]),
     )
-    return ok({"run": snapshot, "created": created}, status_code=201 if created else 200)
+    return ok(
+        {"run": snapshot, "created": created},
+        status_code=201 if created else 200,
+        normalize_timestamps=False,
+    )
 
 
 @router.get("/system/health/runs/{run_id}")
@@ -95,7 +95,11 @@ def get_health_run(
     if auth_error:
         return auth_error
     snapshot = health_run_snapshot(db, run_id)
-    return ok({"run": snapshot}) if snapshot else fail("健康检查记录不存在", status_code=404, code="HEALTH_RUN_NOT_FOUND")
+    return (
+        ok({"run": snapshot}, normalize_timestamps=False)
+        if snapshot
+        else fail("健康检查记录不存在", status_code=404, code="HEALTH_RUN_NOT_FOUND")
+    )
 
 
 @router.get("/system/health/runs/{run_id}/events")
@@ -175,8 +179,7 @@ def restart_import_queue(
     user, auth_error = _system_manager(db, request, settings)
     if auth_error:
         return auth_error
-    active_health = db.execute(text("SELECT `id` FROM `SystemHealthRun` WHERE `status` = 'running' LIMIT 1")).scalar()
-    if active_health:
+    if active_health_run_id(db):
         return fail("健康检查运行期间不能重启导入队列", status_code=409, code="HEALTH_RUN_ACTIVE")
     runtime = queue_runtime_view(db, "import")
     if runtime is None or runtime.get("stale") or runtime.get("status") != "running":
@@ -223,10 +226,9 @@ async def update_log_settings(
     try:
         payload = await request.json()
         max_bytes = int(payload.get("maxBytes"))
-        storage = set_max_event_bytes(db, max_bytes)
+        set_max_event_bytes(db, max_bytes)
     except (AttributeError, TypeError, ValueError):
         return fail("日志容量上限必须在 1 MB 到 100 MB 之间", status_code=400, code="INVALID_LOG_MAX_BYTES")
-    from app.services.system_events import record_system_event
     record_system_event(
         db,
         source="system",

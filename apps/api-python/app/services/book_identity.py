@@ -10,10 +10,11 @@ from typing import Any, Literal
 from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
 
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.modules.system.infrastructure.settings import get_settings_raw, parse_setting_value
 
 UNKNOWN_AUTHOR = "未知作者"
 IDENTITY_PARSER_VERSION = 5
@@ -67,9 +68,12 @@ def logical_import_path(db: Session, settings: Settings, path: Path, original_na
     roots: list[tuple[str, Path]] = []
     try:
         if "MonitorFolder" in inspect(db.connection()).get_table_names():
-            for row in db.execute(text("SELECT `name`, `rootPath` FROM `MonitorFolder` WHERE `enabled` = 1")).mappings():
+            from app.models.settings import MonitorFolder
+            for row in db.execute(
+                select(MonitorFolder.name, MonitorFolder.root_path).where(MonitorFolder.enabled.is_(True))
+            ):
                 try:
-                    roots.append((str(row.get("name") or Path(str(row["rootPath"])).name), Path(str(row["rootPath"])).expanduser().resolve()))
+                    roots.append((str(row.name or Path(str(row.root_path)).name), Path(str(row.root_path)).expanduser().resolve()))
                 except OSError:
                     continue
     except Exception:
@@ -149,13 +153,18 @@ def _identity_cache_available(db: Session) -> bool:
 def _load_identity_cache(db: Session, logical_path: str) -> BookIdentity | None:
     if not _identity_cache_available(db):
         return None
+    from app.models.settings import BookIdentityCache
     row = db.execute(
-        text(
-            "SELECT `title`, `author`, `volumeIndex`, `source`, `confidence` "
-            "FROM `BookIdentityCache` WHERE `logicalPath` = :logical_path "
-            "AND `parserVersion` = :parser_version"
-        ),
-        {"logical_path": logical_path, "parser_version": IDENTITY_PARSER_VERSION},
+        select(
+            BookIdentityCache.title,
+            BookIdentityCache.author,
+            BookIdentityCache.volume_index,
+            BookIdentityCache.source,
+            BookIdentityCache.confidence,
+        ).where(
+            BookIdentityCache.logical_path == logical_path,
+            BookIdentityCache.parser_version == IDENTITY_PARSER_VERSION,
+        )
     ).mappings().first()
     if not row or row.get("source") not in {"ai", "regex"}:
         return None
@@ -170,7 +179,7 @@ def _load_identity_cache(db: Session, logical_path: str) -> BookIdentity | None:
     return BookIdentity(
         title=title,
         author=author,
-        volume_index=_number_or_none(row.get("volumeIndex")),
+        volume_index=_number_or_none(row.get("volume_index") if "volume_index" in row else row.get("volumeIndex")),
         source=row["source"],
         confidence=confidence,
         logical_path=logical_path,
@@ -186,31 +195,37 @@ def _save_identity_cache(db: Session, identity: BookIdentity) -> None:
     now = datetime.now()
     try:
         with db.begin_nested():
-            db.execute(
-                text(
-                    "INSERT INTO `BookIdentityCache` "
-                    "(`logicalPath`, `title`, `author`, `volumeIndex`, `source`, `confidence`, "
-                    "`parserVersion`, `rawJson`, `createdAt`, `updatedAt`) VALUES "
-                    "(:logical_path, :title, :author, :volume_index, :source, :confidence, "
-                    ":parser_version, :raw_json, :now, :now) "
-                    "ON CONFLICT (`logicalPath`) DO UPDATE SET "
-                    "`title` = excluded.`title`, `author` = excluded.`author`, "
-                    "`volumeIndex` = excluded.`volumeIndex`, `source` = excluded.`source`, "
-                    "`confidence` = excluded.`confidence`, `parserVersion` = excluded.`parserVersion`, "
-                    "`rawJson` = excluded.`rawJson`, `updatedAt` = excluded.`updatedAt`"
-                ),
-                {
-                    "logical_path": identity.logical_path,
-                    "title": identity.title,
-                    "author": identity.author,
-                    "volume_index": identity.volume_index,
-                    "source": identity.source,
-                    "confidence": identity.confidence,
-                    "parser_version": IDENTITY_PARSER_VERSION,
-                    "raw_json": json.dumps(identity.raw_metadata(), ensure_ascii=False),
-                    "now": now,
-                },
+            from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+            from app.models.settings import BookIdentityCache
+            statement = (
+                sqlite_insert(BookIdentityCache)
+                .values(
+                    logical_path=identity.logical_path,
+                    title=identity.title,
+                    author=identity.author,
+                    volume_index=identity.volume_index,
+                    source=identity.source,
+                    confidence=identity.confidence,
+                    parser_version=IDENTITY_PARSER_VERSION,
+                    raw_json=json.dumps(identity.raw_metadata(), ensure_ascii=False),
+                    created_at=now,
+                    updated_at=now,
+                )
+                .on_conflict_do_update(
+                    index_elements=[BookIdentityCache.logical_path],
+                    set_={
+                        "title": identity.title,
+                        "author": identity.author,
+                        "volumeIndex": identity.volume_index,
+                        "source": identity.source,
+                        "confidence": identity.confidence,
+                        "parserVersion": IDENTITY_PARSER_VERSION,
+                        "rawJson": json.dumps(identity.raw_metadata(), ensure_ascii=False),
+                        "updatedAt": now,
+                    },
+                )
             )
+            db.execute(statement)
     except Exception:
         return
 
@@ -334,12 +349,8 @@ def _ai_config(db: Session) -> tuple[dict[str, str] | None, str | None]:
         if "SystemSetting" not in inspect(db.connection()).get_table_names():
             return None, None
         keys = ["metadata.ai.enabled", "metadata.ai.baseUrl", "metadata.ai.apiKey", "metadata.ai.model"]
-        placeholders = ", ".join(f":key_{index}" for index, _ in enumerate(keys))
-        params = {f"key_{index}": key for index, key in enumerate(keys)}
-        values = {
-            str(row["key"]): _setting_value(row.get("value"))
-            for row in db.execute(text(f"SELECT `key`, `value` FROM `SystemSetting` WHERE `key` IN ({placeholders})"), params).mappings()
-        }
+        raw = get_settings_raw(db, keys)
+        values = {key: parse_setting_value(raw[key]) for key in keys if raw.get(key) is not None}
     except Exception:
         return None, None
     if not _coerce_bool(values.get("metadata.ai.enabled")):
@@ -418,13 +429,6 @@ def _ai_content(payload: Any) -> dict[str, Any]:
     if all(key in payload for key in ["title", "author"]):
         return payload
     raise ValueError("AI response does not contain identity JSON")
-
-
-def _setting_value(value: Any) -> Any:
-    try:
-        return json.loads(str(value))
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return value
 
 
 def _coerce_bool(value: Any) -> bool:

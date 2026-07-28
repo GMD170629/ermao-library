@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/feedback';
 import { I18nText, useI18n } from '@/i18n/provider';
+import { healthRunElapsedMs } from './health-run-time';
 import { SettingsCenterShell } from './settings-center-shell';
 
 type CheckStatus = 'pending' | 'running' | 'ok' | 'warning' | 'error' | 'skipped';
@@ -270,7 +271,7 @@ export function SystemHealthSettingsPage() {
     }, 1000);
   }
 
-  const elapsed = run ? Math.max(0, (run.finishedAt ?? now) - run.startedAt) : 0;
+  const elapsed = run ? healthRunElapsedMs(run.startedAt, run.finishedAt, now) : 0;
   const current = run?.items.find((item) => item.status === 'running');
   const groups = useMemo(() => run?.groups ?? [
     { id: 'storage', labelCode: 'health.group.storage' },

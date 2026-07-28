@@ -9,15 +9,25 @@ from typing import Any, Protocol
 from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
 
-from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
-from app.modules.metadata.public import (
-    BUILTIN_MANIFESTS,
-    METADATA_SOURCE_KIND,
-    ProviderManifest,
-    ensure_metadata_sources,
+from app.modules.metadata.infrastructure.providers import (
+    clear_work_type_pipelines,
+    ensure_pipeline_row,
+    get_provider_source,
+    list_enabled_provider_ids,
+    list_included_pipelines,
+    list_metadata_sources,
+    list_pipelines_for_provider,
+    set_provider_pipelines_enabled,
+    update_pipeline_row,
+    update_source_config,
+    update_source_enabled_priority,
+    update_source_test_result,
 )
+from app.bootstrap.metadata import ensure_metadata_sources
+from app.bootstrap.system import list_settings, upsert_setting
+from app.modules.metadata.public import BUILTIN_MANIFESTS, ProviderManifest
 
 LOGGER = logging.getLogger(__name__)
 ENTRY_POINT_GROUP = "shuku_starship.metadata_providers"
@@ -52,19 +62,6 @@ def _bool(value: Any, fallback: bool = False) -> bool:
     if isinstance(parsed, str):
         return parsed.strip().lower() in {"1", "true", "yes", "on", "enabled"}
     return fallback
-
-
-def _has_table(db: Session, table: str) -> bool:
-    return table in inspect(db.connection()).get_table_names()
-
-
-def _row(db: Session, sql: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
-    item = db.execute(text(sql), params or {}).mappings().first()
-    return dict(item) if item else None
-
-
-def _rows(db: Session, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    return [dict(item) for item in db.execute(text(sql), params or {}).mappings().all()]
 
 
 class MetadataProviderPlugin(Protocol):
@@ -203,10 +200,11 @@ def _default_config(manifest: ProviderManifest) -> dict[str, Any]:
 
 
 def _legacy_values(db: Session) -> dict[str, Any]:
-    if not _has_table(db, "SystemSetting"):
-        return {}
-    rows = _rows(db, "SELECT `key`, `value` FROM `SystemSetting` WHERE `key` LIKE 'metadata.%'")
-    return {str(item["key"]): _json_value(item.get("value"), item.get("value")) for item in rows}
+    return {
+        key: value
+        for key, value in list_settings(db).items()
+        if key.startswith("metadata.")
+    }
 
 
 def _legacy_provider_config(provider_id: str, values: dict[str, Any], manifest: ProviderManifest) -> dict[str, Any]:
@@ -219,20 +217,19 @@ def _legacy_provider_config(provider_id: str, values: dict[str, Any], manifest: 
 
 
 def ensure_metadata_provider_sources(db: Session) -> list[dict[str, Any]]:
-    if not _has_table(db, "Source"):
-        return []
     registry = metadata_provider_registry()
     ensure_metadata_sources(db, (plugin.manifest for plugin in registry.all()))
-    db.commit()
-    return _rows(
-        db,
-        "SELECT * FROM `Source` WHERE `kind` = :kind ORDER BY `priority`, `createdAt`",
-        {"kind": METADATA_SOURCE_KIND},
-    )
+    sources = list_metadata_sources(db)
+    if sources:
+        db.commit()
+    return sources
 
 
 def ensure_metadata_provider_pipelines(db: Session) -> None:
-    if not _has_table(db, "MetadataProviderPipeline"):
+    from sqlalchemy import inspect
+
+    bind = db.get_bind()
+    if bind is None or not inspect(bind).has_table("MetadataProviderPipeline"):
         return
     sources = ensure_metadata_provider_sources(db)
     source_by_provider = {str(item.get("providerType")): item for item in sources}
@@ -240,22 +237,13 @@ def ensure_metadata_provider_pipelines(db: Session) -> None:
     for plugin in metadata_provider_registry().all():
         source = source_by_provider.get(plugin.manifest.id) or {}
         for work_type in plugin.manifest.work_types:
-            db.execute(
-                text(
-                    """
-                    INSERT INTO `MetadataProviderPipeline`
-                        (`workType`, `providerId`, `included`, `enabled`, `position`, `createdAt`, `updatedAt`)
-                    VALUES (:work_type, :provider_id, 1, :enabled, :position, :now, :now)
-                    ON CONFLICT (`workType`, `providerId`) DO NOTHING
-                    """
-                ),
-                {
-                    "work_type": work_type,
-                    "provider_id": plugin.manifest.id,
-                    "enabled": bool(source.get("enabled")),
-                    "position": int(source.get("priority") or plugin.manifest.default_priority),
-                    "now": now,
-                },
+            ensure_pipeline_row(
+                db,
+                work_type=work_type,
+                provider_id=plugin.manifest.id,
+                enabled=bool(source.get("enabled")),
+                position=int(source.get("priority") or plugin.manifest.default_priority),
+                now=now,
             )
     db.commit()
 
@@ -263,10 +251,7 @@ def ensure_metadata_provider_pipelines(db: Session) -> None:
 def list_metadata_provider_pipelines(db: Session) -> list[dict[str, Any]]:
     ensure_metadata_provider_pipelines(db)
     providers = {str(item["id"]): item for item in list_metadata_providers(db)}
-    rows = _rows(
-        db,
-        "SELECT * FROM `MetadataProviderPipeline` WHERE `included` = 1 ORDER BY `workType`, `position`, `createdAt`",
-    ) if _has_table(db, "MetadataProviderPipeline") else []
+    rows = list_included_pipelines(db)
     by_type: dict[str, list[dict[str, Any]]] = {work_type: [] for work_type in METADATA_WORK_TYPES}
     for row in rows:
         provider = providers.get(str(row.get("providerId")))
@@ -288,18 +273,11 @@ def list_metadata_provider_pipelines(db: Session) -> list[dict[str, Any]]:
 
 
 def _sync_provider_source_from_pipelines(db: Session, provider_id: str, now: datetime) -> tuple[bool, int]:
-    rows = _rows(
-        db,
-        "SELECT `enabled`, `position` FROM `MetadataProviderPipeline` WHERE `providerId` = :provider_id AND `included` = 1",
-        {"provider_id": provider_id},
-    ) if _has_table(db, "MetadataProviderPipeline") else []
+    rows = list_pipelines_for_provider(db, provider_id)
     enabled = any(bool(item.get("enabled")) for item in rows)
     enabled_positions = [int(item.get("position") or 9999) for item in rows if item.get("enabled")]
     priority = min(enabled_positions) if enabled_positions else min([int(item.get("position") or 9999) for item in rows] or [9999])
-    db.execute(
-        text("UPDATE `Source` SET `enabled` = :enabled, `priority` = :priority, `updatedAt` = :now WHERE `kind` = :kind AND `providerType` = :provider_id"),
-        {"enabled": enabled, "priority": priority, "now": now, "kind": METADATA_SOURCE_KIND, "provider_id": provider_id},
-    )
+    update_source_enabled_priority(db, provider_id, enabled=enabled, priority=priority, now=now)
     return enabled, priority
 
 
@@ -324,17 +302,16 @@ def update_metadata_provider_pipeline(db: Session, work_type: str, items: list[d
             if errors:
                 raise ValueError(f"{plugin.manifest.name}：{'；'.join(errors)}")
     now = _now()
-    db.execute(
-        text("UPDATE `MetadataProviderPipeline` SET `included` = 0, `enabled` = 0, `updatedAt` = :now WHERE `workType` = :work_type"),
-        {"now": now, "work_type": normalized},
-    )
+    clear_work_type_pipelines(db, normalized, now)
     for index, (item, provider_id) in enumerate(zip(items, provider_ids), start=1):
-        db.execute(
-            text(
-                "UPDATE `MetadataProviderPipeline` SET `included` = 1, `enabled` = :enabled, `position` = :position, `updatedAt` = :now "
-                "WHERE `workType` = :work_type AND `providerId` = :provider_id"
-            ),
-            {"enabled": bool(item.get("enabled")), "position": index * 100, "now": now, "work_type": normalized, "provider_id": provider_id},
+        update_pipeline_row(
+            db,
+            work_type=normalized,
+            provider_id=provider_id,
+            included=True,
+            enabled=bool(item.get("enabled")),
+            position=index * 100,
+            now=now,
         )
     for provider_id in {str(plugin.manifest.id) for plugin in registry.all()}:
         enabled, _priority = _sync_provider_source_from_pipelines(db, provider_id, now)
@@ -347,11 +324,7 @@ def update_metadata_provider_pipeline(db: Session, work_type: str, items: list[d
 
 def _provider_source(db: Session, provider_id: str) -> dict[str, Any] | None:
     ensure_metadata_provider_sources(db)
-    return _row(
-        db,
-        "SELECT * FROM `Source` WHERE `kind` = :kind AND `providerType` = :provider_id ORDER BY `createdAt` LIMIT 1",
-        {"kind": METADATA_SOURCE_KIND, "provider_id": provider_id},
-    )
+    return get_provider_source(db, provider_id)
 
 
 def _source_config(source: dict[str, Any] | None, manifest: ProviderManifest) -> dict[str, Any]:
@@ -420,19 +393,8 @@ def _validate_config(manifest: ProviderManifest, config: dict[str, Any], enabled
     return errors
 
 
-def _upsert_legacy_setting(db: Session, key: str, value: Any, now: datetime) -> None:
-    if not _has_table(db, "SystemSetting"):
-        return
-    db.execute(
-        text(
-            """
-            INSERT INTO `SystemSetting` (`key`, `value`, `createdAt`, `updatedAt`)
-            VALUES (:key, :value, :now, :now)
-            ON CONFLICT (`key`) DO UPDATE SET `value` = excluded.`value`, `updatedAt` = excluded.`updatedAt`
-            """
-        ),
-        {"key": key, "value": _json_text(value), "now": now},
-    )
+def _upsert_legacy_setting(db: Session, key: str, value: Any, _now: datetime) -> None:
+    upsert_setting(db, key, value)
 
 
 def _sync_legacy_provider_settings(db: Session, provider_id: str, enabled: bool, config: dict[str, Any], now: datetime) -> None:
@@ -479,21 +441,17 @@ def update_metadata_provider(db: Session, provider_id: str, payload: dict[str, A
         raise ValueError("插件优先级格式不正确") from None
     priority = min(max(priority, 1), 9999)
     now = _now()
-    db.execute(
-        text(
-            "UPDATE `Source` SET `enabled` = :enabled, `priority` = :priority, `config` = :config, `updatedAt` = :now WHERE `id` = :id"
-        ),
-        {"enabled": enabled, "priority": priority, "config": _json_text(next_config), "now": now, "id": source["id"]},
+    update_source_config(
+        db,
+        str(source["id"]),
+        enabled=enabled,
+        priority=priority,
+        config=_json_text(next_config),
+        now=now,
     )
-    if "enabled" in payload and _has_table(db, "MetadataProviderPipeline"):
+    if "enabled" in payload:
         ensure_metadata_provider_pipelines(db)
-        db.execute(
-            text(
-                "UPDATE `MetadataProviderPipeline` SET `included` = 1, `enabled` = :enabled, `updatedAt` = :now "
-                "WHERE `providerId` = :provider_id"
-            ),
-            {"enabled": enabled, "now": now, "provider_id": provider_id},
-        )
+        set_provider_pipelines_enabled(db, provider_id, enabled, now)
         enabled, priority = _sync_provider_source_from_pipelines(db, provider_id, now)
     _sync_legacy_provider_settings(db, provider_id, enabled, next_config, now)
     db.commit()
@@ -518,16 +476,12 @@ def test_metadata_provider(db: Session, provider_id: str) -> tuple[dict[str, Any
         except Exception as exc:
             result = {"ok": False, "message": str(exc)}
     now = _now()
-    db.execute(
-        text(
-            "UPDATE `Source` SET `lastTestAt` = :now, `lastTestStatus` = :status, `lastError` = :error, `updatedAt` = :now WHERE `id` = :id"
-        ),
-        {
-            "now": now,
-            "status": "ok" if result.get("ok") else "failed",
-            "error": None if result.get("ok") else str(result.get("message") or "连接测试失败"),
-            "id": source["id"],
-        },
+    update_source_test_result(
+        db,
+        str(source["id"]),
+        status="ok" if result.get("ok") else "failed",
+        error=None if result.get("ok") else str(result.get("message") or "连接测试失败"),
+        now=now,
     )
     db.commit()
     provider = get_metadata_provider(db, provider_id)
@@ -541,32 +495,33 @@ def provider_supports_work_type(manifest: ProviderManifest, work_type: str | Non
 
 
 def enabled_metadata_provider_ids(db: Session, work_type: str | None = None) -> list[str]:
-    if not _has_table(db, "MetadataProviderPipeline"):
+    from sqlalchemy import inspect
+
+    bind = db.get_bind()
+    if bind is None or not inspect(bind).has_table("MetadataProviderPipeline"):
         providers = list_metadata_providers(db)
         registry = metadata_provider_registry()
         return [
             str(provider["id"])
             for provider in providers
             if provider.get("enabled")
-            and (work_type is None or provider_supports_work_type(registry.require(str(provider["id"])).manifest, work_type))
+            and (
+                work_type is None
+                or provider_supports_work_type(registry.require(str(provider["id"])).manifest, work_type)
+            )
         ]
     ensure_metadata_provider_pipelines(db)
     if work_type is None:
-        rows = _rows(
-            db,
-            "SELECT `providerId`, MIN(`position`) AS `position` FROM `MetadataProviderPipeline` "
-            "WHERE `included` = 1 AND `enabled` = 1 GROUP BY `providerId` ORDER BY `position`, `providerId`",
-        )
-    else:
-        value = str(work_type or "").strip().lower()
-        normalized = "comic" if value in {"comic", "cbz", "zip"} else "audiobook" if value in {"audiobook", "audio", "m4b", "m4a", "mp3"} else "ebook"
-        rows = _rows(
-            db,
-            "SELECT `providerId` FROM `MetadataProviderPipeline` "
-            "WHERE `workType` = :work_type AND `included` = 1 AND `enabled` = 1 ORDER BY `position`, `createdAt`",
-            {"work_type": normalized},
-        )
-    return [str(row["providerId"]) for row in rows]
+        return list_enabled_provider_ids(db)
+    value = str(work_type or "").strip().lower()
+    normalized = (
+        "comic"
+        if value in {"comic", "cbz", "zip"}
+        else "audiobook"
+        if value in {"audiobook", "audio", "m4b", "m4a", "mp3"}
+        else "ebook"
+    )
+    return list_enabled_provider_ids(db, normalized)
 
 
 def search_with_metadata_provider(
@@ -578,14 +533,36 @@ def search_with_metadata_provider(
     force: bool = False,
     use_cache: bool = True,
 ) -> dict[str, Any]:
+    from sqlalchemy import inspect
+
     plugin = metadata_provider_registry().require(provider_id)
-    if not _has_table(db, "Source"):
-        return plugin.search(db, context, query, config=_default_config(plugin.manifest), force=force, use_cache=use_cache)
+    bind = db.get_bind()
+    if bind is None or not inspect(bind).has_table("Source"):
+        return plugin.search(
+            db,
+            context,
+            query,
+            config=_default_config(plugin.manifest),
+            force=force,
+            use_cache=use_cache,
+        )
     source = _provider_source(db, provider_id)
     work = context.get("work") if isinstance(context.get("work"), dict) else {}
     work_type = work.get("workType") if isinstance(work, dict) else None
-    provider_enabled = provider_id in enabled_metadata_provider_ids(db, str(work_type)) if work_type else bool(source and source.get("enabled"))
+    provider_enabled = (
+        provider_id in enabled_metadata_provider_ids(db, str(work_type))
+        if work_type
+        else bool(source and source.get("enabled"))
+    )
     if not source or not provider_enabled:
+        # Legacy SystemSetting toggles still enable search when Source seed is disabled.
+        legacy = _legacy_values(db)
+        legacy_enabled = _bool(legacy.get(f"metadata.{provider_id}.enabled"), False)
+        if legacy_enabled or (
+            _bool(legacy.get("metadata.external.enabled"), False) and provider_id in {"douban", "bangumi"}
+        ):
+            config = _legacy_provider_config(provider_id, legacy, plugin.manifest)
+            return plugin.search(db, context, query, config=config, force=force, use_cache=use_cache)
         return {
             "provider": provider_id,
             "enabled": False,

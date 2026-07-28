@@ -761,8 +761,11 @@ def test_shelf_list_is_summary_and_detail_is_lightweight_paginated(client, db_se
 
 def test_series_endpoint_hides_single_book_series_by_default(client, db_session):
     create_worker_tables(db_session)
-    db_session.execute(text("ALTER TABLE LibraryWork ADD COLUMN seriesName TEXT"))
-    db_session.execute(text("ALTER TABLE LibraryWork ADD COLUMN seriesIndex REAL"))
+    work_columns = {row[1] for row in db_session.execute(text("PRAGMA table_info(LibraryWork)")).all()}
+    if "seriesName" not in work_columns:
+        db_session.execute(text("ALTER TABLE LibraryWork ADD COLUMN seriesName TEXT"))
+    if "seriesIndex" not in work_columns:
+        db_session.execute(text("ALTER TABLE LibraryWork ADD COLUMN seriesIndex REAL"))
     _login(client, db_session)
     for work_id, title, series_name, hidden, updated_at in [
         ("series-visible-1", "星舰纪元 一", "星舰纪元", 0, "2026-06-11T10:00:00"),
@@ -815,7 +818,9 @@ def test_series_endpoint_hides_single_book_series_by_default(client, db_session)
 
 def test_management_folders_series_group_hides_empty_and_single_book_series(client, db_session):
     create_worker_tables(db_session)
-    db_session.execute(text("ALTER TABLE LibraryWork ADD COLUMN seriesName TEXT"))
+    work_columns = {row[1] for row in db_session.execute(text("PRAGMA table_info(LibraryWork)")).all()}
+    if "seriesName" not in work_columns:
+        db_session.execute(text("ALTER TABLE LibraryWork ADD COLUMN seriesName TEXT"))
     _login(client, db_session)
     for work_id, title, series_name in [
         ("multi-1", "星舰纪元 一", "星舰纪元"),
@@ -857,8 +862,11 @@ def test_management_folders_series_group_hides_empty_and_single_book_series(clie
 
 def test_works_series_filter_is_exact_and_accepts_unicode_names(client, db_session):
     create_worker_tables(db_session)
-    db_session.execute(text("ALTER TABLE LibraryWork ADD COLUMN seriesName TEXT"))
-    db_session.execute(text("ALTER TABLE LibraryWork ADD COLUMN seriesIndex REAL"))
+    work_columns = {row[1] for row in db_session.execute(text("PRAGMA table_info(LibraryWork)")).all()}
+    if "seriesName" not in work_columns:
+        db_session.execute(text("ALTER TABLE LibraryWork ADD COLUMN seriesName TEXT"))
+    if "seriesIndex" not in work_columns:
+        db_session.execute(text("ALTER TABLE LibraryWork ADD COLUMN seriesIndex REAL"))
     _login(client, db_session)
     for work_id, title, series_name, series_index in [
         ("exact-1", "第 2 卷", "午夜文库·大师系列：岛田庄司作品", 2),
@@ -1546,15 +1554,22 @@ def test_bulk_works_delete_records_removes_selected_books(client, db_session, te
 
 def _create_bulk_management_fixture(db_session):
     create_worker_tables(db_session)
-    for statement in [
-        "ALTER TABLE LibraryWork ADD COLUMN seriesName TEXT",
-        "ALTER TABLE LibraryWork ADD COLUMN seriesIndex REAL",
-        "ALTER TABLE LibraryWork ADD COLUMN publishedYear INTEGER",
-        "ALTER TABLE LibraryEdition ADD COLUMN mediaKind TEXT DEFAULT 'EBOOK'",
-        "ALTER TABLE LibraryEdition ADD COLUMN narrator TEXT",
-        "ALTER TABLE LibraryEdition ADD COLUMN durationMs INTEGER",
+    work_columns = {row[1] for row in db_session.execute(text("PRAGMA table_info(LibraryWork)")).all()}
+    edition_columns = {row[1] for row in db_session.execute(text("PRAGMA table_info(LibraryEdition)")).all()}
+    for column, statement in [
+        ("seriesName", "ALTER TABLE LibraryWork ADD COLUMN seriesName TEXT"),
+        ("seriesIndex", "ALTER TABLE LibraryWork ADD COLUMN seriesIndex REAL"),
+        ("publishedYear", "ALTER TABLE LibraryWork ADD COLUMN publishedYear INTEGER"),
     ]:
-        db_session.execute(text(statement))
+        if column not in work_columns:
+            db_session.execute(text(statement))
+    for column, statement in [
+        ("mediaKind", "ALTER TABLE LibraryEdition ADD COLUMN mediaKind TEXT DEFAULT 'EBOOK'"),
+        ("narrator", "ALTER TABLE LibraryEdition ADD COLUMN narrator TEXT"),
+        ("durationMs", "ALTER TABLE LibraryEdition ADD COLUMN durationMs INTEGER"),
+    ]:
+        if column not in edition_columns:
+            db_session.execute(text(statement))
     db_session.execute(text("CREATE TABLE IF NOT EXISTS Shelf (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, kind TEXT DEFAULT 'STATIC', rulesJson TEXT DEFAULT '{}', pinned INTEGER DEFAULT 0, createdAt TEXT, updatedAt TEXT)"))
     db_session.execute(text("CREATE TABLE IF NOT EXISTS ShelfWork (shelfId TEXT NOT NULL, workId TEXT NOT NULL, createdAt TEXT, PRIMARY KEY (shelfId, workId))"))
     db_session.execute(text("CREATE TABLE IF NOT EXISTS LibraryConsumptionState (id TEXT PRIMARY KEY, userId TEXT, workId TEXT, mediaKind TEXT, status TEXT, lastEditionId TEXT, lastVolumeId TEXT, lastUnitId TEXT, createdAt TEXT, updatedAt TEXT)"))
@@ -2393,7 +2408,9 @@ def test_small_cover_endpoints_compress_cache_and_preserve_other_variants(client
 
 def test_move_content_applies_volume_media_and_backup_rules(client, db_session):
     create_worker_tables(db_session)
-    db_session.execute(text("ALTER TABLE LibraryEdition ADD COLUMN mediaKind TEXT"))
+    edition_columns = {row[1] for row in db_session.execute(text("PRAGMA table_info(LibraryEdition)")).all()}
+    if "mediaKind" not in edition_columns:
+        db_session.execute(text("ALTER TABLE LibraryEdition ADD COLUMN mediaKind TEXT"))
     _login(client, db_session)
     user_id = db_session.query(User).filter(User.email == "admin@example.com").one().id
     db_session.execute(

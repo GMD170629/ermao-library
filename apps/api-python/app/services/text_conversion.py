@@ -16,11 +16,15 @@ from typing import Any, Callable
 from urllib.parse import unquote, urlsplit
 from xml.etree import ElementTree
 
-from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.core.time import now_timestamp_ms
+from app.modules.imports.infrastructure.conversion import (
+    ensure_conversion_task,
+    record_conversion_failure,
+    update_conversion_stage,
+)
 from app.services.epub_normalizer import (
     EPUB_NORMALIZER_VERSION,
     EpubInspection,
@@ -92,10 +96,6 @@ def _now() -> int:
 
 def _id() -> str:
     return f"py_{time.time_ns()}"
-
-
-def _has_table(db: Session, table: str) -> bool:
-    return table in inspect(db.connection()).get_table_names()
 
 
 def _sha256(path: Path) -> str:
@@ -283,16 +283,6 @@ def converter_capability(settings: Settings, runner: CommandRunner | None = None
     }
 
 
-def _conversion_row(db: Session, import_task_id: str) -> dict[str, Any] | None:
-    if not _has_table(db, "BookConversionTask"):
-        return None
-    row = db.execute(
-        text("SELECT * FROM `BookConversionTask` WHERE `importTaskId` = :import_task_id"),
-        {"import_task_id": import_task_id},
-    ).mappings().first()
-    return dict(row) if row else None
-
-
 def _update_stage(
     db: Session,
     import_task_id: str,
@@ -302,19 +292,15 @@ def _update_stage(
     message: str,
     conversion_values: dict[str, Any] | None = None,
 ) -> None:
-    now = _now()
-    if _has_table(db, "ImportTask"):
-        db.execute(
-            text("UPDATE `ImportTask` SET `status` = 'PARSING', `progress` = :progress, `message` = :message, `updatedAt` = :now WHERE `id` = :id"),
-            {"progress": progress, "message": message, "now": now, "id": import_task_id},
-        )
-    if _has_table(db, "BookConversionTask"):
-        values = {"status": status, "progress": progress, "updatedAt": now, **(conversion_values or {})}
-        assignments = ", ".join(f"`{key}` = :{key}" for key in values)
-        db.execute(
-            text(f"UPDATE `BookConversionTask` SET {assignments} WHERE `importTaskId` = :importTaskId"),
-            {**values, "importTaskId": import_task_id},
-        )
+    update_conversion_stage(
+        db,
+        import_task_id,
+        status=status,
+        progress=progress,
+        message=message,
+        conversion_values=conversion_values,
+        now=_now(),
+    )
     db.commit()
 
 
@@ -326,33 +312,18 @@ def _ensure_conversion_task(
     converter: str,
     options: dict[str, Any],
 ) -> dict[str, Any]:
-    existing = _conversion_row(db, import_task_id)
-    if existing:
-        return existing
-    now = _now()
-    values = {
-        "id": _id(),
-        "importTaskId": import_task_id,
-        "mode": "AUTO",
-        "sourceFormat": fmt,
-        "targetFormat": "EPUB",
-        "sourcePath": str(source),
-        "converter": converter,
-        "optionsJson": json.dumps(options, ensure_ascii=False, sort_keys=True),
-        "status": "QUEUED",
-        "progress": 5,
-        "attempts": 0,
-        "retryable": 0,
-        "createdAt": now,
-        "updatedAt": now,
-    }
-    columns = {column["name"] for column in inspect(db.connection()).get_columns("BookConversionTask")}
-    values = {key: value for key, value in values.items() if key in columns}
-    keys = ", ".join(f"`{key}`" for key in values)
-    params = ", ".join(f":{key}" for key in values)
-    db.execute(text(f"INSERT INTO `BookConversionTask` ({keys}) VALUES ({params})"), values)
+    task = ensure_conversion_task(
+        db,
+        import_task_id,
+        task_id=_id(),
+        source_path=str(source),
+        fmt=fmt,
+        converter=converter,
+        options_json=json.dumps(options, ensure_ascii=False, sort_keys=True),
+        now=_now(),
+    )
     db.commit()
-    return _conversion_row(db, import_task_id) or values
+    return task
 
 
 def _failure_from_process(stderr: str, stdout: str) -> ConversionFailure:
@@ -650,23 +621,12 @@ def convert_to_epub(
 
 
 def _record_failure(db: Session, import_task_id: str, failure: ConversionFailure) -> None:
-    summary = str(failure)[:MAX_LOG_CHARS]
-    now = _now()
-    if _has_table(db, "BookConversionTask"):
-        db.execute(
-            text(
-                "UPDATE `BookConversionTask` SET `status` = 'FAILED', `progress` = 100, `retryable` = :retryable, "
-                "`errorCode` = :error_code, `errorSummary` = :summary, `finishedAt` = :now, `updatedAt` = :now "
-                "WHERE `importTaskId` = :id"
-            ),
-            {"retryable": failure.retryable, "error_code": failure.code, "summary": summary, "now": now, "id": import_task_id},
-        )
-    if _has_table(db, "ImportTask"):
-        db.execute(
-            text(
-                "UPDATE `ImportTask` SET `errorCode` = :error_code, `retryable` = :retryable, "
-                "`errorSummary` = :summary, `updatedAt` = :now WHERE `id` = :id"
-            ),
-            {"error_code": failure.code, "retryable": failure.retryable, "summary": summary, "now": now, "id": import_task_id},
-        )
+    record_conversion_failure(
+        db,
+        import_task_id,
+        retryable=failure.retryable,
+        error_code=failure.code,
+        summary=str(failure)[:MAX_LOG_CHARS],
+        now=_now(),
+    )
     db.commit()

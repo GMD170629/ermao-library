@@ -1,14 +1,21 @@
 from __future__ import annotations
 
-import json
 import smtplib
 import ssl
 from dataclasses import dataclass
 from typing import Any
 
 from email_validator import EmailNotValidError, validate_email
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
+
+from app.modules.system.infrastructure.settings import (
+    delete_setting,
+    existing_setting_keys,
+    get_settings_raw,
+    parse_setting_value,
+    upsert_setting,
+)
 
 
 SMTP_PASSWORD_KEY = "email.smtp.password"
@@ -44,31 +51,20 @@ class SmtpConnectionSettings:
 
 def _has_settings_table(db: Session) -> bool:
     try:
-        return "SystemSetting" in inspect(db.get_bind()).get_table_names()
+        return "SystemSetting" in inspect(db.connection()).get_table_names()
     except Exception:
         return False
-
-
-def _decode(value: Any) -> Any:
-    if value is None:
-        return None
-    try:
-        return json.loads(str(value))
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return value
 
 
 def _load_values(db: Session) -> dict[str, Any]:
     if not _has_settings_table(db):
         return {}
     keys = list(SETTING_KEYS.values())
-    placeholders = ", ".join(f":key_{index}" for index in range(len(keys)))
-    params = {f"key_{index}": key for index, key in enumerate(keys)}
-    rows = db.execute(
-        text(f"SELECT `key`, `value` FROM `SystemSetting` WHERE `key` IN ({placeholders})"),
-        params,
-    ).mappings()
-    return {str(row["key"]): _decode(row["value"]) for row in rows}
+    existing = existing_setting_keys(db, keys)
+    if not existing:
+        return {}
+    raw = get_settings_raw(db, keys)
+    return {key: parse_setting_value(raw[key]) for key in existing}
 
 
 def _string(value: Any) -> str:
@@ -190,19 +186,11 @@ def save_email_settings(db: Session, payload: dict[str, Any]) -> tuple[dict[str,
     if "email" in kindle:
         supplied[SETTING_KEYS["kindleEmail"]] = normalized["kindleEmail"]
 
-    now_sql = "CURRENT_TIMESTAMP"
     for key, value in supplied.items():
-        db.execute(
-            text(
-                f"INSERT INTO `SystemSetting` (`key`, `value`, `createdAt`, `updatedAt`) "
-                f"VALUES (:key, :value, {now_sql}, {now_sql}) "
-                "ON CONFLICT (`key`) DO UPDATE SET `value` = excluded.`value`, `updatedAt` = excluded.`updatedAt`"
-            ),
-            {"key": key, "value": json.dumps(value, ensure_ascii=False)},
-        )
+        upsert_setting(db, key, value)
     changed_keys = list(supplied.keys())
     if payload.get("clearSmtpPassword") is True:
-        db.execute(text("DELETE FROM `SystemSetting` WHERE `key` = :key"), {"key": SMTP_PASSWORD_KEY})
+        delete_setting(db, SMTP_PASSWORD_KEY)
         if SMTP_PASSWORD_KEY not in changed_keys:
             changed_keys.append(SMTP_PASSWORD_KEY)
     db.commit()

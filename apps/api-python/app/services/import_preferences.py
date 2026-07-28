@@ -7,9 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+
+from app.modules.system.infrastructure.settings import existing_setting_keys, get_settings_raw
 
 
 IMPORT_STABILITY_ENABLED_KEY = "import.stabilityCheck.enabled"
@@ -140,13 +142,10 @@ def load_import_preferences(db: Session) -> ImportPreferences:
             IMPORT_ALLOWED_EXTENSIONS_KEY,
             IMPORT_IGNORE_PATTERNS_KEY,
         )
-        params = {f"key_{index}": key for index, key in enumerate(keys)}
-        placeholders = ", ".join(f":key_{index}" for index in range(len(keys)))
-        rows = db.execute(
-            text(f"SELECT `key`, `value` FROM `SystemSetting` WHERE `key` IN ({placeholders})"),
-            params,
-        ).mappings().all()
-        values = {str(row["key"]): row.get("value") for row in rows}
+        key_list = list(keys)
+        existing = existing_setting_keys(db, key_list)
+        raw = get_settings_raw(db, key_list)
+        values = {key: raw[key] for key in existing}
     except SQLAlchemyError:
         return ImportPreferences()
     return ImportPreferences(

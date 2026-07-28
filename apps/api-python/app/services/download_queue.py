@@ -6,11 +6,15 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.modules.download.infrastructure.tasks import (
+    list_enabled_monitor_folders,
+    mark_download_task_importing,
+    next_queued_download_task,
+)
 from app.services.download_executor import execute_download_task, has_table
 from app.worker.importer import is_supported_import_file
 from app.worker.persistent_import_queue import enqueue_import_task
@@ -18,7 +22,12 @@ from app.services.queue_runtime import QueueHeartbeatPump
 
 
 class DownloadQueueWorker:
-    def __init__(self, db_factory: Callable[[], Session], settings: Settings) -> None:
+    def __init__(
+        self,
+        db_factory: Callable[[], Session],
+        settings: Settings,
+        heartbeat_db_factory: Callable[[], Session] | None = None,
+    ) -> None:
         self.db_factory = db_factory
         self.settings = settings
         self._stop_event = threading.Event()
@@ -26,7 +35,7 @@ class DownloadQueueWorker:
         self._thread = threading.Thread(target=self._run, name="shuku-download-queue", daemon=True)
         self._instance_id = f"download-{uuid4().hex}"
         self._heartbeat = QueueHeartbeatPump(
-            db_factory,
+            heartbeat_db_factory or db_factory,
             queue_name="download",
             instance_id=self._instance_id,
             poll_interval_seconds=settings.download_queue_interval_seconds,
@@ -71,12 +80,7 @@ class DownloadQueueWorker:
 
 def next_queued_task(db: Session) -> dict[str, Any] | None:
     try:
-        if not has_table(db, "DownloadTask"):
-            return None
-        row = db.execute(
-            text("SELECT * FROM `DownloadTask` WHERE `status` = 'queued' ORDER BY `createdAt` ASC LIMIT 1")
-        ).mappings().first()
-        return dict(row) if row else None
+        return next_queued_download_task(db)
     except SQLAlchemyError as exc:
         print(f"[download-queue] download task table unavailable, retrying later: {exc}", flush=True)
         return None
@@ -99,10 +103,7 @@ def process_next_download_task(db: Session, settings: Settings) -> bool:
                     monitor_folder_id=_monitor_folder_id(db, downloaded_path),
                     message="下载完成，等待后台导入",
                 )
-                db.execute(
-                    text("UPDATE `DownloadTask` SET `status` = 'importing', `updatedAt` = CURRENT_TIMESTAMP WHERE `id` = :task_id"),
-                    {"task_id": task["id"]},
-                )
+                mark_download_task_importing(db, str(task["id"]))
                 db.commit()
                 print(f"[download-queue] downloaded {task['id']} and queued import {import_task.get('id')}", flush=True)
             except Exception as exc:
@@ -116,7 +117,7 @@ def _monitor_folder_id(db: Session, path: Path) -> str | None:
         return None
     resolved = path.resolve()
     matches: list[tuple[int, str]] = []
-    for folder in db.execute(text("SELECT `id`, `rootPath` FROM `MonitorFolder` WHERE `enabled` = 1")).mappings():
+    for folder in list_enabled_monitor_folders(db):
         try:
             root = Path(str(folder["rootPath"])).expanduser().resolve()
         except OSError:
@@ -126,9 +127,13 @@ def _monitor_folder_id(db: Session, path: Path) -> str | None:
     return max(matches, default=(0, None))[1]
 
 
-def start_download_queue_worker(db_factory: Callable[[], Session], settings: Settings) -> DownloadQueueWorker | None:
+def start_download_queue_worker(
+    db_factory: Callable[[], Session],
+    settings: Settings,
+    heartbeat_db_factory: Callable[[], Session] | None = None,
+) -> DownloadQueueWorker | None:
     if not settings.download_queue_enabled:
         return None
-    worker = DownloadQueueWorker(db_factory, settings)
+    worker = DownloadQueueWorker(db_factory, settings, heartbeat_db_factory)
     worker.start()
     return worker

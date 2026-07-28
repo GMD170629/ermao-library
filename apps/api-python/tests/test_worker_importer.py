@@ -22,16 +22,19 @@ def create_worker_tables(db):
         """CREATE TABLE IF NOT EXISTS LibraryWork (
             id TEXT PRIMARY KEY, monitorFolderId TEXT, origin TEXT, title TEXT, normalizedTitle TEXT, author TEXT,
             normalizedAuthor TEXT, description TEXT, workType TEXT, status TEXT, publicationStatus TEXT,
-            trackingStatus TEXT, tags TEXT, metadataQuality INTEGER, organizeStatus TEXT, coverPath TEXT,
+            trackingStatus TEXT, localLatestVolume TEXT, localLatestChapter TEXT, localLatestTitle TEXT,
+            localLatestAt TEXT, tags TEXT, seriesName TEXT, seriesIndex REAL, publishedYear INTEGER,
+            metadataQuality INTEGER, organizeStatus TEXT, coverPath TEXT,
             coverStatus TEXT, hidden BOOLEAN, organized BOOLEAN, primaryEditionId TEXT, mergeKey TEXT,
             createdAt TEXT, updatedAt TEXT
         )""",
         """CREATE TABLE IF NOT EXISTS LibraryEdition (
-            id TEXT PRIMARY KEY, workId TEXT, monitorFolderId TEXT, origin TEXT, format TEXT, versionName TEXT,
-            versionKey TEXT, sourceGroupKey TEXT, description TEXT, language TEXT, publisher TEXT, publishedAt TEXT,
-            identifier TEXT, isbn TEXT, importStatus TEXT, importError TEXT, sizeBytes INTEGER DEFAULT 0,
-            pageCount INTEGER, chapterCount INTEGER, coverPath TEXT, coverStatus TEXT, "primary" BOOLEAN,
-            hidden BOOLEAN, createdAt TEXT, updatedAt TEXT
+            id TEXT PRIMARY KEY, workId TEXT, monitorFolderId TEXT, origin TEXT, mediaKind TEXT,
+            format TEXT, versionName TEXT, versionKey TEXT, sourceGroupKey TEXT, description TEXT, language TEXT,
+            publisher TEXT, publishedAt TEXT, identifier TEXT, isbn TEXT, importStatus TEXT, importError TEXT,
+            sizeBytes INTEGER DEFAULT 0, pageCount INTEGER, chapterCount INTEGER, durationMs INTEGER,
+            trackCount INTEGER, narrator TEXT, abridged BOOLEAN, coverPath TEXT, coverStatus TEXT,
+            "primary" BOOLEAN, hidden BOOLEAN, createdAt TEXT, updatedAt TEXT
         )""",
         """CREATE TABLE IF NOT EXISTS LibraryVolume (
             id TEXT PRIMARY KEY, editionId TEXT, title TEXT, volumeIndex REAL, sortOrder INTEGER,
@@ -67,8 +70,13 @@ def create_worker_tables(db):
             id TEXT PRIMARY KEY, importTaskId TEXT, level TEXT, message TEXT, createdAt TEXT
         )""",
         """CREATE TABLE IF NOT EXISTS OrganizeJob (
-            id TEXT PRIMARY KEY, workId TEXT, editionId TEXT, importTaskId TEXT, status TEXT, issueCodes TEXT,
-            summary TEXT, errorSummary TEXT, createdAt TEXT, updatedAt TEXT
+            id TEXT PRIMARY KEY, runId TEXT, workId TEXT, editionId TEXT, importTaskId TEXT,
+            trigger TEXT DEFAULT 'LEGACY', status TEXT, issueCodes TEXT, reasonCodes TEXT DEFAULT '[]',
+            summary TEXT, errorSummary TEXT, startedAt TEXT, finishedAt TEXT, createdAt TEXT, updatedAt TEXT
+        )""",
+        """CREATE TABLE IF NOT EXISTS MetadataProviderExecution (
+            id TEXT PRIMARY KEY, jobId TEXT, lookupTaskId TEXT, providerId TEXT, status TEXT, attempts INTEGER,
+            rawResultJson TEXT, errorSummary TEXT, startedAt TEXT, finishedAt TEXT, createdAt TEXT, updatedAt TEXT
         )""",
         """CREATE TABLE IF NOT EXISTS LibraryFacet (
             id TEXT PRIMARY KEY, kind TEXT, name TEXT, normalizedName TEXT, aliases TEXT, createdAt TEXT, updatedAt TEXT,
@@ -82,9 +90,9 @@ def create_worker_tables(db):
         )""",
         """CREATE TABLE IF NOT EXISTS MetadataLookupTask (
             id TEXT PRIMARY KEY, workId TEXT, editionId TEXT, importTaskId TEXT UNIQUE, organizeJobId TEXT,
-            status TEXT, providerOrder TEXT, attempts INTEGER, nextAttemptAt TEXT, resultSource TEXT,
-            candidateRawJson TEXT, appliedFields TEXT, errorSummary TEXT, startedAt TEXT, finishedAt TEXT,
-            createdAt TEXT, updatedAt TEXT
+            status TEXT, providerOrder TEXT, attempts INTEGER, nextAttemptAt INTEGER, resultSource TEXT,
+            candidateRawJson TEXT, appliedFields TEXT, errorSummary TEXT, startedAt INTEGER, finishedAt INTEGER,
+            createdAt INTEGER, updatedAt INTEGER
         )""",
     ]
     for statement in statements:

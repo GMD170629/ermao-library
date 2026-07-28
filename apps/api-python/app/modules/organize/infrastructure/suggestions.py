@@ -1,0 +1,110 @@
+"""ORM persistence for MetadataSuggestion review rows."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from sqlalchemy import inspect, select, update
+from sqlalchemy.orm import Session
+
+from app.models.organize import MetadataSuggestion
+
+
+def _has_table(db: Session, table: str) -> bool:
+    return inspect(db.connection()).has_table(table)
+
+
+def suggestion_entity_as_legacy_dict(entity: MetadataSuggestion) -> dict[str, Any]:
+    return {
+        "id": entity.id,
+        "jobId": entity.job_id,
+        "field": entity.field,
+        "currentValue": entity.current_value,
+        "suggestedValue": entity.suggested_value,
+        "source": entity.source,
+        "confidence": entity.confidence,
+        "reason": entity.reason,
+        "status": entity.status,
+        "createdAt": entity.created_at,
+        "updatedAt": entity.updated_at,
+    }
+
+
+def list_pending_suggestions(db: Session, job_id: str) -> list[dict[str, Any]]:
+    if not _has_table(db, "MetadataSuggestion"):
+        return []
+    rows = db.scalars(
+        select(MetadataSuggestion).where(
+            MetadataSuggestion.job_id == job_id,
+            MetadataSuggestion.status == "PENDING",
+        )
+    ).all()
+    return [suggestion_entity_as_legacy_dict(row) for row in rows]
+
+
+def list_suggestion_dedupe_keys(db: Session, job_id: str) -> set[str]:
+    if not _has_table(db, "MetadataSuggestion"):
+        return set()
+    rows = db.execute(
+        select(
+            MetadataSuggestion.field,
+            MetadataSuggestion.source,
+            MetadataSuggestion.suggested_value,
+        ).where(MetadataSuggestion.job_id == job_id)
+    ).all()
+    return {f"{field}:{source}:{suggested}" for field, source, suggested in rows}
+
+
+def insert_suggestion(
+    db: Session,
+    *,
+    suggestion_id: str,
+    job_id: str,
+    field: str,
+    current_value: Any,
+    suggested_value: Any,
+    source: str,
+    confidence: float,
+    reason: str,
+    status: str,
+    now: Any,
+) -> None:
+    db.add(
+        MetadataSuggestion(
+            id=suggestion_id,
+            job_id=job_id,
+            field=field,
+            current_value=None if current_value is None else str(current_value),
+            suggested_value=str(suggested_value),
+            source=source,
+            confidence=float(confidence),
+            reason=str(reason),
+            status=status,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    db.flush()
+
+
+def mark_suggestions_applied(db: Session, suggestion_ids: list[str]) -> None:
+    if not suggestion_ids or not _has_table(db, "MetadataSuggestion"):
+        return
+    db.execute(
+        update(MetadataSuggestion)
+        .where(MetadataSuggestion.id.in_(suggestion_ids))
+        .values(status="APPLIED")
+    )
+
+
+def dismiss_pending_suggestions(db: Session, job_id: str) -> None:
+    if not _has_table(db, "MetadataSuggestion"):
+        return
+    db.execute(
+        update(MetadataSuggestion)
+        .where(
+            MetadataSuggestion.job_id == job_id,
+            MetadataSuggestion.status == "PENDING",
+        )
+        .values(status="DISMISSED")
+    )

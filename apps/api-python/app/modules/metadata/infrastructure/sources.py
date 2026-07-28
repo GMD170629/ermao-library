@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
@@ -20,8 +20,16 @@ def _json_text(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
+def _source_table_ready(db: Session) -> bool:
+    bind = db.get_bind()
+    return bind is not None and inspect(bind).has_table("Source")
+
+
 def ensure_metadata_sources(db: Session, manifests: Iterable[ProviderManifest]) -> None:
     """Insert missing provider sources without changing existing configuration."""
+
+    if not _source_table_ready(db):
+        return
 
     existing_provider_ids = set(
         db.execute(

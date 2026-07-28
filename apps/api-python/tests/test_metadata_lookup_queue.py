@@ -20,8 +20,17 @@ from tests.test_worker_importer import create_worker_tables
 
 
 def _insert_lookup_fixture(db, *, title="黑暗坡食人树", author="岛田庄司", provider_order=None, local_cover="covers/local.jpg"):
-    db.execute(text("ALTER TABLE LibraryWork ADD COLUMN seriesName TEXT"))
-    db.execute(text("ALTER TABLE LibraryWork ADD COLUMN publishedYear INTEGER"))
+    for statement in (
+        "ALTER TABLE LibraryWork ADD COLUMN seriesName TEXT",
+        "ALTER TABLE LibraryWork ADD COLUMN seriesIndex REAL",
+        "ALTER TABLE LibraryWork ADD COLUMN publishedYear INTEGER",
+        "ALTER TABLE OrganizeJob ADD COLUMN startedAt TEXT",
+        "ALTER TABLE OrganizeJob ADD COLUMN finishedAt TEXT",
+    ):
+        try:
+            db.execute(text(statement))
+        except Exception:
+            pass
     db.execute(
         text(
             """
@@ -316,7 +325,7 @@ def test_lookup_keeps_existing_identity_when_overwrite_is_disabled_and_fills_oth
 def test_stale_running_lookup_is_recovered(db_session):
     create_worker_tables(db_session)
     _insert_lookup_fixture(db_session)
-    db_session.execute(text("UPDATE MetadataLookupTask SET startedAt = '2000-01-01 00:00:00' WHERE id = 'lookup-1'"))
+    db_session.execute(text("UPDATE MetadataLookupTask SET startedAt = 946684800000 WHERE id = 'lookup-1'"))
     db_session.commit()
 
     assert recover_stale_metadata_lookup_tasks(db_session) == 1

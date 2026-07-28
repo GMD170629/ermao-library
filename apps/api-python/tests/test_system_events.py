@@ -1,8 +1,14 @@
 import json
 
-from sqlalchemy import text
+from sqlalchemy import func, select
 
-from app.services.system_events import prune_system_events, record_system_event
+from app.models.settings import SystemEvent
+from app.bootstrap.system import (
+    get_setting,
+    prune_system_events,
+    record_system_event,
+    upsert_setting,
+)
 
 
 def test_record_system_event_normalizes_level_and_serializes_metadata(db_session):
@@ -16,10 +22,11 @@ def test_record_system_event_normalizes_level_and_serializes_metadata(db_session
         commit=True,
     )
 
-    event = db_session.execute(text("SELECT * FROM SystemEvent WHERE id = :id"), {"id": event_id}).mappings().one()
-    assert event["level"] == "warning"
-    assert event["source"] == "import"
-    assert json.loads(event["metadata"]) == {"filesScanned": 3, "path": "/books"}
+    event = db_session.get(SystemEvent, event_id)
+    assert event is not None
+    assert event.level == "warning"
+    assert event.source == "import"
+    assert event.metadata_json == {"filesScanned": 3, "path": "/books"}
 
 
 def test_prune_system_events_discards_info_before_protected_error_events(db_session):
@@ -41,8 +48,8 @@ def test_prune_system_events_discards_info_before_protected_error_events(db_sess
     result = prune_system_events(db_session, max_bytes=250, commit=True)
 
     assert result["deleted"] == 3
-    assert db_session.execute(text("SELECT COUNT(*) FROM SystemEvent WHERE level = 'info'")).scalar() == 0
-    assert db_session.execute(text("SELECT COUNT(*) FROM SystemEvent WHERE id = :id"), {"id": protected_id}).scalar() == 1
+    assert db_session.scalar(select(func.count()).select_from(SystemEvent).where(SystemEvent.level == "info")) == 0
+    assert db_session.get(SystemEvent, protected_id) is not None
 
 
 def test_prune_system_events_enforces_hard_limit_after_protected_events(db_session):
@@ -59,3 +66,9 @@ def test_prune_system_events_enforces_hard_limit_after_protected_events(db_sessi
 
     assert result["sizeBytes"] <= 300
     assert result["deleted"] >= 1
+
+
+def test_system_setting_kv_round_trip(db_session):
+    upsert_setting(db_session, "readerTheme", "dark")
+    db_session.commit()
+    assert get_setting(db_session, "readerTheme") == "dark"

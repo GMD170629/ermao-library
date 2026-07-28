@@ -9,13 +9,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from watchdog.events import FileMovedEvent, FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from app.core.config import Settings
+from app.modules.imports.infrastructure.library_queries import audio_bundle_fully_imported
+from app.modules.imports.infrastructure.monitor import (
+    add_work_to_target_shelf,
+    get_completed_import_task_work_id,
+    get_system_settings,
+    list_enabled_monitor_folders,
+    load_known_import_paths as load_known_import_paths_from_db,
+    upsert_system_setting,
+)
 from app.services.system_events import record_system_event
 from app.services.import_preferences import (
     ImportPreferences,
@@ -194,7 +202,7 @@ class WorkerManager:
 
     def process_rescan_requests(self, db: Session) -> None:
         try:
-            settings = {row["key"]: row["value"] for row in db.execute(text("SELECT `key`, `value` FROM `SystemSetting` WHERE `key` IN (:requested, :handled)"), {"requested": RESCAN_REQUESTED_AT_KEY, "handled": RESCAN_HANDLED_AT_KEY}).mappings()}
+            settings = get_system_settings(db, (RESCAN_REQUESTED_AT_KEY, RESCAN_HANDLED_AT_KEY))
         except SQLAlchemyError as exc:
             print(f"[import-worker] system settings unavailable, retrying later: {exc}", flush=True)
             return
@@ -325,7 +333,7 @@ class WorkerManager:
 
 def enabled_monitor_folders(db: Session) -> list[MonitorFolderConfig]:
     try:
-        rows = db.execute(text("SELECT * FROM `MonitorFolder` WHERE `enabled` = 1 ORDER BY `createdAt` DESC")).mappings().all()
+        rows = list_enabled_monitor_folders(db)
     except SQLAlchemyError as exc:
         print(f"[import-worker] monitor folders unavailable, retrying later: {exc}", flush=True)
         return []
@@ -428,20 +436,10 @@ def _audio_bundle_is_fully_imported(db: Session, path: Path) -> bool:
         return False
     if not files:
         return False
-    params = {f"path_{index}": str(item.resolve()) for index, item in enumerate(files)}
-    placeholders = ", ".join(f":path_{index}" for index in range(len(files)))
     try:
-        rows = db.execute(
-            text(
-                "SELECT file.`editionId` FROM `LibraryFile` file "
-                "JOIN `LibraryEdition` edition ON edition.`id` = file.`editionId` "
-                f"WHERE file.`path` IN ({placeholders}) AND COALESCE(edition.`hidden`, 0) = 0"
-            ),
-            params,
-        ).mappings().all()
+        return audio_bundle_fully_imported(db, [str(item.resolve()) for item in files])
     except SQLAlchemyError:
         return False
-    return len(rows) == len(files) and len({str(row.get("editionId") or "") for row in rows}) == 1
 
 
 def wait_for_stable_file(path: Path, min_file_size_bytes: int, delay_seconds: float = 2.0) -> bool:
@@ -487,14 +485,7 @@ def wait_for_stable_import_source(path: Path, min_file_size_bytes: int, delay_se
 def _add_work_to_target_shelf(db: Session, folder: MonitorFolderConfig, work_id: str | None) -> None:
     if not folder.shelf_id or not work_id:
         return
-    shelf = db.execute(text("SELECT `id` FROM `Shelf` WHERE `id` = :shelf_id"), {"shelf_id": folder.shelf_id}).mappings().first()
-    if not shelf:
-        return
-    db.execute(
-        text("INSERT OR IGNORE INTO `ShelfWork` (`shelfId`, `workId`, `createdAt`) VALUES (:shelf_id, :work_id, CURRENT_TIMESTAMP)"),
-        {"shelf_id": folder.shelf_id, "work_id": work_id},
-    )
-    db.execute(text("UPDATE `Shelf` SET `updatedAt` = CURRENT_TIMESTAMP WHERE `id` = :shelf_id"), {"shelf_id": folder.shelf_id})
+    add_work_to_target_shelf(db, shelf_id=folder.shelf_id, work_id=work_id)
     db.commit()
 
 
@@ -527,10 +518,7 @@ def import_watched_file(db: Session, settings: Settings, path: Path, folder: Mon
             prune=True,
         )
         return False
-    existing = db.execute(
-        text("SELECT `id`, `workId` FROM `ImportTask` WHERE `sourcePath` = :source_path AND `status` = 'COMPLETED' LIMIT 1"),
-        {"source_path": str(path)},
-    ).mappings().first()
+    existing = get_completed_import_task_work_id(db, str(path))
     if existing and (path.is_file() or _audio_bundle_is_fully_imported(db, path)):
         _add_work_to_target_shelf(db, folder, existing.get("workId"))
         print(f"[import-worker] skipped already imported file {path}", flush=True)
@@ -569,27 +557,7 @@ def import_source_meets_minimum_size(path: Path, min_file_size_bytes: int) -> bo
 
 
 def load_known_import_paths(db: Session) -> set[Path]:
-    try:
-        task_columns = {column["name"] for column in inspect(db.connection()).get_columns("ImportTask")}
-        task_kind_select = ", `taskKind`" if "taskKind" in task_columns else ""
-        task_rows = db.execute(
-            text(f"SELECT `sourcePath`{task_kind_select} FROM `ImportTask` WHERE `sourcePath` IS NOT NULL")
-        ).mappings().all()
-        rows: list[str] = []
-        for task in task_rows:
-            candidate = Path(str(task["sourcePath"])).expanduser().resolve()
-            directory_task = str(task.get("taskKind") or "").upper() == "AUDIO_BUNDLE"
-            if directory_task and candidate.is_dir() and not _audio_bundle_is_fully_imported(db, candidate):
-                # A failed/legacy directory task must not mask files that are
-                # still spread across multiple editions.
-                continue
-            rows.append(str(candidate))
-        if "LibraryFile" in inspect(db.connection()).get_table_names():
-            rows.extend(str(value) for value in db.execute(text("SELECT `path` FROM `LibraryFile` WHERE `path` IS NOT NULL")).scalars())
-    except SQLAlchemyError as exc:
-        print(f"[import-worker] import task cache unavailable, retrying later: {exc}", flush=True)
-        return set()
-    return {Path(source_path).expanduser().resolve() for source_path in rows if source_path}
+    return load_known_import_paths_from_db(db)
 
 
 def scan_directory_for_imports(
@@ -739,12 +707,3 @@ def scan_directory_with_logging(
     for path, queued_folder in candidates:
         import_queue.enqueue(path, queued_folder)
     return summary
-
-
-def upsert_system_setting(db: Session, key: str, value: str) -> None:
-    existing = db.execute(text("SELECT `key` FROM `SystemSetting` WHERE `key` = :key"), {"key": key}).first()
-    if existing:
-        db.execute(text("UPDATE `SystemSetting` SET `value` = :value WHERE `key` = :key"), {"key": key, "value": value})
-    else:
-        db.execute(text("INSERT INTO `SystemSetting` (`key`, `value`, `createdAt`, `updatedAt`) VALUES (:key, :value, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"), {"key": key, "value": value})
-    db.commit()

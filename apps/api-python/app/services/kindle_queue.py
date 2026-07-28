@@ -12,13 +12,26 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.core.safe_errors import mask_email, safe_error_message
 from app.core.i18n import configured_locale
 from app.core.time import now_timestamp_ms
+from app.modules.kindle.infrastructure.tasks import (
+    claim_kindle_send_task,
+    get_kindle_send_task,
+    get_library_file_for_kindle,
+    has_table,
+    list_sending_kindle_tasks,
+    mark_kindle_task_failed,
+    mark_kindle_task_sent,
+    mark_kindle_task_unknown,
+    next_queued_kindle_task,
+    schedule_kindle_retry,
+    update_kindle_send_snapshot,
+)
 from app.services.email_settings import (
     EmailSettingsError,
     get_email_settings,
@@ -42,40 +55,6 @@ class KindleSendError(RuntimeError):
         self.transient = transient
 
 
-def has_table(db: Session, table: str) -> bool:
-    try:
-        return table in inspect(db.get_bind()).get_table_names()
-    except Exception:
-        return False
-
-
-def mask_email(value: Any) -> str:
-    address = str(value or "")
-    local, separator, domain = address.partition("@")
-    if not separator:
-        return "***"
-    if len(local) <= 2:
-        masked = local[:1] + "***"
-    else:
-        masked = local[:1] + "***" + local[-1:]
-    return f"{masked}@{domain}"
-
-
-def safe_error_message(exc: BaseException, secrets: list[str] | None = None) -> str:
-    message = str(exc).strip() or exc.__class__.__name__
-    for secret in secrets or []:
-        if secret:
-            message = message.replace(secret, "[已隐藏]")
-    message = re.sub(
-        r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}",
-        lambda match: mask_email(match.group(0)),
-        message,
-        flags=re.IGNORECASE,
-    )
-    message = re.sub(r"/(?:Users|home|var|Volumes|mnt|srv|opt)/[^\s'\"]+", "[本地路径]", message)
-    return message[:1000]
-
-
 def _stored_path(path_value: Any, settings: Settings) -> Path | None:
     if not path_value:
         return None
@@ -95,58 +74,31 @@ def _stored_path(path_value: Any, settings: Settings) -> Path | None:
 
 
 def _task(db: Session, task_id: str) -> dict[str, Any] | None:
-    if not has_table(db, "KindleSendTask"):
-        return None
-    row = db.execute(text("SELECT * FROM `KindleSendTask` WHERE `id` = :id"), {"id": task_id}).mappings().first()
-    return dict(row) if row else None
+    return get_kindle_send_task(db, task_id)
 
 
 def next_queued_task(db: Session) -> dict[str, Any] | None:
     try:
-        if not has_table(db, "KindleSendTask"):
-            return None
-        row = db.execute(
-            text(
-                "SELECT * FROM `KindleSendTask` WHERE `status` = 'queued' "
-                "AND (`nextAttemptAt` IS NULL OR CAST(`nextAttemptAt` AS INTEGER) <= :now) "
-                "ORDER BY CAST(`createdAt` AS INTEGER) ASC, `id` ASC LIMIT 1"
-            ),
-            {"now": now_timestamp_ms()},
-        ).mappings().first()
-        return dict(row) if row else None
+        return next_queued_kindle_task(db, now_timestamp_ms())
     except SQLAlchemyError:
         return None
 
 
 def _claim_task(db: Session, task_id: str) -> dict[str, Any] | None:
     now = datetime.now(timezone.utc)
-    claimed = db.execute(
-        text(
-            "UPDATE `KindleSendTask` SET `status` = 'sending', `attemptCount` = `attemptCount` + 1, "
-            "`startedAt` = :now, `nextAttemptAt` = NULL, `updatedAt` = :now "
-            "WHERE `id` = :id AND `status` = 'queued'"
-        ),
-        {"id": task_id, "now": now},
-    )
+    claimed = claim_kindle_send_task(db, task_id, now)
     db.commit()
-    return _task(db, task_id) if int(claimed.rowcount or 0) == 1 else None
+    return claimed
 
 
 def _file_for_task(db: Session, task: dict[str, Any]) -> dict[str, Any]:
     file_id = task.get("fileId")
-    if not file_id or not has_table(db, "LibraryFile"):
+    if not file_id:
         raise KindleSendError("附件记录已不存在")
-    row = db.execute(
-        text(
-            "SELECT f.*, e.`workId`, e.`format` AS `editionFormat` "
-            "FROM `LibraryFile` f JOIN `LibraryEdition` e ON e.`id` = f.`editionId` "
-            "WHERE f.`id` = :id"
-        ),
-        {"id": file_id},
-    ).mappings().first()
+    row = get_library_file_for_kindle(db, str(file_id))
     if not row:
         raise KindleSendError("附件记录已不存在")
-    return dict(row)
+    return row
 
 
 def _smtp_error(exc: BaseException, config_password: str) -> KindleSendError:
@@ -195,25 +147,20 @@ def _event(
 
 
 def _update_send_snapshot(db: Session, task_id: str, config: Any, message_id: str) -> dict[str, Any]:
-    db.execute(
-        text(
-            "UPDATE `KindleSendTask` SET `senderEmail` = :sender, `smtpHost` = :host, `smtpPort` = :port, "
-            "`smtpSecurity` = :security, `smtpUsername` = :username, `messageId` = :message_id, `updatedAt` = :now "
-            "WHERE `id` = :id"
-        ),
-        {
-            "id": task_id,
-            "sender": config.from_email,
-            "host": config.host,
-            "port": config.port,
-            "security": config.security,
-            "username": config.username or None,
-            "message_id": message_id,
-            "now": datetime.now(timezone.utc),
-        },
+    now = datetime.now(timezone.utc)
+    task = update_kindle_send_snapshot(
+        db,
+        task_id,
+        sender_email=config.from_email,
+        smtp_host=config.host,
+        smtp_port=config.port,
+        smtp_security=config.security,
+        smtp_username=config.username or None,
+        message_id=message_id,
+        now=now,
     )
     db.commit()
-    return _task(db, task_id) or {"id": task_id}
+    return task or {"id": task_id}
 
 
 def _send_task(db: Session, settings: Settings, task: dict[str, Any]) -> None:
@@ -276,34 +223,29 @@ def process_next_kindle_send_task(db: Session, settings: Settings) -> bool:
     except Exception as exc:
         error = exc if isinstance(exc, KindleSendError) else KindleSendError(safe_error_message(exc))
         attempt_count = int(task.get("attemptCount") or 0)
+        now = datetime.now(timezone.utc)
         if error.transient and attempt_count < MAX_SEND_ATTEMPTS:
             delay = RETRY_DELAYS_SECONDS[min(attempt_count - 1, len(RETRY_DELAYS_SECONDS) - 1)]
-            retry_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
-            db.execute(
-                text(
-                    "UPDATE `KindleSendTask` SET `status` = 'queued', `nextAttemptAt` = :retry_at, "
-                    "`errorMessage` = :error, `updatedAt` = :now WHERE `id` = :id"
-                ),
-                {"id": task["id"], "retry_at": retry_at, "error": str(error), "now": datetime.now(timezone.utc)},
+            retry_at = now + timedelta(seconds=delay)
+            schedule_kindle_retry(
+                db,
+                str(task["id"]),
+                retry_at=retry_at,
+                error_message=str(error),
+                now=now,
             )
             db.commit()
             task = _task(db, str(task["id"])) or task
             _event(db, task, action="send.retry_scheduled", level="warning", message=f"Kindle 发送失败，等待第 {attempt_count + 1} 次尝试：{task.get('bookTitle')}", metadata={"attemptCount": attempt_count, "nextAttemptAt": retry_at, "errorMessage": str(error)})
         else:
-            db.execute(
-                text("UPDATE `KindleSendTask` SET `status` = 'failed', `errorMessage` = :error, `updatedAt` = :now WHERE `id` = :id"),
-                {"id": task["id"], "error": str(error), "now": datetime.now(timezone.utc)},
-            )
+            mark_kindle_task_failed(db, str(task["id"]), error_message=str(error), now=now)
             db.commit()
             task = _task(db, str(task["id"])) or task
             _event(db, task, action="send.failed", level="error", message=f"Kindle 发送失败：{task.get('bookTitle')}", metadata={"attemptCount": attempt_count, "errorMessage": str(error)})
         return True
 
     sent_at = datetime.now(timezone.utc)
-    db.execute(
-        text("UPDATE `KindleSendTask` SET `status` = 'sent', `sentAt` = :sent_at, `errorMessage` = NULL, `updatedAt` = :sent_at WHERE `id` = :id"),
-        {"id": task["id"], "sent_at": sent_at},
-    )
+    mark_kindle_task_sent(db, str(task["id"]), sent_at)
     db.commit()
     task = _task(db, str(task["id"])) or task
     _event(db, task, action="send.succeeded", message=f"Kindle 邮件已提交：{task.get('bookTitle')}", metadata={"attemptCount": task.get("attemptCount"), "messageId": task.get("messageId")})
@@ -311,14 +253,14 @@ def process_next_kindle_send_task(db: Session, settings: Settings) -> bool:
 
 
 def recover_interrupted_tasks(db: Session) -> int:
-    if not has_table(db, "KindleSendTask"):
-        return 0
-    rows = [dict(row) for row in db.execute(text("SELECT * FROM `KindleSendTask` WHERE `status` = 'sending'")).mappings()]
+    rows = list_sending_kindle_tasks(db)
     now = datetime.now(timezone.utc)
     for task in rows:
-        db.execute(
-            text("UPDATE `KindleSendTask` SET `status` = 'unknown', `errorMessage` = :error, `updatedAt` = :now WHERE `id` = :id"),
-            {"id": task["id"], "error": "服务在发送过程中中断，发送结果未知，请确认后手动重试", "now": now},
+        mark_kindle_task_unknown(
+            db,
+            str(task["id"]),
+            error_message="服务在发送过程中中断，发送结果未知，请确认后手动重试",
+            now=now,
         )
     db.commit()
     for task in rows:
@@ -328,7 +270,12 @@ def recover_interrupted_tasks(db: Session) -> int:
 
 
 class KindleSendQueueWorker:
-    def __init__(self, db_factory: Callable[[], Session], settings: Settings) -> None:
+    def __init__(
+        self,
+        db_factory: Callable[[], Session],
+        settings: Settings,
+        heartbeat_db_factory: Callable[[], Session] | None = None,
+    ) -> None:
         self.db_factory = db_factory
         self.settings = settings
         self._stop_event = threading.Event()
@@ -336,7 +283,7 @@ class KindleSendQueueWorker:
         self._thread = threading.Thread(target=self._run, name="shuku-kindle-send-queue", daemon=True)
         self._instance_id = f"kindle-{uuid4().hex}"
         self._heartbeat = QueueHeartbeatPump(
-            db_factory,
+            heartbeat_db_factory or db_factory,
             queue_name="kindle",
             instance_id=self._instance_id,
             poll_interval_seconds=settings.kindle_send_queue_interval_seconds,
@@ -381,9 +328,13 @@ class KindleSendQueueWorker:
             self._heartbeat.stop()
 
 
-def start_kindle_send_queue_worker(db_factory: Callable[[], Session], settings: Settings) -> KindleSendQueueWorker | None:
+def start_kindle_send_queue_worker(
+    db_factory: Callable[[], Session],
+    settings: Settings,
+    heartbeat_db_factory: Callable[[], Session] | None = None,
+) -> KindleSendQueueWorker | None:
     if not settings.kindle_send_queue_enabled:
         return None
-    worker = KindleSendQueueWorker(db_factory, settings)
+    worker = KindleSendQueueWorker(db_factory, settings, heartbeat_db_factory)
     worker.start()
     return worker

@@ -10,7 +10,7 @@ from secrets import token_hex, token_urlsafe
 from fastapi import APIRouter, Depends, File, Request, UploadFile
 from fastapi.responses import FileResponse
 from PIL import Image, ImageOps, UnidentifiedImageError
-from sqlalchemy import func, text
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -148,31 +148,28 @@ def setup_status(db: Session = Depends(get_db)):
 
 @router.post("/setup", status_code=201)
 def setup(payload: SetupRequest, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+    if db.query(User.id).first() is not None:
+        return fail("系统已经完成初始化，请直接登录", status_code=409)
     email = _normalized_email(payload.email)
     user_id = cuid()
     now = db_timestamp()
-    inserted = db.execute(
-        text(
-            """
-            INSERT INTO `User` (`id`, `email`, `name`, `passwordHash`, `role`, `createdAt`, `updatedAt`)
-            SELECT :id, :email, :name, :password_hash, 'admin', :now, :now
-            WHERE NOT EXISTS (SELECT 1 FROM `User` LIMIT 1)
-            """
-        ),
-        {
-            "id": user_id,
-            "email": email,
-            "name": payload.name,
-            "password_hash": hash_password(payload.password),
-            "now": now,
-        },
+    user = User(
+        id=user_id,
+        email=email,
+        name=payload.name,
+        password_hash=hash_password(payload.password),
+        role="admin",
+        created_at=now,
+        updated_at=now,
     )
-    if inserted.rowcount != 1:
+    db.add(user)
+    try:
+        db.flush()
+        write_user_preference(db, user_id, "locale", payload.locale)
+        db.commit()
+    except IntegrityError:
         db.rollback()
         return fail("系统已经完成初始化，请直接登录", status_code=409)
-
-    write_user_preference(db, user_id, "locale", payload.locale)
-    db.commit()
     user = db.get(User, user_id)
     if user is None:
         return fail("账户创建失败", status_code=500)

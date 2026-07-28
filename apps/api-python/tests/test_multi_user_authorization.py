@@ -245,6 +245,33 @@ def test_folder_scope_system_manager_boundary_and_atomic_bulk_rejection(client, 
     assert works.status_code == 200
     assert {item["id"] for item in works.json()["data"]["books"]} == {"work-a", "work-merged"}
 
+    db_session.execute(
+        text(
+            "UPDATE `LibraryEdition` SET `publisher` = CASE "
+            "WHEN `id` = 'edition-a' THEN 'Middle Press' "
+            "WHEN `id` = 'edition-merged-a' THEN 'Zulu Press' "
+            "WHEN `id` = 'edition-merged-b' THEN 'Alpha Private Press' "
+            "ELSE `publisher` END, "
+            "`primary` = CASE WHEN `id` = 'edition-merged-b' THEN 1 "
+            "WHEN `id` = 'edition-merged-a' THEN 0 ELSE `primary` END "
+            "WHERE `id` IN ('edition-a', 'edition-merged-a', 'edition-merged-b')"
+        )
+    )
+    db_session.commit()
+    publisher_sorted = client.get(
+        "/api/works",
+        params={
+            "sort": "publisher",
+            "sortDirection": "asc",
+            "view": "management",
+            "pageSize": 100,
+        },
+    )
+    assert publisher_sorted.status_code == 200
+    assert [
+        item["id"] for item in publisher_sorted.json()["data"]["books"]
+    ] == ["work-a", "work-merged"]
+
     merged = client.get("/api/works/work-merged")
     assert merged.status_code == 200
     merged_payload = merged.json()["data"]["book"]

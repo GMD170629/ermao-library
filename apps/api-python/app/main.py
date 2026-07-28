@@ -9,7 +9,7 @@ from app.core.auth import get_current_user
 from app.core.authorization import can_manage_system
 from app.core.config import Settings, get_settings
 from app.db.bootstrap import bootstrap_database
-from app.db.session import SessionLocal
+from app.db.session import HeartbeatSessionLocal, SessionLocal
 from app.db.session import engine
 from app.services.download_queue import start_download_queue_worker
 from app.services.kindle_queue import start_kindle_send_queue_worker
@@ -66,6 +66,7 @@ def create_app(settings_override: Settings | None = None, session_factory: Calla
     factory = session_factory or SessionLocal
     if session_factory is None:
         runtime_factory = factory
+        heartbeat_runtime_factory = HeartbeatSessionLocal
     else:
         injected_session = factory()
         runtime_factory = sessionmaker(
@@ -74,13 +75,22 @@ def create_app(settings_override: Settings | None = None, session_factory: Calla
             autocommit=False,
             expire_on_commit=False,
         )
+        heartbeat_runtime_factory = runtime_factory
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if session_factory is None:
             bootstrap_database(engine, settings)
-        download_queue_worker = start_download_queue_worker(runtime_factory, settings)
-        kindle_send_queue_worker = start_kindle_send_queue_worker(runtime_factory, settings)
+        download_queue_worker = start_download_queue_worker(
+            runtime_factory,
+            settings,
+            heartbeat_runtime_factory,
+        )
+        kindle_send_queue_worker = start_kindle_send_queue_worker(
+            runtime_factory,
+            settings,
+            heartbeat_runtime_factory,
+        )
         startup_db = runtime_factory()
         try:
             fail_abandoned_health_runs(startup_db)

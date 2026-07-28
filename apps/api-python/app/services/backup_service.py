@@ -10,12 +10,17 @@ from secrets import token_hex
 from typing import Any
 
 from alembic.migration import MigrationContext
-from sqlalchemy import inspect, text
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.db.runner import head_revision
+from app.modules.backup.infrastructure.persistence import (
+    clear_table_if_present,
+    fetch_table,
+    insert_records,
+    table_names,
+    upsert_user_records,
+)
 
 BACKUP_TABLES: list[tuple[str, str]] = [
     ("users", "User"),
@@ -111,21 +116,6 @@ def assert_backup_id(value: str) -> None:
 def backup_path(settings: Settings, backup_id_value: str) -> Path:
     assert_backup_id(backup_id_value)
     return backup_dir(settings) / f"{backup_id_value}.zip"
-
-
-def table_names(db: Session) -> set[str]:
-    return set(inspect(db.get_bind()).get_table_names())
-
-
-def columns(db: Session, table: str) -> list[str]:
-    return [column["name"] for column in inspect(db.get_bind()).get_columns(table)]
-
-
-def fetch_table(db: Session, table: str) -> list[dict[str, Any]]:
-    if table not in table_names(db):
-        return []
-    order = "`createdAt` ASC" if "createdAt" in columns(db, table) else "1"
-    return [dict(row) for row in db.execute(text(f"SELECT * FROM `{table}` ORDER BY {order}")).mappings().all()]
 
 
 def json_default(value: Any) -> str:
@@ -258,63 +248,6 @@ def parse_backup(path: Path) -> tuple[dict[str, Any], dict[str, list[dict[str, A
     if metadata.get("app") != "shuku-starship" or metadata.get("version") != 2:
         raise ValueError("BACKUP_VERSION_UNSUPPORTED")
     return metadata, database_export
-
-
-def insert_records(db: Session, table: str, records: list[dict[str, Any]]) -> int:
-    if not records:
-        return 0
-    if table not in table_names(db):
-        return 0
-    allowed = set(columns(db, table))
-    inserted = 0
-    for record in records:
-        filtered = {key: value for key, value in record.items() if key in allowed}
-        if not filtered:
-            continue
-        keys = ", ".join(f"`{key}`" for key in filtered)
-        params = ", ".join(f":{key}" for key in filtered)
-        db.execute(text(f"INSERT INTO `{table}` ({keys}) VALUES ({params})"), filtered)
-        inserted += 1
-    db.commit()
-    return inserted
-
-
-def upsert_user_records(db: Session, records: list[dict[str, Any]]) -> int:
-    if not records:
-        return 0
-    if "User" not in table_names(db):
-        return 0
-    allowed = set(columns(db, "User"))
-    restored = 0
-    for record in records:
-        filtered = {key: value for key, value in record.items() if key in allowed}
-        if not filtered:
-            continue
-        existing = None
-        if filtered.get("id"):
-            existing = db.execute(text("SELECT `id` FROM `User` WHERE `id` = :id"), {"id": filtered["id"]}).scalar()
-        if not existing and filtered.get("email"):
-            existing = db.execute(text("SELECT `id` FROM `User` WHERE `email` = :email"), {"email": filtered["email"]}).scalar()
-        if existing:
-            assignments = ", ".join(f"`{key}` = :{key}" for key in filtered if key != "id")
-            if assignments:
-                db.execute(text(f"UPDATE `User` SET {assignments} WHERE `id` = :existing_id"), {**filtered, "existing_id": existing})
-            restored += 1
-            continue
-        keys = ", ".join(f"`{key}`" for key in filtered)
-        params = ", ".join(f":{key}" for key in filtered)
-        db.execute(text(f"INSERT INTO `User` ({keys}) VALUES ({params})"), filtered)
-        restored += 1
-    db.commit()
-    return restored
-
-
-def clear_table_if_present(db: Session, table: str) -> None:
-    try:
-        db.execute(text(f"DELETE FROM `{table}`"))
-        db.commit()
-    except SQLAlchemyError:
-        db.rollback()
 
 
 def restore_backup(db: Session, settings: Settings, backup_id_value: str) -> dict[str, Any]:

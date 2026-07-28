@@ -12,7 +12,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -20,12 +20,13 @@ from app.core.auth import get_current_user
 from app.core.authorization import (
     authorization_context,
     can_access_edition,
-    edition_visibility_sql,
     read_user_preferences,
 )
 from app.core.config import Settings, get_settings
 from app.core.time import timestamp_ms_to_datetime
 from app.db.session import get_db
+from app.modules.media.infrastructure.page_index import ensure_volume_page_index
+from app.modules.reader.infrastructure import queries as reader_queries
 from app.schemas.reader_v2 import (
     AudioChapterSummary,
     AudioLocation,
@@ -77,18 +78,7 @@ def _tables(db: Session) -> set[str]:
 
 
 def _columns(db: Session, table: str) -> set[str]:
-    if table not in _tables(db):
-        return set()
-    return {column["name"] for column in inspect(db.connection()).get_columns(table)}
-
-
-def _row(db: Session, sql: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
-    result = db.execute(text(sql), params or {}).mappings().first()
-    return dict(result) if result else None
-
-
-def _rows(db: Session, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    return [dict(row) for row in db.execute(text(sql), params or {}).mappings().all()]
+    return reader_queries.table_columns(db, table)
 
 
 def _json(value: Any, fallback: Any) -> Any:
@@ -149,10 +139,11 @@ def _upsert_consumption_state(
     if "LibraryConsumptionState" not in _tables(db):
         return
     media_kind = _edition_media_kind(edition)
-    existing = _row(
+    existing = reader_queries.get_consumption_state(
         db,
-        "SELECT * FROM `LibraryConsumptionState` WHERE `userId` = :user_id AND `workId` = :work_id AND `mediaKind` = :media_kind",
-        {"user_id": user_id, "work_id": work_id, "media_kind": media_kind},
+        user_id=user_id,
+        work_id=work_id,
+        media_kind=media_kind,
     )
     resolved_status = "FINISHED" if preserve_finished and (existing or {}).get("status") == "FINISHED" else status
     timestamp = now or _now()
@@ -164,21 +155,16 @@ def _upsert_consumption_state(
         "updatedAt": timestamp,
     }
     if existing:
-        assignments = ", ".join(f"`{key}` = :{key}" for key in values)
-        db.execute(text(f"UPDATE `LibraryConsumptionState` SET {assignments} WHERE `id` = :row_id"), {**values, "row_id": existing["id"]})
+        reader_queries.update_consumption_state(db, str(existing["id"]), values)
     else:
-        db.execute(
-            text(
-                "INSERT INTO `LibraryConsumptionState` "
-                "(`id`, `userId`, `workId`, `mediaKind`, `status`, `lastEditionId`, `lastVolumeId`, `lastUnitId`, `createdAt`, `updatedAt`) "
-                "VALUES (:id, :user_id, :work_id, :media_kind, :status, :lastEditionId, :lastVolumeId, :lastUnitId, :now, :now)"
-            ),
+        reader_queries.insert_consumption_state(
+            db,
             {
                 "id": f"consume_{time_ns()}",
-                "user_id": user_id,
-                "work_id": work_id,
-                "media_kind": media_kind,
-                "now": timestamp,
+                "userId": user_id,
+                "workId": work_id,
+                "mediaKind": media_kind,
+                "createdAt": timestamp,
                 **values,
             },
         )
@@ -187,11 +173,7 @@ def _upsert_consumption_state(
 def _is_final_volume(db: Session, edition_id: str, volume_id: str | None) -> bool:
     if "LibraryVolume" not in _tables(db):
         return True
-    volumes = _rows(
-        db,
-        "SELECT `id` FROM `LibraryVolume` WHERE `editionId` = :edition_id ORDER BY `sortOrder`, `id`",
-        {"edition_id": edition_id},
-    )
+    volumes = reader_queries.list_volume_ids_for_edition(db, edition_id)
     if not volumes:
         return True
     return volume_id is not None and str(volumes[-1]["id"]) == volume_id
@@ -227,7 +209,7 @@ def _legacy_preferences(db: Session, user_id: str, reader_format: str) -> Reader
     defaults = ReaderPreferences()
     if "ReaderPreference" not in _tables(db):
         return defaults
-    rows = _rows(db, "SELECT * FROM `ReaderPreference` WHERE `userId` = :user_id", {"user_id": user_id})
+    rows = reader_queries.list_reader_preferences(db, user_id)
     by_type: dict[str, dict[str, Any]] = {}
     for row in rows:
         parsed = _json(row.get("settings"), {})
@@ -312,11 +294,7 @@ def _recover_stored_preferences(value: object) -> ReaderPreferences | None:
 def _book_preferences(db: Session, user_id: str, work_id: str, reader_format: str) -> tuple[ReaderPreferences, datetime | None]:
     if "ReaderBookPreference" not in _tables(db):
         return _legacy_preferences(db, user_id, reader_format), None
-    existing = _row(
-        db,
-        "SELECT * FROM `ReaderBookPreference` WHERE `userId` = :user_id AND `workId` = :work_id",
-        {"user_id": user_id, "work_id": work_id},
-    )
+    existing = reader_queries.get_book_preference(db, user_id, work_id)
     if existing:
         stored_preferences = _json(existing.get("preferences"), None)
         preferences = _recover_stored_preferences(stored_preferences)
@@ -324,45 +302,36 @@ def _book_preferences(db: Session, user_id: str, work_id: str, reader_format: st
             preferences = _legacy_preferences(db, user_id, reader_format)
         canonical_preferences = preferences.model_dump(by_alias=True, mode="json")
         if existing.get("schemaVersion") != 3 or stored_preferences != canonical_preferences:
-            updates = {"schemaVersion": 3, "preferences": _json_text(canonical_preferences)}
-            allowed = _columns(db, "ReaderBookPreference")
-            filtered = {key: value for key, value in updates.items() if key in allowed}
-            assignments = ", ".join(f"`{key}` = :{key}" for key in filtered)
-            if assignments:
-                db.execute(
-                    text(f"UPDATE `ReaderBookPreference` SET {assignments} WHERE `id` = :preference_id"),
-                    {**filtered, "preference_id": existing["id"]},
-                )
-                db.commit()
+            reader_queries.update_book_preference(
+                db,
+                str(existing["id"]),
+                schema_version=3,
+                preferences=_json_text(canonical_preferences),
+            )
+            db.commit()
         return preferences, _datetime(existing.get("updatedAt"))
 
     preferences = _legacy_preferences(db, user_id, reader_format)
     now = _now()
-    values = {
-        "id": f"py_{time_ns()}",
-        "userId": user_id,
-        "workId": work_id,
-        "schemaVersion": 3,
-        "preferences": _json_text(preferences.model_dump(by_alias=True, mode="json")),
-        "createdAt": now,
-        "updatedAt": now,
-    }
-    allowed = _columns(db, "ReaderBookPreference")
-    filtered = {key: value for key, value in values.items() if key in allowed}
-    keys = ", ".join(f"`{key}`" for key in filtered)
-    placeholders = ", ".join(f":{key}" for key in filtered)
     try:
-        db.execute(text(f"INSERT INTO `ReaderBookPreference` ({keys}) VALUES ({placeholders})"), filtered)
+        reader_queries.insert_book_preference(
+            db,
+            {
+                "id": f"py_{time_ns()}",
+                "userId": user_id,
+                "workId": work_id,
+                "schemaVersion": 3,
+                "preferences": _json_text(preferences.model_dump(by_alias=True, mode="json")),
+                "createdAt": now,
+                "updatedAt": now,
+            },
+        )
         db.commit()
     except IntegrityError:
         # Concurrent bootstraps can race to seed the same (user, work) row.
         # The unique key selects the winner and the loser reads that snapshot.
         db.rollback()
-        winner = _row(
-            db,
-            "SELECT * FROM `ReaderBookPreference` WHERE `userId` = :user_id AND `workId` = :work_id",
-            {"user_id": user_id, "work_id": work_id},
-        )
+        winner = reader_queries.get_book_preference(db, user_id, work_id)
         if not winner:
             raise
         winner_preferences = _recover_stored_preferences(_json(winner.get("preferences"), None))
@@ -377,17 +346,9 @@ def _content_fingerprint(db: Session, edition: dict[str, Any], volume_id: str | 
     files: list[dict[str, Any]] = []
     if "LibraryFile" in _tables(db):
         if volume_id:
-            files = _rows(
-                db,
-                "SELECT * FROM `LibraryFile` WHERE `editionId` = :edition_id AND `volumeId` = :volume_id ORDER BY `sortOrder`, `id`",
-                {"edition_id": edition["id"], "volume_id": volume_id},
-            )
+            files = reader_queries.list_files_for_edition(db, str(edition["id"]), volume_id)
         if not files:
-            files = _rows(
-                db,
-                "SELECT * FROM `LibraryFile` WHERE `editionId` = :edition_id ORDER BY `sortOrder`, `id`",
-                {"edition_id": edition["id"]},
-            )
+            files = reader_queries.list_files_for_edition(db, str(edition["id"]))
     tokens = [
         {
             "id": file.get("id"),
@@ -542,30 +503,22 @@ def reader_bootstrap_v2(
         return fail("阅读器数据库尚未初始化", status_code=503)
     if not can_access_edition(db, user, edition_id):
         return fail("版本不存在", status_code=404, code="EDITION_NOT_FOUND")
-    edition = _row(db, "SELECT * FROM `LibraryEdition` WHERE `id` = :id", {"id": edition_id})
+    edition = reader_queries.get_edition(db, edition_id)
     if not edition:
         return fail("版本不存在", status_code=404)
-    work = _row(db, "SELECT * FROM `LibraryWork` WHERE `id` = :id", {"id": edition["workId"]})
+    work = reader_queries.get_work(db, str(edition["workId"]))
     if not work:
         return fail("作品不存在", status_code=404)
     reader_format = _reader_format(edition.get("format"))
     if reader_format is None:
         return fail("不支持的阅读格式", status_code=422)
 
-    volumes = _rows(
-        db,
-        "SELECT * FROM `LibraryVolume` WHERE `editionId` = :edition_id ORDER BY `sortOrder`, `id`",
-        {"edition_id": edition_id},
-    ) if "LibraryVolume" in _tables(db) else []
-    # One work-scoped read feeds both current-edition resume/volume selection
-    # and the version navigator. Keeping this as the sole progress read avoids
-    # N+1 queries while preserving the current edition's existing volume rules.
-    all_work_progresses = _rows(
-        db,
-        "SELECT * FROM `LibraryReadingProgress` WHERE `userId` = :user_id AND `workId` = :work_id "
-        "ORDER BY `updatedAt` DESC, `id` DESC",
-        {"user_id": user.id, "work_id": work["id"]},
-    ) if "LibraryReadingProgress" in _tables(db) else []
+    volumes = reader_queries.list_volumes_for_edition(db, edition_id) if "LibraryVolume" in _tables(db) else []
+    all_work_progresses = (
+        reader_queries.list_progress_for_user_work(db, user.id, str(work["id"]))
+        if "LibraryReadingProgress" in _tables(db)
+        else []
+    )
     progresses = [row for row in all_work_progresses if str(row.get("editionId")) == edition_id]
     selected_volume, volume_error = _select_volume(volumes, progresses, volume)
     if volume_error:
@@ -573,26 +526,18 @@ def reader_bootstrap_v2(
     selected_volume_id = str(selected_volume["id"]) if selected_volume else None
 
     unit_type = "chapter" if reader_format == "epub" else "audio_chapter" if reader_format == "audio" else "page"
-    units = _rows(
-        db,
-        "SELECT * FROM `LibraryReadingUnit` WHERE `editionId` = :edition_id AND LOWER(`unitType`) = :unit_type AND "
-        + ("`volumeId` = :volume_id " if selected_volume_id else "1 = 1 ")
-        + "ORDER BY `sortOrder`, `id`",
-        {"edition_id": edition_id, "unit_type": unit_type, **({"volume_id": selected_volume_id} if selected_volume_id else {})},
-    ) if reader_format != "pdf" and "LibraryReadingUnit" in _tables(db) else []
+    units = (
+        reader_queries.list_units_for_edition(db, edition_id, unit_type, selected_volume_id)
+        if reader_format != "pdf" and "LibraryReadingUnit" in _tables(db)
+        else []
+    )
     if reader_format == "comic" and selected_volume_id and not units:
         # Comic archives are intentionally indexed lazily by the existing file
         # service. Reuse that single index builder so bootstrap and page serving
         # cannot disagree about archive ordering.
-        from app.api.routes.compat import _ensure_volume_page_index
-
-        _ensure_volume_page_index(db, settings, selected_volume_id)
-        units = _rows(
-            db,
-            "SELECT * FROM `LibraryReadingUnit` WHERE `editionId` = :edition_id AND `volumeId` = :volume_id AND LOWER(`unitType`) = 'page' ORDER BY `sortOrder`, `id`",
-            {"edition_id": edition_id, "volume_id": selected_volume_id},
-        ) if "LibraryReadingUnit" in _tables(db) else []
-        refreshed_volume = _row(db, "SELECT * FROM `LibraryVolume` WHERE `id` = :id", {"id": selected_volume_id})
+        ensure_volume_page_index(db, settings, selected_volume_id)
+        units = reader_queries.list_units_for_edition(db, edition_id, "page", selected_volume_id) if "LibraryReadingUnit" in _tables(db) else []
+        refreshed_volume = reader_queries.get_volume(db, selected_volume_id)
         if refreshed_volume:
             selected_volume = refreshed_volume
             volumes = [refreshed_volume if item.get("id") == selected_volume_id else item for item in volumes]
@@ -631,18 +576,16 @@ def reader_bootstrap_v2(
     elif reader_format == "comic":
         total_pages = len(page_summaries) or int((selected_volume or {}).get("pageCount") or edition.get("pageCount") or 0)
 
-    audio_file_rows = _rows(
-        db,
-        "SELECT * FROM `LibraryFile` WHERE `editionId` = :edition_id "
-        + ("AND `volumeId` = :volume_id " if selected_volume_id else "")
-        + "ORDER BY `sortOrder`, `id`",
-        {"edition_id": edition_id, **({"volume_id": selected_volume_id} if selected_volume_id else {})},
-    ) if reader_format == "audio" and "LibraryFile" in _tables(db) else []
-    audio_manifest_row = _row(
-        db,
-        "SELECT `rawJson` FROM `LibraryMetadata` WHERE `editionId` = :edition_id AND `source` = 'audiobook_manifest' ORDER BY `createdAt` DESC LIMIT 1",
-        {"edition_id": edition_id},
-    ) if reader_format == "audio" and "LibraryMetadata" in _tables(db) else None
+    audio_file_rows = (
+        reader_queries.list_files_for_edition(db, edition_id, selected_volume_id)
+        if reader_format == "audio" and "LibraryFile" in _tables(db)
+        else []
+    )
+    audio_manifest_row = (
+        reader_queries.get_audio_manifest_raw_json(db, edition_id)
+        if reader_format == "audio" and "LibraryMetadata" in _tables(db)
+        else None
+    )
     audio_manifest = _json((audio_manifest_row or {}).get("rawJson"), {})
     track_titles = {
         str(item.get("fileId")): str(item.get("title"))
@@ -705,29 +648,14 @@ def reader_bootstrap_v2(
                 )
             }
         )
-    edition_scope, edition_scope_params = edition_visibility_sql(
-        authorization_context(db, user),
-        alias="LibraryEdition",
-        prefix="reader_versions",
-    )
-    available_edition_rows = _rows(
-        db,
-        "SELECT * FROM `LibraryEdition` WHERE `workId` = :work_id AND COALESCE(`hidden`, 0) = 0 "
-        f"AND {edition_scope} ORDER BY COALESCE(`primary`, 0) DESC, `createdAt`, `id`",
-        {"work_id": work["id"], **edition_scope_params},
-    )
+    context = authorization_context(db, user)
+    available_edition_rows = reader_queries.list_visible_editions_for_work(db, str(work["id"]), context)
     visible_edition_ids = {str(item["id"]) for item in available_edition_rows}
-    all_work_volumes = _rows(
-        db,
-        "SELECT v.* FROM `LibraryVolume` v JOIN `LibraryEdition` e ON e.`id` = v.`editionId` "
-        "WHERE e.`workId` = :work_id AND COALESCE(e.`hidden`, 0) = 0 "
-        f"AND e.`id` IN ({', '.join(f':visible_edition_{index}' for index, _item in enumerate(available_edition_rows))}) "
-        "ORDER BY e.`createdAt`, v.`sortOrder`, v.`id`",
-        {
-            "work_id": work["id"],
-            **{f"visible_edition_{index}": item["id"] for index, item in enumerate(available_edition_rows)},
-        },
-    ) if "LibraryVolume" in _tables(db) else []
+    all_work_volumes = (
+        reader_queries.list_visible_volumes_for_work(db, str(work["id"]), list(visible_edition_ids))
+        if "LibraryVolume" in _tables(db)
+        else []
+    )
     latest_progress_by_edition: dict[str, dict[str, Any]] = {}
     for candidate in all_work_progresses:
         candidate_edition_id = str(candidate.get("editionId") or "")
@@ -803,7 +731,7 @@ def reader_bootstrap_v2(
 def _resolve_progress_volume(db: Session, edition_id: str, requested_volume_id: str | None) -> tuple[str | None, JSONResponse | None]:
     if "LibraryVolume" not in _tables(db):
         return requested_volume_id, None
-    volumes = _rows(db, "SELECT `id` FROM `LibraryVolume` WHERE `editionId` = :edition_id ORDER BY `sortOrder`, `id`", {"edition_id": edition_id})
+    volumes = reader_queries.list_volume_ids_for_edition(db, edition_id)
     if requested_volume_id:
         if not any(str(row["id"]) == requested_volume_id for row in volumes):
             return None, fail("卷册不存在", status_code=404)
@@ -840,15 +768,11 @@ def list_reader_bookmarks(
         return fail("版本不存在", status_code=404, code="EDITION_NOT_FOUND")
     if "ReaderBookmark" not in _tables(db):
         return {"ok": True, "data": {"bookmarks": []}}
-    rows = _rows(
+    rows = reader_queries.list_bookmarks(
         db,
-        "SELECT * FROM `ReaderBookmark` WHERE `userId` = :user_id AND `editionId` = :edition_id "
-        "AND `contentFingerprint` = :fingerprint ORDER BY `percent`, `bookmarkCreatedAt`, `bookmarkId`",
-        {
-            "user_id": user.id,
-            "edition_id": edition_id,
-            "fingerprint": content_fingerprint,
-        },
+        user_id=user.id,
+        edition_id=edition_id,
+        content_fingerprint=content_fingerprint,
     )
     return {"ok": True, "data": {"bookmarks": [_bookmark_view(row) for row in rows]}}
 
@@ -867,9 +791,10 @@ async def replace_reader_bookmarks(
         return fail("版本不存在", status_code=404, code="EDITION_NOT_FOUND")
     if "ReaderBookmark" not in _tables(db):
         return fail("书签表尚未初始化", status_code=503, code="BOOKMARKS_UNAVAILABLE")
-    edition = _row(db, "SELECT `workId` FROM `LibraryEdition` WHERE `id` = :id", {"id": edition_id})
-    if not edition:
+    work_id = reader_queries.get_edition_work_id(db, edition_id)
+    if not work_id:
         return fail("版本不存在", status_code=404, code="EDITION_NOT_FOUND")
+    edition = {"workId": work_id}
     payload = await request.json()
     fingerprint = str(payload.get("contentFingerprint") or "").strip()
     raw_bookmarks = payload.get("bookmarks")
@@ -910,37 +835,26 @@ async def replace_reader_bookmarks(
                 "created_at": created_at,
             }
         )
-    db.execute(
-        text(
-            "DELETE FROM `ReaderBookmark` WHERE `userId` = :user_id AND `editionId` = :edition_id "
-            "AND `contentFingerprint` = :fingerprint"
-        ),
-        {"user_id": user.id, "edition_id": edition_id, "fingerprint": fingerprint},
-    )
     now = _now()
-    for index, bookmark in enumerate(normalized):
-        db.execute(
-            text(
-                "INSERT INTO `ReaderBookmark` "
-                "(`id`, `userId`, `workId`, `editionId`, `contentFingerprint`, `bookmarkId`, "
-                "`locationJson`, `label`, `percent`, `bookmarkCreatedAt`, `createdAt`, `updatedAt`) "
-                "VALUES (:id, :user_id, :work_id, :edition_id, :fingerprint, :bookmark_id, "
-                ":location_json, :label, :percent, :bookmark_created_at, :now, :now)"
-            ),
+    reader_queries.replace_bookmarks(
+        db,
+        user_id=user.id,
+        work_id=str(edition["workId"]),
+        edition_id=edition_id,
+        content_fingerprint=fingerprint,
+        bookmarks=[
             {
                 "id": f"bookmark_{time_ns()}_{index}",
-                "user_id": user.id,
-                "work_id": str(edition["workId"]),
-                "edition_id": edition_id,
-                "fingerprint": fingerprint,
                 "bookmark_id": bookmark["bookmark_id"],
                 "location_json": _json_text(bookmark["location"]),
                 "label": bookmark["label"],
                 "percent": bookmark["percent"],
                 "bookmark_created_at": bookmark["created_at"],
-                "now": now,
-            },
-        )
+            }
+            for index, bookmark in enumerate(normalized)
+        ],
+        now=now,
+    )
     db.commit()
     return {"ok": True, "data": {"bookmarks": [_bookmark_view({
         "bookmarkId": item["bookmark_id"],
@@ -958,7 +872,7 @@ def _epub_location_target(
 ) -> tuple[dict[str, Any] | None, str | None, str | None, JSONResponse | None]:
     if "LibraryEdition" not in _tables(db):
         return None, None, None, fail("阅读器数据库尚未初始化", status_code=503)
-    edition = _row(db, "SELECT * FROM `LibraryEdition` WHERE `id` = :id", {"id": edition_id})
+    edition = reader_queries.get_edition(db, edition_id)
     if not edition:
         return None, None, None, fail("版本不存在", status_code=404)
     if _reader_format(edition.get("format")) != "epub":
@@ -1072,11 +986,7 @@ def _audio_progress_percent(
     edition_id: str,
     location: AudioLocation,
 ) -> tuple[float, bool, JSONResponse | None]:
-    files = _rows(
-        db,
-        "SELECT * FROM `LibraryFile` WHERE `editionId` = :edition_id ORDER BY `sortOrder`, `id`",
-        {"edition_id": edition_id},
-    ) if "LibraryFile" in _tables(db) else []
+    files = reader_queries.list_files_for_edition(db, edition_id) if "LibraryFile" in _tables(db) else []
     if not files:
         return 0, False, fail("有声书没有可播放的音轨", status_code=422)
     index = next((index for index, item in enumerate(files) if str(item.get("id")) == location.file_id), None)
@@ -1089,11 +999,11 @@ def _audio_progress_percent(
     if location.position_ms > current_duration + 1000:
         return 0, False, fail("播放位置超出音轨时长", status_code=422)
     if location.chapter_id:
-        chapter = _row(
-            db,
-            "SELECT `id`, `fileId` FROM `LibraryReadingUnit` WHERE `id` = :chapter_id AND `editionId` = :edition_id",
-            {"chapter_id": location.chapter_id, "edition_id": edition_id},
-        ) if "LibraryReadingUnit" in _tables(db) else None
+        chapter = (
+            reader_queries.get_reading_unit(db, chapter_id=location.chapter_id, edition_id=edition_id)
+            if "LibraryReadingUnit" in _tables(db)
+            else None
+        )
         if not chapter or str(chapter.get("fileId")) != location.file_id:
             return 0, False, fail("音频章节与当前音轨不匹配", status_code=422)
     durations = [max(0, int(item.get("durationMs") or 0)) for item in files]
@@ -1126,65 +1036,15 @@ def _claim_client_sequence(
     row is written. The conditional UPDATE owns the row lock, so a lower or
     duplicate sequence cannot commit after a newer mutation.
     """
-
-    initial_high_water = -1
-    progress_columns = _columns(db, "LibraryReadingProgress")
-    if {"clientId", "clientSequence"}.issubset(progress_columns):
-        stored = db.execute(
-            text(
-                "SELECT MAX(`clientSequence`) FROM `LibraryReadingProgress` "
-                "WHERE `userId` = :user_id AND `workId` = :work_id AND `clientId` = :client_id"
-            ),
-            {"user_id": user_id, "work_id": work_id, "client_id": client_id},
-        ).scalar()
-        if stored is not None:
-            initial_high_water = int(stored)
-
-    key = f"{user_id}\0{work_id}\0{client_id}"
-    params = {
-        "id": f"cursor_{hashlib.sha1(key.encode('utf-8')).hexdigest()}",
-        "user_id": user_id,
-        "work_id": work_id,
-        "client_id": client_id,
-        "high_water": initial_high_water,
-        "now": now,
-    }
-    db.execute(
-        text(
-            """
-            INSERT INTO `ReaderProgressCursor`
-                (`id`, `userId`, `workId`, `clientId`, `highWater`, `lastMutationId`, `createdAt`, `updatedAt`)
-            VALUES
-                (:id, :user_id, :work_id, :client_id, :high_water, NULL, :now, :now)
-            ON CONFLICT (`userId`, `workId`, `clientId`) DO NOTHING
-            """
-        ),
-        params,
+    return reader_queries.claim_client_sequence(
+        db,
+        user_id=user_id,
+        work_id=work_id,
+        client_id=client_id,
+        client_sequence=client_sequence,
+        mutation_id=mutation_id,
+        now=now,
     )
-
-    claimed = db.execute(
-        text(
-            """
-            UPDATE `ReaderProgressCursor`
-            SET `highWater` = :client_sequence,
-                `lastMutationId` = :mutation_id,
-                `updatedAt` = :now
-            WHERE `userId` = :user_id
-              AND `workId` = :work_id
-              AND `clientId` = :client_id
-              AND `highWater` < :client_sequence
-            """
-        ),
-        {
-            "user_id": user_id,
-            "work_id": work_id,
-            "client_id": client_id,
-            "client_sequence": client_sequence,
-            "mutation_id": mutation_id,
-            "now": now,
-        },
-    )
-    return int(claimed.rowcount or 0) == 1
 
 
 @router.put(
@@ -1208,7 +1068,7 @@ def save_progress_v2(
         return fail("版本不存在", status_code=404, code="EDITION_NOT_FOUND")
     if "LibraryEdition" not in _tables(db):
         return fail("阅读器数据库尚未初始化", status_code=503)
-    edition = _row(db, "SELECT * FROM `LibraryEdition` WHERE `id` = :id", {"id": edition_id})
+    edition = reader_queries.get_edition(db, edition_id)
     if not edition:
         return fail("版本不存在", status_code=404)
     reader_format = _reader_format(edition.get("format"))
@@ -1308,40 +1168,32 @@ def save_progress_v2(
         return ReaderProgressResponse(
             data=ReaderProgressData(mutationId=payload.mutation_id, applied=False, progress=stale_progress)
         )
-    existing = _row(
+    existing = reader_queries.get_reading_progress(
         db,
-        "SELECT * FROM `LibraryReadingProgress` WHERE `userId` = :user_id AND `editionId` = :edition_id AND "
-        + ("`volumeId` = :volume_id" if volume_id else "`volumeId` IS NULL"),
-        {"user_id": user.id, "edition_id": edition_id, **({"volume_id": volume_id} if volume_id else {})},
+        user_id=user.id,
+        edition_id=edition_id,
+        volume_id=volume_id,
     )
     filtered = {key: value for key, value in values.items() if key in allowed}
-    if existing:
-        assignments = ", ".join(f"`{key}` = :{key}" for key in filtered)
-        db.execute(text(f"UPDATE `LibraryReadingProgress` SET {assignments} WHERE `id` = :row_id"), {**filtered, "row_id": existing["id"]})
-    else:
-        insert_values = {
+    reader_queries.upsert_reading_progress(
+        db,
+        existing_id=str(existing["id"]) if existing else None,
+        values=filtered,
+        insert_values={
             **filtered,
             "id": f"py_{time_ns()}",
             "userId": user.id,
             "workId": edition["workId"],
             "editionId": edition_id,
             "createdAt": now,
-        }
-        insert_values = {key: value for key, value in insert_values.items() if key in allowed}
-        keys = ", ".join(f"`{key}`" for key in insert_values)
-        placeholders = ", ".join(f":{key}" for key in insert_values)
-        db.execute(text(f"INSERT INTO `LibraryReadingProgress` ({keys}) VALUES ({placeholders})"), insert_values)
+        },
+    )
     if reader_format == "audio":
-        volume_rows = _rows(
+        volume_rows = reader_queries.list_volume_ids_for_edition(db, edition_id)
+        progress_rows = reader_queries.list_progress_volume_percents(
             db,
-            "SELECT `id` FROM `LibraryVolume` WHERE `editionId` = :edition_id ORDER BY `sortOrder`, `id`",
-            {"edition_id": edition_id},
-        )
-        progress_rows = _rows(
-            db,
-            "SELECT `volumeId`, `percent` FROM `LibraryReadingProgress` "
-            "WHERE `userId` = :user_id AND `editionId` = :edition_id",
-            {"user_id": user.id, "edition_id": edition_id},
+            user_id=user.id,
+            edition_id=edition_id,
         )
         progress_by_volume = {
             str(row.get("volumeId")): float(row.get("percent") or 0)

@@ -1,8 +1,12 @@
-def test_health_response_shape(client, test_settings):
-    monitor = test_settings.resolved_monitor_root
-    assert monitor is not None
-    monitor.mkdir(parents=True)
-    setup = client.post(
+import json
+from datetime import datetime, timezone
+
+from app.models.auth import User
+from app.models.settings import SystemHealthRun
+
+
+def _setup_admin(client) -> None:
+    response = client.post(
         "/api/auth/setup",
         json={
             "name": "Administrator",
@@ -10,7 +14,14 @@ def test_health_response_shape(client, test_settings):
             "password": "starshipnas",
         },
     )
-    assert setup.status_code == 201
+    assert response.status_code == 201
+
+
+def test_health_response_shape(client, test_settings):
+    monitor = test_settings.resolved_monitor_root
+    assert monitor is not None
+    monitor.mkdir(parents=True)
+    _setup_admin(client)
 
     response = client.get("/api/system/health")
 
@@ -32,3 +43,78 @@ def test_health_reports_monitor_failure(client):
     assert payload["ok"] is True
     assert payload["data"]["service"] == "shuku-starship"
     assert payload["data"]["status"] == "error"
+
+
+def test_db_ping_succeeds(client):
+    response = client.get("/api/__db-ping")
+    assert response.status_code == 200
+    assert response.json()["data"]["database"] == "ok"
+
+
+def test_health_run_http_and_sse_timestamps_are_epoch_milliseconds(client, db_session):
+    _setup_admin(client)
+    actor = db_session.query(User).filter(User.email == "admin@example.com").one()
+    started_at = 1_785_132_000_000
+    finished_at = 1_785_132_000_250
+    snapshot = {
+        "runId": "health-contract",
+        "status": "completed",
+        "version": 2,
+        "startedAt": started_at,
+        "finishedAt": finished_at,
+        "groups": [{"id": "storage", "labelCode": "health.group.storage"}],
+        "items": [
+            {
+                "id": "database",
+                "group": "storage",
+                "labelCode": "health.item.database",
+                "kind": "database",
+                "options": {},
+                "status": "ok",
+                "messageCode": "health.database.ok",
+                "messageParams": {},
+                "details": {},
+                "startedAt": started_at,
+                "finishedAt": finished_at,
+                "durationMs": 250,
+            }
+        ],
+        "summary": {
+            "total": 1,
+            "completed": 1,
+            "ok": 1,
+            "warning": 0,
+            "error": 0,
+            "skipped": 0,
+        },
+    }
+    db_session.add(
+        SystemHealthRun(
+            id="health-contract",
+            actor_user_id=actor.id,
+            status="completed",
+            version=2,
+            snapshot=json.dumps(snapshot),
+            started_at=datetime.fromtimestamp(started_at / 1000, timezone.utc),
+            finished_at=datetime.fromtimestamp(finished_at / 1000, timezone.utc),
+            created_at=datetime.fromtimestamp(started_at / 1000, timezone.utc),
+            updated_at=datetime.fromtimestamp(finished_at / 1000, timezone.utc),
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/api/system/health/runs/health-contract")
+    assert response.status_code == 200
+    run = response.json()["data"]["run"]
+    assert run["startedAt"] == started_at
+    assert run["finishedAt"] == finished_at
+    assert run["items"][0]["startedAt"] == started_at
+    assert run["items"][0]["finishedAt"] == finished_at
+
+    with client.stream("GET", "/api/system/health/runs/health-contract/events") as stream:
+        event_text = stream.read().decode()
+    data_line = next(line for line in event_text.splitlines() if line.startswith("data: "))
+    event_run = json.loads(data_line.removeprefix("data: "))["run"]
+    assert event_run["startedAt"] == started_at
+    assert event_run["finishedAt"] == finished_at
+    assert event_run["items"][0]["finishedAt"] == finished_at

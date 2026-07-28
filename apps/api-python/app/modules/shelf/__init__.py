@@ -1,0 +1,1 @@
+"""Shelf capability package."""

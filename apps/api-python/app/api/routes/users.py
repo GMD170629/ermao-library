@@ -1,22 +1,27 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import EmailStr, TypeAdapter, ValidationError
-from sqlalchemy import func, inspect, text
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user, hash_password
-from app.core.authorization import authorization_context, is_admin, read_user_preferences
+from app.core.authorization import authorization_context, is_admin, read_user_preferences, write_user_preference
 from app.core.config import Settings, get_settings
 from app.core.i18n import configured_locale
 from app.db.session import get_db
 from app.models.auth import Session as UserSession
 from app.models.auth import User, cuid, db_timestamp
+from app.modules.auth.infrastructure.user_data import (
+    delete_personal_user_data,
+    list_monitor_folder_ids,
+    replace_monitor_folder_access,
+    validate_monitor_folder_ids,
+)
 from app.schemas.auth import (
     AdminCreateUserRequest,
     AdminDeleteUserRequest,
@@ -64,16 +69,7 @@ def _admin_user(
 
 
 def _folder_ids(db: Session, user_id: str) -> list[str]:
-    return [
-        str(item)
-        for item in db.execute(
-            text(
-                "SELECT `monitorFolderId` FROM `UserMonitorFolderAccess` "
-                "WHERE `userId` = :user_id ORDER BY `monitorFolderId`"
-            ),
-            {"user_id": user_id},
-        ).scalars()
-    ]
+    return list_monitor_folder_ids(db, user_id)
 
 
 def _user_view(db: Session, user: User) -> dict[str, Any]:
@@ -92,55 +88,15 @@ def _user_view(db: Session, user: User) -> dict[str, Any]:
 
 
 def _validate_folder_ids(db: Session, folder_ids: list[str]) -> list[str]:
-    if not folder_ids:
-        return []
-    params = {f"folder_{index}": folder_id for index, folder_id in enumerate(folder_ids)}
-    placeholders = ", ".join(f":folder_{index}" for index in range(len(folder_ids)))
-    existing = {
-        str(item)
-        for item in db.execute(
-            text(f"SELECT `id` FROM `MonitorFolder` WHERE `id` IN ({placeholders})"),
-            params,
-        ).scalars()
-    }
-    missing = [folder_id for folder_id in folder_ids if folder_id not in existing]
-    if missing:
-        raise ValueError("包含不存在的监控文件夹")
-    return folder_ids
+    return validate_monitor_folder_ids(db, folder_ids)
 
 
 def _replace_folder_access(db: Session, user_id: str, folder_ids: list[str]) -> None:
-    db.execute(
-        text("DELETE FROM `UserMonitorFolderAccess` WHERE `userId` = :user_id"),
-        {"user_id": user_id},
-    )
-    now = db_timestamp()
-    for folder_id in folder_ids:
-        db.execute(
-            text(
-                "INSERT INTO `UserMonitorFolderAccess` (`userId`, `monitorFolderId`, `createdAt`) "
-                "VALUES (:user_id, :folder_id, :created_at)"
-            ),
-            {"user_id": user_id, "folder_id": folder_id, "created_at": now},
-        )
+    replace_monitor_folder_access(db, user_id, folder_ids, db_timestamp())
 
 
 def _save_preference(db: Session, user_id: str, key: str, value: object) -> None:
-    now = db_timestamp()
-    db.execute(
-        text(
-            "INSERT INTO `UserPreference` (`userId`, `key`, `value`, `createdAt`, `updatedAt`) "
-            "VALUES (:user_id, :key, :value, :now, :now) "
-            "ON CONFLICT (`userId`, `key`) DO UPDATE SET "
-            "`value` = excluded.`value`, `updatedAt` = excluded.`updatedAt`"
-        ),
-        {
-            "user_id": user_id,
-            "key": key,
-            "value": json.dumps(value, ensure_ascii=False, separators=(",", ":")),
-            "now": now,
-        },
-    )
+    write_user_preference(db, user_id, key, value)
 
 
 def _validate_preference(key: str, value: object) -> object:
@@ -198,46 +154,7 @@ def _audit_user_change(
 
 
 def _delete_personal_user_data(db: Session, user_id: str, anonymous_user_id: str) -> None:
-    """Delete account-owned rows even on databases upgraded from pre-FK schemas."""
-
-    tables = set(inspect(db.connection()).get_table_names())
-    if {"Shelf", "ShelfWork"}.issubset(tables):
-        db.execute(
-            text(
-                "DELETE FROM `ShelfWork` WHERE `shelfId` IN "
-                "(SELECT `id` FROM `Shelf` WHERE `ownerUserId` = :user_id)"
-            ),
-            {"user_id": user_id},
-        )
-    if "Shelf" in tables:
-        db.execute(text("DELETE FROM `Shelf` WHERE `ownerUserId` = :user_id"), {"user_id": user_id})
-    for table in (
-        "ReaderBookmark",
-        "WorkDetailPreference",
-        "LibraryConsumptionState",
-        "LibraryReadingProgress",
-        "ReaderProgressCursor",
-        "ReaderBookPreference",
-        "ReaderPreference",
-        "UserPreference",
-        "UserMonitorFolderAccess",
-        "PasswordResetToken",
-        "Session",
-    ):
-        if table in tables:
-            db.execute(text(f"DELETE FROM `{table}` WHERE `userId` = :user_id"), {"user_id": user_id})
-    for table in ("KindleSendTask", "LibraryOperation"):
-        if table in tables:
-            db.execute(text(f"UPDATE `{table}` SET `userId` = NULL WHERE `userId` = :user_id"), {"user_id": user_id})
-    if "SystemEvent" in tables:
-        db.execute(
-            text("UPDATE `SystemEvent` SET `actorId` = :anonymous_id WHERE `actorId` = :user_id"),
-            {"anonymous_id": anonymous_user_id, "user_id": user_id},
-        )
-        db.execute(
-            text("UPDATE `SystemEvent` SET `targetId` = :anonymous_id WHERE `targetId` = :user_id"),
-            {"anonymous_id": anonymous_user_id, "user_id": user_id},
-        )
+    delete_personal_user_data(db, user_id, anonymous_user_id)
 
 
 @router.get("/users")

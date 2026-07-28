@@ -4,7 +4,7 @@ import json
 import re
 import unicodedata
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from html import unescape
 from time import time_ns
 from typing import Any
@@ -12,10 +12,14 @@ from urllib.parse import urlencode, urljoin
 from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
 
-from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.core.time import now_timestamp_ms
+from app.modules.metadata.infrastructure import external_cache as metadata_cache
+from app.modules.organize.infrastructure import duplicates as organize_duplicates
+from app.modules.organize.infrastructure import review as organize_review
+from app.modules.organize.infrastructure import suggestions as organize_suggestions
+from app.modules.system.infrastructure import settings as system_settings_store
 from app.services.book_identity import UNKNOWN_AUTHOR, identity_merge_key, normalize_identity_part
 
 
@@ -34,53 +38,7 @@ def now() -> datetime:
 
 
 def has_table(db: Session, table: str) -> bool:
-    return table in inspect(db.connection()).get_table_names()
-
-
-def columns(db: Session, table: str) -> set[str]:
-    return {column["name"] for column in inspect(db.connection()).get_columns(table)} if has_table(db, table) else set()
-
-
-def row(db: Session, sql: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
-    result = db.execute(text(sql), params or {}).mappings().first()
-    return dict(result) if result else None
-
-
-def rows(db: Session, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    return [dict(item) for item in db.execute(text(sql), params or {}).mappings().all()]
-
-
-def update_row(db: Session, table: str, row_id: str, values: dict[str, Any]) -> dict[str, Any] | None:
-    allowed = columns(db, table)
-    filtered = {key: value for key, value in values.items() if key in allowed}
-    if filtered:
-        params = {**filtered, "row_id": row_id}
-        assignments = ", ".join(f"`{key}` = :{key}" for key in filtered)
-        db.execute(text(f"UPDATE `{table}` SET {assignments} WHERE `id` = :row_id"), params)
-        db.commit()
-    return row(db, f"SELECT * FROM `{table}` WHERE `id` = :id", {"id": row_id})
-
-
-def update_rows(db: Session, table: str, where_sql: str, params: dict[str, Any], values: dict[str, Any]) -> int:
-    allowed = columns(db, table)
-    filtered = {key: value for key, value in values.items() if key in allowed}
-    if not filtered:
-        return 0
-    update_params = {**params, **filtered}
-    assignments = ", ".join(f"`{key}` = :{key}" for key in filtered)
-    result = db.execute(text(f"UPDATE `{table}` SET {assignments} WHERE {where_sql}"), update_params)
-    db.commit()
-    return result.rowcount or 0
-
-
-def insert_row(db: Session, table: str, values: dict[str, Any]) -> dict[str, Any]:
-    allowed = columns(db, table)
-    filtered = {key: value for key, value in values.items() if key in allowed}
-    keys = ", ".join(f"`{key}`" for key in filtered)
-    params = ", ".join(f":{key}" for key in filtered)
-    db.execute(text(f"INSERT INTO `{table}` ({keys}) VALUES ({params})"), filtered)
-    db.commit()
-    return row(db, f"SELECT * FROM `{table}` WHERE `id` = :id", {"id": filtered["id"]}) or filtered
+    return organize_review.has_table(db, table)
 
 
 def parse_json_value(value: Any) -> Any:
@@ -228,10 +186,8 @@ def first_exact_title_candidate(candidates: list[dict[str, Any]], title: str | N
 def system_settings(db: Session, keys: list[str]) -> dict[str, str | None]:
     if not has_table(db, "SystemSetting"):
         return {key: None for key in keys}
-    placeholders = ", ".join(f":key_{index}" for index, _ in enumerate(keys))
-    params = {f"key_{index}": key for index, key in enumerate(keys)}
-    found = {item["key"]: system_setting_string(item.get("value")) for item in rows(db, f"SELECT `key`, `value` FROM `SystemSetting` WHERE `key` IN ({placeholders})", params)}
-    return {key: found.get(key) for key in keys}
+    found_raw = system_settings_store.get_settings_raw(db, keys)
+    return {key: system_setting_string(found_raw.get(key)) for key in keys}
 
 
 def system_setting_string(value: Any) -> str | None:
@@ -246,9 +202,7 @@ def system_setting_string(value: Any) -> str | None:
 
 
 def selected_suggestions(db: Session, job_id: str, suggestion_ids: list[str] | None, high_confidence_only: bool) -> list[dict[str, Any]]:
-    if not has_table(db, "MetadataSuggestion"):
-        return []
-    suggestions = rows(db, "SELECT * FROM `MetadataSuggestion` WHERE `jobId` = :job_id AND `status` = 'PENDING'", {"job_id": job_id})
+    suggestions = organize_suggestions.list_pending_suggestions(db, job_id)
     allowed = set(suggestion_ids or [])
     return [
         suggestion
@@ -258,7 +212,7 @@ def selected_suggestions(db: Session, job_id: str, suggestion_ids: list[str] | N
 
 
 def work_patch_from_suggestions(db: Session, suggestions: list[dict[str, Any]]) -> dict[str, Any]:
-    allowed = columns(db, "LibraryWork")
+    allowed = organize_review.work_column_names(db)
     patch: dict[str, Any] = {}
     for suggestion in suggestions:
         field = suggestion.get("field")
@@ -286,21 +240,22 @@ def work_patch_from_suggestions(db: Session, suggestions: list[dict[str, Any]]) 
 
 
 def apply_organize_job(db: Session, job_id: str, payload: dict[str, Any]) -> ApplyResult:
-    job = row(db, "SELECT * FROM `OrganizeJob` WHERE `id` = :id", {"id": job_id}) if has_table(db, "OrganizeJob") else None
+    job = organize_review.get_job(db, job_id)
     if not job:
         raise ValueError("整理任务不存在")
     if payload.get("dismiss"):
-        update_row(db, "OrganizeJob", job_id, {"status": "DISMISSED", "updatedAt": now()})
+        organize_review.update_job(db, job_id, {"status": "DISMISSED", "updatedAt": now()})
         if job.get("workId") and has_table(db, "LibraryWork"):
-            update_row(db, "LibraryWork", job["workId"], {"organizeStatus": "DISMISSED", "updatedAt": now()})
-        return ApplyResult(row(db, "SELECT * FROM `OrganizeJob` WHERE `id` = :id", {"id": job_id}) or job, 0, 0, False, True, 0)
+            organize_review.update_work(db, job["workId"], {"organizeStatus": "DISMISSED", "updatedAt": now()})
+        db.commit()
+        return ApplyResult(organize_review.get_job(db, job_id) or job, 0, 0, False, True, 0)
 
     suggestion_ids = [str(item) for item in payload.get("suggestionIds") or []] or None
     high_confidence_only = bool(payload.get("highConfidenceOnly"))
     suggestions = selected_suggestions(db, job_id, suggestion_ids, high_confidence_only)
     patch = work_patch_from_suggestions(db, suggestions)
     if ("title" in patch or "author" in patch) and job.get("workId") and has_table(db, "LibraryWork"):
-        current_work = row(db, "SELECT * FROM `LibraryWork` WHERE `id` = :id", {"id": job["workId"]})
+        current_work = organize_review.get_work(db, job["workId"])
         if current_work:
             title = string_value(patch.get("title")) or string_value(current_work.get("title"))
             author = string_value(patch.get("author")) or string_value(current_work.get("author")) or UNKNOWN_AUTHOR
@@ -320,61 +275,80 @@ def apply_organize_job(db: Session, job_id: str, payload: dict[str, Any]) -> App
         patch["organizeStatus"] = "APPLIED"
     if patch and job.get("workId") and has_table(db, "LibraryWork"):
         patch["updatedAt"] = now()
-        update_row(db, "LibraryWork", job["workId"], patch)
-    if suggestions and has_table(db, "MetadataSuggestion"):
-        placeholders = ", ".join(f":id_{index}" for index, _ in enumerate(suggestions))
-        params = {f"id_{index}": suggestion["id"] for index, suggestion in enumerate(suggestions)}
-        db.execute(text(f"UPDATE `MetadataSuggestion` SET `status` = 'APPLIED' WHERE `id` IN ({placeholders})"), params)
+        organize_review.update_work(db, job["workId"], patch)
+        db.commit()
+    if suggestions:
+        organize_suggestions.mark_suggestions_applied(db, [str(item["id"]) for item in suggestions])
         db.commit()
 
     duplicate_ids = [str(item) for item in payload.get("duplicateIds") or [] if str(item)]
     duplicate_actions_applied = apply_duplicate_actions(db, job, duplicate_ids) if duplicate_ids else 0
 
     if mark_organized:
-        if has_table(db, "MetadataSuggestion"):
-            db.execute(text("UPDATE `MetadataSuggestion` SET `status` = 'DISMISSED' WHERE `jobId` = :job_id AND `status` = 'PENDING'"), {"job_id": job_id})
-        if has_table(db, "DuplicateCandidate"):
-            db.execute(text("UPDATE `DuplicateCandidate` SET `status` = 'DISMISSED' WHERE `jobId` = :job_id AND `status` = 'PENDING'"), {"job_id": job_id})
+        organize_suggestions.dismiss_pending_suggestions(db, job_id)
+        organize_duplicates.dismiss_pending_duplicates(db, job_id)
         db.commit()
-    updated_job = update_row(db, "OrganizeJob", job_id, {"status": "APPLIED" if mark_organized else job.get("status"), "updatedAt": now()}) or job
-    return ApplyResult(updated_job, len(suggestions), sum(1 for item in suggestions if item.get("source") == "external"), False, False, duplicate_actions_applied)
+    updated_job = (
+        organize_review.update_job(
+            db,
+            job_id,
+            {"status": "APPLIED" if mark_organized else job.get("status"), "updatedAt": now()},
+        )
+        or job
+    )
+    db.commit()
+    return ApplyResult(
+        updated_job,
+        len(suggestions),
+        sum(1 for item in suggestions if item.get("source") == "external"),
+        False,
+        False,
+        duplicate_actions_applied,
+    )
 
 
 def first_edition_for_work(db: Session, work_id: str) -> dict[str, Any] | None:
-    if not has_table(db, "LibraryEdition"):
-        return None
-    return row(db, "SELECT * FROM `LibraryEdition` WHERE `workId` = :work_id AND COALESCE(`hidden`, 0) = 0 ORDER BY COALESCE(`primary`, 0) DESC, `createdAt` ASC LIMIT 1", {"work_id": work_id})
+    return organize_duplicates.first_visible_edition(db, work_id)
 
 
 def set_work_hidden(db: Session, work_id: str, hidden: bool, organize_status: str = "APPLIED") -> None:
-    if has_table(db, "LibraryWork"):
-        update_row(db, "LibraryWork", work_id, {"hidden": hidden, "organizeStatus": organize_status, "updatedAt": now()})
+    organize_duplicates.set_work_hidden(
+        db, work_id=work_id, hidden=hidden, organize_status=organize_status, now=now()
+    )
+    db.commit()
 
 
 def choose_primary_edition(db: Session, work_id: str, preferred_id: str | None = None) -> str | None:
-    work = row(db, "SELECT * FROM `LibraryWork` WHERE `id` = :id", {"id": work_id}) if has_table(db, "LibraryWork") else None
+    work = organize_review.get_work(db, work_id)
     primary_id = preferred_id or (work or {}).get("primaryEditionId")
-    primary_exists = row(db, "SELECT * FROM `LibraryEdition` WHERE `id` = :id AND `workId` = :work_id", {"id": primary_id, "work_id": work_id}) if primary_id and has_table(db, "LibraryEdition") else None
+    primary_exists = (
+        organize_duplicates.get_edition_for_work(db, edition_id=str(primary_id), work_id=work_id)
+        if primary_id
+        else None
+    )
     if primary_exists:
-        return primary_id
+        return str(primary_id)
     edition = first_edition_for_work(db, work_id)
     primary_id = edition.get("id") if edition else None
     if primary_id:
-        update_row(db, "LibraryWork", work_id, {"primaryEditionId": primary_id, "updatedAt": now()})
-        update_row(db, "LibraryEdition", primary_id, {"primary": True, "updatedAt": now()})
-    return primary_id
+        organize_duplicates.set_work_primary_edition(
+            db, work_id=work_id, edition_id=str(primary_id), now=now()
+        )
+        db.commit()
+    return str(primary_id) if primary_id else None
 
 
 def merge_as_version(db: Session, source_work_id: str, target_work_id: str) -> None:
     if source_work_id == target_work_id:
         return
-    if has_table(db, "LibraryEdition"):
-        update_rows(db, "LibraryEdition", "`workId` = :source_work_id", {"source_work_id": source_work_id}, {"workId": target_work_id, "primary": False, "updatedAt": now()})
-    if has_table(db, "ImportTask"):
-        update_rows(db, "ImportTask", "`workId` = :source_work_id", {"source_work_id": source_work_id}, {"workId": target_work_id, "updatedAt": now()})
-    if has_table(db, "LibraryReadingProgress"):
-        update_rows(db, "LibraryReadingProgress", "`workId` = :source_work_id", {"source_work_id": source_work_id}, {"workId": target_work_id, "updatedAt": now()})
-    set_work_hidden(db, source_work_id, True)
+    stamp = now()
+    organize_duplicates.merge_editions_as_version(
+        db, source_work_id=source_work_id, target_work_id=target_work_id, now=stamp
+    )
+    organize_duplicates.set_work_hidden(
+        db, work_id=source_work_id, hidden=True, organize_status="APPLIED", now=stamp
+    )
+    db.commit()
     choose_primary_edition(db, target_work_id)
 
 
@@ -383,32 +357,33 @@ def merge_as_volume(db: Session, source_work_id: str, target_work_id: str, targe
     if not target_edition_id:
         merge_as_version(db, source_work_id, target_work_id)
         return
-    source_editions = rows(db, "SELECT * FROM `LibraryEdition` WHERE `workId` = :source_work_id", {"source_work_id": source_work_id}) if has_table(db, "LibraryEdition") else []
+    stamp = now()
+    source_editions = organize_duplicates.list_editions_for_work(db, source_work_id)
     for edition in source_editions:
-        source_edition_id = edition["id"]
-        if has_table(db, "LibraryVolume"):
-            update_rows(db, "LibraryVolume", "`editionId` = :source_edition_id", {"source_edition_id": source_edition_id}, {"editionId": target_edition_id, "updatedAt": now()})
-        if has_table(db, "LibraryFile"):
-            update_rows(db, "LibraryFile", "`editionId` = :source_edition_id", {"source_edition_id": source_edition_id}, {"editionId": target_edition_id, "updatedAt": now()})
-        if has_table(db, "LibraryReadingUnit"):
-            update_rows(db, "LibraryReadingUnit", "`editionId` = :source_edition_id", {"source_edition_id": source_edition_id}, {"editionId": target_edition_id, "updatedAt": now()})
-        if has_table(db, "LibraryMetadata"):
-            update_rows(db, "LibraryMetadata", "`editionId` = :source_edition_id", {"source_edition_id": source_edition_id}, {"editionId": target_edition_id, "updatedAt": now()})
-        if has_table(db, "ImportTask"):
-            update_rows(db, "ImportTask", "`editionId` = :source_edition_id", {"source_edition_id": source_edition_id}, {"workId": target_work_id, "editionId": target_edition_id, "updatedAt": now()})
-        update_row(db, "LibraryEdition", source_edition_id, {"hidden": True, "updatedAt": now()})
-    if has_table(db, "LibraryReadingProgress"):
-        update_rows(db, "LibraryReadingProgress", "`workId` = :source_work_id", {"source_work_id": source_work_id}, {"workId": target_work_id, "editionId": target_edition_id, "updatedAt": now()})
-    set_work_hidden(db, source_work_id, True)
+        organize_duplicates.merge_edition_as_volume(
+            db,
+            source_edition_id=str(edition["id"]),
+            target_edition_id=str(target_edition_id),
+            target_work_id=target_work_id,
+            now=stamp,
+        )
+    organize_duplicates.retarget_progress_to_edition(
+        db,
+        source_work_id=source_work_id,
+        target_work_id=target_work_id,
+        target_edition_id=str(target_edition_id),
+        now=stamp,
+    )
+    organize_duplicates.set_work_hidden(
+        db, work_id=source_work_id, hidden=True, organize_status="APPLIED", now=stamp
+    )
+    db.commit()
 
 
 def apply_duplicate_actions(db: Session, job: dict[str, Any], duplicate_ids: list[str]) -> int:
-    if not duplicate_ids or not has_table(db, "DuplicateCandidate"):
-        return 0
-    placeholders = ", ".join(f":id_{index}" for index, _ in enumerate(duplicate_ids))
-    params = {f"id_{index}": duplicate_id for index, duplicate_id in enumerate(duplicate_ids)}
-    params["job_id"] = job["id"]
-    duplicates = rows(db, f"SELECT * FROM `DuplicateCandidate` WHERE `jobId` = :job_id AND `id` IN ({placeholders})", params)
+    duplicates = organize_duplicates.list_duplicates_by_ids(
+        db, job_id=str(job["id"]), duplicate_ids=duplicate_ids
+    )
     target_work_id = job.get("workId")
     if not target_work_id:
         return 0
@@ -424,7 +399,8 @@ def apply_duplicate_actions(db: Session, job: dict[str, Any], duplicate_ids: lis
             merge_as_version(db, source_work_id, target_work_id)
         elif action == "MERGE_AS_VOLUME":
             merge_as_volume(db, source_work_id, target_work_id, job.get("editionId"))
-        update_row(db, "DuplicateCandidate", duplicate["id"], {"status": "APPLIED", "updatedAt": now()})
+        organize_duplicates.mark_duplicate_applied(db, duplicate_id=str(duplicate["id"]), now=now())
+        db.commit()
         applied += 1
     return applied
 
@@ -448,72 +424,83 @@ def issue_codes_for_work(work: dict[str, Any], editions: list[dict[str, Any]], d
 
 
 def refresh_organize_job(db: Session, job_id: str) -> dict[str, Any]:
-    job = row(db, "SELECT * FROM `OrganizeJob` WHERE `id` = :id", {"id": job_id}) if has_table(db, "OrganizeJob") else None
+    job = organize_review.get_job(db, job_id)
     if not job:
         raise ValueError("整理任务不存在")
-    work = row(db, "SELECT * FROM `LibraryWork` WHERE `id` = :id", {"id": job.get("workId")}) if has_table(db, "LibraryWork") and job.get("workId") else None
+    work = organize_review.get_work(db, str(job["workId"])) if job.get("workId") else None
     if not work:
-        return update_row(db, "OrganizeJob", job_id, {"status": "FAILED", "errorSummary": "作品不存在", "updatedAt": now()}) or job
-    editions = rows(db, "SELECT * FROM `LibraryEdition` WHERE `workId` = :work_id", {"work_id": work["id"]}) if has_table(db, "LibraryEdition") else []
+        updated = (
+            organize_review.update_job(
+                db, job_id, {"status": "FAILED", "errorSummary": "作品不存在", "updatedAt": now()}
+            )
+            or job
+        )
+        db.commit()
+        return updated
+    editions = organize_duplicates.list_editions_for_work(db, str(work["id"]))
     duplicate_count = refresh_duplicate_candidates(db, job, work)
     issues = issue_codes_for_work(work, editions, duplicate_count > 0)
     status = "REVIEWING" if issues else "APPLIED"
-    summary = f"发现 {len(issues)} 类整理问题，{duplicate_count} 条重复/版本候选" if issues or duplicate_count else "未发现需要整理的问题"
-    updated_job = update_row(db, "OrganizeJob", job_id, {"status": status, "issueCodes": json_text(issues), "summary": summary, "errorSummary": None, "updatedAt": now()}) or job
-    update_row(db, "LibraryWork", work["id"], {"organizeStatus": status, "metadataQuality": max(0, 100 - len(issues) * 15), "organized": status == "APPLIED" or bool(work.get("organized")), "updatedAt": now()})
+    summary = (
+        f"发现 {len(issues)} 类整理问题，{duplicate_count} 条重复/版本候选"
+        if issues or duplicate_count
+        else "未发现需要整理的问题"
+    )
+    updated_job = (
+        organize_review.update_job(
+            db,
+            job_id,
+            {
+                "status": status,
+                "issueCodes": json_text(issues),
+                "summary": summary,
+                "errorSummary": None,
+                "updatedAt": now(),
+            },
+        )
+        or job
+    )
+    organize_review.update_work(
+        db,
+        str(work["id"]),
+        {
+            "organizeStatus": status,
+            "metadataQuality": max(0, 100 - len(issues) * 15),
+            "organized": status == "APPLIED" or bool(work.get("organized")),
+            "updatedAt": now(),
+        },
+    )
+    db.commit()
     return {**updated_job, "refreshed": True, "issueCodes": issues, "duplicateCount": duplicate_count}
 
 
 def ensure_organize_job_for_work(db: Session, work_id: str) -> dict[str, Any] | None:
     if not has_table(db, "OrganizeJob") or not has_table(db, "LibraryWork"):
         return None
-    work = row(db, "SELECT * FROM `LibraryWork` WHERE `id` = :id AND COALESCE(`hidden`, 0) = 0", {"id": work_id})
+    work = organize_review.get_visible_work(db, work_id)
     if not work:
         return None
-    existing = row(
-        db,
-        "SELECT * FROM `OrganizeJob` WHERE `workId` = :work_id "
-        "AND `status` IN ('LOOKUP_PENDING', 'PENDING', 'QUEUED', 'RUNNING', 'RETRY_WAIT', 'REVIEWING', 'FAILED') "
-        "ORDER BY `updatedAt` DESC LIMIT 1",
-        {"work_id": work_id},
-    )
+    existing = organize_review.get_unresolved_job_for_work(db, work_id)
     if existing:
         return existing
-    edition_id = work.get("primaryEditionId")
-    if not edition_id and has_table(db, "LibraryEdition"):
-        edition = row(db, "SELECT * FROM `LibraryEdition` WHERE `workId` = :work_id ORDER BY `createdAt` ASC LIMIT 1", {"work_id": work_id})
-        edition_id = edition.get("id") if edition else None
+    edition_id = work.get("primaryEditionId") or organize_review.earliest_edition_id(db, work_id)
     already_organized = bool(work.get("organized")) or work.get("organizeStatus") == "APPLIED"
-    return insert_row(
+    created = organize_review.insert_organize_job(
         db,
-        "OrganizeJob",
-        {
-            "id": f"py_{time_ns()}",
-            "workId": work_id,
-            "editionId": edition_id,
-            "status": "APPLIED" if already_organized else "REVIEWING",
-            "issueCodes": json_text([] if already_organized else ["NEW_IMPORT"]),
-            "summary": "已整理，等待元数据刷新" if already_organized else "等待元数据刷新",
-            "createdAt": now(),
-            "updatedAt": now(),
-        },
+        job_id=f"py_{time_ns()}",
+        work_id=work_id,
+        edition_id=str(edition_id) if edition_id else None,
+        status="APPLIED" if already_organized else "REVIEWING",
+        issue_codes_json=json_text([] if already_organized else ["NEW_IMPORT"]),
+        summary="已整理，等待元数据刷新" if already_organized else "等待元数据刷新",
+        now=now(),
     )
+    db.commit()
+    return created
 
 
 def context_for_job(db: Session, job: dict[str, Any]) -> dict[str, Any] | None:
-    work = row(db, "SELECT * FROM `LibraryWork` WHERE `id` = :id", {"id": job.get("workId")}) if has_table(db, "LibraryWork") and job.get("workId") else None
-    if not work:
-        return None
-    editions = rows(db, "SELECT * FROM `LibraryEdition` WHERE `workId` = :work_id", {"work_id": work["id"]}) if has_table(db, "LibraryEdition") else []
-    files = []
-    metadata = []
-    if has_table(db, "LibraryFile"):
-        for edition in editions:
-            files.extend(rows(db, "SELECT * FROM `LibraryFile` WHERE `editionId` = :edition_id", {"edition_id": edition["id"]}))
-    if has_table(db, "LibraryMetadata"):
-        for edition in editions:
-            metadata.extend(rows(db, "SELECT * FROM `LibraryMetadata` WHERE `editionId` = :edition_id", {"edition_id": edition["id"]}))
-    return {"work": work, "editions": editions, "files": files, "metadata": metadata}
+    return organize_review.load_job_context(db, job)
 
 
 def local_metadata_summary(context: dict[str, Any]) -> dict[str, Any]:
@@ -1063,23 +1050,10 @@ def run_external_metadata_provider(db: Session, context: dict[str, Any], force: 
 
 
 def external_metadata_cache_get(db: Session, provider: str, query_key: str) -> dict[str, Any] | None:
-    if not query_key or not has_table(db, "ExternalMetadataCache"):
+    raw_json = metadata_cache.get_cached_raw_json(db, provider=provider, query_key=query_key)
+    if raw_json is None:
         return None
-    cached = row(
-        db,
-        """
-        SELECT `rawJson` FROM `ExternalMetadataCache`
-        WHERE `provider` = :provider AND `queryKey` = :query_key
-          AND (`expiresAt` IS NULL OR CASE
-                WHEN CAST(`expiresAt` AS TEXT) GLOB '*[^0-9]*'
-                THEN CAST(ROUND((julianday(`expiresAt`) - 2440587.5) * 86400000) AS INTEGER)
-                ELSE CAST(`expiresAt` AS INTEGER)
-              END > :now)
-        LIMIT 1
-        """,
-        {"provider": provider, "query_key": query_key, "now": now_timestamp_ms()},
-    )
-    parsed = parse_json_value((cached or {}).get("rawJson"))
+    parsed = parse_json_value(raw_json)
     return parsed if isinstance(parsed, dict) and external_metadata_result_cacheable(parsed) else None
 
 
@@ -1109,25 +1083,14 @@ def external_metadata_cache_put(db: Session, provider: str, query_key: str, resu
             "message": result.get("message"),
         }
     )
-    db.execute(
-        text(
-            """
-            INSERT INTO `ExternalMetadataCache`
-                (`id`, `provider`, `queryKey`, `rawJson`, `expiresAt`, `createdAt`, `updatedAt`)
-            VALUES
-                (:id, :provider, :query_key, :raw_json, :expires_at, :now, :now)
-            ON CONFLICT (`provider`, `queryKey`) DO UPDATE SET
-                `rawJson` = excluded.`rawJson`, `expiresAt` = excluded.`expiresAt`, `updatedAt` = excluded.`updatedAt`
-            """
-        ),
-        {
-            "id": f"py_{time_ns()}",
-            "provider": provider,
-            "query_key": query_key,
-            "raw_json": payload,
-            "expires_at": timestamp + 24 * 60 * 60 * 1000,
-            "now": timestamp,
-        },
+    metadata_cache.upsert_cache_entry(
+        db,
+        entry_id=f"py_{time_ns()}",
+        provider=provider,
+        query_key=query_key,
+        raw_json=payload,
+        expires_at_ms=timestamp + 24 * 60 * 60 * 1000,
+        now_ms=timestamp,
     )
     db.commit()
 
@@ -1193,28 +1156,29 @@ def metadata_search_candidates(
 def add_suggestions_to_job(db: Session, job_id: str, suggestions: list[dict[str, Any]]) -> int:
     if not suggestions or not has_table(db, "MetadataSuggestion"):
         return 0
-    existing = {
-        f"{item.get('field')}:{item.get('source')}:{item.get('suggestedValue')}"
-        for item in rows(db, "SELECT `field`, `source`, `suggestedValue` FROM `MetadataSuggestion` WHERE `jobId` = :job_id", {"job_id": job_id})
-    }
+    existing = organize_suggestions.list_suggestion_dedupe_keys(db, job_id)
     added = 0
     for suggestion in suggestions:
         key = f"{suggestion.get('field')}:{suggestion.get('source')}:{suggestion.get('suggestedValue')}"
         if key in existing:
             continue
-        insert_row(
+        organize_suggestions.insert_suggestion(
             db,
-            "MetadataSuggestion",
-            {
-                "id": f"py_{time_ns()}_{added}",
-                "jobId": job_id,
-                "createdAt": now(),
-                "updatedAt": now(),
-                **suggestion,
-            },
+            suggestion_id=f"py_{time_ns()}_{added}",
+            job_id=job_id,
+            field=str(suggestion.get("field") or ""),
+            current_value=suggestion.get("currentValue"),
+            suggested_value=suggestion.get("suggestedValue"),
+            source=str(suggestion.get("source") or ""),
+            confidence=float(suggestion.get("confidence") or 0),
+            reason=str(suggestion.get("reason") or ""),
+            status=str(suggestion.get("status") or "PENDING"),
+            now=now(),
         )
         existing.add(key)
         added += 1
+    if added:
+        db.commit()
     return added
 
 
@@ -1228,7 +1192,7 @@ def refresh_metadata_providers(db: Session, job_id: str, providers: list[str], f
             selected.append(provider)
     if not selected:
         raise ValueError("请选择要刷新的元数据来源")
-    job = row(db, "SELECT * FROM `OrganizeJob` WHERE `id` = :id", {"id": job_id}) if has_table(db, "OrganizeJob") else None
+    job = organize_review.get_job(db, job_id)
     if not job:
         raise ValueError("整理任务不存在")
     context = context_for_job(db, job)
@@ -1248,29 +1212,40 @@ def refresh_metadata_providers(db: Session, job_id: str, providers: list[str], f
         except Exception as exc:
             results.append({"provider": provider, "enabled": True, "added": 0, "cacheHit": False, "error": str(exc)})
     if total_added > 0:
-        work = row(db, "SELECT * FROM `LibraryWork` WHERE `id` = :id", {"id": job.get("workId")}) if job.get("workId") and has_table(db, "LibraryWork") else None
-        already_organized = bool((work or {}).get("organized")) or (work or {}).get("organizeStatus") == "APPLIED" or job.get("status") == "APPLIED"
-        update_row(
+        work = organize_review.get_work(db, str(job["workId"])) if job.get("workId") else None
+        already_organized = (
+            bool((work or {}).get("organized"))
+            or (work or {}).get("organizeStatus") == "APPLIED"
+            or job.get("status") == "APPLIED"
+        )
+        organize_review.update_job(
             db,
-            "OrganizeJob",
             job_id,
-            {"status": "APPLIED" if already_organized else "REVIEWING", "summary": f"新增 {total_added} 条外部/AI 元数据建议", "updatedAt": now()},
+            {
+                "status": "APPLIED" if already_organized else "REVIEWING",
+                "summary": f"新增 {total_added} 条外部/AI 元数据建议",
+                "updatedAt": now(),
+            },
         )
         if job.get("workId") and has_table(db, "LibraryWork") and not already_organized:
-            update_row(db, "LibraryWork", job["workId"], {"organizeStatus": "REVIEWING", "organized": False, "updatedAt": now()})
+            organize_review.update_work(
+                db,
+                str(job["workId"]),
+                {"organizeStatus": "REVIEWING", "organized": False, "updatedAt": now()},
+            )
+        db.commit()
     return {"added": total_added, "results": results}
 
 
 def refresh_duplicate_candidates(db: Session, job: dict[str, Any], work: dict[str, Any]) -> int:
     if not has_table(db, "DuplicateCandidate") or not has_table(db, "LibraryWork"):
         return 0
-    if "jobId" in columns(db, "DuplicateCandidate"):
-        db.execute(text("DELETE FROM `DuplicateCandidate` WHERE `jobId` = :job_id AND COALESCE(`status`, 'PENDING') = 'PENDING'"), {"job_id": job["id"]})
-        db.commit()
+    organize_duplicates.delete_pending_duplicates(db, str(job["id"]))
+    db.commit()
     title_key = normalize_key(work.get("title"))
     if len(title_key) < 4:
         return 0
-    candidates = rows(db, "SELECT * FROM `LibraryWork` WHERE `id` != :id AND `hidden` = 0", {"id": work["id"]})
+    candidates = organize_duplicates.list_visible_works_except(db, str(work["id"]))
     count = 0
     for candidate in candidates:
         reasons = []
@@ -1278,8 +1253,19 @@ def refresh_duplicate_candidates(db: Session, job: dict[str, Any], work: dict[st
             reasons.append("title")
         if not reasons:
             continue
-        insert_row(db, "DuplicateCandidate", {"id": f"py_{time_ns()}", "jobId": job["id"], "targetWorkId": candidate["id"], "reasons": json_text(reasons), "confidence": 0.75, "suggestedAction": "MERGE_AS_VERSION", "status": "PENDING", "createdAt": now(), "updatedAt": now()})
+        organize_duplicates.insert_duplicate_candidate(
+            db,
+            candidate_id=f"py_{time_ns()}",
+            job_id=str(job["id"]),
+            target_work_id=str(candidate["id"]),
+            reasons_json=json_text(reasons),
+            confidence=0.75,
+            suggested_action="MERGE_AS_VERSION",
+            now=now(),
+        )
         count += 1
+    if count:
+        db.commit()
     return count
 
 
@@ -1291,21 +1277,43 @@ def bulk_apply_organize_jobs(db: Session, job_ids: list[str], payload: dict[str,
     applied = 0
     jobs = 0
     for job_id in job_ids:
-        if not row(db, "SELECT * FROM `OrganizeJob` WHERE `id` = :id", {"id": job_id}):
+        if not organize_review.get_job(db, job_id):
             continue
-        result = apply_organize_job(db, job_id, {"highConfidenceOnly": payload.get("highConfidenceOnly", True), "markOrganized": payload.get("markOrganized")})
+        result = apply_organize_job(
+            db,
+            job_id,
+            {
+                "highConfidenceOnly": payload.get("highConfidenceOnly", True),
+                "markOrganized": payload.get("markOrganized"),
+            },
+        )
         applied += result.applied
         jobs += 1
     tags = [str(tag).strip() for tag in payload.get("addTags") or [] if str(tag).strip()]
     if tags and has_table(db, "LibraryWork"):
         for job_id in job_ids:
-            job = row(db, "SELECT * FROM `OrganizeJob` WHERE `id` = :id", {"id": job_id})
+            job = organize_review.get_job(db, job_id)
             if not job:
                 continue
-            work = row(db, "SELECT * FROM `LibraryWork` WHERE `id` = :id", {"id": job.get("workId")})
+            work = organize_review.get_work(db, str(job.get("workId"))) if job.get("workId") else None
             if not work:
                 continue
             current = parse_json_value(work.get("tags"))
             current_tags = current if isinstance(current, list) else []
-            update_row(db, "LibraryWork", work["id"], {"tags": json_text(sorted({*[str(item).strip() for item in current_tags if str(item).strip()], *tags})), "updatedAt": now()})
+            organize_review.update_work(
+                db,
+                str(work["id"]),
+                {
+                    "tags": json_text(
+                        sorted(
+                            {
+                                *[str(item).strip() for item in current_tags if str(item).strip()],
+                                *tags,
+                            }
+                        )
+                    ),
+                    "updatedAt": now(),
+                },
+            )
+            db.commit()
     return {"matched": len(job_ids), "jobs": jobs, "applied": applied, "tagsAdded": len(set(tags))}

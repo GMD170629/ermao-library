@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.core.i18n import DEFAULT_LOCALE
 from app.models.settings import SystemSetting
-from app.modules.metadata.public import BUILTIN_MANIFESTS, ensure_metadata_sources
+from app.bootstrap.metadata import ensure_metadata_sources
+from app.modules.metadata.public import BUILTIN_MANIFESTS
 
 LOGGER = logging.getLogger(__name__)
 

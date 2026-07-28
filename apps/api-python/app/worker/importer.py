@@ -16,10 +16,18 @@ from urllib.parse import unquote
 from xml.etree import ElementTree
 
 from PIL import Image, UnidentifiedImageError
-from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.modules.imports.infrastructure import library_queries as import_db
+from app.modules.imports.infrastructure.legacy_persistence import (
+    legacy_delete_by_id,
+    legacy_get_by_id,
+    legacy_insert,
+    legacy_update,
+)
+from app.modules.imports.infrastructure.schema import has_table, table_columns
+from app.models.library import LibraryEdition, LibraryFile, LibraryReadingUnit, LibraryVolume
 from app.services.book_identity import BookIdentity, UNKNOWN_AUTHOR, identity_merge_key, logical_import_path, normalize_identity_part, parse_bracketed_series_identity, recognize_book_identity
 from app.services.audio_metadata import (
     AudioBundleStructure,
@@ -114,7 +122,7 @@ def import_managed_book(db: Session, settings: Settings, options: ImportOptions)
     audio_sources: list[Path] = []
     source_ext = source.suffix.lower()
     ext = source_ext
-    _update(db, "ImportTask", task_id, {"status": "PARSING", "progress": 5, "startedAt": _now(), "message": "正在校验文件"})
+    legacy_update(db, "ImportTask", task_id, {"status": "PARSING", "progress": 5, "startedAt": _now(), "message": "正在校验文件"})
     db.commit()
     try:
         if not original_source.exists():
@@ -173,7 +181,7 @@ def import_managed_book(db: Session, settings: Settings, options: ImportOptions)
         stat = source.stat()
         existing_file = _existing_file_result(db, source) if source.is_file() else _existing_audio_bundle_result(db, audio_sources)
         if existing_file:
-            _update(
+            legacy_update(
                 db,
                 "ImportTask",
                 task_id,
@@ -216,7 +224,7 @@ def import_managed_book(db: Session, settings: Settings, options: ImportOptions)
 
         audio_metadata: list[AudioFileMetadata] = []
         if audio_sources:
-            _update(
+            legacy_update(
                 db,
                 "ImportTask",
                 task_id,
@@ -246,13 +254,13 @@ def import_managed_book(db: Session, settings: Settings, options: ImportOptions)
             if identity.source == "ai"
             else "正则规则"
         )
-        _update(db, "ImportTask", task_id, {"progress": 88 if converted else 20, "message": f"已通过{identity_method}获取书名与作者"})
+        legacy_update(db, "ImportTask", task_id, {"progress": 88 if converted else 20, "message": f"已通过{identity_method}获取书名与作者"})
         db.commit()
         content_hash = converted.source_hash if converted else None if ext in {".cbz", ".zip", ".audio-bundle", *SUPPORTED_AUDIO_EXTS} else _content_hash(source)
         task_update = {"progress": 92 if converted else 30, "message": "正在读取元数据"}
         if content_hash:
             task_update["contentHash"] = content_hash
-        _update(db, "ImportTask", task_id, task_update)
+        legacy_update(db, "ImportTask", task_id, task_update)
         if ext == ".epub":
             result = _import_epub(db, settings, effective_options, task_id, stat.st_size, ext, identity)
         elif ext in CONVERTIBLE_TEXT_EXTS:
@@ -264,9 +272,9 @@ def import_managed_book(db: Session, settings: Settings, options: ImportOptions)
         else:
             result = _import_comic(db, settings, effective_options, task_id, stat.st_size, ext, identity)
         sync_work_facets(db, result.work_id, commit=False)
-        if converted and _has_table(db, "LibraryMetadata"):
-            conversion_row = _row(db, "SELECT * FROM `BookConversionTask` WHERE `importTaskId` = :task_id", {"task_id": task_id}) if _has_table(db, "BookConversionTask") else None
-            _insert(
+        if converted and has_table(db, "LibraryMetadata"):
+            conversion_row = import_db.get_conversion_by_import_task_id(db, task_id) if has_table(db, "BookConversionTask") else None
+            legacy_insert(
                 db,
                 "LibraryMetadata",
                 {
@@ -292,7 +300,7 @@ def import_managed_book(db: Session, settings: Settings, options: ImportOptions)
             )
             if options.origin == "DEFERRED_CONVERSION":
                 _complete_deferred_source_conversion(db, original_source, result)
-        _update(
+        legacy_update(
             db,
             "ImportTask",
             task_id,
@@ -347,22 +355,21 @@ def import_managed_book(db: Session, settings: Settings, options: ImportOptions)
     except Exception as exc:
         db.rollback()
         message = str(exc)
-        current_task = _row(db, "SELECT * FROM `ImportTask` WHERE `id` = :id", {"id": task_id}) or {}
+        current_task = import_db.get_import_task_by_id(db, task_id) or {}
         source_missing = not original_source.exists()
         audio_retryable = bool(audio_sources and not source_missing)
         error_code = current_task.get("errorCode") or (
             "SOURCE_NOT_FOUND" if source_missing else "AUDIO_IMPORT_FAILED" if audio_retryable else "IMPORT_FAILED"
         )
         retryable = False if source_missing else audio_retryable or bool(current_task.get("retryable"))
-        _update(db, "ImportTask", task_id, {"status": "FAILED", "progress": 100, "errorCode": error_code, "retryable": retryable, "errorSummary": message, "message": "导入源文件或目录不存在，任务已结束" if source_missing else "导入失败，详情见错误信息", "leaseOwner": None, "leaseExpiresAt": None, "duration": int((time.time() - started) * 1000), "finishedAt": _now()})
-        if _has_table(db, "ImportAsset"):
-            db.execute(
-                text(
-                    "UPDATE `ImportAsset` SET `status` = 'FAILED', `errorCode` = :error_code, "
-                    "`errorSummary` = :error_summary, `updatedAt` = :updated_at "
-                    "WHERE `importTaskId` = :task_id AND `status` != 'COMPLETED'"
-                ),
-                {"error_code": error_code, "error_summary": message, "updated_at": _now(), "task_id": task_id},
+        legacy_update(db, "ImportTask", task_id, {"status": "FAILED", "progress": 100, "errorCode": error_code, "retryable": retryable, "errorSummary": message, "message": "导入源文件或目录不存在，任务已结束" if source_missing else "导入失败，详情见错误信息", "leaseOwner": None, "leaseExpiresAt": None, "duration": int((time.time() - started) * 1000), "finishedAt": _now()})
+        if has_table(db, "ImportAsset"):
+            import_db.fail_import_assets_for_task(
+                db,
+                task_id=task_id,
+                error_code=error_code,
+                error_summary=message,
+                updated_at=_now(),
             )
         _log_import(db, task_id, "error", message)
         record_system_event(
@@ -414,7 +421,7 @@ def _import_epub(db: Session, settings: Settings, options: ImportOptions, task_i
         created_edition = False
         if not edition:
             created_edition = True
-            edition = _insert(
+            edition = legacy_insert(
                 db,
                 "LibraryEdition",
                 {
@@ -446,23 +453,23 @@ def _import_epub(db: Session, settings: Settings, options: ImportOptions, task_i
         cover_path = None
         try:
             sort_order = int(volume_info.series_index * 1000)
-            volume = _insert(db, "LibraryVolume", {"id": _id(), "editionId": edition["id"], "title": volume_info.title, "volumeIndex": volume_info.series_index, "sortOrder": sort_order, "chapterCount": metadata["chapterCount"], "coverPath": None, "createdAt": _now(), "updatedAt": _now()})
+            volume = legacy_insert(db, "LibraryVolume", {"id": _id(), "editionId": edition["id"], "title": volume_info.title, "volumeIndex": volume_info.series_index, "sortOrder": sort_order, "chapterCount": metadata["chapterCount"], "coverPath": None, "createdAt": _now(), "updatedAt": _now()})
             source_path = options.source_file_path.resolve()
-            _update(db, "ImportTask", task_id, {"message": "正在建立 EPUB 卷册记录"})
+            legacy_update(db, "ImportTask", task_id, {"message": "正在建立 EPUB 卷册记录"})
             if metadata.get("coverPath"):
                 cover_path = _extract_epub_cover(settings, source_path, work["id"], edition["id"], metadata, volume["id"])
             source_stat = source_path.stat()
-            file = _insert(db, "LibraryFile", {"id": _id(), "editionId": edition["id"], "volumeId": volume["id"], "path": str(source_path), "filePathHash": _hash_text(str(source_path)), "hashStatus": "PARTIAL_PENDING", "kind": "EPUB", "mimeType": "application/epub+zip", "sizeBytes": file_size, "mtimeMs": int(source_stat.st_mtime * 1000), "sortOrder": sort_order, "createdAt": _now(), "updatedAt": _now()})
+            file = legacy_insert(db, "LibraryFile", {"id": _id(), "editionId": edition["id"], "volumeId": volume["id"], "path": str(source_path), "filePathHash": _hash_text(str(source_path)), "hashStatus": "PARTIAL_PENDING", "kind": "EPUB", "mimeType": "application/epub+zip", "sizeBytes": file_size, "mtimeMs": int(source_stat.st_mtime * 1000), "sortOrder": sort_order, "createdAt": _now(), "updatedAt": _now()})
             for chapter in metadata["chapters"]:
-                _insert(db, "LibraryReadingUnit", {"id": _id(), "editionId": edition["id"], "volumeId": volume["id"], "fileId": file["id"], "unitType": "chapter", "title": chapter["title"], "href": chapter["href"], "mediaType": chapter.get("mediaType"), "sortOrder": chapter["sortOrder"], "metadataJson": json.dumps({"idref": chapter.get("idref"), "volumeIndex": volume_info.series_index}, ensure_ascii=False), "createdAt": _now(), "updatedAt": _now()})
-            _insert(db, "LibraryMetadata", {"id": _id(), "editionId": edition["id"], "source": "epub_opf", "rawJson": json.dumps(metadata["rawMetadata"], ensure_ascii=False), "createdAt": _now(), "updatedAt": _now()})
+                legacy_insert(db, "LibraryReadingUnit", {"id": _id(), "editionId": edition["id"], "volumeId": volume["id"], "fileId": file["id"], "unitType": "chapter", "title": chapter["title"], "href": chapter["href"], "mediaType": chapter.get("mediaType"), "sortOrder": chapter["sortOrder"], "metadataJson": json.dumps({"idref": chapter.get("idref"), "volumeIndex": volume_info.series_index}, ensure_ascii=False), "createdAt": _now(), "updatedAt": _now()})
+            legacy_insert(db, "LibraryMetadata", {"id": _id(), "editionId": edition["id"], "source": "epub_opf", "rawJson": json.dumps(metadata["rawMetadata"], ensure_ascii=False), "createdAt": _now(), "updatedAt": _now()})
             _insert_identity_metadata(db, edition["id"], identity)
             stored_cover_path = cover_path or ensure_default_cover(settings)
             edition_cover_path = cover_path or edition.get("coverPath") or stored_cover_path
-            _update(db, "LibraryVolume", volume["id"], {"coverPath": stored_cover_path, "chapterCount": metadata["chapterCount"], "updatedAt": _now()})
-            size_total = _scalar(db, "SELECT COALESCE(SUM(`sizeBytes`), 0) FROM `LibraryFile` WHERE `editionId` = :edition_id", {"edition_id": edition["id"]}, 0)
-            chapter_total = _scalar(db, "SELECT COALESCE(SUM(`chapterCount`), 0) FROM `LibraryVolume` WHERE `editionId` = :edition_id", {"edition_id": edition["id"]}, 0)
-            _update(db, "LibraryEdition", edition["id"], {"sizeBytes": int(size_total), "chapterCount": int(chapter_total), "coverPath": edition_cover_path, "coverStatus": cover_status(edition_cover_path, settings), "importStatus": "COMPLETED", "updatedAt": _now()})
+            legacy_update(db, "LibraryVolume", volume["id"], {"coverPath": stored_cover_path, "chapterCount": metadata["chapterCount"], "updatedAt": _now()})
+            size_total = import_db.sum_file_size_bytes_for_edition(db, str(edition["id"]))
+            chapter_total = import_db.sum_volume_chapter_count_for_edition(db, str(edition["id"]))
+            legacy_update(db, "LibraryEdition", edition["id"], {"sizeBytes": int(size_total), "chapterCount": int(chapter_total), "coverPath": edition_cover_path, "coverStatus": cover_status(edition_cover_path, settings), "importStatus": "COMPLETED", "updatedAt": _now()})
             _finalize_work_primary(db, settings, work["id"], edition["id"], edition_cover_path)
             return ImportResult(work["id"], work["id"], edition["id"], volume["id"], work["title"], "ebook", "epub", metadata["chapterCount"], "completed", False, (not created) or (not created_edition), "new-epub-work" if created else "new-epub-version" if created_edition else "same-epub-series")
         except Exception:
@@ -472,8 +479,8 @@ def _import_epub(db: Session, settings: Settings, options: ImportOptions, task_i
     cover_path = None
     try:
         source_path = options.source_file_path.resolve()
-        _update(db, "ImportTask", task_id, {"message": "正在建立 EPUB 记录"})
-        edition = _insert(
+        legacy_update(db, "ImportTask", task_id, {"message": "正在建立 EPUB 记录"})
+        edition = legacy_insert(
             db,
             "LibraryEdition",
             {
@@ -504,14 +511,14 @@ def _import_epub(db: Session, settings: Settings, options: ImportOptions, task_i
         if metadata.get("coverPath"):
             cover_path = _extract_epub_cover(settings, source_path, work["id"], edition["id"], metadata)
         stored_cover_path = cover_path or ensure_default_cover(settings)
-        volume = _insert(db, "LibraryVolume", {"id": _id(), "editionId": edition["id"], "title": "正文", "sortOrder": 0, "chapterCount": metadata["chapterCount"], "coverPath": stored_cover_path, "createdAt": _now(), "updatedAt": _now()})
+        volume = legacy_insert(db, "LibraryVolume", {"id": _id(), "editionId": edition["id"], "title": "正文", "sortOrder": 0, "chapterCount": metadata["chapterCount"], "coverPath": stored_cover_path, "createdAt": _now(), "updatedAt": _now()})
         source_stat = source_path.stat()
-        file = _insert(db, "LibraryFile", {"id": _id(), "editionId": edition["id"], "volumeId": volume["id"], "path": str(source_path), "filePathHash": _hash_text(str(source_path)), "hashStatus": "PARTIAL_PENDING", "kind": "EPUB", "mimeType": "application/epub+zip", "sizeBytes": file_size, "mtimeMs": int(source_stat.st_mtime * 1000), "sortOrder": 0, "createdAt": _now(), "updatedAt": _now()})
+        file = legacy_insert(db, "LibraryFile", {"id": _id(), "editionId": edition["id"], "volumeId": volume["id"], "path": str(source_path), "filePathHash": _hash_text(str(source_path)), "hashStatus": "PARTIAL_PENDING", "kind": "EPUB", "mimeType": "application/epub+zip", "sizeBytes": file_size, "mtimeMs": int(source_stat.st_mtime * 1000), "sortOrder": 0, "createdAt": _now(), "updatedAt": _now()})
         for chapter in metadata["chapters"]:
-            _insert(db, "LibraryReadingUnit", {"id": _id(), "editionId": edition["id"], "volumeId": volume["id"], "fileId": file["id"], "unitType": "chapter", "title": chapter["title"], "href": chapter["href"], "mediaType": chapter.get("mediaType"), "sortOrder": chapter["sortOrder"], "metadataJson": json.dumps({"idref": chapter.get("idref")}, ensure_ascii=False), "createdAt": _now(), "updatedAt": _now()})
-        _insert(db, "LibraryMetadata", {"id": _id(), "editionId": edition["id"], "source": "epub_opf", "rawJson": json.dumps(metadata["rawMetadata"], ensure_ascii=False), "createdAt": _now(), "updatedAt": _now()})
+            legacy_insert(db, "LibraryReadingUnit", {"id": _id(), "editionId": edition["id"], "volumeId": volume["id"], "fileId": file["id"], "unitType": "chapter", "title": chapter["title"], "href": chapter["href"], "mediaType": chapter.get("mediaType"), "sortOrder": chapter["sortOrder"], "metadataJson": json.dumps({"idref": chapter.get("idref")}, ensure_ascii=False), "createdAt": _now(), "updatedAt": _now()})
+        legacy_insert(db, "LibraryMetadata", {"id": _id(), "editionId": edition["id"], "source": "epub_opf", "rawJson": json.dumps(metadata["rawMetadata"], ensure_ascii=False), "createdAt": _now(), "updatedAt": _now()})
         _insert_identity_metadata(db, edition["id"], identity)
-        _update(db, "LibraryEdition", edition["id"], {"coverPath": stored_cover_path, "coverStatus": cover_status(stored_cover_path, settings), "importStatus": "COMPLETED", "updatedAt": _now()})
+        legacy_update(db, "LibraryEdition", edition["id"], {"coverPath": stored_cover_path, "coverStatus": cover_status(stored_cover_path, settings), "importStatus": "COMPLETED", "updatedAt": _now()})
         _finalize_work_primary(db, settings, work["id"], edition["id"], stored_cover_path)
         return ImportResult(work["id"], work["id"], edition["id"], volume["id"], work["title"], "ebook", "epub", metadata["chapterCount"], "completed", False, not created, "new-work" if created else "same-epub-work")
     except Exception:
@@ -553,8 +560,8 @@ def _import_unconverted_text(
             "monitorFolderId": options.monitor_folder_id,
         },
     )
-    _update(db, "ImportTask", task_id, {"message": f"正在建立 {source_format} 原始文件版本"})
-    edition = _insert(
+    legacy_update(db, "ImportTask", task_id, {"message": f"正在建立 {source_format} 原始文件版本"})
+    edition = legacy_insert(
         db,
         "LibraryEdition",
         {
@@ -577,7 +584,7 @@ def _import_unconverted_text(
         },
     )
     mime_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
-    _insert(
+    legacy_insert(
         db,
         "LibraryFile",
         {
@@ -596,8 +603,8 @@ def _import_unconverted_text(
             "updatedAt": _now(),
         },
     )
-    if _has_table(db, "LibraryMetadata"):
-        _insert(
+    if has_table(db, "LibraryMetadata"):
+        legacy_insert(
             db,
             "LibraryMetadata",
             {
@@ -619,7 +626,7 @@ def _import_unconverted_text(
         )
         _insert_identity_metadata(db, edition["id"], identity)
     stored_cover_path = ensure_default_cover(settings)
-    _update(
+    legacy_update(
         db,
         "LibraryEdition",
         edition["id"],
@@ -647,31 +654,17 @@ def _import_unconverted_text(
 
 
 def _complete_deferred_source_conversion(db: Session, source_path: Path, result: ImportResult) -> None:
-    source_edition = _row(
+    source_edition = import_db.find_deferred_source_edition(
         db,
-        """
-        SELECT e.`id`
-        FROM `LibraryFile` f
-        JOIN `LibraryEdition` e ON e.`id` = f.`editionId`
-        WHERE f.`path` = :source_path
-          AND e.`workId` = :work_id
-          AND e.`id` != :result_edition_id
-          AND UPPER(e.`format`) IN ('MOBI', 'AZW', 'AZW3', 'PRC', 'FB2', 'TXT')
-          AND COALESCE(e.`hidden`, 0) = 0
-        ORDER BY e.`createdAt` ASC
-        LIMIT 1
-        """,
-        {
-            "source_path": str(source_path.resolve()),
-            "work_id": result.work_id,
-            "result_edition_id": result.edition_id,
-        },
+        source_path=str(source_path.resolve()),
+        work_id=result.work_id,
+        result_edition_id=result.edition_id,
     )
     if not source_edition:
         return
-    _update(db, "LibraryEdition", str(source_edition["id"]), {"primary": False, "hidden": True, "updatedAt": _now()})
-    _update(db, "LibraryEdition", result.edition_id, {"primary": True, "hidden": False, "updatedAt": _now()})
-    _update(
+    legacy_update(db, "LibraryEdition", str(source_edition["id"]), {"primary": False, "hidden": True, "updatedAt": _now()})
+    legacy_update(db, "LibraryEdition", result.edition_id, {"primary": True, "hidden": False, "updatedAt": _now()})
+    legacy_update(
         db,
         "LibraryWork",
         result.work_id,
@@ -699,8 +692,8 @@ def _import_pdf(db: Session, settings: Settings, options: ImportOptions, task_id
     cover_path = None
     try:
         source_path = options.source_file_path.resolve()
-        _update(db, "ImportTask", task_id, {"message": "正在建立 PDF 记录"})
-        edition = _insert(
+        legacy_update(db, "ImportTask", task_id, {"message": "正在建立 PDF 记录"})
+        edition = legacy_insert(
             db,
             "LibraryEdition",
             {
@@ -725,13 +718,13 @@ def _import_pdf(db: Session, settings: Settings, options: ImportOptions, task_id
         )
         cover_path = _extract_pdf_cover(settings, source_path, work["id"], edition["id"], metadata)
         stored_cover_path = cover_path or ensure_default_cover(settings)
-        volume = _insert(db, "LibraryVolume", {"id": _id(), "editionId": edition["id"], "title": "PDF", "sortOrder": 0, "pageCount": metadata["pageCount"], "coverPath": stored_cover_path, "createdAt": _now(), "updatedAt": _now()})
-        file = _insert(db, "LibraryFile", {"id": _id(), "editionId": edition["id"], "volumeId": volume["id"], "path": str(source_path), "filePathHash": _hash_text(str(source_path)), "hashStatus": "PARTIAL_PENDING", "kind": "PDF", "mimeType": "application/pdf", "sizeBytes": file_size, "mtimeMs": int(source_path.stat().st_mtime * 1000), "sortOrder": 0, "createdAt": _now(), "updatedAt": _now()})
+        volume = legacy_insert(db, "LibraryVolume", {"id": _id(), "editionId": edition["id"], "title": "PDF", "sortOrder": 0, "pageCount": metadata["pageCount"], "coverPath": stored_cover_path, "createdAt": _now(), "updatedAt": _now()})
+        file = legacy_insert(db, "LibraryFile", {"id": _id(), "editionId": edition["id"], "volumeId": volume["id"], "path": str(source_path), "filePathHash": _hash_text(str(source_path)), "hashStatus": "PARTIAL_PENDING", "kind": "PDF", "mimeType": "application/pdf", "sizeBytes": file_size, "mtimeMs": int(source_path.stat().st_mtime * 1000), "sortOrder": 0, "createdAt": _now(), "updatedAt": _now()})
         for index in range(1, max(1, metadata["pageCount"]) + 1):
-            _insert(db, "LibraryReadingUnit", {"id": _id(), "editionId": edition["id"], "volumeId": volume["id"], "fileId": file["id"], "unitType": "page", "title": f"第 {index} 页", "href": str(source_path), "mediaType": "application/pdf", "sortOrder": index, "metadataJson": json.dumps({"pageNumber": index, "sourceFileName": options.original_name or options.source_file_path.name}, ensure_ascii=False), "createdAt": _now(), "updatedAt": _now()})
-        _insert(db, "LibraryMetadata", {"id": _id(), "editionId": edition["id"], "source": "pdf", "rawJson": json.dumps(metadata["rawMetadata"], ensure_ascii=False), "createdAt": _now(), "updatedAt": _now()})
+            legacy_insert(db, "LibraryReadingUnit", {"id": _id(), "editionId": edition["id"], "volumeId": volume["id"], "fileId": file["id"], "unitType": "page", "title": f"第 {index} 页", "href": str(source_path), "mediaType": "application/pdf", "sortOrder": index, "metadataJson": json.dumps({"pageNumber": index, "sourceFileName": options.original_name or options.source_file_path.name}, ensure_ascii=False), "createdAt": _now(), "updatedAt": _now()})
+        legacy_insert(db, "LibraryMetadata", {"id": _id(), "editionId": edition["id"], "source": "pdf", "rawJson": json.dumps(metadata["rawMetadata"], ensure_ascii=False), "createdAt": _now(), "updatedAt": _now()})
         _insert_identity_metadata(db, edition["id"], identity)
-        _update(db, "LibraryEdition", edition["id"], {"coverPath": stored_cover_path, "coverStatus": cover_status(stored_cover_path, settings), "importStatus": "COMPLETED", "updatedAt": _now()})
+        legacy_update(db, "LibraryEdition", edition["id"], {"coverPath": stored_cover_path, "coverStatus": cover_status(stored_cover_path, settings), "importStatus": "COMPLETED", "updatedAt": _now()})
         _finalize_work_primary(db, settings, work["id"], edition["id"], stored_cover_path)
         return ImportResult(work["id"], work["id"], edition["id"], volume["id"], work["title"], "ebook", "pdf", metadata["pageCount"], "completed", False, not created, "new-pdf-work" if created else "same-pdf-work")
     except Exception:
@@ -754,27 +747,27 @@ def _import_comic(db: Session, settings: Settings, options: ImportOptions, task_
     created_edition = False
     if not edition:
         created_edition = True
-        edition = _insert(db, "LibraryEdition", {"id": _id(), "workId": work["id"], "monitorFolderId": options.monitor_folder_id, "origin": options.origin, "mediaKind": "COMIC", "format": "COMIC", "versionName": _next_edition_name(db, work["id"], "漫画版本", "COMIC"), "versionKey": f"comic:{source_key}" if volume_index is not None else _file_version_key("comic", options.source_file_path.resolve()), "sourceGroupKey": source_key, "description": parsed.get("description"), "publisher": (parsed.get("comicInfo") or {}).get("publisher"), "coverStatus": "PENDING", "importStatus": "PARSING", "primary": _should_be_media_primary(db, work["id"], "COMIC"), "hidden": False, "createdAt": _now(), "updatedAt": _now()})
+        edition = legacy_insert(db, "LibraryEdition", {"id": _id(), "workId": work["id"], "monitorFolderId": options.monitor_folder_id, "origin": options.origin, "mediaKind": "COMIC", "format": "COMIC", "versionName": _next_edition_name(db, work["id"], "漫画版本", "COMIC"), "versionKey": f"comic:{source_key}" if volume_index is not None else _file_version_key("comic", options.source_file_path.resolve()), "sourceGroupKey": source_key, "description": parsed.get("description"), "publisher": (parsed.get("comicInfo") or {}).get("publisher"), "coverStatus": "PENDING", "importStatus": "PARSING", "primary": _should_be_media_primary(db, work["id"], "COMIC"), "hidden": False, "createdAt": _now(), "updatedAt": _now()})
     cover_path = None
     try:
-        sort_order = int(volume_index * 1000) if volume_index is not None else _table_count(db, "LibraryVolume", "`editionId` = :edition_id", {"edition_id": edition["id"]})
-        volume = _insert(db, "LibraryVolume", {"id": _id(), "editionId": edition["id"], "title": volume_title, "volumeIndex": volume_index, "sortOrder": sort_order, "pageCount": parsed["pageCount"], "coverPath": None, "createdAt": _now(), "updatedAt": _now()})
+        sort_order = int(volume_index * 1000) if volume_index is not None else import_db.count_volumes_for_edition(db, str(edition["id"]))
+        volume = legacy_insert(db, "LibraryVolume", {"id": _id(), "editionId": edition["id"], "title": volume_title, "volumeIndex": volume_index, "sortOrder": sort_order, "pageCount": parsed["pageCount"], "coverPath": None, "createdAt": _now(), "updatedAt": _now()})
         source_path = options.source_file_path.resolve()
-        _update(db, "ImportTask", task_id, {"message": "正在建立漫画记录"})
-        file = _insert(db, "LibraryFile", {"id": _id(), "editionId": edition["id"], "volumeId": volume["id"], "path": str(source_path), "filePathHash": _hash_text(str(source_path)), "hashStatus": "PARTIAL_PENDING", "kind": "COMIC", "mimeType": "application/vnd.comicbook+zip" if parsed["format"] == "cbz" else "application/zip", "sizeBytes": file_size, "mtimeMs": int(source_path.stat().st_mtime * 1000), "sortOrder": sort_order, "createdAt": _now(), "updatedAt": _now()})
+        legacy_update(db, "ImportTask", task_id, {"message": "正在建立漫画记录"})
+        file = legacy_insert(db, "LibraryFile", {"id": _id(), "editionId": edition["id"], "volumeId": volume["id"], "path": str(source_path), "filePathHash": _hash_text(str(source_path)), "hashStatus": "PARTIAL_PENDING", "kind": "COMIC", "mimeType": "application/vnd.comicbook+zip" if parsed["format"] == "cbz" else "application/zip", "sizeBytes": file_size, "mtimeMs": int(source_path.stat().st_mtime * 1000), "sortOrder": sort_order, "createdAt": _now(), "updatedAt": _now()})
         try:
             cover_path = _extract_comic_cover(settings, source_path, work["id"], edition["id"], volume["id"], parsed["coverEntryPath"])
         except Exception as exc:
             cover_path = None
             _log_import(db, task_id, "warning", f"comic cover extraction skipped: {exc}")
-        _insert(db, "LibraryMetadata", {"id": _id(), "editionId": edition["id"], "source": "comic_info" if parsed.get("comicInfo") else "system", "rawJson": json.dumps({**parsed["rawMetadata"], "volumeIndex": volume_index, "sourceFileName": options.original_name or options.source_file_path.name}, ensure_ascii=False), "createdAt": _now(), "updatedAt": _now()})
+        legacy_insert(db, "LibraryMetadata", {"id": _id(), "editionId": edition["id"], "source": "comic_info" if parsed.get("comicInfo") else "system", "rawJson": json.dumps({**parsed["rawMetadata"], "volumeIndex": volume_index, "sourceFileName": options.original_name or options.source_file_path.name}, ensure_ascii=False), "createdAt": _now(), "updatedAt": _now()})
         _insert_identity_metadata(db, edition["id"], identity)
         stored_cover_path = cover_path or ensure_default_cover(settings)
         edition_cover_path = cover_path or edition.get("coverPath") or stored_cover_path
-        _update(db, "LibraryVolume", volume["id"], {"coverPath": stored_cover_path, "pageCount": parsed["pageCount"], "updatedAt": _now()})
-        size_total = _scalar(db, "SELECT COALESCE(SUM(`sizeBytes`), 0) FROM `LibraryFile` WHERE `editionId` = :edition_id", {"edition_id": edition["id"]}, 0)
-        page_total = _scalar(db, "SELECT COALESCE(SUM(`pageCount`), 0) FROM `LibraryVolume` WHERE `editionId` = :edition_id", {"edition_id": edition["id"]}, 0)
-        _update(db, "LibraryEdition", edition["id"], {"sizeBytes": int(size_total), "pageCount": int(page_total), "coverPath": edition_cover_path, "coverStatus": cover_status(edition_cover_path, settings), "importStatus": "COMPLETED", "updatedAt": _now()})
+        legacy_update(db, "LibraryVolume", volume["id"], {"coverPath": stored_cover_path, "pageCount": parsed["pageCount"], "updatedAt": _now()})
+        size_total = import_db.sum_file_size_bytes_for_edition(db, str(edition["id"]))
+        page_total = import_db.sum_volume_page_count_for_edition(db, str(edition["id"]))
+        legacy_update(db, "LibraryEdition", edition["id"], {"sizeBytes": int(size_total), "pageCount": int(page_total), "coverPath": edition_cover_path, "coverStatus": cover_status(edition_cover_path, settings), "importStatus": "COMPLETED", "updatedAt": _now()})
         _finalize_work_primary(db, settings, work["id"], edition["id"], edition_cover_path)
         return ImportResult(work["id"], work["id"], edition["id"], volume["id"], work["title"], "comic", parsed["format"], parsed["pageCount"], "completed", False, (not created) or (not created_edition), "new-comic-work" if created else "new-comic-version" if created_edition else "same-comic-series")
     except Exception:
@@ -871,13 +864,13 @@ def _import_audio(
         if duplicate_result:
             for index, (item_info, duplicate_file) in enumerate(zip(content_info, duplicate_files, strict=True)):
                 item = item_info["item"]
-                asset = _row(
+                asset = import_db.get_import_asset_by_task_and_path(
                     db,
-                    "SELECT * FROM `ImportAsset` WHERE `importTaskId` = :task_id AND `sourcePath` = :source_path",
-                    {"task_id": task_id, "source_path": str(item.path)},
-                ) if _has_table(db, "ImportAsset") else None
+                    task_id,
+                    str(item.path),
+                ) if has_table(db, "ImportAsset") else None
                 if asset:
-                    _update(
+                    legacy_update(
                         db,
                         "ImportAsset",
                         str(asset["id"]),
@@ -890,7 +883,7 @@ def _import_audio(
                             "updatedAt": _now(),
                         },
                     )
-            _update(
+            legacy_update(
                 db,
                 "ImportTask",
                 task_id,
@@ -916,7 +909,7 @@ def _import_audio(
             reconciled = True
         else:
             work, created = _ensure_audio_work(db, options, identity, merge_key)
-            edition = _insert(
+            edition = legacy_insert(
                 db,
                 "LibraryEdition",
                 {
@@ -952,7 +945,7 @@ def _import_audio(
                     else total_duration
                 )
                 volumes.append(
-                    _insert(
+                    legacy_insert(
                         db,
                         "LibraryVolume",
                         {
@@ -1017,15 +1010,15 @@ def _import_audio(
         }
         existing_file = existing_by_path.get(str(item.path))
         if existing_file:
-            _update(db, "LibraryFile", str(existing_file["id"]), file_values)
-            file_row = _row(db, "SELECT * FROM `LibraryFile` WHERE `id` = :id", {"id": existing_file["id"]}) or {**existing_file, **file_values}
+            legacy_update(db, "LibraryFile", str(existing_file["id"]), file_values)
+            file_row = legacy_get_by_id(db, "LibraryFile", str(existing_file["id"])) or {**existing_file, **file_values}
         else:
-            file_row = _insert(db, "LibraryFile", {"id": _id(), "createdAt": _now(), **file_values})
-        asset = _row(
+            file_row = legacy_insert(db, "LibraryFile", {"id": _id(), "createdAt": _now(), **file_values})
+        asset = import_db.get_import_asset_by_task_and_path(
             db,
-            "SELECT * FROM `ImportAsset` WHERE `importTaskId` = :task_id AND `sourcePath` = :source_path",
-            {"task_id": task_id, "source_path": str(item.path)},
-        ) if _has_table(db, "ImportAsset") else None
+            task_id,
+            str(item.path),
+        ) if has_table(db, "ImportAsset") else None
         asset_values = {
             "status": "COMPLETED",
             "sortOrder": sort_order,
@@ -1035,9 +1028,9 @@ def _import_audio(
             "updatedAt": _now(),
         }
         if asset:
-            _update(db, "ImportAsset", str(asset["id"]), asset_values)
-        elif _has_table(db, "ImportAsset"):
-            _insert(
+            legacy_update(db, "ImportAsset", str(asset["id"]), asset_values)
+        elif has_table(db, "ImportAsset"):
+            legacy_insert(
                 db,
                 "ImportAsset",
                 {
@@ -1051,11 +1044,7 @@ def _import_audio(
         source_chapters = list(item.chapters) or [
             AudioChapterMetadata(title=display_titles[item.path], start_ms=0, end_ms=item.duration_ms)
         ]
-        existing_units = _rows(
-            db,
-            "SELECT * FROM `LibraryReadingUnit` WHERE `fileId` = :file_id AND `unitType` = 'audio_chapter' ORDER BY `sortOrder`, `createdAt`, `id`",
-            {"file_id": file_row["id"]},
-        )
+        existing_units = import_db.list_audio_chapters_for_file(db, str(file_row["id"]))
         kept_unit_ids: set[str] = set()
         for chapter_index, chapter in enumerate(source_chapters):
             chapter_sort_order += 1
@@ -1080,10 +1069,10 @@ def _import_audio(
             }
             if chapter_index < len(existing_units):
                 existing_unit = existing_units[chapter_index]
-                _update(db, "LibraryReadingUnit", str(existing_unit["id"]), unit_values)
-                unit = _row(db, "SELECT * FROM `LibraryReadingUnit` WHERE `id` = :id", {"id": existing_unit["id"]}) or {**existing_unit, **unit_values}
+                legacy_update(db, "LibraryReadingUnit", str(existing_unit["id"]), unit_values)
+                unit = legacy_get_by_id(db, "LibraryReadingUnit", str(existing_unit["id"])) or {**existing_unit, **unit_values}
             else:
-                unit = _insert(db, "LibraryReadingUnit", {"id": _id(), "createdAt": _now(), **unit_values})
+                unit = legacy_insert(db, "LibraryReadingUnit", {"id": _id(), "createdAt": _now(), **unit_values})
             kept_unit_ids.add(str(unit["id"]))
             manifest_chapters.append(
                 {
@@ -1097,7 +1086,7 @@ def _import_audio(
             )
         for stale_unit in existing_units:
             if str(stale_unit["id"]) not in kept_unit_ids:
-                db.execute(text("DELETE FROM `LibraryReadingUnit` WHERE `id` = :id"), {"id": stale_unit["id"]})
+                legacy_delete_by_id(db, "LibraryReadingUnit", str(stale_unit["id"]))
         manifest_tracks.append(
             {
                 "fileId": file_row["id"],
@@ -1110,7 +1099,7 @@ def _import_audio(
                 "sortOrder": sort_order,
             }
         )
-        _update(
+        legacy_update(
             db,
             "ImportTask",
             task_id,
@@ -1130,11 +1119,8 @@ def _import_audio(
     raw_tags = _merge_audio_raw_tags(db, str(edition["id"]), raw_tags)
     manifest_tracks, manifest_chapters = _audio_manifest_from_db(db, str(edition["id"]))
     total_duration = sum(int(item.get("durationMs") or 0) for item in manifest_tracks)
-    db.execute(
-        text("DELETE FROM `LibraryMetadata` WHERE `editionId` = :edition_id AND `source` IN ('audio_tags', 'audiobook_manifest')"),
-        {"edition_id": edition["id"]},
-    )
-    _insert(
+    import_db.delete_audio_metadata_sources(db, str(edition["id"]))
+    legacy_insert(
         db,
         "LibraryMetadata",
         {
@@ -1146,7 +1132,7 @@ def _import_audio(
             "updatedAt": _now(),
         },
     )
-    _insert(
+    legacy_insert(
         db,
         "LibraryMetadata",
         {
@@ -1162,30 +1148,16 @@ def _import_audio(
         },
     )
     _insert_identity_metadata(db, edition["id"], identity)
-    actual_size = int(_scalar(db, "SELECT COALESCE(SUM(`sizeBytes`), 0) FROM `LibraryFile` WHERE `editionId` = :edition_id AND UPPER(`kind`) = 'AUDIO'", {"edition_id": edition["id"]}, 0))
-    actual_duration = int(_scalar(db, "SELECT COALESCE(SUM(`durationMs`), 0) FROM `LibraryFile` WHERE `editionId` = :edition_id AND UPPER(`kind`) = 'AUDIO'", {"edition_id": edition["id"]}, 0))
-    actual_tracks = int(_scalar(db, "SELECT COUNT(*) FROM `LibraryFile` WHERE `editionId` = :edition_id AND UPPER(`kind`) = 'AUDIO'", {"edition_id": edition["id"]}, 0))
-    actual_chapters = int(_scalar(db, "SELECT COUNT(*) FROM `LibraryReadingUnit` WHERE `editionId` = :edition_id AND `unitType` = 'audio_chapter'", {"edition_id": edition["id"]}, 0))
+    actual_size = import_db.sum_audio_file_size_for_edition(db, str(edition["id"]))
+    actual_duration = import_db.sum_audio_duration_for_edition(db, str(edition["id"]))
+    actual_tracks = import_db.count_audio_files_for_edition(db, str(edition["id"]))
+    actual_chapters = import_db.count_audio_chapters_for_edition(db, str(edition["id"]))
     if reconciled:
         _refresh_audio_progress_after_bundle_sync(db, str(edition["id"]), str(volume["id"]))
     for item_volume in volumes:
-        volume_chapters = int(
-            _scalar(
-                db,
-                "SELECT COUNT(*) FROM `LibraryReadingUnit` WHERE `volumeId` = :volume_id AND `unitType` = 'audio_chapter'",
-                {"volume_id": item_volume["id"]},
-                0,
-            )
-        )
-        volume_duration = int(
-            _scalar(
-                db,
-                "SELECT COALESCE(SUM(`durationMs`), 0) FROM `LibraryFile` WHERE `volumeId` = :volume_id AND UPPER(`kind`) = 'AUDIO'",
-                {"volume_id": item_volume["id"]},
-                0,
-            )
-        )
-        _update(
+        volume_chapters = import_db.count_audio_chapters_for_volume(db, str(item_volume["id"]))
+        volume_duration = import_db.sum_audio_duration_for_volume(db, str(item_volume["id"]))
+        legacy_update(
             db,
             "LibraryVolume",
             item_volume["id"],
@@ -1196,7 +1168,7 @@ def _import_audio(
                 "updatedAt": _now(),
             },
         )
-    _update(
+    legacy_update(
         db,
         "LibraryEdition",
         edition["id"],
@@ -1230,17 +1202,25 @@ def _import_audio(
 
 
 def _audio_files_by_path(db: Session, paths: list[Path]) -> dict[str, dict[str, Any]]:
-    if not paths or not _has_table(db, "LibraryFile"):
+    if not paths or not has_table(db, "LibraryFile"):
         return {}
-    found: dict[str, dict[str, Any]] = {}
-    resolved = [str(path.resolve()) for path in paths]
-    for offset in range(0, len(resolved), 400):
-        chunk = resolved[offset:offset + 400]
-        params = {f"path_{index}": path for index, path in enumerate(chunk)}
-        placeholders = ", ".join(f":path_{index}" for index in range(len(chunk)))
-        rows = _rows(db, f"SELECT * FROM `LibraryFile` WHERE `path` IN ({placeholders})", params)
-        found.update({str(row["path"]): row for row in rows})
-    return found
+    candidates: list[str] = []
+    for path in paths:
+        candidates.append(str(path))
+        try:
+            candidates.append(str(path.resolve()))
+        except OSError:
+            pass
+    found = import_db.list_library_files_by_paths(db, list(dict.fromkeys(candidates)))
+    by_path: dict[str, dict[str, Any]] = {}
+    for row in found:
+        stored = str(row["path"])
+        by_path[stored] = row
+        try:
+            by_path[str(Path(stored).resolve())] = row
+        except OSError:
+            pass
+    return by_path
 
 
 def _ensure_audio_work(
@@ -1266,13 +1246,7 @@ def _ensure_audio_work(
 
 
 def _audio_flat_edition(db: Session, version_key: str) -> dict[str, Any] | None:
-    return _row(
-        db,
-        "SELECT * FROM `LibraryEdition` WHERE `versionKey` = :version_key "
-        "AND UPPER(`mediaKind`) = 'AUDIOBOOK' AND COALESCE(`hidden`, 0) = 0 "
-        "ORDER BY `createdAt`, `id` LIMIT 1",
-        {"version_key": version_key},
-    )
+    return import_db.find_audio_edition_by_version_key(db, version_key)
 
 
 def _prepare_flat_audio_bundle(
@@ -1287,14 +1261,9 @@ def _prepare_flat_audio_bundle(
     """Append one strict Emby flat-layout chapter to its existing edition."""
 
     edition_id = str(edition["id"])
-    volume = _row(
-        db,
-        "SELECT * FROM `LibraryVolume` WHERE `editionId` = :edition_id "
-        "ORDER BY `sortOrder`, `createdAt`, `id` LIMIT 1",
-        {"edition_id": edition_id},
-    )
+    volume = import_db.get_first_volume_for_edition(db, edition_id)
     if not volume:
-        volume = _insert(
+        volume = legacy_insert(
             db,
             "LibraryVolume",
             {
@@ -1311,14 +1280,8 @@ def _prepare_flat_audio_bundle(
     # The schema has a unique (volume, unit type, sort order) index. Detach
     # the existing units while the new file is inserted, then globally sort
     # all tracks and chapters after the append.
-    db.execute(
-        text(
-            "UPDATE `LibraryReadingUnit` SET `volumeId` = NULL, `updatedAt` = CURRENT_TIMESTAMP "
-            "WHERE `editionId` = :edition_id AND `unitType` = 'audio_chapter'"
-        ),
-        {"edition_id": edition_id},
-    )
-    _update(
+    import_db.detach_audio_chapters_for_edition(db, edition_id)
+    legacy_update(
         db,
         "LibraryEdition",
         edition_id,
@@ -1334,8 +1297,8 @@ def _prepare_flat_audio_bundle(
             "updatedAt": _now(),
         },
     )
-    _update(db, "LibraryWork", str(work["id"]), {"hidden": False, "updatedAt": _now()})
-    refreshed = _row(db, "SELECT * FROM `LibraryEdition` WHERE `id` = :id", {"id": edition_id}) or edition
+    legacy_update(db, "LibraryWork", str(work["id"]), {"hidden": False, "updatedAt": _now()})
+    refreshed = import_db.get_edition_by_id(db, edition_id) or edition
     return refreshed, volume
 
 
@@ -1358,13 +1321,7 @@ def _prepare_existing_audio_bundle(
     edition_ids = sorted({str(row["editionId"]) for row in existing_by_path.values() if row.get("editionId")})
     if not edition_ids:
         raise ValueError("已入库音频缺少版本信息，无法按目录合并")
-    params = {f"edition_{index}": edition_id for index, edition_id in enumerate(edition_ids)}
-    placeholders = ", ".join(f":edition_{index}" for index in range(len(edition_ids)))
-    editions = _rows(
-        db,
-        f"SELECT * FROM `LibraryEdition` WHERE `id` IN ({placeholders})",
-        params,
-    )
+    editions = import_db.list_editions_by_ids(db, edition_ids)
     if not editions:
         raise ValueError("已入库音频的版本记录不完整")
     target_work_id = str(work["id"])
@@ -1382,24 +1339,21 @@ def _prepare_existing_audio_bundle(
     source_work_ids = sorted({str(row.get("workId")) for row in editions if row.get("workId")})
 
     for edition_id in redundant_ids:
-        _update(db, "LibraryEdition", edition_id, {"primary": False, "hidden": True, "updatedAt": _now()})
+        legacy_update(db, "LibraryEdition", edition_id, {"primary": False, "hidden": True, "updatedAt": _now()})
 
-    other_primary = int(
-        _scalar(
-            db,
-            "SELECT COUNT(*) FROM `LibraryEdition` WHERE `workId` = :work_id AND `mediaKind` = 'AUDIOBOOK' "
-            "AND `id` != :edition_id AND COALESCE(`hidden`, 0) = 0 AND `primary` = 1",
-            {"work_id": target_work_id, "edition_id": canonical_id},
-            0,
-        )
+    other_primary = import_db.count_primary_audiobook_editions_for_work(
+        db,
+        target_work_id,
+        exclude_edition_id=canonical_id,
     )
     version_key = f"audio:{bundle_key}:{_normalize_key(narrator or 'default')}"
-    version_conflict = _row(
+    version_conflict = import_db.find_edition_version_key_conflict(
         db,
-        "SELECT `id` FROM `LibraryEdition` WHERE `workId` = :work_id AND `versionKey` = :version_key AND `id` != :edition_id LIMIT 1",
-        {"work_id": target_work_id, "version_key": version_key, "edition_id": canonical_id},
+        target_work_id,
+        version_key,
+        canonical_id,
     )
-    _update(
+    legacy_update(
         db,
         "LibraryEdition",
         canonical_id,
@@ -1419,14 +1373,10 @@ def _prepare_existing_audio_bundle(
             "updatedAt": _now(),
         },
     )
-    canonical = _row(db, "SELECT * FROM `LibraryEdition` WHERE `id` = :id", {"id": canonical_id}) or canonical
-    volume = _row(
-        db,
-        "SELECT * FROM `LibraryVolume` WHERE `editionId` = :edition_id ORDER BY `sortOrder`, `createdAt`, `id` LIMIT 1",
-        {"edition_id": canonical_id},
-    )
+    canonical = import_db.get_edition_by_id(db, canonical_id) or canonical
+    volume = import_db.get_first_volume_for_edition(db, canonical_id)
     if not volume:
-        volume = _insert(
+        volume = legacy_insert(
             db,
             "LibraryVolume",
             {
@@ -1442,47 +1392,20 @@ def _prepare_existing_audio_bundle(
         )
 
     file_ids = sorted({str(row["id"]) for row in existing_by_path.values() if row.get("id")})
-    unit_params: dict[str, Any] = {"canonical_id": canonical_id}
-    file_placeholders: list[str] = []
-    for index, file_id in enumerate(file_ids):
-        key = f"file_{index}"
-        unit_params[key] = file_id
-        file_placeholders.append(f":{key}")
-    if _has_table(db, "LibraryReadingUnit"):
-        where = "`editionId` = :canonical_id"
-        if file_placeholders:
-            where += f" OR `fileId` IN ({', '.join(file_placeholders)})"
-        db.execute(
-            text(f"UPDATE `LibraryReadingUnit` SET `volumeId` = NULL, `updatedAt` = CURRENT_TIMESTAMP WHERE {where}"),
-            unit_params,
-        )
+    if has_table(db, "LibraryReadingUnit"):
+        import_db.detach_audio_chapters_for_edition_or_files(db, canonical_id, file_ids)
 
     _retarget_audio_progress(db, source_work_ids, edition_ids, target_work_id, canonical_id, str(volume["id"]))
-    if _has_table(db, "ShelfWork") and source_work_ids:
-        shelf_params = {"target_work_id": target_work_id, **{f"work_{index}": value for index, value in enumerate(source_work_ids)}}
-        shelf_placeholders = ", ".join(f":work_{index}" for index in range(len(source_work_ids)))
-        db.execute(
-            text(
-                "INSERT OR IGNORE INTO `ShelfWork` (`shelfId`, `workId`, `createdAt`) "
-                f"SELECT `shelfId`, :target_work_id, CURRENT_TIMESTAMP FROM `ShelfWork` WHERE `workId` IN ({shelf_placeholders})"
-            ),
-            shelf_params,
-        )
+    if has_table(db, "ShelfWork") and source_work_ids:
+        import_db.copy_shelf_links_to_work(db, source_work_ids, target_work_id)
 
-    _update(db, "LibraryWork", target_work_id, {"hidden": False, "primaryEditionId": canonical_id, "updatedAt": _now()})
+    legacy_update(db, "LibraryWork", target_work_id, {"hidden": False, "primaryEditionId": canonical_id, "updatedAt": _now()})
     for source_work_id in source_work_ids:
         if source_work_id == target_work_id:
             continue
-        visible_editions = int(
-            _scalar(
-                db,
-                "SELECT COUNT(*) FROM `LibraryEdition` WHERE `workId` = :work_id AND COALESCE(`hidden`, 0) = 0",
-                {"work_id": source_work_id},
-                0,
-            )
-        )
+        visible_editions = import_db.count_visible_editions_for_work(db, source_work_id)
         if visible_editions == 0:
-            _update(db, "LibraryWork", source_work_id, {"hidden": True, "primaryEditionId": None, "updatedAt": _now()})
+            legacy_update(db, "LibraryWork", source_work_id, {"hidden": True, "primaryEditionId": None, "updatedAt": _now()})
     return canonical, volume
 
 
@@ -1494,14 +1417,8 @@ def _retarget_audio_progress(
     target_edition_id: str,
     target_volume_id: str,
 ) -> None:
-    if _has_table(db, "LibraryReadingProgress") and source_edition_ids:
-        params = {f"edition_{index}": value for index, value in enumerate(source_edition_ids)}
-        placeholders = ", ".join(f":edition_{index}" for index in range(len(source_edition_ids)))
-        rows = _rows(
-            db,
-            f"SELECT * FROM `LibraryReadingProgress` WHERE `editionId` IN ({placeholders}) ORDER BY `updatedAt`, `createdAt`, `id`",
-            params,
-        )
+    if has_table(db, "LibraryReadingProgress") and source_edition_ids:
+        rows = import_db.list_reading_progress_for_editions(db, source_edition_ids)
         for user_id in {str(row.get("userId")) for row in rows if row.get("userId")}:
             user_rows = [row for row in rows if str(row.get("userId")) == user_id]
             latest = user_rows[-1]
@@ -1512,28 +1429,21 @@ def _retarget_audio_progress(
                 for key, value in latest.items()
                 if key not in {"id", "userId", "createdAt", "workId", "editionId", "volumeId"}
             }
-            _update(
+            legacy_update(
                 db,
                 "LibraryReadingProgress",
                 str(target["id"]),
                 {**copied, "workId": target_work_id, "editionId": target_edition_id, "volumeId": target_volume_id, "updatedAt": _now()},
             )
 
-    if _has_table(db, "LibraryConsumptionState") and source_work_ids:
-        params = {f"work_{index}": value for index, value in enumerate(source_work_ids)}
-        placeholders = ", ".join(f":work_{index}" for index in range(len(source_work_ids)))
-        rows = _rows(
-            db,
-            f"SELECT * FROM `LibraryConsumptionState` WHERE `workId` IN ({placeholders}) AND UPPER(`mediaKind`) = 'AUDIOBOOK' "
-            "ORDER BY `updatedAt`, `createdAt`, `id`",
-            params,
-        )
+    if has_table(db, "LibraryConsumptionState") and source_work_ids:
+        rows = import_db.list_audiobook_consumption_for_works(db, source_work_ids)
         for user_id in {str(row.get("userId")) for row in rows if row.get("userId")}:
             user_rows = [row for row in rows if str(row.get("userId")) == user_id]
             latest = user_rows[-1]
             canonical = next((row for row in user_rows if str(row.get("workId")) == target_work_id), None)
             target = canonical or latest
-            _update(
+            legacy_update(
                 db,
                 "LibraryConsumptionState",
                 str(target["id"]),
@@ -1550,16 +1460,11 @@ def _retarget_audio_progress(
 
 
 def _restore_unassigned_audio_units(db: Session, edition_id: str, volume_id: str, after_sort_order: int) -> None:
-    rows = _rows(
-        db,
-        "SELECT * FROM `LibraryReadingUnit` WHERE `editionId` = :edition_id AND `volumeId` IS NULL "
-        "ORDER BY `sortOrder`, `createdAt`, `id`",
-        {"edition_id": edition_id},
-    )
+    rows = import_db.list_unassigned_audio_chapters_for_edition(db, edition_id)
     sort_order = after_sort_order
     for row in rows:
         sort_order += 1
-        _update(
+        legacy_update(
             db,
             "LibraryReadingUnit",
             str(row["id"]),
@@ -1568,36 +1473,21 @@ def _restore_unassigned_audio_units(db: Session, edition_id: str, volume_id: str
 
 
 def _resort_audio_edition(db: Session, edition_id: str, volume_id: str) -> None:
-    files = _rows(
-        db,
-        "SELECT * FROM `LibraryFile` WHERE `editionId` = :edition_id AND UPPER(`kind`) = 'AUDIO'",
-        {"edition_id": edition_id},
-    )
+    files = import_db.list_audio_files_for_edition(db, edition_id)
     files.sort(key=_audio_file_row_sort_key)
-    db.execute(
-        text(
-            "UPDATE `LibraryReadingUnit` SET `volumeId` = NULL, `updatedAt` = CURRENT_TIMESTAMP "
-            "WHERE `editionId` = :edition_id AND `unitType` = 'audio_chapter'"
-        ),
-        {"edition_id": edition_id},
-    )
+    import_db.detach_audio_chapters_for_edition(db, edition_id)
     chapter_sort_order = 0
     for file_sort_order, file in enumerate(files):
-        _update(
+        legacy_update(
             db,
             "LibraryFile",
             str(file["id"]),
             {"volumeId": volume_id, "sortOrder": file_sort_order, "updatedAt": _now()},
         )
-        units = _rows(
-            db,
-            "SELECT * FROM `LibraryReadingUnit` WHERE `fileId` = :file_id AND `unitType` = 'audio_chapter' "
-            "ORDER BY COALESCE(`startMs`, 0), `sortOrder`, `createdAt`, `id`",
-            {"file_id": file["id"]},
-        )
+        units = import_db.list_audio_chapter_units_for_file_ordered(db, str(file["id"]))
         for unit in units:
             chapter_sort_order += 1
-            _update(
+            legacy_update(
                 db,
                 "LibraryReadingUnit",
                 str(unit["id"]),
@@ -1631,12 +1521,7 @@ def _merge_audio_raw_tags(
     edition_id: str,
     incoming: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    existing = _row(
-        db,
-        "SELECT `rawJson` FROM `LibraryMetadata` WHERE `editionId` = :edition_id "
-        "AND `source` = 'audio_tags' ORDER BY `updatedAt` DESC, `id` DESC LIMIT 1",
-        {"edition_id": edition_id},
-    )
+    existing = import_db.get_latest_audio_tags_metadata(db, edition_id)
     merged: dict[str, dict[str, Any]] = {}
     if existing:
         try:
@@ -1657,18 +1542,8 @@ def _audio_manifest_from_db(
     db: Session,
     edition_id: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    files = _rows(
-        db,
-        "SELECT * FROM `LibraryFile` WHERE `editionId` = :edition_id AND UPPER(`kind`) = 'AUDIO' "
-        "ORDER BY `sortOrder`, `id`",
-        {"edition_id": edition_id},
-    )
-    chapters = _rows(
-        db,
-        "SELECT * FROM `LibraryReadingUnit` WHERE `editionId` = :edition_id AND `unitType` = 'audio_chapter' "
-        "ORDER BY `sortOrder`, `id`",
-        {"edition_id": edition_id},
-    )
+    files = import_db.list_audio_files_for_edition(db, edition_id)
+    chapters = import_db.list_audio_chapters_for_edition(db, edition_id)
     first_title_by_file: dict[str, str] = {}
     for chapter in chapters:
         file_id = str(chapter.get("fileId") or "")
@@ -1702,14 +1577,9 @@ def _audio_manifest_from_db(
 
 
 def _refresh_audio_progress_after_bundle_sync(db: Session, edition_id: str, volume_id: str) -> None:
-    if not _has_table(db, "LibraryReadingProgress"):
+    if not has_table(db, "LibraryReadingProgress"):
         return
-    files = _rows(
-        db,
-        "SELECT * FROM `LibraryFile` WHERE `editionId` = :edition_id AND `volumeId` = :volume_id "
-        "AND UPPER(`kind`) = 'AUDIO' ORDER BY `sortOrder`, `id`",
-        {"edition_id": edition_id, "volume_id": volume_id},
-    )
+    files = import_db.list_audio_files_for_volume(db, edition_id, volume_id)
     if not files:
         return
     fingerprint_tokens = [
@@ -1731,11 +1601,7 @@ def _refresh_audio_progress_after_bundle_sync(db: Session, edition_id: str, volu
         elapsed += max(0, int(file.get("durationMs") or 0))
     total_duration = elapsed
 
-    progresses = _rows(
-        db,
-        "SELECT * FROM `LibraryReadingProgress` WHERE `editionId` = :edition_id",
-        {"edition_id": edition_id},
-    )
+    progresses = import_db.list_reading_progress_for_edition(db, edition_id)
     for progress in progresses:
         try:
             location = json.loads(str(progress.get("locationJson") or "{}"))
@@ -1768,7 +1634,7 @@ def _refresh_audio_progress_after_bundle_sync(db: Session, edition_id: str, volu
             values["locationType"] = "audio"
             values["locationJson"] = json.dumps(location, ensure_ascii=False, separators=(",", ":"))
             values["extra"] = json.dumps(extra, ensure_ascii=False, separators=(",", ":"))
-        _update(db, "LibraryReadingProgress", str(progress["id"]), values)
+        legacy_update(db, "LibraryReadingProgress", str(progress["id"]), values)
 
 
 def parse_epub_metadata(path: Path) -> dict[str, Any]:
@@ -1971,15 +1837,10 @@ def parse_comic_volume_info(parsed: dict[str, Any], path: Path, original_name: s
 
 
 def _ensure_import_task(db: Session, options: ImportOptions) -> str:
-    existing = _row(
-        db,
-        "SELECT `id` FROM `ImportTask` WHERE `sourcePath` = :source_path AND `status` = 'PENDING' "
-        "ORDER BY CAST(`createdAt` AS INTEGER) ASC, `id` ASC LIMIT 1",
-        {"source_path": str(options.source_file_path)},
-    )
+    existing = import_db.get_pending_import_task_for_source(db, str(options.source_file_path))
     if existing:
-        return existing["id"]
-    row = _insert(
+        return str(existing["id"])
+    row = legacy_insert(
         db,
         "ImportTask",
         {
@@ -2003,7 +1864,7 @@ def _ensure_import_task(db: Session, options: ImportOptions) -> str:
 
 
 def _existing_series_volume_identity(db: Session, settings: Settings, options: ImportOptions) -> BookIdentity | None:
-    if not all(_has_table(db, table) for table in ["LibraryWork", "LibraryEdition", "LibraryFile"]):
+    if not all(has_table(db, table) for table in ["LibraryWork", "LibraryEdition", "LibraryFile"]):
         return None
     source_path = (options.original_source_file_path or options.source_file_path).resolve()
     folder_metadata = _series_folder_metadata(source_path.parent.name, options.original_name or source_path.name)
@@ -2022,19 +1883,7 @@ def _existing_series_volume_identity(db: Session, settings: Settings, options: I
         return None
 
     source_group_suffix = f":{_hash_text(str(source_path.parent))[:24]}"
-    works = _rows(
-        db,
-        """
-        SELECT DISTINCT w.`id`, w.`title`, w.`author`
-        FROM `LibraryEdition` e
-        JOIN `LibraryWork` w ON w.`id` = e.`workId`
-        WHERE e.`sourceGroupKey` LIKE :source_group_suffix
-          AND e.`hidden` = 0
-          AND w.`hidden` = 0
-        ORDER BY w.`createdAt` ASC, w.`id` ASC
-        """,
-        {"source_group_suffix": f"%{source_group_suffix}"},
-    )
+    works = import_db.list_works_by_source_group_suffix(db, source_group_suffix)
     if folder_title_matches:
         candidates = works
     else:
@@ -2059,18 +1908,7 @@ def _existing_series_volume_identity(db: Session, settings: Settings, options: I
 
 
 def _work_has_matching_source_series(db: Session, work_id: str, source_group_suffix: str, series_name: str) -> bool:
-    files = _rows(
-        db,
-        """
-        SELECT f.`path`
-        FROM `LibraryFile` f
-        JOIN `LibraryEdition` e ON e.`id` = f.`editionId`
-        WHERE e.`workId` = :work_id
-          AND e.`sourceGroupKey` LIKE :source_group_suffix
-        ORDER BY f.`createdAt` ASC
-        """,
-        {"work_id": work_id, "source_group_suffix": f"%{source_group_suffix}"},
-    )
+    files = import_db.list_edition_file_paths_for_work(db, work_id, source_group_suffix)
     expected = _normalize_key(series_name)
     for file in files:
         existing_path = Path(str(file.get("path") or ""))
@@ -2081,22 +1919,9 @@ def _work_has_matching_source_series(db: Session, work_id: str, source_group_suf
 
 
 def _existing_file_result(db: Session, path: Path) -> ImportResult | None:
-    if not all(_has_table(db, table) for table in ["LibraryFile", "LibraryEdition", "LibraryWork"]):
+    if not all(has_table(db, table) for table in ["LibraryFile", "LibraryEdition", "LibraryWork"]):
         return None
-    existing = _row(
-        db,
-        """
-        SELECT
-            f.`volumeId`, e.`id` AS `editionId`, e.`format`, e.`pageCount`, e.`chapterCount`,
-            w.`id` AS `workId`, w.`title`, w.`workType`
-        FROM `LibraryFile` f
-        JOIN `LibraryEdition` e ON e.`id` = f.`editionId`
-        JOIN `LibraryWork` w ON w.`id` = e.`workId`
-        WHERE f.`path` = :path
-        LIMIT 1
-        """,
-        {"path": str(path.resolve())},
-    )
+    existing = import_db.existing_file_import_snapshot(db, path)
     if not existing:
         return None
     file_format = str(existing.get("format") or "").lower()
@@ -2119,15 +1944,9 @@ def _existing_file_result(db: Session, path: Path) -> ImportResult | None:
 
 
 def _existing_audio_bundle_result(db: Session, paths: list[Path]) -> ImportResult | None:
-    if not paths or not all(_has_table(db, table) for table in ["LibraryFile", "LibraryEdition", "LibraryWork"]):
+    if not paths or not all(has_table(db, table) for table in ["LibraryFile", "LibraryEdition", "LibraryWork"]):
         return None
-    params = {f"path_{index}": str(path.resolve()) for index, path in enumerate(paths)}
-    placeholders = ", ".join(f":path_{index}" for index in range(len(paths)))
-    rows = _rows(
-        db,
-        f"SELECT `path`, `editionId` FROM `LibraryFile` WHERE `path` IN ({placeholders})",
-        params,
-    )
+    rows = import_db.list_file_editions_by_paths(db, [str(path.resolve()) for path in paths])
     if len(rows) != len(paths) or len({row.get("editionId") for row in rows}) != 1:
         return None
     return _existing_file_result(db, paths[0])
@@ -2139,16 +1958,15 @@ def _audio_content_duplicate_result(
 ) -> tuple[ImportResult | None, list[dict[str, Any]]]:
     """Resolve byte-identical audio moved to a new path without full scans of unrelated files."""
 
-    if not content_info or not _has_table(db, "LibraryFile"):
+    if not content_info or not has_table(db, "LibraryFile"):
         return None, []
 
     matches: list[dict[str, Any] | None] = []
     for info in content_info:
-        candidates = _rows(
+        candidates = import_db.list_audio_files_by_fingerprint(
             db,
-            "SELECT * FROM `LibraryFile` WHERE `sizeBytes` = :size AND `fingerprint` = :fingerprint "
-            "AND UPPER(`kind`) = 'AUDIO' ORDER BY `createdAt`, `id`",
-            {"size": info["size"], "fingerprint": info["fingerprint"]},
+            size_bytes=info["size"],
+            fingerprint=info["fingerprint"],
         )
         if not candidates:
             matches.append(None)
@@ -2165,7 +1983,7 @@ def _audio_content_duplicate_result(
                     candidate_hash = _content_hash(candidate_path)
                 except OSError:
                     continue
-                _update(
+                legacy_update(
                     db,
                     "LibraryFile",
                     str(candidate["id"]),
@@ -2185,14 +2003,7 @@ def _audio_content_duplicate_result(
     if len(edition_ids) != 1:
         raise ValueError("有声书目录中的音轨已分散存在于多个版本，请拆分目录后重试")
     edition_id = next(iter(edition_ids))
-    existing_count = int(
-        _scalar(
-            db,
-            "SELECT COUNT(*) FROM `LibraryFile` WHERE `editionId` = :edition_id AND UPPER(`kind`) = 'AUDIO'",
-            {"edition_id": edition_id},
-            0,
-        )
-    )
+    existing_count = import_db.count_audio_files_for_edition(db, edition_id)
     if existing_count != len(matched_files):
         raise ValueError("有声书目录只匹配现有版本的部分音轨，请确认目录内容后重试")
     result = _existing_file_result(db, Path(str(matched_files[0]["path"])))
@@ -2495,7 +2306,7 @@ def _validated_audio_cover(data: bytes) -> tuple[bytes, str] | None:
 
 
 def _insert_identity_metadata(db: Session, edition_id: str, identity: BookIdentity) -> None:
-    _insert(
+    legacy_insert(
         db,
         "LibraryMetadata",
         {
@@ -2517,10 +2328,10 @@ def _enqueue_metadata_lookup(
     organize_job_id: str,
     file_format: str,
 ) -> None:
-    if not _has_table(db, "MetadataLookupTask"):
+    if not has_table(db, "MetadataLookupTask"):
         return
     provider_order = ["bangumi", "douban"] if file_format.lower() in {"comic", "cbz", "zip"} else ["douban", "bangumi"]
-    existing = _row(db, "SELECT `id` FROM `MetadataLookupTask` WHERE `importTaskId` = :task_id", {"task_id": import_task_id})
+    existing = import_db.get_metadata_lookup_task_id_by_import(db, import_task_id)
     values = {
         "workId": work_id,
         "editionId": edition_id,
@@ -2538,9 +2349,9 @@ def _enqueue_metadata_lookup(
         "updatedAt": _now(),
     }
     if existing:
-        _update(db, "MetadataLookupTask", str(existing["id"]), values)
+        legacy_update(db, "MetadataLookupTask", str(existing["id"]), values)
         return
-    _insert(
+    legacy_insert(
         db,
         "MetadataLookupTask",
         {
@@ -2554,70 +2365,25 @@ def _enqueue_metadata_lookup(
 
 def _ensure_work(db: Session, data: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     if data.get("workId"):
-        existing_by_id = _row(db, "SELECT * FROM `LibraryWork` WHERE `id` = :id", {"id": data["workId"]})
+        existing_by_id = import_db.get_work_by_id(db, str(data["workId"]))
         if existing_by_id:
-            _update(db, "LibraryWork", existing_by_id["id"], {"hidden": False, "updatedAt": _now()})
-            return _row(db, "SELECT * FROM `LibraryWork` WHERE `id` = :id", {"id": existing_by_id["id"]}) or existing_by_id, False
-    existing = _row(db, "SELECT * FROM `LibraryWork` WHERE `mergeKey` = :merge_key", {"merge_key": data["mergeKey"]})
+            legacy_update(db, "LibraryWork", existing_by_id["id"], {"hidden": False, "updatedAt": _now()})
+            return import_db.get_work_by_id(db, str(existing_by_id["id"])) or existing_by_id, False
+    existing = import_db.get_work_by_merge_key(db, str(data["mergeKey"]))
     if existing:
-        _update(db, "LibraryWork", existing["id"], {"hidden": False, "updatedAt": _now()})
-        return _row(db, "SELECT * FROM `LibraryWork` WHERE `id` = :id", {"id": existing["id"]}) or existing, False
-    row = _insert(db, "LibraryWork", {"id": _id(), "monitorFolderId": data.get("monitorFolderId"), "origin": data["origin"], "title": data["title"], "normalizedTitle": _normalize_key(data["title"]), "author": data["author"], "normalizedAuthor": _normalize_key(data["author"]), "description": data.get("description"), "workType": data["workType"], "status": "UNREAD", "publicationStatus": "UNKNOWN", "trackingStatus": "NOT_TRACKING", "tags": json.dumps(data["tags"], ensure_ascii=False), "metadataQuality": 0, "organizeStatus": "UNASSESSED", "coverStatus": "PENDING", "hidden": False, "organized": False, "mergeKey": data["mergeKey"], "createdAt": _now(), "updatedAt": _now()})
+        legacy_update(db, "LibraryWork", existing["id"], {"hidden": False, "updatedAt": _now()})
+        return import_db.get_work_by_id(db, str(existing["id"])) or existing, False
+    row = legacy_insert(db, "LibraryWork", {"id": _id(), "monitorFolderId": data.get("monitorFolderId"), "origin": data["origin"], "title": data["title"], "normalizedTitle": _normalize_key(data["title"]), "author": data["author"], "normalizedAuthor": _normalize_key(data["author"]), "description": data.get("description"), "workType": data["workType"], "status": "UNREAD", "publicationStatus": "UNKNOWN", "trackingStatus": "NOT_TRACKING", "tags": json.dumps(data["tags"], ensure_ascii=False), "metadataQuality": 0, "organizeStatus": "UNASSESSED", "coverStatus": "PENDING", "hidden": False, "organized": False, "mergeKey": data["mergeKey"], "createdAt": _now(), "updatedAt": _now()})
     return row, True
 
 
 def _create_or_refresh_organize_job(db: Session, work_id: str, edition_id: str, task_id: str) -> str:
-    existing = _row(db, "SELECT * FROM `OrganizeJob` WHERE `workId` = :work_id AND `editionId` = :edition_id", {"work_id": work_id, "edition_id": edition_id})
+    existing = import_db.get_organize_job_for_work_edition(db, work_id, edition_id)
     if existing:
-        _update(db, "OrganizeJob", existing["id"], {"status": "LOOKUP_PENDING", "summary": "等待豆瓣/Bangumi 元数据匹配", "errorSummary": None, "updatedAt": _now()})
+        legacy_update(db, "OrganizeJob", existing["id"], {"status": "LOOKUP_PENDING", "summary": "等待豆瓣/Bangumi 元数据匹配", "errorSummary": None, "updatedAt": _now()})
         return str(existing["id"])
-    job = _insert(db, "OrganizeJob", {"id": _id(), "workId": work_id, "editionId": edition_id, "importTaskId": task_id, "status": "LOOKUP_PENDING", "issueCodes": "[]", "summary": "等待豆瓣/Bangumi 元数据匹配", "createdAt": _now(), "updatedAt": _now()})
+    job = legacy_insert(db, "OrganizeJob", {"id": _id(), "workId": work_id, "editionId": edition_id, "importTaskId": task_id, "status": "LOOKUP_PENDING", "issueCodes": "[]", "summary": "等待豆瓣/Bangumi 元数据匹配", "createdAt": _now(), "updatedAt": _now()})
     return str(job["id"])
-
-
-def _insert(db: Session, table: str, values: dict[str, Any]) -> dict[str, Any]:
-    columns = _columns(db, table)
-    filtered = {key: value for key, value in values.items() if key in columns}
-    keys = ", ".join(f"`{key}`" for key in filtered)
-    params = ", ".join(f":{key}" for key in filtered)
-    db.execute(text(f"INSERT INTO `{table}` ({keys}) VALUES ({params})"), filtered)
-    return _row(db, f"SELECT * FROM `{table}` WHERE `id` = :id", {"id": filtered["id"]}) or filtered
-
-
-def _update(db: Session, table: str, row_id: str, values: dict[str, Any]) -> None:
-    columns = _columns(db, table)
-    filtered = {key: value for key, value in values.items() if key in columns}
-    if not filtered:
-        return
-    filtered["row_id"] = row_id
-    assignments = ", ".join(f"`{key}` = :{key}" for key in filtered if key != "row_id")
-    db.execute(text(f"UPDATE `{table}` SET {assignments} WHERE `id` = :row_id"), filtered)
-
-
-def _row(db: Session, sql: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
-    result = db.execute(text(sql), params or {}).mappings().first()
-    return dict(result) if result else None
-
-
-def _scalar(db: Session, sql: str, params: dict[str, Any] | None = None, default: Any = None) -> Any:
-    value = db.execute(text(sql), params or {}).scalar()
-    return default if value is None else value
-
-
-def _table_count(db: Session, table: str, where: str = "", params: dict[str, Any] | None = None) -> int:
-    suffix = f" WHERE {where}" if where else ""
-    return int(_scalar(db, f"SELECT COUNT(*) FROM `{table}`{suffix}", params, 0))
-
-
-def _columns(db: Session, table: str) -> set[str]:
-    # Keep schema introspection on the Session connection.  With SQLite an
-    # Inspector created from the Engine can check the same pooled DB-API
-    # connection back in and roll back the import transaction underneath us.
-    return {column["name"] for column in inspect(db.connection()).get_columns(table)}
-
-
-def _has_table(db: Session, table: str) -> bool:
-    return table in inspect(db.connection()).get_table_names()
 
 
 def _id() -> str:
@@ -2641,8 +2407,8 @@ def _hash_text(value: str) -> str:
 
 
 def _log_import(db: Session, task_id: str | None, level: str, message: str) -> None:
-    if task_id and "ImportLog" in inspect(db.connection()).get_table_names():
-        _insert(db, "ImportLog", {"id": _id(), "importTaskId": task_id, "level": level, "message": message, "createdAt": _now()})
+    if task_id and has_table(db, "ImportLog"):
+        legacy_insert(db, "ImportLog", {"id": _id(), "importTaskId": task_id, "level": level, "message": message, "createdAt": _now()})
 
 
 def _record_identity_system_events(db: Session, task_id: str, identity: BookIdentity, source_path: Path) -> None:
@@ -2733,38 +2499,27 @@ def _file_version_key(fmt: str, path: Path) -> str:
 
 
 def _next_edition_name(db: Session, work_id: str, base: str, media_kind: str | None = None) -> str:
-    where = "`workId` = :work_id"
-    params = {"work_id": work_id}
-    if media_kind and "mediaKind" in _columns(db, "LibraryEdition"):
-        where += " AND `mediaKind` = :media_kind"
-        params["media_kind"] = media_kind
-    count = _table_count(db, "LibraryEdition", where, params)
+    count = import_db.count_editions_for_work(db, work_id, media_kind=media_kind)
     return base if count == 0 else f"{base} {count + 1}"
 
 
 def _should_be_media_primary(db: Session, work_id: str, media_kind: str) -> bool:
-    edition_columns = _columns(db, "LibraryEdition")
+    edition_columns = table_columns(db, "LibraryEdition")
     if "mediaKind" not in edition_columns:
-        return _table_count(db, "LibraryEdition", "`workId` = :work_id", {"work_id": work_id}) == 0
-    existing = _scalar(
-        db,
-        "SELECT COUNT(*) FROM `LibraryEdition` WHERE `workId` = :work_id AND `mediaKind` = :media_kind AND COALESCE(`hidden`, 0) = 0",
-        {"work_id": work_id, "media_kind": media_kind},
-        0,
-    )
-    return int(existing or 0) == 0
+        return import_db.count_editions_for_work(db, work_id) == 0
+    return import_db.count_audiobook_media_kind_editions(db, work_id, media_kind) == 0
 
 
 def _finalize_work_primary(db: Session, settings: Settings, work_id: str, edition_id: str, cover_path: str | None) -> None:
-    work = _row(db, "SELECT * FROM `LibraryWork` WHERE `id` = :id", {"id": work_id})
+    work = import_db.get_work_by_id(db, work_id)
     if not work:
         return
     primary_edition_id = work.get("primaryEditionId") or edition_id
-    primary_edition = _row(db, "SELECT `format` FROM `LibraryEdition` WHERE `id` = :id", {"id": primary_edition_id})
+    primary_edition = import_db.get_edition_format(db, str(primary_edition_id))
     preferred_cover_path = _preferred_work_cover_path(db, work_id, primary_edition_id, settings) or cover_path or ensure_default_cover(settings)
     current_cover_path = work.get("coverPath")
     should_update_cover = not current_cover_path or _is_generated_work_cover_path(db, work_id, str(current_cover_path))
-    _update(
+    legacy_update(
         db,
         "LibraryWork",
         work_id,
@@ -2780,78 +2535,33 @@ def _finalize_work_primary(db: Session, settings: Settings, work_id: str, editio
 
 def _preferred_work_cover_path(db: Session, work_id: str, primary_edition_id: str | None, settings: Settings) -> str | None:
     if primary_edition_id:
-        volumes = _rows(
-            db,
-            """
-            SELECT `coverPath`
-            FROM `LibraryVolume`
-            WHERE `editionId` = :edition_id AND `coverPath` IS NOT NULL AND `coverPath` != ''
-            ORDER BY
-                CASE WHEN `volumeIndex` IS NULL THEN 1 ELSE 0 END ASC,
-                `volumeIndex` ASC,
-                `sortOrder` ASC,
-                `createdAt` ASC
-            """,
-            {"edition_id": primary_edition_id},
-        )
+        volumes = import_db.list_volume_cover_paths_for_edition(db, str(primary_edition_id))
         volume = next((item for item in volumes if not is_default_cover_path(item.get("coverPath"), settings)), volumes[0] if volumes else None)
         if volume and volume.get("coverPath"):
             return str(volume["coverPath"])
-        edition = _row(db, "SELECT `coverPath` FROM `LibraryEdition` WHERE `id` = :edition_id", {"edition_id": primary_edition_id})
+        edition = import_db.get_edition_cover_path(db, str(primary_edition_id))
         if edition and edition.get("coverPath"):
             return str(edition["coverPath"])
-    edition = _row(
-        db,
-        """
-        SELECT `coverPath`
-        FROM `LibraryEdition`
-        WHERE `workId` = :work_id AND `hidden` = 0 AND `coverPath` IS NOT NULL AND `coverPath` != ''
-        ORDER BY CASE WHEN `primary` = 1 THEN 0 ELSE 1 END ASC, `createdAt` ASC
-        LIMIT 1
-        """,
-        {"work_id": work_id},
-    )
+    edition = import_db.find_work_cover_edition(db, work_id)
     return str(edition["coverPath"]) if edition and edition.get("coverPath") else None
 
 
 def _is_generated_work_cover_path(db: Session, work_id: str, cover_path: str) -> bool:
-    generated = _row(
-        db,
-        """
-        SELECT `coverPath` FROM `LibraryEdition` WHERE `workId` = :work_id AND `coverPath` = :cover_path
-        UNION
-        SELECT v.`coverPath`
-        FROM `LibraryVolume` v
-        JOIN `LibraryEdition` e ON e.`id` = v.`editionId`
-        WHERE e.`workId` = :work_id AND v.`coverPath` = :cover_path
-        LIMIT 1
-        """,
-        {"work_id": work_id, "cover_path": cover_path},
-    )
-    return generated is not None
+    return import_db.has_generated_cover_path(db, work_id, cover_path)
 
 
 def _select_volume_edition(db: Session, work_id: str, fmt: str, source_key: str, volume_index: float | None, volume_title: str) -> dict[str, Any] | None:
-    editions = _rows(db, "SELECT * FROM `LibraryEdition` WHERE `workId` = :work_id AND `format` = :fmt AND `hidden` = 0 ORDER BY `createdAt` ASC", {"work_id": work_id, "fmt": fmt})
+    editions = import_db.list_visible_editions_for_work_and_format(db, work_id, fmt)
     for edition in editions:
-        conflict = _row(
+        conflict = import_db.find_volume_conflict(
             db,
-            """
-            SELECT * FROM `LibraryVolume`
-            WHERE `editionId` = :edition_id
-              AND ((:volume_index IS NOT NULL AND `volumeIndex` = :volume_index)
-                   OR (:volume_index IS NULL AND `title` = :volume_title))
-            LIMIT 1
-            """,
-            {"edition_id": edition["id"], "volume_index": volume_index, "volume_title": volume_title},
+            str(edition["id"]),
+            volume_index,
+            volume_title,
         )
         if not conflict and edition.get("sourceGroupKey") == source_key:
             return edition
     return None
-
-
-def _rows(db: Session, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    return [dict(row) for row in db.execute(text(sql), params or {}).mappings().all()]
 
 
 def _first_text(xml: str, tag: str) -> str | None:
