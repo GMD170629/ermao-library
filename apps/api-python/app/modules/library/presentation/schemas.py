@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import Field
+from typing_extensions import TypeAliasType
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.http_errors import HttpContractError
@@ -15,6 +16,16 @@ ReadingStatus = Literal["UNREAD", "READING", "FINISHED"]
 DetailTabKey = Literal["EBOOK", "COMIC", "AUDIOBOOK", "STRUCTURE"]
 ScalarFilterValue = str | int | float | bool | None
 FilterValue = ScalarFilterValue | list[str] | list[float]
+MetadataCandidateRawValue = TypeAliasType(
+    "MetadataCandidateRawValue",
+    str
+    | int
+    | float
+    | bool
+    | None
+    | list["MetadataCandidateRawValue"]
+    | dict[str, "MetadataCandidateRawValue"],
+)
 
 
 class ProgressNavigation(HttpContractModel):
@@ -750,75 +761,6 @@ class UndoOperationPayload(HttpContractModel):
     restored: bool
 
 
-class MetadataImageSet(HttpContractModel):
-    large: str | None = None
-    common: str | None = None
-    medium: str | None = None
-    small: str | None = None
-    grid: str | None = None
-
-
-class MetadataTag(HttpContractModel):
-    name: str
-    count: int | None = None
-
-
-class MetadataInfoboxValue(HttpContractModel):
-    v: str
-    k: str | None = None
-
-
-class MetadataInfoboxEntry(HttpContractModel):
-    key: str
-    value: str | int | float | list[str] | list[MetadataInfoboxValue]
-
-
-class DoubanCandidateRaw(HttpContractModel):
-    id: str | int | None = None
-    tpl_name: str | None = None
-    title: str | None = None
-    subtitle: str | None = None
-    url: str | None = None
-    abstract: str | None = None
-    abstract_2: str | None = None
-    cover_url: str | None = None
-    cover_url_cdn: str | None = None
-    coverUrl: str | None = None
-    image: str | None = None
-    author: str | list[str] | None = None
-    authors: list[str] | None = None
-    publisher: str | None = None
-    pubdate: str | None = None
-    date: str | None = None
-    isbn: str | None = None
-    isbn13: str | None = None
-    isbn10: str | None = None
-    series: str | None = None
-    seriesName: str | None = None
-    series_name: str | None = None
-    summary: str | None = None
-    description: str | None = None
-    tags: list[str] | None = None
-    tag: list[str] | str | None = None
-    publishedAt: str | None = None
-    publishedYear: int | None = None
-    images: MetadataImageSet | None = None
-
-
-class BangumiCandidateRaw(HttpContractModel):
-    id: str | int | None = None
-    url: str | None = None
-    name: str | None = None
-    name_cn: str | None = None
-    summary: str | None = None
-    date: str | None = None
-    air_date: str | None = None
-    image: str | None = None
-    images: MetadataImageSet | None = None
-    tags: list[str | MetadataTag] | None = None
-    infobox: list[MetadataInfoboxEntry] | None = None
-
-
 class MetadataCandidate(HttpContractModel):
     id: str
     source: str
@@ -836,7 +778,7 @@ class MetadataCandidate(HttpContractModel):
     series_name: str | None = Field(default=None, alias="seriesName")
     series_index: float | None = Field(default=None, alias="seriesIndex")
     confidence: float
-    raw: DoubanCandidateRaw | BangumiCandidateRaw
+    raw: dict[str, MetadataCandidateRawValue]
 
 
 class MetadataSearchPayload(HttpContractModel):

@@ -416,6 +416,10 @@ def serve_douban_crawler_gateway():
                 </script></html>
                 """.replace("__COVER_URL__", cover_url).replace(
                     "__REVISED_COVER_URL__", revised_cover_url
+                ).replace(
+                    '"/subject/4913065/"}',
+                    '"/subject/4913065/","topics":[],"extra_actions":[],'
+                    '"rating":{"count":21,"value":7.9}}',
                 )
             elif self.path.startswith("/subject/4913064"):
                 cover_url = (
@@ -5929,6 +5933,11 @@ def test_ebook_metadata_search_returns_all_douban_crawler_candidates_and_proxy_c
         assert search_payload["candidates"][1]["coverUrl"].startswith(
             f"http://127.0.0.1:{douban.server_port}/covers/"
         )
+        assert search_payload["candidates"][1]["raw"]["topics"] == []
+        assert search_payload["candidates"][1]["raw"]["rating"] == {
+            "count": 21,
+            "value": 7.9,
+        }
 
         proxied = client.get(
             f"/api/metadata/cover-proxy?url={quote(search_payload['candidates'][0]['coverUrl'], safe='')}"
