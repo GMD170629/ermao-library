@@ -47,16 +47,16 @@ jobs:
             gh release edit "$release_tag" --title "$release_tag" --notes-file "$notes_path"
             remote_body="$RUNNER_TEMP/${release_tag}-body.md"
             gh release view "$release_tag" --json body --jq .body > "$remote_body"
-            node - "$notes_path" "$remote_body" <<'NODE'
-            const fs = require('node:fs');
-            const normalize = (value) => value.replace(/\r\n/g, '\n').replace(/\n?$/, '\n');
-            const expected = normalize(fs.readFileSync(process.argv[2], 'utf8'));
-            const actual = normalize(fs.readFileSync(process.argv[3], 'utf8'));
-            if (expected !== actual) {
-              console.error(`Release body synchronization failed for ${process.argv[2]}.`);
-              process.exit(1);
-            }
-            NODE
+            node -e '
+              const fs = require("node:fs");
+              const normalize = (value) => value.replace(/\r\n/g, "\n").replace(/\n?$/, "\n");
+              const expected = normalize(fs.readFileSync(process.argv[1], "utf8"));
+              const actual = normalize(fs.readFileSync(process.argv[2], "utf8"));
+              if (expected !== actual) {
+                console.error(`Release body synchronization failed for ${process.argv[1]}.`);
+                process.exit(1);
+              }
+            ' "$notes_path" "$remote_body"
           done < "$RUNNER_TEMP/releases.tsv"
 
       - name: Initialize verified release feed
