@@ -183,7 +183,7 @@ jobs:
           gh release view "$RELEASE_TAG" --json body --jq .body > "$remote_body"
           node - "$RELEASE_NOTES_PATH" "$remote_body" <<'NODE'
           const fs = require('node:fs');
-          const normalize = (value) => value.replace(/\r\n/g, '\n').replace(/\n?$/, '\n');
+                const normalize = (value) => value.replace(/\r\n/g, '\n').replace(/\n*$/, '\n');
           const expected = normalize(fs.readFileSync(process.argv[2], 'utf8'));
           const actual = normalize(fs.readFileSync(process.argv[3], 'utf8'));
           if (expected !== actual) {
@@ -282,7 +282,7 @@ jobs:
           gh release view "$RELEASE_TAG" --json body --jq .body > "$remote_body"
           node - "$RELEASE_NOTES_PATH" "$remote_body" <<'NODE'
           const fs = require('node:fs');
-          const normalize = (value) => value.replace(/\r\n/g, '\n').replace(/\n?$/, '\n');
+                const normalize = (value) => value.replace(/\r\n/g, '\n').replace(/\n*$/, '\n');
           const expected = normalize(fs.readFileSync(process.argv[2], 'utf8'));
           const actual = normalize(fs.readFileSync(process.argv[3], 'utf8'));
           if (expected !== actual) {
