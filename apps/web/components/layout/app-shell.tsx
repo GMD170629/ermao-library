@@ -4,10 +4,13 @@ import {
   ArrowLeft,
   BookOpen,
   ChevronRight,
+  Folders,
   Grid2X2,
   Home,
+  LibraryBig,
   Plus,
   Search,
+  UsersRound,
   X
 } from 'lucide-react';
 import Image from 'next/image';
@@ -35,6 +38,11 @@ import { clearPrivatePwaStorage, PwaClient } from '../system/pwa-client';
 import { cn } from '../ui/cn';
 import { useToast } from '../ui/feedback';
 import { useAudioPlayback } from '../../features/audio/audio-playback-provider';
+import {
+  fetchShelves,
+  topLevelShelves,
+  type ShelfView
+} from '../../features/shelves/public';
 import { isSettingsItemActive, settingsGroups, settingsItemAllowed } from '../../features/settings/center/settings-secondary-nav';
 import {
   AppSessionProvider,
@@ -54,7 +62,9 @@ const primaryNavItems = [
 
 const libraryNavItems = [
   { href: '/library', icon: Grid2X2, label: '全部' },
-  { href: '/library?status=READING', icon: BookOpen, label: '进行中' }
+  { href: '/library?status=READING', icon: BookOpen, label: '在读' },
+  { href: '/library/series', icon: LibraryBig, label: '系列' },
+  { href: '/library/authors', icon: UsersRound, label: '作者' }
 ];
 
 const shellSurfaces = {
@@ -77,16 +87,6 @@ type BookSearchItem = {
   author: string;
   coverUrl: string;
   format: string;
-};
-
-type ShelfSummary = {
-  id: string;
-  name: string;
-};
-
-type ShelvesPayload = {
-  ok: boolean;
-  data?: { shelves?: ShelfSummary[] };
 };
 
 type SessionStatus = 'checking' | 'authenticated' | 'unavailable' | 'redirecting';
@@ -118,7 +118,9 @@ function isActive(pathname: string, currentSearch: URLSearchParams, href: string
     return Array.from(targetSearch.entries()).every(([key, value]) => currentSearch.get(key) === value);
   }
 
-  if (targetPath === '/library') return !currentSearch.get('status');
+  if (targetPath === '/library') {
+    return pathname === '/library' && !currentSearch.get('status');
+  }
   if (targetPath === '/shelves') return !currentSearch.get('shelf') && currentSearch.get('create') !== '1';
   return true;
 }
@@ -132,7 +134,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [authorization, setAuthorization] = useState<AppSessionAuthorization | null>(() => getCachedAppSession()?.authorization ?? null);
   const [pendingSettingsHref, setPendingSettingsHref] = useState<string | null>(null);
   const [avatarFailed, setAvatarFailed] = useState(false);
-  const [shelves, setShelves] = useState<ShelfSummary[]>([]);
+  const [shelves, setShelves] = useState<ShelfView[]>([]);
+  const visibleShelves = useMemo(() => topLevelShelves(shelves), [shelves]);
   const [librarySearch, setLibrarySearch] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
   const [searchBooks, setSearchBooks] = useState<BookSearchItem[]>([]);
@@ -409,16 +412,15 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (isReader || isAuthPage || isOffline || sessionStatus === 'checking' || sessionStatus === 'redirecting') return;
     let active = true;
     const refreshShelves = () => {
-      fetch('/api/shelves')
-        .then((response) => response.json() as Promise<ShelvesPayload>)
-        .then((payload) => {
-          if (active) setShelves(payload?.ok ? (payload.data?.shelves ?? []) : []);
+      fetchShelves()
+        .then((nextShelves) => {
+          if (active) setShelves(nextShelves);
         })
         .catch(() => undefined);
     };
-    fetch('/api/shelves').then((response) => response.json() as Promise<ShelvesPayload>).catch(() => null).then((shelvesPayload) => {
+    fetchShelves().catch(() => null).then((nextShelves) => {
       if (!active) return;
-      setShelves(shelvesPayload?.ok ? (shelvesPayload.data?.shelves ?? []) : []);
+      setShelves(nextShelves ?? []);
     });
     window.addEventListener('shuku:shelves-changed', refreshShelves);
     const refreshAccount = (event: Event) => {
@@ -437,7 +439,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       window.removeEventListener('shuku:shelves-changed', refreshShelves);
       window.removeEventListener('shuku:account-changed', refreshAccount);
     };
-  }, [isAuthPage, isOffline, isReader, sessionStatus]);
+  }, [authorization, isAuthPage, isOffline, isReader, sessionStatus]);
 
   useEffect(() => {
     setPendingSettingsHref(null);
@@ -856,18 +858,21 @@ export function AppShell({ children }: { children: ReactNode }) {
           <section className="mt-7">
             <div className="mb-2 px-3 text-[13px] text-[#8A857F]"><I18nText>我的书架</I18nText></div>
             <nav className="space-y-1">
-              {shelves.map((shelf) => {
+              {visibleShelves.map((shelf) => {
                 const href = `/shelves?shelf=${encodeURIComponent(shelf.id)}`;
                 return (
                   <Link
                     key={shelf.id}
                     href={href}
+                    data-shelf-kind={shelf.kind}
                     className={cn(
                       'flex min-h-11 items-center gap-3 rounded-xl px-3 text-[15px] font-medium transition',
                       isActive(pathname, currentSearch, href) ? 'bg-[#F9DED4] text-[#EF4D2F]' : 'text-[#34312E] hover:bg-black/[0.04]'
                     )}
                   >
-                    <BookOpen size={20} strokeWidth={1.65} />
+                    {shelf.kind === 'COLLECTION'
+                      ? <Folders size={20} strokeWidth={1.65} aria-hidden="true" />
+                      : <BookOpen size={20} strokeWidth={1.65} aria-hidden="true" />}
                     <span data-i18n-skip className="truncate">{shelf.name}</span>
                   </Link>
                 );
@@ -1020,12 +1025,13 @@ export function AppShell({ children }: { children: ReactNode }) {
             <section className="mt-6 border-t border-black/[0.065] pt-5">
               <div className="mb-2 px-3.5 text-[13px] font-medium text-[#8A857F]"><I18nText>我的书架</I18nText></div>
               <nav aria-label={i18nAttribute("我的书架")} className="space-y-1">
-                {shelves.map((shelf) => {
+                {visibleShelves.map((shelf) => {
                   const href = `/shelves?shelf=${encodeURIComponent(shelf.id)}`;
                   return (
                     <Link
                       key={`${shelf.id}-drawer`}
                       href={href}
+                      data-shelf-kind={shelf.kind}
                       onClick={(event) => handleMobileDrawerLink(event, href)}
                       aria-current={isActive(pathname, currentSearch, href) ? 'page' : undefined}
                       className={cn(
@@ -1033,7 +1039,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                         isActive(pathname, currentSearch, href) ? 'bg-[#F9DED4] text-[#E94B2D]' : 'text-[#34312E] hover:bg-black/[0.045]'
                       )}
                     >
-                      <BookOpen size={21} strokeWidth={1.7} aria-hidden="true" />
+                      {shelf.kind === 'COLLECTION'
+                        ? <Folders size={21} strokeWidth={1.7} aria-hidden="true" />
+                        : <BookOpen size={21} strokeWidth={1.7} aria-hidden="true" />}
                       <span data-i18n-skip className="truncate">{shelf.name}</span>
                     </Link>
                   );

@@ -912,9 +912,10 @@ def test_shelf_list_is_summary_and_detail_is_lightweight_paginated(client, db_se
         event.remove(engine, "before_cursor_execute", capture_statement)
 
     assert listed[0]["id"] == shelf["id"]
-    assert listed[0]["bookCount"] == 25
-    assert len(listed[0]["books"]) == 3
-    assert "bookIds" not in listed[0]
+    personal_shelf = next(item for item in listed if item["id"] == shelf["id"])
+    assert personal_shelf["bookCount"] == 25
+    assert len(personal_shelf["books"]) == 3
+    assert "bookIds" not in personal_shelf
     assert detailed["bookCount"] == 25
     assert detailed["page"] == 2
     assert detailed["pageSize"] == 10

@@ -59,6 +59,7 @@ from app.models.settings import (
     SystemSetting,
 )
 from app.models.shelf import Shelf, ShelfWork
+from app.modules.shelf.infrastructure.models import ShelfCollectionMembership
 
 __all__ = [
     "BookConversionTask",
@@ -99,6 +100,7 @@ __all__ = [
     "ReaderProgressCursor",
     "Session",
     "Shelf",
+    "ShelfCollectionMembership",
     "ShelfWork",
     "Source",
     "SourceSearchRecord",

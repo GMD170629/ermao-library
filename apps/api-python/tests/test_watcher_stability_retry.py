@@ -133,6 +133,25 @@ def test_import_queue_retries_when_stability_check_defers_without_a_second_event
         queue.stop()
 
 
+def test_stopped_import_queue_rejects_new_files(tmp_path: Path, monkeypatch) -> None:
+    calls: list[Path] = []
+    monkeypatch.setattr(
+        watcher_module,
+        "import_watched_file",
+        lambda _db, _settings, path, _folder, **_kwargs: calls.append(path) or True,
+    )
+    queue = ImportQueue(lambda: nullcontext(object()), object())
+    folder = MonitorFolderConfig(id="folder-1", root_path=str(tmp_path))
+    queue.stop()
+
+    source = tmp_path / "after-stop.epub"
+    source.write_bytes(b"content")
+    queue.enqueue(source, folder)
+    sleep(0.05)
+
+    assert calls == []
+
+
 def test_unstable_file_marks_a_retry_after_it_reaches_the_minimum_size(
     tmp_path: Path,
     monkeypatch,

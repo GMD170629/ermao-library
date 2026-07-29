@@ -26,7 +26,13 @@ from app.bootstrap.imports import (
     save_uploaded_files,
     scan_directory_for_imports,
 )
-from app.bootstrap.system import record_system_event, upsert_setting
+from app.bootstrap.system import (
+    active_health_run_id,
+    create_queue_operation,
+    queue_runtime_view,
+    record_system_event,
+    upsert_setting,
+)
 from app.contracts.http_errors import ErrorResponses
 from app.core.authorization import authorization_context, can_access_monitor_folder
 from app.core.config import Settings, get_settings
@@ -61,6 +67,8 @@ from app.modules.imports.presentation.schemas import (
     ImportForbiddenError,
     ImportInternalError,
     ImportNotFoundError,
+    ImportQueueClearPayload,
+    ImportQueueClearResponse,
     ImportTaskResponse,
     ImportUploadResponse,
     RescanImportTasksResponse,
@@ -477,6 +485,45 @@ def clear_import_tasks(
             metadata={"deleted": deleted},
         )
     return ok({"deleted": deleted})
+
+
+@router.post("/import-tasks/clear", status_code=202)
+def request_clear_import_queue(
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    ImportQueueClearResponse,
+    ErrorResponses(ImportConflictError),
+]:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    if active_health_run_id(db):
+        _raise_import_error(
+            "健康检查运行期间不能清理导入队列",
+            status_code=409,
+            code="HEALTH_RUN_ACTIVE",
+        )
+    runtime = queue_runtime_view(db, "import")
+    if runtime is None or runtime.get("stale") or runtime.get("status") != "running":
+        _raise_import_error(
+            "导入工作进程当前不可用",
+            status_code=409,
+            code="IMPORT_QUEUE_OFFLINE",
+        )
+    operation, created = create_queue_operation(db, user.id, action="clear")
+    if operation.get("action") != "clear":
+        _raise_import_error(
+            "导入队列正在执行其他控制操作",
+            status_code=409,
+            code="QUEUE_OPERATION_CONFLICT",
+        )
+    return ImportQueueClearResponse(
+        data=ImportQueueClearPayload.model_validate(
+            {"operation": operation, "created": created}
+        )
+    )
 
 
 @router.delete("/import-tasks/{task_id}")

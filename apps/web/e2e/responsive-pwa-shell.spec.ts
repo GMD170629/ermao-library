@@ -120,18 +120,198 @@ test('mobile drawer supports focus, escape, browser back, and route navigation',
   await expect(drawer).toBeHidden();
 });
 
-test('desktop library navigation keeps only All and Reading', async ({ page }) => {
+test('desktop and mobile library navigation expose all, reading, series, and authors', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/');
 
   const sidebar = page.locator('aside');
   await expect(sidebar.getByRole('link', { name: '全部', exact: true })).toBeVisible();
-  await expect(sidebar.getByRole('link', { name: '进行中', exact: true })).toBeVisible();
+  await expect(sidebar.getByRole('link', { name: '在读', exact: true })).toBeVisible();
+  await expect(sidebar.getByRole('link', { name: '系列', exact: true })).toHaveAttribute('href', '/library/series');
+  await expect(sidebar.getByRole('link', { name: '作者', exact: true })).toHaveAttribute('href', '/library/authors');
   await expect(sidebar.getByRole('link', { name: '未读', exact: true })).toHaveCount(0);
   await expect(sidebar.getByRole('link', { name: '已读', exact: true })).toHaveCount(0);
   const accountLink = sidebar.getByRole('link', { name: '进入账户与设置' });
   await expect(accountLink.getByText('Web', { exact: true })).toBeVisible();
   await expect(accountLink.getByText('账户与设置', { exact: true })).toBeVisible();
+});
+
+test('shelf collections and unassigned shelves are the only top-level sidebar entries', async ({ page }) => {
+  await page.route('**/api/shelves', async (route) => {
+    await route.fulfill({
+      json: {
+        ok: true,
+        data: {
+          shelves: [
+            { id: 'loose', name: '独立书架', kind: 'STATIC', collectionIds: [] },
+            { id: 'assigned', name: '合集成员', kind: 'SMART', collectionIds: ['collection-a'] },
+            { id: 'collection-a', name: '旅行合集', kind: 'COLLECTION', shelfCount: 1 }
+          ]
+        }
+      }
+    });
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  const sidebar = page.locator('aside');
+  await expect(sidebar.getByRole('link', { name: '独立书架', exact: true })).toHaveAttribute('data-shelf-kind', 'STATIC');
+  await expect(sidebar.getByRole('link', { name: '旅行合集', exact: true })).toHaveAttribute('data-shelf-kind', 'COLLECTION');
+  await expect(sidebar.getByRole('link', { name: '合集成员', exact: true })).toHaveCount(0);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: '打开导航菜单' }).click();
+  const drawer = page.getByTestId('mobile-navigation');
+  await expect(drawer.getByRole('link', { name: '系列', exact: true })).toBeVisible();
+  await expect(drawer.getByRole('link', { name: '独立书架', exact: true })).toBeVisible();
+  await expect(drawer.getByRole('link', { name: '旅行合集', exact: true })).toHaveAttribute('data-shelf-kind', 'COLLECTION');
+  await expect(drawer.getByRole('link', { name: '合集成员', exact: true })).toHaveCount(0);
+});
+
+test('series and author groupings open the existing library with exact facet filters', async ({ page }) => {
+  const requestedWorkQueries: URL[] = [];
+  await page.route('**/api/library/groupings?**', async (route) => {
+    const url = new URL(route.request().url());
+    const isSeries = url.searchParams.get('kind') === 'SERIES';
+    await route.fulfill({
+      json: {
+        ok: true,
+        data: {
+          groups: [{
+            id: isSeries ? 'series-facet' : 'author-facet',
+            name: isSeries ? '星海丛书' : '林川',
+            bookCount: isSeries ? 2 : 1,
+            updatedAt: '2026-07-29T00:00:00Z'
+          }],
+          page: 1,
+          pageSize: 48,
+          total: 1,
+          totalPages: 1
+        }
+      }
+    });
+  });
+  await page.route('**/api/works?**', async (route) => {
+    requestedWorkQueries.push(new URL(route.request().url()));
+    await route.fulfill({
+      json: {
+        ok: true,
+        data: {
+          books: [],
+          total: 0,
+          page: 1,
+          pageSize: 50,
+          totalPages: 1
+        }
+      }
+    });
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/library/series');
+  await expect(page.getByRole('heading', { name: '系列' })).toBeVisible();
+  await page.getByRole('button', { name: /打开“星海丛书”/ }).click();
+  await expect(page).toHaveURL(/facetKind=SERIES/);
+  await expect(page.getByRole('heading', { name: '星海丛书' })).toBeVisible();
+  await expect.poll(() => requestedWorkQueries.some((url) => (
+    url.searchParams.get('facetKind') === 'SERIES'
+    && url.searchParams.get('facetId') === 'series-facet'
+    && url.searchParams.get('sort') === 'series_index'
+    && url.searchParams.get('sortDirection') === 'asc'
+  ))).toBe(true);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/library/authors');
+  await expect(page.getByRole('heading', { name: '作者' })).toBeVisible();
+  await page.getByRole('button', { name: /打开“林川”/ }).click();
+  await expect(page).toHaveURL(/facetKind=AUTHOR/);
+  await expect(page.getByRole('heading', { name: '林川' })).toBeVisible();
+  await expect.poll(() => requestedWorkQueries.some((url) => (
+    url.searchParams.get('facetKind') === 'AUTHOR'
+    && url.searchParams.get('facetId') === 'author-facet'
+    && url.searchParams.get('sort') === 'updated'
+    && url.searchParams.get('sortDirection') === 'desc'
+  ))).toBe(true);
+  await page.getByRole('button', { name: '管理图书', exact: true }).click();
+  await page.getByRole('button', { name: '更多筛选', exact: true }).click();
+  await page.getByRole('button', { name: '清除作者筛选', exact: true }).click();
+  await expect(page).toHaveURL(/\/library$/);
+});
+
+test('collection creation can select standard and smart shelf members', async ({ page }) => {
+  const members = [
+    {
+      id: 'member-static',
+      name: '纸书计划',
+      description: null,
+      kind: 'STATIC',
+      bookCount: 3,
+      books: [],
+      collectionIds: [],
+      createdAt: '2026-07-29T00:00:00Z',
+      updatedAt: '2026-07-29T00:00:00Z'
+    },
+    {
+      id: 'member-smart',
+      name: '近期科幻',
+      description: null,
+      kind: 'SMART',
+      bookCount: 5,
+      books: [],
+      collectionIds: [],
+      createdAt: '2026-07-29T00:00:00Z',
+      updatedAt: '2026-07-29T00:00:00Z'
+    }
+  ];
+  let collection: Record<string, unknown> | null = null;
+
+  await page.route('**/api/shelves**', async (route) => {
+    const url = new URL(route.request().url());
+    const method = route.request().method();
+    if (method === 'POST' && url.pathname.endsWith('/api/shelves')) {
+      const body = route.request().postDataJSON() as { name: string; description: string; memberShelfIds: string[] };
+      collection = {
+        id: 'collection-new',
+        name: body.name,
+        description: body.description,
+        kind: 'COLLECTION',
+        shelfCount: body.memberShelfIds.length,
+        memberShelfIds: body.memberShelfIds,
+        shelves: members,
+        page: 1,
+        pageSize: 24,
+        total: body.memberShelfIds.length,
+        totalPages: 1,
+        createdAt: '2026-07-29T00:00:00Z',
+        updatedAt: '2026-07-29T00:00:00Z'
+      };
+      await route.fulfill({ status: 201, json: { ok: true, data: { shelf: collection } } });
+      return;
+    }
+    if (url.pathname.endsWith('/api/shelves/collection-new')) {
+      await route.fulfill({ json: { ok: true, data: { shelf: collection } } });
+      return;
+    }
+    await route.fulfill({
+      json: {
+        ok: true,
+        data: { shelves: collection ? [...members, collection] : members }
+      }
+    });
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/shelves?create=1&kind=collection');
+  await expect(page.getByRole('button', { name: /书架合集/ })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByPlaceholder('例如：周末阅读、轻小说收藏').fill('暑期阅读');
+  await page.getByRole('checkbox').nth(0).check();
+  await page.getByRole('checkbox').nth(1).check();
+  await page.getByRole('button', { name: '创建合集' }).click();
+
+  await expect(page).toHaveURL(/shelf=collection-new/);
+  await expect(page.getByRole('heading', { name: '暑期阅读' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /纸书计划/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /近期科幻/ })).toBeVisible();
 });
 
 test('dashboard recent shelves share a ten-book horizontal rail without visible scrollbars or progress bars', async ({ page }) => {

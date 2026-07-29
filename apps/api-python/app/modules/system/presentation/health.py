@@ -46,6 +46,8 @@ from app.modules.system.presentation.health_schemas import (
     LogSettingsResponse,
     QueueOperationNotFoundBody,
     QueueOperationNotFoundError,
+    QueueOperationConflictBody,
+    QueueOperationConflictError,
     QueueOperationPayload,
     QueueOperationResponse,
     ServiceHealthPayload,
@@ -247,6 +249,7 @@ def restart_import_queue(
         SystemManagerRequiredError,
         HealthRunActiveError,
         ImportQueueOfflineError,
+        QueueOperationConflictError,
     ),
 ]:
     user = _system_manager(db, request, settings)
@@ -260,6 +263,10 @@ def restart_import_queue(
             ImportQueueOfflineBody(message="导入工作进程当前不可用")
         )
     operation, created = create_restart_operation(db, user.id)
+    if operation.get("action") != "restart":
+        raise QueueOperationConflictError(
+            QueueOperationConflictBody(message="导入队列正在执行其他控制操作")
+        )
     return QueueOperationResponse(
         data=QueueOperationPayload.model_validate(
             {"operation": operation, "created": created}

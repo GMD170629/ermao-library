@@ -77,6 +77,11 @@ class PersistentImportWorker:
             )
         return True
 
+    def clear_records(self) -> int:
+        if self.is_alive():
+            raise RuntimeError("import worker must be stopped before clearing records")
+        return self.runtime.clear_records()
+
     def _run(self) -> None:
         self._heartbeat.start()
         try:

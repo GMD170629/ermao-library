@@ -162,4 +162,3 @@ Next.js proxies `/api/*` to FastAPI inside the container. SQLite is currently th
 
 - [Python API, converters, and worker](apps/api-python/README.md)
 - [fnOS template and local build](deploy/fnos/README.md)
-- [Automatic text ebook conversion design (Chinese)](docs/design/text-conversion/V1_DESIGN_AND_EXECUTION_PLAN.md)

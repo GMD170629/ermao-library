@@ -10,9 +10,11 @@ from sqlalchemy import (
     case,
     exists,
     func,
-    inspect as sa_inspect,
     or_,
     select,
+)
+from sqlalchemy import (
+    inspect as sa_inspect,
 )
 from sqlalchemy.orm import Session, aliased
 
@@ -25,9 +27,11 @@ from app.core.authorization import (
 from app.models.auth import User
 from app.models.library import (
     LibraryEdition,
+    LibraryFacet,
     LibraryFile,
     LibraryReadingProgress,
     LibraryWork,
+    LibraryWorkFacet,
 )
 from app.modules.library.application.filter_ast import (
     FilterCondition,
@@ -41,7 +45,10 @@ from app.modules.library.infrastructure.filter_query import (
     inferred_media_kind,
 )
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
-from app.services.library_filters import compile_filter_predicate, normalize_filter_rules
+from app.services.library_filters import (
+    compile_filter_predicate,
+    normalize_filter_rules,
+)
 
 
 def _has_table(db: Session, table: str) -> bool:
@@ -92,8 +99,7 @@ def _status_predicate(
     if normalized not in {"UNREAD", "READING", "FINISHED"}:
         return None
     if not (
-        _has_table(db, "LibraryConsumptionState")
-        and _has_table(db, "LibraryEdition")
+        _has_table(db, "LibraryConsumptionState") and _has_table(db, "LibraryEdition")
     ):
         if normalized == "UNREAD":
             return LibraryWork.status.in_(("UNREAD", "WANT"))
@@ -126,7 +132,9 @@ def _type_filter_predicate(
     lowered = normalized.lower()
     upper = normalized.upper()
     has_edition_table = _has_table(db, "LibraryEdition")
-    has_media_kind = has_edition_table and _has_column(db, "LibraryEdition", "mediaKind")
+    has_media_kind = has_edition_table and _has_column(
+        db, "LibraryEdition", "mediaKind"
+    )
     edition = aliased(LibraryEdition)
 
     if lowered == "ebook":
@@ -138,7 +146,9 @@ def _type_filter_predicate(
             )
         return _edition_exists(
             context,
-            edition.format.in_(("EPUB", "PDF", "MOBI", "AZW", "AZW3", "PRC", "FB2", "TXT")),
+            edition.format.in_(
+                ("EPUB", "PDF", "MOBI", "AZW", "AZW3", "PRC", "FB2", "TXT")
+            ),
             edition=edition,
         )
     if lowered in {"audio", "audiobook"}:
@@ -269,6 +279,21 @@ def _build_predicates(
     if series_name and _has_column(db, "LibraryWork", "seriesName"):
         predicates.append(func.trim(LibraryWork.series_name) == series_name)
 
+    if query.facet_kind and query.facet_id:
+        facet_link = aliased(LibraryWorkFacet)
+        facet = aliased(LibraryFacet)
+        predicates.append(
+            exists(
+                select(facet_link.work_id)
+                .join(facet, facet.id == facet_link.facet_id)
+                .where(
+                    facet_link.work_id == LibraryWork.id,
+                    facet_link.facet_id == query.facet_id,
+                    facet.kind == query.facet_kind,
+                )
+            )
+        )
+
     if query.filter_rules:
         filter_predicate, filter_error = compile_filter_predicate(
             db,
@@ -287,7 +312,11 @@ def _build_predicates(
 
 
 def _sort_direction(query: WorkListQuery) -> str:
-    default = "DESC" if query.sort in {"updated", "recent_read", "recent_import", "progress"} else "ASC"
+    default = (
+        "DESC"
+        if query.sort in {"updated", "recent_read", "recent_import", "progress"}
+        else "ASC"
+    )
     if query.sort_direction and query.sort_direction.lower() in {"asc", "desc"}:
         return query.sort_direction.upper()
     return default
@@ -321,9 +350,7 @@ def _order_by_clauses(
     direction: str,
 ) -> list[ColumnElement[Any]]:
     descending = direction == "DESC"
-    title_order = (
-        LibraryWork.title.desc() if descending else LibraryWork.title.asc()
-    )
+    title_order = LibraryWork.title.desc() if descending else LibraryWork.title.asc()
     updated_order = (
         LibraryWork.updated_at.desc() if descending else LibraryWork.updated_at.asc()
     )
@@ -346,9 +373,9 @@ def _order_by_clauses(
         return [
             case(
                 (
-                    func.nullif(func.trim(func.coalesce(LibraryWork.author, "")), "").is_(
-                        None
-                    ),
+                    func.nullif(
+                        func.trim(func.coalesce(LibraryWork.author, "")), ""
+                    ).is_(None),
                     1,
                 ),
                 else_=0,
@@ -379,9 +406,9 @@ def _order_by_clauses(
         return [
             case(
                 (
-                    func.nullif(func.trim(func.coalesce(LibraryWork.series_name, "")), "").is_(
-                        None
-                    ),
+                    func.nullif(
+                        func.trim(func.coalesce(LibraryWork.series_name, "")), ""
+                    ).is_(None),
                     1,
                 ),
                 else_=0,
@@ -395,8 +422,16 @@ def _order_by_clauses(
             LibraryWork.id.asc(),
         ]
     if query.sort == "recent_import":
-        return [LibraryWork.created_at.desc() if descending else LibraryWork.created_at.asc(), LibraryWork.id.desc() if descending else LibraryWork.id.asc()]
-    return [updated_order, LibraryWork.id.desc() if descending else LibraryWork.id.asc()]
+        return [
+            LibraryWork.created_at.desc()
+            if descending
+            else LibraryWork.created_at.asc(),
+            LibraryWork.id.desc() if descending else LibraryWork.id.asc(),
+        ]
+    return [
+        updated_order,
+        LibraryWork.id.desc() if descending else LibraryWork.id.asc(),
+    ]
 
 
 def _recent_read_statement(
@@ -474,18 +509,15 @@ def list_works(
         raise ValueError(filter_error)
 
     total = int(
-        db.scalar(select(func.count()).select_from(LibraryWork).where(and_(*predicates)))
+        db.scalar(
+            select(func.count()).select_from(LibraryWork).where(and_(*predicates))
+        )
         or 0
     )
     direction = _sort_direction(query)
 
-    if (
-        query.sort == "progress"
-        and _has_table(db, "LibraryReadingProgress")
-    ):
-        rows = db.scalars(
-            select(LibraryWork).where(and_(*predicates))
-        ).all()
+    if query.sort == "progress" and _has_table(db, "LibraryReadingProgress"):
+        rows = db.scalars(select(LibraryWork).where(and_(*predicates))).all()
         return WorkListResult(
             works=[entity_as_legacy_dict(row) for row in rows],
             total=total,
@@ -494,10 +526,7 @@ def list_works(
             progress_sort=True,
         )
 
-    if (
-        query.sort == "recent_read"
-        and _has_table(db, "LibraryReadingProgress")
-    ):
+    if query.sort == "recent_read" and _has_table(db, "LibraryReadingProgress"):
         statement = _recent_read_statement(
             db,
             predicates,

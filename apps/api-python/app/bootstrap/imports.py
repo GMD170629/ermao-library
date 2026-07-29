@@ -13,6 +13,9 @@ from app.core.time import now_timestamp_ms
 from app.modules.imports.application.claim import (
     claim_next_import_task as claim_next_import_task_command,
 )
+from app.modules.imports.application.clear_queue import (
+    clear_import_queue as clear_import_queue_command,
+)
 from app.modules.imports.application.deletion import (
     FileCleanupResult,
     execute_import_deletion,
@@ -56,6 +59,9 @@ from app.modules.imports.infrastructure.directory_scan import (
     should_ignore_path,
 )
 from app.modules.imports.infrastructure.managed_pipeline import SessionImportPipeline
+from app.modules.imports.infrastructure.queue_maintenance import (
+    SqlAlchemyImportQueueMaintenanceStore,
+)
 from app.modules.imports.infrastructure.source_probe import LocalImportSourceProbe
 from app.modules.imports.infrastructure.task_store import SqlAlchemyImportTaskStore
 from app.modules.imports.infrastructure.uow import SqlAlchemyImportUnitOfWork
@@ -249,6 +255,15 @@ def fail_claimed_import_task(
     )
 
 
+def clear_import_queue_records(db: Session) -> int:
+    """Delete every persisted import task after the worker has safely stopped."""
+
+    return clear_import_queue_command(
+        SqlAlchemyImportQueueMaintenanceStore(db),
+        SqlAlchemyImportUnitOfWork(db),
+    )
+
+
 class ImportWorkerRuntime:
     """Session-owning facade used by the thin persistent import worker loop."""
 
@@ -282,12 +297,17 @@ class ImportWorkerRuntime:
         with self._session() as db:
             return fail_claimed_import_task(db, task, error)
 
+    def clear_records(self) -> int:
+        with self._session() as db:
+            return clear_import_queue_records(db)
+
 
 __all__ = [
     "ImportWorkerRuntime",
     "MonitorFolderConfig",
     "ScanSummary",
     "claim_next_import_task",
+    "clear_import_queue_records",
     "enqueue_import_task",
     "execute_recoverable_import_deletion",
     "fail_claimed_import_task",

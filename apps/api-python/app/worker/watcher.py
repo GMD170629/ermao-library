@@ -74,6 +74,7 @@ class ImportQueue:
         self._changed_while_pending: set[Path] = set()
         self._deferred_paths: set[Path] = set()
         self._known_paths: set[Path] = set()
+        self._accepting = True
         self._lock = threading.Lock()
         self._thread = threading.Thread(
             target=self._run, name="shuku-import-queue", daemon=True
@@ -83,6 +84,8 @@ class ImportQueue:
     def enqueue(self, path: Path, folder: MonitorFolderConfig) -> None:
         real = path.resolve()
         with self._lock:
+            if not self._accepting:
+                return
             # A directory-backed audiobook is a mutable bundle: adding a new
             # episode must be allowed to enqueue the directory again. Rescans
             # suppress unchanged bundles before they reach this queue.
@@ -99,9 +102,15 @@ class ImportQueue:
         with self._lock:
             self._known_paths = known_paths
 
-    def stop(self) -> None:
+    def stop(self, *, require_stopped: bool = False) -> None:
+        with self._lock:
+            if not self._accepting and not self._thread.is_alive():
+                return
+            self._accepting = False
         self._queue.put(None)
         self._thread.join(timeout=10)
+        if require_stopped and self._thread.is_alive():
+            raise RuntimeError("import staging queue did not stop within 10 seconds")
 
     def _run(self) -> None:
         while True:
@@ -188,6 +197,7 @@ class WorkerManager:
         self.security = PathSecurityService(settings)
         self.watchers: dict[str, WatchState] = {}
         self.import_queue = ImportQueue(db_factory, settings)
+        self._imports_paused = False
         self.last_handled_rescan_request: str | None = None
 
     def refresh_worker_state(self) -> None:
@@ -359,6 +369,8 @@ class WorkerManager:
     def schedule_import(
         self, path: Path, folder: MonitorFolderConfig, state: WatchState
     ) -> None:
+        if getattr(self, "_imports_paused", False):
+            return
         if should_ignore_file(path, folder):
             return
         candidate = path
@@ -396,8 +408,9 @@ class WorkerManager:
             existing.cancel()
         # File-system events are briefly debounced here; the configurable
         # stability window is applied once, immediately before enqueueing.
+        target_queue = self.import_queue
         timer = threading.Timer(
-            0.25, lambda: self.import_queue.enqueue(candidate, folder)
+            0.25, lambda: target_queue.enqueue(candidate, folder)
         )
         state.timers[candidate] = timer
         timer.start()
@@ -406,6 +419,21 @@ class WorkerManager:
         for folder_id in list(self.watchers):
             self._stop_watcher(folder_id)
         self.import_queue.stop()
+
+    def pause_import_scheduling(self) -> None:
+        self._imports_paused = True
+        for state in self.watchers.values():
+            for timer in state.timers.values():
+                timer.cancel()
+            state.timers.clear()
+        self.import_queue.stop(require_stopped=True)
+
+    def resume_import_scheduling(self) -> None:
+        replacement = ImportQueue(self.db_factory, self.settings)
+        with self.db_factory() as db:
+            replacement.reload_known_paths(db)
+        self.import_queue = replacement
+        self._imports_paused = False
 
     def _stop_watcher(self, folder_id: str) -> None:
         state = self.watchers.pop(folder_id, None)

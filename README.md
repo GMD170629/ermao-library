@@ -162,4 +162,3 @@ Next.js 将 `/api/*` 转发到容器内的 FastAPI。SQLite 是当前唯一数�
 
 - [Python API、转换器与 Worker](apps/api-python/README.md)
 - [fnOS 模板与本地构建](deploy/fnos/README.md)
-- [文本电子书自动转换设计](docs/design/text-conversion/V1_DESIGN_AND_EXECUTION_PLAN.md)

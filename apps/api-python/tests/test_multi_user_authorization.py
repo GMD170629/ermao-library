@@ -481,7 +481,8 @@ def test_preferences_progress_bookmarks_and_shelves_are_isolated(
     assert "library.view" not in second_preferences
     assert "library.sort" not in second_preferences
     assert "library.sortDirection" not in second_preferences
-    assert client.get("/api/shelves").json()["data"]["shelves"] == []
+    second_shelves = client.get("/api/shelves").json()["data"]["shelves"]
+    assert second_shelves == []
     second_bookmarks = client.get(
         "/api/reader/v2/editions/edition-a/bookmarks?contentFingerprint=sha256%3Atest"
     )

@@ -74,3 +74,43 @@ def test_queue_heartbeat_reports_staleness(db_session):
     assert runtime["status"] == "running"
     assert runtime["stale"] is False
     assert runtime["staleAfterMs"] == 30_000
+
+
+def test_import_queue_clear_operation_is_idempotent_and_conflicts_with_restart(
+    client,
+    db_session,
+):
+    _setup_admin(client)
+    record_queue_heartbeat(db_session, "import", "test-worker", 2)
+
+    first = client.post("/api/import-tasks/clear")
+    assert first.status_code == 202
+    first_data = first.json()["data"]
+    assert first_data["created"] is True
+    assert first_data["operation"]["action"] == "clear"
+    assert first_data["operation"]["status"] == "requested"
+
+    repeated = client.post("/api/import-tasks/clear")
+    assert repeated.status_code == 202
+    repeated_data = repeated.json()["data"]
+    assert repeated_data["created"] is False
+    assert repeated_data["operation"]["id"] == first_data["operation"]["id"]
+
+    restart = client.post("/api/system/queues/import/restart")
+    assert restart.status_code == 409
+    assert restart.json()["error"]["code"] == "QUEUE_OPERATION_CONFLICT"
+
+    operation = client.get(
+        f"/api/system/queue-operations/{first_data['operation']['id']}"
+    )
+    assert operation.status_code == 200
+    assert operation.json()["data"]["operation"]["action"] == "clear"
+
+
+def test_import_queue_clear_rejects_an_unavailable_worker(client):
+    _setup_admin(client)
+
+    response = client.post("/api/import-tasks/clear")
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "IMPORT_QUEUE_OFFLINE"

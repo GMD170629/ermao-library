@@ -1,6 +1,6 @@
 {
   "name": "@shuku/web",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "scripts": {
     "predev": "node scripts/prepare-pdfjs-worker.mjs",
@@ -32,7 +32,8 @@
     "next": "14.2.15",
     "pdfjs-dist": "6.1.200",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "sharp": "^0.35.3"
   },
   "devDependencies": {
     "@playwright/test": "1.61.1",

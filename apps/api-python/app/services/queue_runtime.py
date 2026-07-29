@@ -9,13 +9,16 @@ from app.modules.system.domain.queue import (
 )
 from app.bootstrap.system import (
     QueueHeartbeatPump,
+    active_queue_operation,
     active_restart_operation,
+    create_queue_operation,
     create_restart_operation,
     mark_queue_stopped,
     queue_operation_view,
     queue_runtime_view,
     record_queue_heartbeat,
     update_restart_operation,
+    update_queue_operation,
 )
 
 __all__ = [
@@ -25,6 +28,8 @@ __all__ = [
     "QueueHeartbeatPump",
     "TERMINAL_OPERATION_STATUSES",
     "active_restart_operation",
+    "active_queue_operation",
+    "create_queue_operation",
     "create_restart_operation",
     "mark_queue_stopped",
     "queue_operation_view",
@@ -32,4 +37,5 @@ __all__ = [
     "record_queue_heartbeat",
     "safe_runtime_error",
     "update_restart_operation",
+    "update_queue_operation",
 ]

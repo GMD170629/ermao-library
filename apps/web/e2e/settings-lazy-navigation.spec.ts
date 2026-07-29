@@ -92,6 +92,50 @@ async function mockSettingsApi(page: Page, locale: 'zh-CN' | 'en-US' = 'zh-CN') 
       await route.fulfill({ json: { ok: true, data: { tasks: [], total: 0 } } });
       return;
     }
+    if (pathname.endsWith('/api/import-tasks/clear')) {
+      await route.fulfill({
+        status: 202,
+        json: {
+          ok: true,
+          data: {
+            created: true,
+            operation: {
+              id: 'queue-clear',
+              queueName: 'import',
+              action: 'clear',
+              status: 'requested',
+              messageCode: 'queue.clear.requested',
+              requestedAt: '2026-07-29T00:00:00Z',
+              startedAt: null,
+              finishedAt: null,
+              updatedAt: '2026-07-29T00:00:00Z'
+            }
+          }
+        }
+      });
+      return;
+    }
+    if (pathname.endsWith('/api/system/queue-operations/queue-clear')) {
+      await route.fulfill({
+        json: {
+          ok: true,
+          data: {
+            operation: {
+              id: 'queue-clear',
+              queueName: 'import',
+              action: 'clear',
+              status: 'completed',
+              messageCode: 'queue.clear.completed',
+              requestedAt: '2026-07-29T00:00:00Z',
+              startedAt: '2026-07-29T00:00:01Z',
+              finishedAt: '2026-07-29T00:00:02Z',
+              updatedAt: '2026-07-29T00:00:02Z'
+            }
+          }
+        }
+      });
+      return;
+    }
     if (pathname.endsWith('/api/import-tasks')) {
       await route.fulfill({ json: { ok: true, data: { tasks: [], summary: { completed: 0, failed: 0 }, page: 1, pageSize: 10, total: 0, totalPages: 1 } } });
       return;
@@ -224,6 +268,26 @@ test('library import sections fetch only when their tab mounts and refresh after
   await expect.poll(() => requestCount(counts, '/api/system-settings')).toBeGreaterThan(0);
   await page.getByRole('tab', { name: '导入记录' }).click();
   await expect.poll(() => requestCount(counts, '/api/import-tasks')).toBeGreaterThan(initialImportTaskRequests);
+});
+
+test('library import queue clear confirms, polls, and refreshes only after completion', async ({ page }) => {
+  const counts = await mockSettingsApi(page);
+  await page.goto('/settings/library');
+
+  const clearButton = page.getByRole('button', { name: '清理导入队列' });
+  await clearButton.click();
+  const dialog = page.getByRole('dialog', { name: '清理导入队列？' });
+  await expect(dialog).toContainText('只删除队列记录，不会删除源文件、生成文件或已入库书籍');
+  await dialog.getByRole('button', { name: '取消' }).click();
+  expect(requestCount(counts, 'POST /api/import-tasks/clear')).toBe(0);
+
+  await clearButton.click();
+  await page.getByRole('dialog', { name: '清理导入队列？' }).getByRole('button', { name: '确认清理' }).click();
+
+  await expect.poll(() => requestCount(counts, 'POST /api/import-tasks/clear')).toBe(1);
+  await expect.poll(() => requestCount(counts, 'GET /api/system/queue-operations/queue-clear')).toBe(1);
+  await expect(page.getByText('导入队列已清理', { exact: true }).first()).toBeVisible();
+  await expect.poll(() => requestCount(counts, '/api/import-tasks')).toBeGreaterThan(1);
 });
 
 test('library import preferences save after editing the stability check time', async ({ page }) => {

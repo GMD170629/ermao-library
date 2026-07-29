@@ -948,12 +948,22 @@ def get_monitor_folder_shelf_id(db: Session, monitor_folder_id: str) -> str | No
 
 
 def shelf_exists(db: Session, shelf_id: str) -> bool:
-    return db.scalar(select(Shelf.id).where(Shelf.id == shelf_id)) is not None
+    return (
+        db.scalar(
+            select(Shelf.id).where(
+                Shelf.id == shelf_id,
+                Shelf.kind == "STATIC",
+            )
+        )
+        is not None
+    )
 
 
 def add_work_to_shelf(
     db: Session, shelf_id: str, work_id: str, *, created_at: Any
 ) -> None:
+    if not shelf_exists(db, shelf_id):
+        return
     db.execute(
         sqlite_insert(ShelfWork)
         .values(shelf_id=shelf_id, work_id=work_id, created_at=created_at)

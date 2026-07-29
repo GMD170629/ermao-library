@@ -1,49 +1,75 @@
 """Public application and domain contracts for the library capability."""
 
+from app.modules.library.application.commands import (
+    LibraryUnitOfWork,
+    execute_library_write,
+)
+from app.modules.library.application.dto import MoveVolumeResult
 from app.modules.library.application.filter_ast import (
     FilterCondition,
     FilterExpression,
     InvalidFilterExpression,
     parse_filter_expression,
 )
-from app.modules.library.application.commands import (
-    LibraryUnitOfWork,
-    execute_library_write,
+from app.modules.library.application.groupings import (
+    LIBRARY_GROUPING_KINDS,
+    LibraryGrouping,
+    LibraryGroupingPage,
+    LibraryGroupingQueryPort,
+    ListLibraryGroupings,
 )
 from app.modules.library.application.queries import (
     GetSmartShelfWorkIds,
     SmartShelfCriteria,
     SmartShelfQueryPort,
 )
-from app.modules.library.domain.facets import FACET_KINDS
 from app.modules.library.application.work_list import (
     WorkListQuery,
     WorkListResult,
     parse_media_kinds,
 )
-from app.modules.library.application.dto import MoveVolumeResult
+from app.modules.library.domain.facets import FACET_KINDS
+from app.modules.library.presentation.schemas import WorkView
 from app.modules.library.presentation.views import (
     _bookshelf_item_view as bookshelf_item_view,
+)
+from app.modules.library.presentation.views import (
     _get_work as get_work,
+)
+from app.modules.library.presentation.views import (
     _preferred_work_cover_path as preferred_work_cover_path,
+)
+from app.modules.library.presentation.views import (
     _work_view as work_view,
 )
-from app.modules.library.presentation.schemas import WorkView
 from app.modules.library.presentation.work_ops import (
     _collect_import_linked_library_scope_paths as collect_import_linked_library_scope_paths,
+)
+from app.modules.library.presentation.work_ops import (
     _conversion_output_paths as conversion_output_paths,
+)
+from app.modules.library.presentation.work_ops import (
     _delete_import_linked_library_scope as delete_import_linked_library_scope,
+)
+from app.modules.library.presentation.work_ops import (
     _delete_source_paths as delete_source_paths,
+)
+from app.modules.library.presentation.work_ops import (
     _source_delete_path as source_delete_path,
 )
 
 __all__ = [
     "FACET_KINDS",
+    "LIBRARY_GROUPING_KINDS",
     "FilterCondition",
     "FilterExpression",
     "GetSmartShelfWorkIds",
     "InvalidFilterExpression",
+    "LibraryGrouping",
+    "LibraryGroupingPage",
+    "LibraryGroupingQueryPort",
     "LibraryUnitOfWork",
+    "ListLibraryGroupings",
     "MoveVolumeResult",
     "SmartShelfCriteria",
     "SmartShelfQueryPort",

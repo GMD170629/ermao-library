@@ -28,13 +28,16 @@ from app.modules.system.infrastructure.health_runs import (
 )
 from app.modules.system.infrastructure.queue_runtime import (
     QueueHeartbeatPump,
+    active_queue_operation,
     active_restart_operation,
+    create_queue_operation as _create_queue_operation,
     create_restart_operation as _create_restart_operation,
     mark_queue_stopped as _mark_queue_stopped,
     queue_operation_view,
     queue_runtime_view,
     record_queue_heartbeat as _record_queue_heartbeat,
     update_restart_operation as _update_restart_operation,
+    update_queue_operation as _update_queue_operation,
 )
 from app.modules.system.infrastructure.settings import (
     delete_setting,
@@ -163,6 +166,35 @@ def create_restart_operation(
     )
 
 
+def create_queue_operation(
+    db: Session,
+    actor_user_id: str,
+    *,
+    action: str,
+) -> tuple[dict[str, Any], bool]:
+    return execute_system_transaction(
+        db,
+        lambda: _create_queue_operation(db, actor_user_id, action=action),
+    )
+
+
+def update_queue_operation(
+    db: Session,
+    operation_id: str,
+    status: str,
+    message_code: str,
+) -> None:
+    execute_system_transaction(
+        db,
+        lambda: _update_queue_operation(
+            db,
+            operation_id,
+            status,
+            message_code,
+        ),
+    )
+
+
 def update_restart_operation(
     db: Session,
     operation_id: str,
@@ -181,10 +213,12 @@ def update_restart_operation(
 
 __all__ = [
     "QueueHeartbeatPump",
+    "active_queue_operation",
     "active_health_run_id",
     "active_restart_operation",
     "configured_max_event_bytes",
     "create_or_reuse_health_run",
+    "create_queue_operation",
     "create_restart_operation",
     "delete_setting",
     "delete_settings",
@@ -211,6 +245,7 @@ __all__ = [
     "system_event_size_bytes",
     "system_event_storage_view",
     "update_restart_operation",
+    "update_queue_operation",
     "upsert_setting",
     "upsert_settings",
 ]

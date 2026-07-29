@@ -210,7 +210,14 @@ def queue_runtime_view(db: Session, queue_name: str) -> dict[str, Any] | None:
     )
 
 
-def create_restart_operation(db: Session, actor_user_id: str) -> tuple[dict[str, Any], bool]:
+def create_queue_operation(
+    db: Session,
+    actor_user_id: str,
+    *,
+    action: str,
+) -> tuple[dict[str, Any], bool]:
+    if action not in {"restart", "clear"}:
+        raise ValueError(action)
     existing = db.scalars(
         select(QueueControlOperation)
         .where(
@@ -226,10 +233,10 @@ def create_restart_operation(db: Session, actor_user_id: str) -> tuple[dict[str,
     operation = QueueControlOperation(
         id=f"queue_{uuid4().hex}",
         queue_name="import",
-        action="restart",
+        action=action,
         status="requested",
         actor_user_id=actor_user_id,
-        message_code="queue.restart.requested",
+        message_code=f"queue.{action}.requested",
         requested_at=now,
         started_at=None,
         finished_at=None,
@@ -240,7 +247,7 @@ def create_restart_operation(db: Session, actor_user_id: str) -> tuple[dict[str,
     return _operation_row_dict(operation), True
 
 
-def active_restart_operation(db: Session) -> dict[str, Any] | None:
+def active_queue_operation(db: Session) -> dict[str, Any] | None:
     row = db.scalars(
         select(QueueControlOperation)
         .where(
@@ -253,7 +260,12 @@ def active_restart_operation(db: Session) -> dict[str, Any] | None:
     return _operation_row_dict(row) if row else None
 
 
-def update_restart_operation(db: Session, operation_id: str, status: str, message_code: str) -> None:
+def update_queue_operation(
+    db: Session,
+    operation_id: str,
+    status: str,
+    message_code: str,
+) -> None:
     if status not in (*ACTIVE_OPERATION_STATUSES, *TERMINAL_OPERATION_STATUSES):
         raise ValueError(status)
     now = now_timestamp_ms()
@@ -276,3 +288,23 @@ def update_restart_operation(db: Session, operation_id: str, status: str, messag
 def queue_operation_view(db: Session, operation_id: str) -> dict[str, Any] | None:
     row = db.get(QueueControlOperation, operation_id)
     return _operation_row_dict(row) if row else None
+
+
+def create_restart_operation(
+    db: Session,
+    actor_user_id: str,
+) -> tuple[dict[str, Any], bool]:
+    return create_queue_operation(db, actor_user_id, action="restart")
+
+
+def active_restart_operation(db: Session) -> dict[str, Any] | None:
+    return active_queue_operation(db)
+
+
+def update_restart_operation(
+    db: Session,
+    operation_id: str,
+    status: str,
+    message_code: str,
+) -> None:
+    update_queue_operation(db, operation_id, status, message_code)

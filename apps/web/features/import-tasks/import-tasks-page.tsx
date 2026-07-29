@@ -12,6 +12,10 @@ import { Progress } from '../../components/ui/progress';
 import { Select } from '../../components/ui/select';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
+import {
+  requestImportQueueClear,
+  waitForImportQueueClear
+} from './api/clear-queue';
 
 type ImportTask = {
   id: string;
@@ -155,6 +159,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const requestIdRef = useRef(0);
+  const clearControllerRef = useRef<AbortController | null>(null);
   const confirm = useConfirm();
   const toast = useToast();
   const activeTask = useMemo(() => page === 1 ? tasks.find((task) => task.status === 'PARSING' || task.status === 'PENDING') ?? null : null, [page, tasks]);
@@ -213,33 +218,41 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
     }
   }
 
-  async function clearFinishedTasks() {
+  async function clearImportQueue() {
     const confirmed = await confirm({
-      title: '清空导入记录',
-      description: '确认清空已完成和失败的导入记录吗？书库读物和源文件不会被删除。',
-      confirmLabel: '清空记录',
+      title: '清理导入队列？',
+      description: '清理完成前会停止领取新任务，并等待当前任务安全完成或回滚。只删除队列记录，不会删除源文件、生成文件或已入库书籍。',
+      confirmLabel: '确认清理',
       tone: 'danger'
     });
     if (!confirmed) return;
     setBusy('clear');
+    const controller = new AbortController();
+    clearControllerRef.current?.abort();
+    clearControllerRef.current = controller;
     try {
-      const response = await fetch('/api/import-tasks', { method: 'DELETE' });
-      const text = await response.text();
-      const payload = text ? JSON.parse(text) as { ok: boolean; data?: { deleted: number }; error?: { message: string } } : null;
-      if (!response.ok) throw new Error(payload?.error?.message ?? `清空记录失败：HTTP ${response.status}`);
-      if (!payload?.ok) throw new Error(payload?.error?.message ?? '清空记录失败');
-      const successMessage = `已清空 ${payload.data?.deleted ?? 0} 条已结束导入记录`;
+      const requested = await requestImportQueueClear(controller.signal);
+      setMessage('正在停止并清理导入队列');
+      const completed = await waitForImportQueueClear(requested.id, {
+        signal: controller.signal
+      });
+      if (completed.status === 'failed') throw new Error('清理导入队列失败');
+      const successMessage = '导入队列已清理';
       setMessage(successMessage);
       toast.success(successMessage);
       setError('');
       setPage(1);
       await loadTasks(1);
     } catch (reason) {
-      const nextError = reason instanceof Error ? reason.message : '清空记录失败';
+      if (controller.signal.aborted) return;
+      const nextError = reason instanceof Error ? reason.message : '清理导入队列失败';
       setError(nextError);
-      toast.error('清空记录失败', nextError);
+      toast.error('清理导入队列失败', nextError);
     } finally {
-      setBusy('');
+      if (clearControllerRef.current === controller) {
+        clearControllerRef.current = null;
+        setBusy('');
+      }
     }
   }
 
@@ -321,6 +334,10 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
     setSelectedIds(new Set());
   }, [keyword, page, pageSize, statusFilter]);
 
+  useEffect(() => () => {
+    clearControllerRef.current?.abort();
+  }, []);
+
   const selectableTasks = useMemo(() => tasks.filter((task) => task.status === 'COMPLETED' || task.status === 'FAILED'), [tasks]);
   const selectedTasks = useMemo(() => tasks.filter((task) => selectedIds.has(task.id)), [selectedIds, tasks]);
   const allPageSelected = selectableTasks.length > 0 && selectableTasks.every((task) => selectedIds.has(task.id));
@@ -361,15 +378,15 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
             <Button variant="secondary" icon={RefreshCw} loading={loading} loadingText={i18nAttribute("刷新中")} onClick={() => void loadTasks(page)}><I18nText>刷新</I18nText></Button>
             <Button loading={busy === 'rescan'} loadingText={i18nAttribute("请求中")} variant="secondary" icon={Search} onClick={() => void requestRescan()}>
               <I18nText>强制重新识别</I18nText></Button>
-            <Button loading={busy === 'clear'} loadingText={i18nAttribute("清空中")} variant="danger" icon={Trash2} onClick={() => void clearFinishedTasks()}>
-              <I18nText>清空记录</I18nText></Button>
+            <Button loading={busy === 'clear'} loadingText={i18nAttribute("清理中")} variant="danger" icon={Trash2} onClick={() => void clearImportQueue()}>
+              <I18nText>清理导入队列</I18nText></Button>
           </div>
         )}
       /> : (
         <div className="flex flex-wrap justify-end gap-2">
           <Button variant="secondary" icon={RefreshCw} loading={loading} loadingText={i18nAttribute("刷新中")} onClick={() => void loadTasks(page)}><I18nText>刷新</I18nText></Button>
           <Button loading={busy === 'rescan'} loadingText={i18nAttribute("请求中")} variant="secondary" icon={Search} onClick={() => void requestRescan()}><I18nText>重新识别全部文件夹</I18nText></Button>
-          <Button loading={busy === 'clear'} loadingText={i18nAttribute("清空中")} variant="ghost" icon={Trash2} onClick={() => void clearFinishedTasks()}><I18nText>清理已结束记录</I18nText></Button>
+          <Button loading={busy === 'clear'} loadingText={i18nAttribute("清理中")} variant="ghost" icon={Trash2} onClick={() => void clearImportQueue()}><I18nText>清理导入队列</I18nText></Button>
         </div>
       )}
       <form onSubmit={submitSearch} className="flex flex-col gap-3 rounded-[20px] border border-[#DEDAD4] bg-[#FAF9F7] p-3 md:flex-row md:items-center">

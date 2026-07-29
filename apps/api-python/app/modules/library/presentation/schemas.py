@@ -429,6 +429,22 @@ class SeriesPayload(HttpContractModel):
     total: int
 
 
+class LibraryGroupingSummary(HttpContractModel):
+    id: str
+    name: str
+    book_count: int = Field(alias="bookCount")
+    updated_at: datetime = Field(alias="updatedAt")
+
+
+class LibraryGroupingsPayload(HttpContractModel):
+    kind: Literal["SERIES", "AUTHOR"]
+    groups: list[LibraryGroupingSummary]
+    page: int
+    page_size: int = Field(alias="pageSize")
+    total: int
+    total_pages: int = Field(alias="totalPages")
+
+
 class WorksPayload(HttpContractModel):
     books: list[WorkListItem]
     page: int
@@ -890,6 +906,7 @@ ContinueReadingResponse = SuccessEnvelope[ContinueReadingPayload]
 ManagementOverviewResponse = SuccessEnvelope[ManagementOverviewPayload]
 ManagementFoldersResponse = SuccessEnvelope[ManagementFoldersPayload]
 SeriesResponse = SuccessEnvelope[SeriesPayload]
+LibraryGroupingsResponse = SuccessEnvelope[LibraryGroupingsPayload]
 WorksResponse = SuccessEnvelope[WorksPayload]
 WorkResponse = SuccessEnvelope[WorkPayload]
 WorkDetailResponse = SuccessEnvelope[WorkDetailPayload]

@@ -5,18 +5,13 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.models.auth import User
-from app.modules.library.application.work_list import WorkListQuery, WorkListResult
+from app.modules.library.application.dto import MoveVolumeResult
+from app.modules.library.application.groupings import ListLibraryGroupings
 from app.modules.library.application.queries import (
     GetSmartShelfWorkIds,
     SmartShelfCriteria,
 )
-from app.modules.library.infrastructure.queries import SqlAlchemyLibraryQueries
-from app.modules.library.application.dto import MoveVolumeResult
-from app.modules.library.infrastructure.structural_operations import (
-    move_volume_to_work as _move_volume_to_work,
-    reorder_volume as _reorder_volume,
-)
-from app.modules.library.infrastructure.work_list import list_works as _list_works
+from app.modules.library.application.work_list import WorkListQuery, WorkListResult
 from app.modules.library.infrastructure import dashboard as library_dashboard
 from app.modules.library.infrastructure import deletion as library_deletion
 from app.modules.library.infrastructure import facet_queries as library_facet_queries
@@ -25,6 +20,17 @@ from app.modules.library.infrastructure import operations as library_operation_s
 from app.modules.library.infrastructure import projections as library_projections
 from app.modules.library.infrastructure import storage as library_storage
 from app.modules.library.infrastructure import works as library_works
+from app.modules.library.infrastructure.groupings import (
+    SqlAlchemyLibraryGroupingQueries,
+)
+from app.modules.library.infrastructure.queries import SqlAlchemyLibraryQueries
+from app.modules.library.infrastructure.structural_operations import (
+    move_volume_to_work as _move_volume_to_work,
+)
+from app.modules.library.infrastructure.structural_operations import (
+    reorder_volume as _reorder_volume,
+)
+from app.modules.library.infrastructure.work_list import list_works as _list_works
 
 
 def smart_shelf_work_ids(
@@ -38,6 +44,10 @@ def smart_shelf_work_ids(
         SmartShelfCriteria.from_external(rules),
         user_id=user_id,
     )
+
+
+def library_groupings(db: Session) -> ListLibraryGroupings:
+    return ListLibraryGroupings(SqlAlchemyLibraryGroupingQueries(db))
 
 
 def list_works(

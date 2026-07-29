@@ -14,6 +14,8 @@ class WorkListQuery:
     search: str | None = None
     keyword: str | None = None
     series_name: str | None = None
+    facet_kind: str | None = None
+    facet_id: str | None = None
     sort: str = "updated"
     sort_direction: str | None = None
     type_filter: str = ""

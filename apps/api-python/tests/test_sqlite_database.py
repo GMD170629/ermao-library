@@ -19,6 +19,7 @@ from app.db.runner import head_revision
 from app.db.seed import seed_baseline_data
 from app.db.sqlite import create_sqlite_engine
 from app.models.settings import ReaderBookPreference
+from app.modules.shelf.infrastructure.models import ShelfCollectionMembership
 from app.services.backup_service import backup_path, create_backup, restore_backup
 
 EXPECTED_TABLES = {
@@ -58,6 +59,7 @@ EXPECTED_TABLES = {
     "ReaderProgressCursor",
     "Session",
     "Shelf",
+    "ShelfCollectionMembership",
     "ShelfWork",
     "Source",
     "SourceSearchRecord",
@@ -315,6 +317,7 @@ def test_bootstrap_accepts_v14_database_at_current_schema_revision(tmp_path) -> 
     try:
         bootstrap_database(engine, settings)
         with engine.begin() as connection:
+            ShelfCollectionMembership.__table__.drop(connection)
             connection.execute(
                 text(
                     "INSERT INTO `LibraryWork` "

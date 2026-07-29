@@ -270,6 +270,16 @@ class QueueOperationNotFoundError(HttpContractError[QueueOperationNotFoundBody])
     body_model = QueueOperationNotFoundBody
 
 
+class QueueOperationConflictBody(HttpContractModel):
+    message: str
+    code: Literal["QUEUE_OPERATION_CONFLICT"] = "QUEUE_OPERATION_CONFLICT"
+
+
+class QueueOperationConflictError(HttpContractError[QueueOperationConflictBody]):
+    status_code = 409
+    body_model = QueueOperationConflictBody
+
+
 class HealthRunActiveBody(HttpContractModel):
     message: str
     code: Literal["HEALTH_RUN_ACTIVE"] = "HEALTH_RUN_ACTIVE"

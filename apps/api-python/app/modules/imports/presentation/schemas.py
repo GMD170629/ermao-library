@@ -198,6 +198,24 @@ class DeletedImportTasksPayload(HttpContractModel):
     deleted: int
 
 
+class ImportQueueClearOperation(HttpContractModel):
+    id: str
+    queue_name: Literal["import"] = Field(alias="queueName")
+    action: Literal["clear"]
+    status: Literal["requested", "waiting", "running", "completed", "failed"]
+    actor_user_id: str = Field(alias="actorUserId")
+    message_code: str = Field(alias="messageCode")
+    requested_at: datetime = Field(alias="requestedAt")
+    started_at: datetime | None = Field(alias="startedAt")
+    finished_at: datetime | None = Field(alias="finishedAt")
+    updated_at: datetime = Field(alias="updatedAt")
+
+
+class ImportQueueClearPayload(HttpContractModel):
+    operation: ImportQueueClearOperation
+    created: bool
+
+
 class RescanImportTasksPayload(HttpContractModel):
     requested_at: datetime = Field(alias="requestedAt")
     monitor_folder_ids: list[str] | None = Field(alias="monitorFolderIds")
@@ -208,6 +226,7 @@ ImportTaskResponse = SuccessEnvelope[ImportTaskPayload]
 ImportLogsResponse = SuccessEnvelope[ImportLogsPayload]
 ImportDirectoryScanResponse = SuccessEnvelope[ImportDirectoryScanPayload]
 DeletedImportTasksResponse = SuccessEnvelope[DeletedImportTasksPayload]
+ImportQueueClearResponse = SuccessEnvelope[ImportQueueClearPayload]
 RescanImportTasksResponse = SuccessEnvelope[RescanImportTasksPayload]
 
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, BookOpen, Check, Edit3, Loader2, Plus, Save, Search, Sparkles, Trash2, X } from 'lucide-react';
+import { ArrowLeft, BookOpen, Check, Edit3, Folders, Loader2, Plus, Save, Search, Sparkles, Trash2, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BookshelfCollection, type BookshelfItem } from '../../components/book/bookshelf';
@@ -17,41 +17,20 @@ import {
   type SmartFilterField,
   type SmartFilterRules as LibrarySmartFilterRules
 } from '../library/public';
-import { summarizeSmartShelfRules, type SmartShelfRules } from './smart-shelf-rules';
+import {
+  deleteShelfById,
+  fetchShelf,
+  fetchShelves,
+  ShelfApiError,
+  writeShelf,
+  type ShelfKind,
+  type ShelfView
+} from './public';
+import { summarizeSmartShelfRules } from './smart-shelf-rules';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type BookSearchItem = BookshelfItem & { format: string };
-
-type ShelfView = {
-  id: string;
-  name: string;
-  description: string | null;
-  bookCount: number;
-  bookIds?: string[];
-  books?: BookshelfItem[];
-  page?: number;
-  pageSize?: number;
-  total?: number;
-  totalPages?: number;
-  createdAt: string;
-  updatedAt: string;
-  kind?: 'STATIC' | 'SMART';
-  rules?: SmartShelfRules;
-  pinned?: boolean;
-};
-
-type ShelvesPayload = {
-  ok: boolean;
-  data?: { shelves: ShelfView[] };
-  error?: { message: string };
-};
-
-type ShelfPayload = {
-  ok: boolean;
-  data?: { shelf: ShelfView };
-  error?: { message: string };
-};
 
 type BooksPayload = {
   ok: boolean;
@@ -89,8 +68,10 @@ export function ShelvesPage() {
   const [activeShelf, setActiveShelf] = useState<ShelfView | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
-  const [draftKind, setDraftKind] = useState<'STATIC' | 'SMART'>('STATIC');
+  const [draftKind, setDraftKind] = useState<ShelfKind>('STATIC');
   const [selectedBookIds, setSelectedBookIds] = useState<string[]>([]);
+  const [selectedMemberShelfIds, setSelectedMemberShelfIds] = useState<string[]>([]);
+  const [selectedCollectionIds, setSelectedCollectionIds] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [searchBooks, setSearchBooks] = useState<BookSearchItem[]>([]);
   const [smartFilterFields, setSmartFilterFields] = useState<SmartFilterField[]>([]);
@@ -115,9 +96,14 @@ export function ShelvesPage() {
 
   const route = useMemo(() => new URLSearchParams(currentSearch), [currentSearch]);
   const activeIsNew = activeId === 'new';
-  const editing = activeIsNew || (Boolean(activeId) && route.get('edit') === '1' && Boolean(activeShelf));
+  const editing = activeIsNew || (
+    Boolean(activeId)
+    && route.get('edit') === '1'
+    && Boolean(activeShelf)
+  );
   const activeKind = activeIsNew ? draftKind : activeShelf?.kind ?? 'STATIC';
   const activeIsSmart = activeKind === 'SMART';
+  const activeIsCollection = activeKind === 'COLLECTION';
   const smartRuleSummaries = useMemo(() => summarizeSmartShelfRules(activeShelf?.rules), [activeShelf?.rules]);
   const applicableRules = useMemo(
     () => applicableSmartFilterRules(smartFilterRules),
@@ -139,7 +125,13 @@ export function ShelvesPage() {
     const requestedShelf = route.get('shelf');
     if (route.get('create') === '1') {
       openRequestRef.current += 1;
-      openCreate(route.get('kind') === 'smart');
+      openCreate(
+        route.get('kind') === 'smart'
+          ? 'SMART'
+          : route.get('kind') === 'collection'
+            ? 'COLLECTION'
+            : 'STATIC'
+      );
     } else if (requestedShelf) {
       void openShelf(requestedShelf);
     } else {
@@ -147,6 +139,8 @@ export function ShelvesPage() {
       setActiveId(null);
       setActiveShelf(null);
       setSelectedBookIds([]);
+      setSelectedMemberShelfIds([]);
+      setSelectedCollectionIds([]);
       setSearch('');
       setSearchBooks([]);
       setDraftKind('STATIC');
@@ -161,7 +155,7 @@ export function ShelvesPage() {
   }, [route]);
 
   useEffect(() => {
-    if (!editing || activeIsSmart || !activeId || search.trim().length === 0) {
+    if (!editing || activeIsSmart || activeIsCollection || !activeId || search.trim().length === 0) {
       setSearchBooks([]);
       setSearchLoading(false);
       return;
@@ -183,7 +177,7 @@ export function ShelvesPage() {
     return () => {
       active = false;
     };
-  }, [activeId, activeIsSmart, editing, search]);
+  }, [activeId, activeIsCollection, activeIsSmart, editing, search]);
 
   useEffect(() => {
     if (!activeIsNew || !activeIsSmart || filterSchemaLoaded) return;
@@ -275,26 +269,58 @@ export function ShelvesPage() {
   }, [activeShelf, searchBooks]);
   const selectedBooks = selectedBookIds.map((id) => previewBooksById.get(id)).filter(Boolean) as BookshelfItem[];
   const shelfBooks = activeShelf?.books ?? [];
+  const memberShelves = activeShelf?.shelves ?? [];
   const initialBookIds = activeShelf?.bookIds ?? (activeShelf?.books ?? []).map((book) => book.id);
+  const initialMemberShelfIds = activeShelf?.memberShelfIds ?? memberShelves.map((shelf) => shelf.id);
+  const initialCollectionIds = activeShelf?.collectionIds ?? [];
+  const memberShelfOptions = shelves.filter((shelf) => shelf.kind !== 'COLLECTION');
+  const collectionOptions = shelves.filter(
+    (shelf) => (
+      shelf.kind === 'COLLECTION'
+      && shelf.id !== activeShelf?.id
+    )
+  );
   const hasUnsavedChanges = activeIsNew
     ? Boolean(
         form.name.trim()
         || form.description.trim()
-        || draftKind === 'SMART'
+        || draftKind !== 'STATIC'
         || selectedBookIds.length
+        || selectedMemberShelfIds.length
+        || selectedCollectionIds.length
       )
     : activeShelf ? (
       form.name.trim() !== activeShelf.name
       || form.description.trim() !== (activeShelf.description ?? '')
-      || (!activeIsSmart && selectedBookIds.join('\u0000') !== initialBookIds.join('\u0000'))
+      || (activeIsCollection
+        ? selectedMemberShelfIds.join('\u0000') !== initialMemberShelfIds.join('\u0000')
+        : selectedCollectionIds.join('\u0000') !== initialCollectionIds.join('\u0000')
+          || (!activeIsSmart && selectedBookIds.join('\u0000') !== initialBookIds.join('\u0000')))
     ) : false;
+
+  function shelfErrorMessage(reason: unknown, fallback: string): string {
+    if (!(reason instanceof ShelfApiError)) {
+      return reason instanceof Error ? reason.message : fallback;
+    }
+    switch (reason.code) {
+      case 'SHELF_COLLECTION_NOT_EMPTY':
+        return i18nAttribute("合集仍有书架，请先移除全部书架");
+      case 'INVALID_COLLECTION_MEMBER':
+        return i18nAttribute("合集只能包含自己的普通或智能书架");
+      case 'COLLECTION_CANNOT_CONTAIN_WORKS':
+        return i18nAttribute("合集不能包含图书");
+      case 'COLLECTION_CANNOT_HAVE_RULES':
+        return i18nAttribute("合集不能设置智能书架规则");
+      default:
+        return reason.message || fallback;
+    }
+  }
 
   async function loadShelves() {
     setLoading(true);
     setError('');
     try {
-      const payload = await readPayload<ShelvesPayload>(await fetch('/api/shelves'), '读取书架失败');
-      setShelves(payload.data?.shelves ?? []);
+      setShelves(await fetchShelves());
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '读取书架失败');
     } finally {
@@ -310,16 +336,23 @@ export function ShelvesPage() {
     else setDetailLoading(true);
     setError('');
     try {
-      const params = new URLSearchParams({
-        page: String(page),
-        pageSize: '24',
-        includeBookIds: page === 1 ? 'true' : 'false'
+      const shelf = await fetchShelf(id, {
+        page,
+        pageSize: 24,
+        includeIds: page === 1
       });
-      const payload = await readPayload<ShelfPayload>(await fetch(`/api/shelves/${id}?${params}`), '读取书架详情失败');
-      if (requestId !== openRequestRef.current || !payload.data) return;
-      const shelf = payload.data.shelf;
+      if (requestId !== openRequestRef.current) return;
       setActiveShelf((current) => {
         if (!append || !current || current.id !== shelf.id) return shelf;
+        if (shelf.kind === 'COLLECTION') {
+          const members = new Map((current.shelves ?? []).map((member) => [member.id, member]));
+          (shelf.shelves ?? []).forEach((member) => members.set(member.id, member));
+          return {
+            ...shelf,
+            memberShelfIds: shelf.memberShelfIds ?? current.memberShelfIds,
+            shelves: Array.from(members.values())
+          };
+        }
         const books = new Map((current.books ?? []).map((book) => [book.id, book]));
         (shelf.books ?? []).forEach((book) => books.set(book.id, book));
         return {
@@ -333,6 +366,8 @@ export function ShelvesPage() {
         setDraftKind(shelf.kind ?? 'STATIC');
         setSmartFilterRules(emptySmartFilterRules);
         setSelectedBookIds(shelf.bookIds ?? (shelf.books ?? []).map((book) => book.id));
+        setSelectedMemberShelfIds(shelf.memberShelfIds ?? (shelf.shelves ?? []).map((member) => member.id));
+        setSelectedCollectionIds(shelf.collectionIds ?? []);
         setSearch('');
         setSearchBooks([]);
       }
@@ -346,14 +381,16 @@ export function ShelvesPage() {
     }
   }
 
-  function openCreate(smart = false) {
+  function openCreate(kind: ShelfKind = 'STATIC') {
     setActiveId('new');
     setActiveShelf(null);
     setForm(emptyForm);
-    setDraftKind(smart ? 'SMART' : 'STATIC');
+    setDraftKind(kind);
     setSmartFilterRules(emptySmartFilterRules);
     setFilterSchemaError('');
     setSelectedBookIds([]);
+    setSelectedMemberShelfIds([]);
+    setSelectedCollectionIds([]);
     setSearch('');
     setSearchBooks([]);
     setPreviewBooks([]);
@@ -366,7 +403,11 @@ export function ShelvesPage() {
     if (hasUnsavedChanges) {
       const discard = await confirm({
         title: '放弃未保存的更改',
-        description: activeIsSmart ? '书架名称和描述的更改不会保留。' : '书架名称、描述和图书调整都不会保留。',
+        description: activeIsCollection
+          ? '合集名称、描述和成员调整都不会保留。'
+          : activeIsSmart
+            ? '书架名称、描述和合集归属的更改不会保留。'
+            : '书架名称、描述、图书和合集归属调整都不会保留。',
         confirmLabel: '放弃更改',
         tone: 'danger'
       });
@@ -392,34 +433,42 @@ export function ShelvesPage() {
     setSaving(true);
     setError('');
     try {
-      const response = await fetch(activeIsNew ? '/api/shelves' : `/api/shelves/${activeId}`, {
-        method: activeIsNew ? 'POST' : 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          description: form.description.trim(),
-          ...(activeIsNew ? { kind: activeKind } : {}),
-          ...(activeIsNew && activeIsSmart
-            ? { rules: serializableSmartFilterRules(applicableRules), pinned: true }
-            : !activeIsSmart
-              ? { bookIds: selectedBookIds }
-              : {})
-        })
+      const saved = await writeShelf(activeIsNew ? null : activeId, {
+        name,
+        description: form.description.trim(),
+        ...(activeIsNew ? { kind: activeKind } : {}),
+        ...(activeIsCollection
+          ? { memberShelfIds: selectedMemberShelfIds }
+          : {
+              collectionIds: selectedCollectionIds,
+              ...(activeIsNew && activeIsSmart
+                ? { rules: serializableSmartFilterRules(applicableRules), pinned: true }
+                : !activeIsSmart
+                  ? { bookIds: selectedBookIds }
+                  : {})
+            })
       });
-      const payload = await readPayload<ShelfPayload>(response, '保存书架失败');
-      if (!payload.data) throw new Error('保存书架失败');
-      const saved = payload.data.shelf;
       setActiveShelf(saved);
       setActiveId(saved.id);
       setDraftKind(saved.kind ?? 'STATIC');
       setForm({ name: saved.name, description: saved.description ?? '' });
       setSelectedBookIds(saved.bookIds ?? (saved.books ?? []).map((book) => book.id));
+      setSelectedMemberShelfIds(saved.memberShelfIds ?? (saved.shelves ?? []).map((member) => member.id));
+      setSelectedCollectionIds(saved.collectionIds ?? []);
       await loadShelves();
       window.dispatchEvent(new Event('shuku:shelves-changed'));
-      toast.success(activeIsNew ? '书架已创建' : '书架更改已保存');
+      toast.success(
+        activeIsNew
+          ? activeIsCollection
+            ? '合集已创建'
+            : '书架已创建'
+          : activeIsCollection
+            ? '合集更改已保存'
+            : '书架更改已保存'
+      );
       router.replace(`/shelves?shelf=${encodeURIComponent(saved.id)}`, { scroll: false });
     } catch (reason) {
-      const nextError = reason instanceof Error ? reason.message : '保存书架失败';
+      const nextError = shelfErrorMessage(reason, '保存书架失败');
       setError(nextError);
       toast.error('保存书架失败', nextError);
     } finally {
@@ -429,25 +478,31 @@ export function ShelvesPage() {
 
   async function deleteShelf() {
     if (!activeShelf) return;
+    if (activeIsCollection && (activeShelf.shelfCount ?? 0) > 0) {
+      setError(i18nAttribute("合集仍有书架，请先移除全部书架"));
+      return;
+    }
     const approved = await confirm({
-      title: '删除书架',
-      description: activeIsSmart
+      title: activeIsCollection ? '删除合集' : '删除书架',
+      description: activeIsCollection
+        ? `删除合集“${activeShelf.name}”？`
+        : activeIsSmart
         ? `删除智能书架“${activeShelf.name}”？自动收录规则会被删除，但图书仍会保留在书库中。`
         : `删除书架“${activeShelf.name}”？书架中的图书仍会保留在书库中。`,
-      confirmLabel: '删除书架',
+      confirmLabel: activeIsCollection ? '删除合集' : '删除书架',
       tone: 'danger'
     });
     if (!approved) return;
     setSaving(true);
     setError('');
     try {
-      await readPayload(await fetch(`/api/shelves/${activeShelf.id}`, { method: 'DELETE' }), '删除书架失败');
+      await deleteShelfById(activeShelf.id);
       await loadShelves();
       window.dispatchEvent(new Event('shuku:shelves-changed'));
-      toast.success('书架已删除');
+      toast.success(activeIsCollection ? '合集已删除' : '书架已删除');
       router.replace('/shelves', { scroll: false });
     } catch (reason) {
-      const nextError = reason instanceof Error ? reason.message : '删除书架失败';
+      const nextError = shelfErrorMessage(reason, '删除书架失败');
       setError(nextError);
       toast.error('删除书架失败', nextError);
     } finally {
@@ -460,23 +515,29 @@ export function ShelvesPage() {
       <Button variant="secondary" icon={ArrowLeft} onClick={() => editing ? void leaveEditor() : router.push('/shelves', { scroll: false })}>
         {editing ? i18nAttribute("取消") : i18nAttribute("全部书架")}
       </Button>
-      {!editing && activeShelf ? <Button icon={Edit3} onClick={() => router.push(`/shelves?shelf=${encodeURIComponent(activeShelf.id)}&edit=1`, { scroll: false })}><I18nText>管理书架</I18nText></Button> : null}
-      {editing ? <Button icon={Save} loading={saving} loadingText={i18nAttribute("保存中")} disabled={detailLoading || (activeIsNew && activeIsSmart && incompleteSmartFilterCount > 0)} onClick={saveShelf}>{activeIsNew ? i18nAttribute(activeIsSmart ? "创建智能书架" : "创建书架") : i18nAttribute("保存更改")}</Button> : null}
+      {!editing && activeShelf ? <Button icon={Edit3} onClick={() => router.push(`/shelves?shelf=${encodeURIComponent(activeShelf.id)}&edit=1`, { scroll: false })}>{activeIsCollection ? <I18nText>管理合集</I18nText> : <I18nText>管理书架</I18nText>}</Button> : null}
+      {editing ? <Button icon={Save} loading={saving} loadingText={i18nAttribute("保存中")} disabled={detailLoading || (activeIsNew && activeIsSmart && incompleteSmartFilterCount > 0)} onClick={saveShelf}>{activeIsNew ? i18nAttribute(activeIsCollection ? "创建合集" : activeIsSmart ? "创建智能书架" : "创建书架") : i18nAttribute("保存更改")}</Button> : null}
     </div>
   ) : <Button icon={Plus} onClick={() => router.push('/shelves?create=1', { scroll: false })}><I18nText>创建书架</I18nText></Button>;
 
   return (
     <div className="shuku-content-frame space-y-6">
       <PageTitle
-        title={activeIsNew ? i18nAttribute("创建书架") : activeShelf?.name ?? (activeId ? i18nAttribute("书架详情") : i18nAttribute("书架"))}
+        title={activeIsNew ? i18nAttribute("创建书架") : activeShelf ? activeShelf.name : activeId ? i18nAttribute("书架详情") : i18nAttribute("书架")}
         titleMeta={activeShelf ? (
-          <span className="shrink-0 text-[13px] text-[#8A847E] sm:text-[15px]">
-            {activeShelf.bookCount} <I18nText>本</I18nText>
+          <span className="flex shrink-0 items-center gap-2 text-[13px] text-[#8A847E] sm:text-[15px]">
+            <span>
+              {activeIsCollection
+                ? <>{activeShelf.shelfCount ?? 0} <I18nText>个书架</I18nText></>
+                : <>{activeShelf.bookCount ?? 0} <I18nText>本</I18nText></>}
+            </span>
           </span>
         ) : undefined}
         translateTitle={!activeShelf}
         desc={activeIsNew
-          ? activeIsSmart
+          ? activeIsCollection
+            ? i18nAttribute("创建合集，把相关书架集中整理在一起。")
+            : activeIsSmart
             ? i18nAttribute("设置自动收录条件，书架会随图书信息变化自动更新。")
             : i18nAttribute("填写基本信息，也可以现在就加入第一批图书。")
           : activeShelf
@@ -498,12 +559,18 @@ export function ShelvesPage() {
               <div className="mt-1 text-sm text-[#7C756F]">
                 {activeIsNew && activeIsSmart
                   ? i18nAttribute("使用与全部图书相同的筛选条件，匹配结果会自动更新。")
+                  : activeIsCollection
+                    ? i18nAttribute("选择要包含的书架，合集本身不能包含图书。")
                   : activeIsSmart
                     ? i18nAttribute("可以修改基本信息并查看自动收录条件；图书由规则自动管理。")
                     : i18nAttribute("勾选或移除图书后，点击“{value0}”统一生效。", { value0: activeIsNew ? '创建书架' : '保存更改' })}
               </div>
             </div>
-            <Badge>{activeIsNew && activeIsSmart ? previewTotal : activeIsSmart ? activeShelf?.bookCount ?? 0 : selectedBookIds.length} <I18nText>本图书</I18nText></Badge>
+            <Badge>
+              {activeIsCollection
+                ? <>{selectedMemberShelfIds.length} <I18nText>个书架</I18nText></>
+                : <>{activeIsNew && activeIsSmart ? previewTotal : activeIsSmart ? activeShelf?.bookCount ?? 0 : selectedBookIds.length} <I18nText>本图书</I18nText></>}
+            </Badge>
           </div>
 
           <div className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,1fr)_390px]">
@@ -511,7 +578,7 @@ export function ShelvesPage() {
               {activeIsNew ? (
                 <fieldset>
                   <legend className="text-sm font-semibold text-[#2A2825]"><I18nText>书架类型</I18nText></legend>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div className="mt-3 grid gap-3 sm:grid-cols-3">
                     <button
                       type="button"
                       aria-pressed={draftKind === 'STATIC'}
@@ -546,6 +613,23 @@ export function ShelvesPage() {
                         <span className="mt-1 block text-xs text-[#817A74]"><I18nText>图书会按条件自动加入或移出</I18nText></span>
                       </span>
                     </button>
+                    <button
+                      type="button"
+                      aria-pressed={draftKind === 'COLLECTION'}
+                      onClick={() => setDraftKind('COLLECTION')}
+                      className={cn(
+                        'flex min-h-20 items-center gap-3 rounded-2xl border px-4 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-[#F6B7A5]',
+                        draftKind === 'COLLECTION'
+                          ? 'border-[#F0AA96] bg-[#FFF8F5] ring-2 ring-[#FBE1D9]'
+                          : 'border-[#E4DED8] bg-white hover:border-[#D7CEC7]'
+                      )}
+                    >
+                      <Folders size={20} className={draftKind === 'COLLECTION' ? 'text-[#D94724]' : 'text-[#817A74]'} />
+                      <span>
+                        <span className="block text-sm font-semibold text-[#2A2825]"><I18nText>书架合集</I18nText></span>
+                        <span className="mt-1 block text-xs text-[#817A74]"><I18nText>集中整理多个书架</I18nText></span>
+                      </span>
+                    </button>
                   </div>
                 </fieldset>
               ) : null}
@@ -561,7 +645,64 @@ export function ShelvesPage() {
                 </label>
               </div>
 
-              {activeIsNew && activeIsSmart ? (
+              {activeIsCollection ? (
+                <fieldset>
+                  <legend className="text-sm font-semibold text-[#2A2825]"><I18nText>合集中的书架</I18nText></legend>
+                  <div className="mt-1 text-xs leading-5 text-[#8A837D]"><I18nText>普通书架和智能书架可以同时加入多个合集。</I18nText></div>
+                  {memberShelfOptions.length > 0 ? (
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      {memberShelfOptions.map((shelf) => {
+                        const checked = selectedMemberShelfIds.includes(shelf.id);
+                        return (
+                          <label key={shelf.id} className={cn('flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition', checked ? 'border-[#F0AA96] bg-[#FFF8F5]' : 'border-[#E5DED8] hover:border-[#D7CEC7]')}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(event) => setSelectedMemberShelfIds((current) => event.target.checked ? [...new Set([...current, shelf.id])] : current.filter((id) => id !== shelf.id))}
+                              className="h-4 w-4 accent-[#E94B27]"
+                            />
+                            {shelf.kind === 'SMART' ? <Sparkles size={17} className="text-amber-600" /> : <BookOpen size={17} className="text-[#817A74]" />}
+                            <span className="min-w-0 flex-1">
+                              <span data-i18n-skip className="block truncate text-sm font-medium text-[#2A2825]">{shelf.name}</span>
+                              <span className="mt-0.5 block text-xs text-[#8A837D]">{shelf.bookCount ?? 0} <I18nText>本图书</I18nText></span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-2xl border border-dashed border-[#DCD5CE] bg-[#FAF8F6] px-4 py-6 text-center text-sm text-[#817A74]"><I18nText>暂无可加入合集的书架</I18nText></div>
+                  )}
+                </fieldset>
+              ) : (
+                <fieldset>
+                  <legend className="text-sm font-semibold text-[#2A2825]"><I18nText>所属合集</I18nText></legend>
+                  <div className="mt-1 text-xs leading-5 text-[#8A837D]"><I18nText>加入合集后，这个书架会从侧栏顶层隐藏，并可从每个所属合集进入。</I18nText></div>
+                  {collectionOptions.length > 0 ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {collectionOptions.map((collection) => {
+                        const checked = selectedCollectionIds.includes(collection.id);
+                        return (
+                          <label key={collection.id} className={cn('inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border px-3 text-sm transition', checked ? 'border-[#F0AA96] bg-[#FFF8F5] text-[#B63D23]' : 'border-[#E5DED8] text-[#5F5954] hover:border-[#D7CEC7]')}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(event) => setSelectedCollectionIds((current) => event.target.checked ? [...new Set([...current, collection.id])] : current.filter((id) => id !== collection.id))}
+                              className="h-4 w-4 accent-[#E94B27]"
+                            />
+                            <Folders size={15} />
+                            <span data-i18n-skip>{collection.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="mt-3 text-sm text-[#918A84]"><I18nText>还没有可加入的合集。</I18nText></div>
+                  )}
+                </fieldset>
+              )}
+
+              {activeIsCollection ? null : activeIsNew && activeIsSmart ? (
                 <div className="border-t border-[#EEE8E3] pt-3">
                   {filterSchemaError ? (
                     <div className="mt-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-5 text-sm text-red-700" role="alert">
@@ -637,7 +778,7 @@ export function ShelvesPage() {
               </div>}
             </div>
 
-            {!activeIsSmart ? <aside className="self-start rounded-[20px] bg-[#F6F3F0] p-4 xl:sticky xl:top-6">
+            {!activeIsSmart && !activeIsCollection ? <aside className="self-start rounded-[20px] bg-[#F6F3F0] p-4 xl:sticky xl:top-6">
               <div className="text-sm font-semibold text-[#2A2825]"><I18nText>添加图书</I18nText></div>
               <div className="mt-1 text-xs leading-5 text-[#827B75]"><I18nText>按书名、作者或标签搜索，勾选后随书架一起保存。</I18nText></div>
               <div className="mt-3 flex h-11 items-center gap-2 rounded-xl border border-[#DED8D1] bg-white px-3 transition focus-within:border-[#ED9D86] focus-within:ring-4 focus-within:ring-[#FFE4DC]">
@@ -663,7 +804,12 @@ export function ShelvesPage() {
                   );
                 })}
               </div>
-            </aside> : activeIsNew ? (
+            </aside> : activeIsCollection ? (
+              <aside className="self-start rounded-[20px] border border-[#E5DED8] bg-[#FAF8F6] p-4 text-sm leading-6 text-[#6F6963] xl:sticky xl:top-6">
+                <div className="flex items-center gap-2 font-semibold text-[#2A2825]"><Folders size={17} /><I18nText>关于书架合集</I18nText></div>
+                <div className="mt-2"><I18nText>合集只整理书架，不直接包含图书。一个书架可以加入多个合集。</I18nText></div>
+              </aside>
+            ) : activeIsNew ? (
               <aside className="self-start overflow-hidden rounded-[20px] border border-[#E5DED8] bg-[#FAF8F6] xl:sticky xl:top-6">
                 <div className="flex items-start justify-between gap-3 border-b border-[#E9E2DC] px-4 py-4">
                   <div>
@@ -719,8 +865,16 @@ export function ShelvesPage() {
 
           {!activeIsNew ? (
             <div className="mt-6 flex flex-col gap-3 border-t border-[#EEE8E3] pt-5 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm text-[#817A74]">{activeIsSmart ? i18nAttribute("删除智能书架只会删除自动收录规则，不会删除任何图书。") : i18nAttribute("不再需要这个分类时，可以只删除书架，图书会继续保留在书库。")}</div>
-              <Button variant="danger" icon={Trash2} disabled={saving} onClick={deleteShelf}><I18nText>删除书架</I18nText></Button>
+              <div className="text-sm text-[#817A74]">
+                {activeIsCollection
+                  ? (activeShelf?.shelfCount ?? 0) > 0
+                    ? i18nAttribute("合集仍有书架，移除全部成员后才能删除。")
+                    : i18nAttribute("空合集可以安全删除，不会影响任何书架。")
+                  : activeIsSmart
+                    ? i18nAttribute("删除智能书架只会删除自动收录规则，不会删除任何图书。")
+                    : i18nAttribute("不再需要这个分类时，可以只删除书架，图书会继续保留在书库。")}
+              </div>
+              <Button variant="danger" icon={Trash2} disabled={saving || (activeIsCollection && (activeShelf?.shelfCount ?? 0) > 0)} onClick={deleteShelf}>{activeIsCollection ? <I18nText>删除合集</I18nText> : <I18nText>删除书架</I18nText>}</Button>
             </div>
           ) : null}
         </section>
@@ -728,7 +882,33 @@ export function ShelvesPage() {
 
       {activeId && !detailLoading && !editing && activeShelf ? (
         <section>
-          {shelfBooks.length > 0 ? (
+          {activeIsCollection && memberShelves.length > 0 ? (
+            <>
+              <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                {memberShelves.map((member) => (
+                  <ShelfCard
+                    key={member.id}
+                    shelf={member}
+                    onOpen={() => router.push(`/shelves?shelf=${encodeURIComponent(member.id)}`, { scroll: false })}
+                  />
+                ))}
+              </div>
+              <ShelfLoadStatus
+                sentinelRef={loadMoreRef}
+                loading={loadingMore}
+                loaded={memberShelves.length}
+                total={activeShelf.total ?? activeShelf.shelfCount ?? 0}
+                unit="shelves"
+              />
+            </>
+          ) : activeIsCollection ? (
+            <div className="rounded-[24px] border border-dashed border-[#DCD5CE] bg-[#FAF8F6] px-6 py-12 text-center">
+              <Folders size={30} className="mx-auto text-[#B4ABA4]" />
+              <div className="mt-4 font-semibold text-[#403C38]"><I18nText>这个合集还没有书架</I18nText></div>
+              <div className="mt-1 text-sm text-[#8D857E]"><I18nText>打开管理页，选择想放进合集的普通或智能书架。</I18nText></div>
+              <Button className="mt-5" icon={Plus} onClick={() => router.push(`/shelves?shelf=${encodeURIComponent(activeShelf.id)}&edit=1`, { scroll: false })}><I18nText>添加书架</I18nText></Button>
+            </div>
+          ) : shelfBooks.length > 0 ? (
             <>
               <BookshelfCollection
                 books={shelfBooks}
@@ -739,7 +919,7 @@ export function ShelvesPage() {
                 sentinelRef={loadMoreRef}
                 loading={loadingMore}
                 loaded={shelfBooks.length}
-                total={activeShelf.total ?? activeShelf.bookCount}
+                total={activeShelf.total ?? activeShelf.bookCount ?? 0}
               />
             </>
           ) : (
@@ -765,27 +945,11 @@ export function ShelvesPage() {
       {!activeId && !loading && shelves.length > 0 ? (
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {shelves.map((shelf) => (
-            <button
+            <ShelfCard
               key={shelf.id}
-              type="button"
-              onClick={() => router.push(`/shelves?shelf=${encodeURIComponent(shelf.id)}`, { scroll: false })}
-              className="group rounded-[22px] border border-[#E5DED8] bg-white p-4 text-left outline-none transition duration-200 hover:-translate-y-0.5 hover:border-[#E9B7A7] hover:shadow-[0_12px_28px_rgba(73,52,43,0.09)] focus-visible:ring-4 focus-visible:ring-[#FBE1D9]"
-            >
-              <div className="flex h-32 items-end overflow-hidden rounded-[16px] bg-[#F4F0EC] px-5 pb-3">
-                {(shelf.books ?? []).slice(0, 3).map((book, index) => (
-                  <Cover key={`${book.id}-${index}`} book={book} className={cn('h-24 w-16 shrink-0 shadow-md transition duration-200 group-hover:-translate-y-1', index > 0 && '-ml-3')} small />
-                ))}
-                {(shelf.books ?? []).length === 0 ? <div className="flex w-full items-center justify-center self-center text-sm text-[#A09790]"><BookOpen size={17} className="mr-2" /> <I18nText>暂无图书</I18nText></div> : null}
-              </div>
-              <div className="mt-4">
-                <div className="flex items-center gap-2"><div data-i18n-skip className="line-clamp-1 font-semibold text-[#2A2825]">{shelf.name}</div>{shelf.kind === 'SMART' ? <Badge tone="amber"><I18nText>智能</I18nText></Badge> : null}</div>
-                <div data-i18n-skip={shelf.description ? '' : undefined} className="mt-1 line-clamp-2 min-h-10 text-sm leading-5 text-[#817A74]">{shelf.description || i18nAttribute("自定义书架")}</div>
-                <div className="mt-3 flex items-center justify-between border-t border-[#EEE8E3] pt-3 text-xs text-[#938B84]">
-                  <span>{shelf.bookCount} <I18nText>本图书</I18nText></span>
-                  <span className="font-medium text-[#D94724] transition group-hover:translate-x-0.5"><I18nText>打开书架 →</I18nText></span>
-                </div>
-              </div>
-            </button>
+              shelf={shelf}
+              onOpen={() => router.push(`/shelves?shelf=${encodeURIComponent(shelf.id)}`, { scroll: false })}
+            />
           ))}
         </div>
       ) : null}
@@ -793,24 +957,79 @@ export function ShelvesPage() {
   );
 }
 
+function ShelfCard({
+  shelf,
+  onOpen
+}: {
+  shelf: ShelfView;
+  onOpen: () => void;
+}) {
+  const { t: i18nAttribute } = useAttributeI18n();
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group rounded-[22px] border border-[#E5DED8] bg-white p-4 text-left outline-none transition duration-200 hover:-translate-y-0.5 hover:border-[#E9B7A7] hover:shadow-[0_12px_28px_rgba(73,52,43,0.09)] focus-visible:ring-4 focus-visible:ring-[#FBE1D9]"
+    >
+      <div className="flex h-32 items-end overflow-hidden rounded-[16px] bg-[#F4F0EC] px-5 pb-3">
+        {shelf.kind === 'COLLECTION' ? (
+          <div className="flex w-full flex-col items-center justify-center self-center text-[#A09790]">
+            <Folders size={34} />
+            <span className="mt-2 text-sm">{shelf.shelfCount ?? 0} <I18nText>个书架</I18nText></span>
+          </div>
+        ) : (
+          <>
+            {(shelf.books ?? []).slice(0, 3).map((book, index) => (
+              <Cover key={`${book.id}-${index}`} book={book} className={cn('h-24 w-16 shrink-0 shadow-md transition duration-200 group-hover:-translate-y-1', index > 0 && '-ml-3')} small />
+            ))}
+            {(shelf.books ?? []).length === 0 ? <div className="flex w-full items-center justify-center self-center text-sm text-[#A09790]"><BookOpen size={17} className="mr-2" /> <I18nText>暂无图书</I18nText></div> : null}
+          </>
+        )}
+      </div>
+      <div className="mt-4">
+        <div className="flex items-center gap-2">
+          <div data-i18n-skip className="line-clamp-1 font-semibold text-[#2A2825]">{shelf.name}</div>
+          {shelf.kind === 'SMART'
+              ? <Badge tone="amber"><I18nText>智能</I18nText></Badge>
+              : shelf.kind === 'COLLECTION'
+                ? <Badge><I18nText>合集</I18nText></Badge>
+                : null}
+        </div>
+        <div data-i18n-skip={shelf.description ? '' : undefined} className="mt-1 line-clamp-2 min-h-10 text-sm leading-5 text-[#817A74]">
+          {shelf.description || i18nAttribute(shelf.kind === 'COLLECTION' ? "书架合集" : "自定义书架")}
+        </div>
+        <div className="mt-3 flex items-center justify-between border-t border-[#EEE8E3] pt-3 text-xs text-[#938B84]">
+          <span>{shelf.kind === 'COLLECTION' ? <>{shelf.shelfCount ?? 0} <I18nText>个书架</I18nText></> : <>{shelf.bookCount ?? 0} <I18nText>本图书</I18nText></>}</span>
+          <span className="font-medium text-[#D94724] transition group-hover:translate-x-0.5">{shelf.kind === 'COLLECTION' ? <I18nText>打开合集 →</I18nText> : <I18nText>打开书架 →</I18nText>}</span>
+        </div>
+      </div>
+    </button>
+  );
+}
+
 function ShelfLoadStatus({
   sentinelRef,
   loading,
   loaded,
-  total
+  total,
+  unit = 'books'
 }: {
   sentinelRef: { current: HTMLDivElement | null };
   loading: boolean;
   loaded: number;
   total: number;
+  unit?: 'books' | 'shelves';
 }) {
   const { t: i18nAttribute } = useAttributeI18n();
 
   return (
     <div ref={sentinelRef} className="flex min-h-20 items-center justify-center py-5 text-xs tabular-nums text-[#8A847E]" role="status" aria-live="polite">
       {loading
-        ? <><Loader2 size={15} className="mr-2 animate-spin" /><I18nText>正在加载更多图书...</I18nText></>
-        : i18nAttribute("已加载 {value0} / {value1} 本", { value0: loaded, value1: total })}
+        ? <><Loader2 size={15} className="mr-2 animate-spin" />{unit === 'shelves' ? <I18nText>正在加载更多书架...</I18nText> : <I18nText>正在加载更多图书...</I18nText>}</>
+        : unit === 'shelves'
+          ? i18nAttribute("已加载 {value0} / {value1} 个书架", { value0: loaded, value1: total })
+          : i18nAttribute("已加载 {value0} / {value1} 本", { value0: loaded, value1: total })}
     </div>
   );
 }

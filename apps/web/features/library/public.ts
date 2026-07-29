@@ -1,4 +1,5 @@
 export { UploadBookDialog } from './upload-book-dialog';
+export { LibraryGroupingPage } from './library-grouping-page';
 export {
   SmartFilterBuilder,
   type SmartFilterCondition,

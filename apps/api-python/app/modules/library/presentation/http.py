@@ -25,6 +25,7 @@ from app.bootstrap.library import (
     library_dashboard,
     library_deletion,
     library_facet_queries,
+    library_groupings,
     library_join_queries,
     library_operation_store,
     library_projections,
@@ -70,6 +71,7 @@ from app.modules.library.presentation.schemas import (
     LibraryConflictError,
     LibraryErrorBody,
     LibraryForbiddenError,
+    LibraryGroupingsResponse,
     LibraryNotFoundError,
     LibraryUnavailableError,
     LibraryUnprocessableError,
@@ -691,6 +693,57 @@ def list_series(
     )
 
 
+@router.get("/library/groupings")
+def list_library_groupings(
+    request: Request,
+    kind: str,
+    page: int = 1,
+    pageSize: int = 50,
+    search: str = "",
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    LibraryGroupingsResponse,
+    ErrorResponses(LibraryBadRequestError),
+]:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    normalized_page = max(1, page)
+    normalized_page_size = min(100, max(1, pageSize))
+    try:
+        result = library_groupings(db).execute(
+            kind=kind,
+            context=authorization_context(db, user),
+            search=search,
+            page=normalized_page,
+            page_size=normalized_page_size,
+        )
+    except ValueError as exc:
+        _raise_library_error(str(exc), status_code=400)
+    return LibraryGroupingsResponse(
+        data={
+            "kind": kind.strip().upper(),
+            "groups": [
+                {
+                    "id": group.id,
+                    "name": group.name,
+                    "bookCount": group.book_count,
+                    "updatedAt": group.updated_at,
+                }
+                for group in result.groups
+            ],
+            "page": normalized_page,
+            "pageSize": normalized_page_size,
+            "total": result.total,
+            "totalPages": max(
+                1,
+                (result.total + normalized_page_size - 1) // normalized_page_size,
+            ),
+        }
+    )
+
+
 @router.get("/works")
 def list_works(
     request: Request,
@@ -721,6 +774,12 @@ def list_works(
     status = (request.query_params.get("status") or "").strip().upper()
     if status == "WANT":
         status = "UNREAD"
+    facet_kind = (request.query_params.get("facetKind") or "").strip().upper()
+    facet_id = (request.query_params.get("facetId") or "").strip()
+    if bool(facet_kind) != bool(facet_id) or (
+        facet_kind and facet_kind not in {"SERIES", "AUTHOR"}
+    ):
+        _raise_library_error("分类筛选参数无效", status_code=400)
     query = WorkListQuery(
         page=page,
         page_size=page_size,
@@ -728,6 +787,8 @@ def list_works(
         search=search,
         keyword=keyword,
         series_name=seriesName,
+        facet_kind=facet_kind or None,
+        facet_id=facet_id or None,
         sort=sort,
         sort_direction=sortDirection,
         type_filter=(
