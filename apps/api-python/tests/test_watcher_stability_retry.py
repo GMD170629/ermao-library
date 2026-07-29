@@ -144,6 +144,7 @@ def test_unstable_file_marks_a_retry_after_it_reaches_the_minimum_size(
         id="folder-1",
         root_path=str(tmp_path),
         min_file_size_bytes=1,
+        stability_check_enabled=True,
     )
     monkeypatch.setattr(
         watcher_module, "wait_for_stable_import_source", lambda *_args: False

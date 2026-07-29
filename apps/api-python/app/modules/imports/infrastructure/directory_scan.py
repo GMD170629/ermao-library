@@ -13,6 +13,7 @@ from app.services.audio_metadata import (
     is_supported_audio_file,
 )
 from app.services.import_preferences import (
+    DEFAULT_STABILITY_CHECK_ENABLED,
     ImportPreferences,
     SUPPORTED_IMPORT_EXTENSIONS,
     matches_ignore_patterns,
@@ -29,7 +30,7 @@ class MonitorFolderConfig:
     min_file_size_bytes: int = 10240
     global_ignore_patterns: str = ""
     allowed_extensions: tuple[str, ...] = SUPPORTED_IMPORT_EXTENSIONS
-    stability_check_enabled: bool = True
+    stability_check_enabled: bool = DEFAULT_STABILITY_CHECK_ENABLED
     stability_check_seconds: float = 2.0
     auto_convert_to_epub: bool = True
 

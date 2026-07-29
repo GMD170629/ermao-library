@@ -312,6 +312,48 @@ final result: passed
 
 ---
 
+# Smart Shelf Creation — Design QA
+
+## Comparison setup
+
+- Visual source of truth: `/Users/guyu/.codex/generated_images/019fab82-8308-7c52-ab38-a816e58d583d/call_8A5xGmEhzj8IWmNmG3yukH4x.png`
+- Implementation capture: `/Users/guyu/.codex/visualizations/2026/07/29/019fab82-8308-7c52-ab38-a816e58d583d/smart-shelf-implementation-final-1920x1080.png`
+- Full side-by-side comparison: `/Users/guyu/.codex/visualizations/2026/07/29/019fab82-8308-7c52-ab38-a816e58d583d/smart-shelf-design-comparison.png`
+- Focused filter comparison: `/Users/guyu/.codex/visualizations/2026/07/29/019fab82-8308-7c52-ab38-a816e58d583d/smart-shelf-filter-comparison.png`
+- Viewport: 1920 × 1080 at device scale factor 1
+- Source normalization: 1706 × 920 source contained in a 1920 × 1080 canvas
+- State: smart shelf selected, shelf metadata filled, one complete shared-library filter rule, live preview settled
+
+## Visual findings
+
+- Layout and hierarchy match the approved direction: page actions, normal/smart shelf selector, metadata form, shared filter builder, and preview are all present in the expected order.
+- The implementation intentionally uses the production `SmartFilterBuilder`; its compact row density differs slightly from the concept image but preserves the same visual rhythm and controls.
+- Preview content is live library data. The captured filter returns no matches, so the implementation correctly shows the designed empty state instead of the concept image's illustrative books.
+- Typography, warm neutral palette, coral accent, borders, corner radii, spacing, and button hierarchy are consistent with the existing application and the approved design.
+- No blocking clipping, overlap, horizontal overflow, or unreadable text was found at 1920 × 1080, 1024 × 768, or 390 × 844.
+
+## Interaction checks
+
+- Switching between normal and smart shelf modes preserves the respective creation interaction.
+- Adding an incomplete rule disables creation and shows an actionable validation message.
+- Completing a rule re-enables creation and refreshes the preview without creating a real shelf.
+- Existing filter-schema fields and operators are reused rather than reimplemented.
+- Keyboard-operable inputs, buttons, comboboxes, and accessible names are present.
+
+## Engineering checks
+
+- Focused rule-model tests, full web tests, production build, lint, type checking, and bilingual i18n validation pass.
+- The development shell still reports a pre-existing `AppShell` hydration warning; it originates in untouched layout code and is not introduced by this change.
+
+## Fix history
+
+- Restarted the local Next.js development process after its hot-reload route cache temporarily returned `/shelves` as 404.
+- Re-ran the signed-in browser flow and captured the final settled implementation state.
+
+final result: passed
+
+---
+
 # 当前设备阅读器设置与真实阅读器选项对齐 QA — 2026-07-23
 
 ## 对照目标与证据

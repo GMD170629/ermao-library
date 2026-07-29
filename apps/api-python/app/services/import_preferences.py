@@ -44,11 +44,12 @@ SUPPORTED_IMPORT_EXTENSIONS = (
 )
 DEFAULT_STABILITY_SECONDS = 2.0
 MAX_STABILITY_SECONDS = 300.0
+DEFAULT_STABILITY_CHECK_ENABLED = False
 
 
 @dataclass(frozen=True)
 class ImportPreferences:
-    stability_check_enabled: bool = True
+    stability_check_enabled: bool = DEFAULT_STABILITY_CHECK_ENABLED
     stability_check_seconds: float = DEFAULT_STABILITY_SECONDS
     auto_convert_to_epub: bool = True
     allowed_extensions: tuple[str, ...] = SUPPORTED_IMPORT_EXTENSIONS
@@ -119,7 +120,7 @@ def normalize_ignore_patterns(value: Any) -> str:
 
 def normalize_import_setting_value(key: str, value: Any) -> Any:
     if key == IMPORT_STABILITY_ENABLED_KEY:
-        return _boolean(value, True)
+        return _boolean(value, DEFAULT_STABILITY_CHECK_ENABLED)
     if key == IMPORT_STABILITY_SECONDS_KEY:
         return normalize_stability_seconds(value)
     if key == IMPORT_AUTO_CONVERT_KEY:
@@ -149,7 +150,10 @@ def load_import_preferences(db: Session) -> ImportPreferences:
     except SQLAlchemyError:
         return ImportPreferences()
     return ImportPreferences(
-        stability_check_enabled=_boolean(values.get(IMPORT_STABILITY_ENABLED_KEY), True),
+        stability_check_enabled=_boolean(
+            values.get(IMPORT_STABILITY_ENABLED_KEY),
+            DEFAULT_STABILITY_CHECK_ENABLED,
+        ),
         stability_check_seconds=(
             normalize_stability_seconds(values[IMPORT_STABILITY_SECONDS_KEY])
             if IMPORT_STABILITY_SECONDS_KEY in values

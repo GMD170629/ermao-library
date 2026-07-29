@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, BookOpen, Check, Edit3, Loader2, Plus, Save, Search, Trash2, X } from 'lucide-react';
+import { ArrowLeft, BookOpen, Check, Edit3, Loader2, Plus, Save, Search, Sparkles, Trash2, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BookshelfCollection, type BookshelfItem } from '../../components/book/bookshelf';
@@ -10,6 +10,13 @@ import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { useConfirm, useToast } from '../../components/ui/feedback';
 import { PageTitle } from '../../components/ui/page-title';
+import {
+  applicableSmartFilterRules,
+  serializableSmartFilterRules,
+  SmartFilterBuilder,
+  type SmartFilterField,
+  type SmartFilterRules as LibrarySmartFilterRules
+} from '../library/public';
 import { summarizeSmartShelfRules, type SmartShelfRules } from './smart-shelf-rules';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
@@ -48,11 +55,24 @@ type ShelfPayload = {
 
 type BooksPayload = {
   ok: boolean;
-  data?: { books: BookSearchItem[] };
+  data?: {
+    books: BookSearchItem[];
+    total?: number;
+    page?: number;
+    pageSize?: number;
+    totalPages?: number;
+  };
+  error?: { message: string };
+};
+
+type FilterSchemaPayload = {
+  ok: boolean;
+  data?: { fields: SmartFilterField[]; maxConditions: number };
   error?: { message: string };
 };
 
 const emptyForm = { name: '', description: '' };
+const emptySmartFilterRules: LibrarySmartFilterRules = { combinator: 'ALL', conditions: [] };
 
 async function readPayload<T extends { ok: boolean; error?: { message: string } }>(response: Response, fallback: string): Promise<T> {
   const payload = (await response.json().catch(() => null)) as T | null;
@@ -69,9 +89,19 @@ export function ShelvesPage() {
   const [activeShelf, setActiveShelf] = useState<ShelfView | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
+  const [draftKind, setDraftKind] = useState<'STATIC' | 'SMART'>('STATIC');
   const [selectedBookIds, setSelectedBookIds] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [searchBooks, setSearchBooks] = useState<BookSearchItem[]>([]);
+  const [smartFilterFields, setSmartFilterFields] = useState<SmartFilterField[]>([]);
+  const [smartFilterRules, setSmartFilterRules] = useState<LibrarySmartFilterRules>(emptySmartFilterRules);
+  const [filterSchemaLoading, setFilterSchemaLoading] = useState(false);
+  const [filterSchemaLoaded, setFilterSchemaLoaded] = useState(false);
+  const [filterSchemaError, setFilterSchemaError] = useState('');
+  const [previewBooks, setPreviewBooks] = useState<BookSearchItem[]>([]);
+  const [previewTotal, setPreviewTotal] = useState(0);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState('');
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -86,8 +116,20 @@ export function ShelvesPage() {
   const route = useMemo(() => new URLSearchParams(currentSearch), [currentSearch]);
   const activeIsNew = activeId === 'new';
   const editing = activeIsNew || (Boolean(activeId) && route.get('edit') === '1' && Boolean(activeShelf));
-  const activeIsSmart = activeShelf?.kind === 'SMART';
+  const activeKind = activeIsNew ? draftKind : activeShelf?.kind ?? 'STATIC';
+  const activeIsSmart = activeKind === 'SMART';
   const smartRuleSummaries = useMemo(() => summarizeSmartShelfRules(activeShelf?.rules), [activeShelf?.rules]);
+  const applicableRules = useMemo(
+    () => applicableSmartFilterRules(smartFilterRules),
+    [smartFilterRules]
+  );
+  const incompleteSmartFilterCount = smartFilterRules.conditions.length - applicableRules.conditions.length;
+  const smartFilterQuery = useMemo(
+    () => applicableRules.conditions.length > 0
+      ? JSON.stringify(serializableSmartFilterRules(applicableRules))
+      : '',
+    [applicableRules]
+  );
 
   useEffect(() => {
     void loadShelves();
@@ -97,7 +139,7 @@ export function ShelvesPage() {
     const requestedShelf = route.get('shelf');
     if (route.get('create') === '1') {
       openRequestRef.current += 1;
-      openCreate();
+      openCreate(route.get('kind') === 'smart');
     } else if (requestedShelf) {
       void openShelf(requestedShelf);
     } else {
@@ -107,6 +149,12 @@ export function ShelvesPage() {
       setSelectedBookIds([]);
       setSearch('');
       setSearchBooks([]);
+      setDraftKind('STATIC');
+      setSmartFilterRules(emptySmartFilterRules);
+      setFilterSchemaError('');
+      setPreviewBooks([]);
+      setPreviewTotal(0);
+      setPreviewError('');
       setForm(emptyForm);
       setError('');
     }
@@ -138,6 +186,76 @@ export function ShelvesPage() {
   }, [activeId, activeIsSmart, editing, search]);
 
   useEffect(() => {
+    if (!activeIsNew || !activeIsSmart || filterSchemaLoaded) return;
+    const controller = new AbortController();
+    setFilterSchemaLoading(true);
+    setFilterSchemaError('');
+    fetch('/api/library/filter-schema', {
+      cache: 'no-store',
+      credentials: 'same-origin',
+      signal: controller.signal
+    })
+      .then((response) => readPayload<FilterSchemaPayload>(response, i18nAttribute("读取筛选条件失败")))
+      .then((payload) => {
+        setSmartFilterFields(payload.data?.fields ?? []);
+        setFilterSchemaLoaded(true);
+      })
+      .catch((reason) => {
+        if (controller.signal.aborted) return;
+        setFilterSchemaError(reason instanceof Error ? reason.message : i18nAttribute("读取筛选条件失败"));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setFilterSchemaLoading(false);
+      });
+    return () => controller.abort();
+  }, [activeIsNew, activeIsSmart, filterSchemaLoaded, i18nAttribute]);
+
+  useEffect(() => {
+    if (!activeIsNew || !activeIsSmart) {
+      setPreviewBooks([]);
+      setPreviewTotal(0);
+      setPreviewLoading(false);
+      setPreviewError('');
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({
+        page: '1',
+        pageSize: '3',
+        visibility: 'active',
+        sort: 'updated',
+        sortDirection: 'desc',
+        view: 'search'
+      });
+      if (smartFilterQuery) params.set('filters', smartFilterQuery);
+      setPreviewLoading(true);
+      setPreviewError('');
+      fetch(`/api/works?${params}`, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+        signal: controller.signal
+      })
+        .then((response) => readPayload<BooksPayload>(response, i18nAttribute("读取匹配预览失败")))
+        .then((payload) => {
+          setPreviewBooks(payload.data?.books ?? []);
+          setPreviewTotal(payload.data?.total ?? payload.data?.books.length ?? 0);
+        })
+        .catch((reason) => {
+          if (controller.signal.aborted) return;
+          setPreviewError(reason instanceof Error ? reason.message : i18nAttribute("读取匹配预览失败"));
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setPreviewLoading(false);
+        });
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [activeIsNew, activeIsSmart, i18nAttribute, smartFilterQuery]);
+
+  useEffect(() => {
     const sentinel = loadMoreRef.current;
     const currentPage = activeShelf?.page ?? 1;
     const totalPages = activeShelf?.totalPages ?? 1;
@@ -159,7 +277,12 @@ export function ShelvesPage() {
   const shelfBooks = activeShelf?.books ?? [];
   const initialBookIds = activeShelf?.bookIds ?? (activeShelf?.books ?? []).map((book) => book.id);
   const hasUnsavedChanges = activeIsNew
-    ? Boolean(form.name.trim() || form.description.trim() || selectedBookIds.length)
+    ? Boolean(
+        form.name.trim()
+        || form.description.trim()
+        || draftKind === 'SMART'
+        || selectedBookIds.length
+      )
     : activeShelf ? (
       form.name.trim() !== activeShelf.name
       || form.description.trim() !== (activeShelf.description ?? '')
@@ -207,6 +330,8 @@ export function ShelvesPage() {
       });
       if (!append) {
         setForm({ name: shelf.name, description: shelf.description ?? '' });
+        setDraftKind(shelf.kind ?? 'STATIC');
+        setSmartFilterRules(emptySmartFilterRules);
         setSelectedBookIds(shelf.bookIds ?? (shelf.books ?? []).map((book) => book.id));
         setSearch('');
         setSearchBooks([]);
@@ -221,13 +346,19 @@ export function ShelvesPage() {
     }
   }
 
-  function openCreate() {
+  function openCreate(smart = false) {
     setActiveId('new');
     setActiveShelf(null);
     setForm(emptyForm);
+    setDraftKind(smart ? 'SMART' : 'STATIC');
+    setSmartFilterRules(emptySmartFilterRules);
+    setFilterSchemaError('');
     setSelectedBookIds([]);
     setSearch('');
     setSearchBooks([]);
+    setPreviewBooks([]);
+    setPreviewTotal(0);
+    setPreviewError('');
     setError('');
   }
 
@@ -254,6 +385,10 @@ export function ShelvesPage() {
       setError('请填写书架名称');
       return;
     }
+    if (activeIsNew && activeIsSmart && incompleteSmartFilterCount > 0) {
+      setError(i18nAttribute("还有 {value0} 条条件没有填写完整，请补全后再创建。", { value0: incompleteSmartFilterCount }));
+      return;
+    }
     setSaving(true);
     setError('');
     try {
@@ -263,7 +398,12 @@ export function ShelvesPage() {
         body: JSON.stringify({
           name,
           description: form.description.trim(),
-          ...(!activeIsSmart ? { bookIds: selectedBookIds } : {})
+          ...(activeIsNew ? { kind: activeKind } : {}),
+          ...(activeIsNew && activeIsSmart
+            ? { rules: serializableSmartFilterRules(applicableRules), pinned: true }
+            : !activeIsSmart
+              ? { bookIds: selectedBookIds }
+              : {})
         })
       });
       const payload = await readPayload<ShelfPayload>(response, '保存书架失败');
@@ -271,6 +411,7 @@ export function ShelvesPage() {
       const saved = payload.data.shelf;
       setActiveShelf(saved);
       setActiveId(saved.id);
+      setDraftKind(saved.kind ?? 'STATIC');
       setForm({ name: saved.name, description: saved.description ?? '' });
       setSelectedBookIds(saved.bookIds ?? (saved.books ?? []).map((book) => book.id));
       await loadShelves();
@@ -320,7 +461,7 @@ export function ShelvesPage() {
         {editing ? i18nAttribute("取消") : i18nAttribute("全部书架")}
       </Button>
       {!editing && activeShelf ? <Button icon={Edit3} onClick={() => router.push(`/shelves?shelf=${encodeURIComponent(activeShelf.id)}&edit=1`, { scroll: false })}><I18nText>管理书架</I18nText></Button> : null}
-      {editing ? <Button icon={Save} loading={saving} loadingText={i18nAttribute("保存中")} disabled={detailLoading} onClick={saveShelf}>{activeIsNew ? i18nAttribute("创建书架") : i18nAttribute("保存更改")}</Button> : null}
+      {editing ? <Button icon={Save} loading={saving} loadingText={i18nAttribute("保存中")} disabled={detailLoading || (activeIsNew && activeIsSmart && incompleteSmartFilterCount > 0)} onClick={saveShelf}>{activeIsNew ? i18nAttribute(activeIsSmart ? "创建智能书架" : "创建书架") : i18nAttribute("保存更改")}</Button> : null}
     </div>
   ) : <Button icon={Plus} onClick={() => router.push('/shelves?create=1', { scroll: false })}><I18nText>创建书架</I18nText></Button>;
 
@@ -328,12 +469,20 @@ export function ShelvesPage() {
     <div className="shuku-content-frame space-y-6">
       <PageTitle
         title={activeIsNew ? i18nAttribute("创建书架") : activeShelf?.name ?? (activeId ? i18nAttribute("书架详情") : i18nAttribute("书架"))}
+        titleMeta={activeShelf ? (
+          <span className="shrink-0 text-[13px] text-[#8A847E] sm:text-[15px]">
+            {activeShelf.bookCount} <I18nText>本</I18nText>
+          </span>
+        ) : undefined}
         translateTitle={!activeShelf}
         desc={activeIsNew
-          ? i18nAttribute("填写基本信息，也可以现在就加入第一批图书。")
+          ? activeIsSmart
+            ? i18nAttribute("设置自动收录条件，书架会随图书信息变化自动更新。")
+            : i18nAttribute("填写基本信息，也可以现在就加入第一批图书。")
           : activeShelf
-            ? i18nAttribute("{value0} 本图书{value1}", { value0: activeShelf.bookCount, value1: activeShelf.kind === 'SMART' ? ' · 智能书架，结果自动更新' : activeShelf.description ? ` · ${activeShelf.description}` : '' })
+            ? activeShelf.description ?? ''
             : i18nAttribute("创建自定义书架，按主题、系列或阅读计划整理图书。")}
+        translateDescription={!activeShelf}
         action={pageAction}
       />
 
@@ -346,13 +495,61 @@ export function ShelvesPage() {
           <div className="flex flex-col gap-3 border-b border-[#EEE8E3] pb-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="flex items-center gap-2 font-semibold text-[#2A2825]"><Edit3 size={17} /> {activeIsNew ? i18nAttribute("书架信息") : i18nAttribute("编辑书架")}</div>
-              <div className="mt-1 text-sm text-[#7C756F]">{activeIsSmart ? i18nAttribute("可以修改基本信息并查看自动收录条件；图书由规则自动管理。") : i18nAttribute("勾选或移除图书后，点击“{value0}”统一生效。", { value0: activeIsNew ? '创建书架' : '保存更改' })}</div>
+              <div className="mt-1 text-sm text-[#7C756F]">
+                {activeIsNew && activeIsSmart
+                  ? i18nAttribute("使用与全部图书相同的筛选条件，匹配结果会自动更新。")
+                  : activeIsSmart
+                    ? i18nAttribute("可以修改基本信息并查看自动收录条件；图书由规则自动管理。")
+                    : i18nAttribute("勾选或移除图书后，点击“{value0}”统一生效。", { value0: activeIsNew ? '创建书架' : '保存更改' })}
+              </div>
             </div>
-            <Badge>{activeIsSmart ? activeShelf?.bookCount ?? 0 : selectedBookIds.length} <I18nText>本图书</I18nText></Badge>
+            <Badge>{activeIsNew && activeIsSmart ? previewTotal : activeIsSmart ? activeShelf?.bookCount ?? 0 : selectedBookIds.length} <I18nText>本图书</I18nText></Badge>
           </div>
 
           <div className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,1fr)_390px]">
             <div className="space-y-6">
+              {activeIsNew ? (
+                <fieldset>
+                  <legend className="text-sm font-semibold text-[#2A2825]"><I18nText>书架类型</I18nText></legend>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      aria-pressed={draftKind === 'STATIC'}
+                      onClick={() => setDraftKind('STATIC')}
+                      className={cn(
+                        'flex min-h-20 items-center gap-3 rounded-2xl border px-4 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-[#F6B7A5]',
+                        draftKind === 'STATIC'
+                          ? 'border-[#F0AA96] bg-[#FFF8F5] ring-2 ring-[#FBE1D9]'
+                          : 'border-[#E4DED8] bg-white hover:border-[#D7CEC7]'
+                      )}
+                    >
+                      <BookOpen size={20} className={draftKind === 'STATIC' ? 'text-[#D94724]' : 'text-[#817A74]'} />
+                      <span>
+                        <span className="block text-sm font-semibold text-[#2A2825]"><I18nText>普通书架</I18nText></span>
+                        <span className="mt-1 block text-xs text-[#817A74]"><I18nText>手动选择图书加入</I18nText></span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={draftKind === 'SMART'}
+                      onClick={() => setDraftKind('SMART')}
+                      className={cn(
+                        'flex min-h-20 items-center gap-3 rounded-2xl border px-4 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-[#F6B7A5]',
+                        draftKind === 'SMART'
+                          ? 'border-[#F0AA96] bg-[#FFF8F5] ring-2 ring-[#FBE1D9]'
+                          : 'border-[#E4DED8] bg-white hover:border-[#D7CEC7]'
+                      )}
+                    >
+                      <Sparkles size={20} className={draftKind === 'SMART' ? 'text-[#D94724]' : 'text-[#817A74]'} />
+                      <span>
+                        <span className="block text-sm font-semibold text-[#2A2825]"><I18nText>智能书架</I18nText></span>
+                        <span className="mt-1 block text-xs text-[#817A74]"><I18nText>图书会按条件自动加入或移出</I18nText></span>
+                      </span>
+                    </button>
+                  </div>
+                </fieldset>
+              ) : null}
+
               <div className="grid gap-4 md:grid-cols-[minmax(0,320px)_1fr]">
                 <label className="block">
                   <span className="text-sm font-medium text-[#5F5954]"><I18nText>名称 </I18nText><span className="text-[#D94724]">*</span></span>
@@ -364,7 +561,27 @@ export function ShelvesPage() {
                 </label>
               </div>
 
-              {activeIsSmart ? (
+              {activeIsNew && activeIsSmart ? (
+                <div className="border-t border-[#EEE8E3] pt-3">
+                  {filterSchemaError ? (
+                    <div className="mt-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-5 text-sm text-red-700" role="alert">
+                      {filterSchemaError}
+                    </div>
+                  ) : (
+                    <SmartFilterBuilder
+                      fields={smartFilterFields}
+                      rules={smartFilterRules}
+                      loading={filterSchemaLoading || !filterSchemaLoaded}
+                      onChange={setSmartFilterRules}
+                    />
+                  )}
+                  {incompleteSmartFilterCount > 0 ? (
+                    <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800" role="status">
+                      {i18nAttribute("还有 {value0} 条条件没有填写完整，请补全后再创建。", { value0: incompleteSmartFilterCount })}
+                    </div>
+                  ) : null}
+                </div>
+              ) : activeIsSmart ? (
                 <div>
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                     <div>
@@ -446,7 +663,53 @@ export function ShelvesPage() {
                   );
                 })}
               </div>
-            </aside> : (
+            </aside> : activeIsNew ? (
+              <aside className="self-start overflow-hidden rounded-[20px] border border-[#E5DED8] bg-[#FAF8F6] xl:sticky xl:top-6">
+                <div className="flex items-start justify-between gap-3 border-b border-[#E9E2DC] px-4 py-4">
+                  <div>
+                    <div className="text-sm font-semibold text-[#2A2825]"><I18nText>匹配预览</I18nText></div>
+                    <div className="mt-1 text-xs leading-5 text-[#827B75]"><I18nText>筛选条件修改后实时更新</I18nText></div>
+                  </div>
+                  <Badge>{previewTotal} <I18nText>本图书</I18nText></Badge>
+                </div>
+                <div className="space-y-2 p-4" aria-live="polite">
+                  {previewLoading ? (
+                    <div className="flex min-h-28 items-center justify-center text-sm text-[#8D857E]" role="status">
+                      <Loader2 size={16} className="mr-2 animate-spin" />
+                      <I18nText>正在更新匹配结果...</I18nText>
+                    </div>
+                  ) : previewError ? (
+                    <div className="rounded-xl border border-red-100 bg-red-50 px-3 py-4 text-sm text-red-700">{previewError}</div>
+                  ) : previewBooks.length > 0 ? previewBooks.map((book) => (
+                    <div key={book.id} className="flex items-center gap-3 rounded-xl border border-[#E8E1DB] bg-white p-2.5">
+                      <Cover book={book} className="h-[72px] w-12 shrink-0 rounded-lg" small />
+                      <div data-i18n-skip className="min-w-0">
+                        <div className="line-clamp-1 text-sm font-semibold text-[#2A2825]">{book.title}</div>
+                        <div className="mt-1 line-clamp-1 text-xs text-[#8B847E]">{book.author || i18nAttribute("未知作者")}</div>
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="rounded-xl border border-dashed border-[#DCD5CE] bg-white/70 px-4 py-6 text-center">
+                      <BookOpen size={20} className="mx-auto text-[#B3AAA2]" />
+                      <div className="mt-2 text-sm font-medium text-[#5F5954]"><I18nText>暂无图书符合条件</I18nText></div>
+                      <div className="mt-1 text-xs leading-5 text-[#918A84]"><I18nText>调整筛选条件后再试试。</I18nText></div>
+                    </div>
+                  )}
+                  {!previewLoading && !previewError && previewTotal > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => router.push(`/library${smartFilterQuery ? `?filters=${encodeURIComponent(smartFilterQuery)}` : ''}`)}
+                      className="mt-2 inline-flex h-9 w-full items-center justify-center rounded-lg text-sm font-medium text-[#D94724] outline-none transition hover:bg-[#FFF0EA] focus-visible:ring-2 focus-visible:ring-[#F6B7A5]"
+                    >
+                      <I18nText>查看全部匹配图书</I18nText>
+                    </button>
+                  ) : null}
+                </div>
+                <div className="border-t border-[#E9E2DC] px-4 py-3 text-xs leading-5 text-[#817A74]">
+                  <I18nText>创建后，匹配图书会自动加入或移出书架。</I18nText>
+                </div>
+              </aside>
+            ) : (
               <aside className="self-start rounded-[20px] border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900 xl:sticky xl:top-6">
                 <div className="font-semibold"><I18nText>图书自动管理</I18nText></div>
                 <div className="mt-1"><I18nText>智能书架会随图书信息和阅读状态变化自动更新，因此不提供手动添加或移除。</I18nText></div>
@@ -465,13 +728,6 @@ export function ShelvesPage() {
 
       {activeId && !detailLoading && !editing && activeShelf ? (
         <section>
-          <div className="mb-5 flex flex-col gap-3 border-b border-[#E7E0DA] pb-5 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <div className="text-sm font-medium text-[#716A64]"><I18nText>收录图书</I18nText></div>
-              <div className="mt-1 text-sm text-[#948C85]">{activeShelf.kind === 'SMART' ? i18nAttribute("符合保存条件的图书会自动加入或移出；点击封面查看详情。") : i18nAttribute("点击封面查看图书详情；使用“管理书架”调整名称和图书。")}</div>
-            </div>
-            <Badge>{activeShelf.bookCount} <I18nText>本</I18nText></Badge>
-          </div>
           {shelfBooks.length > 0 ? (
             <>
               <BookshelfCollection

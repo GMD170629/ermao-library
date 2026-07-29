@@ -110,6 +110,55 @@ def test_text_format_detection_and_txt_encoding(tmp_path):
     assert detect_txt_encoding(gb18030) == "gb18030"
 
 
+@pytest.mark.parametrize(
+    ("encoding", "boundary_character"),
+    [("utf-8", "中"), ("gb18030", "个")],
+)
+def test_txt_encoding_detection_allows_character_crossing_sample_boundary(
+    tmp_path: Path, encoding: str, boundary_character: str
+) -> None:
+    sample_size = 4 * 1024 * 1024
+    source = tmp_path / f"boundary-{encoding}.txt"
+    source.write_bytes(
+        b"A" * (sample_size - 1)
+        + boundary_character.encode(encoding)
+        + "\n边界后的正文".encode(encoding)
+    )
+
+    assert detect_txt_encoding(source) == encoding
+
+
+def test_txt_encoding_detection_rejects_incomplete_character_at_end(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "truncated.txt"
+    source.write_bytes("正文".encode("gb18030") + b"\xb8")
+
+    with pytest.raises(ConversionFailure) as raised:
+        detect_txt_encoding(source)
+
+    assert raised.value.code == "TEXT_ENCODING_UNCERTAIN"
+
+
+def test_txt_encoding_detection_allows_trailing_nul_padding(tmp_path: Path) -> None:
+    source = tmp_path / "nul-padded.txt"
+    source.write_bytes("第一章\n正文结束。".encode("gb18030") + b"\x00" * 160)
+
+    assert detect_txt_encoding(source) == "gb18030"
+
+
+def test_txt_encoding_detection_rejects_nul_inside_content(tmp_path: Path) -> None:
+    source = tmp_path / "embedded-nul.txt"
+    source.write_bytes(
+        "第一章\n正文".encode("gb18030") + b"\x00" + "继续".encode("gb18030")
+    )
+
+    with pytest.raises(ConversionFailure) as raised:
+        detect_txt_encoding(source)
+
+    assert raised.value.code == "TEXT_ENCODING_UNCERTAIN"
+
+
 @pytest.mark.parametrize("extension", ["mobi", "azw", "azw3", "prc", "fb2", "txt"])
 def test_download_entry_accepts_all_convertible_text_formats(extension):
     assert_allowed_extension(f"novel.{extension}")

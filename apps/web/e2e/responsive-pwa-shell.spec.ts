@@ -273,6 +273,11 @@ test('wide shelf details use responsive bookshelf rows and load more on scroll',
   await page.setViewportSize({ width: 2048, height: 1152 });
   await page.goto('/shelves?shelf=wide-shelf');
 
+  await expect(page.getByText('验证书架详情布局', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '宽屏书架' }).locator('..').getByText('25 本', { exact: true })).toBeVisible();
+  await expect(page.getByText('收录图书', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('点击封面查看图书详情；使用“管理书架”调整名称和图书。', { exact: true })).toHaveCount(0);
+
   const grid = page.getByTestId('shelf-book-bookshelves');
   await expect(grid).toBeVisible();
   await expect(grid.locator('[data-book-cover="true"]')).toHaveCount(25);

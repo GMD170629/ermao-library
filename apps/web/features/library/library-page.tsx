@@ -13,6 +13,11 @@ import { Select } from '../../components/ui/select';
 import type { WorkView } from '../../types/work';
 import { LibraryBatchContextMenu, LibraryBatchDialog, type LibraryBatchAction } from './library-batch-actions';
 import { canUseLibraryBatchAction } from './model/library-batch-action';
+import {
+  applicableSmartFilterRules,
+  parseSmartFilterRules,
+  serializableSmartFilterRules
+} from './model/smart-filter-rules';
 import { SmartFilterBuilder, type SmartFilterField, type SmartFilterRules } from './smart-filter-builder';
 import { UploadBookDialog } from './upload-book-dialog';
 import { I18nText } from '@/i18n/provider';
@@ -71,35 +76,6 @@ function routeStatus(value: string | null) {
   return value && validStatuses.has(value) ? value : '全部';
 }
 
-function parseSmartFilterRules(value: string | null): SmartFilterRules {
-  if (!value) return { combinator: 'ALL', conditions: [] };
-  try {
-    const parsed = JSON.parse(value) as { combinator?: string; conditions?: Array<{ field?: string; operator?: string; value?: string | string[] }> };
-    const conditions = Array.isArray(parsed.conditions)
-      ? parsed.conditions
-          .filter((condition) => condition && typeof condition.field === 'string' && typeof condition.operator === 'string')
-          .slice(0, 30)
-          .map((condition, index) => ({ id: `route-filter-${index}`, field: condition.field as string, operator: condition.operator as string, value: condition.value }))
-      : [];
-    return { combinator: parsed.combinator === 'ANY' ? 'ANY' : 'ALL', conditions };
-  } catch {
-    return { combinator: 'ALL', conditions: [] };
-  }
-}
-
-function serializableSmartFilterRules(rules: SmartFilterRules) {
-  return {
-    combinator: rules.combinator,
-    conditions: rules.conditions.map(({ field, operator, value }) => ({ field, operator, ...(value === undefined ? {} : { value }) }))
-  };
-}
-
-function smartFilterConditionComplete(condition: SmartFilterRules['conditions'][number]) {
-  if (['is_empty', 'is_not_empty', 'is_true', 'is_false'].includes(condition.operator)) return true;
-  if (condition.operator === 'between') return Array.isArray(condition.value) && condition.value.length === 2 && condition.value.every((item) => String(item).trim());
-  return !Array.isArray(condition.value) && Boolean(String(condition.value ?? '').trim());
-}
-
 export function LibraryPage() {
   const { t: i18nAttribute } = useAttributeI18n();
   const router = useRouter();
@@ -145,12 +121,12 @@ export function LibraryPage() {
   const requestedReloadKeyRef = useRef(reloadKey);
   const rememberedSortPreferenceRef = useRef(initialSortPreference);
   const toast = useToast();
-  const applicableSmartFilterRules = useMemo<SmartFilterRules>(() => ({
-    combinator: smartFilterRules.combinator,
-    conditions: smartFilterRules.conditions.filter(smartFilterConditionComplete)
-  }), [smartFilterRules]);
-  const incompleteSmartFilterCount = smartFilterRules.conditions.length - applicableSmartFilterRules.conditions.length;
-  const smartFilterQuery = useMemo(() => applicableSmartFilterRules.conditions.length > 0 ? JSON.stringify(serializableSmartFilterRules(applicableSmartFilterRules)) : '', [applicableSmartFilterRules]);
+  const applicableRules = useMemo(
+    () => applicableSmartFilterRules(smartFilterRules),
+    [smartFilterRules]
+  );
+  const incompleteSmartFilterCount = smartFilterRules.conditions.length - applicableRules.conditions.length;
+  const smartFilterQuery = useMemo(() => applicableRules.conditions.length > 0 ? JSON.stringify(serializableSmartFilterRules(applicableRules)) : '', [applicableRules]);
   const queryBase = useMemo(() => {
     const params = new URLSearchParams();
     if (search.trim()) params.set('search', search.trim());
@@ -473,7 +449,7 @@ export function LibraryPage() {
       if (search.trim()) rules.search = search.trim();
       if (statusFilter !== '全部') rules.statuses = [statusFilter];
       if (formatFilter !== '全部') rules.mediaKinds = [formatFilter === 'ebook' ? 'EBOOK' : formatFilter];
-      if (applicableSmartFilterRules.conditions.length > 0) Object.assign(rules, serializableSmartFilterRules(applicableSmartFilterRules));
+      if (applicableRules.conditions.length > 0) Object.assign(rules, serializableSmartFilterRules(applicableRules));
       const response = await fetch('/api/shelves', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: smartShelfName.trim(), description: '由书库筛选条件自动更新', kind: 'SMART', rules, pinned: true }) });
       const payload = await response.json() as { ok: boolean; error?: { message: string } };
       if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '保存智能书架失败');
@@ -558,7 +534,7 @@ export function LibraryPage() {
           <div className="w-full max-w-md rounded-t-3xl bg-[#FFFEFC] p-6 shadow-2xl md:rounded-3xl">
             <div className="flex items-start justify-between gap-4"><div><h2 className="text-lg font-semibold text-[#2D2926]"><I18nText>保存为智能书架</I18nText></h2><p className="mt-1 text-sm leading-6 text-[#817B75]"><I18nText>保存当前搜索、类型、状态和标签条件，结果会随书库自动更新。</I18nText></p></div><button type="button" onClick={() => setSmartShelfOpen(false)}><X size={18} /></button></div>
             <label className="mt-5 block text-sm text-[#6F6963]"><I18nText>书架名称</I18nText><input autoFocus value={smartShelfName} onChange={(event) => setSmartShelfName(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-black/[0.1] bg-white px-4 outline-none focus:border-[#E8A18D]" placeholder={pageTitle === '全部图书' ? i18nAttribute("例如：近期科幻阅读") : pageTitle} /></label>
-            <div className={cn('mt-4 rounded-xl px-4 py-3 text-xs leading-5', incompleteSmartFilterCount > 0 ? 'bg-amber-50 text-amber-800' : 'bg-black/[0.035] text-[#746E68]')}>{incompleteSmartFilterCount > 0 ? i18nAttribute("还有 {value0} 条条件没有填写完整，请返回补全后再保存。", { value0: incompleteSmartFilterCount }) : [search.trim() && `搜索“${search.trim()}”`, formatFilter !== '全部' && `类型：${formatOptions.find((item) => item.value === formatFilter)?.label}`, statusFilter !== '全部' && `状态：${statusOptions.find((item) => item.value === statusFilter)?.label}`, applicableSmartFilterRules.conditions.length > 0 && `${applicableSmartFilterRules.conditions.length} 条${applicableSmartFilterRules.combinator === 'ALL' ? '全部匹配' : '任一匹配'}规则`].filter(Boolean).join(' · ') || i18nAttribute("当前没有额外条件，将包含全部可见图书")}</div>
+            <div className={cn('mt-4 rounded-xl px-4 py-3 text-xs leading-5', incompleteSmartFilterCount > 0 ? 'bg-amber-50 text-amber-800' : 'bg-black/[0.035] text-[#746E68]')}>{incompleteSmartFilterCount > 0 ? i18nAttribute("还有 {value0} 条条件没有填写完整，请返回补全后再保存。", { value0: incompleteSmartFilterCount }) : [search.trim() && `搜索“${search.trim()}”`, formatFilter !== '全部' && `类型：${formatOptions.find((item) => item.value === formatFilter)?.label}`, statusFilter !== '全部' && `状态：${statusOptions.find((item) => item.value === statusFilter)?.label}`, applicableRules.conditions.length > 0 && `${applicableRules.conditions.length} 条${applicableRules.combinator === 'ALL' ? '全部匹配' : '任一匹配'}规则`].filter(Boolean).join(' · ') || i18nAttribute("当前没有额外条件，将包含全部可见图书")}</div>
             <div className="mt-6 flex justify-end gap-2"><Button variant="secondary" onClick={() => setSmartShelfOpen(false)}><I18nText>取消</I18nText></Button><Button icon={BookmarkPlus} loading={smartShelfSaving} disabled={!smartShelfName.trim() || incompleteSmartFilterCount > 0} onClick={() => void saveSmartShelf()}><I18nText>保存书架</I18nText></Button></div>
           </div>
         </div>

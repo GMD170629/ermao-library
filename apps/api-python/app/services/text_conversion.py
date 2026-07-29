@@ -54,6 +54,8 @@ RETRYABLE_CONVERSION_ERRORS = {
     "EPUB_NORMALIZATION_FAILED",
 }
 MAX_LOG_CHARS = 16_000
+TXT_ENCODING_SAMPLE_BYTES = 4 * 1024 * 1024
+TXT_ENCODING_MAX_SEQUENCE_BYTES = 4
 
 
 class ConversionFailure(RuntimeError):
@@ -117,27 +119,78 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _decode_txt_sample(
+    sample: bytes, continuation: bytes, *, encoding: str
+) -> str:
+    if not continuation:
+        return sample.decode(encoding, errors="strict")
+
+    decoder = codecs.getincrementaldecoder(encoding)(errors="strict")
+    decoded = decoder.decode(sample, final=False)
+    continuation_offset = 0
+    pending, _ = decoder.getstate()
+    while pending:
+        if continuation_offset >= len(continuation):
+            return decoded + decoder.decode(b"", final=True)
+        decoded += decoder.decode(
+            continuation[continuation_offset : continuation_offset + 1],
+            final=False,
+        )
+        continuation_offset += 1
+        pending, _ = decoder.getstate()
+    return decoded
+
+
+def _strip_verified_trailing_nul_padding(path: Path, prefix: bytes) -> bytes:
+    first_nul = prefix.find(b"\x00")
+    if first_nul < 0:
+        return prefix
+
+    with path.open("rb") as source:
+        source.seek(first_nul)
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            if chunk.strip(b"\x00"):
+                raise ConversionFailure(
+                    "TEXT_ENCODING_UNCERTAIN",
+                    "无法可靠识别 TXT 编码",
+                    retryable=False,
+                )
+    return prefix[:first_nul]
+
+
 def detect_txt_encoding(path: Path) -> str:
-    sample = path.read_bytes()[: 4 * 1024 * 1024]
+    with path.open("rb") as source:
+        prefix = source.read(
+            TXT_ENCODING_SAMPLE_BYTES + TXT_ENCODING_MAX_SEQUENCE_BYTES - 1
+        )
+    sample = prefix[:TXT_ENCODING_SAMPLE_BYTES]
+    continuation = prefix[TXT_ENCODING_SAMPLE_BYTES:]
     if not sample:
         raise ConversionFailure("CONVERSION_FAILED", "TXT 文件为空", retryable=False)
     if sample.startswith(codecs.BOM_UTF8):
+        _strip_verified_trailing_nul_padding(path, prefix)
         return "utf-8-sig"
     if sample.startswith(codecs.BOM_UTF16_LE):
         return "utf-16-le"
     if sample.startswith(codecs.BOM_UTF16_BE):
         return "utf-16-be"
     if b"\x00" in sample:
-        raise ConversionFailure(
-            "TEXT_ENCODING_UNCERTAIN", "无法可靠识别 TXT 编码", retryable=False
-        )
+        prefix = _strip_verified_trailing_nul_padding(path, prefix)
+        sample = prefix[:TXT_ENCODING_SAMPLE_BYTES]
+        continuation = prefix[TXT_ENCODING_SAMPLE_BYTES:]
+        if not sample:
+            raise ConversionFailure(
+                "TEXT_ENCODING_UNCERTAIN",
+                "无法可靠识别 TXT 编码",
+                retryable=False,
+            )
     try:
-        sample.decode("utf-8", errors="strict")
+        _decode_txt_sample(sample, continuation, encoding="utf-8")
         return "utf-8"
     except UnicodeDecodeError:
         pass
     try:
-        decoded = sample.decode("gb18030", errors="strict")
+        decoded = _decode_txt_sample(sample, continuation, encoding="gb18030")
     except UnicodeDecodeError as exc:
         raise ConversionFailure(
             "TEXT_ENCODING_UNCERTAIN", "无法可靠识别 TXT 编码", retryable=False

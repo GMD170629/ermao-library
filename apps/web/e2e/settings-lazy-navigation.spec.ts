@@ -18,6 +18,8 @@ async function mockSettingsApi(page: Page, locale: 'zh-CN' | 'en-US' = 'zh-CN') 
   await page.route('**/api/**', async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     counts[pathname] = (counts[pathname] ?? 0) + 1;
+    const methodPath = `${route.request().method()} ${pathname}`;
+    counts[methodPath] = (counts[methodPath] ?? 0) + 1;
 
     if (pathname.endsWith('/api/auth/me')) {
       await route.fulfill({
@@ -168,7 +170,10 @@ test('settings navigation keeps session and shelves stable while tabs load on de
   await page.locator('a[href="/settings/organize?tab=queue"]').click();
   await expect.poll(() => requestCount(counts, '/api/organize/jobs')).toBeGreaterThan(initialJobsRequests);
 
-  await page.locator('aside a[href="/settings/email"]').click();
+  await page
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('link', { name: '邮件与 Kindle' })
+    .click();
   await expect.poll(() => requestCount(counts, '/api/kindle-settings')).toBeGreaterThan(0);
   expect(requestCount(counts, '/api/email-settings')).toBe(0);
   expect(requestCount(counts, '/api/kindle-send-tasks')).toBe(0);
@@ -187,7 +192,17 @@ test('settings navigation keeps session and shelves stable while tabs load on de
     }));
     window.dispatchEvent(new CustomEvent('shuku:shelves-changed'));
   });
-  await expect(page.locator('aside').first().getByText('Updated settings user', { exact: true })).toBeVisible();
+  const mobileNavigationTrigger = page.getByRole('button', { name: '打开导航菜单' });
+  if (await mobileNavigationTrigger.isVisible()) {
+    await mobileNavigationTrigger.click();
+    await expect(
+      page.getByTestId('mobile-navigation').getByText('Updated settings user', { exact: true })
+    ).toBeVisible();
+  } else {
+    await expect(
+      page.locator('aside').first().getByText('Updated settings user', { exact: true })
+    ).toBeVisible();
+  }
   await expect.poll(() => requestCount(counts, '/api/shelves')).toBe(initialShelfRequests + 1);
   expect(requestCount(counts, '/api/auth/me')).toBe(initialAuthRequests);
 });
@@ -209,6 +224,34 @@ test('library import sections fetch only when their tab mounts and refresh after
   await expect.poll(() => requestCount(counts, '/api/system-settings')).toBeGreaterThan(0);
   await page.getByRole('tab', { name: '导入记录' }).click();
   await expect.poll(() => requestCount(counts, '/api/import-tasks')).toBeGreaterThan(initialImportTaskRequests);
+});
+
+test('library import preferences save after editing the stability check time', async ({ page }) => {
+  const counts = await mockSettingsApi(page);
+  await page.goto('/settings/library');
+  await page.getByRole('tab', { name: '偏好设置' }).click();
+  await expect.poll(() => requestCount(counts, '/api/system-settings')).toBeGreaterThan(0);
+
+  const checkTime = page.getByRole('spinbutton', { name: '检查时间' });
+  const stabilitySwitch = page.getByRole('switch', { name: '导入时检查文件稳定性' });
+  await expect(stabilitySwitch).not.toBeChecked();
+  await stabilitySwitch.click();
+  await checkTime.fill('2.0');
+  await expect(page.getByRole('button', { name: '保存偏好' })).toBeEnabled();
+  await page.getByRole('button', { name: '保存偏好' }).click();
+
+  await expect.poll(() => requestCount(counts, 'PUT /api/system-settings')).toBe(1);
+  await expect(page.getByRole('button', { name: '保存偏好' })).toBeDisabled();
+
+  await checkTime.fill('3.5');
+  await page.getByRole('button', { name: '保存偏好' }).click();
+  await expect.poll(() => requestCount(counts, 'PUT /api/system-settings')).toBe(2);
+
+  await stabilitySwitch.click();
+  await expect(page.getByRole('button', { name: '保存偏好' })).toBeEnabled();
+  await page.getByRole('button', { name: '撤销更改' }).click();
+  await expect(stabilitySwitch).toBeChecked();
+  await expect(page.getByRole('button', { name: '保存偏好' })).toBeDisabled();
 });
 
 test('English settings tabs retain route-backed accessibility state', async ({ context, page }) => {

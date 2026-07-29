@@ -1993,6 +1993,7 @@ def test_monitor_folder_config_preserves_zero_minimum_file_size():
     )
 
     assert folder.min_file_size_bytes == 0
+    assert not folder.stability_check_enabled
 
 
 def test_global_import_preferences_filter_extensions_conversion_and_patterns(
@@ -2029,7 +2030,7 @@ def test_global_import_preferences_filter_extensions_conversion_and_patterns(
 def test_missing_import_preferences_keep_every_supported_extension_enabled(db_session):
     preferences = load_import_preferences(db_session)
     assert preferences.allowed_extensions == SUPPORTED_IMPORT_EXTENSIONS
-    assert preferences.stability_check_enabled
+    assert not preferences.stability_check_enabled
     assert preferences.auto_convert_to_epub
 
 
