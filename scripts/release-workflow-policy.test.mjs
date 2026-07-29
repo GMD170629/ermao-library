@@ -28,9 +28,17 @@ test('Draft Release publication and release-feed updates have a strict order', (
 test('maintenance synchronization edits published history but cannot create or publish Releases', () => {
   assert.doesNotMatch(maintenanceWorkflow, /gh release create/u);
   assert.doesNotMatch(maintenanceWorkflow, /--draft=false/u);
+  assert.doesNotMatch(maintenanceWorkflow, /<<['"]?NODE/u);
   assert.match(maintenanceWorkflow, /if \[\[ "\$is_draft" != 'false' \]\]/u);
   assert.match(maintenanceWorkflow, /gh release edit "\$release_tag".*--notes-file/u);
+  assert.match(maintenanceWorkflow, /replace\(\/\\n\*\$\/, "\\n"\)/u);
   assert.match(maintenanceWorkflow, /release-feed/u);
+});
+
+test('Release body verification ignores only transport-added trailing newlines', () => {
+  const strictTrailingNewlineNormalizers =
+    releaseWorkflow.match(/replace\(\/\\n\*\$\/, '\\n'\)/gu) ?? [];
+  assert.equal(strictTrailingNewlineNormalizers.length, 2);
 });
 
 test('the standalone Docker publisher always validates release metadata', () => {
