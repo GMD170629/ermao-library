@@ -4,8 +4,29 @@ import type { ReactNode } from 'react';
 import { I18nText } from '../../../i18n/provider';
 import { MobileNavigationTrigger } from '../../../components/layout/mobile-navigation';
 import { SettingsSecondaryNav } from './settings-secondary-nav';
+import { ReleaseFeedProvider } from '../../updates/public';
 
 export function SettingsCenterShell({
+  title,
+  description,
+  children,
+  actions
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+  actions?: ReactNode;
+}) {
+  return (
+    <ReleaseFeedProvider>
+      <SettingsCenterContent title={title} description={description} actions={actions}>
+        {children}
+      </SettingsCenterContent>
+    </ReleaseFeedProvider>
+  );
+}
+
+function SettingsCenterContent({
   title,
   description,
   children,

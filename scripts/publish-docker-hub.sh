@@ -116,6 +116,13 @@ if [ -z "$NAMESPACE" ]; then
   exit 1
 fi
 
+pnpm release:validate
+APP_VERSION="$(node -p "require('./package.json').version")"
+if [[ "$VERSION_TAG" == v* && "$VERSION_TAG" != "v${APP_VERSION}" ]]; then
+  echo "Version tag ${VERSION_TAG} does not match the validated application version v${APP_VERSION}." >&2
+  exit 1
+fi
+
 IMAGE_PREFIX="${REGISTRY}/${NAMESPACE}"
 BUILD_ARGS=(--platform "$PLATFORM" --push)
 
@@ -125,8 +132,10 @@ fi
 
 run_checks() {
   echo "==> Running checks"
+  pnpm --filter @shuku/web lint
   pnpm --filter @shuku/web typecheck
   pnpm --filter @shuku/web test
+  pnpm --filter @shuku/web i18n:check
   pnpm --filter @shuku/web build
 }
 

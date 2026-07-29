@@ -25,6 +25,8 @@
     "verify:python-backend": "node scripts/verify-python-backend-migration.mjs",
     "fnos:validate": "FNOS_VALIDATE_ONLY=true scripts/build-fnos-package.sh",
     "fnos:build": "scripts/build-fnos-package.sh",
+    "release:validate": "node scripts/validate-release-notes.mjs",
+    "test:release-notes": "node --test scripts/validate-release-notes.test.mjs scripts/release-workflow-policy.test.mjs",
     "docker:publish": "scripts/publish-docker-hub.sh"
   },
   "devDependencies": {

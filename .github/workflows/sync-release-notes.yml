@@ -1,0 +1,78 @@
+name: Synchronize existing bilingual Release notes
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  synchronize:
+    name: Backfill published Releases and release feed
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Validate authoritative bilingual release notes
+        run: |
+          node --test scripts/validate-release-notes.test.mjs
+          node scripts/validate-release-notes.mjs
+
+      - name: Synchronize every existing published Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          node -e "
+            const index = require('./release-notes/index.json');
+            for (const release of index.releases) {
+              process.stdout.write([release.tag, 'release-notes/' + release.notesPath].join('\t') + '\n');
+            }
+          " > "$RUNNER_TEMP/releases.tsv"
+
+          while IFS=$'\t' read -r release_tag notes_path; do
+            if ! gh release view "$release_tag" >/dev/null 2>&1; then
+              echo "Published Release $release_tag does not exist; refusing to create it from the maintenance workflow." >&2
+              exit 1
+            fi
+            is_draft="$(gh release view "$release_tag" --json isDraft --jq .isDraft)"
+            if [[ "$is_draft" != 'false' ]]; then
+              echo "Release $release_tag is a draft; refusing to publish it from the maintenance workflow." >&2
+              exit 1
+            fi
+            gh release edit "$release_tag" --title "$release_tag" --notes-file "$notes_path"
+            remote_body="$RUNNER_TEMP/${release_tag}-body.md"
+            gh release view "$release_tag" --json body --jq .body > "$remote_body"
+            node - "$notes_path" "$remote_body" <<'NODE'
+            const fs = require('node:fs');
+            const normalize = (value) => value.replace(/\r\n/g, '\n').replace(/\n?$/, '\n');
+            const expected = normalize(fs.readFileSync(process.argv[2], 'utf8'));
+            const actual = normalize(fs.readFileSync(process.argv[3], 'utf8'));
+            if (expected !== actual) {
+              console.error(`Release body synchronization failed for ${process.argv[2]}.`);
+              process.exit(1);
+            }
+            NODE
+          done < "$RUNNER_TEMP/releases.tsv"
+
+      - name: Initialize verified release feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          feed_root="$(mktemp -d)"
+          cp -R release-notes/. "$feed_root/"
+          touch "$feed_root/.nojekyll"
+          git -C "$feed_root" init
+          git -C "$feed_root" checkout -b release-feed
+          git -C "$feed_root" config user.name github-actions
+          git -C "$feed_root" config user.email github-actions@github.com
+          git -C "$feed_root" add .
+          git -C "$feed_root" commit -m "Initialize verified bilingual release feed"
+          git -C "$feed_root" push --force \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            release-feed

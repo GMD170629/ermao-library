@@ -159,7 +159,27 @@ const exactOverrides = {
   '选择《{value0}》的一个 EPUB 或 PDF 文件加入后台队列。': 'Choose an EPUB or PDF file for “{value0}” and add it to the background queue.',
   '此链接在创建后 30 分钟内有效，并且只能使用一次。': 'This link is valid for 30 minutes after creation and can only be used once.',
   '打开二毛图书并设置新密码': 'Open Ermao Books and set a new password',
-  '重置二毛图书密码': 'Reset your Ermao Books password'
+  '重置二毛图书密码': 'Reset your Ermao Books password',
+  '无法比较无效的正式版本号': 'Invalid stable versions cannot be compared',
+  '更新清单格式无效': 'The update feed format is invalid',
+  '更新清单包含无效版本': 'The update feed contains an invalid version',
+  '更新清单包含重复版本': 'The update feed contains duplicate versions',
+  '更新清单版本顺序无效': 'The update feed version order is invalid',
+  '更新说明缺少当前语言内容': 'Release notes are unavailable in the current language',
+  '暂时无法检查更新': 'Unable to check for updates right now',
+  '更新说明路径无效': 'The release-note path is invalid',
+  '暂时无法读取更新说明': 'Unable to load the release notes right now',
+  '正在检查更新…': 'Checking for updates…',
+  '发现新版本 v{version}': 'New version v{version} is available',
+  '当前版本 v{current}，最新版本发布于 {date}。': 'Current version: v{current}. The latest version was published on {date}.',
+  '当前运行的是高于最新正式版的开发版本。': 'This is a development build newer than the latest stable release.',
+  '当前已是最新正式版本。': 'You are running the latest stable version.',
+  '当前版本': 'Current version',
+  '正在读取更新说明…': 'Loading release notes…',
+  '在 GitHub 查看此版本': 'View this release on GitHub',
+  '更新与版本历史': 'Updates and version history',
+  '更新说明与 GitHub Release 保持一致。': 'Release notes are synchronized with GitHub Releases.',
+  '有新版本': 'New version available'
 };
 
 for (const source of Object.keys(catalog)) {

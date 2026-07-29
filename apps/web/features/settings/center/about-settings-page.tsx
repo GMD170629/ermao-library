@@ -5,6 +5,7 @@ import { withBasePath } from '../../../lib/base-path';
 import { PRODUCT_DESCRIPTION, PRODUCT_NAME } from '../../../lib/brand';
 import { SettingsCenterShell } from './settings-center-shell';
 import { I18nText } from '@/i18n/provider';
+import { ReleaseHistory } from '../../updates/public';
 
 const PROJECT_URL = 'https://github.com/GMD170629/ermao-library';
 
@@ -53,6 +54,8 @@ export function AboutSettingsPage() {
           ))}
         </div>
       </div>
+
+      <ReleaseHistory />
 
       <section className="mt-8 border-t border-[#DEDAD4] pt-7" aria-labelledby="project-introduction-title">
         <div className="flex items-start gap-3">

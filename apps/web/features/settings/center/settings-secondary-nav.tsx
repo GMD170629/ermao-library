@@ -8,6 +8,8 @@ import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { cn } from '../../../components/ui/cn';
 import { useAppSession } from '../../../components/layout/app-session-context';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
+import rootPackage from '../../../../../package.json';
+import { updateStatus, useReleaseFeed } from '../../updates/public';
 
 export type SettingsAccess = 'account' | 'system' | 'admin';
 export type SettingsAuthorization = { isAdmin: boolean; canManageSystem: boolean };
@@ -68,6 +70,7 @@ export function isSettingsItemActive(pathname: string, href: string) {
 
 export function SettingsSecondaryNav() {
   const { t: i18nAttribute } = useAttributeI18n();
+  const { state: releaseFeedState } = useReleaseFeed();
   const pathname = usePathname();
   const router = useRouter();
   const session = useAppSession();
@@ -104,6 +107,9 @@ export function SettingsSecondaryNav() {
               {group.items.map(({ href, label, icon: Icon }) => {
                 const active = isSettingsItemActive(pathname, href);
                 const selected = pendingHref ? pendingHref === href : active;
+                const hasUpdate = href === '/settings/about'
+                  && releaseFeedState.status === 'ready'
+                  && updateStatus(rootPackage.version, releaseFeedState.feed).kind === 'update-available';
                 return (
                   <Link
                     key={href}
@@ -118,6 +124,12 @@ export function SettingsSecondaryNav() {
                   >
                     <Icon size={20} className="shrink-0" strokeWidth={1.75} />
                     <span className="whitespace-nowrap">{i18nAttribute(label)}</span>
+                    {hasUpdate ? (
+                      <>
+                        <span className="ml-auto h-2.5 w-2.5 rounded-full bg-[#ED4D2D]" aria-hidden="true" />
+                        <span className="sr-only">{i18nAttribute('有新版本')}</span>
+                      </>
+                    ) : null}
                   </Link>
                 );
               })}

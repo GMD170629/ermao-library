@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "repository": "GMD170629/ermao-library",
+  "releases": [
+    {
+      "version": "0.4.2",
+      "tag": "v0.4.2",
+      "publishedAt": "2026-07-29T09:53:00Z",
+      "notesPath": "v0.4.2.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.4.2"
+    },
+    {
+      "version": "0.4.1",
+      "tag": "v0.4.1",
+      "publishedAt": "2026-07-29T02:58:00Z",
+      "notesPath": "v0.4.1.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.4.1"
+    },
+    {
+      "version": "0.4.0",
+      "tag": "v0.4.0",
+      "publishedAt": "2026-07-28T13:34:00Z",
+      "notesPath": "v0.4.0.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.4.0"
+    },
+    {
+      "version": "0.3.3",
+      "tag": "v0.3.3",
+      "publishedAt": "2026-07-25T04:59:00Z",
+      "notesPath": "v0.3.3.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.3.3"
+    },
+    {
+      "version": "0.3.2",
+      "tag": "v0.3.2",
+      "publishedAt": "2026-07-24T13:20:00Z",
+      "notesPath": "v0.3.2.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.3.2"
+    },
+    {
+      "version": "0.3.1",
+      "tag": "v0.3.1",
+      "publishedAt": "2026-07-24T09:06:00Z",
+      "notesPath": "v0.3.1.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.3.1"
+    },
+    {
+      "version": "0.3.0",
+      "tag": "v0.3.0",
+      "publishedAt": "2026-07-23T08:22:00Z",
+      "notesPath": "v0.3.0.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.3.0"
+    },
+    {
+      "version": "0.2.3",
+      "tag": "v0.2.3",
+      "publishedAt": "2026-07-23T03:25:00Z",
+      "notesPath": "v0.2.3.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.2.3"
+    },
+    {
+      "version": "0.2.2",
+      "tag": "v0.2.2",
+      "publishedAt": "2026-07-22T17:16:00Z",
+      "notesPath": "v0.2.2.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.2.2"
+    },
+    {
+      "version": "0.2.0",
+      "tag": "v0.2.0",
+      "publishedAt": "2026-07-22T09:53:00Z",
+      "notesPath": "v0.2.0.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.2.0"
+    },
+    {
+      "version": "0.1.25",
+      "tag": "v0.1.25",
+      "publishedAt": "2026-07-22T09:28:00Z",
+      "notesPath": "v0.1.25.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.1.25"
+    }
+  ]
+}

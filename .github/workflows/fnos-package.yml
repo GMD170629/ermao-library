@@ -15,24 +15,26 @@ on:
       - 'apps/web/next.config.js'
       - 'apps/api-python/app/core/**'
       - 'apps/api-python/app/db/**'
+      - 'apps/api-python/pyproject.toml'
+      - 'apps/api-python/uv.lock'
+      - 'apps/web/package.json'
+      - 'release-notes/**'
+      - 'scripts/validate-release-notes.mjs'
+      - 'scripts/validate-release-notes.test.mjs'
       - 'scripts/build-fnos-package.sh'
+      - 'scripts/publish-docker-hub.sh'
       - 'scripts/start-unified-app.sh'
       - 'docker-compose.yml'
       - 'docker-compose.prod.yml'
       - 'package.json'
       - '.github/workflows/fnos-package.yml'
+      - '.github/workflows/sync-release-notes.yml'
   push:
     branches:
       - prod
     tags:
       - 'v*.*.*'
   workflow_dispatch:
-    inputs:
-      publish_release:
-        description: 'Publish the package to a GitHub Release'
-        required: true
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -48,7 +50,45 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Test strict bilingual release-note validation
+        run: node --test scripts/validate-release-notes.test.mjs
+
+      - name: Validate application version and bilingual release notes
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        shell: bash
+        run: |
+          args=()
+          if [[ -n "$BASE_REF" ]]; then
+            args+=(--base-ref "origin/$BASE_REF")
+          fi
+          node scripts/validate-release-notes.mjs "${args[@]}"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4.4.0
+        with:
+          version: 9.12.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+
+      - name: Install Web dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Web quality gates
+        run: |
+          pnpm --filter @shuku/web lint
+          pnpm --filter @shuku/web typecheck
+          pnpm --filter @shuku/web test
+          pnpm --filter @shuku/web i18n:check
+          pnpm --filter @shuku/web build
 
       - name: Validate fnOS package templates
         env:
@@ -58,26 +98,15 @@ jobs:
   publish-prod-image:
     name: Publish prod Docker image
     if: github.ref == 'refs/heads/prod'
+    needs: validate
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Verify application versions
-        shell: bash
-        run: |
-          app_version="$(node -p "require('./package.json').version")"
-          web_version="$(node -p "require('./apps/web/package.json').version")"
-          python_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' apps/api-python/pyproject.toml | head -n 1)"
-          runtime_version="$(sed -n 's/^[[:space:]]*app_version: str = "\([^"]*\)"/\1/p' apps/api-python/app/core/config.py)"
-          lock_version="$(awk '/^name = "shuku-starship-api-python"$/ { found=1; next } found && /^version = / { gsub(/"/, "", $3); print $3; exit }' apps/api-python/uv.lock)"
-          for version_source in "$web_version" "$python_version" "$runtime_version" "$lock_version"; do
-            if [[ "$version_source" != "$app_version" ]]; then
-              echo "Application versions are inconsistent: root=$app_version web=$web_version python=$python_version runtime=$runtime_version lock=$lock_version" >&2
-              exit 1
-            fi
-          done
+      - name: Validate application version and bilingual release notes
+        run: node scripts/validate-release-notes.mjs
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -111,35 +140,57 @@ jobs:
   package:
     name: Build fnOS FPK
     if: github.event_name != 'pull_request' && github.ref != 'refs/heads/prod'
+    needs: validate
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Read and verify package version
+      - name: Read and verify package version and bilingual release notes
         id: version
         shell: bash
         run: |
-          app_version="$(node -p "require('./package.json').version")"
-          web_version="$(node -p "require('./apps/web/package.json').version")"
-          python_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' apps/api-python/pyproject.toml | head -n 1)"
-          runtime_version="$(sed -n 's/^[[:space:]]*app_version: str = "\([^"]*\)"/\1/p' apps/api-python/app/core/config.py)"
-          lock_version="$(awk '/^name = "shuku-starship-api-python"$/ { found=1; next } found && /^version = / { gsub(/"/, "", $3); print $3; exit }' apps/api-python/uv.lock)"
-          for version_source in "$web_version" "$python_version" "$runtime_version" "$lock_version"; do
-            if [[ "$version_source" != "$app_version" ]]; then
-              echo "Application versions are inconsistent: root=$app_version web=$web_version python=$python_version runtime=$runtime_version lock=$lock_version" >&2
-              exit 1
-            fi
-          done
-          if [[ "${GITHUB_REF_TYPE}" == 'tag' && "${GITHUB_REF_NAME}" != "v${app_version}" ]]; then
-            echo "Tag ${GITHUB_REF_NAME} does not match package version v${app_version}" >&2
-            exit 1
+          if [[ "${GITHUB_REF_TYPE}" == 'tag' ]]; then
+            node scripts/validate-release-notes.mjs --tag "${GITHUB_REF_NAME}"
+          else
+            node scripts/validate-release-notes.mjs
           fi
-          echo "app_version=${app_version}" >> "$GITHUB_OUTPUT"
-          echo "release_tag=v${app_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare strict bilingual Draft Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+          RELEASE_NOTES_PATH: ${{ steps.version.outputs.release_notes_path }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)"
+            if [[ "$is_draft" == 'true' ]]; then
+              gh release edit "$RELEASE_TAG" --title "$RELEASE_TAG" --notes-file "$RELEASE_NOTES_PATH"
+            fi
+          else
+            gh release create "$RELEASE_TAG" \
+              --draft \
+              --target "$GITHUB_SHA" \
+              --title "$RELEASE_TAG" \
+              --notes-file "$RELEASE_NOTES_PATH"
+          fi
+          remote_body="$RUNNER_TEMP/prepared-release-body.md"
+          gh release view "$RELEASE_TAG" --json body --jq .body > "$remote_body"
+          node - "$RELEASE_NOTES_PATH" "$remote_body" <<'NODE'
+          const fs = require('node:fs');
+          const normalize = (value) => value.replace(/\r\n/g, '\n').replace(/\n?$/, '\n');
+          const expected = normalize(fs.readFileSync(process.argv[2], 'utf8'));
+          const actual = normalize(fs.readFileSync(process.argv[3], 'utf8'));
+          if (expected !== actual) {
+            console.error('Published GitHub Release body differs from the authoritative bilingual release note.');
+            process.exit(1);
+          }
+          NODE
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -173,8 +224,8 @@ jobs:
           flavor: latest=false
           tags: |
             type=raw,value=${{ steps.version.outputs.app_version }}
-            type=raw,value=prod,enable=${{ github.ref_type == 'tag' || inputs.publish_release == true }}
-            type=raw,value=latest,enable=${{ github.ref_type == 'tag' || inputs.publish_release == true }}
+            type=raw,value=prod,enable=${{ github.ref_type == 'tag' }}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
 
       - name: Build and push release Docker image
         uses: docker/build-push-action@v6
@@ -212,18 +263,59 @@ jobs:
           path: dist/fnos/*.fpk
           if-no-files-found: error
 
-      - name: Publish fnOS package to GitHub Release
-        if: github.ref_type == 'tag' || inputs.publish_release == true
+      - name: Upload fnOS package to Draft Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+        run: gh release upload "$RELEASE_TAG" dist/fnos/*.fpk --clobber
+
+      - name: Verify and publish strict bilingual Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+          RELEASE_NOTES_PATH: ${{ steps.version.outputs.release_notes_path }}
+        shell: bash
+        run: |
+          remote_body="$RUNNER_TEMP/release-body.md"
+          gh release view "$RELEASE_TAG" --json body --jq .body > "$remote_body"
+          node - "$RELEASE_NOTES_PATH" "$remote_body" <<'NODE'
+          const fs = require('node:fs');
+          const normalize = (value) => value.replace(/\r\n/g, '\n').replace(/\n?$/, '\n');
+          const expected = normalize(fs.readFileSync(process.argv[2], 'utf8'));
+          const actual = normalize(fs.readFileSync(process.argv[3], 'utf8'));
+          if (expected !== actual) {
+            console.error('GitHub Release body differs from the authoritative bilingual release note.');
+            process.exit(1);
+          }
+          NODE
+          is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)"
+          if [[ "$is_draft" == 'true' ]]; then
+            gh release edit "$RELEASE_TAG" --draft=false
+          fi
+
+      - name: Publish verified release feed
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
         shell: bash
         run: |
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" dist/fnos/*.fpk --clobber
-          else
-            gh release create "$RELEASE_TAG" dist/fnos/*.fpk \
-              --target "$GITHUB_SHA" \
-              --title "$RELEASE_TAG" \
-              --generate-notes
+          published_tag="$(gh release view "$RELEASE_TAG" --json tagName,isDraft --jq 'select(.isDraft == false) | .tagName')"
+          if [[ "$published_tag" != "$RELEASE_TAG" ]]; then
+            echo "Release $RELEASE_TAG is not published; refusing to update release-feed." >&2
+            exit 1
           fi
+          feed_root="$(mktemp -d)"
+          cp -R release-notes/. "$feed_root/"
+          touch "$feed_root/.nojekyll"
+          git -C "$feed_root" init
+          git -C "$feed_root" checkout -b release-feed
+          git -C "$feed_root" config user.name github-actions
+          git -C "$feed_root" config user.email github-actions@github.com
+          git -C "$feed_root" add .
+          git -C "$feed_root" commit -m "Publish release feed $RELEASE_TAG"
+          git -C "$feed_root" push --force \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            release-feed
