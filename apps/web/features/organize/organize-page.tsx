@@ -46,11 +46,29 @@ export type OrganizeJobView = {
   book: WorkView;
 };
 
+type OrganizeBookSummary = {
+  id: string;
+  title: string;
+  author: string;
+  format: string;
+};
+
+export type OrganizeJobSummaryView = {
+  id: string;
+  trigger: string;
+  statusCategory: OrganizeStatusCategory;
+  issueCodes: string[];
+  reasonCodes: string[];
+  metadataSources: string[];
+  createdAt: string;
+  updatedAt: string;
+  book: OrganizeBookSummary;
+};
+
 type JobsResponse = {
   ok: boolean;
   data?: {
-    jobs: OrganizeJobView[];
-    books: WorkView[];
+    jobs: OrganizeJobSummaryView[];
     page: number;
     pageSize: number;
     total: number;
@@ -128,7 +146,7 @@ function reasonLabel(code: string) {
   return code.replace(/^SUGGEST_/, '建议补全 ');
 }
 
-function jobReasons(job: OrganizeJobView) {
+function jobReasons(job: OrganizeJobView | OrganizeJobSummaryView) {
   const rawCodes = job.reasonCodes?.length ? job.reasonCodes : job.issueCodes;
   const codes = rawCodes.filter((code) => code !== 'DUPLICATE' && !code.startsWith('SUGGEST_'));
   if (codes.length) return [...new Set(codes.map(reasonLabel))];
@@ -138,14 +156,23 @@ function jobReasons(job: OrganizeJobView) {
   return ['历史整理任务'];
 }
 
-function jobSources(job: OrganizeJobView) {
-  const values = [
-    ...(job.metadataSources ?? []),
-    job.metadataLookupSource,
-    ...(job.providerExecutions ?? []).map((execution) => execution.providerId),
-    ...(job.metadataLookupProviders ?? [])
-  ];
-  return [...new Set(values.map((value) => String(value || '').trim()).filter(Boolean))];
+function jobSources(job: OrganizeJobSummaryView) {
+  return job.metadataSources;
+}
+
+function normalizeOrganizeJobSummary(job: OrganizeJobSummaryView): OrganizeJobSummaryView | null {
+  if (!job?.book) return null;
+  return {
+    ...job,
+    issueCodes: Array.isArray(job.issueCodes) ? job.issueCodes : [],
+    reasonCodes: Array.isArray(job.reasonCodes) ? job.reasonCodes : [],
+    metadataSources: Array.isArray(job.metadataSources) ? job.metadataSources : [],
+    book: {
+      ...job.book,
+      title: job.book.title || '未命名作品',
+      author: job.book.author || '未知作者',
+    },
+  };
 }
 
 function StatusBadge({ category }: { category: OrganizeStatusCategory }) {
@@ -175,7 +202,7 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
   const router = useRouter();
   const confirm = useConfirm();
   const toast = useToast();
-  const [jobs, setJobs] = useState<OrganizeJobView[]>([]);
+  const [jobs, setJobs] = useState<OrganizeJobSummaryView[]>([]);
   const [providerNames, setProviderNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -203,7 +230,7 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
       const jobsResponse = await fetch(`/api/organize/jobs?${params.toString()}`, { cache: 'no-store' });
       const jobsPayload = (await jobsResponse.json()) as JobsResponse;
       if (!jobsPayload.ok) throw new Error(jobsPayload.error?.message ?? '读取整理记录失败');
-      setJobs((jobsPayload.data?.jobs ?? []).map(normalizeOrganizeJob).filter((job): job is OrganizeJobView => job !== null));
+      setJobs((jobsPayload.data?.jobs ?? []).map(normalizeOrganizeJobSummary).filter((job): job is OrganizeJobSummaryView => job !== null));
       const nextTotalPages = Math.max(1, Number(jobsPayload.data?.totalPages ?? 1));
       const nextPage = Math.min(nextTotalPages, Math.max(1, Number(jobsPayload.data?.page ?? page)));
       setTotal(Number(jobsPayload.data?.total ?? 0));
@@ -225,7 +252,7 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
     return providerNames[source] ?? fallbackSourceLabels[source] ?? source;
   }
 
-  async function mutateJob(job: OrganizeJobView, action: 'delete' | 'recognize') {
+  async function mutateJob(job: OrganizeJobSummaryView, action: 'delete' | 'recognize') {
     if (action === 'delete' && !await confirm({
       title: '删除整理记录',
       description: `仅删除《${job.book.title}》的整理记录，不会删除书库读物或文件。`,

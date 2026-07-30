@@ -119,6 +119,27 @@ class OrganizeJob(HttpContractModel):
     book: WorkView
 
 
+class OrganizeJobListBook(HttpContractModel):
+    id: str
+    title: str
+    author: str
+    format: str
+
+
+class OrganizeJobListItem(HttpContractModel):
+    id: str
+    trigger: str
+    status_category: Literal["SUCCESS", "FAILED", "RECOGNIZING", "WAITING"] = Field(
+        alias="statusCategory"
+    )
+    issue_codes: list[str] = Field(alias="issueCodes")
+    reason_codes: list[str] = Field(alias="reasonCodes")
+    metadata_sources: list[str] = Field(alias="metadataSources")
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+    book: OrganizeJobListBook
+
+
 class OrganizeStatusCounts(HttpContractModel):
     success: int = Field(alias="SUCCESS")
     failed: int = Field(alias="FAILED")
@@ -127,8 +148,7 @@ class OrganizeStatusCounts(HttpContractModel):
 
 
 class OrganizeJobsPayload(HttpContractModel):
-    jobs: list[OrganizeJob]
-    books: list[WorkView]
+    jobs: list[OrganizeJobListItem]
     page: int
     page_size: int = Field(alias="pageSize")
     total: int
