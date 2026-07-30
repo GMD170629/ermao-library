@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "书库星舰",
+    "slug": "shuku-starship",
+    "scheme": "shuku-starship",
+    "version": "0.4.4",
+    "platforms": [
+      "ios",
+      "android"
+    ],
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.shuku.starship",
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "用于连接您的书库服务器 / Used to connect to your library server.",
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        }
+      }
+    },
+    "android": {
+      "package": "com.shuku.starship",
+      "predictiveBackGestureEnabled": true
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "用于扫描书库服务器二维码 / Used to scan your library server QR code.",
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": true
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          },
+          "ios": {
+            "deploymentTarget": "16.4"
+          }
+        }
+      ]
+    ]
+  }
+}
