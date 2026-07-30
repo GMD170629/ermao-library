@@ -166,7 +166,7 @@ jobs:
           context: .
           file: apps/web/Dockerfile.prod
           target: runner
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: gamersgu/shuku-starship-web:develop
           labels: |
@@ -177,7 +177,7 @@ jobs:
 
   package:
     name: Build fnOS FPK
-    if: github.event_name != 'pull_request' && github.ref != 'refs/heads/prod'
+    if: github.event_name != 'pull_request' && github.ref != 'refs/heads/prod' && github.ref != 'refs/heads/develop'
     needs: validate
     runs-on: ubuntu-latest
     permissions:
