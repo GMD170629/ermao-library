@@ -45,3 +45,16 @@ test('the standalone Docker publisher always validates release metadata', () => 
   assert.match(dockerPublisher, /pnpm release:validate/u);
   assert.match(dockerPublisher, /VERSION_TAG.*v\$\{APP_VERSION\}/u);
 });
+
+test('develop pushes publish only the isolated develop image channel', () => {
+  assert.match(releaseWorkflow, /branches:\s+- prod\s+- develop/u);
+  const developJob = releaseWorkflow.match(
+    /\n  publish-develop-image:[\s\S]*?(?=\n  package:)/
+  )?.[0];
+
+  assert.ok(developJob, 'the develop image publishing job must exist');
+  assert.match(developJob, /if: github\.ref == 'refs\/heads\/develop'/u);
+  assert.match(developJob, /needs: validate/u);
+  assert.match(developJob, /tags: gamersgu\/shuku-starship-web:develop/u);
+  assert.doesNotMatch(developJob, /shuku-starship-web:(?:prod|latest)/u);
+});
