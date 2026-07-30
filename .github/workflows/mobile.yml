@@ -1,0 +1,59 @@
+name: Validate mobile app
+
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/**'
+      - 'packages/reader-core/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'turbo.json'
+      - '.github/workflows/mobile.yml'
+  push:
+    branches:
+      - develop
+    paths:
+      - 'apps/mobile/**'
+      - 'packages/reader-core/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'turbo.json'
+      - '.github/workflows/mobile.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Expo application
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4.4.0
+        with:
+          version: 9.12.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check shared reader contracts
+        run: pnpm --filter @shuku/reader-core typecheck
+
+      - name: Run Mobile quality gates
+        run: pnpm --filter @shuku/mobile check
+
+      - name: Export Android and iOS bundles
+        run: pnpm --filter @shuku/mobile exec expo export --platform all --output-dir "$RUNNER_TEMP/mobile-export"
