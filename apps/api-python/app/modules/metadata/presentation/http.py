@@ -97,7 +97,6 @@ async def update_registered_metadata_provider_pipeline(
         message=f"更新{work_type}数据源组合",
         metadata={"providerIds": [item.get("providerId") for item in items or []]},
         commit=True,
-        prune=True,
     )
     return ProvidersResponse(
         data=ProvidersPayload.model_validate(
@@ -166,7 +165,6 @@ async def update_registered_metadata_provider(
         message=f"更新元数据插件：{provider.get('name') or provider_id}",
         metadata={"enabled": provider.get("enabled"), "priority": provider.get("priority")},
         commit=True,
-        prune=True,
     )
     return ProviderResponse(
         data=ProviderPayload(

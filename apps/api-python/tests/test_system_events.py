@@ -7,6 +7,8 @@ from app.bootstrap.system import (
     get_setting,
     prune_system_events,
     record_system_event,
+    set_max_event_bytes,
+    system_event_size_bytes,
     upsert_setting,
 )
 
@@ -66,6 +68,46 @@ def test_prune_system_events_enforces_hard_limit_after_protected_events(db_sessi
 
     assert result["sizeBytes"] <= 300
     assert result["deleted"] >= 1
+
+
+def test_prune_system_events_reduces_over_capacity_to_half_limit(db_session):
+    for index in range(12):
+        record_system_event(
+            db_session,
+            source="import",
+            action=f"scan.file.detected.{index}",
+            message="普通扫描事件" + ("x" * 300),
+        )
+
+    max_bytes = 1_800
+    result = prune_system_events(db_session, max_bytes=max_bytes, commit=True)
+
+    assert result["deleted"] >= 1
+    assert result["sizeBytes"] <= max_bytes // 2
+    assert db_session.scalar(select(func.count()).select_from(SystemEvent)) > 0
+    assert get_setting(db_session, "events.lastPrunedAt") is not None
+
+
+def test_updating_capacity_defers_pruning_to_maintenance_worker(db_session):
+    for index in range(20):
+        record_system_event(
+            db_session,
+            source="import",
+            action=f"scan.payload.{index}",
+            message="大体积日志",
+            metadata={"payload": "x" * 64_000},
+        )
+    db_session.commit()
+
+    set_max_event_bytes(db_session, 1 * 1024 * 1024)
+    db_session.commit()
+
+    assert system_event_size_bytes(db_session) > 1 * 1024 * 1024
+    assert (
+        db_session.scalar(select(func.count()).select_from(SystemEvent))
+        == 20
+    )
+    assert get_setting(db_session, "events.lastPrunedAt") is None
 
 
 def test_system_setting_kv_round_trip(db_session):

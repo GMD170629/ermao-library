@@ -111,7 +111,6 @@ def _event(
             **(metadata or {}),
         },
         commit=True,
-        prune=True,
     )
 
 
@@ -152,7 +151,6 @@ async def update_email_settings(request: Request, db: Session = Depends(get_db),
         target_type="settings",
         metadata={"keys": changed_keys},
         commit=True,
-        prune=True,
     )
     return ok(public)
 

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import String, cast, delete, func, select
+from sqlalchemy import String, case, cast, delete, func, select
 from sqlalchemy.orm import Session
 
 from app.models.common import db_timestamp
@@ -24,30 +24,31 @@ from app.modules.system.domain.events import (
 )
 from app.modules.system.infrastructure import settings as setting_store
 
+EVENT_PRUNE_DELETE_BATCH_SIZE = 1_000
+
 
 def _column_length(column: Any) -> Any:
     return func.length(func.coalesce(cast(column, String), ""))
 
 
+def _event_size_expression() -> Any:
+    return (
+        _column_length(SystemEvent.id)
+        + _column_length(SystemEvent.level)
+        + _column_length(SystemEvent.source)
+        + _column_length(SystemEvent.actor_type)
+        + _column_length(SystemEvent.actor_id)
+        + _column_length(SystemEvent.action)
+        + _column_length(SystemEvent.target_type)
+        + _column_length(SystemEvent.target_id)
+        + _column_length(SystemEvent.message)
+        + _column_length(SystemEvent.metadata_json)
+    )
+
+
 def system_event_size_bytes(db: Session) -> int:
     value = db.scalar(
-        select(
-            func.coalesce(
-                func.sum(
-                    _column_length(SystemEvent.id)
-                    + _column_length(SystemEvent.level)
-                    + _column_length(SystemEvent.source)
-                    + _column_length(SystemEvent.actor_type)
-                    + _column_length(SystemEvent.actor_id)
-                    + _column_length(SystemEvent.action)
-                    + _column_length(SystemEvent.target_type)
-                    + _column_length(SystemEvent.target_id)
-                    + _column_length(SystemEvent.message)
-                    + _column_length(SystemEvent.metadata_json)
-                ),
-                0,
-            )
-        )
+        select(func.coalesce(func.sum(_event_size_expression()), 0))
     )
     return int(value or 0)
 
@@ -65,8 +66,7 @@ def system_event_storage_view(db: Session) -> dict[str, Any]:
 def set_max_event_bytes(db: Session, max_bytes: int) -> dict[str, Any]:
     size = validate_log_max_bytes(max_bytes)
     setting_store.upsert_setting(db, LOG_MAX_BYTES_SETTING, size)
-    result = prune_system_events(db, size)
-    return {**result, "lastPrunedAt": system_event_storage_view(db).get("lastPrunedAt")}
+    return system_event_storage_view(db)
 
 
 def prune_system_events(
@@ -74,27 +74,52 @@ def prune_system_events(
     max_bytes: int | None = None,
 ) -> dict[str, int]:
     max_bytes = configured_max_event_bytes(db) if max_bytes is None else int(max_bytes)
-    deleted = 0
-    for level in PRUNE_LEVEL_ORDER:
-        while system_event_size_bytes(db) > max_bytes:
-            statement = select(SystemEvent.id).where(SystemEvent.level == level).order_by(SystemEvent.created_at.asc()).limit(100)
-            if level == "error":
-                statement = statement.where(SystemEvent.action.notin_(sorted(PROTECTED_ERROR_ACTIONS)))
-            ids = list(db.scalars(statement).all())
-            if not ids:
-                break
-            result = db.execute(delete(SystemEvent).where(SystemEvent.id.in_(ids)))
-            deleted += int(result.rowcount or 0)
+    current_size_bytes = system_event_size_bytes(db)
+    if current_size_bytes <= max_bytes:
+        return {
+            "deleted": 0,
+            "sizeBytes": current_size_bytes,
+            "maxBytes": max_bytes,
+        }
 
-    while system_event_size_bytes(db) > max_bytes:
-        ids = list(
-            db.scalars(
-                select(SystemEvent.id).order_by(SystemEvent.created_at.asc(), SystemEvent.id.asc()).limit(100)
-            ).all()
+    target_size_bytes = max_bytes // 2
+    bytes_to_reclaim = current_size_bytes - target_size_bytes
+    retention_priority = case(
+        (SystemEvent.level == PRUNE_LEVEL_ORDER[0], 0),
+        (SystemEvent.level.in_(PRUNE_LEVEL_ORDER[1:3]), 1),
+        (
+            (
+                (SystemEvent.level == "error")
+                & SystemEvent.action.notin_(sorted(PROTECTED_ERROR_ACTIONS))
+            ),
+            2,
+        ),
+        else_=3,
+    )
+    candidates = db.execute(
+        select(
+            SystemEvent.id,
+            _event_size_expression().label("size_bytes"),
+        ).order_by(
+            retention_priority.asc(),
+            SystemEvent.created_at.asc(),
+            SystemEvent.id.asc(),
         )
-        if not ids:
+    ).all()
+    reclaimed_bytes = 0
+    ids_to_delete: list[str] = []
+    for event_id, size_bytes in candidates:
+        ids_to_delete.append(str(event_id))
+        reclaimed_bytes += int(size_bytes or 0)
+        if reclaimed_bytes >= bytes_to_reclaim:
             break
-        result = db.execute(delete(SystemEvent).where(SystemEvent.id.in_(ids)))
+
+    deleted = 0
+    for start in range(0, len(ids_to_delete), EVENT_PRUNE_DELETE_BATCH_SIZE):
+        batch_ids = ids_to_delete[start : start + EVENT_PRUNE_DELETE_BATCH_SIZE]
+        result = db.execute(
+            delete(SystemEvent).where(SystemEvent.id.in_(batch_ids))
+        )
         deleted += int(result.rowcount or 0)
 
     size_bytes = system_event_size_bytes(db)
@@ -115,7 +140,6 @@ def record_system_event(
     target_type: str | None = None,
     target_id: str | None = None,
     metadata: dict[str, Any] | None = None,
-    prune: bool = False,
 ) -> str | None:
     event_id = f"py_{uuid4().hex}"
     db.add(
@@ -134,8 +158,6 @@ def record_system_event(
         )
     )
     db.flush()
-    if prune:
-        prune_system_events(db)
     return event_id
 
 

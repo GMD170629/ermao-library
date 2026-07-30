@@ -96,7 +96,6 @@ class SqlAlchemyImportTaskStore:
                 "error": error_summary,
                 "finishedAt": now,
             },
-            prune=True,
         )
 
     def monitor_folder_exists(self, monitor_folder_id: str) -> bool:

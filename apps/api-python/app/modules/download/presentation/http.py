@@ -115,7 +115,6 @@ def _record_system_event(
         message=message,
         metadata=metadata,
         commit=True,
-        prune=True,
     )
 
 

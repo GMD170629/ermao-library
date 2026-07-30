@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
+from urllib.error import HTTPError
 from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
 
@@ -29,6 +30,7 @@ class BookIdentity:
     confidence: float
     logical_path: str
     fallback_reason: str | None = None
+    fallback_code: str | None = None
     cache_hit: bool = False
     reused_work_id: str | None = None
 
@@ -49,6 +51,7 @@ class BookIdentity:
             "confidence": self.confidence,
             "logicalPath": self.logical_path,
             "fallbackReason": self.fallback_reason,
+            "fallbackCode": self.fallback_code,
             "cacheHit": self.cache_hit,
             "reusedWorkId": self.reused_work_id,
         }
@@ -117,6 +120,7 @@ def recognize_book_identity(
         try:
             ai_identity = _recognize_with_ai(logical_path, ai_config)
         except Exception as exc:
+            fallback_code, fallback_reason = _ai_identity_failure(exc)
             return BookIdentity(
                 title=regex_identity.title,
                 author=regex_identity.author,
@@ -124,7 +128,8 @@ def recognize_book_identity(
                 source="regex",
                 confidence=regex_identity.confidence,
                 logical_path=logical_path,
-                fallback_reason=f"AI identity recognition failed: {exc}",
+                fallback_reason=fallback_reason,
+                fallback_code=fallback_code,
             )
         if ai_identity.volume_index is None and regex_identity.volume_index is not None:
             ai_identity = replace(ai_identity, volume_index=regex_identity.volume_index)
@@ -140,6 +145,7 @@ def recognize_book_identity(
         confidence=regex_identity.confidence,
         logical_path=logical_path,
         fallback_reason=config_fallback_reason,
+        fallback_code="AI_CONFIGURATION_MISSING",
     )
 
 
@@ -412,6 +418,15 @@ def _recognize_with_ai(logical_path: str, config: dict[str, str]) -> BookIdentit
         confidence=confidence,
         logical_path=logical_path,
     )
+
+
+def _ai_identity_failure(exc: Exception) -> tuple[str, str]:
+    if isinstance(exc, HTTPError) and exc.code == 402:
+        return (
+            "AI_BILLING_REQUIRED",
+            "AI 标题识别失败：AI 服务计费不可用，请检查服务商套餐、账户余额和计费设置",
+        )
+    return "AI_REQUEST_FAILED", f"AI identity recognition failed: {exc}"
 
 
 def _ai_content(payload: Any) -> dict[str, Any]:

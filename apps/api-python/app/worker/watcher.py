@@ -18,6 +18,7 @@ from app.bootstrap.imports import (
     MonitorFolderConfig,
     ScanSummary,
     enqueue_import_task,
+    import_source_meets_minimum_size,
     is_proven_audio_bundle_directory,
     library_repository,
     load_known_import_paths,
@@ -242,7 +243,6 @@ class WorkerManager:
                         "error": str(exc),
                     },
                     commit=True,
-                    prune=True,
                 )
                 continue
             observer = Observer()
@@ -336,7 +336,6 @@ class WorkerManager:
                         "error": str(exc),
                     },
                     commit=True,
-                    prune=True,
                 )
                 continue
             scan_directory_with_logging(
@@ -363,7 +362,6 @@ class WorkerManager:
                 "completedFolderCount": completed_folders,
             },
             commit=True,
-            prune=True,
         )
 
     def schedule_import(
@@ -586,7 +584,6 @@ def import_watched_file(
                 "retryScheduled": retry_after_stability_check or changed_during_check,
             },
             commit=True,
-            prune=True,
         )
         return False
     existing = get_completed_import_task_work_id(db, str(path))
@@ -606,7 +603,6 @@ def import_watched_file(
                 "reason": "completed_import_task_exists",
             },
             commit=True,
-            prune=True,
         )
         return True
     enqueue_import_task(
@@ -619,18 +615,6 @@ def import_watched_file(
         allow_terminal_requeue=path.is_dir(),
     )
     return True
-
-
-def import_source_meets_minimum_size(path: Path, min_file_size_bytes: int) -> bool:
-    try:
-        if path.is_file():
-            return path.stat().st_size >= min_file_size_bytes
-        files = collect_audio_bundle_files(path)
-        return bool(files) and all(
-            item.stat().st_size >= min_file_size_bytes for item in files
-        )
-    except (OSError, ValueError):
-        return False
 
 
 def scan_directory_with_logging(
@@ -684,7 +668,6 @@ def scan_directory_with_logging(
                 "format": path.suffix.lower().removeprefix("."),
             },
             commit=flush_batch,
-            prune=flush_batch,
         )
     error_count = len(summary.errors)
     action = "scan.completed_with_errors" if error_count else "scan.completed"
@@ -714,7 +697,6 @@ def scan_directory_with_logging(
             "errors": summary.errors[:20],
             "errorCount": error_count,
         },
-        prune=True,
     )
     commit_import_checkpoint(db)
     for path, queued_folder in candidates:

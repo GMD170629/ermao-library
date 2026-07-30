@@ -2181,6 +2181,39 @@ def test_directory_scan_records_candidates_and_summary_in_system_log(
     assert completed["requestedAt"] == "2026-07-17T10:00:00Z"
 
 
+def test_directory_scan_filters_minimum_file_size_before_queue(
+    db_session, tmp_path
+):
+    create_worker_tables(db_session)
+    root = tmp_path / "scan-size-filter"
+    root.mkdir()
+    (root / "accepted.epub").write_bytes(b"a" * 16)
+    (root / "too-small.epub").write_bytes(b"x")
+    folder = MonitorFolderConfig(
+        id="folder-size-filter",
+        root_path=str(root),
+        min_file_size_bytes=10,
+    )
+
+    class CollectingQueue:
+        def __init__(self):
+            self.paths = []
+
+        def enqueue(self, path, _folder):
+            self.paths.append(path)
+
+    import_queue = CollectingQueue()
+
+    summary = scan_directory_with_logging(
+        db_session, root, folder, import_queue, trigger="watcher_started"
+    )
+
+    assert summary.files_scanned == 2
+    assert summary.candidates_found == 1
+    assert summary.ignored_files == 1
+    assert import_queue.paths == [root / "accepted.epub"]
+
+
 def test_directory_scan_only_queues_files_without_existing_import_records(
     db_session, tmp_path
 ):

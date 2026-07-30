@@ -52,6 +52,7 @@ from app.modules.imports.infrastructure.deletion_files import LocalImportDeletio
 from app.modules.imports.infrastructure.directory_scan import (
     MonitorFolderConfig,
     ScanSummary,
+    import_source_meets_minimum_size,
     is_proven_audio_bundle_directory,
     monitor_folder_config,
     scan_directory_for_imports,
@@ -313,6 +314,7 @@ __all__ = [
     "fail_claimed_import_task",
     "import_http_store",
     "import_managed_book",
+    "import_source_meets_minimum_size",
     "is_proven_audio_bundle_directory",
     "library_repository",
     "load_known_import_paths",

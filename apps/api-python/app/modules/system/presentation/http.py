@@ -17,9 +17,9 @@ from app.bootstrap.system import (
     list_event_level_facets,
     list_event_source_facets,
     list_settings,
-    prune_system_events,
     record_system_event,
     run_system_health_checks,
+    system_event_storage_view,
     upsert_setting,
 )
 from app.core.config import Settings, get_settings
@@ -66,6 +66,15 @@ def _has_table(db: Session, table: str) -> bool:
         return table in inspect(db.connection()).get_table_names()
     except Exception:
         return False
+
+
+def _event_storage_snapshot(db: Session) -> dict[str, int]:
+    storage = system_event_storage_view(db)
+    return {
+        "deleted": 0,
+        "sizeBytes": int(storage["sizeBytes"]),
+        "maxBytes": int(storage["maxBytes"]),
+    }
 
 
 def _auth(db: Session, request: Request, settings: Settings):
@@ -142,7 +151,6 @@ async def update_system_settings(
             message=f"更新系统设置 {len(saved)} 项",
             metadata={"keys": list(saved.keys())},
             commit=False,
-            prune=True,
         )
 
     execute_system_transaction(db, persist_settings_update)
@@ -195,7 +203,7 @@ def list_system_events(
         return ManagementEventsResponse(
             data=management_events_empty_page(page, page_size)
         )
-    storage = prune_system_events(db, commit=True)
+    storage = _event_storage_snapshot(db)
     date_from_ms, date_to_ms = parse_event_date_bounds(dateFrom, dateTo)
     events, total = library_dashboard.list_system_events_page(
         db,
@@ -247,10 +255,9 @@ def clear_system_events(
         message=f"清理结构化日志 {deleted} 条",
         metadata={"deleted": deleted},
         commit=True,
-        prune=True,
     )
     return ClearedEventsResponse(
-        data={"deleted": deleted, "storage": prune_system_events(db, commit=True)}
+        data={"deleted": deleted, "storage": _event_storage_snapshot(db)}
     )
 
 

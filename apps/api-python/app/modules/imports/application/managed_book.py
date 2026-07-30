@@ -248,7 +248,6 @@ def import_managed_book(
                         "editionId": existing_file.edition_id,
                         "volumeId": existing_file.volume_id,
                     },
-                    prune=True,
                 )
             )
             return existing_file
@@ -478,7 +477,6 @@ def import_managed_book(
                     "mergeReason": result.merge_reason,
                     "durationMs": duration_ms,
                 },
-                prune=True,
             )
         )
         return result

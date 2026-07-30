@@ -103,6 +103,30 @@ def should_ignore_file(path: Path, folder: MonitorFolderConfig) -> bool:
     return False
 
 
+def import_source_meets_minimum_size(
+    path: Path, min_file_size_bytes: int
+) -> bool:
+    try:
+        if path.is_file():
+            return path.stat().st_size >= min_file_size_bytes
+        files = collect_audio_bundle_files(path)
+        return bool(files) and all(
+            item.stat().st_size >= min_file_size_bytes for item in files
+        )
+    except (OSError, ValueError):
+        return False
+
+
+def should_ignore_import_source(
+    path: Path, folder: MonitorFolderConfig
+) -> bool:
+    if should_ignore_file(path, folder):
+        return True
+    return not import_source_meets_minimum_size(
+        path, folder.min_file_size_bytes
+    )
+
+
 _TRACK_FILE_PATTERN = re.compile(
     r"^(?:(?:cd|disc|disk)\s*\d+[ ._-]*)?(?:(?:track|chapter|chap|ch|第)\s*)?[\[(]?\d{1,6}[\])]?(?:\s*[章回集节])?(?:[ ._-]+|$)",
     re.IGNORECASE,
@@ -130,7 +154,10 @@ def is_proven_audio_bundle_directory(
             child.is_file()
             and not is_supported_audio_file(child)
             and is_supported_import_filename(child)
-            and (folder is None or not should_ignore_path(child, folder))
+            and (
+                folder is None
+                or not should_ignore_import_source(child, folder)
+            )
             for child in path.iterdir()
         )
     except OSError:
@@ -169,7 +196,7 @@ def scan_directory_for_imports(
         summary.files_scanned += len(bundle_files)
         resolved_root = root_path.resolve()
         handled_bundle_files = {item.resolve() for item in bundle_files}
-        if should_ignore_path(root_path, folder):
+        if should_ignore_import_source(root_path, folder):
             summary.ignored_files += len(bundle_files)
         elif (
             known_paths is not None
@@ -206,7 +233,7 @@ def scan_directory_for_imports(
             if entry.resolve() in handled_bundle_files:
                 continue
             summary.files_scanned += 1
-            if should_ignore_file(entry, folder):
+            if should_ignore_import_source(entry, folder):
                 summary.ignored_files += 1
                 continue
             if known_paths is not None and entry.resolve() in known_paths:

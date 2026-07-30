@@ -410,7 +410,11 @@ test('wide shelf details use responsive bookshelf rows and load more on scroll',
     statusValue: 'UNREAD',
     progress: 0,
     tags: [],
-    coverUrl: index === 0 ? '/test-landscape-cover.svg' : '',
+    coverUrl: index === 0
+      ? '/test-landscape-cover.svg'
+      : index === 1
+        ? '/test-square-cover.svg'
+        : '',
     gradient: 'from-orange-100 to-stone-200'
   }));
 
@@ -418,6 +422,12 @@ test('wide shelf details use responsive bookshelf rows and load more on scroll',
     await route.fulfill({
       contentType: 'image/svg+xml',
       body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="#d94724"/></svg>'
+    });
+  });
+  await page.route('**/test-square-cover.svg', async (route) => {
+    await route.fulfill({
+      contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320"><rect width="320" height="320" fill="#222222"/></svg>'
     });
   });
 
@@ -461,7 +471,7 @@ test('wide shelf details use responsive bookshelf rows and load more on scroll',
   const grid = page.getByTestId('shelf-book-bookshelves');
   await expect(grid).toBeVisible();
   await expect(grid.locator('[data-book-cover="true"]')).toHaveCount(25);
-  await expect.poll(() => coverRequestUrls.some((url) => url.includes('/shelf-work-2/cover?size=small'))).toBe(true);
+  await expect.poll(() => coverRequestUrls.some((url) => url.includes('/shelf-work-3/cover?size=small'))).toBe(true);
   const firstCover = grid.locator('[data-book-cover="true"]').first();
   const firstBook = grid.getByRole('button', { name: '查看《书架读物 1》' });
   const firstBookVisual = firstBook.locator('[data-bookshelf-book-visual]');
@@ -532,7 +542,9 @@ test('wide shelf details use responsive bookshelf rows and load more on scroll',
   expect(layout.rowCount).toBe(3);
   expect(Math.min(...layout.coverWidths)).toBeGreaterThan(90);
   expect(Math.max(...layout.coverWidths)).toBeLessThanOrEqual(130);
-  expect(layout.coverRatios.every((ratio) => Math.abs(ratio - 1.5) < 0.01)).toBe(true);
+  expect(Math.abs((layout.coverRatios[0] ?? 0) - 180 / 320)).toBeLessThan(0.01);
+  expect(Math.abs((layout.coverRatios[1] ?? 0) - 1)).toBeLessThan(0.01);
+  expect(layout.coverRatios.slice(2).every((ratio) => Math.abs(ratio - 1.5) < 0.01)).toBe(true);
   expect(layout.firstCoverBackground).toBe('rgba(0, 0, 0, 0)');
   expect(layout.firstCoverHasVisibleShadow).toBe(true);
   expect(layout.eleventhTop).toBeGreaterThan(layout.firstRowTop ?? 0);

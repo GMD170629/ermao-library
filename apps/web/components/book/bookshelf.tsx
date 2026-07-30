@@ -205,6 +205,7 @@ function ShelfBook<T extends BookshelfItem>({
         <Cover
           book={book}
           size="small"
+          variant="bookshelf"
           priority={priority}
           className="aspect-[2/3] w-full"
           style={{

@@ -157,7 +157,6 @@ def _record_system_event(
         message=message,
         metadata=metadata,
         commit=True,
-        prune=True,
     )
 
 
@@ -186,7 +185,6 @@ def _stage_system_event(
         message=message,
         metadata=metadata,
         commit=False,
-        prune=True,
     )
 
 

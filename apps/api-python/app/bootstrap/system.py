@@ -82,7 +82,6 @@ def record_system_event(
     target_id: str | None = None,
     metadata: dict[str, Any] | None = None,
     commit: bool = False,
-    prune: bool = False,
 ) -> str | None:
     operation = lambda: _record_system_event(
         db,
@@ -95,7 +94,6 @@ def record_system_event(
         target_type=target_type,
         target_id=target_id,
         metadata=metadata,
-        prune=prune,
     )
     return execute_system_transaction(db, operation) if commit else operation()
 

@@ -39,7 +39,7 @@ from app.bootstrap.library import (
 )
 from app.bootstrap.media import media_streaming
 from app.bootstrap.shelf import shelf_store
-from app.bootstrap.system import prune_system_events, record_system_event
+from app.bootstrap.system import record_system_event, system_event_storage_view
 from app.contracts.http_errors import AdditionalStatusCodes, ErrorResponses
 from app.contracts.imports import ImportTaskContract
 from app.core.authorization import (
@@ -192,10 +192,6 @@ def _system_auth(db: Session, request: Request, settings: Settings):
     return require_system_manager(db, request, settings)
 
 
-def _prune_system_events(db: Session, max_bytes: int | None = None) -> dict[str, int]:
-    return prune_system_events(db, max_bytes, commit=True)
-
-
 def _record_system_event(
     db: Session,
     *,
@@ -221,7 +217,6 @@ def _record_system_event(
         message=message,
         metadata=metadata,
         commit=True,
-        prune=True,
     )
 
 
@@ -472,7 +467,7 @@ def management_overview(
     if auth_error:
         return auth_error
     health = run_system_health_checks(db, settings)
-    event_storage = _prune_system_events(db)
+    event_storage = system_event_storage_view(db)
     cards = library_dashboard.management_card_counts(db)
     failed_imports = cards["failedImports"]
     failed_downloads = cards["failedDownloads"]

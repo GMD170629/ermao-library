@@ -2615,6 +2615,7 @@
   "作者：": "Author:",
   "作者|作画|原作": "The author makes the original painting.",
   "AI 服务地址、模型或 API Key 未配置": "AI service address, model or API Key not configured",
+  "AI 标题识别失败：AI 服务计费不可用，请检查服务商套餐、账户余额和计费设置": "AI title recognition failed: billing is unavailable. Check the provider plan, account balance, and billing settings.",
   "AI 识别：": "AI Identification:",
   "AI 识别：{value0}": "AI Identification: {value0}",
   "AI 元数据识别": "AI metadata recognition",

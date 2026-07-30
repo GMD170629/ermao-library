@@ -1922,6 +1922,31 @@ def test_audio_bundle_detection_applies_ignore_rules_before_mixed_content_check(
             timer.cancel()
 
 
+def test_audio_bundle_detection_applies_minimum_size_before_mixed_content_check(
+    tmp_path,
+) -> None:
+    root = tmp_path / "monitor"
+    book_dir = root / "没有章节号的有声书"
+    book_dir.mkdir(parents=True)
+    first_track = book_dir / "开场.m4a"
+    second_track = book_dir / "继续.m4a"
+    first_track.write_bytes(b"a" * 16)
+    second_track.write_bytes(b"b" * 16)
+    (book_dir / "desc.txt").write_bytes(b"x")
+    folder = MonitorFolderConfig(
+        id="watch",
+        root_path=str(root),
+        min_file_size_bytes=10,
+    )
+
+    queue = _RecordingQueue()
+    summary = scan_directory_for_imports(root, folder, queue)
+
+    assert queue.paths == [book_dir.resolve()]
+    assert summary.candidates_found == 1
+    assert summary.ignored_files == 1
+
+
 def test_monitor_root_audio_tracks_are_enqueued_as_one_directory(tmp_path) -> None:
     root = tmp_path / "鬼出棺"
     root.mkdir()

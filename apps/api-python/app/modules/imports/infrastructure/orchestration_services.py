@@ -78,6 +78,7 @@ class SessionImportOrchestrationServices:
             confidence=identity.confidence,
             logical_path=identity.logical_path,
             fallback_reason=identity.fallback_reason,
+            fallback_code=identity.fallback_code,
             cache_hit=identity.cache_hit,
             reused_work_id=identity.reused_work_id,
         )
@@ -102,7 +103,6 @@ class SessionImportOrchestrationServices:
             target_type=event.target_type,
             target_id=event.target_id,
             metadata=dict(event.metadata) if event.metadata is not None else None,
-            prune=event.prune,
         )
 
     def ensure_default_cover(self) -> str:

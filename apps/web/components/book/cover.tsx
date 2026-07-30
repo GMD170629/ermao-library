@@ -21,6 +21,7 @@ export function Cover({
   className = '',
   small = false,
   size,
+  variant = 'contained',
   priority = false,
   style
 }: {
@@ -28,6 +29,7 @@ export function Cover({
   className?: string;
   small?: boolean;
   size?: 'small' | 'medium' | 'large';
+  variant?: 'contained' | 'bookshelf';
   priority?: boolean;
   style?: CSSProperties;
 }) {
@@ -40,14 +42,24 @@ export function Cover({
   }, [book.coverUrl, book.id, requestedSize]);
   const fallbackCoverUrl = withBasePath('/images/fallback-book-cover-v1.png');
   const [imageFailed, setImageFailed] = useState(false);
+  const [imageAspectRatio, setImageAspectRatio] = useState<number | null>(null);
 
   useEffect(() => {
     setImageFailed(false);
+    setImageAspectRatio(null);
   }, [coverUrl]);
 
   if (coverUrl && !imageFailed) {
     return (
-      <div data-book-cover="true" data-i18n-skip className={cn('relative overflow-hidden rounded-2xl bg-transparent', className)} style={style}>
+      <div
+        data-book-cover="true"
+        data-i18n-skip
+        className={cn('relative overflow-hidden rounded-2xl bg-transparent', className)}
+        style={{
+          ...style,
+          ...(variant === 'bookshelf' && imageAspectRatio ? { aspectRatio: imageAspectRatio } : {})
+        }}
+      >
         <Image
           src={coverUrl}
           alt={book.title}
@@ -57,6 +69,12 @@ export function Cover({
           className="rounded-[inherit] object-contain object-center"
           loading={priority ? 'eager' : 'lazy'}
           priority={priority}
+          onLoad={(event) => {
+            const { naturalWidth, naturalHeight } = event.currentTarget;
+            if (variant === 'bookshelf' && naturalWidth > 0 && naturalHeight > 0) {
+              setImageAspectRatio(naturalWidth / naturalHeight);
+            }
+          }}
           onError={() => setImageFailed(true)}
         />
       </div>

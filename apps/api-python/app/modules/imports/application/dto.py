@@ -57,6 +57,7 @@ class BookIdentityDTO:
     confidence: float
     logical_path: str
     fallback_reason: str | None = None
+    fallback_code: str | None = None
     cache_hit: bool = False
     reused_work_id: str | None = None
     selection_reason: str | None = None
@@ -79,6 +80,7 @@ class BookIdentityDTO:
             "confidence": self.confidence,
             "logicalPath": self.logical_path,
             "fallbackReason": self.fallback_reason,
+            "fallbackCode": self.fallback_code,
             "cacheHit": self.cache_hit,
             "reusedWorkId": self.reused_work_id,
             "selectionReason": self.selection_reason,
@@ -116,7 +118,6 @@ class ImportSystemEvent:
     target_type: str | None = None
     target_id: str | None = None
     metadata: Mapping[str, object] | None = None
-    prune: bool = False
 
 
 @dataclass(frozen=True)

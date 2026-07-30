@@ -142,7 +142,6 @@ def _event(
             **(metadata or {}),
         },
         commit=True,
-        prune=True,
     )
 
 

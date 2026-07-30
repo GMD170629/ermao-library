@@ -89,6 +89,13 @@ function normalizeImportTask(task: ImportTask): ImportTask {
   };
 }
 
+function ImportLogMessage({ message }: { message: string }) {
+  if (message === 'AI 标题识别失败：AI 服务计费不可用，请检查服务商套餐、账户余额和计费设置') {
+    return <I18nText>AI 标题识别失败：AI 服务计费不可用，请检查服务商套餐、账户余额和计费设置</I18nText>;
+  }
+  return <>{message}</>;
+}
+
 function statusTone(status: ImportTask['status']) {
   if (status === 'COMPLETED') return 'green';
   if (status === 'FAILED') return 'red';
@@ -494,7 +501,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
               <div className="mt-4 space-y-1 rounded-2xl bg-slate-50 p-3 font-mono text-xs text-slate-500">
                 {task.logs.slice(0, 5).map((log) => (
                   <div key={log.id} className="break-words">
-                    <span className={log.level === 'error' ? 'text-red-600' : log.level === 'warn' ? 'text-amber-600' : 'text-slate-500'}>{log.level}</span> · {log.message}
+                    <span className={log.level === 'error' ? 'text-red-600' : log.level === 'warn' ? 'text-amber-600' : 'text-slate-500'}>{log.level}</span> · <ImportLogMessage message={log.message} />
                   </div>
                 ))}
               </div>

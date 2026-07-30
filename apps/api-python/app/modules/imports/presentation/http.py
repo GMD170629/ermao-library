@@ -188,7 +188,6 @@ async def create_monitor_folder(
         message=f"新增来源目录：{folder.get('name')}",
         metadata={"rootPath": root_path},
         commit=True,
-        prune=True,
     )
     return ok({"folder": folder}, status_code=201)
 
@@ -269,7 +268,6 @@ async def update_monitor_folder(
                 "rootPath": (folder or existing).get("rootPath"),
             },
             commit=True,
-            prune=True,
         )
     return ok({"folder": folder})
 
@@ -304,7 +302,6 @@ def delete_monitor_folder(
                 "authorizationInvalidatedFor": len(affected_user_ids),
             },
             commit=True,
-            prune=True,
         )
     return ok({"deleted": deleted, "id": folder_id})
 

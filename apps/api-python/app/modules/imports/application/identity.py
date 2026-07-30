@@ -126,6 +126,7 @@ def _record_identity_system_events(
         "volumeIndex": identity.volume_index,
         "confidence": identity.confidence,
         "fallbackReason": identity.fallback_reason,
+        "fallbackCode": identity.fallback_code,
         "cacheHit": identity.cache_hit,
         "reusedWorkId": identity.reused_work_id,
     }
@@ -154,7 +155,10 @@ def _record_identity_system_events(
         )
         return
     if identity.fallback_reason:
-        ai_failed = identity.fallback_reason.startswith(
+        ai_failed = identity.fallback_code in {
+            "AI_BILLING_REQUIRED",
+            "AI_REQUEST_FAILED",
+        } or identity.fallback_reason.startswith(
             "AI identity recognition failed:"
         )
         services.stage_system_event(

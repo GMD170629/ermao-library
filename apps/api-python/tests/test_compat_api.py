@@ -4283,11 +4283,13 @@ def test_scan_selected_directory_reuses_monitor_rules_and_known_import_paths(
     hidden = selected / ".hidden.epub"
     globally_ignored = selected / "ignore-me.epub"
     disabled_format = selected / "disabled.pdf"
-    fresh.write_bytes(b"fresh")
-    known.write_bytes(b"known")
+    undersized = selected / "too-small.epub"
+    fresh.write_bytes(b"fresh-enough")
+    known.write_bytes(b"known-enough")
     hidden.write_bytes(b"hidden")
     globally_ignored.write_bytes(b"ignored")
     disabled_format.write_bytes(b"disabled")
+    undersized.write_bytes(b"x")
 
     created = client.post(
         "/api/monitor-folders",
@@ -4296,11 +4298,11 @@ def test_scan_selected_directory_reuses_monitor_rules_and_known_import_paths(
             "rootPath": str(scan_root),
             "enabled": True,
             "ignoreHidden": True,
-            "minFileSizeBytes": 0,
+            "minFileSizeBytes": 6,
         },
     )
     assert created.status_code == 201
-    assert created.json()["data"]["folder"]["minFileSizeBytes"] == 0
+    assert created.json()["data"]["folder"]["minFileSizeBytes"] == 6
     folder_id = created.json()["data"]["folder"]["id"]
     db_session.execute(
         text(
@@ -4330,7 +4332,7 @@ def test_scan_selected_directory_reuses_monitor_rules_and_known_import_paths(
     assert scanned.status_code == 200
     data = scanned.json()["data"]
     assert data["queued"] == 1
-    assert data["skipped"] == 4
+    assert data["skipped"] == 5
     queued = (
         db_session.execute(
             text("SELECT * FROM ImportTask WHERE sourcePath = :path"),

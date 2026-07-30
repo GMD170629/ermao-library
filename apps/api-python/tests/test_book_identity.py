@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.error import HTTPError
 
 import pytest
 from sqlalchemy import text
@@ -426,6 +427,48 @@ def test_ai_fallback_failure_keeps_incomplete_regex_result(db_session, test_sett
     assert (identity.title, identity.author) == ("活着", UNKNOWN_AUTHOR)
     assert identity.fallback_reason == "AI identity recognition failed: gateway timeout"
     assert identity.logical_path == source.name
+
+
+def test_ai_payment_required_explains_how_to_restore_recognition(
+    db_session, test_settings, tmp_path, monkeypatch
+):
+    source = tmp_path / "活着.epub"
+    source.write_bytes(b"book")
+    for key, value in {
+        "metadata.ai.enabled": "true",
+        "metadata.ai.baseUrl": "https://ai.example/v1",
+        "metadata.ai.apiKey": "secret",
+        "metadata.ai.model": "identity-model",
+    }.items():
+        db_session.execute(
+            text(
+                "INSERT INTO SystemSetting (`key`, `value`, `createdAt`, `updatedAt`) "
+                "VALUES (:key, :value, 'now', 'now')"
+            ),
+            {"key": key, "value": value},
+        )
+    db_session.commit()
+
+    def payment_required(request, timeout):
+        raise HTTPError(
+            request.full_url,
+            402,
+            "Payment Required",
+            hdrs=None,
+            fp=None,
+        )
+
+    monkeypatch.setattr(book_identity, "urlopen", payment_required)
+
+    identity = recognize_book_identity(
+        db_session, test_settings, source, source.name
+    )
+
+    assert identity.source == "regex"
+    assert identity.fallback_reason == (
+        "AI 标题识别失败：AI 服务计费不可用，请检查服务商套餐、账户余额和计费设置"
+    )
+    assert identity.fallback_code == "AI_BILLING_REQUIRED"
 
 
 def test_incomplete_regex_with_incomplete_ai_config_records_reason(db_session, test_settings, tmp_path):
