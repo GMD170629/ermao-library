@@ -6345,7 +6345,7 @@ def test_backup_listing_keeps_legacy_automatic_files_manual_only(
                 {
                     "id": manual_id,
                     "kind": "manual",
-                    "app": "shuku-starship",
+                    "app": "ermao-books",
                     "version": 2,
                     "createdAt": "2026-06-12T03:00:00+00:00",
                     "counts": {},
@@ -6359,7 +6359,7 @@ def test_backup_listing_keeps_legacy_automatic_files_manual_only(
                 {
                     "id": automatic_id,
                     "kind": "automatic",
-                    "app": "shuku-starship",
+                    "app": "ermao-books",
                     "version": 2,
                     "createdAt": "2026-06-11T03:00:00+00:00",
                     "counts": {},

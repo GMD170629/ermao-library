@@ -4,7 +4,7 @@ set -eu
 is_running() {
   container_id="$(
     docker ps \
-      --filter "label=com.docker.compose.project=shuku-starship" \
+      --filter "label=com.docker.compose.project=ermao-books" \
       --filter "label=com.docker.compose.service=web" \
       --filter "status=running" \
       --quiet 2>/dev/null | head -n 1 || true

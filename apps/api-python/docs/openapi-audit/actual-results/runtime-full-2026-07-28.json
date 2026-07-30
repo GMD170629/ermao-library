@@ -735,7 +735,7 @@
     "response_shape_ok": true,
     "database_changes": {},
     "note": "基础健康摘要",
-    "response_excerpt": "{\"ok\":true,\"data\":{\"service\":\"shuku-starship\",\"status\":\"ok\"}}"
+    "response_excerpt": "{\"ok\":true,\"data\":{\"service\":\"ermao-books\",\"status\":\"ok\"}}"
   },
   {
     "module": "health",

@@ -485,7 +485,7 @@ wheels = [
 ]
 
 [[package]]
-name = "shuku-starship-api-python"
+name = "ermao-books-api-python"
 version = "0.4.3"
 source = { editable = "." }
 dependencies = [

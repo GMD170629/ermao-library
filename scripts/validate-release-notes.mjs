@@ -114,7 +114,7 @@ export function validateReleaseIndex(index, currentVersion) {
 
 function packageVersionFromUvLock(contents) {
   for (const section of contents.split('[[package]]')) {
-    if (!/^\s*name = "shuku-starship-api-python"\s*$/mu.test(section)) continue;
+    if (!/^\s*name = "ermao-books-api-python"\s*$/mu.test(section)) continue;
     const match = /^\s*version = "([^"]+)"\s*$/mu.exec(section);
     if (match) return match[1];
   }

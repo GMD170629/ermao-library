@@ -9,7 +9,7 @@ FNPACK_BIN="${FNPACK_BIN:-fnpack}"
 VALIDATE_ONLY="${FNOS_VALIDATE_ONLY:-false}"
 OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/dist/fnos}"
 BUILD_ROOT="${BUILD_ROOT:-$ROOT_DIR/.fnos-build}"
-PACKAGE_DIR="$BUILD_ROOT/shuku-starship"
+PACKAGE_DIR="$BUILD_ROOT/ermao-books"
 
 if [[ ! "$APP_VERSION" =~ ^[0-9]+([.][0-9]+){0,2}(-[A-Za-z0-9._-]+)?$ ]]; then
   echo "Invalid APP_VERSION: $APP_VERSION" >&2
@@ -82,7 +82,7 @@ shares = resource.get("data-share", {}).get("shares", [])
 if shares != [{"name": "shuku.monitor"}]:
     raise SystemExit("fnOS must declare the shuku.monitor shared data directory")
 projects = resource.get("docker-project", {}).get("projects", [])
-if projects != [{"name": "shuku-starship", "path": "docker"}]:
+if projects != [{"name": "ermao-books", "path": "docker"}]:
     raise SystemExit("fnOS Docker project resource declaration is invalid")
 
 with open(manifest_path, encoding="utf-8") as file:
@@ -216,7 +216,7 @@ for callback in install_callback config_callback upgrade_callback; do
   fi
 done
 
-if ! grep -Fq 'label=com.docker.compose.project=shuku-starship' "$PACKAGE_DIR/cmd/main" || \
+if ! grep -Fq 'label=com.docker.compose.project=ermao-books' "$PACKAGE_DIR/cmd/main" || \
    ! grep -Fq 'label=com.docker.compose.service=web' "$PACKAGE_DIR/cmd/main" || \
    ! grep -Fq 'exit 3' "$PACKAGE_DIR/cmd/main"; then
   echo "fnOS cmd/main does not accurately report the Docker service status" >&2
@@ -294,7 +294,7 @@ if ! cmp -s "$PACKAGE_DIR/ICON.PNG" <(tar -xOzf "$artifact" ICON.PNG) || \
   exit 1
 fi
 
-destination="$OUTPUT_DIR/shuku-starship-${APP_VERSION}-all.fpk"
+destination="$OUTPUT_DIR/ermao-books-${APP_VERSION}-all.fpk"
 cp "$artifact" "$destination"
 
 echo "Built fnOS package: $destination"

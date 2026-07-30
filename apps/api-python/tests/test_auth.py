@@ -101,7 +101,7 @@ def test_login_requires_first_run_setup_when_no_account_exists(client):
 
 
 def test_login_cookie_respects_gateway_path(client, db_session, test_settings):
-    test_settings.cookie_path = "/app/shuku-starship"
+    test_settings.cookie_path = "/app/ermao-books"
     test_settings.secure_cookies = True
     _create_user(db_session)
 
@@ -109,7 +109,7 @@ def test_login_cookie_respects_gateway_path(client, db_session, test_settings):
 
     assert response.status_code == 200
     set_cookie = response.headers["set-cookie"]
-    assert "Path=/app/shuku-starship" in set_cookie
+    assert "Path=/app/ermao-books" in set_cookie
     assert "Secure" in set_cookie
 
 
@@ -257,7 +257,7 @@ def test_password_reset_writes_local_file_is_hashed_single_use_and_revokes_sessi
     requested = client.post(
         "/api/auth/password-reset/request",
         json={"email": "ADMIN@EXAMPLE.COM"},
-        headers={"referer": "https://books.example.test/app/shuku-starship/forgot-password"},
+        headers={"referer": "https://books.example.test/app/ermao-books/forgot-password"},
     )
     assert missing.status_code == requested.status_code == 202
     assert missing.json()["data"]["message"] == requested.json()["data"]["message"]
@@ -266,7 +266,7 @@ def test_password_reset_writes_local_file_is_hashed_single_use_and_revokes_sessi
     document = reset_file.read_text(encoding="utf-8")
     assert '<html lang="en-US">' in document
     assert "Reset your Ermao Books password" in document
-    match = re.search(r"https://books\.example\.test/app/shuku-starship/reset-password#token=([^\"]+)", document)
+    match = re.search(r"https://books\.example\.test/app/ermao-books/reset-password#token=([^\"]+)", document)
     assert match is not None
     raw_token = unquote(match.group(1))
     stored_token = db_session.query(PasswordResetToken).filter(PasswordResetToken.user_id == user.id).one()

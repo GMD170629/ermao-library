@@ -41,7 +41,7 @@ def test_health_reports_monitor_failure(client):
     assert response.status_code == 503
     payload = response.json()
     assert payload["ok"] is True
-    assert payload["data"]["service"] == "shuku-starship"
+    assert payload["data"]["service"] == "ermao-books"
     assert payload["data"]["status"] == "error"
 
 

@@ -2,7 +2,7 @@
   "docker-project": {
     "projects": [
       {
-        "name": "shuku-starship",
+        "name": "ermao-books",
         "path": "docker"
       }
     ]

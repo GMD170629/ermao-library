@@ -38,7 +38,7 @@ class HealthCheck(HttpContractModel):
 
 
 class ServiceHealthPayload(HttpContractModel):
-    service: Literal["shuku-starship"]
+    service: Literal["ermao-books"]
     status: str
 
 

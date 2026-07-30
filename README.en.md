@@ -1,4 +1,4 @@
-# Ermao Books (shuku-starship)
+# Ermao Books (ermao-books)
 
 English | [简体中文](README.md)
 
@@ -55,7 +55,7 @@ DRM-protected Kindle files are not supported.
 The production image supports both `linux/amd64` and `linux/arm64`. Docker automatically pulls the image for your device architecture. When the latest release tag matching the root `package.json` is published, the versioned image, `gamersgu/shuku-starship-web:prod`, and `gamersgu/shuku-starship-web:latest` are updated together. Copy the complete configuration below into your NAS Docker Compose manager, or save it as `compose.yaml` and deploy it:
 
 ```yaml
-name: shuku-starship
+name: ermao-books
 
 services:
   web:

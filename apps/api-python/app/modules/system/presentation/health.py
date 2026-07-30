@@ -77,7 +77,7 @@ def health(
     )
     return ServiceHealthResponse(
         data=ServiceHealthPayload(
-            service="shuku-starship",
+            service="ermao-books",
             status=str(health_status["status"]),
         )
     )

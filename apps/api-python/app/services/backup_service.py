@@ -179,7 +179,7 @@ def create_backup(db: Session, settings: Settings, kind: str = "manual") -> Back
     metadata = {
         "id": backup_id_value,
         "kind": kind,
-        "app": "shuku-starship",
+        "app": "ermao-books",
         "version": 2,
         "databaseRevision": current_database_revision(db),
         "createdAt": created_at.isoformat(),
@@ -244,7 +244,7 @@ def parse_backup(path: Path) -> tuple[dict[str, Any], dict[str, list[dict[str, A
     with zipfile.ZipFile(path) as archive:
         metadata = json.loads(archive.read("metadata.json").decode("utf-8"))
         database_export = json.loads(archive.read("database-export.json").decode("utf-8"))
-    if metadata.get("app") != "shuku-starship" or metadata.get("version") != 2:
+    if metadata.get("app") != "ermao-books" or metadata.get("version") != 2:
         raise ValueError("BACKUP_VERSION_UNSUPPORTED")
     return metadata, database_export
 

@@ -1,4 +1,4 @@
-# 二毛图书（shuku-starship）
+# 二毛图书（ermao-books）
 
 [English](README.en.md) | 简体中文
 
@@ -55,7 +55,7 @@
 生产镜像同时支持 `linux/amd64` 和 `linux/arm64`，Docker 会根据设备架构自动拉取对应镜像。发布与根 `package.json` 匹配的最新版本标签时，会同步更新版本镜像、`gamersgu/shuku-starship-web:prod` 和 `gamersgu/shuku-starship-web:latest`。复制下面的完整内容，粘贴到 NAS 的 Docker Compose 管理器中，或保存为 `compose.yaml` 后部署：
 
 ```yaml
-name: shuku-starship
+name: ermao-books
 
 services:
   web:

@@ -84,7 +84,7 @@ async function main() {
     });
 
     const health = await waitForHealth(`http://127.0.0.1:${port}/api/health`, child);
-    if (health?.data?.service !== 'shuku-starship' || !['ok', 'error'].includes(health?.data?.status)) {
+    if (health?.data?.service !== 'ermao-books' || !['ok', 'error'].includes(health?.data?.status)) {
       throw new Error('/api/health returned an invalid public health envelope');
     }
     const ping = await fetch(`http://127.0.0.1:${port}/api/__db-ping`);

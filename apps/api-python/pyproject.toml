@@ -3,7 +3,7 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "shuku-starship-api-python"
+name = "ermao-books-api-python"
 version = "0.4.3"
 description = "Python FastAPI backend for 二毛图书"
 requires-python = "==3.11.*"

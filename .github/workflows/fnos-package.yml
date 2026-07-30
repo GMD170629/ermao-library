@@ -259,7 +259,7 @@ jobs:
       - name: Upload fnOS package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: shuku-starship-fnos-${{ steps.version.outputs.app_version }}-all
+          name: ermao-books-fnos-${{ steps.version.outputs.app_version }}-all
           path: dist/fnos/*.fpk
           if-no-files-found: error
 
