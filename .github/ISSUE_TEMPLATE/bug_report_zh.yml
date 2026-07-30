@@ -1,0 +1,78 @@
+name: "错误报告（中文）"
+description: "报告可复现的问题，帮助我们定位并修复"
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: dropdown
+    id: installation
+    attributes:
+      label: 安装方式
+      description: 请选择你使用的安装或运行方式。
+      options:
+        - Docker Compose
+        - fnOS 应用
+        - 源码运行
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 系统版本和运行环境
+      description: 请填写服务端系统、CPU 架构、浏览器或客户端，以及二毛图书版本。
+      placeholder: |
+        二毛图书版本：例如 v1.2.3
+        服务端系统：例如 fnOS 0.9 / Ubuntu 24.04
+        CPU 架构：例如 amd64 / arm64
+        浏览器或客户端：例如 Chrome 126 / iOS PWA
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题简述
+      description: 请简要说明发生了什么，以及你原本预期的结果。
+      placeholder: |
+        实际发生的情况：
+        预期结果：
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤
+      description: 请按顺序列出能够稳定触发问题的操作；如果无法稳定复现，也请说明。
+      placeholder: |
+        1. 打开……
+        2. 点击……
+        3. 出现……
+    validations:
+      required: true
+
+  - type: textarea
+    id: book_file
+    attributes:
+      label: 出现问题的图书文件（可选）
+      description: 如果方便，请将能够复现问题的 EPUB、PDF、漫画、文本或音频文件拖到这里上传。上传前请确认你有权分享，并移除私人信息或敏感内容；也可以提供一个最小化的复现文件。
+      placeholder: 将文件拖到这里，或说明文件格式、大小及其他相关特征。
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: 补充信息（可选）
+      description: 可附上截图、录屏或已去除敏感信息的日志。请勿提交密码、令牌、Cookie 或个人隐私信息。
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索现有 Issue，未发现相同问题。
+          required: true
+        - label: 我已移除附件和日志中的密码、令牌、Cookie 及个人隐私信息。
+          required: true
+

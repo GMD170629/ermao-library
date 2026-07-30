@@ -1,0 +1,77 @@
+name: "Bug report (English)"
+description: "Report a reproducible problem to help us investigate and fix it"
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: dropdown
+    id: installation
+    attributes:
+      label: Installation method
+      description: Select how you installed or run the application.
+      options:
+        - Docker Compose
+        - fnOS app
+        - From source
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: System version and environment
+      description: Include the server OS, CPU architecture, browser or client, and Ermao Library version.
+      placeholder: |
+        Ermao Library version: e.g. v1.2.3
+        Server OS: e.g. fnOS 0.9 / Ubuntu 24.04
+        CPU architecture: e.g. amd64 / arm64
+        Browser or client: e.g. Chrome 126 / iOS PWA
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Problem summary
+      description: Briefly describe what happened and what you expected instead.
+      placeholder: |
+        What happened:
+        Expected behavior:
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: List the actions that reliably trigger the problem. If it is intermittent, tell us that as well.
+      placeholder: |
+        1. Open…
+        2. Click…
+        3. Observe…
+    validations:
+      required: true
+
+  - type: textarea
+    id: book_file
+    attributes:
+      label: Affected book file (optional)
+      description: If convenient, drag and drop an EPUB, PDF, comic, text, or audio file that reproduces the problem. Only share files you have permission to share, and remove private or sensitive content first. A minimal reproduction file is also welcome.
+      placeholder: Drag the file here, or describe its format, size, and other relevant characteristics.
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional context (optional)
+      description: Add screenshots, screen recordings, or sanitized logs. Do not include passwords, tokens, cookies, or personal information.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and did not find a duplicate.
+          required: true
+        - label: I removed passwords, tokens, cookies, and personal information from attachments and logs.
+          required: true
