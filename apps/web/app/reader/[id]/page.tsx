@@ -1,5 +1,10 @@
 import { ReaderPage } from '../../../features/reader/reader-page';
 
-export default function Page({ params }: { params: { id: string } }) {
-  return <ReaderPage editionId={params.id} />;
+type ReaderPageProps = {
+  params: Promise<{ id: string }>;
+};
+
+export default async function Page({ params }: ReaderPageProps) {
+  const { id } = await params;
+  return <ReaderPage editionId={id} />;
 }

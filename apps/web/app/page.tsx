@@ -2,8 +2,9 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { DashboardPage } from '../features/dashboard/dashboard-page';
 
-export default function HomePage() {
-  if (!cookies().get('shuku_session')?.value) {
+export default async function HomePage() {
+  const cookieStore = await cookies();
+  if (!cookieStore.get('shuku_session')?.value) {
     redirect('/login');
   }
 

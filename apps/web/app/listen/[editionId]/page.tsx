@@ -1,5 +1,10 @@
 import { AudioListenRedirect } from '../../../features/audio/audio-listen-redirect';
 
-export default function ListenPage({ params }: { params: { editionId: string } }) {
-  return <AudioListenRedirect editionId={params.editionId} />;
+type ListenPageProps = {
+  params: Promise<{ editionId: string }>;
+};
+
+export default async function ListenPage({ params }: ListenPageProps) {
+  const { editionId } = await params;
+  return <AudioListenRedirect editionId={editionId} />;
 }

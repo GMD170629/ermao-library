@@ -130,8 +130,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [user, setUser] = useState<AppSessionUser | null>(() => getCachedAppSession()?.user ?? null);
-  const [authorization, setAuthorization] = useState<AppSessionAuthorization | null>(() => getCachedAppSession()?.authorization ?? null);
+  const [user, setUser] = useState<AppSessionUser | null>(null);
+  const [authorization, setAuthorization] = useState<AppSessionAuthorization | null>(null);
   const [pendingSettingsHref, setPendingSettingsHref] = useState<string | null>(null);
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [shelves, setShelves] = useState<ShelfView[]>([]);
@@ -142,7 +142,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [searchTotal, setSearchTotal] = useState(0);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchActiveIndex, setSearchActiveIndex] = useState(0);
-  const [sessionStatus, setSessionStatus] = useState<SessionStatus>(() => getCachedAppSession()?.user ? 'authenticated' : 'checking');
+  const [sessionStatus, setSessionStatus] = useState<SessionStatus>('checking');
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const searchFormRef = useRef<HTMLFormElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);

@@ -663,9 +663,13 @@ export class EpubReaderAdapter extends ReaderAdapterBase implements ReaderAdapte
       if (step === 1) await rendition.next();
       else await rendition.prev();
       throwIfAborted(signal);
-      // Same-spine rendition steps do not render a new iframe. In that case
-      // there is nothing to gate and the placeholder disappears immediately.
-      if (transition && !transition.rendered) this.finishViewTransition(transition.id);
+      const next = this.readCurrentLocation();
+      const crossedSpine = previous?.href !== next?.href
+        || previous?.spineIndex !== next?.spineIndex;
+      // Same-spine rendition steps do not render a new iframe. A cross-spine
+      // step can resolve before epub.js emits "rendered", especially under
+      // concurrent browser load, so keep the gate until that iframe is ready.
+      if (transition && !transition.rendered && !crossedSpine) this.finishViewTransition(transition.id);
       else if (transition) await this.waitForRequest(transition.promise, signal);
     } catch (reason) {
       this.finishViewTransition();
@@ -870,6 +874,9 @@ export class EpubReaderAdapter extends ReaderAdapterBase implements ReaderAdapte
     if (!this.readerReady) return null;
     if (this.viewTransition) return this.viewTransition;
 
+    this.container.querySelectorAll<HTMLIFrameElement>('iframe').forEach((iframe) => {
+      iframe.dataset.shukuEpubTransitionCurrent = 'true';
+    });
     const preferences = this.appliedPreferences ?? this.preferences;
     const placeholder = this.container.ownerDocument.createElement('div');
     placeholder.dataset.shukuEpubTransitionPlaceholder = 'true';
@@ -949,6 +956,9 @@ export class EpubReaderAdapter extends ReaderAdapterBase implements ReaderAdapte
     clearTimeout(transition.labelTimer);
     this.hiddenTransitionFrames.forEach((iframe) => iframe.style.removeProperty('opacity'));
     this.hiddenTransitionFrames.clear();
+    this.container.querySelectorAll<HTMLIFrameElement>('iframe').forEach((iframe) => {
+      delete iframe.dataset.shukuEpubTransitionCurrent;
+    });
     delete this.container.dataset.shukuEpubTransitionActive;
     this.viewTransitionPlaceholder?.remove();
     this.viewTransitionPlaceholder = null;

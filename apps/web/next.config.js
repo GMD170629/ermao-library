@@ -8,6 +8,9 @@ const basePath = configuredBasePath && configuredBasePath !== '/'
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
+  outputFileTracingRoot: path.join(__dirname, '../..'),
+  allowedDevOrigins: ['127.0.0.1'],
+  devIndicators: false,
   basePath,
   httpAgentOptions: {
     keepAlive: false
@@ -21,9 +24,6 @@ const nextConfig = {
         }
       ]
     };
-  },
-  experimental: {
-    outputFileTracingRoot: path.join(__dirname, '../..')
   }
 };
 

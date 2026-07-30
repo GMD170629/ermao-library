@@ -838,6 +838,7 @@ test('EPUB swipe submits one navigation command without a visual paging track', 
   await expect(iframe.contentFrame().getByText('第一章 开始阅读')).toBeVisible();
   const iframeHtml = iframe.contentFrame().locator('html');
   await expect(iframeHtml).toHaveAttribute('data-shuku-input-bridge', 'ready');
+  await waitForReaderReady(page);
   await iframe.contentFrame().locator('body').evaluate((body) => {
     const view = body.ownerDocument.defaultView;
     if (!view?.PointerEvent) throw new Error('PointerEvent is unavailable');

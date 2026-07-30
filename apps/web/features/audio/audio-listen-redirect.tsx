@@ -9,6 +9,9 @@ import { I18nText } from '@/i18n/provider';
 
 export function AudioListenRedirect({ editionId }: { editionId: string }) {
   const player = useAudioPlayback();
+  const loadEdition = player.loadEdition;
+  const playerBootstrap = player.bootstrap;
+  const selectTrack = player.selectTrack;
   const router = useRouter();
   const searchParams = useSearchParams();
   const chapterId = searchParams.get('chapter')?.trim() || null;
@@ -17,26 +20,26 @@ export function AudioListenRedirect({ editionId }: { editionId: string }) {
   const appliedTrackRef = useRef('');
 
   useEffect(() => {
-    void player.loadEdition(editionId, {
+    void loadEdition(editionId, {
       autoplay: false,
       volumeId,
       chapterId: chapterId ?? undefined
     });
-  }, [chapterId, editionId, player.loadEdition, volumeId]);
+  }, [chapterId, editionId, loadEdition, volumeId]);
 
   useEffect(() => {
-    const bootstrap = player.bootstrap?.edition.id === editionId ? player.bootstrap : null;
+    const bootstrap = playerBootstrap?.edition.id === editionId ? playerBootstrap : null;
     if (!bootstrap) return;
     const targetKey = `${editionId}:${trackParam ?? ''}`;
     if (!chapterId && trackParam !== null && appliedTrackRef.current !== targetKey) {
       const trackIndex = Number(trackParam);
       if (Number.isInteger(trackIndex) && trackIndex >= 0 && trackIndex < bootstrap.tracks.length) {
-        player.selectTrack(trackIndex, false);
+        selectTrack(trackIndex, false);
       }
       appliedTrackRef.current = targetKey;
     }
     router.replace(`/works/${encodeURIComponent(bootstrap.edition.workId)}?detailTab=AUDIOBOOK&editionId=${encodeURIComponent(bootstrap.edition.id)}`);
-  }, [chapterId, editionId, player.bootstrap, player.selectTrack, router, trackParam]);
+  }, [chapterId, editionId, playerBootstrap, router, selectTrack, trackParam]);
 
   const failed = player.pendingEditionId === editionId && Boolean(player.loadError);
   if (failed) {
