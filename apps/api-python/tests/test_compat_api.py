@@ -407,19 +407,21 @@ def serve_douban_crawler_gateway():
                 revised_cover_url = (
                     f"http://127.0.0.1:{self.server.server_port}/covers/revised.jpg"
                 )
-                body = """
+                body = (
+                    """
                 <html><script>
                 window.__DATA__ = {"items":[
                   {"tpl_name":"search_subject","id":4913064,"title":"活着","abstract":"余华 / 作家出版社 / 2012-8 / 28.00元","abstract_2":"","cover_url":"__COVER_URL__","url":"/subject/4913064/"},
                   {"tpl_name":"search_subject","id":4913065,"title":"活着：新版","abstract":"余华 / 北京十月文艺出版社 / 2021-1 / 45.00元","abstract_2":"新版简介","cover_url":"__REVISED_COVER_URL__","url":"/subject/4913065/"}
                 ]};
                 </script></html>
-                """.replace("__COVER_URL__", cover_url).replace(
-                    "__REVISED_COVER_URL__", revised_cover_url
-                ).replace(
-                    '"/subject/4913065/"}',
-                    '"/subject/4913065/","topics":[],"extra_actions":[],'
-                    '"rating":{"count":21,"value":7.9}}',
+                """.replace("__COVER_URL__", cover_url)
+                    .replace("__REVISED_COVER_URL__", revised_cover_url)
+                    .replace(
+                        '"/subject/4913065/"}',
+                        '"/subject/4913065/","topics":[],"extra_actions":[],'
+                        '"rating":{"count":21,"value":7.9}}',
+                    )
                 )
             elif self.path.startswith("/subject/4913064"):
                 cover_url = (
@@ -3632,7 +3634,15 @@ def test_organize_jobs_return_frontend_contract(client, db_session):
     assert listed.status_code == 200
     list_payload = listed.json()["data"]
     job = next(item for item in list_payload["jobs"] if item["id"] == "job-contract")
-    assert list_payload["books"][0]["id"] == "work-contract"
+    assert set(list_payload) == {
+        "jobs",
+        "page",
+        "pageSize",
+        "total",
+        "totalPages",
+        "statusCounts",
+        "providerNames",
+    }
     assert list_payload["page"] == 1
     assert list_payload["pageSize"] == 100
     assert list_payload["total"] == 4
@@ -3644,12 +3654,26 @@ def test_organize_jobs_return_frontend_contract(client, db_session):
         "WAITING": 1,
     }
     assert list_payload["providerNames"] == {}
-    assert job["book"]["id"] == "work-contract"
+    assert set(job) == {
+        "id",
+        "trigger",
+        "statusCategory",
+        "issueCodes",
+        "reasonCodes",
+        "metadataSources",
+        "createdAt",
+        "updatedAt",
+        "book",
+    }
+    assert job["book"] == {
+        "id": "work-contract",
+        "title": "Contract Book",
+        "author": "未知作者",
+        "format": "EPUB",
+    }
     assert job["statusCategory"] == "FAILED"
     assert job["metadataSources"] == []
     assert job["issueCodes"] == ["MISSING_AUTHOR", "SUGGEST_TITLE"]
-    assert "suggestions" not in job
-    assert "duplicates" not in job
     history_job = next(
         item for item in list_payload["jobs"] if item["id"] == "job-organized-history"
     )

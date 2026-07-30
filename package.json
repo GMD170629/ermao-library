@@ -1,7 +1,7 @@
 {
   "name": "ermao-books",
   "private": true,
-  "version": "0.4.3",
+  "version": "0.4.4",
   "packageManager": "pnpm@9.12.2",
   "engines": {
     "node": "20.20.2",
