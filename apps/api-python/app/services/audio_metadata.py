@@ -177,12 +177,6 @@ def audio_bundle_root(path: str | Path, monitor_root: str | Path | None = None) 
             structure = None
         if structure and any(volume.path == parent for volume in structure.volumes):
             return grandparent
-    if monitor_root is not None:
-        try:
-            if parent == Path(monitor_root).expanduser().resolve():
-                return source
-        except OSError:
-            return source
     return parent
 
 

@@ -4050,6 +4050,7 @@ def test_monitor_folder_and_system_settings_mutations(
     assert created.status_code == 201
     folder_id = created.json()["data"]["folder"]["id"]
     assert created.json()["data"]["folder"]["shelfId"] is None
+    assert created.json()["data"]["folder"]["minFileSizeBytes"] == 10240
 
     retired_shelf_binding = client.put(
         f"/api/monitor-folders/{folder_id}", json={"shelfId": "auto-shelf"}

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from app.modules.imports.application.audio_types import audio_episode_number
 from app.modules.imports.application.file_types import is_supported_import_filename
 from app.services.audio_metadata import (
     collect_audio_bundle_files,
@@ -115,6 +116,8 @@ _EPISODE_FILE_PATTERN = re.compile(
 def is_proven_audio_bundle_directory(
     path: Path,
     files: list[Path] | None = None,
+    *,
+    folder: MonitorFolderConfig | None = None,
 ) -> bool:
     try:
         candidates = files if files is not None else collect_audio_bundle_files(path)
@@ -127,6 +130,7 @@ def is_proven_audio_bundle_directory(
             child.is_file()
             and not is_supported_audio_file(child)
             and is_supported_import_filename(child)
+            and (folder is None or not should_ignore_path(child, folder))
             for child in path.iterdir()
         )
     except OSError:
@@ -134,7 +138,9 @@ def is_proven_audio_bundle_directory(
     if not has_sibling_book:
         return True
     return all(
-        _TRACK_FILE_PATTERN.match(item.name) or _EPISODE_FILE_PATTERN.search(item.stem)
+        _TRACK_FILE_PATTERN.match(item.name)
+        or _EPISODE_FILE_PATTERN.search(item.stem)
+        or audio_episode_number(item) is not None
         for item in candidates
     )
 
@@ -148,7 +154,6 @@ def scan_directory_for_imports(
     known_paths: set[Path] | None = None,
 ) -> ScanSummary:
     summary = summary or ScanSummary()
-    monitor_root = Path(folder.root_path).expanduser().resolve()
     summary.directories_scanned += 1
     try:
         bundle_files = collect_audio_bundle_files(root_path)
@@ -157,8 +162,7 @@ def scan_directory_for_imports(
         return summary
     is_bundle = (
         bool(bundle_files)
-        and root_path.resolve() != monitor_root
-        and is_proven_audio_bundle_directory(root_path, bundle_files)
+        and is_proven_audio_bundle_directory(root_path, bundle_files, folder=folder)
     )
     handled_bundle_files: set[Path] = set()
     if is_bundle:

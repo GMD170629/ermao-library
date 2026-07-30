@@ -13,6 +13,18 @@ DISC_DIRECTORY_PATTERN = re.compile(
     r"^(?:cd|disc|disk|碟|盘)\s*[-_. ]*\d+(?:\s*(?:of|/|[-–—])\s*\d+)?$",
     re.I,
 )
+_EXPLICIT_EPISODE_PATTERN = re.compile(
+    r"第\s*0*(\d{1,6})\s*[集章回节]",
+    re.I,
+)
+_PREFIXED_EPISODE_PATTERN = re.compile(
+    r"^(?:(?:cd|disc|disk)\s*\d+[ ._-]*)?"
+    r"(?:(?:track|chapter|chap|ch)\s*)?"
+    r"[\[(]?0*(\d{1,6})[\])]?"
+    r"(?:\s*[集章回节])?(?:[ ._-]+|$)",
+    re.I,
+)
+_FALLBACK_EPISODE_PATTERN = re.compile(r"(?<!\d)0*(\d{1,6})(?!\d)")
 
 
 @dataclass(frozen=True)
@@ -71,3 +83,17 @@ class AudioBundleStructure:
 
 def is_supported_audio_file(path: str | Path) -> bool:
     return Path(path).suffix.lower() in SUPPORTED_AUDIO_EXTS
+
+
+def audio_episode_number(path: str | Path) -> int | None:
+    """Extract an episode number using explicit rules before a numeric fallback."""
+
+    stem = Path(path).stem
+    explicit = _EXPLICIT_EPISODE_PATTERN.search(stem)
+    if explicit:
+        return int(explicit.group(1))
+    prefixed = _PREFIXED_EPISODE_PATTERN.match(stem)
+    if prefixed:
+        return int(prefixed.group(1))
+    fallback = _FALLBACK_EPISODE_PATTERN.search(stem)
+    return int(fallback.group(1)) if fallback else None

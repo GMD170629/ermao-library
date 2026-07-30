@@ -137,7 +137,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   const [rootPath, setRootPath] = useState('/books');
   const [ignorePatterns, setIgnorePatterns] = useState('');
   const [ignoreHidden, setIgnoreHidden] = useState(true);
-  const [minFileSizeKb, setMinFileSizeKb] = useState('0');
+  const [minFileSizeKb, setMinFileSizeKb] = useState('10');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [backupBusy, setBackupBusy] = useState('');
@@ -145,7 +145,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   const [pathBusy, setPathBusy] = useState('');
   const [ruleBusy, setRuleBusy] = useState('');
   const [showCreateFolder, setShowCreateFolder] = useState(false);
-  const [showCreateRules, setShowCreateRules] = useState(false);
+  const [showCreateRules, setShowCreateRules] = useState(true);
   const [pendingSecretClears, setPendingSecretClears] = useState<string[]>([]);
   const [expandedRules, setExpandedRules] = useState<Record<string, boolean>>({});
   const confirm = useConfirm();
@@ -240,8 +240,13 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     toast.success('监控文件夹已保存');
     await loadPaths();
     setShowCreateFolder(false);
-    setShowCreateRules(false);
     setPathBusy('');
+  }
+
+  function toggleCreateFolderForm() {
+    const nextVisible = !showCreateFolder;
+    setShowCreateFolder(nextVisible);
+    if (nextVisible) setShowCreateRules(true);
   }
 
   async function togglePath(path: MonitorFolder) {
@@ -446,7 +451,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
           {active === '监控文件夹' ? (
             <div className="mt-6 space-y-5">
               <div className="flex justify-end">
-                <Button type="button" variant="secondary" icon={FolderOpen} onClick={() => setShowCreateFolder((current) => !current)}>
+                <Button type="button" variant="secondary" icon={FolderOpen} onClick={toggleCreateFolderForm}>
                   {showCreateFolder ? i18nAttribute("收起添加表单") : i18nAttribute("添加文件夹")}
                 </Button>
               </div>
@@ -471,7 +476,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                 >
                   <SlidersHorizontal size={15} />
                   <I18nText>扫描规则</I18nText><ChevronDown size={15} className={cn('transition-transform', showCreateRules && 'rotate-180')} />
-                  <span className="font-normal text-slate-400"><I18nText>默认忽略隐藏文件，不限制文件大小</I18nText></span>
+                  <span className="font-normal text-slate-400"><I18nText>默认忽略隐藏文件，小于 10 KB 跳过</I18nText></span>
                 </button>
                 {showCreateRules ? (
                   <div className="grid gap-3 border-t border-slate-200 pt-3 md:col-span-12 md:grid-cols-12">

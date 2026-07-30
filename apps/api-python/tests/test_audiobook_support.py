@@ -10,7 +10,7 @@ import pytest
 from PIL import Image
 from sqlalchemy import text
 
-import app.modules.imports.application.import_audio as import_audio_module
+import app.modules.imports.application.managed_book as managed_book_module
 import app.modules.imports.application.import_audio as importer_module
 import app.modules.imports.infrastructure.audio_cover as audio_cover_module
 import app.services.audio_metadata as audio_metadata_module
@@ -554,50 +554,54 @@ def test_audio_bundle_import_merges_with_existing_epub_and_orders_tracks(
     )
 
 
-def test_audio_content_dedup_is_lazy_on_first_import_and_reuses_moved_files(
+def test_audio_moved_copy_runs_normal_import_without_content_hashing(
     db_session, test_settings, monkeypatch, tmp_path
 ) -> None:
     _initialize_schema(db_session)
-    real_content_hash = importer_module._content_hash
-    hashed_paths: list[Path] = []
-
-    def tracked_content_hash(path: Path) -> str:
-        hashed_paths.append(path)
-        return real_content_hash(path)
-
-    monkeypatch.setattr(import_audio_module, "_content_hash", tracked_content_hash)
     first, original_dir = _import_audio_fixture(
         db_session, test_settings, monkeypatch, tmp_path
     )
-    assert hashed_paths == []
-    initial_hashes = (
-        db_session.execute(
-            text(
-                "SELECT `fullHash`, `hashStatus` FROM `LibraryFile` WHERE `editionId` = :edition_id"
-            ),
-            {"edition_id": first.edition_id},
-        )
-        .mappings()
-        .all()
+    same_path = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=original_dir,
+            origin="MANUAL",
+            original_name=original_dir.name,
+        ),
     )
-    assert all(row["fullHash"] is None for row in initial_hashes)
-    assert {row["hashStatus"] for row in initial_hashes} == {"PARTIAL_PENDING"}
+    assert same_path.duplicate is True
+    assert same_path.edition_id == first.edition_id
 
     moved_dir = test_settings.resolved_monitor_root / "moved-copy"
     moved_dir.mkdir()
     for source in original_dir.iterdir():
         (moved_dir / source.name).write_bytes(source.read_bytes())
 
-    duplicate = import_managed_book(
+    real_path_open = Path.open
+
+    def reject_audio_content_reads(path: Path, *args, **kwargs):
+        mode = str(args[0] if args else kwargs.get("mode", "r"))
+        if path.suffix.lower() in {".mp3", ".m4a", ".m4b"} and "r" in mode:
+            raise AssertionError(f"audio content was read for hashing: {path}")
+        return real_path_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", reject_audio_content_reads)
+    moved = import_managed_book(
         db_session,
         test_settings,
         ImportOptions(
-            source_file_path=moved_dir, origin="MANUAL", original_name=moved_dir.name
+            source_file_path=moved_dir,
+            origin="MANUAL",
+            original_name=moved_dir.name,
+            requested_title="三体",
+            requested_author="刘慈欣",
         ),
     )
-    assert duplicate.duplicate is True
-    assert duplicate.edition_id == first.edition_id
-    assert duplicate.merge_reason == "duplicate-audio-content"
+    assert moved.duplicate is False
+    assert moved.work_id == first.work_id
+    assert moved.edition_id != first.edition_id
+    assert moved.merge_reason == "new-audio-edition"
     assert (
         db_session.execute(
             text(
@@ -605,91 +609,65 @@ def test_audio_content_dedup_is_lazy_on_first_import_and_reuses_moved_files(
             ),
             {"work_id": first.work_id},
         ).scalar()
-        == 1
+        == 2
     )
-    assert len(hashed_paths) == 4
-    hashes = (
+    files = (
         db_session.execute(
             text(
-                "SELECT `fullHash`, `hashStatus` FROM `LibraryFile` WHERE `editionId` = :edition_id"
+                "SELECT `path`, `fingerprint`, `fullHash`, `hashStatus` "
+                "FROM `LibraryFile` WHERE `editionId` = :edition_id ORDER BY `sortOrder`"
             ),
-            {"edition_id": first.edition_id},
+            {"edition_id": moved.edition_id},
         )
         .mappings()
         .all()
     )
-    assert all(row["fullHash"] and len(row["fullHash"]) == 64 for row in hashes)
-    assert {row["hashStatus"] for row in hashes} == {"COMPLETED"}
+    assert len(files) == 2
+    assert all(str(row["path"]).startswith(str(moved_dir)) for row in files)
+    assert all(row["fingerprint"] is None for row in files)
+    assert all(row["fullHash"] is None for row in files)
+    assert {row["hashStatus"] for row in files} == {"PARTIAL_PENDING"}
 
 
-def test_audio_sample_collision_uses_full_hash_and_does_not_false_deduplicate(
-    db_session, test_settings, monkeypatch
+def test_audio_partial_content_overlap_runs_normal_import(
+    db_session, test_settings, monkeypatch, tmp_path
 ) -> None:
     _initialize_schema(db_session)
-    folder = test_settings.resolved_monitor_root / "sample-collision"
-    folder.mkdir(parents=True)
-    sample_size = 1024 * 1024
-    first_path = folder / "first.mp3"
-    second_path = folder / "second.mp3"
-    first_path.write_bytes(b"H" * sample_size + b"A" * sample_size + b"T" * sample_size)
-    second_path.write_bytes(
-        b"H" * sample_size + b"B" * sample_size + b"T" * sample_size
+    first, original_dir = _import_audio_fixture(
+        db_session, test_settings, monkeypatch, tmp_path
     )
-    assert importer_module._sample_fingerprint(
-        first_path
-    ) == importer_module._sample_fingerprint(second_path)
-    monkeypatch.setattr(
-        SessionImportOrchestrationServices,
-        "parse_audio_metadata",
-        lambda _services, path: _fake_audio_metadata(path),
-    )
-
-    first = import_managed_book(
+    overlap_dir = test_settings.resolved_monitor_root / "partial-overlap"
+    overlap_dir.mkdir()
+    (overlap_dir / "02.mp3").write_bytes((original_dir / "02.mp3").read_bytes())
+    (overlap_dir / "11.mp3").write_bytes(b"new-track-eleven")
+    result = import_managed_book(
         db_session,
         test_settings,
         ImportOptions(
-            source_file_path=first_path,
+            source_file_path=overlap_dir,
             origin="MANUAL",
-            requested_title="采样碰撞",
-            requested_author="测试作者",
+            original_name=overlap_dir.name,
+            requested_title="三体",
+            requested_author="刘慈欣",
         ),
     )
-    assert (
+    assert result.duplicate is False
+    assert result.work_id == first.work_id
+    assert result.edition_id != first.edition_id
+    files = (
         db_session.execute(
             text(
-                "SELECT `fullHash` FROM `LibraryFile` WHERE `editionId` = :edition_id"
+                "SELECT `fingerprint`, `fullHash` FROM `LibraryFile` "
+                "WHERE `editionId` = :edition_id ORDER BY `sortOrder`"
             ),
-            {"edition_id": first.edition_id},
-        ).scalar()
-        is None
-    )
-
-    second = import_managed_book(
-        db_session,
-        test_settings,
-        ImportOptions(
-            source_file_path=second_path,
-            origin="MANUAL",
-            requested_title="采样碰撞",
-            requested_author="测试作者",
-        ),
-    )
-    assert second.duplicate is False
-    assert second.work_id == first.work_id
-    assert second.edition_id != first.edition_id
-    hashes = (
-        db_session.execute(
-            text(
-                "SELECT `fullHash`, `hashStatus` FROM `LibraryFile` "
-                "WHERE `editionId` IN (:first_id, :second_id) ORDER BY `editionId`"
-            ),
-            {"first_id": first.edition_id, "second_id": second.edition_id},
+            {"edition_id": result.edition_id},
         )
         .mappings()
         .all()
     )
-    assert len({row["fullHash"] for row in hashes}) == 2
-    assert {row["hashStatus"] for row in hashes} == {"COMPLETED"}
+    assert len(files) == 2
+    assert all(row["fingerprint"] is None for row in files)
+    assert all(row["fullHash"] is None for row in files)
 
 
 def test_audio_bundle_keeps_byte_identical_tracks_as_distinct_chapters(
@@ -743,7 +721,7 @@ def test_audio_bundle_keeps_byte_identical_tracks_as_distinct_chapters(
     assert len(files) == 2
     assert len({row["id"] for row in files}) == 2
     assert len({row["path"] for row in files}) == 2
-    assert len({row["fingerprint"] for row in files}) == 1
+    assert all(row["fingerprint"] is None for row in files)
     assert [row["sortOrder"] for row in files] == [0, 1]
     assert [row["fileId"] for row in chapters] == [row["id"] for row in files]
     assert [row["sortOrder"] for row in chapters] == [1, 2]
@@ -790,7 +768,7 @@ def test_file_import_does_not_apply_browser_upload_bundle_byte_limit(
     )
 
 
-def test_two_single_file_audio_editions_in_one_folder_have_distinct_version_keys(
+def test_single_audio_file_task_imports_parent_directory_as_one_bundle(
     db_session, test_settings, monkeypatch
 ) -> None:
     _initialize_schema(db_session)
@@ -826,19 +804,22 @@ def test_two_single_file_audio_editions_in_one_folder_have_distinct_version_keys
         ),
     )
     assert first.work_id == second.work_id
-    assert first.edition_id != second.edition_id
-    keys = (
+    assert first.edition_id == second.edition_id
+    assert second.duplicate is True
+    editions = (
         db_session.execute(
             text(
-                "SELECT `versionKey` FROM `LibraryEdition` WHERE `workId` = :work_id ORDER BY `id`"
+                "SELECT `id`, `trackCount`, `chapterCount` FROM `LibraryEdition` "
+                "WHERE `workId` = :work_id AND `hidden` = 0"
             ),
             {"work_id": first.work_id},
         )
-        .scalars()
+        .mappings()
         .all()
     )
-    assert len(keys) == 2
-    assert len(set(keys)) == 2
+    assert [dict(row) for row in editions] == [
+        {"id": first.edition_id, "trackCount": 2, "chapterCount": 2}
+    ]
 
 
 def test_audio_bootstrap_range_head_and_completion_requires_explicit_ended_signal(
@@ -849,6 +830,20 @@ def test_audio_bootstrap_range_head_and_completion_requires_explicit_ended_signa
     result, _audio_dir = _import_audio_fixture(
         db_session, test_settings, monkeypatch, tmp_path
     )
+    stored_hashes = (
+        db_session.execute(
+            text(
+                "SELECT `fingerprint`, `fullHash` FROM `LibraryFile` "
+                "WHERE `editionId` = :edition_id ORDER BY `sortOrder`"
+            ),
+            {"edition_id": result.edition_id},
+        )
+        .mappings()
+        .all()
+    )
+    assert stored_hashes
+    assert all(row["fingerprint"] is None for row in stored_hashes)
+    assert all(row["fullHash"] is None for row in stored_hashes)
 
     bootstrap_response = client.get(
         f"/api/reader/v2/editions/{result.edition_id}/bootstrap"
@@ -856,6 +851,12 @@ def test_audio_bootstrap_range_head_and_completion_requires_explicit_ended_signa
     assert bootstrap_response.status_code == 200
     bootstrap = bootstrap_response.json()["data"]
     assert bootstrap["readerType"] == "audio"
+    assert bootstrap["contentFingerprint"].startswith("sha256:")
+    assert (
+        client.get(f"/api/reader/v2/editions/{result.edition_id}/bootstrap")
+        .json()["data"]["contentFingerprint"]
+        == bootstrap["contentFingerprint"]
+    )
     assert [track["trackNumber"] for track in bootstrap["tracks"]] == [2, 10]
     assert bootstrap["totalDurationMs"] == 1_200_000
     assert len(bootstrap["chapters"]) == 2
@@ -1885,6 +1886,87 @@ def test_watcher_live_and_rescan_only_bundle_proven_book_directories(tmp_path) -
             timer.cancel()
 
 
+def test_audio_bundle_detection_applies_ignore_rules_before_mixed_content_check(
+    tmp_path,
+) -> None:
+    root = tmp_path / "monitor"
+    book_dir = root / "我靠充值当武帝"
+    book_dir.mkdir(parents=True)
+    first_track = book_dir / "我靠充值当武帝001-穿越了.m4a"
+    second_track = book_dir / "我靠充值当武帝002-充钱令人快乐.m4a"
+    for path in (first_track, second_track):
+        path.write_bytes(b"fixture")
+    (book_dir / "desc.txt").write_text("description")
+    (book_dir / "reader.txt").write_text("reader")
+    folder = MonitorFolderConfig(
+        id="watch",
+        root_path=str(root),
+        ignore_patterns="*.txt",
+        min_file_size_bytes=0,
+    )
+
+    queue = _RecordingQueue()
+    summary = scan_directory_for_imports(root, folder, queue)
+    assert queue.paths == [book_dir.resolve()]
+    assert summary.ignored_files == 2
+
+    manager = object.__new__(WorkerManager)
+    manager.stable_delay_seconds = 60
+    manager.import_queue = _RecordingQueue()
+    state = WatchState(observer=None, root_path=root.resolve(), config_signature="test")  # type: ignore[arg-type]
+    try:
+        manager.schedule_import(first_track, folder, state)
+        assert set(state.timers) == {book_dir}
+    finally:
+        for timer in state.timers.values():
+            timer.cancel()
+
+
+def test_monitor_root_audio_tracks_are_enqueued_as_one_directory(tmp_path) -> None:
+    root = tmp_path / "鬼出棺"
+    root.mkdir()
+    first_track = root / "鬼出棺第001章刑台屠军.m4a"
+    second_track = root / "鬼出棺第002章谢半鬼.m4a"
+    for path in (first_track, second_track):
+        path.write_bytes(b"fixture")
+    folder = MonitorFolderConfig(
+        id="watch",
+        root_path=str(root),
+        min_file_size_bytes=0,
+    )
+
+    queue = _RecordingQueue()
+    summary = scan_directory_for_imports(root, folder, queue)
+    assert summary.candidates_found == 1
+    assert queue.paths == [root.resolve()]
+
+    manager = object.__new__(WorkerManager)
+    manager.stable_delay_seconds = 60
+    manager.import_queue = _RecordingQueue()
+    state = WatchState(observer=None, root_path=root.resolve(), config_signature="test")  # type: ignore[arg-type]
+    try:
+        manager.schedule_import(first_track, folder, state)
+        assert set(state.timers) == {root}
+    finally:
+        for timer in state.timers.values():
+            timer.cancel()
+
+
+@pytest.mark.parametrize(
+    ("file_name", "expected"),
+    [
+        ("我靠充值当武帝590-没听进去.m4a", 590),
+        ("2020版-我靠充值当武帝第590集-没听进去.m4a", 590),
+        ("001-标题2020.m4a", 1),
+    ],
+)
+def test_audio_episode_number_falls_back_to_digits_anywhere_after_explicit_rules(
+    file_name: str,
+    expected: int,
+) -> None:
+    assert importer_module._audio_episode_number(Path(file_name)) == expected
+
+
 def test_directory_first_episode_bundle_imports_as_one_ordered_audiobook(
     db_session, test_settings, monkeypatch
 ) -> None:
@@ -2015,6 +2097,12 @@ def test_rescan_reconciles_tracks_split_across_versions_and_preserves_progress(
         lambda _services, path: _episode_audio_metadata(path),
     )
 
+    resolve_audio_import_source = managed_book_module._resolve_audio_import_source
+    monkeypatch.setattr(
+        managed_book_module,
+        "_resolve_audio_import_source",
+        lambda _services, source: (source, None),
+    )
     legacy_results = [
         import_managed_book(
             db_session,
@@ -2029,6 +2117,40 @@ def test_rescan_reconciles_tracks_split_across_versions_and_preserves_progress(
         )
         for index, path in enumerate(paths, start=1)
     ]
+    monkeypatch.setattr(
+        managed_book_module,
+        "_resolve_audio_import_source",
+        resolve_audio_import_source,
+    )
+    historical_hashes: dict[str, tuple[str, str]] = {}
+    for index, result in enumerate(legacy_results, start=1):
+        file_row = (
+            db_session.execute(
+                text(
+                    "SELECT `id` FROM `LibraryFile` "
+                    "WHERE `editionId` = :edition_id"
+                ),
+                {"edition_id": result.edition_id},
+            )
+            .mappings()
+            .one()
+        )
+        fingerprint = f"legacy-sample-{index}"
+        full_hash = f"{index:064x}"
+        historical_hashes[str(file_row["id"])] = (fingerprint, full_hash)
+        db_session.execute(
+            text(
+                "UPDATE `LibraryFile` SET `fingerprint` = :fingerprint, "
+                "`fullHash` = :full_hash, `hashStatus` = 'COMPLETED' "
+                "WHERE `id` = :file_id"
+            ),
+            {
+                "file_id": file_row["id"],
+                "fingerprint": fingerprint,
+                "full_hash": full_hash,
+            },
+        )
+    db_session.commit()
     failed_bundle_task, failed_bundle_created = enqueue_import_task(
         db_session,
         book_dir,
@@ -2143,7 +2265,9 @@ def test_rescan_reconciles_tracks_split_across_versions_and_preserves_progress(
     tracks = (
         db_session.execute(
             text(
-                "SELECT `editionId`, `trackNumber`, `sortOrder` FROM `LibraryFile` WHERE UPPER(`kind`) = 'AUDIO' ORDER BY `sortOrder`"
+                "SELECT `id`, `editionId`, `trackNumber`, `sortOrder`, "
+                "`fingerprint`, `fullHash`, `hashStatus` FROM `LibraryFile` "
+                "WHERE UPPER(`kind`) = 'AUDIO' ORDER BY `sortOrder`"
             ),
         )
         .mappings()
@@ -2155,6 +2279,17 @@ def test_rescan_reconciles_tracks_split_across_versions_and_preserves_progress(
         (2, 1),
         (3, 2),
     ]
+    assert {
+        str(row["id"]): (
+            row["fingerprint"],
+            row["fullHash"],
+            row["hashStatus"],
+        )
+        for row in tracks
+    } == {
+        file_id: (fingerprint, full_hash, "COMPLETED")
+        for file_id, (fingerprint, full_hash) in historical_hashes.items()
+    }
     assert {
         row["id"]
         for row in db_session.execute(

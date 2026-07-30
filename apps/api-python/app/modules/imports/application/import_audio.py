@@ -17,8 +17,6 @@ from app.modules.imports.application.dto import (
     ImportRuntimeConfig,
 )
 from app.modules.imports.application.import_support import (
-    _content_hash,
-    _existing_file_result,
     _finalize_work_primary,
     _hash_text,
     _id,
@@ -42,6 +40,7 @@ from app.modules.imports.application.audio_types import (
     AudioFileMetadata,
     DISC_DIRECTORY_PATTERN,
     MAX_AUDIO_CHAPTERS,
+    audio_episode_number,
     is_supported_audio_file,
 )
 from app.modules.imports.application.identity_policy import UNKNOWN_AUTHOR
@@ -92,15 +91,6 @@ def _import_audio(
         _flat_audio_bundle_key(source_root, flat_title) if flat_title else None
     )
     display_titles = _audio_track_titles(metadata_items)
-    content_info = [
-        {
-            "item": item,
-            "size": item.path.stat().st_size,
-            "fingerprint": _sample_fingerprint(item.path),
-            "fullHash": None,
-        }
-        for item in metadata_items
-    ]
     existing_by_path = _audio_files_by_path(
         queries, [item.path for item in metadata_items]
     )
@@ -148,37 +138,6 @@ def _import_audio(
         volumes = [volume]
         reconciled = True
     else:
-        duplicate_result, duplicate_files = _audio_content_duplicate_result(
-            store, queries, content_info
-        )
-        if duplicate_result:
-            for index, (item_info, duplicate_file) in enumerate(
-                zip(content_info, duplicate_files, strict=True)
-            ):
-                item = item_info["item"]
-                asset = queries.get_import_asset_by_task_and_path(
-                    task_id, str(item.path)
-                )
-                if asset:
-                    store.update_import_asset(
-                        str(asset["id"]),
-                        columns={
-                            "status": "COMPLETED",
-                            "sortOrder": index,
-                            "fileId": duplicate_file["id"],
-                            "errorCode": None,
-                            "errorSummary": None,
-                            "updatedAt": _now(),
-                        },
-                    )
-            store.update_import_task(
-                task_id,
-                columns={
-                    "processedAssetCount": len(metadata_items),
-                    "message": "音频内容已存在，复用现有有声书版本",
-                },
-            )
-            return replace(duplicate_result, merge_reason="duplicate-audio-content")
         flat_edition = (
             _audio_flat_edition(queries, version_key) if flat_bundle_key else None
         )
@@ -287,21 +246,26 @@ def _import_audio(
     chapter_sort_order = 0
     for index, item in enumerate(metadata_items):
         item_volume = volume_by_source_path.get(item.path.resolve(), volume)
-        item_content = content_info[index]
         stat = item.path.stat()
         sort_order = index
+        existing_file = existing_by_path.get(str(item.path))
+        existing_full_hash = (
+            existing_file.get("fullHash") if existing_file else None
+        )
+        existing_hash_status = (
+            existing_file.get("hashStatus") if existing_file else None
+        )
         file_values = {
             "editionId": edition["id"],
             "volumeId": item_volume["id"],
             "path": str(item.path),
             "filePathHash": _hash_text(str(item.path)),
-            "fingerprint": item_content["fingerprint"],
-            "fullHash": item_content["fullHash"]
-            or (existing_by_path.get(str(item.path)) or {}).get("fullHash"),
-            "hashStatus": "COMPLETED"
-            if item_content["fullHash"]
-            or (existing_by_path.get(str(item.path)) or {}).get("fullHash")
-            else "PARTIAL_PENDING",
+            "fingerprint": existing_file.get("fingerprint")
+            if existing_file
+            else None,
+            "fullHash": existing_full_hash,
+            "hashStatus": existing_hash_status
+            or ("COMPLETED" if existing_full_hash else "PARTIAL_PENDING"),
             "mtimeMs": int(stat.st_mtime * 1000),
             "kind": "AUDIO",
             "mimeType": "audio/mpeg"
@@ -320,7 +284,6 @@ def _import_audio(
             "sortOrder": sort_order,
             "updatedAt": _now(),
         }
-        existing_file = existing_by_path.get(str(item.path))
         if existing_file:
             store.update_library_file(str(existing_file["id"]), columns=file_values)
             file_row = store.get_library_file(str(existing_file["id"])) or {
@@ -1088,78 +1051,6 @@ def _refresh_audio_progress_after_bundle_sync(
         store.update_library_reading_progress(str(progress["id"]), columns=values)
 
 
-def _audio_content_duplicate_result(
-    store: LibraryImportStore,
-    queries: ImportLibraryQueries,
-    content_info: list[dict[str, Any]],
-) -> tuple[ImportResult | None, list[dict[str, Any]]]:
-    """Resolve byte-identical audio moved to a new path without full scans of unrelated files."""
-
-    if not content_info:
-        return None, []
-
-    matches: list[dict[str, Any] | None] = []
-    for info in content_info:
-        candidates = queries.list_audio_files_by_fingerprint(
-            size_bytes=info["size"],
-            fingerprint=info["fingerprint"],
-        )
-        if not candidates:
-            matches.append(None)
-            continue
-        current_hash = _audio_info_full_hash(info)
-        matched = None
-        for candidate in candidates:
-            candidate_hash = str(candidate.get("fullHash") or "")
-            if not candidate_hash:
-                candidate_path = Path(str(candidate.get("path") or ""))
-                if not candidate_path.is_file():
-                    continue
-                try:
-                    candidate_hash = _content_hash(candidate_path)
-                except OSError:
-                    continue
-                store.update_library_file(
-                    str(candidate["id"]),
-                    columns={
-                        "fullHash": candidate_hash,
-                        "hashStatus": "COMPLETED",
-                        "updatedAt": _now(),
-                    },
-                )
-            if candidate_hash == current_hash:
-                matched = candidate
-                break
-        matches.append(matched)
-
-    matched_files = [item for item in matches if item is not None]
-    if not matched_files:
-        return None, []
-    if len(matched_files) != len(content_info):
-        raise ValueError("有声书目录中部分音轨与书库内容重复，请移除重复音轨后重试")
-    edition_ids = {str(item.get("editionId")) for item in matched_files}
-    if len(edition_ids) != 1:
-        raise ValueError("有声书目录中的音轨已分散存在于多个版本，请拆分目录后重试")
-    edition_id = next(iter(edition_ids))
-    existing_count = queries.count_audio_files_for_edition(edition_id)
-    if existing_count != len(matched_files):
-        raise ValueError("有声书目录只匹配现有版本的部分音轨，请确认目录内容后重试")
-    result = _existing_file_result(queries, Path(str(matched_files[0]["path"])))
-    return result, matched_files if result else []
-
-
-def _audio_info_full_hash(info: dict[str, Any]) -> str:
-    existing = str(info.get("fullHash") or "")
-    if existing:
-        return existing
-    item = info.get("item")
-    if not isinstance(item, AudioFileMetadata):
-        raise ValueError("有声书音轨缺少可计算哈希的文件信息")
-    calculated = _content_hash(item.path)
-    info["fullHash"] = calculated
-    return calculated
-
-
 def _audio_identity(
     services: ImportOrchestrationServices,
     settings: ImportRuntimeConfig,
@@ -1172,10 +1063,23 @@ def _audio_identity(
 
     requested_title = re.sub(r"\s+", " ", str(options.requested_title or "")).strip()
     requested_author = re.sub(r"\s+", " ", str(options.requested_author or "")).strip()
-    fallback = services.recognize_identity(source, options.original_name)
+    fallback = services.recognize_identity(
+        source,
+        options.original_name if source.is_file() else None,
+    )
     fallback_title = _clean_audio_work_title(fallback.title)
     directory_bundle = source.is_dir()
     flat_title = _flat_audio_filename_title(source) if source.is_file() else None
+    directory_flat_titles = {
+        _normalize_key(item_title): item_title
+        for item in metadata_items
+        if (item_title := _flat_audio_filename_title(item.path))
+    }
+    directory_flat_title = (
+        next(iter(directory_flat_titles.values()))
+        if len(directory_flat_titles) == 1
+        else None
+    )
     directory_author = structure.author if directory_bundle and structure else None
     volume_authors = {
         _normalize_key(volume.author): volume.author
@@ -1213,6 +1117,8 @@ def _audio_identity(
     )
     if requested_title:
         title = requested_title
+    elif directory_bundle and directory_flat_title:
+        title = directory_flat_title
     elif directory_bundle and structure:
         title = structure.title
     elif directory_bundle:
@@ -1351,16 +1257,7 @@ def _audio_metadata_sort_key(
 
 
 def _audio_episode_number(path: Path) -> int | None:
-    stem = path.stem
-    explicit = re.search(r"第\s*0*(\d{1,6})\s*[集章回节]", stem, re.I)
-    if explicit:
-        return int(explicit.group(1))
-    prefixed = re.match(
-        r"^(?:(?:cd|disc|disk)\s*\d+[ ._-]*)?(?:(?:track|chapter|chap|ch)\s*)?[\[(]?0*(\d{1,6})[\])]?(?:\s*[集章回节])?(?:[ ._-]+|$)",
-        stem,
-        re.I,
-    )
-    return int(prefixed.group(1)) if prefixed else None
+    return audio_episode_number(path)
 
 
 def _audio_disc_number(path: Path) -> int | None:
@@ -1392,15 +1289,3 @@ def _audio_track_titles(metadata_items: list[AudioFileMetadata]) -> dict[Path, s
             else embedded
         )
     return titles
-
-
-def _sample_fingerprint(path: Path, sample_bytes: int = 1024 * 1024) -> str:
-    stat = path.stat()
-    digest = hashlib.sha256()
-    digest.update(str(stat.st_size).encode("ascii"))
-    with path.open("rb") as handle:
-        digest.update(handle.read(sample_bytes))
-        if stat.st_size > sample_bytes:
-            handle.seek(max(0, stat.st_size - sample_bytes))
-            digest.update(handle.read(sample_bytes))
-    return f"sample-sha256:{digest.hexdigest()}"

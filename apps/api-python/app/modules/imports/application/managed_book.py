@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import replace
+from pathlib import Path
 
 from app.modules.imports.application.audio_types import (
     SUPPORTED_AUDIO_EXTS,
@@ -62,6 +63,22 @@ from app.modules.imports.application.ports import (
 )
 
 
+def _resolve_audio_import_source(
+    services: ImportOrchestrationServices,
+    source: Path,
+) -> tuple[Path, AudioBundleStructure | None]:
+    if not source.is_file() or source.suffix.lower() not in SUPPORTED_AUDIO_EXTS:
+        return source, None
+    parent = source.parent.resolve()
+    structure = services.inspect_audio_bundle(parent)
+    if structure is None or len(structure.files) < 2:
+        return source, None
+    resolved_source = source.resolve()
+    if resolved_source not in {path.resolve() for path in structure.files}:
+        return source, None
+    return parent, structure
+
+
 def import_managed_book(
     store: LibraryImportStore,
     queries: ImportLibraryQueries,
@@ -72,13 +89,22 @@ def import_managed_book(
 ) -> ImportResult:
     """Import one media source using explicit collaborator ports."""
 
+    requested_source = options.source_file_path.resolve()
     original_source = (
-        options.original_source_file_path or options.source_file_path
+        options.original_source_file_path or requested_source
     ).resolve()
-    source = options.source_file_path.resolve()
-    task_id = options.import_task_id or _ensure_import_task(store, queries, options)
+    source, audio_structure = _resolve_audio_import_source(
+        services, requested_source
+    )
+    effective_options = (
+        replace(options, source_file_path=source, original_name=source.name)
+        if source != requested_source
+        else options
+    )
+    task_id = options.import_task_id or _ensure_import_task(
+        store, queries, effective_options
+    )
     started = time.time()
-    audio_structure: AudioBundleStructure | None = None
     audio_sources: list = []
     source_ext = source.suffix.lower()
     ext = source_ext
@@ -95,7 +121,7 @@ def import_managed_book(
     try:
         if not original_source.exists():
             raise FileNotFoundError(f"导入源已不存在：{original_source}")
-        audio_structure = services.inspect_audio_bundle(source)
+        audio_structure = audio_structure or services.inspect_audio_bundle(source)
         audio_sources = list(audio_structure.files) if audio_structure else []
         source_ext = (
             source.suffix.lower()
@@ -166,7 +192,6 @@ def import_managed_book(
                     f"音频文件超过单文件上限 {settings.audiobook_max_file_bytes} bytes：{oversized[0]}"
                 )
         converted: ConversionArtifactDTO | None = None
-        effective_options = options
         should_convert_text = source_ext in CONVERTIBLE_TEXT_EXTS and (
             import_preferences.auto_convert_to_epub
             or options.origin == "DEFERRED_CONVERSION"
@@ -176,7 +201,7 @@ def import_managed_book(
             source = converted.output_path.resolve()
             ext = ".epub"
             effective_options = replace(
-                options,
+                effective_options,
                 source_file_path=source,
                 original_source_file_path=original_source,
             )
@@ -234,9 +259,9 @@ def import_managed_book(
                 task_id,
                 columns={
                     "taskKind": "AUDIO_BUNDLE"
-                    if original_source.is_dir() or len(audio_sources) > 1
+                    if source.is_dir() or len(audio_sources) > 1
                     else "FILE",
-                    "bundleKey": _hash_text(str(original_source)),
+                    "bundleKey": _hash_text(str(source)),
                     "assetCount": len(audio_sources),
                     "processedAssetCount": 0,
                     "message": f"正在读取 {len(audio_sources)} 个音频文件",
@@ -248,8 +273,8 @@ def import_managed_book(
             identity = _audio_identity(
                 services,
                 settings,
-                original_source,
-                options,
+                source,
+                effective_options,
                 audio_metadata,
                 audio_structure,
             )

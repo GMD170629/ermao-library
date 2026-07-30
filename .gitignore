@@ -21,7 +21,5 @@ data
 !apps/web/app/settings/data/page.tsx
 /books
 
-# Local visual QA and comparison outputs
-/artifacts/comic-page-190-compression/
-/artifacts/comic-page-190-original-ratios/
-/artifacts/design-qa/bookshelf-metadata/
+# Local reports, visual QA, and comparison outputs
+/artifacts/

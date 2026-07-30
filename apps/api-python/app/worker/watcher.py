@@ -379,8 +379,7 @@ class WorkerManager:
             candidate = (
                 possible_root
                 if possible_root.is_dir()
-                and possible_root.resolve() != state.root_path.resolve()
-                and is_proven_audio_bundle_directory(possible_root)
+                and is_proven_audio_bundle_directory(possible_root, folder=folder)
                 else path
             )
         if candidate.is_dir():

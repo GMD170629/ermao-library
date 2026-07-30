@@ -116,9 +116,6 @@ class SqlAlchemyImportLibraryQueries:
         self.list_audio_chapters_for_file = partial(
             library_queries.list_audio_chapters_for_file, db
         )
-        self.list_audio_files_by_fingerprint = partial(
-            library_queries.list_audio_files_by_fingerprint, db
-        )
         self.list_audio_files_for_edition = partial(
             library_queries.list_audio_files_for_edition, db
         )

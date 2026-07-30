@@ -270,6 +270,17 @@ test('library import sections fetch only when their tab mounts and refresh after
   await expect.poll(() => requestCount(counts, '/api/import-tasks')).toBeGreaterThan(initialImportTaskRequests);
 });
 
+test('new monitor folder shows expanded scan rules with a 10 KB minimum by default', async ({ page }) => {
+  await page.goto('/settings/library');
+  await page.getByRole('tab', { name: '文件管理' }).click();
+  await page.getByRole('tab', { name: '监控文件夹' }).click();
+  await page.getByRole('button', { name: '添加文件夹' }).click();
+
+  const scanRules = page.getByRole('button', { name: /扫描规则/ });
+  await expect(scanRules).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('spinbutton', { name: '最小文件大小 KB' })).toHaveValue('10');
+});
+
 test('library import queue clear confirms, polls, and refreshes only after completion', async ({ page }) => {
   const counts = await mockSettingsApi(page);
   await page.goto('/settings/library');

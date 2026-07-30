@@ -911,21 +911,6 @@ def list_file_editions_by_paths(db: Session, paths: list[str]) -> list[dict[str,
     return [{"path": row["path"], "editionId": row["edition_id"]} for row in rows]
 
 
-def list_audio_files_by_fingerprint(
-    db: Session,
-    *,
-    size_bytes: int,
-    fingerprint: str,
-) -> list[dict[str, Any]]:
-    return _list_library_files(
-        db,
-        LibraryFile.size_bytes == size_bytes,
-        LibraryFile.fingerprint == fingerprint,
-        func.upper(LibraryFile.kind) == "AUDIO",
-        order_by=(LibraryFile.created_at.asc(), LibraryFile.id.asc()),
-    )
-
-
 def audio_bundle_fully_imported(db: Session, paths: list[str]) -> bool:
     if not paths:
         return False

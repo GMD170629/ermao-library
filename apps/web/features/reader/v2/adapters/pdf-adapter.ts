@@ -24,6 +24,12 @@ type RenderedPdfPage = {
   settled: boolean;
 };
 
+type PdfPageCandidate = {
+  entry: RenderedPdfPage;
+  previous: RenderedPdfPage | null;
+  fresh: boolean;
+};
+
 export type PdfViewModel = {
   status: 'idle' | 'loading' | 'password' | 'ready' | 'error';
   pageNumber: number;
@@ -37,6 +43,7 @@ export type PdfViewModel = {
 export type PdfAdapterOptions = {
   container: HTMLElement;
   fetch?: typeof globalThis.fetch;
+  loadPdfJs?: () => Promise<PdfJsModule>;
   onViewModel?: (model: PdfViewModel) => void;
 };
 
@@ -99,6 +106,7 @@ const pdfTextLayerStyles = `
 export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter {
   private readonly container: HTMLElement;
   private readonly fetcher: typeof globalThis.fetch;
+  private readonly loadPdfJs: () => Promise<PdfJsModule>;
   private readonly viewListeners = new Set<(model: PdfViewModel) => void>();
   private pdfjs: PdfJsModule | null = null;
   private loadingTask: PDFDocumentLoadingTask | null = null;
@@ -110,9 +118,11 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
   private lastDirection: 1 | -1 = 1;
   private renderEpoch = 0;
   private renderedPages = new Map<number, RenderedPdfPage>();
+  private pendingPages = new Set<RenderedPdfPage>();
   private resizeObserver: ResizeObserver | null = null;
   private resizeFrame: number | null = null;
   private resizeController: AbortController | null = null;
+  private observedViewportSize: { width: number; height: number } | null = null;
   private renderTail: Promise<void> = Promise.resolve();
   private passwordCallback: ((password: string) => void) | null = null;
   private passwordReason: PdfViewModel['passwordReason'];
@@ -128,6 +138,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     super();
     this.container = options.container;
     this.fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
+    this.loadPdfJs = options.loadPdfJs ?? (() => import('pdfjs-dist'));
     if (options.onViewModel) this.viewListeners.add(options.onViewModel);
     this.container.addEventListener('touchstart', this.stopNativePanPropagation, { passive: true });
     this.container.addEventListener('touchmove', this.stopNativePanPropagation, { passive: true });
@@ -176,7 +187,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     try {
       const [, pdfjs] = await Promise.all([
         assertPdfHeader(context.source.contentUrl, this.fetcher, context.signal),
-        import('pdfjs-dist')
+        this.loadPdfJs()
       ]);
       this.assertActive(generation, context.signal);
       this.pdfjs = pdfjs;
@@ -363,22 +374,37 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     this.assertActive(generation, signal);
     const epoch = ++this.renderEpoch;
     this.cancelPendingRenders();
-    if (force) this.releaseAllPages();
     const neighbor = this.neighborPage();
     const keep = new Set([this.pageNumber, neighbor].filter((page): page is number => Boolean(page)));
     Array.from(this.renderedPages.keys()).forEach((page) => {
       if (!keep.has(page)) this.releasePage(page);
     });
 
-    const current = await this.renderPage(this.pageNumber, generation, epoch, signal);
-    this.assertRenderActive(generation, epoch, signal);
-    this.container.replaceChildren(current.wrapper);
+    const current = await this.renderPage(this.pageNumber, generation, epoch, signal, force);
+    try {
+      this.assertRenderActive(generation, epoch, signal);
+    } catch (reason) {
+      this.discardCandidate(current);
+      throw reason;
+    }
+    this.container.replaceChildren(current.entry.wrapper);
+    this.commitPage(this.pageNumber, current);
     if (neighbor) {
-      void this.renderPage(neighbor, generation, epoch, signal).catch((reason) => {
-        if (!this.isRenderingCancelled(reason) && !isAbortError(reason) && !(reason instanceof StaleReaderOperationError)) {
-          this.releasePage(neighbor);
-        }
-      });
+      void this.renderPage(neighbor, generation, epoch, signal, force)
+        .then((candidate) => {
+          try {
+            this.assertRenderActive(generation, epoch, signal);
+          } catch (reason) {
+            this.discardCandidate(candidate);
+            throw reason;
+          }
+          this.commitPage(neighbor, candidate);
+        })
+        .catch((reason) => {
+          if (!this.isRenderingCancelled(reason) && !isAbortError(reason) && !(reason instanceof StaleReaderOperationError)) {
+            this.releasePage(neighbor);
+          }
+        });
     }
   }
 
@@ -398,10 +424,17 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     return task;
   }
 
-  private async renderPage(pageNumber: number, generation: number, epoch: number, signal: AbortSignal) {
+  private async renderPage(
+    pageNumber: number,
+    generation: number,
+    epoch: number,
+    signal: AbortSignal,
+    force = false
+  ): Promise<PdfPageCandidate> {
     const cached = this.renderedPages.get(pageNumber);
-    if (cached?.settled) return cached;
-    if (cached) this.releasePage(pageNumber);
+    if (cached?.settled && !force) {
+      return { entry: cached, previous: null, fresh: false };
+    }
     const document = this.document;
     const pdfjs = this.pdfjs;
     const preferences = this.preferences;
@@ -458,7 +491,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       background: '#ffffff'
     });
     const entry: RenderedPdfPage = { page, wrapper, renderTask, textLayer: null, settled: false };
-    this.renderedPages.set(pageNumber, entry);
+    this.pendingPages.add(entry);
     try {
       await renderTask.promise;
       this.assertRenderActive(generation, epoch, signal);
@@ -479,12 +512,11 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
         entry.textLayer = null;
       }
       entry.settled = true;
-      return entry;
+      this.pendingPages.delete(entry);
+      return { entry, previous: cached ?? null, fresh: true };
     } catch (reason) {
-      if (this.renderedPages.get(pageNumber) === entry) this.renderedPages.delete(pageNumber);
-      entry.textLayer?.cancel();
-      renderTask.cancel();
-      page.cleanup();
+      this.pendingPages.delete(entry);
+      this.releaseEntry(entry);
       throw reason;
     }
   }
@@ -492,7 +524,21 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
   private installResizeObserver(generation: number) {
     if (typeof ResizeObserver === 'undefined') return;
     this.resizeObserver?.disconnect();
-    this.resizeObserver = new ResizeObserver(() => {
+    this.observedViewportSize = this.viewportSize();
+    this.resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[entries.length - 1];
+      const nextSize = entry
+        ? {
+            width: Math.round(entry.contentRect.width),
+            height: Math.round(entry.contentRect.height)
+          }
+        : this.viewportSize();
+      if (
+        this.observedViewportSize
+        && nextSize.width === this.observedViewportSize.width
+        && nextSize.height === this.observedViewportSize.height
+      ) return;
+      this.observedViewportSize = nextSize;
       if (this.resizeFrame !== null) cancelAnimationFrame(this.resizeFrame);
       this.resizeFrame = requestAnimationFrame(() => {
         this.resizeFrame = null;
@@ -504,6 +550,23 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       });
     });
     this.resizeObserver.observe(this.container);
+  }
+
+  private viewportSize() {
+    return {
+      width: Math.round(this.container.clientWidth),
+      height: Math.round(this.container.clientHeight)
+    };
+  }
+
+  private commitPage(pageNumber: number, candidate: PdfPageCandidate) {
+    if (!candidate.fresh) return;
+    this.renderedPages.set(pageNumber, candidate.entry);
+    if (candidate.previous) this.releaseEntry(candidate.previous);
+  }
+
+  private discardCandidate(candidate: PdfPageCandidate) {
+    if (candidate.fresh) this.releaseEntry(candidate.entry);
   }
 
   private emitLocation(operation = this.currentOperation()) {
@@ -534,11 +597,11 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       entry.renderTask.cancel();
       entry.textLayer?.cancel();
     });
+    this.cancelPendingRenders();
   }
 
   private cancelPendingRenders() {
-    this.renderedPages.forEach((entry) => {
-      if (entry.settled) return;
+    this.pendingPages.forEach((entry) => {
       entry.renderTask.cancel();
       entry.textLayer?.cancel();
     });
@@ -547,11 +610,15 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
   private releasePage(pageNumber: number) {
     const entry = this.renderedPages.get(pageNumber);
     if (!entry) return;
+    this.renderedPages.delete(pageNumber);
+    this.releaseEntry(entry);
+  }
+
+  private releaseEntry(entry: RenderedPdfPage) {
     entry.renderTask.cancel();
     entry.textLayer?.cancel();
     entry.page.cleanup();
     entry.wrapper.remove();
-    this.renderedPages.delete(pageNumber);
   }
 
   private releaseAllPages() {
@@ -617,6 +684,8 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     this.resizeController = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    this.observedViewportSize = null;
+    this.cancelPendingRenders();
     this.releaseAllPages();
     const loadingTask = this.loadingTask;
     this.loadingTask = null;
