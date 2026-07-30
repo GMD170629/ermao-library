@@ -1,6 +1,7 @@
 'use client';
 
 import { CheckCircle2, Search, Sparkles, X } from 'lucide-react';
+import Image from 'next/image';
 import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
@@ -215,7 +216,14 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
     if (typeof value !== 'string' || !value.trim()) return '未生成';
     return (
       <div className="flex items-center gap-3">
-        <img src={previewCoverUrl(value)} alt="" className="h-20 w-14 rounded-lg border border-slate-200 object-cover" />
+        <Image
+          src={previewCoverUrl(value)}
+          alt=""
+          width={56}
+          height={80}
+          unoptimized
+          className="h-20 w-14 rounded-lg border border-slate-200 object-cover"
+        />
         <span className="text-xs text-slate-500">{kind === 'current' ? i18nAttribute("当前封面") : i18nAttribute("候选封面")}</span>
       </div>
     );
@@ -266,7 +274,16 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
                 className={cn('w-full rounded-2xl border p-3 text-left transition', selected?.id === candidate.id ? 'border-blue-200 bg-blue-50' : 'border-slate-200 hover:bg-slate-50')}
               >
                 <div className="flex gap-3">
-                  {candidate.coverUrl ? <img src={previewCoverUrl(candidate.coverUrl)} alt="" className="h-20 w-14 shrink-0 rounded-lg border border-slate-200 object-cover" /> : null}
+                  {candidate.coverUrl ? (
+                    <Image
+                      src={previewCoverUrl(candidate.coverUrl)}
+                      alt=""
+                      width={56}
+                      height={80}
+                      unoptimized
+                      className="h-20 w-14 shrink-0 rounded-lg border border-slate-200 object-cover"
+                    />
+                  ) : null}
                   <div data-i18n-skip className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
                       <div className="line-clamp-2 font-medium text-slate-900">{candidate.title || i18nAttribute("未命名候选")}</div>

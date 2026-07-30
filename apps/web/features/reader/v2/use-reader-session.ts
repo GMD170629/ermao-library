@@ -131,6 +131,9 @@ export function useReaderSession({
 
   useEffect(() => {
     if (!adapter || openedAdapterRef.current === adapter) return undefined;
+    const navigationQueue = navigationQueueRef.current;
+    const activeControllers = activeControllersRef.current;
+    const controllers = controllersRef.current;
     openedAdapterRef.current = adapter;
     const { operation, signal, controller } = beginOperation('bootstrap');
     let adapterReady = false;
@@ -183,10 +186,10 @@ export function useReaderSession({
 
     return () => {
       unsubscribe();
-      navigationQueueRef.current.reset();
-      activeControllersRef.current.forEach((controller) => controller.abort());
-      activeControllersRef.current.clear();
-      controllersRef.current.clear();
+      navigationQueue.reset();
+      activeControllers.forEach((controller) => controller.abort());
+      activeControllers.clear();
+      controllers.clear();
       openedAdapterRef.current = null;
       void adapter.dispose();
       dispatch({ type: 'session/dispose' });

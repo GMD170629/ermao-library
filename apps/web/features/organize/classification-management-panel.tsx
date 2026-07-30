@@ -1,7 +1,7 @@
 'use client';
 
 import { ChevronLeft, ChevronRight, Edit3, GitMerge, Loader2, Search, Trash2 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { useToast } from '../../components/ui/feedback';
@@ -43,7 +43,7 @@ export function ClassificationManagementPanel() {
   const [error, setError] = useState('');
   const toast = useToast();
 
-  async function load(nextKind = kind, nextSearch = search, nextPage = page, nextPageSize = pageSize) {
+  const load = useCallback(async (nextKind = kind, nextSearch = search, nextPage = page, nextPageSize = pageSize) => {
     setLoading(true);
     setError('');
     try {
@@ -59,12 +59,12 @@ export function ClassificationManagementPanel() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [kind, page, pageSize, search]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(kind, search, page, pageSize), 180);
     return () => window.clearTimeout(timer);
-  }, [kind, search, page, pageSize]);
+  }, [kind, load, page, pageSize, search]);
 
   const selectedIds = useMemo(() => selectedItems.map((item) => item.id), [selectedItems]);
 

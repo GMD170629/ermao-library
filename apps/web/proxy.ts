@@ -15,7 +15,7 @@ const publicPaths = [
   '/api/health'
 ];
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
   if (
     publicPaths.some((path) => pathname === path || pathname.startsWith(`${path}/`)) ||

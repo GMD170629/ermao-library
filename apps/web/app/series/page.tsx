@@ -1,5 +1,10 @@
 import { SeriesPage } from '../../features/series/series-page';
 
-export default function Page({ searchParams }: { searchParams?: { name?: string } }) {
-  return <SeriesPage initialName={searchParams?.name ?? ''} />;
+type SeriesPageProps = {
+  searchParams: Promise<{ name?: string }>;
+};
+
+export default async function Page({ searchParams }: SeriesPageProps) {
+  const { name } = await searchParams;
+  return <SeriesPage initialName={name ?? ''} />;
 }

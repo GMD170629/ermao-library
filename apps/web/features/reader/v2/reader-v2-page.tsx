@@ -2,6 +2,7 @@
 
 import type { ReaderPreferences } from '@shuku/reader-core';
 import { AlertTriangle, LoaderCircle, RotateCcw } from 'lucide-react';
+import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import {
@@ -112,9 +113,12 @@ function OpeningCover({ context, ready, background, color, indexProgress }: {
       aria-hidden={ready}
     >
       {context?.coverUrl ? (
-        <img
+        <Image
           src={withBasePath(context.coverUrl)}
           alt=""
+          width={targetWidth}
+          height={Math.round(targetWidth * 1.42)}
+          unoptimized
           className="absolute rounded-lg object-cover shadow-2xl transition-all duration-500 ease-out motion-reduce:transition-none"
           style={expanded || !initial ? {
             left: `calc(50% - ${targetWidth / 2}px)`,

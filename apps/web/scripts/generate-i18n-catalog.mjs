@@ -52,8 +52,10 @@ function templateSource(node) {
 function collectTypeScriptMessages() {
   const messages = new Set();
   const files = sourceRoots.flatMap((directory) => listFiles(join(webRoot, directory), new Set(['.ts', '.tsx'])));
-  const middleware = join(webRoot, 'middleware.ts');
-  if (existsSync(middleware)) files.push(middleware);
+  for (const requestBoundary of ['proxy.ts', 'middleware.ts']) {
+    const requestBoundaryPath = join(webRoot, requestBoundary);
+    if (existsSync(requestBoundaryPath)) files.push(requestBoundaryPath);
+  }
 
   for (const file of files) {
     if (file.includes(`${join(webRoot, 'i18n', 'messages')}`)) continue;
