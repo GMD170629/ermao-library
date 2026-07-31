@@ -6,7 +6,7 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from app.bootstrap.imports import (
     claim_next_import_task,
@@ -16,6 +16,7 @@ from app.bootstrap.imports import (
 )
 from app.core.auth import hash_password
 from app.models.auth import User
+from app.models.library import LibraryFile, LibraryMetadata
 from app.modules.imports.application.dto import ImportOptions
 from app.services.download_executor import assert_allowed_extension
 from app.services.epub_normalizer import EPUB_NORMALIZER_VERSION
@@ -316,7 +317,7 @@ def test_fb2_is_converted_internally_with_metadata_and_image(
         assert "chapter-0002.xhtml#note-1" in chapter_html
 
 
-def test_importer_converts_text_ebook_then_records_provenance(
+def test_explicit_conversion_records_text_ebook_provenance(
     db_session, test_settings, tmp_path, monkeypatch
 ):
     create_worker_tables(db_session)
@@ -329,21 +330,24 @@ def test_importer_converts_text_ebook_then_records_provenance(
         db_session,
         test_settings,
         ImportOptions(
-            source_file_path=source, origin="MANUAL", original_name=source.name
+            source_file_path=source,
+            origin="DEFERRED_CONVERSION",
+            original_name=source.name,
         ),
     )
 
     assert result.format == "epub"
     assert result.type == "ebook"
     assert source.exists()
-    library_file = db_session.execute(text("SELECT path FROM LibraryFile")).scalar_one()
-    assert library_file.endswith(".epub")
-    provenance = db_session.execute(
-        text("SELECT rawJson FROM LibraryMetadata WHERE source = 'conversion'")
-    ).scalar_one()
-    assert '"sourceFormat": "AZW3"' in provenance
-    assert '"targetFormat": "EPUB"' in provenance
-    assert '"converter": "libmobi"' in provenance
+    library_file = db_session.scalars(select(LibraryFile)).one()
+    assert library_file.path.endswith(".epub")
+    provenance = db_session.scalars(
+        select(LibraryMetadata).where(LibraryMetadata.source == "conversion")
+    ).one()
+    provenance_json = provenance.raw_json
+    assert '"sourceFormat": "AZW3"' in provenance_json
+    assert '"targetFormat": "EPUB"' in provenance_json
+    assert '"converter": "libmobi"' in provenance_json
 
 
 @pytest.mark.parametrize(

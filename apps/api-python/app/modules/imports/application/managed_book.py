@@ -35,7 +35,7 @@ from app.modules.imports.application.import_comic import _import_comic
 from app.modules.imports.application.import_epub import _import_epub
 from app.modules.imports.application.import_pdf import _import_pdf
 from app.modules.imports.application.import_policy import (
-    CONVERTIBLE_TEXT_EXTS,
+    REFLOWABLE_SOURCE_EXTS,
     extension_is_allowed,
     matches_ignore_patterns,
 )
@@ -53,7 +53,7 @@ from app.modules.imports.application.import_support import (
 )
 from app.modules.imports.application.import_text import (
     _complete_deferred_source_conversion,
-    _import_unconverted_text,
+    _import_reflowable_source,
 )
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
@@ -192,9 +192,9 @@ def import_managed_book(
                     f"音频文件超过单文件上限 {settings.audiobook_max_file_bytes} bytes：{oversized[0]}"
                 )
         converted: ConversionArtifactDTO | None = None
-        should_convert_text = source_ext in CONVERTIBLE_TEXT_EXTS and (
-            import_preferences.auto_convert_to_epub
-            or options.origin == "DEFERRED_CONVERSION"
+        should_convert_text = (
+            source_ext in REFLOWABLE_SOURCE_EXTS
+            and options.origin == "DEFERRED_CONVERSION"
         )
         if should_convert_text:
             converted = services.convert_text(task_id, original_source)
@@ -348,8 +348,8 @@ def import_managed_book(
                 ext,
                 identity,
             )
-        elif ext in CONVERTIBLE_TEXT_EXTS:
-            result = _import_unconverted_text(
+        elif ext in REFLOWABLE_SOURCE_EXTS:
+            result = _import_reflowable_source(
                 store,
                 queries,
                 services,

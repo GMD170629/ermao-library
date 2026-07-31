@@ -1,9 +1,8 @@
-"""Unconverted-text media import and deferred-conversion completion."""
+"""Original reflowable-source import and deferred-conversion completion."""
 
 from __future__ import annotations
 
 import json
-import mimetypes
 from pathlib import Path
 
 from app.modules.imports.application.dto import (
@@ -13,6 +12,7 @@ from app.modules.imports.application.dto import (
     ImportRuntimeConfig,
 )
 from app.modules.imports.application.import_support import (
+    _ensure_work,
     _file_version_key,
     _finalize_work_primary,
     _hash_text,
@@ -21,7 +21,6 @@ from app.modules.imports.application.import_support import (
     _next_edition_name,
     _now,
     _should_be_media_primary,
-    _ensure_work,
     _work_merge_key,
 )
 from app.modules.imports.application.ports import (
@@ -30,8 +29,17 @@ from app.modules.imports.application.ports import (
     LibraryImportStore,
 )
 
+REFLOWABLE_MIME_TYPES = {
+    "MOBI": "application/x-mobipocket-ebook",
+    "AZW": "application/vnd.amazon.ebook",
+    "AZW3": "application/vnd.amazon.ebook",
+    "PRC": "application/x-mobipocket-ebook",
+    "FB2": "application/x-fictionbook+xml",
+    "TXT": "text/plain",
+}
 
-def _import_unconverted_text(
+
+def _import_reflowable_source(
     store: LibraryImportStore,
     queries: ImportLibraryQueries,
     services: ImportOrchestrationServices,
@@ -42,11 +50,10 @@ def _import_unconverted_text(
     ext: str,
     identity: BookIdentityDTO,
 ) -> ImportResult:
-    """Register a supported text source without fabricating readable content.
+    """Register an original source for the foliate reflowable reader.
 
-    The original file becomes a normal library edition and remains downloadable,
-    but has no reading units until the user requests the existing EPUB conversion
-    pipeline from the work detail page.
+    Foliate supplies its table of contents dynamically, so importing the source
+    does not require fabricated backend reading units.
     """
 
     source_path = options.source_file_path.resolve()
@@ -92,7 +99,7 @@ def _import_unconverted_text(
             "updatedAt": _now(),
         }
     )
-    mime_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
+    mime_type = REFLOWABLE_MIME_TYPES[source_format]
     store.insert_library_file(
         columns={
             "id": _id(),
@@ -101,7 +108,7 @@ def _import_unconverted_text(
             "path": str(source_path),
             "filePathHash": _hash_text(str(source_path)),
             "hashStatus": "PARTIAL_PENDING",
-            "kind": "TEXT_SOURCE",
+            "kind": source_format,
             "mimeType": mime_type,
             "sizeBytes": file_size,
             "mtimeMs": int(source_path.stat().st_mtime * 1000),
@@ -114,12 +121,12 @@ def _import_unconverted_text(
         columns={
             "id": _id(),
             "editionId": edition["id"],
-            "source": "unconverted_text",
+            "source": "reflowable_source",
             "rawJson": json.dumps(
                 {
                     "sourceFormat": source_format,
                     "sourcePath": str(source_path),
-                    "readable": False,
+                    "readable": True,
                     "conversionAvailable": True,
                 },
                 ensure_ascii=False,
@@ -158,7 +165,7 @@ def _import_unconverted_text(
         "completed",
         False,
         not created,
-        "unconverted-text-source",
+        "reflowable-source",
     )
 
 

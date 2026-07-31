@@ -1,7 +1,6 @@
 export const importPreferenceSettingKeys = {
   stabilityEnabled: 'import.stabilityCheck.enabled',
   stabilitySeconds: 'import.stabilityCheck.seconds',
-  autoConvert: 'import.autoConvertToEpub',
   allowedExtensions: 'import.allowedExtensions',
   ignorePatterns: 'import.ignorePatterns'
 } as const;
@@ -9,7 +8,6 @@ export const importPreferenceSettingKeys = {
 export type ImportPreferenceValues = {
   [importPreferenceSettingKeys.stabilityEnabled]: boolean;
   [importPreferenceSettingKeys.stabilitySeconds]: number;
-  [importPreferenceSettingKeys.autoConvert]: boolean;
   [importPreferenceSettingKeys.allowedExtensions]: string[];
   [importPreferenceSettingKeys.ignorePatterns]: string;
 };

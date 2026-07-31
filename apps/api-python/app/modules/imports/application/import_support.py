@@ -16,26 +16,24 @@ from xml.etree import ElementTree
 
 from app.core.time import now_timestamp_ms
 from app.modules.imports.application.dto import (
-    BookIdentityDTO,
     ImportOptions,
     ImportResult,
-    ImportRuntimeConfig,
     SeriesVolumeInfo,
 )
+from app.modules.imports.application.identity_policy import (
+    identity_merge_key,
+    normalize_identity_part,
+    parse_bracketed_series_identity,
+)
+from app.modules.imports.application.import_policy import REFLOWABLE_SOURCE_EXTS
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
     ImportOrchestrationServices,
     LibraryImportStore,
 )
 from app.modules.imports.application.release_titles import parse_release_title
-from app.modules.imports.application.identity_policy import (
-    identity_merge_key,
-    normalize_identity_part,
-    parse_bracketed_series_identity,
-)
-from app.modules.imports.application.import_policy import CONVERTIBLE_TEXT_EXTS
 
-SUPPORTED_EXTS = {".epub", ".cbz", ".zip", ".pdf", *CONVERTIBLE_TEXT_EXTS}
+SUPPORTED_EXTS = {".epub", ".cbz", ".zip", ".pdf", *REFLOWABLE_SOURCE_EXTS}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 MAX_EPUB_SIZE_BYTES = 512 * 1024 * 1024
 MAX_TEXT_EBOOK_SIZE_BYTES = 512 * 1024 * 1024
@@ -47,7 +45,7 @@ def import_file_size_limit_bytes_for_ext(ext: str) -> int | None:
     normalized = normalized.lower()
     if normalized == ".epub":
         return MAX_EPUB_SIZE_BYTES
-    if normalized in CONVERTIBLE_TEXT_EXTS:
+    if normalized in REFLOWABLE_SOURCE_EXTS:
         return MAX_TEXT_EBOOK_SIZE_BYTES
     if normalized in {".cbz", ".zip"}:
         return MAX_ARCHIVE_SIZE_BYTES
@@ -239,7 +237,7 @@ def _volume_range_part(value: str) -> bool:
         re.search(
             r"(?:vol\.?|volume|v|第)?\s*\d+(?:\.\d+)?\s*[-~至到]\s*(?:vol\.?|volume|v|第)?\s*\d+(?:\.\d+)?",
             value,
-            re.I,
+            re.IGNORECASE,
         )
     )
 
@@ -254,7 +252,7 @@ def _volume_index_from_suffix(value: str) -> float | None:
         r"(?:^|\s)(?:第\s*)?(\d+(?:\.\d+)?)\s*(?:卷|冊|册|集)$",
         r"(?:^|\s)(\d+(?:\.\d+)?)$",
     ]:
-        match = re.search(pattern, suffix, re.I)
+        match = re.search(pattern, suffix, re.IGNORECASE)
         if match:
             return float(match.group(1))
     return None
@@ -307,7 +305,7 @@ def _texts(xml: str, tag: str) -> list[str]:
     for match in re.finditer(
         rf"<(?:[\w]+:)?{re.escape(tag)}\b[^>]*>([\s\S]*?)</(?:[\w]+:)?{re.escape(tag)}>",
         xml,
-        re.I,
+        re.IGNORECASE,
     ):
         text_value = _decode_xml_text(match.group(1))
         if text_value:
@@ -327,7 +325,7 @@ def _decode_xml_text(value: str) -> str:
 
 def _attrs(xml: str, name: str) -> list[dict[str, str]]:
     output = []
-    for match in re.finditer(rf"<{name}\b([^>]*)/?>(?:</{name}>)?", xml, re.I):
+    for match in re.finditer(rf"<{name}\b([^>]*)/?>(?:</{name}>)?", xml, re.IGNORECASE):
         output.append(
             {
                 item.group(1): item.group(2) or item.group(3) or ""

@@ -15,6 +15,7 @@ from app.bootstrap.imports import (
     process_import_task,
 )
 from app.db.base import Base
+from app.models.library import LibraryEdition, LibraryFile, LibraryMetadata
 from app.models.settings import SystemEvent
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
@@ -2038,11 +2039,10 @@ def test_missing_import_preferences_keep_every_supported_extension_enabled(db_se
     assert preferences.auto_convert_to_epub
 
 
-def test_text_file_imports_raw_when_auto_conversion_is_disabled_and_can_convert_later(
+def test_text_file_imports_raw_and_can_convert_later(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
-    set_system_setting(db_session, "import.autoConvertToEpub", "false")
     source = tmp_path / "稍后转换.txt"
     source.write_text(
         "第一章\n这是一段用于验证后置转换流程的正文。\n\n第二章\n转换完成后应当可以阅读。",
@@ -2078,7 +2078,7 @@ def test_text_file_imports_raw_when_auto_conversion_is_disabled_and_can_convert_
     assert not raw_edition["hidden"]
     assert raw_edition["chapterCount"] == 0
     assert Path(raw_file["path"]) == source.resolve()
-    assert raw_file["kind"] == "TEXT_SOURCE"
+    assert raw_file["kind"] == "TXT"
 
     converted_result = import_managed_book(
         db_session,
@@ -2118,6 +2118,58 @@ def test_text_file_imports_raw_when_auto_conversion_is_disabled_and_can_convert_
     assert work["primaryEditionId"] == converted_result.edition_id
     assert work["workType"] == "EPUB"
     assert source.exists()
+
+
+@pytest.mark.parametrize(
+    ("suffix", "source_format", "mime_type"),
+    [
+        ("mobi", "MOBI", "application/x-mobipocket-ebook"),
+        ("azw", "AZW", "application/vnd.amazon.ebook"),
+        ("azw3", "AZW3", "application/vnd.amazon.ebook"),
+        ("prc", "PRC", "application/x-mobipocket-ebook"),
+        ("fb2", "FB2", "application/x-fictionbook+xml"),
+        ("txt", "TXT", "text/plain"),
+    ],
+)
+def test_native_reflowable_sources_do_not_require_automatic_conversion(
+    db_session,
+    test_settings,
+    tmp_path,
+    suffix: str,
+    source_format: str,
+    mime_type: str,
+) -> None:
+    create_worker_tables(db_session)
+    source = tmp_path / f"native-reader.{suffix}"
+    source.write_bytes(b"native reflowable fixture")
+
+    imported = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=source,
+            origin="MANUAL",
+            original_name=source.name,
+        ),
+    )
+
+    edition = db_session.get(LibraryEdition, imported.edition_id)
+    book_file = db_session.scalars(
+        select(LibraryFile).where(LibraryFile.edition_id == imported.edition_id)
+    ).one()
+    metadata = db_session.scalars(
+        select(LibraryMetadata).where(
+            LibraryMetadata.edition_id == imported.edition_id,
+            LibraryMetadata.source == "reflowable_source",
+        )
+    ).one()
+
+    assert edition is not None
+    assert edition.format == source_format
+    assert edition.hidden is False
+    assert book_file.kind == source_format
+    assert book_file.mime_type == mime_type
+    assert json.loads(metadata.raw_json)["readable"] is True
 
 
 def test_directory_scan_records_candidates_and_summary_in_system_log(
