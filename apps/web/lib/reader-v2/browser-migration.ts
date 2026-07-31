@@ -65,7 +65,7 @@ function migrationMarker(context: LegacyBrowserReaderContext) {
 }
 
 function legacyPreferenceType(kind: ReaderKind) {
-  return kind === 'epub' ? 'ebook' : kind;
+  return kind === 'reflowable' ? 'ebook' : kind;
 }
 
 function idbRequest<T>(request: IDBRequest<T>) {

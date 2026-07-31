@@ -92,10 +92,48 @@ export type ReaderBookSummary = {
   coverUrl?: string | null;
 };
 
+export type ReaderBookmark = {
+  id: string;
+  location: ReaderBookmarkLocation;
+  label: string;
+  percent: number;
+  createdAt: string;
+};
+
+export type ReaderBookmarkLocation = {
+  kind: "epub" | "reflowable" | "comic" | "pdf" | "audio";
+  format?: "epub" | "mobi" | "azw" | "azw3" | "prc" | "fb2" | "txt" | null;
+  cfi?: string | null;
+  href?: string | null;
+  spineIndex?: number | null;
+  progression?: number | null;
+  pageIndex?: number | null;
+  pageNumber?: number | null;
+  volumeId?: string | null;
+  fileId?: string | null;
+  chapterId?: string | null;
+  positionMs?: number | null;
+};
+
+export type ReaderBookmarksData = {
+  bookmarks: Array<ReaderBookmark>;
+};
+
+export type ReaderBookmarksReplaceRequest = {
+  contentFingerprint: string;
+  bookmarks: Array<ReaderBookmark>;
+};
+
+export type ReaderBookmarksResponse = {
+  ok?: true;
+  data: ReaderBookmarksData;
+};
+
 export type ReaderBootstrapData = {
   schemaVersion?: 2;
   userId: string;
-  readerType: "epub" | "comic" | "pdf" | "audio";
+  readerType: "reflowable" | "comic" | "pdf" | "audio";
+  sourceFormat?: "epub" | "mobi" | "azw" | "azw3" | "prc" | "fb2" | "txt" | null;
   contentFingerprint: string;
   book: ReaderBookSummary;
   edition: ReaderEditionSummary;
@@ -111,7 +149,7 @@ export type ReaderBootstrapData = {
   fileUrl: string;
   capabilities: ReaderCapabilities;
   serverPreferences: ReaderServerPreferences;
-  resumeLocation?: EpubLocation | ComicLocation | PdfLocation | AudioLocation | null;
+  resumeLocation?: EpubLocation | ReflowableLocation | ComicLocation | PdfLocation | AudioLocation | null;
   resumeFingerprintMismatch?: boolean;
   resumeDiscardedReason?: "content_fingerprint_mismatch" | null;
   progressPercent?: number;
@@ -139,7 +177,8 @@ export type ReaderCapabilities = {
 export type ReaderEditionOption = {
   id: string;
   workId: string;
-  format: "epub" | "comic" | "pdf" | "audio";
+  format: "reflowable" | "comic" | "pdf" | "audio";
+  sourceFormat?: "epub" | "mobi" | "azw" | "azw3" | "prc" | "fb2" | "txt" | null;
   versionName: string;
   pageCount?: number | null;
   chapterCount?: number | null;
@@ -155,7 +194,8 @@ export type ReaderEditionOption = {
 export type ReaderEditionSummary = {
   id: string;
   workId: string;
-  format: "epub" | "comic" | "pdf" | "audio";
+  format: "reflowable" | "comic" | "pdf" | "audio";
+  sourceFormat?: "epub" | "mobi" | "azw" | "azw3" | "prc" | "fb2" | "txt" | null;
   versionName: string;
   pageCount?: number | null;
   chapterCount?: number | null;
@@ -163,6 +203,19 @@ export type ReaderEditionSummary = {
   durationMs?: number | null;
   trackCount?: number | null;
   narrator?: string | null;
+};
+
+export type ReaderErrorBody = {
+  message: string;
+  code?: string | null;
+  details?: ReaderErrorDetails | null;
+};
+
+export type ReaderErrorDetails = {
+  expectedContentFingerprint: string;
+  receivedContentFingerprint: string;
+  editionId: string;
+  volumeId: string | null;
 };
 
 export type ReaderPageSummary = {
@@ -197,7 +250,7 @@ export type ReaderProgressPut = {
   clientSequence: number;
   contentFingerprint: string;
   volumeId?: string | null;
-  location: EpubLocation | ComicLocation | PdfLocation | AudioLocation;
+  location: EpubLocation | ReflowableLocation | ComicLocation | PdfLocation | AudioLocation;
   percent: number;
 };
 
@@ -207,11 +260,11 @@ export type ReaderProgressRecord = {
   clientId: string;
   clientSequence: number;
   contentFingerprint: string;
-  readerType: "epub" | "comic" | "pdf" | "audio";
+  readerType: "reflowable" | "comic" | "pdf" | "audio";
   workId: string;
   editionId: string;
   volumeId?: string | null;
-  location: EpubLocation | ComicLocation | PdfLocation | AudioLocation;
+  location: EpubLocation | ReflowableLocation | ComicLocation | PdfLocation | AudioLocation;
   percent: number;
   updatedAt: string;
 };
@@ -219,6 +272,15 @@ export type ReaderProgressRecord = {
 export type ReaderProgressResponse = {
   ok?: true;
   data: ReaderProgressData;
+};
+
+export type ReaderRetiredBody = {
+  message?: "READER_V1_RETIRED";
+  details: ReaderRetiredDetails;
+};
+
+export type ReaderRetiredDetails = {
+  replacement: string;
 };
 
 export type ReaderServerPreferences = {
@@ -245,4 +307,12 @@ export type ReaderVolumeSummary = {
   pageCount?: number | null;
   chapterCount?: number | null;
   durationMs?: number | null;
+};
+
+export type ReflowableLocation = {
+  type: "reflowable";
+  format: "epub" | "mobi" | "azw" | "azw3" | "prc" | "fb2" | "txt";
+  cfi?: string | null;
+  href?: string | null;
+  progression?: number | null;
 };

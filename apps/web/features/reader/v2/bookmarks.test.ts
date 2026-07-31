@@ -4,6 +4,7 @@ import { hasReaderBookmark, mergeReaderBookmarks, readReaderBookmarks, readerBoo
 
 test('creates stable bookmark ids for every reader location kind', () => {
   assert.equal(readerBookmarkId({ kind: 'epub', cfi: 'epubcfi(/6/4!/4/2:1)' }), 'epub:cfi:epubcfi(/6/4!/4/2:1)');
+  assert.equal(readerBookmarkId({ kind: 'reflowable', format: 'fb2', cfi: 'epubcfi(/6/4!/4/2:1)' }), 'reflowable:fb2:cfi:epubcfi(/6/4!/4/2:1)');
   assert.equal(readerBookmarkId({ kind: 'comic', volumeId: 'volume-2', pageIndex: 18 }), 'comic:volume-2:18');
   assert.equal(readerBookmarkId({ kind: 'pdf', pageNumber: 7 }), 'pdf:7');
 });

@@ -9,7 +9,7 @@ const input = path.resolve(inputArg);
 const output = path.resolve(outputArg);
 const document = JSON.parse(await readFile(input, 'utf8'));
 const schemas = document.components?.schemas ?? {};
-const included = Object.keys(schemas).filter((name) => /^(Appearance|Audio|Epub|Comic|Pdf|Reader)/.test(name)).sort();
+const included = Object.keys(schemas).filter((name) => /^(Appearance|Audio|Epub|Reflowable|Comic|Pdf|Reader)/.test(name)).sort();
 
 function refName(ref) {
   return ref.split('/').at(-1);

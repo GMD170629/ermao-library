@@ -31,7 +31,8 @@ test('stores the validated normalized reader location', () => {
   });
 
   assert.deepEqual(recorded.entry.location, {
-    kind: 'epub',
+    kind: 'reflowable',
+    format: 'epub',
     cfi: 'epubcfi(/6/2!/4/1:0)',
     href: 'chapter-1.xhtml',
   });

@@ -48,6 +48,12 @@ class ProgressNavigation(HttpContractModel):
 class ProgressExtra(HttpContractModel):
     cfi: str | None = None
     progression: float | None = None
+    source_format: (
+        Literal["epub", "mobi", "azw", "azw3", "prc", "fb2", "txt"] | None
+    ) = Field(
+        default=None,
+        alias="sourceFormat",
+    )
     file_id: str | None = Field(default=None, alias="fileId")
     chapter_id: str | None = Field(default=None, alias="chapterId")
     position_ms: int | None = Field(default=None, alias="positionMs")

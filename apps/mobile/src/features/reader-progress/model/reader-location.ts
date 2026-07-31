@@ -1,5 +1,6 @@
 import type {
-  EpubLocation,
+  ReflowableFormat,
+  ReflowableLocation,
   ReaderLocation,
 } from '@shuku/reader-core';
 
@@ -18,6 +19,16 @@ const EPUB_KEYS = new Set([
   'href',
   'spineIndex',
   'progression',
+]);
+const REFLOWABLE_KEYS = new Set(['kind', 'format', 'cfi', 'href', 'progression']);
+const REFLOWABLE_FORMATS = new Set<ReflowableFormat>([
+  'epub',
+  'mobi',
+  'azw',
+  'azw3',
+  'prc',
+  'fb2',
+  'txt',
 ]);
 const COMIC_KEYS = new Set(['kind', 'volumeId', 'pageIndex']);
 const PDF_KEYS = new Set(['kind', 'pageNumber']);
@@ -84,22 +95,52 @@ function decodeEpubLocation(
     !progression.ok ||
     (cfi.value === undefined &&
       href.value === undefined &&
-      spineIndex.value === undefined &&
       progression.value === undefined)
   ) {
     return { ok: false, reason: 'INVALID_EPUB_LOCATION' };
   }
 
-  const location: EpubLocation = {
-    kind: 'epub',
+  const location: ReflowableLocation = {
+    kind: 'reflowable',
+    format: 'epub',
     ...(cfi.value === undefined ? {} : { cfi: cfi.value }),
     ...(href.value === undefined ? {} : { href: href.value }),
-    ...(spineIndex.value === undefined
-      ? {}
-      : { spineIndex: spineIndex.value }),
     ...(progression.value === undefined
       ? {}
       : { progression: progression.value }),
+  };
+  return { ok: true, value: location };
+}
+
+function decodeReflowableLocation(
+  value: Readonly<Record<string, unknown>>,
+): ValidationResult<ReaderLocation> {
+  if (
+    !hasOnlyKeys(value, REFLOWABLE_KEYS) ||
+    typeof value.format !== 'string' ||
+    !REFLOWABLE_FORMATS.has(value.format as ReflowableFormat)
+  ) {
+    return { ok: false, reason: 'INVALID_REFLOWABLE_LOCATION' };
+  }
+  const cfi = optionalString(value, 'cfi', 4_096);
+  const href = optionalString(value, 'href', 2_048);
+  const progression = optionalUnitNumber(value, 'progression');
+  if (
+    !cfi.ok ||
+    !href.ok ||
+    !progression.ok ||
+    (cfi.value === undefined &&
+      href.value === undefined &&
+      progression.value === undefined)
+  ) {
+    return { ok: false, reason: 'INVALID_REFLOWABLE_LOCATION' };
+  }
+  const location: ReflowableLocation = {
+    kind: 'reflowable',
+    format: value.format as ReflowableFormat,
+    ...(cfi.value === undefined ? {} : { cfi: cfi.value }),
+    ...(href.value === undefined ? {} : { href: href.value }),
+    ...(progression.value === undefined ? {} : { progression: progression.value }),
   };
   return { ok: true, value: location };
 }
@@ -112,6 +153,9 @@ export function decodeReaderLocation(
   }
   if (value.kind === 'epub') {
     return decodeEpubLocation(value);
+  }
+  if (value.kind === 'reflowable') {
+    return decodeReflowableLocation(value);
   }
   if (value.kind === 'comic') {
     const volumeId = nonEmptyString(value.volumeId, 191);
@@ -144,6 +188,15 @@ export function decodeReaderLocation(
 }
 
 export function encodeReaderLocation(location: ReaderLocation): unknown {
+  if (location.kind === 'reflowable') {
+    return {
+      kind: location.kind,
+      format: location.format,
+      ...(location.cfi === undefined ? {} : { cfi: location.cfi }),
+      ...(location.href === undefined ? {} : { href: location.href }),
+      ...(location.progression === undefined ? {} : { progression: location.progression }),
+    };
+  }
   if (location.kind === 'epub') {
     return {
       kind: location.kind,

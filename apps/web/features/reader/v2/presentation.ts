@@ -88,6 +88,15 @@ export function locationProgress(location: ReaderLocation | null, percent: numbe
 
 export function locationExtra(location: ReaderLocation | null) {
   if (!location) return {};
+  if (location.kind === 'reflowable') {
+    return {
+      readerType: 'reflowable',
+      format: location.format,
+      cfi: location.cfi,
+      currentHref: location.href,
+      progression: location.progression
+    };
+  }
   if (location.kind === 'epub') {
     return {
       readerType: 'epub',

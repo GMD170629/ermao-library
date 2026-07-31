@@ -8,6 +8,18 @@ from urllib.parse import unquote
 
 from app.core.time import to_timestamp_ms
 
+_VOLUME_AWARE_READER_FORMATS = {
+    "EPUB",
+    "MOBI",
+    "AZW",
+    "AZW3",
+    "PRC",
+    "FB2",
+    "TXT",
+    "COMIC",
+    "AUDIO",
+}
+
 
 def _parse_json(value: Any, fallback: Any) -> Any:
     if value is None:
@@ -249,7 +261,7 @@ def continue_progress_for_edition(
     progresses: list[dict[str, Any]],
     volumes: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
-    if edition and edition.get("format") in {"EPUB", "COMIC", "AUDIO"} and len(volumes) > 1:
+    if edition and edition.get("format") in _VOLUME_AWARE_READER_FORMATS and len(volumes) > 1:
         volume = choose_continue_volume(volumes, progresses)
         volume_progress = progress_for_volume(progresses, volume.get("id") if volume else None)
         return volume_progress or empty_progress_for_volume(edition, volume)

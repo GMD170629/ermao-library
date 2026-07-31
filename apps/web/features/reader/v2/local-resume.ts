@@ -1,15 +1,19 @@
-import type { ReaderKind, ReaderLocation } from '@shuku/reader-core';
+import type { ReaderKind, ReaderLocation, ReflowableFormat } from '@shuku/reader-core';
 import type { ProgressMutation } from '../../../lib/reader-v2';
 
 type VisualProgressMutation = ProgressMutation & { location: ReaderLocation };
 
-export type LocalResumeContext = {
+type LocalResumeContextBase = {
   userId: string;
   editionId: string;
   volumeId?: string | null;
   contentFingerprint: string;
-  readerKind: ReaderKind;
 };
+
+export type LocalResumeContext = LocalResumeContextBase & (
+  | { readerKind: 'reflowable'; sourceFormat: ReflowableFormat }
+  | { readerKind: Exclude<ReaderKind, 'reflowable'>; sourceFormat?: never }
+);
 
 export type StartupResumeDecision = {
   location: ReaderLocation | null;
@@ -26,6 +30,23 @@ function hasVisualReaderLocation(mutation: ProgressMutation): mutation is Visual
   return mutation.location.kind !== 'audio';
 }
 
+function locationForContext(location: ReaderLocation, context: LocalResumeContext): ReaderLocation | null {
+  if (context.readerKind === 'reflowable') {
+    if (location.kind === 'epub') {
+      return {
+        kind: 'reflowable',
+        format: 'epub',
+        cfi: location.cfi,
+        href: location.href,
+        progression: location.progression
+      };
+    }
+    if (location.kind !== 'reflowable') return null;
+    return location.format === context.sourceFormat ? location : null;
+  }
+  return location.kind === context.readerKind ? location : null;
+}
+
 /**
  * Selects only an exact content-scoped mutation. A pending position from a
  * different user, edition, volume, rendition, or reader cannot be restored.
@@ -33,23 +54,34 @@ function hasVisualReaderLocation(mutation: ProgressMutation): mutation is Visual
 export function newestLocalResume(
   mutations: readonly ProgressMutation[],
   context: LocalResumeContext
-) {
-  return mutations.reduce<VisualProgressMutation | null>((latest, mutation) => {
+): VisualProgressMutation | null {
+  let latest: VisualProgressMutation | null = null;
+  for (const mutation of mutations) {
+    if (!hasVisualReaderLocation(mutation)) continue;
+    const normalizedLocation = locationForContext(mutation.location, context);
     if (
       mutation.userId !== context.userId
       || mutation.editionId !== context.editionId
       || !sameVolume(mutation.volumeId, context.volumeId)
       || mutation.contentFingerprint !== context.contentFingerprint
-      || !hasVisualReaderLocation(mutation)
-      || mutation.location.kind !== context.readerKind
-    ) return latest;
+      || !normalizedLocation
+    ) continue;
 
-    if (!latest) return mutation;
-    if (mutation.clientSequence !== latest.clientSequence) {
-      return mutation.clientSequence > latest.clientSequence ? mutation : latest;
+    const normalizedMutation: VisualProgressMutation = normalizedLocation === mutation.location
+      ? mutation
+      : { ...mutation, location: normalizedLocation };
+
+    if (!latest) {
+      latest = normalizedMutation;
+      continue;
     }
-    return mutation.updatedAt > latest.updatedAt ? mutation : latest;
-  }, null);
+    if (mutation.clientSequence !== latest.clientSequence) {
+      if (mutation.clientSequence > latest.clientSequence) latest = normalizedMutation;
+      continue;
+    }
+    if (mutation.updatedAt > latest.updatedAt) latest = normalizedMutation;
+  }
+  return latest;
 }
 
 /**

@@ -12,7 +12,8 @@ class ReaderWireModel(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
-ReaderFormat = Literal["epub", "comic", "pdf", "audio"]
+ReaderFormat = Literal["reflowable", "comic", "pdf", "audio"]
+ReflowableFormat = Literal["epub", "mobi", "azw", "azw3", "prc", "fb2", "txt"]
 ReaderTheme = Literal["day", "warm", "night", "black"]
 
 
@@ -84,6 +85,20 @@ class EpubLocation(ReaderWireModel):
         return self
 
 
+class ReflowableLocation(ReaderWireModel):
+    type: Literal["reflowable"]
+    format: ReflowableFormat
+    cfi: str | None = Field(default=None, min_length=1, max_length=4096)
+    href: str | None = Field(default=None, min_length=1, max_length=2048)
+    progression: float | None = Field(default=None, ge=0, le=1)
+
+    @model_validator(mode="after")
+    def require_anchor(self) -> ReflowableLocation:
+        if self.cfi is None and self.href is None and self.progression is None:
+            raise ValueError("Reflowable location requires cfi, href, or progression")
+        return self
+
+
 class ComicLocation(ReaderWireModel):
     type: Literal["comic"]
     volume_id: str = Field(alias="volumeId", min_length=1, max_length=191)
@@ -103,7 +118,10 @@ class AudioLocation(ReaderWireModel):
     position_ms: int = Field(alias="positionMs", ge=0)
 
 
-ReaderLocation = Annotated[EpubLocation | ComicLocation | PdfLocation | AudioLocation, Field(discriminator="type")]
+ReaderLocation = Annotated[
+    EpubLocation | ReflowableLocation | ComicLocation | PdfLocation | AudioLocation,
+    Field(discriminator="type"),
+]
 
 
 class ReaderProgressPut(ReaderWireModel):
@@ -118,17 +136,6 @@ class ReaderProgressPut(ReaderWireModel):
     percent: float = Field(ge=0, le=100)
 
 
-class EpubLocationsClaimRequest(ReaderWireModel):
-    cache_version: Literal[2] = Field(alias="cacheVersion")
-    content_fingerprint: str = Field(alias="contentFingerprint", min_length=1, max_length=191)
-    break_size: int = Field(alias="breakSize", ge=100, le=10000)
-
-
-class EpubLocationsSaveRequest(EpubLocationsClaimRequest):
-    lease_token: str = Field(alias="leaseToken", min_length=1, max_length=191)
-    serialized: str = Field(min_length=1, max_length=64 * 1024 * 1024)
-
-
 class ReaderBookSummary(ReaderWireModel):
     id: str
     title: str
@@ -140,6 +147,7 @@ class ReaderEditionSummary(ReaderWireModel):
     id: str
     work_id: str = Field(alias="workId")
     format: ReaderFormat
+    source_format: ReflowableFormat | None = Field(default=None, alias="sourceFormat")
     version_name: str = Field(alias="versionName")
     page_count: int | None = Field(default=None, alias="pageCount")
     chapter_count: int | None = Field(default=None, alias="chapterCount")
@@ -147,6 +155,12 @@ class ReaderEditionSummary(ReaderWireModel):
     duration_ms: int | None = Field(default=None, alias="durationMs")
     track_count: int | None = Field(default=None, alias="trackCount")
     narrator: str | None = None
+
+    @model_validator(mode="after")
+    def require_reflowable_source_format(self) -> ReaderEditionSummary:
+        if self.format == "reflowable" and self.source_format is None:
+            raise ValueError("Reflowable edition requires sourceFormat")
+        return self
 
 
 class ReaderVolumeSummary(ReaderWireModel):
@@ -234,6 +248,7 @@ class ReaderBootstrapData(ReaderWireModel):
     schema_version: Literal[2] = Field(2, alias="schemaVersion")
     user_id: str = Field(alias="userId")
     reader_type: ReaderFormat = Field(alias="readerType")
+    source_format: ReflowableFormat | None = Field(default=None, alias="sourceFormat")
     content_fingerprint: str = Field(alias="contentFingerprint")
     book: ReaderBookSummary
     edition: ReaderEditionSummary
@@ -253,6 +268,12 @@ class ReaderBootstrapData(ReaderWireModel):
     resume_fingerprint_mismatch: bool = Field(False, alias="resumeFingerprintMismatch")
     resume_discarded_reason: Literal["content_fingerprint_mismatch"] | None = Field(default=None, alias="resumeDiscardedReason")
     progress_percent: float = Field(0, alias="progressPercent", ge=0, le=100)
+
+    @model_validator(mode="after")
+    def require_reflowable_source_format(self) -> ReaderBootstrapData:
+        if self.reader_type == "reflowable" and self.source_format is None:
+            raise ValueError("Reflowable bootstrap requires sourceFormat")
+        return self
 
 
 class ReaderProgressRecord(ReaderWireModel):
@@ -287,7 +308,9 @@ class ReaderProgressResponse(ReaderWireModel):
 
 
 class ReaderBookmarkLocation(ReaderWireModel):
-    kind: Literal["epub", "comic", "pdf", "audio"]
+    kind: Literal["epub", "reflowable", "comic", "pdf", "audio"]
+    format: ReflowableFormat | None = None
+    cfi: str | None = Field(default=None, min_length=1, max_length=4096)
     href: str | None = None
     spine_index: int | None = Field(default=None, alias="spineIndex", ge=0)
     progression: float | None = Field(default=None, ge=0, le=1)
@@ -298,9 +321,17 @@ class ReaderBookmarkLocation(ReaderWireModel):
     chapter_id: str | None = Field(default=None, alias="chapterId")
     position_ms: int | None = Field(default=None, alias="positionMs", ge=0)
 
+    @model_validator(mode="after")
+    def validate_reflowable_format(self) -> ReaderBookmarkLocation:
+        if self.kind == "reflowable" and self.format is None:
+            raise ValueError("Reflowable bookmark requires format")
+        return self
+
 
 class ReaderBookmark(ReaderWireModel):
-    id: str = Field(min_length=1, max_length=2000)
+    # Legacy clients derive bookmark IDs from the complete location anchor, so
+    # the identifier must accommodate a maximum-length CFI plus its prefix.
+    id: str = Field(min_length=1, max_length=5000)
     location: ReaderBookmarkLocation
     label: str = Field(max_length=500)
     percent: float = Field(ge=0, le=100)
@@ -319,34 +350,6 @@ class ReaderBookmarksData(ReaderWireModel):
 class ReaderBookmarksResponse(ReaderWireModel):
     ok: Literal[True] = True
     data: ReaderBookmarksData
-
-
-class EpubLocationsReady(ReaderWireModel):
-    status: Literal["ready"]
-    serialized: str
-
-
-class EpubLocationsGenerating(ReaderWireModel):
-    status: Literal["generating"]
-    lease_expires_at: int = Field(alias="leaseExpiresAt")
-    retry_after_ms: int = Field(alias="retryAfterMs")
-
-
-class EpubLocationsClaimed(ReaderWireModel):
-    status: Literal["claimed"]
-    lease_token: str = Field(alias="leaseToken")
-    lease_expires_at: int = Field(alias="leaseExpiresAt")
-
-
-EpubLocationsResult = Annotated[
-    EpubLocationsReady | EpubLocationsGenerating | EpubLocationsClaimed,
-    Field(discriminator="status"),
-]
-
-
-class EpubLocationsResponse(ReaderWireModel):
-    ok: Literal[True] = True
-    data: EpubLocationsResult
 
 
 class ReaderErrorDetails(ReaderWireModel):

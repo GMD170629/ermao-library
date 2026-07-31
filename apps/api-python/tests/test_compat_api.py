@@ -4277,9 +4277,9 @@ def test_raw_text_detail_exposes_deferred_epub_conversion(
     assert detail.status_code == 200
     raw_edition = detail.json()["data"]["book"]["editions"][0]
     assert raw_edition["formatValue"] == "TXT"
-    assert raw_edition["readable"] is False
+    assert raw_edition["readable"] is True
     assert raw_edition["conversionAvailable"] is True
-    assert detail.json()["data"]["activeMedia"]["primaryAction"] is None
+    assert detail.json()["data"]["activeMedia"]["primaryAction"] is not None
     ebook_list = client.get("/api/works?type=ebook")
     assert [book["id"] for book in ebook_list.json()["data"]["books"]] == [
         imported.work_id
@@ -6762,7 +6762,8 @@ def test_epub_volume_file_and_bootstrap_use_requested_volume(
     )
     assert bootstrap.status_code == 200
     data = bootstrap.json()["data"]
-    assert data["readerType"] == "epub"
+    assert data["readerType"] == "reflowable"
+    assert data["sourceFormat"] == "epub"
     assert data["selectedVolume"]["id"] == second_result.volume_id
     assert data["selectedVolume"]["title"] == "第 2 卷"
     assert data["selectedVolume"]["chapterCount"] == 1
@@ -6816,9 +6817,11 @@ def test_reader_v2_bootstrap_matches_epub_and_comic_shapes(
     )
     assert epub_bootstrap.status_code == 200
     epub_data = epub_bootstrap.json()["data"]
-    assert epub_data["readerType"] == "epub"
+    assert epub_data["readerType"] == "reflowable"
+    assert epub_data["sourceFormat"] == "epub"
     assert epub_data["edition"]["id"] == epub_payload["editionId"]
-    assert epub_data["edition"]["format"] == "epub"
+    assert epub_data["edition"]["format"] == "reflowable"
+    assert epub_data["edition"]["sourceFormat"] == "epub"
     assert len(epub_data["units"]) == 2
     assert [unit["title"] for unit in epub_data["units"]] == ["第一节", "第二节"]
     epub_detail = client.get(f"/api/works/{epub_payload['workId']}")

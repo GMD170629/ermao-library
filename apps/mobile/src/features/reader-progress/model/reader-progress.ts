@@ -119,7 +119,7 @@ type ReaderProgressSlot = Readonly<{
   editionId: string;
   volumeId: string | null;
   contentFingerprint: string;
-  location: Readonly<{ kind: ReaderKind }>;
+  location: Readonly<{ kind: ReaderLocation['kind'] }>;
 }>;
 
 export function readerProgressSlotKey(
@@ -198,6 +198,10 @@ export function recordReaderProgress(
   ) {
     throw new ReaderProgressInvariantError('INVALID_PROGRESS');
   }
+  const normalizedCommand: RecordReaderProgressCommand = {
+    ...command,
+    location: decodedLocation.value,
+  };
   if (
     current !== null &&
     (current.connection.profileId !== command.connection.profileId ||
@@ -223,7 +227,7 @@ export function recordReaderProgress(
     current?.updatedAtMs ?? command.nowMs,
   );
   const previousEntry = current?.entries.find((entry) =>
-    sameSlot(entry, command),
+    sameSlot(entry, normalizedCommand),
   );
   const entry: LocalProgressEntryV1 = {
     mutationId: command.mutationId,

@@ -3,6 +3,7 @@ import type {
   ComicLocation,
   EpubLocation,
   PdfLocation,
+  ReflowableLocation,
   ReaderBootstrapData,
   ReaderBootstrapResponse,
   ReaderEditionOption,
@@ -11,8 +12,8 @@ import type {
 import { withBasePath } from '../../../lib/base-path';
 import type { ReaderBookmark } from './bookmarks';
 
-type ReaderWireLocation = EpubLocation | ComicLocation | PdfLocation;
-type VisualReaderType = 'epub' | 'comic' | 'pdf';
+type ReaderWireLocation = EpubLocation | ReflowableLocation | ComicLocation | PdfLocation;
+type VisualReaderType = 'reflowable' | 'comic' | 'pdf';
 type VisualReaderEdition = Omit<ReaderEditionSummary, 'format'> & { format: VisualReaderType };
 type VisualReaderEditionOption = Omit<ReaderEditionOption, 'format'> & { format: VisualReaderType };
 type VisualReaderBootstrapData = Omit<ReaderBootstrapData, 'readerType' | 'edition' | 'availableEditions' | 'resumeLocation'> & {
@@ -35,17 +36,26 @@ export type ReaderBootstrap = Omit<VisualReaderBootstrapData, 'schemaVersion' | 
 };
 
 function isVisualReaderType(value: ReaderBootstrapData['readerType'] | ReaderEditionSummary['format']): value is VisualReaderType {
-  return value === 'epub' || value === 'comic' || value === 'pdf';
+  return value === 'reflowable' || value === 'comic' || value === 'pdf';
 }
 
 export function wireLocationToDomain(location: ReaderWireLocation | null | undefined): ReaderLocation | null {
   if (!location) return null;
   if (location.type === 'epub') {
     return {
-      kind: 'epub',
+      kind: 'reflowable',
+      format: 'epub',
       cfi: location.cfi ?? undefined,
       href: location.href ?? undefined,
-      spineIndex: location.spineIndex ?? undefined,
+      progression: location.progression ?? undefined
+    };
+  }
+  if (location.type === 'reflowable') {
+    return {
+      kind: 'reflowable',
+      format: location.format,
+      cfi: location.cfi ?? undefined,
+      href: location.href ?? undefined,
       progression: location.progression ?? undefined
     };
   }
@@ -71,6 +81,7 @@ export async function fetchReaderBootstrap(
     throw new Error(errorPayload?.error?.message ?? errorPayload?.detail ?? `读取阅读器启动信息失败（${response.status}）`);
   }
   const data = payload.data;
+  const sourceFormat = data.sourceFormat;
   if (!isVisualReaderType(data.readerType) || !isVisualReaderType(data.edition.format)) {
     throw new Error('有声书请使用专用播放器打开');
   }
@@ -80,6 +91,30 @@ export async function fetchReaderBootstrap(
   const initialLocation = wireLocationToDomain(resumeLocation);
   const edition: VisualReaderEdition = { ...data.edition, format: data.edition.format };
   const availableEditions = data.availableEditions.filter((candidate): candidate is VisualReaderEditionOption => isVisualReaderType(candidate.format));
+  let source: ReaderSource;
+  if (data.readerType === 'reflowable') {
+    if (!sourceFormat) throw new Error('小说阅读器启动信息缺少源格式');
+    source = {
+      editionId: data.edition.id,
+      workId: data.edition.workId,
+      kind: 'reflowable',
+      sourceFormat,
+      contentUrl: withBasePath(data.fileUrl),
+      contentFingerprint: data.contentFingerprint,
+      volumeId: selectedVolumeId,
+      totalPages: data.totalPages ?? data.edition.pageCount ?? null
+    };
+  } else {
+    source = {
+      editionId: data.edition.id,
+      workId: data.edition.workId,
+      kind: data.readerType,
+      contentUrl: withBasePath(data.fileUrl),
+      contentFingerprint: data.contentFingerprint,
+      volumeId: selectedVolumeId,
+      totalPages: data.totalPages ?? data.edition.pageCount ?? null
+    };
+  }
   return {
     ...data,
     readerType: data.readerType,
@@ -93,15 +128,7 @@ export async function fetchReaderBootstrap(
       ...data.serverPreferences,
       settings: normalizeReaderPreferences(data.serverPreferences.settings)
     },
-    source: {
-      editionId: data.edition.id,
-      workId: data.edition.workId,
-      kind: data.readerType,
-      contentUrl: withBasePath(data.fileUrl),
-      contentFingerprint: data.contentFingerprint,
-      volumeId: selectedVolumeId,
-      totalPages: data.totalPages ?? data.edition.pageCount ?? null
-    },
+    source,
     initialLocation
   };
 }

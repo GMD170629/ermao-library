@@ -6,6 +6,7 @@ import type {
   ReaderKind,
   ReaderLifecycle,
   ReaderLocation,
+  ReaderNavigationEntry,
   ReaderOperationKind,
   ReaderPreferences
 } from './types';
@@ -20,6 +21,7 @@ export type ReaderSessionState = {
   operations: ReaderOperationVersions;
   capabilities: ReaderCapabilities | null;
   totalPages: number | null;
+  navigationItems: ReaderNavigationEntry[];
   location: ReaderLocation | null;
   percent: number;
   phase: string | null;
@@ -63,6 +65,7 @@ export function createReaderSessionState(sessionId: string, preferences: ReaderP
     operations: { ...INITIAL_OPERATIONS },
     capabilities: null,
     totalPages: null,
+    navigationItems: [],
     location: null,
     percent: 0,
     phase: null,
@@ -117,6 +120,8 @@ export function readerSessionReducer(state: ReaderSessionState, action: ReaderSe
           return { ...state, capabilities: event.capabilities };
         case 'metadata-changed':
           return { ...state, totalPages: event.totalPages };
+        case 'navigation-changed':
+          return { ...state, navigationItems: event.items };
         case 'location-changed':
           return { ...state, location: event.location, percent: clampPercent(event.percent) };
         case 'phase-changed':
@@ -141,6 +146,6 @@ export function readerSessionReducer(state: ReaderSessionState, action: ReaderSe
       }
     }
     case 'session/dispose':
-      return { ...state, lifecycle: 'disposed', capabilities: null, totalPages: null, phase: null, paginationProgress: null };
+      return { ...state, lifecycle: 'disposed', capabilities: null, totalPages: null, navigationItems: [], phase: null, paginationProgress: null };
   }
 }

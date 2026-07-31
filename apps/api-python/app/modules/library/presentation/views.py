@@ -716,7 +716,8 @@ def _work_view(db: Session, work: dict[str, Any], user_id: str | None = None) ->
                 "lastReadAt": _dt(e_progress.get("updatedAt")) if e_progress else None,
                 "coverUrl": _cover_url("editions", edition["id"], edition, size="medium"),
                 "conversion": conversion_by_edition.get(edition["id"]),
-                "readable": edition_format in {"EPUB", "PDF", "COMIC", "AUDIO"},
+                "readable": edition_format
+                in {"EPUB", "MOBI", "AZW", "AZW3", "PRC", "FB2", "TXT", "PDF", "COMIC", "AUDIO"},
                 "conversionAvailable": f".{edition_format.lower()}" in CONVERTIBLE_TEXT_EXTS,
                 "files": [file_view(file) for file in edition_files],
                 "volumes": edition_volumes,
@@ -1150,5 +1151,4 @@ def _apply_remote_cover(work_id: str, cover_url: str, settings: Settings) -> dic
     target = target_dir / f"{work_id}{suffix}"
     target.write_bytes(data)
     return {"coverPath": str(target.relative_to(settings.resolved_storage_root)), "coverStatus": "READY", "updatedAt": _now()}
-
 

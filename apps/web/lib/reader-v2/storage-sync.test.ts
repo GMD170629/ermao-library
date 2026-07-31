@@ -278,7 +278,7 @@ test('legacy hooks migrate only explicitly identified state', async () => {
     return storage.enqueueProgress(input);
   } }, storage);
   assert.equal(progressResult.status, 'migrated');
-  assert.deepEqual(enqueued[0].location, { kind: 'epub', cfi: 'epubcfi(/6/2)', href: undefined, spineIndex: undefined, progression: undefined });
+  assert.deepEqual(enqueued[0].location, { kind: 'reflowable', format: 'epub', cfi: 'epubcfi(/6/2)', href: undefined, progression: undefined });
 
   await migrateLegacyProgressCandidate({
     userId: 'user-1',
@@ -291,7 +291,7 @@ test('legacy hooks migrate only explicitly identified state', async () => {
     enqueued.push(input);
     return storage.enqueueProgress(input);
   } }, storage);
-  assert.deepEqual(enqueued[1].location, { kind: 'epub', cfi: undefined, href: undefined, spineIndex: undefined, progression: 0.25 });
+  assert.deepEqual(enqueued[1].location, { kind: 'reflowable', format: 'epub', cfi: undefined, href: undefined, progression: 0.25 });
 });
 
 test('browser migration quarantines unowned cache, migrates exact owner once, and removes legacy keys', async () => {
@@ -320,7 +320,7 @@ test('browser migration quarantines unowned cache, migrates exact owner once, an
       currentWorkId: 'work-1',
       currentEditionId: 'edition-1',
       contentFingerprint: 'fingerprint',
-      readerKind: 'epub'
+      readerKind: 'reflowable'
     }, { storage, repository: new ReaderPreferenceRepository(storage) });
     assert.deepEqual(first, { status: 'migrated', migrated: 1, quarantined: 1 });
     assert.equal(values.has('shuku:reader:preferences:ebook'), false);
@@ -333,7 +333,7 @@ test('browser migration quarantines unowned cache, migrates exact owner once, an
       currentWorkId: 'work-1',
       currentEditionId: 'edition-1',
       contentFingerprint: 'fingerprint',
-      readerKind: 'epub'
+      readerKind: 'reflowable'
     }, { storage });
     assert.deepEqual(second, { status: 'skipped', migrated: 0, quarantined: 0 });
   } finally {

@@ -6,14 +6,14 @@ from threading import Barrier
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
+from app.bootstrap.reader import SqlAlchemyReaderProgressCursor
 from app.core.auth import hash_password
 from app.models.auth import User
-from app.bootstrap.reader import SqlAlchemyReaderProgressCursor
-from app.modules.reader.public import ClaimClientSequence, ClaimClientSequenceCommand
 from app.modules.reader.presentation.v2_schemas import (
     ReaderPreferences,
     ReaderServerPreferences,
 )
+from app.modules.reader.public import ClaimClientSequence, ClaimClientSequenceCommand
 from tests.test_worker_importer import create_worker_tables, write_comic_fixture
 
 
@@ -42,6 +42,9 @@ def test_reader_v2_openapi_exposes_generated_request_and_response_contracts(clie
     assert edition_option["properties"]["progress"]["maximum"] == 100
     comic_location = schema["components"]["schemas"]["ComicLocation"]
     assert set(comic_location["required"]) == {"type", "volumeId", "pageIndex"}
+    reflowable_location = schema["components"]["schemas"]["ReflowableLocation"]
+    assert set(reflowable_location["required"]) == {"type", "format"}
+    assert schema["components"]["schemas"]["ReaderBookmark"]["properties"]["id"]["maxLength"] == 5000
     appearance = schema["components"]["schemas"]["AppearancePreferences"]
     assert appearance["properties"]["theme"]["default"] == "warm"
     epub_preferences = schema["components"]["schemas"]["EpubPreferences"]["properties"]
@@ -219,7 +222,10 @@ def test_bootstrap_seeds_user_work_preferences_from_legacy_and_returns_typed_con
     data = response.json()["data"]
     assert data["schemaVersion"] == 2
     assert data["userId"] == user_id
-    assert data["readerType"] == "epub"
+    assert data["readerType"] == "reflowable"
+    assert data["sourceFormat"] == "epub"
+    assert data["edition"]["format"] == "reflowable"
+    assert data["edition"]["sourceFormat"] == "epub"
     assert data["capabilities"]["supportsSpreads"] is True
     assert data["contentFingerprint"].startswith("sha256:")
     assert data["book"] == {
@@ -264,77 +270,34 @@ def test_bootstrap_seeds_user_work_preferences_from_legacy_and_returns_typed_con
     assert inherited_again["serverPreferences"]["settings"]["appearance"]["theme"] == "warm"
 
 
-def test_epub_locations_are_generated_once_and_shared_through_server_cache(client, db_session, test_settings):
+def test_bootstrap_supports_all_native_reflowable_source_formats(client, db_session):
     _reader_tables(db_session)
     _login(client, db_session)
     _epub_fixture(db_session)
-    bootstrap = client.get("/api/reader/v2/editions/edition-v2/bootstrap?volume=volume-v2")
-    fingerprint = bootstrap.json()["data"]["contentFingerprint"]
-    request = {
-        "cacheVersion": 2,
-        "contentFingerprint": fingerprint,
-        "breakSize": 1200,
-    }
 
-    first = client.post(
-        "/api/reader/v2/editions/edition-v2/epub-locations/claim?volume=volume-v2",
-        json=request,
-    )
-    assert first.status_code == 200
-    assert first.json()["data"]["status"] == "claimed"
-    lease_token = first.json()["data"]["leaseToken"]
+    for source_format in ("EPUB", "MOBI", "AZW", "AZW3", "PRC", "FB2", "TXT"):
+        db_session.execute(
+            text("UPDATE LibraryEdition SET format = :source_format WHERE id = 'edition-v2'"),
+            {"source_format": source_format},
+        )
+        db_session.commit()
 
-    concurrent = client.post(
-        "/api/reader/v2/editions/edition-v2/epub-locations/claim?volume=volume-v2",
-        json=request,
-    )
-    assert concurrent.status_code == 200
-    assert concurrent.json()["data"]["status"] == "generating"
+        response = client.get("/api/reader/v2/editions/edition-v2/bootstrap?volume=volume-v2")
 
-    serialized = json.dumps(["epubcfi(/6/2!/4/2:0)", "epubcfi(/6/4!/4/2:0)"])
-    saved = client.put(
-        "/api/reader/v2/editions/edition-v2/epub-locations?volume=volume-v2",
-        json={**request, "leaseToken": lease_token, "serialized": serialized},
-    )
-    assert saved.status_code == 200
-    assert saved.json()["data"] == {"status": "ready", "serialized": serialized}
-
-    reused = client.post(
-        "/api/reader/v2/editions/edition-v2/epub-locations/claim?volume=volume-v2",
-        json=request,
-    )
-    assert reused.status_code == 200
-    assert reused.json()["data"] == {"status": "ready", "serialized": serialized}
-    assert list((test_settings.resolved_storage_root / "reader-indexes" / "epub-locations" / "v2").glob("*.json"))
+        assert response.status_code == 200, response.text
+        data = response.json()["data"]
+        assert data["readerType"] == "reflowable"
+        assert data["sourceFormat"] == source_format.lower()
+        assert data["edition"]["format"] == "reflowable"
+        assert data["edition"]["sourceFormat"] == source_format.lower()
+        assert data["capabilities"]["canJumpToHref"] is True
+        assert data["capabilities"]["supportsScrolling"] is True
 
 
-def test_epub_locations_reject_wrong_content_and_invalid_payload(client, db_session):
-    _reader_tables(db_session)
-    _login(client, db_session)
-    _epub_fixture(db_session)
-    wrong = client.post(
-        "/api/reader/v2/editions/edition-v2/epub-locations/claim?volume=volume-v2",
-        json={"cacheVersion": 2, "contentFingerprint": "sha256:wrong", "breakSize": 1200},
-    )
-    assert wrong.status_code == 409
+def test_openapi_does_not_expose_retired_epub_location_cache(client):
+    paths = client.get("/openapi.json").json()["paths"]
 
-    bootstrap = client.get("/api/reader/v2/editions/edition-v2/bootstrap?volume=volume-v2")
-    fingerprint = bootstrap.json()["data"]["contentFingerprint"]
-    claim = client.post(
-        "/api/reader/v2/editions/edition-v2/epub-locations/claim?volume=volume-v2",
-        json={"cacheVersion": 2, "contentFingerprint": fingerprint, "breakSize": 1200},
-    ).json()["data"]
-    invalid = client.put(
-        "/api/reader/v2/editions/edition-v2/epub-locations?volume=volume-v2",
-        json={
-            "cacheVersion": 2,
-            "contentFingerprint": fingerprint,
-            "breakSize": 1200,
-            "leaseToken": claim["leaseToken"],
-            "serialized": "[]",
-        },
-    )
-    assert invalid.status_code == 422
+    assert not any("epub-locations" in path for path in paths)
 
 
 def test_bootstrap_normalizes_and_rewrites_stored_v2_preferences(client, db_session):
@@ -558,10 +521,10 @@ def test_progress_v2_validates_fingerprint_and_writes_v2_and_legacy_projections(
         "contentFingerprint": fingerprint,
         "volumeId": "volume-v2",
         "location": {
-            "type": "epub",
+            "type": "reflowable",
+            "format": "epub",
             "cfi": "epubcfi(/6/2!/4/1:0)",
             "href": "two.xhtml",
-            "spineIndex": 1,
             "progression": 0.5,
         },
         "percent": 50,
@@ -572,17 +535,24 @@ def test_progress_v2_validates_fingerprint_and_writes_v2_and_legacy_projections(
     assert saved.status_code == 200
     assert saved.json()["data"]["applied"] is True
     progress = saved.json()["data"]["progress"]
-    assert progress["readerType"] == "epub"
+    assert progress["readerType"] == "reflowable"
+    assert progress["location"] == {
+        "type": "reflowable",
+        "format": "epub",
+        "cfi": "epubcfi(/6/2!/4/1:0)",
+        "href": "two.xhtml",
+        "progression": 0.5,
+    }
     assert progress["workId"] == "work-v2"
     assert progress["editionId"] == "edition-v2"
     assert progress["clientSequence"] == 7
     row = db_session.execute(text("SELECT * FROM LibraryReadingProgress")).mappings().one()
     assert row["userId"] == user_id
     assert row["schemaVersion"] == 2
-    assert row["locationType"] == "epub"
+    assert row["locationType"] == "reflowable"
     assert json.loads(row["locationJson"])["href"] == "two.xhtml"
     assert row["position"] == "epubcfi(/6/2!/4/1:0)"
-    assert row["page"] == 2
+    assert row["page"] is None
     assert row["percent"] == 50
     assert row["contentFingerprint"] == fingerprint
     assert row["mutationId"] == "mutation-1"
@@ -818,6 +788,17 @@ def test_progress_cursor_lazily_backfills_visible_legacy_client_sequence(client,
         },
     )
     db_session.commit()
+
+    resumed = client.get(
+        "/api/reader/v2/editions/edition-v2/bootstrap?volume=volume-v2"
+    ).json()["data"]
+    assert resumed["resumeLocation"] == {
+        "type": "reflowable",
+        "format": "epub",
+        "cfi": "legacy-cfi",
+        "href": None,
+        "progression": None,
+    }
 
     duplicate = client.put(
         "/api/reader/v2/editions/edition-v2/progress",
