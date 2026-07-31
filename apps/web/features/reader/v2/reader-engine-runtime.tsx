@@ -76,7 +76,17 @@ export function ReaderEngineRuntime({
   const shellEventsRef = useRef<ReaderShellEvents | null>(null);
   const interactionBlockedRef = useRef(true);
   const onSelectVolumeRef = useRef(onSelectVolume);
+  const adapterNavigationRef = useRef({
+    contentFingerprint: bootstrap.contentFingerprint,
+    units: bootstrap.units
+  });
   onSelectVolumeRef.current = onSelectVolume;
+  if (adapterNavigationRef.current.contentFingerprint !== bootstrap.contentFingerprint) {
+    adapterNavigationRef.current = {
+      contentFingerprint: bootstrap.contentFingerprint,
+      units: bootstrap.units
+    };
+  }
 
   useEffect(() => {
     if (!container) return undefined;
@@ -106,16 +116,16 @@ export function ReaderEngineRuntime({
         return executeRef.current(intent.command);
       };
       if (bootstrap.readerType === 'epub') {
-        const module = await import('./adapters/epub-adapter');
-        created = module.createEpubAdapter({
+        const adapterModule = await import('./adapters/epub-adapter');
+        created = adapterModule.createEpubAdapter({
           container,
-          navigationItems: bootstrap.units,
+          navigationItems: adapterNavigationRef.current.units,
           onEndOfVolume: openNextVolume,
           onInputIntent: handleAdapterInputIntent
         });
       } else if (bootstrap.readerType === 'comic') {
-        const module = await import('./adapters/comic-adapter');
-        created = module.createComicAdapter({
+        const adapterModule = await import('./adapters/comic-adapter');
+        created = adapterModule.createComicAdapter({
           container,
           onInputIntent: handleAdapterInputIntent,
           onEndOfVolume: openNextVolume,
@@ -129,8 +139,8 @@ export function ReaderEngineRuntime({
           }))
         });
       } else {
-        const module = await import('./adapters/pdf-adapter');
-        created = module.createPdfAdapter({ container });
+        const adapterModule = await import('./adapters/pdf-adapter');
+        created = adapterModule.createPdfAdapter({ container });
       }
       if (!active) {
         void created.dispose();
@@ -164,7 +174,9 @@ export function ReaderEngineRuntime({
       setPasswordReason(reason);
     }
   });
-  executeRef.current = session.execute;
+  const sessionControls = session.controls;
+  const sessionExecute = session.execute;
+  executeRef.current = sessionExecute;
   const interactionBlocked = !adapter
     || session.state.lifecycle === 'bootstrapping'
     || session.state.lifecycle === 'loading'
@@ -296,16 +308,16 @@ export function ReaderEngineRuntime({
       onSelectVolume(bookmark.location.volumeId, bookmark.location.pageIndex);
       return;
     }
-    await session.execute({ type: 'go-to-location', location: bookmark.location });
-  }, [bootstrap.selectedVolume?.id, onSelectVolume, session.execute]);
+    await sessionExecute({ type: 'go-to-location', location: bookmark.location });
+  }, [bootstrap.selectedVolume?.id, onSelectVolume, sessionExecute]);
 
   const controls: ReaderControls = useMemo(() => ({
-    next: async () => { await session.controls.next(); },
-    prev: async () => { await session.controls.prev(); },
-    jumpToProgress: async (percent) => { await session.controls.jumpToProgress(percent); },
-    jumpToHref: async (href) => { await session.controls.jumpToHref(href); },
-    jumpToIndex: async (index) => { await session.controls.jumpToIndex(index); }
-  }), [session.controls]);
+    next: async () => { await sessionControls.next(); },
+    prev: async () => { await sessionControls.prev(); },
+    jumpToProgress: async (percent) => { await sessionControls.jumpToProgress(percent); },
+    jumpToHref: async (href) => { await sessionControls.jumpToHref(href); },
+    jumpToIndex: async (index) => { await sessionControls.jumpToIndex(index); }
+  }), [sessionControls]);
 
   const volumeNavigation: ReaderVolumeNavigation = useMemo(() => ({
     editions: bootstrap.availableEditions.map((edition) => ({
@@ -336,10 +348,10 @@ export function ReaderEngineRuntime({
     onSelectEdition,
     onSelectVolume,
     onSelectItem: (item) => {
-      if (item.href) void session.controls.jumpToHref(item.href);
-      else void session.controls.jumpToIndex(item.index);
+      if (item.href) void sessionControls.jumpToHref(item.href);
+      else void sessionControls.jumpToIndex(item.index);
     }
-  }), [bootstrap, items, onSelectEdition, onSelectVolume, session.controls]);
+  }), [bootstrap, items, onSelectEdition, onSelectVolume, sessionControls]);
 
   function submitPassword(event: FormEvent) {
     event.preventDefault();

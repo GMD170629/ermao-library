@@ -1,11 +1,12 @@
 import json
 import zipfile
+from contextlib import nullcontext
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from app import models as _models  # noqa: F401
 from app.bootstrap.imports import (
@@ -14,6 +15,7 @@ from app.bootstrap.imports import (
     process_import_task,
 )
 from app.db.base import Base
+from app.models.settings import SystemEvent
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
     ImportOptions,
@@ -42,6 +44,8 @@ from app.worker.path_security import (
 )
 from app.worker.watcher import (
     MonitorFolderConfig,
+    WatchState,
+    WorkerManager,
     import_watched_file,
     monitor_folder_config,
     scan_directory_with_logging,
@@ -2154,7 +2158,7 @@ def test_directory_scan_records_candidates_and_summary_in_system_log(
     assert summary.directories_scanned == 2
     assert summary.files_scanned == 3
     assert summary.candidates_found == 3
-    assert summary.ignored_files == 0
+    assert summary.ignored_files == 1
     assert {path.name for path in import_queue.paths} == {
         "first.epub",
         "notes.txt",
@@ -2169,15 +2173,12 @@ def test_directory_scan_records_candidates_and_summary_in_system_log(
     )
     assert [event["action"] for event in events] == [
         "scan.started",
-        "scan.file.detected",
-        "scan.file.detected",
-        "scan.file.detected",
         "scan.completed",
     ]
     completed = json.loads(events[-1]["metadata"])
     assert completed["filesScanned"] == 3
     assert completed["candidatesFound"] == 3
-    assert completed["ignoredFiles"] == 0
+    assert completed["ignoredFiles"] == 1
     assert completed["requestedAt"] == "2026-07-17T10:00:00Z"
 
 
@@ -2212,6 +2213,98 @@ def test_directory_scan_filters_minimum_file_size_before_queue(
     assert summary.candidates_found == 1
     assert summary.ignored_files == 1
     assert import_queue.paths == [root / "accepted.epub"]
+
+
+def test_directory_scan_aggregates_ignore_reasons_without_file_events(
+    db_session,
+    tmp_path,
+):
+    create_worker_tables(db_session)
+    root = tmp_path / "scan-ignore-rules"
+    root.mkdir()
+    for name in (
+        "accepted.epub",
+        "global-skip.epub",
+        "folder-skip.epub",
+        "not-enabled.pdf",
+        "unsupported.bin",
+        ".hidden.epub",
+        ".upload-draft.part",
+    ):
+        (root / name).write_bytes(b"x" * 16)
+    (root / "too-small.epub").write_bytes(b"x")
+    folder = MonitorFolderConfig(
+        id="folder-ignore-rules",
+        root_path=str(root),
+        ignore_patterns="folder-*.epub",
+        min_file_size_bytes=10,
+        global_ignore_patterns="global-*.epub",
+        allowed_extensions=(".epub",),
+    )
+
+    class CollectingQueue:
+        def __init__(self):
+            self.paths = []
+
+        def enqueue(self, path, _folder):
+            self.paths.append(path)
+
+    import_queue = CollectingQueue()
+
+    summary = scan_directory_with_logging(
+        db_session,
+        root,
+        folder,
+        import_queue,
+        trigger="manual_rescan",
+    )
+
+    assert summary.files_scanned == 8
+    assert summary.candidates_found == 1
+    assert summary.ignored_files == 7
+    assert import_queue.paths == [root / "accepted.epub"]
+    completed = db_session.scalars(
+        select(SystemEvent).where(SystemEvent.action == "scan.completed")
+    ).one()
+    assert set(completed.metadata_json["ignoredReasonCounts"]) == {
+        "below_minimum_size",
+        "extension_not_allowed",
+        "global_ignore_pattern",
+        "hidden_path",
+        "monitor_folder_ignore_pattern",
+        "temporary_upload",
+        "unsupported_file_type",
+    }
+
+
+def test_file_watcher_drops_ignored_file_without_file_level_event(
+    db_session,
+    tmp_path,
+):
+    create_worker_tables(db_session)
+    source = tmp_path / "ignored-by-watcher.epub"
+    source.write_bytes(b"ignored")
+    folder = MonitorFolderConfig(
+        id="folder-watcher-ignore",
+        root_path=str(tmp_path),
+        ignore_patterns="ignored-by-watcher.epub",
+        min_file_size_bytes=1,
+    )
+    manager = WorkerManager.__new__(WorkerManager)
+    manager.db_factory = lambda: nullcontext(db_session)
+    manager._imports_paused = False
+    state = WatchState(
+        observer=object(),
+        root_path=tmp_path,
+        config_signature="test",
+    )
+
+    manager.schedule_import(source, folder, state)
+
+    events = db_session.scalars(
+        select(SystemEvent).where(SystemEvent.action == "scan.file.ignored")
+    ).all()
+    assert events == []
 
 
 def test_directory_scan_only_queues_files_without_existing_import_records(
@@ -2250,7 +2343,7 @@ def test_directory_scan_only_queues_files_without_existing_import_records(
     )
 
     assert summary.files_scanned == 2
-    assert summary.candidates_found == 1
+    assert summary.candidates_found == 2
     assert summary.cached_files == 1
     assert import_queue.paths == [added]
     completed = db_session.execute(

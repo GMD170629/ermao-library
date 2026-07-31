@@ -46,33 +46,91 @@ class LibraryWork(Base):
         ForeignKey("MonitorFolder.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
-    origin: Mapped[str] = mapped_column(String(191), nullable=False, default="MANUAL", server_default="MANUAL")
+    origin: Mapped[str] = mapped_column(
+        String(191), nullable=False, default="MANUAL", server_default="MANUAL"
+    )
     title: Mapped[str] = mapped_column(Text, nullable=False)
-    normalized_title: Mapped[str] = mapped_column("normalizedTitle", Text, nullable=False)
+    normalized_title: Mapped[str] = mapped_column(
+        "normalizedTitle", Text, nullable=False
+    )
     author: Mapped[str | None] = mapped_column(Text, nullable=True)
-    normalized_author: Mapped[str | None] = mapped_column("normalizedAuthor", Text, nullable=True)
+    normalized_author: Mapped[str | None] = mapped_column(
+        "normalizedAuthor", Text, nullable=True
+    )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     work_type: Mapped[str] = mapped_column("workType", String(191), nullable=False)
-    status: Mapped[str] = mapped_column(String(191), nullable=False, default="UNREAD", server_default="UNREAD")
-    publication_status: Mapped[str] = mapped_column("publicationStatus", String(191), nullable=False, default="UNKNOWN", server_default="UNKNOWN")
-    tracking_status: Mapped[str] = mapped_column("trackingStatus", String(191), nullable=False, default="NOT_TRACKING", server_default="NOT_TRACKING")
-    local_latest_volume: Mapped[float | None] = mapped_column("localLatestVolume", Float, nullable=True)
-    local_latest_chapter: Mapped[float | None] = mapped_column("localLatestChapter", Float, nullable=True)
-    local_latest_title: Mapped[str | None] = mapped_column("localLatestTitle", Text, nullable=True)
-    local_latest_at: Mapped[datetime | None] = mapped_column("localLatestAt", TimestampMilliseconds(), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(191), nullable=False, default="UNREAD", server_default="UNREAD"
+    )
+    publication_status: Mapped[str] = mapped_column(
+        "publicationStatus",
+        String(191),
+        nullable=False,
+        default="UNKNOWN",
+        server_default="UNKNOWN",
+    )
+    tracking_status: Mapped[str] = mapped_column(
+        "trackingStatus",
+        String(191),
+        nullable=False,
+        default="NOT_TRACKING",
+        server_default="NOT_TRACKING",
+    )
+    local_latest_volume: Mapped[float | None] = mapped_column(
+        "localLatestVolume", Float, nullable=True
+    )
+    local_latest_chapter: Mapped[float | None] = mapped_column(
+        "localLatestChapter", Float, nullable=True
+    )
+    local_latest_title: Mapped[str | None] = mapped_column(
+        "localLatestTitle", Text, nullable=True
+    )
+    local_latest_at: Mapped[datetime | None] = mapped_column(
+        "localLatestAt", TimestampMilliseconds(), nullable=True
+    )
     tags: Mapped[str] = mapped_column(Text, nullable=False)
     series_name: Mapped[str | None] = mapped_column("seriesName", Text, nullable=True)
-    series_index: Mapped[float | None] = mapped_column("seriesIndex", Float, nullable=True)
-    published_year: Mapped[int | None] = mapped_column("publishedYear", Integer, nullable=True)
-    metadata_quality: Mapped[int] = mapped_column("metadataQuality", Integer, nullable=False, default=0, server_default="0")
-    organize_status: Mapped[str] = mapped_column("organizeStatus", String(191), nullable=False, default="REVIEWING", server_default="REVIEWING")
+    series_index: Mapped[float | None] = mapped_column(
+        "seriesIndex", Float, nullable=True
+    )
+    published_year: Mapped[int | None] = mapped_column(
+        "publishedYear", Integer, nullable=True
+    )
+    metadata_quality: Mapped[int] = mapped_column(
+        "metadataQuality", Integer, nullable=False, default=0, server_default="0"
+    )
+    organize_status: Mapped[str] = mapped_column(
+        "organizeStatus",
+        String(191),
+        nullable=False,
+        default="REVIEWING",
+        server_default="REVIEWING",
+    )
     cover_path: Mapped[str | None] = mapped_column("coverPath", Text, nullable=True)
-    cover_status: Mapped[str] = mapped_column("coverStatus", String(191), nullable=False, default="PENDING", server_default="PENDING")
-    hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
-    organized: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
-    primary_edition_id: Mapped[str | None] = mapped_column("primaryEditionId", String(191), nullable=True)
+    cover_status: Mapped[str] = mapped_column(
+        "coverStatus",
+        String(191),
+        nullable=False,
+        default="PENDING",
+        server_default="PENDING",
+    )
+    hidden: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    organized: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    primary_edition_id: Mapped[str | None] = mapped_column(
+        "primaryEditionId", String(191), nullable=True
+    )
     merge_key: Mapped[str | None] = mapped_column("mergeKey", Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, server_default=timestamp_ms_server_default())
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         "updatedAt",
         TimestampMilliseconds(),
@@ -100,7 +158,9 @@ class LibraryEdition(Base):
         Index("LibraryEdition_isbn_idx", "isbn"),
         Index("LibraryEdition_sourceGroupKey_idx", "sourceGroupKey"),
         Index("LibraryEdition_monitorFolderId_idx", "monitorFolderId"),
-        Index("LibraryEdition_workId_versionKey_key", "workId", "versionKey", unique=True),
+        Index(
+            "LibraryEdition_workId_versionKey_key", "workId", "versionKey", unique=True
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
@@ -116,32 +176,74 @@ class LibraryEdition(Base):
         ForeignKey("MonitorFolder.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
-    origin: Mapped[str] = mapped_column(String(191), nullable=False, default="MANUAL", server_default="MANUAL")
-    media_kind: Mapped[str] = mapped_column("mediaKind", String(191), nullable=False, default="EBOOK", server_default="EBOOK")
+    origin: Mapped[str] = mapped_column(
+        String(191), nullable=False, default="MANUAL", server_default="MANUAL"
+    )
+    media_kind: Mapped[str] = mapped_column(
+        "mediaKind",
+        String(191),
+        nullable=False,
+        default="EBOOK",
+        server_default="EBOOK",
+    )
     format: Mapped[str] = mapped_column(String(191), nullable=False)
     version_name: Mapped[str] = mapped_column("versionName", Text, nullable=False)
     version_key: Mapped[str] = mapped_column("versionKey", String(191), nullable=False)
-    source_group_key: Mapped[str | None] = mapped_column("sourceGroupKey", Text, nullable=True)
+    source_group_key: Mapped[str | None] = mapped_column(
+        "sourceGroupKey", Text, nullable=True
+    )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     language: Mapped[str | None] = mapped_column(String(191), nullable=True)
     publisher: Mapped[str | None] = mapped_column(Text, nullable=True)
-    published_at: Mapped[datetime | None] = mapped_column("publishedAt", TimestampMilliseconds(), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(
+        "publishedAt", TimestampMilliseconds(), nullable=True
+    )
     identifier: Mapped[str | None] = mapped_column(Text, nullable=True)
     isbn: Mapped[str | None] = mapped_column(String(191), nullable=True)
-    import_status: Mapped[str] = mapped_column("importStatus", String(191), nullable=False, default="PENDING", server_default="PENDING")
+    import_status: Mapped[str] = mapped_column(
+        "importStatus",
+        String(191),
+        nullable=False,
+        default="PENDING",
+        server_default="PENDING",
+    )
     import_error: Mapped[str | None] = mapped_column("importError", Text, nullable=True)
-    size_bytes: Mapped[int] = mapped_column("sizeBytes", Integer, nullable=False, default=0, server_default="0")
+    size_bytes: Mapped[int] = mapped_column(
+        "sizeBytes", Integer, nullable=False, default=0, server_default="0"
+    )
     page_count: Mapped[int | None] = mapped_column("pageCount", Integer, nullable=True)
-    chapter_count: Mapped[int | None] = mapped_column("chapterCount", Integer, nullable=True)
-    duration_ms: Mapped[int | None] = mapped_column("durationMs", Integer, nullable=True)
-    track_count: Mapped[int | None] = mapped_column("trackCount", Integer, nullable=True)
+    chapter_count: Mapped[int | None] = mapped_column(
+        "chapterCount", Integer, nullable=True
+    )
+    duration_ms: Mapped[int | None] = mapped_column(
+        "durationMs", Integer, nullable=True
+    )
+    track_count: Mapped[int | None] = mapped_column(
+        "trackCount", Integer, nullable=True
+    )
     narrator: Mapped[str | None] = mapped_column(Text, nullable=True)
     abridged: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     cover_path: Mapped[str | None] = mapped_column("coverPath", Text, nullable=True)
-    cover_status: Mapped[str] = mapped_column("coverStatus", String(191), nullable=False, default="PENDING", server_default="PENDING")
-    is_primary: Mapped[bool] = mapped_column("primary", Boolean, nullable=False, default=False, server_default="0")
-    hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
-    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, server_default=timestamp_ms_server_default())
+    cover_status: Mapped[str] = mapped_column(
+        "coverStatus",
+        String(191),
+        nullable=False,
+        default="PENDING",
+        server_default="PENDING",
+    )
+    is_primary: Mapped[bool] = mapped_column(
+        "primary", Boolean, nullable=False, default=False, server_default="0"
+    )
+    hidden: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         "updatedAt",
         TimestampMilliseconds(),
@@ -166,13 +268,27 @@ class LibraryVolume(Base):
         nullable=False,
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
-    volume_index: Mapped[float | None] = mapped_column("volumeIndex", Float, nullable=True)
-    sort_order: Mapped[int] = mapped_column("sortOrder", Integer, nullable=False, default=0, server_default="0")
+    volume_index: Mapped[float | None] = mapped_column(
+        "volumeIndex", Float, nullable=True
+    )
+    sort_order: Mapped[int] = mapped_column(
+        "sortOrder", Integer, nullable=False, default=0, server_default="0"
+    )
     page_count: Mapped[int | None] = mapped_column("pageCount", Integer, nullable=True)
-    chapter_count: Mapped[int | None] = mapped_column("chapterCount", Integer, nullable=True)
-    duration_ms: Mapped[int | None] = mapped_column("durationMs", Integer, nullable=True)
+    chapter_count: Mapped[int | None] = mapped_column(
+        "chapterCount", Integer, nullable=True
+    )
+    duration_ms: Mapped[int | None] = mapped_column(
+        "durationMs", Integer, nullable=True
+    )
     cover_path: Mapped[str | None] = mapped_column("coverPath", Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, server_default=timestamp_ms_server_default())
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         "updatedAt",
         TimestampMilliseconds(),
@@ -193,6 +309,7 @@ class LibraryFile(Base):
         Index("LibraryFile_fingerprint_idx", "fingerprint"),
         Index("LibraryFile_fullHash_idx", "fullHash"),
         Index("LibraryFile_sizeBytes_mtimeMs_idx", "sizeBytes", "mtimeMs"),
+        Index("LibraryFile_pathKey_idx", "pathKey"),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
@@ -209,23 +326,54 @@ class LibraryFile(Base):
         nullable=True,
     )
     path: Mapped[str] = mapped_column(Text, nullable=False)
-    file_path_hash: Mapped[str | None] = mapped_column("filePathHash", String(191), nullable=True)
+    path_key: Mapped[str | None] = mapped_column("pathKey", String(64), nullable=True)
+    file_path_hash: Mapped[str | None] = mapped_column(
+        "filePathHash", String(191), nullable=True
+    )
     fingerprint: Mapped[str | None] = mapped_column(Text, nullable=True)
-    full_hash: Mapped[str | None] = mapped_column("fullHash", String(191), nullable=True)
-    hash_status: Mapped[str] = mapped_column("hashStatus", String(191), nullable=False, default="FAILED", server_default="FAILED")
-    mtime_ms: Mapped[int] = mapped_column("mtimeMs", Integer, nullable=False, default=0, server_default="0")
+    full_hash: Mapped[str | None] = mapped_column(
+        "fullHash", String(191), nullable=True
+    )
+    hash_status: Mapped[str] = mapped_column(
+        "hashStatus",
+        String(191),
+        nullable=False,
+        default="FAILED",
+        server_default="FAILED",
+    )
+    mtime_ms: Mapped[int] = mapped_column(
+        "mtimeMs", Integer, nullable=False, default=0, server_default="0"
+    )
     kind: Mapped[str] = mapped_column(String(191), nullable=False)
     mime_type: Mapped[str] = mapped_column("mimeType", String(191), nullable=False)
-    size_bytes: Mapped[int] = mapped_column("sizeBytes", Integer, nullable=False, default=0, server_default="0")
-    duration_ms: Mapped[int | None] = mapped_column("durationMs", Integer, nullable=True)
+    size_bytes: Mapped[int] = mapped_column(
+        "sizeBytes", Integer, nullable=False, default=0, server_default="0"
+    )
+    duration_ms: Mapped[int | None] = mapped_column(
+        "durationMs", Integer, nullable=True
+    )
     codec: Mapped[str | None] = mapped_column(String(191), nullable=True)
     bitrate: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    sample_rate: Mapped[int | None] = mapped_column("sampleRate", Integer, nullable=True)
+    sample_rate: Mapped[int | None] = mapped_column(
+        "sampleRate", Integer, nullable=True
+    )
     channels: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    disc_number: Mapped[int | None] = mapped_column("discNumber", Integer, nullable=True)
-    track_number: Mapped[int | None] = mapped_column("trackNumber", Integer, nullable=True)
-    sort_order: Mapped[int] = mapped_column("sortOrder", Integer, nullable=False, default=0, server_default="0")
-    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, server_default=timestamp_ms_server_default())
+    disc_number: Mapped[int | None] = mapped_column(
+        "discNumber", Integer, nullable=True
+    )
+    track_number: Mapped[int | None] = mapped_column(
+        "trackNumber", Integer, nullable=True
+    )
+    sort_order: Mapped[int] = mapped_column(
+        "sortOrder", Integer, nullable=False, default=0, server_default="0"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         "updatedAt",
         TimestampMilliseconds(),
@@ -246,8 +394,16 @@ class LibraryFacet(Base):
     kind: Mapped[str] = mapped_column(String(191), nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     normalized_name: Mapped[str] = mapped_column("normalizedName", Text, nullable=False)
-    aliases: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
-    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, server_default=timestamp_ms_server_default())
+    aliases: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]", server_default="[]"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         "updatedAt",
         TimestampMilliseconds(),
@@ -274,13 +430,15 @@ class LibraryWorkFacet(Base):
         primary_key=True,
     )
     sort_order: Mapped[int] = mapped_column(
-        "sortOrder",
-        Integer,
-        nullable=False,
-        default=0,
-        server_default="0",
+        "sortOrder", Integer, nullable=False, default=0, server_default="0"
     )
-    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, server_default=timestamp_ms_server_default())
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
 
 
 class LibraryEditionFacet(Base):
@@ -299,7 +457,13 @@ class LibraryEditionFacet(Base):
         ForeignKey("LibraryEdition.id", ondelete="CASCADE", onupdate="CASCADE"),
         primary_key=True,
     )
-    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, server_default=timestamp_ms_server_default())
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
 
 
 class LibraryOperation(Base):
@@ -318,31 +482,34 @@ class LibraryOperation(Base):
     )
     action: Mapped[str] = mapped_column(String(191), nullable=False)
     status: Mapped[str] = mapped_column(
-        String(191),
-        nullable=False,
-        default="COMPLETED",
-        server_default="COMPLETED",
+        String(191), nullable=False, default="COMPLETED", server_default="COMPLETED"
     )
-    target_type: Mapped[str | None] = mapped_column("targetType", String(191), nullable=True)
-    target_id: Mapped[str | None] = mapped_column("targetId", String(191), nullable=True)
+    target_type: Mapped[str | None] = mapped_column(
+        "targetType", String(191), nullable=True
+    )
+    target_id: Mapped[str | None] = mapped_column(
+        "targetId", String(191), nullable=True
+    )
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     payload_json: Mapped[str] = mapped_column(
-        "payloadJson",
-        Text,
-        nullable=False,
-        default="{}",
-        server_default="{}",
+        "payloadJson", Text, nullable=False, default="{}", server_default="{}"
     )
     inverse_json: Mapped[str] = mapped_column(
-        "inverseJson",
-        Text,
-        nullable=False,
-        default="{}",
-        server_default="{}",
+        "inverseJson", Text, nullable=False, default="{}", server_default="{}"
     )
-    expires_at: Mapped[datetime | None] = mapped_column("expiresAt", TimestampMilliseconds(), nullable=True)
-    undone_at: Mapped[datetime | None] = mapped_column("undoneAt", TimestampMilliseconds(), nullable=True)
-    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, server_default=timestamp_ms_server_default())
+    expires_at: Mapped[datetime | None] = mapped_column(
+        "expiresAt", TimestampMilliseconds(), nullable=True
+    )
+    undone_at: Mapped[datetime | None] = mapped_column(
+        "undoneAt", TimestampMilliseconds(), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         "updatedAt",
         TimestampMilliseconds(),
@@ -359,7 +526,13 @@ class LibraryReadingUnit(Base):
         Index("LibraryReadingUnit_editionId_unitType_idx", "editionId", "unitType"),
         Index("LibraryReadingUnit_volumeId_sortOrder_idx", "volumeId", "sortOrder"),
         Index("LibraryReadingUnit_fileId_sortOrder_idx", "fileId", "sortOrder"),
-        Index("LibraryReadingUnit_volumeId_unitType_sortOrder_key", "volumeId", "unitType", "sortOrder", unique=True),
+        Index(
+            "LibraryReadingUnit_volumeId_unitType_sortOrder_key",
+            "volumeId",
+            "unitType",
+            "sortOrder",
+            unique=True,
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
@@ -384,16 +557,26 @@ class LibraryReadingUnit(Base):
     unit_type: Mapped[str] = mapped_column("unitType", String(191), nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     href: Mapped[str] = mapped_column(Text, nullable=False)
-    media_type: Mapped[str | None] = mapped_column("mediaType", String(191), nullable=True)
+    media_type: Mapped[str | None] = mapped_column(
+        "mediaType", String(191), nullable=True
+    )
     sort_order: Mapped[int] = mapped_column("sortOrder", Integer, nullable=False)
     width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     start_ms: Mapped[int | None] = mapped_column("startMs", Integer, nullable=True)
     end_ms: Mapped[int | None] = mapped_column("endMs", Integer, nullable=True)
-    duration_ms: Mapped[int | None] = mapped_column("durationMs", Integer, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(
+        "durationMs", Integer, nullable=True
+    )
     metadata_json: Mapped[str] = mapped_column("metadataJson", Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, server_default=timestamp_ms_server_default())
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         "updatedAt",
         TimestampMilliseconds(),
@@ -416,7 +599,13 @@ class LibraryMetadata(Base):
     )
     source: Mapped[str] = mapped_column(String(191), nullable=False)
     raw_json: Mapped[str] = mapped_column("rawJson", Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, server_default=timestamp_ms_server_default())
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         "updatedAt",
         TimestampMilliseconds(),
@@ -432,8 +621,18 @@ class LibraryReadingProgress(Base):
         Index("LibraryReadingProgress_workId_idx", "workId"),
         Index("LibraryReadingProgress_editionId_idx", "editionId"),
         Index("LibraryReadingProgress_volumeId_idx", "volumeId"),
-        Index("LibraryReadingProgress_clientId_clientSequence_idx", "clientId", "clientSequence"),
-        Index("LibraryReadingProgress_userId_editionId_volumeId_key", "userId", "editionId", "volumeId", unique=True),
+        Index(
+            "LibraryReadingProgress_clientId_clientSequence_idx",
+            "clientId",
+            "clientSequence",
+        ),
+        Index(
+            "LibraryReadingProgress_userId_editionId_volumeId_key",
+            "userId",
+            "editionId",
+            "volumeId",
+            unique=True,
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
@@ -462,18 +661,42 @@ class LibraryReadingProgress(Base):
         nullable=True,
     )
     reader_type: Mapped[str] = mapped_column("readerType", String(191), nullable=False)
-    position: Mapped[str] = mapped_column(Text, nullable=False, default="0", server_default="0")
+    position: Mapped[str] = mapped_column(
+        Text, nullable=False, default="0", server_default="0"
+    )
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    percent: Mapped[float] = mapped_column(Float, nullable=False, default=0, server_default="0")
+    percent: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0, server_default="0"
+    )
     extra: Mapped[str] = mapped_column(Text, nullable=False)
-    schema_version: Mapped[int] = mapped_column("schemaVersion", Integer, nullable=False, default=1, server_default="1")
-    location_type: Mapped[str | None] = mapped_column("locationType", String(191), nullable=True)
-    location_json: Mapped[str | None] = mapped_column("locationJson", Text, nullable=True)
-    content_fingerprint: Mapped[str | None] = mapped_column("contentFingerprint", String(191), nullable=True)
-    mutation_id: Mapped[str | None] = mapped_column("mutationId", String(191), nullable=True)
-    client_id: Mapped[str | None] = mapped_column("clientId", String(191), nullable=True)
-    client_sequence: Mapped[int | None] = mapped_column("clientSequence", Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, server_default=timestamp_ms_server_default())
+    schema_version: Mapped[int] = mapped_column(
+        "schemaVersion", Integer, nullable=False, default=1, server_default="1"
+    )
+    location_type: Mapped[str | None] = mapped_column(
+        "locationType", String(191), nullable=True
+    )
+    location_json: Mapped[str | None] = mapped_column(
+        "locationJson", Text, nullable=True
+    )
+    content_fingerprint: Mapped[str | None] = mapped_column(
+        "contentFingerprint", String(191), nullable=True
+    )
+    mutation_id: Mapped[str | None] = mapped_column(
+        "mutationId", String(191), nullable=True
+    )
+    client_id: Mapped[str | None] = mapped_column(
+        "clientId", String(191), nullable=True
+    )
+    client_sequence: Mapped[int | None] = mapped_column(
+        "clientSequence", Integer, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         "updatedAt",
         TimestampMilliseconds(),
@@ -487,7 +710,13 @@ class LibraryConsumptionState(Base):
     __tablename__ = "LibraryConsumptionState"
     __table_args__ = (
         Index("LibraryConsumptionState_workId_idx", "workId"),
-        Index("LibraryConsumptionState_user_work_media_key", "userId", "workId", "mediaKind", unique=True),
+        Index(
+            "LibraryConsumptionState_user_work_media_key",
+            "userId",
+            "workId",
+            "mediaKind",
+            unique=True,
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
@@ -505,10 +734,7 @@ class LibraryConsumptionState(Base):
     )
     media_kind: Mapped[str] = mapped_column("mediaKind", String(191), nullable=False)
     status: Mapped[str] = mapped_column(
-        String(191),
-        nullable=False,
-        default="UNREAD",
-        server_default="UNREAD",
+        String(191), nullable=False, default="UNREAD", server_default="UNREAD"
     )
     last_edition_id: Mapped[str | None] = mapped_column(
         "lastEditionId",
@@ -528,7 +754,13 @@ class LibraryConsumptionState(Base):
         ForeignKey("LibraryReadingUnit.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
-    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, server_default=timestamp_ms_server_default())
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         "updatedAt",
         TimestampMilliseconds(),
@@ -540,7 +772,9 @@ class LibraryConsumptionState(Base):
 
 class WorkDetailPreference(Base):
     __tablename__ = "WorkDetailPreference"
-    __table_args__ = (Index("WorkDetailPreference_user_work_key", "userId", "workId", unique=True),)
+    __table_args__ = (
+        Index("WorkDetailPreference_user_work_key", "userId", "workId", unique=True),
+    )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
     user_id: Mapped[str] = mapped_column(
@@ -555,8 +789,16 @@ class WorkDetailPreference(Base):
         ForeignKey("LibraryWork.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
-    selected_tab: Mapped[str] = mapped_column("selectedTab", String(191), nullable=False)
-    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, server_default=timestamp_ms_server_default())
+    selected_tab: Mapped[str] = mapped_column(
+        "selectedTab", String(191), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         "updatedAt",
         TimestampMilliseconds(),
@@ -570,15 +812,28 @@ class ExternalMetadataCache(Base):
     __tablename__ = "ExternalMetadataCache"
     __table_args__ = (
         Index("ExternalMetadataCache_provider_expiresAt_idx", "provider", "expiresAt"),
-        Index("ExternalMetadataCache_provider_queryKey_key", "provider", "queryKey", unique=True),
+        Index(
+            "ExternalMetadataCache_provider_queryKey_key",
+            "provider",
+            "queryKey",
+            unique=True,
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
     provider: Mapped[str] = mapped_column(String(191), nullable=False)
     query_key: Mapped[str] = mapped_column("queryKey", Text, nullable=False)
     raw_json: Mapped[str] = mapped_column("rawJson", Text, nullable=False)
-    expires_at: Mapped[datetime | None] = mapped_column("expiresAt", TimestampMilliseconds(), nullable=True)
-    created_at: Mapped[datetime] = mapped_column("createdAt", TimestampMilliseconds(), nullable=False, default=db_timestamp, server_default=timestamp_ms_server_default())
+    expires_at: Mapped[datetime | None] = mapped_column(
+        "expiresAt", TimestampMilliseconds(), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         "updatedAt",
         TimestampMilliseconds(),

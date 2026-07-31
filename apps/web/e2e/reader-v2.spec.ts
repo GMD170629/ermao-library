@@ -11,7 +11,7 @@ const defaultPreferences = {
   appearance: { theme: 'warm' },
   epub: { fontSize: 18, lineHeight: 1.9, pageWidth: 1350, fontFamily: 'pingfang', spreadMode: 'single', pageTurnAnimation: 'slide', flow: 'paginated' },
   comic: { direction: 'ltr', mode: 'single', pageTurnAnimation: 'slide', imageFit: 'width', imageVariant: 'original', zoom: 1 },
-  pdf: { zoom: 1, fit: 'width' }
+  pdf: { zoom: 1, fit: 'page' }
 };
 
 function bootstrap(kind: 'epub' | 'comic' | 'pdf', epubUnitCount = 2) {
@@ -838,6 +838,7 @@ test('EPUB swipe submits one navigation command without a visual paging track', 
   await expect(iframe.contentFrame().getByText('第一章 开始阅读')).toBeVisible();
   const iframeHtml = iframe.contentFrame().locator('html');
   await expect(iframeHtml).toHaveAttribute('data-shuku-input-bridge', 'ready');
+  await waitForReaderReady(page);
   await iframe.contentFrame().locator('body').evaluate((body) => {
     const view = body.ownerDocument.defaultView;
     if (!view?.PointerEvent) throw new Error('PointerEvent is unavailable');

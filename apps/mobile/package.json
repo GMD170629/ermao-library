@@ -1,0 +1,35 @@
+{
+  "name": "@shuku/mobile",
+  "version": "0.4.5",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "lint": "expo lint --max-warnings=0",
+    "typecheck": "node scripts/verify-react-type-isolation.mjs && tsc -p tsconfig.test.json --noEmit",
+    "test": "tsx --test \"src/**/*.test.ts\"",
+    "check": "pnpm lint && pnpm typecheck && pnpm test"
+  },
+  "dependencies": {
+    "@shuku/reader-core": "workspace:*",
+    "expo": "~57.0.9",
+    "expo-build-properties": "~57.0.7",
+    "expo-camera": "~57.0.3",
+    "expo-crypto": "~57.0.1",
+    "expo-dev-client": "~57.0.10",
+    "expo-file-system": "~57.0.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.86.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "~19.2.2",
+    "eslint": "^9.39.1",
+    "eslint-config-expo": "~57.0.1",
+    "tsx": "^4.19.1",
+    "typescript": "~6.0.3"
+  }
+}

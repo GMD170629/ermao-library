@@ -758,7 +758,7 @@ def list_works(
     if auth_error:
         return auth_error
     page = max(1, page)
-    page_size = min(100, max(1, pageSize))
+    page_size = None if pageSize == 0 else pageSize
     raw_filters = (request.query_params.get("filters") or "").strip()
     filter_rules: dict[str, Any] | None = None
     if raw_filters:
@@ -777,7 +777,7 @@ def list_works(
         _raise_library_error("分类筛选参数无效", status_code=400)
     query = WorkListQuery(
         page=page,
-        page_size=page_size,
+        requested_page_size=page_size,
         visibility=visibility,
         search=search,
         keyword=keyword,
@@ -839,8 +839,9 @@ def list_works(
             ),
             reverse=direction == "DESC",
         )
-        start = (page - 1) * page_size
-        page_items = work_views[start : start + page_size]
+        result_page_size = result.page_size
+        start = (page - 1) * result_page_size
+        page_items = work_views[start : start + result_page_size]
         book_views = (
             [_bookshelf_item_view(work) for work, _item_view in page_items]
             if bookshelf_view

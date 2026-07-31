@@ -1,5 +1,10 @@
 import { BookDetailPage } from '../../../features/works/book-detail-page';
 
-export default function Page({ params }: { params: { id: string } }) {
-  return <BookDetailPage bookId={params.id} />;
+type BookDetailPageProps = {
+  params: Promise<{ id: string }>;
+};
+
+export default async function Page({ params }: BookDetailPageProps) {
+  const { id } = await params;
+  return <BookDetailPage bookId={id} />;
 }

@@ -1,5 +1,6 @@
 """Public domain contracts for the system capability."""
 
+from app.core.database_errors import is_database_busy_error
 from app.modules.system.domain.events import (
     DEFAULT_MAX_EVENT_BYTES,
     LOG_MAX_BYTES_SETTING,
@@ -46,6 +47,7 @@ __all__ = [
     "HealthRunSnapshot",
     "SystemUnitOfWork",
     "execute_system_transaction",
+    "is_database_busy_error",
     "normalize_detail_tab_order",
     "normalize_health_run_snapshot",
     "public_system_settings",

@@ -9,6 +9,7 @@ import { useToast } from '../../components/ui/feedback';
 import { PageTitle } from '../../components/ui/page-title';
 import { useI18n } from '../../i18n/provider';
 import { ManagementNav } from './management-nav';
+import { ignoredImportEventSummary } from './system-event-presentation';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
@@ -213,7 +214,7 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
           new Date(event.createdAt).toLocaleString(locale),
           levelLabel(event.level),
           sourceLabel(event.source),
-          redactString(event.message),
+          ignoredImportEventSummary(event, i18nAttribute) ?? redactString(event.message),
           event.action,
           event.targetType ?? ''
         ].map(csvCell).join(','))
@@ -323,6 +324,7 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
           const href = targetHref(event);
           const expanded = expandedEventId === event.id;
           const safeMetadata = sanitizeValue(event.metadata);
+          const summary = ignoredImportEventSummary(event, i18nAttribute) ?? i18nAttribute(redactString(event.message));
           return (
             <article key={event.id} data-testid="system-event-mobile-card" className="rounded-[22px] border border-[#DEDAD4] bg-white p-4">
               <div className="flex flex-wrap items-center gap-2">
@@ -330,7 +332,7 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
                 <Badge tone="slate">{sourceLabel(event.source)}</Badge>
                 <time className="text-xs tabular-nums text-[#77716A]">{new Date(event.createdAt).toLocaleString(locale)}</time>
               </div>
-              <p className="mt-3 break-words text-sm font-medium leading-6 text-[#2A2825]">{i18nAttribute(redactString(event.message))}</p>
+              <p className="mt-3 break-words text-sm font-medium leading-6 text-[#2A2825]">{summary}</p>
               {expanded ? (
                 <div className="mt-3 rounded-xl bg-[#F7F4F1] p-3 text-xs leading-5 text-[#68625C]">
                   <div><span className="text-[#969089]"><I18nText>动作：</I18nText></span>{event.action || '—'}</div>
@@ -368,13 +370,14 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
               const href = targetHref(event);
               const expanded = expandedEventId === event.id;
               const safeMetadata = sanitizeValue(event.metadata);
+              const summary = ignoredImportEventSummary(event, i18nAttribute) ?? i18nAttribute(redactString(event.message));
               return (
                 <tr key={event.id} className="group align-top hover:bg-[#FCFAF8]">
                   <td className="px-4 py-3.5 tabular-nums text-[#716B64]">{new Date(event.createdAt).toLocaleString(locale)}</td>
                   <td className="px-3 py-3"><Badge tone={tone(event.level)}>{levelLabel(event.level)}</Badge></td>
                   <td className="px-3 py-3 text-[#5F5A54]">{sourceLabel(event.source)}</td>
                   <td className="px-3 py-3.5">
-                    <div className="break-words font-medium leading-6 text-[#2A2825]">{i18nAttribute(redactString(event.message))}</div>
+                    <div className="break-words font-medium leading-6 text-[#2A2825]">{summary}</div>
                     {expanded ? (
                       <div className="mt-3 rounded-xl bg-[#F7F4F1] p-3 text-xs leading-5 text-[#68625C]">
                         <div><span className="text-[#969089]"><I18nText>动作：</I18nText></span>{event.action || '—'}</div>

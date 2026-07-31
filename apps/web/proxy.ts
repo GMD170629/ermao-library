@@ -15,7 +15,7 @@ const publicPaths = [
   '/api/health'
 ];
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
   if (
     publicPaths.some((path) => pathname === path || pathname.startsWith(`${path}/`)) ||
@@ -42,5 +42,8 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!.*\\.).*)']
+  // FastAPI authenticates this upload endpoint itself. Keeping it outside the
+  // Next Proxy preserves streaming instead of cloning and truncating large
+  // multipart bodies at Next's request-body buffer limit.
+  matcher: ['/((?!api/works/import(?:/|$)|.*\\.).*)']
 };

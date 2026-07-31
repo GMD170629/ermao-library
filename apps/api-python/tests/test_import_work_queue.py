@@ -1,0 +1,508 @@
+from __future__ import annotations
+
+from contextlib import nullcontext
+from datetime import timedelta
+from itertools import chain
+from pathlib import Path
+
+import pytest
+from sqlalchemy import delete, func, select
+
+from app.bootstrap.imports import ImportWorkerRuntime
+from app.models.common import db_timestamp
+from app.models.import_pipeline import ImportScanJob, ImportTask, ImportWorkItem
+from app.models.settings import MonitorFolder
+from app.modules.imports.infrastructure import streaming_scan
+from app.modules.imports.infrastructure.directory_scan import MonitorFolderConfig
+from app.modules.imports.infrastructure.scan_batch_store import (
+    stage_scan_candidate_batch,
+)
+from app.modules.imports.infrastructure.streaming_scan import StreamingDirectoryScanner
+from app.modules.imports.infrastructure.work_queue import (
+    claim_next_work_item,
+    create_or_reuse_scan_job,
+    ensure_import_work_item,
+    get_scan_job,
+    recover_scan_work_items,
+)
+from app.modules.imports.presentation.schemas import ScanError
+
+
+class _FakeFileEntry:
+    def __init__(self, index: int) -> None:
+        self.name = f"{index}.epub"
+        self.path = f"/virtual/library/{index}.epub"
+
+    def is_dir(self, *, follow_symlinks: bool) -> bool:
+        return False
+
+    def is_file(self, *, follow_symlinks: bool) -> bool:
+        return True
+
+
+class _NamedFakeFileEntry:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.path = f"/virtual/library/{name}"
+
+    def is_dir(self, *, follow_symlinks: bool) -> bool:
+        return False
+
+    def is_file(self, *, follow_symlinks: bool) -> bool:
+        return True
+
+
+class _NamedFakeDirectoryEntry:
+    def __init__(self, path: str) -> None:
+        self.name = Path(path).name
+        self.path = path
+
+    def is_dir(self, *, follow_symlinks: bool) -> bool:
+        return True
+
+    def is_file(self, *, follow_symlinks: bool) -> bool:
+        return False
+
+
+@pytest.mark.parametrize(
+    ("model", "expected_candidates"),
+    [
+        ("ignored", 0),
+        ("candidates", 1_800_000),
+        ("mixed", 900_000),
+    ],
+)
+def test_streaming_scan_keeps_million_scale_candidate_buffer_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+    model: str,
+    expected_candidates: int,
+) -> None:
+    total_entries = 1_800_000
+    monkeypatch.setattr(Path, "resolve", lambda self: self)
+    monkeypatch.setattr(streaming_scan, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(
+        streaming_scan.os,
+        "scandir",
+        lambda _path: (_FakeFileEntry(index) for index in range(total_entries)),
+    )
+
+    def ignore_reason(path: Path, _folder: MonitorFolderConfig):
+        if model == "ignored":
+            return "unsupported_file_type"
+        if model == "mixed" and int(path.stem) % 2:
+            return "unsupported_file_type"
+        return None
+
+    monkeypatch.setattr(streaming_scan, "import_source_ignore_reason", ignore_reason)
+    scanner = StreamingDirectoryScanner(
+        Path("/virtual/library"),
+        MonitorFolderConfig(
+            id="folder-million",
+            root_path="/virtual/library",
+            min_file_size_bytes=0,
+        ),
+    )
+    files_scanned = 0
+    candidates_found = 0
+    largest_batch = 0
+    try:
+        while True:
+            scan_slice = scanner.next_slice()
+            files_scanned += scan_slice.files_scanned
+            candidates_found += scan_slice.candidates_found
+            largest_batch = max(largest_batch, len(scan_slice.candidates))
+            if scan_slice.completed:
+                break
+    finally:
+        scanner.close()
+
+    assert files_scanned == total_entries
+    assert candidates_found == expected_candidates
+    assert largest_batch <= 500
+
+
+def test_streaming_scan_blocks_overflowing_audio_bundle_without_hiding_non_audio(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entries = (_NamedFakeFileEntry(f"{index:07d}.mp3") for index in range(1_800_000))
+    mixed_entries = chain(entries, (_NamedFakeFileEntry("appendix.epub"),))
+    monkeypatch.setattr(Path, "resolve", lambda self: self)
+    monkeypatch.setattr(streaming_scan, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(
+        streaming_scan.os,
+        "scandir",
+        lambda _path: iter(mixed_entries),
+    )
+    monkeypatch.setattr(
+        streaming_scan, "import_source_ignore_reason", lambda _path, _folder: None
+    )
+    scanner = StreamingDirectoryScanner(
+        Path("/virtual/library"),
+        MonitorFolderConfig(
+            id="folder-audio-overflow",
+            root_path="/virtual/library",
+            min_file_size_bytes=0,
+        ),
+    )
+    candidates: list[Path] = []
+    errors: list[object] = []
+    files_scanned = 0
+    skipped = 0
+    largest_audio_buffer = 0
+    largest_file_slice = 0
+    try:
+        while True:
+            scan_slice = scanner.next_slice()
+            candidates.extend(scan_slice.candidates)
+            errors.extend(scan_slice.errors)
+            files_scanned += scan_slice.files_scanned
+            skipped += scan_slice.skipped_count
+            largest_audio_buffer = max(
+                largest_audio_buffer,
+                scanner.buffered_audio_path_count,
+            )
+            largest_file_slice = max(largest_file_slice, scan_slice.files_scanned)
+            if scan_slice.completed:
+                break
+    finally:
+        scanner.close()
+
+    assert candidates == [Path("/virtual/library/appendix.epub")]
+    assert files_scanned == 1_800_001
+    assert skipped == 1_800_000
+    assert largest_audio_buffer <= 10_000
+    assert largest_file_slice <= 5_000
+    assert len(errors) == 1
+    assert errors[0].code == "AUDIO_TRACK_LIMIT_EXCEEDED"
+    assert errors[0].limit == 10_000
+    assert errors[0].observed_count == 1_800_000
+
+
+def test_audio_overflow_scan_persists_typed_error_without_import_work(
+    db_session,
+    test_settings,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "overflow"
+    root.mkdir()
+    folder = MonitorFolder(
+        id="folder-audio-overflow-persistence",
+        name="Audio overflow persistence",
+        root_path=str(root),
+        enabled=True,
+        min_file_size_bytes=0,
+    )
+    db_session.add(folder)
+    db_session.flush()
+    _job, created = create_or_reuse_scan_job(
+        db_session,
+        monitor_folder_id=folder.id,
+        actor_user_id=None,
+        root_path=root,
+        trigger="TEST",
+    )
+    db_session.commit()
+    assert created is True
+    monkeypatch.setattr(Path, "resolve", lambda self: self)
+    monkeypatch.setattr(streaming_scan, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(
+        streaming_scan.os,
+        "scandir",
+        lambda _path: (
+            _NamedFakeFileEntry(f"{index:05d}.mp3") for index in range(10_001)
+        ),
+    )
+    monkeypatch.setattr(
+        streaming_scan, "import_source_ignore_reason", lambda _path, _folder: None
+    )
+    runtime = ImportWorkerRuntime(lambda: nullcontext(db_session), test_settings)
+
+    while True:
+        work_item = runtime.claim_work("audio-overflow-worker", 900)
+        if work_item is None:
+            break
+        assert work_item.kind == "SCAN_DIRECTORY"
+        runtime.process_scan(work_item)
+
+    stored = get_scan_job(db_session, _job.id)
+    assert stored is not None
+    assert stored.status == "COMPLETED"
+    assert stored.queued_count == 0
+    assert stored.skipped_count == 10_001
+    assert stored.error_count == 1
+    assert db_session.scalar(select(func.count()).select_from(ImportTask)) == 0
+    assert db_session.scalar(select(func.count()).select_from(ImportWorkItem)) == 0
+    error = stored.error_samples[0]
+    assert error.code == "AUDIO_TRACK_LIMIT_EXCEEDED"
+    assert error.limit == 10_000
+    assert error.observed_count == 10_001
+    assert ScanError.model_validate(error, from_attributes=True).model_dump(
+        by_alias=True
+    ) == {
+        "path": str(root),
+        "error": "有声书音轨超过 10000 条，请拆分目录后重新导入",
+        "code": "AUDIO_TRACK_LIMIT_EXCEEDED",
+        "limit": 10_000,
+        "observedCount": 10_001,
+    }
+
+
+def test_multivolume_audio_limit_is_aggregated_across_the_whole_book(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = Path("/virtual/library/Book")
+    first_volume = root / "Vol.1"
+    second_volume = root / "Vol.2"
+
+    def entries(path: Path):
+        if path == root:
+            return iter(
+                (
+                    _NamedFakeDirectoryEntry(str(first_volume)),
+                    _NamedFakeDirectoryEntry(str(second_volume)),
+                )
+            )
+        if path == first_volume:
+            return (
+                _NamedFakeFileEntry(f"Vol.1/{index:05d}.mp3") for index in range(6_000)
+            )
+        if path == second_volume:
+            return (
+                _NamedFakeFileEntry(f"Vol.2/{index:05d}.mp3") for index in range(6_000)
+            )
+        raise AssertionError(f"unexpected directory: {path}")
+
+    monkeypatch.setattr(Path, "resolve", lambda self: self)
+    monkeypatch.setattr(streaming_scan, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(streaming_scan.os, "scandir", entries)
+    monkeypatch.setattr(
+        streaming_scan, "import_source_ignore_reason", lambda _path, _folder: None
+    )
+    scanner = StreamingDirectoryScanner(
+        root,
+        MonitorFolderConfig(
+            id="folder-multivolume-overflow",
+            root_path=str(root),
+            min_file_size_bytes=0,
+        ),
+    )
+    errors: list[object] = []
+    candidates: list[Path] = []
+    skipped = 0
+    try:
+        while True:
+            scan_slice = scanner.next_slice()
+            candidates.extend(scan_slice.candidates)
+            errors.extend(scan_slice.errors)
+            skipped += scan_slice.skipped_count
+            assert scanner.buffered_audio_path_count <= 10_000
+            if scan_slice.completed:
+                break
+    finally:
+        scanner.close()
+
+    assert candidates == []
+    assert skipped == 12_000
+    assert len(errors) == 1
+    assert errors[0].code == "AUDIO_TRACK_LIMIT_EXCEEDED"
+    assert errors[0].observed_count == 12_000
+
+
+def test_persistent_queue_prioritizes_import_and_debounces_pending_work(
+    db_session,
+    tmp_path: Path,
+) -> None:
+    folder = MonitorFolder(
+        id="folder-priority",
+        name="Priority",
+        root_path=str(tmp_path),
+        enabled=True,
+    )
+    task = ImportTask(
+        id="task-priority",
+        monitor_folder_id=folder.id,
+        origin="WATCH",
+        status="PENDING",
+        source_path=str(tmp_path / "book.epub"),
+    )
+    db_session.add_all([folder, task])
+    db_session.flush()
+    first_available_at = db_timestamp() + timedelta(seconds=2)
+    work = ensure_import_work_item(db_session, task, available_at=first_available_at)
+    create_or_reuse_scan_job(
+        db_session,
+        monitor_folder_id=folder.id,
+        actor_user_id=None,
+        root_path=tmp_path,
+        trigger="TEST",
+    )
+    later_available_at = db_timestamp() + timedelta(seconds=4)
+    ensure_import_work_item(db_session, task, available_at=later_available_at)
+    assert work.available_at == later_available_at
+
+    work.available_at = db_timestamp()
+    db_session.commit()
+    claimed = claim_next_work_item(
+        db_session, worker_id="worker-priority", import_lease_seconds=900
+    )
+    assert claimed is not None
+    assert claimed.kind == "IMPORT_SOURCE"
+    ensure_import_work_item(
+        db_session,
+        task,
+        available_at=db_timestamp() + timedelta(seconds=30),
+    )
+    leased = db_session.get(ImportWorkItem, claimed.id)
+    assert leased is not None and leased.status == "LEASED"
+
+
+def test_pending_audio_scan_job_refreshes_stability_debounce(
+    db_session,
+    tmp_path: Path,
+) -> None:
+    folder = MonitorFolder(
+        id="folder-audio-scan-debounce",
+        name="Audio scan debounce",
+        root_path=str(tmp_path),
+        enabled=True,
+    )
+    db_session.add(folder)
+    db_session.flush()
+    first_available_at = db_timestamp() + timedelta(seconds=2)
+    job, created = create_or_reuse_scan_job(
+        db_session,
+        monitor_folder_id=folder.id,
+        actor_user_id=None,
+        root_path=tmp_path / "audiobook",
+        trigger="WATCHER_AUDIO_EVENT",
+        available_at=first_available_at,
+    )
+    later_available_at = db_timestamp() + timedelta(seconds=5)
+    reused, created_again = create_or_reuse_scan_job(
+        db_session,
+        monitor_folder_id=folder.id,
+        actor_user_id=None,
+        root_path=tmp_path / "audiobook",
+        trigger="WATCHER_AUDIO_EVENT",
+        available_at=later_available_at,
+    )
+    db_session.flush()
+
+    work = db_session.scalar(
+        select(ImportWorkItem).where(ImportWorkItem.scan_job_id == job.id)
+    )
+    assert created is True
+    assert created_again is False
+    assert reused.id == job.id
+    assert work is not None
+    assert abs((work.available_at - later_available_at).total_seconds()) < 0.001
+
+
+def test_scan_candidate_batch_bulk_inserts_and_is_idempotent(
+    db_session,
+    tmp_path: Path,
+) -> None:
+    folder = MonitorFolder(
+        id="folder-batch",
+        name="Batch",
+        root_path=str(tmp_path),
+        enabled=True,
+    )
+    db_session.add(folder)
+    candidates = tuple(tmp_path / f"book-{index:03d}.epub" for index in range(500))
+    for candidate in candidates:
+        candidate.write_bytes(b"book")
+    db_session.flush()
+
+    first = stage_scan_candidate_batch(
+        db_session, candidates, monitor_folder_id=folder.id
+    )
+    second = stage_scan_candidate_batch(
+        db_session, candidates, monitor_folder_id=folder.id
+    )
+    db_session.commit()
+
+    assert first.queued_count == 500
+    assert first.cached_count == 0
+    assert second.queued_count == 0
+    assert second.cached_count == 500
+    assert db_session.scalar(select(func.count()).select_from(ImportTask)) == 500
+    assert db_session.scalar(select(func.count()).select_from(ImportWorkItem)) == 500
+
+
+def test_completed_audio_bundle_is_not_requeued_by_repeated_scan(
+    db_session,
+    tmp_path: Path,
+) -> None:
+    folder = MonitorFolder(
+        id="folder-audio-repeat",
+        name="Audio repeat",
+        root_path=str(tmp_path),
+        enabled=True,
+    )
+    bundle = tmp_path / "audiobook"
+    bundle.mkdir()
+    (bundle / "01.mp3").write_bytes(b"first")
+    (bundle / "02.mp3").write_bytes(b"second")
+    db_session.add(folder)
+    db_session.flush()
+
+    first = stage_scan_candidate_batch(
+        db_session, (bundle,), monitor_folder_id=folder.id
+    )
+    task = db_session.scalar(select(ImportTask))
+    assert task is not None
+    task.status = "COMPLETED"
+    db_session.execute(delete(ImportWorkItem))
+    db_session.flush()
+
+    second = stage_scan_candidate_batch(
+        db_session, (bundle,), monitor_folder_id=folder.id
+    )
+    db_session.commit()
+
+    assert first.queued_count == 1
+    assert second.queued_count == 0
+    assert second.cached_count == 1
+    assert db_session.scalar(select(func.count()).select_from(ImportTask)) == 1
+    assert db_session.scalar(select(func.count()).select_from(ImportWorkItem)) == 0
+
+
+def test_scan_recovery_restarts_from_root_and_resets_attempt_counts(
+    db_session,
+    tmp_path: Path,
+) -> None:
+    folder = MonitorFolder(
+        id="folder-recovery",
+        name="Recovery",
+        root_path=str(tmp_path),
+        enabled=True,
+    )
+    db_session.add(folder)
+    db_session.flush()
+    job, _created = create_or_reuse_scan_job(
+        db_session,
+        monitor_folder_id=folder.id,
+        actor_user_id=None,
+        root_path=tmp_path,
+        trigger="TEST",
+    )
+    claimed = claim_next_work_item(
+        db_session, worker_id="worker-recovery", import_lease_seconds=900
+    )
+    assert claimed is not None
+    scan_row = db_session.get(ImportScanJob, job.id)
+    assert scan_row is not None
+    scan_row.files_scanned = 100_000
+    scan_row.queued_count = 500
+    db_session.commit()
+
+    assert recover_scan_work_items(db_session) == 1
+    db_session.commit()
+    recovered = get_scan_job(db_session, job.id)
+    assert recovered is not None
+    assert recovered.status == "PENDING"
+    assert recovered.files_scanned == 0
+    assert recovered.queued_count == 0
+    assert recovered.restart_count == 1

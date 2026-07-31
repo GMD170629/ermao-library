@@ -906,7 +906,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     } catch {
       // Metadata is enhancement-only; native audio remains fully usable.
     }
-  }, [state.bootstrap, state.chapter?.id, state.track]);
+  }, [state.bootstrap, state.chapter?.id, state.chapter?.title, state.track]);
 
   const value = useMemo<AudioPlaybackContextValue>(() => ({
     ...state,

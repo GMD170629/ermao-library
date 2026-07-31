@@ -52,7 +52,7 @@ def ensure_metadata_sources(db: Session, manifests: Iterable[ProviderManifest]) 
                 name=manifest.name,
                 kind=METADATA_SOURCE_KIND,
                 provider_type=manifest.id,
-                enabled=False,
+                enabled=manifest.enabled_by_default,
                 priority=manifest.default_priority,
                 config=_json_text(config),
                 capabilities=_json_text(list(manifest.capabilities)),

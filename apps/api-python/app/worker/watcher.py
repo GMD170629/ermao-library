@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import json
-import queue
-import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from watchdog.events import FileMovedEvent, FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
@@ -17,18 +16,22 @@ from watchdog.observers import Observer
 from app.bootstrap.imports import (
     MonitorFolderConfig,
     ScanSummary,
+    StreamingDirectoryScanner,
     enqueue_import_task,
+    import_file_ignore_reason,
+    import_queue_at_high_watermark,
+    import_source_already_known,
     import_source_meets_minimum_size,
-    is_proven_audio_bundle_directory,
     library_repository,
-    load_known_import_paths,
     monitor_folder_config,
     monitor_repository,
-    scan_directory_for_imports,
+    schedule_import_scan_job,
     should_ignore_file,
 )
 from app.core.config import Settings
+from app.modules.imports.application.errors import AudioTrackLimitExceededError
 from app.modules.imports.public import commit_import_checkpoint
+from app.modules.system.public import is_database_busy_error
 from app.services.audio_metadata import (
     audio_bundle_root,
     collect_audio_bundle_files,
@@ -36,7 +39,7 @@ from app.services.audio_metadata import (
 )
 from app.services.import_preferences import load_import_preferences
 from app.services.system_events import record_system_event
-from app.worker.path_security import PathSecurityService
+from app.worker.path_security import PathSecurityError, PathSecurityService
 
 
 class ImportQueueProtocol(Protocol):
@@ -54,6 +57,7 @@ upsert_system_setting = monitor_repository.upsert_system_setting
 
 RESCAN_REQUESTED_AT_KEY = "monitor.rescanRequestedAt"
 RESCAN_HANDLED_AT_KEY = "monitor.rescanHandledAt"
+WATCHER_DATABASE_RETRY_DELAYS_SECONDS = (0.05, 0.2)
 
 
 @dataclass
@@ -61,110 +65,6 @@ class WatchState:
     observer: Observer
     root_path: Path
     config_signature: str
-    timers: dict[Path, threading.Timer] = field(default_factory=dict)
-
-
-class ImportQueue:
-    def __init__(self, db_factory, settings: Settings) -> None:
-        self.db_factory = db_factory
-        self.settings = settings
-        self._queue: queue.Queue[tuple[Path, MonitorFolderConfig] | None] = (
-            queue.Queue()
-        )
-        self._queued_paths: set[Path] = set()
-        self._changed_while_pending: set[Path] = set()
-        self._deferred_paths: set[Path] = set()
-        self._known_paths: set[Path] = set()
-        self._accepting = True
-        self._lock = threading.Lock()
-        self._thread = threading.Thread(
-            target=self._run, name="shuku-import-queue", daemon=True
-        )
-        self._thread.start()
-
-    def enqueue(self, path: Path, folder: MonitorFolderConfig) -> None:
-        real = path.resolve()
-        with self._lock:
-            if not self._accepting:
-                return
-            # A directory-backed audiobook is a mutable bundle: adding a new
-            # episode must be allowed to enqueue the directory again. Rescans
-            # suppress unchanged bundles before they reach this queue.
-            if real in self._known_paths and real.is_file():
-                return
-            if real in self._queued_paths:
-                self._changed_while_pending.add(real)
-                return
-            self._queued_paths.add(real)
-        self._queue.put((real, folder))
-
-    def reload_known_paths(self, db: Session) -> None:
-        known_paths = load_known_import_paths(db)
-        with self._lock:
-            self._known_paths = known_paths
-
-    def stop(self, *, require_stopped: bool = False) -> None:
-        with self._lock:
-            if not self._accepting and not self._thread.is_alive():
-                return
-            self._accepting = False
-        self._queue.put(None)
-        self._thread.join(timeout=10)
-        if require_stopped and self._thread.is_alive():
-            raise RuntimeError("import staging queue did not stop within 10 seconds")
-
-    def _run(self) -> None:
-        while True:
-            item = self._queue.get()
-            if item is None:
-                return
-            path, folder = item
-            with self._lock:
-                self._changed_while_pending.discard(path)
-                self._deferred_paths.discard(path)
-            completed = False
-            try:
-                with self.db_factory() as db:
-                    completed = import_watched_file(
-                        db,
-                        self.settings,
-                        path,
-                        folder,
-                        has_changed=lambda watched_path=path: (
-                            self._path_changed_while_pending(watched_path)
-                        ),
-                        mark_deferred=lambda watched_path=path: self._mark_deferred(
-                            watched_path
-                        ),
-                    )
-                    if completed:
-                        with self._lock:
-                            self._known_paths.add(path)
-            except Exception as exc:
-                print(
-                    f"[import-worker] watched import failed {path}: {exc}", flush=True
-                )
-            finally:
-                with self._lock:
-                    retry_after_change = not completed and (
-                        path in self._changed_while_pending
-                        or path in self._deferred_paths
-                    )
-                    self._changed_while_pending.discard(path)
-                    self._deferred_paths.discard(path)
-                    if not retry_after_change:
-                        self._queued_paths.discard(path)
-                if retry_after_change:
-                    self._queue.put((path, folder))
-                self._queue.task_done()
-
-    def _path_changed_while_pending(self, path: Path) -> bool:
-        with self._lock:
-            return path in self._changed_while_pending
-
-    def _mark_deferred(self, path: Path) -> None:
-        with self._lock:
-            self._deferred_paths.add(path)
 
 
 class WorkerFileHandler(FileSystemEventHandler):
@@ -183,12 +83,21 @@ class WorkerFileHandler(FileSystemEventHandler):
 
     def on_moved(self, event: FileMovedEvent) -> None:
         if not event.is_directory:
-            self.manager.schedule_import(Path(event.dest_path), self.folder, self.state)
+            self._schedule_path(Path(event.dest_path))
 
     def _schedule(self, event: FileSystemEvent) -> None:
         if event.is_directory:
             return
-        self.manager.schedule_import(Path(event.src_path), self.folder, self.state)
+        self._schedule_path(Path(event.src_path))
+
+    def _schedule_path(self, path: Path) -> None:
+        try:
+            self.manager.schedule_import(path, self.folder, self.state)
+        except Exception as exc:  # noqa: BLE001 — watchdog callback containment boundary
+            print(
+                f"[import-worker] watcher event scheduling failed {path.name}: {exc}",
+                flush=True,
+            )
 
 
 class WorkerManager:
@@ -197,15 +106,15 @@ class WorkerManager:
         self.settings = settings
         self.security = PathSecurityService(settings)
         self.watchers: dict[str, WatchState] = {}
-        self.import_queue = ImportQueue(db_factory, settings)
         self._imports_paused = False
+        self._pending_scan_recovery_folder_ids: set[str] = set()
         self.last_handled_rescan_request: str | None = None
 
     def refresh_worker_state(self) -> None:
         with self.db_factory() as db:
-            self.import_queue.reload_known_paths(db)
             self.refresh_watchers(db)
             self.process_rescan_requests(db)
+        self._schedule_pending_recovery_scans()
 
     def refresh_watchers(self, db: Session) -> None:
         folders = enabled_monitor_folders(db)
@@ -224,7 +133,7 @@ class WorkerManager:
                 real_path = self.security.validate_monitor_folder(
                     folder.root_path
                 ).real_path
-            except Exception as exc:
+            except PathSecurityError as exc:
                 print(
                     f"[import-worker] monitor folder unavailable {folder.root_path}: {exc}",
                     flush=True,
@@ -257,8 +166,12 @@ class WorkerManager:
             observer.start()
             self.watchers[folder.id] = state
             print(f"[import-worker] monitoring {real_path}", flush=True)
-            scan_directory_with_logging(
-                db, real_path, folder, self.import_queue, trigger="watcher_started"
+            schedule_import_scan_job(
+                db,
+                monitor_folder_id=folder.id,
+                actor_user_id=None,
+                root_path=real_path,
+                trigger="watcher_started",
             )
 
     def process_rescan_requests(self, db: Session) -> None:
@@ -310,13 +223,13 @@ class WorkerManager:
             metadata={"requestedAt": request_timestamp, "folderCount": len(folders)},
             commit=True,
         )
-        completed_folders = 0
+        scheduled_folders = 0
         for folder in folders:
             try:
                 real_path = self.security.validate_monitor_folder(
                     folder.root_path
                 ).real_path
-            except Exception as exc:
+            except PathSecurityError as exc:
                 print(
                     f"[import-worker] rescan monitor folder unavailable {folder.root_path}: {exc}",
                     flush=True,
@@ -338,28 +251,27 @@ class WorkerManager:
                     commit=True,
                 )
                 continue
-            scan_directory_with_logging(
+            _job, created = schedule_import_scan_job(
                 db,
-                real_path,
-                folder,
-                self.import_queue,
+                monitor_folder_id=folder.id,
+                actor_user_id=None,
+                root_path=real_path,
                 trigger="manual_rescan",
-                requested_at=request_timestamp,
             )
-            completed_folders += 1
+            scheduled_folders += int(created)
         self.last_handled_rescan_request = requested_at
         upsert_system_setting(db, RESCAN_HANDLED_AT_KEY, requested_at)
         record_system_event(
             db,
             source="import",
             action="rescan.completed",
-            level="warning" if completed_folders != len(folders) else "info",
+            level="info",
             target_type="monitorFolder",
-            message=f"重新扫描完成：{completed_folders}/{len(folders)} 个监控文件夹",
+            message=f"已提交重新扫描：{len(folders)} 个监控文件夹",
             metadata={
                 "requestedAt": request_timestamp,
                 "folderCount": len(folders),
-                "completedFolderCount": completed_folders,
+                "createdJobCount": scheduled_folders,
             },
             commit=True,
         )
@@ -369,75 +281,128 @@ class WorkerManager:
     ) -> None:
         if getattr(self, "_imports_paused", False):
             return
-        if should_ignore_file(path, folder):
+        ignore_reason = import_file_ignore_reason(path, folder)
+        if ignore_reason is not None:
             return
-        candidate = path
-        if is_supported_audio_file(path):
-            possible_root = audio_bundle_root(path, state.root_path)
-            candidate = (
-                possible_root
-                if possible_root.is_dir()
-                and is_proven_audio_bundle_directory(possible_root, folder=folder)
-                else path
-            )
-        if candidate.is_dir():
-            # A second track can turn an earlier single-file event into a
-            # proven bundle. Cancel its pending child timer so only one task is
-            # eventually enqueued.
-            for pending_path, pending_timer in list(state.timers.items()):
-                try:
-                    pending_path.resolve().relative_to(candidate.resolve())
-                except ValueError:
-                    continue
-                pending_timer.cancel()
-                state.timers.pop(pending_path, None)
-        else:
-            for pending_path in state.timers:
-                if not pending_path.is_dir():
-                    continue
-                try:
-                    candidate.resolve().relative_to(pending_path.resolve())
-                except ValueError:
-                    continue
-                return
-        existing = state.timers.pop(candidate, None)
-        if existing:
-            existing.cancel()
-        # File-system events are briefly debounced here; the configurable
-        # stability window is applied once, immediately before enqueueing.
-        target_queue = self.import_queue
-        timer = threading.Timer(
-            0.25, lambda: target_queue.enqueue(candidate, folder)
+        audio_scan_root = (
+            audio_bundle_root(path, state.root_path)
+            if is_supported_audio_file(path)
+            else None
         )
-        state.timers[candidate] = timer
-        timer.start()
+        for delay_seconds in (0.0, *WATCHER_DATABASE_RETRY_DELAYS_SECONDS):
+            if delay_seconds:
+                time.sleep(delay_seconds)
+            try:
+                self._schedule_import_once(
+                    path,
+                    folder,
+                    state,
+                    audio_scan_root=audio_scan_root,
+                )
+            except OperationalError as exc:
+                if not is_database_busy_error(exc):
+                    raise
+                continue
+            self._pending_recovery_folders().discard(folder.id)
+            return
+        self._pending_recovery_folders().add(folder.id)
+        print(
+            "[import-worker] watcher database remained busy; "
+            f"scheduled folder recovery scan {folder.id}",
+            flush=True,
+        )
+
+    def _schedule_import_once(
+        self,
+        candidate: Path,
+        folder: MonitorFolderConfig,
+        state: WatchState,
+        *,
+        audio_scan_root: Path | None,
+    ) -> None:
+        with self.db_factory() as db:
+            if import_queue_at_high_watermark(db):
+                schedule_import_scan_job(
+                    db,
+                    monitor_folder_id=folder.id,
+                    actor_user_id=None,
+                    root_path=state.root_path,
+                    trigger="WATCHER_BACKPRESSURE",
+                )
+                return
+            available_at = (
+                datetime.now(UTC)
+                + timedelta(seconds=max(0, folder.stability_check_seconds))
+                if folder.stability_check_enabled
+                else None
+            )
+            if audio_scan_root is not None:
+                schedule_import_scan_job(
+                    db,
+                    monitor_folder_id=folder.id,
+                    actor_user_id=None,
+                    root_path=audio_scan_root,
+                    trigger="WATCHER_AUDIO_EVENT",
+                    available_at=available_at,
+                )
+                return
+            enqueue_import_task(
+                db,
+                candidate,
+                origin="WATCH",
+                original_name=candidate.name,
+                monitor_folder_id=folder.id,
+                message="监控文件已进入导入队列",
+                allow_terminal_requeue=candidate.is_dir(),
+                available_at=available_at,
+            )
+
+    def _pending_recovery_folders(self) -> set[str]:
+        pending = getattr(self, "_pending_scan_recovery_folder_ids", None)
+        if pending is None:
+            pending = set()
+            self._pending_scan_recovery_folder_ids = pending
+        return pending
+
+    def _schedule_pending_recovery_scans(self) -> None:
+        pending = self._pending_recovery_folders()
+        for folder_id in tuple(pending):
+            state = self.watchers.get(folder_id)
+            if state is None:
+                pending.discard(folder_id)
+                continue
+            try:
+                with self.db_factory() as db:
+                    schedule_import_scan_job(
+                        db,
+                        monitor_folder_id=folder_id,
+                        actor_user_id=None,
+                        root_path=state.root_path,
+                        trigger="WATCHER_RECOVERY",
+                    )
+            except SQLAlchemyError as exc:
+                print(
+                    "[import-worker] watcher recovery scan scheduling deferred "
+                    f"{folder_id}: {exc}",
+                    flush=True,
+                )
+                continue
+            pending.discard(folder_id)
 
     def shutdown(self) -> None:
         for folder_id in list(self.watchers):
             self._stop_watcher(folder_id)
-        self.import_queue.stop()
 
     def pause_import_scheduling(self) -> None:
         self._imports_paused = True
-        for state in self.watchers.values():
-            for timer in state.timers.values():
-                timer.cancel()
-            state.timers.clear()
-        self.import_queue.stop(require_stopped=True)
 
     def resume_import_scheduling(self) -> None:
-        replacement = ImportQueue(self.db_factory, self.settings)
-        with self.db_factory() as db:
-            replacement.reload_known_paths(db)
-        self.import_queue = replacement
         self._imports_paused = False
 
     def _stop_watcher(self, folder_id: str) -> None:
         state = self.watchers.pop(folder_id, None)
         if not state:
             return
-        for timer in state.timers.values():
-            timer.cancel()
         state.observer.stop()
         state.observer.join(timeout=10)
         print(f"[import-worker] stopped monitor {state.root_path}", flush=True)
@@ -476,7 +441,7 @@ def config_signature(folder: MonitorFolderConfig) -> str:
 def _audio_bundle_is_fully_imported(db: Session, path: Path) -> bool:
     try:
         files = collect_audio_bundle_files(path)
-    except (OSError, ValueError):
+    except (AudioTrackLimitExceededError, OSError, ValueError):
         return False
     if not files:
         return False
@@ -508,7 +473,10 @@ def wait_for_stable_import_source(
 ) -> bool:
     if path.is_file():
         return wait_for_stable_file(path, min_file_size_bytes, delay_seconds)
-    files = collect_audio_bundle_files(path)
+    try:
+        files = collect_audio_bundle_files(path)
+    except AudioTrackLimitExceededError:
+        return False
     if not files:
         return False
     before: list[tuple[Path, int, int]] = []
@@ -518,7 +486,7 @@ def wait_for_stable_import_source(
             if stat.st_size < min_file_size_bytes:
                 return False
             before.append((item, stat.st_size, stat.st_mtime_ns))
-    except OSError:
+    except (AudioTrackLimitExceededError, OSError):
         return False
     time.sleep(delay_seconds)
     try:
@@ -643,32 +611,30 @@ def scan_directory_with_logging(
         commit=True,
     )
 
-    candidates: list[tuple[Path, MonitorFolderConfig]] = []
-
-    class StagedImportQueue:
-        def enqueue(self, path: Path, queued_folder: MonitorFolderConfig) -> None:
-            candidates.append((path, queued_folder))
-
-    known_paths = load_known_import_paths(db)
-    summary = scan_directory_for_imports(
-        root_path, folder, StagedImportQueue(), known_paths=known_paths
-    )
-    for index, (path, _queued_folder) in enumerate(candidates, start=1):
-        flush_batch = index % 100 == 0
-        record_system_event(
-            db,
-            source="import",
-            action="scan.file.detected",
-            target_type="monitorFolder",
-            target_id=folder.id,
-            message=f"扫描到可导入文件：{path.name}",
-            metadata={
-                **base_metadata,
-                "sourcePath": str(path),
-                "format": path.suffix.lower().removeprefix("."),
-            },
-            commit=flush_batch,
-        )
+    summary = ScanSummary()
+    ignored_reason_counts: dict[str, int] = {}
+    scanner = StreamingDirectoryScanner(root_path, folder)
+    try:
+        while True:
+            scan_slice = scanner.next_slice()
+            summary.directories_scanned += scan_slice.directories_scanned
+            summary.files_scanned += scan_slice.files_scanned
+            summary.candidates_found += scan_slice.candidates_found
+            summary.ignored_files += scan_slice.skipped_count
+            summary.errors.extend(error.to_storage() for error in scan_slice.errors)
+            for reason, count in scan_slice.ignored_reason_counts.items():
+                ignored_reason_counts[reason] = (
+                    ignored_reason_counts.get(reason, 0) + count
+                )
+            for path in scan_slice.candidates:
+                if path.is_file() and import_source_already_known(db, path):
+                    summary.cached_files += 1
+                    continue
+                import_queue.enqueue(path, folder)
+            if scan_slice.completed:
+                break
+    finally:
+        scanner.close()
     error_count = len(summary.errors)
     action = "scan.completed_with_errors" if error_count else "scan.completed"
     record_system_event(
@@ -694,11 +660,10 @@ def scan_directory_with_logging(
             "candidatesFound": summary.candidates_found,
             "cachedFiles": summary.cached_files,
             "ignoredFiles": summary.ignored_files,
+            "ignoredReasonCounts": ignored_reason_counts,
             "errors": summary.errors[:20],
             "errorCount": error_count,
         },
     )
     commit_import_checkpoint(db)
-    for path, queued_folder in candidates:
-        import_queue.enqueue(path, queued_folder)
     return summary

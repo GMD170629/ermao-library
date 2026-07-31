@@ -29,6 +29,7 @@ fi
 PYTHON_API_PORT="8000"
 WEB_PORT="${WEB_PORT:-3000}"
 WEB_HOST="${WEB_HOST:-0.0.0.0}"
+NEXT_INTERNAL_PORT="${NEXT_INTERNAL_PORT:-3001}"
 WEB_MODE="${WEB_MODE:-dev}"
 MONITOR_ROOT="${MONITOR_ROOT:-$ROOT_DIR/books}"
 STORAGE_ROOT="${STORAGE_ROOT:-$ROOT_DIR/storage}"
@@ -106,10 +107,17 @@ CHILD_PIDS="$CHILD_PIDS $!"
 pnpm --filter @shuku/web exec node scripts/prepare-pdfjs-worker.mjs
 
 if [ "$WEB_MODE" = "start" ]; then
-  pnpm --filter @shuku/web exec next start -H "$WEB_HOST" -p "$WEB_PORT" &
+  pnpm --filter @shuku/web exec next start -H 127.0.0.1 -p "$NEXT_INTERNAL_PORT" &
 else
-  pnpm --filter @shuku/web exec next dev -H "$WEB_HOST" -p "$WEB_PORT" &
+  pnpm --filter @shuku/web exec next dev -H 127.0.0.1 -p "$NEXT_INTERNAL_PORT" &
 fi
+CHILD_PIDS="$CHILD_PIDS $!"
+
+GATEWAY_HOST="$WEB_HOST" \
+  GATEWAY_PORT="$WEB_PORT" \
+  API_PORT="$PYTHON_API_PORT" \
+  WEB_UPSTREAM_PORT="$NEXT_INTERNAL_PORT" \
+  node scripts/unified-http-gateway.mjs &
 CHILD_PIDS="$CHILD_PIDS $!"
 
 wait

@@ -12,6 +12,7 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.infrastructure.sqlite_retry import execute_with_sqlite_busy_retry
 from app.models.common import db_timestamp
 from app.modules.metadata.application.commands import execute_metadata_transaction
 from app.modules.metadata.infrastructure import lookup_queue as lookup_persist
@@ -27,6 +28,7 @@ from app.services.queue_runtime import QueueHeartbeatPump
 
 LOGGER = logging.getLogger(__name__)
 RETRY_DELAYS_SECONDS = (60, 300, 1800)
+DATABASE_BUSY_RETRY_DELAYS_SECONDS = (0.25, 1.0)
 STALE_RUNNING_MINUTES = lookup_persist.STALE_RUNNING_MINUTES
 
 
@@ -447,6 +449,15 @@ class MetadataLookupWorker:
         if self._thread.is_alive():
             self._thread.join(timeout=max(2.0, self._poll_seconds + 1.0))
 
+    def _process_iteration(self) -> bool | None:
+        result = execute_with_sqlite_busy_retry(
+            self._db_factory,
+            lambda db: process_next_metadata_lookup_task(db, self._settings),
+            retry_delays_seconds=DATABASE_BUSY_RETRY_DELAYS_SECONDS,
+            stop_wait=self._stop.wait,
+        )
+        return bool(result.value) if result.completed else None
+
     def _run(self) -> None:
         self._heartbeat.start()
         try:
@@ -454,8 +465,10 @@ class MetadataLookupWorker:
                 worked = False
                 error = None
                 try:
-                    with self._db_factory() as db:
-                        worked = process_next_metadata_lookup_task(db, self._settings)
+                    iteration_result = self._process_iteration()
+                    if iteration_result is None:
+                        break
+                    worked = iteration_result
                 except Exception as exc:
                     error = exc
                     LOGGER.exception("metadata lookup worker iteration failed")

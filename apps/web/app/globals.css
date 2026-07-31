@@ -342,6 +342,11 @@ html[data-audio-mini-player='reader'] .shuku-pwa-bottom-overlay {
   box-shadow: var(--shuku-shadow-cover);
 }
 
+[data-shuku-epub-transition-active='true']
+  iframe:not([data-shuku-epub-transition-current='true']):not([data-shuku-epub-transition-ready='true']) {
+  opacity: 0 !important;
+}
+
 .shuku-app-shell ::selection {
   background: #ffd8cc;
 }

@@ -22,6 +22,7 @@ from app.models.library import (
     LibraryWork,
 )
 from app.models.organize import MetadataLookupTask, OrganizeJob
+from app.modules.imports.infrastructure.source_keys import source_key
 
 
 class SqlAlchemyLibraryImportStore:
@@ -100,11 +101,17 @@ class SqlAlchemyLibraryImportStore:
         )
 
     def insert_library_file(self, *, columns: dict[str, object]) -> dict[str, object]:
+        path = columns.get("path")
+        if isinstance(path, str):
+            columns = {**columns, "pathKey": source_key(path)}
         self._db.execute(insert(LibraryFile.__table__).values(columns))
         self._db.flush()
         return dict(columns)
 
     def update_library_file(self, file_id: str, *, columns: dict[str, object]) -> None:
+        path = columns.get("path")
+        if isinstance(path, str):
+            columns = {**columns, "pathKey": source_key(path)}
         self._db.execute(
             update(LibraryFile.__table__)
             .where(LibraryFile.id == file_id)

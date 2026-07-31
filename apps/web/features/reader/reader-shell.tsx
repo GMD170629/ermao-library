@@ -185,8 +185,8 @@ function stopControlEvent(event: MouseEvent) {
   event.stopPropagation();
 }
 
-function inertWhen(condition: boolean): Record<string, string> {
-  return condition ? { inert: '' } : {};
+function inertWhen(condition: boolean): { inert?: boolean } {
+  return condition ? { inert: true } : {};
 }
 
 function shouldIgnoreReaderInteraction(target: EventTarget | null) {
@@ -209,6 +209,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   const readerDirectionRef = useRef<ComicDirection>('ltr');
   const interactionBlockedRef = useRef(interactionBlocked);
   const capabilitiesRef = useRef<ReaderCapabilities | null>(capabilities);
+  const handleInputIntentRef = useRef<(intent: ReaderInputIntent | null) => void>(() => undefined);
   const panelElementRef = useRef<HTMLElement | null>(null);
   const panelReturnFocusRef = useRef<HTMLElement | null>(null);
   const [controlsVisible, setControlsVisible] = useState(false);
@@ -356,6 +357,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
     else if (intent === 'last') void jumpToEnd();
     else goByIntent(intent);
   }
+  handleInputIntentRef.current = handleInputIntent;
 
   function handleReaderTap(clientX: number, clientY: number) {
     const bounds = readerViewportRef.current?.getBoundingClientRect();
@@ -396,12 +398,12 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
       if (!intent) return;
       if (intent === 'escape') {
         event.preventDefault();
-        handleInputIntent(intent);
+        handleInputIntentRef.current(intent);
         return;
       }
       if (isInteractionBlocked() || shouldIgnoreReaderInteraction(event.target)) return;
       event.preventDefault();
-      handleInputIntent(intent);
+      handleInputIntentRef.current(intent);
     }
 
     window.addEventListener('keydown', onKeyDown);

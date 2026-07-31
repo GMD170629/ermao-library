@@ -5,6 +5,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.core.database_errors import (
+    DATABASE_BUSY_MESSAGES,
+    is_database_busy_error,
+)
+
 ACTIVE_OPERATION_STATUSES = ("requested", "waiting", "running")
 TERMINAL_OPERATION_STATUSES = ("completed", "failed")
 HEARTBEAT_BUSY_TIMEOUT_MS = 1_000
@@ -19,7 +24,9 @@ def safe_runtime_error(error: BaseException | str | None) -> str | None:
         if isinstance(error, BaseException)
         else str(error).strip()
     )
-    if "database is locked" in value.lower():
+    if isinstance(error, BaseException) and is_database_busy_error(error):
+        return "database-is-busy"
+    if any(fragment in value.lower() for fragment in DATABASE_BUSY_MESSAGES):
         return "database-is-busy"
     value = re.sub(r"/(?:Users|home|var|Volumes|volume\d+|mnt|srv|opt)/[^\s'\"]+", "[local-path]", value)
     value = re.sub(r"[A-Z]:\\[^\s'\"]+", "[local-path]", value, flags=re.I)

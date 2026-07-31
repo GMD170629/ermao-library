@@ -315,15 +315,10 @@ def test_folder_scope_system_manager_boundary_and_atomic_bulk_rejection(
     assert import_tasks.status_code == 200
     assert {item["id"] for item in import_tasks.json()["data"]["tasks"]} == {"task-a"}
     rescan = client.post("/api/import-tasks/rescan")
-    assert rescan.status_code == 200
-    rescan_request = json.loads(
-        db_session.execute(
-            text(
-                "SELECT `value` FROM `SystemSetting` WHERE `key` = 'monitor.rescanRequestedAt'"
-            )
-        ).scalar()
-    )
-    assert rescan_request["monitorFolderIds"] == ["folder-a"]
+    assert rescan.status_code == 202
+    assert {job["monitorFolderId"] for job in rescan.json()["data"]["jobs"]} == {
+        "folder-a"
+    }
 
     allowed_edit = client.patch("/api/works/work-a", json={"author": "新作者"})
     assert allowed_edit.status_code == 200

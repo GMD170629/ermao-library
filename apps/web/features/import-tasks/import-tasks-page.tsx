@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Clock, FileArchive, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Clock, FileArchive, RefreshCw, Search, Square, Trash2, X } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '../../components/ui/badge';
 import type { BadgeTone } from '../../components/ui/badge';
@@ -47,6 +47,18 @@ type ImportTask = {
     errorCode?: string | null;
   } | null;
   logs: Array<{ id: string; level: string; message: string; createdAt: string }>;
+};
+
+type ImportScanJob = {
+  id: string;
+  rootPath: string;
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+  filesScanned: number;
+  candidatesFound: number;
+  queuedCount: number;
+  skippedCount: number;
+  errorCount: number;
+  restartCount: number;
 };
 
 type DeleteMode = 'record' | 'source' | 'converted';
@@ -146,6 +158,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   const { t: i18nAttribute } = useAttributeI18n();
   const { locale } = useI18n();
   const [tasks, setTasks] = useState<ImportTask[]>([]);
+  const [scanJobs, setScanJobs] = useState<ImportScanJob[]>([]);
   const [summary, setSummary] = useState(emptySummary);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
@@ -170,6 +183,18 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   const confirm = useConfirm();
   const toast = useToast();
   const activeTask = useMemo(() => page === 1 ? tasks.find((task) => task.status === 'PARSING' || task.status === 'PENDING') ?? null : null, [page, tasks]);
+
+  const loadActiveScanJobs = useCallback(async () => {
+    const responses = await Promise.all(
+      ['PENDING', 'RUNNING'].map(async (status) => {
+        const response = await fetch(`/api/import-scan-jobs?status=${status}`);
+        const payload = await response.json() as { ok: boolean; data?: { jobs: ImportScanJob[] }; error?: { message: string } };
+        if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '读取扫描进度失败');
+        return payload.data?.jobs ?? [];
+      })
+    );
+    setScanJobs(responses.flat());
+  }, []);
 
   const loadTasks = useCallback(async (targetPage: number) => {
     const requestId = ++requestIdRef.current;
@@ -208,10 +233,11 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
     try {
       const response = await fetch('/api/import-tasks/rescan', { method: 'POST' });
       const text = await response.text();
-      const payload = text ? JSON.parse(text) as { ok: boolean; data?: { requestedAt: string }; error?: { message: string } } : null;
+      const payload = text ? JSON.parse(text) as { ok: boolean; data?: { requestedAt: string; jobs: ImportScanJob[] }; error?: { message: string } } : null;
       if (!response.ok) throw new Error(payload?.error?.message ?? `请求重新识别失败：HTTP ${response.status}`);
       if (!payload?.ok) throw new Error(payload?.error?.message ?? '请求重新识别失败');
       setMessage('已请求重新识别监控文件夹');
+      setScanJobs(payload.data?.jobs ?? []);
       toast.success('已请求重新识别监控文件夹');
       setError('');
       setPage(1);
@@ -338,6 +364,14 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   }, [loadTasks, page]);
 
   useEffect(() => {
+    void loadActiveScanJobs().catch(() => undefined);
+    const timer = window.setInterval(() => {
+      void loadActiveScanJobs().catch(() => undefined);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [loadActiveScanJobs]);
+
+  useEffect(() => {
     setSelectedIds(new Set());
   }, [keyword, page, pageSize, statusFilter]);
 
@@ -396,6 +430,25 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
           <Button loading={busy === 'clear'} loadingText={i18nAttribute("清理中")} variant="ghost" icon={Trash2} onClick={() => void clearImportQueue()}><I18nText>清理导入队列</I18nText></Button>
         </div>
       )}
+      {scanJobs.length > 0 ? (
+        <div className="space-y-2 rounded-[20px] border border-[#F0DED5] bg-[#FFF8F4] p-4">
+          <div className="text-sm font-semibold text-[#3D3732]"><I18nText>活动扫描任务</I18nText></div>
+          {scanJobs.map((job) => (
+            <div key={job.id} className="flex flex-col gap-2 rounded-xl bg-white px-3 py-2 text-xs text-[#6D625B] md:flex-row md:items-center">
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium text-[#3D3732]">{job.rootPath}</div>
+                <div className="mt-1">
+                  <I18nText>检查文件：</I18nText>{job.filesScanned} · <I18nText>发现候选：</I18nText>{job.candidatesFound} · <I18nText>加入队列：</I18nText>{job.queuedCount} · <I18nText>按规则跳过：</I18nText>{job.skippedCount} · <I18nText>错误：</I18nText>{job.errorCount} · <I18nText>重启次数：</I18nText>{job.restartCount}
+                </div>
+              </div>
+              <Button variant="ghost" icon={Square} onClick={() => void (async () => {
+                await fetch(`/api/import-scan-jobs/${encodeURIComponent(job.id)}/cancel`, { method: 'POST' });
+                await loadActiveScanJobs();
+              })()} aria-label={i18nAttribute("取消扫描任务")}><I18nText>取消扫描</I18nText></Button>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <form onSubmit={submitSearch} className="flex flex-col gap-3 rounded-[20px] border border-[#DEDAD4] bg-[#FAF9F7] p-3 md:flex-row md:items-center">
         <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-[#DEDAD4] bg-white px-3 focus-within:border-[#F19B84] focus-within:ring-2 focus-within:ring-[#FCE5DE]">
           <Search size={16} className="shrink-0 text-[#8A847D]" />

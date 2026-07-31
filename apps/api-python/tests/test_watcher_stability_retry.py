@@ -1,18 +1,19 @@
 from __future__ import annotations
 
-from contextlib import nullcontext
 from pathlib import Path
 from threading import Event
-from time import monotonic, sleep
+from types import SimpleNamespace
 
+import pytest
+from sqlalchemy.exc import OperationalError
 from watchdog.events import FileMovedEvent
 
 import app.worker.watcher as watcher_module
 from app.worker.watcher import (
-    ImportQueue,
     MonitorFolderConfig,
     WatchState,
     WorkerFileHandler,
+    WorkerManager,
 )
 
 
@@ -38,118 +39,6 @@ def test_atomic_publish_rename_is_scheduled_for_monitoring(tmp_path: Path) -> No
     handler.on_moved(FileMovedEvent(str(tmp_path / ".upload-123.part"), str(source)))
 
     assert scheduled == [(source, folder)]
-
-
-def test_import_queue_retries_when_a_file_changes_during_stability_check(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    source = tmp_path / "large.epub"
-    source.write_bytes(b"initial")
-    checking_started = Event()
-    completed = Event()
-    calls: list[Path] = []
-
-    def defer_then_complete(
-        _db,
-        _settings,
-        path,
-        _folder,
-        *,
-        has_changed=None,
-        mark_deferred=None,
-    ) -> bool:
-        calls.append(path)
-        if len(calls) == 1:
-            checking_started.set()
-            deadline = monotonic() + 2
-            while (
-                has_changed is not None and not has_changed() and monotonic() < deadline
-            ):
-                sleep(0.01)
-            assert has_changed is not None and has_changed()
-            return False
-        completed.set()
-        return True
-
-    monkeypatch.setattr(watcher_module, "import_watched_file", defer_then_complete)
-    queue = ImportQueue(lambda: nullcontext(object()), object())
-    folder = MonitorFolderConfig(
-        id="folder-1",
-        root_path=str(tmp_path),
-        min_file_size_bytes=1,
-        stability_check_seconds=0,
-    )
-    try:
-        queue.enqueue(source, folder)
-        assert checking_started.wait(timeout=2)
-        source.write_bytes(b"changed while the first check was pending")
-        queue.enqueue(source, folder)
-        assert completed.wait(timeout=2)
-        assert calls == [source.resolve(), source.resolve()]
-    finally:
-        queue.stop()
-
-
-def test_import_queue_retries_when_stability_check_defers_without_a_second_event(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    source = tmp_path / "growing.epub"
-    source.write_bytes(b"initial")
-    completed = Event()
-    calls: list[Path] = []
-
-    def defer_then_complete(
-        _db,
-        _settings,
-        path,
-        _folder,
-        *,
-        has_changed=None,
-        mark_deferred=None,
-    ) -> bool:
-        calls.append(path)
-        if len(calls) == 1:
-            assert mark_deferred is not None
-            mark_deferred()
-            return False
-        completed.set()
-        return True
-
-    monkeypatch.setattr(watcher_module, "import_watched_file", defer_then_complete)
-    queue = ImportQueue(lambda: nullcontext(object()), object())
-    folder = MonitorFolderConfig(
-        id="folder-1",
-        root_path=str(tmp_path),
-        min_file_size_bytes=1,
-        stability_check_seconds=0,
-    )
-    try:
-        queue.enqueue(source, folder)
-        assert completed.wait(timeout=2)
-        assert calls == [source.resolve(), source.resolve()]
-    finally:
-        queue.stop()
-
-
-def test_stopped_import_queue_rejects_new_files(tmp_path: Path, monkeypatch) -> None:
-    calls: list[Path] = []
-    monkeypatch.setattr(
-        watcher_module,
-        "import_watched_file",
-        lambda _db, _settings, path, _folder, **_kwargs: calls.append(path) or True,
-    )
-    queue = ImportQueue(lambda: nullcontext(object()), object())
-    folder = MonitorFolderConfig(id="folder-1", root_path=str(tmp_path))
-    queue.stop()
-
-    source = tmp_path / "after-stop.epub"
-    source.write_bytes(b"content")
-    queue.enqueue(source, folder)
-    sleep(0.05)
-
-    assert calls == []
 
 
 def test_unstable_file_marks_a_retry_after_it_reaches_the_minimum_size(
@@ -182,3 +71,160 @@ def test_unstable_file_marks_a_retry_after_it_reaches_the_minimum_size(
 
     assert imported is False
     assert deferred.is_set()
+
+
+def test_watcher_retries_a_transient_database_lock_without_losing_event(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "locked.epub"
+    source.write_bytes(b"book")
+    folder = MonitorFolderConfig(id="folder-locked", root_path=str(tmp_path))
+    state = WatchState(observer=object(), root_path=tmp_path, config_signature="test")
+    factory_calls = 0
+    enqueued: list[Path] = []
+
+    class SessionContext:
+        def __enter__(self):
+            return object()
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+    def db_factory() -> SessionContext:
+        nonlocal factory_calls
+        factory_calls += 1
+        return SessionContext()
+
+    def high_watermark(_db) -> bool:
+        if factory_calls == 1:
+            raise OperationalError(
+                "queue capacity",
+                {},
+                RuntimeError("database is locked"),
+            )
+        return False
+
+    monkeypatch.setattr(
+        watcher_module, "import_queue_at_high_watermark", high_watermark
+    )
+    monkeypatch.setattr(
+        watcher_module,
+        "enqueue_import_task",
+        lambda _db, path, **_kwargs: enqueued.append(path),
+    )
+    monkeypatch.setattr(watcher_module.time, "sleep", lambda _seconds: None)
+
+    manager = WorkerManager(
+        db_factory,
+        SimpleNamespace(monitor_root=str(tmp_path)),
+    )
+    manager.schedule_import(source, folder, state)
+
+    assert factory_calls == 2
+    assert enqueued == [source]
+
+
+def test_watcher_recovers_exhausted_database_lock_with_folder_scan(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "still-locked.epub"
+    source.write_bytes(b"book")
+    folder = MonitorFolderConfig(id="folder-recovery", root_path=str(tmp_path))
+    state = WatchState(observer=object(), root_path=tmp_path, config_signature="test")
+    recovery_scans: list[tuple[str, Path, str]] = []
+
+    class SessionContext:
+        def __enter__(self):
+            return object()
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+    monkeypatch.setattr(
+        watcher_module,
+        "import_queue_at_high_watermark",
+        lambda _db: (_ for _ in ()).throw(
+            OperationalError(
+                "queue capacity",
+                {},
+                RuntimeError("database is locked"),
+            )
+        ),
+    )
+    monkeypatch.setattr(watcher_module.time, "sleep", lambda _seconds: None)
+    manager = WorkerManager(
+        SessionContext,
+        SimpleNamespace(monitor_root=str(tmp_path)),
+    )
+    manager.watchers[folder.id] = state
+
+    manager.schedule_import(source, folder, state)
+
+    monkeypatch.setattr(
+        watcher_module,
+        "schedule_import_scan_job",
+        lambda _db, **kwargs: recovery_scans.append(
+            (
+                kwargs["monitor_folder_id"],
+                kwargs["root_path"],
+                kwargs["trigger"],
+            )
+        ),
+    )
+    manager._schedule_pending_recovery_scans()
+
+    assert recovery_scans == [(folder.id, tmp_path, "WATCHER_RECOVERY")]
+    assert manager._pending_scan_recovery_folder_ids == set()
+
+
+def test_watcher_audio_events_debounce_into_delayed_directory_scan(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "001.mp3"
+    source.write_bytes(b"audio")
+    folder = MonitorFolderConfig(
+        id="folder-audio-watch",
+        root_path=str(tmp_path),
+        stability_check_enabled=True,
+        stability_check_seconds=3,
+    )
+    state = WatchState(observer=object(), root_path=tmp_path, config_signature="test")
+    scheduled: list[dict[str, object]] = []
+
+    class SessionContext:
+        def __enter__(self):
+            return object()
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+    monkeypatch.setattr(
+        watcher_module, "import_queue_at_high_watermark", lambda _db: False
+    )
+    monkeypatch.setattr(
+        watcher_module,
+        "schedule_import_scan_job",
+        lambda _db, **kwargs: scheduled.append(kwargs),
+    )
+    monkeypatch.setattr(
+        watcher_module,
+        "enqueue_import_task",
+        lambda *_args, **_kwargs: pytest.fail(
+            "audio watcher events must not create file-level import tasks"
+        ),
+    )
+    manager = WorkerManager(
+        SessionContext,
+        SimpleNamespace(monitor_root=str(tmp_path)),
+    )
+
+    manager.schedule_import(source, folder, state)
+    manager.schedule_import(source, folder, state)
+
+    assert len(scheduled) == 2
+    assert all(item["root_path"] == tmp_path for item in scheduled)
+    assert all(item["trigger"] == "WATCHER_AUDIO_EVENT" for item in scheduled)
+    assert all(item["available_at"] is not None for item in scheduled)

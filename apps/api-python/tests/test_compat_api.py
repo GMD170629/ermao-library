@@ -1,5 +1,6 @@
 import json
 import zipfile
+from contextlib import nullcontext
 from functools import partial
 from http.server import (
     BaseHTTPRequestHandler,
@@ -14,16 +15,20 @@ from urllib.parse import parse_qs, quote, urlparse
 
 import pytest
 from PIL import Image, ImageDraw
-from sqlalchemy import event, text
+from sqlalchemy import event, func, select, text
 
-from app.bootstrap.imports import import_managed_book, process_import_task
+from app.bootstrap.imports import (
+    ImportWorkerRuntime,
+    import_managed_book,
+    process_import_task,
+)
 from app.contracts.imports import ImportTaskContract
 from app.core.auth import hash_password
 from app.core.config import get_settings
 from app.db.base import Base
 from app.db.runner import apply_schema
 from app.models.auth import User
-from app.models.import_pipeline import BookConversionTask, ImportTask
+from app.models.import_pipeline import BookConversionTask, ImportTask, ImportWorkItem
 from app.modules.imports.application.dto import ImportOptions
 from app.modules.imports.infrastructure.task_mapper import import_task_dto_from_row
 from app.modules.media.infrastructure import http_streaming as media_streaming
@@ -1541,7 +1546,18 @@ def test_works_recent_read_sort_uses_latest_user_progress_across_pages(
     ]
 
     maximum_page = client.get("/api/works", params={"pageSize": 999}).json()
-    assert maximum_page["data"]["pageSize"] == 100
+    assert maximum_page["data"]["pageSize"] == 500
+
+    all_books = client.get(
+        "/api/works", params={"sort": "recent_read", "pageSize": 0}
+    ).json()
+    assert all_books["data"]["pageSize"] == 3
+    assert all_books["data"]["totalPages"] == 1
+    assert [book["id"] for book in all_books["data"]["books"]] == [
+        "work-new",
+        "work-old",
+        "work-unread",
+    ]
 
     def reject_detail_serialization(*_args, **_kwargs):
         raise AssertionError("summary views must not use the detail serializer")
@@ -3881,13 +3897,9 @@ def test_import_tasks_return_logs_summary_and_rescan_contract(client, db_session
     assert logs.json()["data"]["total"] == 1
 
     rescan = client.post("/api/import-tasks/rescan")
-    assert rescan.status_code == 200
+    assert rescan.status_code == 202
     assert rescan.json()["data"]["requestedAt"]
-    assert db_session.execute(
-        text(
-            "SELECT `value` FROM SystemSetting WHERE `key` = 'monitor.rescanRequestedAt'"
-        )
-    ).scalar()
+    assert len(rescan.json()["data"]["jobs"]) == 1
 
 
 def test_import_tasks_are_server_paginated_with_global_summary(client, db_session):
@@ -4353,10 +4365,18 @@ def test_scan_selected_directory_reuses_monitor_rules_and_known_import_paths(
     scanned = client.post(
         "/api/import-tasks/scan-directory", json={"path": str(selected)}
     )
-    assert scanned.status_code == 200
+    assert scanned.status_code == 202
     data = scanned.json()["data"]
-    assert data["queued"] == 1
-    assert data["skipped"] == 5
+    assert data["created"] is True
+    assert data["job"]["status"] == "PENDING"
+    runtime = ImportWorkerRuntime(lambda: nullcontext(db_session), test_settings)
+    work_item = runtime.claim_work("scan-test", 900)
+    assert work_item is not None and work_item.kind == "SCAN_DIRECTORY"
+    assert runtime.process_scan(work_item) is True
+    job = client.get(f"/api/import-scan-jobs/{data['job']['id']}")
+    assert job.status_code == 200
+    assert job.json()["data"]["job"]["queuedCount"] == 1
+    assert job.json()["data"]["job"]["skippedCount"] == 5
     queued = (
         db_session.execute(
             text("SELECT * FROM ImportTask WHERE sourcePath = :path"),
@@ -4388,6 +4408,53 @@ def test_scan_selected_directory_reuses_monitor_rules_and_known_import_paths(
         "/api/import-tasks/scan-directory", json={"path": str(outside)}
     )
     assert rejected.status_code == 400
+
+
+def test_scan_job_list_cancel_and_resubmit_contract(
+    client, db_session, test_settings
+):
+    create_worker_tables(db_session)
+    _login(client, db_session)
+    scan_root = test_settings.resolved_monitor_root / "scan-cancel"
+    scan_root.mkdir(parents=True)
+    created_folder = client.post(
+        "/api/monitor-folders",
+        json={
+            "name": "Cancelable scan",
+            "rootPath": str(scan_root),
+            "enabled": True,
+            "minFileSizeBytes": 0,
+        },
+    )
+    assert created_folder.status_code == 201
+
+    submitted = client.post(
+        "/api/import-tasks/scan-directory", json={"path": str(scan_root)}
+    )
+    assert submitted.status_code == 202
+    job_id = submitted.json()["data"]["job"]["id"]
+    active = client.get("/api/import-scan-jobs?status=PENDING")
+    assert active.status_code == 200
+    assert [job["id"] for job in active.json()["data"]["jobs"]] == [job_id]
+
+    cancelled = client.post(f"/api/import-scan-jobs/{job_id}/cancel")
+    assert cancelled.status_code == 200
+    assert cancelled.json()["data"]["job"]["status"] == "CANCELLED"
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(ImportWorkItem)
+            .where(ImportWorkItem.scan_job_id == job_id)
+        )
+        == 0
+    )
+    resubmitted = client.post(
+        "/api/import-tasks/scan-directory", json={"path": str(scan_root)}
+    )
+    assert resubmitted.status_code == 202
+    assert resubmitted.json()["data"]["created"] is True
+    assert resubmitted.json()["data"]["job"]["id"] != job_id
+    assert client.get("/api/import-scan-jobs?status=unknown").status_code == 400
 
 
 def test_scan_selected_audiobook_directory_queues_one_directory_bundle(
@@ -4441,11 +4508,18 @@ def test_scan_selected_audiobook_directory_queues_one_directory_bundle(
         "/api/import-tasks/scan-directory", json={"path": str(selected)}
     )
 
-    assert scanned.status_code == 200
+    assert scanned.status_code == 202
     data = scanned.json()["data"]
-    assert data["filesScanned"] == len(tracks)
-    assert data["candidatesFound"] == 1
-    assert data["queued"] == 1
+    runtime = ImportWorkerRuntime(lambda: nullcontext(db_session), test_settings)
+    work_item = runtime.claim_work("audio-scan-test", 900)
+    assert work_item is not None and work_item.kind == "SCAN_DIRECTORY"
+    assert runtime.process_scan(work_item) is True
+    job = client.get(f"/api/import-scan-jobs/{data['job']['id']}").json()["data"][
+        "job"
+    ]
+    assert job["filesScanned"] == len(tracks)
+    assert job["candidatesFound"] == 1
+    assert job["queuedCount"] == 1
     tasks = (
         db_session.execute(
             text(

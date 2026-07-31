@@ -5,11 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+MAX_LIBRARY_PAGE_SIZE = 500
+
 
 @dataclass(frozen=True)
 class WorkListQuery:
     page: int
-    page_size: int
+    requested_page_size: int | None
     visibility: str = "active"
     search: str | None = None
     keyword: str | None = None
@@ -36,6 +38,12 @@ class WorkListResult:
     page: int
     page_size: int
     progress_sort: bool = False
+
+
+def resolve_page_size(requested_page_size: int | None, total: int) -> int:
+    if requested_page_size is None:
+        return max(1, total)
+    return min(MAX_LIBRARY_PAGE_SIZE, max(1, requested_page_size))
 
 
 def parse_media_kinds(raw: str) -> tuple[str, ...]:

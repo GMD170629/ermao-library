@@ -55,6 +55,7 @@ class PersistentImportWorker:
     def stop(self) -> None:
         self._stop_event.set()
         self._thread.join(timeout=10)
+        self.runtime.shutdown()
 
     def request_stop(self) -> None:
         self._stop_event.set()
@@ -63,11 +64,15 @@ class PersistentImportWorker:
         return self._thread.is_alive()
 
     def process_once(self) -> bool:
-        recovered = self.runtime.recover()
         lease_seconds = max(900, self.settings.ebook_conversion_timeout_seconds + 300)
-        task = self.runtime.claim(self.worker_id, lease_seconds)
+        work_item = self.runtime.claim_work(self.worker_id, lease_seconds)
+        if work_item is None:
+            return self.runtime.run_bounded_maintenance() > 0
+        if work_item.kind == "SCAN_DIRECTORY":
+            return self.runtime.process_scan(work_item)
+        task = self.runtime.claim_import(work_item, self.worker_id, lease_seconds)
         if task is None:
-            return bool(recovered)
+            return True
         try:
             self.runtime.process(task)
         except Exception as exc:  # noqa: BLE001 — worker task containment boundary
@@ -75,6 +80,8 @@ class PersistentImportWorker:
             print(
                 f"[import-worker] persistent task failed {task.id}: {exc}", flush=True
             )
+        finally:
+            self.runtime.complete_work(work_item.id)
         return True
 
     def clear_records(self) -> int:
@@ -98,6 +105,7 @@ class PersistentImportWorker:
                 self._stop_event.wait(self.settings.import_queue_interval_seconds)
         finally:
             self._heartbeat.stop()
+            self.runtime.shutdown()
 
 
 def start_persistent_import_worker(

@@ -793,6 +793,12 @@ test('desktop book list opens details from both the cover and title', async ({ p
   await page.getByRole('button', { name: '每页数量' }).click();
   await page.getByRole('option', { name: '100 本/页' }).click();
   await expect.poll(() => requestedPageSizes.at(-1)).toBe('100');
+  await page.getByRole('button', { name: '每页数量' }).click();
+  await page.getByRole('option', { name: '500 本/页' }).click();
+  await expect.poll(() => requestedPageSizes.at(-1)).toBe('500');
+  await page.getByRole('button', { name: '每页数量' }).click();
+  await page.getByRole('option', { name: '全部显示' }).click();
+  await expect.poll(() => requestedPageSizes.at(-1)).toBe('0');
   await expect.poll(() => requestedViews.at(-1)).toBe('management');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await expect(page.getByRole('button', { name: '进度排序' })).toHaveCount(0);

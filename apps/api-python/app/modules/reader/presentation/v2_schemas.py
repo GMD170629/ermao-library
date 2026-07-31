@@ -46,7 +46,7 @@ class ComicPreferences(ReaderWireModel):
 
 class PdfPreferences(ReaderWireModel):
     zoom: float = Field(1.0, ge=0.6, le=2.4)
-    fit: Literal["width", "page"] = "width"
+    fit: Literal["width", "page"] = "page"
 
 
 class AudioPreferences(ReaderWireModel):

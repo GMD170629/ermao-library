@@ -3,26 +3,27 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping
 
 SUPPORTED_AUDIO_EXTS = {".m4b", ".m4a", ".mp3"}
 MAX_AUDIO_CHAPTERS = 10_000
+MAX_AUDIO_BUNDLE_TRACKS = 10_000
 DISC_DIRECTORY_PATTERN = re.compile(
     r"^(?:cd|disc|disk|碟|盘)\s*[-_. ]*\d+(?:\s*(?:of|/|[-–—])\s*\d+)?$",
-    re.I,
+    re.IGNORECASE,
 )
 _EXPLICIT_EPISODE_PATTERN = re.compile(
     r"第\s*0*(\d{1,6})\s*[集章回节]",
-    re.I,
+    re.IGNORECASE,
 )
 _PREFIXED_EPISODE_PATTERN = re.compile(
     r"^(?:(?:cd|disc|disk)\s*\d+[ ._-]*)?"
     r"(?:(?:track|chapter|chap|ch)\s*)?"
     r"[\[(]?0*(\d{1,6})[\])]?"
     r"(?:\s*[集章回节])?(?:[ ._-]+|$)",
-    re.I,
+    re.IGNORECASE,
 )
 _FALLBACK_EPISODE_PATTERN = re.compile(r"(?<!\d)0*(\d{1,6})(?!\d)")
 

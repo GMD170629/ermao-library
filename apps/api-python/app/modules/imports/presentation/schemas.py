@@ -180,18 +180,43 @@ class ImportLogsPayload(HttpContractModel):
 class ScanError(HttpContractModel):
     path: str
     error: str
+    code: str | None = None
+    limit: int | None = None
+    observed_count: int | None = Field(default=None, alias="observedCount")
 
 
-class ImportDirectoryScanPayload(HttpContractModel):
-    path: str
-    monitor_folder_id: str = Field(alias="monitorFolderId")
-    monitor_folder_name: str | None = Field(alias="monitorFolderName")
+class ImportScanJob(HttpContractModel):
+    id: str
+    monitor_folder_id: str | None = Field(alias="monitorFolderId")
+    root_path: str = Field(alias="rootPath")
+    trigger: str
+    status: Literal["PENDING", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"]
     directories_scanned: int = Field(alias="directoriesScanned")
     files_scanned: int = Field(alias="filesScanned")
     candidates_found: int = Field(alias="candidatesFound")
-    queued: int
-    skipped: int
-    errors: list[ScanError]
+    queued_count: int = Field(alias="queuedCount")
+    skipped_count: int = Field(alias="skippedCount")
+    error_count: int = Field(alias="errorCount")
+    ignored_reason_counts: dict[str, int] = Field(alias="ignoredReasonCounts")
+    error_samples: list[ScanError] = Field(alias="errorSamples")
+    restart_count: int = Field(alias="restartCount")
+    started_at: datetime | None = Field(alias="startedAt")
+    heartbeat_at: datetime | None = Field(alias="heartbeatAt")
+    finished_at: datetime | None = Field(alias="finishedAt")
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+
+
+class ImportScanJobPayload(HttpContractModel):
+    job: ImportScanJob
+
+
+class ImportScanJobMutationPayload(ImportScanJobPayload):
+    created: bool
+
+
+class ImportScanJobsPayload(HttpContractModel):
+    jobs: list[ImportScanJob]
 
 
 class DeletedImportTasksPayload(HttpContractModel):
@@ -218,13 +243,15 @@ class ImportQueueClearPayload(HttpContractModel):
 
 class RescanImportTasksPayload(HttpContractModel):
     requested_at: datetime = Field(alias="requestedAt")
-    monitor_folder_ids: list[str] | None = Field(alias="monitorFolderIds")
+    jobs: list[ImportScanJob]
 
 
 ImportTasksResponse = SuccessEnvelope[ImportTasksPayload]
 ImportTaskResponse = SuccessEnvelope[ImportTaskPayload]
 ImportLogsResponse = SuccessEnvelope[ImportLogsPayload]
-ImportDirectoryScanResponse = SuccessEnvelope[ImportDirectoryScanPayload]
+ImportDirectoryScanResponse = SuccessEnvelope[ImportScanJobMutationPayload]
+ImportScanJobResponse = SuccessEnvelope[ImportScanJobPayload]
+ImportScanJobsResponse = SuccessEnvelope[ImportScanJobsPayload]
 DeletedImportTasksResponse = SuccessEnvelope[DeletedImportTasksPayload]
 ImportQueueClearResponse = SuccessEnvelope[ImportQueueClearPayload]
 RescanImportTasksResponse = SuccessEnvelope[RescanImportTasksPayload]

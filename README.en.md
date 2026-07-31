@@ -119,7 +119,7 @@ Updating or rebuilding the container does not clear the mounted library and data
 
 ## Local Development
 
-The required runtimes are Node.js 20.20.2, pnpm 9.12.2, and Python 3.11.15. The Node.js version is recorded in `.nvmrc`, and the backend Python version is recorded in `apps/api-python/.python-version`; `uv` installs or selects the appropriate interpreter automatically. Do not run the project tests with Node.js 22 or Python 3.12.
+The required runtimes are Node.js 22.23.1, pnpm 9.12.2, and Python 3.11.15. The Node.js version is recorded in `.nvmrc`, and the backend Python version is recorded in `apps/api-python/.python-version`; `uv` installs or selects the appropriate interpreter automatically. Do not run the project tests with another Node.js version or with Python 3.12.
 
 ```bash
 pnpm install

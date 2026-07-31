@@ -24,8 +24,8 @@ const basePathFetchBridge = `(() => {
   window.__shukuBasePathFetchInstalled = true;
 })();`;
 
-export function generateMetadata(): Metadata {
-  const t = getServerTranslator();
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getServerTranslator();
   return {
     applicationName: t(PRODUCT_NAME),
     title: t(PRODUCT_NAME),
@@ -70,8 +70,8 @@ export const viewport: Viewport = {
   colorScheme: 'light dark'
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const locale = getRequestLocale();
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const locale = await getRequestLocale();
   return (
     <html lang={locale} suppressHydrationWarning>
       <head>

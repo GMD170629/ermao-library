@@ -4,17 +4,19 @@ set -eu
 ROOT_DIR="${ROOT_DIR:-/app}"
 PYTHON_API_PORT="8000"
 WEB_PORT="${PORT:-3000}"
+NEXT_INTERNAL_PORT="${NEXT_INTERNAL_PORT:-3001}"
 PYTHON_API_DIR="${PYTHON_API_DIR:-$ROOT_DIR/apps/api-python}"
 NEXT_SERVER="${NEXT_SERVER:-$ROOT_DIR/apps/web/server.js}"
+GATEWAY_SERVER="${GATEWAY_SERVER:-$ROOT_DIR/scripts/unified-http-gateway.mjs}"
 
 shutdown() {
   trap - INT TERM EXIT
-  for pid in ${API_PID:-} ${WORKER_PID:-} ${WEB_PID:-}; do
+  for pid in ${API_PID:-} ${WORKER_PID:-} ${WEB_PID:-} ${GATEWAY_PID:-}; do
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
       kill "$pid" 2>/dev/null || true
     fi
   done
-  wait ${API_PID:-} ${WORKER_PID:-} ${WEB_PID:-} 2>/dev/null || true
+  wait ${API_PID:-} ${WORKER_PID:-} ${WEB_PID:-} ${GATEWAY_PID:-} 2>/dev/null || true
 }
 
 trap shutdown INT TERM EXIT
@@ -36,9 +38,6 @@ if [ -z "${SESSION_SECRET:-}" ]; then
   SESSION_SECRET="$(tr -d '\r\n' < "$secret_file")"
   export SESSION_SECRET
 fi
-
-export HOSTNAME="${HOSTNAME:-0.0.0.0}"
-export PORT="$WEB_PORT"
 
 (
   cd "$PYTHON_API_DIR"
@@ -72,11 +71,18 @@ fi
 ) &
 WORKER_PID="$!"
 
-node "$NEXT_SERVER" &
+HOSTNAME=127.0.0.1 PORT="$NEXT_INTERNAL_PORT" node "$NEXT_SERVER" &
 WEB_PID="$!"
 
+GATEWAY_HOST="${HOSTNAME:-0.0.0.0}" \
+  GATEWAY_PORT="$WEB_PORT" \
+  API_PORT="$PYTHON_API_PORT" \
+  WEB_UPSTREAM_PORT="$NEXT_INTERNAL_PORT" \
+  node "$GATEWAY_SERVER" &
+GATEWAY_PID="$!"
+
 while :; do
-  for pid in "$API_PID" "$WORKER_PID" "$WEB_PID"; do
+  for pid in "$API_PID" "$WORKER_PID" "$WEB_PID" "$GATEWAY_PID"; do
     if ! kill -0 "$pid" 2>/dev/null; then
       wait "$pid" || exit $?
       exit 1

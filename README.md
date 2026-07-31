@@ -119,7 +119,7 @@ docker compose up -d
 
 ## 本地开发
 
-运行时环境为 Node.js 20.20.2、pnpm 9.12.2 和 Python 3.11.15。Node 版本记录在 `.nvmrc`，后端 Python 版本记录在 `apps/api-python/.python-version`；`uv` 会自动安装或选择对应解释器。不要使用 Node 22 或 Python 3.12 运行项目测试。
+运行时环境为 Node.js 22.23.1、pnpm 9.12.2 和 Python 3.11.15。Node 版本记录在 `.nvmrc`，后端 Python 版本记录在 `apps/api-python/.python-version`；`uv` 会自动安装或选择对应解释器。不要使用其他 Node.js 版本或 Python 3.12 运行项目测试。
 
 ```bash
 pnpm install

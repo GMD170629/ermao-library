@@ -29,6 +29,7 @@ class ProviderManifest:
     capabilities: tuple[str, ...]
     config_fields: tuple[ProviderConfigField, ...]
     default_priority: int
+    enabled_by_default: bool = False
 
 
 BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
@@ -60,6 +61,7 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
             ),
         ),
         default_priority=100,
+        enabled_by_default=True,
     ),
     ProviderManifest(
         id="bangumi",
@@ -101,6 +103,7 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
             ),
         ),
         default_priority=110,
+        enabled_by_default=True,
     ),
     ProviderManifest(
         id="ai",

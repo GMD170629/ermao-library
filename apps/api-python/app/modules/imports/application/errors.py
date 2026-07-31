@@ -3,6 +3,33 @@
 from __future__ import annotations
 
 
+class ImportExecutionError(RuntimeError):
+    """Stable application failure translated from an import infrastructure adapter."""
+
+    def __init__(self, code: str, message: str, *, retryable: bool) -> None:
+        super().__init__(message)
+        self.code = code
+        self.retryable = retryable
+
+
+class AudioTrackLimitExceededError(RuntimeError):
+    """A logical audiobook contains more tracks than one import may own."""
+
+    code = "AUDIO_TRACK_LIMIT_EXCEEDED"
+
+    def __init__(
+        self,
+        *,
+        path: str,
+        limit: int,
+        observed_count: int,
+    ) -> None:
+        super().__init__(f"有声书音轨超过 {limit} 条，请拆分目录后重新导入")
+        self.path = path
+        self.limit = limit
+        self.observed_count = observed_count
+
+
 class MonitorFolderDeletedDuringImportError(RuntimeError):
     """The monitor-folder configuration disappeared while its task was running."""
 

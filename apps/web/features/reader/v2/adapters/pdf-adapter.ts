@@ -8,13 +8,19 @@ import type {
   ReaderCommandAck,
   ReaderPreferences
 } from '@shuku/reader-core';
-import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, RenderTask, TextLayer } from 'pdfjs-dist';
+import type {
+  PDFDocumentLoadingTask,
+  PDFDocumentProxy,
+  PDFPageProxy,
+  RenderTask,
+  TextLayer
+} from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { withBasePath } from '../../../../lib/base-path';
 import { readerThemeSurfaces } from '../../reader-theme';
 import { ReaderAdapterBase, StaleReaderOperationError, errorMessage, isAbortError } from './adapter-base';
 import { computePdfRenderBudget, pdfPageScale } from './pdf-render-budget';
 
-type PdfJsModule = typeof import('pdfjs-dist');
+type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
 
 type RenderedPdfPage = {
   page: PDFPageProxy;
@@ -138,7 +144,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     super();
     this.container = options.container;
     this.fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
-    this.loadPdfJs = options.loadPdfJs ?? (() => import('pdfjs-dist'));
+    this.loadPdfJs = options.loadPdfJs ?? (() => import('pdfjs-dist/legacy/build/pdf.mjs'));
     if (options.onViewModel) this.viewListeners.add(options.onViewModel);
     this.container.addEventListener('touchstart', this.stopNativePanPropagation, { passive: true });
     this.container.addEventListener('touchmove', this.stopNativePanPropagation, { passive: true });
@@ -191,7 +197,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       ]);
       this.assertActive(generation, context.signal);
       this.pdfjs = pdfjs;
-      pdfjs.GlobalWorkerOptions.workerSrc = withBasePath('/vendor/pdfjs/pdf.worker.min.mjs?v=6.1.200');
+      pdfjs.GlobalWorkerOptions.workerSrc = withBasePath('/vendor/pdfjs/pdf.worker.legacy.min.mjs?v=6.1.200');
       const loadingTask = pdfjs.getDocument({
         url: context.source.contentUrl,
         disableRange: false,
@@ -651,7 +657,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       pageNumber: this.pageNumber,
       pageCount: this.pageCount,
       zoom: this.preferences?.pdf.zoom ?? 1,
-      fit: this.preferences?.pdf.fit ?? 'width',
+      fit: this.preferences?.pdf.fit ?? 'page',
       passwordReason: this.passwordReason,
       error: this.error
     };

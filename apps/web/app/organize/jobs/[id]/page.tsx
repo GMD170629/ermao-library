@@ -1,5 +1,10 @@
 import { OrganizeJobDetailPage } from '../../../../features/organize/organize-job-detail-page';
 
-export default function Page({ params }: { params: { id: string } }) {
-  return <OrganizeJobDetailPage jobId={params.id} />;
+type OrganizeJobPageProps = {
+  params: Promise<{ id: string }>;
+};
+
+export default async function Page({ params }: OrganizeJobPageProps) {
+  const { id } = await params;
+  return <OrganizeJobDetailPage jobId={id} />;
 }

@@ -24,6 +24,7 @@ from app.bootstrap.organize import (
     sync_organize_runs,
     update_organize_policy,
 )
+from app.infrastructure.sqlite_retry import execute_with_sqlite_busy_retry
 from app.modules.organize.infrastructure import eligibility as organize_eligibility
 from app.modules.organize.infrastructure import jobs as organize_jobs
 from app.modules.organize.infrastructure import runs as organize_runs
@@ -31,6 +32,7 @@ from app.services.metadata_provider_registry import enabled_metadata_provider_id
 
 
 LOGGER = logging.getLogger(__name__)
+DATABASE_BUSY_RETRY_DELAYS_SECONDS = (0.25, 1.0)
 ACTIVE_JOB_STATUSES = ("LOOKUP_PENDING", "PENDING", "QUEUED", "RUNNING", "RETRY_WAIT", "REVIEWING")
 UNRESOLVED_JOB_STATUSES = organize_eligibility.UNRESOLVED_JOB_STATUSES
 TERMINAL_JOB_STATUSES = ("APPLIED", "COMPLETED", "DISMISSED", "CANCELLED", "FAILED")
@@ -363,11 +365,20 @@ class OrganizerScheduler:
         if self._thread.is_alive():
             self._thread.join(timeout=max(2.0, self._poll_seconds + 1.0))
 
+    def _process_iteration(self) -> bool:
+        result = execute_with_sqlite_busy_retry(
+            self._db_factory,
+            process_organize_schedule_tick,
+            retry_delays_seconds=DATABASE_BUSY_RETRY_DELAYS_SECONDS,
+            stop_wait=self._stop.wait,
+        )
+        return result.completed
+
     def _run(self) -> None:
         while not self._stop.is_set():
             try:
-                with self._db_factory() as db:
-                    process_organize_schedule_tick(db)
+                if not self._process_iteration():
+                    break
             except Exception:
                 LOGGER.exception("organizer scheduler iteration failed")
             self._stop.wait(self._poll_seconds)

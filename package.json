@@ -1,10 +1,10 @@
 {
   "name": "ermao-books",
   "private": true,
-  "version": "0.4.4",
+  "version": "0.4.5",
   "packageManager": "pnpm@9.12.2",
   "engines": {
-    "node": "20.20.2",
+    "node": "22.23.1",
     "pnpm": "9.12.2"
   },
   "scripts": {
@@ -27,6 +27,7 @@
     "fnos:build": "scripts/build-fnos-package.sh",
     "release:validate": "node scripts/validate-release-notes.mjs",
     "test:release-notes": "node --test scripts/validate-release-notes.test.mjs scripts/release-workflow-policy.test.mjs",
+    "test:gateway": "node --test scripts/unified-http-gateway.test.mjs",
     "docker:publish": "scripts/publish-docker-hub.sh"
   },
   "devDependencies": {

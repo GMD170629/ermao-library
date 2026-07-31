@@ -9,8 +9,8 @@ from typing import Any
 from sqlalchemy import Integer, cast, insert, select, update
 from sqlalchemy.orm import Session
 
-from app.models.import_pipeline import ImportAsset, ImportTask
 from app.core.time import now_timestamp_ms
+from app.models.import_pipeline import ImportAsset, ImportTask
 from app.modules.imports.infrastructure.library_queries import (
     add_work_to_shelf,
     complete_download_task_for_source,
@@ -18,6 +18,7 @@ from app.modules.imports.infrastructure.library_queries import (
     get_import_task_by_id,
     get_monitor_folder_shelf_id,
 )
+from app.modules.imports.infrastructure.source_keys import source_key
 from app.services.audio_metadata import collect_audio_bundle_files
 
 
@@ -32,11 +33,16 @@ def find_existing_import_task(
         if allow_terminal_requeue
         else ("PENDING", "PARSING", "COMPLETED", "FAILED")
     )
+    key = source_key(source_path)
     row = (
         db.execute(
             select(ImportTask.__table__)
             .where(
-                ImportTask.source_path == source_path,
+                (ImportTask.source_key == key)
+                | (
+                    ImportTask.source_key.is_(None)
+                    & (ImportTask.source_path == source_path)
+                ),
                 ImportTask.status.in_(statuses),
             )
             .order_by(cast(ImportTask.created_at, Integer).desc(), ImportTask.id.desc())
@@ -269,6 +275,7 @@ def build_import_task_values(
         "requestedTitle": requested_title,
         "requestedAuthor": requested_author,
         "sourcePath": str(source),
+        "sourceKey": source_key(source),
         "taskKind": "AUDIO_BUNDLE" if is_audio_bundle else "FILE",
         "bundleKey": str(source) if is_audio_bundle else None,
         "assetCount": len(bundle_files) if is_audio_bundle else 1,

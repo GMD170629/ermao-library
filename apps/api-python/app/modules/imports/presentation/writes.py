@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Never
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
@@ -17,14 +16,20 @@ from starlette.datastructures import UploadFile
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.imports import (
-    MonitorFolderConfig,
+    cancel_import_scan_job as cancel_import_scan_job_command,
+)
+from app.bootstrap.imports import (
     enqueue_import_task,
     execute_recoverable_import_deletion,
     import_http_store,
-    load_known_import_paths,
-    monitor_folder_config,
     save_uploaded_files,
-    scan_directory_for_imports,
+    schedule_import_scan_job,
+)
+from app.bootstrap.imports import (
+    get_import_scan_job as get_import_scan_job_query,
+)
+from app.bootstrap.imports import (
+    list_import_scan_jobs as list_import_scan_jobs_query,
 )
 from app.bootstrap.system import (
     active_health_run_id,
@@ -38,11 +43,8 @@ from app.core.authorization import authorization_context, can_access_monitor_fol
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
-from app.modules.imports.public import (
-    UploadFileTooLargeError,
-    UploadPublicationError,
-    safe_upload_filename,
-)
+from app.modules.imports.application.errors import AudioTrackLimitExceededError
+from app.modules.imports.application.work_queue_dto import ImportScanJobDTO
 from app.modules.imports.presentation.mappers import (
     import_task_view as _import_task_view,
 )
@@ -69,16 +71,24 @@ from app.modules.imports.presentation.schemas import (
     ImportNotFoundError,
     ImportQueueClearPayload,
     ImportQueueClearResponse,
+    ImportScanJobResponse,
+    ImportScanJobsResponse,
     ImportTaskResponse,
     ImportUploadResponse,
     RescanImportTasksResponse,
 )
+from app.modules.imports.presentation.schemas import (
+    ImportScanJob as ImportScanJobContract,
+)
 from app.modules.imports.public import (
     ImportFileQuarantineError,
     SaveUploadedFilesCommand,
+    UploadFileTooLargeError,
+    UploadPublicationError,
     UploadSource,
     execute_import_checkpoint,
     is_supported_import_filename,
+    safe_upload_filename,
 )
 from app.modules.imports.public import (
     target_directory_from_path as _target_directory_from_path,
@@ -199,8 +209,8 @@ def _visible_import_task_or_none(
     return task
 
 
-def _json_text(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, default=str)
+def _scan_job_contract(job: ImportScanJobDTO) -> ImportScanJobContract:
+    return ImportScanJobContract.model_validate(job, from_attributes=True)
 
 
 def _has_table(db: Session, table: str) -> bool:
@@ -366,7 +376,7 @@ async def import_work(
     )
 
 
-@router.post("/import-tasks/scan-directory")
+@router.post("/import-tasks/scan-directory", status_code=202)
 async def scan_import_directory(
     request: Request,
     db: Session = Depends(get_db),
@@ -403,58 +413,28 @@ async def scan_import_directory(
         _raise_import_error(
             "目录不可用", status_code=404, code="MONITOR_FOLDER_NOT_FOUND"
         )
-    folder_config = monitor_folder_config(
-        folder, preferences=load_import_preferences(db)
+    job, created = schedule_import_scan_job(
+        db,
+        monitor_folder_id=str(folder["id"]),
+        actor_user_id=user.id,
+        root_path=target_path,
+        trigger="MANUAL_DIRECTORY",
     )
-
-    class PersistentQueue:
-        def __init__(self) -> None:
-            self.queued = 0
-
-        def enqueue(self, path: Path, selected_folder: MonitorFolderConfig) -> None:
-            _task, created = enqueue_import_task(
-                db,
-                path,
-                origin="WATCH",
-                original_name=path.name,
-                monitor_folder_id=selected_folder.id,
-                message="从文件管理手动加入导入队列",
-                allow_terminal_requeue=path.is_dir(),
-            )
-            if created:
-                self.queued += 1
-
-    queue = PersistentQueue()
-    summary = scan_directory_for_imports(
-        target_path,
-        folder_config,
-        queue,
-        known_paths=load_known_import_paths(db),
-    )
-    data = {
-        "path": str(target_path),
-        "monitorFolderId": folder_config.id,
-        "monitorFolderName": folder.get("name"),
-        "directoriesScanned": summary.directories_scanned,
-        "filesScanned": summary.files_scanned,
-        "candidatesFound": summary.candidates_found,
-        "queued": queue.queued,
-        "skipped": summary.cached_files + summary.ignored_files,
-        "errors": summary.errors,
-    }
     _record_system_event(
         db,
-        level="warning" if summary.errors else "info",
+        level="info",
         source="import",
         actor_type="admin",
         actor_id=user.id,
         action="scan.directory.requested",
         target_type="monitorFolder",
-        target_id=folder_config.id,
+        target_id=str(folder["id"]),
         message=f"从文件管理识别目录：{target_path}",
-        metadata=data,
+        metadata={"scanJobId": job.id, "created": created, "path": str(target_path)},
     )
-    return ok(data)
+    return ImportDirectoryScanResponse(
+        data={"job": _scan_job_contract(job), "created": created}
+    )
 
 
 @router.delete("/import-tasks")
@@ -671,7 +651,7 @@ async def delete_import_task(
     )
 
 
-@router.post("/import-tasks/rescan")
+@router.post("/import-tasks/rescan", status_code=202)
 def rescan_import_tasks(
     request: Request,
     db: Session = Depends(get_db),
@@ -680,24 +660,31 @@ def rescan_import_tasks(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    requested_at = _now().isoformat()
+    requested_at = _now()
     context = authorization_context(db, user)
-    requested_value = (
-        requested_at
-        if context.is_admin
-        else _json_text(
-            {
-                "requestedAt": requested_at,
-                "monitorFolderIds": list(context.monitor_folder_ids),
-            }
-        )
-    )
     if not context.is_admin and not context.monitor_folder_ids:
         _raise_import_error(
             "没有可重新识别的授权文件夹", status_code=403, code="NO_IMPORT_SCOPE"
         )
-    if _has_table(db, "SystemSetting"):
-        import_http_store.request_monitor_rescan(db, requested_value)
+    allowed_ids = None if context.is_admin else set(context.monitor_folder_ids)
+    jobs: list[ImportScanJobDTO] = []
+    created_count = 0
+    for folder in import_http_store.list_enabled_monitor_folder_rows(db):
+        folder_id = str(folder.get("id") or "")
+        if not folder_id or (allowed_ids is not None and folder_id not in allowed_ids):
+            continue
+        root_path = str(folder.get("rootPath") or "").strip()
+        if not root_path:
+            continue
+        job, created = schedule_import_scan_job(
+            db,
+            monitor_folder_id=folder_id,
+            actor_user_id=user.id,
+            root_path=Path(root_path),
+            trigger="RESCAN",
+        )
+        jobs.append(job)
+        created_count += int(created)
     _record_system_event(
         db,
         level="info",
@@ -708,20 +695,104 @@ def rescan_import_tasks(
         target_type="monitorFolder",
         message="请求重新识别监控文件夹",
         metadata={
-            "requestedAt": requested_at,
-            "monitorFolderIds": None
-            if context.is_admin
-            else list(context.monitor_folder_ids),
+            "requestedAt": requested_at.isoformat(),
+            "scanJobIds": [job.id for job in jobs],
+            "createdCount": created_count,
         },
     )
-    return ok(
-        {
+    return RescanImportTasksResponse(
+        data={
             "requestedAt": requested_at,
-            "monitorFolderIds": None
-            if context.is_admin
-            else list(context.monitor_folder_ids),
+            "jobs": [_scan_job_contract(job) for job in jobs],
         }
     )
+
+
+def _visible_scan_job_or_none(
+    db: Session, user: User, job_id: str
+) -> ImportScanJobDTO | None:
+    job = get_import_scan_job_query(db, job_id)
+    if job is None or not can_access_monitor_folder(db, user, job.monitor_folder_id):
+        return None
+    return job
+
+
+@router.get("/import-scan-jobs")
+def list_import_scan_jobs(
+    request: Request,
+    status: Annotated[str | None, Query()] = None,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    ImportScanJobsResponse,
+    ErrorResponses(ImportBadRequestError),
+]:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    if status is not None and status not in {
+        "PENDING",
+        "RUNNING",
+        "COMPLETED",
+        "FAILED",
+        "CANCELLED",
+    }:
+        _raise_import_error(
+            "扫描任务状态无效", status_code=400, code="INVALID_SCAN_JOB_STATUS"
+        )
+    context = authorization_context(db, user)
+    jobs = list_import_scan_jobs_query(
+        db,
+        monitor_folder_ids=None
+        if context.is_admin
+        else tuple(context.monitor_folder_ids),
+        status=status,
+    )
+    return ImportScanJobsResponse(
+        data={"jobs": [_scan_job_contract(job) for job in jobs]}
+    )
+
+
+@router.get("/import-scan-jobs/{job_id}")
+def get_import_scan_job(
+    job_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[ImportScanJobResponse, ErrorResponses(ImportNotFoundError)]:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    job = _visible_scan_job_or_none(db, user, job_id)
+    if job is None:
+        _raise_import_error(
+            "扫描任务不存在", status_code=404, code="IMPORT_SCAN_JOB_NOT_FOUND"
+        )
+    return ImportScanJobResponse(data={"job": _scan_job_contract(job)})
+
+
+@router.post("/import-scan-jobs/{job_id}/cancel")
+def cancel_import_scan_job(
+    job_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[ImportScanJobResponse, ErrorResponses(ImportNotFoundError)]:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    job = _visible_scan_job_or_none(db, user, job_id)
+    if job is None:
+        _raise_import_error(
+            "扫描任务不存在", status_code=404, code="IMPORT_SCAN_JOB_NOT_FOUND"
+        )
+    cancel_import_scan_job_command(db, job_id)
+    updated = get_import_scan_job_query(db, job_id)
+    if updated is None:
+        _raise_import_error(
+            "扫描任务不存在", status_code=404, code="IMPORT_SCAN_JOB_NOT_FOUND"
+        )
+    return ImportScanJobResponse(data={"job": _scan_job_contract(updated)})
 
 
 @router.post("/import-tasks/{task_id}/retry")
@@ -748,7 +819,7 @@ def retry_import_task(
         source_available = source_path.is_file() or (
             source_path.is_dir() and bool(collect_audio_bundle_files(source_path))
         )
-    except ValueError:
+    except (AudioTrackLimitExceededError, ValueError):
         source_available = False
     if not source_available:
         _raise_import_error("原文件不存在，无法重试", status_code=400)
@@ -765,6 +836,18 @@ def retry_import_task(
         task_id,
         updated_at=updated_at,
     )
+    if task is not None:
+        enqueue_import_task(
+            db,
+            source_path,
+            origin=str(task.get("origin") or "MANUAL"),
+            original_name=str(task.get("originalName") or source_path.name),
+            requested_title=task.get("requestedTitle"),
+            requested_author=task.get("requestedAuthor"),
+            work_id=task.get("workId"),
+            monitor_folder_id=task.get("monitorFolderId"),
+            message="等待后台重试",
+        )
     _record_system_event(
         db,
         level="info",

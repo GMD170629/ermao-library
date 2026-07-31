@@ -12,6 +12,7 @@ from app.modules.imports.application.dto import (
     ImportTaskDTO,
 )
 from app.modules.imports.application.errors import (
+    ImportExecutionError,
     MonitorFolderDeletedDuringImportError,
 )
 from app.modules.imports.application.fail import fail_claimed_import_task
@@ -232,9 +233,10 @@ class FailureRecordingStore:
     def __init__(self) -> None:
         self.failure: dict[str, object] | None = None
         self.event_staged = False
+        self.monitor_folder_available = False
 
     def monitor_folder_exists(self, monitor_folder_id: str) -> bool:
-        return False
+        return self.monitor_folder_available
 
     def fail_claimed(
         self,
@@ -288,6 +290,35 @@ def test_fail_claimed_import_is_terminal_when_monitor_folder_was_deleted() -> No
         "error_summary": "监控文件夹已在导入期间被删除",
         "message": "监控文件夹已被删除，本次导入任务已结束",
         "retryable": False,
+    }
+    assert store.event_staged is True
+    assert unit_of_work.commits == 1
+
+
+def test_fail_claimed_import_preserves_named_execution_failure() -> None:
+    store = FailureRecordingStore()
+    store.monitor_folder_available = True
+    unit_of_work = RecordingUnitOfWork()
+
+    failed = fail_claimed_import_task(
+        store,
+        unit_of_work,
+        _task(),
+        ImportExecutionError(
+            "CONVERTER_UNAVAILABLE",
+            "电子书转换服务不可用",
+            retryable=True,
+        ),
+        now=123,
+        source_probe=ExistingSourceProbe(),
+    )
+
+    assert failed is True
+    assert store.failure == {
+        "error_code": "CONVERTER_UNAVAILABLE",
+        "error_summary": "电子书转换服务不可用",
+        "message": "导入处理失败，任务已结束",
+        "retryable": True,
     }
     assert store.event_staged is True
     assert unit_of_work.commits == 1

@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DEFAULT_READER_PREFERENCES } from '@shuku/reader-core';
-import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, RenderTask, TextLayer } from 'pdfjs-dist';
+import type {
+  PDFDocumentLoadingTask,
+  PDFDocumentProxy,
+  PDFPageProxy,
+  RenderTask,
+  TextLayer
+} from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { PdfReaderAdapter } from './pdf-adapter';
 
 type FakeListener = (event: Event) => void;
@@ -154,7 +160,7 @@ test('PDF resize and preference rerenders keep the committed page visible until 
     TextLayer: FakeTextLayer as unknown as typeof TextLayer,
     AnnotationMode: { DISABLE: 0 },
     PasswordResponses: { INCORRECT_PASSWORD: 2 }
-  } as unknown as typeof import('pdfjs-dist');
+  } as unknown as typeof import('pdfjs-dist/legacy/build/pdf.mjs');
 
   Object.assign(globalThis, {
     ResizeObserver: FakeResizeObserver,

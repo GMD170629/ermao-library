@@ -14,7 +14,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.core.time import now_timestamp_ms
+from app.core.time import now_timestamp_ms, timestamp_ms_to_iso
 from app.models.auth import UserPreference
 from app.models.import_pipeline import DownloadTask, ImportTask, KindleSendTask
 from app.models.organize import MetadataLookupTask
@@ -349,8 +349,10 @@ def _queue_result(db: Session, options: dict[str, Any]) -> tuple[str, str, dict[
         details[key] = int(
             db.scalar(select(func.count()).select_from(model).where(model.status.in_(statuses))) or 0
         )
-    details["oldestPendingAt"] = db.scalar(
-        select(func.min(model.created_at)).where(model.status.in_(pending_values))
+    details["oldestPendingAt"] = timestamp_ms_to_iso(
+        db.scalar(
+            select(func.min(model.created_at)).where(model.status.in_(pending_values))
+        )
     )
     if runtime is None:
         return "error", "health.queue.noHeartbeat", details

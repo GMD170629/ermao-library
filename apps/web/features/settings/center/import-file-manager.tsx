@@ -1,7 +1,7 @@
 'use client';
 
-import { ChevronRight, Folder, FolderOpen, RefreshCw, Search } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ChevronRight, Folder, FolderOpen, RefreshCw, Search, Square } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../../../components/ui/button';
 import { cn } from '../../../components/ui/cn';
 import { useToast } from '../../../components/ui/feedback';
@@ -24,15 +24,23 @@ type DirectoryNode = {
   children: Array<{ name: string; path: string; readable: boolean }>;
 };
 
-type ScanResult = {
-  path: string;
-  monitorFolderName?: string | null;
+type ScanJob = {
+  id: string;
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
   directoriesScanned: number;
   filesScanned: number;
   candidatesFound: number;
-  queued: number;
-  skipped: number;
-  errors: Array<{ path: string; error: string }>;
+  queuedCount: number;
+  skippedCount: number;
+  errorCount: number;
+  errorSamples: Array<{
+    path: string;
+    error: string;
+    code?: string | null;
+    limit?: number | null;
+    observedCount?: number | null;
+  }>;
+  restartCount: number;
 };
 
 function normalizePath(value: string) {
@@ -55,8 +63,11 @@ export function ImportFileManager() {
   const [loadingPath, setLoadingPath] = useState('');
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState('');
-  const [result, setResult] = useState<ScanResult | null>(null);
+  const [result, setResult] = useState<ScanJob | null>(null);
+  const terminalNotifications = useRef(new Set<string>());
   const toast = useToast();
+  const activeScanId = result?.id;
+  const activeScanStatus = result?.status;
 
   const loadNode = useCallback(async (path?: string) => {
     const key = path || '__root__';
@@ -100,6 +111,42 @@ export function ImportFileManager() {
     return () => { active = false; };
   }, [loadNode]);
 
+  useEffect(() => {
+    if (!activeScanId || !activeScanStatus || !['PENDING', 'RUNNING'].includes(activeScanStatus)) return;
+    const controller = new AbortController();
+    const timer = window.setInterval(() => {
+      void (async () => {
+        try {
+          const response = await fetch(`/api/import-scan-jobs/${encodeURIComponent(activeScanId)}`, {
+            signal: controller.signal
+          });
+          const payload = await response.json() as { ok: boolean; data?: { job: ScanJob }; error?: { message: string } };
+          if (!response.ok || !payload.ok || !payload.data?.job) throw new Error(payload.error?.message ?? i18nAttribute('读取扫描进度失败'));
+          setResult(payload.data.job);
+        } catch (reason) {
+          if (controller.signal.aborted) return;
+          setError(reason instanceof Error ? reason.message : i18nAttribute('读取扫描进度失败'));
+        }
+      })();
+    }, 1000);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [activeScanId, activeScanStatus, i18nAttribute]);
+
+  useEffect(() => {
+    if (!result || ['PENDING', 'RUNNING'].includes(result.status)) return;
+    setScanning(false);
+    if (terminalNotifications.current.has(result.id)) return;
+    terminalNotifications.current.add(result.id);
+    if (result.status === 'COMPLETED') {
+      toast.success(i18nAttribute('目录扫描完成'), i18nAttribute('新增 {value0} 条导入任务，跳过 {value1} 项', { value0: result.queuedCount, value1: result.skippedCount }));
+    } else if (result.status === 'FAILED') {
+      toast.error(i18nAttribute('识别目录失败'), i18nAttribute('扫描任务执行失败，请查看错误样本'));
+    }
+  }, [i18nAttribute, result, toast]);
+
   const selectedMonitorFolder = useMemo(() => folders
     .filter((folder) => folder.enabled && selectedPath && isInside(folder.rootPath, selectedPath))
     .sort((left, right) => right.rootPath.length - left.rootPath.length)[0] ?? null, [folders, selectedPath]);
@@ -118,6 +165,7 @@ export function ImportFileManager() {
 
   async function scanSelectedDirectory() {
     if (!selectedPath || !selectedMonitorFolder) return;
+    let submitted = false;
     setScanning(true);
     setError('');
     setResult(null);
@@ -127,16 +175,37 @@ export function ImportFileManager() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: selectedPath })
       });
-      const payload = await response.json() as { ok: boolean; data?: ScanResult; error?: { message: string } };
-      if (!response.ok || !payload.ok || !payload.data) throw new Error(payload.error?.message ?? '识别目录失败');
-      setResult(payload.data);
-      toast.success('目录扫描完成', `新增 ${payload.data.queued} 条导入任务，跳过 ${payload.data.skipped} 项`);
+      const payload = await response.json() as { ok: boolean; data?: { job: ScanJob; created: boolean }; error?: { message: string } };
+      if (!response.ok || !payload.ok || !payload.data?.job) throw new Error(payload.error?.message ?? '识别目录失败');
+      setResult(payload.data.job);
+      submitted = true;
+      toast.success(i18nAttribute(payload.data.created ? '扫描任务已提交' : '扫描任务已在队列中'));
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : '识别目录失败';
       setError(message);
       toast.error('识别目录失败', message);
     } finally {
+      if (!submitted) {
+        setScanning(false);
+      }
+    }
+  }
+
+  async function cancelScan() {
+    if (!result || !['PENDING', 'RUNNING'].includes(result.status)) return;
+    try {
+      const response = await fetch(`/api/import-scan-jobs/${encodeURIComponent(result.id)}/cancel`, {
+        method: 'POST'
+      });
+      const payload = await response.json() as { ok: boolean; data?: { job: ScanJob }; error?: { message: string } };
+      if (!response.ok || !payload.ok || !payload.data?.job) throw new Error(payload.error?.message ?? i18nAttribute('取消扫描失败'));
+      setResult(payload.data.job);
       setScanning(false);
+      toast.success(i18nAttribute('扫描任务已取消'));
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : i18nAttribute('取消扫描失败');
+      setError(message);
+      toast.error(i18nAttribute('取消扫描失败'), message);
     }
   }
 
@@ -173,13 +242,31 @@ export function ImportFileManager() {
             <div className="mt-4 space-y-2 border-t border-[#E9E5DF] pt-4 text-sm text-[#5F5953]">
               <div><I18nText>扫描目录：</I18nText>{result.directoriesScanned}</div>
               <div><I18nText>检查文件：</I18nText>{result.filesScanned}</div>
-              <div><I18nText>加入队列：</I18nText>{result.queued}</div>
-              <div><I18nText>按规则跳过：</I18nText>{result.skipped}</div>
-              {result.errors.length > 0 ? <div className="text-red-600"><I18nText>读取失败：</I18nText>{result.errors.length}</div> : null}
+              <div><I18nText>发现候选：</I18nText>{result.candidatesFound}</div>
+              <div><I18nText>加入队列：</I18nText>{result.queuedCount}</div>
+              <div><I18nText>按规则跳过：</I18nText>{result.skippedCount}</div>
+              <div><I18nText>重启次数：</I18nText>{result.restartCount}</div>
+              {result.errorCount > 0 ? <div className="text-red-600"><I18nText>读取失败：</I18nText>{result.errorCount}</div> : null}
+              {result.errorSamples.slice(0, 5).map((sample) => (
+                <div key={`${sample.code ?? 'scan'}:${sample.path}`} className="rounded-lg bg-red-50 px-3 py-2 text-xs leading-5 text-red-700">
+                  <div className="break-all font-medium">{sample.path}</div>
+                  <div>
+                    {sample.code === 'AUDIO_TRACK_LIMIT_EXCEEDED'
+                      ? i18nAttribute('有声书音轨超过 {value0} 条（检测到 {value1} 条），请按卷或子目录拆分后重新识别。', {
+                        value0: sample.limit ?? 10_000,
+                        value1: sample.observedCount ?? 10_001
+                      })
+                      : sample.error}
+                  </div>
+                </div>
+              ))}
             </div>
           ) : null}
           {error ? <div className="mt-4 rounded-xl bg-red-50 px-3 py-2 text-xs leading-5 text-red-700">{error}</div> : null}
-          <Button className="mt-auto w-full" icon={Search} disabled={!selectedMonitorFolder || !selectedPath} loading={scanning} loadingText={i18nAttribute("识别中")} onClick={() => void scanSelectedDirectory()}><I18nText>识别此目录</I18nText></Button>
+          <div className="mt-auto space-y-2">
+            {result && ['PENDING', 'RUNNING'].includes(result.status) ? <Button className="w-full" variant="secondary" icon={Square} onClick={() => void cancelScan()} aria-label={i18nAttribute("取消扫描任务")}><I18nText>取消扫描</I18nText></Button> : null}
+            <Button className="w-full" icon={Search} disabled={!selectedMonitorFolder || !selectedPath} loading={scanning} loadingText={i18nAttribute("识别中")} onClick={() => void scanSelectedDirectory()}><I18nText>识别此目录</I18nText></Button>
+          </div>
         </aside>
       </div>
     </div>

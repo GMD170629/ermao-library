@@ -63,7 +63,9 @@ const statusOptions = [
 const pageSizeOptions = [
   { value: '20', label: '20 本/页' },
   { value: '50', label: '50 本/页' },
-  { value: '100', label: '100 本/页' }
+  { value: '100', label: '100 本/页' },
+  { value: '500', label: '500 本/页' },
+  { value: 'all', label: '全部显示' }
 ];
 
 const validStatuses = new Set(statusOptions.map((option) => option.value));
@@ -151,7 +153,11 @@ export function LibraryPage() {
     params.set('sortDirection', isSeriesFacet ? 'asc' : isAuthorFacet ? 'desc' : sortDirection);
     return params.toString();
   }, [facetIdFilter, facetKindFilter, formatFilter, isAuthorFacet, isSeriesFacet, search, seriesNameFilter, smartFilterQuery, sort, sortDirection, statusFilter]);
-  const requestPageSize = view === 'grid' ? String(BROWSE_LIBRARY_PAGE_SIZE) : pageSize;
+  const requestPageSize = view === 'grid'
+    ? String(BROWSE_LIBRARY_PAGE_SIZE)
+    : pageSize === 'all'
+    ? '0'
+    : pageSize;
   const requestScope = `${queryBase}&pageSize=${requestPageSize}&view=${view}`;
 
   useEffect(() => {

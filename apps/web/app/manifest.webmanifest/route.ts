@@ -4,8 +4,8 @@ import { buildWebManifest } from '../../lib/pwa/manifest';
 
 export const dynamic = 'force-dynamic';
 
-export function GET() {
-  const locale = getRequestLocale();
+export async function GET() {
+  const locale = await getRequestLocale();
   return NextResponse.json(buildWebManifest(locale), {
     headers: {
       'Cache-Control': 'private, no-store',
