@@ -3,7 +3,7 @@
     "name": "书库星舰",
     "slug": "shuku-starship",
     "scheme": "shuku-starship",
-    "version": "0.4.4",
+    "version": "0.4.5",
     "platforms": [
       "ios",
       "android"

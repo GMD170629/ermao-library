@@ -113,6 +113,54 @@ wheels = [
 ]
 
 [[package]]
+name = "ermao-books-api-python"
+version = "0.4.5"
+source = { editable = "." }
+dependencies = [
+    { name = "alembic" },
+    { name = "ebooklib" },
+    { name = "email-validator" },
+    { name = "fastapi" },
+    { name = "lxml" },
+    { name = "mutagen" },
+    { name = "pillow" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pypdfium2" },
+    { name = "python-multipart" },
+    { name = "sqlalchemy" },
+    { name = "uvicorn", extra = ["standard"] },
+    { name = "watchdog" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "httpx" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "alembic", specifier = ">=1.13.0" },
+    { name = "ebooklib", specifier = ">=0.18" },
+    { name = "email-validator", specifier = ">=2.2.0" },
+    { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0" },
+    { name = "lxml", specifier = ">=5.2.0" },
+    { name = "mutagen", specifier = ">=1.47.0" },
+    { name = "pillow", specifier = ">=11.3.0" },
+    { name = "pydantic", specifier = ">=2.8.0" },
+    { name = "pydantic-settings", specifier = ">=2.4.0" },
+    { name = "pypdfium2", specifier = ">=4.30.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.0" },
+    { name = "python-multipart", specifier = ">=0.0.20" },
+    { name = "sqlalchemy", specifier = ">=2.0.30" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
+    { name = "watchdog", specifier = ">=4.0.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "fastapi"
 version = "0.136.3"
 source = { registry = "https://pypi.org/simple" }
@@ -483,54 +531,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/45/91/47a6e1c42d9ee337c4839208f30d9f09caa9f720ec7582917b264defc875/pyyaml-6.0.3-cp311-cp311-win32.whl", hash = "sha256:8098f252adfa6c80ab48096053f512f2321f0b998f98150cea9bd23d83e1467b", size = 142543, upload-time = "2025-09-25T21:32:08.95Z" },
     { url = "https://files.pythonhosted.org/packages/da/e3/ea007450a105ae919a72393cb06f122f288ef60bba2dc64b26e2646fa315/pyyaml-6.0.3-cp311-cp311-win_amd64.whl", hash = "sha256:9f3bfb4965eb874431221a3ff3fdcddc7e74e3b07799e0e84ca4a0f867d449bf", size = 158763, upload-time = "2025-09-25T21:32:09.96Z" },
 ]
-
-[[package]]
-name = "ermao-books-api-python"
-version = "0.4.4"
-source = { editable = "." }
-dependencies = [
-    { name = "alembic" },
-    { name = "ebooklib" },
-    { name = "email-validator" },
-    { name = "fastapi" },
-    { name = "lxml" },
-    { name = "mutagen" },
-    { name = "pillow" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pypdfium2" },
-    { name = "python-multipart" },
-    { name = "sqlalchemy" },
-    { name = "uvicorn", extra = ["standard"] },
-    { name = "watchdog" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "httpx" },
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "alembic", specifier = ">=1.13.0" },
-    { name = "ebooklib", specifier = ">=0.18" },
-    { name = "email-validator", specifier = ">=2.2.0" },
-    { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0" },
-    { name = "lxml", specifier = ">=5.2.0" },
-    { name = "mutagen", specifier = ">=1.47.0" },
-    { name = "pillow", specifier = ">=11.3.0" },
-    { name = "pydantic", specifier = ">=2.8.0" },
-    { name = "pydantic-settings", specifier = ">=2.4.0" },
-    { name = "pypdfium2", specifier = ">=4.30.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.0" },
-    { name = "python-multipart", specifier = ">=0.0.20" },
-    { name = "sqlalchemy", specifier = ">=2.0.30" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
-    { name = "watchdog", specifier = ">=4.0.0" },
-]
-provides-extras = ["dev"]
 
 [[package]]
 name = "six"

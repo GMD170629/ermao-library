@@ -110,6 +110,8 @@ test('application version sources and release tags must exactly match', () => {
   const versions = {
     root: '1.2.3',
     web: '1.2.3',
+    mobile: '1.2.3',
+    mobileRuntime: '1.2.3',
     python: '1.2.3',
     runtime: '1.2.3',
     uvLock: '1.2.3'
