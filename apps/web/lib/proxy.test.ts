@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { NextRequest } from 'next/server';
-import { proxy } from '../proxy';
+import { config, proxy } from '../proxy';
 
 function createRequest(path: string, session?: string): NextRequest {
   const headers = session ? { cookie: `shuku_session=${session}` } : undefined;
@@ -39,4 +39,10 @@ test('proxy allows protected routes with a session', () => {
 
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('x-middleware-next'), '1');
+});
+
+test('large import uploads bypass proxy request-body buffering', () => {
+  assert.deepEqual(config.matcher, [
+    '/((?!api/works/import(?:/|$)|.*\\.).*)'
+  ]);
 });

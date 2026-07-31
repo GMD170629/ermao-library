@@ -449,7 +449,7 @@ def test_bootstrap_preserves_valid_fields_in_partially_invalid_stored_preference
     assert preferences["epub"]["pageTurnAnimation"] == "slide"
     assert preferences["comic"]["mode"] == "double"
     assert preferences["comic"]["zoom"] == 1.0
-    assert preferences["pdf"] == {"zoom": 1.0, "fit": "width"}
+    assert preferences["pdf"] == {"zoom": 1.0, "fit": "page"}
 
     stored = db_session.execute(
         text("SELECT schemaVersion, preferences, updatedAt FROM ReaderBookPreference WHERE id = :preference_id"),

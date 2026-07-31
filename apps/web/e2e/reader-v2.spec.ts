@@ -11,7 +11,7 @@ const defaultPreferences = {
   appearance: { theme: 'warm' },
   epub: { fontSize: 18, lineHeight: 1.9, pageWidth: 1350, fontFamily: 'pingfang', spreadMode: 'single', pageTurnAnimation: 'slide', flow: 'paginated' },
   comic: { direction: 'ltr', mode: 'single', pageTurnAnimation: 'slide', imageFit: 'width', imageVariant: 'original', zoom: 1 },
-  pdf: { zoom: 1, fit: 'width' }
+  pdf: { zoom: 1, fit: 'page' }
 };
 
 function bootstrap(kind: 'epub' | 'comic' | 'pdf', epubUnitCount = 2) {

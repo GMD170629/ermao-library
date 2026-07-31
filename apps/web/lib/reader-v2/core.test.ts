@@ -59,9 +59,18 @@ test('normalizes a complete V3 preference snapshot from legacy and invalid input
       imageVariant: 'data-saver',
       zoom: 1.6
     },
-    pdf: { zoom: 1.6, fit: 'width' }
+    pdf: { zoom: 1.6, fit: 'page' }
   });
   assert.equal(DEFAULT_READER_PREFERENCES.appearance.theme, 'warm');
+  assert.equal(DEFAULT_READER_PREFERENCES.pdf.fit, 'page');
+});
+
+test('preserves an explicitly saved PDF width fit preference', () => {
+  const preferences = normalizeReaderPreferences({
+    pdf: { fit: 'width' }
+  });
+
+  assert.equal(preferences.pdf.fit, 'width');
 });
 
 test('migrates V2 kindle animation and missing paging fields to V3 defaults', () => {

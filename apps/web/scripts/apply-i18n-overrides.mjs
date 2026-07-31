@@ -76,6 +76,8 @@ const exactOverrides = {
   '查看详情': 'View Details',
   '查看全部': 'View All',
   '管理图书': 'Manage Books',
+  '500 本/页': '500 per page',
+  '全部显示': 'Show all',
   '返回书架': 'Back to Shelves',
   '正在加载更多图书...': 'Loading more books...',
   '已加载 {value0} / {value1} 本': 'Loaded {value0} of {value1} books',

@@ -39,7 +39,11 @@ from app.modules.library.application.filter_ast import (
     InvalidFilterExpression,
     parse_filter_expression,
 )
-from app.modules.library.application.work_list import WorkListQuery, WorkListResult
+from app.modules.library.application.work_list import (
+    WorkListQuery,
+    WorkListResult,
+    resolve_page_size,
+)
 from app.modules.library.infrastructure.filter_query import (
     compile_filter_expression,
     inferred_media_kind,
@@ -499,8 +503,8 @@ def list_works(
     query: WorkListQuery,
 ) -> WorkListResult:
     page = max(1, query.page)
-    page_size = min(100, max(1, query.page_size))
     if not _has_table(db, "LibraryWork"):
+        page_size = resolve_page_size(query.requested_page_size, total=0)
         return WorkListResult(works=[], total=0, page=page, page_size=page_size)
 
     context = authorization_context(db, user)
@@ -514,6 +518,7 @@ def list_works(
         )
         or 0
     )
+    page_size = resolve_page_size(query.requested_page_size, total)
     direction = _sort_direction(query)
 
     if query.sort == "progress" and _has_table(db, "LibraryReadingProgress"):

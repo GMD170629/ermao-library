@@ -22,7 +22,7 @@ export const DEFAULT_READER_PREFERENCES: Readonly<ReaderPreferences> = Object.fr
   }),
   pdf: Object.freeze({
     zoom: 1,
-    fit: 'width'
+    fit: 'page'
   })
 });
 

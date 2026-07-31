@@ -1541,7 +1541,18 @@ def test_works_recent_read_sort_uses_latest_user_progress_across_pages(
     ]
 
     maximum_page = client.get("/api/works", params={"pageSize": 999}).json()
-    assert maximum_page["data"]["pageSize"] == 100
+    assert maximum_page["data"]["pageSize"] == 500
+
+    all_books = client.get(
+        "/api/works", params={"sort": "recent_read", "pageSize": 0}
+    ).json()
+    assert all_books["data"]["pageSize"] == 3
+    assert all_books["data"]["totalPages"] == 1
+    assert [book["id"] for book in all_books["data"]["books"]] == [
+        "work-new",
+        "work-old",
+        "work-unread",
+    ]
 
     def reject_detail_serialization(*_args, **_kwargs):
         raise AssertionError("summary views must not use the detail serializer")
