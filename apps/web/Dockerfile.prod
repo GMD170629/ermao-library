@@ -35,6 +35,7 @@ RUN apt-get update \
   && python --version
 
 COPY --from=builder /app/scripts/start-unified-app.sh ./scripts/start-unified-app.sh
+COPY --from=builder /app/scripts/unified-http-gateway.mjs ./scripts/unified-http-gateway.mjs
 COPY --from=builder /app/apps/web/.next/standalone ./
 COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder /app/apps/web/public ./apps/web/public
