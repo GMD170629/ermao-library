@@ -65,6 +65,8 @@ def friendly_import_error(
         return "导入工作进程意外中断，本次任务已经结束，可以稍后重试。"
     if code == "CONVERTER_UNAVAILABLE":
         return "转换服务暂时不可用，请检查 libmobi 是否已安装后重试。"
+    if code == "AUDIO_TRACK_LIMIT_EXCEEDED":
+        return "有声书音轨超过 10000 条，请按卷或子目录拆分后重新导入。"
     if code == "DRM_PROTECTED":
         return "文件可能受 DRM 保护，无法自动转换。原文件已保留。"
     if code == "TEXT_ENCODING_UNCERTAIN":
@@ -163,6 +165,7 @@ def import_task_view(
         }
     )
     view.pop("duplicate", None)
+    view.pop("sourceKey", None)
     return view
 
 

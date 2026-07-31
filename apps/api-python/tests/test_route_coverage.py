@@ -6,7 +6,6 @@ from fastapi.routing import APIRoute
 
 from app.main import create_app
 
-
 HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
 
 
@@ -21,13 +20,21 @@ def test_python_api_covers_next_api_route_contracts():
     next_api_root = repo_root / "apps" / "web" / "app" / "api"
     expected: set[tuple[str, str]] = set()
 
-    assert not next_api_root.exists(), "Next.js API routes should not contain backend logic; /api is served by Python."
+    assert not next_api_root.exists(), (
+        "Next.js API routes should not contain backend logic; /api is served by Python."
+    )
 
     for route_file in next_api_root.rglob("route.ts"):
         source = route_file.read_text(encoding="utf-8")
-        methods = set(re.findall(r"export\s+async\s+function\s+(GET|POST|PUT|PATCH|DELETE)\b", source))
+        methods = set(
+            re.findall(
+                r"export\s+async\s+function\s+(GET|POST|PUT|PATCH|DELETE)\b", source
+            )
+        )
         relative = route_file.parent.relative_to(next_api_root)
-        route_path = "/api" if str(relative) == "." else "/api/" + "/".join(relative.parts)
+        route_path = (
+            "/api" if str(relative) == "." else "/api/" + "/".join(relative.parts)
+        )
         for method in methods:
             expected.add((method, _normalize(route_path)))
 
@@ -51,7 +58,7 @@ def test_registered_api_endpoints_are_owned_by_capability_presentations() -> Non
         if isinstance(route, APIRoute) and route.path.startswith("/api")
     ]
 
-    assert len(api_routes) == 180
+    assert len(api_routes) == 183
     legacy = [
         (next(iter(route.methods or ())), route.path, route.endpoint.__module__)
         for route in api_routes
@@ -72,8 +79,7 @@ def test_migrated_endpoint_sources_match_capability_ownership() -> None:
     counts = Counter(
         route.endpoint.__module__
         for route in app.routes
-        if isinstance(route, APIRoute)
-        and route.endpoint.__module__ in migrated_modules
+        if isinstance(route, APIRoute) and route.endpoint.__module__ in migrated_modules
     )
 
     assert counts == migrated_modules
@@ -90,5 +96,5 @@ def test_registered_api_method_path_pairs_are_unique() -> None:
         if method in HTTP_METHODS
     ]
 
-    assert len(pairs) == 179
+    assert len(pairs) == 182
     assert len(pairs) == len(set(pairs))

@@ -11,26 +11,25 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-from app.services.book_identity import (
-    UNKNOWN_AUTHOR,
-    normalize_identity_part,
-    recognize_book_identity_with_regex,
-)
 from app.modules.imports.application.audio_types import (
     DISC_DIRECTORY_PATTERN,
+    MAX_AUDIO_BUNDLE_TRACKS,
     MAX_AUDIO_CHAPTERS,
-    SUPPORTED_AUDIO_EXTS,
     AudioBundleStructure,
     AudioChapterMetadata,
     AudioFileMetadata,
     AudioVolumeDirectory,
     is_supported_audio_file,
 )
-
+from app.modules.imports.application.errors import AudioTrackLimitExceededError
+from app.services.book_identity import (
+    UNKNOWN_AUTHOR,
+    normalize_identity_part,
+    recognize_book_identity_with_regex,
+)
 
 SUPPORTED_AUDIO_CODECS = {"aac", "mp3"}
 AAC_RFC6381_OBJECT_TYPES = {2, 5, 29}
-MAX_AUDIO_BUNDLE_TRACKS = 1000
 MAX_EMBEDDED_COVER_BYTES = 20 * 1024 * 1024
 MAX_FFPROBE_STDOUT_BYTES = 16 * 1024 * 1024
 MAX_FFPROBE_STDERR_BYTES = 256 * 1024
@@ -73,11 +72,52 @@ def _directory_identity(path: Path) -> tuple[str, str | None, float | None]:
     return identity.title.strip() or path.name, author, identity.volume_index
 
 
-def _directory_audio_files(path: Path) -> list[Path]:
-    files = [item.resolve() for item in path.iterdir() if item.is_file() and is_supported_audio_file(item)]
-    for child in path.iterdir():
-        if child.is_dir() and DISC_DIRECTORY_PATTERN.match(child.name.strip()):
-            files.extend(item.resolve() for item in child.iterdir() if item.is_file() and is_supported_audio_file(item))
+class _AudioTrackCounter:
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.count = 0
+
+    def add(self, path: Path) -> Path:
+        self.count += 1
+        if self.count > MAX_AUDIO_BUNDLE_TRACKS:
+            raise AudioTrackLimitExceededError(
+                path=str(self.root),
+                limit=MAX_AUDIO_BUNDLE_TRACKS,
+                observed_count=self.count,
+            )
+        return path.resolve()
+
+
+def _iter_directory_entries(path: Path):
+    iterator = os.scandir(path)
+    try:
+        yield from iterator
+    finally:
+        close = getattr(iterator, "close", None)
+        if callable(close):
+            close()
+
+
+def _direct_audio_files(path: Path, counter: _AudioTrackCounter) -> list[Path]:
+    return [
+        counter.add(Path(entry.path))
+        for entry in _iter_directory_entries(path)
+        if entry.is_file(follow_symlinks=False)
+        and is_supported_audio_file(entry.name)
+    ]
+
+
+def _directory_audio_files(
+    path: Path,
+    counter: _AudioTrackCounter,
+) -> list[Path]:
+    files = _direct_audio_files(path, counter)
+    for entry in _iter_directory_entries(path):
+        if not entry.is_dir(follow_symlinks=False) or not DISC_DIRECTORY_PATTERN.match(
+            entry.name.strip()
+        ):
+            continue
+        files.extend(_direct_audio_files(Path(entry.path), counter))
     return sorted(dict.fromkeys(files), key=_natural_audio_key)
 
 
@@ -102,20 +142,24 @@ def inspect_audio_bundle(path: str | Path) -> AudioBundleStructure | None:
     if not root.is_dir():
         return None
 
+    counter = _AudioTrackCounter(root)
     root_title, root_author, _root_volume_index = _directory_identity(root)
-    direct_files = _directory_audio_files(root)
+    direct_files = _directory_audio_files(root, counter)
     root_key = normalize_identity_part(root_title)
     matched_volumes: list[AudioVolumeDirectory] = []
-    for child in sorted((item for item in root.iterdir() if item.is_dir()), key=lambda item: _natural_audio_key(item)):
-        if DISC_DIRECTORY_PATTERN.match(child.name.strip()):
+    for entry in _iter_directory_entries(root):
+        if not entry.is_dir(follow_symlinks=False):
             continue
-        child_files = _directory_audio_files(child)
-        if not child_files:
+        child = Path(entry.path)
+        if DISC_DIRECTORY_PATTERN.match(entry.name.strip()):
             continue
         child_title, child_author, volume_index = _directory_identity(child)
         child_key = normalize_identity_part(child_title)
         title_contains_parent = bool(root_key and child_key and root_key != child_key and root_key in child_key)
         if volume_index is None and not title_contains_parent:
+            continue
+        child_files = _directory_audio_files(child, counter)
+        if not child_files:
             continue
         matched_volumes.append(
             AudioVolumeDirectory(
@@ -151,10 +195,12 @@ def inspect_audio_bundle(path: str | Path) -> AudioBundleStructure | None:
     else:
         return None
 
-    result = AudioBundleStructure(root=root, title=root_title, author=root_author, volumes=volumes)
-    if len(result.files) > MAX_AUDIO_BUNDLE_TRACKS:
-        raise ValueError(f"有声书分轨超过 {MAX_AUDIO_BUNDLE_TRACKS} 个，请拆分后导入")
-    return result
+    return AudioBundleStructure(
+        root=root,
+        title=root_title,
+        author=root_author,
+        volumes=volumes,
+    )
 
 
 def collect_audio_bundle_files(path: str | Path) -> list[Path]:
@@ -169,13 +215,27 @@ def audio_bundle_root(path: str | Path, monitor_root: str | Path | None = None) 
     parent = source.parent
     if DISC_DIRECTORY_PATTERN.match(parent.name.strip()):
         parent = parent.parent
+    configured_root = (
+        Path(monitor_root).expanduser().resolve() if monitor_root is not None else None
+    )
+    if configured_root is not None and parent == configured_root:
+        return parent
     grandparent = parent.parent
-    if grandparent != parent:
-        try:
-            structure = inspect_audio_bundle(grandparent)
-        except (OSError, ValueError):
-            structure = None
-        if structure and any(volume.path == parent for volume in structure.volumes):
+    if grandparent != parent and (
+        configured_root is None
+        or grandparent == configured_root
+        or configured_root in grandparent.parents
+    ):
+        root_title, _root_author, _root_volume = _directory_identity(grandparent)
+        child_title, _child_author, child_volume = _directory_identity(parent)
+        root_key = normalize_identity_part(root_title)
+        child_key = normalize_identity_part(child_title)
+        if child_volume is not None or bool(
+            root_key
+            and child_key
+            and root_key != child_key
+            and root_key in child_key
+        ):
             return grandparent
     return parent
 

@@ -30,7 +30,9 @@ EXPECTED_TABLES = {
     "ExternalMetadataCache",
     "ImportLog",
     "ImportAsset",
+    "ImportScanJob",
     "ImportTask",
+    "ImportWorkItem",
     "KindleSendTask",
     "LibraryEdition",
     "LibraryEditionFacet",
@@ -190,7 +192,7 @@ def test_empty_storage_bootstraps_complete_sqlite_database(tmp_path) -> None:
                     "WHERE `kind` = 'metadata' ORDER BY `providerType`"
                 )
             ).all()
-            assert sources == [("ai", 0), ("bangumi", 0), ("douban", 0)]
+            assert sources == [("ai", 0), ("bangumi", 1), ("douban", 1)]
             assert (
                 connection.exec_driver_sql("PRAGMA foreign_key_check").first() is None
             )
@@ -269,7 +271,7 @@ def test_seed_is_insert_only_and_safe_across_concurrent_sessions(tmp_path) -> No
             )
             connection.execute(
                 text(
-                    "UPDATE `Source` SET `name` = '自定义豆瓣', `enabled` = 1 "
+                    "UPDATE `Source` SET `name` = '自定义豆瓣', `enabled` = 0 "
                     "WHERE `providerType` = 'douban'"
                 )
             )
@@ -294,7 +296,7 @@ def test_seed_is_insert_only_and_safe_across_concurrent_sessions(tmp_path) -> No
                 text(
                     "SELECT `name`, `enabled` FROM `Source` WHERE `providerType` = 'douban'"
                 )
-            ).one() == ("自定义豆瓣", 1)
+            ).one() == ("自定义豆瓣", 0)
             assert (
                 connection.execute(
                     text("SELECT COUNT(*) FROM `SystemSetting`")

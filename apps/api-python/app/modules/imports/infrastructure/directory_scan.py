@@ -5,9 +5,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from app.modules.imports.application.audio_types import audio_episode_number
+from app.modules.imports.application.errors import AudioTrackLimitExceededError
 from app.modules.imports.application.file_types import is_supported_import_filename
 from app.services.audio_metadata import (
     collect_audio_bundle_files,
@@ -15,8 +16,8 @@ from app.services.audio_metadata import (
 )
 from app.services.import_preferences import (
     DEFAULT_STABILITY_CHECK_ENABLED,
-    ImportPreferences,
     SUPPORTED_IMPORT_EXTENSIONS,
+    ImportPreferences,
     matches_ignore_patterns,
 )
 
@@ -40,6 +41,25 @@ class ImportQueueProtocol(Protocol):
     def enqueue(self, path: Path, folder: MonitorFolderConfig) -> None: ...
 
 
+ImportIgnoreReason = Literal[
+    "temporary_upload",
+    "hidden_path",
+    "global_ignore_pattern",
+    "monitor_folder_ignore_pattern",
+    "unsupported_file_type",
+    "extension_not_allowed",
+    "below_minimum_size",
+    "audio_track_limit_exceeded",
+]
+
+
+@dataclass(frozen=True)
+class IgnoredImportSource:
+    path: Path
+    reason: ImportIgnoreReason
+    file_count: int = 1
+
+
 @dataclass
 class ScanSummary:
     directories_scanned: int = 0
@@ -47,7 +67,8 @@ class ScanSummary:
     candidates_found: int = 0
     cached_files: int = 0
     ignored_files: int = 0
-    errors: list[dict[str, str]] = field(default_factory=list)
+    ignored_sources: list[IgnoredImportSource] = field(default_factory=list)
+    errors: list[dict[str, object]] = field(default_factory=list)
 
 
 def monitor_folder_config(
@@ -74,38 +95,51 @@ def monitor_folder_config(
     )
 
 
-def should_ignore_path(path: Path, folder: MonitorFolderConfig) -> bool:
+def path_ignore_reason(
+    path: Path,
+    folder: MonitorFolderConfig,
+) -> ImportIgnoreReason | None:
     if any(
         part.endswith(".part") or part.startswith(".upload-") for part in path.parts
     ):
-        return True
+        return "temporary_upload"
     if folder.ignore_hidden and any(
         part.startswith(".") and len(part) > 1 for part in path.parts
     ):
-        return True
-    return matches_ignore_patterns(
-        path,
-        folder.global_ignore_patterns,
-    ) or matches_ignore_patterns(path, folder.ignore_patterns)
+        return "hidden_path"
+    if matches_ignore_patterns(path, folder.global_ignore_patterns):
+        return "global_ignore_pattern"
+    if matches_ignore_patterns(path, folder.ignore_patterns):
+        return "monitor_folder_ignore_pattern"
+    return None
+
+
+def should_ignore_path(path: Path, folder: MonitorFolderConfig) -> bool:
+    return path_ignore_reason(path, folder) is not None
+
+
+def import_file_ignore_reason(
+    path: Path,
+    folder: MonitorFolderConfig,
+) -> ImportIgnoreReason | None:
+    reason = path_ignore_reason(path, folder)
+    if reason is not None:
+        return reason
+    if not (
+        is_supported_import_filename(path)
+        or (path.is_dir() and bool(collect_audio_bundle_files(path)))
+    ):
+        return "unsupported_file_type"
+    if path.suffix and path.suffix.lower() not in folder.allowed_extensions:
+        return "extension_not_allowed"
+    return None
 
 
 def should_ignore_file(path: Path, folder: MonitorFolderConfig) -> bool:
-    if should_ignore_path(path, folder):
-        return True
-    if not (
-        is_supported_import_filename(path)
-        or path.is_dir()
-        and bool(collect_audio_bundle_files(path))
-    ):
-        return True
-    if path.suffix and path.suffix.lower() not in folder.allowed_extensions:
-        return True
-    return False
+    return import_file_ignore_reason(path, folder) is not None
 
 
-def import_source_meets_minimum_size(
-    path: Path, min_file_size_bytes: int
-) -> bool:
+def import_source_meets_minimum_size(path: Path, min_file_size_bytes: int) -> bool:
     try:
         if path.is_file():
             return path.stat().st_size >= min_file_size_bytes
@@ -113,18 +147,24 @@ def import_source_meets_minimum_size(
         return bool(files) and all(
             item.stat().st_size >= min_file_size_bytes for item in files
         )
-    except (OSError, ValueError):
+    except (AudioTrackLimitExceededError, OSError, ValueError):
         return False
 
 
-def should_ignore_import_source(
-    path: Path, folder: MonitorFolderConfig
-) -> bool:
-    if should_ignore_file(path, folder):
-        return True
-    return not import_source_meets_minimum_size(
-        path, folder.min_file_size_bytes
-    )
+def should_ignore_import_source(path: Path, folder: MonitorFolderConfig) -> bool:
+    return import_source_ignore_reason(path, folder) is not None
+
+
+def import_source_ignore_reason(
+    path: Path,
+    folder: MonitorFolderConfig,
+) -> ImportIgnoreReason | None:
+    reason = import_file_ignore_reason(path, folder)
+    if reason is not None:
+        return reason
+    if not import_source_meets_minimum_size(path, folder.min_file_size_bytes):
+        return "below_minimum_size"
+    return None
 
 
 _TRACK_FILE_PATTERN = re.compile(
@@ -145,7 +185,7 @@ def is_proven_audio_bundle_directory(
 ) -> bool:
     try:
         candidates = files if files is not None else collect_audio_bundle_files(path)
-    except (OSError, ValueError):
+    except (AudioTrackLimitExceededError, OSError, ValueError):
         return False
     if len(candidates) < 2:
         return False
@@ -154,21 +194,21 @@ def is_proven_audio_bundle_directory(
             child.is_file()
             and not is_supported_audio_file(child)
             and is_supported_import_filename(child)
-            and (
-                folder is None
-                or not should_ignore_import_source(child, folder)
-            )
+            and (folder is None or not should_ignore_import_source(child, folder))
             for child in path.iterdir()
         )
     except OSError:
         return False
     if not has_sibling_book:
         return True
-    return all(
-        _TRACK_FILE_PATTERN.match(item.name)
-        or _EPISODE_FILE_PATTERN.search(item.stem)
-        or audio_episode_number(item) is not None
-        for item in candidates
+    return all(audio_track_name_proves_membership(item) for item in candidates)
+
+
+def audio_track_name_proves_membership(path: Path) -> bool:
+    return bool(
+        _TRACK_FILE_PATTERN.match(path.name)
+        or _EPISODE_FILE_PATTERN.search(path.stem)
+        or audio_episode_number(path) is not None
     )
 
 
@@ -179,25 +219,47 @@ def scan_directory_for_imports(
     *,
     summary: ScanSummary | None = None,
     known_paths: set[Path] | None = None,
+    _suppress_audio: bool = False,
 ) -> ScanSummary:
     summary = summary or ScanSummary()
     summary.directories_scanned += 1
-    try:
-        bundle_files = collect_audio_bundle_files(root_path)
-    except ValueError as exc:
-        summary.errors.append({"path": str(root_path), "error": str(exc)})
-        return summary
-    is_bundle = (
-        bool(bundle_files)
-        and is_proven_audio_bundle_directory(root_path, bundle_files, folder=folder)
+    bundle_files: list[Path] = []
+    overflowed = _suppress_audio
+    if not _suppress_audio:
+        try:
+            bundle_files = collect_audio_bundle_files(root_path)
+        except AudioTrackLimitExceededError as exc:
+            overflowed = True
+            summary.errors.append(
+                {
+                    "path": str(root_path),
+                    "error": str(exc),
+                    "code": exc.code,
+                    "limit": exc.limit,
+                    "observedCount": exc.observed_count,
+                }
+            )
+        except ValueError as exc:
+            summary.errors.append({"path": str(root_path), "error": str(exc)})
+            return summary
+    is_bundle = bool(bundle_files) and is_proven_audio_bundle_directory(
+        root_path, bundle_files, folder=folder
     )
     handled_bundle_files: set[Path] = set()
     if is_bundle:
         summary.files_scanned += len(bundle_files)
         resolved_root = root_path.resolve()
         handled_bundle_files = {item.resolve() for item in bundle_files}
-        if should_ignore_import_source(root_path, folder):
+        ignore_reason = import_source_ignore_reason(root_path, folder)
+        if ignore_reason is not None:
             summary.ignored_files += len(bundle_files)
+            summary.ignored_sources.append(
+                IgnoredImportSource(
+                    path=root_path,
+                    reason=ignore_reason,
+                    file_count=len(bundle_files),
+                )
+            )
         elif (
             known_paths is not None
             and resolved_root in known_paths
@@ -208,7 +270,7 @@ def scan_directory_for_imports(
             summary.candidates_found += 1
             import_queue.enqueue(root_path, folder)
     try:
-        entries = list(root_path.iterdir())
+        entries = root_path.iterdir()
     except OSError as exc:
         summary.errors.append({"path": str(root_path), "error": str(exc)})
         return summary
@@ -226,15 +288,24 @@ def scan_directory_for_imports(
                         import_queue,
                         summary=summary,
                         known_paths=known_paths,
+                        _suppress_audio=overflowed,
                     )
                 continue
             if not entry.is_file():
                 continue
+            if overflowed and is_supported_audio_file(entry):
+                summary.files_scanned += 1
+                summary.ignored_files += 1
+                continue
             if entry.resolve() in handled_bundle_files:
                 continue
             summary.files_scanned += 1
-            if should_ignore_import_source(entry, folder):
+            ignore_reason = import_source_ignore_reason(entry, folder)
+            if ignore_reason is not None:
                 summary.ignored_files += 1
+                summary.ignored_sources.append(
+                    IgnoredImportSource(path=entry, reason=ignore_reason)
+                )
                 continue
             if known_paths is not None and entry.resolve() in known_paths:
                 summary.cached_files += 1

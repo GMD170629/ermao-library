@@ -7,28 +7,32 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.modules.imports.application.audio_types import (
+    AudioBundleStructure,
+    AudioFileMetadata,
+)
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
     ConversionArtifactDTO,
     ImportPreferencesDTO,
     ImportSystemEvent,
 )
-from app.modules.system.infrastructure.events import record_system_event
-from app.modules.library.infrastructure.facets import sync_work_facets
-from app.services.book_identity import logical_import_path, recognize_book_identity
-from app.services.audio_metadata import inspect_audio_bundle, parse_audio_metadata
-from app.modules.imports.application.audio_types import (
-    AudioBundleStructure,
-    AudioFileMetadata,
+from app.modules.imports.application.errors import (
+    AudioTrackLimitExceededError,
+    ImportExecutionError,
 )
 from app.modules.imports.infrastructure.audio_cover import publish_audio_cover
+from app.modules.library.infrastructure.facets import sync_work_facets
+from app.modules.system.infrastructure.events import record_system_event
+from app.services.audio_metadata import inspect_audio_bundle, parse_audio_metadata
+from app.services.book_identity import logical_import_path, recognize_book_identity
 from app.services.default_cover import (
     cover_status,
     ensure_default_cover,
     is_default_cover_path,
 )
 from app.services.import_preferences import load_import_preferences
-from app.services.text_conversion import convert_to_epub
+from app.services.text_conversion import ConversionFailure, convert_to_epub
 
 
 class SessionImportOrchestrationServices:
@@ -48,12 +52,19 @@ class SessionImportOrchestrationServices:
     def convert_text(
         self, import_task_id: str, source_path: Path
     ) -> ConversionArtifactDTO:
-        artifact = convert_to_epub(
-            self._db,
-            self._settings,
-            import_task_id,
-            source_path,
-        )
+        try:
+            artifact = convert_to_epub(
+                self._db,
+                self._settings,
+                import_task_id,
+                source_path,
+            )
+        except ConversionFailure as exc:
+            raise ImportExecutionError(
+                exc.code,
+                str(exc),
+                retryable=exc.retryable,
+            ) from exc
         return ConversionArtifactDTO(
             source_path=artifact.source_path,
             output_path=artifact.output_path,
@@ -83,9 +94,7 @@ class SessionImportOrchestrationServices:
             reused_work_id=identity.reused_work_id,
         )
 
-    def logical_import_path(
-        self, path: Path, original_name: str | None
-    ) -> str:
+    def logical_import_path(self, path: Path, original_name: str | None) -> str:
         return logical_import_path(self._db, self._settings, path, original_name)
 
     def sync_work_facets(self, work_id: str) -> None:
@@ -115,7 +124,14 @@ class SessionImportOrchestrationServices:
         return is_default_cover_path(value, self._settings)
 
     def inspect_audio_bundle(self, path: Path) -> AudioBundleStructure | None:
-        return inspect_audio_bundle(path)
+        try:
+            return inspect_audio_bundle(path)
+        except AudioTrackLimitExceededError as exc:
+            raise ImportExecutionError(
+                exc.code,
+                str(exc),
+                retryable=False,
+            ) from exc
 
     def parse_audio_metadata(self, path: Path) -> AudioFileMetadata:
         return parse_audio_metadata(path)

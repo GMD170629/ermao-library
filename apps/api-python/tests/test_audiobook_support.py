@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,20 +11,24 @@ import pytest
 from PIL import Image
 from sqlalchemy import text
 
-import app.modules.imports.application.managed_book as managed_book_module
 import app.modules.imports.application.import_audio as importer_module
+import app.modules.imports.application.managed_book as managed_book_module
 import app.modules.imports.infrastructure.audio_cover as audio_cover_module
 import app.services.audio_metadata as audio_metadata_module
 import app.worker.watcher as watcher_module
 from app.bootstrap.imports import (
     enqueue_import_task,
     import_managed_book,
+    load_known_import_paths,
+    scan_directory_for_imports,
 )
 from app.core.auth import hash_password
 from app.db.base import Base
 from app.db.bootstrap import apply_schema
 from app.models.auth import User
+from app.modules.imports.application.audio_types import MAX_AUDIO_BUNDLE_TRACKS
 from app.modules.imports.application.dto import ImportOptions
+from app.modules.imports.application.errors import AudioTrackLimitExceededError
 from app.modules.imports.infrastructure.orchestration_services import (
     SessionImportOrchestrationServices,
 )
@@ -39,9 +44,20 @@ from app.worker.watcher import (
     MonitorFolderConfig,
     WatchState,
     WorkerManager,
-    scan_directory_for_imports,
 )
 from tests.test_worker_importer import write_epub_metadata_fixture
+
+
+class _FakeAudioDirectoryEntry:
+    def __init__(self, root: Path, index: int) -> None:
+        self.name = f"{index:05d}.mp3"
+        self.path = str(root / self.name)
+
+    def is_dir(self, *, follow_symlinks: bool) -> bool:
+        return False
+
+    def is_file(self, *, follow_symlinks: bool) -> bool:
+        return True
 
 
 def _initialize_schema(db_session) -> None:
@@ -853,8 +869,9 @@ def test_audio_bootstrap_range_head_and_completion_requires_explicit_ended_signa
     assert bootstrap["readerType"] == "audio"
     assert bootstrap["contentFingerprint"].startswith("sha256:")
     assert (
-        client.get(f"/api/reader/v2/editions/{result.edition_id}/bootstrap")
-        .json()["data"]["contentFingerprint"]
+        client.get(f"/api/reader/v2/editions/{result.edition_id}/bootstrap").json()[
+            "data"
+        ]["contentFingerprint"]
         == bootstrap["contentFingerprint"]
     )
     assert [track["trackNumber"] for track in bootstrap["tracks"]] == [2, 10]
@@ -1734,6 +1751,53 @@ def test_audio_directory_structure_rejects_mixed_tracks_and_keeps_unmatched_chil
     assert independent.author is None
 
 
+@pytest.mark.parametrize("track_count", [9_999, 10_000])
+def test_audio_bundle_accepts_tracks_up_to_the_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    track_count: int,
+) -> None:
+    root = tmp_path / "Bounded Audio"
+    root.mkdir()
+    monkeypatch.setattr(
+        audio_metadata_module.os,
+        "scandir",
+        lambda _path: (
+            _FakeAudioDirectoryEntry(root, index) for index in range(track_count)
+        ),
+    )
+
+    structure = audio_metadata_module.inspect_audio_bundle(root)
+
+    assert structure is not None
+    assert len(structure.files) == track_count
+    assert track_count <= MAX_AUDIO_BUNDLE_TRACKS
+
+
+def test_audio_bundle_stops_buffering_at_track_limit_plus_one(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "Overflow Audio"
+    root.mkdir()
+    yielded = 0
+
+    def entries(_path):
+        nonlocal yielded
+        for index in range(1_800_000):
+            yielded += 1
+            yield _FakeAudioDirectoryEntry(root, index)
+
+    monkeypatch.setattr(audio_metadata_module.os, "scandir", entries)
+
+    with pytest.raises(AudioTrackLimitExceededError) as raised:
+        audio_metadata_module.inspect_audio_bundle(root)
+
+    assert raised.value.limit == 10_000
+    assert raised.value.observed_count == 10_001
+    assert yielded == 10_001
+
+
 def test_emby_flat_layout_appends_strictly_named_chapters_to_one_edition(
     client, db_session, test_settings, monkeypatch
 ) -> None:
@@ -1830,7 +1894,9 @@ class _RecordingQueue:
         self.paths.append(path.resolve())
 
 
-def test_watcher_live_and_rescan_only_bundle_proven_book_directories(tmp_path) -> None:
+def test_watcher_live_and_rescan_only_bundle_proven_book_directories(
+    tmp_path, monkeypatch
+) -> None:
     root = tmp_path / "monitor"
     author = root / "作者目录"
     author.mkdir(parents=True)
@@ -1869,25 +1935,40 @@ def test_watcher_live_and_rescan_only_bundle_proven_book_directories(tmp_path) -
     }
 
     manager = object.__new__(WorkerManager)
-    manager.stable_delay_seconds = 60
-    manager.import_queue = _RecordingQueue()
+    manager.db_factory = lambda: nullcontext(object())
+    manager._imports_paused = False
+    scheduled: list[Path] = []
+    monkeypatch.setattr(
+        watcher_module, "import_queue_at_high_watermark", lambda _db: False
+    )
+    monkeypatch.setattr(
+        watcher_module,
+        "schedule_import_scan_job",
+        lambda _db, **kwargs: scheduled.append(kwargs["root_path"].resolve()),
+    )
+    monkeypatch.setattr(
+        watcher_module,
+        "enqueue_import_task",
+        lambda *_args, **_kwargs: pytest.fail(
+            "audio events must schedule a directory scan"
+        ),
+    )
     state = WatchState(observer=None, root_path=root.resolve(), config_signature="test")  # type: ignore[arg-type]
-    try:
-        manager.schedule_import(book_a, folder, state)
-        manager.schedule_import(book_b, folder, state)
-        assert set(state.timers) == {book_a, book_b}
-        manager.schedule_import(first_track, folder, state)
-        manager.schedule_import(second_track, folder, state)
-        assert split_book in state.timers
-        assert first_track not in state.timers
-        assert second_track not in state.timers
-    finally:
-        for timer in state.timers.values():
-            timer.cancel()
+    manager.schedule_import(book_a, folder, state)
+    manager.schedule_import(book_b, folder, state)
+    manager.schedule_import(first_track, folder, state)
+    manager.schedule_import(second_track, folder, state)
+    assert scheduled == [
+        author.resolve(),
+        author.resolve(),
+        split_book.resolve(),
+        split_book.resolve(),
+    ]
 
 
 def test_audio_bundle_detection_applies_ignore_rules_before_mixed_content_check(
     tmp_path,
+    monkeypatch,
 ) -> None:
     root = tmp_path / "monitor"
     book_dir = root / "我靠充值当武帝"
@@ -1911,15 +1992,27 @@ def test_audio_bundle_detection_applies_ignore_rules_before_mixed_content_check(
     assert summary.ignored_files == 2
 
     manager = object.__new__(WorkerManager)
-    manager.stable_delay_seconds = 60
-    manager.import_queue = _RecordingQueue()
+    manager.db_factory = lambda: nullcontext(object())
+    manager._imports_paused = False
+    scheduled: list[Path] = []
+    monkeypatch.setattr(
+        watcher_module, "import_queue_at_high_watermark", lambda _db: False
+    )
+    monkeypatch.setattr(
+        watcher_module,
+        "schedule_import_scan_job",
+        lambda _db, **kwargs: scheduled.append(kwargs["root_path"].resolve()),
+    )
+    monkeypatch.setattr(
+        watcher_module,
+        "enqueue_import_task",
+        lambda *_args, **_kwargs: pytest.fail(
+            "audio events must schedule a directory scan"
+        ),
+    )
     state = WatchState(observer=None, root_path=root.resolve(), config_signature="test")  # type: ignore[arg-type]
-    try:
-        manager.schedule_import(first_track, folder, state)
-        assert set(state.timers) == {book_dir}
-    finally:
-        for timer in state.timers.values():
-            timer.cancel()
+    manager.schedule_import(first_track, folder, state)
+    assert scheduled == [book_dir.resolve()]
 
 
 def test_audio_bundle_detection_applies_minimum_size_before_mixed_content_check(
@@ -1947,7 +2040,9 @@ def test_audio_bundle_detection_applies_minimum_size_before_mixed_content_check(
     assert summary.ignored_files == 1
 
 
-def test_monitor_root_audio_tracks_are_enqueued_as_one_directory(tmp_path) -> None:
+def test_monitor_root_audio_tracks_are_enqueued_as_one_directory(
+    tmp_path, monkeypatch
+) -> None:
     root = tmp_path / "鬼出棺"
     root.mkdir()
     first_track = root / "鬼出棺第001章刑台屠军.m4a"
@@ -1966,15 +2061,27 @@ def test_monitor_root_audio_tracks_are_enqueued_as_one_directory(tmp_path) -> No
     assert queue.paths == [root.resolve()]
 
     manager = object.__new__(WorkerManager)
-    manager.stable_delay_seconds = 60
-    manager.import_queue = _RecordingQueue()
+    manager.db_factory = lambda: nullcontext(object())
+    manager._imports_paused = False
+    scheduled: list[Path] = []
+    monkeypatch.setattr(
+        watcher_module, "import_queue_at_high_watermark", lambda _db: False
+    )
+    monkeypatch.setattr(
+        watcher_module,
+        "schedule_import_scan_job",
+        lambda _db, **kwargs: scheduled.append(kwargs["root_path"].resolve()),
+    )
+    monkeypatch.setattr(
+        watcher_module,
+        "enqueue_import_task",
+        lambda *_args, **_kwargs: pytest.fail(
+            "audio events must schedule a directory scan"
+        ),
+    )
     state = WatchState(observer=None, root_path=root.resolve(), config_signature="test")  # type: ignore[arg-type]
-    try:
-        manager.schedule_import(first_track, folder, state)
-        assert set(state.timers) == {root}
-    finally:
-        for timer in state.timers.values():
-            timer.cancel()
+    manager.schedule_import(first_track, folder, state)
+    assert scheduled == [root.resolve()]
 
 
 @pytest.mark.parametrize(
@@ -2151,10 +2258,7 @@ def test_rescan_reconciles_tracks_split_across_versions_and_preserves_progress(
     for index, result in enumerate(legacy_results, start=1):
         file_row = (
             db_session.execute(
-                text(
-                    "SELECT `id` FROM `LibraryFile` "
-                    "WHERE `editionId` = :edition_id"
-                ),
+                text("SELECT `id` FROM `LibraryFile` WHERE `editionId` = :edition_id"),
                 {"edition_id": result.edition_id},
             )
             .mappings()
@@ -2188,7 +2292,7 @@ def test_rescan_reconciles_tracks_split_across_versions_and_preserves_progress(
         {"id": failed_bundle_task.id},
     )
     db_session.commit()
-    known_paths = watcher_module.load_known_import_paths(db_session)
+    known_paths = load_known_import_paths(db_session)
     assert book_dir.resolve() not in known_paths
     rescan_queue = _RecordingQueue()
     scan_directory_for_imports(

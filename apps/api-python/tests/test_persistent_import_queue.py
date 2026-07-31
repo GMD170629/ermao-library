@@ -32,9 +32,20 @@ class _BlockingRuntime:
     def recover(self) -> int:
         return 0
 
-    def claim(self, _worker_id: str, _lease_seconds: int):
+    def claim_work(self, _worker_id: str, _lease_seconds: int):
         self.claims += 1
-        return SimpleNamespace(id="active-task") if self.claims == 1 else None
+        return (
+            SimpleNamespace(
+                id="active-work",
+                kind="IMPORT_SOURCE",
+                import_task_id="active-task",
+            )
+            if self.claims == 1
+            else None
+        )
+
+    def claim_import(self, _work_item, _worker_id: str, _lease_seconds: int):
+        return SimpleNamespace(id="active-task")
 
     def process(self, _task) -> None:
         self.process_started.set()
@@ -42,6 +53,15 @@ class _BlockingRuntime:
 
     def fail(self, _task, _error: BaseException) -> bool:
         return False
+
+    def complete_work(self, _work_item_id: str) -> None:
+        return None
+
+    def run_bounded_maintenance(self) -> int:
+        return 0
+
+    def shutdown(self) -> None:
+        return None
 
     def clear_records(self) -> int:
         self.clears += 1

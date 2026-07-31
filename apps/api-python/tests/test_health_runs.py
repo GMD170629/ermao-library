@@ -1,5 +1,7 @@
 import time
+from datetime import datetime, timezone
 
+from app.models.import_pipeline import ImportTask
 from app.services.queue_runtime import queue_runtime_view, record_queue_heartbeat
 
 
@@ -11,7 +13,11 @@ def _setup_admin(client):
     assert response.status_code == 201
 
 
-def test_manual_health_run_exposes_initial_items_and_reaches_terminal_state(client, test_settings):
+def test_manual_health_run_exposes_initial_items_and_reaches_terminal_state(
+    client,
+    db_session,
+    test_settings,
+):
     test_settings.resolved_monitor_root.mkdir(parents=True)
     for path in (
         test_settings.resolved_storage_root,
@@ -27,6 +33,19 @@ def test_manual_health_run_exposes_initial_items_and_reaches_terminal_state(clie
     ):
         path.mkdir(parents=True, exist_ok=True)
     _setup_admin(client)
+    pending_created_at = datetime(2026, 7, 31, 8, 30, tzinfo=timezone.utc)
+    db_session.add(
+        ImportTask(
+            id="health-pending-import",
+            origin="manual",
+            status="PENDING",
+            source_path="/library/pending.epub",
+            created_at=pending_created_at,
+            updated_at=pending_created_at,
+        )
+    )
+    db_session.flush()
+    record_queue_heartbeat(db_session, "import", "health-test-worker", 2)
 
     response = client.post("/api/system/health/runs")
     assert response.status_code == 201
@@ -47,6 +66,11 @@ def test_manual_health_run_exposes_initial_items_and_reaches_terminal_state(clie
     assert final["status"] in {"completed", "warning", "error"}
     assert final["summary"]["completed"] == final["summary"]["total"], final
     assert all(item["status"] in {"ok", "warning", "error", "skipped"} for item in final["items"])
+    import_queue = next(item for item in final["items"] if item["id"] == "queue:import")
+    assert import_queue["status"] == "ok"
+    assert import_queue["messageCode"] == "health.queue.ok"
+    assert import_queue["details"]["oldestPendingAt"] == "2026-07-31T08:30:00Z"
+    assert isinstance(import_queue["details"]["runtime"]["heartbeatAt"], int)
 
     with client.stream("GET", f"/api/system/health/runs/{run['runId']}/events?after=0") as stream:
         assert stream.status_code == 200

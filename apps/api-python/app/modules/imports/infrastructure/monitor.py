@@ -8,9 +8,11 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from app.models.common import db_timestamp
 from app.models.import_pipeline import ImportTask
 from app.models.library import LibraryFile
 from app.models.settings import MonitorFolder, SystemSetting
+from app.modules.imports.application.errors import AudioTrackLimitExceededError
 from app.modules.imports.infrastructure.library_queries import (
     add_work_to_shelf,
     audio_bundle_fully_imported,
@@ -18,7 +20,6 @@ from app.modules.imports.infrastructure.library_queries import (
     shelf_exists,
     touch_shelf_updated_at,
 )
-from app.models.common import db_timestamp
 from app.services.audio_metadata import collect_audio_bundle_files
 
 
@@ -82,15 +83,17 @@ def load_known_import_paths(db: Session) -> set[Path]:
     for source_path, task_kind in task_rows:
         candidate = Path(str(source_path)).expanduser().resolve()
         directory_task = str(task_kind or "").upper() == "AUDIO_BUNDLE"
-        if (
-            directory_task
-            and candidate.is_dir()
-            and not audio_bundle_fully_imported(
+        if directory_task and candidate.is_dir():
+            try:
+                bundle_files = collect_audio_bundle_files(candidate)
+            except AudioTrackLimitExceededError:
+                rows.append(str(candidate))
+                continue
+            if not audio_bundle_fully_imported(
                 db,
-                [str(item.resolve()) for item in collect_audio_bundle_files(candidate)],
-            )
-        ):
-            continue
+                [str(item.resolve()) for item in bundle_files],
+            ):
+                continue
         rows.append(str(candidate))
     rows.extend(
         str(value)

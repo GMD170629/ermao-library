@@ -31,11 +31,11 @@ def _runtime_row_dict(row: QueueRuntimeState) -> dict[str, Any]:
         "instanceId": row.instance_id,
         "status": row.status,
         "pollIntervalSeconds": row.poll_interval_seconds,
-        "startedAt": row.started_at,
-        "heartbeatAt": row.heartbeat_at,
-        "lastProcessedAt": row.last_processed_at,
+        "startedAt": to_timestamp_ms(row.started_at),
+        "heartbeatAt": to_timestamp_ms(row.heartbeat_at),
+        "lastProcessedAt": to_timestamp_ms(row.last_processed_at),
         "lastError": row.last_error,
-        "updatedAt": row.updated_at,
+        "updatedAt": to_timestamp_ms(row.updated_at),
     }
 
 

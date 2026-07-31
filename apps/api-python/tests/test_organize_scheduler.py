@@ -63,7 +63,7 @@ def test_manual_run_is_the_only_component_that_creates_queue_items(tmp_path) -> 
             assert job["status"] == "LOOKUP_PENDING"
             assert job["importTaskId"] is None
             assert json.loads(job["reasonCodes"]) == ["MANUAL_SELECTED"]
-            assert json.loads(task["providerOrder"]) == ["douban"]
+            assert json.loads(task["providerOrder"]) == ["douban", "bangumi"]
     finally:
         engine.dispose()
 
@@ -254,6 +254,18 @@ def test_provider_pipelines_are_independent_ordered_and_composable(tmp_path) -> 
             assert [item["providerId"] for item in pipelines["ebook"]] == ["douban", "bangumi", "ai"]
             assert [item["providerId"] for item in pipelines["comic"]] == ["bangumi", "ai"]
             assert [item["providerId"] for item in pipelines["audiobook"]] == ["douban", "ai"]
+            assert {
+                work_type: [
+                    item["providerId"]
+                    for item in providers
+                    if item["enabled"]
+                ]
+                for work_type, providers in pipelines.items()
+            } == {
+                "ebook": ["douban", "bangumi"],
+                "comic": ["bangumi"],
+                "audiobook": ["douban"],
+            }
 
             update_metadata_provider(
                 db,
@@ -269,7 +281,7 @@ def test_provider_pipelines_are_independent_ordered_and_composable(tmp_path) -> 
 
             assert enabled_metadata_provider_ids(db, "EPUB") == ["ai", "douban"]
             assert enabled_metadata_provider_ids(db, "COMIC") == ["bangumi"]
-            assert enabled_metadata_provider_ids(db, "AUDIO") == []
+            assert enabled_metadata_provider_ids(db, "AUDIO") == ["douban"]
             pipelines = {item["workType"]: item["providers"] for item in list_metadata_provider_pipelines(db)}
             assert [item["providerId"] for item in pipelines["comic"]] == ["bangumi"]
             assert [item["providerId"] for item in pipelines["audiobook"]] == ["douban", "ai"]
@@ -324,7 +336,7 @@ def test_queue_record_can_be_rerecognized_from_any_state_and_deleted_without_del
             new_task = db.execute(text("SELECT * FROM `MetadataLookupTask` WHERE `organizeJobId` = :job_id"), {"job_id": job["id"]}).mappings().one()
             assert new_task["id"] != old_task["id"]
             assert new_task["status"] == "PENDING"
-            assert json.loads(new_task["providerOrder"]) == ["douban"]
+            assert json.loads(new_task["providerOrder"]) == ["douban", "bangumi"]
             assert db.execute(text("SELECT COUNT(*) FROM `MetadataProviderExecution` WHERE `jobId` = :job_id"), {"job_id": job["id"]}).scalar() == 0
             assert db.execute(text("SELECT COUNT(*) FROM `MetadataSuggestion` WHERE `jobId` = :job_id"), {"job_id": job["id"]}).scalar() == 0
             assert db.execute(text("SELECT COUNT(*) FROM `DuplicateCandidate` WHERE `jobId` = :job_id"), {"job_id": job["id"]}).scalar() == 0

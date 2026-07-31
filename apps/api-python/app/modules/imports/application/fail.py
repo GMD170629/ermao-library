@@ -9,6 +9,7 @@ from app.modules.imports.application.commands import (
     reset_failed_import_checkpoint,
 )
 from app.modules.imports.application.dto import ImportTaskDTO
+from app.modules.imports.application.errors import ImportExecutionError
 from app.modules.imports.application.ports import (
     ImportSourceProbe,
     ImportTaskStore,
@@ -44,6 +45,11 @@ def fail_claimed_import_task(
         error_summary = f"导入源已不存在：{source}"
         message = "导入源文件或目录不存在，任务已结束"
         retryable = False
+    elif isinstance(error, ImportExecutionError):
+        error_code = error.code
+        error_summary = str(error) or error.__class__.__name__
+        message = "导入处理失败，任务已结束"
+        retryable = error.retryable
     else:
         error_code = "IMPORT_WORKER_FAILED"
         error_summary = str(error) or error.__class__.__name__
