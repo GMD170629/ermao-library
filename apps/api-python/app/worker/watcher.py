@@ -31,6 +31,7 @@ from app.bootstrap.imports import (
 from app.core.config import Settings
 from app.modules.imports.application.errors import AudioTrackLimitExceededError
 from app.modules.imports.public import commit_import_checkpoint
+from app.modules.system.public import is_database_busy_error
 from app.services.audio_metadata import (
     audio_bundle_root,
     collect_audio_bundle_files,
@@ -299,7 +300,7 @@ class WorkerManager:
                     audio_scan_root=audio_scan_root,
                 )
             except OperationalError as exc:
-                if not _is_database_busy(exc):
+                if not is_database_busy_error(exc):
                     raise
                 continue
             self._pending_recovery_folders().discard(folder.id)
@@ -405,10 +406,6 @@ class WorkerManager:
         state.observer.stop()
         state.observer.join(timeout=10)
         print(f"[import-worker] stopped monitor {state.root_path}", flush=True)
-
-
-def _is_database_busy(error: OperationalError) -> bool:
-    return "database is locked" in str(error).lower()
 
 
 def enabled_monitor_folders(db: Session) -> list[MonitorFolderConfig]:

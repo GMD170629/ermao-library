@@ -1,0 +1,1 @@
+"""Cross-capability infrastructure adapters."""
