@@ -30,6 +30,16 @@ function newSessionId() {
   return `reader-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function readerOpenError(reason: unknown) {
+  if (reason instanceof Error) {
+    const code = 'code' in reason && typeof reason.code === 'string'
+      ? reason.code
+      : 'READER_OPEN_FAILED';
+    return { code, message: reason.message, recoverable: code !== 'NOVEL_DRM_PROTECTED' };
+  }
+  return { code: 'READER_OPEN_FAILED', message: '阅读器加载失败', recoverable: true };
+}
+
 /**
  * Serializes navigation intents without allocating their operation token early.
  * Reset invalidates work that has not started when an adapter session closes.
@@ -176,11 +186,7 @@ export function useReaderSession({
       dispatch({
         type: 'session/fail',
         operation,
-        error: {
-          code: 'READER_OPEN_FAILED',
-          message: reason instanceof Error ? reason.message : '阅读器加载失败',
-          recoverable: true
-        }
+        error: readerOpenError(reason)
       });
     }).finally(() => finishOperation('bootstrap', controller));
 

@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReaderAdapter, ReaderCommand, ReaderPreferences } from '@shuku/reader-core';
+import type { ReaderAdapter, ReaderCommand, ReaderNavigationEntry, ReaderPreferences } from '@shuku/reader-core';
 import { LoaderCircle, LockKeyhole, RotateCcw, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ReaderShell, type ReaderControls, type ReaderNavigationItem, type ReaderShellEvents, type ReaderVolumeNavigation } from '../reader-shell';
@@ -33,8 +33,8 @@ function canProvidePassword(adapter: ReaderAdapter | null): adapter is PasswordC
   return Boolean(adapter && 'providePassword' in adapter && typeof (adapter as PasswordCapableAdapter).providePassword === 'function');
 }
 
-function navigationItems(bootstrap: ReaderBootstrap, actualTotalPages?: number | null): ReaderNavigationItem[] {
-  if (bootstrap.readerType === 'epub') {
+function bootstrapNavigationItems(bootstrap: ReaderBootstrap, actualTotalPages?: number | null): ReaderNavigationItem[] {
+  if (bootstrap.readerType === 'reflowable') {
     return bootstrap.units.map((unit) => ({ index: unit.index, title: unit.title, href: unit.href ?? undefined }));
   }
   const pageCount = actualTotalPages ?? bootstrap.totalPages ?? bootstrap.pages.length ?? 0;
@@ -42,6 +42,30 @@ function navigationItems(bootstrap: ReaderBootstrap, actualTotalPages?: number |
     return bootstrap.pages.map((page) => ({ index: page.pageIndex, title: page.title ?? `第 ${page.pageIndex} 页` }));
   }
   return Array.from({ length: pageCount }, (_, index) => ({ index: index + 1, title: `第 ${index + 1} 页` }));
+}
+
+function adapterNavigationItems(entries: ReaderNavigationEntry[]): ReaderNavigationItem[] {
+  const items: ReaderNavigationItem[] = [];
+  const append = (entry: ReaderNavigationEntry) => {
+    items.push({
+      index: entry.index ?? items.length + 1,
+      title: entry.label,
+      href: entry.href
+    });
+    entry.children?.forEach(append);
+  };
+  entries.forEach(append);
+  return items;
+}
+
+function novelErrorMessage(code: string | undefined, translate: (source: string) => string) {
+  if (code === 'NOVEL_UNSUPPORTED_FORMAT') return translate('当前小说格式暂不受支持。');
+  if (code === 'NOVEL_DRM_PROTECTED') return translate('文件可能受 DRM 保护，无法打开。');
+  if (code === 'NOVEL_PARSE_FAILED') return translate('小说文件无法解析，可尝试转换为 EPUB。');
+  if (code === 'NOVEL_ENCODING_UNCERTAIN') return translate('无法确定 TXT 文件的文字编码。');
+  if (code === 'NOVEL_RESOURCE_FAILED') return translate('小说文件加载失败，请检查网络后重试。');
+  if (code === 'NOVEL_SECURITY_REJECTED') return translate('文件包含不安全的内容，已停止打开。');
+  return null;
 }
 
 function phaseLabel(phase: string | null, kind: ReaderBootstrap['readerType']) {
@@ -76,17 +100,7 @@ export function ReaderEngineRuntime({
   const shellEventsRef = useRef<ReaderShellEvents | null>(null);
   const interactionBlockedRef = useRef(true);
   const onSelectVolumeRef = useRef(onSelectVolume);
-  const adapterNavigationRef = useRef({
-    contentFingerprint: bootstrap.contentFingerprint,
-    units: bootstrap.units
-  });
   onSelectVolumeRef.current = onSelectVolume;
-  if (adapterNavigationRef.current.contentFingerprint !== bootstrap.contentFingerprint) {
-    adapterNavigationRef.current = {
-      contentFingerprint: bootstrap.contentFingerprint,
-      units: bootstrap.units
-    };
-  }
 
   useEffect(() => {
     if (!container) return undefined;
@@ -115,11 +129,11 @@ export function ReaderEngineRuntime({
         }
         return executeRef.current(intent.command);
       };
-      if (bootstrap.readerType === 'epub') {
-        const adapterModule = await import('./adapters/epub-adapter');
-        created = adapterModule.createEpubAdapter({
+      if (bootstrap.readerType === 'reflowable') {
+        const adapterModule = await import('./adapters/foliate-adapter');
+        created = adapterModule.createFoliateAdapter({
           container,
-          navigationItems: adapterNavigationRef.current.units,
+          title: bootstrap.book.title,
           onEndOfVolume: openNextVolume,
           onInputIntent: handleAdapterInputIntent
         });
@@ -159,7 +173,7 @@ export function ReaderEngineRuntime({
       if (created) void created.dispose();
       container.replaceChildren();
     };
-  }, [bootstrap.contentFingerprint, bootstrap.pages, bootstrap.readerType, bootstrap.selectedVolume?.id, bootstrap.volumes, container]);
+  }, [bootstrap.book.title, bootstrap.contentFingerprint, bootstrap.pages, bootstrap.readerType, bootstrap.selectedVolume?.id, bootstrap.volumes, container]);
 
   const session = useReaderSession({
     adapter,
@@ -203,7 +217,7 @@ export function ReaderEngineRuntime({
       : null);
   }, [onIndexProgress, session.state.paginationProgress, session.state.phase]);
 
-  const totalHint = bootstrap.readerType === 'epub'
+  const totalHint = bootstrap.readerType === 'reflowable'
     ? null
     : (session.state.totalPages ?? bootstrap.totalPages ?? bootstrap.pages.length) || null;
   const currentPercent = session.state.location ? session.state.percent : bootstrap.progressPercent;
@@ -217,7 +231,9 @@ export function ReaderEngineRuntime({
     ? { ...adapterCapabilities, canGoNext: true }
     : adapterCapabilities;
   const settings = preferencesToReaderSettings(preferences);
-  const items = useMemo(() => navigationItems(bootstrap, session.state.totalPages), [bootstrap, session.state.totalPages]);
+  const items = useMemo(() => session.state.navigationItems.length
+    ? adapterNavigationItems(session.state.navigationItems)
+    : bootstrapNavigationItems(bootstrap, session.state.totalPages), [bootstrap, session.state.navigationItems, session.state.totalPages]);
   const bookmarkStorageKey = useMemo(() => readerBookmarkStorageKey(
     bootstrap.userId,
     bootstrap.edition.id,
@@ -283,8 +299,12 @@ export function ReaderEngineRuntime({
     if (currentLocation?.kind === 'comic') {
       return bootstrap.selectedVolume?.title ? `${bootstrap.selectedVolume.title} · ${progress.label}` : progress.label;
     }
-    if (currentLocation?.kind !== 'epub') return progress.label;
-    const activeIndex = resolveActiveEpubNavigationIndex(items, currentLocation.href, currentLocation.spineIndex);
+    if (currentLocation?.kind !== 'reflowable' && currentLocation?.kind !== 'epub') return progress.label;
+    const activeIndex = resolveActiveEpubNavigationIndex(
+      items,
+      currentLocation.href,
+      currentLocation.kind === 'epub' ? currentLocation.spineIndex : undefined
+    );
     const chapter = activeIndex === null ? null : items[activeIndex];
     return chapter ? `${chapter.title} · 全书 ${Math.round(progress.percent)}%` : progress.label;
   }, [bootstrap.selectedVolume?.title, currentLocation, items, progress.label, progress.percent]);
@@ -329,7 +349,7 @@ export function ReaderEngineRuntime({
       volumes: edition.volumes.map((volume) => ({
         id: volume.id,
         title: volume.title,
-        pageCount: edition.format.toLowerCase() === 'epub'
+        pageCount: edition.format.toLowerCase() === 'reflowable'
           ? volume.chapterCount ?? null
           : volume.pageCount ?? null
       }))
@@ -337,7 +357,7 @@ export function ReaderEngineRuntime({
     volumeSections: bootstrap.volumes.map((volume) => ({
       id: volume.id,
       title: volume.title,
-      pageCount: bootstrap.readerType === 'epub'
+      pageCount: bootstrap.readerType === 'reflowable'
         ? volume.chapterCount ?? 0
         : volume.pageCount ?? 0
     })),
@@ -429,9 +449,18 @@ export function ReaderEngineRuntime({
               <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/45 p-6 text-center backdrop-blur-sm">
                 <div className="w-full max-w-sm rounded-2xl bg-slate-950/90 p-5 text-white shadow-2xl">
                   <div className="text-base font-semibold"><I18nText>阅读器加载失败</I18nText></div>
-                  <p className="mt-2 text-sm text-slate-300">{adapterLoadError || session.state.error?.message || i18nAttribute("请检查网络或文件是否仍然存在。")}</p>
+                  <p className="mt-2 text-sm text-slate-300">{
+                    novelErrorMessage(session.state.error?.code, i18nAttribute)
+                      || adapterLoadError
+                      || session.state.error?.message
+                      || i18nAttribute("请检查网络或文件是否仍然存在。")
+                  }</p>
                   <div className="mt-4 grid grid-cols-2 gap-2">
-                    <button type="button" onClick={onBack} className="min-h-11 rounded-xl bg-white/10 px-3 text-sm"><I18nText>返回书库</I18nText></button>
+                    <button type="button" onClick={onBack} className="min-h-11 rounded-xl bg-white/10 px-3 text-sm">{
+                      bootstrap.readerType === 'reflowable'
+                        ? i18nAttribute("返回版本详情并转换 EPUB")
+                        : i18nAttribute("返回书库")
+                    }</button>
                     <button type="button" onClick={onRetry} className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-sm"><RotateCcw size={16} /><I18nText>重试</I18nText></button>
                   </div>
                 </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReaderCapabilities, ReaderPreferences } from '@shuku/reader-core';
+import type { ReaderCapabilities, ReaderKind, ReaderPreferences } from '@shuku/reader-core';
 import { Bookmark, Check, ChevronLeft, ChevronRight, Gauge, Highlighter, ListTree, Minus, Plus, RotateCcw, Rows2, Rows3, Rows4, Settings, Trash2, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { Button } from '../../components/ui/button';
@@ -37,7 +37,6 @@ type ComicPageTurnAnimation = ReaderPreferences['comic']['pageTurnAnimation'];
 type ComicImageFit = ReaderPreferences['comic']['imageFit'];
 type ComicImageVariant = ReaderPreferences['comic']['imageVariant'];
 
-export type ReaderKind = 'epub' | 'comic' | 'pdf';
 export type ReaderTheme = ReaderPreferences['appearance']['theme'];
 export const readerFontFamilyOptions = READER_FONT_FAMILY_OPTIONS;
 const readerFontSizeOptions = READER_FONT_SIZE_OPTIONS;
@@ -174,7 +173,7 @@ function navigationItemKey(item: ReaderNavigationItem) {
 }
 
 function activeNavigationItem(readerType: ReaderKind, items: ReaderNavigationItem[], progress: ReaderProgress, progressExtra: Record<string, unknown>) {
-  if (readerType !== 'epub') return items.find((item) => item.index === progress.page) ?? null;
+  if (readerType !== 'reflowable') return items.find((item) => item.index === progress.page) ?? null;
   const sectionIndex = numberFromExtra(progressExtra.sectionIndex ?? progressExtra.chapterIndex);
   const href = progressExtra.currentHref ?? progressExtra.chapterHref;
   const index = resolveActiveEpubNavigationIndex(items, href, sectionIndex);
@@ -226,7 +225,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   const currentNavigationTitle = currentNavigationItem?.title ?? null;
   const progressDetail = currentNavigationTitle ? `${currentNavigationTitle} · ${progress.label}` : progress.label;
   const readerDirection: ComicDirection = readingDirection ?? (readerType === 'comic' ? settings.comicDirection : 'ltr');
-  const usesCompactPassiveProgress = readerType === 'epub' || readerType === 'comic';
+  const usesCompactPassiveProgress = readerType === 'reflowable' || readerType === 'comic';
   const passiveProgressAreaHeight = usesCompactPassiveProgress ? 'calc(2.75rem + var(--shuku-safe-area-bottom))' : readerBottomAreaHeight;
   const supportsTextAnnotations = readerType !== 'comic';
   const accentColor = dark ? '#f59e0b' : '#b45309';
@@ -707,7 +706,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
       >
         <div className={cn('mx-auto flex h-full flex-col gap-3', readerBottomControlsMaxWidth)}>
           <div className="flex items-center justify-between gap-3 text-[11px] opacity-60 md:text-xs">
-            <span className="truncate">{readerType === 'epub' ? (currentNavigationTitle ?? i18nAttribute("阅读中")) : progressPageLabel(progress)}</span>
+            <span className="truncate">{readerType === 'reflowable' ? (currentNavigationTitle ?? i18nAttribute("阅读中")) : progressPageLabel(progress)}</span>
             <span className="shrink-0">{clampPercent(progress.percent)}%</span>
           </div>
           <div className="min-h-0 flex-1" aria-hidden="true" />
@@ -827,7 +826,13 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
           <div className="flex items-center justify-between gap-3">
             <div>
               <div id="reader-panel-title" className="text-sm font-semibold">
-                {panel === 'toc' ? i18nAttribute("目录") : panel === 'bookmarks' ? i18nAttribute("书签") : panel === 'settings' ? i18nAttribute("阅读设置") : panel === 'annotations' ? i18nAttribute("标注与批注") : i18nAttribute("阅读进度")}
+                {panel === 'toc'
+                  ? i18nAttribute("目录")
+                  : panel === 'bookmarks'
+                    ? i18nAttribute("书签")
+                    : panel === 'settings'
+                      ? readerType === 'reflowable' ? i18nAttribute("小说排版") : i18nAttribute("阅读设置")
+                      : panel === 'annotations' ? i18nAttribute("标注与批注") : i18nAttribute("阅读进度")}
               </div>
               {panel === 'settings' ? null : (
                 <div className="mt-0.5 text-xs opacity-60">
@@ -982,7 +987,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
 
           {panel === 'settings' ? (
             <div data-pwa-scroll="true" className="mt-3 min-h-0 flex-1 space-y-3 overflow-auto overscroll-contain pr-1 text-sm">
-              {readerType === 'epub' ? (
+              {readerType === 'reflowable' ? (
                 <>
                   <ThemeSwatches
                     value={settings.theme}
