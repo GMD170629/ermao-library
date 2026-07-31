@@ -1,0 +1,6 @@
+[submodule "ermao-library.wiki"]
+	path = ermao-library.wiki
+	url = https://github.com/GMD170629/ermao-library.wiki.git
+[submodule "third_party/foliate-js"]
+	path = third_party/foliate-js
+	url = https://github.com/johnfactotum/foliate-js.git

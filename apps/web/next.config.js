@@ -7,6 +7,7 @@ const basePath = configuredBasePath && configuredBasePath !== '/'
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   output: 'standalone',
   outputFileTracingRoot: path.join(__dirname, '../..'),
   allowedDevOrigins: ['127.0.0.1'],

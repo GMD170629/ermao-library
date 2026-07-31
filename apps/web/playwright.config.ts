@@ -1,16 +1,19 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const externalBaseURL = process.env.PLAYWRIGHT_BASE_URL;
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
   timeout: 60_000,
   expect: { timeout: 15_000 },
   use: {
-    baseURL: 'http://127.0.0.1:3100',
+    baseURL: externalBaseURL ?? 'http://127.0.0.1:3100',
+    serviceWorkers: 'block',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure'
   },
-  webServer: {
+  webServer: externalBaseURL ? undefined : {
     command: 'node scripts/prepare-pdfjs-worker.mjs && pnpm exec next dev -p 3100',
     url: 'http://127.0.0.1:3100/login',
     reuseExistingServer: true,
