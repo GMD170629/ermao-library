@@ -32,6 +32,7 @@ def test_0003_upgrade_merges_same_media_editions_without_losing_volumes(
         edition = _table(engine, "LibraryEdition")
         volume = _table(engine, "LibraryVolume")
         file = _table(engine, "LibraryFile")
+        reading_unit = _table(engine, "LibraryReadingUnit")
         import_task = _table(engine, "ImportTask")
         import_asset = _table(engine, "ImportAsset")
         import_log = _table(engine, "ImportLog")
@@ -108,6 +109,21 @@ def test_0003_upgrade_merges_same_media_editions_without_losing_volumes(
                         updatedAt=now,
                     )
                 )
+                if edition_id == "edition-a":
+                    connection.execute(
+                        insert(reading_unit).values(
+                            id="unit-a",
+                            editionId=edition_id,
+                            volumeId=None,
+                            fileId="file-a",
+                            unitType="CHAPTER",
+                            title="Chapter 1",
+                            href="chapter.xhtml",
+                            sortOrder=0,
+                            metadataJson="{}",
+                            updatedAt=now,
+                        )
+                    )
             for progress_id, percent, updated_at in (
                 ("progress-old", 25, now),
                 ("progress-new", 75, now + timedelta(seconds=1)),
@@ -246,6 +262,12 @@ def test_0003_upgrade_merges_same_media_editions_without_losing_volumes(
                 connection.scalar(select(_table(engine, "BookConversionTask").c.id))
                 == "conversion-1"
             )
+            migrated_unit = _table(engine, "LibraryReadingUnit")
+            assert connection.execute(
+                select(migrated_unit.c.volumeId, migrated_unit.c.fileId).where(
+                    migrated_unit.c.id == "unit-a"
+                )
+            ).one() == ("volume-a", "file-a")
             migrated_progress = _table(engine, "LibraryReadingProgress")
             progress_rows = connection.execute(
                 select(
@@ -274,5 +296,70 @@ def test_0003_upgrade_merges_same_media_editions_without_losing_volumes(
                 "migrations/shuku-before-alembic-*.sqlite3"
             )
         )
+    finally:
+        engine.dispose()
+
+
+def test_0003_upgrade_discards_conversion_without_a_source_volume(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_sqlite_engine(settings.database_path)
+    now = datetime.now(UTC)
+    try:
+        _run_alembic(
+            engine,
+            lambda config: command.upgrade(config, "0003_import_work_queue"),
+        )
+        import_task = _table(engine, "ImportTask")
+        conversion = _table(engine, "BookConversionTask")
+        with engine.begin() as connection:
+            connection.execute(
+                insert(import_task).values(
+                    id="orphaned-import",
+                    origin="UPLOAD",
+                    status="FAILED",
+                    sourcePath="/incoming/broken.mobi",
+                    taskKind="FILE",
+                    assetCount=1,
+                    processedAssetCount=0,
+                    progress=0,
+                    duplicate=False,
+                    duration=0,
+                    retryable=False,
+                    attempts=1,
+                    updatedAt=now,
+                )
+            )
+            connection.execute(
+                insert(conversion).values(
+                    id="orphaned-conversion",
+                    importTaskId="orphaned-import",
+                    mode="AUTO",
+                    sourceFormat="MOBI",
+                    targetFormat="EPUB",
+                    sourcePath="/incoming/broken.mobi",
+                    converter="shuku-internal",
+                    optionsJson="{}",
+                    status="FAILED",
+                    progress=0,
+                    attempts=1,
+                    retryable=False,
+                    updatedAt=now,
+                )
+            )
+
+        apply_schema(engine, settings)
+
+        assert head_revision(engine) == "0006_media_versions_contract"
+        with engine.connect() as connection:
+            assert connection.scalar(select(_table(engine, "ImportTask").c.id)) == (
+                "orphaned-import"
+            )
+            assert connection.scalar(
+                select(_table(engine, "BookConversionTask").c.id)
+            ) is None
+
+        apply_schema(engine, settings)
+        assert head_revision(engine) == "0006_media_versions_contract"
     finally:
         engine.dispose()
