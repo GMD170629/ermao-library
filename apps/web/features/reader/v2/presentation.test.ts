@@ -33,3 +33,18 @@ test('never presents the EPUB table of contents as chapters or physical pages', 
     label: '全书 31%'
   });
 });
+
+test('projects a foliate location without inventing layout pages', () => {
+  assert.deepEqual(locationProgress({
+    kind: 'reflowable',
+    format: 'txt',
+    cfi: 'epubcfi(/6/8!/4/2:3)',
+    progression: 0.72
+  }, 72, 200), {
+    page: 1,
+    total: null,
+    percent: 72,
+    position: 'epubcfi(/6/8!/4/2:3)',
+    label: '全书 72%'
+  });
+});

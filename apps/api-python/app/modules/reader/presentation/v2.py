@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
-from datetime import datetime, timezone
+from copy import deepcopy
+from datetime import UTC, datetime
 from pathlib import Path
 from time import time_ns
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -17,6 +17,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.typed_route import TypedContractRoute
+from app.bootstrap.media import ensure_volume_page_index
+from app.bootstrap.reader import SqlAlchemyReaderProgressCursor, reader_queries
 from app.contracts.http_errors import ErrorResponses
 from app.core.auth import get_current_user
 from app.core.authorization import (
@@ -27,52 +29,51 @@ from app.core.authorization import (
 from app.core.config import Settings, get_settings
 from app.core.time import timestamp_ms_to_datetime
 from app.db.session import get_db
-from app.bootstrap.media import ensure_volume_page_index
-from app.bootstrap.reader import SqlAlchemyReaderProgressCursor, reader_queries
-from app.modules.reader.public import ClaimClientSequence, ClaimClientSequenceCommand
 from app.modules.reader.presentation.v2_schemas import (
     AudioChapterSummary,
     AudioLocation,
     AudioTrackSummary,
     ComicLocation,
-    EpubLocationsClaimRequest,
-    EpubLocationsSaveRequest,
     EpubLocation,
     PdfLocation,
-    ReaderBookSummary,
-    ReaderBootstrapData,
-    ReaderBootstrapResponse,
     ReaderBookmarksData,
     ReaderBookmarksReplaceRequest,
     ReaderBookmarksResponse,
+    ReaderBookSummary,
+    ReaderBootstrapData,
+    ReaderBootstrapResponse,
     ReaderCapabilities,
     ReaderEditionOption,
     ReaderEditionSummary,
+    ReaderFormat,
+    ReaderNotFoundError,
     ReaderPageSummary,
     ReaderPreferences,
     ReaderProgressData,
     ReaderProgressPut,
     ReaderProgressRecord,
     ReaderProgressResponse,
-    ReaderConflictError,
-    ReaderNotFoundError,
+    ReaderServerPreferences,
     ReaderUnauthorizedError,
     ReaderUnavailableError,
-    ReaderValidationError,
-    ReaderServerPreferences,
     ReaderUnitSummary,
+    ReaderValidationError,
     ReaderVolumeSummary,
-    EpubLocationsResponse,
+    ReflowableFormat,
+    ReflowableLocation,
+)
+from app.modules.reader.public import (
+    ClaimClientSequence,
+    ClaimClientSequenceCommand,
+    build_content_fingerprint,
 )
 from app.schemas.responses import fail
-from app.services.epub_location_cache import claim_epub_locations, save_epub_locations
-
 
 router = APIRouter(prefix="/reader/v2", tags=["reader-v2"], route_class=TypedContractRoute)
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _auth(db: Session, request: Request, settings: Settings):
@@ -116,14 +117,64 @@ def _datetime(value: Any) -> datetime | None:
     return timestamp_ms_to_datetime(value)
 
 
-def _reader_format(value: Any) -> str | None:
+_REFLOWABLE_FORMATS: frozenset[str] = frozenset({"epub", "mobi", "azw", "azw3", "prc", "fb2", "txt"})
+
+
+def _source_format(value: object) -> ReflowableFormat | None:
     normalized = str(value or "").lower()
-    return {"epub": "epub", "ebook": "epub", "comic": "comic", "pdf": "pdf", "audio": "audio", "audiobook": "audio"}.get(normalized)
+    if normalized in _REFLOWABLE_FORMATS:
+        return cast(ReflowableFormat, normalized)
+    if normalized == "ebook":
+        return "epub"
+    return None
+
+
+def _reader_unit_navigation(
+    unit: dict[str, Any], source_format: ReflowableFormat | None
+) -> tuple[int, str] | None:
+    href = unit.get("href")
+    if not isinstance(href, str) or not href:
+        return None
+    if href.startswith(("mobi-section:", "txt-chapter:", "fb2-section:")):
+        return None
+    metadata = _json(unit.get("metadataJson"), {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    level_value = metadata.get("level")
+    level = level_value if isinstance(level_value, int) and level_value >= 0 else 0
+    navigation_key = metadata.get("navigationKey")
+    if (
+        metadata.get("exactNavigation") is True
+        and isinstance(navigation_key, str)
+        and navigation_key
+    ):
+        return level, navigation_key
+    if source_format == "epub":
+        digest = hashlib.sha256(f"epub\0{href}".encode()).hexdigest()[:24]
+        return level, f"epub:{digest}"
+    return None
+
+
+def _reader_format(value: object) -> ReaderFormat | None:
+    normalized = str(value or "").lower()
+    if _source_format(normalized) is not None:
+        return "reflowable"
+    return cast(
+        ReaderFormat | None,
+        {"comic": "comic", "pdf": "pdf", "audio": "audio", "audiobook": "audio"}.get(normalized),
+    )
 
 
 def _clamp(value: Any, minimum: float, maximum: float, fallback: float) -> float:
     try:
         return min(maximum, max(minimum, float(value)))
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _float_value(value: object, fallback: float = 0) -> float:
+    try:
+        return float(str(value))
     except (TypeError, ValueError):
         return fallback
 
@@ -229,7 +280,7 @@ def _legacy_preferences(db: Session, user_id: str, reader_format: str) -> Reader
     epub = by_type.get("epub") or by_type.get("ebook") or {}
     comic = by_type.get("comic") or {}
     pdf = by_type.get("pdf") or {}
-    current = {"epub": epub, "comic": comic, "pdf": pdf}.get(reader_format, {})
+    current = {"reflowable": epub, "comic": comic, "pdf": pdf}.get(reader_format, {})
     payload = defaults.model_dump()
 
     theme = current.get("theme")
@@ -362,28 +413,15 @@ def _content_fingerprint(db: Session, edition: dict[str, Any], volume_id: str | 
             files = reader_queries.list_files_for_edition(db, str(edition["id"]), volume_id)
         if not files:
             files = reader_queries.list_files_for_edition(db, str(edition["id"]))
-    tokens = [
-        {
-            "id": file.get("id"),
-            # Prefer the import-time fingerprint so a later full-hash backfill
-            # does not invalidate an otherwise unchanged reader session.
-            "hash": file.get("fingerprint") or file.get("fullHash"),
-            "size": file.get("sizeBytes"),
-            "mtime": file.get("mtimeMs"),
-        }
-        for file in files
-    ]
-    if not tokens:
-        tokens = [{"edition": edition.get("id"), "updated": str(edition.get("updatedAt") or ""), "volume": volume_id}]
-    digest = hashlib.sha256(_json_text(tokens).encode("utf-8")).hexdigest()
-    return f"sha256:{digest}"
+    return build_content_fingerprint(edition, files, volume_id)
 
 
 def _volume_summary(volume: dict[str, Any]) -> ReaderVolumeSummary:
+    volume_index = volume.get("volumeIndex")
     return ReaderVolumeSummary(
         id=str(volume["id"]),
         title=str(volume.get("title") or "未命名卷"),
-        index=float(volume.get("volumeIndex") if volume.get("volumeIndex") is not None else volume.get("sortOrder") or 0),
+        index=_float_value(volume_index if volume_index is not None else volume.get("sortOrder")),
         pageCount=volume.get("pageCount"),
         chapterCount=volume.get("chapterCount"),
         durationMs=volume.get("durationMs"),
@@ -391,12 +429,16 @@ def _volume_summary(volume: dict[str, Any]) -> ReaderVolumeSummary:
 
 
 def _edition_summary(edition: dict[str, Any]) -> ReaderEditionSummary:
-    reader_format = _reader_format(edition.get("format")) or "epub"
-    media_kind = str(edition.get("mediaKind") or "").upper() or ("AUDIOBOOK" if reader_format == "audio" else "COMIC" if reader_format == "comic" else "EBOOK")
+    reader_format = _reader_format(edition.get("format")) or "reflowable"
+    source_format = _source_format(edition.get("format"))
+    media_kind = str(edition.get("mediaKind") or "").upper() or (
+        "AUDIOBOOK" if reader_format == "audio" else "COMIC" if reader_format == "comic" else "EBOOK"
+    )
     return ReaderEditionSummary(
         id=str(edition["id"]),
         workId=str(edition["workId"]),
         format=reader_format,
+        sourceFormat=source_format,
         versionName=str(edition.get("versionName") or "默认版本"),
         pageCount=edition.get("pageCount"),
         chapterCount=edition.get("chapterCount"),
@@ -412,18 +454,22 @@ def _capabilities(reader_format: str, reading_direction: str = "ltr") -> ReaderC
         canGoNext=True,
         canGoPrevious=True,
         canJumpToProgress=True,
-        canJumpToHref=reader_format == "epub",
+        canJumpToHref=reader_format == "reflowable",
         canJumpToIndex=True,
         canZoom=reader_format in {"comic", "pdf"},
-        canSelectText=reader_format in {"epub", "pdf"},
+        canSelectText=reader_format in {"reflowable", "pdf"},
         supportsPagination=reader_format != "audio",
-        supportsScrolling=reader_format == "epub",
-        supportsSpreads=reader_format in {"epub", "comic"},
+        supportsScrolling=reader_format == "reflowable",
+        supportsSpreads=reader_format in {"reflowable", "comic"},
         readingDirection=reading_direction,
     )
 
 
-def _select_volume(volumes: list[dict[str, Any]], progresses: list[dict[str, Any]], requested: str | None) -> tuple[dict[str, Any] | None, JSONResponse | None]:
+def _select_volume(
+    volumes: list[dict[str, Any]],
+    progresses: list[dict[str, Any]],
+    requested: str | None,
+) -> tuple[dict[str, Any] | None, JSONResponse | None]:
     if requested:
         selected = next((volume for volume in volumes if str(volume.get("id")) == requested), None)
         if selected is None:
@@ -437,6 +483,7 @@ def _select_volume(volumes: list[dict[str, Any]], progresses: list[dict[str, Any
 def _location_from_progress(
     progress: dict[str, Any] | None,
     reader_format: str,
+    source_format: ReflowableFormat | None = None,
     selected_volume_id: str | None = None,
 ):
     if not progress:
@@ -444,8 +491,20 @@ def _location_from_progress(
     parsed = _json(progress.get("locationJson"), None)
     if isinstance(parsed, dict):
         try:
+            if parsed.get("type") == "reflowable" and source_format is not None:
+                location = ReflowableLocation.model_validate(parsed)
+                if location.format == source_format:
+                    return location
             if parsed.get("type") == "epub":
-                return EpubLocation.model_validate(parsed)
+                legacy = EpubLocation.model_validate(parsed)
+                if source_format == "epub":
+                    return ReflowableLocation(
+                        type="reflowable",
+                        format="epub",
+                        cfi=legacy.cfi,
+                        href=legacy.href,
+                        progression=legacy.progression,
+                    )
             if parsed.get("type") == "comic":
                 volume_id = parsed.get("volumeId") or progress.get("volumeId") or selected_volume_id
                 if volume_id:
@@ -458,12 +517,17 @@ def _location_from_progress(
         except ValidationError:
             pass
     extra = _json(progress.get("extra"), {})
-    if reader_format == "epub":
+    if reader_format == "reflowable" and source_format is not None:
         cfi = extra.get("cfi") or progress.get("position")
         href = extra.get("currentHref") or extra.get("chapterHref")
-        spine_index = max(0, extra["sectionIndex"]) if isinstance(extra.get("sectionIndex"), int) else None
         progression = _clamp(progress.get("percent"), 0, 100, 0) / 100
-        return EpubLocation(type="epub", cfi=str(cfi) if cfi else None, href=str(href) if href else None, spineIndex=spine_index, progression=progression)
+        return ReflowableLocation(
+            type="reflowable",
+            format=source_format,
+            cfi=str(cfi) if cfi else None,
+            href=str(href) if href else None,
+            progression=progression,
+        )
     try:
         page = max(1, int(progress.get("page") or extra.get("pageIndex") or 1))
     except (TypeError, ValueError):
@@ -493,7 +557,10 @@ def _location_from_progress(
 
 def _progress_for_volume(progresses: list[dict[str, Any]], volume_id: str | None) -> dict[str, Any] | None:
     if volume_id is None:
-        return next((row for row in progresses if row.get("volumeId") is None), progresses[0] if progresses else None)
+        return next(
+            (row for row in progresses if row.get("volumeId") is None),
+            progresses[0] if progresses else None,
+        )
     return next((row for row in progresses if row.get("volumeId") == volume_id), None)
 
 
@@ -523,14 +590,13 @@ def reader_bootstrap_v2(
     if not work:
         return fail("作品不存在", status_code=404)
     reader_format = _reader_format(edition.get("format"))
+    source_format = _source_format(edition.get("format"))
     if reader_format is None:
         return fail("不支持的阅读格式", status_code=422)
 
     volumes = reader_queries.list_volumes_for_edition(db, edition_id) if "LibraryVolume" in _tables(db) else []
     all_work_progresses = (
-        reader_queries.list_progress_for_user_work(db, user.id, str(work["id"]))
-        if "LibraryReadingProgress" in _tables(db)
-        else []
+        reader_queries.list_progress_for_user_work(db, user.id, str(work["id"])) if "LibraryReadingProgress" in _tables(db) else []
     )
     progresses = [row for row in all_work_progresses if str(row.get("editionId")) == edition_id]
     selected_volume, volume_error = _select_volume(volumes, progresses, volume)
@@ -538,48 +604,84 @@ def reader_bootstrap_v2(
         return volume_error
     selected_volume_id = str(selected_volume["id"]) if selected_volume else None
 
-    unit_type = "chapter" if reader_format == "epub" else "audio_chapter" if reader_format == "audio" else "page"
+    unit_type = "chapter" if reader_format == "reflowable" else "audio_chapter" if reader_format == "audio" else "page"
     units = (
         reader_queries.list_units_for_edition(db, edition_id, unit_type, selected_volume_id)
         if reader_format != "pdf" and "LibraryReadingUnit" in _tables(db)
         else []
     )
+    navigation_manifest = (
+        reader_queries.get_edition_metadata_raw_json(
+            db, edition_id, "reflowable_source"
+        )
+        if reader_format == "reflowable" and "LibraryMetadata" in _tables(db)
+        else None
+    )
+    navigation_metadata = _json((navigation_manifest or {}).get("rawJson"), {})
+    navigation_fingerprint = (
+        navigation_metadata.get("navigationFingerprint")
+        if isinstance(navigation_metadata, dict)
+        and isinstance(navigation_metadata.get("navigationFingerprint"), str)
+        else None
+    )
+    if reader_format == "reflowable":
+        units = [
+            unit
+            for unit in units
+            if _reader_unit_navigation(unit, source_format) is not None
+        ]
     if reader_format == "comic" and selected_volume_id and not units:
         # Comic archives are intentionally indexed lazily by the existing file
         # service. Reuse that single index builder so bootstrap and page serving
         # cannot disagree about archive ordering.
         ensure_volume_page_index(db, settings, selected_volume_id)
-        units = reader_queries.list_units_for_edition(db, edition_id, "page", selected_volume_id) if "LibraryReadingUnit" in _tables(db) else []
+        units = (
+            reader_queries.list_units_for_edition(db, edition_id, "page", selected_volume_id) if "LibraryReadingUnit" in _tables(db) else []
+        )
         refreshed_volume = reader_queries.get_volume(db, selected_volume_id)
         if refreshed_volume:
             selected_volume = refreshed_volume
             volumes = [refreshed_volume if item.get("id") == selected_volume_id else item for item in volumes]
     unit_sort_orders = [int(unit["sortOrder"]) for unit in units if unit.get("sortOrder") is not None]
     unit_index_offset = 1 if unit_sort_orders and min(unit_sort_orders) == 0 else 0
-    unit_summaries = [
-        ReaderUnitSummary(
-            id=str(unit.get("id")) if unit.get("id") else None,
-            index=(int(unit["sortOrder"]) + unit_index_offset) if unit.get("sortOrder") is not None else index + 1,
-            title=str(unit.get("title") or f"第 {index + 1} 节"),
-            href=unit.get("href"),
-            fileId=str(unit.get("fileId")) if unit.get("fileId") else None,
-            startMs=unit.get("startMs"),
-            endMs=unit.get("endMs"),
-            durationMs=unit.get("durationMs"),
-        )
-        for index, unit in enumerate(units)
-    ] if reader_format in {"epub", "audio"} else []
-    page_summaries = [
-        ReaderPageSummary(
-            pageIndex=index + 1,
-            title=unit.get("title"),
-            mimeType=unit.get("mediaType"),
-            width=unit.get("width"),
-            height=unit.get("height"),
-            size=unit.get("size"),
-        )
-        for index, unit in enumerate(units)
-    ] if reader_format == "comic" else []
+    unit_summaries = (
+        [
+            ReaderUnitSummary(
+                id=str(unit.get("id")) if unit.get("id") else None,
+                index=(int(unit["sortOrder"]) + unit_index_offset) if unit.get("sortOrder") is not None else index + 1,
+                title=str(unit.get("title") or f"第 {index + 1} 节"),
+                href=unit.get("href"),
+                level=(
+                    _reader_unit_navigation(unit, source_format) or (None, None)
+                )[0],
+                navigationKey=(
+                    _reader_unit_navigation(unit, source_format) or (None, None)
+                )[1],
+                fileId=str(unit.get("fileId")) if unit.get("fileId") else None,
+                startMs=unit.get("startMs"),
+                endMs=unit.get("endMs"),
+                durationMs=unit.get("durationMs"),
+            )
+            for index, unit in enumerate(units)
+        ]
+        if reader_format in {"reflowable", "audio"}
+        else []
+    )
+    page_summaries = (
+        [
+            ReaderPageSummary(
+                pageIndex=index + 1,
+                title=unit.get("title"),
+                mimeType=unit.get("mediaType"),
+                width=unit.get("width"),
+                height=unit.get("height"),
+                size=unit.get("size"),
+            )
+            for index, unit in enumerate(units)
+        ]
+        if reader_format == "comic"
+        else []
+    )
     total_pages = None
     if reader_format == "pdf":
         total_pages = int((selected_volume or {}).get("pageCount") or edition.get("pageCount") or 1)
@@ -620,19 +722,26 @@ def reader_bootstrap_v2(
     ]
     if reader_format == "audio" and not audio_tracks:
         return fail("有声书没有可播放的音轨", status_code=422)
-    audio_chapters = [
-        AudioChapterSummary(
-            id=str(item["id"]),
-            title=str(item.get("title") or f"第 {index + 1} 章"),
-            fileId=str(item.get("fileId")),
-            startMs=max(0, int(item.get("startMs") or 0)),
-            endMs=max(0, int(item.get("endMs") or 0)),
-            durationMs=max(0, int(item.get("durationMs") or (int(item.get("endMs") or 0) - int(item.get("startMs") or 0)))),
-            sortOrder=int(item.get("sortOrder") or index),
-        )
-        for index, item in enumerate(units)
-        if item.get("fileId")
-    ] if reader_format == "audio" else []
+    audio_chapters = (
+        [
+            AudioChapterSummary(
+                id=str(item["id"]),
+                title=str(item.get("title") or f"第 {index + 1} 章"),
+                fileId=str(item.get("fileId")),
+                startMs=max(0, int(item.get("startMs") or 0)),
+                endMs=max(0, int(item.get("endMs") or 0)),
+                durationMs=max(
+                    0,
+                    int(item.get("durationMs") or (int(item.get("endMs") or 0) - int(item.get("startMs") or 0))),
+                ),
+                sortOrder=int(item.get("sortOrder") or index),
+            )
+            for index, item in enumerate(units)
+            if item.get("fileId")
+        ]
+        if reader_format == "audio"
+        else []
+    )
     total_duration_ms = (
         max(
             sum(track.duration_ms for track in audio_tracks),
@@ -650,16 +759,21 @@ def reader_bootstrap_v2(
     # produced it. Keep mismatch diagnostics, but never hand a stale location
     # to any adapter (including EPUB CFIs).
     discarded = "content_fingerprint_mismatch" if fingerprint_mismatch else None
-    resume_location = None if discarded else _location_from_progress(progress, reader_format, selected_volume_id)
+    resume_location = (
+        None
+        if discarded
+        else _location_from_progress(
+            progress,
+            reader_format,
+            source_format,
+            selected_volume_id,
+        )
+    )
     preferences, preferences_updated_at = _book_preferences(db, user.id, str(work["id"]), reader_format)
     account_playback_rate = read_user_preferences(db, user.id).get("audio.playbackRate")
     if reader_format == "audio" and isinstance(account_playback_rate, (int, float)):
         preferences = preferences.model_copy(
-            update={
-                "audio": preferences.audio.model_copy(
-                    update={"playback_rate": max(0.75, min(3.0, float(account_playback_rate)))}
-                )
-            }
+            update={"audio": preferences.audio.model_copy(update={"playback_rate": max(0.75, min(3.0, float(account_playback_rate)))})}
         )
     context = authorization_context(db, user)
     available_edition_rows = reader_queries.list_visible_editions_for_work(db, str(work["id"]), context)
@@ -683,9 +797,7 @@ def reader_bootstrap_v2(
                 100,
                 0,
             ),
-            lastReadAt=_datetime(
-                (latest_progress_by_edition.get(str(item.get("id"))) or {}).get("updatedAt")
-            ),
+            lastReadAt=_datetime((latest_progress_by_edition.get(str(item.get("id"))) or {}).get("updatedAt")),
             volumes=[_volume_summary(candidate) for candidate in all_work_volumes if candidate.get("editionId") == item.get("id")],
         )
         for item in available_edition_rows
@@ -700,7 +812,9 @@ def reader_bootstrap_v2(
     data = ReaderBootstrapData(
         userId=user.id,
         readerType=reader_format,
+        sourceFormat=source_format,
         contentFingerprint=content_fingerprint,
+        navigationFingerprint=navigation_fingerprint,
         book=ReaderBookSummary(
             id=str(work["id"]),
             title=str(work.get("title") or "未命名作品"),
@@ -718,7 +832,10 @@ def reader_bootstrap_v2(
         totalDurationMs=total_duration_ms,
         totalPages=total_pages,
         fileUrl=file_url,
-        capabilities=_capabilities(reader_format, preferences.comic.direction if reader_format == "comic" else "ltr"),
+        capabilities=_capabilities(
+            reader_format,
+            preferences.comic.direction if reader_format == "comic" else "ltr",
+        ),
         serverPreferences=ReaderServerPreferences(settings=preferences, updatedAt=preferences_updated_at),
         resumeLocation=resume_location,
         resumeFingerprintMismatch=fingerprint_mismatch,
@@ -793,11 +910,7 @@ def list_reader_bookmarks(
         edition_id=edition_id,
         content_fingerprint=content_fingerprint,
     )
-    return ReaderBookmarksResponse(
-        data=ReaderBookmarksData.model_validate(
-            {"bookmarks": [_bookmark_view(row) for row in rows]}
-        )
-    )
+    return ReaderBookmarksResponse(data=ReaderBookmarksData.model_validate({"bookmarks": [_bookmark_view(row) for row in rows]}))
 
 
 @router.put("/editions/{edition_id}/bookmarks")
@@ -879,138 +992,102 @@ async def replace_reader_bookmarks(
     )
 
 
-def _epub_location_target(
-    db: Session,
-    edition_id: str,
-    requested_volume_id: str | None,
-) -> tuple[dict[str, Any] | None, str | None, str | None, JSONResponse | None]:
-    if "LibraryEdition" not in _tables(db):
-        return None, None, None, fail("阅读器数据库尚未初始化", status_code=503)
-    edition = reader_queries.get_edition(db, edition_id)
-    if not edition:
-        return None, None, None, fail("版本不存在", status_code=404)
-    if _reader_format(edition.get("format")) != "epub":
-        return None, None, None, fail("只有 EPUB 支持全书位置索引", status_code=422)
-    volume_id, volume_error = _resolve_progress_volume(db, edition_id, requested_volume_id)
-    if volume_error:
-        return None, None, None, volume_error
-    return edition, volume_id, _content_fingerprint(db, edition, volume_id), None
-
-
-@router.post("/editions/{edition_id}/epub-locations/claim")
-def claim_reader_epub_locations(
-    edition_id: str,
-    payload: EpubLocationsClaimRequest,
-    request: Request,
-    volume: str | None = Query(default=None),
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> Annotated[
-    EpubLocationsResponse,
-    ErrorResponses(
-        ReaderUnauthorizedError,
-        ReaderNotFoundError,
-        ReaderConflictError,
-        ReaderValidationError,
-        ReaderUnavailableError,
-    ),
-]:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    if not can_access_edition(db, user, edition_id):
-        return fail("版本不存在", status_code=404, code="EDITION_NOT_FOUND")
-    _edition, _volume_id, expected_fingerprint, target_error = _epub_location_target(db, edition_id, volume)
-    if target_error:
-        return target_error
-    if payload.content_fingerprint != expected_fingerprint:
-        return fail(
-            "CONTENT_FINGERPRINT_MISMATCH",
-            status_code=409,
-            details={
-                "expectedContentFingerprint": expected_fingerprint,
-                "receivedContentFingerprint": payload.content_fingerprint,
-                "editionId": edition_id,
-                "volumeId": _volume_id,
+def _legacy_projection(location, volume_id: str | None) -> tuple[str, int | None, dict[str, Any]]:
+    if isinstance(location, ReflowableLocation):
+        position = location.cfi or location.href or (str(location.progression) if location.progression is not None else "0")
+        foliate = location.foliate
+        toc = foliate.toc if foliate else None
+        section = foliate.section if foliate else None
+        foliate_location = foliate.location if foliate else None
+        remaining = foliate.remaining_seconds if foliate else None
+        return (
+            position,
+            None,
+            {
+                "cfi": location.cfi,
+                "currentHref": location.href,
+                "progression": location.progression,
+                "sourceFormat": location.format,
+                "volumeId": volume_id,
+                "chapterIndex": toc.index if toc else None,
+                "chapterTitle": toc.title if toc else None,
+                "chapterHref": toc.href if toc else None,
+                "navigationKey": toc.navigation_key if toc else None,
+                "navigationFingerprint": foliate.navigation_fingerprint if foliate else None,
+                "sectionIndex": section.current if section else None,
+                "sectionTotal": section.total if section else None,
+                "locationCurrent": foliate_location.current if foliate_location else None,
+                "locationNext": foliate_location.next if foliate_location else None,
+                "locationTotal": foliate_location.total if foliate_location else None,
+                "remainingSectionSeconds": remaining.section if remaining else None,
+                "remainingTotalSeconds": remaining.total if remaining else None,
+                "progressEstimated": False if toc else None,
             },
         )
-    result = claim_epub_locations(
-        settings,
-        expected_fingerprint,
-        payload.break_size,
-        payload.cache_version,
-    )
-    return EpubLocationsResponse.model_validate({"data": result})
-
-
-@router.put("/editions/{edition_id}/epub-locations")
-def save_reader_epub_locations(
-    edition_id: str,
-    payload: EpubLocationsSaveRequest,
-    request: Request,
-    volume: str | None = Query(default=None),
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> Annotated[
-    EpubLocationsResponse,
-    ErrorResponses(
-        ReaderUnauthorizedError,
-        ReaderNotFoundError,
-        ReaderConflictError,
-        ReaderValidationError,
-        ReaderUnavailableError,
-    ),
-]:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    if not can_access_edition(db, user, edition_id):
-        return fail("版本不存在", status_code=404, code="EDITION_NOT_FOUND")
-    _edition, _volume_id, expected_fingerprint, target_error = _epub_location_target(db, edition_id, volume)
-    if target_error:
-        return target_error
-    if payload.content_fingerprint != expected_fingerprint:
-        return fail("CONTENT_FINGERPRINT_MISMATCH", status_code=409)
-    try:
-        result = save_epub_locations(
-            settings,
-            expected_fingerprint,
-            payload.break_size,
-            payload.cache_version,
-            payload.lease_token,
-            payload.serialized,
-        )
-    except ValueError:
-        return fail("EPUB 位置索引格式无效", status_code=422)
-    except PermissionError:
-        return fail("EPUB_LOCATION_LEASE_MISMATCH", status_code=409)
-    return EpubLocationsResponse.model_validate({"data": result})
-
-
-def _legacy_projection(location, volume_id: str | None) -> tuple[str, int | None, dict[str, Any]]:
     if isinstance(location, EpubLocation):
         position = location.cfi or location.href or (str(location.progression) if location.progression is not None else "0")
         page = location.spine_index + 1 if location.spine_index is not None else None
-        return position, page, {
-            "cfi": location.cfi,
-            "currentHref": location.href,
-            "sectionIndex": location.spine_index,
-            "progression": location.progression,
-            "volumeId": volume_id,
-        }
+        return (
+            position,
+            page,
+            {
+                "cfi": location.cfi,
+                "currentHref": location.href,
+                "sectionIndex": location.spine_index,
+                "progression": location.progression,
+                "volumeId": volume_id,
+            },
+        )
     if isinstance(location, ComicLocation):
-        return str(location.page_index), location.page_index, {
-            "pageIndex": location.page_index,
-            "volumeId": location.volume_id,
-        }
+        return (
+            str(location.page_index),
+            location.page_index,
+            {
+                "pageIndex": location.page_index,
+                "volumeId": location.volume_id,
+            },
+        )
     if isinstance(location, AudioLocation):
-        return str(location.position_ms), None, {
-            "fileId": location.file_id,
-            "chapterId": location.chapter_id,
-            "positionMs": location.position_ms,
-            "volumeId": location.volume_id or volume_id,
-        }
-    return str(location.page_number), location.page_number, {"pageIndex": location.page_number, "volumeId": volume_id}
+        return (
+            str(location.position_ms),
+            None,
+            {
+                "fileId": location.file_id,
+                "chapterId": location.chapter_id,
+                "positionMs": location.position_ms,
+                "volumeId": location.volume_id or volume_id,
+            },
+        )
+    return (
+        str(location.page_number),
+        location.page_number,
+        {"pageIndex": location.page_number, "volumeId": volume_id},
+    )
+
+
+def _normalize_progress_location(
+    location: EpubLocation | ReflowableLocation | ComicLocation | PdfLocation | AudioLocation,
+    *,
+    reader_format: ReaderFormat,
+    source_format: ReflowableFormat | None,
+) -> ReflowableLocation | ComicLocation | PdfLocation | AudioLocation | None:
+    if reader_format == "reflowable":
+        if source_format is None:
+            return None
+        if isinstance(location, ReflowableLocation):
+            return location if location.format == source_format else None
+        if isinstance(location, EpubLocation) and source_format == "epub":
+            return ReflowableLocation(
+                type="reflowable",
+                format="epub",
+                cfi=location.cfi,
+                href=location.href,
+                progression=location.progression,
+            )
+        return None
+    if location.type == reader_format and not isinstance(location, (EpubLocation, ReflowableLocation)):
+        return location
+    return None
 
 
 def _audio_progress_percent(
@@ -1021,7 +1098,10 @@ def _audio_progress_percent(
     files = reader_queries.list_files_for_edition(db, edition_id) if "LibraryFile" in _tables(db) else []
     if not files:
         return 0, False, fail("有声书没有可播放的音轨", status_code=422)
-    index = next((index for index, item in enumerate(files) if str(item.get("id")) == location.file_id), None)
+    index = next(
+        (index for index, item in enumerate(files) if str(item.get("id")) == location.file_id),
+        None,
+    )
     if index is None:
         return 0, False, fail("音频位置引用了不属于该版本的文件", status_code=422)
     current = files[index]
@@ -1079,24 +1159,30 @@ def save_progress_v2(
     reader_format = _reader_format(edition.get("format"))
     if reader_format is None:
         return fail("不支持的阅读格式", status_code=422)
-    if payload.location.type != reader_format:
+    source_format = _source_format(edition.get("format"))
+    location = _normalize_progress_location(
+        payload.location,
+        reader_format=reader_format,
+        source_format=source_format,
+    )
+    if location is None:
         return fail("位置类型与版本格式不匹配", status_code=422)
     requested_volume_id = payload.volume_id
-    if isinstance(payload.location, ComicLocation):
-        if payload.volume_id is not None and payload.volume_id != payload.location.volume_id:
+    if isinstance(location, ComicLocation):
+        if payload.volume_id is not None and payload.volume_id != location.volume_id:
             return fail("漫画位置的 volumeId 与进度目标不匹配", status_code=422)
-        requested_volume_id = payload.location.volume_id
-    if isinstance(payload.location, AudioLocation):
-        if payload.volume_id is not None and payload.location.volume_id is not None and payload.volume_id != payload.location.volume_id:
+        requested_volume_id = location.volume_id
+    if isinstance(location, AudioLocation):
+        if payload.volume_id is not None and location.volume_id is not None and payload.volume_id != location.volume_id:
             return fail("音频位置的 volumeId 与进度目标不匹配", status_code=422)
-        requested_volume_id = payload.location.volume_id or payload.volume_id
+        requested_volume_id = location.volume_id or payload.volume_id
     volume_id, volume_error = _resolve_progress_volume(db, edition_id, requested_volume_id)
     if volume_error:
         return volume_error
     resolved_percent = float(payload.percent)
     completes_work = payload.percent >= 100 and _is_final_volume(db, edition_id, volume_id)
-    if isinstance(payload.location, AudioLocation):
-        resolved_percent, at_final_end, audio_error = _audio_progress_percent(db, edition_id, payload.location)
+    if isinstance(location, AudioLocation):
+        resolved_percent, at_final_end, audio_error = _audio_progress_percent(db, edition_id, location)
         if audio_error:
             return audio_error
         if payload.percent >= 100:
@@ -1123,7 +1209,7 @@ def save_progress_v2(
     if "ReaderProgressCursor" not in _tables(db):
         return fail("阅读进度游标表尚未初始化", status_code=503)
 
-    position, page, extra = _legacy_projection(payload.location, volume_id)
+    position, page, extra = _legacy_projection(location, volume_id)
     now = _now()
     values = {
         # The V1 rollback projection is VARCHAR(191); the complete location,
@@ -1136,7 +1222,7 @@ def save_progress_v2(
         "readerType": reader_format,
         "schemaVersion": 2,
         "locationType": reader_format,
-        "locationJson": _json_text(payload.location.model_dump(by_alias=True, mode="json", exclude_none=True)),
+        "locationJson": _json_text(location.model_dump(by_alias=True, mode="json", exclude_none=True)),
         "contentFingerprint": expected_fingerprint,
         "mutationId": payload.mutation_id,
         "clientId": payload.client_id,
@@ -1167,13 +1253,11 @@ def save_progress_v2(
             workId=str(edition["workId"]),
             editionId=edition_id,
             volumeId=volume_id,
-            location=payload.location,
+            location=location,
             percent=resolved_percent,
             updatedAt=now,
         )
-        return ReaderProgressResponse(
-            data=ReaderProgressData(mutationId=payload.mutation_id, applied=False, progress=stale_progress)
-        )
+        return ReaderProgressResponse(data=ReaderProgressData(mutationId=payload.mutation_id, applied=False, progress=stale_progress))
     existing = reader_queries.get_reading_progress(
         db,
         user_id=user.id,
@@ -1201,14 +1285,8 @@ def save_progress_v2(
             user_id=user.id,
             edition_id=edition_id,
         )
-        progress_by_volume = {
-            str(row.get("volumeId")): float(row.get("percent") or 0)
-            for row in progress_rows
-            if row.get("volumeId")
-        }
-        completes_work = bool(volume_rows) and all(
-            progress_by_volume.get(str(volume["id"]), 0) >= 100 for volume in volume_rows
-        )
+        progress_by_volume = {str(row.get("volumeId")): float(row.get("percent") or 0) for row in progress_rows if row.get("volumeId")}
+        completes_work = bool(volume_rows) and all(progress_by_volume.get(str(volume["id"]), 0) >= 100 for volume in volume_rows)
     _advance_work_status_for_progress(
         db,
         user_id=user.id,
@@ -1216,7 +1294,7 @@ def save_progress_v2(
         work_id=str(edition["workId"]),
         completed=completes_work,
         volume_id=volume_id,
-        unit_id=payload.location.chapter_id if isinstance(payload.location, AudioLocation) else None,
+        unit_id=location.chapter_id if isinstance(location, AudioLocation) else None,
         now=now,
     )
     db.commit()
@@ -1230,7 +1308,7 @@ def save_progress_v2(
         workId=str(edition["workId"]),
         editionId=edition_id,
         volumeId=volume_id,
-        location=payload.location,
+        location=location,
         percent=resolved_percent,
         updatedAt=now,
     )

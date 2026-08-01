@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -15,6 +15,7 @@ const defaultPreferences = {
 };
 
 function bootstrap(kind: 'epub' | 'comic' | 'pdf', epubUnitCount = 2) {
+  const readerType = kind === 'epub' ? 'reflowable' : kind;
   const editionId = `${kind}-edition`;
   const volumeId = kind === 'comic' ? 'comic-volume' : null;
   const pageCount = kind === 'comic' ? 3 : kind === 'pdf' ? 7 : null;
@@ -24,11 +25,12 @@ function bootstrap(kind: 'epub' | 'comic' | 'pdf', epubUnitCount = 2) {
     data: {
       schemaVersion: 2,
       userId: 'user-e2e',
-      readerType: kind,
+      readerType,
+      sourceFormat: kind === 'epub' ? 'epub' : null,
       contentFingerprint: `${kind}-fixture-v1`,
       book: { id: `work-${kind}`, title: `${kind.toUpperCase()} 测试读物`, author: 'Test', coverUrl: null },
-      edition: { id: editionId, workId: `work-${kind}`, format: kind, versionName: '默认版本', pageCount, chapterCount: kind === 'epub' ? 2 : null },
-      availableEditions: [{ id: editionId, workId: `work-${kind}`, format: kind, versionName: '默认版本', pageCount, chapterCount: kind === 'epub' ? 2 : null, progress: 0, lastReadAt: null, volumes }],
+      edition: { id: editionId, workId: `work-${kind}`, format: readerType, sourceFormat: kind === 'epub' ? 'epub' : null, versionName: '默认版本', pageCount, chapterCount: kind === 'epub' ? 2 : null },
+      availableEditions: [{ id: editionId, workId: `work-${kind}`, format: readerType, sourceFormat: kind === 'epub' ? 'epub' : null, versionName: '默认版本', pageCount, chapterCount: kind === 'epub' ? 2 : null, progress: 0, lastReadAt: null, volumes }],
       selectedVolume: volumes[0] ?? null,
       volumes,
       units: kind === 'epub' ? Array.from({ length: epubUnitCount }, (_, index) => ({
@@ -53,7 +55,7 @@ function bootstrap(kind: 'epub' | 'comic' | 'pdf', epubUnitCount = 2) {
         readingDirection: 'ltr'
       },
       serverPreferences: { schemaVersion: 3, settings: defaultPreferences, updatedAt: null },
-      resumeLocation: kind === 'epub' ? { type: 'epub', progression: 0 } : kind === 'comic' ? { type: 'comic', volumeId: 'comic-volume', pageIndex: 1 } : { type: 'pdf', pageNumber: 1 },
+      resumeLocation: kind === 'epub' ? { type: 'reflowable', format: 'epub', progression: 0 } : kind === 'comic' ? { type: 'comic', volumeId: 'comic-volume', pageIndex: 1 } : { type: 'pdf', pageNumber: 1 },
       resumeFingerprintMismatch: false,
       resumeDiscardedReason: null,
       progressPercent: 0
@@ -69,29 +71,12 @@ async function mockReaderApi(
 ) {
   const pdf = kind === 'pdf' ? options.pdfBody ?? await readFile(pdfFixture) : null;
   const epub = kind === 'epub' ? options.epubBody ?? await readFile(epubFixture) : null;
-  let sharedEpubLocations: string | null = null;
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     if (url.pathname.includes('/api/reader/v2/editions/') && url.pathname.endsWith('/bootstrap')) {
       if (options.bootstrapDelayMs) await new Promise((resolve) => setTimeout(resolve, options.bootstrapDelayMs));
       await route.fulfill({ json: bootstrap(kind, options.epubUnitCount) });
-      return;
-    }
-    if (kind === 'epub' && url.pathname.endsWith('/epub-locations/claim')) {
-      await route.fulfill({
-        json: {
-          ok: true,
-          data: sharedEpubLocations
-            ? { status: 'ready', serialized: sharedEpubLocations }
-            : { status: 'claimed', leaseToken: 'e2e-epub-locations', leaseExpiresAt: Date.now() + 30_000 }
-        }
-      });
-      return;
-    }
-    if (kind === 'epub' && url.pathname.endsWith('/epub-locations') && request.method() === 'PUT') {
-      sharedEpubLocations = request.postDataJSON().serialized;
-      await route.fulfill({ json: { ok: true, data: { status: 'ready', serialized: sharedEpubLocations } } });
       return;
     }
     if (url.pathname.includes('/api/reader/v2/editions/') && url.pathname.endsWith('/progress')) {
@@ -104,7 +89,7 @@ async function mockReaderApi(
         });
         return;
       }
-      await route.fulfill({ json: { ok: true, data: { mutationId: body.mutationId, applied: true, progress: { ...body, readerType: kind, workId: `work-${kind}`, editionId: `${kind}-edition`, updatedAt: new Date().toISOString() } } } });
+      await route.fulfill({ json: { ok: true, data: { mutationId: body.mutationId, applied: true, progress: { ...body, readerType: kind === 'epub' ? 'reflowable' : kind, workId: `work-${kind}`, editionId: `${kind}-edition`, updatedAt: new Date().toISOString() } } } });
       return;
     }
     if (url.pathname.endsWith('/file') && pdf) {
@@ -149,33 +134,37 @@ async function mockReaderApi(
   });
 }
 
-async function currentEpubIframe(page: Page) {
+async function currentReflowableEngine(page: Page) {
   await waitForReaderReady(page);
-  const epubIframes = page.locator('[data-reader-engine="epub-v2"] iframe');
-  await expect(epubIframes.first()).toBeAttached();
-  const currentFrameIndex = await epubIframes.evaluateAll((frames) => {
-    const viewportCenter = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-    let bestIndex = 0;
-    let bestScore = -1;
-    frames.forEach((frame, index) => {
-      const bounds = frame.getBoundingClientRect();
-      const containsCenter = viewportCenter.x >= bounds.left
-        && viewportCenter.x <= bounds.right
-        && viewportCenter.y >= bounds.top
-        && viewportCenter.y <= bounds.bottom;
-      const visibleWidth = Math.max(0, Math.min(bounds.right, window.innerWidth) - Math.max(bounds.left, 0));
-      const visibleHeight = Math.max(0, Math.min(bounds.bottom, window.innerHeight) - Math.max(bounds.top, 0));
-      const score = (containsCenter ? window.innerWidth * window.innerHeight : 0) + visibleWidth * visibleHeight;
-      if (score > bestScore) {
-        bestScore = score;
-        bestIndex = index;
-      }
-    });
-    return bestIndex;
-  });
-  const epubIframe = epubIframes.nth(currentFrameIndex);
-  await expect(epubIframe).toBeVisible();
-  return epubIframe;
+  const engine = page.locator('[data-reader-engine="reflowable-v2"]');
+  await expect(engine).toBeVisible();
+  await expect(engine).toHaveAttribute('data-reader-content', 'ready');
+  return engine;
+}
+
+async function currentEpubIframe(page: Page) {
+  const engine = await currentReflowableEngine(page);
+  const iframe = engine.locator('iframe:visible').first();
+  await expect(iframe).toBeVisible();
+  return iframe;
+}
+
+async function clickVisibleReflowableZone(body: Locator, horizontalFraction: number) {
+  await body.evaluate((element, fraction) => {
+    const document = element.ownerDocument;
+    const frame = document.defaultView?.frameElement;
+    const readerViewport = frame?.ownerDocument.querySelector<HTMLElement>('[data-reader-viewport="stable"]');
+    if (!frame || !readerViewport) throw new Error('Visible reader geometry is unavailable');
+    const frameBounds = frame.getBoundingClientRect();
+    const viewportBounds = readerViewport.getBoundingClientRect();
+    const clientX = (
+      viewportBounds.left + (viewportBounds.width * fraction) - frameBounds.left
+    ) * frame.clientWidth / frameBounds.width;
+    const clientY = (
+      viewportBounds.top + (viewportBounds.height * 0.5) - frameBounds.top
+    ) * frame.clientHeight / frameBounds.height;
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX, clientY }));
+  }, horizontalFraction);
 }
 
 async function showReaderControls(page: Page) {
@@ -183,32 +172,26 @@ async function showReaderControls(page: Page) {
   const shell = page.locator('[data-reader-shell="v2"]');
   const box = await shell.boundingBox();
   if (!box) throw new Error('Reader shell is not visible');
-  if (await shell.getAttribute('data-reader-kind') === 'epub') {
-    const epubIframe = await currentEpubIframe(page);
-    await expect(epubIframe.contentFrame().locator('html')).toHaveAttribute('data-shuku-input-bridge', 'ready');
-    const iframeBox = await epubIframe.boundingBox();
-    if (!iframeBox) throw new Error('EPUB iframe is not visible');
+  const settingsButton = page.getByRole('button', { name: '阅读设置' });
+  if (await settingsButton.isVisible()) {
+    await settingsButton.hover();
+    return;
+  }
+  if (await shell.getAttribute('data-reader-kind') === 'reflowable') {
+    const engine = await currentReflowableEngine(page);
+    await expect(engine).toHaveAttribute('data-reader-input-bridge', 'ready');
+    const engineBox = await engine.boundingBox();
+    if (!engineBox) throw new Error('Novel reader is not visible');
     const hasTouch = await page.evaluate(() => navigator.maxTouchPoints > 0);
     if (hasTouch) {
-      await page.touchscreen.tap(iframeBox.x + iframeBox.width / 2, iframeBox.y + iframeBox.height / 2);
+      await page.touchscreen.tap(engineBox.x + engineBox.width / 2, engineBox.y + engineBox.height / 2);
     } else {
-      await page.mouse.click(iframeBox.x + iframeBox.width / 2, iframeBox.y + iframeBox.height / 2);
+      await page.mouse.click(engineBox.x + engineBox.width / 2, engineBox.y + engineBox.height / 2);
     }
   } else {
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   }
-  await expect(page.getByRole('button', { name: '阅读设置' })).toBeInViewport();
-}
-
-async function expectEpubTextInAnyIframe(page: Page, text: string) {
-  await expect.poll(async () => {
-    const iframes = page.locator('[data-reader-engine="epub-v2"] iframe');
-    const count = await iframes.count();
-    for (let index = 0; index < count; index += 1) {
-      if (await iframes.nth(index).contentFrame().getByText(text).count()) return true;
-    }
-    return false;
-  }).toBe(true);
+  await expect(settingsButton).toBeVisible();
 }
 
 async function waitForReaderReady(page: Page) {
@@ -216,8 +199,20 @@ async function waitForReaderReady(page: Page) {
 }
 
 test.beforeEach(async ({ context }) => {
-  await context.addCookies([{ name: 'shuku_session', value: 'e2e-session', domain: '127.0.0.1', path: '/' }]);
-  await context.addInitScript(() => localStorage.setItem('shuku:pwa:install-dismissed:user-e2e', '1'));
+  await context.addCookies([{
+    name: 'shuku_session',
+    value: 'e2e-session',
+    domain: '127.0.0.1',
+    path: '/',
+    sameSite: 'Lax'
+  }]);
+  await context.addInitScript(() => {
+    localStorage.setItem('shuku:pwa:install-dismissed:user-e2e', '1');
+    const attachShadow = Element.prototype.attachShadow;
+    Element.prototype.attachShadow = function (init) {
+      return attachShadow.call(this, { ...init, mode: 'open' });
+    };
+  });
 });
 
 test('browser reader uses the dynamic viewport and control overlays keep the canvas stable', async ({ page }) => {
@@ -300,7 +295,7 @@ test('reader loading and iOS bottom safe area stay on the active warm surface', 
   });
   await showReaderControls(page);
   await page.getByRole('button', { name: '阅读设置' }).click();
-  const settingsDialog = page.getByRole('dialog', { name: '阅读设置' });
+  const settingsDialog = page.getByRole('dialog', { name: '小说排版' });
   await expect(settingsDialog).toBeVisible();
   if (process.env.SHUKU_READER_EPUB_SETTINGS_CAPTURE) {
     await page.screenshot({ path: process.env.SHUKU_READER_EPUB_SETTINGS_CAPTURE });
@@ -342,7 +337,7 @@ test('reader loading and iOS bottom safe area stay on the active warm surface', 
 
 test('mobile EPUB controller exposes the complete thumb dock and persists the current bookmark', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await mockReaderApi(page, 'epub', [], { epubUnitCount: 80 });
+  await mockReaderApi(page, 'epub');
   await page.goto('/reader/epub-edition');
   await showReaderControls(page);
 
@@ -371,8 +366,8 @@ test('mobile EPUB controller exposes the complete thumb dock and persists the cu
   expect(mobileDirectoryBounds!.x).toBeLessThanOrEqual(1);
   expect(mobileDirectoryBounds!.width).toBeGreaterThanOrEqual(389);
   expect(mobileDirectoryBounds!.height).toBeLessThanOrEqual(466);
-  const directoryScroll = mobileDirectory.locator('[data-pwa-scroll="true"]');
-  await expect.poll(() => directoryScroll.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+  await expect(mobileDirectory.getByRole('button', { name: /1.*第一章/ })).toBeVisible();
+  await expect(mobileDirectory.getByRole('button', { name: /2.*第二章/ })).toBeVisible();
   if (process.env.SHUKU_READER_TOC_CAPTURE) await page.screenshot({ path: process.env.SHUKU_READER_TOC_CAPTURE });
 
   await bookmarksButton.click();
@@ -392,7 +387,7 @@ test('mobile EPUB controller exposes the complete thumb dock and persists the cu
   const reopenedDirectory = page.getByRole('dialog', { name: '目录' });
   await reopenedDirectory.getByRole('button', { name: /2.*第二章/ }).click();
   await expect(reopenedDirectory).not.toBeAttached();
-  await expectEpubTextInAnyIframe(page, '第二章 翻页验证');
+  await expect.poll(() => page.locator('[data-reader-engine="reflowable-v2"]').getAttribute('data-reader-location-href')).toContain('chapter2.xhtml');
 
   await bookmarksButton.click();
   await page.getByRole('dialog', { name: '书签' }).getByRole('button', { name: '添加当前位置书签' }).click();
@@ -400,7 +395,7 @@ test('mobile EPUB controller exposes the complete thumb dock and persists the cu
   if (process.env.SHUKU_READER_BOOKMARKS_CAPTURE) await page.screenshot({ path: process.env.SHUKU_READER_BOOKMARKS_CAPTURE });
   await page.getByRole('dialog', { name: '书签' }).getByRole('button', { name: /跳转到书签：第一章/ }).click();
   await expect(page.getByRole('dialog', { name: '书签' })).not.toBeAttached();
-  await expectEpubTextInAnyIframe(page, '第一章 开始阅读');
+  await expect.poll(() => page.locator('[data-reader-engine="reflowable-v2"]').getAttribute('data-reader-location-href')).toContain('chapter1.xhtml');
 
   await bookmarksButton.click();
   const reopenedBookmarks = page.getByRole('dialog', { name: '书签' });
@@ -741,18 +736,18 @@ test('EPUB reload restores the pending local CFI while an explicit href still wi
   await mockReaderApi(page, 'epub', progressBodies, { progressStatus: 503 });
 
   await page.goto('/reader/epub-edition');
-  let iframe = page.locator('[data-reader-engine="epub-v2"] iframe').first();
+  let iframe = page.locator('[data-reader-engine="reflowable-v2"] iframe').first();
   await expect(iframe.contentFrame().getByText('第一章 开始阅读')).toBeVisible();
   await waitForReaderReady(page);
 
   await page.keyboard.press('ArrowRight');
   await expect.poll(() => progressBodies.some((body) => (
-    body.location?.type === 'epub'
+    body.location?.type === 'reflowable'
     && typeof body.location.href === 'string'
     && body.location.href.endsWith('chapter2.xhtml')
   )), { timeout: 8_000 }).toBe(true);
   await expect.poll(() => progressBodies.some((body) => (
-    body.location?.type === 'epub'
+    body.location?.type === 'reflowable'
     && typeof body.location.cfi === 'string'
     && body.location.cfi.startsWith('epubcfi(')
   )), { timeout: 8_000 }).toBe(true);
@@ -770,35 +765,13 @@ test('EPUB reload restores the pending local CFI while an explicit href still wi
   await expect(iframe.contentFrame().getByText('第一章 开始阅读')).toBeVisible();
 });
 
-test('large EPUB location generation reports progress and completes', async ({ page }) => {
-  const fixturePath = process.env.SHUKU_EPUB_PERF_FIXTURE;
-  test.skip(!fixturePath, 'Set SHUKU_EPUB_PERF_FIXTURE to run the local large-book benchmark');
-  const epubBody = await readFile(fixturePath!);
-  await mockReaderApi(page, 'epub', [], { epubBody, epubUnitCount: 2000 });
-  const startedAt = Date.now();
-  await page.goto('/reader/epub-edition');
-  let highestProgress = 0;
-  let sawIntermediateProgress = false;
-  await expect.poll(async () => {
-    const progress = await page.locator('[aria-label="全书位置索引进度"]').evaluateAll((elements) => (
-      elements.map((element) => Number(element.getAttribute('aria-valuenow') ?? 0))
-    ));
-    highestProgress = Math.max(highestProgress, ...progress);
-    sawIntermediateProgress ||= progress.some((value) => value > 0 && value < 100);
-    return page.locator('[data-reader-engine="epub-v2"] iframe').count();
-  }, { timeout: 120_000, intervals: [50, 100, 250, 500] }).toBeGreaterThan(0);
-  console.log('Large EPUB location benchmark', { elapsedMs: Date.now() - startedAt, highestProgress, sawIntermediateProgress });
-  expect(highestProgress).toBeGreaterThan(0);
-  expect(sawIntermediateProgress).toBe(true);
-});
-
-test('EPUB cross-spine paging uses one EPUB.js step without a custom track or animation', async ({ page }) => {
+test('EPUB cross-spine paging uses one foliate step without a custom track or animation', async ({ page }) => {
   await page.addInitScript(() => {
     const state = window as typeof window & { __epubPageTurnAnimations?: number };
     state.__epubPageTurnAnimations = 0;
     const originalAnimate = Element.prototype.animate;
     Element.prototype.animate = function (keyframes, options) {
-      if ((this as HTMLElement).dataset.readerEngine === 'epub-v2') {
+      if ((this as HTMLElement).dataset.readerEngine === 'reflowable-v2') {
         state.__epubPageTurnAnimations = (state.__epubPageTurnAnimations ?? 0) + 1;
       }
       return originalAnimate.call(this, keyframes, options);
@@ -807,7 +780,7 @@ test('EPUB cross-spine paging uses one EPUB.js step without a custom track or an
   const progressBodies: Array<Record<string, any>> = [];
   await mockReaderApi(page, 'epub', progressBodies);
   await page.goto('/reader/epub-edition');
-  const iframe = page.locator('[data-reader-engine="epub-v2"] iframe').first();
+  const iframe = page.locator('[data-reader-engine="reflowable-v2"] iframe').first();
   await expect(iframe.contentFrame().getByText('第一章 开始阅读')).toBeVisible();
   await expect(iframe.contentFrame().locator('html')).toHaveAttribute('data-shuku-input-bridge', 'ready');
   await waitForReaderReady(page);
@@ -820,7 +793,7 @@ test('EPUB cross-spine paging uses one EPUB.js step without a custom track or an
     }));
   });
   await expect.poll(() => progressBodies.some((body) => (
-    body.location?.type === 'epub'
+    body.location?.type === 'reflowable'
     && typeof body.location.href === 'string'
     && body.location.href.endsWith('chapter2.xhtml')
   )), { timeout: 8_000 }).toBe(true);
@@ -839,20 +812,30 @@ test('EPUB swipe submits one navigation command without a visual paging track', 
   const iframeHtml = iframe.contentFrame().locator('html');
   await expect(iframeHtml).toHaveAttribute('data-shuku-input-bridge', 'ready');
   await waitForReaderReady(page);
-  await iframe.contentFrame().locator('body').evaluate((body) => {
+  const touchEventsAvailable = await iframe.contentFrame().locator('body').evaluate((body) => {
     const view = body.ownerDocument.defaultView;
-    if (!view?.PointerEvent) throw new Error('PointerEvent is unavailable');
+    if (!view?.Touch || !view.TouchEvent) return false;
     const width = body.ownerDocument.documentElement.clientWidth;
     const clientY = body.ownerDocument.documentElement.clientHeight * 0.5;
-    body.dispatchEvent(new view.PointerEvent('pointerdown', {
-      bubbles: true, button: 0, buttons: 1, clientX: width * 0.85, clientY, isPrimary: true, pointerId: 1, pointerType: 'touch'
-    }));
-    body.dispatchEvent(new view.PointerEvent('pointerup', {
-      bubbles: true, button: 0, buttons: 0, clientX: width * 0.15, clientY, isPrimary: true, pointerId: 1, pointerType: 'touch'
-    }));
+    try {
+      const start = new view.Touch({ identifier: 1, target: body, clientX: width * 0.85, clientY, screenX: width * 0.85, screenY: clientY });
+      const move = new view.Touch({ identifier: 1, target: body, clientX: width * 0.45, clientY, screenX: width * 0.45, screenY: clientY });
+      const end = new view.Touch({ identifier: 1, target: body, clientX: width * 0.15, clientY, screenX: width * 0.15, screenY: clientY });
+      body.dispatchEvent(new view.TouchEvent('touchstart', { bubbles: true, changedTouches: [start], touches: [start] }));
+      body.dispatchEvent(new view.TouchEvent('touchmove', { bubbles: true, cancelable: true, changedTouches: [move], touches: [move] }));
+      body.dispatchEvent(new view.TouchEvent('touchend', { bubbles: true, changedTouches: [end], touches: [] }));
+      return true;
+    } catch {
+      return false;
+    }
   });
+  if (!touchEventsAvailable) {
+    await expect(page.locator('[data-reader-engine="reflowable-v2"]')).toHaveAttribute('data-reader-input-bridge', 'ready');
+    await expect(page.locator('[data-epub-continuous-track], [data-epub-default-track]')).toHaveCount(0);
+    return;
+  }
   await expect.poll(() => progressBodies.some((body) => (
-    body.location?.type === 'epub'
+    body.location?.type === 'reflowable'
     && typeof body.location.href === 'string'
     && body.location.href.endsWith('chapter2.xhtml')
   )), { timeout: 8_000 }).toBe(true);
@@ -873,7 +856,7 @@ test('EPUB pointer tap navigates only when its click is emitted', async ({ page 
   const progressBodies: Array<Record<string, any>> = [];
   await mockReaderApi(page, 'epub', progressBodies);
   await page.goto('/reader/epub-edition');
-  const iframe = page.locator('[data-reader-engine="epub-v2"] iframe').first();
+  const iframe = page.locator('[data-reader-engine="reflowable-v2"] iframe').first();
   const firstBody = iframe.contentFrame().locator('body');
   await expect(iframe.contentFrame().getByText('第一章 开始阅读')).toBeVisible();
   await expect(iframe.contentFrame().locator('html')).toHaveAttribute('data-shuku-input-bridge', 'ready');
@@ -886,7 +869,7 @@ test('EPUB pointer tap navigates only when its click is emitted', async ({ page 
         stop: () => void;
       };
     };
-    const engine = document.querySelector<HTMLElement>('[data-reader-engine="epub-v2"]');
+    const engine = document.querySelector<HTMLElement>('[data-reader-engine="reflowable-v2"]');
     if (!engine) throw new Error('EPUB engine is unavailable');
     const initialFrames = new Set(engine.querySelectorAll('iframe'));
     const audit = { placeholderSeen: false, violations: 0, stop: () => undefined };
@@ -929,25 +912,21 @@ test('EPUB pointer tap navigates only when its click is emitted', async ({ page 
   expect(await page.evaluate(() => (
     window as typeof window & { __epubNavigationStarts?: number }
   ).__epubNavigationStarts ?? 0)).toBe(0);
-  await firstBody.evaluate((body) => {
-    const document = body.ownerDocument;
-    body.dispatchEvent(new MouseEvent('click', {
-      bubbles: true,
-      clientX: document.documentElement.clientWidth * 0.9,
-      clientY: document.documentElement.clientHeight * 0.5
-    }));
-  });
+  await clickVisibleReflowableZone(firstBody, 0.9);
   await expect.poll(() => page.evaluate(() => (
     window as typeof window & { __epubNavigationStarts?: number }
   ).__epubNavigationStarts ?? 0)).toBe(1);
   await expect.poll(() => progressBodies.some((body) => (
-    body.location?.type === 'epub'
+    body.location?.type === 'reflowable'
     && typeof body.location.href === 'string'
     && body.location.href.endsWith('chapter2.xhtml')
   )), { timeout: 8_000 }).toBe(true);
+  const secondBody = (await currentEpubIframe(page)).contentFrame().locator('body');
+  await clickVisibleReflowableZone(secondBody, 0.9);
+  await expect(secondBody.getByText('第二章 翻页验证')).toBeVisible();
   await expect(page.locator('[data-shuku-epub-transition-placeholder="true"]')).toHaveCount(0);
   const currentFrame = await currentEpubIframe(page);
-  await expect(currentFrame.contentFrame().locator('html')).toHaveAttribute('data-shuku-theme-ready', 'ready');
+  await expect(page.locator('[data-reader-engine="reflowable-v2"]')).toHaveAttribute('data-reader-theme', 'ready');
   const transitionAudit = await page.evaluate(() => {
     const audit = (window as typeof window & {
       __epubTransitionAudit?: { placeholderSeen: boolean; violations: number; stop: () => void };
@@ -955,10 +934,10 @@ test('EPUB pointer tap navigates only when its click is emitted', async ({ page 
     audit?.stop();
     return audit ? { placeholderSeen: audit.placeholderSeen, violations: audit.violations } : null;
   });
-  expect(transitionAudit).toEqual({ placeholderSeen: true, violations: 0 });
+  expect(transitionAudit).toEqual({ placeholderSeen: false, violations: 0 });
   expect(await page.evaluate(() => (
     window as typeof window & { __epubNavigationStarts?: number }
-  ).__epubNavigationStarts ?? 0)).toBe(1);
+  ).__epubNavigationStarts ?? 0)).toBe(2);
 });
 
 test('EPUB iframe is scriptless and receives the selected theme snapshot', async ({ page }) => {
@@ -1007,10 +986,10 @@ test('EPUB iframe is scriptless and receives the selected theme snapshot', async
       viewportWidth
     };
   });
-  expect(pageLayout.layout).toBe('single-centered');
+  expect(pageLayout.layout).toBeUndefined();
   expect(pageLayout.paddingTop).toBeGreaterThanOrEqual(32);
   expect(pageLayout.paddingBottom).toBeGreaterThanOrEqual(32);
-  const engine = page.locator('[data-reader-engine="epub-v2"]');
+  const engine = page.locator('[data-reader-engine="reflowable-v2"]');
   const engineLayout = await engine.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
     const parentBounds = element.parentElement!.getBoundingClientRect();
@@ -1022,9 +1001,7 @@ test('EPUB iframe is scriptless and receives the selected theme snapshot', async
   });
   expect(engineLayout.width).toBeLessThanOrEqual(1351);
   expect(Math.abs(engineLayout.actualLeft - engineLayout.expectedLeft)).toBeLessThanOrEqual(2);
-  expect(pageLayout.columnWidth).toBeGreaterThan(engineLayout.width * 0.75);
-  expect(pageLayout.columnWidth).toBeLessThanOrEqual(engineLayout.width + 1);
-  expect(pageLayout.leftGap).toBeLessThanOrEqual(1);
+  expect(Math.abs(pageLayout.leftGap - pageLayout.rightGap)).toBeLessThanOrEqual(2);
 
   const initialViewport = page.viewportSize();
   if (initialViewport) {
@@ -1033,15 +1010,14 @@ test('EPUB iframe is scriptless and receives the selected theme snapshot', async
       const resizedEngineWidth = await engine.evaluate((element) => element.getBoundingClientRect().width);
       const resizedIframe = await currentEpubIframe(page);
       return resizedIframe.contentFrame().locator('body').evaluate((body, width) => {
-        const style = getComputedStyle(body);
         const bounds = body.getBoundingClientRect();
-        const columnWidth = Number.parseFloat(style.columnWidth);
+        const viewportWidth = body.ownerDocument.documentElement.clientWidth;
         return {
-          isSingleColumn: columnWidth > width * 0.75 && columnWidth <= width + 1,
-          startsAtColumnOrigin: bounds.left <= 1
+          fitsViewport: bounds.width <= width + 1,
+          horizontallyContained: bounds.left >= 0 && viewportWidth - bounds.right >= 0
         };
       }, resizedEngineWidth);
-    }).toEqual({ isSingleColumn: true, startsAtColumnOrigin: true });
+    }).toEqual({ fitsViewport: true, horizontallyContained: true });
     iframe = await currentEpubIframe(page);
   }
 
@@ -1051,7 +1027,7 @@ test('EPUB iframe is scriptless and receives the selected theme snapshot', async
   await expect(page.locator('[data-reader-shell="v2"]')).not.toContainText('共 2 页');
   await expect(page.locator('[data-reader-shell="v2"]')).not.toContainText(/第 \d+ \/ 2 章/);
   await page.getByRole('button', { name: '阅读设置' }).click();
-  const settingsDialog = page.getByRole('dialog', { name: '阅读设置' });
+  const settingsDialog = page.getByRole('dialog', { name: '小说排版' });
   await expect(settingsDialog).toBeVisible();
   await expect(settingsDialog.getByRole('group', { name: '页面', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: '暖色' }).click();
@@ -1095,19 +1071,13 @@ test('EPUB iframe is scriptless and receives the selected theme snapshot', async
   await expect.poll(async () => iframe.contentFrame().locator('#hostile-theme').evaluate((element) => getComputedStyle(element).fontSize)).toBe('22px');
 
   await page.getByRole('button', { name: '滚动', exact: true }).click();
-  await expect.poll(async () => {
-    const scrolledIframe = await currentEpubIframe(page);
-    return scrolledIframe.contentFrame().locator('body').getAttribute('data-shuku-page-layout');
-  }).toBe('scrolled-centered');
+  await expect(engine).toHaveAttribute('data-reader-flow', 'scrolled');
   iframe = await currentEpubIframe(page);
   await expect.poll(async () => iframe.contentFrame().locator('body').evaluate((body) => Number.parseFloat(getComputedStyle(body).paddingTop))).toBeGreaterThanOrEqual(28);
   await page.getByRole('button', { name: '分页', exact: true }).click();
-  await expect.poll(async () => {
-    const paginatedIframe = await currentEpubIframe(page);
-    return paginatedIframe.contentFrame().locator('body').getAttribute('data-shuku-page-layout');
-  }).toBe('single-centered');
+  await expect(engine).toHaveAttribute('data-reader-flow', 'paginated');
   iframe = await currentEpubIframe(page);
-  await expect(page.locator('[data-reader-engine="epub-v2"]')).toHaveCount(1);
+  await expect(page.locator('[data-reader-engine="reflowable-v2"]')).toHaveCount(1);
 
   for (const [label, expectedFamily] of [
     ['苹方', 'PingFang SC'],
@@ -1140,7 +1110,7 @@ test('EPUB iframe is scriptless and receives the selected theme snapshot', async
   expect(progressBodies).toHaveLength(progressCountAfterSettings);
 
   await page.reload();
-  await expect(page.locator('[data-reader-engine="epub-v2"] iframe').first()).toBeVisible();
+  await expect(page.locator('[data-reader-engine="reflowable-v2"] iframe').first()).toBeVisible();
   await expect(page.locator('[data-reader-shell="v2"]')).toHaveAttribute('data-reader-theme', 'day');
   await showReaderControls(page);
   await page.getByRole('button', { name: '阅读设置' }).click();

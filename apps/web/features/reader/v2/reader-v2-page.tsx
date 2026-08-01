@@ -18,11 +18,19 @@ import { fetchReaderBootstrap, type ReaderBootstrap } from './api';
 import { resolveRequestedEpubHref } from './epub-direct-target';
 import { resolveStartupResume } from './local-resume';
 import { ReaderEngineRuntime } from './reader-engine-runtime';
+import { isEngineResolvableReflowableHref } from './reflowable-navigation-href';
 import { useReaderPwaSurface } from './use-reader-pwa-surface';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 const openingStorageKey = 'shuku:reader:opening';
+
+function requireReflowableSourceFormat(bootstrap: ReaderBootstrap) {
+  if (bootstrap.readerType !== 'reflowable' || !bootstrap.sourceFormat) {
+    throw new Error('小说阅读器启动信息缺少源格式');
+  }
+  return bootstrap.sourceFormat;
+}
 
 type OpeningContext = {
   editionId: string;
@@ -203,10 +211,14 @@ export function ReaderV2Page({ editionId }: { editionId: string }) {
       let bootstrap = await fetchReaderBootstrap(editionId, requestedVolumeId, controller.signal);
       if (controller.signal.aborted) return;
       let hasDirectTarget = false;
-      if (bootstrap.readerType === 'epub' && requestedHref) {
+      if (bootstrap.readerType === 'reflowable' && requestedHref) {
+        const sourceFormat = requireReflowableSourceFormat(bootstrap);
         const targetHref = resolveRequestedEpubHref(bootstrap.units, requestedHref);
-        if (targetHref) {
-          bootstrap = { ...bootstrap, initialLocation: { kind: 'epub', href: targetHref } };
+        if (targetHref && isEngineResolvableReflowableHref(sourceFormat, targetHref)) {
+          bootstrap = {
+            ...bootstrap,
+            initialLocation: { kind: 'reflowable', format: sourceFormat, href: targetHref }
+          };
           hasDirectTarget = true;
         } else {
           emitReaderDebug('warning', '已忽略不属于当前 EPUB 的章节直达目标', { requestedHref });
@@ -242,7 +254,14 @@ export function ReaderV2Page({ editionId }: { editionId: string }) {
       ]);
       const startupResume = resolveStartupResume({
         mutations: [...pendingAtOpen, ...pendingAfterMigration],
-        context: {
+        context: bootstrap.readerType === 'reflowable' ? {
+          userId: bootstrap.userId,
+          editionId: bootstrap.edition.id,
+          volumeId: bootstrap.selectedVolume?.id ?? null,
+          contentFingerprint: bootstrap.contentFingerprint,
+          readerKind: 'reflowable',
+          sourceFormat: requireReflowableSourceFormat(bootstrap)
+        } : {
           userId: bootstrap.userId,
           editionId: bootstrap.edition.id,
           volumeId: bootstrap.selectedVolume?.id ?? null,

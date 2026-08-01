@@ -41,6 +41,16 @@ test('keeps visual reader locations on the existing Reader V2 wire contract', ()
   });
 });
 
+test('serializes foliate positions with their original source format', () => {
+  assert.deepEqual(toWireLocation({ kind: 'reflowable', format: 'azw3', cfi: 'epubcfi(/6/8)', progression: 0.6 }), {
+    type: 'reflowable',
+    format: 'azw3',
+    cfi: 'epubcfi(/6/8)',
+    href: undefined,
+    progression: 0.6
+  });
+});
+
 test('durably queues audio through the shared Reader V2 progress coordinator', async () => {
   const storage = new MemoryReaderV2Storage();
   const location: AudioProgressLocation = {

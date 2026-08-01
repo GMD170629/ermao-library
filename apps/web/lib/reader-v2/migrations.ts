@@ -22,7 +22,7 @@ type LegacyProgressCandidate = {
   editionId?: string;
   contentFingerprint?: string;
   volumeId?: string | null;
-  readerType?: ReaderKind | 'ebook' | 'unknown';
+  readerType?: ReaderKind | 'epub' | 'ebook' | 'unknown';
   progress: unknown;
   sourceKey?: string;
 };
@@ -79,7 +79,7 @@ export async function migrateLegacyPreferenceCandidate(
 function legacyLocation(candidate: LegacyProgressCandidate, progress: Record<string, unknown>): ReaderLocation | null {
   const extra = record(progress.extra);
   const rawKind = candidate.readerType ?? progress.readerType;
-  const kind = rawKind === 'ebook' ? 'epub' : rawKind;
+  const kind = rawKind === 'ebook' || rawKind === 'reflowable' ? 'epub' : rawKind;
   if (kind === 'epub') {
     const cfi = nonEmpty(extra.cfi) ? extra.cfi : nonEmpty(progress.position) && progress.position.startsWith('epubcfi(') ? progress.position : undefined;
     const href = nonEmpty(extra.currentHref) ? extra.currentHref : nonEmpty(extra.chapterHref) ? extra.chapterHref : undefined;
@@ -88,7 +88,7 @@ function legacyLocation(candidate: LegacyProgressCandidate, progress: Record<str
       ? undefined
       : Math.max(0, Math.min(1, rawProgression > 1 ? rawProgression / 100 : rawProgression));
     if (!cfi && !href && progression === undefined) return null;
-    return { kind: 'epub', cfi, href, spineIndex: finite(extra.spineIndex), progression };
+    return { kind: 'reflowable', format: 'epub', cfi, href, progression };
   }
   if (kind === 'comic') {
     const pageIndex = finite(progress.page) ?? finite(extra.pageIndex);

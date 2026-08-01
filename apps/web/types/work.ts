@@ -40,6 +40,7 @@ export type WorkView = {
   size: string;
   progress: number;
   progressExtra?: Record<string, unknown>;
+  progressEstimated?: boolean;
   currentHref?: string | null;
   currentSectionIndex?: number | null;
   currentChapterTitle?: string | null;
@@ -123,6 +124,7 @@ export type WorkView = {
     coverUrl: string;
     progress?: number;
     progressExtra?: Record<string, unknown>;
+    progressEstimated?: boolean;
     lastReadAt?: string | null;
     position?: string | null;
     currentPage?: number | null;

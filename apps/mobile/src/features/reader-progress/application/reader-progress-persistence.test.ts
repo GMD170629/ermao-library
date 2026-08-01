@@ -71,7 +71,7 @@ test('saves the latest slot with a monotonic client sequence', async () => {
     editionId: 'edition-1',
     volumeId: null,
     contentFingerprint: 'fingerprint-1',
-    readerKind: 'epub',
+    readerKind: 'reflowable',
   });
   assert.equal(restored.outcome, 'found');
   if (restored.outcome === 'found') {
@@ -144,7 +144,7 @@ test('falls back to the prior on-disk progress after latest corruption', async (
     editionId: 'edition-1',
     volumeId: null,
     contentFingerprint: 'fingerprint-1',
-    readerKind: 'epub',
+    readerKind: 'reflowable',
   });
   assert.equal(restored.outcome, 'found');
   assert.equal(restored.recoveredFromCorruption, true);
@@ -174,7 +174,7 @@ test('does not restore progress across a content fingerprint boundary', async ()
     editionId: 'edition-1',
     volumeId: null,
     contentFingerprint: 'different-fingerprint',
-    readerKind: 'epub',
+    readerKind: 'reflowable',
   });
   assert.equal(restored.outcome, 'not-found');
 });

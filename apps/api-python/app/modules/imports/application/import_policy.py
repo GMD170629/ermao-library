@@ -7,7 +7,7 @@ from pathlib import Path
 
 from app.modules.imports.application.dto import ImportPreferencesDTO
 
-CONVERTIBLE_TEXT_EXTS = {".mobi", ".azw", ".azw3", ".prc", ".fb2", ".txt"}
+REFLOWABLE_SOURCE_EXTS = {".mobi", ".azw", ".azw3", ".prc", ".fb2", ".txt"}
 
 
 def extension_is_allowed(

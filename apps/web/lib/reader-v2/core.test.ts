@@ -109,7 +109,7 @@ test('preserves valid V3 spread and animation preferences', () => {
 });
 
 test('session reducer rejects stale operations and events from another session', () => {
-  let state = createReaderSessionState('session-current', normalizeReaderPreferences(null), 'epub');
+  let state = createReaderSessionState('session-current', normalizeReaderPreferences(null), 'reflowable');
   const bootstrap = nextOperationToken(state, 'bootstrap');
   state = readerSessionReducer(state, { type: 'operation/begin', operation: bootstrap });
   state = readerSessionReducer(state, {
@@ -151,6 +151,17 @@ test('session reducer rejects stale operations and events from another session',
     event: { type: 'metadata-changed', sessionId: state.sessionId, operation: bootstrap, occurredAt: 1, totalPages: 321 }
   });
   assert.equal(state.totalPages, 321);
+  state = readerSessionReducer(state, {
+    type: 'adapter/event',
+    event: {
+      type: 'navigation-changed',
+      sessionId: state.sessionId,
+      operation: bootstrap,
+      occurredAt: 1,
+      items: [{ id: 'chapter-1', label: 'Chapter 1', href: 'chapter-1.xhtml' }]
+    }
+  });
+  assert.deepEqual(state.navigationItems, [{ id: 'chapter-1', label: 'Chapter 1', href: 'chapter-1.xhtml' }]);
 
   const firstNavigation = nextOperationToken(state, 'navigation');
   state = readerSessionReducer(state, { type: 'operation/begin', operation: firstNavigation });

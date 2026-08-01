@@ -35,7 +35,7 @@ from app.modules.imports.application.import_comic import _import_comic
 from app.modules.imports.application.import_epub import _import_epub
 from app.modules.imports.application.import_pdf import _import_pdf
 from app.modules.imports.application.import_policy import (
-    CONVERTIBLE_TEXT_EXTS,
+    REFLOWABLE_SOURCE_EXTS,
     extension_is_allowed,
     matches_ignore_patterns,
 )
@@ -53,7 +53,8 @@ from app.modules.imports.application.import_support import (
 )
 from app.modules.imports.application.import_text import (
     _complete_deferred_source_conversion,
-    _import_unconverted_text,
+    _import_reflowable_source,
+    refresh_existing_reflowable_source,
 )
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
@@ -90,12 +91,8 @@ def import_managed_book(
     """Import one media source using explicit collaborator ports."""
 
     requested_source = options.source_file_path.resolve()
-    original_source = (
-        options.original_source_file_path or requested_source
-    ).resolve()
-    source, audio_structure = _resolve_audio_import_source(
-        services, requested_source
-    )
+    original_source = (options.original_source_file_path or requested_source).resolve()
+    source, audio_structure = _resolve_audio_import_source(services, requested_source)
     effective_options = (
         replace(options, source_file_path=source, original_name=source.name)
         if source != requested_source
@@ -192,9 +189,9 @@ def import_managed_book(
                     f"音频文件超过单文件上限 {settings.audiobook_max_file_bytes} bytes：{oversized[0]}"
                 )
         converted: ConversionArtifactDTO | None = None
-        should_convert_text = source_ext in CONVERTIBLE_TEXT_EXTS and (
-            import_preferences.auto_convert_to_epub
-            or options.origin == "DEFERRED_CONVERSION"
+        should_convert_text = (
+            source_ext in REFLOWABLE_SOURCE_EXTS
+            and options.origin == "DEFERRED_CONVERSION"
         )
         if should_convert_text:
             converted = services.convert_text(task_id, original_source)
@@ -212,6 +209,18 @@ def import_managed_book(
             else _existing_audio_bundle_result(queries, audio_sources)
         )
         if existing_file:
+            if source_ext in REFLOWABLE_SOURCE_EXTS:
+                existing_file = refresh_existing_reflowable_source(
+                    store,
+                    queries,
+                    services,
+                    settings,
+                    source,
+                    existing_file,
+                )
+            metadata_refreshed = (
+                existing_file.merge_reason == "refreshed-native-metadata"
+            )
             store.update_import_task(
                 task_id,
                 columns={
@@ -221,7 +230,9 @@ def import_managed_book(
                     "status": "COMPLETED",
                     "progress": 100,
                     "duplicate": True,
-                    "message": "文件路径已入库，跳过重复处理",
+                    "message": "已补充原文件章节与元数据"
+                    if metadata_refreshed
+                    else "文件路径已入库，跳过重复处理",
                     "errorCode": None,
                     "errorSummary": None,
                     "retryable": False,
@@ -232,18 +243,33 @@ def import_managed_book(
                 },
             )
             _log_import(
-                store, task_id, "info", f"import skipped existing path: {source}"
+                store,
+                task_id,
+                "info",
+                f"native metadata refreshed: {source}"
+                if metadata_refreshed
+                else f"import skipped existing path: {source}",
             )
             services.stage_system_event(
                 ImportSystemEvent(
                     source="import",
-                    action="import.skipped",
+                    action=(
+                        "import.metadata_refreshed"
+                        if metadata_refreshed
+                        else "import.skipped"
+                    ),
                     target_type="importTask",
                     target_id=task_id,
-                    message=f"跳过已导入文件：{options.original_name or source.name}",
+                    message=(
+                        f"已补充原文件章节与元数据：{options.original_name or source.name}"
+                        if metadata_refreshed
+                        else f"跳过已导入文件：{options.original_name or source.name}"
+                    ),
                     metadata={
                         "sourcePath": str(original_source),
-                        "reason": "existing_path",
+                        "reason": "native_metadata_refreshed"
+                        if metadata_refreshed
+                        else "existing_path",
                         "workId": existing_file.work_id,
                         "editionId": existing_file.edition_id,
                         "volumeId": existing_file.volume_id,
@@ -303,6 +329,7 @@ def import_managed_book(
                 "epub_opf": "EPUB 元数据",
                 "pdf_metadata": "PDF 元数据",
                 "comic_info": "ComicInfo 元数据",
+                "reflowable_metadata": "原文件元数据",
             }.get(identity.source, "多来源裁决")
         )
         store.update_import_task(
@@ -348,8 +375,8 @@ def import_managed_book(
                 ext,
                 identity,
             )
-        elif ext in CONVERTIBLE_TEXT_EXTS:
-            result = _import_unconverted_text(
+        elif ext in REFLOWABLE_SOURCE_EXTS:
+            result = _import_reflowable_source(
                 store,
                 queries,
                 services,

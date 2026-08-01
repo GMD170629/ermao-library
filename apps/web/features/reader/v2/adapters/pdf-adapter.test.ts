@@ -33,6 +33,8 @@ class FakeElement {
   textContent = '';
   width = 0;
   height = 0;
+  scrollLeft = 0;
+  scrollTop = 0;
 
   constructor(ownerDocument: FakeDocument) {
     this.ownerDocument = ownerDocument;
@@ -73,6 +75,84 @@ class FakeElement {
 
   setAttribute() {}
 }
+
+test('PDF page navigation resets a zoomed document to the top', async () => {
+  const originalResizeObserver = globalThis.ResizeObserver;
+  const originalWindow = globalThis.window;
+  const ownerDocument = new FakeDocument();
+  const container = new FakeElement(ownerDocument);
+  const page = {
+    getViewport: ({ scale }: { scale: number }) => ({ width: 600 * scale, height: 900 * scale }),
+    render: () => ({ promise: Promise.resolve(), cancel() {} }) as RenderTask,
+    streamTextContent: () => ({}),
+    cleanup() {}
+  } as unknown as PDFPageProxy;
+  const document = {
+    numPages: 2,
+    getPage: async () => page
+  } as unknown as PDFDocumentProxy;
+  const loadingTask = {
+    promise: Promise.resolve(document),
+    destroy: async () => undefined,
+    onPassword: undefined
+  } as unknown as PDFDocumentLoadingTask;
+  class FakeTextLayer {
+    render() { return Promise.resolve(); }
+    cancel() {}
+  }
+  const pdfjs = {
+    GlobalWorkerOptions: {},
+    getDocument: () => loadingTask,
+    TextLayer: FakeTextLayer as unknown as typeof TextLayer,
+    AnnotationMode: { DISABLE: 0 },
+    PasswordResponses: { INCORRECT_PASSWORD: 2 }
+  } as unknown as typeof import('pdfjs-dist/legacy/build/pdf.mjs');
+  Object.assign(globalThis, {
+    ResizeObserver: FakeResizeObserver,
+    window: { devicePixelRatio: 1, innerWidth: 800, innerHeight: 600 }
+  });
+  const adapter = new PdfReaderAdapter({
+    container: container as unknown as HTMLElement,
+    fetch: async () => new Response('%PDF-1.7', { status: 200 }),
+    loadPdfJs: async () => pdfjs
+  });
+
+  try {
+    await adapter.open({
+      sessionId: 'pdf-session',
+      operation: { sessionId: 'pdf-session', kind: 'bootstrap', sequence: 1 },
+      signal: new AbortController().signal,
+      source: {
+        editionId: 'edition-1',
+        workId: 'work-1',
+        kind: 'pdf',
+        contentUrl: '/book.pdf',
+        contentFingerprint: 'pdf-fingerprint',
+        totalPages: 2
+      },
+      initialLocation: null,
+      preferences: {
+        ...DEFAULT_READER_PREFERENCES,
+        pdf: { ...DEFAULT_READER_PREFERENCES.pdf, zoom: 2 }
+      }
+    });
+    container.scrollTop = 420;
+
+    const acknowledged = await adapter.execute({ type: 'next' }, {
+      operation: { sessionId: 'pdf-session', kind: 'navigation', sequence: 2 },
+      signal: new AbortController().signal
+    });
+
+    assert.equal(acknowledged.accepted, true);
+    assert.equal(container.scrollTop, 0);
+  } finally {
+    await adapter.dispose();
+    Object.assign(globalThis, {
+      ResizeObserver: originalResizeObserver,
+      window: originalWindow
+    });
+  }
+});
 
 class FakeDocument {
   createElement() {

@@ -38,7 +38,16 @@ test('round-trips a validated EPUB progress document', () => {
   }
 });
 
-test('validates EPUB, comic and PDF locations at the file boundary', () => {
+test('validates reflowable, legacy EPUB, comic and PDF locations at the file boundary', () => {
+  assert.equal(
+    decodeReaderLocation({
+      kind: 'reflowable',
+      format: 'mobi',
+      cfi: 'epubcfi(/6/4)',
+      progression: 0.5,
+    }).ok,
+    true,
+  );
   assert.equal(
     decodeReaderLocation({ kind: 'epub', progression: 0.5 }).ok,
     true,
@@ -57,6 +66,14 @@ test('validates EPUB, comic and PDF locations at the file boundary', () => {
   );
 
   assert.equal(decodeReaderLocation({ kind: 'epub' }).ok, false);
+  assert.equal(
+    decodeReaderLocation({
+      kind: 'reflowable',
+      format: 'docx',
+      progression: 0.5,
+    }).ok,
+    false,
+  );
   assert.equal(
     decodeReaderLocation({ kind: 'epub', progression: 42 }).ok,
     false,

@@ -15,7 +15,7 @@ function mutation(overrides: Partial<ProgressMutation> = {}): ProgressMutation {
     editionId: 'edition-1',
     volumeId: null,
     contentFingerprint: 'sha256:current',
-    location: { kind: 'epub', cfi: 'epubcfi(/6/2)' },
+    location: { kind: 'reflowable', format: 'epub', cfi: 'epubcfi(/6/2)' },
     percent: 12,
     createdAt: 100,
     updatedAt: 100,
@@ -30,18 +30,32 @@ const context = {
   editionId: 'edition-1',
   volumeId: null,
   contentFingerprint: 'sha256:current',
-  readerKind: 'epub' as const
+  readerKind: 'reflowable' as const,
+  sourceFormat: 'epub' as const
 };
 
 test('restores the newest exact local CFI ahead of an older server snapshot', () => {
   const latest = mutation({
     mutationId: 'mutation-2',
     clientSequence: 2,
-    location: { kind: 'epub', cfi: 'epubcfi(/6/8)' },
+    location: { kind: 'reflowable', format: 'epub', cfi: 'epubcfi(/6/8)' },
     percent: 38,
     updatedAt: 200
   });
   assert.equal(newestLocalResume([latest, mutation()], context), latest);
+});
+
+test('upgrades a pending legacy EPUB anchor before foliate restores it', () => {
+  const legacy = mutation({
+    location: { kind: 'epub', cfi: 'epubcfi(/6/12)', href: 'legacy.xhtml', progression: 0.7 }
+  });
+  assert.deepEqual(newestLocalResume([legacy], context)?.location, {
+    kind: 'reflowable',
+    format: 'epub',
+    cfi: 'epubcfi(/6/12)',
+    href: 'legacy.xhtml',
+    progression: 0.7
+  });
 });
 
 test('never crosses content, volume, owner, or reader boundaries', () => {
@@ -69,10 +83,10 @@ test('startup reconciliation prefers the newest pending CFI over an older server
     mutationId: 'mutation-3',
     clientSequence: 3,
     location: {
-      kind: 'epub',
+      kind: 'reflowable',
+      format: 'epub',
       cfi: 'epubcfi(/6/8!/4/2/6)',
       href: 'chapter-2.xhtml',
-      spineIndex: 1,
       progression: 0.42
     },
     percent: 42,
@@ -81,7 +95,7 @@ test('startup reconciliation prefers the newest pending CFI over an older server
   const decision = resolveStartupResume({
     mutations: [mutation(), latest],
     context,
-    initialLocation: { kind: 'epub', cfi: 'epubcfi(/6/2!/4/2/2)', href: 'chapter-1.xhtml', progression: 0.04 },
+    initialLocation: { kind: 'reflowable', format: 'epub', cfi: 'epubcfi(/6/2!/4/2/2)', href: 'chapter-1.xhtml', progression: 0.04 },
     progressPercent: 4,
     hasDirectTarget: false
   });
@@ -93,11 +107,11 @@ test('startup reconciliation prefers the newest pending CFI over an older server
 });
 
 test('a validated explicit href wins over a pending local CFI', () => {
-  const directLocation = { kind: 'epub' as const, href: 'chapter-1.xhtml#opening' };
+  const directLocation = { kind: 'reflowable' as const, format: 'epub' as const, href: 'chapter-1.xhtml#opening' };
   const decision = resolveStartupResume({
     mutations: [mutation({
       clientSequence: 9,
-      location: { kind: 'epub', cfi: 'epubcfi(/6/8!/4/2/6)', href: 'chapter-2.xhtml' },
+      location: { kind: 'reflowable', format: 'epub', cfi: 'epubcfi(/6/8!/4/2/6)', href: 'chapter-2.xhtml' },
       percent: 65
     })],
     context,
@@ -115,7 +129,7 @@ test('a validated explicit href wins over a pending local CFI', () => {
 });
 
 test('startup reconciliation preserves the server snapshot without an exact pending mutation', () => {
-  const serverLocation = { kind: 'epub' as const, cfi: 'epubcfi(/6/4!/4/2/2)', progression: 0.23 };
+  const serverLocation = { kind: 'reflowable' as const, format: 'epub' as const, cfi: 'epubcfi(/6/4!/4/2/2)', progression: 0.23 };
   const decision = resolveStartupResume({
     mutations: [mutation({ contentFingerprint: 'sha256:another-rendition', clientSequence: 10 })],
     context,

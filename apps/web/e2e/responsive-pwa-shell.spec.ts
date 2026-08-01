@@ -552,6 +552,15 @@ test('wide shelf details use responsive bookshelf rows and load more on scroll',
   await expect(page.getByText('已加载 25 / 25 本')).toBeVisible();
   expect(shelfRequestUrls.some((url) => new URL(url).searchParams.get('page') === '2')).toBe(true);
   await expect(page.getByRole('button', { name: '下一页' })).toHaveCount(0);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => grid.evaluate((element) => {
+    const firstRowGrid = element.querySelector<HTMLElement>('[data-testid="bookshelf-row"] .grid');
+    return firstRowGrid
+      ? getComputedStyle(firstRowGrid).gridTemplateColumns.split(' ').filter(Boolean).length
+      : 0;
+  })).toBe(3);
+  await expect(grid.getByTestId('bookshelf-ledge')).toHaveCount(9);
 });
 
 test('legacy mobile URLs redirect authenticated users to the shared web home', async ({ page }) => {

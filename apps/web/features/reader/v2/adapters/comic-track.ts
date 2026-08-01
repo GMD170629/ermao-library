@@ -206,16 +206,18 @@ export class ComicSpreadTrackDriver implements PagedTrackDriver {
     throwIfAborted(signal);
     this.rotateSlots(step);
     this.render(this.source.getView());
-    this.recenter();
+    this.recenter(true);
   }
 
-  recenter() {
+  recenter(resetVerticalToStart = false) {
     this.stopAnimation(abortError());
     this.viewport.scrollLeft = this.viewportWidth();
     const current = this.slots.current;
     if (this.source.getView().zoom > 1) {
       current.scrollLeft = Math.max(0, (current.scrollWidth - current.clientWidth) / 2);
-      current.scrollTop = Math.max(0, (current.scrollHeight - current.clientHeight) / 2);
+      current.scrollTop = resetVerticalToStart
+        ? 0
+        : Math.max(0, (current.scrollHeight - current.clientHeight) / 2);
     } else {
       current.scrollLeft = 0;
       current.scrollTop = 0;

@@ -9,6 +9,7 @@ from sqlalchemy import Integer, case, cast, delete, func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
+from app.models.common import db_timestamp
 from app.models.import_pipeline import (
     BookConversionTask,
     DownloadTask,
@@ -28,7 +29,6 @@ from app.models.library import (
 from app.models.organize import MetadataLookupTask, OrganizeJob
 from app.models.settings import MonitorFolder
 from app.models.shelf import Shelf, ShelfWork
-from app.models.common import db_timestamp
 
 
 def _records(
@@ -69,6 +69,17 @@ def _list_reading_units(
     if limit is not None:
         statement = statement.limit(limit)
     return _records(db, statement)
+
+
+def list_reflowable_chapters_for_edition(
+    db: Session, edition_id: str
+) -> list[dict[str, Any]]:
+    return _list_reading_units(
+        db,
+        LibraryReadingUnit.edition_id == edition_id,
+        func.lower(LibraryReadingUnit.unit_type) == "chapter",
+        order_by=(LibraryReadingUnit.sort_order, LibraryReadingUnit.id),
+    )
 
 
 def _list_reading_progress(

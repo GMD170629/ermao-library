@@ -4277,9 +4277,9 @@ def test_raw_text_detail_exposes_deferred_epub_conversion(
     assert detail.status_code == 200
     raw_edition = detail.json()["data"]["book"]["editions"][0]
     assert raw_edition["formatValue"] == "TXT"
-    assert raw_edition["readable"] is False
+    assert raw_edition["readable"] is True
     assert raw_edition["conversionAvailable"] is True
-    assert detail.json()["data"]["activeMedia"]["primaryAction"] is None
+    assert detail.json()["data"]["activeMedia"]["primaryAction"] is not None
     ebook_list = client.get("/api/works?type=ebook")
     assert [book["id"] for book in ebook_list.json()["data"]["books"]] == [
         imported.work_id
@@ -4410,9 +4410,7 @@ def test_scan_selected_directory_reuses_monitor_rules_and_known_import_paths(
     assert rejected.status_code == 400
 
 
-def test_scan_job_list_cancel_and_resubmit_contract(
-    client, db_session, test_settings
-):
+def test_scan_job_list_cancel_and_resubmit_contract(client, db_session, test_settings):
     create_worker_tables(db_session)
     _login(client, db_session)
     scan_root = test_settings.resolved_monitor_root / "scan-cancel"
@@ -4514,9 +4512,7 @@ def test_scan_selected_audiobook_directory_queues_one_directory_bundle(
     work_item = runtime.claim_work("audio-scan-test", 900)
     assert work_item is not None and work_item.kind == "SCAN_DIRECTORY"
     assert runtime.process_scan(work_item) is True
-    job = client.get(f"/api/import-scan-jobs/{data['job']['id']}").json()["data"][
-        "job"
-    ]
+    job = client.get(f"/api/import-scan-jobs/{data['job']['id']}").json()["data"]["job"]
     assert job["filesScanned"] == len(tracks)
     assert job["candidatesFound"] == 1
     assert job["queuedCount"] == 1
@@ -4663,7 +4659,7 @@ def test_monitor_folder_create_ignores_retired_import_mode(
     monkeypatch.setattr(
         monitor_paths.os,
         "access",
-        lambda _path, mode: False if mode == monitor_paths.os.W_OK else True,
+        lambda _path, mode: mode != monitor_paths.os.W_OK,
     )
 
     created = client.post(
@@ -6357,7 +6353,7 @@ def test_backup_create_download_and_restore_database_export(
     backup_path = test_settings.resolved_storage_root / "backups" / backup["filename"]
     with zipfile.ZipFile(backup_path) as archive:
         names = set(archive.namelist())
-        assert set(["metadata.json", "database-export.json", "settings.json"]).issubset(
+        assert {"metadata.json", "database-export.json", "settings.json"}.issubset(
             names
         )
         assert "library-files.json" not in names
@@ -6762,7 +6758,8 @@ def test_epub_volume_file_and_bootstrap_use_requested_volume(
     )
     assert bootstrap.status_code == 200
     data = bootstrap.json()["data"]
-    assert data["readerType"] == "epub"
+    assert data["readerType"] == "reflowable"
+    assert data["sourceFormat"] == "epub"
     assert data["selectedVolume"]["id"] == second_result.volume_id
     assert data["selectedVolume"]["title"] == "第 2 卷"
     assert data["selectedVolume"]["chapterCount"] == 1
@@ -6816,9 +6813,11 @@ def test_reader_v2_bootstrap_matches_epub_and_comic_shapes(
     )
     assert epub_bootstrap.status_code == 200
     epub_data = epub_bootstrap.json()["data"]
-    assert epub_data["readerType"] == "epub"
+    assert epub_data["readerType"] == "reflowable"
+    assert epub_data["sourceFormat"] == "epub"
     assert epub_data["edition"]["id"] == epub_payload["editionId"]
-    assert epub_data["edition"]["format"] == "epub"
+    assert epub_data["edition"]["format"] == "reflowable"
+    assert epub_data["edition"]["sourceFormat"] == "epub"
     assert len(epub_data["units"]) == 2
     assert [unit["title"] for unit in epub_data["units"]] == ["第一节", "第二节"]
     epub_detail = client.get(f"/api/works/{epub_payload['workId']}")

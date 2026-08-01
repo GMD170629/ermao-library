@@ -17,11 +17,19 @@ from app.modules.imports.application.dto import (
     ImportPreferencesDTO,
     ImportSystemEvent,
 )
+from app.modules.imports.application.reflowable_types import ReflowableBookMetadata
 from app.modules.imports.application.errors import (
     AudioTrackLimitExceededError,
     ImportExecutionError,
 )
 from app.modules.imports.infrastructure.audio_cover import publish_audio_cover
+from app.modules.imports.infrastructure.reflowable_cover import (
+    publish_reflowable_cover,
+)
+from app.modules.imports.infrastructure.reflowable_metadata import (
+    ReflowableMetadataError,
+    inspect_reflowable_book,
+)
 from app.modules.library.infrastructure.facets import sync_work_facets
 from app.modules.system.infrastructure.events import record_system_event
 from app.services.audio_metadata import inspect_audio_bundle, parse_audio_metadata
@@ -161,6 +169,47 @@ class SessionImportOrchestrationServices:
             published_path = Path(published)
             if published_path not in existing_targets:
                 self._new_publications.add(published_path)
+        return published
+
+    def inspect_reflowable_book(
+        self, path: Path, source_format: str
+    ) -> ReflowableBookMetadata:
+        try:
+            return inspect_reflowable_book(path, source_format)
+        except ReflowableMetadataError as exc:
+            return ReflowableBookMetadata(
+                title=path.stem,
+                authors=(),
+                language=None,
+                publisher=None,
+                published_at=None,
+                identifier=None,
+                isbn=None,
+                description=None,
+                subjects=(),
+                chapters=(),
+                cover=None,
+                raw_metadata={
+                    "sourceFormat": source_format,
+                    "inspectionWarning": str(exc),
+                },
+            )
+
+    def publish_reflowable_cover(
+        self,
+        storage_root: Path,
+        work_id: str,
+        edition_id: str,
+        metadata: ReflowableBookMetadata,
+    ) -> str | None:
+        published = publish_reflowable_cover(
+            storage_root,
+            work_id,
+            edition_id,
+            metadata.cover,
+        )
+        if published:
+            self._new_publications.add(Path(published))
         return published
 
     def finalize_publications(self) -> None:

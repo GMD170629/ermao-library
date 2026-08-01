@@ -438,11 +438,12 @@ def test_preferences_progress_bookmarks_and_shelves_are_isolated(
             "contentFingerprint": "sha256:test",
             "bookmarks": [
                 {
-                    "id": "epub:position:chapter.xhtml:0:0.25",
+                    "id": "reflowable:epub:position:chapter.xhtml:0.25",
                     "location": {
-                        "kind": "epub",
+                        "kind": "reflowable",
+                        "format": "epub",
+                        "cfi": "epubcfi(/6/2!/4/1:0)",
                         "href": "chapter.xhtml",
-                        "spineIndex": 0,
                         "progression": 0.25,
                     },
                     "label": "第一章",
@@ -453,6 +454,10 @@ def test_preferences_progress_bookmarks_and_shelves_are_isolated(
         },
     )
     assert bookmark.status_code == 200, bookmark.text
+    assert (
+        bookmark.json()["data"]["bookmarks"][0]["location"]["cfi"]
+        == "epubcfi(/6/2!/4/1:0)"
+    )
     db_session.execute(
         text(
             "INSERT INTO `LibraryReadingProgress` "

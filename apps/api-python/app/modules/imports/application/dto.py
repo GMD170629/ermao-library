@@ -15,6 +15,7 @@ IdentitySource = Literal[
     "epub_opf",
     "pdf_metadata",
     "comic_info",
+    "reflowable_metadata",
 ]
 
 

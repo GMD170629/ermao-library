@@ -177,12 +177,18 @@ def list_files_for_edition(
 
 
 def get_audio_manifest_raw_json(db: Session, edition_id: str) -> dict[str, Any] | None:
+    return get_edition_metadata_raw_json(db, edition_id, "audiobook_manifest")
+
+
+def get_edition_metadata_raw_json(
+    db: Session, edition_id: str, source: str
+) -> dict[str, Any] | None:
     table = _legacy_table(db, "LibraryMetadata")
     if table is None:
         return None
     row = db.execute(
         select(table.c.rawJson)
-        .where(table.c.editionId == edition_id, table.c.source == "audiobook_manifest")
+        .where(table.c.editionId == edition_id, table.c.source == source)
         .order_by(table.c.createdAt.desc())
         .limit(1)
     ).first()

@@ -134,11 +134,6 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
   private passwordReason: PdfViewModel['passwordReason'];
   private status: PdfViewModel['status'] = 'idle';
   private error: string | undefined;
-  private readonly stopNativePanPropagation = (event: Event) => {
-    if ((this.preferences?.pdf.zoom ?? 1) <= 1 || event.type === 'touchend') return;
-    if (event instanceof TouchEvent && event.touches.length > 1) return;
-    event.stopPropagation();
-  };
 
   constructor(options: PdfAdapterOptions) {
     super();
@@ -146,9 +141,6 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     this.fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.loadPdfJs = options.loadPdfJs ?? (() => import('pdfjs-dist/legacy/build/pdf.mjs'));
     if (options.onViewModel) this.viewListeners.add(options.onViewModel);
-    this.container.addEventListener('touchstart', this.stopNativePanPropagation, { passive: true });
-    this.container.addEventListener('touchmove', this.stopNativePanPropagation, { passive: true });
-    this.container.addEventListener('touchend', this.stopNativePanPropagation, { passive: true });
   }
 
   subscribeView(listener: (model: PdfViewModel) => void) {
@@ -299,6 +291,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       return this.ack(context.operation, true, { location: this.location() });
     }
     let forceRender = false;
+    let pageChanged = false;
     if (command.type === 'set-zoom') {
       this.preferences = { ...this.preferences, pdf: { ...this.preferences.pdf, zoom: Math.max(0.6, Math.min(2.4, command.zoom)) } };
       forceRender = true;
@@ -325,6 +318,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
         return this.failOperation(context, command.type === 'next' ? 'end-of-document' : command.type === 'previous' ? 'start-of-document' : 'no-op');
       }
       this.lastDirection = clamped >= this.pageNumber ? 1 : -1;
+      pageChanged = clamped !== this.pageNumber;
       this.pageNumber = clamped;
     }
 
@@ -333,6 +327,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     this.emitView();
     try {
       await this.queueRender(this.currentGeneration(), context.signal, forceRender);
+      if (pageChanged) this.container.scrollTop = 0;
       this.status = 'ready';
       this.emitLocation(context.operation);
       this.emitView();
@@ -370,9 +365,6 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
   async dispose() {
     if (!this.markDisposed()) return;
     await this.cleanupEngine();
-    this.container.removeEventListener('touchstart', this.stopNativePanPropagation);
-    this.container.removeEventListener('touchmove', this.stopNativePanPropagation);
-    this.container.removeEventListener('touchend', this.stopNativePanPropagation);
     this.viewListeners.clear();
   }
 

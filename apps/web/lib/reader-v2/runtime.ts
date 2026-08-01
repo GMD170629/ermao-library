@@ -18,6 +18,16 @@ export function toWireLocation(location: ReaderProgressLocation) {
       positionMs: location.positionMs
     };
   }
+  if (location.kind === 'reflowable') {
+    return {
+      type: 'reflowable' as const,
+      format: location.format,
+      cfi: location.cfi,
+      href: location.href,
+      progression: location.progression,
+      ...(location.foliate ? { foliate: location.foliate } : {})
+    };
+  }
   if (location.kind === 'epub') {
     return {
       type: 'epub' as const,

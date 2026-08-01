@@ -1,6 +1,7 @@
 export const READER_SCHEMA_VERSION = 3 as const;
 
-export type ReaderKind = 'epub' | 'comic' | 'pdf';
+export type ReflowableFormat = 'epub' | 'mobi' | 'azw' | 'azw3' | 'prc' | 'fb2' | 'txt';
+export type ReaderKind = 'reflowable' | 'comic' | 'pdf';
 export type ReaderTheme = 'day' | 'warm' | 'night' | 'black';
 export type ReaderFontFamily = 'pingfang' | 'heiti' | 'songti' | 'yahei' | 'kaiti';
 export type ReaderLifecycle = 'bootstrapping' | 'loading' | 'ready' | 'error' | 'disposed';
@@ -14,6 +15,41 @@ export type EpubLocation = {
   progression?: number;
 };
 
+/** Persisted by the former EPUB.js reader and accepted for resume migration only. */
+export type LegacyEpubLocation = EpubLocation;
+
+export type ReflowableLocation = {
+  kind: 'reflowable';
+  format: ReflowableFormat;
+  cfi?: string;
+  href?: string;
+  progression?: number;
+  foliate?: FoliateProgressSnapshot;
+};
+
+export type FoliateProgressSnapshot = {
+  toc?: {
+    index: number;
+    title: string;
+    href?: string;
+    navigationKey?: string;
+  };
+  navigationFingerprint?: string;
+  section?: {
+    current: number;
+    total: number;
+  };
+  location?: {
+    current: number;
+    next: number;
+    total: number;
+  };
+  remainingSeconds?: {
+    section: number;
+    total: number;
+  };
+};
+
 export type ComicLocation = {
   kind: 'comic';
   volumeId: string;
@@ -25,7 +61,17 @@ export type PdfLocation = {
   pageNumber: number;
 };
 
-export type ReaderLocation = EpubLocation | ComicLocation | PdfLocation;
+export type ReaderLocation = ReflowableLocation | LegacyEpubLocation | ComicLocation | PdfLocation;
+
+export type ReaderNavigationEntry = {
+  id: string;
+  navigationKey?: string;
+  label: string;
+  href?: string;
+  index?: number;
+  level?: number;
+  children?: ReaderNavigationEntry[];
+};
 
 export type ReaderPreferences = {
   schemaVersion: typeof READER_SCHEMA_VERSION;
@@ -55,15 +101,24 @@ export type ReaderPreferences = {
   };
 };
 
-export type ReaderSource = {
+type ReaderSourceBase = {
   editionId: string;
   workId: string;
-  kind: ReaderKind;
   contentUrl: string;
   contentFingerprint: string;
   volumeId?: string | null;
   totalPages?: number | null;
 };
+
+export type ReaderSource = ReaderSourceBase & (
+  | {
+    kind: 'reflowable';
+    sourceFormat: ReflowableFormat;
+    navigation: ReaderNavigationEntry[];
+    navigationFingerprint?: string;
+  }
+  | { kind: 'comic' | 'pdf'; sourceFormat?: never }
+);
 
 export type OperationToken = {
   sessionId: string;
@@ -122,6 +177,7 @@ export type ReaderAdapterEvent =
   | (ReaderAdapterEventBase & { type: 'ready'; capabilities: ReaderCapabilities; location: ReaderLocation | null })
   | (ReaderAdapterEventBase & { type: 'capabilities-changed'; capabilities: ReaderCapabilities })
   | (ReaderAdapterEventBase & { type: 'metadata-changed'; totalPages: number | null })
+  | (ReaderAdapterEventBase & { type: 'navigation-changed'; items: ReaderNavigationEntry[] })
   | (ReaderAdapterEventBase & { type: 'location-changed'; location: ReaderLocation; percent: number })
   | (ReaderAdapterEventBase & { type: 'phase-changed'; phase: 'loading-content' | 'loading-font' | 'generating-pagination' | 'rendering' | null })
   | (ReaderAdapterEventBase & { type: 'pagination-progress'; completed: number; total: number; percent: number })

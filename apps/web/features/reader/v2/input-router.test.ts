@@ -34,6 +34,15 @@ test('projects an expanded EPUB iframe pointer into the visible reader viewport'
   assert.equal(readerFramePointerIntent(4410, 400, 45000, 800, frame, viewport, 'rtl'), 'previous');
 });
 
+test('projects a shifted MOBI iframe using the frame layout box coordinate space', () => {
+  const viewport = { left: 0, top: 0, width: 2560, height: 1352 };
+  const frame = { left: -2095, top: 48, width: 6750, height: 1256 };
+
+  assert.equal(readerFramePointerIntent(3375, 628, 6750, 1256, frame, viewport, 'ltr'), 'toggle-controls');
+  assert.equal(readerFramePointerIntent(4270, 628, 6750, 1256, frame, viewport, 'ltr'), 'next');
+  assert.equal(readerFramePointerIntent(2480, 628, 6750, 1256, frame, viewport, 'ltr'), 'previous');
+});
+
 test('keeps EPUB drag coordinates stable while the continuous iframe moves', () => {
   const frameAtPointerDown = { left: 100, top: 40, width: 1000, height: 800 };
   const frameAfterScroll = { left: 60, top: 40, width: 1000, height: 800 };

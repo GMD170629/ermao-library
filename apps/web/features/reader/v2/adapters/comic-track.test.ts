@@ -88,11 +88,12 @@ function createHarness(initial = view()) {
     prepare: async (step) => Boolean(step === -1 ? currentView.previous : currentView.next),
     promote: (step) => {
       if (step === 1) {
-        currentView = view({
+        currentView = {
+          ...currentView,
           previous: { anchor: 1, pages: [page(1)] },
           current: { anchor: 2, pages: [page(2)] },
           next: { anchor: 3, pages: [page(3)] }
-        });
+        };
       }
     }
   });
@@ -121,6 +122,22 @@ test('comic track keeps the viewport and rotates persistent slots after promotio
   assert.equal(harness.driver.getSlotElement('next'), previous);
   assert.equal(harness.driver.getSlotElement('current').dataset.comicSpreadAnchor, '2');
   assert.equal(viewport.scrollLeft, 800);
+});
+
+test('zoomed comic navigation starts the promoted spread at the top', async () => {
+  const harness = createHarness(view({ zoom: 2 }));
+  const next = harness.driver.getSlotElement('next') as unknown as FakeElement;
+  next.scrollHeight = 1_200;
+  next.clientHeight = 600;
+  next.scrollWidth = 1_600;
+  next.clientWidth = 800;
+  next.scrollTop = 480;
+
+  await harness.driver.promote(1, new AbortController().signal);
+
+  const current = harness.driver.getSlotElement('current') as unknown as FakeElement;
+  assert.equal(current.scrollTop, 0);
+  assert.equal(current.scrollLeft, 400);
 });
 
 test('RTL reverses physical neighbor placement and preserves visual page order from the source', () => {
