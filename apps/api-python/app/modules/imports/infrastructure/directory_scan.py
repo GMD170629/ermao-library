@@ -7,7 +7,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-from app.modules.imports.application.audio_types import audio_episode_number
+from app.modules.imports.application.audio_types import (
+    audio_bundle_membership_is_proven,
+    audio_episode_number,
+)
 from app.modules.imports.application.errors import AudioTrackLimitExceededError
 from app.modules.imports.application.file_types import is_supported_import_filename
 from app.services.audio_metadata import (
@@ -199,9 +202,10 @@ def is_proven_audio_bundle_directory(
         )
     except OSError:
         return False
-    if not has_sibling_book:
-        return True
-    return all(audio_track_name_proves_membership(item) for item in candidates)
+    return audio_bundle_membership_is_proven(
+        candidates,
+        has_sibling_book=has_sibling_book,
+    )
 
 
 def audio_track_name_proves_membership(path: Path) -> bool:

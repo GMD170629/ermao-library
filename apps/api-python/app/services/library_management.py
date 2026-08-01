@@ -8,7 +8,6 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from functools import wraps
 from hashlib import sha1
-from time import time_ns
 from typing import Any, Concatenate, ParamSpec, TypeVar
 
 from sqlalchemy.orm import Session
@@ -49,6 +48,8 @@ STATUS_RANK = library_works.STATUS_RANK
 P = ParamSpec("P")
 R = TypeVar("R")
 
+__all__ = ["count_categories", "list_categories"]
+
 
 def _transactional_write(
     operation: Callable[Concatenate[Session, P], R],
@@ -73,7 +74,9 @@ def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
-def smart_shelf_work_ids(db: Session, rules: dict[str, Any], user_id: str | None = None) -> list[str]:
+def smart_shelf_work_ids(
+    db: Session, rules: dict[str, Any], user_id: str | None = None
+) -> list[str]:
     """Compatibility entry point; remove after callers inject GetSmartShelfWorkIds."""
 
     return _query_smart_shelf_work_ids(db, rules, user_id=user_id)
@@ -120,28 +123,37 @@ def _shelf_snapshot(db: Session, work_ids: list[str]) -> list[dict[str, Any]]:
 
 
 @_transactional_write
-def merge_works(db: Session, target_work_id: str, source_work_ids: list[str], user_id: str | None) -> dict[str, Any]:
-    sources = [value for value in dict.fromkeys(source_work_ids) if value and value != target_work_id]
+def merge_works(
+    db: Session, target_work_id: str, source_work_ids: list[str], user_id: str | None
+) -> dict[str, Any]:
+    sources = [
+        value
+        for value in dict.fromkeys(source_work_ids)
+        if value and value != target_work_id
+    ]
     target = library_works.get_visible_work(db, target_work_id)
     if not target:
         raise ValueError("主作品不存在")
     source_rows = [
-        row for work_id in sources
+        row
+        for work_id in sources
         if (row := library_works.get_visible_work(db, work_id))
     ]
     if len(source_rows) != len(sources) or not source_rows:
         raise ValueError("请选择至少一条可合并的作品")
 
     all_work_ids = [target_work_id, *sources]
-    editions = library_works.list_editions_for_works(db, all_work_ids)
-    progress = library_works.list_progress_for_works(db, all_work_ids)
-    consumption = library_works.list_consumption_for_works(db, all_work_ids)
+    media_versions = library_works.list_media_versions_for_works(db, all_work_ids)
+    media_histories = library_works.list_media_histories_for_works(db, all_work_ids)
     inverse = {
         "targetWork": target,
         "sourceWorks": source_rows,
-        "editions": editions,
-        "progress": progress,
-        "consumption": consumption,
+        "mediaVersions": media_versions,
+        "volumes": library_operations.snapshot_volumes_for_media_versions(
+            db,
+            [str(item["id"]) for item in media_versions],
+        ),
+        "mediaHistories": media_histories,
         "shelfWorks": _shelf_snapshot(db, all_work_ids),
     }
 
@@ -153,40 +165,25 @@ def merge_works(db: Session, target_work_id: str, source_work_ids: list[str], us
         db,
         work_id=target_work_id,
         tags_json=_json(target_tags),
-        description=next((row.get("description") for row in source_rows if row.get("description")), None),
-        series_name=next((row.get("seriesName") for row in source_rows if row.get("seriesName")), None),
+        description=next(
+            (row.get("description") for row in source_rows if row.get("description")),
+            None,
+        ),
+        series_name=next(
+            (row.get("seriesName") for row in source_rows if row.get("seriesName")),
+            None,
+        ),
         now=now,
     )
 
-    target_primary_kinds = {
-        str(row.get("mediaKind") or "EBOOK")
-        for row in editions
-        if row.get("workId") == target_work_id and bool(row.get("primary")) and not bool(row.get("hidden"))
-    }
-    target_version_keys = {
-        str(row.get("versionKey") or "")
-        for row in editions
-        if row.get("workId") == target_work_id
-    }
     source_id_set = set(sources)
-    for edition in editions:
-        if edition.get("workId") not in source_id_set:
+    for media_version in media_versions:
+        if media_version.get("workId") not in source_id_set:
             continue
-        edition_id = str(edition["id"])
-        media_kind = str(edition.get("mediaKind") or "EBOOK")
-        version_key = str(edition.get("versionKey") or edition_id)
-        if version_key in target_version_keys:
-            version_key = f"{version_key}:merged:{edition_id[-10:]}"
-        target_version_keys.add(version_key)
-        primary = bool(edition.get("primary")) and media_kind not in target_primary_kinds
-        if primary:
-            target_primary_kinds.add(media_kind)
-        library_works.reassign_edition_to_work(
+        library_works.move_media_version_to_work(
             db,
-            edition_id=edition_id,
+            media_version_id=str(media_version["id"]),
             target_work_id=target_work_id,
-            version_key=version_key,
-            primary=primary,
             now=now,
         )
 
@@ -198,15 +195,6 @@ def merge_works(db: Session, target_work_id: str, source_work_ids: list[str], us
             now=now,
         )
 
-    primary = library_works.select_preferred_edition(db, target_work_id)
-    if primary:
-        library_works.set_work_primary_edition(
-            db,
-            work_id=target_work_id,
-            edition_id=str(primary["id"]),
-            work_type=str(primary.get("format") or target.get("workType")),
-            now=now,
-        )
     operation = library_operations.create_operation(
         db,
         user_id=user_id,
@@ -219,113 +207,11 @@ def merge_works(db: Session, target_work_id: str, source_work_ids: list[str], us
         now=now,
     )
     sync_work_facets(db, target_work_id, commit=False)
-    return {"targetWorkId": target_work_id, "sourceWorkIds": sources, "operation": operation}
-
-
-@_transactional_write
-def split_edition(
-    db: Session,
-    source_work_id: str,
-    edition_id: str,
-    *,
-    title: str,
-    author: str | None,
-    copy_shelves: bool,
-    user_id: str | None,
-) -> dict[str, Any]:
-    source = library_works.get_work(db, source_work_id)
-    edition = library_works.get_visible_edition_for_work(
-        db,
-        edition_id=edition_id,
-        work_id=source_work_id,
-    )
-    if not source or not edition:
-        raise ValueError("版本不存在或不属于该作品")
-    edition_count = library_works.count_visible_editions(db, source_work_id)
-    if edition_count < 2:
-        raise ValueError("作品只有一个版本，无法拆分")
-    next_title = re.sub(r"\s+", " ", title).strip()
-    if not next_title:
-        raise ValueError("请填写新作品标题")
-    next_author = re.sub(r"\s+", " ", str(author or source.get("author") or UNKNOWN_AUTHOR)).strip() or UNKNOWN_AUTHOR
-    now = _now()
-    new_work_id = f"work_{time_ns()}"
-    inverse = {
-        "sourceWork": source,
-        "edition": edition,
-        "progress": (
-            library_works.list_progress_work_ids_for_edition(db, edition_id)
-            if library_operations.has_table(db, "LibraryReadingProgress")
-            else []
-        ),
-        "shelfWorks": _shelf_snapshot(db, [source_work_id]),
-        "newWorkId": new_work_id,
+    return {
+        "targetWorkId": target_work_id,
+        "sourceWorkIds": sources,
+        "operation": operation_view(operation),
     }
-    library_works.insert_work_row(
-        db,
-        {
-            **source,
-            "id": new_work_id,
-            "title": next_title,
-            "normalizedTitle": _normalized_name(next_title),
-            "author": next_author,
-            "normalizedAuthor": _normalized_name(next_author),
-            "workType": edition.get("format") or source.get("workType") or "EPUB",
-            "status": source.get("status") or "UNREAD",
-            "coverPath": edition.get("coverPath") or source.get("coverPath"),
-            "coverStatus": edition.get("coverStatus") or source.get("coverStatus") or "PENDING",
-            "hidden": 0,
-            "primaryEditionId": edition_id,
-            "mergeKey": identity_merge_key(next_title, next_author),
-            "createdAt": now,
-            "updatedAt": now,
-        },
-    )
-    library_works.move_edition_to_new_work_as_primary(
-        db,
-        edition_id=edition_id,
-        new_work_id=new_work_id,
-        now=now,
-    )
-    if library_operations.has_table(db, "LibraryReadingProgress"):
-        library_works.reassign_progress_by_edition(
-            db,
-            edition_id=edition_id,
-            new_work_id=new_work_id,
-            now=now,
-        )
-    replacement = library_works.select_preferred_edition(db, source_work_id)
-    if replacement:
-        library_works.mark_edition_primary(db, edition_id=str(replacement["id"]), now=now)
-        library_works.set_work_primary_edition(
-            db,
-            work_id=source_work_id,
-            edition_id=str(replacement["id"]),
-            work_type=str(replacement.get("format") or source.get("workType")),
-            now=now,
-        )
-    if copy_shelves and library_operations.has_table(db, "ShelfWork"):
-        for shelf in inverse["shelfWorks"]:
-            library_works.ensure_shelf_work_link(
-                db,
-                shelf_id=str(shelf["shelfId"]),
-                work_id=new_work_id,
-                now=now,
-            )
-    operation = library_operations.create_operation(
-        db,
-        user_id=user_id,
-        action="SPLIT_EDITION",
-        target_type="work",
-        target_id=new_work_id,
-        summary=f"已将版本拆分为《{next_title}》",
-        payload={"sourceWorkId": source_work_id, "editionId": edition_id, "newWorkId": new_work_id},
-        inverse=inverse,
-        now=now,
-    )
-    sync_work_facets(db, source_work_id, commit=False)
-    sync_work_facets(db, new_work_id, commit=False)
-    return {"sourceWorkId": source_work_id, "newWorkId": new_work_id, "editionId": edition_id, "operation": operation}
 
 
 @_transactional_write
@@ -342,30 +228,31 @@ def merge_categories(
     target = library_categories.get_facet_of_kind(db, target_id, normalized_kind)
     sources = [value for value in dict.fromkeys(source_ids) if value != target_id]
     source_rows = [
-        row for source_id in sources
+        row
+        for source_id in sources
         if (row := library_categories.get_facet_of_kind(db, source_id, normalized_kind))
     ]
     if not target or not source_rows or len(source_rows) != len(sources):
         raise ValueError("请选择同一分类中的有效合并项")
     all_facet_ids = [target_id, *sources]
     work_links = library_categories.list_work_facet_links(db, all_facet_ids)
-    edition_links = library_categories.list_edition_facet_links(db, all_facet_ids)
+    volume_links = library_categories.list_volume_facet_links(db, all_facet_ids)
     work_ids = list(dict.fromkeys(str(row["workId"]) for row in work_links))
-    edition_ids = list(dict.fromkeys(str(row["editionId"]) for row in edition_links))
+    volume_ids = list(dict.fromkeys(str(row["volumeId"]) for row in volume_links))
     affected_works = [
-        row for work_id in work_ids
-        if (row := library_categories.get_work(db, work_id))
+        row for work_id in work_ids if (row := library_categories.get_work(db, work_id))
     ]
-    affected_editions = [
-        row for edition_id in edition_ids
-        if (row := library_categories.get_edition(db, edition_id))
+    affected_volumes = [
+        row
+        for volume_id in volume_ids
+        if (row := library_categories.get_volume(db, volume_id))
     ]
     inverse = {
         "facets": [target, *source_rows],
         "workLinks": work_links,
-        "editionLinks": edition_links,
+        "volumeLinks": volume_links,
         "works": affected_works,
-        "editions": affected_editions,
+        "volumes": affected_volumes,
         "kind": normalized_kind,
     }
     source_names = {_normalized_name(row.get("name")) for row in source_rows}
@@ -373,7 +260,10 @@ def merge_categories(
     now = _now()
     if normalized_kind == "TAG":
         for work in affected_works:
-            tags = [target_name if _normalized_name(tag) in source_names else tag for tag in _work_tags(work.get("tags"))]
+            tags = [
+                target_name if _normalized_name(tag) in source_names else tag
+                for tag in _work_tags(work.get("tags"))
+            ]
             library_categories.update_work_tags(
                 db,
                 work_id=str(work["id"]),
@@ -382,7 +272,10 @@ def merge_categories(
             )
     elif normalized_kind == "AUTHOR":
         for work in affected_works:
-            authors = [target_name if _normalized_name(author) in source_names else author for author in split_authors(work.get("author"))]
+            authors = [
+                target_name if _normalized_name(author) in source_names else author
+                for author in split_authors(work.get("author"))
+            ]
             author_text = "、".join(_unique_names(authors)) or target_name
             library_categories.update_work_author(
                 db,
@@ -401,19 +294,25 @@ def merge_categories(
                 now=now,
             )
     else:
-        for edition in affected_editions:
-            library_categories.update_edition_publisher(
+        for volume in affected_volumes:
+            library_categories.update_volume_publisher(
                 db,
-                edition_id=str(edition["id"]),
+                volume_id=str(volume["id"]),
                 publisher=target_name,
                 now=now,
             )
 
-    aliases = _unique_names([
-        *_parse_json(target.get("aliases"), []),
-        *(row.get("name") for row in source_rows),
-        *(alias for row in source_rows for alias in _parse_json(row.get("aliases"), [])),
-    ])
+    aliases = _unique_names(
+        [
+            *_parse_json(target.get("aliases"), []),
+            *(row.get("name") for row in source_rows),
+            *(
+                alias
+                for row in source_rows
+                for alias in _parse_json(row.get("aliases"), [])
+            ),
+        ]
+    )
     library_categories.update_facet_aliases(
         db,
         facet_id=target_id,
@@ -434,11 +333,17 @@ def merge_categories(
     )
     for work_id in work_ids:
         sync_work_facets(db, work_id, commit=False)
-    return {"targetId": target_id, "mergedIds": sources, "operation": operation}
+    return {
+        "targetId": target_id,
+        "mergedIds": sources,
+        "operation": operation_view(operation),
+    }
 
 
 @_transactional_write
-def rename_category(db: Session, facet_id: str, name: str, user_id: str | None) -> dict[str, Any]:
+def rename_category(
+    db: Session, facet_id: str, name: str, user_id: str | None
+) -> dict[str, Any]:
     facet = library_categories.get_facet(db, facet_id)
     next_name = re.sub(r"\s+", " ", name).strip()
     if not facet or not next_name:
@@ -454,32 +359,36 @@ def rename_category(db: Session, facet_id: str, name: str, user_id: str | None) 
         raise ValueError("同名分类已存在，请使用合并")
     source_name = str(facet["name"])
     linked_works: list[dict[str, Any]] = []
-    linked_editions: list[dict[str, Any]] = []
+    linked_volumes: list[dict[str, Any]] = []
     now = _now()
     if facet["kind"] == "PUBLISHER":
-        edition_ids = library_categories.list_edition_ids_for_facet(db, facet_id)
-        linked_editions = [
-            item for edition_id in edition_ids
-            if (item := library_categories.get_edition(db, edition_id))
+        volume_ids = library_categories.list_volume_ids_for_facet(db, facet_id)
+        linked_volumes = [
+            item
+            for volume_id in volume_ids
+            if (item := library_categories.get_volume(db, volume_id))
         ]
-        for edition_id in edition_ids:
-            library_categories.update_edition_publisher(
+        for volume_id in volume_ids:
+            library_categories.update_volume_publisher(
                 db,
-                edition_id=edition_id,
+                volume_id=volume_id,
                 publisher=next_name,
                 now=now,
             )
     else:
         work_ids = library_categories.list_work_ids_for_facet(db, facet_id)
         linked_works = [
-            item for work_id in work_ids
+            item
+            for work_id in work_ids
             if (item := library_categories.get_work(db, work_id))
         ]
         for work_id in work_ids:
             work = library_categories.get_work(db, work_id) or {}
             if facet["kind"] == "TAG":
                 values = [
-                    next_name if _normalized_name(tag) == _normalized_name(source_name) else tag
+                    next_name
+                    if _normalized_name(tag) == _normalized_name(source_name)
+                    else tag
                     for tag in _work_tags(work.get("tags"))
                 ]
                 library_categories.update_work_tags(
@@ -490,7 +399,9 @@ def rename_category(db: Session, facet_id: str, name: str, user_id: str | None) 
                 )
             elif facet["kind"] == "AUTHOR":
                 values = [
-                    next_name if _normalized_name(author) == _normalized_name(source_name) else author
+                    next_name
+                    if _normalized_name(author) == _normalized_name(source_name)
+                    else author
                     for author in split_authors(work.get("author"))
                 ]
                 author_text = "、".join(_unique_names(values))
@@ -499,7 +410,9 @@ def rename_category(db: Session, facet_id: str, name: str, user_id: str | None) 
                     work_id=work_id,
                     author=author_text,
                     normalized_author=_normalized_name(author_text),
-                    merge_key=identity_merge_key(str(work.get("title") or ""), author_text),
+                    merge_key=identity_merge_key(
+                        str(work.get("title") or ""), author_text
+                    ),
                     now=now,
                 )
             elif facet["kind"] == "SERIES":
@@ -526,16 +439,20 @@ def rename_category(db: Session, facet_id: str, name: str, user_id: str | None) 
         target_id=facet_id,
         summary=f"已将“{source_name}”重命名为“{next_name}”",
         payload={"facetId": facet_id, "name": next_name},
-        inverse={"facet": facet, "works": linked_works, "editions": linked_editions},
+        inverse={"facet": facet, "works": linked_works, "volumes": linked_volumes},
         now=now,
     )
     work_ids_to_sync = {
         *(str(work["id"]) for work in linked_works),
-        *(str(edition["workId"]) for edition in linked_editions),
+        *(str(volume["workId"]) for volume in linked_volumes),
     }
     for work_id in work_ids_to_sync:
         sync_work_facets(db, work_id, commit=False)
-    return {"facetId": facet_id, "name": next_name, "operation": operation}
+    return {
+        "facetId": facet_id,
+        "name": next_name,
+        "operation": operation_view(operation),
+    }
 
 
 @_transactional_write
@@ -547,14 +464,16 @@ def delete_category(db: Session, facet_id: str, user_id: str | None) -> dict[str
     kind = str(facet["kind"])
     source_name = str(facet["name"])
     work_links = library_categories.list_work_facet_links(db, [facet_id])
-    edition_links = library_categories.list_edition_facet_links(db, [facet_id])
+    volume_links = library_categories.list_volume_facet_links(db, [facet_id])
     affected_works = [
-        row for link in work_links
+        row
+        for link in work_links
         if (row := library_categories.get_work(db, str(link["workId"])))
     ]
-    affected_editions = [
-        row for link in edition_links
-        if (row := library_categories.get_edition(db, str(link["editionId"])))
+    affected_volumes = [
+        row
+        for link in volume_links
+        if (row := library_categories.get_volume(db, str(link["volumeId"])))
     ]
     now = _now()
 
@@ -591,8 +510,10 @@ def delete_category(db: Session, facet_id: str, user_id: str | None) -> dict[str
         for work in affected_works:
             library_categories.clear_work_series(db, work_id=str(work["id"]), now=now)
     elif kind == "PUBLISHER":
-        for edition in affected_editions:
-            library_categories.clear_edition_publisher(db, edition_id=str(edition["id"]), now=now)
+        for volume in affected_volumes:
+            library_categories.clear_volume_publisher(
+                db, volume_id=str(volume["id"]), now=now
+            )
     else:
         raise ValueError("分类类型无效")
 
@@ -608,15 +529,15 @@ def delete_category(db: Session, facet_id: str, user_id: str | None) -> dict[str
         inverse={
             "facet": facet,
             "workLinks": work_links,
-            "editionLinks": edition_links,
+            "volumeLinks": volume_links,
             "works": affected_works,
-            "editions": affected_editions,
+            "volumes": affected_volumes,
         },
         now=now,
     )
     work_ids_to_sync = {
         *(str(link["workId"]) for link in work_links),
-        *(str(edition["workId"]) for edition in affected_editions),
+        *(str(volume["workId"]) for volume in affected_volumes),
     }
     for work_id in work_ids_to_sync:
         sync_work_facets(db, work_id, commit=False)
@@ -624,98 +545,155 @@ def delete_category(db: Session, facet_id: str, user_id: str | None) -> dict[str
         "facetId": facet_id,
         "kind": kind,
         "name": source_name,
-        "affectedBookCount": len({
-            *(str(link["workId"]) for link in work_links),
-            *(str(edition["workId"]) for edition in affected_editions),
-        }),
-        "operation": operation,
+        "affectedBookCount": len(
+            {
+                *(str(link["workId"]) for link in work_links),
+                *(str(volume["workId"]) for volume in affected_volumes),
+            }
+        ),
+        "operation": operation_view(operation),
     }
 
 
 @_transactional_write
-def undo_operation(db: Session, operation_id: str, user_id: str | None) -> dict[str, Any]:
+def undo_operation(
+    db: Session,
+    operation_id: str,
+    user_id: str | None,
+) -> dict[str, Any]:
     operation = library_operations.get_operation(db, operation_id)
     if not operation:
+        raise ValueError("操作记录不存在")
+    owner_id = operation.get("userId")
+    if user_id is not None and owner_id != user_id:
         raise ValueError("操作记录不存在")
     if operation.get("status") == "UNDONE":
         raise ValueError("该操作已经撤销")
     expires_at = to_timestamp_ms(operation.get("expiresAt"))
     if expires_at is not None and expires_at < now_timestamp_ms():
         raise ValueError("撤销期限已过")
+
     inverse = _parse_json(operation.get("inverseJson"), {})
     action = str(operation.get("action") or "")
     if action == "MERGE_WORKS":
         target = inverse.get("targetWork") or {}
         sources = inverse.get("sourceWorks") or []
-        work_ids = [str(target.get("id") or ""), *(str(item.get("id") or "") for item in sources)]
-        shelf_ids = list(dict.fromkeys(str(item.get("shelfId")) for item in inverse.get("shelfWorks") or []))
+        work_ids = [
+            str(target.get("id") or ""),
+            *(str(item.get("id") or "") for item in sources),
+        ]
+        shelf_ids = list(
+            dict.fromkeys(
+                str(item.get("shelfId")) for item in inverse.get("shelfWorks") or []
+            )
+        )
         for shelf_id in shelf_ids:
             for work_id in work_ids:
-                library_operations.delete_shelf_work_link(db, shelf_id=shelf_id, work_id=work_id)
+                library_operations.delete_shelf_work_link(
+                    db,
+                    shelf_id=shelf_id,
+                    work_id=work_id,
+                )
+        library_operations.insert_snapshot(db, "LibraryWork", target)
+        for source in sources:
+            library_operations.insert_snapshot(db, "LibraryWork", source)
+        for media_version in inverse.get("mediaVersions") or []:
+            library_operations.insert_snapshot(
+                db,
+                "LibraryMediaVersion",
+                media_version,
+            )
+        for volume in inverse.get("volumes") or []:
+            library_operations.insert_snapshot(db, "LibraryVolume", volume)
+        for history in inverse.get("mediaHistories") or []:
+            library_operations.insert_snapshot(db, "UserMediaHistory", history)
         for shelf in inverse.get("shelfWorks") or []:
             library_operations.insert_snapshot(db, "ShelfWork", shelf)
-        for state in inverse.get("consumption") or []:
-            library_operations.delete_consumption_by_id(db, str(state["id"]))
-        for state in inverse.get("consumption") or []:
-            library_operations.insert_snapshot(db, "LibraryConsumptionState", state)
-        for progress in inverse.get("progress") or []:
-            library_operations.reassign_progress_work_id_by_id(
-                db,
-                progress_id=str(progress["id"]),
-                work_id=str(progress["workId"]),
-            )
-        edition_ids = [str(item["id"]) for item in inverse.get("editions") or []]
-        for edition_id in edition_ids:
-            library_operations.clear_edition_primary(db, edition_id)
-        for edition in inverse.get("editions") or []:
-            library_operations.restore_edition_row(db, str(edition["id"]), edition)
-        library_operations.restore_work_row(db, str(target["id"]), target)
-        for source in sources:
-            library_operations.restore_work_row(db, str(source["id"]), source)
         for work_id in work_ids:
             if work_id:
                 sync_work_facets(db, work_id, commit=False)
-    elif action == "SPLIT_EDITION":
-        source = inverse.get("sourceWork") or {}
-        edition = inverse.get("edition") or {}
-        new_work_id = str(inverse.get("newWorkId") or "")
-        library_operations.clear_edition_primary(db, str(edition.get("id")))
-        library_operations.restore_edition_row(db, str(edition["id"]), edition)
-        for progress in inverse.get("progress") or []:
-            library_operations.reassign_progress_work_id_by_id(
+    elif action in {"MOVE_VOLUME", "SPLIT_VOLUME"}:
+        source_work = inverse.get("sourceWork")
+        if isinstance(source_work, dict) and source_work:
+            library_operations.insert_snapshot(db, "LibraryWork", source_work)
+            source_dependents = inverse.get("sourceWorkDependents") or {}
+            if isinstance(source_dependents, dict):
+                library_operations.restore_rows(db, source_dependents)
+        source_media = inverse.get("sourceMediaVersion") or {}
+        volume = inverse.get("volume") or {}
+        if not source_media or not volume:
+            raise ValueError("撤销数据不完整")
+        library_operations.insert_snapshot(
+            db,
+            "LibraryMediaVersion",
+            source_media,
+        )
+        library_operations.insert_snapshot(db, "LibraryVolume", volume)
+        for history in inverse.get("mediaHistories") or []:
+            library_operations.insert_snapshot(db, "UserMediaHistory", history)
+        target_media_version_id = str(inverse.get("targetMediaVersionId") or "")
+        if inverse.get("targetMediaVersionCreated") and target_media_version_id:
+            library_operations.delete_media_version_if_empty(
                 db,
-                progress_id=str(progress["id"]),
-                work_id=str(progress["workId"]),
+                target_media_version_id,
             )
+        new_work_id = str(inverse.get("newWorkId") or "")
         if new_work_id:
-            library_operations.delete_work(db, new_work_id)
-        library_operations.restore_work_row(db, str(source["id"]), source)
-        sync_work_facets(db, str(source["id"]), commit=False)
+            library_operations.delete_work_if_empty(db, new_work_id)
+        source_work_id = str(source_media.get("workId") or "")
+        if source_work_id:
+            sync_work_facets(db, source_work_id, commit=False)
+    elif action == "DELETE_VOLUME":
+        snapshot = inverse.get("snapshot")
+        if not isinstance(snapshot, dict):
+            raise ValueError("撤销数据不完整")
+        library_operations.restore_volume_delete_snapshot(db, snapshot)
+        restored_volume = (snapshot.get("LibraryVolume") or [{}])[0]
+        media_version_id = str(restored_volume.get("mediaVersionId") or "")
+        if media_version_id:
+            media_version = next(
+                iter(snapshot.get("LibraryMediaVersion") or []),
+                None,
+            )
+            if media_version and media_version.get("workId"):
+                sync_work_facets(
+                    db,
+                    str(media_version["workId"]),
+                    commit=False,
+                )
     elif action == "MERGE_FACETS":
         for work in inverse.get("works") or []:
             library_operations.restore_work_row(db, str(work["id"]), work)
-        for edition in inverse.get("editions") or []:
-            library_operations.restore_edition_row(db, str(edition["id"]), edition)
+        for volume in inverse.get("volumes") or []:
+            library_operations.restore_volume_row(db, volume)
         for facet in inverse.get("facets") or []:
             library_operations.insert_snapshot(db, "LibraryFacet", facet)
-        work_ids = list(dict.fromkeys(str(item["workId"]) for item in inverse.get("workLinks") or []))
-        edition_ids = list(dict.fromkeys(str(item["editionId"]) for item in inverse.get("editionLinks") or []))
+        work_ids = list(
+            dict.fromkeys(
+                str(item["workId"]) for item in inverse.get("workLinks") or []
+            )
+        )
+        volume_ids = list(
+            dict.fromkeys(
+                str(item["volumeId"]) for item in inverse.get("volumeLinks") or []
+            )
+        )
         for work_id in work_ids:
             library_operations.delete_work_facets_for_work(db, work_id)
-        for edition_id in edition_ids:
-            library_operations.delete_edition_facets_for_edition(db, edition_id)
+        for volume_id in volume_ids:
+            library_operations.delete_volume_facets_for_volume(db, volume_id)
         for link in inverse.get("workLinks") or []:
             library_operations.insert_snapshot(db, "LibraryWorkFacet", link)
-        for link in inverse.get("editionLinks") or []:
-            library_operations.insert_snapshot(db, "LibraryEditionFacet", link)
+        for link in inverse.get("volumeLinks") or []:
+            library_operations.insert_snapshot(db, "LibraryVolumeFacet", link)
     elif action == "RENAME_FACET":
         facet = inverse.get("facet") or {}
         if not facet:
             raise ValueError("撤销数据不完整")
         for work in inverse.get("works") or []:
             library_operations.restore_work_row(db, str(work["id"]), work)
-        for edition in inverse.get("editions") or []:
-            library_operations.restore_edition_row(db, str(edition["id"]), edition)
+        for volume in inverse.get("volumes") or []:
+            library_operations.restore_volume_row(db, volume)
         library_operations.restore_facet_row(db, str(facet["id"]), facet)
     elif action == "DELETE_FACET":
         facet = inverse.get("facet") or {}
@@ -723,24 +701,32 @@ def undo_operation(db: Session, operation_id: str, user_id: str | None) -> dict[
             raise ValueError("撤销数据不完整")
         for work in inverse.get("works") or []:
             library_operations.restore_work_row(db, str(work["id"]), work)
-        for edition in inverse.get("editions") or []:
-            library_operations.restore_edition_row(db, str(edition["id"]), edition)
+        for volume in inverse.get("volumes") or []:
+            library_operations.restore_volume_row(db, volume)
         library_operations.insert_snapshot(db, "LibraryFacet", facet)
         for link in inverse.get("workLinks") or []:
             library_operations.insert_snapshot(db, "LibraryWorkFacet", link)
-        for link in inverse.get("editionLinks") or []:
-            library_operations.insert_snapshot(db, "LibraryEditionFacet", link)
+        for link in inverse.get("volumeLinks") or []:
+            library_operations.insert_snapshot(db, "LibraryVolumeFacet", link)
     else:
         raise ValueError("该操作不支持撤销")
+
     now = _now()
-    library_operations.mark_operation_undone(db, operation_id=operation_id, now=now)
+    library_operations.mark_operation_undone(
+        db,
+        operation_id=operation_id,
+        now=now,
+    )
     updated_operation = {
         **operation,
         "status": "UNDONE",
         "undoneAt": timestamp_ms_to_iso(now),
         "updatedAt": timestamp_ms_to_iso(now),
     }
-    return {"operation": operation_view(updated_operation), "restored": True}
+    return {
+        "operation": operation_view(updated_operation),
+        "restored": True,
+    }
 
 
 def operation_view(operation: dict[str, Any]) -> dict[str, Any]:
@@ -755,7 +741,9 @@ def operation_view(operation: dict[str, Any]) -> dict[str, Any]:
         "undoneAt": operation.get("undoneAt"),
         "createdAt": operation.get("createdAt"),
         "updatedAt": operation.get("updatedAt"),
-        "undoAvailable": operation.get("status") == "COMPLETED" and (
-            not operation.get("expiresAt") or (to_timestamp_ms(operation.get("expiresAt")) or 0) >= now_timestamp_ms()
+        "undoAvailable": operation.get("status") == "COMPLETED"
+        and (
+            not operation.get("expiresAt")
+            or (to_timestamp_ms(operation.get("expiresAt")) or 0) >= now_timestamp_ms()
         ),
     }

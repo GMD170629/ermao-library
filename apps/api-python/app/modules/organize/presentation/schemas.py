@@ -97,6 +97,7 @@ class ProviderExecution(HttpContractModel):
 class OrganizeJob(HttpContractModel):
     id: str
     run_id: str | None = Field(alias="runId")
+    volume_id: str | None = Field(alias="volumeId")
     trigger: str
     status: str
     status_category: Literal["SUCCESS", "FAILED", "RECOGNIZING", "WAITING"] = Field(

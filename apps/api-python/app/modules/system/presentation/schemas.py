@@ -81,7 +81,6 @@ class SystemImportTaskSummary(HttpContractModel):
     id: str
     monitor_folder_id: str | None = Field(alias="monitorFolderId")
     work_id: str | None = Field(alias="workId")
-    edition_id: str | None = Field(alias="editionId")
     volume_id: str | None = Field(alias="volumeId")
     origin: str
     status: str

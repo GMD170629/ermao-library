@@ -1,182 +1,111 @@
-export type ReadingFormat = 'COMIC' | 'EPUB' | 'PDF' | 'AUDIO' | 'MOBI' | 'AZW' | 'AZW3' | 'PRC' | 'FB2' | 'TXT';
+export type VolumeFormat = 'COMIC' | 'EPUB' | 'PDF' | 'AUDIO' | 'MOBI' | 'AZW' | 'AZW3' | 'PRC' | 'FB2' | 'TXT';
+export type ReadingFormat = VolumeFormat;
 export type MediaKind = 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
 export type WorkDetailTabKey = MediaKind | 'STRUCTURE';
-export type ReadingStatus = 'UNREAD' | 'READING' | 'FINISHED';
 export type PublicationStatus = 'UNKNOWN' | 'ONGOING' | 'COMPLETED' | 'HIATUS' | 'CANCELLED';
 export type TrackingStatus = 'NOT_TRACKING' | 'TRACKING' | 'PAUSED' | 'IGNORED';
 
-export type WorkDetailTab = {
+export type WorkDetailTab = Readonly<{
   key: WorkDetailTabKey;
   label: string;
   sortOrder: number;
-};
+}>;
 
-export type WorkMediaGroup = {
-  kind: MediaKind;
-  primaryEditionId: string | null;
-  recentEditionId: string | null;
-  recentVolumeId: string | null;
-  status: ReadingStatus;
-  progress: number;
-  positionLabel: string;
-  durationMs: number | null;
-  chapterCount: number | null;
-  volumeCount: number;
-  editions: WorkView['editions'];
-};
-
-export type WorkView = {
+export type LibraryFileResource = Readonly<{
   id: string;
-  workId: string;
-  editionId: string | null;
-  monitorFolderId: string | null;
-  title: string;
-  author: string;
-  publisher: string | null;
-  type: 'ebook' | 'comic' | 'audiobook';
-  mediaKind?: MediaKind;
-  formatValue: ReadingFormat;
-  format: string;
-  size: string;
-  progress: number;
-  progressExtra?: Record<string, unknown>;
-  progressEstimated?: boolean;
-  currentHref?: string | null;
-  currentSectionIndex?: number | null;
-  currentChapterTitle?: string | null;
-  currentChapterSortOrder?: number | null;
-  statusValue: ReadingStatus;
-  status: string;
-  publicationStatusValue: PublicationStatus;
-  publicationStatus: string;
-  trackingStatusValue: TrackingStatus;
-  trackingStatus: string;
-  localLatestVolume: number | null;
-  localLatestChapter: number | null;
-  localLatestTitle: string | null;
-  localLatestAt: string | null;
-  ignored: boolean;
-  organized: boolean;
-  organizeStatus: string;
-  metadataQuality: number;
-  tags: string[];
-  seriesName: string | null;
-  seriesIndex: number | null;
-  publishedYear: number | null;
-  added: string;
-  lastRead: string;
-  lastReadAt: string | null;
-  chapter: string;
-  chapterCount: number | null;
-  pageCount: number | null;
-  desc: string;
+  volumeId: string;
   path: string;
-  fileHash: string;
-  gradient: string;
-  coverStatus: string;
-  coverUrl: string;
-  totalUnits: number;
-  readingProgress: number;
+  mimeType: string;
+  kind: string;
+  sortOrder: number;
+  sizeBytes: number;
+  size: string;
   durationMs?: number | null;
-  narrator?: string | null;
-  trackCount?: number | null;
+  codec?: string | null;
+  bitrate?: number | null;
+  sampleRate?: number | null;
+  channels?: number | null;
+  discNumber?: number | null;
+  trackNumber?: number | null;
+  url?: string;
+}>;
+
+export type VolumeResource = Readonly<{
+  id: string;
+  mediaVersionId: string;
+  title: string;
+  volumeIndex: number | null;
+  sortOrder: number;
+  format: VolumeFormat;
+  derivedFromVolumeId: string | null;
+  publisher: string | null;
+  publishedAt: string | null;
+  language: string | null;
+  isbn: string | null;
+  identifier: string | null;
+  narrator: string | null;
+  abridged: boolean | null;
   importStatus: string;
   importError: string | null;
-  importedAt: string;
-  files: Array<{
-    id: string;
-    editionId: string;
-    volumeId: string | null;
-    path: string;
-    mimeType: string;
-    kind: string;
-    sortOrder: number;
-    sizeBytes: number;
-    size: string;
-    durationMs?: number | null;
-    codec?: string | null;
-    bitrate?: number | null;
-    sampleRate?: number | null;
-    channels?: number | null;
-    discNumber?: number | null;
-    trackNumber?: number | null;
-    url?: string;
-  }>;
-  versionCount: number;
-  volumeCount: number;
-  primaryEditionId: string | null;
-  primaryEditionName: string | null;
-  recentEditionId: string | null;
-  recentVolumeId: string | null;
-  availableMediaKinds?: MediaKind[];
-  defaultMediaKind?: MediaKind | null;
-  mediaGroups?: WorkMediaGroup[];
-  detailTabs?: WorkDetailTab[];
-  selectedDetailTab?: WorkDetailTabKey;
-  volumes: Array<{
-    id: string;
-    editionId: string;
-    title: string;
-    volumeIndex: number | null;
-    sortOrder: number;
-    pageCount: number | null;
-    chapterCount: number | null;
-    coverUrl: string;
-    progress?: number;
-    progressExtra?: Record<string, unknown>;
-    progressEstimated?: boolean;
-    lastReadAt?: string | null;
-    position?: string | null;
-    currentPage?: number | null;
-    currentHref?: string | null;
-    currentSectionIndex?: number | null;
-    currentChapterTitle?: string | null;
-    currentChapterSortOrder?: number | null;
-    durationMs?: number | null;
-  }>;
-  editions: Array<{
-    id: string;
-    workId: string;
-    formatValue: ReadingFormat;
-    mediaKind?: MediaKind;
-    format: string;
-    versionName: string;
-    description?: string | null;
-    publisher?: string | null;
-    publishedAt?: string | null;
-    language?: string | null;
-    identifier?: string | null;
-    isbn?: string | null;
-    origin?: string | null;
-    sourcePath?: string | null;
-    primary: boolean;
-    hidden: boolean;
-    readable: boolean;
-    conversionAvailable: boolean;
-    size: string;
-    pageCount: number | null;
-    chapterCount: number | null;
-    durationMs?: number | null;
-    narrator?: string | null;
-    trackCount?: number | null;
-    abridged?: boolean | null;
-    progress: number;
-    lastReadAt: string | null;
-    coverUrl: string;
-    conversion?: {
-      sourceFormat: string;
-      targetFormat: string;
-      converter: string;
-      converterVersion: string | null;
-      cached: boolean;
-    } | null;
-    files: WorkView['files'];
-    volumes: WorkView['volumes'];
-  }>;
-};
+  coverUrl: string;
+  pageCount: number | null;
+  chapterCount: number | null;
+  durationMs: number | null;
+  trackCount: number | null;
+  progress: number;
+  lastReadAt: string | null;
+  hidden: boolean;
+  readable: boolean;
+  conversionAvailable: boolean;
+  files: LibraryFileResource[];
+}>;
 
-export type SeriesSummary = {
+export type MediaVersionResource = Readonly<{
+  id: string;
+  mediaKind: MediaKind;
+  completed: boolean;
+  volumes: VolumeResource[];
+}>;
+
+export type WorkView = Readonly<{
+  id: string;
+  title: string;
+  author: string;
+  description: string;
+  seriesName: string | null;
+  seriesIndex: number | null;
+  tags: string[];
+  publicationStatus: PublicationStatus;
+  trackingStatus: TrackingStatus;
+  ignored: boolean;
+  organized: boolean;
+  metadataQuality: number;
+  addedAt: string;
+  updatedAt: string;
+  coverUrl: string;
+  coverStatus: string;
+  gradient: string;
+  recentMediaKind: MediaKind | null;
+  continueVolumeId: string | null;
+  completed: boolean;
+  mediaVersions: MediaVersionResource[];
+}>;
+
+export type SeriesSummary = Readonly<{
   name: string;
   bookCount: number;
   latestUpdatedAt: string | null;
-};
+}>;
+
+export function allWorkVolumes(work: WorkView): VolumeResource[] {
+  return work.mediaVersions.flatMap((mediaVersion) => mediaVersion.volumes);
+}
+
+export function mediaVersionForKind(work: WorkView, mediaKind: MediaKind): MediaVersionResource | null {
+  return work.mediaVersions.find((mediaVersion) => mediaVersion.mediaKind === mediaKind) ?? null;
+}
+
+export function volumeById(work: WorkView, volumeId: string | null | undefined): VolumeResource | null {
+  if (!volumeId) return null;
+  return allWorkVolumes(work).find((volume) => volume.id === volumeId) ?? null;
+}

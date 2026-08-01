@@ -1,19 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { ProgressMutation } from '../../lib/reader-v2/model';
+import type { ProgressMutation } from '../../lib/reader/model';
 import { latestScopedProgress, localProgressProjection } from './local-reader-progress';
 
 function mutation(overrides: Partial<ProgressMutation> = {}): ProgressMutation {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     mutationId: 'mutation-1',
     clientId: 'client-1',
     clientSequence: 1,
     slotKey: 'slot',
     userId: 'user-1',
     workId: 'work-1',
-    editionId: 'edition-1',
-    volumeId: null,
+    volumeId: 'volume-1',
     contentFingerprint: 'sha256:current',
     location: { kind: 'pdf', pageNumber: 2 },
     percent: 20,
@@ -25,7 +24,7 @@ function mutation(overrides: Partial<ProgressMutation> = {}): ProgressMutation {
   };
 }
 
-test('latestScopedProgress isolates user, edition, volume, and content fingerprint', () => {
+test('latestScopedProgress isolates user, volume, and content fingerprint', () => {
   const latest = mutation({ mutationId: 'latest', clientSequence: 3 });
   const result = latestScopedProgress([
     mutation({ mutationId: 'other-user', userId: 'user-2', clientSequence: 9 }),
@@ -35,8 +34,7 @@ test('latestScopedProgress isolates user, edition, volume, and content fingerpri
   ], {
     userId: 'user-1',
     workId: 'work-1',
-    editionId: 'edition-1',
-    volumeId: null,
+    volumeId: 'volume-1',
     contentFingerprint: 'sha256:current'
   });
   assert.equal(result?.mutationId, 'latest');

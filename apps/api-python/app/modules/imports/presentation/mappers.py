@@ -11,9 +11,9 @@ from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.bootstrap.imports import import_http_store
-from app.bootstrap.library import library_works
 from app.contracts.imports import ImportTaskContract
 from app.core.time import timestamp_ms_to_iso
+from app.models.library import LibraryWork
 from app.modules.imports.application.dto import ImportTaskDTO
 from app.modules.imports.application.monitor_paths import (
     is_inside_path,
@@ -115,7 +115,12 @@ def import_task_view(
         )
     book = None
     if task.get("workId") and _has_table(db, "LibraryWork"):
-        work = library_works.get_work(db, str(task.get("workId")))
+        work_row = db.get(LibraryWork, str(task.get("workId")))
+        work = (
+            {"id": work_row.id, "title": work_row.title}
+            if work_row is not None
+            else None
+        )
         if work:
             book = {"id": work.get("id"), "title": work.get("title") or "未命名作品"}
     logs = import_http_store.list_import_logs(

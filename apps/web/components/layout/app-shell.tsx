@@ -921,7 +921,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main
         ref={appMainRef}
         data-testid="app-shell-main"
-        data-audio-mini-player={audioPlayback.bootstrap || audioPlayback.pendingEditionId ? 'true' : undefined}
+        data-audio-mini-player={audioPlayback.bootstrap || audioPlayback.pendingVolumeId ? 'true' : undefined}
         className="shuku-mobile-shell-main min-h-screen pb-8 lg:pl-[var(--shuku-sidebar-width)] lg:pb-0"
       >
         <div data-testid="app-shell-content" className="shuku-mobile-shell-content px-5 py-7 sm:px-7 lg:px-10 lg:py-10 xl:px-12 xl:py-12">{children}</div>

@@ -1,4 +1,4 @@
-"""ORM persistence for library undoable operations and snapshot restore."""
+"""ORM persistence for volume-only library operation snapshots."""
 
 from __future__ import annotations
 
@@ -7,101 +7,93 @@ from datetime import datetime, timedelta
 from time import time_ns
 from typing import Any
 
-from sqlalchemy import delete, inspect as sa_inspect, or_, select, update
+from sqlalchemy import delete, or_, select, update
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
+from app.models.auth import ReaderBookmark
+from app.models.import_pipeline import (
+    BookConversionTask,
+    ImportAsset,
+    ImportTask,
+    KindleSendTask,
+)
 from app.models.library import (
-    LibraryConsumptionState,
-    LibraryEdition,
-    LibraryEditionFacet,
     LibraryFacet,
+    LibraryFile,
+    LibraryMediaVersion,
+    LibraryMetadata,
     LibraryOperation,
     LibraryReadingProgress,
+    LibraryReadingUnit,
+    LibraryVolume,
+    LibraryVolumeFacet,
     LibraryWork,
     LibraryWorkFacet,
+    UserMediaHistory,
+    WorkDetailPreference,
 )
+from app.models.organize import MetadataLookupTask, OrganizeJob
 from app.models.shelf import ShelfWork
+from app.modules.library.application.volume_commands import OperationSummary
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
 
-WORK_RESTORE_COLUMNS = {
-    "monitorFolderId",
-    "origin",
-    "title",
-    "normalizedTitle",
-    "author",
-    "normalizedAuthor",
-    "description",
-    "workType",
-    "status",
-    "publicationStatus",
-    "trackingStatus",
-    "localLatestVolume",
-    "localLatestChapter",
-    "localLatestTitle",
-    "localLatestAt",
-    "tags",
-    "seriesName",
-    "seriesIndex",
-    "publishedYear",
-    "metadataQuality",
-    "organizeStatus",
-    "coverPath",
-    "coverStatus",
-    "hidden",
-    "organized",
-    "primaryEditionId",
-    "mergeKey",
-    "updatedAt",
-}
-EDITION_RESTORE_COLUMNS = {
-    "workId",
-    "monitorFolderId",
-    "origin",
-    "mediaKind",
-    "format",
-    "versionName",
-    "versionKey",
-    "sourceGroupKey",
-    "description",
-    "language",
-    "publisher",
-    "publishedAt",
-    "identifier",
-    "isbn",
-    "importStatus",
-    "importError",
-    "sizeBytes",
-    "pageCount",
-    "chapterCount",
-    "durationMs",
-    "trackCount",
-    "narrator",
-    "abridged",
-    "coverPath",
-    "coverStatus",
-    "primary",
-    "hidden",
-    "updatedAt",
-}
-FACET_RESTORE_COLUMNS = {"name", "normalizedName", "aliases", "updatedAt"}
-
 _SNAPSHOT_MODELS: dict[str, type] = {
-    "LibraryWork": LibraryWork,
-    "LibraryEdition": LibraryEdition,
-    "LibraryFacet": LibraryFacet,
-    "LibraryWorkFacet": LibraryWorkFacet,
-    "LibraryEditionFacet": LibraryEditionFacet,
-    "ShelfWork": ShelfWork,
-    "LibraryConsumptionState": LibraryConsumptionState,
+    model.__tablename__: model
+    for model in (
+        LibraryWork,
+        LibraryMediaVersion,
+        LibraryVolume,
+        LibraryFile,
+        LibraryReadingUnit,
+        LibraryMetadata,
+        LibraryReadingProgress,
+        ReaderBookmark,
+        LibraryFacet,
+        LibraryWorkFacet,
+        LibraryVolumeFacet,
+        ShelfWork,
+        UserMediaHistory,
+        WorkDetailPreference,
+        ImportTask,
+        ImportAsset,
+        KindleSendTask,
+        OrganizeJob,
+        MetadataLookupTask,
+        BookConversionTask,
+    )
 }
+
+_RESTORE_ORDER = (
+    "LibraryWork",
+    "LibraryMediaVersion",
+    "LibraryVolume",
+    "LibraryFile",
+    "LibraryReadingUnit",
+    "LibraryMetadata",
+    "LibraryReadingProgress",
+    "ReaderBookmark",
+    "LibraryFacet",
+    "LibraryWorkFacet",
+    "LibraryVolumeFacet",
+    "ShelfWork",
+    "UserMediaHistory",
+    "WorkDetailPreference",
+    "ImportTask",
+    "ImportAsset",
+    "KindleSendTask",
+    "OrganizeJob",
+    "MetadataLookupTask",
+    "BookConversionTask",
+)
 
 
 def has_table(db: Session, table: str) -> bool:
     return sa_inspect(db.connection()).has_table(table)
 
 
-def _json(value: Any) -> str:
+def _json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
@@ -110,21 +102,13 @@ def _column_name_to_attr(model: type) -> dict[str, str]:
     return {prop.columns[0].name: prop.key for prop in mapper.column_attrs}
 
 
-def legacy_row_to_attr_values(
-    model: type,
-    row: dict[str, Any],
-    *,
-    columns: set[str] | None = None,
-) -> dict[str, Any]:
+def row_to_attr_values(model: type, row: dict[str, Any]) -> dict[str, Any]:
     name_to_key = _column_name_to_attr(model)
-    values: dict[str, Any] = {}
-    for name, value in row.items():
-        if columns is not None and name not in columns:
-            continue
-        key = name_to_key.get(name)
-        if key is not None:
-            values[key] = value
-    return values
+    return {
+        attribute: value
+        for name, value in row.items()
+        if (attribute := name_to_key.get(name)) is not None
+    }
 
 
 def create_operation(
@@ -141,40 +125,37 @@ def create_operation(
 ) -> dict[str, Any]:
     operation_id = f"op_{time_ns()}"
     expires_at = now + timedelta(days=7)
-    if not has_table(db, "LibraryOperation"):
-        return {
-            "id": operation_id,
-            "action": action,
-            "status": "COMPLETED",
-            "summary": summary,
-            "expiresAt": expires_at.isoformat(),
-            "undoAvailable": False,
-        }
-    db.add(
-        LibraryOperation(
-            id=operation_id,
-            user_id=user_id,
-            action=action,
-            status="COMPLETED",
-            target_type=target_type,
-            target_id=target_id,
-            summary=summary,
-            payload_json=_json(payload),
-            inverse_json=_json(inverse),
-            expires_at=expires_at,
-            created_at=now,
-            updated_at=now,
-        )
+    operation = LibraryOperation(
+        id=operation_id,
+        user_id=user_id,
+        action=action,
+        status="COMPLETED",
+        target_type=target_type,
+        target_id=target_id,
+        summary=summary,
+        payload_json=_json(payload),
+        inverse_json=_json(inverse),
+        expires_at=expires_at,
+        created_at=now,
+        updated_at=now,
     )
+    db.add(operation)
     db.flush()
-    return {
-        "id": operation_id,
-        "action": action,
-        "status": "COMPLETED",
-        "summary": summary,
-        "expiresAt": expires_at.isoformat(),
-        "undoAvailable": True,
-    }
+    return entity_as_legacy_dict(operation)
+
+
+def operation_summary(operation: dict[str, Any]) -> OperationSummary:
+    expires_at = operation.get("expiresAt")
+    if not isinstance(expires_at, datetime):
+        raise TypeError("Operation expiry is missing")
+    return OperationSummary(
+        id=str(operation["id"]),
+        action=str(operation["action"]),
+        status=str(operation["status"]),
+        summary=str(operation["summary"]),
+        expires_at=expires_at,
+        undo_available=True,
+    )
 
 
 def get_operation(db: Session, operation_id: str) -> dict[str, Any] | None:
@@ -216,66 +197,231 @@ def insert_snapshot(db: Session, table: str, row: dict[str, Any]) -> None:
     model = _SNAPSHOT_MODELS.get(table)
     if model is None:
         raise ValueError(f"Unsupported snapshot table: {table}")
-    values = legacy_row_to_attr_values(model, row)
+    values = row_to_attr_values(model, row)
     if not values:
         return
-    primary_key = list(sa_inspect(model).primary_key)
-    pk_attr_keys = {column.key for column in primary_key}
-    stmt = sqlite_insert(model).values(**values)
+    mapper = sa_inspect(model)
+    primary_key = list(mapper.primary_key)
+    primary_key_attrs = {
+        mapper.get_property_by_column(column).key for column in primary_key
+    }
+    statement = sqlite_insert(model).values(**values)
     update_set = {
         getattr(model, key): value
         for key, value in values.items()
-        if key not in pk_attr_keys
+        if key not in primary_key_attrs
     }
     if update_set:
-        stmt = stmt.on_conflict_do_update(index_elements=primary_key, set_=update_set)
+        statement = statement.on_conflict_do_update(
+            index_elements=primary_key,
+            set_=update_set,
+        )
     else:
-        stmt = stmt.on_conflict_do_nothing(index_elements=primary_key)
-    db.execute(stmt)
+        statement = statement.on_conflict_do_nothing(index_elements=primary_key)
+    db.execute(statement)
+
+
+def restore_rows(db: Session, rows_by_table: dict[str, list[dict[str, Any]]]) -> None:
+    for table in _RESTORE_ORDER:
+        for row in rows_by_table.get(table, []):
+            insert_snapshot(db, table, row)
+
+
+def snapshot_volumes_for_media_versions(
+    db: Session, media_version_ids: list[str]
+) -> list[dict[str, Any]]:
+    if not media_version_ids:
+        return []
+    return _rows(
+        db,
+        LibraryVolume,
+        LibraryVolume.media_version_id.in_(media_version_ids),
+    )
+
+
+def snapshot_work_dependents(
+    db: Session, work_id: str
+) -> dict[str, list[dict[str, Any]]]:
+    return {
+        "LibraryWorkFacet": _rows(
+            db,
+            LibraryWorkFacet,
+            LibraryWorkFacet.work_id == work_id,
+        ),
+        "ShelfWork": _rows(db, ShelfWork, ShelfWork.work_id == work_id),
+        "WorkDetailPreference": _rows(
+            db,
+            WorkDetailPreference,
+            WorkDetailPreference.work_id == work_id,
+        ),
+    }
+
+
+def _rows(db: Session, model: type, condition: object) -> list[dict[str, Any]]:
+    return [
+        entity_as_legacy_dict(row)
+        for row in db.scalars(select(model).where(condition)).all()
+    ]
+
+
+def capture_volume_delete_snapshot(
+    db: Session, *, work_id: str, volume_id: str
+) -> dict[str, list[dict[str, Any]]]:
+    volume = db.get(LibraryVolume, volume_id)
+    if volume is None:
+        raise ValueError("Volume does not exist")
+    media_version = db.get(LibraryMediaVersion, volume.media_version_id)
+    if media_version is None or media_version.work_id != work_id:
+        raise ValueError("Volume does not belong to work")
+    work = db.get(LibraryWork, work_id)
+    if work is None:
+        raise ValueError("Work does not exist")
+
+    file_ids = list(
+        db.scalars(select(LibraryFile.id).where(LibraryFile.volume_id == volume_id))
+    )
+    # A parent is snapshotted only if this deletion removes it.
+    media_volume_count = len(
+        db.scalars(
+            select(LibraryVolume.id).where(
+                LibraryVolume.media_version_id == media_version.id
+            )
+        ).all()
+    )
+    work_media_count = len(
+        db.scalars(
+            select(LibraryMediaVersion.id).where(LibraryMediaVersion.work_id == work_id)
+        ).all()
+    )
+    deletes_media = media_volume_count == 1
+    deletes_work = deletes_media and work_media_count == 1
+
+    snapshot: dict[str, list[dict[str, Any]]] = {
+        "LibraryVolume": [entity_as_legacy_dict(volume)],
+        "LibraryFile": _rows(db, LibraryFile, LibraryFile.volume_id == volume_id),
+        "LibraryReadingUnit": _rows(
+            db, LibraryReadingUnit, LibraryReadingUnit.volume_id == volume_id
+        ),
+        "LibraryMetadata": _rows(
+            db, LibraryMetadata, LibraryMetadata.volume_id == volume_id
+        ),
+        "LibraryReadingProgress": _rows(
+            db, LibraryReadingProgress, LibraryReadingProgress.volume_id == volume_id
+        ),
+        "ReaderBookmark": _rows(
+            db, ReaderBookmark, ReaderBookmark.volume_id == volume_id
+        ),
+        "LibraryVolumeFacet": _rows(
+            db, LibraryVolumeFacet, LibraryVolumeFacet.volume_id == volume_id
+        ),
+        "ImportTask": _rows(
+            db,
+            ImportTask,
+            (
+                ImportTask.work_id == work_id
+                if deletes_work
+                else ImportTask.volume_id == volume_id
+            ),
+        ),
+        "KindleSendTask": _rows(
+            db,
+            KindleSendTask,
+            (
+                KindleSendTask.work_id == work_id
+                if deletes_work
+                else (KindleSendTask.volume_id == volume_id)
+                | KindleSendTask.file_id.in_(file_ids)
+            ),
+        ),
+        "OrganizeJob": _rows(
+            db,
+            OrganizeJob,
+            (
+                OrganizeJob.work_id == work_id
+                if deletes_work
+                else OrganizeJob.volume_id == volume_id
+            ),
+        ),
+        "MetadataLookupTask": _rows(
+            db,
+            MetadataLookupTask,
+            (
+                MetadataLookupTask.work_id == work_id
+                if deletes_work
+                else MetadataLookupTask.volume_id == volume_id
+            ),
+        ),
+        "BookConversionTask": _rows(
+            db,
+            BookConversionTask,
+            (BookConversionTask.source_volume_id == volume_id)
+            | (BookConversionTask.derived_volume_id == volume_id),
+        ),
+        "ImportAsset": (
+            _rows(db, ImportAsset, ImportAsset.file_id.in_(file_ids))
+            if file_ids
+            else []
+        ),
+        # Derived resources survive source deletion but their link is set NULL.
+        "dependentVolumes": _rows(
+            db,
+            LibraryVolume,
+            LibraryVolume.derived_from_volume_id == volume_id,
+        ),
+    }
+    if deletes_media:
+        snapshot["LibraryMediaVersion"] = [entity_as_legacy_dict(media_version)]
+        snapshot["UserMediaHistory"] = _rows(
+            db,
+            UserMediaHistory,
+            UserMediaHistory.media_version_id == media_version.id,
+        )
+    if deletes_work:
+        snapshot["LibraryWork"] = [entity_as_legacy_dict(work)]
+        snapshot["LibraryWorkFacet"] = _rows(
+            db, LibraryWorkFacet, LibraryWorkFacet.work_id == work_id
+        )
+        snapshot["ShelfWork"] = _rows(db, ShelfWork, ShelfWork.work_id == work_id)
+        snapshot["WorkDetailPreference"] = _rows(
+            db, WorkDetailPreference, WorkDetailPreference.work_id == work_id
+        )
+    return snapshot
+
+
+def restore_volume_delete_snapshot(
+    db: Session, snapshot: dict[str, list[dict[str, Any]]]
+) -> None:
+    rows = dict(snapshot)
+    dependent_volumes = rows.pop("dependentVolumes", [])
+    restore_rows(db, rows)
+    for row in dependent_volumes:
+        insert_snapshot(db, "LibraryVolume", row)
 
 
 def restore_work_row(db: Session, work_id: str, row: dict[str, Any]) -> None:
-    filtered = legacy_row_to_attr_values(LibraryWork, row, columns=WORK_RESTORE_COLUMNS)
-    if not filtered:
-        return
-    db.execute(update(LibraryWork).where(LibraryWork.id == work_id).values(**filtered))
+    del work_id
+    insert_snapshot(db, "LibraryWork", row)
 
 
-def restore_edition_row(db: Session, edition_id: str, row: dict[str, Any]) -> None:
-    filtered = legacy_row_to_attr_values(LibraryEdition, row, columns=EDITION_RESTORE_COLUMNS)
-    if not filtered:
-        return
-    db.execute(update(LibraryEdition).where(LibraryEdition.id == edition_id).values(**filtered))
+def restore_media_version_row(db: Session, row: dict[str, Any]) -> None:
+    insert_snapshot(db, "LibraryMediaVersion", row)
+
+
+def restore_volume_row(db: Session, row: dict[str, Any]) -> None:
+    insert_snapshot(db, "LibraryVolume", row)
 
 
 def restore_facet_row(db: Session, facet_id: str, row: dict[str, Any]) -> None:
-    filtered = legacy_row_to_attr_values(LibraryFacet, row, columns=FACET_RESTORE_COLUMNS)
-    if not filtered:
-        return
-    db.execute(update(LibraryFacet).where(LibraryFacet.id == facet_id).values(**filtered))
+    del facet_id
+    insert_snapshot(db, "LibraryFacet", row)
 
 
 def delete_shelf_work_link(db: Session, *, shelf_id: str, work_id: str) -> None:
     db.execute(
-        delete(ShelfWork).where(ShelfWork.shelf_id == shelf_id, ShelfWork.work_id == work_id)
-    )
-
-
-def delete_consumption_by_id(db: Session, consumption_id: str) -> None:
-    db.execute(delete(LibraryConsumptionState).where(LibraryConsumptionState.id == consumption_id))
-
-
-def reassign_progress_work_id_by_id(db: Session, *, progress_id: str, work_id: str) -> None:
-    db.execute(
-        update(LibraryReadingProgress)
-        .where(LibraryReadingProgress.id == progress_id)
-        .values(work_id=work_id)
-    )
-
-
-def clear_edition_primary(db: Session, edition_id: str) -> None:
-    db.execute(
-        update(LibraryEdition).where(LibraryEdition.id == edition_id).values(is_primary=False)
+        delete(ShelfWork).where(
+            ShelfWork.shelf_id == shelf_id,
+            ShelfWork.work_id == work_id,
+        )
     )
 
 
@@ -283,9 +429,35 @@ def delete_work(db: Session, work_id: str) -> None:
     db.execute(delete(LibraryWork).where(LibraryWork.id == work_id))
 
 
+def delete_media_version_if_empty(db: Session, media_version_id: str) -> None:
+    has_volume = db.scalar(
+        select(LibraryVolume.id)
+        .where(LibraryVolume.media_version_id == media_version_id)
+        .limit(1)
+    )
+    if has_volume is None:
+        db.execute(
+            delete(LibraryMediaVersion).where(
+                LibraryMediaVersion.id == media_version_id
+            )
+        )
+
+
+def delete_work_if_empty(db: Session, work_id: str) -> None:
+    has_media = db.scalar(
+        select(LibraryMediaVersion.id)
+        .where(LibraryMediaVersion.work_id == work_id)
+        .limit(1)
+    )
+    if has_media is None:
+        db.execute(delete(LibraryWork).where(LibraryWork.id == work_id))
+
+
 def delete_work_facets_for_work(db: Session, work_id: str) -> None:
     db.execute(delete(LibraryWorkFacet).where(LibraryWorkFacet.work_id == work_id))
 
 
-def delete_edition_facets_for_edition(db: Session, edition_id: str) -> None:
-    db.execute(delete(LibraryEditionFacet).where(LibraryEditionFacet.edition_id == edition_id))
+def delete_volume_facets_for_volume(db: Session, volume_id: str) -> None:
+    db.execute(
+        delete(LibraryVolumeFacet).where(LibraryVolumeFacet.volume_id == volume_id)
+    )

@@ -66,9 +66,8 @@ test('nested application copy is translated before interpolation', () => {
     }),
     '1 rule(s) enabled · All conditions'
   );
-  assert.equal(translateMessage('en-US', '1 个音轨'), '1 track');
-  assert.equal(translateMessage('en-US', '{value0} 个音轨', { value0: 2 }), '2 tracks');
-  assert.equal(translateMessage('zh-CN', '{value0} 个音轨', { value0: 1 }), '1 个音轨');
+  assert.equal(translateMessage('en-US', '卷号 {value0}', { value0: 2 }), 'Volume 2');
+  assert.equal(translateMessage('zh-CN', '卷号 {value0}', { value0: 1 }), '卷号 1');
 });
 
 test('brand metadata has a deliberate English translation', () => {

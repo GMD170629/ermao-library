@@ -1,180 +1,94 @@
-"""ORM adapter for edition and volume structure changes."""
+"""ORM adapter for media-version and volume structure changes."""
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import case, func, inspect, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
-from app.models.import_pipeline import ImportTask, KindleSendTask
-from app.models.library import (
-    LibraryEdition,
-    LibraryFile,
-    LibraryReadingProgress,
-    LibraryReadingUnit,
-    LibraryVolume,
-    LibraryWork,
-)
+from app.models.common import cuid
+from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
 from app.modules.library.application.dto import MoveVolumeResult
 
 
-def _media_kind(format_name: str, stored_media_kind: str | None) -> str:
-    if stored_media_kind:
-        return stored_media_kind.upper()
-    normalized = format_name.upper()
-    if normalized == "COMIC":
-        return "COMIC"
-    if normalized in {"AUDIO", "AUDIOBOOK"}:
-        return "AUDIOBOOK"
-    return "EBOOK"
-
-
-def _remaining_edition_id(db: Session, work_id: str) -> str | None:
+def _media_version_for_work(
+    db: Session, *, work_id: str, media_kind: str
+) -> LibraryMediaVersion | None:
     return db.scalar(
-        select(LibraryEdition.id)
+        select(LibraryMediaVersion)
         .where(
-            LibraryEdition.work_id == work_id,
-            func.coalesce(LibraryEdition.hidden, 0) == 0,
-        )
-        .order_by(
-            func.coalesce(LibraryEdition.is_primary, 0).desc(),
-            LibraryEdition.created_at.asc(),
-            LibraryEdition.id.asc(),
+            LibraryMediaVersion.work_id == work_id,
+            LibraryMediaVersion.media_kind == media_kind,
         )
         .limit(1)
     )
 
 
-def _refresh_work_primary(db: Session, work_id: str, now: datetime) -> None:
-    remaining_id = _remaining_edition_id(db, work_id)
-    db.execute(
-        update(LibraryWork)
-        .where(LibraryWork.id == work_id)
-        .values(
-            primary_edition_id=remaining_id,
-            hidden=remaining_id is None,
-            updated_at=now,
-        )
+def _ensure_media_version(
+    db: Session, *, work_id: str, media_kind: str, now: datetime
+) -> tuple[LibraryMediaVersion, bool]:
+    existing = _media_version_for_work(db, work_id=work_id, media_kind=media_kind)
+    if existing is not None:
+        return existing, False
+    media_version = LibraryMediaVersion(
+        id=cuid(),
+        work_id=work_id,
+        media_kind=media_kind,
+        created_at=now,
+        updated_at=now,
     )
+    db.add(media_version)
+    db.flush()
+    return media_version, True
 
 
-def _edition_totals(db: Session, edition_id: str) -> tuple[int, int, int]:
-    row = db.execute(
-        select(
-            func.count(LibraryVolume.id),
-            func.coalesce(func.sum(LibraryVolume.page_count), 0),
-            func.coalesce(func.sum(LibraryVolume.chapter_count), 0),
-        ).where(LibraryVolume.edition_id == edition_id)
-    ).one()
-    return int(row[0] or 0), int(row[1] or 0), int(row[2] or 0)
-
-
-def _refresh_edition_totals(db: Session, edition_id: str, now: datetime) -> None:
-    _count, pages, chapters = _edition_totals(db, edition_id)
-    db.execute(
-        update(LibraryEdition)
-        .where(LibraryEdition.id == edition_id)
-        .values(page_count=pages, chapter_count=chapters, updated_at=now)
-    )
-
-
-def _reorder_edition_volumes(db: Session, edition_id: str, now: datetime) -> None:
+def _reorder_media_version_volumes(
+    db: Session, media_version_id: str, now: datetime
+) -> None:
     volume_ids = db.scalars(
         select(LibraryVolume.id)
-        .where(LibraryVolume.edition_id == edition_id)
+        .where(LibraryVolume.media_version_id == media_version_id)
         .order_by(
-            case((LibraryVolume.volume_index.is_(None), 1), else_=0).asc(),
-            LibraryVolume.volume_index.asc(),
             LibraryVolume.sort_order.asc(),
             LibraryVolume.created_at.asc(),
             LibraryVolume.id.asc(),
         )
     ).all()
-    for index, volume_id in enumerate(volume_ids):
+    for index, volume_id in enumerate(volume_ids, start=1):
         db.execute(
             update(LibraryVolume)
             .where(LibraryVolume.id == volume_id)
-            .values(sort_order=(index + 1) * 1000, updated_at=now)
+            .values(sort_order=index * 1000, updated_at=now)
         )
 
 
-def _move_volume_references(
-    db: Session,
-    *,
-    volume_id: str,
-    target_work_id: str,
-    target_edition_id: str,
-    now: datetime,
+def _remove_empty_media_version(
+    db: Session, *, media_version_id: str, work_id: str
 ) -> None:
-    db.execute(
-        update(LibraryVolume)
-        .where(LibraryVolume.id == volume_id)
-        .values(edition_id=target_edition_id, updated_at=now)
-    )
-    db.execute(
-        update(LibraryFile)
-        .where(LibraryFile.volume_id == volume_id)
-        .values(edition_id=target_edition_id, updated_at=now)
-    )
-    db.execute(
-        update(LibraryReadingUnit)
-        .where(LibraryReadingUnit.volume_id == volume_id)
-        .values(edition_id=target_edition_id, updated_at=now)
-    )
-    db.execute(
-        update(LibraryReadingProgress)
-        .where(LibraryReadingProgress.volume_id == volume_id)
-        .values(
-            work_id=target_work_id,
-            edition_id=target_edition_id,
-            updated_at=now,
-        )
-    )
-    db.execute(
-        update(ImportTask)
-        .where(ImportTask.volume_id == volume_id)
-        .values(
-            work_id=target_work_id,
-            edition_id=target_edition_id,
-            updated_at=now,
-        )
-    )
-    if inspect(db.connection()).has_table("KindleSendTask"):
-        db.execute(
-            update(KindleSendTask)
-            .where(KindleSendTask.volume_id == volume_id)
-            .values(
-                work_id=target_work_id,
-                edition_id=target_edition_id,
-                updated_at=now,
+    remaining = int(
+        db.scalar(
+            select(func.count(LibraryVolume.id)).where(
+                LibraryVolume.media_version_id == media_version_id
             )
         )
-
-
-def _move_edition_references(
-    db: Session,
-    *,
-    edition_id: str,
-    target_work_id: str,
-    now: datetime,
-) -> None:
-    db.execute(
-        update(LibraryReadingProgress)
-        .where(LibraryReadingProgress.edition_id == edition_id)
-        .values(work_id=target_work_id, updated_at=now)
+        or 0
     )
+    if remaining:
+        return
     db.execute(
-        update(ImportTask)
-        .where(ImportTask.edition_id == edition_id)
-        .values(work_id=target_work_id, updated_at=now)
+        delete(LibraryMediaVersion).where(LibraryMediaVersion.id == media_version_id)
     )
-    if inspect(db.connection()).has_table("KindleSendTask"):
-        db.execute(
-            update(KindleSendTask)
-            .where(KindleSendTask.edition_id == edition_id)
-            .values(work_id=target_work_id, updated_at=now)
+    remaining_media = int(
+        db.scalar(
+            select(func.count(LibraryMediaVersion.id)).where(
+                LibraryMediaVersion.work_id == work_id
+            )
         )
+        or 0
+    )
+    if remaining_media == 0:
+        db.execute(delete(LibraryWork).where(LibraryWork.id == work_id))
 
 
 def move_volume_to_work(
@@ -183,166 +97,56 @@ def move_volume_to_work(
     source_work_id: str,
     volume_id: str,
     target_work_id: str,
-    source_format: str,
     now: datetime,
 ) -> MoveVolumeResult:
-    source_edition = db.execute(
-        select(
-            LibraryEdition.id,
-            LibraryEdition.format,
-            LibraryEdition.media_kind,
-            LibraryEdition.version_key,
-            LibraryEdition.is_primary,
+    """Move one resource without using a volume number as identity."""
+
+    source = db.execute(
+        select(LibraryVolume, LibraryMediaVersion)
+        .join(
+            LibraryMediaVersion,
+            LibraryMediaVersion.id == LibraryVolume.media_version_id,
         )
-        .join(LibraryVolume, LibraryVolume.edition_id == LibraryEdition.id)
         .where(
             LibraryVolume.id == volume_id,
-            LibraryEdition.work_id == source_work_id,
+            LibraryMediaVersion.work_id == source_work_id,
         )
     ).one_or_none()
-    if source_edition is None:
+    if source is None:
         raise ValueError("卷册不存在或不属于该作品")
+    if db.get(LibraryWork, target_work_id) is None:
+        raise ValueError("目标作品不存在")
 
-    source_edition_id = str(source_edition.id)
-    source_media_kind = _media_kind(
-        str(source_edition.format or source_format),
-        source_edition.media_kind,
+    volume, source_media_version = source
+    target_media_version, created = _ensure_media_version(
+        db,
+        work_id=target_work_id,
+        media_kind=source_media_version.media_kind,
+        now=now,
     )
-    matching_primary = db.execute(
-        select(LibraryEdition.id)
-        .where(
-            LibraryEdition.work_id == target_work_id,
-            func.upper(LibraryEdition.format) == source_format.upper(),
-            func.coalesce(LibraryEdition.hidden, 0) == 0,
-        )
-        .order_by(
-            func.coalesce(LibraryEdition.is_primary, 0).desc(),
-            LibraryEdition.created_at.asc(),
-            LibraryEdition.id.asc(),
-        )
-        .limit(1)
-    ).one_or_none()
-    source_volume_count, _pages, _chapters = _edition_totals(db, source_edition_id)
-    matching_volume_count = (
-        _edition_totals(db, str(matching_primary.id))[0]
-        if matching_primary is not None
-        else 0
-    )
-    merge_volumes = bool(
-        matching_primary is not None
-        and source_volume_count > 0
-        and matching_volume_count > 0
-    )
+    source_media_version_id = source_media_version.id
+    volume.media_version_id = target_media_version.id
+    volume.updated_at = now
+    db.flush()
 
-    if merge_volumes:
-        target_edition_id = str(matching_primary.id)
-        _move_volume_references(
-            db,
-            volume_id=volume_id,
-            target_work_id=target_work_id,
-            target_edition_id=target_edition_id,
-            now=now,
-        )
-        remaining_count, _pages, _chapters = _edition_totals(db, source_edition_id)
-        _refresh_edition_totals(db, source_edition_id, now)
-        direct_file_count = int(
-            db.scalar(
-                select(func.count(LibraryFile.id)).where(
-                    LibraryFile.edition_id == source_edition_id,
-                    LibraryFile.volume_id.is_(None),
-                )
-            )
-            or 0
-        )
-        if remaining_count == 0 and direct_file_count == 0:
-            db.execute(
-                update(LibraryEdition)
-                .where(LibraryEdition.id == source_edition_id)
-                .values(is_primary=False, hidden=True, updated_at=now)
-            )
-            if bool(source_edition.is_primary):
-                replacement_id = db.scalar(
-                    select(LibraryEdition.id)
-                    .where(
-                        LibraryEdition.work_id == source_work_id,
-                        LibraryEdition.media_kind == source_media_kind,
-                        func.coalesce(LibraryEdition.hidden, 0) == 0,
-                    )
-                    .order_by(
-                        func.coalesce(LibraryEdition.is_primary, 0).desc(),
-                        LibraryEdition.created_at.asc(),
-                        LibraryEdition.id.asc(),
-                    )
-                    .limit(1)
-                )
-                if replacement_id is not None:
-                    db.execute(
-                        update(LibraryEdition)
-                        .where(LibraryEdition.id == replacement_id)
-                        .values(is_primary=True, updated_at=now)
-                    )
-            _refresh_work_primary(db, source_work_id, now)
-        _reorder_edition_volumes(db, target_edition_id, now)
-        _refresh_edition_totals(db, target_edition_id, now)
-        transfer_mode = "MERGED_VOLUME"
-    else:
-        target_edition_id = source_edition_id
-        existing_media_id = db.scalar(
-            select(LibraryEdition.id)
-            .where(
-                LibraryEdition.work_id == target_work_id,
-                LibraryEdition.media_kind == source_media_kind,
-                func.coalesce(LibraryEdition.hidden, 0) == 0,
-            )
-            .limit(1)
-        )
-        transfer_mode = (
-            "ADDED_MEDIA" if existing_media_id is None else "ADDED_BACKUP_EDITION"
-        )
-        desired_version_key = str(source_edition.version_key or source_edition_id)
-        version_key = desired_version_key
-        suffix = 1
-        while db.scalar(
-            select(LibraryEdition.id)
-            .where(
-                LibraryEdition.work_id == target_work_id,
-                LibraryEdition.version_key == version_key,
-                LibraryEdition.id != source_edition_id,
-            )
-            .limit(1)
-        ):
-            suffix += 1
-            version_key = f"{desired_version_key}:backup-{suffix}"
-        db.execute(
-            update(LibraryEdition)
-            .where(LibraryEdition.id == source_edition_id)
-            .values(
-                work_id=target_work_id,
-                version_key=version_key,
-                is_primary=existing_media_id is None,
-                updated_at=now,
-            )
-        )
-        _move_edition_references(
-            db,
-            edition_id=source_edition_id,
-            target_work_id=target_work_id,
-            now=now,
-        )
-        _refresh_work_primary(db, source_work_id, now)
-
+    _reorder_media_version_volumes(db, source_media_version_id, now)
+    _reorder_media_version_volumes(db, target_media_version.id, now)
+    _remove_empty_media_version(
+        db,
+        media_version_id=source_media_version_id,
+        work_id=source_work_id,
+    )
     db.execute(
         update(LibraryWork)
-        .where(LibraryWork.id.in_([source_work_id, target_work_id]))
+        .where(LibraryWork.id == target_work_id)
         .values(updated_at=now)
     )
     db.flush()
     return MoveVolumeResult(
-        source_edition_id=source_edition_id,
-        target_edition_id=target_edition_id,
+        source_media_version_id=source_media_version_id,
+        target_media_version_id=target_media_version.id,
         target_work_id=target_work_id,
-        transfer_mode=transfer_mode,
-        merged_volume=merge_volumes,
+        transfer_mode=("CREATED_MEDIA_VERSION" if created else "APPENDED_VOLUME"),
     )
 
 
@@ -350,13 +154,13 @@ def reorder_volume(
     db: Session,
     *,
     volume_id: str,
-    edition_id: str,
+    media_version_id: str,
     direction: str,
     now: datetime,
 ) -> bool:
     volumes = db.execute(
         select(LibraryVolume.id, LibraryVolume.sort_order)
-        .where(LibraryVolume.edition_id == edition_id)
+        .where(LibraryVolume.media_version_id == media_version_id)
         .order_by(LibraryVolume.sort_order.asc(), LibraryVolume.id.asc())
     ).all()
     index = next(
@@ -371,12 +175,12 @@ def reorder_volume(
     db.execute(
         update(LibraryVolume)
         .where(LibraryVolume.id == current.id)
-        .values(sort_order=target.sort_order or 0, updated_at=now)
+        .values(sort_order=target.sort_order, updated_at=now)
     )
     db.execute(
         update(LibraryVolume)
         .where(LibraryVolume.id == target.id)
-        .values(sort_order=current.sort_order or 0, updated_at=now)
+        .values(sort_order=current.sort_order, updated_at=now)
     )
     db.flush()
     return True

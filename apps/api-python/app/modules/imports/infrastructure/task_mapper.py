@@ -41,9 +41,6 @@ def import_task_dto_from_row(row: Mapping[str, object]) -> ImportTaskDTO:
         work_id=_optional_str(
             row.get("workId") if "workId" in row else row.get("work_id")
         ),
-        edition_id=_optional_str(
-            row.get("editionId") if "editionId" in row else row.get("edition_id")
-        ),
         volume_id=_optional_str(
             row.get("volumeId") if "volumeId" in row else row.get("volume_id")
         ),

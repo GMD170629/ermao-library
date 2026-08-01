@@ -12,3 +12,8 @@ export {
   serializableSmartFilterRules,
   smartFilterConditionComplete
 } from './model/smart-filter-rules';
+export type {
+  BookshelfWorkSummary,
+  LibraryWorkSummary,
+  ManagementWorkSummary
+} from './api/works';

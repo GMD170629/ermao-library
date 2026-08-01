@@ -6,5 +6,5 @@ type ReaderPageProps = {
 
 export default async function Page({ params }: ReaderPageProps) {
   const { id } = await params;
-  return <ReaderPage editionId={id} />;
+  return <ReaderPage volumeId={id} />;
 }

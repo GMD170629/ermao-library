@@ -9,20 +9,23 @@ from sqlalchemy.orm import Session
 
 from app.core.authorization import (
     AuthorizationContext,
-    edition_visibility_predicate,
+    volume_visibility_predicate,
     work_visibility_predicate,
 )
 from app.models.library import (
-    LibraryEdition,
-    LibraryEditionFacet,
     LibraryFacet,
+    LibraryMediaVersion,
+    LibraryVolume,
+    LibraryVolumeFacet,
     LibraryWork,
     LibraryWorkFacet,
 )
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
 
 
-def list_visible_works(db: Session, context: AuthorizationContext) -> list[dict[str, Any]]:
+def list_visible_works(
+    db: Session, context: AuthorizationContext
+) -> list[dict[str, Any]]:
     rows = db.scalars(
         select(LibraryWork).where(
             func.coalesce(LibraryWork.hidden, False).is_(False),
@@ -32,17 +35,20 @@ def list_visible_works(db: Session, context: AuthorizationContext) -> list[dict[
     return [entity_as_legacy_dict(row) for row in rows]
 
 
-def media_kind_counts(db: Session, context: AuthorizationContext) -> list[dict[str, Any]]:
+def media_kind_counts(
+    db: Session, context: AuthorizationContext
+) -> list[dict[str, Any]]:
     rows = db.execute(
         select(
-            LibraryEdition.media_kind.label("value"),
-            func.count(func.distinct(LibraryEdition.work_id)).label("count"),
+            LibraryMediaVersion.media_kind.label("value"),
+            func.count(func.distinct(LibraryMediaVersion.work_id)).label("count"),
         )
+        .join(LibraryVolume, LibraryVolume.media_version_id == LibraryMediaVersion.id)
         .where(
-            func.coalesce(LibraryEdition.hidden, False).is_(False),
-            edition_visibility_predicate(context),
+            LibraryVolume.hidden.is_(False),
+            volume_visibility_predicate(context),
         )
-        .group_by(LibraryEdition.media_kind)
+        .group_by(LibraryMediaVersion.media_kind)
     ).all()
     return [{"value": row.value, "count": int(row.count or 0)} for row in rows]
 
@@ -57,19 +63,28 @@ def visible_categories(
         rows = db.execute(
             select(
                 LibraryFacet,
-                func.count(func.distinct(LibraryEdition.work_id)).label("bookCount"),
+                func.count(func.distinct(LibraryMediaVersion.work_id)).label(
+                    "bookCount"
+                ),
             )
-            .join(LibraryEditionFacet, LibraryEditionFacet.facet_id == LibraryFacet.id)
-            .join(LibraryEdition, LibraryEdition.id == LibraryEditionFacet.edition_id)
-            .join(LibraryWork, LibraryWork.id == LibraryEdition.work_id)
+            .join(LibraryVolumeFacet, LibraryVolumeFacet.facet_id == LibraryFacet.id)
+            .join(LibraryVolume, LibraryVolume.id == LibraryVolumeFacet.volume_id)
+            .join(
+                LibraryMediaVersion,
+                LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            )
+            .join(LibraryWork, LibraryWork.id == LibraryMediaVersion.work_id)
             .where(
                 LibraryFacet.kind == "PUBLISHER",
-                func.coalesce(LibraryEdition.hidden, False).is_(False),
+                LibraryVolume.hidden.is_(False),
                 func.coalesce(LibraryWork.hidden, False).is_(False),
-                edition_visibility_predicate(context),
+                volume_visibility_predicate(context),
             )
             .group_by(LibraryFacet.id)
-            .order_by(func.count(func.distinct(LibraryEdition.work_id)).desc(), LibraryFacet.name.asc())
+            .order_by(
+                func.count(func.distinct(LibraryMediaVersion.work_id)).desc(),
+                LibraryFacet.name.asc(),
+            )
         ).all()
     else:
         rows = db.execute(
@@ -85,7 +100,10 @@ def visible_categories(
                 work_visibility_predicate(context),
             )
             .group_by(LibraryFacet.id)
-            .order_by(func.count(func.distinct(LibraryWork.id)).desc(), LibraryFacet.name.asc())
+            .order_by(
+                func.count(func.distinct(LibraryWork.id)).desc(),
+                LibraryFacet.name.asc(),
+            )
         ).all()
     result: list[dict[str, Any]] = []
     for facet, book_count in rows:
@@ -95,7 +113,9 @@ def visible_categories(
     return result
 
 
-def visible_work_option_rows(db: Session, context: AuthorizationContext) -> list[dict[str, Any]]:
+def visible_work_option_rows(
+    db: Session, context: AuthorizationContext
+) -> list[dict[str, Any]]:
     rows = db.execute(
         select(
             LibraryWork.author,
@@ -118,18 +138,25 @@ def visible_work_option_rows(db: Session, context: AuthorizationContext) -> list
     ]
 
 
-def visible_edition_option_rows(db: Session, context: AuthorizationContext) -> list[dict[str, Any]]:
+def visible_volume_option_rows(
+    db: Session, context: AuthorizationContext
+) -> list[dict[str, Any]]:
     rows = db.execute(
         select(
-            LibraryEdition.publisher,
-            LibraryEdition.language,
-            LibraryEdition.format,
-            LibraryEdition.import_status,
-            LibraryEdition.origin,
-            LibraryEdition.media_kind,
-        ).where(
-            func.coalesce(LibraryEdition.hidden, False).is_(False),
-            edition_visibility_predicate(context),
+            LibraryVolume.publisher,
+            LibraryVolume.language,
+            LibraryVolume.format,
+            LibraryVolume.import_status,
+            LibraryVolume.origin,
+            LibraryMediaVersion.media_kind,
+        )
+        .join(
+            LibraryMediaVersion,
+            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+        )
+        .where(
+            LibraryVolume.hidden.is_(False),
+            volume_visibility_predicate(context),
         )
     ).all()
     return [

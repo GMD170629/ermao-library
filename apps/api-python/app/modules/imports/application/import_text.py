@@ -17,14 +17,10 @@ from app.modules.imports.application.identity_resolution import (
 )
 from app.modules.imports.application.import_support import (
     _ensure_work,
-    _file_version_key,
-    _finalize_work_primary,
+    _finalize_work_cover,
     _hash_text,
     _id,
-    _insert_identity_metadata,
-    _next_edition_name,
     _now,
-    _should_be_media_primary,
     _work_merge_key,
 )
 from app.modules.imports.application.ports import (
@@ -64,14 +60,20 @@ def refresh_existing_reflowable_source(
     if not file_rows:
         return existing
     file_row = file_rows[0]
-    volume = queries.get_first_volume_for_edition(existing.edition_id)
+    volume_id = str(file_row.get("volumeId") or existing.volume_id or "")
+    volume = queries.get_volume_context_by_id(volume_id) if volume_id else None
     if volume is None:
         volume = store.insert_library_volume(
             columns={
                 "id": _id(),
-                "editionId": existing.edition_id,
+                "mediaVersionId": existing.media_version_id,
                 "title": metadata.title or existing.title,
-                "sortOrder": 0,
+                "format": source_format,
+                "resourceKey": _hash_text(str(source_path)),
+                "sortOrder": queries.count_volumes_for_media_version(
+                    existing.media_version_id
+                )
+                * 1000,
                 "chapterCount": len(metadata.chapters),
                 "coverPath": None,
                 "createdAt": _now(),
@@ -85,13 +87,12 @@ def refresh_existing_reflowable_source(
             file_id,
             columns={"volumeId": volume_id, "updatedAt": _now()},
         )
-    for unit in queries.list_reflowable_chapters_for_edition(existing.edition_id):
+    for unit in queries.list_reflowable_chapters_for_volume(volume_id):
         unit_id = unit.get("id")
         if unit_id:
             store.delete_library_reading_unit(str(unit_id))
     _insert_reflowable_chapters(
         store,
-        existing.edition_id,
         volume_id,
         file_id,
         source_format,
@@ -100,7 +101,7 @@ def refresh_existing_reflowable_source(
     store.insert_library_metadata(
         columns={
             "id": _id(),
-            "editionId": existing.edition_id,
+            "volumeId": volume_id,
             "source": "reflowable_source",
             "rawJson": _reflowable_metadata_json(metadata, source_path, source_format),
             "createdAt": _now(),
@@ -110,10 +111,10 @@ def refresh_existing_reflowable_source(
     cover_path = services.publish_reflowable_cover(
         settings.resolved_storage_root,
         existing.work_id,
-        existing.edition_id,
+        existing.media_version_id,
         metadata,
     )
-    edition_values: dict[str, object] = {
+    volume_values: dict[str, object] = {
         "description": metadata.description,
         "language": metadata.language,
         "publisher": metadata.publisher,
@@ -124,16 +125,15 @@ def refresh_existing_reflowable_source(
         "updatedAt": _now(),
     }
     if cover_path:
-        edition_values.update(
+        volume_values.update(
             coverPath=cover_path,
             coverStatus=services.cover_status(cover_path),
         )
-    store.update_library_edition(existing.edition_id, columns=edition_values)
     store.update_library_volume(
         volume_id,
         columns={
+            **volume_values,
             "chapterCount": len(metadata.chapters),
-            **({"coverPath": cover_path} if cover_path else {}),
             "updatedAt": _now(),
         },
     )
@@ -169,7 +169,7 @@ def refresh_existing_reflowable_source(
     return ImportResult(
         existing.book_id,
         existing.work_id,
-        existing.edition_id,
+        existing.media_version_id,
         volume_id,
         selected_title,
         existing.type,
@@ -184,7 +184,6 @@ def refresh_existing_reflowable_source(
 
 def _insert_reflowable_chapters(
     store: LibraryImportStore,
-    edition_id: str,
     volume_id: str,
     file_id: str,
     source_format: str,
@@ -195,7 +194,6 @@ def _insert_reflowable_chapters(
         store.insert_library_reading_unit(
             columns={
                 "id": _id(),
-                "editionId": edition_id,
                 "volumeId": volume_id,
                 "fileId": file_id,
                 "unitType": "chapter",
@@ -297,32 +295,13 @@ def _import_reflowable_source(
         },
     )
     store.update_import_task(
-        task_id, columns={"message": f"正在建立 {source_format} 原始文件版本"}
+        task_id, columns={"message": f"正在建立 {source_format} 原始文件卷册"}
     )
-    edition = store.insert_library_edition(
+    media_version = store.ensure_library_media_version(
         columns={
             "id": _id(),
             "workId": work["id"],
-            "monitorFolderId": options.monitor_folder_id,
-            "origin": options.origin,
             "mediaKind": "EBOOK",
-            "format": source_format,
-            "versionName": _next_edition_name(
-                queries, work["id"], f"{source_format} 原始文件", "EBOOK"
-            ),
-            "versionKey": _file_version_key(source_format.lower(), source_path),
-            "sizeBytes": file_size,
-            "description": metadata.description,
-            "language": metadata.language,
-            "publisher": metadata.publisher,
-            "publishedAt": metadata.published_at,
-            "identifier": metadata.identifier,
-            "isbn": metadata.isbn,
-            "chapterCount": len(metadata.chapters),
-            "coverStatus": "PENDING",
-            "importStatus": "COMPLETED",
-            "primary": _should_be_media_primary(queries, work["id"], "EBOOK"),
-            "hidden": False,
             "createdAt": _now(),
             "updatedAt": _now(),
         }
@@ -331,11 +310,27 @@ def _import_reflowable_source(
     volume = store.insert_library_volume(
         columns={
             "id": _id(),
-            "editionId": edition["id"],
+            "mediaVersionId": media_version["id"],
             "title": identity.title,
-            "sortOrder": 0,
+            "sortOrder": queries.count_volumes_for_media_version(
+                str(media_version["id"])
+            )
+            * 1000,
+            "format": source_format,
+            "resourceKey": _hash_text(str(source_path)),
+            "monitorFolderId": options.monitor_folder_id,
+            "origin": options.origin,
+            "description": metadata.description,
+            "language": metadata.language,
+            "publisher": metadata.publisher,
+            "publishedAt": metadata.published_at,
+            "identifier": metadata.identifier,
+            "isbn": metadata.isbn,
+            "sizeBytes": file_size,
             "chapterCount": len(metadata.chapters),
             "coverPath": None,
+            "coverStatus": "PENDING",
+            "importStatus": "COMPLETED",
             "createdAt": _now(),
             "updatedAt": _now(),
         }
@@ -343,7 +338,6 @@ def _import_reflowable_source(
     file = store.insert_library_file(
         columns={
             "id": _id(),
-            "editionId": edition["id"],
             "volumeId": volume["id"],
             "path": str(source_path),
             "filePathHash": _hash_text(str(source_path)),
@@ -359,7 +353,6 @@ def _import_reflowable_source(
     )
     _insert_reflowable_chapters(
         store,
-        str(edition["id"]),
         str(volume["id"]),
         str(file["id"]),
         source_format,
@@ -368,18 +361,27 @@ def _import_reflowable_source(
     store.insert_library_metadata(
         columns={
             "id": _id(),
-            "editionId": edition["id"],
+            "volumeId": volume["id"],
             "source": "reflowable_source",
             "rawJson": _reflowable_metadata_json(metadata, source_path, source_format),
             "createdAt": _now(),
             "updatedAt": _now(),
         }
     )
-    _insert_identity_metadata(store, str(edition["id"]), identity)
+    store.insert_library_metadata(
+        columns={
+            "id": _id(),
+            "volumeId": volume["id"],
+            "source": f"identity_{identity.source}",
+            "rawJson": json.dumps(identity.raw_metadata(), ensure_ascii=False),
+            "createdAt": _now(),
+            "updatedAt": _now(),
+        }
+    )
     cover_path = services.publish_reflowable_cover(
         settings.resolved_storage_root,
         str(work["id"]),
-        str(edition["id"]),
+        str(volume["id"]),
         metadata,
     )
     stored_cover_path = cover_path or services.ensure_default_cover()
@@ -387,26 +389,18 @@ def _import_reflowable_source(
         str(volume["id"]),
         columns={"coverPath": stored_cover_path, "updatedAt": _now()},
     )
-    store.update_library_edition(
-        str(edition["id"]),
-        columns={
-            "coverPath": stored_cover_path,
-            "coverStatus": services.cover_status(stored_cover_path),
-            "updatedAt": _now(),
-        },
-    )
-    _finalize_work_primary(
+    _finalize_work_cover(
         store,
         queries,
         services,
         str(work["id"]),
-        str(edition["id"]),
+        str(media_version["id"]),
         stored_cover_path,
     )
     return ImportResult(
         str(work["id"]),
         str(work["id"]),
-        str(edition["id"]),
+        str(media_version["id"]),
         str(volume["id"]),
         str(work["title"]),
         "ebook",
@@ -425,26 +419,17 @@ def _complete_deferred_source_conversion(
     source_path: Path,
     result: ImportResult,
 ) -> None:
-    source_edition = queries.find_deferred_source_edition(
+    source_volume = queries.find_deferred_source_volume(
         source_path=str(source_path.resolve()),
         work_id=result.work_id,
-        result_edition_id=result.edition_id,
+        result_volume_id=result.volume_id,
     )
-    if not source_edition:
+    if not source_volume or not result.volume_id:
         return
-    store.update_library_edition(
-        str(source_edition["id"]),
-        columns={"primary": False, "hidden": True, "updatedAt": _now()},
-    )
-    store.update_library_edition(
-        result.edition_id,
-        columns={"primary": True, "hidden": False, "updatedAt": _now()},
-    )
-    store.update_library_work(
-        result.work_id,
+    store.update_library_volume(
+        result.volume_id,
         columns={
-            "primaryEditionId": result.edition_id,
-            "workType": "EPUB",
+            "derivedFromVolumeId": source_volume["id"],
             "updatedAt": _now(),
         },
     )

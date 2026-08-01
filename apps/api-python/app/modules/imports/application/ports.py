@@ -21,9 +21,11 @@ from app.modules.imports.application.dto import (
     StageImportCommand,
 )
 from app.modules.imports.application.query_ports import (
-    ImportLibraryQueries as ImportLibraryQueries,
+    ImportLibraryQueries,
 )
 from app.modules.imports.application.reflowable_types import ReflowableBookMetadata
+
+__all__ = ["ImportLibraryQueries"]
 
 
 class ImportUnitOfWork(Protocol):
@@ -121,12 +123,12 @@ class LibraryImportStore(Protocol):
         self, work_id: str, *, columns: dict[str, object]
     ) -> None: ...
 
-    def insert_library_edition(
+    def ensure_library_media_version(
         self, *, columns: dict[str, object]
     ) -> dict[str, object]: ...
 
-    def update_library_edition(
-        self, edition_id: str, *, columns: dict[str, object]
+    def update_library_media_version(
+        self, media_version_id: str, *, columns: dict[str, object]
     ) -> None: ...
 
     def insert_library_volume(
@@ -170,9 +172,9 @@ class LibraryImportStore(Protocol):
         columns: dict[str, object],
     ) -> None: ...
 
-    def update_library_consumption_state(
+    def update_user_media_history(
         self,
-        state_id: str,
+        history_id: str,
         *,
         columns: dict[str, object],
     ) -> None: ...
@@ -215,6 +217,10 @@ class ImportOrchestrationServices(Protocol):
         self, import_task_id: str, source_path: Path
     ) -> ConversionArtifactDTO: ...
 
+    def bind_conversion_result(
+        self, idempotency_key: str, derived_volume_id: str
+    ) -> None: ...
+
     def recognize_identity(
         self, path: Path, original_name: str | None
     ) -> BookIdentityDTO: ...
@@ -239,7 +245,7 @@ class ImportOrchestrationServices(Protocol):
         self,
         storage_root: Path,
         work_id: str,
-        edition_id: str,
+        media_version_id: str,
         metadata_items: tuple[AudioFileMetadata, ...],
         *,
         bundle_root: Path | None = None,
@@ -253,7 +259,7 @@ class ImportOrchestrationServices(Protocol):
         self,
         storage_root: Path,
         work_id: str,
-        edition_id: str,
+        media_version_id: str,
         metadata: ReflowableBookMetadata,
     ) -> str | None: ...
 

@@ -16,8 +16,7 @@ test('stores the validated normalized reader location', () => {
     connection,
     owner: { kind: 'local' },
     workId: 'work-1',
-    editionId: 'edition-1',
-    volumeId: null,
+    volumeId: 'volume-1',
     contentFingerprint: 'fingerprint-1',
     location: {
       kind: 'epub',

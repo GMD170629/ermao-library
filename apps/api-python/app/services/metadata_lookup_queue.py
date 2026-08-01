@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Any, Callable
+from typing import Any
 from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
 from uuid import uuid4
@@ -16,15 +17,21 @@ from app.infrastructure.sqlite_retry import execute_with_sqlite_busy_retry
 from app.models.common import db_timestamp
 from app.modules.metadata.application.commands import execute_metadata_transaction
 from app.modules.metadata.infrastructure import lookup_queue as lookup_persist
-from app.services.book_identity import UNKNOWN_AUTHOR, identity_merge_key, normalize_identity_part
+from app.services.book_identity import (
+    UNKNOWN_AUTHOR,
+    identity_merge_key,
+    normalize_identity_part,
+)
 from app.services.library_management import sync_work_facets
-from app.services.metadata_provider_registry import metadata_provider_registry, search_with_metadata_provider
+from app.services.metadata_provider_registry import (
+    metadata_provider_registry,
+    search_with_metadata_provider,
+)
 from app.services.organize_service import (
     context_for_job,
     metadata_candidate_title_exact_match,
 )
 from app.services.queue_runtime import QueueHeartbeatPump
-
 
 LOGGER = logging.getLogger(__name__)
 RETRY_DELAYS_SECONDS = (60, 300, 1800)
@@ -59,11 +66,17 @@ def _provider_order(task: dict[str, Any]) -> list[str]:
     return [str(item) for item in parsed if str(item) in registered]
 
 
-def _search_provider(db: Session, context: dict[str, Any], provider: str, query: str) -> dict[str, Any]:
-    return search_with_metadata_provider(db, context, provider, query, force=False, use_cache=True)
+def _search_provider(
+    db: Session, context: dict[str, Any], provider: str, query: str
+) -> dict[str, Any]:
+    return search_with_metadata_provider(
+        db, context, provider, query, force=False, use_cache=True
+    )
 
 
-def _start_provider_execution(db: Session, task: dict[str, Any], provider: str) -> str | None:
+def _start_provider_execution(
+    db: Session, task: dict[str, Any], provider: str
+) -> str | None:
     return execute_metadata_transaction(
         db,
         lambda: lookup_persist.start_provider_execution(db, task, provider),
@@ -90,13 +103,25 @@ def _finish_provider_execution(
     )
 
 
-def _choose_exact_candidate(candidates: list[dict[str, Any]], title: str, author: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
-    exact = [candidate for candidate in candidates if metadata_candidate_title_exact_match(title, candidate)]
+def _choose_exact_candidate(
+    candidates: list[dict[str, Any]], title: str, author: str
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    exact = [
+        candidate
+        for candidate in candidates
+        if metadata_candidate_title_exact_match(title, candidate)
+    ]
     if len(exact) == 1:
         return exact[0], exact
-    if len(exact) > 1 and normalize_identity_part(author) != normalize_identity_part(UNKNOWN_AUTHOR):
+    if len(exact) > 1 and normalize_identity_part(author) != normalize_identity_part(
+        UNKNOWN_AUTHOR
+    ):
         author_key = normalize_identity_part(author)
-        author_matches = [candidate for candidate in exact if normalize_identity_part(candidate.get("author")) == author_key]
+        author_matches = [
+            candidate
+            for candidate in exact
+            if normalize_identity_part(candidate.get("author")) == author_key
+        ]
         if len(author_matches) == 1:
             return author_matches[0], exact
     return None, exact
@@ -114,30 +139,43 @@ def _parse_tags(value: Any) -> list[str]:
     return []
 
 
-def _local_cover_exists(db: Session, work: dict[str, Any], edition_id: str | None) -> bool:
+def _local_cover_exists(
+    db: Session, work: dict[str, Any], volume_id: str | None
+) -> bool:
     if str(work.get("coverPath") or "").strip():
         return True
-    if not edition_id:
+    if not volume_id:
         return False
-    edition = lookup_persist.get_edition(db, edition_id)
-    if str((edition or {}).get("coverPath") or "").strip():
+    volume = lookup_persist.get_volume(db, volume_id)
+    if str((volume or {}).get("coverPath") or "").strip():
         return True
-    return lookup_persist.edition_has_volume_cover(db, edition_id)
+    return lookup_persist.volume_has_cover(db, volume_id)
 
 
-def _download_remote_cover(work_id: str, cover_url: str, settings: Settings) -> str | None:
+def _download_remote_cover(
+    work_id: str, cover_url: str, settings: Settings
+) -> str | None:
     if not cover_url.startswith(("http://", "https://")):
         return None
     request = UrlRequest(
         cover_url,
-        headers={"Accept": "image/*", "User-Agent": "ShukuStarship/0.1 metadata-worker"},
+        headers={
+            "Accept": "image/*",
+            "User-Agent": "ShukuStarship/0.1 metadata-worker",
+        },
     )
     with urlopen(request, timeout=20) as response:
         content_type = str(response.headers.get("content-type") or "").lower()
         data = response.read(8 * 1024 * 1024 + 1)
     if len(data) > 8 * 1024 * 1024 or not data:
         raise ValueError("远程封面为空或超过 8 MiB")
-    suffix = ".png" if "png" in content_type else ".webp" if "webp" in content_type else ".jpg"
+    suffix = (
+        ".png"
+        if "png" in content_type
+        else ".webp"
+        if "webp" in content_type
+        else ".jpg"
+    )
     target_dir = settings.resolved_storage_root / "covers"
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / f"{work_id}-remote{suffix}"
@@ -155,10 +193,10 @@ def _apply_candidate(
     work = lookup_persist.get_work(db, str(task["workId"]))
     if not work:
         raise ValueError("作品已不存在")
-    edition_id = str(work.get("primaryEditionId") or task.get("editionId") or "") or None
-    edition = lookup_persist.get_edition(db, edition_id) if edition_id else None
+    volume_id = str(task.get("volumeId") or "") or None
+    volume = lookup_persist.get_volume(db, volume_id) if volume_id else None
     work_patch: dict[str, Any] = {}
-    edition_patch: dict[str, Any] = {}
+    volume_patch: dict[str, Any] = {}
     applied: list[str] = []
 
     overwrite_title_author = lookup_persist.overwrite_title_author_enabled(db)
@@ -166,7 +204,10 @@ def _apply_candidate(
     candidate_author = str(candidate.get("author") or "").strip()
     current_title = str(work.get("title") or "").strip()
     current_author = str(work.get("author") or "").strip()
-    if candidate_title and (not current_title or (overwrite_title_author and candidate_title != current_title)):
+    if candidate_title and (
+        not current_title
+        or (overwrite_title_author and candidate_title != current_title)
+    ):
         work_patch["title"] = candidate_title
         applied.append("title")
     if candidate_author and (
@@ -176,14 +217,22 @@ def _apply_candidate(
     ):
         work_patch["author"] = candidate_author
         applied.append("author")
-    if not str(work.get("description") or "").strip() and str(candidate.get("description") or "").strip():
+    if (
+        not str(work.get("description") or "").strip()
+        and str(candidate.get("description") or "").strip()
+    ):
         work_patch["description"] = str(candidate["description"]).strip()
         applied.append("description")
     candidate_tags = _parse_tags(candidate.get("tags"))
     if not _parse_tags(work.get("tags")) and candidate_tags:
-        work_patch["tags"] = json.dumps(list(dict.fromkeys(candidate_tags)), ensure_ascii=False)
+        work_patch["tags"] = json.dumps(
+            list(dict.fromkeys(candidate_tags)), ensure_ascii=False
+        )
         applied.append("tags")
-    if not str(work.get("seriesName") or "").strip() and str(candidate.get("seriesName") or "").strip():
+    if (
+        not str(work.get("seriesName") or "").strip()
+        and str(candidate.get("seriesName") or "").strip()
+    ):
         work_patch["seriesName"] = str(candidate["seriesName"]).strip()
         applied.append("seriesName")
     if work.get("seriesIndex") is None and candidate.get("seriesIndex") is not None:
@@ -198,12 +247,21 @@ def _apply_candidate(
             applied.append("publishedYear")
         except (TypeError, ValueError):
             pass
-    if edition and not str(edition.get("publisher") or "").strip() and str(candidate.get("publisher") or "").strip():
-        edition_patch["publisher"] = str(candidate["publisher"]).strip()
+    if (
+        volume
+        and not str(volume.get("publisher") or "").strip()
+        and str(candidate.get("publisher") or "").strip()
+    ):
+        volume_patch["publisher"] = str(candidate["publisher"]).strip()
         applied.append("publisher")
-    if not _local_cover_exists(db, work, edition_id) and str(candidate.get("coverUrl") or "").strip():
+    if (
+        not _local_cover_exists(db, work, volume_id)
+        and str(candidate.get("coverUrl") or "").strip()
+    ):
         try:
-            cover_path = _download_remote_cover(str(work["id"]), str(candidate["coverUrl"]).strip(), settings)
+            cover_path = _download_remote_cover(
+                str(work["id"]), str(candidate["coverUrl"]).strip(), settings
+            )
         except Exception as exc:
             LOGGER.warning("remote metadata cover skipped work=%s: %s", work["id"], exc)
         else:
@@ -213,7 +271,10 @@ def _apply_candidate(
 
     if "title" in work_patch or "author" in work_patch:
         title = str(work_patch.get("title", work.get("title")) or "").strip()
-        author = str(work_patch.get("author", work.get("author")) or "").strip() or UNKNOWN_AUTHOR
+        author = (
+            str(work_patch.get("author", work.get("author")) or "").strip()
+            or UNKNOWN_AUTHOR
+        )
         work_patch.update(
             {
                 "normalizedTitle": normalize_identity_part(title),
@@ -224,16 +285,18 @@ def _apply_candidate(
 
     work_patch.update(
         {
-            "metadataQuality": max(int(work.get("metadataQuality") or 0), 85 if applied else 80),
+            "metadataQuality": max(
+                int(work.get("metadataQuality") or 0), 85 if applied else 80
+            ),
             "organized": True,
             "organizeStatus": "APPLIED",
             "updatedAt": _now(),
         }
     )
     lookup_persist.update_work(db, str(work["id"]), work_patch)
-    if edition and edition_patch:
-        edition_patch["updatedAt"] = _now()
-        lookup_persist.update_edition(db, str(edition["id"]), edition_patch)
+    if volume and volume_patch:
+        volume_patch["updatedAt"] = _now()
+        lookup_persist.update_volume(db, str(volume["id"]), volume_patch)
     sync_work_facets(db, str(work["id"]), commit=False)
 
     job_id = task.get("organizeJobId")
@@ -250,21 +313,28 @@ def _apply_candidate(
             error_summary=None,
             set_finished_at=True,
         )
-    if edition_id:
+    if volume_id:
         lookup_persist.insert_library_metadata(
             db,
-            edition_id=edition_id,
+            volume_id=volume_id,
             source=provider,
-            raw_json=json.dumps({"candidate": candidate, "appliedFields": applied}, ensure_ascii=False),
+            raw_json=json.dumps(
+                {"candidate": candidate, "appliedFields": applied}, ensure_ascii=False
+            ),
         )
     return applied
 
 
-def _mark_organize_lookup_unresolved(db: Session, task: dict[str, Any], message: str, *, failed: bool = False) -> None:
+def _mark_organize_lookup_unresolved(
+    db: Session, task: dict[str, Any], message: str, *, failed: bool = False
+) -> None:
     """Expose a lookup in the organize queue only after it has no usable match."""
 
     work = lookup_persist.get_work_organize_state(db, task.get("workId"))
-    already_organized = bool((work or {}).get("organized")) or (work or {}).get("organizeStatus") == "APPLIED"
+    already_organized = (
+        bool((work or {}).get("organized"))
+        or (work or {}).get("organizeStatus") == "APPLIED"
+    )
     if work and not already_organized and task.get("workId"):
         lookup_persist.mark_work_reviewing(db, str(task["workId"]))
     if task.get("organizeJobId"):
@@ -283,7 +353,13 @@ def _update_task(db: Session, task_id: str, **values: Any) -> None:
     lookup_persist.update_lookup_task(db, task_id, **values)
 
 
-def _finish_without_match(db: Session, task: dict[str, Any], status: str, candidates: list[dict[str, Any]], message: str) -> None:
+def _finish_without_match(
+    db: Session,
+    task: dict[str, Any],
+    status: str,
+    candidates: list[dict[str, Any]],
+    message: str,
+) -> None:
     _update_task(
         db,
         str(task["id"]),
@@ -297,7 +373,9 @@ def _finish_without_match(db: Session, task: dict[str, Any], status: str, candid
     db.commit()
 
 
-def _schedule_retry(db: Session, task: dict[str, Any], message: str, candidates: list[dict[str, Any]]) -> None:
+def _schedule_retry(
+    db: Session, task: dict[str, Any], message: str, candidates: list[dict[str, Any]]
+) -> None:
     attempts = int(task.get("attempts") or 0) + 1
     if attempts > len(RETRY_DELAYS_SECONDS):
         _update_task(
@@ -317,7 +395,8 @@ def _schedule_retry(db: Session, task: dict[str, Any], message: str, candidates:
             str(task["id"]),
             status="PENDING",
             attempts=attempts,
-            nextAttemptAt=_now() + timedelta(seconds=RETRY_DELAYS_SECONDS[attempts - 1]),
+            nextAttemptAt=_now()
+            + timedelta(seconds=RETRY_DELAYS_SECONDS[attempts - 1]),
             candidateRawJson=json.dumps(candidates, ensure_ascii=False),
             errorSummary=message,
             startedAt=None,
@@ -332,7 +411,9 @@ def _schedule_retry(db: Session, task: dict[str, Any], message: str, candidates:
     db.commit()
 
 
-def process_metadata_lookup_task(db: Session, settings: Settings, task: dict[str, Any]) -> str:
+def process_metadata_lookup_task(
+    db: Session, settings: Settings, task: dict[str, Any]
+) -> str:
     import_status = lookup_persist.get_import_task_status(db, task.get("importTaskId"))
     if import_status is not None and import_status != "COMPLETED":
         _schedule_retry(db, task, "等待本地导入任务完成", [])
@@ -352,20 +433,42 @@ def process_metadata_lookup_task(db: Session, settings: Settings, task: dict[str
     for provider in _provider_order(task):
         execution_id = _start_provider_execution(db, task, provider)
         try:
-            result = _search_provider(db, context, provider, str(work.get("title") or ""))
+            result = _search_provider(
+                db, context, provider, str(work.get("title") or "")
+            )
         except Exception as exc:
-            _finish_provider_execution(db, execution_id, status="FAILED", error=str(exc))
+            _finish_provider_execution(
+                db, execution_id, status="FAILED", error=str(exc)
+            )
             errors.append(f"{provider}: {exc}")
             continue
         if not result.get("enabled"):
-            _finish_provider_execution(db, execution_id, status="SKIPPED", result=result)
+            _finish_provider_execution(
+                db, execution_id, status="SKIPPED", result=result
+            )
             continue
         enabled_providers += 1
-        candidates = result.get("candidates") if isinstance(result.get("candidates"), list) else []
-        candidate, exact = _choose_exact_candidate(candidates, str(work.get("title") or ""), str(work.get("author") or UNKNOWN_AUTHOR))
-        inspected.append({"provider": provider, "exactCandidates": exact, "cacheHit": bool(result.get("cacheHit"))})
+        candidates = (
+            result.get("candidates")
+            if isinstance(result.get("candidates"), list)
+            else []
+        )
+        candidate, exact = _choose_exact_candidate(
+            candidates,
+            str(work.get("title") or ""),
+            str(work.get("author") or UNKNOWN_AUTHOR),
+        )
+        inspected.append(
+            {
+                "provider": provider,
+                "exactCandidates": exact,
+                "cacheHit": bool(result.get("cacheHit")),
+            }
+        )
         if not candidate:
-            _finish_provider_execution(db, execution_id, status="NO_MATCH", result=result)
+            _finish_provider_execution(
+                db, execution_id, status="NO_MATCH", result=result
+            )
             continue
         if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
             return "CANCELLED"
@@ -378,23 +481,34 @@ def process_metadata_lookup_task(db: Session, settings: Settings, task: dict[str
                 attempts=int(task.get("attempts") or 0) + 1,
                 nextAttemptAt=None,
                 resultSource=provider,
-                candidateRawJson=json.dumps({"selected": candidate, "attempted": inspected}, ensure_ascii=False),
+                candidateRawJson=json.dumps(
+                    {"selected": candidate, "attempted": inspected}, ensure_ascii=False
+                ),
                 appliedFields=json.dumps(applied, ensure_ascii=False),
                 errorSummary=None,
                 finishedAt=_now(),
             )
-            _finish_provider_execution(db, execution_id, status="COMPLETED", result={"selected": candidate, "appliedFields": applied})
+            _finish_provider_execution(
+                db,
+                execution_id,
+                status="COMPLETED",
+                result={"selected": candidate, "appliedFields": applied},
+            )
             db.commit()
             return "COMPLETED"
         except Exception as exc:
             db.rollback()
-            _finish_provider_execution(db, execution_id, status="FAILED", error=f"apply: {exc}")
+            _finish_provider_execution(
+                db, execution_id, status="FAILED", error=f"apply: {exc}"
+            )
             errors.append(f"{provider} apply: {exc}")
 
     if enabled_providers == 0 and not errors:
         if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
             return "CANCELLED"
-        _finish_without_match(db, task, "NO_PROVIDER", inspected, "所有适用的元数据插件均未启用")
+        _finish_without_match(
+            db, task, "NO_PROVIDER", inspected, "所有适用的元数据插件均未启用"
+        )
         return "NO_PROVIDER"
     if errors:
         if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
@@ -404,7 +518,9 @@ def process_metadata_lookup_task(db: Session, settings: Settings, task: dict[str
         return str(refreshed_status or "FAILED")
     if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
         return "CANCELLED"
-    _finish_without_match(db, task, "NO_MATCH", inspected, "未找到可唯一确定的标题精确候选")
+    _finish_without_match(
+        db, task, "NO_MATCH", inspected, "未找到可唯一确定的标题精确候选"
+    )
     return "NO_MATCH"
 
 
@@ -428,7 +544,9 @@ class MetadataLookupWorker:
         self._settings = settings
         self._poll_seconds = poll_seconds
         self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, name="metadata-lookup-worker", daemon=True)
+        self._thread = threading.Thread(
+            target=self._run, name="metadata-lookup-worker", daemon=True
+        )
         self._instance_id = f"metadata-{uuid4().hex}"
         self._heartbeat = QueueHeartbeatPump(
             heartbeat_db_factory or db_factory,

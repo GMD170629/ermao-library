@@ -1,4 +1,4 @@
-import { resolveActiveEpubNavigationIndex } from '../reader/v2/epub-navigation';
+import { resolveActiveEpubNavigationIndex } from '../reader/v3/epub-navigation';
 
 export type ChapterReadingUnit = {
   href?: string;

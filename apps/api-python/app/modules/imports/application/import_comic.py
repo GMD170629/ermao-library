@@ -25,8 +25,8 @@ from app.modules.imports.application.import_support import (
     _bracketed_folder_metadata,
     _clean_title_part,
     _ensure_work,
-    _file_version_key,
-    _finalize_work_primary,
+    _file_resource_key,
+    _finalize_work_cover,
     _first_text,
     _hash_text,
     _id,
@@ -34,11 +34,9 @@ from app.modules.imports.application.import_support import (
     _insert_identity_metadata,
     _log_import,
     _natural_key,
-    _next_edition_name,
     _now,
     _safe_entry_name,
-    _select_volume_edition,
-    _should_be_media_primary,
+    _select_volume_media_version,
     _source_group_key,
     _split_tags,
     _title_from_file,
@@ -117,17 +115,17 @@ def _import_comic(
             "monitorFolderId": options.monitor_folder_id,
         },
     )
-    edition = (
-        _select_volume_edition(
+    media_version = (
+        _select_volume_media_version(
             queries, work["id"], "COMIC", source_key, volume_index, volume_title
         )
         if volume_index is not None
         else None
     )
-    created_edition = False
-    if not edition:
-        created_edition = True
-        edition = store.insert_library_edition(
+    created_media_version = False
+    if not media_version:
+        created_media_version = True
+        media_version = store.ensure_library_media_version(
             columns={
                 "id": _id(),
                 "workId": work["id"],
@@ -135,19 +133,6 @@ def _import_comic(
                 "origin": options.origin,
                 "mediaKind": "COMIC",
                 "format": "COMIC",
-                "versionName": _next_edition_name(
-                    queries, work["id"], "漫画版本", "COMIC"
-                ),
-                "versionKey": f"comic:{source_key}"
-                if volume_index is not None
-                else _file_version_key("comic", options.source_file_path.resolve()),
-                "sourceGroupKey": source_key,
-                "description": parsed.get("description"),
-                "publisher": (parsed.get("comicInfo") or {}).get("publisher"),
-                "coverStatus": "PENDING",
-                "importStatus": "PARSING",
-                "primary": _should_be_media_primary(queries, work["id"], "COMIC"),
-                "hidden": False,
                 "createdAt": _now(),
                 "updatedAt": _now(),
             }
@@ -157,27 +142,38 @@ def _import_comic(
         sort_order = (
             int(volume_index * 1000)
             if volume_index is not None
-            else queries.count_volumes_for_edition(str(edition["id"]))
+            else queries.count_volumes_for_media_version(str(media_version["id"]))
         )
         volume = store.insert_library_volume(
             columns={
                 "id": _id(),
-                "editionId": edition["id"],
+                "mediaVersionId": media_version["id"],
                 "title": volume_title,
                 "volumeIndex": volume_index,
                 "sortOrder": sort_order,
+                "format": "COMIC",
+                "resourceKey": _file_resource_key(
+                    "comic", options.source_file_path.resolve()
+                ),
+                "monitorFolderId": options.monitor_folder_id,
+                "origin": options.origin,
+                "sourceGroupKey": source_key,
+                "description": parsed.get("description"),
+                "publisher": (parsed.get("comicInfo") or {}).get("publisher"),
+                "sizeBytes": file_size,
                 "pageCount": parsed["pageCount"],
                 "coverPath": None,
+                "coverStatus": "PENDING",
+                "importStatus": "PARSING",
                 "createdAt": _now(),
                 "updatedAt": _now(),
             }
         )
         source_path = options.source_file_path.resolve()
         store.update_import_task(task_id, columns={"message": "正在建立漫画记录"})
-        file = store.insert_library_file(
+        store.insert_library_file(
             columns={
                 "id": _id(),
-                "editionId": edition["id"],
                 "volumeId": volume["id"],
                 "path": str(source_path),
                 "filePathHash": _hash_text(str(source_path)),
@@ -198,7 +194,7 @@ def _import_comic(
                 settings,
                 source_path,
                 work["id"],
-                edition["id"],
+                media_version["id"],
                 volume["id"],
                 parsed["coverEntryPath"],
             )
@@ -210,7 +206,7 @@ def _import_comic(
         store.insert_library_metadata(
             columns={
                 "id": _id(),
-                "editionId": edition["id"],
+                "volumeId": volume["id"],
                 "source": "comic_info" if parsed.get("comicInfo") else "system",
                 "rawJson": json.dumps(
                     {
@@ -225,9 +221,11 @@ def _import_comic(
                 "updatedAt": _now(),
             }
         )
-        _insert_identity_metadata(store, edition["id"], identity)
+        _insert_identity_metadata(store, volume["id"], identity)
         stored_cover_path = cover_path or services.ensure_default_cover()
-        edition_cover_path = cover_path or edition.get("coverPath") or stored_cover_path
+        media_version_cover_path = (
+            cover_path or media_version.get("coverPath") or stored_cover_path
+        )
         store.update_library_volume(
             volume["id"],
             columns={
@@ -236,31 +234,29 @@ def _import_comic(
                 "updatedAt": _now(),
             },
         )
-        size_total = queries.sum_file_size_bytes_for_edition(str(edition["id"]))
-        page_total = queries.sum_volume_page_count_for_edition(str(edition["id"]))
-        store.update_library_edition(
-            edition["id"],
+        store.update_library_volume(
+            volume["id"],
             columns={
-                "sizeBytes": int(size_total),
-                "pageCount": int(page_total),
-                "coverPath": edition_cover_path,
-                "coverStatus": services.cover_status(edition_cover_path),
+                "sizeBytes": file_size,
+                "pageCount": parsed["pageCount"],
+                "coverPath": media_version_cover_path,
+                "coverStatus": services.cover_status(media_version_cover_path),
                 "importStatus": "COMPLETED",
                 "updatedAt": _now(),
             },
         )
-        _finalize_work_primary(
+        _finalize_work_cover(
             store,
             queries,
             services,
             work["id"],
-            edition["id"],
-            edition_cover_path,
+            media_version["id"],
+            media_version_cover_path,
         )
         return ImportResult(
             work["id"],
             work["id"],
-            edition["id"],
+            media_version["id"],
             volume["id"],
             work["title"],
             "comic",
@@ -268,11 +264,11 @@ def _import_comic(
             parsed["pageCount"],
             "completed",
             False,
-            (not created) or (not created_edition),
+            (not created) or (not created_media_version),
             "new-comic-work"
             if created
             else "new-comic-version"
-            if created_edition
+            if created_media_version
             else "same-comic-series",
         )
     except Exception:
@@ -332,7 +328,9 @@ def parse_comic_archive(path: Path, original_name: str | None = None) -> dict[st
                     page
                     for page in pages
                     if re.search(
-                        r"(cover|folder|front|封面)", Path(page["entryPath"]).name, re.IGNORECASE
+                        r"(cover|folder|front|封面)",
+                        Path(page["entryPath"]).name,
+                        re.IGNORECASE,
                     )
                 ),
                 pages[0],
@@ -466,7 +464,7 @@ def _extract_comic_cover(
     settings: ImportRuntimeConfig,
     staged: Path,
     work_id: str,
-    edition_id: str,
+    media_version_id: str,
     volume_id: str,
     entry: str,
 ) -> str:
@@ -475,14 +473,17 @@ def _extract_comic_cover(
         settings.resolved_storage_root
         / "books"
         / work_id
-        / edition_id
+        / media_version_id
         / volume_id
         / f"cover{ext}"
     )
     target.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(staged) as archive:
-        with archive.open(entry, "r") as source, target.open("wb") as destination:
-            shutil.copyfileobj(source, destination, length=1024 * 1024)
+    with (
+        zipfile.ZipFile(staged) as archive,
+        archive.open(entry, "r") as source,
+        target.open("wb") as destination,
+    ):
+        shutil.copyfileobj(source, destination, length=1024 * 1024)
     return str(target)
 
 

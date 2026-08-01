@@ -14,22 +14,27 @@ from tempfile import TemporaryDirectory
 import httpx
 from sqlalchemy.orm import Session
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 API_ROOT = REPO_ROOT / "apps" / "api-python"
 sys.path.insert(0, str(API_ROOT))
 
-from app.core.config import Settings  # noqa: E402
-from app.db.bootstrap import bootstrap_database  # noqa: E402
-from app.db.sqlite import create_sqlite_engine  # noqa: E402
-from app.bootstrap.imports import (  # noqa: E402
+from app.bootstrap.imports import (
     claim_next_import_task,
     enqueue_import_task,
     process_import_task,
 )
-from tests.test_worker_importer import write_comic_fixture, write_epub_fixture, write_pdf_fixture  # noqa: E402
+from app.core.config import Settings
+from app.db.bootstrap import bootstrap_database
+from app.db.sqlite import create_sqlite_engine
+from tests.test_worker_importer import (
+    write_comic_fixture,
+    write_epub_fixture,
+    write_pdf_fixture,
+)
 
 SUPPORTED_EXTS = {".epub", ".pdf", ".cbz", ".zip"}
+
+
 def free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
@@ -45,10 +50,16 @@ def wait_for_health(base_url: str, process: subprocess.Popen[str]) -> None:
         try:
             response = httpx.get(f"{base_url}/api/health", timeout=2)
             payload = response.json()
-            if response.status_code == 200 and payload.get("ok") is True and payload.get("data", {}).get("status") == "ok":
+            if (
+                response.status_code == 200
+                and payload.get("ok") is True
+                and payload.get("data", {}).get("status") == "ok"
+            ):
                 return
-            last_error = RuntimeError(f"unexpected health response {response.status_code}: {payload}")
-        except Exception as exc:  # noqa: BLE001
+            last_error = RuntimeError(
+                f"unexpected health response {response.status_code}: {payload}"
+            )
+        except Exception as exc:
             last_error = exc
         time.sleep(0.25)
     raise RuntimeError(f"health check timed out: {last_error}")
@@ -58,7 +69,9 @@ def expect_ok(response: httpx.Response) -> dict:
     try:
         payload = response.json()
     except ValueError as exc:
-        raise AssertionError(f"response was not JSON: {response.status_code} {response.text[:200]}") from exc
+        raise AssertionError(
+            f"response was not JSON: {response.status_code} {response.text[:200]}"
+        ) from exc
     assert 200 <= response.status_code < 300, payload
     assert payload.get("ok") is True, payload
     return payload["data"]
@@ -78,7 +91,7 @@ def import_sample(path: Path, settings: Settings) -> dict:
             assert task is not None
             result = process_import_task(db, settings, task)
         return {
-            "editionId": result.edition_id,
+            "mediaVersionId": result.media_version_id,
             "volumeId": result.volume_id,
             "format": result.format,
             "type": result.type,
@@ -87,27 +100,38 @@ def import_sample(path: Path, settings: Settings) -> dict:
         engine.dispose()
 
 
-def validate_imported_sample(client: httpx.Client, result: dict, expected_ext: str) -> None:
+def validate_imported_sample(
+    client: httpx.Client, result: dict, expected_ext: str
+) -> None:
     fmt = result["format"]
-    volume_query = f"?volume={result['volumeId']}" if result.get("volumeId") else ""
+    bootstrap = expect_ok(
+        client.get(f"/api/reader/v3/volumes/{result['volumeId']}/bootstrap")
+    )
+    assert bootstrap["volume"]["id"] == result["volumeId"]
+    assert bootstrap["mediaVersion"]["id"] == result["mediaVersionId"]
     if fmt == "epub":
-        bootstrap = expect_ok(client.get(f"/api/reader/v2/editions/{result['editionId']}/bootstrap{volume_query}"))
-        assert bootstrap["readerType"] == "epub"
-        assert bootstrap["availableEditions"][0]["id"] == result["editionId"]
+        assert bootstrap["readerType"] == "reflowable"
+        assert bootstrap["availableVolumes"][0]["id"] == result["volumeId"]
         assert bootstrap["units"], bootstrap
-        epub_file = client.get(f"/api/editions/{result['editionId']}/file", headers={"Range": "bytes=0-3"})
+        epub_file = client.get(
+            f"/api/volumes/{result['volumeId']}/file",
+            headers={"Range": "bytes=0-3"},
+        )
         assert epub_file.status_code == 206, epub_file.text
         assert epub_file.content == b"PK\x03\x04"
         return
     if fmt == "pdf":
-        pdf_file = client.get(f"/api/editions/{result['editionId']}/file", headers={"Range": "bytes=0-4"})
+        assert bootstrap["readerType"] == "pdf"
+        pdf_file = client.get(
+            f"/api/volumes/{result['volumeId']}/file",
+            headers={"Range": "bytes=0-4"},
+        )
         assert pdf_file.status_code == 206, pdf_file.text
         assert pdf_file.content == b"%PDF-"
         return
     if fmt in {"cbz", "zip"} or result["type"] == "comic":
-        bootstrap = expect_ok(client.get(f"/api/reader/v2/editions/{result['editionId']}/bootstrap{volume_query}"))
         assert bootstrap["readerType"] == "comic"
-        assert bootstrap["pages"], bootstrap
+        assert bootstrap["volume"]["pageCount"] >= 1, bootstrap
         pages = expect_ok(client.get(f"/api/volumes/{result['volumeId']}/pages"))
         assert pages["total"] >= 1, pages
         page = client.get(f"/api/volumes/{result['volumeId']}/pages/1")
@@ -132,7 +156,10 @@ def run_http_flow(base_url: str, sample_dir: Path, settings: Settings) -> None:
         setup = expect_ok(
             client.post(
                 "/api/auth/setup",
-                json={"email": "smoke@example.com", "password": "runtime-smoke-password"},
+                json={
+                    "email": "smoke@example.com",
+                    "password": "runtime-smoke-password",
+                },
             )
         )
         assert setup["initialized"] is True
@@ -162,13 +189,18 @@ def discover_real_library_samples() -> Iterable[Path]:
     required = os.environ.get("REQUIRE_REAL_LIBRARY_SAMPLE_DIR") == "true"
     if not root_value:
         if required:
-            raise RuntimeError("PYTHON_REAL_LIBRARY_SAMPLE_DIR is required for real-library smoke")
+            raise RuntimeError(
+                "PYTHON_REAL_LIBRARY_SAMPLE_DIR is required for real-library smoke"
+            )
         return []
     root = Path(root_value).expanduser().resolve()
     if not root.is_dir():
         raise RuntimeError(f"PYTHON_REAL_LIBRARY_SAMPLE_DIR is not a directory: {root}")
     max_count = max(1, int(os.environ.get("PYTHON_REAL_LIBRARY_SAMPLE_LIMIT") or "6"))
-    max_bytes = int(os.environ.get("PYTHON_REAL_LIBRARY_SAMPLE_MAX_BYTES") or str(1024 * 1024 * 1024))
+    max_bytes = int(
+        os.environ.get("PYTHON_REAL_LIBRARY_SAMPLE_MAX_BYTES")
+        or str(1024 * 1024 * 1024)
+    )
     found: list[Path] = []
     for path in sorted(root.rglob("*")):
         if len(found) >= max_count:
@@ -197,7 +229,9 @@ def main() -> None:
         for path in [monitor_root, storage_root, inbox, sample_dir]:
             path.mkdir(parents=True, exist_ok=True)
 
-        settings = Settings(storage_root=str(storage_root), monitor_root=str(monitor_root))
+        settings = Settings(
+            storage_root=str(storage_root), monitor_root=str(monitor_root)
+        )
         engine = create_sqlite_engine(settings.database_path)
         bootstrap_database(engine, settings)
         engine.dispose()
@@ -210,7 +244,20 @@ def main() -> None:
             "DOWNLOAD_INBOX_PATH": str(inbox),
         }
         process = subprocess.Popen(
-            ["uv", "run", "--extra", "dev", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(port), "--log-level", "warning"],
+            [
+                "uv",
+                "run",
+                "--extra",
+                "dev",
+                "uvicorn",
+                "app.main:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+                "--log-level",
+                "warning",
+            ],
             cwd=API_ROOT,
             env=env,
             stdout=subprocess.PIPE,

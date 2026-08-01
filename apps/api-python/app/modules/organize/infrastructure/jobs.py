@@ -72,7 +72,7 @@ def try_insert_unresolved_job(
     job_id: str,
     run_id: str,
     work_id: str,
-    edition_id: str | None,
+    volume_id: str | None,
     trigger: str,
     reasons: list[str],
     summary: str,
@@ -89,7 +89,7 @@ def try_insert_unresolved_job(
             id=job_id,
             run_id=run_id,
             work_id=work_id,
-            edition_id=edition_id,
+            volume_id=volume_id,
             import_task_id=None,
             trigger=trigger,
             status="LOOKUP_PENDING",
@@ -116,7 +116,7 @@ def insert_lookup_task(
     *,
     task_id: str,
     work_id: str,
-    edition_id: str | None,
+    volume_id: str | None,
     job_id: str,
     provider_order: list[str],
     now: Any,
@@ -125,7 +125,7 @@ def insert_lookup_task(
         MetadataLookupTask(
             id=task_id,
             work_id=work_id,
-            edition_id=edition_id,
+            volume_id=volume_id,
             import_task_id=None,
             organize_job_id=job_id,
             status="PENDING",
@@ -138,7 +138,9 @@ def insert_lookup_task(
     )
 
 
-def mark_work_organize_status(db: Session, *, work_id: str, status: str, now: Any) -> None:
+def mark_work_organize_status(
+    db: Session, *, work_id: str, status: str, now: Any
+) -> None:
     db.execute(
         update(LibraryWork)
         .where(LibraryWork.id == work_id)
@@ -168,7 +170,9 @@ def cancel_job(db: Session, *, job_id: str, now: Any) -> None:
 
 
 def get_work_row(db: Session, work_id: str) -> dict[str, Any] | None:
-    from app.modules.organize.infrastructure.eligibility import work_entity_as_legacy_dict
+    from app.modules.organize.infrastructure.eligibility import (
+        work_entity_as_legacy_dict,
+    )
 
     entity = db.get(LibraryWork, work_id)
     return work_entity_as_legacy_dict(entity) if entity is not None else None
@@ -197,11 +201,17 @@ def list_lookup_task_ids_for_job(db: Session, job_id: str) -> list[str]:
     if not _has_table(db, "MetadataLookupTask"):
         return []
     return list(
-        db.scalars(select(MetadataLookupTask.id).where(MetadataLookupTask.organize_job_id == job_id)).all()
+        db.scalars(
+            select(MetadataLookupTask.id).where(
+                MetadataLookupTask.organize_job_id == job_id
+            )
+        ).all()
     )
 
 
-def clear_job_recognition_artifacts(db: Session, *, job_id: str, task_ids: list[str]) -> None:
+def clear_job_recognition_artifacts(
+    db: Session, *, job_id: str, task_ids: list[str]
+) -> None:
     present = {
         name
         for name in (
@@ -213,17 +223,31 @@ def clear_job_recognition_artifacts(db: Session, *, job_id: str, task_ids: list[
         if _has_table(db, name)
     }
     if "MetadataProviderExecution" in present:
-        db.execute(delete(MetadataProviderExecution).where(MetadataProviderExecution.job_id == job_id))
+        db.execute(
+            delete(MetadataProviderExecution).where(
+                MetadataProviderExecution.job_id == job_id
+            )
+        )
         if task_ids:
             db.execute(
-                delete(MetadataProviderExecution).where(MetadataProviderExecution.lookup_task_id.in_(task_ids))
+                delete(MetadataProviderExecution).where(
+                    MetadataProviderExecution.lookup_task_id.in_(task_ids)
+                )
             )
     if "MetadataSuggestion" in present:
-        db.execute(delete(MetadataSuggestion).where(MetadataSuggestion.job_id == job_id))
+        db.execute(
+            delete(MetadataSuggestion).where(MetadataSuggestion.job_id == job_id)
+        )
     if "DuplicateCandidate" in present:
-        db.execute(delete(DuplicateCandidate).where(DuplicateCandidate.job_id == job_id))
+        db.execute(
+            delete(DuplicateCandidate).where(DuplicateCandidate.job_id == job_id)
+        )
     if "MetadataLookupTask" in present:
-        db.execute(delete(MetadataLookupTask).where(MetadataLookupTask.organize_job_id == job_id))
+        db.execute(
+            delete(MetadataLookupTask).where(
+                MetadataLookupTask.organize_job_id == job_id
+            )
+        )
 
 
 def reset_job_for_recognition(
@@ -273,7 +297,9 @@ def latest_job_status_for_work(db: Session, work_id: str) -> str | None:
 
 
 def work_is_organized(db: Session, work_id: str) -> bool:
-    return bool(db.scalar(select(LibraryWork.organized).where(LibraryWork.id == work_id)))
+    return bool(
+        db.scalar(select(LibraryWork.organized).where(LibraryWork.id == work_id))
+    )
 
 
 def finish_unresolved_jobs_for_work(
@@ -312,7 +338,12 @@ def refresh_run_queue_count(db: Session, *, run_id: str, now: Any) -> None:
     db.execute(
         update(OrganizeRun)
         .where(OrganizeRun.id == run_id)
-        .values(status="RUNNING", queued_count=remaining_count, finished_at=None, updated_at=now)
+        .values(
+            status="RUNNING",
+            queued_count=remaining_count,
+            finished_at=None,
+            updated_at=now,
+        )
     )
 
 

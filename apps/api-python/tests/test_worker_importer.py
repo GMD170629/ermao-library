@@ -15,9 +15,10 @@ from app.bootstrap.imports import (
     process_import_task,
 )
 from app.db.base import Base
+from app.models.import_pipeline import BookConversionTask
 from app.models.library import (
-    LibraryEdition,
     LibraryFile,
+    LibraryMediaVersion,
     LibraryMetadata,
     LibraryReadingUnit,
     LibraryVolume,
@@ -431,7 +432,7 @@ def test_import_epub_creates_library_records(db_session, test_settings, tmp_path
     assert result.import_status == "completed"
     assert result.type == "ebook"
     assert _count(db_session, "LibraryWork") == 1
-    assert _count(db_session, "LibraryEdition") == 1
+    assert _count(db_session, "LibraryMediaVersion") == 1
     assert _count(db_session, "LibraryReadingUnit") == 2
     assert _count(db_session, "ImportTask") == 1
     assert _count(db_session, "OrganizeJob") == 0
@@ -623,7 +624,7 @@ def test_structural_parse_failure_rolls_back_all_library_records(
         )
 
     assert _count(db_session, "LibraryWork") == 0
-    assert _count(db_session, "LibraryEdition") == 0
+    assert _count(db_session, "LibraryMediaVersion") == 0
     assert _count(db_session, "LibraryVolume") == 0
     assert _count(db_session, "LibraryFile") == 0
     assert _count(db_session, "LibraryReadingUnit") == 0
@@ -1044,11 +1045,17 @@ def test_watch_epub_import_merges_series_volumes_from_folder_layout(
     )
 
     assert first_result.work_id == tenth_result.work_id == duplicate_result.work_id
-    assert first_result.edition_id == tenth_result.edition_id
-    assert duplicate_result.edition_id != first_result.edition_id
+    assert first_result.media_version_id == tenth_result.media_version_id
+    assert duplicate_result.media_version_id == first_result.media_version_id
+    assert (
+        len(
+            {first_result.volume_id, tenth_result.volume_id, duplicate_result.volume_id}
+        )
+        == 3
+    )
     assert duplicate_result.duplicate is False
     assert _count(db_session, "LibraryWork") == 1
-    assert _count(db_session, "LibraryEdition") == 2
+    assert _count(db_session, "LibraryMediaVersion") == 1
     assert _count(db_session, "LibraryVolume") == 3
     work = (
         db_session.execute(text("SELECT title, author FROM LibraryWork"))
@@ -1057,28 +1064,29 @@ def test_watch_epub_import_merges_series_volumes_from_folder_layout(
     )
     assert work["title"] == "辣妹因为惩罚游戏才向我这个边缘人告白，但显然是真心爱上我了"
     assert work["author"] == "結石"
-    edition = (
+    first_volume = (
         db_session.execute(
-            text("SELECT chapterCount, sizeBytes FROM LibraryEdition WHERE id = :id"),
-            {"id": first_result.edition_id},
+            text("SELECT chapterCount, sizeBytes FROM LibraryVolume WHERE id = :id"),
+            {"id": first_result.volume_id},
         )
         .mappings()
         .first()
     )
-    assert edition["chapterCount"] == 2
-    assert edition["sizeBytes"] > 0
+    assert first_volume["chapterCount"] == 1
+    assert first_volume["sizeBytes"] > 0
     volumes = (
         db_session.execute(
             text(
-                "SELECT title, volumeIndex, sortOrder, chapterCount FROM LibraryVolume WHERE editionId = :id ORDER BY sortOrder"
+                "SELECT title, volumeIndex, sortOrder, chapterCount FROM LibraryVolume WHERE mediaVersionId = :id ORDER BY sortOrder"
             ),
-            {"id": first_result.edition_id},
+            {"id": first_result.media_version_id},
         )
         .mappings()
         .all()
     )
     assert [dict(volume) for volume in volumes] == [
         {"title": "第 1 卷", "volumeIndex": 1, "sortOrder": 1000, "chapterCount": 1},
+        {"title": "第 10 卷", "volumeIndex": 10, "sortOrder": 10000, "chapterCount": 1},
         {"title": "第 10 卷", "volumeIndex": 10, "sortOrder": 10000, "chapterCount": 1},
     ]
 
@@ -1136,7 +1144,7 @@ def test_explicit_series_directory_reuses_existing_work_without_recognition(
 
     assert recognition_calls == [volume_26.name]
     assert first.work_id == second.work_id
-    assert first.edition_id == second.edition_id
+    assert first.media_version_id == second.media_version_id
     assert db_session.execute(
         text("SELECT volumeIndex FROM LibraryVolume ORDER BY volumeIndex")
     ).scalars().all() == [26, 30]
@@ -1217,7 +1225,7 @@ def test_author_first_tagged_directory_imports_later_file_as_new_volume_without_
 
     assert recognition_calls == [volume_8.name]
     assert first.work_id == second.work_id
-    assert first.edition_id == second.edition_id
+    assert first.media_version_id == second.media_version_id
     assert db_session.execute(
         text("SELECT volumeIndex FROM LibraryVolume ORDER BY volumeIndex")
     ).scalars().all() == [5, 8]
@@ -1274,7 +1282,7 @@ def test_filename_alias_reuses_existing_work_for_later_volume_in_same_directory(
 
     assert recognition_calls == [volume_14.name]
     assert first.work_id == second.work_id
-    assert first.edition_id == second.edition_id
+    assert first.media_version_id == second.media_version_id
     assert db_session.execute(
         text("SELECT volumeIndex FROM LibraryVolume ORDER BY volumeIndex")
     ).scalars().all() == [14, 16]
@@ -1466,14 +1474,14 @@ def test_import_epub_merges_same_title_author_despite_different_identifiers(
     assert second_result.duplicate is False
     assert first_result.work_id == second_result.work_id
     assert _count(db_session, "LibraryWork") == 1
-    assert _count(db_session, "LibraryEdition") == 2
+    assert _count(db_session, "LibraryMediaVersion") == 1
     assert (
         db_session.execute(text("SELECT mergeKey FROM LibraryWork")).scalar()
         == "斯泰尔斯庄园奇案:阿加莎克里斯蒂"
     )
 
 
-def test_same_path_identity_groups_epub_pdf_and_comic_as_distinct_editions(
+def test_same_path_identity_groups_epub_pdf_and_comic_into_media_versions(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
@@ -1510,8 +1518,17 @@ def test_same_path_identity_groups_epub_pdf_and_comic_as_distinct_editions(
 
     assert epub_result.work_id == pdf_result.work_id == comic_result.work_id
     assert (
-        len({epub_result.edition_id, pdf_result.edition_id, comic_result.edition_id})
-        == 3
+        len(
+            {
+                epub_result.media_version_id,
+                pdf_result.media_version_id,
+                comic_result.media_version_id,
+            }
+        )
+        == 2
+    )
+    assert (
+        len({epub_result.volume_id, pdf_result.volume_id, comic_result.volume_id}) == 3
     )
     assert _count(db_session, "LibraryWork") == 1
     assert (
@@ -1522,11 +1539,34 @@ def test_same_path_identity_groups_epub_pdf_and_comic_as_distinct_editions(
         db_session.execute(text("SELECT author FROM LibraryWork")).scalar() == "作者甲"
     )
     assert set(
-        db_session.execute(text("SELECT format FROM LibraryEdition")).scalars()
+        db_session.execute(text("SELECT format FROM LibraryVolume")).scalars()
     ) == {"EPUB", "PDF", "COMIC"}
     assert (
         db_session.execute(text("SELECT workType FROM LibraryWork")).scalar() == "EPUB"
     )
+
+
+def test_pdf_series_volume_preserves_explicit_chinese_volume_index(
+    db_session, test_settings, tmp_path
+):
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    series_dir = tmp_path / "[Series][Author]"
+    series_dir.mkdir()
+    pdf = series_dir / "Series \u7b2c01\u5377.pdf"
+    write_pdf_fixture(pdf)
+
+    result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(source_file_path=pdf, origin="WATCH", original_name=pdf.name),
+    )
+
+    volume = db_session.get(LibraryVolume, result.volume_id)
+    assert volume is not None
+    assert volume.title == "\u7b2c 1 \u5377"
+    assert volume.volume_index == 1
+    assert volume.sort_order == 1000
 
 
 def test_import_epub_leaves_metadata_queue_to_organizer_without_blocking_on_external_services(
@@ -1700,14 +1740,14 @@ def test_import_epub_with_missing_declared_cover_persists_default_cover(
 
     assert result.import_status == "completed"
     assert result.total_units == 1
-    edition = (
+    volume_resource = (
         db_session.execute(
-            text("SELECT importStatus, coverPath, coverStatus FROM LibraryEdition")
+            text("SELECT importStatus, coverPath, coverStatus FROM LibraryVolume")
         )
         .mappings()
         .one()
     )
-    assert dict(edition) == {
+    assert dict(volume_resource) == {
         "importStatus": "COMPLETED",
         "coverPath": "covers/default-book-cover-v1.png",
         "coverStatus": "DEFAULT",
@@ -1725,7 +1765,7 @@ def test_import_epub_with_missing_declared_cover_persists_default_cover(
         "coverPath": "covers/default-book-cover-v1.png",
         "coverStatus": "DEFAULT",
     }
-    stored_default = test_settings.resolved_storage_root / edition["coverPath"]
+    stored_default = test_settings.resolved_storage_root / volume_resource["coverPath"]
     assert stored_default.read_bytes() == DEFAULT_COVER_ASSET_PATH.read_bytes()
 
 
@@ -1747,7 +1787,7 @@ def test_import_epub_resolves_cover_path_case_and_url_encoding(
 
     assert result.import_status == "completed"
     edition = (
-        db_session.execute(text("SELECT coverPath, coverStatus FROM LibraryEdition"))
+        db_session.execute(text("SELECT coverPath, coverStatus FROM LibraryVolume"))
         .mappings()
         .one()
     )
@@ -1811,7 +1851,7 @@ def test_import_comic_defers_page_units_and_detects_duplicate(
     edition = (
         db_session.execute(
             text(
-                "SELECT publisher, pageCount, coverPath, coverStatus FROM LibraryEdition"
+                "SELECT publisher, pageCount, coverPath, coverStatus FROM LibraryVolume"
             )
         )
         .mappings()
@@ -1904,7 +1944,7 @@ def test_import_pdf_creates_library_records(db_session, test_settings, tmp_path)
     assert _count(db_session, "LibraryWork") == 1
     edition = (
         db_session.execute(
-            text("SELECT format, coverPath, coverStatus FROM LibraryEdition")
+            text("SELECT format, coverPath, coverStatus FROM LibraryVolume")
         )
         .mappings()
         .first()
@@ -1967,7 +2007,7 @@ def test_import_pdf_maps_subject_keywords_metadata(db_session, test_settings, tm
     assert work["description"] is None
     assert json.loads(work["tags"]) == ["pdf"]
     edition = (
-        db_session.execute(text("SELECT description FROM LibraryEdition"))
+        db_session.execute(text("SELECT description FROM LibraryVolume"))
         .mappings()
         .first()
     )
@@ -2063,27 +2103,27 @@ def test_text_file_imports_raw_and_can_convert_later(
             source_file_path=source, origin="MANUAL", original_name=source.name
         ),
     )
-    raw_edition = (
+    raw_volume = (
         db_session.execute(
             text(
-                "SELECT format, hidden, chapterCount FROM LibraryEdition WHERE id = :id"
+                "SELECT format, hidden, chapterCount FROM LibraryVolume WHERE id = :id"
             ),
-            {"id": raw_result.edition_id},
+            {"id": raw_result.volume_id},
         )
         .mappings()
         .one()
     )
     raw_file = (
         db_session.execute(
-            text("SELECT path, kind FROM LibraryFile WHERE editionId = :id"),
-            {"id": raw_result.edition_id},
+            text("SELECT path, kind FROM LibraryFile WHERE volumeId = :id"),
+            {"id": raw_result.volume_id},
         )
         .mappings()
         .one()
     )
-    assert raw_edition["format"] == "TXT"
-    assert not raw_edition["hidden"]
-    assert raw_edition["chapterCount"] == 2
+    assert raw_volume["format"] == "TXT"
+    assert not raw_volume["hidden"]
+    assert raw_volume["chapterCount"] == 2
     assert Path(raw_file["path"]) == source.resolve()
     assert raw_file["kind"] == "TXT"
 
@@ -2097,34 +2137,46 @@ def test_text_file_imports_raw_and_can_convert_later(
             requested_work_id=raw_result.work_id,
         ),
     )
-    visible_editions = (
+    visible_volumes = (
         db_session.execute(
             text(
-                "SELECT id, format, hidden FROM LibraryEdition WHERE workId = :work_id ORDER BY createdAt"
+                "SELECT volume.id, volume.format, volume.hidden, volume.derivedFromVolumeId "
+                "FROM LibraryVolume AS volume "
+                "JOIN LibraryMediaVersion AS media ON media.id = volume.mediaVersionId "
+                "WHERE media.workId = :work_id ORDER BY volume.sortOrder, volume.createdAt"
             ),
             {"work_id": raw_result.work_id},
         )
         .mappings()
         .all()
     )
-    work = (
-        db_session.execute(
-            text(
-                "SELECT primaryEditionId, workType FROM LibraryWork WHERE id = :work_id"
-            ),
-            {"work_id": raw_result.work_id},
-        )
-        .mappings()
-        .one()
-    )
     assert converted_result.work_id == raw_result.work_id
-    assert [(row["format"], bool(row["hidden"])) for row in visible_editions] == [
-        ("TXT", True),
+    assert [(row["format"], bool(row["hidden"])) for row in visible_volumes] == [
+        ("TXT", False),
         ("EPUB", False),
     ]
-    assert work["primaryEditionId"] == converted_result.edition_id
-    assert work["workType"] == "EPUB"
+    converted_volume = next(
+        row for row in visible_volumes if row["id"] == converted_result.volume_id
+    )
+    assert converted_volume["derivedFromVolumeId"] == raw_result.volume_id
     assert source.exists()
+    conversion_task = db_session.scalars(select(BookConversionTask)).one()
+    assert conversion_task.source_volume_id == raw_result.volume_id
+    assert conversion_task.derived_volume_id == converted_result.volume_id
+
+    retried_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=source,
+            origin="DEFERRED_CONVERSION",
+            original_name=source.name,
+            requested_work_id=raw_result.work_id,
+        ),
+    )
+    assert retried_result.volume_id == converted_result.volume_id
+    assert len(db_session.scalars(select(LibraryVolume)).all()) == 2
+    assert len(db_session.scalars(select(BookConversionTask)).all()) == 1
 
 
 @pytest.mark.parametrize(
@@ -2160,20 +2212,20 @@ def test_native_reflowable_sources_do_not_require_automatic_conversion(
         ),
     )
 
-    edition = db_session.get(LibraryEdition, imported.edition_id)
+    volume = db_session.get(LibraryVolume, imported.volume_id)
     book_file = db_session.scalars(
-        select(LibraryFile).where(LibraryFile.edition_id == imported.edition_id)
+        select(LibraryFile).where(LibraryFile.volume_id == imported.volume_id)
     ).one()
     metadata = db_session.scalars(
         select(LibraryMetadata).where(
-            LibraryMetadata.edition_id == imported.edition_id,
+            LibraryMetadata.volume_id == imported.volume_id,
             LibraryMetadata.source == "reflowable_source",
         )
     ).one()
 
-    assert edition is not None
-    assert edition.format == source_format
-    assert edition.hidden is False
+    assert volume is not None
+    assert volume.format == source_format
+    assert volume.hidden is False
     assert book_file.kind == source_format
     assert book_file.mime_type == mime_type
     assert json.loads(metadata.raw_json)["readable"] is True
@@ -2201,26 +2253,17 @@ def test_reimport_backfills_legacy_reflowable_metadata_without_creating_epub(
             source_file_path=source, origin="MANUAL", original_name=source.name
         ),
     )
-    edition = db_session.get(LibraryEdition, imported.edition_id)
+    volume = db_session.get(LibraryVolume, imported.volume_id)
     work = db_session.get(LibraryWork, imported.work_id)
-    book_file = db_session.scalars(
-        select(LibraryFile).where(LibraryFile.edition_id == imported.edition_id)
-    ).one()
-    volumes = db_session.scalars(
-        select(LibraryVolume).where(LibraryVolume.edition_id == imported.edition_id)
-    ).all()
     for unit in db_session.scalars(
         select(LibraryReadingUnit).where(
-            LibraryReadingUnit.edition_id == imported.edition_id
+            LibraryReadingUnit.volume_id == imported.volume_id
         )
     ).all():
         db_session.delete(unit)
-    book_file.volume_id = None
-    for volume in volumes:
-        db_session.delete(volume)
-    assert edition is not None
+    assert volume is not None
     assert work is not None
-    edition.chapter_count = 0
+    volume.chapter_count = 0
     work.title = source.stem
     work.author = "未知作者"
     db_session.commit()
@@ -2233,19 +2276,24 @@ def test_reimport_backfills_legacy_reflowable_metadata_without_creating_epub(
         ),
     )
 
-    db_session.refresh(edition)
+    db_session.refresh(volume)
     db_session.refresh(work)
     assert refreshed.duplicate is True
     assert refreshed.merge_reason == "refreshed-native-metadata"
-    assert edition.format == "FB2"
-    assert edition.chapter_count == 2
+    assert volume.format == "FB2"
+    assert volume.chapter_count == 2
     assert work.title == "真实标题"
     assert work.author == "测试作者"
     assert (
         db_session.scalar(
-            select(LibraryEdition).where(
-                LibraryEdition.work_id == imported.work_id,
-                LibraryEdition.format == "EPUB",
+            select(LibraryVolume)
+            .join(
+                LibraryMediaVersion,
+                LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            )
+            .where(
+                LibraryMediaVersion.work_id == imported.work_id,
+                LibraryVolume.format == "EPUB",
             )
         )
         is None
@@ -2254,7 +2302,7 @@ def test_reimport_backfills_legacy_reflowable_metadata_without_creating_epub(
         len(
             db_session.scalars(
                 select(LibraryReadingUnit).where(
-                    LibraryReadingUnit.edition_id == imported.edition_id
+                    LibraryReadingUnit.volume_id == imported.volume_id
                 )
             ).all()
         )

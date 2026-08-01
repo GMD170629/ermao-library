@@ -10,7 +10,7 @@ test('only authentication and offline surfaces are public', () => {
   assert.equal(isPublicAppPath('/offline'), true);
   assert.equal(isPublicAppPath('/library'), false);
   assert.equal(isPublicAppPath('/mobile'), false);
-  assert.equal(isPublicAppPath('/reader/edition-1'), false);
+  assert.equal(isPublicAppPath('/reader/volume-1'), false);
 });
 
 test('login redirects retain the protected route and its query', () => {
@@ -21,7 +21,7 @@ test('login redirects retain the protected route and its query', () => {
 });
 
 test('post-login redirects allow local protected paths only', () => {
-  assert.equal(safePostLoginPath('/reader/edition-1?volume=2'), '/reader/edition-1?volume=2');
+  assert.equal(safePostLoginPath('/reader/volume-1'), '/reader/volume-1');
   assert.equal(safePostLoginPath('https://example.com'), '/library');
   assert.equal(safePostLoginPath('//example.com'), '/library');
   assert.equal(safePostLoginPath('/\\example.com'), '/library');

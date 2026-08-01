@@ -21,9 +21,8 @@ type KindleSettingsPayload = {
 
 type SendOption = {
   fileId: string;
-  editionId: string;
-  editionName: string;
-  volumeTitle: string | null;
+  volumeId: string;
+  volumeTitle: string;
   fileName: string;
   format: string;
   size: string;
@@ -38,22 +37,20 @@ function supported(path: string, format: string) {
   return (format === 'EPUB' && suffix === 'epub') || (format === 'PDF' && suffix === 'pdf');
 }
 
-export function KindleSendModal({ book, open, preferredEditionId, onClose }: { book: WorkView; open: boolean; preferredEditionId: string | null; onClose: () => void }) {
+export function KindleSendModal({ book, open, preferredVolumeId, onClose }: { book: WorkView; open: boolean; preferredVolumeId: string | null; onClose: () => void }) {
   const { t: i18nAttribute } = useAttributeI18n();
   const toast = useToast();
-  const options = useMemo<SendOption[]>(() => book.editions.flatMap((edition) => edition.files
-    .filter((file) => supported(file.path, edition.formatValue))
+  const options = useMemo<SendOption[]>(() => book.mediaVersions.flatMap((mediaVersion) => mediaVersion.volumes).flatMap((volume) => volume.files
+    .filter((file) => supported(file.path, volume.format))
     .map((file) => ({
       fileId: file.id,
-      editionId: edition.id,
-      editionName: edition.versionName,
-      volumeTitle: edition.volumes.find((volume) => volume.id === file.volumeId)?.title ?? null,
+      volumeId: volume.id,
+      volumeTitle: volume.title,
       fileName: fileName(file.path),
-      format: edition.formatValue,
+      format: volume.format,
       size: file.size
-    }))), [book.editions]);
-  const defaultOption = options.find((option) => option.editionId === preferredEditionId)
-    ?? options.find((option) => option.editionId === book.primaryEditionId)
+    }))), [book.mediaVersions]);
+  const defaultOption = options.find((option) => option.volumeId === preferredVolumeId)
     ?? options[0];
   const [selectedFileId, setSelectedFileId] = useState(defaultOption?.fileId ?? '');
   const [recipient, setRecipient] = useState('');
@@ -134,7 +131,7 @@ export function KindleSendModal({ book, open, preferredEditionId, onClose }: { b
               return (
                 <button key={option.fileId} type="button" onClick={() => setSelectedFileId(option.fileId)} className={cn('flex w-full items-start gap-3 rounded-2xl border p-4 text-left transition', selected ? 'border-orange-200 bg-[#FFF5F1]' : 'border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50')}>
                   <span className={cn('mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl', selected ? 'bg-[#ED4D2D] text-white' : 'bg-stone-100 text-stone-500')}>{selected ? <CheckCircle2 size={17} /> : <FileText size={17} />}</span>
-                  <span className="min-w-0 flex-1"><span className="block font-medium text-stone-900">{option.editionName}{option.volumeTitle ? ` · ${option.volumeTitle}` : ''}</span><span className="mt-1 block break-all text-xs leading-5 text-stone-500">{option.format} · {option.size} · {option.fileName}</span></span>
+                  <span className="min-w-0 flex-1"><span className="block font-medium text-stone-900">{option.volumeTitle}</span><span className="mt-1 block break-all text-xs leading-5 text-stone-500">{option.format} · {option.size} · {option.fileName}</span></span>
                 </button>
               );
             })}

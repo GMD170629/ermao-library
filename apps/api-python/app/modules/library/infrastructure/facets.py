@@ -1,4 +1,4 @@
-"""ORM persistence for LibraryFacet rows and work/edition facet links."""
+"""ORM persistence for work and volume facets."""
 
 from __future__ import annotations
 
@@ -16,9 +16,10 @@ from sqlalchemy.orm import Session
 from app.core.time import to_timestamp_ms
 from app.models.common import db_timestamp
 from app.models.library import (
-    LibraryEdition,
-    LibraryEditionFacet,
     LibraryFacet,
+    LibraryMediaVersion,
+    LibraryVolume,
+    LibraryVolumeFacet,
     LibraryWork,
     LibraryWorkFacet,
 )
@@ -90,7 +91,9 @@ def ensure_facet(db: Session, kind: str, name: str) -> str:
             created_at=now,
             updated_at=now,
         )
-        .on_conflict_do_nothing(index_elements=[LibraryFacet.kind, LibraryFacet.normalized_name])
+        .on_conflict_do_nothing(
+            index_elements=[LibraryFacet.kind, LibraryFacet.normalized_name]
+        )
     )
     existing = db.execute(
         select(LibraryFacet.id).where(
@@ -181,33 +184,36 @@ def sync_work_facets(db: Session, work_id: str) -> None:
 
     try:
         with db.begin_nested():
-            editions = db.execute(
-                select(LibraryEdition.id, LibraryEdition.publisher).where(
-                    LibraryEdition.work_id == work_id
+            volumes = db.execute(
+                select(LibraryVolume.id, LibraryVolume.publisher)
+                .join(
+                    LibraryMediaVersion,
+                    LibraryMediaVersion.id == LibraryVolume.media_version_id,
                 )
+                .where(LibraryMediaVersion.work_id == work_id)
             ).all()
     except OperationalError:
-        editions = [
-            (edition_id, None)
-            for edition_id in db.execute(
-                select(LibraryEdition.id).where(LibraryEdition.work_id == work_id)
-            ).scalars()
-        ]
-    for edition in editions:
-        edition_id = str(edition.id if hasattr(edition, "id") else edition[0])
-        publisher = edition.publisher if hasattr(edition, "publisher") else edition[1]
-        db.execute(delete(LibraryEditionFacet).where(LibraryEditionFacet.edition_id == edition_id))
+        volumes = []
+    for volume in volumes:
+        volume_id = str(volume.id if hasattr(volume, "id") else volume[0])
+        publisher = volume.publisher if hasattr(volume, "publisher") else volume[1]
+        db.execute(
+            delete(LibraryVolumeFacet).where(LibraryVolumeFacet.volume_id == volume_id)
+        )
         for publisher_name in unique_names([publisher]):
             facet_id = ensure_facet(db, "PUBLISHER", publisher_name)
             db.execute(
-                sqlite_insert(LibraryEditionFacet)
+                sqlite_insert(LibraryVolumeFacet)
                 .values(
                     facet_id=facet_id,
-                    edition_id=edition_id,
+                    volume_id=volume_id,
                     created_at=now,
                 )
                 .on_conflict_do_nothing(
-                    index_elements=[LibraryEditionFacet.facet_id, LibraryEditionFacet.edition_id]
+                    index_elements=[
+                        LibraryVolumeFacet.facet_id,
+                        LibraryVolumeFacet.volume_id,
+                    ]
                 )
             )
     db.flush()
@@ -217,7 +223,11 @@ def count_categories(db: Session, kind: str, search: str = "") -> int:
     normalized_kind = kind.strip().upper()
     if normalized_kind not in FACET_KINDS:
         raise ValueError("分类类型无效")
-    statement = select(func.count()).select_from(LibraryFacet).where(LibraryFacet.kind == normalized_kind)
+    statement = (
+        select(func.count())
+        .select_from(LibraryFacet)
+        .where(LibraryFacet.kind == normalized_kind)
+    )
     search_clause = _facet_search_clause(search)
     if search_clause is not None:
         statement = statement.where(search_clause)
@@ -242,15 +252,28 @@ def list_categories(
         book_count = func.count(
             distinct(
                 case(
-                    (func.coalesce(LibraryWork.hidden, 0) == 0, LibraryEdition.work_id),
+                    (
+                        func.coalesce(LibraryWork.hidden, 0) == 0,
+                        LibraryMediaVersion.work_id,
+                    ),
                 )
             )
         ).label("bookCount")
         statement = (
             select(LibraryFacet, book_count)
-            .outerjoin(LibraryEditionFacet, LibraryEditionFacet.facet_id == LibraryFacet.id)
-            .outerjoin(LibraryEdition, LibraryEdition.id == LibraryEditionFacet.edition_id)
-            .outerjoin(LibraryWork, LibraryWork.id == LibraryEdition.work_id)
+            .outerjoin(
+                LibraryVolumeFacet,
+                LibraryVolumeFacet.facet_id == LibraryFacet.id,
+            )
+            .outerjoin(
+                LibraryVolume,
+                LibraryVolume.id == LibraryVolumeFacet.volume_id,
+            )
+            .outerjoin(
+                LibraryMediaVersion,
+                LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            )
+            .outerjoin(LibraryWork, LibraryWork.id == LibraryMediaVersion.work_id)
             .where(LibraryFacet.kind == normalized_kind)
             .group_by(LibraryFacet.id)
             .order_by(book_count.desc(), LibraryFacet.name.collate("NOCASE").asc())
@@ -259,7 +282,10 @@ def list_categories(
         book_count = func.count(
             distinct(
                 case(
-                    (func.coalesce(LibraryWork.hidden, 0) == 0, LibraryWorkFacet.work_id),
+                    (
+                        func.coalesce(LibraryWork.hidden, 0) == 0,
+                        LibraryWorkFacet.work_id,
+                    ),
                 )
             )
         ).label("bookCount")

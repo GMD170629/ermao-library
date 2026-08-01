@@ -602,29 +602,31 @@ test('mobile page actions keep labels horizontal and move below long headings', 
 test('mobile data-heavy views use cards instead of compressed desktop tables', async ({ context, page }) => {
   const mobileBook = {
     id: 'mobile-work',
-    workId: 'mobile-work',
-    editionId: 'mobile-edition',
     title: '用于验证移动端卡片布局的超长读物标题',
     author: '未知作者',
-    type: 'ebook',
-    format: 'EPUB',
-    formatValue: 'EPUB',
-    status: '在读',
-    statusValue: 'READING',
-    progress: 42,
-    lastRead: '今天',
-    lastReadAt: '2026-07-17T08:30:00.000Z',
+    description: '',
     tags: ['移动端'],
     coverUrl: '',
     coverStatus: 'MISSING',
     gradient: 'from-orange-100 to-stone-200',
     seriesName: null,
     seriesIndex: null,
-    publishedYear: null,
-    desc: '',
-    path: '/books/mobile.epub',
-    importedAt: '2026-07-17T08:30:00.000Z',
-    metadataQuality: 20
+    metadataQuality: 20,
+    publicationStatus: 'UNKNOWN',
+    trackingStatus: 'NOT_TRACKING',
+    ignored: false,
+    organized: true,
+    addedAt: '2026-07-17T08:30:00.000Z',
+    updatedAt: '2026-07-17T08:30:00.000Z',
+    recentMediaKind: 'EBOOK',
+    continueVolumeId: 'mobile-volume',
+    completed: false,
+    mediaVersions: [{
+      id: 'mobile-media',
+      mediaKind: 'EBOOK',
+      completed: false,
+      volumes: [{ id: 'mobile-volume', mediaVersionId: 'mobile-media', title: '全本', volumeIndex: null, sortOrder: 0, format: 'EPUB', derivedFromVolumeId: null, publisher: null, publishedAt: null, language: null, isbn: null, identifier: null, narrator: null, abridged: null, importStatus: 'READY', importError: null, coverUrl: '', pageCount: null, chapterCount: null, durationMs: null, trackCount: null, progress: 42, lastReadAt: '2026-07-17T08:30:00.000Z', hidden: false, readable: true, conversionAvailable: false, files: [] }]
+    }]
   };
 
   await page.route('**/api/works?**', async (route) => {

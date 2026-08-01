@@ -42,8 +42,8 @@ export function AudioMiniPlayer() {
   const pathname = usePathname();
   const player = useAudioPlayback();
   const bootstrap = player.bootstrap;
-  const pendingSummary = player.pendingEditionId && player.pendingSummary
-    && player.pendingEditionId === player.pendingSummary.editionId
+  const pendingSummary = player.pendingVolumeId && player.pendingSummary
+    && player.pendingVolumeId === player.pendingSummary.volumeId
     ? player.pendingSummary
     : null;
   const [openPanel, setOpenPanel] = useState<MiniPlayerPanel>(null);
@@ -64,7 +64,7 @@ export function AudioMiniPlayer() {
 
   useEffect(() => {
     setOpenPanel(null);
-  }, [bootstrap?.edition.id, pathname]);
+  }, [bootstrap?.volume.id, pathname]);
 
   useEffect(() => {
     if (!openPanel) return undefined;
@@ -116,7 +116,7 @@ export function AudioMiniPlayer() {
     const pendingCoverUrl = pendingSummary.coverUrl
       ? withBasePath(pendingSummary.coverUrl)
       : withBasePath(`/api/works/${encodeURIComponent(pendingSummary.workId)}/cover?size=small`);
-    const pendingHref = `/works/${encodeURIComponent(pendingSummary.workId)}?detailTab=AUDIOBOOK&editionId=${encodeURIComponent(pendingSummary.editionId)}`;
+    const pendingHref = `/works/${encodeURIComponent(pendingSummary.workId)}?detailTab=AUDIOBOOK&volumeId=${encodeURIComponent(pendingSummary.volumeId)}`;
     return (
       <section
         ref={rootRef}
@@ -144,7 +144,7 @@ export function AudioMiniPlayer() {
               </button>
             ) : <LoaderCircle size={22} className="shrink-0 animate-spin text-[#EF4D2F] motion-reduce:animate-none" aria-hidden="true" />}
             {bootstrap ? (
-              <button type="button" onClick={player.cancelEditionSwitch} className="flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-xl px-2 text-sm font-semibold text-[#625C56] hover:bg-black/[0.05]" aria-label={i18nAttribute("返回原播放")}>
+              <button type="button" onClick={player.cancelVolumeSwitch} className="flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-xl px-2 text-sm font-semibold text-[#625C56] hover:bg-black/[0.05]" aria-label={i18nAttribute("返回原播放")}>
                 <ArrowLeft size={17} aria-hidden="true" /> <span className="hidden xl:inline"><I18nText>原播放</I18nText></span>
               </button>
             ) : null}
@@ -162,7 +162,7 @@ export function AudioMiniPlayer() {
   const coverUrl = bootstrap.book.coverUrl
     ? withBasePath(bootstrap.book.coverUrl)
     : withBasePath(`/api/works/${encodeURIComponent(bootstrap.book.id)}/cover?size=small`);
-  const workHref = `/works/${encodeURIComponent(bootstrap.edition.workId)}?detailTab=AUDIOBOOK&editionId=${encodeURIComponent(bootstrap.edition.id)}`;
+  const workHref = `/works/${encodeURIComponent(bootstrap.mediaVersion.workId)}?detailTab=AUDIOBOOK&volumeId=${encodeURIComponent(bootstrap.volume.id)}`;
   const isPlaying = player.lifecycle === 'playing';
   const isLoading = player.lifecycle === 'loading';
   const playbackError = player.loadError ?? player.error;
@@ -206,13 +206,13 @@ export function AudioMiniPlayer() {
               <X size={17} />
             </button>
           </header>
-          {bootstrap.volumes.length > 1 ? (
+          {bootstrap.availableVolumes.length > 1 ? (
             <div className="border-b border-black/[0.07] px-4 py-2.5">
               <VolumeSelect
-                items={bootstrap.volumes.map((volume) => ({ id: volume.id, title: volume.title }))}
-                value={bootstrap.volumeId}
-                onChange={(volumeId) => void player.loadEdition(bootstrap.edition.id, { volumeId })}
-                disabled={Boolean(player.pendingEditionId)}
+                items={bootstrap.availableVolumes.map((volume) => ({ id: volume.id, title: volume.title }))}
+                value={bootstrap.volume.id}
+                onChange={(volumeId) => void player.loadVolume(volumeId)}
+                disabled={Boolean(player.pendingVolumeId)}
                 compact
                 className="w-full"
               />

@@ -154,6 +154,7 @@ def _organize_job_view(
     return {
         "id": job.get("id"),
         "runId": job.get("runId"),
+        "volumeId": job.get("volumeId"),
         "trigger": job.get("trigger") or "LEGACY",
         "status": raw_status,
         "statusCategory": status_category,

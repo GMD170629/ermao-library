@@ -10,6 +10,7 @@ import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { PageTitle } from '../../components/ui/page-title';
 import { Select } from '../../components/ui/select';
+import { mapWorkView } from '../works/public';
 import type { SeriesSummary, WorkView } from '../../types/work';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
@@ -22,7 +23,7 @@ type SeriesPayload = {
 
 type BooksPayload = {
   ok: boolean;
-  data?: { books: WorkView[]; total: number; page: number; pageSize: number; totalPages: number };
+  data?: { books: unknown[]; total: number; page: number; pageSize: number; totalPages: number };
   error?: { message: string };
 };
 
@@ -108,7 +109,7 @@ export function SeriesPage({ initialName = '' }: { initialName?: string }) {
       .then((payload) => {
         if (!active) return;
         if (!payload.ok) throw new Error(payload.error?.message ?? '读取系列图书失败');
-        setBooks(payload.data?.books ?? []);
+        setBooks((payload.data?.books ?? []).map(mapWorkView));
         setBookTotal(payload.data?.total ?? 0);
         setSeries([]);
         setSeriesTotal(0);

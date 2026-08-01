@@ -19,7 +19,6 @@ class ImportTaskContract(BaseModel):
     requested_author: str | None = Field(default=None, alias="requestedAuthor")
     monitor_folder_id: str | None = Field(default=None, alias="monitorFolderId")
     work_id: str | None = Field(default=None, alias="workId")
-    edition_id: str | None = Field(default=None, alias="editionId")
     volume_id: str | None = Field(default=None, alias="volumeId")
     task_kind: str = Field(alias="taskKind")
     bundle_key: str | None = Field(default=None, alias="bundleKey")

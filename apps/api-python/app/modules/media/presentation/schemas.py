@@ -19,7 +19,6 @@ class MediaImageResponse(Response):
 
 class VolumePage(HttpContractModel):
     id: str
-    edition_id: str = Field(alias="editionId")
     volume_id: str = Field(alias="volumeId")
     file_id: str | None = Field(default=None, alias="fileId")
     unit_type: str = Field(alias="unitType")

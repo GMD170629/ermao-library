@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.models.common import db_timestamp
 from app.models.import_pipeline import ImportTask
-from app.models.library import LibraryEdition, LibraryMetadata, LibraryVolume, LibraryWork
+from app.models.library import LibraryMetadata, LibraryVolume, LibraryWork
 from app.models.organize import (
     MetadataLookupTask,
     MetadataProviderExecution,
@@ -55,7 +55,7 @@ _WORK_CAMEL_TO_SNAKE: dict[str, str] = {
     "updatedAt": "updated_at",
 }
 
-_EDITION_CAMEL_TO_SNAKE: dict[str, str] = {
+_VOLUME_CAMEL_TO_SNAKE: dict[str, str] = {
     "publisher": "publisher",
     "updatedAt": "updated_at",
 }
@@ -71,7 +71,7 @@ def lookup_task_to_dict(task: MetadataLookupTask) -> dict[str, Any]:
     return {
         "id": task.id,
         "workId": task.work_id,
-        "editionId": task.edition_id,
+        "volumeId": task.volume_id,
         "importTaskId": task.import_task_id,
         "organizeJobId": task.organize_job_id,
         "status": task.status,
@@ -108,7 +108,6 @@ def work_row_to_dict(row: Any) -> dict[str, Any]:
         "publishedYear": data.get("published_year", data.get("publishedYear")),
         "coverPath": data.get("cover_path", data.get("coverPath")),
         "coverStatus": data.get("cover_status", data.get("coverStatus")),
-        "primaryEditionId": data.get("primary_edition_id", data.get("primaryEditionId")),
         "metadataQuality": data.get("metadata_quality", data.get("metadataQuality")),
         "organized": data.get("organized"),
         "organizeStatus": data.get("organize_status", data.get("organizeStatus")),
@@ -118,9 +117,13 @@ def work_row_to_dict(row: Any) -> dict[str, Any]:
     }
 
 
-def edition_row_to_dict(row: Any) -> dict[str, Any]:
+def volume_row_to_dict(row: Any) -> dict[str, Any]:
     mapping = getattr(row, "_mapping", None)
-    data = dict(mapping) if mapping is not None else (row._asdict() if hasattr(row, "_asdict") else dict(row))
+    data = (
+        dict(mapping)
+        if mapping is not None
+        else (row._asdict() if hasattr(row, "_asdict") else dict(row))
+    )
     return {
         "id": data.get("id"),
         "coverPath": data.get("cover_path", data.get("coverPath")),
@@ -143,7 +146,11 @@ def lookup_task_is_active(db: Session, task_id: str) -> bool:
 def overwrite_title_author_enabled(db: Session) -> bool:
     if not _has_table(db, "OrganizePolicy"):
         return True
-    value = db.scalar(select(OrganizePolicy.overwrite_title_author).where(OrganizePolicy.id == "default"))
+    value = db.scalar(
+        select(OrganizePolicy.overwrite_title_author).where(
+            OrganizePolicy.id == "default"
+        )
+    )
     return True if value is None else bool(value)
 
 
@@ -223,7 +230,9 @@ def claim_next_lookup_task(db: Session) -> dict[str, Any] | None:
     return payload
 
 
-def mark_organize_job_running(db: Session, job_id: str, *, started_at: datetime) -> None:
+def mark_organize_job_running(
+    db: Session, job_id: str, *, started_at: datetime
+) -> None:
     values: dict[str, Any] = {
         "status": "RUNNING",
         "summary": "正在调用元数据插件",
@@ -238,7 +247,9 @@ def source_table_ready(db: Session) -> bool:
     return _has_table(db, "Source")
 
 
-def start_provider_execution(db: Session, task: dict[str, Any], provider: str) -> str | None:
+def start_provider_execution(
+    db: Session, task: dict[str, Any], provider: str
+) -> str | None:
     if not _has_table(db, "MetadataProviderExecution"):
         return None
     execution_id = f"py_{time_ns()}"
@@ -276,7 +287,9 @@ def finish_provider_execution(
         .where(MetadataProviderExecution.id == execution_id)
         .values(
             status=status,
-            raw_result_json=json.dumps(result, ensure_ascii=False) if result is not None else None,
+            raw_result_json=json.dumps(result, ensure_ascii=False)
+            if result is not None
+            else None,
             error_summary=error,
             finished_at=now,
             updated_at=now,
@@ -300,7 +313,6 @@ def get_work(db: Session, work_id: str | None) -> dict[str, Any] | None:
             LibraryWork.published_year,
             LibraryWork.cover_path,
             LibraryWork.cover_status,
-            LibraryWork.primary_edition_id,
             LibraryWork.metadata_quality,
             LibraryWork.organized,
             LibraryWork.organize_status,
@@ -316,7 +328,9 @@ def get_work_organize_state(db: Session, work_id: str | None) -> dict[str, Any] 
     if not work_id:
         return None
     row = db.execute(
-        select(LibraryWork.organized, LibraryWork.organize_status).where(LibraryWork.id == work_id)
+        select(LibraryWork.organized, LibraryWork.organize_status).where(
+            LibraryWork.id == work_id
+        )
     ).one_or_none()
     if row is None:
         return None
@@ -326,27 +340,29 @@ def get_work_organize_state(db: Session, work_id: str | None) -> dict[str, Any] 
     }
 
 
-def get_edition(db: Session, edition_id: str | None) -> dict[str, Any] | None:
-    if not edition_id:
+def get_volume(db: Session, volume_id: str | None) -> dict[str, Any] | None:
+    if not volume_id:
         return None
     row = db.execute(
         select(
-            LibraryEdition.id,
-            LibraryEdition.cover_path,
-            LibraryEdition.publisher,
-        ).where(LibraryEdition.id == edition_id)
+            LibraryVolume.id,
+            LibraryVolume.cover_path,
+            LibraryVolume.publisher,
+        ).where(LibraryVolume.id == volume_id)
     ).one_or_none()
-    return edition_row_to_dict(row) if row else None
+    return volume_row_to_dict(row) if row else None
 
 
-def edition_has_volume_cover(db: Session, edition_id: str) -> bool:
+def volume_has_cover(db: Session, volume_id: str) -> bool:
     return (
         db.scalar(
-            select(LibraryVolume.id).where(
-                LibraryVolume.edition_id == edition_id,
+            select(LibraryVolume.id)
+            .where(
+                LibraryVolume.id == volume_id,
                 LibraryVolume.cover_path.is_not(None),
                 LibraryVolume.cover_path != "",
-            ).limit(1)
+            )
+            .limit(1)
         )
         is not None
     )
@@ -359,7 +375,9 @@ def get_import_task_status(db: Session, import_task_id: str | None) -> str | Non
 
 
 def get_lookup_task_status(db: Session, task_id: str) -> str | None:
-    return db.scalar(select(MetadataLookupTask.status).where(MetadataLookupTask.id == task_id))
+    return db.scalar(
+        select(MetadataLookupTask.status).where(MetadataLookupTask.id == task_id)
+    )
 
 
 def update_work(db: Session, work_id: str, patch: dict[str, Any]) -> None:
@@ -367,9 +385,11 @@ def update_work(db: Session, work_id: str, patch: dict[str, Any]) -> None:
     db.execute(update(LibraryWork).where(LibraryWork.id == work_id).values(**mapped))
 
 
-def update_edition(db: Session, edition_id: str, patch: dict[str, Any]) -> None:
-    mapped = {_EDITION_CAMEL_TO_SNAKE[key]: value for key, value in patch.items()}
-    db.execute(update(LibraryEdition).where(LibraryEdition.id == edition_id).values(**mapped))
+def update_volume(db: Session, volume_id: str, patch: dict[str, Any]) -> None:
+    mapped = {_VOLUME_CAMEL_TO_SNAKE[key]: value for key, value in patch.items()}
+    db.execute(
+        update(LibraryVolume).where(LibraryVolume.id == volume_id).values(**mapped)
+    )
 
 
 def mark_work_reviewing(db: Session, work_id: str) -> None:
@@ -405,7 +425,9 @@ def finish_organize_job(
     db.execute(update(OrganizeJob).where(clause).values(**values))
 
 
-def mark_organize_job_retry_wait(db: Session, job_id: str, *, summary: str, error: str) -> None:
+def mark_organize_job_retry_wait(
+    db: Session, job_id: str, *, summary: str, error: str
+) -> None:
     db.execute(
         update(OrganizeJob)
         .where(OrganizeJob.id == job_id)
@@ -421,7 +443,7 @@ def mark_organize_job_retry_wait(db: Session, job_id: str, *, summary: str, erro
 def insert_library_metadata(
     db: Session,
     *,
-    edition_id: str,
+    volume_id: str,
     source: str,
     raw_json: str,
 ) -> None:
@@ -429,7 +451,7 @@ def insert_library_metadata(
     db.add(
         LibraryMetadata(
             id=f"py_{time_ns()}",
-            edition_id=edition_id,
+            volume_id=volume_id,
             source=source,
             raw_json=raw_json,
             created_at=now,

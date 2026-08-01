@@ -195,7 +195,7 @@ export function SmartFilterBuilder({ fields, rules, loading = false, actions, on
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FFF0EA] text-[#DE4C2E]"><WandSparkles size={18} /></span>
           <div>
             <div className="font-semibold text-[#302C29]"><I18nText>智能组合筛选</I18nText></div>
-            <div className="mt-0.5 text-xs leading-5 text-[#817A74]"><I18nText>所有作品、版本、文件、阅读和书架维度都可以自由组合，修改后实时生效。</I18nText></div>
+            <div className="mt-0.5 text-xs leading-5 text-[#817A74]"><I18nText>所有作品、卷册、文件、阅读和书架维度都可以自由组合，修改后实时生效。</I18nText></div>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">

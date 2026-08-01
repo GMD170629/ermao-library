@@ -10,11 +10,10 @@ import os
 import re
 import threading
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.utils import format_datetime, parsedate_to_datetime
 from pathlib import Path
 from time import monotonic, time_ns
-from typing import Any
 from urllib.parse import quote
 
 from fastapi import Request
@@ -41,6 +40,7 @@ SMALL_COVER_MEDIA_TYPE = "image/webp"
 SMALL_COVER_CACHE_VERSION = 1
 SMALL_COVER_QUALITIES = (82, 74, 66, 58, 50, 42, 34, 26, 18, 10)
 
+
 def _stored_path(path_value: str | None, settings: Settings) -> Path | None:
     if not path_value:
         return None
@@ -62,7 +62,9 @@ def _stored_path(path_value: str | None, settings: Settings) -> Path | None:
     return None
 
 
-def _parse_byte_range(header: str | None, size: int) -> tuple[str, tuple[int, int] | None]:
+def _parse_byte_range(
+    header: str | None, size: int
+) -> tuple[str, tuple[int, int] | None]:
     if not header:
         return "none", None
     match = re.match(r"^bytes=(\d*)-(\d*)$", header.strip())
@@ -129,30 +131,46 @@ def _should_use_range(request: Request, etag: str, last_modified: str) -> bool:
         return False
 
 
-def _response_headers(size: int, mtime: float, media_type: str, name: str, extra: str = "") -> dict[str, str]:
-    modified = datetime.fromtimestamp(mtime, timezone.utc).replace(microsecond=0)
+def _response_headers(
+    size: int, mtime: float, media_type: str, name: str, extra: str = ""
+) -> dict[str, str]:
+    modified = datetime.fromtimestamp(mtime, UTC).replace(microsecond=0)
     return {
         "Accept-Ranges": "bytes",
         "Content-Type": media_type,
         "Content-Disposition": f"inline; filename*=UTF-8''{quote(name)}",
-        "Cache-Control": "private, max-age=86400" if media_type.lower().startswith("image/") else "private, max-age=60",
+        "Cache-Control": "private, max-age=86400"
+        if media_type.lower().startswith("image/")
+        else "private, max-age=60",
         "Vary": "Cookie",
         "ETag": _weak_etag(size, int(mtime * 1000), extra),
         "Last-Modified": format_datetime(modified, usegmt=True),
     }
 
 
-def _bytes_response(data: bytes, request: Request, media_type: str, name: str, mtime: float | None = None, extra: str = "") -> Response:
+def _bytes_response(
+    data: bytes,
+    request: Request,
+    media_type: str,
+    name: str,
+    mtime: float | None = None,
+    extra: str = "",
+) -> Response:
     started_at = monotonic()
     size = len(data)
     user_id = str(getattr(request.state, "user_id", "") or "")
     cache_identity = f"{extra}|user:{user_id}" if user_id else extra
-    headers = _response_headers(size, mtime or _now().timestamp(), media_type, name, cache_identity)
-    if not request.headers.get("range") and _not_modified(request, headers["ETag"], headers["Last-Modified"]):
+    effective_mtime = mtime if mtime is not None else datetime.now(UTC).timestamp()
+    headers = _response_headers(size, effective_mtime, media_type, name, cache_identity)
+    if not request.headers.get("range") and _not_modified(
+        request, headers["ETag"], headers["Last-Modified"]
+    ):
         return Response(status_code=304, headers=headers)
     range_header = request.headers.get("range")
     byte_range = None
-    if range_header and _should_use_range(request, headers["ETag"], headers["Last-Modified"]):
+    if range_header and _should_use_range(
+        request, headers["ETag"], headers["Last-Modified"]
+    ):
         kind, parsed = _parse_byte_range(range_header, size)
         if kind == "invalid":
             response = fail("Range 请求格式不正确", status_code=416)
@@ -168,10 +186,22 @@ def _bytes_response(data: bytes, request: Request, media_type: str, name: str, m
         body = data[start : end + 1]
         headers["Content-Length"] = str(len(body))
         headers["Content-Range"] = f"bytes {start}-{end}/{size}"
-        _log_slow_file_request(request, "bytes", "memory", request.headers.get("range"), len(body), 206, started_at)
-        return Response(content=body, status_code=206, headers=headers, media_type=media_type)
+        _log_slow_file_request(
+            request,
+            "bytes",
+            "memory",
+            request.headers.get("range"),
+            len(body),
+            206,
+            started_at,
+        )
+        return Response(
+            content=body, status_code=206, headers=headers, media_type=media_type
+        )
     headers["Content-Length"] = str(size)
-    _log_slow_file_request(request, "bytes", "memory", request.headers.get("range"), size, 200, started_at)
+    _log_slow_file_request(
+        request, "bytes", "memory", request.headers.get("range"), size, 200, started_at
+    )
     return Response(content=data, headers=headers, media_type=media_type)
 
 
@@ -180,8 +210,21 @@ def _base_media_type(media_type: str | None) -> str:
 
 
 def _comic_page_image_variant(request: Request) -> str:
-    value = (request.query_params.get("imageVariant") or request.query_params.get("image_variant") or "").strip().lower()
-    return COMIC_PAGE_DATA_SAVER_VARIANT if value in {COMIC_PAGE_DATA_SAVER_VARIANT, "saver", "compressed", "webp", "avif"} else COMIC_PAGE_ORIGINAL_VARIANT
+    value = (
+        (
+            request.query_params.get("imageVariant")
+            or request.query_params.get("image_variant")
+            or ""
+        )
+        .strip()
+        .lower()
+    )
+    return (
+        COMIC_PAGE_DATA_SAVER_VARIANT
+        if value
+        in {COMIC_PAGE_DATA_SAVER_VARIANT, "saver", "compressed", "webp", "avif"}
+        else COMIC_PAGE_ORIGINAL_VARIANT
+    )
 
 
 def _is_comic_page_image(media_type: str | None) -> bool:
@@ -190,7 +233,13 @@ def _is_comic_page_image(media_type: str | None) -> bool:
 
 def _comic_page_cache_path(settings: Settings, cache_key: str) -> Path:
     digest = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()
-    return settings.resolved_storage_root / "cache" / "comic-pages" / digest[:2] / f"{digest}.avif"
+    return (
+        settings.resolved_storage_root
+        / "cache"
+        / "comic-pages"
+        / digest[:2]
+        / f"{digest}.avif"
+    )
 
 
 def _write_cache_bytes(path: Path, data: bytes) -> None:
@@ -213,11 +262,19 @@ def _small_cover_cache_key(path: Path, stat: os.stat_result) -> str:
 
 def _small_cover_cache_path(settings: Settings, cache_key: str) -> Path:
     digest = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()
-    return settings.resolved_storage_root / "cache" / "covers" / digest[:2] / f"{digest}.webp"
+    return (
+        settings.resolved_storage_root
+        / "cache"
+        / "covers"
+        / digest[:2]
+        / f"{digest}.webp"
+    )
 
 
 def _image_has_alpha(image: Image.Image) -> bool:
-    return image.mode in {"RGBA", "LA"} or (image.mode == "P" and "transparency" in image.info)
+    return image.mode in {"RGBA", "LA"} or (
+        image.mode == "P" and "transparency" in image.info
+    )
 
 
 def _image_for_webp(image: Image.Image) -> Image.Image:
@@ -256,7 +313,9 @@ def _small_cover_webp_bytes(path: Path) -> bytes | None:
         return None
 
 
-def _small_cover_response(path: Path, request: Request, user_id: str, settings: Settings) -> Response | None:
+def _small_cover_response(
+    path: Path, request: Request, user_id: str, settings: Settings
+) -> Response | None:
     stat = path.stat()
     cache_key = _small_cover_cache_key(path, stat)
     cache_path = _small_cover_cache_path(settings, cache_key)
@@ -282,7 +341,10 @@ def _comic_page_avif_image(image: Image.Image) -> Image.Image:
     prepared = ImageOps.exif_transpose(image)
     if prepared.mode == "RGB":
         red, green, blue = prepared.split()
-        if ImageChops.difference(red, green).getbbox() is None and ImageChops.difference(red, blue).getbbox() is None:
+        if (
+            ImageChops.difference(red, green).getbbox() is None
+            and ImageChops.difference(red, blue).getbbox() is None
+        ):
             return red
         return prepared
     if prepared.mode in {"L", "RGBA"}:
@@ -314,7 +376,14 @@ def _avif_page_name(name: str) -> str:
     return str(Path(name or "page").with_suffix(".avif"))
 
 
-def _comic_page_avif_response(data: bytes, request: Request, name: str, source_mtime: float, source_size: int, cache_extra: str) -> Response:
+def _comic_page_avif_response(
+    data: bytes,
+    request: Request,
+    name: str,
+    source_mtime: float,
+    source_size: int,
+    cache_extra: str,
+) -> Response:
     variant_extra = hashlib.sha256(cache_extra.encode("utf-8")).hexdigest()[:24]
     response = _bytes_response(
         data,
@@ -330,7 +399,9 @@ def _comic_page_avif_response(data: bytes, request: Request, name: str, source_m
         f"speed={COMIC_PAGE_DATA_SAVER_SPEED};mode=extreme"
     )
     if source_size > 0:
-        response.headers["X-Comic-Image-Compression-Ratio"] = f"{len(data) / source_size:.3f}"
+        response.headers["X-Comic-Image-Compression-Ratio"] = (
+            f"{len(data) / source_size:.3f}"
+        )
     return response
 
 
@@ -367,7 +438,15 @@ def _acquire_file_stream_slot(user_id: str):
     return release
 
 
-def _log_slow_file_request(request: Request, route: str, file_id: str, range_header: str | None, bytes_sent: int, status_code: int, started_at: float) -> None:
+def _log_slow_file_request(
+    request: Request,
+    route: str,
+    file_id: str,
+    range_header: str | None,
+    bytes_sent: int,
+    status_code: int,
+    started_at: float,
+) -> None:
     threshold_ms = SLOW_REQUEST_LOG_THRESHOLD_MS
     duration_ms = int((monotonic() - started_at) * 1000)
     if duration_ms < threshold_ms:
@@ -384,12 +463,23 @@ def _log_slow_file_request(request: Request, route: str, file_id: str, range_hea
     )
 
 
-def _file_response(path: Path | None, request: Request, user_id: str, media_type: str | None = None, name: str | None = None, missing_message: str = "文件不存在", route: str = "file", file_id: str | None = None) -> Response:
+def _file_response(
+    path: Path | None,
+    request: Request,
+    user_id: str,
+    media_type: str | None = None,
+    name: str | None = None,
+    missing_message: str = "文件不存在",
+    route: str = "file",
+    file_id: str | None = None,
+) -> Response:
     if path is None or not path.exists() or not path.is_file():
         return fail(missing_message, status_code=404)
     request.state.user_id = user_id
     stat = path.stat()
-    resolved_media_type = media_type or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    resolved_media_type = (
+        media_type or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    )
     headers = _response_headers(
         stat.st_size,
         stat.st_mtime,
@@ -397,11 +487,15 @@ def _file_response(path: Path | None, request: Request, user_id: str, media_type
         name or path.name,
         extra=f"user:{user_id}",
     )
-    if not request.headers.get("range") and _not_modified(request, headers["ETag"], headers["Last-Modified"]):
+    if not request.headers.get("range") and _not_modified(
+        request, headers["ETag"], headers["Last-Modified"]
+    ):
         return Response(status_code=304, headers=headers)
     byte_range = None
     range_header = request.headers.get("range")
-    if range_header and _should_use_range(request, headers["ETag"], headers["Last-Modified"]):
+    if range_header and _should_use_range(
+        request, headers["ETag"], headers["Last-Modified"]
+    ):
         kind, parsed = _parse_byte_range(range_header, stat.st_size)
         if kind == "invalid":
             response = fail("Range 请求格式不正确", status_code=416)
@@ -421,17 +515,32 @@ def _file_response(path: Path | None, request: Request, user_id: str, media_type
             start, end = byte_range
             headers["Content-Length"] = str(end - start + 1)
             headers["Content-Range"] = f"bytes {start}-{end}/{stat.st_size}"
-            return Response(status_code=206, headers=headers, media_type=resolved_media_type)
+            return Response(
+                status_code=206, headers=headers, media_type=resolved_media_type
+            )
         headers["Content-Length"] = str(stat.st_size)
-        return Response(status_code=200, headers=headers, media_type=resolved_media_type)
+        return Response(
+            status_code=200, headers=headers, media_type=resolved_media_type
+        )
 
-    def iterator(release, started_at: float, status_code: int, bytes_sent: int, start: int = 0, end: int | None = None):
+    def iterator(
+        release,
+        started_at: float,
+        status_code: int,
+        bytes_sent: int,
+        start: int = 0,
+        end: int | None = None,
+    ):
         try:
             remaining = None if end is None else end - start + 1
             with path.open("rb") as handle:
                 handle.seek(start)
                 while True:
-                    chunk_size = 1024 * 1024 if remaining is None else min(1024 * 1024, remaining)
+                    chunk_size = (
+                        1024 * 1024
+                        if remaining is None
+                        else min(1024 * 1024, remaining)
+                    )
                     if chunk_size <= 0:
                         break
                     chunk = handle.read(chunk_size)
@@ -442,7 +551,15 @@ def _file_response(path: Path | None, request: Request, user_id: str, media_type
                     yield chunk
         finally:
             release()
-            _log_slow_file_request(request, route, file_id or str(path), range_header, bytes_sent, status_code, started_at)
+            _log_slow_file_request(
+                request,
+                route,
+                file_id or str(path),
+                range_header,
+                bytes_sent,
+                status_code,
+                started_at,
+            )
 
     release = _acquire_file_stream_slot(user_id)
     if release is None:
@@ -453,17 +570,55 @@ def _file_response(path: Path | None, request: Request, user_id: str, media_type
         bytes_sent = end - start + 1
         headers["Content-Length"] = str(bytes_sent)
         headers["Content-Range"] = f"bytes {start}-{end}/{stat.st_size}"
-        return StreamingResponse(iterator(release, started_at, 206, bytes_sent, start, end), status_code=206, headers=headers, media_type=resolved_media_type)
+        return StreamingResponse(
+            iterator(release, started_at, 206, bytes_sent, start, end),
+            status_code=206,
+            headers=headers,
+            media_type=resolved_media_type,
+        )
     headers["Content-Length"] = str(stat.st_size)
-    return StreamingResponse(iterator(release, started_at, 200, stat.st_size), headers=headers, media_type=resolved_media_type)
+    return StreamingResponse(
+        iterator(release, started_at, 200, stat.st_size),
+        headers=headers,
+        media_type=resolved_media_type,
+    )
 
 
-def _send_file(path: Path | None, request: Request, user_id: str, media_type: str | None = None, name: str | None = None, route: str = "file", file_id: str | None = None) -> Response:
-    return _file_response(path, request, user_id=user_id, media_type=media_type, name=name, route=route, file_id=file_id)
+def _send_file(
+    path: Path | None,
+    request: Request,
+    user_id: str,
+    media_type: str | None = None,
+    name: str | None = None,
+    route: str = "file",
+    file_id: str | None = None,
+) -> Response:
+    return _file_response(
+        path,
+        request,
+        user_id=user_id,
+        media_type=media_type,
+        name=name,
+        route=route,
+        file_id=file_id,
+    )
 
 
-def _send_zip_entry(archive_path: Path | None, entry_name: str | None, request: Request, user_id: str, media_type: str | None = None, route: str = "zip-entry", file_id: str | None = None) -> Response:
-    if archive_path is None or not archive_path.exists() or not archive_path.is_file() or not entry_name:
+def _send_zip_entry(
+    archive_path: Path | None,
+    entry_name: str | None,
+    request: Request,
+    user_id: str,
+    media_type: str | None = None,
+    route: str = "zip-entry",
+    file_id: str | None = None,
+) -> Response:
+    if (
+        archive_path is None
+        or not archive_path.exists()
+        or not archive_path.is_file()
+        or not entry_name
+    ):
         return fail("页面不存在", status_code=404)
     try:
         with zipfile.ZipFile(archive_path) as archive:
@@ -471,7 +626,9 @@ def _send_zip_entry(archive_path: Path | None, entry_name: str | None, request: 
     except (KeyError, OSError, zipfile.BadZipFile):
         return fail("页面不存在", status_code=404)
     request.state.user_id = user_id
-    resolved_media_type = media_type or mimetypes.guess_type(entry_name)[0] or "application/octet-stream"
+    resolved_media_type = (
+        media_type or mimetypes.guess_type(entry_name)[0] or "application/octet-stream"
+    )
     size = int(info.file_size)
     headers = _response_headers(
         size,
@@ -480,11 +637,15 @@ def _send_zip_entry(archive_path: Path | None, entry_name: str | None, request: 
         Path(entry_name).name,
         extra=f"{entry_name}|user:{user_id}",
     )
-    if not request.headers.get("range") and _not_modified(request, headers["ETag"], headers["Last-Modified"]):
+    if not request.headers.get("range") and _not_modified(
+        request, headers["ETag"], headers["Last-Modified"]
+    ):
         return Response(status_code=304, headers=headers)
     byte_range = None
     range_header = request.headers.get("range")
-    if range_header and _should_use_range(request, headers["ETag"], headers["Last-Modified"]):
+    if range_header and _should_use_range(
+        request, headers["ETag"], headers["Last-Modified"]
+    ):
         kind, parsed = _parse_byte_range(range_header, size)
         if kind == "invalid":
             response = fail("Range 请求格式不正确", status_code=416)
@@ -496,30 +657,51 @@ def _send_zip_entry(archive_path: Path | None, entry_name: str | None, request: 
             return response
         byte_range = parsed
 
-    def iterator(release, started_at: float, status_code: int, bytes_sent: int, start: int = 0, end: int | None = None):
+    def iterator(
+        release,
+        started_at: float,
+        status_code: int,
+        bytes_sent: int,
+        start: int = 0,
+        end: int | None = None,
+    ):
         try:
-            with zipfile.ZipFile(archive_path) as archive:
-                with archive.open(entry_name, "r") as handle:
-                    remaining_skip = start
-                    while remaining_skip > 0:
-                        skipped = handle.read(min(1024 * 1024, remaining_skip))
-                        if not skipped:
-                            return
-                        remaining_skip -= len(skipped)
-                    remaining = None if end is None else end - start + 1
-                    while True:
-                        chunk_size = 1024 * 1024 if remaining is None else min(1024 * 1024, remaining)
-                        if chunk_size <= 0:
-                            break
-                        chunk = handle.read(chunk_size)
-                        if not chunk:
-                            break
-                        if remaining is not None:
-                            remaining -= len(chunk)
-                        yield chunk
+            with (
+                zipfile.ZipFile(archive_path) as archive,
+                archive.open(entry_name, "r") as handle,
+            ):
+                remaining_skip = start
+                while remaining_skip > 0:
+                    skipped = handle.read(min(1024 * 1024, remaining_skip))
+                    if not skipped:
+                        return
+                    remaining_skip -= len(skipped)
+                remaining = None if end is None else end - start + 1
+                while True:
+                    chunk_size = (
+                        1024 * 1024
+                        if remaining is None
+                        else min(1024 * 1024, remaining)
+                    )
+                    if chunk_size <= 0:
+                        break
+                    chunk = handle.read(chunk_size)
+                    if not chunk:
+                        break
+                    if remaining is not None:
+                        remaining -= len(chunk)
+                    yield chunk
         finally:
             release()
-            _log_slow_file_request(request, route, file_id or entry_name, range_header, bytes_sent, status_code, started_at)
+            _log_slow_file_request(
+                request,
+                route,
+                file_id or entry_name,
+                range_header,
+                bytes_sent,
+                status_code,
+                started_at,
+            )
 
     release = _acquire_file_stream_slot(user_id)
     if release is None:
@@ -530,9 +712,18 @@ def _send_zip_entry(archive_path: Path | None, entry_name: str | None, request: 
         bytes_sent = end - start + 1
         headers["Content-Length"] = str(bytes_sent)
         headers["Content-Range"] = f"bytes {start}-{end}/{size}"
-        return StreamingResponse(iterator(release, started_at, 206, bytes_sent, start, end), status_code=206, headers=headers, media_type=resolved_media_type)
+        return StreamingResponse(
+            iterator(release, started_at, 206, bytes_sent, start, end),
+            status_code=206,
+            headers=headers,
+            media_type=resolved_media_type,
+        )
     headers["Content-Length"] = str(size)
-    return StreamingResponse(iterator(release, started_at, 200, size), headers=headers, media_type=resolved_media_type)
+    return StreamingResponse(
+        iterator(release, started_at, 200, size),
+        headers=headers,
+        media_type=resolved_media_type,
+    )
 
 
 def _with_comic_page_variant_header(response: Response, variant: str) -> Response:
@@ -540,27 +731,71 @@ def _with_comic_page_variant_header(response: Response, variant: str) -> Respons
     return response
 
 
-def _send_original_comic_page_file(path: Path | None, request: Request, user_id: str, media_type: str | None = None, route: str = "volume-page", file_id: str | None = None) -> Response:
+def _send_original_comic_page_file(
+    path: Path | None,
+    request: Request,
+    user_id: str,
+    media_type: str | None = None,
+    route: str = "volume-page",
+    file_id: str | None = None,
+) -> Response:
     return _with_comic_page_variant_header(
-        _send_file(path, request, user_id, media_type=media_type, route=route, file_id=file_id),
+        _send_file(
+            path, request, user_id, media_type=media_type, route=route, file_id=file_id
+        ),
         COMIC_PAGE_ORIGINAL_VARIANT,
     )
 
 
-def _send_original_comic_page_zip_entry(archive_path: Path | None, entry_name: str | None, request: Request, user_id: str, media_type: str | None = None, route: str = "volume-page-zip", file_id: str | None = None) -> Response:
+def _send_original_comic_page_zip_entry(
+    archive_path: Path | None,
+    entry_name: str | None,
+    request: Request,
+    user_id: str,
+    media_type: str | None = None,
+    route: str = "volume-page-zip",
+    file_id: str | None = None,
+) -> Response:
     return _with_comic_page_variant_header(
-        _send_zip_entry(archive_path, entry_name, request, user_id, media_type=media_type, route=route, file_id=file_id),
+        _send_zip_entry(
+            archive_path,
+            entry_name,
+            request,
+            user_id,
+            media_type=media_type,
+            route=route,
+            file_id=file_id,
+        ),
         COMIC_PAGE_ORIGINAL_VARIANT,
     )
 
 
-def _send_comic_page_file(path: Path | None, request: Request, user_id: str, settings: Settings, media_type: str | None = None, route: str = "volume-page", file_id: str | None = None) -> Response:
+def _send_comic_page_file(
+    path: Path | None,
+    request: Request,
+    user_id: str,
+    settings: Settings,
+    media_type: str | None = None,
+    route: str = "volume-page",
+    file_id: str | None = None,
+) -> Response:
     variant = _comic_page_image_variant(request)
     if path is None or not path.exists() or not path.is_file():
         return fail("文件不存在", status_code=404)
-    resolved_media_type = media_type or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    if variant != COMIC_PAGE_DATA_SAVER_VARIANT or not _is_comic_page_image(resolved_media_type):
-        return _send_original_comic_page_file(path, request, user_id, media_type=resolved_media_type, route=route, file_id=file_id)
+    resolved_media_type = (
+        media_type or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    )
+    if variant != COMIC_PAGE_DATA_SAVER_VARIANT or not _is_comic_page_image(
+        resolved_media_type
+    ):
+        return _send_original_comic_page_file(
+            path,
+            request,
+            user_id,
+            media_type=resolved_media_type,
+            route=route,
+            file_id=file_id,
+        )
 
     request.state.user_id = user_id
     stat = path.stat()
@@ -572,31 +807,81 @@ def _send_comic_page_file(path: Path | None, request: Request, user_id: str, set
     )
     cache_path = _comic_page_cache_path(settings, cache_key)
     if cache_path.exists() and cache_path.is_file():
-        return _comic_page_avif_response(cache_path.read_bytes(), request, path.name, stat.st_mtime, stat.st_size, cache_key)
+        return _comic_page_avif_response(
+            cache_path.read_bytes(),
+            request,
+            path.name,
+            stat.st_mtime,
+            stat.st_size,
+            cache_key,
+        )
     try:
         source = path.read_bytes()
     except OSError:
         return fail("文件不存在", status_code=404)
     optimized = _comic_page_avif_bytes(source)
     if optimized is None:
-        return _send_original_comic_page_file(path, request, user_id, media_type=resolved_media_type, route=route, file_id=file_id)
+        return _send_original_comic_page_file(
+            path,
+            request,
+            user_id,
+            media_type=resolved_media_type,
+            route=route,
+            file_id=file_id,
+        )
     _write_cache_bytes(cache_path, optimized)
-    return _comic_page_avif_response(optimized, request, path.name, stat.st_mtime, len(source), cache_key)
+    return _comic_page_avif_response(
+        optimized, request, path.name, stat.st_mtime, len(source), cache_key
+    )
 
 
-def _send_comic_page_zip_entry(archive_path: Path | None, entry_name: str | None, request: Request, user_id: str, settings: Settings, media_type: str | None = None, route: str = "volume-page-zip", file_id: str | None = None) -> Response:
+def _send_comic_page_zip_entry(
+    archive_path: Path | None,
+    entry_name: str | None,
+    request: Request,
+    user_id: str,
+    settings: Settings,
+    media_type: str | None = None,
+    route: str = "volume-page-zip",
+    file_id: str | None = None,
+) -> Response:
     variant = _comic_page_image_variant(request)
-    if archive_path is None or not archive_path.exists() or not archive_path.is_file() or not entry_name:
+    if (
+        archive_path is None
+        or not archive_path.exists()
+        or not archive_path.is_file()
+        or not entry_name
+    ):
         return fail("页面不存在", status_code=404)
     if variant != COMIC_PAGE_DATA_SAVER_VARIANT:
-        return _send_original_comic_page_zip_entry(archive_path, entry_name, request, user_id, media_type=media_type, route=route, file_id=file_id)
+        return _send_original_comic_page_zip_entry(
+            archive_path,
+            entry_name,
+            request,
+            user_id,
+            media_type=media_type,
+            route=route,
+            file_id=file_id,
+        )
 
     try:
         with zipfile.ZipFile(archive_path) as archive:
             info = archive.getinfo(entry_name)
-            resolved_media_type = media_type or mimetypes.guess_type(entry_name)[0] or "application/octet-stream"
+            resolved_media_type = (
+                media_type
+                or mimetypes.guess_type(entry_name)[0]
+                or "application/octet-stream"
+            )
             if not _is_comic_page_image(resolved_media_type):
-                return _send_original_comic_page_zip_entry(archive_path, entry_name, request, user_id, media_type=resolved_media_type, route=route, file_id=file_id)
+                return _send_original_comic_page_zip_entry(
+                    archive_path,
+                    entry_name,
+                    request,
+                    user_id,
+                    media_type=resolved_media_type,
+                    route=route,
+                    file_id=file_id,
+                )
             archive_stat = archive_path.stat()
             cache_key = (
                 f"zip:{archive_path}:{archive_stat.st_size}:{archive_stat.st_mtime_ns}:"
@@ -607,17 +892,38 @@ def _send_comic_page_zip_entry(archive_path: Path | None, entry_name: str | None
             )
             cache_path = _comic_page_cache_path(settings, cache_key)
             if cache_path.exists() and cache_path.is_file():
-                return _comic_page_avif_response(cache_path.read_bytes(), request, Path(entry_name).name, archive_stat.st_mtime, info.file_size, cache_key)
+                return _comic_page_avif_response(
+                    cache_path.read_bytes(),
+                    request,
+                    Path(entry_name).name,
+                    archive_stat.st_mtime,
+                    info.file_size,
+                    cache_key,
+                )
             source = archive.read(entry_name)
     except (KeyError, OSError, zipfile.BadZipFile):
         return fail("页面不存在", status_code=404)
 
     optimized = _comic_page_avif_bytes(source)
     if optimized is None:
-        return _send_original_comic_page_zip_entry(archive_path, entry_name, request, user_id, media_type=resolved_media_type, route=route, file_id=file_id)
+        return _send_original_comic_page_zip_entry(
+            archive_path,
+            entry_name,
+            request,
+            user_id,
+            media_type=resolved_media_type,
+            route=route,
+            file_id=file_id,
+        )
     _write_cache_bytes(cache_path, optimized)
-    return _comic_page_avif_response(optimized, request, Path(entry_name).name, archive_stat.st_mtime, len(source), cache_key)
-
+    return _comic_page_avif_response(
+        optimized,
+        request,
+        Path(entry_name).name,
+        archive_stat.st_mtime,
+        len(source),
+        cache_key,
+    )
 
 
 def stored_path(path_value: str | None, settings: Settings) -> Path | None:
@@ -633,10 +939,20 @@ def send_file(
     route: str = "file",
     file_id: str | None = None,
 ) -> Response:
-    return _send_file(path, request, user_id, media_type=media_type, name=name, route=route, file_id=file_id)
+    return _send_file(
+        path,
+        request,
+        user_id,
+        media_type=media_type,
+        name=name,
+        route=route,
+        file_id=file_id,
+    )
 
 
-def small_cover_response(path: Path, request: Request, user_id: str, settings: Settings) -> Response | None:
+def small_cover_response(
+    path: Path, request: Request, user_id: str, settings: Settings
+) -> Response | None:
     return _small_cover_response(path, request, user_id, settings)
 
 
@@ -649,7 +965,15 @@ def send_comic_page_file(
     route: str = "volume-page",
     file_id: str | None = None,
 ) -> Response:
-    return _send_comic_page_file(path, request, user_id, settings, media_type=media_type, route=route, file_id=file_id)
+    return _send_comic_page_file(
+        path,
+        request,
+        user_id,
+        settings,
+        media_type=media_type,
+        route=route,
+        file_id=file_id,
+    )
 
 
 def send_comic_page_zip_entry(

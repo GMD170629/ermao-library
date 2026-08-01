@@ -5,15 +5,15 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import and_, delete, exists, func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy import inspect as sa_inspect
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session
 
 from app.core.authorization import (
     AuthorizationContext,
-    monitor_folder_visibility_predicate,
+    work_visibility_predicate,
 )
-from app.models.library import LibraryEdition, LibraryWork
+from app.models.library import LibraryWork
 from app.models.settings import MonitorFolder
 from app.models.shelf import Shelf, ShelfWork
 from app.modules.shelf.infrastructure.models import ShelfCollectionMembership
@@ -234,36 +234,7 @@ def filter_visible_work_ids(
         chunk = work_ids[chunk_start : chunk_start + 400]
         stmt = select(LibraryWork.id).where(LibraryWork.id.in_(chunk))
         if not context.is_admin:
-            accessible_edition = aliased(LibraryEdition)
-            any_visible_edition = aliased(LibraryEdition)
-            has_accessible = exists(
-                select(accessible_edition.id).where(
-                    accessible_edition.work_id == LibraryWork.id,
-                    accessible_edition.hidden.is_(False),
-                    monitor_folder_visibility_predicate(
-                        context,
-                        accessible_edition.monitor_folder_id,
-                    ),
-                )
-            )
-            has_any = exists(
-                select(any_visible_edition.id).where(
-                    any_visible_edition.work_id == LibraryWork.id,
-                    any_visible_edition.hidden.is_(False),
-                )
-            )
-            stmt = stmt.where(
-                or_(
-                    has_accessible,
-                    and_(
-                        ~has_any,
-                        monitor_folder_visibility_predicate(
-                            context,
-                            LibraryWork.monitor_folder_id,
-                        ),
-                    ),
-                )
-            )
+            stmt = stmt.where(work_visibility_predicate(context))
         visible.update(str(row) for row in db.scalars(stmt).all())
     return [str(work_id) for work_id in work_ids if str(work_id) in visible]
 

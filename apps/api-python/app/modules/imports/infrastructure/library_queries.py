@@ -17,14 +17,14 @@ from app.models.import_pipeline import (
     ImportTask,
 )
 from app.models.library import (
-    LibraryConsumptionState,
-    LibraryEdition,
     LibraryFile,
+    LibraryMediaVersion,
     LibraryMetadata,
     LibraryReadingProgress,
     LibraryReadingUnit,
     LibraryVolume,
     LibraryWork,
+    UserMediaHistory,
 )
 from app.models.organize import MetadataLookupTask, OrganizeJob
 from app.models.settings import MonitorFolder
@@ -71,12 +71,27 @@ def _list_reading_units(
     return _records(db, statement)
 
 
-def list_reflowable_chapters_for_edition(
-    db: Session, edition_id: str
+def list_reflowable_chapters_for_media_version(
+    db: Session, media_version_id: str
 ) -> list[dict[str, Any]]:
     return _list_reading_units(
         db,
-        LibraryReadingUnit.edition_id == edition_id,
+        LibraryReadingUnit.volume_id.in_(
+            select(LibraryVolume.id).where(
+                LibraryVolume.media_version_id == media_version_id
+            )
+        ),
+        func.lower(LibraryReadingUnit.unit_type) == "chapter",
+        order_by=(LibraryReadingUnit.sort_order, LibraryReadingUnit.id),
+    )
+
+
+def list_reflowable_chapters_for_volume(
+    db: Session, volume_id: str
+) -> list[dict[str, Any]]:
+    return _list_reading_units(
+        db,
+        LibraryReadingUnit.volume_id == volume_id,
         func.lower(LibraryReadingUnit.unit_type) == "chapter",
         order_by=(LibraryReadingUnit.sort_order, LibraryReadingUnit.id),
     )
@@ -102,7 +117,7 @@ def _list_consumption_states(
     order_by: tuple[Any, ...] | None = None,
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
-    statement = select(LibraryConsumptionState.__table__).where(*filters)
+    statement = select(UserMediaHistory.__table__).where(*filters)
     if order_by:
         statement = statement.order_by(*order_by)
     if limit is not None:
@@ -110,13 +125,13 @@ def _list_consumption_states(
     return _records(db, statement)
 
 
-def _list_editions(
+def _list_media_versions(
     db: Session,
     *filters: Any,
     order_by: tuple[Any, ...] | None = None,
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
-    statement = select(LibraryEdition.__table__).where(*filters)
+    statement = select(LibraryMediaVersion.__table__).where(*filters)
     if order_by:
         statement = statement.order_by(*order_by)
     if limit is not None:
@@ -159,10 +174,10 @@ def _get_work(db: Session, *filters: Any) -> dict[str, Any] | None:
     return _first_record(db, select(LibraryWork.__table__).where(*filters))
 
 
-def _get_edition(
+def _get_media_version(
     db: Session, *filters: Any, order_by: tuple[Any, ...] | None = None
 ) -> dict[str, Any] | None:
-    statement = select(LibraryEdition.__table__).where(*filters)
+    statement = select(LibraryMediaVersion.__table__).where(*filters)
     if order_by:
         statement = statement.order_by(*order_by)
     return _first_record(db, statement)
@@ -181,9 +196,10 @@ def _get_organize_job(db: Session, *filters: Any) -> dict[str, Any] | None:
     return _first_record(db, select(OrganizeJob.__table__).where(*filters))
 
 
-def _count_editions(db: Session, *filters: Any) -> int:
+def _count_media_versions(db: Session, *filters: Any) -> int:
     return int(
-        db.scalar(select(func.count()).select_from(LibraryEdition).where(*filters)) or 0
+        db.scalar(select(func.count()).select_from(LibraryMediaVersion).where(*filters))
+        or 0
     )
 
 
@@ -229,31 +245,54 @@ def get_work_by_merge_key(db: Session, merge_key: str) -> dict[str, Any] | None:
     return _get_work(db, LibraryWork.merge_key == merge_key)
 
 
-def get_edition_by_id(db: Session, edition_id: str) -> dict[str, Any] | None:
-    return _get_edition(db, LibraryEdition.id == edition_id)
+def get_media_version_by_id(
+    db: Session, media_version_id: str
+) -> dict[str, Any] | None:
+    return _get_media_version(db, LibraryMediaVersion.id == media_version_id)
 
 
-def get_edition_format(db: Session, edition_id: str) -> dict[str, Any] | None:
-    edition = db.get(LibraryEdition, edition_id)
-    if edition is None:
+def get_media_version_format(
+    db: Session, media_version_id: str
+) -> dict[str, Any] | None:
+    volume = db.scalar(
+        select(LibraryVolume)
+        .where(LibraryVolume.media_version_id == media_version_id)
+        .order_by(LibraryVolume.sort_order, LibraryVolume.id)
+        .limit(1)
+    )
+    if volume is None:
         return None
-    return {"format": edition.format}
+    return {"format": volume.format}
 
 
-def get_edition_cover_path(db: Session, edition_id: str) -> dict[str, Any] | None:
-    edition = db.get(LibraryEdition, edition_id)
-    if edition is None:
+def get_media_version_cover_path(
+    db: Session, media_version_id: str
+) -> dict[str, Any] | None:
+    volume = db.scalar(
+        select(LibraryVolume)
+        .where(
+            LibraryVolume.media_version_id == media_version_id,
+            LibraryVolume.cover_path.is_not(None),
+        )
+        .order_by(LibraryVolume.sort_order, LibraryVolume.id)
+        .limit(1)
+    )
+    if volume is None:
         return None
-    return {"coverPath": edition.cover_path}
+    return {"coverPath": volume.cover_path}
 
 
-def get_organize_job_for_work_edition(
-    db: Session, work_id: str, edition_id: str
+def get_organize_job_for_work_media_version(
+    db: Session, work_id: str, media_version_id: str
 ) -> dict[str, Any] | None:
     return _get_organize_job(
         db,
         OrganizeJob.work_id == work_id,
-        OrganizeJob.edition_id == edition_id,
+        OrganizeJob.volume_id.in_(
+            select(LibraryVolume.id).where(
+                LibraryVolume.media_version_id == media_version_id
+            )
+        ),
     )
 
 
@@ -324,99 +363,123 @@ def fail_import_assets_for_task(
     )
 
 
-def sum_file_size_bytes_for_edition(db: Session, edition_id: str) -> int:
+def sum_file_size_bytes_for_media_version(db: Session, media_version_id: str) -> int:
     return int(
         _scalar_value(
             db,
             select(func.coalesce(func.sum(LibraryFile.size_bytes), 0)).where(
-                LibraryFile.edition_id == edition_id
+                LibraryFile.volume_id.in_(
+                    select(LibraryVolume.id).where(
+                        LibraryVolume.media_version_id == media_version_id
+                    )
+                )
             ),
             0,
         )
     )
 
 
-def sum_volume_chapter_count_for_edition(db: Session, edition_id: str) -> int:
+def sum_volume_chapter_count_for_media_version(
+    db: Session, media_version_id: str
+) -> int:
     return int(
         _scalar_value(
             db,
             select(func.coalesce(func.sum(LibraryVolume.chapter_count), 0)).where(
-                LibraryVolume.edition_id == edition_id
+                LibraryVolume.media_version_id == media_version_id
             ),
             0,
         )
     )
 
 
-def sum_volume_page_count_for_edition(db: Session, edition_id: str) -> int:
+def sum_volume_page_count_for_media_version(db: Session, media_version_id: str) -> int:
     return int(
         _scalar_value(
             db,
             select(func.coalesce(func.sum(LibraryVolume.page_count), 0)).where(
-                LibraryVolume.edition_id == edition_id
+                LibraryVolume.media_version_id == media_version_id
             ),
             0,
         )
     )
 
 
-def count_volumes_for_edition(db: Session, edition_id: str) -> int:
-    return _count_volumes(db, LibraryVolume.edition_id == edition_id)
+def count_volumes_for_media_version(db: Session, media_version_id: str) -> int:
+    return _count_volumes(db, LibraryVolume.media_version_id == media_version_id)
 
 
-def count_editions_for_work(
+def count_media_versions_for_work(
     db: Session,
     work_id: str,
     *,
     media_kind: str | None = None,
 ) -> int:
-    filters: list[Any] = [LibraryEdition.work_id == work_id]
+    filters: list[Any] = [LibraryMediaVersion.work_id == work_id]
     if media_kind:
-        filters.append(LibraryEdition.media_kind == media_kind)
-    return _count_editions(db, *filters)
+        filters.append(LibraryMediaVersion.media_kind == media_kind)
+    return _count_media_versions(db, *filters)
 
 
-def count_visible_editions_for_work(db: Session, work_id: str) -> int:
-    return _count_editions(
+def count_visible_media_versions_for_work(db: Session, work_id: str) -> int:
+    return _count_media_versions(
         db,
-        LibraryEdition.work_id == work_id,
-        func.coalesce(LibraryEdition.hidden, False).is_(False),
+        LibraryMediaVersion.work_id == work_id,
     )
 
 
-def count_primary_audiobook_editions_for_work(
+def count_visible_volumes_for_work(db: Session, work_id: str) -> int:
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(LibraryVolume)
+            .join(
+                LibraryMediaVersion,
+                LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            )
+            .where(
+                LibraryMediaVersion.work_id == work_id,
+                LibraryVolume.hidden.is_(False),
+            )
+        )
+        or 0
+    )
+
+
+def count_primary_audiobook_media_versions_for_work(
     db: Session,
     work_id: str,
     *,
-    exclude_edition_id: str,
+    exclude_media_version_id: str,
 ) -> int:
-    return _count_editions(
+    return _count_media_versions(
         db,
-        LibraryEdition.work_id == work_id,
-        LibraryEdition.media_kind == "AUDIOBOOK",
-        LibraryEdition.id != exclude_edition_id,
-        func.coalesce(LibraryEdition.hidden, 0) == 0,
-        LibraryEdition.is_primary.is_(True),
+        LibraryMediaVersion.work_id == work_id,
+        LibraryMediaVersion.media_kind == "AUDIOBOOK",
+        LibraryMediaVersion.id != exclude_media_version_id,
     )
 
 
-def count_audiobook_media_kind_editions(
+def count_audiobook_media_kind_media_versions(
     db: Session, work_id: str, media_kind: str
 ) -> int:
-    return _count_editions(
+    return _count_media_versions(
         db,
-        LibraryEdition.work_id == work_id,
-        LibraryEdition.media_kind == media_kind,
-        func.coalesce(LibraryEdition.hidden, 0) == 0,
+        LibraryMediaVersion.work_id == work_id,
+        LibraryMediaVersion.media_kind == media_kind,
     )
 
 
-def sum_audio_file_size_for_edition(db: Session, edition_id: str) -> int:
+def sum_audio_file_size_for_media_version(db: Session, media_version_id: str) -> int:
     return int(
         _scalar_value(
             db,
             select(func.coalesce(func.sum(LibraryFile.size_bytes), 0)).where(
-                LibraryFile.edition_id == edition_id,
+                LibraryFile.volume_id.in_(
+                    select(LibraryVolume.id).where(
+                        LibraryVolume.media_version_id == media_version_id
+                    )
+                ),
                 func.upper(LibraryFile.kind) == "AUDIO",
             ),
             0,
@@ -424,12 +487,16 @@ def sum_audio_file_size_for_edition(db: Session, edition_id: str) -> int:
     )
 
 
-def sum_audio_duration_for_edition(db: Session, edition_id: str) -> int:
+def sum_audio_duration_for_media_version(db: Session, media_version_id: str) -> int:
     return int(
         _scalar_value(
             db,
             select(func.coalesce(func.sum(LibraryFile.duration_ms), 0)).where(
-                LibraryFile.edition_id == edition_id,
+                LibraryFile.volume_id.in_(
+                    select(LibraryVolume.id).where(
+                        LibraryVolume.media_version_id == media_version_id
+                    )
+                ),
                 func.upper(LibraryFile.kind) == "AUDIO",
             ),
             0,
@@ -437,18 +504,26 @@ def sum_audio_duration_for_edition(db: Session, edition_id: str) -> int:
     )
 
 
-def count_audio_files_for_edition(db: Session, edition_id: str) -> int:
+def count_audio_files_for_media_version(db: Session, media_version_id: str) -> int:
     return _count_files(
         db,
-        LibraryFile.edition_id == edition_id,
+        LibraryFile.volume_id.in_(
+            select(LibraryVolume.id).where(
+                LibraryVolume.media_version_id == media_version_id
+            )
+        ),
         func.upper(LibraryFile.kind) == "AUDIO",
     )
 
 
-def count_audio_chapters_for_edition(db: Session, edition_id: str) -> int:
+def count_audio_chapters_for_media_version(db: Session, media_version_id: str) -> int:
     return _count_reading_units(
         db,
-        LibraryReadingUnit.edition_id == edition_id,
+        LibraryReadingUnit.volume_id.in_(
+            select(LibraryVolume.id).where(
+                LibraryVolume.media_version_id == media_version_id
+            )
+        ),
         LibraryReadingUnit.unit_type == "audio_chapter",
     )
 
@@ -496,33 +571,42 @@ def list_library_files_by_paths(db: Session, paths: list[str]) -> list[dict[str,
     return list(deduped.values())
 
 
-def list_audio_files_for_edition(db: Session, edition_id: str) -> list[dict[str, Any]]:
+def list_audio_files_for_media_version(
+    db: Session, media_version_id: str
+) -> list[dict[str, Any]]:
     return _list_library_files(
         db,
-        LibraryFile.edition_id == edition_id,
+        LibraryFile.volume_id.in_(
+            select(LibraryVolume.id).where(
+                LibraryVolume.media_version_id == media_version_id
+            )
+        ),
         func.upper(LibraryFile.kind) == "AUDIO",
         order_by=(LibraryFile.sort_order.asc(), LibraryFile.id.asc()),
     )
 
 
 def list_audio_files_for_volume(
-    db: Session, edition_id: str, volume_id: str
+    db: Session, media_version_id: str, volume_id: str
 ) -> list[dict[str, Any]]:
     return _list_library_files(
         db,
-        LibraryFile.edition_id == edition_id,
         LibraryFile.volume_id == volume_id,
         func.upper(LibraryFile.kind) == "AUDIO",
         order_by=(LibraryFile.sort_order.asc(), LibraryFile.id.asc()),
     )
 
 
-def list_audio_chapters_for_edition(
-    db: Session, edition_id: str
+def list_audio_chapters_for_media_version(
+    db: Session, media_version_id: str
 ) -> list[dict[str, Any]]:
     return _list_reading_units(
         db,
-        LibraryReadingUnit.edition_id == edition_id,
+        LibraryReadingUnit.volume_id.in_(
+            select(LibraryVolume.id).where(
+                LibraryVolume.media_version_id == media_version_id
+            )
+        ),
         LibraryReadingUnit.unit_type == "audio_chapter",
         order_by=(LibraryReadingUnit.sort_order.asc(), LibraryReadingUnit.id.asc()),
     )
@@ -557,39 +641,39 @@ def list_audio_chapter_units_for_file_ordered(
     )
 
 
-def list_unassigned_audio_chapters_for_edition(
-    db: Session, edition_id: str
+def list_unassigned_audio_chapters_for_media_version(
+    db: Session, media_version_id: str
 ) -> list[dict[str, Any]]:
-    return _list_reading_units(
+    del db, media_version_id
+    return []
+
+
+def list_reading_progress_for_media_version(
+    db: Session, media_version_id: str
+) -> list[dict[str, Any]]:
+    return _list_reading_progress(
         db,
-        LibraryReadingUnit.edition_id == edition_id,
-        LibraryReadingUnit.volume_id.is_(None),
-        order_by=(
-            LibraryReadingUnit.sort_order.asc(),
-            LibraryReadingUnit.created_at.asc(),
-            LibraryReadingUnit.id.asc(),
+        LibraryReadingProgress.volume_id.in_(
+            select(LibraryVolume.id).where(
+                LibraryVolume.media_version_id == media_version_id
+            )
         ),
     )
 
 
-def list_reading_progress_for_edition(
-    db: Session, edition_id: str
-) -> list[dict[str, Any]]:
-    return _list_reading_progress(
-        db,
-        LibraryReadingProgress.edition_id == edition_id,
-    )
-
-
-def list_reading_progress_for_editions(
+def list_reading_progress_for_media_versions(
     db: Session,
-    edition_ids: list[str],
+    media_version_ids: list[str],
 ) -> list[dict[str, Any]]:
-    if not edition_ids:
+    if not media_version_ids:
         return []
     return _list_reading_progress(
         db,
-        LibraryReadingProgress.edition_id.in_(edition_ids),
+        LibraryReadingProgress.volume_id.in_(
+            select(LibraryVolume.id).where(
+                LibraryVolume.media_version_id.in_(media_version_ids)
+            )
+        ),
         order_by=(
             LibraryReadingProgress.updated_at.asc(),
             LibraryReadingProgress.created_at.asc(),
@@ -604,42 +688,58 @@ def list_audiobook_consumption_for_works(
 ) -> list[dict[str, Any]]:
     if not work_ids:
         return []
-    return _list_consumption_states(
+    return _records(
         db,
-        LibraryConsumptionState.work_id.in_(work_ids),
-        func.upper(LibraryConsumptionState.media_kind) == "AUDIOBOOK",
-        order_by=(
-            LibraryConsumptionState.updated_at.asc(),
-            LibraryConsumptionState.created_at.asc(),
-            LibraryConsumptionState.id.asc(),
-        ),
+        select(UserMediaHistory.__table__)
+        .join(
+            LibraryMediaVersion,
+            LibraryMediaVersion.id == UserMediaHistory.media_version_id,
+        )
+        .where(
+            LibraryMediaVersion.work_id.in_(work_ids),
+            LibraryMediaVersion.media_kind == "AUDIOBOOK",
+        )
+        .order_by(UserMediaHistory.updated_at.asc(), UserMediaHistory.id.asc()),
     )
 
 
-def list_editions_by_ids(db: Session, edition_ids: list[str]) -> list[dict[str, Any]]:
-    if not edition_ids:
+def list_media_versions_by_ids(
+    db: Session, media_version_ids: list[str]
+) -> list[dict[str, Any]]:
+    if not media_version_ids:
         return []
-    return _list_editions(db, LibraryEdition.id.in_(edition_ids))
+    return _list_media_versions(db, LibraryMediaVersion.id.in_(media_version_ids))
 
 
-def list_visible_editions_for_work_and_format(
+def list_visible_media_versions_for_work_and_format(
     db: Session,
     work_id: str,
     fmt: str,
 ) -> list[dict[str, Any]]:
-    return _list_editions(
-        db,
-        LibraryEdition.work_id == work_id,
-        LibraryEdition.format == fmt,
-        func.coalesce(LibraryEdition.hidden, 0) == 0,
-        order_by=(LibraryEdition.created_at.asc(),),
-    )
+    rows = db.execute(
+        select(LibraryMediaVersion.id, LibraryVolume.resource_key)
+        .join(
+            LibraryVolume,
+            LibraryVolume.media_version_id == LibraryMediaVersion.id,
+        )
+        .where(
+            LibraryMediaVersion.work_id == work_id,
+            func.upper(LibraryVolume.format) == fmt.upper(),
+            func.coalesce(LibraryVolume.hidden, 0) == 0,
+        )
+        .order_by(LibraryVolume.created_at.asc(), LibraryVolume.id.asc())
+    ).all()
+    return [
+        {"id": row.id, "resourceKey": row.resource_key, "format": fmt} for row in rows
+    ]
 
 
-def get_first_volume_for_edition(db: Session, edition_id: str) -> dict[str, Any] | None:
+def get_first_volume_for_media_version(
+    db: Session, media_version_id: str
+) -> dict[str, Any] | None:
     return _get_volume(
         db,
-        LibraryVolume.edition_id == edition_id,
+        LibraryVolume.media_version_id == media_version_id,
         order_by=(
             LibraryVolume.sort_order.asc(),
             LibraryVolume.created_at.asc(),
@@ -648,57 +748,91 @@ def get_first_volume_for_edition(db: Session, edition_id: str) -> dict[str, Any]
     )
 
 
+def get_volume_context_by_id(db: Session, volume_id: str) -> dict[str, Any] | None:
+    row = (
+        db.execute(
+            select(
+                LibraryVolume.__table__,
+                LibraryMediaVersion.work_id.label("workId"),
+                LibraryMediaVersion.media_kind.label("mediaKind"),
+            )
+            .join(
+                LibraryMediaVersion,
+                LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            )
+            .where(LibraryVolume.id == volume_id)
+        )
+        .mappings()
+        .first()
+    )
+    return dict(row) if row is not None else None
+
+
 def find_volume_conflict(
     db: Session,
-    edition_id: str,
+    media_version_id: str,
     volume_index: float | None,
     volume_title: str,
 ) -> dict[str, Any] | None:
-    if volume_index is not None:
-        return _get_volume(
-            db,
-            LibraryVolume.edition_id == edition_id,
-            LibraryVolume.volume_index == volume_index,
-        )
-    return _get_volume(
-        db,
-        LibraryVolume.edition_id == edition_id,
-        LibraryVolume.title == volume_title,
-    )
+    del db, media_version_id, volume_index, volume_title
+    return None
 
 
-def find_audio_edition_by_version_key(
-    db: Session, version_key: str
+def find_audio_media_version_by_resource_key(
+    db: Session, resource_key: str
 ) -> dict[str, Any] | None:
-    return _get_edition(
-        db,
-        LibraryEdition.version_key == version_key,
-        func.upper(LibraryEdition.media_kind) == "AUDIOBOOK",
-        func.coalesce(LibraryEdition.hidden, 0) == 0,
-        order_by=(LibraryEdition.created_at.asc(), LibraryEdition.id.asc()),
+    row = (
+        db.execute(
+            select(LibraryMediaVersion.__table__)
+            .join(
+                LibraryVolume,
+                LibraryVolume.media_version_id == LibraryMediaVersion.id,
+            )
+            .where(
+                LibraryVolume.resource_key == resource_key,
+                func.coalesce(LibraryVolume.hidden, 0) == 0,
+            )
+            .order_by(LibraryVolume.created_at.asc(), LibraryVolume.id.asc())
+            .limit(1)
+        )
+        .mappings()
+        .first()
     )
+    return dict(row) if row is not None else None
 
 
-def find_edition_version_key_conflict(
+def find_media_version_resource_key_conflict(
     db: Session,
     work_id: str,
-    version_key: str,
-    exclude_edition_id: str,
+    resource_key: str,
+    exclude_media_version_id: str,
 ) -> dict[str, Any] | None:
-    return _get_edition(
-        db,
-        LibraryEdition.work_id == work_id,
-        LibraryEdition.version_key == version_key,
-        LibraryEdition.id != exclude_edition_id,
+    volume = (
+        db.execute(
+            select(LibraryVolume.__table__)
+            .join(
+                LibraryMediaVersion,
+                LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            )
+            .where(
+                LibraryMediaVersion.work_id == work_id,
+                LibraryVolume.resource_key == resource_key,
+                LibraryMediaVersion.id != exclude_media_version_id,
+            )
+            .limit(1)
+        )
+        .mappings()
+        .first()
     )
+    return dict(volume) if volume else None
 
 
-def list_volume_cover_paths_for_edition(
-    db: Session, edition_id: str
+def list_volume_cover_paths_for_media_version(
+    db: Session, media_version_id: str
 ) -> list[dict[str, Any]]:
     return _list_volumes(
         db,
-        LibraryVolume.edition_id == edition_id,
+        LibraryVolume.media_version_id == media_version_id,
         LibraryVolume.cover_path.is_not(None),
         LibraryVolume.cover_path != "",
         order_by=(
@@ -710,39 +844,43 @@ def list_volume_cover_paths_for_edition(
     )
 
 
-def find_work_cover_edition(db: Session, work_id: str) -> dict[str, Any] | None:
-    edition = db.scalars(
-        select(LibraryEdition)
+def find_work_cover_media_version(db: Session, work_id: str) -> dict[str, Any] | None:
+    volume = db.scalars(
+        select(LibraryVolume)
+        .join(
+            LibraryMediaVersion,
+            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+        )
         .where(
-            LibraryEdition.work_id == work_id,
-            func.coalesce(LibraryEdition.hidden, 0) == 0,
-            LibraryEdition.cover_path.is_not(None),
-            LibraryEdition.cover_path != "",
+            LibraryMediaVersion.work_id == work_id,
+            func.coalesce(LibraryVolume.hidden, 0) == 0,
+            LibraryVolume.cover_path.is_not(None),
+            LibraryVolume.cover_path != "",
         )
         .order_by(
-            case((LibraryEdition.is_primary.is_(True), 0), else_=1).asc(),
-            LibraryEdition.created_at.asc(),
+            case(
+                (LibraryMediaVersion.media_kind == "EBOOK", 0),
+                (LibraryMediaVersion.media_kind == "COMIC", 1),
+                else_=2,
+            ),
+            LibraryVolume.sort_order.asc(),
+            LibraryVolume.created_at.asc(),
         )
         .limit(1)
     ).first()
-    return {"coverPath": edition.cover_path} if edition is not None else None
+    return {"coverPath": volume.cover_path} if volume is not None else None
 
 
 def has_generated_cover_path(db: Session, work_id: str, cover_path: str) -> bool:
-    edition_match = db.scalar(
-        select(LibraryEdition.cover_path)
-        .where(
-            LibraryEdition.work_id == work_id, LibraryEdition.cover_path == cover_path
-        )
-        .limit(1)
-    )
-    if edition_match:
-        return True
     volume_match = db.scalar(
         select(LibraryVolume.cover_path)
-        .join(LibraryEdition, LibraryEdition.id == LibraryVolume.edition_id)
+        .join(
+            LibraryMediaVersion,
+            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+        )
         .where(
-            LibraryEdition.work_id == work_id, LibraryVolume.cover_path == cover_path
+            LibraryMediaVersion.work_id == work_id,
+            LibraryVolume.cover_path == cover_path,
         )
         .limit(1)
     )
@@ -750,12 +888,16 @@ def has_generated_cover_path(db: Session, work_id: str, cover_path: str) -> bool
 
 
 def get_latest_audio_tags_metadata(
-    db: Session, edition_id: str
+    db: Session, media_version_id: str
 ) -> dict[str, Any] | None:
     row = db.scalars(
         select(LibraryMetadata)
         .where(
-            LibraryMetadata.edition_id == edition_id,
+            LibraryMetadata.volume_id.in_(
+                select(LibraryVolume.id).where(
+                    LibraryVolume.media_version_id == media_version_id
+                )
+            ),
             LibraryMetadata.source == "audio_tags",
         )
         .order_by(LibraryMetadata.updated_at.desc(), LibraryMetadata.id.desc())
@@ -764,40 +906,52 @@ def get_latest_audio_tags_metadata(
     return {"rawJson": row.raw_json} if row is not None else None
 
 
-def delete_audio_metadata_sources(db: Session, edition_id: str) -> None:
+def delete_audio_metadata_sources(db: Session, media_version_id: str) -> None:
     db.execute(
         delete(LibraryMetadata).where(
-            LibraryMetadata.edition_id == edition_id,
+            LibraryMetadata.volume_id.in_(
+                select(LibraryVolume.id).where(
+                    LibraryVolume.media_version_id == media_version_id
+                )
+            ),
             LibraryMetadata.source.in_(("audio_tags", "audiobook_manifest")),
         )
     )
 
 
-def detach_audio_chapters_for_edition(db: Session, edition_id: str) -> None:
+def detach_audio_chapters_for_media_version(db: Session, media_version_id: str) -> None:
     db.execute(
-        update(LibraryReadingUnit)
-        .where(
-            LibraryReadingUnit.edition_id == edition_id,
+        delete(LibraryReadingUnit).where(
+            LibraryReadingUnit.volume_id.in_(
+                select(LibraryVolume.id).where(
+                    LibraryVolume.media_version_id == media_version_id
+                )
+            ),
             LibraryReadingUnit.unit_type == "audio_chapter",
         )
-        .values(volume_id=None)
     )
 
 
-def detach_audio_chapters_for_edition_or_files(
+def detach_audio_chapters_for_media_version_or_files(
     db: Session,
-    edition_id: str,
+    media_version_id: str,
     file_ids: list[str],
 ) -> None:
-    filters = [LibraryReadingUnit.edition_id == edition_id]
+    filters = [
+        LibraryReadingUnit.volume_id.in_(
+            select(LibraryVolume.id).where(
+                LibraryVolume.media_version_id == media_version_id
+            )
+        )
+    ]
     if file_ids:
         filters = [
             or_(
-                LibraryReadingUnit.edition_id == edition_id,
+                *filters,
                 LibraryReadingUnit.file_id.in_(file_ids),
             )
         ]
-    db.execute(update(LibraryReadingUnit).where(*filters).values(volume_id=None))
+    db.execute(delete(LibraryReadingUnit).where(*filters))
 
 
 def copy_shelf_links_to_work(
@@ -817,26 +971,30 @@ def copy_shelf_links_to_work(
         )
 
 
-def find_deferred_source_edition(
+def find_deferred_source_volume(
     db: Session,
     *,
     source_path: str,
     work_id: str,
-    result_edition_id: str,
+    result_volume_id: str | None,
 ) -> dict[str, Any] | None:
     row = db.execute(
-        select(LibraryEdition.id)
-        .join(LibraryFile, LibraryFile.edition_id == LibraryEdition.id)
+        select(LibraryVolume.id)
+        .join(LibraryFile, LibraryFile.volume_id == LibraryVolume.id)
+        .join(
+            LibraryMediaVersion,
+            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+        )
         .where(
             LibraryFile.path == source_path,
-            LibraryEdition.work_id == work_id,
-            LibraryEdition.id != result_edition_id,
-            func.upper(LibraryEdition.format).in_(
+            LibraryMediaVersion.work_id == work_id,
+            LibraryVolume.id != result_volume_id,
+            func.upper(LibraryVolume.format).in_(
                 ("MOBI", "AZW", "AZW3", "PRC", "FB2", "TXT")
             ),
-            func.coalesce(LibraryEdition.hidden, 0) == 0,
+            func.coalesce(LibraryVolume.hidden, 0) == 0,
         )
-        .order_by(LibraryEdition.created_at.asc())
+        .order_by(LibraryVolume.created_at.asc())
         .limit(1)
     ).first()
     return {"id": row[0]} if row else None
@@ -847,10 +1005,14 @@ def list_works_by_source_group_suffix(
 ) -> list[dict[str, Any]]:
     rows = db.execute(
         select(LibraryWork.id, LibraryWork.title, LibraryWork.author)
-        .join(LibraryEdition, LibraryEdition.work_id == LibraryWork.id)
+        .join(LibraryMediaVersion, LibraryMediaVersion.work_id == LibraryWork.id)
+        .join(
+            LibraryVolume,
+            LibraryVolume.media_version_id == LibraryMediaVersion.id,
+        )
         .where(
-            LibraryEdition.source_group_key.like(f"%{source_group_suffix}"),
-            func.coalesce(LibraryEdition.hidden, 0) == 0,
+            LibraryVolume.source_group_key.like(f"%{source_group_suffix}"),
+            func.coalesce(LibraryVolume.hidden, 0) == 0,
             func.coalesce(LibraryWork.hidden, 0) == 0,
         )
         .distinct()
@@ -859,17 +1021,21 @@ def list_works_by_source_group_suffix(
     return [{"id": row.id, "title": row.title, "author": row.author} for row in rows]
 
 
-def list_edition_file_paths_for_work(
+def list_media_version_file_paths_for_work(
     db: Session,
     work_id: str,
     source_group_suffix: str,
 ) -> list[dict[str, Any]]:
     rows = db.execute(
         select(LibraryFile.path)
-        .join(LibraryEdition, LibraryEdition.id == LibraryFile.edition_id)
+        .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
+        .join(
+            LibraryMediaVersion,
+            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+        )
         .where(
-            LibraryEdition.work_id == work_id,
-            LibraryEdition.source_group_key.like(f"%{source_group_suffix}"),
+            LibraryMediaVersion.work_id == work_id,
+            LibraryVolume.source_group_key.like(f"%{source_group_suffix}"),
         )
         .order_by(LibraryFile.created_at.asc())
     ).all()
@@ -880,17 +1046,21 @@ def existing_file_import_snapshot(db: Session, path: Path) -> dict[str, Any] | N
     row = (
         db.execute(
             select(
-                LibraryFile.volume_id,
-                LibraryEdition.id.label("editionId"),
-                LibraryEdition.format,
-                LibraryEdition.page_count,
-                LibraryEdition.chapter_count,
+                LibraryFile.volume_id.label("volumeId"),
+                LibraryMediaVersion.id.label("mediaVersionId"),
+                LibraryVolume.format,
+                LibraryVolume.page_count,
+                LibraryVolume.chapter_count,
                 LibraryWork.id.label("workId"),
                 LibraryWork.title,
                 LibraryWork.work_type,
             )
-            .join(LibraryEdition, LibraryEdition.id == LibraryFile.edition_id)
-            .join(LibraryWork, LibraryWork.id == LibraryEdition.work_id)
+            .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
+            .join(
+                LibraryMediaVersion,
+                LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            )
+            .join(LibraryWork, LibraryWork.id == LibraryMediaVersion.work_id)
             .where(LibraryFile.path == str(path.resolve()))
             .limit(1)
         )
@@ -900,7 +1070,7 @@ def existing_file_import_snapshot(db: Session, path: Path) -> dict[str, Any] | N
     return dict(row) if row else None
 
 
-def list_file_editions_by_paths(db: Session, paths: list[str]) -> list[dict[str, Any]]:
+def list_file_volumes_by_paths(db: Session, paths: list[str]) -> list[dict[str, Any]]:
     if not paths:
         return []
     expanded: list[str] = []
@@ -912,29 +1082,29 @@ def list_file_editions_by_paths(db: Session, paths: list[str]) -> list[dict[str,
             pass
     rows = (
         db.execute(
-            select(LibraryFile.path, LibraryFile.edition_id).where(
+            select(LibraryFile.path, LibraryFile.volume_id).where(
                 LibraryFile.path.in_(list(dict.fromkeys(expanded)))
             )
         )
         .mappings()
         .all()
     )
-    return [{"path": row["path"], "editionId": row["edition_id"]} for row in rows]
+    return [{"path": row["path"], "volumeId": row["volume_id"]} for row in rows]
 
 
 def audio_bundle_fully_imported(db: Session, paths: list[str]) -> bool:
     if not paths:
         return False
     rows = db.execute(
-        select(LibraryFile.edition_id)
-        .join(LibraryEdition, LibraryEdition.id == LibraryFile.edition_id)
+        select(LibraryFile.volume_id)
+        .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
         .where(
             LibraryFile.path.in_(paths),
-            func.coalesce(LibraryEdition.hidden, 0) == 0,
+            func.coalesce(LibraryVolume.hidden, 0) == 0,
         )
     ).all()
-    edition_ids = {str(row[0] or "") for row in rows}
-    return len(rows) == len(paths) and len(edition_ids) == 1
+    volume_ids = {str(row[0] or "") for row in rows}
+    return len(rows) == len(paths) and len(volume_ids) == 1
 
 
 def get_monitor_folder_shelf_id(db: Session, monitor_folder_id: str) -> str | None:

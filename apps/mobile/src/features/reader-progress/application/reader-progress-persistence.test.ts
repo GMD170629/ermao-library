@@ -27,8 +27,7 @@ function epubProgress(
     connection,
     owner: { kind: 'local' },
     workId: 'work-1',
-    editionId: 'edition-1',
-    volumeId: null,
+    volumeId: 'volume-1',
     contentFingerprint: 'fingerprint-1',
     location: { kind: 'epub', progression: percent / 100 },
     percent,
@@ -67,9 +66,7 @@ test('saves the latest slot with a monotonic client sequence', async () => {
   ).execute({
     connection,
     owner: { kind: 'local' },
-    workId: 'work-1',
-    editionId: 'edition-1',
-    volumeId: null,
+    volumeId: 'volume-1',
     contentFingerprint: 'fingerprint-1',
     readerKind: 'reflowable',
   });
@@ -80,7 +77,7 @@ test('saves the latest slot with a monotonic client sequence', async () => {
   }
 });
 
-test('serializes concurrent progress writes without dropping another edition', async () => {
+test('serializes concurrent progress writes without dropping another volume', async () => {
   const fileSystem = new MemoryPrivateFileSystem();
   const ids = new SequenceIdGenerator();
   const store = new SnapshotReaderProgressDocumentStore(
@@ -95,8 +92,8 @@ test('serializes concurrent progress writes without dropping another edition', a
   );
 
   const [first, second] = await Promise.all([
-    save.execute(epubProgress(10, { editionId: 'edition-1' })),
-    save.execute(epubProgress(20, { editionId: 'edition-2' })),
+    save.execute(epubProgress(10, { volumeId: 'volume-1' })),
+    save.execute(epubProgress(20, { volumeId: 'volume-2' })),
   ]);
   assert.deepEqual(
     [first.entry.clientSequence, second.entry.clientSequence],
@@ -140,9 +137,7 @@ test('falls back to the prior on-disk progress after latest corruption', async (
   const restored = await new LoadReaderProgress(restarted).execute({
     connection,
     owner: { kind: 'local' },
-    workId: 'work-1',
-    editionId: 'edition-1',
-    volumeId: null,
+    volumeId: 'volume-1',
     contentFingerprint: 'fingerprint-1',
     readerKind: 'reflowable',
   });
@@ -170,9 +165,7 @@ test('does not restore progress across a content fingerprint boundary', async ()
   const restored = await new LoadReaderProgress(store).execute({
     connection,
     owner: { kind: 'local' },
-    workId: 'work-1',
-    editionId: 'edition-1',
-    volumeId: null,
+    volumeId: 'volume-1',
     contentFingerprint: 'different-fingerprint',
     readerKind: 'reflowable',
   });

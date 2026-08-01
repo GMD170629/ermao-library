@@ -1,13 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree
 
 import pytest
-from sqlalchemy import select, text
-
 from app.bootstrap.imports import (
     claim_next_import_task,
     enqueue_import_task,
@@ -16,17 +15,26 @@ from app.bootstrap.imports import (
 )
 from app.core.auth import hash_password
 from app.models.auth import User
-from app.models.library import LibraryFile, LibraryMetadata
+from app.models.import_pipeline import BookConversionTask, ImportTask
+from app.models.library import (
+    LibraryFile,
+    LibraryMediaVersion,
+    LibraryMetadata,
+    LibraryVolume,
+    LibraryWork,
+)
 from app.modules.imports.application.dto import ImportOptions
 from app.services.download_executor import assert_allowed_extension
 from app.services.epub_normalizer import EPUB_NORMALIZER_VERSION
 from app.services.text_conversion import (
     ConversionFailure,
+    conversion_idempotency_key,
     convert_to_epub,
     detect_txt_encoding,
     source_format,
     validate_epub,
 )
+from sqlalchemy import select, text
 from tests.test_worker_importer import create_worker_tables
 
 
@@ -66,13 +74,53 @@ def write_libmobi_epub_with_private_markup(path: Path) -> None:
 def insert_import_task(
     db, task_id: str, source: Path, *, status: str = "PENDING", retryable: bool = False
 ) -> None:
+    source_key = hashlib.sha256(str(source.resolve()).encode()).hexdigest()[:20]
+    volume_id = db.scalar(
+        select(ImportTask.volume_id)
+        .where(
+            ImportTask.source_path == str(source),
+            ImportTask.volume_id.is_not(None),
+        )
+        .limit(1)
+    )
+    if volume_id is None:
+        work_id = f"work-{source_key}"
+        media_version_id = f"media-{source_key}"
+        volume_id = f"volume-{source_key}"
+        db.add(
+            LibraryWork(
+                id=work_id,
+                title=source.stem,
+                normalized_title=source.stem.casefold(),
+                work_type="NOVEL",
+                tags="[]",
+            )
+        )
+        db.add(
+            LibraryMediaVersion(
+                id=media_version_id,
+                work_id=work_id,
+                media_kind="EBOOK",
+            )
+        )
+        db.add(
+            LibraryVolume(
+                id=volume_id,
+                media_version_id=media_version_id,
+                title=source.stem,
+                format=source.suffix.removeprefix(".").upper() or "TXT",
+                resource_key=f"source:{source_key}",
+            )
+        )
+        db.flush()
     db.execute(
         text(
-            "INSERT INTO ImportTask (id, origin, status, originalName, sourcePath, progress, duplicate, duration, retryable, attempts, createdAt, updatedAt) "
-            "VALUES (:id, 'MANUAL', :status, :name, :path, 0, 0, 0, :retryable, 0, '2026-07-18 10:00:00', '2026-07-18 10:00:00')"
+            "INSERT INTO ImportTask (id, volumeId, origin, status, originalName, sourcePath, progress, duplicate, duration, retryable, attempts, createdAt, updatedAt) "
+            "VALUES (:id, :volume_id, 'MANUAL', :status, :name, :path, 0, 0, 0, :retryable, 0, '2026-07-18 10:00:00', '2026-07-18 10:00:00')"
         ),
         {
             "id": task_id,
+            "volume_id": volume_id,
             "status": status,
             "name": source.name,
             "path": str(source),
@@ -184,23 +232,45 @@ def test_conversion_validates_output_and_reuses_versioned_cache(
     assert second.cached is True
     assert second.output_path == first.output_path
     assert runner.conversion_calls == 1
-    conversion = (
-        db_session.execute(
-            text(
-                "SELECT status, converterVersion FROM BookConversionTask WHERE importTaskId = 'task-2'"
-            )
-        )
-        .mappings()
-        .one()
+    conversions = db_session.scalars(select(BookConversionTask)).all()
+    assert len(conversions) == 1
+    conversion = conversions[0]
+    assert conversion.import_task_id == "task-1"
+    assert conversion.status == "COMPLETED"
+    assert conversion.idempotency_key == conversion_idempotency_key(
+        conversion.source_volume_id, first.source_hash
     )
-    assert conversion["status"] == "COMPLETED"
-    assert "mobitool" in conversion["converterVersion"]
-    assert EPUB_NORMALIZER_VERSION in conversion["converterVersion"]
-    normalization = db_session.execute(
-        text("SELECT optionsJson FROM BookConversionTask WHERE importTaskId = 'task-2'")
-    ).scalar_one()
+    assert second.idempotency_key == conversion.idempotency_key
+    assert "mobitool" in str(conversion.converter_version)
+    assert EPUB_NORMALIZER_VERSION in str(conversion.converter_version)
+    normalization = conversion.options_json
     assert '"normalizerVersion": "shuku-epub-normalizer/1"' in normalization
     assert '"normalizationApplied": true' in normalization
+
+
+def test_conversion_source_change_creates_a_new_idempotency_scope(
+    db_session, test_settings, tmp_path
+):
+    create_worker_tables(db_session)
+    source = tmp_path / "changed.azw3"
+    source.write_bytes(b"source revision one")
+    insert_import_task(db_session, "task-revision-1", source)
+    runner = SuccessfulRunner()
+
+    first = convert_to_epub(
+        db_session, test_settings, "task-revision-1", source, runner=runner
+    )
+    source.write_bytes(b"source revision two")
+    insert_import_task(db_session, "task-revision-2", source)
+    second = convert_to_epub(
+        db_session, test_settings, "task-revision-2", source, runner=runner
+    )
+
+    assert first.source_hash != second.source_hash
+    assert first.idempotency_key != second.idempotency_key
+    assert first.output_path != second.output_path
+    assert runner.conversion_calls == 2
+    assert len(db_session.scalars(select(BookConversionTask)).all()) == 2
 
 
 def test_txt_is_converted_internally_with_detected_chapters(
@@ -326,6 +396,15 @@ def test_explicit_conversion_records_text_ebook_provenance(
     runner = SuccessfulRunner()
     monkeypatch.setattr("app.services.text_conversion._command_runner", runner)
 
+    source_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=source,
+            origin="MANUAL",
+            original_name=source.name,
+        ),
+    )
     result = import_managed_book(
         db_session,
         test_settings,
@@ -333,14 +412,23 @@ def test_explicit_conversion_records_text_ebook_provenance(
             source_file_path=source,
             origin="DEFERRED_CONVERSION",
             original_name=source.name,
+            requested_work_id=source_result.work_id,
         ),
     )
 
     assert result.format == "epub"
     assert result.type == "ebook"
     assert source.exists()
-    library_file = db_session.scalars(select(LibraryFile)).one()
+    library_file = db_session.scalar(
+        select(LibraryFile).where(LibraryFile.volume_id == result.volume_id)
+    )
+    assert library_file is not None
     assert library_file.path.endswith(".epub")
+    derived_volume = db_session.get(LibraryVolume, result.volume_id)
+    assert derived_volume is not None
+    assert derived_volume.derived_from_volume_id == source_result.volume_id
+    conversion_task = db_session.scalars(select(BookConversionTask)).one()
+    assert conversion_task.derived_volume_id == result.volume_id
     provenance = db_session.scalars(
         select(LibraryMetadata).where(LibraryMetadata.source == "conversion")
     ).one()
@@ -348,6 +436,20 @@ def test_explicit_conversion_records_text_ebook_provenance(
     assert '"sourceFormat": "AZW3"' in provenance_json
     assert '"targetFormat": "EPUB"' in provenance_json
     assert '"converter": "libmobi"' in provenance_json
+
+    retried = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=source,
+            origin="DEFERRED_CONVERSION",
+            original_name=source.name,
+            requested_work_id=source_result.work_id,
+        ),
+    )
+    assert retried.volume_id == result.volume_id
+    assert len(db_session.scalars(select(LibraryVolume)).all()) == 2
+    assert len(db_session.scalars(select(BookConversionTask)).all()) == 1
 
 
 @pytest.mark.parametrize(

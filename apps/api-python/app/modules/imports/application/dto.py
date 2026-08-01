@@ -106,6 +106,7 @@ class ConversionArtifactDTO:
     converter: str
     converter_version: str
     cached: bool
+    idempotency_key: str
 
 
 @dataclass(frozen=True)
@@ -132,7 +133,6 @@ class ImportTaskDTO:
     requested_author: str | None = None
     monitor_folder_id: str | None = None
     work_id: str | None = None
-    edition_id: str | None = None
     volume_id: str | None = None
     task_kind: str = "FILE"
     bundle_key: str | None = None
@@ -180,7 +180,7 @@ class ImportOptions:
 class ImportResult:
     book_id: str
     work_id: str
-    edition_id: str
+    media_version_id: str
     volume_id: str | None
     title: str
     type: str

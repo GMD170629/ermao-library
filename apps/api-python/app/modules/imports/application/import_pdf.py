@@ -19,15 +19,13 @@ from app.modules.imports.application.identity_resolution import (
 )
 from app.modules.imports.application.import_support import (
     _ensure_work,
-    _file_version_key,
-    _finalize_work_primary,
+    _file_resource_key,
+    _finalize_work_cover,
     _hash_text,
     _id,
     _insert_identity_metadata,
-    _next_edition_name,
     _now,
     _sanitize_description,
-    _should_be_media_primary,
     _split_tags,
     _title_from_file,
     _work_merge_key,
@@ -82,7 +80,7 @@ def _import_pdf(
     try:
         source_path = options.source_file_path.resolve()
         store.update_import_task(task_id, columns={"message": "正在建立 PDF 记录"})
-        edition = store.insert_library_edition(
+        media_version = store.ensure_library_media_version(
             columns={
                 "id": _id(),
                 "workId": work["id"],
@@ -90,33 +88,42 @@ def _import_pdf(
                 "origin": options.origin,
                 "mediaKind": "EBOOK",
                 "format": "PDF",
-                "versionName": _next_edition_name(queries, work["id"], "PDF", "EBOOK"),
-                "versionKey": _file_version_key("pdf", source_path),
-                "description": metadata.get("description"),
-                "sizeBytes": file_size,
-                "pageCount": metadata["pageCount"],
-                "chapterCount": len(metadata["chapters"]),
-                "coverStatus": "PENDING",
-                "importStatus": "PARSING",
-                "primary": _should_be_media_primary(queries, work["id"], "EBOOK"),
-                "hidden": False,
                 "createdAt": _now(),
                 "updatedAt": _now(),
             },
         )
         cover_path = _extract_pdf_cover(
-            settings, source_path, work["id"], edition["id"], metadata
+            settings, source_path, work["id"], media_version["id"], metadata
         )
         stored_cover_path = cover_path or services.ensure_default_cover()
         volume = store.insert_library_volume(
             columns={
                 "id": _id(),
-                "editionId": edition["id"],
-                "title": "PDF",
-                "sortOrder": 0,
+                "mediaVersionId": media_version["id"],
+                "title": (
+                    f"第 {identity.volume_index:g} 卷"
+                    if identity.volume_index is not None
+                    else str(
+                        metadata.get("title") or identity.title or source_path.stem
+                    )
+                ),
+                "volumeIndex": identity.volume_index,
+                "sortOrder": (
+                    int(identity.volume_index * 1000)
+                    if identity.volume_index is not None
+                    else 0
+                ),
+                "format": "PDF",
+                "resourceKey": _file_resource_key("pdf", source_path),
+                "monitorFolderId": options.monitor_folder_id,
+                "origin": options.origin,
+                "description": metadata.get("description"),
+                "sizeBytes": file_size,
                 "pageCount": metadata["pageCount"],
                 "chapterCount": len(metadata["chapters"]),
                 "coverPath": stored_cover_path,
+                "coverStatus": services.cover_status(stored_cover_path),
+                "importStatus": "PARSING",
                 "createdAt": _now(),
                 "updatedAt": _now(),
             }
@@ -124,7 +131,6 @@ def _import_pdf(
         file = store.insert_library_file(
             columns={
                 "id": _id(),
-                "editionId": edition["id"],
                 "volumeId": volume["id"],
                 "path": str(source_path),
                 "filePathHash": _hash_text(str(source_path)),
@@ -142,7 +148,6 @@ def _import_pdf(
             store.insert_library_reading_unit(
                 columns={
                     "id": _id(),
-                    "editionId": edition["id"],
                     "volumeId": volume["id"],
                     "fileId": file["id"],
                     "unitType": "page",
@@ -165,16 +170,16 @@ def _import_pdf(
         store.insert_library_metadata(
             columns={
                 "id": _id(),
-                "editionId": edition["id"],
+                "volumeId": volume["id"],
                 "source": "pdf",
                 "rawJson": json.dumps(metadata["rawMetadata"], ensure_ascii=False),
                 "createdAt": _now(),
                 "updatedAt": _now(),
             }
         )
-        _insert_identity_metadata(store, edition["id"], identity)
-        store.update_library_edition(
-            edition["id"],
+        _insert_identity_metadata(store, volume["id"], identity)
+        store.update_library_volume(
+            volume["id"],
             columns={
                 "coverPath": stored_cover_path,
                 "coverStatus": services.cover_status(stored_cover_path),
@@ -182,18 +187,18 @@ def _import_pdf(
                 "updatedAt": _now(),
             },
         )
-        _finalize_work_primary(
+        _finalize_work_cover(
             store,
             queries,
             services,
             work["id"],
-            edition["id"],
+            media_version["id"],
             stored_cover_path,
         )
         return ImportResult(
             work["id"],
             work["id"],
-            edition["id"],
+            media_version["id"],
             volume["id"],
             work["title"],
             "ebook",
@@ -362,9 +367,7 @@ def _clean_pdf_metadata_text(value: object) -> str | None:
     text = str(value or "").strip()
     if not text or "\ufffd" in text:
         return None
-    if any(
-        ord(character) < 32 and character not in "\t\n\r" for character in text
-    ):
+    if any(ord(character) < 32 and character not in "\t\n\r" for character in text):
         return None
     return text
 
@@ -392,11 +395,15 @@ def _extract_pdf_cover(
     settings: ImportRuntimeConfig,
     staged: Path,
     work_id: str,
-    edition_id: str,
+    media_version_id: str,
     metadata: dict[str, Any],
 ) -> str | None:
     target = (
-        settings.resolved_storage_root / "books" / work_id / edition_id / "cover.jpg"
+        settings.resolved_storage_root
+        / "books"
+        / work_id
+        / media_version_id
+        / "cover.jpg"
     )
     try:
         import pypdfium2 as pdfium

@@ -136,14 +136,14 @@ export function ClassificationManagementPanel() {
     if (item.kind === 'SERIES') {
       return i18nAttribute('将清除 {value0} 本图书的丛书“{value1}”及对应丛书序号。', { value0: item.bookCount, value1: item.name });
     }
-    return i18nAttribute('将从 {value0} 本图书的相关版本中清除出版社“{value1}”。', { value0: item.bookCount, value1: item.name });
+    return i18nAttribute('将从 {value0} 本图书的相关卷册中清除出版社“{value1}”。', { value0: item.bookCount, value1: item.name });
   }
 
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-black/[0.07] bg-white/60 p-5">
         <h2 className="text-base font-semibold text-[#2C2926]"><I18nText>分类治理</I18nText></h2>
-        <p className="mt-1 text-sm leading-6 text-[#817B75]"><I18nText>统一作者、标签、丛书和出版社命名。重命名与合并会同步更新作品和版本元数据。</I18nText></p>
+        <p className="mt-1 text-sm leading-6 text-[#817B75]"><I18nText>统一作者、标签、丛书和出版社命名。作品字段与卷册出版信息会按各自作用域更新。</I18nText></p>
         <div className="mt-4 flex flex-wrap gap-2">
           {tabs.map((tab) => <button key={tab.key} type="button" onClick={() => changeKind(tab.key)} className={cn('rounded-xl px-4 py-2 text-sm transition', kind === tab.key ? 'bg-[#F9DED4] font-medium text-[#D7462B]' : 'bg-black/[0.035] text-[#6F6963] hover:bg-black/[0.06]')}>{i18nAttribute(tab.label)}</button>)}
         </div>

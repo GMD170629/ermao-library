@@ -185,6 +185,42 @@ def enqueue_import_task(
     return task, created
 
 
+def stage_import_task_with_work_item(
+    db: Session,
+    source_path: str | Path,
+    *,
+    origin: str,
+    original_name: str | None = None,
+    requested_title: str | None = None,
+    requested_author: str | None = None,
+    work_id: str | None = None,
+    monitor_folder_id: str | None = None,
+    message: str = "等待后台处理",
+    allow_terminal_requeue: bool = False,
+) -> tuple[ImportTaskDTO, bool]:
+    """Stage a task and its worker item inside the caller-owned transaction."""
+
+    store = SqlAlchemyImportTaskStore(db)
+    task, created = stage_import_path(
+        store,
+        source_path,
+        origin=origin,
+        original_name=original_name,
+        requested_title=requested_title,
+        requested_author=requested_author,
+        work_id=work_id,
+        monitor_folder_id=monitor_folder_id,
+        message=message,
+        allow_terminal_requeue=allow_terminal_requeue,
+    )
+    if created or task.status == "PENDING":
+        row = db.get(ImportTask, task.id)
+        if row is None:
+            raise RuntimeError(f"staged import task {task.id} was not persisted")
+        ensure_import_work_item(db, row)
+    return task, created
+
+
 def schedule_import_scan_job(
     db: Session,
     *,

@@ -15,13 +15,12 @@ export type ProgressConnection = Readonly<{
   baseUrl: string;
 }>;
 
-export type LocalProgressEntryV1 = Readonly<{
+export type LocalProgressEntryV2 = Readonly<{
   mutationId: string;
   clientSequence: number;
   owner: ProgressOwner;
   workId: string;
-  editionId: string;
-  volumeId: string | null;
+  volumeId: string;
   contentFingerprint: string;
   location: ReaderLocation;
   percent: number;
@@ -29,9 +28,9 @@ export type LocalProgressEntryV1 = Readonly<{
   updatedAtMs: number;
 }>;
 
-export type ReaderProgressDocumentV1 = Readonly<{
+export type ReaderProgressDocumentV2 = Readonly<{
   format: 'shuku.reader-progress';
-  schemaVersion: 1;
+  schemaVersion: 2;
   generation: number;
   connection: ProgressConnection;
   client: Readonly<{
@@ -39,15 +38,14 @@ export type ReaderProgressDocumentV1 = Readonly<{
     lastSequence: number;
   }>;
   updatedAtMs: number;
-  entries: readonly LocalProgressEntryV1[];
+  entries: readonly LocalProgressEntryV2[];
 }>;
 
 export type RecordReaderProgressCommand = Readonly<{
   connection: ProgressConnection;
   owner: ProgressOwner;
   workId: string;
-  editionId: string;
-  volumeId: string | null;
+  volumeId: string;
   contentFingerprint: string;
   location: ReaderLocation;
   percent: number;
@@ -59,16 +57,14 @@ export type RecordReaderProgressCommand = Readonly<{
 export type FindReaderProgressQuery = Readonly<{
   connection: ProgressConnection;
   owner: ProgressOwner;
-  workId: string;
-  editionId: string;
-  volumeId: string | null;
+  volumeId: string;
   contentFingerprint: string;
   readerKind: ReaderKind;
 }>;
 
 export type RecordReaderProgressResult = Readonly<{
-  document: ReaderProgressDocumentV1;
-  entry: LocalProgressEntryV1;
+  document: ReaderProgressDocumentV2;
+  entry: LocalProgressEntryV2;
 }>;
 
 export type ReaderProgressInvariantErrorCode =
@@ -115,9 +111,7 @@ function ownersEqual(
 
 type ReaderProgressSlot = Readonly<{
   owner: ProgressOwner;
-  workId: string;
-  editionId: string;
-  volumeId: string | null;
+  volumeId: string;
   contentFingerprint: string;
   location: Readonly<{ kind: ReaderLocation['kind'] }>;
 }>;
@@ -128,8 +122,6 @@ export function readerProgressSlotKey(
   return JSON.stringify([
     slot.owner.kind,
     slot.owner.kind === 'user' ? slot.owner.userId : null,
-    slot.workId,
-    slot.editionId,
     slot.volumeId,
     slot.contentFingerprint,
     slot.location.kind,
@@ -137,15 +129,15 @@ export function readerProgressSlotKey(
 }
 
 function sameSlot(
-  entry: LocalProgressEntryV1,
+  entry: LocalProgressEntryV2,
   command: RecordReaderProgressCommand,
 ): boolean {
   return readerProgressSlotKey(entry) === readerProgressSlotKey(command);
 }
 
 function retainEntriesForNewSlot(
-  entries: readonly LocalProgressEntryV1[],
-): readonly LocalProgressEntryV1[] {
+  entries: readonly LocalProgressEntryV2[],
+): readonly LocalProgressEntryV2[] {
   if (entries.length < MAXIMUM_READER_PROGRESS_ENTRIES) {
     return entries;
   }
@@ -172,8 +164,7 @@ function commandIsValid(
     command.connection.baseUrl.length <= 2_048 &&
     ownerIsValid(command.owner) &&
     isIdentifier(command.workId) &&
-    isIdentifier(command.editionId) &&
-    (command.volumeId === null || isIdentifier(command.volumeId)) &&
+    isIdentifier(command.volumeId) &&
     isIdentifier(command.contentFingerprint) &&
     Number.isFinite(command.percent) &&
     command.percent >= 0 &&
@@ -188,7 +179,7 @@ function commandIsValid(
 }
 
 export function recordReaderProgress(
-  current: ReaderProgressDocumentV1 | null,
+  current: ReaderProgressDocumentV2 | null,
   command: RecordReaderProgressCommand,
 ): RecordReaderProgressResult {
   const decodedLocation = decodeReaderLocation(command.location);
@@ -229,12 +220,11 @@ export function recordReaderProgress(
   const previousEntry = current?.entries.find((entry) =>
     sameSlot(entry, normalizedCommand),
   );
-  const entry: LocalProgressEntryV1 = {
+  const entry: LocalProgressEntryV2 = {
     mutationId: command.mutationId,
     clientSequence: sequence,
     owner: command.owner,
     workId: command.workId,
-    editionId: command.editionId,
     volumeId: command.volumeId,
     contentFingerprint: command.contentFingerprint,
     location: decodedLocation.value,
@@ -249,9 +239,9 @@ export function recordReaderProgress(
       : currentEntries.map((candidate) =>
           candidate === previousEntry ? entry : candidate,
         );
-  const document: ReaderProgressDocumentV1 = {
+  const document: ReaderProgressDocumentV2 = {
     format: 'shuku.reader-progress',
-    schemaVersion: 1,
+    schemaVersion: 2,
     generation: (current?.generation ?? 0) + 1,
     connection: command.connection,
     client: {
@@ -265,9 +255,9 @@ export function recordReaderProgress(
 }
 
 export function findReaderProgress(
-  document: ReaderProgressDocumentV1,
+  document: ReaderProgressDocumentV2,
   query: FindReaderProgressQuery,
-): LocalProgressEntryV1 | null {
+): LocalProgressEntryV2 | null {
   if (
     document.connection.profileId !== query.connection.profileId ||
     document.connection.baseUrl !== query.connection.baseUrl
@@ -277,9 +267,7 @@ export function findReaderProgress(
   if (
     !isSafeRuntimeId(query.connection.profileId) ||
     !ownerIsValid(query.owner) ||
-    !isIdentifier(query.workId) ||
-    !isIdentifier(query.editionId) ||
-    (query.volumeId !== null && !isIdentifier(query.volumeId)) ||
+    !isIdentifier(query.volumeId) ||
     !isIdentifier(query.contentFingerprint)
   ) {
     throw new ReaderProgressInvariantError('INVALID_PROGRESS');
@@ -289,8 +277,6 @@ export function findReaderProgress(
     document.entries.find(
       (entry) =>
         ownersEqual(entry.owner, query.owner) &&
-        entry.workId === query.workId &&
-        entry.editionId === query.editionId &&
         entry.volumeId === query.volumeId &&
         entry.contentFingerprint === query.contentFingerprint &&
         entry.location.kind === query.readerKind,

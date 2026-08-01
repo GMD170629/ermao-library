@@ -1,16 +1,11 @@
-import type { ProgressMutation } from '../../lib/reader-v2/model';
+import type { ProgressMutation } from '../../lib/reader/model';
 
 export type LocalProgressScope = {
   userId: string;
   workId: string;
-  editionId: string;
-  volumeId: string | null;
+  volumeId: string;
   contentFingerprint: string;
 };
-
-function sameVolume(left: string | null | undefined, right: string | null | undefined) {
-  return (left ?? null) === (right ?? null);
-}
 
 export function latestScopedProgress(
   mutations: readonly ProgressMutation[],
@@ -20,8 +15,7 @@ export function latestScopedProgress(
     .filter((mutation) => (
       mutation.userId === scope.userId
       && mutation.workId === scope.workId
-      && mutation.editionId === scope.editionId
-      && sameVolume(mutation.volumeId, scope.volumeId)
+      && mutation.volumeId === scope.volumeId
       && mutation.contentFingerprint === scope.contentFingerprint
     ))
     .sort((left, right) => right.clientSequence - left.clientSequence || right.updatedAt - left.updatedAt)[0] ?? null;

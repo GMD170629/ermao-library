@@ -10,9 +10,9 @@ import {
 import { SaveReaderProgress } from '../application/save-reader-progress';
 import {
   MAXIMUM_READER_PROGRESS_ENTRIES,
-  type LocalProgressEntryV1,
+  type LocalProgressEntryV2,
   type ProgressConnection,
-  type ReaderProgressDocumentV1,
+  type ReaderProgressDocumentV2,
 } from '../model/reader-progress';
 import { SnapshotReaderProgressDocumentStore } from './snapshot-reader-progress-document-store';
 
@@ -37,7 +37,7 @@ function maximumSafeRuntimeId(prefix: string, index: number): string {
   return `${uniquePrefix}${'x'.repeat(128 - uniquePrefix.length)}`;
 }
 
-function maximumEntry(index: number): LocalProgressEntryV1 {
+function maximumEntry(index: number): LocalProgressEntryV2 {
   return {
     mutationId: maximumSafeRuntimeId('mutation', index),
     clientSequence: index + 1,
@@ -46,7 +46,6 @@ function maximumEntry(index: number): LocalProgressEntryV1 {
       userId: maximumIdentifier('user', index),
     },
     workId: maximumIdentifier('work', index),
-    editionId: maximumIdentifier('edition', index),
     volumeId: maximumIdentifier('volume', index),
     contentFingerprint: maximumIdentifier('fingerprint', index),
     location: {
@@ -60,10 +59,10 @@ function maximumEntry(index: number): LocalProgressEntryV1 {
   };
 }
 
-function maximumDocument(): ReaderProgressDocumentV1 {
+function maximumDocument(): ReaderProgressDocumentV2 {
   return {
     format: 'shuku.reader-progress',
-    schemaVersion: 1,
+    schemaVersion: 2,
     generation: 1,
     connection,
     client: {
@@ -103,7 +102,6 @@ test('persists and rotates a worst-case full progress snapshot below its file bu
       userId: maximumIdentifier('user', nextIndex),
     },
     workId: maximumIdentifier('work', nextIndex),
-    editionId: maximumIdentifier('edition', nextIndex),
     volumeId: maximumIdentifier('volume', nextIndex),
     contentFingerprint: maximumIdentifier(
       'fingerprint',

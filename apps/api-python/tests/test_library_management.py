@@ -1,14 +1,12 @@
 import json
 
 import pytest
-from sqlalchemy import select, text
-from sqlalchemy.orm import Session
-
-import app.services.library_management as library_management
-from app.models.library import LibraryWork
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
+from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
+from app.modules.library.infrastructure.deletion import delete_work_records
+from app.services import library_management
 from app.services.library_filters import compile_filter_rules, library_filter_schema
 from app.services.library_management import (
     count_categories,
@@ -19,13 +17,16 @@ from app.services.library_management import (
     merge_works,
     rename_category,
     smart_shelf_work_ids,
-    split_edition,
     sync_work_facets,
     undo_operation,
 )
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session
 
 
-def _insert_work(db: Session, work_id: str, title: str, author: str, tags: list[str]) -> None:
+def _insert_work(
+    db: Session, work_id: str, title: str, author: str, tags: list[str]
+) -> None:
     db.execute(
         text(
             "INSERT INTO `LibraryWork` (`id`, `title`, `normalizedTitle`, `author`, `normalizedAuthor`, `workType`, `tags`, `mergeKey`, `updatedAt`) "
@@ -43,12 +44,24 @@ def _insert_work(db: Session, work_id: str, title: str, author: str, tags: list[
     )
     db.execute(
         text(
-            "INSERT INTO `LibraryEdition` (`id`, `workId`, `format`, `versionName`, `versionKey`, `publisher`, `importStatus`, `primary`, `updatedAt`) "
-            "VALUES (:id, :work_id, 'EPUB', :version_name, :version_key, :publisher, 'IMPORTED', 1, '2026-07-22T00:00:00')"
+            "INSERT INTO `LibraryMediaVersion` (`id`, `workId`, `mediaKind`, `updatedAt`) "
+            "VALUES (:id, :work_id, 'EBOOK', '2026-07-22T00:00:00')"
         ),
-        {"id": f"edition-{work_id}", "work_id": work_id, "version_name": f"{title} 默认版", "version_key": f"key-{work_id}", "publisher": "星海出版社"},
+        {"id": f"media-{work_id}", "work_id": work_id},
     )
-    db.execute(text("UPDATE `LibraryWork` SET `primaryEditionId` = :edition_id WHERE `id` = :work_id"), {"edition_id": f"edition-{work_id}", "work_id": work_id})
+    db.execute(
+        text(
+            "INSERT INTO `LibraryVolume` (`id`, `mediaVersionId`, `title`, `sortOrder`, `format`, `resourceKey`, `publisher`, `importStatus`, `updatedAt`) "
+            "VALUES (:id, :media_id, :title, 0, 'EPUB', :resource_key, :publisher, 'IMPORTED', '2026-07-22T00:00:00')"
+        ),
+        {
+            "id": f"volume-{work_id}",
+            "media_id": f"media-{work_id}",
+            "title": f"{title} 默认卷",
+            "resource_key": f"key-{work_id}",
+            "publisher": "星海出版社",
+        },
+    )
     db.commit()
     sync_work_facets(db, work_id)
 
@@ -62,17 +75,31 @@ def test_duplicates_smart_shelf_merge_and_undo_use_persisted_v9_data(tmp_path) -
             _insert_work(db, "work-a", "星海列车", "林川", ["科幻", "收藏"])
             _insert_work(db, "work-b", "星海列车", "林川", ["科幻小说"])
             assert len(duplicate_groups(db)) == 1
-            assert smart_shelf_work_ids(db, {"search": "星海", "tags": ["科幻"]}) == ["work-a"]
-            assert {item["name"] for item in list_categories(db, "TAG")} == {"科幻", "收藏", "科幻小说"}
+            assert smart_shelf_work_ids(db, {"search": "星海", "tags": ["科幻"]}) == [
+                "work-a"
+            ]
+            assert {item["name"] for item in list_categories(db, "TAG")} == {
+                "科幻",
+                "收藏",
+                "科幻小说",
+            }
 
             merged = merge_works(db, "work-a", ["work-b"], None)
-            assert db.execute(text("SELECT `hidden` FROM `LibraryWork` WHERE `id` = 'work-b'")).scalar() == 1
-            assert db.execute(text("SELECT `workId` FROM `LibraryEdition` WHERE `id` = 'edition-work-b'")).scalar() == "work-a"
+            assert db.get(LibraryWork, "work-b") is None
+            assert db.get(LibraryMediaVersion, "media-work-b") is None
+            assert (
+                db.get(LibraryVolume, "volume-work-b").media_version_id
+                == "media-work-a"
+            )
             assert merged["operation"]["undoAvailable"] is True
 
             undo_operation(db, merged["operation"]["id"], None)
-            assert db.execute(text("SELECT `hidden` FROM `LibraryWork` WHERE `id` = 'work-b'")).scalar() == 0
-            assert db.execute(text("SELECT `workId` FROM `LibraryEdition` WHERE `id` = 'edition-work-b'")).scalar() == "work-b"
+            assert db.get(LibraryWork, "work-b") is not None
+            assert db.get(LibraryMediaVersion, "media-work-b") is not None
+            assert (
+                db.get(LibraryVolume, "volume-work-b").media_version_id
+                == "media-work-b"
+            )
     finally:
         engine.dispose()
 
@@ -84,15 +111,26 @@ def test_category_listing_supports_count_search_and_stable_pagination(tmp_path) 
         bootstrap_database(engine, settings)
         with Session(engine) as db:
             for index in range(1, 26):
-                _insert_work(db, f"work-{index:02d}", f"作品 {index:02d}", f"作者 {index:02d}", [f"标签 {index:02d}"])
+                _insert_work(
+                    db,
+                    f"work-{index:02d}",
+                    f"作品 {index:02d}",
+                    f"作者 {index:02d}",
+                    [f"标签 {index:02d}"],
+                )
             assert count_categories(db, "AUTHOR") == 25
             first_page = list_categories(db, "AUTHOR", limit=10, offset=0)
             third_page = list_categories(db, "AUTHOR", limit=10, offset=20)
             assert len(first_page) == 10
             assert len(third_page) == 5
-            assert {item["id"] for item in first_page}.isdisjoint({item["id"] for item in third_page})
+            assert {item["id"] for item in first_page}.isdisjoint(
+                {item["id"] for item in third_page}
+            )
             assert count_categories(db, "AUTHOR", "作者 02") == 1
-            assert [item["name"] for item in list_categories(db, "AUTHOR", "作者 02", limit=10)] == ["作者 02"]
+            assert [
+                item["name"]
+                for item in list_categories(db, "AUTHOR", "作者 02", limit=10)
+            ] == ["作者 02"]
     finally:
         engine.dispose()
 
@@ -107,16 +145,36 @@ def test_category_merge_rename_and_undo_restore_legacy_metadata(tmp_path) -> Non
             _insert_work(db, "work-b", "远航", "周禾", ["科幻小说"])
             tags = {item["name"]: item for item in list_categories(db, "TAG")}
 
-            merged = merge_categories(db, "TAG", [tags["科幻小说"]["id"]], tags["科幻"]["id"], None)
-            assert json.loads(db.execute(text("SELECT `tags` FROM `LibraryWork` WHERE `id` = 'work-b'")).scalar()) == ["科幻"]
+            merged = merge_categories(
+                db, "TAG", [tags["科幻小说"]["id"]], tags["科幻"]["id"], None
+            )
+            assert json.loads(
+                db.execute(
+                    text("SELECT `tags` FROM `LibraryWork` WHERE `id` = 'work-b'")
+                ).scalar()
+            ) == ["科幻"]
             undo_operation(db, merged["operation"]["id"], None)
-            assert json.loads(db.execute(text("SELECT `tags` FROM `LibraryWork` WHERE `id` = 'work-b'")).scalar()) == ["科幻小说"]
+            assert json.loads(
+                db.execute(
+                    text("SELECT `tags` FROM `LibraryWork` WHERE `id` = 'work-b'")
+                ).scalar()
+            ) == ["科幻小说"]
 
-            tag = next(item for item in list_categories(db, "TAG") if item["name"] == "科幻")
+            tag = next(
+                item for item in list_categories(db, "TAG") if item["name"] == "科幻"
+            )
             renamed = rename_category(db, tag["id"], "科学幻想", None)
-            assert json.loads(db.execute(text("SELECT `tags` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar()) == ["科学幻想"]
+            assert json.loads(
+                db.execute(
+                    text("SELECT `tags` FROM `LibraryWork` WHERE `id` = 'work-a'")
+                ).scalar()
+            ) == ["科学幻想"]
             undo_operation(db, renamed["operation"]["id"], None)
-            assert json.loads(db.execute(text("SELECT `tags` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar()) == ["科幻"]
+            assert json.loads(
+                db.execute(
+                    text("SELECT `tags` FROM `LibraryWork` WHERE `id` = 'work-a'")
+                ).scalar()
+            ) == ["科幻"]
     finally:
         engine.dispose()
 
@@ -143,30 +201,98 @@ def test_category_delete_clears_all_metadata_kinds_and_supports_undo(tmp_path) -
                 ("SERIES", "星海丛书"),
                 ("PUBLISHER", "星海出版社"),
             ):
-                category = next(item for item in list_categories(db, kind) if item["name"] == name)
+                category = next(
+                    item for item in list_categories(db, kind) if item["name"] == name
+                )
                 deleted = delete_category(db, category["id"], None)
                 assert deleted["kind"] == kind
                 assert deleted["affectedBookCount"] == 1
-                assert all(item["id"] != category["id"] for item in list_categories(db, kind))
+                assert all(
+                    item["id"] != category["id"] for item in list_categories(db, kind)
+                )
 
                 if kind == "TAG":
-                    assert json.loads(db.execute(text("SELECT `tags` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar()) == ["收藏"]
+                    assert json.loads(
+                        db.execute(
+                            text(
+                                "SELECT `tags` FROM `LibraryWork` WHERE `id` = 'work-a'"
+                            )
+                        ).scalar()
+                    ) == ["收藏"]
                 elif kind == "AUTHOR":
-                    assert db.execute(text("SELECT `author` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar() == "周禾"
+                    assert (
+                        db.execute(
+                            text(
+                                "SELECT `author` FROM `LibraryWork` WHERE `id` = 'work-a'"
+                            )
+                        ).scalar()
+                        == "周禾"
+                    )
                 elif kind == "SERIES":
-                    assert db.execute(text("SELECT `seriesName` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar() is None
-                    assert db.execute(text("SELECT `seriesIndex` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar() is None
+                    assert (
+                        db.execute(
+                            text(
+                                "SELECT `seriesName` FROM `LibraryWork` WHERE `id` = 'work-a'"
+                            )
+                        ).scalar()
+                        is None
+                    )
+                    assert (
+                        db.execute(
+                            text(
+                                "SELECT `seriesIndex` FROM `LibraryWork` WHERE `id` = 'work-a'"
+                            )
+                        ).scalar()
+                        is None
+                    )
                 else:
-                    assert db.execute(text("SELECT `publisher` FROM `LibraryEdition` WHERE `id` = 'edition-work-a'")).scalar() is None
+                    assert (
+                        db.execute(
+                            text(
+                                "SELECT `publisher` FROM `LibraryVolume` WHERE `id` = 'volume-work-a'"
+                            )
+                        ).scalar()
+                        is None
+                    )
 
                 undo_operation(db, deleted["operation"]["id"], None)
-                assert any(item["id"] == category["id"] for item in list_categories(db, kind))
+                assert any(
+                    item["id"] == category["id"] for item in list_categories(db, kind)
+                )
 
-            assert json.loads(db.execute(text("SELECT `tags` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar()) == ["科幻", "收藏"]
-            assert db.execute(text("SELECT `author` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar() == "林川、周禾"
-            assert db.execute(text("SELECT `seriesName` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar() == "星海丛书"
-            assert db.execute(text("SELECT `seriesIndex` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar() == 3
-            assert db.execute(text("SELECT `publisher` FROM `LibraryEdition` WHERE `id` = 'edition-work-a'")).scalar() == "星海出版社"
+            assert json.loads(
+                db.execute(
+                    text("SELECT `tags` FROM `LibraryWork` WHERE `id` = 'work-a'")
+                ).scalar()
+            ) == ["科幻", "收藏"]
+            assert (
+                db.execute(
+                    text("SELECT `author` FROM `LibraryWork` WHERE `id` = 'work-a'")
+                ).scalar()
+                == "林川、周禾"
+            )
+            assert (
+                db.execute(
+                    text("SELECT `seriesName` FROM `LibraryWork` WHERE `id` = 'work-a'")
+                ).scalar()
+                == "星海丛书"
+            )
+            assert (
+                db.execute(
+                    text(
+                        "SELECT `seriesIndex` FROM `LibraryWork` WHERE `id` = 'work-a'"
+                    )
+                ).scalar()
+                == 3
+            )
+            assert (
+                db.execute(
+                    text(
+                        "SELECT `publisher` FROM `LibraryVolume` WHERE `id` = 'volume-work-a'"
+                    )
+                ).scalar()
+                == "星海出版社"
+            )
     finally:
         engine.dispose()
 
@@ -178,12 +304,23 @@ def test_deleting_a_work_only_author_uses_unknown_author_fallback(tmp_path) -> N
         bootstrap_database(engine, settings)
         with Session(engine) as db:
             _insert_work(db, "work-a", "边界", "林川", [])
-            author = next(item for item in list_categories(db, "AUTHOR") if item["name"] == "林川")
+            author = next(
+                item for item in list_categories(db, "AUTHOR") if item["name"] == "林川"
+            )
 
             delete_category(db, author["id"], None)
 
-            assert db.execute(text("SELECT `author` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar() == "未知作者"
-            assert db.execute(text("SELECT `normalizedAuthor` FROM `LibraryWork` WHERE `id` = 'work-a'")).scalar()
+            assert (
+                db.execute(
+                    text("SELECT `author` FROM `LibraryWork` WHERE `id` = 'work-a'")
+                ).scalar()
+                == "未知作者"
+            )
+            assert db.execute(
+                text(
+                    "SELECT `normalizedAuthor` FROM `LibraryWork` WHERE `id` = 'work-a'"
+                )
+            ).scalar()
     finally:
         engine.dispose()
 
@@ -204,13 +341,24 @@ def test_library_writes_rollback_when_facet_sync_fails(tmp_path, monkeypatch) ->
             monkeypatch.setattr(library_management, "sync_work_facets", fail_sync)
             with pytest.raises(RuntimeError, match="facet sync failed"):
                 merge_works(db, "work-a", ["work-b"], None)
-            assert db.execute(
-                text("SELECT `hidden` FROM `LibraryWork` WHERE `id` = 'work-b'")
-            ).scalar() == 0
-            assert db.execute(
-                text("SELECT `workId` FROM `LibraryEdition` WHERE `id` = 'edition-work-b'")
-            ).scalar() == "work-b"
-            assert db.execute(text("SELECT COUNT(*) FROM `LibraryOperation`")).scalar() == 0
+            assert (
+                db.execute(
+                    text("SELECT `hidden` FROM `LibraryWork` WHERE `id` = 'work-b'")
+                ).scalar()
+                == 0
+            )
+            assert (
+                db.execute(
+                    text(
+                        "SELECT media.workId FROM LibraryVolume AS volume JOIN LibraryMediaVersion AS media ON media.id = volume.mediaVersionId WHERE volume.id = 'volume-work-b'"
+                    )
+                ).scalar()
+                == "work-b"
+            )
+            assert (
+                db.execute(text("SELECT COUNT(*) FROM `LibraryOperation`")).scalar()
+                == 0
+            )
 
             monkeypatch.setattr(library_management, "sync_work_facets", original_sync)
             merged = merge_works(db, "work-a", ["work-b"], None)
@@ -218,28 +366,37 @@ def test_library_writes_rollback_when_facet_sync_fails(tmp_path, monkeypatch) ->
             monkeypatch.setattr(library_management, "sync_work_facets", fail_sync)
             with pytest.raises(RuntimeError, match="facet sync failed"):
                 undo_operation(db, operation_id, None)
-            assert db.execute(
-                text("SELECT `hidden` FROM `LibraryWork` WHERE `id` = 'work-b'")
-            ).scalar() == 1
-            assert db.execute(
-                text("SELECT `workId` FROM `LibraryEdition` WHERE `id` = 'edition-work-b'")
-            ).scalar() == "work-a"
-            assert db.execute(
-                text("SELECT `status` FROM `LibraryOperation` WHERE `id` = :operation_id"),
-                {"operation_id": operation_id},
-            ).scalar() == "COMPLETED"
+            assert db.get(LibraryWork, "work-b") is None
+            assert db.get(LibraryMediaVersion, "media-work-b") is None
+            assert (
+                db.get(LibraryVolume, "volume-work-b").media_version_id
+                == "media-work-a"
+            )
+            assert (
+                db.execute(
+                    text(
+                        "SELECT `status` FROM `LibraryOperation` WHERE `id` = :operation_id"
+                    ),
+                    {"operation_id": operation_id},
+                ).scalar()
+                == "COMPLETED"
+            )
     finally:
         engine.dispose()
 
 
-def test_category_write_rolls_back_and_success_commits_once(tmp_path, monkeypatch) -> None:
+def test_category_write_rolls_back_and_success_commits_once(
+    tmp_path, monkeypatch
+) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
     try:
         bootstrap_database(engine, settings)
         with Session(engine) as db:
             _insert_work(db, "work-a", "边界", "林川", ["科幻"])
-            tag = next(item for item in list_categories(db, "TAG") if item["name"] == "科幻")
+            tag = next(
+                item for item in list_categories(db, "TAG") if item["name"] == "科幻"
+            )
             original_commit = db.commit
             commit_count = 0
 
@@ -257,7 +414,9 @@ def test_category_write_rolls_back_and_success_commits_once(tmp_path, monkeypatc
 
             monkeypatch.setattr(library_management, "sync_work_facets", fail_sync)
             renamed_tag = next(
-                item for item in list_categories(db, "TAG") if item["name"] == "科学幻想"
+                item
+                for item in list_categories(db, "TAG")
+                if item["name"] == "科学幻想"
             )
             with pytest.raises(RuntimeError, match="facet sync failed"):
                 delete_category(db, str(renamed_tag["id"]), None)
@@ -267,60 +426,17 @@ def test_category_write_rolls_back_and_success_commits_once(tmp_path, monkeypatc
                 ).scalar()
             ) == ["科学幻想"]
             assert next(
-                item for item in list_categories(db, "TAG") if item["name"] == "科学幻想"
+                item
+                for item in list_categories(db, "TAG")
+                if item["name"] == "科学幻想"
             )
     finally:
         engine.dispose()
 
 
-def test_split_rolls_back_when_facet_sync_fails(tmp_path, monkeypatch) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
-    engine = create_sqlite_engine(settings.database_path)
-    try:
-        bootstrap_database(engine, settings)
-        with Session(engine) as db:
-            _insert_work(db, "work-a", "边界", "林川", ["科幻"])
-            db.execute(
-                text(
-                    "INSERT INTO `LibraryEdition` "
-                    "(`id`, `workId`, `format`, `mediaKind`, `versionName`, `versionKey`, "
-                    "`importStatus`, `primary`, `hidden`, `updatedAt`) "
-                    "VALUES ('edition-work-a-second', 'work-a', 'EPUB', 'EBOOK', "
-                    "'第二版', 'key-work-a-second', 'IMPORTED', 0, 0, "
-                    "'2026-07-22T00:00:00')"
-                )
-            )
-            db.commit()
-
-            def fail_sync(*_args, **_kwargs) -> None:
-                raise RuntimeError("facet sync failed")
-
-            monkeypatch.setattr(library_management, "sync_work_facets", fail_sync)
-            with pytest.raises(RuntimeError, match="facet sync failed"):
-                split_edition(
-                    db,
-                    "work-a",
-                    "edition-work-a-second",
-                    title="拆分作品",
-                    author="林川",
-                    copy_shelves=False,
-                    user_id=None,
-                )
-            assert db.execute(
-                text(
-                    "SELECT `workId` FROM `LibraryEdition` "
-                    "WHERE `id` = 'edition-work-a-second'"
-                )
-            ).scalar() == "work-a"
-            assert db.execute(
-                text("SELECT COUNT(*) FROM `LibraryWork` WHERE `title` = '拆分作品'")
-            ).scalar() == 0
-            assert db.execute(text("SELECT COUNT(*) FROM `LibraryOperation`")).scalar() == 0
-    finally:
-        engine.dispose()
-
-
-def test_dynamic_filters_cover_metadata_files_shelves_folders_and_free_combinations(tmp_path) -> None:
+def test_dynamic_filters_cover_metadata_files_shelves_folders_and_free_combinations(
+    tmp_path,
+) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
     try:
@@ -340,16 +456,42 @@ def test_dynamic_filters_cover_metadata_files_shelves_folders_and_free_combinati
                     "`publishedYear` = 2026, `metadataQuality` = 92, `createdAt` = '2026-07-01T10:00:00' WHERE `id` = 'work-a'"
                 )
             )
-            db.execute(text("UPDATE `LibraryEdition` SET `mediaKind` = 'EBOOK', `format` = 'EPUB', `language` = 'zh-CN' WHERE `id` = 'edition-work-a'"))
-            db.execute(text("UPDATE `LibraryEdition` SET `mediaKind` = 'AUDIOBOOK', `format` = 'AUDIO' WHERE `id` = 'edition-work-b'"))
             db.execute(
                 text(
-                    "INSERT INTO `LibraryFile` (`id`, `editionId`, `path`, `kind`, `mimeType`, `sizeBytes`, `updatedAt`) "
-                    "VALUES ('file-a', 'edition-work-a', '/books/scifi/星海列车.epub', 'BOOK', 'application/epub+zip', 2097152, '2026-07-22T00:00:00')"
+                    "UPDATE `LibraryVolume` SET `format` = 'EPUB', `language` = 'zh-CN' WHERE `id` = 'volume-work-a'"
                 )
             )
-            db.execute(text("INSERT INTO `Shelf` (`id`, `name`, `updatedAt`) VALUES ('shelf-a', '科幻收藏', '2026-07-22T00:00:00')"))
-            db.execute(text("INSERT INTO `ShelfWork` (`shelfId`, `workId`, `createdAt`) VALUES ('shelf-a', 'work-a', '2026-07-22T00:00:00')"))
+            db.execute(
+                text(
+                    "UPDATE `LibraryVolume` SET `monitorFolderId` = 'folder-a', `origin` = 'WATCH' WHERE `id` = 'volume-work-a'"
+                )
+            )
+            db.execute(
+                text(
+                    "UPDATE `LibraryMediaVersion` SET `mediaKind` = 'AUDIOBOOK' WHERE `id` = 'media-work-b'"
+                )
+            )
+            db.execute(
+                text(
+                    "UPDATE `LibraryVolume` SET `format` = 'AUDIO' WHERE `id` = 'volume-work-b'"
+                )
+            )
+            db.execute(
+                text(
+                    "INSERT INTO `LibraryFile` (`id`, `volumeId`, `path`, `kind`, `mimeType`, `sizeBytes`, `updatedAt`) "
+                    "VALUES ('file-a', 'volume-work-a', '/books/scifi/星海列车.epub', 'BOOK', 'application/epub+zip', 2097152, '2026-07-22T00:00:00')"
+                )
+            )
+            db.execute(
+                text(
+                    "INSERT INTO `Shelf` (`id`, `name`, `updatedAt`) VALUES ('shelf-a', '科幻收藏', '2026-07-22T00:00:00')"
+                )
+            )
+            db.execute(
+                text(
+                    "INSERT INTO `ShelfWork` (`shelfId`, `workId`, `createdAt`) VALUES ('shelf-a', 'work-a', '2026-07-22T00:00:00')"
+                )
+            )
             db.commit()
             all_rules = {
                 "combinator": "ALL",
@@ -358,10 +500,18 @@ def test_dynamic_filters_cover_metadata_files_shelves_folders_and_free_combinati
                     {"field": "publisher", "operator": "equals", "value": "星海出版社"},
                     {"field": "mediaKind", "operator": "equals", "value": "EBOOK"},
                     {"field": "shelf", "operator": "equals", "value": "shelf-a"},
-                    {"field": "monitorFolder", "operator": "equals", "value": "folder-a"},
+                    {
+                        "field": "monitorFolder",
+                        "operator": "equals",
+                        "value": "folder-a",
+                    },
                     {"field": "sourcePath", "operator": "contains", "value": "scifi"},
                     {"field": "fileSize", "operator": "greater_than", "value": "1.5"},
-                    {"field": "createdAt", "operator": "on_or_after", "value": "2026-07-01"},
+                    {
+                        "field": "createdAt",
+                        "operator": "on_or_after",
+                        "value": "2026-07-01",
+                    },
                 ],
             }
             predicate, _params, error = compile_filter_rules(db, all_rules, alias="w")
@@ -384,8 +534,41 @@ def test_dynamic_filters_cover_metadata_files_shelves_folders_and_free_combinati
 
             schema = library_filter_schema(db)
             fields = {item["key"]: item for item in schema["fields"]}
-            assert {"title", "publisher", "format", "progress", "shelf", "monitorFolder", "createdAt"}.issubset(fields)
-            assert {option["value"] for option in fields["shelf"]["options"]} == {"shelf-a"}
-            assert {option["value"] for option in fields["monitorFolder"]["options"]} == {"folder-a"}
+            assert {
+                "title",
+                "publisher",
+                "format",
+                "progress",
+                "shelf",
+                "monitorFolder",
+                "createdAt",
+            }.issubset(fields)
+            assert {option["value"] for option in fields["shelf"]["options"]} == {
+                "shelf-a"
+            }
+            assert {
+                option["value"] for option in fields["monitorFolder"]["options"]
+            } == {"folder-a"}
+    finally:
+        engine.dispose()
+
+
+def test_delete_work_removes_media_versions_and_volumes(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            _insert_work(db, "work-delete", "待删除作品", "林川", ["科幻"])
+            media_version = db.get(LibraryMediaVersion, "media-work-delete")
+            assert media_version is not None
+
+            result = delete_work_records(db, "work-delete")
+            db.commit()
+
+            assert result["deleted"] is True
+            assert db.get(LibraryWork, "work-delete") is None
+            assert db.get(LibraryMediaVersion, "media-work-delete") is None
+            assert db.get(LibraryVolume, "volume-work-delete") is None
     finally:
         engine.dispose()

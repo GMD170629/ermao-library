@@ -102,11 +102,10 @@ export type ReaderPreferences = {
 };
 
 type ReaderSourceBase = {
-  editionId: string;
   workId: string;
+  volumeId: string;
   contentUrl: string;
   contentFingerprint: string;
-  volumeId?: string | null;
   totalPages?: number | null;
 };
 

@@ -42,24 +42,24 @@ export function pendingSeekAfterAssignment(
     : pendingPositionMs;
 }
 
-export function beginAudioEditionSwitch(
+export function beginAudioVolumeSwitch(
   current: AudioPlaybackState,
-  requestedEditionId: string,
+  requestedVolumeId: string,
   pendingSummary: AudioLaunchSummary | null = null
 ): AudioPlaybackState {
   return {
     ...current,
     lifecycle: 'loading',
-    pendingEditionId: requestedEditionId,
+    pendingVolumeId: requestedVolumeId,
     pendingSummary,
     loadError: null,
     error: null
   };
 }
 
-export function failAudioEditionSwitch(
+export function failAudioVolumeSwitch(
   previous: AudioPlaybackState,
-  requestedEditionId: string,
+  requestedVolumeId: string,
   message: string,
   pendingSummary: AudioLaunchSummary | null = null
 ): AudioPlaybackState {
@@ -68,7 +68,7 @@ export function failAudioEditionSwitch(
     lifecycle: previous.bootstrap
       ? previous.lifecycle === 'playing' || previous.lifecycle === 'loading' ? 'paused' : previous.lifecycle
       : 'error',
-    pendingEditionId: requestedEditionId,
+    pendingVolumeId: requestedVolumeId,
     pendingSummary,
     loadError: message
   };
@@ -162,7 +162,7 @@ export function audioLocation(
   track: AudioTrack,
   chapter: AudioChapter | null,
   positionMs: number,
-  volumeId: string | null = null
+  volumeId: string
 ): AudioLocation {
   return {
     type: 'audio',

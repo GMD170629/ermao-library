@@ -7,6 +7,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.core.time import now_timestamp_ms
 from app.modules.imports.application.audio_types import (
     AudioBundleStructure,
     AudioFileMetadata,
@@ -17,12 +18,13 @@ from app.modules.imports.application.dto import (
     ImportPreferencesDTO,
     ImportSystemEvent,
 )
-from app.modules.imports.application.reflowable_types import ReflowableBookMetadata
 from app.modules.imports.application.errors import (
     AudioTrackLimitExceededError,
     ImportExecutionError,
 )
+from app.modules.imports.application.reflowable_types import ReflowableBookMetadata
 from app.modules.imports.infrastructure.audio_cover import publish_audio_cover
+from app.modules.imports.infrastructure.conversion import bind_derived_volume
 from app.modules.imports.infrastructure.reflowable_cover import (
     publish_reflowable_cover,
 )
@@ -81,6 +83,17 @@ class SessionImportOrchestrationServices:
             converter=artifact.converter,
             converter_version=artifact.converter_version,
             cached=artifact.cached,
+            idempotency_key=artifact.idempotency_key,
+        )
+
+    def bind_conversion_result(
+        self, idempotency_key: str, derived_volume_id: str
+    ) -> None:
+        bind_derived_volume(
+            self._db,
+            idempotency_key=idempotency_key,
+            derived_volume_id=derived_volume_id,
+            now=now_timestamp_ms(),
         )
 
     def recognize_identity(
@@ -148,20 +161,20 @@ class SessionImportOrchestrationServices:
         self,
         storage_root: Path,
         work_id: str,
-        edition_id: str,
+        media_version_id: str,
         metadata_items: tuple[AudioFileMetadata, ...],
         *,
         bundle_root: Path | None = None,
     ) -> str | None:
         possible_targets = {
-            storage_root / "books" / work_id / edition_id / f"cover{extension}"
+            storage_root / "books" / work_id / media_version_id / f"cover{extension}"
             for extension in (".jpg", ".png", ".webp", ".gif")
         }
         existing_targets = {path for path in possible_targets if path.exists()}
         published = publish_audio_cover(
             storage_root,
             work_id,
-            edition_id,
+            media_version_id,
             metadata_items,
             bundle_root=bundle_root,
         )
@@ -199,13 +212,13 @@ class SessionImportOrchestrationServices:
         self,
         storage_root: Path,
         work_id: str,
-        edition_id: str,
+        media_version_id: str,
         metadata: ReflowableBookMetadata,
     ) -> str | None:
         published = publish_reflowable_cover(
             storage_root,
             work_id,
-            edition_id,
+            media_version_id,
             metadata.cover,
         )
         if published:

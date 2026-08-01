@@ -1,6 +1,5 @@
-from sqlalchemy import text
-
 from app.services.book_identity import identity_merge_key
+from sqlalchemy import text
 from tests.test_compat_api import _login, create_organize_detail_tables
 from tests.test_worker_importer import create_worker_tables
 
@@ -10,20 +9,27 @@ def _insert_work(db, work_id, title, author):
         text(
             """
             INSERT INTO LibraryWork (
-                id, origin, title, normalizedTitle, author, normalizedAuthor, workType, status,
+                id, origin, title, normalizedTitle, author, normalizedAuthor, workType,
                 publicationStatus, trackingStatus, tags, metadataQuality, organizeStatus, coverStatus,
                 hidden, organized, mergeKey, createdAt, updatedAt
             ) VALUES (
-                :id, 'MANUAL', :title, :title, :author, :author, 'EPUB', 'WANT', 'UNKNOWN',
+                :id, 'MANUAL', :title, :title, :author, :author, 'EPUB', 'UNKNOWN',
                 'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING', 0, 0, :merge_key, 'now', 'now'
             )
             """
         ),
-        {"id": work_id, "title": title, "author": author, "merge_key": identity_merge_key(title, author)},
+        {
+            "id": work_id,
+            "title": title,
+            "author": author,
+            "merge_key": identity_merge_key(title, author),
+        },
     )
 
 
-def test_manual_identity_update_allows_same_title_and_author_without_merge_candidate(client, db_session):
+def test_manual_identity_update_allows_same_title_and_author_without_merge_candidate(
+    client, db_session
+):
     create_worker_tables(db_session)
     create_organize_detail_tables(db_session)
     _insert_work(db_session, "work-a", "原书名", "原作者")
@@ -31,16 +37,33 @@ def test_manual_identity_update_allows_same_title_and_author_without_merge_candi
     db_session.commit()
     _login(client, db_session)
 
-    duplicate = client.patch("/api/works/work-a", json={"title": "目标书名", "author": "目标作者"})
+    duplicate = client.patch(
+        "/api/works/work-a", json={"title": "目标书名", "author": "目标作者"}
+    )
 
     assert duplicate.status_code == 200
-    assert db_session.execute(text("SELECT mergeKey FROM LibraryWork WHERE id = 'work-a'")).scalar() == identity_merge_key("目标书名", "目标作者")
-    assert db_session.execute(text("SELECT COUNT(*) FROM DuplicateCandidate")).scalar() == 0
+    assert db_session.execute(
+        text("SELECT mergeKey FROM LibraryWork WHERE id = 'work-a'")
+    ).scalar() == identity_merge_key("目标书名", "目标作者")
+    assert (
+        db_session.execute(text("SELECT COUNT(*) FROM DuplicateCandidate")).scalar()
+        == 0
+    )
 
-    updated = client.patch("/api/works/work-a", json={"title": " 新书名（典藏版） ", "author": "作者·甲"})
+    updated = client.patch(
+        "/api/works/work-a", json={"title": " 新书名（典藏版） ", "author": "作者·甲"}
+    )
 
     assert updated.status_code == 200
-    row = db_session.execute(text("SELECT title, author, normalizedTitle, normalizedAuthor, mergeKey FROM LibraryWork WHERE id = 'work-a'")).mappings().first()
+    row = (
+        db_session.execute(
+            text(
+                "SELECT title, author, normalizedTitle, normalizedAuthor, mergeKey FROM LibraryWork WHERE id = 'work-a'"
+            )
+        )
+        .mappings()
+        .first()
+    )
     assert row["title"] == "新书名（典藏版）"
     assert row["author"] == "作者·甲"
     assert row["normalizedTitle"] == "新书名典藏版"
@@ -48,37 +71,58 @@ def test_manual_identity_update_allows_same_title_and_author_without_merge_candi
     assert row["mergeKey"] == "新书名典藏版:作者甲"
 
 
-def test_manual_metadata_apply_writes_publisher_to_primary_edition(client, db_session):
+def test_manual_metadata_apply_writes_publisher_to_selected_volume(client, db_session):
     create_worker_tables(db_session)
     create_organize_detail_tables(db_session)
     _insert_work(db_session, "work-publisher", "出版测试", "测试作者")
     db_session.execute(
         text(
             """
-            INSERT INTO LibraryEdition (
-                id, workId, origin, format, versionName, versionKey, importStatus, sizeBytes,
-                "primary", hidden, createdAt, updatedAt
+            INSERT INTO LibraryMediaVersion (
+                id, workId, mediaKind, createdAt, updatedAt
             ) VALUES (
-                'edition-publisher', 'work-publisher', 'MANUAL', 'EPUB', 'EPUB', 'epub:publisher',
-                'COMPLETED', 1, 1, 0, 'now', 'now'
+                'media-publisher', 'work-publisher', 'EBOOK', 'now', 'now'
             )
             """
         )
     )
-    db_session.execute(text("UPDATE LibraryWork SET primaryEditionId = 'edition-publisher' WHERE id = 'work-publisher'"))
+    db_session.execute(
+        text(
+            """
+            INSERT INTO LibraryVolume (
+                id, mediaVersionId, origin, title, sortOrder, format, resourceKey,
+                importStatus, sizeBytes, coverStatus, hidden, createdAt, updatedAt
+            ) VALUES (
+                'volume-publisher', 'media-publisher', 'MANUAL', 'EPUB', 0, 'EPUB',
+                'epub:publisher', 'COMPLETED', 1, 'PENDING', 0, 'now', 'now'
+            )
+            """
+        )
+    )
     db_session.commit()
     _login(client, db_session)
 
     response = client.post(
         "/api/works/work-publisher/metadata/apply",
-        json={"candidate": {"publisher": "新星出版社"}, "fields": ["publisher"]},
+        json={
+            "candidate": {"publisher": "新星出版社"},
+            "fields": ["publisher"],
+            "volumeId": "volume-publisher",
+        },
     )
 
     assert response.status_code == 200
-    assert db_session.execute(text("SELECT publisher FROM LibraryEdition WHERE id = 'edition-publisher'")).scalar() == "新星出版社"
+    assert (
+        db_session.execute(
+            text("SELECT publisher FROM LibraryVolume WHERE id = 'volume-publisher'")
+        ).scalar()
+        == "新星出版社"
+    )
 
 
-def test_manual_metadata_apply_remains_available_after_organize_suggestion_apply_is_removed(client, db_session):
+def test_manual_metadata_apply_remains_available_after_organize_suggestion_apply_is_removed(
+    client, db_session
+):
     create_worker_tables(db_session)
     create_organize_detail_tables(db_session)
     _insert_work(db_session, "work-target", "目标书名", "目标作者")
@@ -115,19 +159,37 @@ def test_manual_metadata_apply_remains_available_after_organize_suggestion_apply
 
     metadata = client.post(
         "/api/works/work-metadata/metadata/apply",
-        json={"candidate": {"title": "目标书名", "author": "目标作者"}, "fields": ["title", "author"]},
+        json={
+            "candidate": {"title": "目标书名", "author": "目标作者"},
+            "fields": ["title", "author"],
+        },
     )
     organized = client.post(
         "/api/organize/jobs/job-identity/apply",
-        json={"suggestionIds": ["suggest-title", "suggest-author"], "markOrganized": True},
+        json={
+            "suggestionIds": ["suggest-title", "suggest-author"],
+            "markOrganized": True,
+        },
     )
 
     assert metadata.status_code == 200
     assert organized.status_code == 404
-    assert db_session.execute(text("SELECT mergeKey FROM LibraryWork WHERE id = 'work-metadata'")).scalar() == identity_merge_key("目标书名", "目标作者")
-    assert db_session.execute(text("SELECT mergeKey FROM LibraryWork WHERE id = 'work-organize'")).scalar() == identity_merge_key("整理旧名", "旧作者")
-    assert db_session.execute(text("SELECT COUNT(*) FROM MetadataSuggestion WHERE status = 'PENDING'")).scalar() == 2
-    assert db_session.execute(text("SELECT COUNT(*) FROM DuplicateCandidate")).scalar() == 0
+    assert db_session.execute(
+        text("SELECT mergeKey FROM LibraryWork WHERE id = 'work-metadata'")
+    ).scalar() == identity_merge_key("目标书名", "目标作者")
+    assert db_session.execute(
+        text("SELECT mergeKey FROM LibraryWork WHERE id = 'work-organize'")
+    ).scalar() == identity_merge_key("整理旧名", "旧作者")
+    assert (
+        db_session.execute(
+            text("SELECT COUNT(*) FROM MetadataSuggestion WHERE status = 'PENDING'")
+        ).scalar()
+        == 2
+    )
+    assert (
+        db_session.execute(text("SELECT COUNT(*) FROM DuplicateCandidate")).scalar()
+        == 0
+    )
 
 
 def test_work_and_organize_views_expose_optional_lookup_status(client, db_session):

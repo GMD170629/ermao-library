@@ -132,9 +132,23 @@ def _apply_schema_once(engine: Engine, settings: Settings | None = None) -> None
         head = head_revision(engine)
 
         if current_alembic is not None:
-            raw_connection.close()
-            raw_connection = None
-            _upgrade_head(engine)
+            if current_alembic == head:
+                raw_connection.close()
+                raw_connection = None
+            else:
+                if settings is not None and engine.url.database not in (
+                    None,
+                    "",
+                    ":memory:",
+                ):
+                    _backup_before_migration(
+                        driver_connection,
+                        settings,
+                        f"{current_alembic}-to-{head}",
+                    )
+                raw_connection.close()
+                raw_connection = None
+                _upgrade_head(engine)
         elif not has_tables:
             if settings is not None and engine.url.database not in (
                 None,

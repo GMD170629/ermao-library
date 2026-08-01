@@ -4,7 +4,7 @@ import type { Clock, IdGenerator } from '../../../shared/lib/runtime';
 import type { ReaderProgressDocumentStore } from './ports';
 import {
   recordReaderProgress,
-  type LocalProgressEntryV1,
+  type LocalProgressEntryV2,
   type ProgressConnection,
   type ProgressOwner,
 } from '../model/reader-progress';
@@ -13,15 +13,14 @@ export type SaveReaderProgressCommand = Readonly<{
   connection: ProgressConnection;
   owner: ProgressOwner;
   workId: string;
-  editionId: string;
-  volumeId: string | null;
+  volumeId: string;
   contentFingerprint: string;
   location: ReaderLocation;
   percent: number;
 }>;
 
 export type SaveReaderProgressResult = Readonly<{
-  entry: LocalProgressEntryV1;
+  entry: LocalProgressEntryV2;
   recoveredFromCorruption: boolean;
   maintenanceWarningCount: number;
 }>;

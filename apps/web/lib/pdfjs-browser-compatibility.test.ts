@@ -4,7 +4,7 @@ import test from 'node:test';
 
 test('PDF reader uses the official legacy main module and worker together', async () => {
   const [adapterSource, workerPreparationSource] = await Promise.all([
-    readFile('features/reader/v2/adapters/pdf-adapter.ts', 'utf8'),
+    readFile('features/reader/v3/adapters/pdf-adapter.ts', 'utf8'),
     readFile('scripts/prepare-pdfjs-worker.mjs', 'utf8')
   ]);
 

@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-
 from app.modules.imports.application.dto import (
     ImportResult,
     ImportRuntimeConfig,
@@ -93,8 +92,8 @@ class RecordingPipeline:
         return ImportResult(
             book_id="work-1",
             work_id="work-1",
-            edition_id="edition-1",
-            volume_id=None,
+            media_version_id="media-version-1",
+            volume_id="volume-1",
             title="测试书",
             type="EPUB",
             format="EPUB",

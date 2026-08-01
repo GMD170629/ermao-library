@@ -13,14 +13,14 @@ import { useI18n as useAttributeI18n } from '@/i18n/provider';
 export type KindleSendTask = {
   id: string;
   workId: string | null;
-  editionId: string | null;
-  volumeId: string | null;
+  mediaVersionId: string;
+  mediaKind: 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
+  volumeId: string;
   fileId: string | null;
   bookTitle: string;
-  editionName: string | null;
   volumeTitle: string | null;
   fileName: string;
-  format: string;
+  volumeFormat: string;
   mimeType: string;
   sizeBytes: number;
   senderEmail: string | null;
@@ -186,10 +186,11 @@ export function KindleSendQueuePage({ embedded = false }: { embedded?: boolean }
                         {task.status === 'sending' ? <Send size={18} className="text-[#ED4D2D]" /> : <Mail size={18} className="text-[#766F68]" />}
                         <h5 className="break-words font-semibold text-[#242220]">{task.bookTitle}</h5>
                         <Badge tone={statusTone(task.status)}>{statusLabels[task.status]}</Badge>
-                        <Badge>{task.format}</Badge>
+                        <Badge>{task.volumeFormat}</Badge>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2 text-xs text-[#6F6962]">
-                        <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1">{task.editionName ?? i18nAttribute("默认版本")}{task.volumeTitle ? ` · ${task.volumeTitle}` : ''}</span>
+                        <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1">{task.volumeTitle ?? task.fileName}</span>
+                        <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1">{task.mediaKind}</span>
                         <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1">{task.fileName}</span>
                         <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1">{formatBytes(task.sizeBytes)}</span>
                         <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1"><I18nText>尝试 </I18nText>{task.attemptCount} <I18nText>次</I18nText></span>

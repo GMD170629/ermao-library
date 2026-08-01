@@ -24,10 +24,10 @@ import {
   closestReaderOptionValue,
   type ReaderFontFamily
 } from './reader-preference-options';
-import type { ReaderBookmark } from './v2/bookmarks';
-import { resolveActiveEpubNavigationIndex } from './v2/epub-navigation';
-import type { ReaderInteractionPolicy } from './v2/adapters/reader-interaction';
-import { hasActiveTextSelection, isReaderControlTarget, readerKeyIntent, readerPinchZoom, readerPointerIntentInViewport, readerSwipeIntent, type ReaderInputIntent } from './v2/input-router';
+import type { ReaderBookmark } from './v3/bookmarks';
+import { resolveActiveEpubNavigationIndex } from './v3/epub-navigation';
+import type { ReaderInteractionPolicy } from './v3/adapters/reader-interaction';
+import { hasActiveTextSelection, isReaderControlTarget, readerKeyIntent, readerPinchZoom, readerPointerIntentInViewport, readerSwipeIntent, type ReaderInputIntent } from './v3/input-router';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
@@ -127,20 +127,10 @@ export type ReaderNavigationItem = {
 };
 
 export type ReaderVolumeNavigation = {
-  editions: Array<{
-    id: string;
-    versionName: string;
-    format: string;
-    progress: number;
-    lastReadAt: string | null;
-    volumes: Array<{ id: string; title: string; pageCount: number | null }>;
-  }>;
   volumeSections: Array<{ id: string; title: string; pageCount: number }>;
   pages: ReaderNavigationItem[];
-  currentEditionId: string;
-  currentVolumeId: string | null;
+  currentVolumeId: string;
   loading: boolean;
-  onSelectEdition: (editionId: string) => void;
   onSelectVolume: (volumeId: string) => void;
   onSelectItem: (item: ReaderNavigationItem) => void;
 };
@@ -571,7 +561,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   return (
     <div
       className={cn('fixed inset-0 z-50 min-h-0 overflow-clip transition-colors', themeSurface.textClass)}
-      data-reader-shell="v2"
+      data-reader-shell="v3"
       data-reader-theme={settings.theme}
       data-reader-kind={readerType}
       data-reader-horizontal-paging={horizontalPaging}
@@ -1296,7 +1286,6 @@ function CompactStepper({ label, value, onMinus, onPlus, dark }: { label: string
 
 function VolumeNavigationPanel({ navigation, readerType, activeItemKey, dark, onJumpItem }: { navigation: ReaderVolumeNavigation; readerType: ReaderKind; activeItemKey: string | null; dark: boolean; onJumpItem: (item: ReaderNavigationItem) => void }) {
   const { t: i18nAttribute } = useAttributeI18n();
-  const showEditions = navigation.editions.length > 1;
   const showVolumes = navigation.volumeSections.length > 1;
   const idleText = navigation.loading ? '正在切换...' : null;
   const isComic = readerType === 'comic';
@@ -1304,33 +1293,6 @@ function VolumeNavigationPanel({ navigation, readerType, activeItemKey, dark, on
   return (
     <div data-pwa-scroll="true" className="mt-5 min-h-0 flex-1 overflow-auto overscroll-contain pr-1">
       {idleText ? <div className="mb-3 rounded-xl bg-white/10 px-3 py-2 text-xs opacity-70">{idleText}</div> : null}
-      {showEditions ? (
-        <VolumeNavigationGroup title={i18nAttribute("版本")}>
-          {navigation.editions.map((edition) => {
-            const selected = edition.id === navigation.currentEditionId;
-            const detail = [
-              edition.format,
-              edition.volumes.length > 0 ? `${edition.volumes.length} ${isComic ? '卷/话' : '卷'}` : '',
-              edition.progress > 0 ? `${clampPercent(edition.progress)}%` : ''
-            ].filter(Boolean).join(' · ');
-            return (
-              <button
-                key={edition.id}
-                type="button"
-                disabled={navigation.loading}
-                onClick={() => navigation.onSelectEdition(edition.id)}
-                className={comicNavButtonClass(selected, dark)}
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">{edition.versionName}</span>
-                  <span className="mt-0.5 block truncate text-xs opacity-65">{detail || i18nAttribute("默认版本")}</span>
-                </span>
-              </button>
-            );
-          })}
-        </VolumeNavigationGroup>
-      ) : null}
-
       {showVolumes && !isComic ? (
         <VolumeNavigationGroup title={i18nAttribute("卷册")}>
           <VolumeSelect

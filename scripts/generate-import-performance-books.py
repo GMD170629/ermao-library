@@ -33,7 +33,9 @@ def deterministic_payload(index: int, size: int = MIN_PAYLOAD_BYTES) -> bytes:
     chunks: list[bytes] = []
     sequence = 0
     while sum(map(len, chunks)) < size:
-        chunks.append(hashlib.sha256(f"shuku-import-perf:{index}:{sequence}".encode()).digest())
+        chunks.append(
+            hashlib.sha256(f"shuku-import-perf:{index}:{sequence}".encode()).digest()
+        )
         sequence += 1
     return b"".join(chunks)[:size]
 
@@ -125,7 +127,9 @@ def show_status(output: Path, database: Path) -> int:
     elapsed = max(time.time() - started_at, 0.001)
     path_pattern = f"{output.resolve()}/%"
 
-    connection = sqlite3.connect(f"file:{database.resolve()}?mode=ro", uri=True, timeout=10)
+    connection = sqlite3.connect(
+        f"file:{database.resolve()}?mode=ro", uri=True, timeout=10
+    )
     try:
         statuses = dict(
             connection.execute(
@@ -189,7 +193,10 @@ def generate(output: Path, count: int) -> int:
             created += 1
         if index % 500 == 0 or index == count:
             elapsed = max(time.perf_counter() - started, 0.001)
-            print(f"进度 {index}/{count}，新建 {created}，已存在 {existing}，{index / elapsed:.1f} 本/秒", flush=True)
+            print(
+                f"进度 {index}/{count}，新建 {created}，已存在 {existing}，{index / elapsed:.1f} 本/秒",
+                flush=True,
+            )
 
     elapsed = time.perf_counter() - started
     files = list(output.glob("*.epub"))
@@ -203,7 +210,9 @@ def generate(output: Path, count: int) -> int:
         "totalBytes": total_bytes,
         "generationDurationSeconds": round(elapsed, 3),
     }
-    (output / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (output / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     print(json.dumps(manifest, ensure_ascii=False))
     print(f"生成完成：{output}")
     print(f"清理命令：python3 {Path(__file__).name} --output {output} --clean")
@@ -212,15 +221,24 @@ def generate(output: Path, count: int) -> int:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="生成书库监控导入性能测试 EPUB")
-    parser.add_argument("--count", type=int, default=DEFAULT_COUNT, help=f"生成数量，默认 {DEFAULT_COUNT}")
+    parser.add_argument(
+        "--count",
+        type=int,
+        default=DEFAULT_COUNT,
+        help=f"生成数量，默认 {DEFAULT_COUNT}",
+    )
     parser.add_argument(
         "--output",
         type=Path,
         default=project_root() / "books" / "import-performance-5000",
         help="输出目录",
     )
-    parser.add_argument("--clean", action="store_true", help="只清理带安全标记的输出目录")
-    parser.add_argument("--status", action="store_true", help="读取数据库并报告这批文件的导入状态")
+    parser.add_argument(
+        "--clean", action="store_true", help="只清理带安全标记的输出目录"
+    )
+    parser.add_argument(
+        "--status", action="store_true", help="读取数据库并报告这批文件的导入状态"
+    )
     parser.add_argument(
         "--database",
         type=Path,

@@ -5,22 +5,36 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session
 
 from app.core.authorization import (
     AuthorizationContext,
-    edition_visibility_predicate,
     monitor_folder_visibility_predicate,
+    volume_visibility_predicate,
     work_visibility_predicate,
 )
 from app.core.time import to_timestamp_ms
 from app.models.import_pipeline import DownloadTask, ImportTask
-from app.models.library import LibraryEdition, LibraryFile, LibraryReadingProgress, LibraryWork
+from app.models.library import (
+    LibraryFile,
+    LibraryMediaVersion,
+    LibraryReadingProgress,
+    LibraryVolume,
+    LibraryWork,
+    UserMediaHistory,
+)
 from app.models.settings import MonitorFolder, SystemEvent
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
+from app.modules.reader.public import (
+    MediaKind,
+    VolumeReadingState,
+    choose_continue_volume_id,
+)
 
 
-def dashboard_summary(db: Session, context: AuthorizationContext, user_id: str) -> dict[str, Any]:
+def dashboard_summary(
+    db: Session, context: AuthorizationContext, user_id: str
+) -> dict[str, Any]:
     work_visible = work_visibility_predicate(context)
     total_books = int(
         db.scalar(
@@ -57,9 +71,9 @@ def dashboard_summary(db: Session, context: AuthorizationContext, user_id: str) 
 
     storage = int(
         db.scalar(
-            select(func.coalesce(func.sum(LibraryEdition.size_bytes), 0)).where(
-                LibraryEdition.hidden.is_(False),
-                edition_visibility_predicate(context),
+            select(func.coalesce(func.sum(LibraryVolume.size_bytes), 0)).where(
+                LibraryVolume.hidden.is_(False),
+                volume_visibility_predicate(context),
             )
         )
         or 0
@@ -88,7 +102,9 @@ def dashboard_summary(db: Session, context: AuthorizationContext, user_id: str) 
     monitor_folder_count = (
         int(
             db.scalar(
-                select(func.count()).select_from(MonitorFolder).where(MonitorFolder.enabled.is_(True))
+                select(func.count())
+                .select_from(MonitorFolder)
+                .where(MonitorFolder.enabled.is_(True))
             )
             or 0
         )
@@ -102,12 +118,15 @@ def dashboard_summary(db: Session, context: AuthorizationContext, user_id: str) 
         "novelBooks": novel_books,
         "storageUsedBytes": storage,
         "monitorFolderCount": monitor_folder_count,
-        "lastImportAt": (last_import or {}).get("finishedAt") or (last_import or {}).get("updatedAt"),
+        "lastImportAt": (last_import or {}).get("finishedAt")
+        or (last_import or {}).get("updatedAt"),
         "latestSyncAt": latest_progress_at,
     }
 
 
-def recent_books(db: Session, context: AuthorizationContext, *, limit: int) -> list[dict[str, Any]]:
+def recent_books(
+    db: Session, context: AuthorizationContext, *, limit: int
+) -> list[dict[str, Any]]:
     rows = db.execute(
         select(
             LibraryWork.id,
@@ -134,8 +153,9 @@ def recent_books(db: Session, context: AuthorizationContext, *, limit: int) -> l
     ]
 
 
-def recent_reading(db: Session, context: AuthorizationContext, user_id: str, *, limit: int) -> list[dict[str, Any]]:
-    recent_edition = aliased(LibraryEdition)
+def recent_reading(
+    db: Session, context: AuthorizationContext, user_id: str, *, limit: int
+) -> list[dict[str, Any]]:
     latest_read_at = func.max(LibraryReadingProgress.updated_at).label("lastReadAt")
     rows = db.execute(
         select(
@@ -146,14 +166,17 @@ def recent_reading(db: Session, context: AuthorizationContext, user_id: str, *, 
             LibraryWork.cover_path,
             latest_read_at,
         )
-        .join(LibraryReadingProgress, LibraryReadingProgress.work_id == LibraryWork.id)
-        .join(recent_edition, recent_edition.id == LibraryReadingProgress.edition_id)
+        .join(LibraryMediaVersion, LibraryMediaVersion.work_id == LibraryWork.id)
+        .join(LibraryVolume, LibraryVolume.media_version_id == LibraryMediaVersion.id)
+        .join(
+            LibraryReadingProgress, LibraryReadingProgress.volume_id == LibraryVolume.id
+        )
         .where(
             LibraryReadingProgress.user_id == user_id,
             LibraryWork.hidden.is_(False),
-            func.coalesce(recent_edition.hidden, False).is_(False),
+            LibraryVolume.hidden.is_(False),
             work_visibility_predicate(context),
-            edition_visibility_predicate(context, recent_edition),
+            volume_visibility_predicate(context),
         )
         .group_by(
             LibraryWork.id,
@@ -181,35 +204,124 @@ def recent_reading(db: Session, context: AuthorizationContext, user_id: str, *, 
 def continue_reading_progress(
     db: Session, context: AuthorizationContext, user_id: str
 ) -> dict[str, Any] | None:
-    filters = [
-        LibraryReadingProgress.user_id == user_id,
-        LibraryReadingProgress.percent > 0,
-        LibraryReadingProgress.percent < 100,
-        LibraryWork.hidden.is_(False),
-        func.coalesce(LibraryEdition.hidden, False).is_(False),
-    ]
-    if not context.is_admin:
-        filters.append(
-            monitor_folder_visibility_predicate(
-                context,
-                LibraryEdition.monitor_folder_id,
-            )
+    rows = db.execute(
+        select(
+            LibraryVolume.id.label("volume_id"),
+            LibraryVolume.media_version_id,
+            LibraryVolume.title.label("volume_title"),
+            LibraryVolume.sort_order,
+            LibraryVolume.narrator,
+            LibraryMediaVersion.media_kind,
+            LibraryWork.id.label("work_id"),
+            LibraryWork.title.label("work_title"),
+            LibraryWork.author,
+            LibraryWork.cover_path,
+            LibraryWork.cover_status,
+            LibraryReadingProgress.percent,
+            LibraryReadingProgress.updated_at.label("progress_updated_at"),
+            UserMediaHistory.last_volume_id,
+            UserMediaHistory.updated_at.label("history_updated_at"),
         )
-    row = db.scalar(
-        select(LibraryReadingProgress)
-        .select_from(
-            LibraryReadingProgress
-        )
-        .join(LibraryWork, LibraryWork.id == LibraryReadingProgress.work_id)
+        .select_from(LibraryVolume)
         .join(
-            LibraryEdition,
-            LibraryEdition.id == LibraryReadingProgress.edition_id,
+            LibraryMediaVersion,
+            LibraryMediaVersion.id == LibraryVolume.media_version_id,
         )
-        .where(*filters)
-        .order_by(LibraryReadingProgress.updated_at.desc())
-        .limit(1)
+        .join(LibraryWork, LibraryWork.id == LibraryMediaVersion.work_id)
+        .outerjoin(
+            LibraryReadingProgress,
+            (LibraryReadingProgress.volume_id == LibraryVolume.id)
+            & (LibraryReadingProgress.user_id == user_id),
+        )
+        .outerjoin(
+            UserMediaHistory,
+            (UserMediaHistory.media_version_id == LibraryMediaVersion.id)
+            & (UserMediaHistory.user_id == user_id),
+        )
+        .where(
+            LibraryWork.hidden.is_(False),
+            LibraryVolume.hidden.is_(False),
+            volume_visibility_predicate(context),
+        )
+        .order_by(
+            LibraryMediaVersion.id.asc(),
+            LibraryVolume.sort_order.asc(),
+            LibraryVolume.id.asc(),
+        )
+    ).all()
+    if not rows:
+        return None
+
+    grouped: dict[str, list[Any]] = {}
+    for row in rows:
+        grouped.setdefault(str(row.media_version_id), []).append(row)
+
+    unfinished_media = [
+        media_version_id
+        for media_version_id, media_rows in grouped.items()
+        if any(float(row.percent or 0) < 100 for row in media_rows)
+    ]
+    candidate_media = unfinished_media or list(grouped)
+    media_priority = {
+        MediaKind.EBOOK: 0,
+        MediaKind.COMIC: 1,
+        MediaKind.AUDIOBOOK: 2,
+    }
+
+    def media_rank(media_version_id: str) -> tuple[float, int, str, str]:
+        media_rows = grouped[media_version_id]
+        recent_at = max(
+            (
+                row.history_updated_at or row.progress_updated_at
+                for row in media_rows
+                if row.history_updated_at is not None
+                or row.progress_updated_at is not None
+            ),
+            default=None,
+        )
+        kind = MediaKind(str(media_rows[0].media_kind))
+        return (
+            -(recent_at.timestamp() if recent_at is not None else float("-inf")),
+            media_priority[kind],
+            str(media_rows[0].work_id),
+            media_version_id,
+        )
+
+    selected_media_id = min(candidate_media, key=media_rank)
+    selected_media_rows = grouped[selected_media_id]
+    states = [
+        VolumeReadingState(
+            volume_id=str(row.volume_id),
+            media_kind=MediaKind(str(row.media_kind)),
+            sort_order=int(row.sort_order),
+            percent=int(float(row.percent or 0)),
+            last_read_at=(
+                row.history_updated_at
+                if row.last_volume_id == row.volume_id
+                else row.progress_updated_at
+            ),
+        )
+        for row in selected_media_rows
+    ]
+    selected_volume_id = choose_continue_volume_id(states)
+    if selected_volume_id is None:
+        return None
+    selected = next(
+        row for row in selected_media_rows if row.volume_id == selected_volume_id
     )
-    return entity_as_legacy_dict(row) if row else None
+    return {
+        "workId": selected.work_id,
+        "title": selected.work_title,
+        "author": selected.author,
+        "coverPath": selected.cover_path,
+        "coverStatus": selected.cover_status,
+        "mediaKind": selected.media_kind,
+        "volumeId": selected.volume_id,
+        "volumeTitle": selected.volume_title,
+        "narrator": selected.narrator,
+        "percent": float(selected.percent or 0),
+        "updatedAt": selected.progress_updated_at,
+    }
 
 
 def management_card_counts(db: Session) -> dict[str, int]:
@@ -254,7 +366,9 @@ def management_card_counts(db: Session) -> dict[str, int]:
 def list_library_file_paths(db: Session) -> set[str]:
     return {
         str(path)
-        for path in db.scalars(select(LibraryFile.path).where(LibraryFile.path.is_not(None))).all()
+        for path in db.scalars(
+            select(LibraryFile.path).where(LibraryFile.path.is_not(None))
+        ).all()
         if path
     }
 
@@ -302,14 +416,13 @@ def list_management_file_rows(
         .order_by(LibraryFile.path.asc(), LibraryFile.id.asc())
         .limit(limit)
     ).all()
-    return [
-        {"path": row.path, "sizeBytes": int(row.size_bytes or 0)}
-        for row in rows
-    ]
+    return [{"path": row.path, "sizeBytes": int(row.size_bytes or 0)} for row in rows]
 
 
 def recent_system_events(db: Session, *, limit: int = 8) -> list[dict[str, Any]]:
-    rows = db.scalars(select(SystemEvent).order_by(SystemEvent.created_at.desc()).limit(limit)).all()
+    rows = db.scalars(
+        select(SystemEvent).order_by(SystemEvent.created_at.desc()).limit(limit)
+    ).all()
     return [entity_as_legacy_dict(row) for row in rows]
 
 
@@ -368,5 +481,7 @@ def list_system_events_page(
 def clear_info_warning_events(db: Session) -> int:
     from sqlalchemy import delete
 
-    result = db.execute(delete(SystemEvent).where(SystemEvent.level.in_(("info", "warning"))))
+    result = db.execute(
+        delete(SystemEvent).where(SystemEvent.level.in_(("info", "warning")))
+    )
     return int(result.rowcount or 0)

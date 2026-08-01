@@ -1,15 +1,15 @@
-"""ORM queries and writes for library files, covers, and managed paths."""
+"""Volume-scoped library file, cover, and storage queries."""
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import case, func, select, update
+from sqlalchemy import case, select, update
 from sqlalchemy.orm import Session
 
 from app.models.library import (
-    LibraryEdition,
     LibraryFile,
+    LibraryMediaVersion,
     LibraryVolume,
     LibraryWork,
 )
@@ -17,22 +17,14 @@ from app.modules.library.infrastructure.works import entity_as_legacy_dict
 
 
 def get_file(db: Session, file_id: str) -> dict[str, object] | None:
-    row = db.get(LibraryFile, file_id)
-    return entity_as_legacy_dict(row) if row is not None else None
+    file = db.get(LibraryFile, file_id)
+    return entity_as_legacy_dict(file) if file is not None else None
 
 
-def first_file_for_edition(
-    db: Session,
-    *,
-    edition_id: str,
-    volume_id: str | None = None,
-) -> dict[str, object] | None:
-    filters = [LibraryFile.edition_id == edition_id]
-    if volume_id is not None:
-        filters.append(LibraryFile.volume_id == volume_id)
-    row = db.scalar(
+def first_file_for_volume(db: Session, *, volume_id: str) -> dict[str, object] | None:
+    file = db.scalar(
         select(LibraryFile)
-        .where(*filters)
+        .where(LibraryFile.volume_id == volume_id)
         .order_by(
             LibraryFile.sort_order.asc(),
             LibraryFile.created_at.asc(),
@@ -40,25 +32,23 @@ def first_file_for_edition(
         )
         .limit(1)
     )
-    return entity_as_legacy_dict(row) if row is not None else None
+    return entity_as_legacy_dict(file) if file is not None else None
 
 
 def get_cover_record(
     db: Session,
     *,
     work_id: str | None = None,
-    edition_id: str | None = None,
     volume_id: str | None = None,
 ) -> dict[str, object] | None:
-    if work_id is not None:
-        row = db.get(LibraryWork, work_id)
-    elif edition_id is not None:
-        row = db.get(LibraryEdition, edition_id)
-    elif volume_id is not None:
-        row = db.get(LibraryVolume, volume_id)
-    else:
-        row = None
-    return entity_as_legacy_dict(row) if row is not None else None
+    record = (
+        db.get(LibraryWork, work_id)
+        if work_id is not None
+        else db.get(LibraryVolume, volume_id)
+        if volume_id is not None
+        else None
+    )
+    return entity_as_legacy_dict(record) if record is not None else None
 
 
 def update_cover_record(
@@ -70,83 +60,42 @@ def update_cover_record(
     cover_status: str | None,
     now: datetime,
 ) -> None:
-    if record_type == "LibraryWork":
-        values: dict[str, object] = {
-            "cover_path": cover_path,
-            "updated_at": now,
-        }
-        if cover_status is not None:
-            values["cover_status"] = cover_status
-        db.execute(
-            update(LibraryWork)
-            .where(LibraryWork.id == record_id)
-            .values(**values)
-        )
-    elif record_type == "LibraryEdition":
-        values = {"cover_path": cover_path, "updated_at": now}
-        if cover_status is not None:
-            values["cover_status"] = cover_status
-        db.execute(
-            update(LibraryEdition)
-            .where(LibraryEdition.id == record_id)
-            .values(**values)
-        )
-    elif record_type == "LibraryVolume":
-        db.execute(
-            update(LibraryVolume)
-            .where(LibraryVolume.id == record_id)
-            .values(cover_path=cover_path, updated_at=now)
-        )
+    model = LibraryWork if record_type == "LibraryWork" else LibraryVolume
+    values: dict[str, object] = {"cover_path": cover_path, "updated_at": now}
+    if cover_status is not None:
+        values["cover_status"] = cover_status
+    db.execute(update(model).where(model.id == record_id).values(**values))
     db.flush()
 
 
 def preferred_work_cover_path(db: Session, work_id: str) -> str | None:
-    work = db.execute(
-        select(LibraryWork.primary_edition_id).where(LibraryWork.id == work_id)
-    ).first()
-    primary_edition_id = work.primary_edition_id if work is not None else None
-    if primary_edition_id:
-        volume_cover = db.scalar(
-            select(LibraryVolume.cover_path)
-            .where(
-                LibraryVolume.edition_id == primary_edition_id,
-                LibraryVolume.cover_path.is_not(None),
-                LibraryVolume.cover_path != "",
-            )
-            .order_by(
-                case((LibraryVolume.volume_index.is_(None), 1), else_=0),
-                LibraryVolume.volume_index.asc(),
-                LibraryVolume.sort_order.asc(),
-                LibraryVolume.created_at.asc(),
-                LibraryVolume.id.asc(),
-            )
-            .limit(1)
+    media_priority = case(
+        (LibraryMediaVersion.media_kind == "EBOOK", 0),
+        (LibraryMediaVersion.media_kind == "COMIC", 1),
+        (LibraryMediaVersion.media_kind == "AUDIOBOOK", 2),
+        else_=3,
+    )
+    cover = db.scalar(
+        select(LibraryVolume.cover_path)
+        .join(
+            LibraryMediaVersion,
+            LibraryMediaVersion.id == LibraryVolume.media_version_id,
         )
-        if volume_cover:
-            return str(volume_cover)
-        edition_cover = db.scalar(
-            select(LibraryEdition.cover_path).where(
-                LibraryEdition.id == primary_edition_id
-            )
-        )
-        if edition_cover:
-            return str(edition_cover)
-    edition_cover = db.scalar(
-        select(LibraryEdition.cover_path)
         .where(
-            LibraryEdition.work_id == work_id,
-            func.coalesce(LibraryEdition.hidden, False).is_(False),
-            LibraryEdition.cover_path.is_not(None),
-            LibraryEdition.cover_path != "",
+            LibraryMediaVersion.work_id == work_id,
+            LibraryVolume.hidden.is_(False),
+            LibraryVolume.cover_path.is_not(None),
+            LibraryVolume.cover_path != "",
         )
         .order_by(
-            case((LibraryEdition.is_primary.is_(True), 0), else_=1),
-            LibraryEdition.created_at.asc(),
-            LibraryEdition.id.asc(),
+            media_priority,
+            LibraryVolume.sort_order.asc(),
+            LibraryVolume.created_at.asc(),
+            LibraryVolume.id.asc(),
         )
         .limit(1)
     )
-    return str(edition_cover) if edition_cover else None
+    return str(cover) if cover else None
 
 
 def update_work_cover(
@@ -171,31 +120,48 @@ def update_work_cover(
 
 
 def collect_storage_values(
-    db: Session,
-    work_id: str,
-) -> tuple[str | None, list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
+    db: Session, work_id: str
+) -> tuple[
+    str | None,
+    list[dict[str, object]],
+    list[dict[str, object]],
+    list[dict[str, object]],
+]:
     work_cover = db.scalar(
         select(LibraryWork.cover_path).where(LibraryWork.id == work_id)
     )
-    edition_rows = db.scalars(
-        select(LibraryEdition)
-        .where(LibraryEdition.work_id == work_id)
-        .order_by(LibraryEdition.created_at.asc(), LibraryEdition.id.asc())
+    media_versions = db.scalars(
+        select(LibraryMediaVersion)
+        .where(LibraryMediaVersion.work_id == work_id)
+        .order_by(
+            LibraryMediaVersion.created_at.asc(),
+            LibraryMediaVersion.id.asc(),
+        )
     ).all()
-    editions = [entity_as_legacy_dict(row) for row in edition_rows]
-    edition_ids = [str(edition["id"]) for edition in editions]
-    if not edition_ids:
-        return work_cover, editions, [], []
-    volumes = [
-        entity_as_legacy_dict(row)
-        for row in db.scalars(
-            select(LibraryVolume).where(LibraryVolume.edition_id.in_(edition_ids))
-        ).all()
+    media_version_rows = [
+        entity_as_legacy_dict(media_version) for media_version in media_versions
     ]
-    files = [
-        entity_as_legacy_dict(row)
-        for row in db.scalars(
-            select(LibraryFile).where(LibraryFile.edition_id.in_(edition_ids))
+    media_version_ids = [media_version.id for media_version in media_versions]
+    volumes = (
+        db.scalars(
+            select(LibraryVolume).where(
+                LibraryVolume.media_version_id.in_(media_version_ids)
+            )
         ).all()
-    ]
-    return work_cover, editions, volumes, files
+        if media_version_ids
+        else []
+    )
+    volume_ids = [volume.id for volume in volumes]
+    files = (
+        db.scalars(
+            select(LibraryFile).where(LibraryFile.volume_id.in_(volume_ids))
+        ).all()
+        if volume_ids
+        else []
+    )
+    return (
+        work_cover,
+        media_version_rows,
+        [entity_as_legacy_dict(volume) for volume in volumes],
+        [entity_as_legacy_dict(file) for file in files],
+    )

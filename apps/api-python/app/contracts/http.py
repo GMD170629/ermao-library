@@ -31,3 +31,4 @@ class ErrorEnvelope(HttpContractModel, Generic[ErrorBodyT]):
 
 class MessageError(HttpContractModel):
     message: str
+    code: str | None = None

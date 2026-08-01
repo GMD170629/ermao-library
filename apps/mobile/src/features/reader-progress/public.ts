@@ -11,7 +11,7 @@ export type {
 export type { ReaderProgressDocumentStore } from './application/ports';
 export { SnapshotReaderProgressDocumentStore } from './infrastructure/snapshot-reader-progress-document-store';
 export type {
-  LocalProgressEntryV1,
+  LocalProgressEntryV2,
   ProgressConnection,
   ProgressOwner,
 } from './model/reader-progress';

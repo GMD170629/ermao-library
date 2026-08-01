@@ -5,22 +5,20 @@ from sqlalchemy.orm import Session, aliased
 
 from app.core.authorization import (
     authorization_context,
-    edition_visibility_predicate,
+    volume_visibility_predicate,
     work_visibility_predicate,
 )
 from app.models.auth import User
 from app.models.library import (
-    LibraryEdition,
     LibraryFacet,
+    LibraryMediaVersion,
+    LibraryVolume,
     LibraryWork,
     LibraryWorkFacet,
 )
 from app.modules.library.application.filter_ast import FilterCondition, FilterExpression
 from app.modules.library.application.queries import SmartShelfCriteria
-from app.modules.library.infrastructure.filter_query import (
-    compile_filter_expression,
-    inferred_media_kind,
-)
+from app.modules.library.infrastructure.filter_query import compile_filter_expression
 
 
 class SqlAlchemyLibraryQueries:
@@ -78,17 +76,22 @@ class SqlAlchemyLibraryQueries:
             if status_predicate is not None:
                 predicates.append(status_predicate)
         if criteria.media_kinds:
-            edition = aliased(LibraryEdition)
-            edition_predicates = [
-                edition.work_id == LibraryWork.id,
-                edition.hidden.is_(False),
-                inferred_media_kind(edition).in_(criteria.media_kinds),
+            media_version = aliased(LibraryMediaVersion)
+            volume = aliased(LibraryVolume)
+            media_predicates = [
+                media_version.work_id == LibraryWork.id,
+                media_version.media_kind.in_(criteria.media_kinds),
+                volume.hidden.is_(False),
             ]
             if context is not None:
-                edition_predicates.append(
-                    edition_visibility_predicate(context, edition)
+                media_predicates.append(volume_visibility_predicate(context, volume))
+            predicates.append(
+                exists(
+                    select(volume.id)
+                    .join(media_version, media_version.id == volume.media_version_id)
+                    .where(*media_predicates)
                 )
-            predicates.append(exists(select(edition.id).where(*edition_predicates)))
+            )
         for tag in criteria.tags:
             link = aliased(LibraryWorkFacet)
             facet = aliased(LibraryFacet)
@@ -115,19 +118,26 @@ class SqlAlchemyLibraryQueries:
                 )
             )
         if criteria.publishers:
-            edition = aliased(LibraryEdition)
+            media_version = aliased(LibraryMediaVersion)
+            volume = aliased(LibraryVolume)
             publisher_predicates = [
-                edition.work_id == LibraryWork.id,
-                edition.hidden.is_(False),
-                func.lower(func.coalesce(edition.publisher, "")).in_(
+                media_version.work_id == LibraryWork.id,
+                volume.hidden.is_(False),
+                func.lower(func.coalesce(volume.publisher, "")).in_(
                     tuple(item.casefold() for item in criteria.publishers)
                 ),
             ]
             if context is not None:
                 publisher_predicates.append(
-                    edition_visibility_predicate(context, edition)
+                    volume_visibility_predicate(context, volume)
                 )
-            predicates.append(exists(select(edition.id).where(*publisher_predicates)))
+            predicates.append(
+                exists(
+                    select(volume.id)
+                    .join(media_version, media_version.id == volume.media_version_id)
+                    .where(*publisher_predicates)
+                )
+            )
         if criteria.filters.conditions:
             if context is None:
                 from app.core.authorization import AuthorizationContext
@@ -164,9 +174,7 @@ class SqlAlchemyLibraryQueries:
         if context is not None:
             included_predicates.append(work_visibility_predicate(context))
         visible_included = set(
-            self._db.scalars(
-                select(LibraryWork.id).where(and_(*included_predicates))
-            )
+            self._db.scalars(select(LibraryWork.id).where(and_(*included_predicates)))
         )
         return list(
             dict.fromkeys(

@@ -15,7 +15,7 @@ export function isReflowableEbookFormat(format: string | null | undefined): form
   return Boolean(format && REFLOWABLE_EBOOK_FORMATS.has(format as ReadingFormat));
 }
 
-/** Whether the ebook detail tab should render chapter navigation for this edition. */
+/** Whether the ebook detail tab should render chapter navigation for this volume. */
 export function hasEbookChapterNavigation(
   detailTab: WorkDetailTabKey | null | undefined,
   format: string | null | undefined

@@ -5,22 +5,21 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
-from sqlalchemy import inspect, text
-from sqlalchemy.orm import Session
-
 from app.core.config import Settings
 from app.db import bootstrap as bootstrap_module
 from app.db import runner as runner_module
 from app.db.base import Base
 from app.db.bootstrap import bootstrap_database
-from app.db.runner import head_revision
+from app.db.runner import _run_alembic, head_revision
 from app.db.seed import seed_baseline_data
 from app.db.sqlite import create_sqlite_engine
 from app.models.settings import ReaderBookPreference
-from app.modules.shelf.infrastructure.models import ShelfCollectionMembership
 from app.services.backup_service import backup_path, create_backup, restore_backup
+from sqlalchemy import inspect, text
+from sqlalchemy.orm import Session
 
 EXPECTED_TABLES = {
     "BookIdentityCache",
@@ -34,14 +33,15 @@ EXPECTED_TABLES = {
     "ImportTask",
     "ImportWorkItem",
     "KindleSendTask",
-    "LibraryEdition",
-    "LibraryEditionFacet",
     "LibraryFacet",
     "LibraryFile",
     "LibraryMetadata",
     "LibraryOperation",
     "LibraryReadingProgress",
-    "LibraryConsumptionState",
+    "LibraryMediaVersion",
+    "LibraryVolumeFacet",
+    "UserMediaHistory",
+    "MediaVersionMigrationEvent",
     "LibraryReadingUnit",
     "LibraryVolume",
     "LibraryWork",
@@ -77,7 +77,6 @@ EXPECTED_TABLES = {
 }
 
 EXPECTED_BASELINE_DEFAULTS = {
-    ("LibraryConsumptionState", "status"): "UNREAD",
     ("LibraryFacet", "aliases"): "[]",
     ("LibraryOperation", "inverseJson"): "{}",
     ("LibraryOperation", "payloadJson"): "{}",
@@ -155,6 +154,17 @@ def _replace_backup_revision(path: Path, revision: str | None) -> None:
         metadata.pop("databaseRevision", None)
     else:
         metadata["databaseRevision"] = revision
+    entries["metadata.json"] = json.dumps(metadata, ensure_ascii=False).encode()
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as target:
+        for name, content in entries.items():
+            target.writestr(name, content)
+
+
+def _replace_backup_version(path: Path, version: int) -> None:
+    with zipfile.ZipFile(path) as source:
+        entries = {name: source.read(name) for name in source.namelist()}
+    metadata = json.loads(entries["metadata.json"].decode())
+    metadata["version"] = version
     entries["metadata.json"] = json.dumps(metadata, ensure_ascii=False).encode()
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as target:
         for name, content in entries.items():
@@ -313,13 +323,15 @@ def test_seed_is_insert_only_and_safe_across_concurrent_sessions(tmp_path) -> No
         engine.dispose()
 
 
-def test_bootstrap_accepts_v14_database_at_current_schema_revision(tmp_path) -> None:
+def test_bootstrap_upgrades_0001_database_to_media_version_head(tmp_path) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_sqlite_engine(settings.database_path)
     try:
-        bootstrap_database(engine, settings)
+        _run_alembic(
+            engine, lambda config: command.upgrade(config, "0001_current_schema")
+        )
         with engine.begin() as connection:
-            ShelfCollectionMembership.__table__.drop(connection)
             connection.execute(
                 text(
                     "INSERT INTO `LibraryWork` "
@@ -361,11 +373,14 @@ def test_bootstrap_accepts_v14_database_at_current_schema_revision(tmp_path) -> 
 
         with engine.connect() as connection:
             assert _alembic_version(connection) == head_revision(engine)
-            assert connection.execute(
-                text(
-                    "SELECT `status`, `mergeKey` FROM `LibraryWork` WHERE `id` = 'legacy-work'"
-                )
-            ).one() == ("WANT", "legacy-identity-key")
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT `mergeKey` FROM `LibraryWork` WHERE `id` = 'legacy-work'"
+                    )
+                ).scalar_one()
+                == "legacy-identity-key"
+            )
             assert connection.execute(
                 text(
                     "SELECT `status`, `attempts` FROM `MetadataLookupTask` "
@@ -468,7 +483,7 @@ def test_backup_includes_current_database_revision_and_restores_matching_backup(
             backup = create_backup(db, settings)
             with zipfile.ZipFile(backup_path(settings, backup.id)) as archive:
                 metadata = json.loads(archive.read("metadata.json"))
-            assert metadata["version"] == 2
+            assert metadata["version"] == 3
             assert metadata["databaseRevision"] == head_revision(engine)
 
             db.execute(
@@ -518,15 +533,45 @@ def test_restore_rejects_unsupported_revision_before_clearing_tables(
             )
             db.commit()
 
-            with pytest.raises(
-                ValueError, match="BACKUP_DATABASE_REVISION_UNSUPPORTED"
-            ):
+            with pytest.raises(ValueError, match="BACKUP_REVISION_UNSUPPORTED"):
                 restore_backup(db, settings, backup.id)
 
             assert (
                 db.execute(
                     text(
                         "SELECT `value` FROM `SystemSetting` WHERE `key` = 'restore.guard'"
+                    )
+                ).scalar_one()
+                == "must-survive"
+            )
+    finally:
+        engine.dispose()
+
+
+def test_restore_rejects_v2_backup_before_clearing_tables(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage-v2"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            db.execute(
+                text(
+                    "INSERT INTO `SystemSetting` (`key`, `value`, `updatedAt`) "
+                    "VALUES ('restore.v2.guard', 'must-survive', CURRENT_TIMESTAMP)"
+                )
+            )
+            db.commit()
+            backup = create_backup(db, settings)
+            _replace_backup_version(backup_path(settings, backup.id), 2)
+
+            with pytest.raises(ValueError, match="BACKUP_REVISION_UNSUPPORTED"):
+                restore_backup(db, settings, backup.id)
+
+            assert (
+                db.execute(
+                    text(
+                        "SELECT `value` FROM `SystemSetting` "
+                        "WHERE `key` = 'restore.v2.guard'"
                     )
                 ).scalar_one()
                 == "must-survive"

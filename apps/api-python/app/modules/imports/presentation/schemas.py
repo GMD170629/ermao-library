@@ -91,6 +91,9 @@ class ConversionOptions(HttpContractModel):
 class ImportConversion(HttpContractModel):
     id: str
     import_task_id: str = Field(alias="importTaskId")
+    source_volume_id: str = Field(alias="sourceVolumeId")
+    derived_volume_id: str | None = Field(alias="derivedVolumeId")
+    idempotency_key: str = Field(alias="idempotencyKey")
     mode: str
     source_format: str = Field(alias="sourceFormat")
     target_format: str = Field(alias="targetFormat")
@@ -116,7 +119,6 @@ class ImportTask(HttpContractModel):
     id: str
     monitor_folder_id: str | None = Field(alias="monitorFolderId")
     work_id: str | None = Field(alias="workId")
-    edition_id: str | None = Field(alias="editionId")
     volume_id: str | None = Field(alias="volumeId")
     origin: str
     status: str

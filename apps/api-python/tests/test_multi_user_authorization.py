@@ -2,12 +2,20 @@ from __future__ import annotations
 
 import json
 
-from sqlalchemy import text
-
 from app.core.auth import hash_password
 from app.db.base import Base
 from app.db.bootstrap import apply_schema
 from app.models.auth import User
+from app.models.import_pipeline import ImportTask
+from app.models.library import (
+    LibraryFile,
+    LibraryMediaVersion,
+    LibraryReadingProgress,
+    LibraryVolume,
+    LibraryWork,
+)
+from app.models.settings import MonitorFolder
+from sqlalchemy import text
 
 PASSWORD = "starshipnas"
 
@@ -40,89 +48,104 @@ def _logout(client) -> None:
 
 
 def _seed_library(db_session) -> None:
-    for folder_id, name in (("folder-a", "A 书库"), ("folder-b", "B 书库")):
-        db_session.execute(
-            text(
-                "INSERT INTO `MonitorFolder` "
-                "(`id`, `name`, `rootPath`, `enabled`, `ignoreHidden`, `minFileSizeBytes`, "
-                "`createdAt`, `updatedAt`) "
-                "VALUES (:id, :name, :path, 1, 1, 10240, "
-                "'2026-07-23T00:00:00Z', '2026-07-23T00:00:00Z')"
-            ),
-            {"id": folder_id, "name": name, "path": f"/library/{folder_id}"},
-        )
-    for work_id, title, folder_id in (
-        ("work-a", "A 范围作品", "folder-a"),
-        ("work-b", "B 范围作品", "folder-b"),
-        ("work-merged", "跨范围合并作品", "folder-a"),
-    ):
-        db_session.execute(
-            text(
-                "INSERT INTO `LibraryWork` "
-                "(`id`, `monitorFolderId`, `origin`, `title`, `normalizedTitle`, `author`, `workType`, "
-                "`status`, `tags`, `hidden`, `organized`, `createdAt`, `updatedAt`) "
-                "VALUES (:id, :folder_id, 'WATCH', :title, :title, '作者', 'EPUB', "
-                "'UNREAD', '[]', 0, 1, '2026-07-23T00:00:00Z', '2026-07-23T00:00:00Z')"
-            ),
-            {"id": work_id, "folder_id": folder_id, "title": title},
-        )
-    editions = (
-        ("edition-a", "work-a", "folder-a", "A 版本"),
-        ("edition-b", "work-b", "folder-b", "B 版本"),
-        ("edition-merged-a", "work-merged", "folder-a", "合并 A 版本"),
-        ("edition-merged-b", "work-merged", "folder-b", "合并 B 版本"),
+    folders = [
+        MonitorFolder(id="folder-a", name="A 书库", root_path="/library/folder-a"),
+        MonitorFolder(id="folder-b", name="B 书库", root_path="/library/folder-b"),
+    ]
+    works = [
+        LibraryWork(
+            id="work-a",
+            monitor_folder_id="folder-a",
+            origin="WATCH",
+            title="A 范围作品",
+            normalized_title="A 范围作品",
+            author="作者",
+            normalized_author="作者",
+            work_type="EPUB",
+            tags="[]",
+            organized=True,
+        ),
+        LibraryWork(
+            id="work-b",
+            monitor_folder_id="folder-b",
+            origin="WATCH",
+            title="B 范围作品",
+            normalized_title="B 范围作品",
+            author="作者",
+            normalized_author="作者",
+            work_type="EPUB",
+            tags="[]",
+            organized=True,
+        ),
+        LibraryWork(
+            id="work-merged",
+            monitor_folder_id="folder-a",
+            origin="WATCH",
+            title="跨范围合并作品",
+            normalized_title="跨范围合并作品",
+            author="作者",
+            normalized_author="作者",
+            work_type="EPUB",
+            tags="[]",
+            organized=True,
+        ),
+    ]
+    media_versions = [
+        LibraryMediaVersion(id="media-a", work_id="work-a", media_kind="EBOOK"),
+        LibraryMediaVersion(id="media-b", work_id="work-b", media_kind="EBOOK"),
+        LibraryMediaVersion(
+            id="media-merged", work_id="work-merged", media_kind="EBOOK"
+        ),
+    ]
+    volume_specs = (
+        ("volume-a", "media-a", "folder-a", "A 电子书", 0),
+        ("volume-b", "media-b", "folder-b", "B 电子书", 0),
+        ("volume-merged-a", "media-merged", "folder-a", "合并 A 电子书", 0),
+        ("volume-merged-b", "media-merged", "folder-b", "合并 B 电子书", 1),
     )
-    for index, (edition_id, work_id, folder_id, version_name) in enumerate(editions):
-        db_session.execute(
-            text(
-                "INSERT INTO `LibraryEdition` "
-                "(`id`, `workId`, `monitorFolderId`, `origin`, `mediaKind`, `format`, `versionName`, "
-                "`versionKey`, `importStatus`, `primary`, `hidden`, `createdAt`, `updatedAt`) "
-                "VALUES (:id, :work_id, :folder_id, 'WATCH', 'EBOOK', 'EPUB', :version_name, "
-                ":version_key, 'COMPLETED', :primary, 0, "
-                "'2026-07-23T00:00:00Z', '2026-07-23T00:00:00Z')"
-            ),
-            {
-                "id": edition_id,
-                "work_id": work_id,
-                "folder_id": folder_id,
-                "version_name": version_name,
-                "version_key": f"key-{edition_id}",
-                "primary": 1 if index != 3 else 0,
-            },
+    volumes = [
+        LibraryVolume(
+            id=volume_id,
+            media_version_id=media_version_id,
+            monitor_folder_id=folder_id,
+            origin="WATCH",
+            title=title,
+            sort_order=sort_order,
+            format="EPUB",
+            resource_key=f"test:{volume_id}",
+            import_status="COMPLETED",
         )
-        db_session.execute(
-            text(
-                "INSERT INTO `LibraryFile` "
-                "(`id`, `editionId`, `path`, `kind`, `mimeType`, `sizeBytes`, `sortOrder`, "
-                "`createdAt`, `updatedAt`) "
-                "VALUES (:id, :edition_id, :path, 'EPUB', 'application/epub+zip', 10, 0, "
-                "'2026-07-23T00:00:00Z', '2026-07-23T00:00:00Z')"
-            ),
-            {
-                "id": f"file-{edition_id}",
-                "edition_id": edition_id,
-                "path": f"library/{folder_id}/{edition_id}.epub",
-            },
+        for volume_id, media_version_id, folder_id, title, sort_order in volume_specs
+    ]
+    files = [
+        LibraryFile(
+            id=f"file-{volume_id}",
+            volume_id=volume_id,
+            path=f"library/{folder_id}/{volume_id}.epub",
+            hash_status="COMPLETED",
+            mtime_ms=1,
+            kind="EPUB",
+            mime_type="application/epub+zip",
+            size_bytes=10,
+            sort_order=0,
         )
-    for task_id, folder_id in (("task-a", "folder-a"), ("task-b", "folder-b")):
-        db_session.execute(
-            text(
-                "INSERT INTO `ImportTask` "
-                "(`id`, `monitorFolderId`, `origin`, `status`, `originalName`, `sourcePath`, "
-                "`taskKind`, `assetCount`, `processedAssetCount`, `progress`, `duplicate`, "
-                "`duration`, `retryable`, `attempts`, `createdAt`, `updatedAt`) "
-                "VALUES (:id, :folder_id, 'WATCH', 'COMPLETED', :name, :path, "
-                "'FILE', 1, 1, 100, 0, 0, 0, 1, "
-                "'2026-07-23T00:00:00Z', '2026-07-23T00:00:00Z')"
-            ),
-            {
-                "id": task_id,
-                "folder_id": folder_id,
-                "name": f"{task_id}.epub",
-                "path": f"/library/{folder_id}/{task_id}.epub",
-            },
+        for volume_id, _, folder_id, _, _ in volume_specs
+    ]
+    tasks = [
+        ImportTask(
+            id=task_id,
+            monitor_folder_id=folder_id,
+            origin="WATCH",
+            status="COMPLETED",
+            original_name=f"{task_id}.epub",
+            source_path=f"/library/{folder_id}/{task_id}.epub",
+            processed_asset_count=1,
+            progress=100,
+            attempts=1,
         )
+        for task_id, folder_id in (("task-a", "folder-a"), ("task-b", "folder-b"))
+    ]
+    db_session.add_all(folders + works + media_versions + volumes + files + tasks)
     db_session.commit()
 
 
@@ -273,14 +296,12 @@ def test_folder_scope_system_manager_boundary_and_atomic_bulk_rejection(
 
     db_session.execute(
         text(
-            "UPDATE `LibraryEdition` SET `publisher` = CASE "
-            "WHEN `id` = 'edition-a' THEN 'Middle Press' "
-            "WHEN `id` = 'edition-merged-a' THEN 'Zulu Press' "
-            "WHEN `id` = 'edition-merged-b' THEN 'Alpha Private Press' "
-            "ELSE `publisher` END, "
-            "`primary` = CASE WHEN `id` = 'edition-merged-b' THEN 1 "
-            "WHEN `id` = 'edition-merged-a' THEN 0 ELSE `primary` END "
-            "WHERE `id` IN ('edition-a', 'edition-merged-a', 'edition-merged-b')"
+            "UPDATE `LibraryVolume` SET `publisher` = CASE "
+            "WHEN `id` = 'volume-a' THEN 'Middle Press' "
+            "WHEN `id` = 'volume-merged-a' THEN 'Zulu Press' "
+            "WHEN `id` = 'volume-merged-b' THEN 'Alpha Private Press' "
+            "ELSE `publisher` END "
+            "WHERE `id` IN ('volume-a', 'volume-merged-a', 'volume-merged-b')"
         )
     )
     db_session.commit()
@@ -302,13 +323,13 @@ def test_folder_scope_system_manager_boundary_and_atomic_bulk_rejection(
     merged = client.get("/api/works/work-merged")
     assert merged.status_code == 200
     merged_payload = merged.json()["data"]["book"]
-    assert {edition["id"] for edition in merged_payload["editions"]} == {
-        "edition-merged-a"
-    }
+    assert {item["mediaKind"] for item in merged_payload["mediaVersions"]} == {"EBOOK"}
+    merged_volumes = merged_payload["mediaVersions"][0]["volumes"]
+    assert {volume["id"] for volume in merged_volumes} == {"volume-merged-a"}
     assert "folder-b" not in json.dumps(merged_payload)
 
     assert client.get("/api/works/work-b").status_code == 404
-    assert client.get("/api/files/file-edition-b").status_code == 404
+    assert client.get("/api/files/file-volume-b").status_code == 404
     assert client.get("/api/management/overview").status_code == 200
     assert client.get("/api/admin/users").status_code == 403
     import_tasks = client.get("/api/import-tasks?pageSize=100")
@@ -353,31 +374,6 @@ def test_folder_scope_system_manager_boundary_and_atomic_bulk_rejection(
         client.patch("/api/works/work-a", json={"author": "普通用户"}).status_code
         == 403
     )
-    personal_status = client.patch("/api/works/work-a", json={"status": "FINISHED"})
-    assert personal_status.status_code == 200
-    assert (
-        db_session.execute(
-            text("SELECT `status` FROM `LibraryWork` WHERE `id` = 'work-a'")
-        ).scalar()
-        == "UNREAD"
-    )
-    bulk_status = client.post(
-        "/api/works/bulk",
-        json={"ids": ["work-a"], "action": "set_status", "status": "FINISHED"},
-    )
-    assert bulk_status.status_code == 200
-    assert (
-        db_session.execute(
-            text("SELECT `status` FROM `LibraryWork` WHERE `id` = 'work-a'")
-        ).scalar()
-        == "UNREAD"
-    )
-    finished_shelf = client.post(
-        "/api/shelves",
-        json={"name": "已读", "kind": "SMART", "rules": {"statuses": ["FINISHED"]}},
-    )
-    assert finished_shelf.status_code == 201
-    assert finished_shelf.json()["data"]["shelf"]["bookIds"] == ["work-a"]
     inaccessible_source_shelf = client.post(
         "/api/shelves",
         json={
@@ -432,16 +428,18 @@ def test_preferences_progress_bookmarks_and_shelves_are_isolated(
         "/api/shelves", json={"name": "First shelf", "bookIds": ["work-a"]}
     )
     assert shelf.status_code == 201
+    bootstrap = client.get("/api/reader/v3/volumes/volume-a/bootstrap")
+    assert bootstrap.status_code == 200
+    content_fingerprint = bootstrap.json()["data"]["contentFingerprint"]
     bookmark = client.put(
-        "/api/reader/v2/editions/edition-a/bookmarks",
+        "/api/reader/v3/volumes/volume-a/bookmarks",
         json={
-            "contentFingerprint": "sha256:test",
+            "contentFingerprint": content_fingerprint,
             "bookmarks": [
                 {
                     "id": "reflowable:epub:position:chapter.xhtml:0.25",
                     "location": {
-                        "kind": "reflowable",
-                        "format": "epub",
+                        "type": "epub",
                         "cfi": "epubcfi(/6/2!/4/1:0)",
                         "href": "chapter.xhtml",
                         "progression": 0.25,
@@ -458,19 +456,30 @@ def test_preferences_progress_bookmarks_and_shelves_are_isolated(
         bookmark.json()["data"]["bookmarks"][0]["location"]["cfi"]
         == "epubcfi(/6/2!/4/1:0)"
     )
-    db_session.execute(
-        text(
-            "INSERT INTO `LibraryReadingProgress` "
-            "(`id`, `userId`, `workId`, `editionId`, `readerType`, `position`, `percent`, `extra`, "
-            "`schemaVersion`, `createdAt`, `updatedAt`) "
-            "VALUES ('progress-first', :user_id, 'work-a', 'edition-a', 'EPUB', 'chapter.xhtml', "
-            "50, '{}', 2, '2026-07-23T00:00:00Z', '2026-07-23T00:00:00Z')"
-        ),
-        {"user_id": first["id"]},
+    db_session.add(
+        LibraryReadingProgress(
+            id="progress-first",
+            user_id=first["id"],
+            volume_id="volume-a",
+            reader_type="epub",
+            position="chapter.xhtml",
+            percent=50,
+            extra="{}",
+            schema_version=3,
+            content_fingerprint=content_fingerprint,
+            location_type="epub",
+            location_json=json.dumps(
+                {"type": "epub", "href": "chapter.xhtml", "progression": 0.5}
+            ),
+            mutation_id="seed-first-progress",
+            client_id="test",
+            client_sequence=1,
+        )
     )
     db_session.commit()
     first_work = client.get("/api/works/work-a").json()["data"]["book"]
-    assert first_work["progress"] == 50
+    assert first_work["completed"] is False
+    assert first_work["mediaVersions"][0]["volumes"][0]["progress"] == 50
     _logout(client)
 
     _login(client, second["email"])
@@ -484,10 +493,11 @@ def test_preferences_progress_bookmarks_and_shelves_are_isolated(
     second_shelves = client.get("/api/shelves").json()["data"]["shelves"]
     assert second_shelves == []
     second_bookmarks = client.get(
-        "/api/reader/v2/editions/edition-a/bookmarks?contentFingerprint=sha256%3Atest"
+        "/api/reader/v3/volumes/volume-a/bookmarks",
+        params={"contentFingerprint": content_fingerprint},
     )
     assert second_bookmarks.status_code == 200
     assert second_bookmarks.json()["data"]["bookmarks"] == []
     second_work = client.get("/api/works/work-a").json()["data"]["book"]
-    assert second_work["progress"] == 0
-    assert second_work["statusValue"] == "UNREAD"
+    assert second_work["completed"] is False
+    assert second_work["mediaVersions"][0]["volumes"][0]["progress"] == 0

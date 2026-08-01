@@ -1,28 +1,27 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { AudioProgressLocation } from '../../lib/reader-v2/model';
-import { MemoryReaderV2Storage } from '../../lib/reader-v2/memory-storage';
-import { toWireLocation } from '../../lib/reader-v2/runtime';
-import { ReaderProgressSyncCoordinator } from '../../lib/reader-v2/sync-coordinator';
+import type { AudioProgressLocation } from '../../lib/reader/model';
+import { MemoryReaderStorage } from '../../lib/reader/memory-storage';
+import { toWireLocation } from '../../lib/reader/runtime';
+import { ReaderProgressSyncCoordinator } from '../../lib/reader/sync-coordinator';
 
-test('serializes audio progress into the Reader V2 wire location', () => {
+test('serializes audio progress into the volume-scoped Reader v3 wire location', () => {
   const location: AudioProgressLocation = {
     kind: 'audio',
-    volumeId: null,
+    volumeId: 'volume-1',
     fileId: 'file-1',
     chapterId: 'chapter-2',
     positionMs: 42_500
   };
   assert.deepEqual(toWireLocation(location), {
     type: 'audio',
-    volumeId: null,
     fileId: 'file-1',
     chapterId: 'chapter-2',
     positionMs: 42_500
   });
 });
 
-test('keeps visual reader locations on the existing Reader V2 wire contract', () => {
+test('keeps visual reader locations on the Reader v3 wire contract', () => {
   assert.deepEqual(toWireLocation({ kind: 'epub', cfi: 'epubcfi(/6/2)', href: 'chapter.xhtml' }), {
     type: 'epub',
     cfi: 'epubcfi(/6/2)',
@@ -51,8 +50,8 @@ test('serializes foliate positions with their original source format', () => {
   });
 });
 
-test('durably queues audio through the shared Reader V2 progress coordinator', async () => {
-  const storage = new MemoryReaderV2Storage();
+test('durably queues audio through the shared Reader v3 progress coordinator', async () => {
+  const storage = new MemoryReaderStorage();
   const location: AudioProgressLocation = {
     kind: 'audio',
     volumeId: 'volume-1',
@@ -69,7 +68,6 @@ test('durably queues audio through the shared Reader V2 progress coordinator', a
   await coordinator.enqueue({
     userId: 'user-1',
     workId: 'work-1',
-    editionId: 'audio-edition-1',
     volumeId: 'volume-1',
     contentFingerprint: 'sha256:audio',
     location,

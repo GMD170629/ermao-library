@@ -7,30 +7,28 @@ import { useEffect, useRef } from 'react';
 import { useAudioPlayback } from './audio-playback-provider';
 import { I18nText } from '@/i18n/provider';
 
-export function AudioListenRedirect({ editionId }: { editionId: string }) {
+export function AudioListenRedirect({ volumeId }: { volumeId: string }) {
   const player = useAudioPlayback();
-  const loadEdition = player.loadEdition;
+  const loadVolume = player.loadVolume;
   const playerBootstrap = player.bootstrap;
   const selectTrack = player.selectTrack;
   const router = useRouter();
   const searchParams = useSearchParams();
   const chapterId = searchParams.get('chapter')?.trim() || null;
-  const volumeId = searchParams.get('volume')?.trim() || null;
   const trackParam = searchParams.get('track');
   const appliedTrackRef = useRef('');
 
   useEffect(() => {
-    void loadEdition(editionId, {
+    void loadVolume(volumeId, {
       autoplay: false,
-      volumeId,
       chapterId: chapterId ?? undefined
     });
-  }, [chapterId, editionId, loadEdition, volumeId]);
+  }, [chapterId, loadVolume, volumeId]);
 
   useEffect(() => {
-    const bootstrap = playerBootstrap?.edition.id === editionId ? playerBootstrap : null;
+    const bootstrap = playerBootstrap?.volume.id === volumeId ? playerBootstrap : null;
     if (!bootstrap) return;
-    const targetKey = `${editionId}:${trackParam ?? ''}`;
+    const targetKey = `${volumeId}:${trackParam ?? ''}`;
     if (!chapterId && trackParam !== null && appliedTrackRef.current !== targetKey) {
       const trackIndex = Number(trackParam);
       if (Number.isInteger(trackIndex) && trackIndex >= 0 && trackIndex < bootstrap.tracks.length) {
@@ -38,10 +36,10 @@ export function AudioListenRedirect({ editionId }: { editionId: string }) {
       }
       appliedTrackRef.current = targetKey;
     }
-    router.replace(`/works/${encodeURIComponent(bootstrap.edition.workId)}?detailTab=AUDIOBOOK&editionId=${encodeURIComponent(bootstrap.edition.id)}`);
-  }, [chapterId, editionId, playerBootstrap, router, selectTrack, trackParam]);
+    router.replace(`/works/${encodeURIComponent(bootstrap.mediaVersion.workId)}?detailTab=AUDIOBOOK&volumeId=${encodeURIComponent(bootstrap.volume.id)}`);
+  }, [chapterId, playerBootstrap, router, selectTrack, trackParam, volumeId]);
 
-  const failed = player.pendingEditionId === editionId && Boolean(player.loadError);
+  const failed = player.pendingVolumeId === volumeId && Boolean(player.loadError);
   if (failed) {
     return (
       <div className="flex min-h-[60dvh] items-center justify-center px-4">

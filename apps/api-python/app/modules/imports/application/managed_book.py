@@ -11,6 +11,7 @@ from app.modules.imports.application.audio_types import (
     SUPPORTED_AUDIO_EXTS,
     AudioBundleStructure,
     AudioFileMetadata,
+    audio_bundle_membership_is_proven,
 )
 from app.modules.imports.application.commands import (
     commit_import_checkpoint,
@@ -74,10 +75,32 @@ def _resolve_audio_import_source(
     structure = services.inspect_audio_bundle(parent)
     if structure is None or len(structure.files) < 2:
         return source, None
+    if not _audio_bundle_is_proven(parent, structure):
+        return source, None
     resolved_source = source.resolve()
     if resolved_source not in {path.resolve() for path in structure.files}:
         return source, None
     return parent, structure
+
+
+def _audio_bundle_is_proven(
+    directory: Path,
+    structure: AudioBundleStructure,
+) -> bool:
+    bundled_paths = {path.resolve() for path in structure.files}
+    try:
+        has_sibling_book = any(
+            child.is_file()
+            and child.resolve() not in bundled_paths
+            and child.suffix.lower() in SUPPORTED_EXTS
+            for child in directory.iterdir()
+        )
+    except OSError:
+        return False
+    return audio_bundle_membership_is_proven(
+        list(structure.files),
+        has_sibling_book=has_sibling_book,
+    )
 
 
 def import_managed_book(
@@ -119,6 +142,14 @@ def import_managed_book(
         if not original_source.exists():
             raise FileNotFoundError(f"导入源已不存在：{original_source}")
         audio_structure = audio_structure or services.inspect_audio_bundle(source)
+        if (
+            source.is_dir()
+            and audio_structure is not None
+            and not _audio_bundle_is_proven(source, audio_structure)
+        ):
+            raise ValueError(
+                "Audiobook directory mixes independent resources; rescan it as individual files"
+            )
         audio_sources = list(audio_structure.files) if audio_structure else []
         source_ext = (
             source.suffix.lower()
@@ -218,6 +249,10 @@ def import_managed_book(
                     source,
                     existing_file,
                 )
+            if converted is not None:
+                services.bind_conversion_result(
+                    converted.idempotency_key, existing_file.volume_id
+                )
             metadata_refreshed = (
                 existing_file.merge_reason == "refreshed-native-metadata"
             )
@@ -225,7 +260,6 @@ def import_managed_book(
                 task_id,
                 columns={
                     "workId": existing_file.work_id,
-                    "editionId": existing_file.edition_id,
                     "volumeId": existing_file.volume_id,
                     "status": "COMPLETED",
                     "progress": 100,
@@ -271,7 +305,7 @@ def import_managed_book(
                         if metadata_refreshed
                         else "existing_path",
                         "workId": existing_file.work_id,
-                        "editionId": existing_file.edition_id,
+                        "mediaVersionId": existing_file.media_version_id,
                         "volumeId": existing_file.volume_id,
                     },
                 )
@@ -429,7 +463,7 @@ def import_managed_book(
             store.insert_library_metadata(
                 columns={
                     "id": _id(),
-                    "editionId": result.edition_id,
+                    "volumeId": result.volume_id,
                     "source": "conversion",
                     "rawJson": json.dumps(
                         {
@@ -454,11 +488,11 @@ def import_managed_book(
                 _complete_deferred_source_conversion(
                     store, queries, original_source, result
                 )
+            services.bind_conversion_result(converted.idempotency_key, result.volume_id)
         store.update_import_task(
             task_id,
             columns={
                 "workId": result.work_id,
-                "editionId": result.edition_id,
                 "volumeId": result.volume_id,
                 "status": "COMPLETED",
                 "progress": 100,
@@ -491,7 +525,7 @@ def import_managed_book(
                 metadata={
                     "sourcePath": str(original_source),
                     "workId": result.work_id,
-                    "editionId": result.edition_id,
+                    "mediaVersionId": result.media_version_id,
                     "volumeId": result.volume_id,
                     "title": result.title,
                     "format": result.format,

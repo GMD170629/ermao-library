@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import mimetypes
-import re
 import smtplib
 import threading
 from collections.abc import Callable
@@ -16,14 +15,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.core.safe_errors import mask_email, safe_error_message
 from app.core.i18n import configured_locale
+from app.core.safe_errors import mask_email, safe_error_message
 from app.core.time import now_timestamp_ms
 from app.modules.kindle.infrastructure.tasks import (
     claim_kindle_send_task,
     get_kindle_send_task,
     get_library_file_for_kindle,
-    has_table,
     list_sending_kindle_tasks,
     mark_kindle_task_failed,
     mark_kindle_task_sent,
@@ -38,9 +36,8 @@ from app.services.email_settings import (
     open_smtp_connection,
     smtp_connection_settings,
 )
-from app.services.system_events import record_system_event
 from app.services.queue_runtime import QueueHeartbeatPump
-
+from app.services.system_events import record_system_event
 
 MAX_SEND_ATTEMPTS = 3
 RETRY_DELAYS_SECONDS = (30, 120)
@@ -103,11 +100,27 @@ def _file_for_task(db: Session, task: dict[str, Any]) -> dict[str, Any]:
 
 def _smtp_error(exc: BaseException, config_password: str) -> KindleSendError:
     safe = safe_error_message(exc, [config_password])
-    if isinstance(exc, (smtplib.SMTPAuthenticationError, smtplib.SMTPNotSupportedError, smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused)):
+    if isinstance(
+        exc,
+        (
+            smtplib.SMTPAuthenticationError,
+            smtplib.SMTPNotSupportedError,
+            smtplib.SMTPRecipientsRefused,
+            smtplib.SMTPSenderRefused,
+        ),
+    ):
         return KindleSendError(safe)
     if isinstance(exc, smtplib.SMTPResponseException):
         return KindleSendError(safe, transient=int(exc.smtp_code) < 500)
-    if isinstance(exc, (TimeoutError, OSError, smtplib.SMTPServerDisconnected, smtplib.SMTPConnectError)):
+    if isinstance(
+        exc,
+        (
+            TimeoutError,
+            OSError,
+            smtplib.SMTPServerDisconnected,
+            smtplib.SMTPConnectError,
+        ),
+    ):
         return KindleSendError(safe, transient=True)
     if isinstance(exc, (EmailSettingsError, ValueError)):
         return KindleSendError(safe)
@@ -145,7 +158,9 @@ def _event(
     )
 
 
-def _update_send_snapshot(db: Session, task_id: str, config: Any, message_id: str) -> dict[str, Any]:
+def _update_send_snapshot(
+    db: Session, task_id: str, config: Any, message_id: str
+) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     task = update_kindle_send_snapshot(
         db,
@@ -169,20 +184,31 @@ def _send_task(db: Session, settings: Settings, task: dict[str, Any]) -> None:
     path = _stored_path(file_row.get("path"), settings)
     if path is None or not path.is_file():
         raise KindleSendError("附件文件已不存在或不在受管理目录中")
-    file_format = str(task.get("format") or file_row.get("editionFormat") or "").upper()
+    file_format = str(task.get("format") or file_row.get("volumeFormat") or "").upper()
     suffix = path.suffix.lower()
     if file_format not in SUPPORTED_FORMATS or suffix not in SUPPORTED_EXTENSIONS:
         raise KindleSendError("Kindle 邮件发送目前仅支持 EPUB 和 PDF")
-    if config.max_attachment_mb is not None and path.stat().st_size > config.max_attachment_mb * 1024 * 1024:
-        raise KindleSendError(f"附件超过已配置的 {config.max_attachment_mb:g} MB 大小上限")
+    if (
+        config.max_attachment_mb is not None
+        and path.stat().st_size > config.max_attachment_mb * 1024 * 1024
+    ):
+        raise KindleSendError(
+            f"附件超过已配置的 {config.max_attachment_mb:g} MB 大小上限"
+        )
 
     message = EmailMessage()
     message_id = make_msgid()
     message["Message-ID"] = message_id
     locale = configured_locale(db)
     fallback_subject = "Send to Kindle" if locale == "en-US" else "发送到 Kindle"
-    message["Subject"] = str(task.get("subject") or task.get("bookTitle") or fallback_subject)
-    sender_name = "Ermao Books" if locale == "en-US" and config.from_name == "二毛图书" else config.from_name
+    message["Subject"] = str(
+        task.get("subject") or task.get("bookTitle") or fallback_subject
+    )
+    sender_name = (
+        "Ermao Books"
+        if locale == "en-US" and config.from_name == "二毛图书"
+        else config.from_name
+    )
     message["From"] = formataddr((sender_name, config.from_email))
     message["To"] = str(task.get("recipientEmail") or "")
     book_title = str(task.get("bookTitle") or ("Book" if locale == "en-US" else "图书"))
@@ -190,10 +216,20 @@ def _send_task(db: Session, settings: Settings, task: dict[str, Any]) -> None:
         message.set_content(f"“{book_title}” has been sent to Kindle by Ermao Books.")
     else:
         message.set_content(f"《{book_title}》已由二毛图书发送至 Kindle。")
-    media_type = str(task.get("mimeType") or mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+    media_type = str(
+        task.get("mimeType")
+        or mimetypes.guess_type(path.name)[0]
+        or "application/octet-stream"
+    )
     maintype, subtype = (media_type.split("/", 1) + ["octet-stream"])[:2]
-    attachment_name = Path(str(task.get("fileName") or path.name)).name.replace("\r", "").replace("\n", "")
-    message.add_attachment(path.read_bytes(), maintype=maintype, subtype=subtype, filename=attachment_name)
+    attachment_name = (
+        Path(str(task.get("fileName") or path.name))
+        .name.replace("\r", "")
+        .replace("\n", "")
+    )
+    message.add_attachment(
+        path.read_bytes(), maintype=maintype, subtype=subtype, filename=attachment_name
+    )
     task = _update_send_snapshot(db, str(task["id"]), config, message_id)
 
     client: smtplib.SMTP | None = None
@@ -220,11 +256,17 @@ def process_next_kindle_send_task(db: Session, settings: Settings) -> bool:
     try:
         _send_task(db, settings, task)
     except Exception as exc:
-        error = exc if isinstance(exc, KindleSendError) else KindleSendError(safe_error_message(exc))
+        error = (
+            exc
+            if isinstance(exc, KindleSendError)
+            else KindleSendError(safe_error_message(exc))
+        )
         attempt_count = int(task.get("attemptCount") or 0)
         now = datetime.now(timezone.utc)
         if error.transient and attempt_count < MAX_SEND_ATTEMPTS:
-            delay = RETRY_DELAYS_SECONDS[min(attempt_count - 1, len(RETRY_DELAYS_SECONDS) - 1)]
+            delay = RETRY_DELAYS_SECONDS[
+                min(attempt_count - 1, len(RETRY_DELAYS_SECONDS) - 1)
+            ]
             retry_at = now + timedelta(seconds=delay)
             schedule_kindle_retry(
                 db,
@@ -235,19 +277,48 @@ def process_next_kindle_send_task(db: Session, settings: Settings) -> bool:
             )
             db.commit()
             task = _task(db, str(task["id"])) or task
-            _event(db, task, action="send.retry_scheduled", level="warning", message=f"Kindle 发送失败，等待第 {attempt_count + 1} 次尝试：{task.get('bookTitle')}", metadata={"attemptCount": attempt_count, "nextAttemptAt": retry_at, "errorMessage": str(error)})
+            _event(
+                db,
+                task,
+                action="send.retry_scheduled",
+                level="warning",
+                message=f"Kindle 发送失败，等待第 {attempt_count + 1} 次尝试：{task.get('bookTitle')}",
+                metadata={
+                    "attemptCount": attempt_count,
+                    "nextAttemptAt": retry_at,
+                    "errorMessage": str(error),
+                },
+            )
         else:
-            mark_kindle_task_failed(db, str(task["id"]), error_message=str(error), now=now)
+            mark_kindle_task_failed(
+                db, str(task["id"]), error_message=str(error), now=now
+            )
             db.commit()
             task = _task(db, str(task["id"])) or task
-            _event(db, task, action="send.failed", level="error", message=f"Kindle 发送失败：{task.get('bookTitle')}", metadata={"attemptCount": attempt_count, "errorMessage": str(error)})
+            _event(
+                db,
+                task,
+                action="send.failed",
+                level="error",
+                message=f"Kindle 发送失败：{task.get('bookTitle')}",
+                metadata={"attemptCount": attempt_count, "errorMessage": str(error)},
+            )
         return True
 
     sent_at = datetime.now(timezone.utc)
     mark_kindle_task_sent(db, str(task["id"]), sent_at)
     db.commit()
     task = _task(db, str(task["id"])) or task
-    _event(db, task, action="send.succeeded", message=f"Kindle 邮件已提交：{task.get('bookTitle')}", metadata={"attemptCount": task.get("attemptCount"), "messageId": task.get("messageId")})
+    _event(
+        db,
+        task,
+        action="send.succeeded",
+        message=f"Kindle 邮件已提交：{task.get('bookTitle')}",
+        metadata={
+            "attemptCount": task.get("attemptCount"),
+            "messageId": task.get("messageId"),
+        },
+    )
     return True
 
 
@@ -264,7 +335,13 @@ def recover_interrupted_tasks(db: Session) -> int:
     db.commit()
     for task in rows:
         task["status"] = "unknown"
-        _event(db, task, action="send.unknown", level="warning", message=f"Kindle 发送结果未知：{task.get('bookTitle')}")
+        _event(
+            db,
+            task,
+            action="send.unknown",
+            level="warning",
+            message=f"Kindle 发送结果未知：{task.get('bookTitle')}",
+        )
     return len(rows)
 
 
@@ -279,7 +356,9 @@ class KindleSendQueueWorker:
         self.settings = settings
         self._stop_event = threading.Event()
         self._process_lock = threading.Lock()
-        self._thread = threading.Thread(target=self._run, name="shuku-kindle-send-queue", daemon=True)
+        self._thread = threading.Thread(
+            target=self._run, name="shuku-kindle-send-queue", daemon=True
+        )
         self._instance_id = f"kindle-{uuid4().hex}"
         self._heartbeat = QueueHeartbeatPump(
             heartbeat_db_factory or db_factory,
@@ -304,7 +383,10 @@ class KindleSendQueueWorker:
             with self.db_factory() as db:
                 return process_next_kindle_send_task(db, self.settings)
         except Exception as exc:
-            print(f"[kindle-send-queue] task processing failed: {safe_error_message(exc)}", flush=True)
+            print(
+                f"[kindle-send-queue] task processing failed: {safe_error_message(exc)}",
+                flush=True,
+            )
             return False
         finally:
             self._process_lock.release()

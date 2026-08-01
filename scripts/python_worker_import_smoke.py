@@ -48,7 +48,10 @@ def wait_for_ready(ready_file: Path, process: subprocess.Popen[str]) -> None:
     while time.time() < deadline:
         if process.poll() is not None:
             raise RuntimeError(f"worker exited early with code {process.returncode}")
-        if ready_file.exists() and ready_file.read_text(encoding="utf-8").strip().isdigit():
+        if (
+            ready_file.exists()
+            and ready_file.read_text(encoding="utf-8").strip().isdigit()
+        ):
             return
         time.sleep(0.2)
     raise RuntimeError("worker did not create ready file")
@@ -61,11 +64,39 @@ def wait_for_import(database_url: str, source_path: Path) -> None:
     try:
         while time.time() < deadline:
             with engine.connect() as conn:
-                task = conn.execute(text("SELECT status, message, errorSummary FROM ImportTask WHERE sourcePath = :source_path ORDER BY createdAt DESC LIMIT 1"), {"source_path": str(source_path)}).mappings().first()
-                work_count = conn.execute(text("SELECT COUNT(*) FROM LibraryWork WHERE origin = 'WATCH'")).scalar() or 0
-                unit_count = conn.execute(text("SELECT COUNT(*) FROM LibraryReadingUnit")).scalar() or 0
-                last_state = {"task": dict(task) if task else None, "workCount": work_count, "unitCount": unit_count}
-                if task and task["status"] == "COMPLETED" and work_count == 1 and unit_count == 2:
+                task = (
+                    conn.execute(
+                        text(
+                            "SELECT status, message, errorSummary FROM ImportTask WHERE sourcePath = :source_path ORDER BY createdAt DESC LIMIT 1"
+                        ),
+                        {"source_path": str(source_path)},
+                    )
+                    .mappings()
+                    .first()
+                )
+                work_count = (
+                    conn.execute(
+                        text("SELECT COUNT(*) FROM LibraryWork WHERE origin = 'WATCH'")
+                    ).scalar()
+                    or 0
+                )
+                unit_count = (
+                    conn.execute(
+                        text("SELECT COUNT(*) FROM LibraryReadingUnit")
+                    ).scalar()
+                    or 0
+                )
+                last_state = {
+                    "task": dict(task) if task else None,
+                    "workCount": work_count,
+                    "unitCount": unit_count,
+                }
+                if (
+                    task
+                    and task["status"] == "COMPLETED"
+                    and work_count == 1
+                    and unit_count == 2
+                ):
                     return
                 if task and task["status"] == "FAILED":
                     raise RuntimeError(f"worker import failed: {task}")
@@ -120,7 +151,9 @@ def main() -> None:
                     process.kill()
                     process.wait(timeout=5)
             output = process.stdout.read() if process.stdout else ""
-            interesting = "\n".join(line for line in output.splitlines() if "[import-worker]" in line).strip()
+            interesting = "\n".join(
+                line for line in output.splitlines() if "[import-worker]" in line
+            ).strip()
             if interesting:
                 print(interesting)
     finally:

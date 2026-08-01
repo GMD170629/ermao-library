@@ -148,8 +148,7 @@ class ImportBookCommand:
 
 
 class ImportBook:
-    def execute(self, command: ImportBookCommand) -> ImportBookResult:
-        ...
+    def execute(self, command: ImportBookCommand) -> ImportBookResult: ...
 ```
 
 是否使用类取决于是否需要注入依赖和持有端口；单纯的无状态计算继续使用函数。

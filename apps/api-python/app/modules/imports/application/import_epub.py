@@ -26,18 +26,16 @@ from app.modules.imports.application.import_support import (
     _decode_xml_text,
     _ensure_work,
     _extract_isbn,
-    _file_version_key,
-    _finalize_work_primary,
+    _file_resource_key,
+    _finalize_work_cover,
     _first_text,
     _hash_text,
     _id,
     _insert_identity_metadata,
-    _next_edition_name,
     _now,
     _preferred_identifier,
     _sanitize_description,
-    _select_volume_edition,
-    _should_be_media_primary,
+    _select_volume_media_version,
     _source_group_key,
     _texts,
     _title_from_file,
@@ -131,7 +129,7 @@ def _import_epub(
     if volume_info:
         source_key = _source_group_key(options, metadata["title"])
         source_path = options.source_file_path.resolve()
-        edition = _select_volume_edition(
+        media_version = _select_volume_media_version(
             queries,
             work["id"],
             "EPUB",
@@ -139,47 +137,14 @@ def _import_epub(
             volume_info.series_index,
             volume_info.title,
         )
-        created_edition = False
-        if not edition:
-            created_edition = True
-            base_version_key = f"epub:{source_key}"
-            existing_version_keys = {
-                str(candidate.get("versionKey"))
-                for candidate in queries.list_visible_editions_for_work_and_format(
-                    work["id"], "EPUB"
-                )
-                if candidate.get("versionKey")
-            }
-            version_key = (
-                _file_version_key("epub", source_path)
-                if base_version_key in existing_version_keys
-                else base_version_key
-            )
-            edition = store.insert_library_edition(
+        created_media_version = False
+        if not media_version:
+            created_media_version = True
+            media_version = store.ensure_library_media_version(
                 columns={
                     "id": _id(),
                     "workId": work["id"],
-                    "monitorFolderId": options.monitor_folder_id,
-                    "origin": options.origin,
                     "mediaKind": "EBOOK",
-                    "format": "EPUB",
-                    "versionName": _next_edition_name(
-                        queries, work["id"], "EPUB", "EBOOK"
-                    ),
-                    "versionKey": version_key,
-                    "sourceGroupKey": source_key,
-                    "description": metadata.get("description"),
-                    "language": metadata.get("language"),
-                    "publisher": metadata.get("publisher"),
-                    "publishedAt": metadata.get("publishedAt"),
-                    "identifier": metadata.get("identifier"),
-                    "isbn": metadata.get("isbn"),
-                    "sizeBytes": 0,
-                    "chapterCount": 0,
-                    "coverStatus": "PENDING",
-                    "importStatus": "PARSING",
-                    "primary": _should_be_media_primary(queries, work["id"], "EBOOK"),
-                    "hidden": False,
                     "createdAt": _now(),
                     "updatedAt": _now(),
                 },
@@ -190,12 +155,26 @@ def _import_epub(
             volume = store.insert_library_volume(
                 columns={
                     "id": _id(),
-                    "editionId": edition["id"],
+                    "mediaVersionId": media_version["id"],
                     "title": volume_info.title,
                     "volumeIndex": volume_info.series_index,
                     "sortOrder": sort_order,
+                    "format": "EPUB",
+                    "resourceKey": _file_resource_key("epub", source_path),
+                    "monitorFolderId": options.monitor_folder_id,
+                    "origin": options.origin,
+                    "sourceGroupKey": source_key,
+                    "description": metadata.get("description"),
+                    "language": metadata.get("language"),
+                    "publisher": metadata.get("publisher"),
+                    "publishedAt": metadata.get("publishedAt"),
+                    "identifier": metadata.get("identifier"),
+                    "isbn": metadata.get("isbn"),
+                    "sizeBytes": file_size,
                     "chapterCount": metadata["chapterCount"],
                     "coverPath": None,
+                    "coverStatus": "PENDING",
+                    "importStatus": "PARSING",
                     "createdAt": _now(),
                     "updatedAt": _now(),
                 }
@@ -208,7 +187,7 @@ def _import_epub(
                     settings,
                     source_path,
                     work["id"],
-                    edition["id"],
+                    media_version["id"],
                     metadata,
                     volume["id"],
                 )
@@ -216,7 +195,6 @@ def _import_epub(
             file = store.insert_library_file(
                 columns={
                     "id": _id(),
-                    "editionId": edition["id"],
                     "volumeId": volume["id"],
                     "path": str(source_path),
                     "filePathHash": _hash_text(str(source_path)),
@@ -234,7 +212,6 @@ def _import_epub(
                 store.insert_library_reading_unit(
                     columns={
                         "id": _id(),
-                        "editionId": edition["id"],
                         "volumeId": volume["id"],
                         "fileId": file["id"],
                         "unitType": "chapter",
@@ -256,17 +233,17 @@ def _import_epub(
             store.insert_library_metadata(
                 columns={
                     "id": _id(),
-                    "editionId": edition["id"],
+                    "volumeId": volume["id"],
                     "source": "epub_opf",
                     "rawJson": json.dumps(metadata["rawMetadata"], ensure_ascii=False),
                     "createdAt": _now(),
                     "updatedAt": _now(),
                 }
             )
-            _insert_identity_metadata(store, edition["id"], identity)
+            _insert_identity_metadata(store, volume["id"], identity)
             stored_cover_path = cover_path or services.ensure_default_cover()
-            edition_cover_path = (
-                cover_path or edition.get("coverPath") or stored_cover_path
+            media_version_cover_path = (
+                cover_path or media_version.get("coverPath") or stored_cover_path
             )
             store.update_library_volume(
                 volume["id"],
@@ -276,33 +253,29 @@ def _import_epub(
                     "updatedAt": _now(),
                 },
             )
-            size_total = queries.sum_file_size_bytes_for_edition(str(edition["id"]))
-            chapter_total = queries.sum_volume_chapter_count_for_edition(
-                str(edition["id"])
-            )
-            store.update_library_edition(
-                edition["id"],
+            store.update_library_volume(
+                volume["id"],
                 columns={
-                    "sizeBytes": int(size_total),
-                    "chapterCount": int(chapter_total),
-                    "coverPath": edition_cover_path,
-                    "coverStatus": services.cover_status(edition_cover_path),
+                    "sizeBytes": file_size,
+                    "chapterCount": metadata["chapterCount"],
+                    "coverPath": media_version_cover_path,
+                    "coverStatus": services.cover_status(media_version_cover_path),
                     "importStatus": "COMPLETED",
                     "updatedAt": _now(),
                 },
             )
-            _finalize_work_primary(
+            _finalize_work_cover(
                 store,
                 queries,
                 services,
                 work["id"],
-                edition["id"],
-                edition_cover_path,
+                media_version["id"],
+                media_version_cover_path,
             )
             return ImportResult(
                 work["id"],
                 work["id"],
-                edition["id"],
+                media_version["id"],
                 volume["id"],
                 work["title"],
                 "ebook",
@@ -310,11 +283,11 @@ def _import_epub(
                 metadata["chapterCount"],
                 "completed",
                 False,
-                (not created) or (not created_edition),
+                (not created) or (not created_media_version),
                 "new-epub-work"
                 if created
                 else "new-epub-version"
-                if created_edition
+                if created_media_version
                 else "same-epub-series",
             )
         except Exception:
@@ -325,7 +298,7 @@ def _import_epub(
     try:
         source_path = options.source_file_path.resolve()
         store.update_import_task(task_id, columns={"message": "正在建立 EPUB 记录"})
-        edition = store.insert_library_edition(
+        media_version = store.ensure_library_media_version(
             columns={
                 "id": _id(),
                 "workId": work["id"],
@@ -333,8 +306,27 @@ def _import_epub(
                 "origin": options.origin,
                 "mediaKind": "EBOOK",
                 "format": "EPUB",
-                "versionName": _next_edition_name(queries, work["id"], "EPUB", "EBOOK"),
-                "versionKey": _file_version_key("epub", source_path),
+                "createdAt": _now(),
+                "updatedAt": _now(),
+            },
+        )
+        if metadata.get("coverPath"):
+            cover_path = _extract_epub_cover(
+                settings, source_path, work["id"], media_version["id"], metadata
+            )
+        stored_cover_path = cover_path or services.ensure_default_cover()
+        volume = store.insert_library_volume(
+            columns={
+                "id": _id(),
+                "mediaVersionId": media_version["id"],
+                "title": str(
+                    metadata.get("title") or identity.title or source_path.stem
+                ),
+                "sortOrder": 0,
+                "format": "EPUB",
+                "resourceKey": _file_resource_key("epub", source_path),
+                "monitorFolderId": options.monitor_folder_id,
+                "origin": options.origin,
                 "description": metadata.get("description"),
                 "language": metadata.get("language"),
                 "publisher": metadata.get("publisher"),
@@ -343,27 +335,9 @@ def _import_epub(
                 "isbn": metadata.get("isbn"),
                 "sizeBytes": file_size,
                 "chapterCount": metadata["chapterCount"],
-                "coverStatus": "PENDING",
-                "importStatus": "PARSING",
-                "primary": _should_be_media_primary(queries, work["id"], "EBOOK"),
-                "hidden": False,
-                "createdAt": _now(),
-                "updatedAt": _now(),
-            },
-        )
-        if metadata.get("coverPath"):
-            cover_path = _extract_epub_cover(
-                settings, source_path, work["id"], edition["id"], metadata
-            )
-        stored_cover_path = cover_path or services.ensure_default_cover()
-        volume = store.insert_library_volume(
-            columns={
-                "id": _id(),
-                "editionId": edition["id"],
-                "title": "正文",
-                "sortOrder": 0,
-                "chapterCount": metadata["chapterCount"],
                 "coverPath": stored_cover_path,
+                "coverStatus": services.cover_status(stored_cover_path),
+                "importStatus": "PARSING",
                 "createdAt": _now(),
                 "updatedAt": _now(),
             }
@@ -372,7 +346,6 @@ def _import_epub(
         file = store.insert_library_file(
             columns={
                 "id": _id(),
-                "editionId": edition["id"],
                 "volumeId": volume["id"],
                 "path": str(source_path),
                 "filePathHash": _hash_text(str(source_path)),
@@ -390,7 +363,6 @@ def _import_epub(
             store.insert_library_reading_unit(
                 columns={
                     "id": _id(),
-                    "editionId": edition["id"],
                     "volumeId": volume["id"],
                     "fileId": file["id"],
                     "unitType": "chapter",
@@ -408,16 +380,16 @@ def _import_epub(
         store.insert_library_metadata(
             columns={
                 "id": _id(),
-                "editionId": edition["id"],
+                "volumeId": volume["id"],
                 "source": "epub_opf",
                 "rawJson": json.dumps(metadata["rawMetadata"], ensure_ascii=False),
                 "createdAt": _now(),
                 "updatedAt": _now(),
             }
         )
-        _insert_identity_metadata(store, edition["id"], identity)
-        store.update_library_edition(
-            edition["id"],
+        _insert_identity_metadata(store, volume["id"], identity)
+        store.update_library_volume(
+            volume["id"],
             columns={
                 "coverPath": stored_cover_path,
                 "coverStatus": services.cover_status(stored_cover_path),
@@ -425,18 +397,18 @@ def _import_epub(
                 "updatedAt": _now(),
             },
         )
-        _finalize_work_primary(
+        _finalize_work_cover(
             store,
             queries,
             services,
             work["id"],
-            edition["id"],
+            media_version["id"],
             stored_cover_path,
         )
         return ImportResult(
             work["id"],
             work["id"],
-            edition["id"],
+            media_version["id"],
             volume["id"],
             work["title"],
             "ebook",
@@ -608,15 +580,21 @@ def _parse_nav(
     if not xml:
         return []
     entries = []
-    nav_blocks = list(re.finditer(r"<nav\b([^>]*)>([\s\S]*?)</nav>", xml, re.IGNORECASE))
+    nav_blocks = list(
+        re.finditer(r"<nav\b([^>]*)>([\s\S]*?)</nav>", xml, re.IGNORECASE)
+    )
     toc_block = next(
         (
             match.group(2)
             for match in nav_blocks
             if re.search(
-                r"\b(?:epub:)?type\s*=\s*['\"][^'\"]*\btoc\b", match.group(1), re.IGNORECASE
+                r"\b(?:epub:)?type\s*=\s*['\"][^'\"]*\btoc\b",
+                match.group(1),
+                re.IGNORECASE,
             )
-            or re.search(r"\brole\s*=\s*['\"]doc-toc['\"]", match.group(1), re.IGNORECASE)
+            or re.search(
+                r"\brole\s*=\s*['\"]doc-toc['\"]", match.group(1), re.IGNORECASE
+            )
         ),
         nav_blocks[0].group(2) if nav_blocks else xml,
     )
@@ -699,7 +677,9 @@ def _epub_cover(manifest: list[dict[str, str]], opf_xml: str) -> dict[str, str] 
                 for item in manifest
                 if "image" in str(item.get("mediaType") or "")
                 and re.search(
-                    r"(cover|front|folder|封面)", str(item.get("href") or ""), re.IGNORECASE
+                    r"(cover|front|folder|封面)",
+                    str(item.get("href") or ""),
+                    re.IGNORECASE,
                 )
             ),
             None,
@@ -753,7 +733,7 @@ def _extract_epub_cover(
     settings: ImportRuntimeConfig,
     staged: Path,
     work_id: str,
-    edition_id: str,
+    media_version_id: str,
     metadata: dict[str, Any],
     volume_id: str | None = None,
 ) -> str | None:
@@ -770,7 +750,7 @@ def _extract_epub_cover(
         settings.resolved_storage_root
         / "books"
         / work_id
-        / edition_id
+        / media_version_id
         / (volume_id or "")
         / f"cover{ext}"
     )
