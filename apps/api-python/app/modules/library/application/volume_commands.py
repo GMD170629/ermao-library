@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from app.modules.library.application.dto import MoveVolumeResult
 
@@ -90,6 +90,15 @@ class VolumeStructurePort(Protocol):
         target_work_id: str,
         now: datetime,
     ) -> VolumeMoveOutcome: ...
+
+    def reorder_volume(
+        self,
+        *,
+        volume_id: str,
+        media_version_id: str,
+        direction: Literal["up", "down"],
+        now: datetime,
+    ) -> bool: ...
 
     def split_volume(
         self,
@@ -229,6 +238,38 @@ def move_volume_resource(
     except ValueError as exc:
         unit_of_work.rollback()
         raise VolumeNotFoundError(str(exc)) from exc
+    except Exception:
+        unit_of_work.rollback()
+        raise
+
+
+def reorder_volume_resource(
+    port: VolumeStructurePort,
+    unit_of_work: UnitOfWork,
+    *,
+    actor: LibraryActor,
+    work_id: str,
+    volume_id: str,
+    direction: Literal["up", "down"],
+    now: datetime,
+) -> bool:
+    _require_work_access(port, actor=actor, work_id=work_id)
+    _require_manager(actor)
+    context = _require_volume(
+        port,
+        actor=actor,
+        work_id=work_id,
+        volume_id=volume_id,
+    )
+    try:
+        changed = port.reorder_volume(
+            volume_id=volume_id,
+            media_version_id=context.media_version_id,
+            direction=direction,
+            now=now,
+        )
+        unit_of_work.commit()
+        return changed
     except Exception:
         unit_of_work.rollback()
         raise

@@ -15,6 +15,7 @@ import { readDeviceReaderPreferences } from '../../../lib/reader-device-preferen
 import { withBasePath } from '../../../lib/base-path';
 import { DEFAULT_READER_THEME, readerThemeSurfaces } from '../reader-theme';
 import { fetchReaderBootstrap, type ReaderBootstrap } from './api';
+import { requestedPdfPage } from './direct-page-target';
 import { resolveRequestedEpubHref } from './epub-direct-target';
 import { resolveStartupResume } from './local-resume';
 import { ReaderEngineRuntime } from './reader-engine-runtime';
@@ -235,6 +236,17 @@ export function ReaderV3Page({ volumeId }: { volumeId: string }) {
           hasDirectTarget = true;
         } else {
           emitReaderDebug('warning', '已忽略不属于当前漫画卷册的书签页码', { requestedPage });
+        }
+      } else if (bootstrap.readerType === 'pdf' && requestedPage) {
+        const pageNumber = requestedPdfPage(requestedPage, bootstrap.volume.pageCount);
+        if (pageNumber !== null) {
+          bootstrap = {
+            ...bootstrap,
+            initialLocation: { kind: 'pdf', pageNumber }
+          };
+          hasDirectTarget = true;
+        } else {
+          emitReaderDebug('warning', '已忽略超出当前 PDF 范围的页码', { requestedPage });
         }
       }
       activateReaderUser(bootstrap.userId);

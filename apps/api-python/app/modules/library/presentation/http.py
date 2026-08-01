@@ -12,7 +12,7 @@ from pathlib import Path
 from time import time_ns
 from typing import Annotated, Any, Never
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from fastapi.responses import Response
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import delete, inspect, select
@@ -68,6 +68,7 @@ from app.modules.library.application.volume_commands import (
     delete_volume_resource,
     move_volume_resource,
     queue_volume_epub_conversion,
+    reorder_volume_resource,
     split_volume_resource,
     update_volume_resource,
 )
@@ -102,16 +103,20 @@ from app.modules.library.presentation.schemas import (
     MetadataSearchResponse,
     MoveVolumeRequest,
     OperationsResponse,
+    ReorderVolumeRequest,
     RenameCategoryResponse,
     SeriesResponse,
     SplitVolumeRequest,
     UndoOperationResponse,
     UpdateVolumeRequest,
     WorkDetailResponse,
+    WorkDetailSummaryResponse,
+    WorkReadingUnitsResponse,
     WorkResponse,
     WorksResponse,
     WorkStructureMutationResponse,
     WorkSummariesResponse,
+    WorkVolumePageResponse,
 )
 from app.modules.library.presentation.views import (
     _active_media_view,
@@ -128,7 +133,10 @@ from app.modules.library.presentation.views import (
     _require_work_manager,
     _resolve_detail_tab,
     _visible_work_or_none,
+    _work_detail_summary_view,
+    _work_reading_units_view,
     _work_view,
+    _work_volume_page_view,
 )
 from app.modules.library.presentation.work_ops import (
     _delete_work_and_storage,
@@ -875,14 +883,28 @@ def get_work(
     chapterPageSize: int = 120,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Annotated[WorkDetailResponse, ErrorResponses(LibraryNotFoundError)]:
+) -> Annotated[
+    WorkDetailSummaryResponse | WorkDetailResponse,
+    ErrorResponses(LibraryNotFoundError),
+]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     work = _visible_work_or_none(db, user, work_id)
     if not work:
         _raise_library_error("作品不存在", status_code=404)
-    book = _work_view(db, work, user.id)
+    navigation_requested = bool(request.query_params)
+    book = _work_view(
+        db,
+        work,
+        user.id,
+        volume_limit_per_media=None if navigation_requested else 10,
+        include_files=navigation_requested,
+    )
+    if not navigation_requested:
+        return WorkDetailSummaryResponse(
+            data={"book": _work_detail_summary_view(book)}
+        )
     selected_tab = _resolve_detail_tab(
         db, user.id, work_id, book.get("detailTabs", []), detailTab
     )
@@ -899,6 +921,62 @@ def get_work(
     return WorkDetailResponse(
         data={"book": book, "activeMedia": active_media, **navigation}
     )
+
+
+@router.get("/works/{work_id}/media-versions/{media_version_id}/volumes")
+def get_work_media_version_volumes(
+    work_id: str,
+    media_version_id: str,
+    request: Request,
+    page: Annotated[int, Query(ge=1)] = 1,
+    pageSize: Annotated[int, Query(ge=1, le=100)] = 100,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[WorkVolumePageResponse, ErrorResponses(LibraryNotFoundError)]:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    if not _visible_work_or_none(db, user, work_id):
+        _raise_library_error("作品不存在", status_code=404)
+    result = _work_volume_page_view(
+        db,
+        user=user,
+        work_id=work_id,
+        media_version_id=media_version_id,
+        page=page,
+        page_size=pageSize,
+    )
+    if result is None:
+        _raise_library_error("媒介版本不存在", status_code=404)
+    return WorkVolumePageResponse(data=result)
+
+
+@router.get("/works/{work_id}/volumes/{volume_id}/reading-units")
+def get_work_volume_reading_units(
+    work_id: str,
+    volume_id: str,
+    request: Request,
+    page: Annotated[int, Query(ge=1)] = 1,
+    pageSize: Annotated[int, Query(ge=1, le=200)] = 120,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[WorkReadingUnitsResponse, ErrorResponses(LibraryNotFoundError)]:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    if not _visible_work_or_none(db, user, work_id):
+        _raise_library_error("作品不存在", status_code=404)
+    result = _work_reading_units_view(
+        db,
+        user=user,
+        work_id=work_id,
+        volume_id=volume_id,
+        page=page,
+        page_size=pageSize,
+    )
+    if result is None:
+        _raise_library_error("卷册不存在", status_code=404)
+    return WorkReadingUnitsResponse(data=result)
 
 
 @router.put("/works/{work_id}/detail-preference")
@@ -2500,8 +2578,65 @@ def update_work_volume(
     )
 
 
-@router.post("/works/{work_id}/volumes/{volume_id}/move-to")
 @router.post("/works/{work_id}/volumes/{volume_id}/move")
+def reorder_work_volume(
+    work_id: str,
+    volume_id: str,
+    payload: ReorderVolumeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    WorkStructureMutationResponse,
+    ErrorResponses(
+        LibraryForbiddenError,
+        LibraryNotFoundError,
+    ),
+]:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    try:
+        reorder_volume_resource(
+            volume_structure_commands(db),
+            db,
+            actor=_library_actor(db, user),
+            work_id=work_id,
+            volume_id=volume_id,
+            direction=payload.direction,
+            now=_now(),
+        )
+    except WorkNotFoundError:
+        _raise_library_error(
+            "作品不存在或无权访问",
+            status_code=404,
+            code="WORK_NOT_FOUND",
+        )
+    except VolumeNotFoundError:
+        _raise_library_error(
+            "卷册不存在或不属于该作品",
+            status_code=404,
+            code="VOLUME_NOT_FOUND",
+        )
+    except LibraryAuthorizationError:
+        _raise_library_error(
+            "需要系统管理权限",
+            status_code=403,
+            code="SYSTEM_MANAGER_REQUIRED",
+        )
+    refreshed_work = _get_work(db, work_id)
+    return WorkStructureMutationResponse(
+        data={
+            "book": (
+                _work_view(db, refreshed_work, user.id) if refreshed_work else None
+            ),
+            "workId": work_id,
+            "volumeId": volume_id,
+        }
+    )
+
+
+@router.post("/works/{work_id}/volumes/{volume_id}/move-to")
 def move_work_volume(
     work_id: str,
     volume_id: str,

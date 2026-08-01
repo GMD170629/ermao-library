@@ -32,7 +32,6 @@ from app.modules.imports.application.dto import (
 )
 from app.modules.imports.application.import_comic import parse_comic_volume_from_name
 from app.modules.imports.application.import_epub import parse_epub_metadata
-from app.modules.imports.application.import_pdf import parse_pdf_metadata
 from app.modules.imports.application.import_support import (
     _work_merge_key,
     parse_series_volume_info,
@@ -40,6 +39,7 @@ from app.modules.imports.application.import_support import (
 from app.modules.imports.infrastructure.orchestration_services import (
     SessionImportOrchestrationServices,
 )
+from app.modules.imports.infrastructure.pdf_inspection import inspect_pdf
 from app.modules.imports.infrastructure.task_mapper import import_task_dto_from_row
 from app.services.default_cover import DEFAULT_COVER_ASSET_PATH
 from app.services.import_preferences import (
@@ -346,6 +346,48 @@ def write_pdf_fixture(path: Path):
         b"3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >> endobj\n"
         b"trailer << /Root 1 0 R >>\n%%EOF\n"
     )
+
+
+def write_text_pdf_fixture(path: Path, text_value: str) -> None:
+    encoded_text = (
+        text_value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    )
+    content = f"BT /F1 12 Tf 20 100 Td ({encoded_text}) Tj ET".encode("ascii")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        (
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+            b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"
+        ),
+        (
+            b"<< /Length "
+            + str(len(content)).encode("ascii")
+            + b" >>\nstream\n"
+            + content
+            + b"\nendstream"
+        ),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    payload = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for index, body in enumerate(objects, start=1):
+        offsets.append(len(payload))
+        payload.extend(f"{index} 0 obj\n".encode("ascii"))
+        payload.extend(body)
+        payload.extend(b"\nendobj\n")
+    xref_offset = len(payload)
+    payload.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    payload.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        payload.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    payload.extend(
+        (
+            f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
+            f"startxref\n{xref_offset}\n%%EOF\n"
+        ).encode("ascii")
+    )
+    path.write_bytes(payload)
 
 
 def write_pdf_metadata_fixture(path: Path):
@@ -1938,7 +1980,7 @@ def test_import_pdf_creates_library_records(db_session, test_settings, tmp_path)
     )
 
     assert result.import_status == "completed"
-    assert result.type == "ebook"
+    assert result.type == "comic"
     assert result.format == "pdf"
     assert result.total_units == 1
     assert _count(db_session, "LibraryWork") == 1
@@ -1971,7 +2013,50 @@ def test_import_pdf_creates_library_records(db_session, test_settings, tmp_path)
         ).scalar()
     )
     assert raw_metadata["coverRenderedFromPage"] == 1
+    assert raw_metadata["contentClassification"]["kind"] == "IMAGE_ONLY"
+    work = db_session.execute(
+        text("SELECT workType, tags, mergeKey FROM LibraryWork")
+    ).mappings().one()
+    assert work["workType"] == "COMIC"
+    assert json.loads(work["tags"]) == ["comic", "pdf"]
+    assert work["mergeKey"] == _work_merge_key(
+        "pdf-comic", "Manual PDF", "未知作者"
+    )
+    assert (
+        db_session.execute(text("SELECT mediaKind FROM LibraryMediaVersion")).scalar()
+        == "COMIC"
+    )
     assert _count(db_session, "LibraryReadingUnit") == 1
+
+
+def test_import_text_pdf_remains_ebook(db_session, test_settings, tmp_path):
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    pdf = tmp_path / "text-manual.pdf"
+    write_text_pdf_fixture(
+        pdf,
+        "A substantive paragraph with more than forty letters for classification.",
+    )
+
+    result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(source_file_path=pdf, origin="MANUAL", original_name=pdf.name),
+    )
+
+    assert result.type == "ebook"
+    assert (
+        db_session.execute(text("SELECT workType FROM LibraryWork")).scalar()
+        == "PDF"
+    )
+    assert (
+        db_session.execute(text("SELECT mediaKind FROM LibraryMediaVersion")).scalar()
+        == "EBOOK"
+    )
+    assert (
+        db_session.execute(text("SELECT format FROM LibraryVolume")).scalar()
+        == "PDF"
+    )
 
 
 def test_import_pdf_maps_subject_keywords_metadata(db_session, test_settings, tmp_path):
@@ -1980,11 +2065,11 @@ def test_import_pdf_maps_subject_keywords_metadata(db_session, test_settings, tm
     pdf = tmp_path / "metadata.pdf"
     write_pdf_metadata_fixture(pdf)
 
-    parsed = parse_pdf_metadata(pdf, "fallback.pdf")
-    assert parsed["title"] == "星舰手册"
-    assert parsed["author"] == "作者甲"
-    assert parsed["description"] == "PDF 简介"
-    assert parsed["tags"] == ["space", "manual", "science"]
+    parsed = inspect_pdf(pdf, "fallback.pdf")
+    assert parsed.title == "星舰手册"
+    assert parsed.author == "作者甲"
+    assert parsed.description == "PDF 简介"
+    assert parsed.tags == ("space", "manual", "science")
 
     result = import_managed_book(
         db_session,
@@ -2005,7 +2090,7 @@ def test_import_pdf_maps_subject_keywords_metadata(db_session, test_settings, tm
     assert work["title"] == "星舰手册"
     assert work["author"] == "作者甲"
     assert work["description"] is None
-    assert json.loads(work["tags"]) == ["pdf"]
+    assert json.loads(work["tags"]) == ["comic", "pdf"]
     edition = (
         db_session.execute(text("SELECT description FROM LibraryVolume"))
         .mappings()

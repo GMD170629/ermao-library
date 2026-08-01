@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
@@ -155,7 +156,7 @@ def reorder_volume(
     *,
     volume_id: str,
     media_version_id: str,
-    direction: str,
+    direction: Literal["up", "down"],
     now: datetime,
 ) -> bool:
     volumes = db.execute(

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -34,7 +35,10 @@ from app.modules.library.application.volume_commands import (
 )
 from app.modules.library.infrastructure import operations as operation_store
 from app.modules.library.infrastructure.deletion import delete_volume_scope
-from app.modules.library.infrastructure.structural_operations import move_volume_to_work
+from app.modules.library.infrastructure.structural_operations import (
+    move_volume_to_work,
+    reorder_volume as reorder_volume_within_media_version,
+)
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
 from app.services.book_identity import (
     UNKNOWN_AUTHOR,
@@ -235,6 +239,22 @@ class SqlAlchemyVolumeStructure:
         return VolumeMoveOutcome(
             move=result,
             operation=operation_store.operation_summary(operation),
+        )
+
+    def reorder_volume(
+        self,
+        *,
+        volume_id: str,
+        media_version_id: str,
+        direction: Literal["up", "down"],
+        now: datetime,
+    ) -> bool:
+        return reorder_volume_within_media_version(
+            self._db,
+            volume_id=volume_id,
+            media_version_id=media_version_id,
+            direction=direction,
+            now=now,
         )
 
     def create_work_from_volume(

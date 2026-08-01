@@ -9,6 +9,7 @@
   --shuku-safe-area-right: env(safe-area-inset-right, 0px);
   --shuku-safe-area-bottom: env(safe-area-inset-bottom, 0px);
   --shuku-safe-area-left: env(safe-area-inset-left, 0px);
+  --shuku-content-max-width: 80rem;
 }
 
 body {
@@ -17,6 +18,10 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   margin: 0;
+}
+
+html:has(.shuku-app-shell) {
+  scrollbar-gutter: stable;
 }
 
 .shuku-app-shell {
@@ -330,7 +335,7 @@ html[data-audio-mini-player='reader'] .shuku-pwa-bottom-overlay {
 }
 
 .shuku-content-frame {
-  width: min(100%, 1280px);
+  width: min(100%, var(--shuku-content-max-width));
   margin-inline: auto;
 }
 

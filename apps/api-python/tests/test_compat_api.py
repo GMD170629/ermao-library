@@ -1479,7 +1479,9 @@ def test_work_detail_empty_epub_and_comic_return_reading_units_page(client, db_s
             "total": 0,
             "totalPages": 1,
         }
-    comic = client.get("/api/works/comic-detail").json()["data"]
+    comic = client.get(
+        "/api/works/comic-detail", params={"detailTab": "COMIC"}
+    ).json()["data"]
     assert comic["activeMedia"]["selectedVolumeId"] == "comic-detail-volume"
 
 
@@ -6659,6 +6661,7 @@ def test_imported_pdf_supports_stream_bootstrap_and_v3_progress(
     assert bootstrap.status_code == 200
     data = bootstrap.json()["data"]
     assert data["readerType"] == "pdf"
+    assert data["mediaVersion"]["mediaKind"] == "COMIC"
     assert data["volume"]["format"] == "PDF"
     assert data["volume"]["pageCount"] >= 1
     assert len(data["units"]) == 1

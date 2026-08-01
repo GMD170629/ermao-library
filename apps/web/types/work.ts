@@ -48,6 +48,7 @@ export type VolumeResource = Readonly<{
   importStatus: string;
   importError: string | null;
   coverUrl: string;
+  sizeBytes: number;
   pageCount: number | null;
   chapterCount: number | null;
   durationMs: number | null;
@@ -64,6 +65,8 @@ export type MediaVersionResource = Readonly<{
   id: string;
   mediaKind: MediaKind;
   completed: boolean;
+  volumeCount: number;
+  sizeBytes: number;
   volumes: VolumeResource[];
 }>;
 
@@ -87,6 +90,9 @@ export type WorkView = Readonly<{
   gradient: string;
   recentMediaKind: MediaKind | null;
   continueVolumeId: string | null;
+  availableMediaKinds: MediaKind[];
+  detailTabs: WorkDetailTab[];
+  selectedDetailTab: WorkDetailTabKey | null;
   completed: boolean;
   mediaVersions: MediaVersionResource[];
 }>;

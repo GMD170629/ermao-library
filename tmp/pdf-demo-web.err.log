@@ -1,0 +1,26 @@
+ ⚠ Invalid next.config.js options detected: 
+ ⚠     Expected object, received boolean at "devIndicators"
+ ⚠     Unrecognized key(s) in object: 'outputFileTracingRoot', 'allowedDevOrigins'
+ ⚠ See more info here: https://nextjs.org/docs/messages/invalid-next-config
+
+warn - The `content` option in your Tailwind CSS configuration is missing or empty.
+warn - Configure your content sources or your generated CSS will be missing styles.
+warn - https://tailwindcss.com/docs/content-configuration
+(node:85706) [DEP0060] DeprecationWarning: The `util._extend` API is deprecated. Please use Object.assign() instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOENT: no such file or directory, lstat '/home/liumianti/shuku-starship/apps/web/.next/server/vendor-chunks/micromark-core-commonmark@2.0.3.js'
+<w> [webpack.cache.PackFileCacheStrategy/webpack.FileSystemInfo] Resolving './vendor-chunks/micromark-core-commonmark@2.0.3' in /home/liumianti/shuku-starship/apps/web/.next/server for build dependencies doesn't lead to expected result '/home/liumianti/shuku-starship/apps/web/.next/server/vendor-chunks/micromark-core-commonmark@2.0.3.js', but to 'Error: Can't resolve './vendor-chunks/micromark-core-commonmark@2.0.3' in '/home/liumianti/shuku-starship/apps/web/.next/server'' instead. Resolving dependencies are ignored for this path.
+<w>  at resolve commonjs file ./vendor-chunks/micromark-core-commonmark@2.0.3 (expected /home/liumianti/shuku-starship/apps/web/.next/server/vendor-chunks/micromark-core-commonmark@2.0.3.js)
+<w>  at file dependencies /home/liumianti/shuku-starship/apps/web/.next/server/webpack-runtime.js
+<w>  at file /home/liumianti/shuku-starship/apps/web/.next/server/webpack-runtime.js
+<w>  at file dependencies /home/liumianti/shuku-starship/apps/web/.next/server/pages/_error.js
+<w>  at file /home/liumianti/shuku-starship/apps/web/.next/server/pages/_error.js
+<w>  at file dependencies /home/liumianti/shuku-starship/node_modules/.pnpm/next@14.2.15_@playwright+test@1.61.1_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/next/dist/server/require.js
+<w>  at file /home/liumianti/shuku-starship/node_modules/.pnpm/next@14.2.15_@playwright+test@1.61.1_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/next/dist/server/require.js
+<w>  at file dependencies /home/liumianti/shuku-starship/node_modules/.pnpm/next@14.2.15_@playwright+test@1.61.1_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/next/dist/server/load-components.js
+<w>  at file /home/liumianti/shuku-starship/node_modules/.pnpm/next@14.2.15_@playwright+test@1.61.1_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/next/dist/server/load-components.js
+<w>  at file dependencies /home/liumianti/shuku-starship/node_modules/.pnpm/next@14.2.15_@playwright+test@1.61.1_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/next/dist/build/utils.js
+<w>  at file /home/liumianti/shuku-starship/node_modules/.pnpm/next@14.2.15_@playwright+test@1.61.1_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/next/dist/build/utils.js
+<w>  at file dependencies /home/liumianti/shuku-starship/node_modules/.pnpm/next@14.2.15_@playwright+test@1.61.1_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/next/dist/build/webpack/loaders/next-route-loader/index.js
+<w>  at file /home/liumianti/shuku-starship/node_modules/.pnpm/next@14.2.15_@playwright+test@1.61.1_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/next/dist/build/webpack/loaders/next-route-loader/index.js
+<w>  at resolve commonjs /home/liumianti/shuku-starship/node_modules/.pnpm/next@14.2.15_@playwright+test@1.61.1_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/next/dist/build/webpack/loaders/next-route-loader/index.js

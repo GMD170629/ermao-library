@@ -22,9 +22,17 @@ from app.modules.imports.application.errors import (
     AudioTrackLimitExceededError,
     ImportExecutionError,
 )
+from app.modules.imports.application.pdf_types import (
+    PdfCoverPublication,
+    PdfInspection,
+)
 from app.modules.imports.application.reflowable_types import ReflowableBookMetadata
 from app.modules.imports.infrastructure.audio_cover import publish_audio_cover
 from app.modules.imports.infrastructure.conversion import bind_derived_volume
+from app.modules.imports.infrastructure.pdf_inspection import (
+    inspect_pdf,
+    publish_pdf_cover,
+)
 from app.modules.imports.infrastructure.reflowable_cover import (
     publish_reflowable_cover,
 )
@@ -224,6 +232,26 @@ class SessionImportOrchestrationServices:
         if published:
             self._new_publications.add(Path(published))
         return published
+
+    def inspect_pdf(self, path: Path, original_name: str | None) -> PdfInspection:
+        return inspect_pdf(path, original_name)
+
+    def publish_pdf_cover(
+        self,
+        storage_root: Path,
+        source_path: Path,
+        work_id: str,
+        media_version_id: str,
+    ) -> PdfCoverPublication:
+        publication = publish_pdf_cover(
+            storage_root,
+            source_path,
+            work_id,
+            media_version_id,
+        )
+        if publication.path:
+            self._new_publications.add(Path(publication.path))
+        return publication
 
     def finalize_publications(self) -> None:
         self._new_publications.clear()

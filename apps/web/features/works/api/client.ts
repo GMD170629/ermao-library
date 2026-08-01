@@ -1,4 +1,5 @@
-import type { MediaKind, MediaVersionResource, VolumeFormat, VolumeResource, WorkView } from '../../../types/work';
+import type { MediaKind, MediaVersionResource, VolumeFormat, VolumeResource, WorkDetailTab, WorkDetailTabKey, WorkView } from '../../../types/work';
+import type { ChapterDetailUnit, EbookChapterDetail } from '../model/chapter-detail';
 
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -22,8 +23,34 @@ function nullableNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+function positiveInteger(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
 function mediaKind(value: unknown): MediaKind | null {
   return value === 'EBOOK' || value === 'COMIC' || value === 'AUDIOBOOK' ? value : null;
+}
+
+function detailTabKey(value: unknown): WorkDetailTabKey | null {
+  return mediaKind(value) ?? (value === 'STRUCTURE' ? value : null);
+}
+
+function parseAvailableMediaKinds(value: unknown, mediaVersions: readonly MediaVersionResource[]): MediaKind[] {
+  const parsed = Array.isArray(value) ? value.map(mediaKind).filter((kind): kind is MediaKind => kind !== null) : [];
+  const fallback = mediaVersions.map((mediaVersion) => mediaVersion.mediaKind);
+  return [...new Set(parsed.length ? parsed : fallback)];
+}
+
+function parseDetailTabs(value: unknown): WorkDetailTab[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<WorkDetailTabKey>();
+  return value.flatMap((entry, index) => {
+    const item = record(entry);
+    const key = detailTabKey(item.key);
+    if (!key || seen.has(key)) return [];
+    seen.add(key);
+    return [{ key, label: stringValue(item.label, key), sortOrder: finiteNumber(item.sortOrder, index) }];
+  });
 }
 
 function volumeFormat(value: unknown): VolumeFormat | null {
@@ -77,6 +104,7 @@ function mapVolume(value: unknown): VolumeResource | null {
     importStatus: stringValue(item.importStatus),
     importError: nullableString(item.importError),
     coverUrl: stringValue(item.coverUrl),
+    sizeBytes: finiteNumber(item.sizeBytes),
     pageCount: nullableNumber(item.pageCount),
     chapterCount: nullableNumber(item.chapterCount),
     durationMs: nullableNumber(item.durationMs),
@@ -99,15 +127,34 @@ function mapMediaVersion(value: unknown): MediaVersionResource | null {
     id,
     mediaKind: kind,
     completed: item.completed === true,
+    volumeCount: Math.max(0, finiteNumber(item.volumeCount, Array.isArray(item.volumes) ? item.volumes.length : 0)),
+    sizeBytes: Math.max(0, finiteNumber(item.sizeBytes)),
     volumes: (Array.isArray(item.volumes) ? item.volumes : []).map(mapVolume).filter((volume): volume is VolumeResource => volume !== null)
   };
 }
+
+export type MediaVersionVolumePage = Readonly<{
+  mediaVersionId: string;
+  mediaKind: MediaKind;
+  volumes: VolumeResource[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}>;
+
+export type WorkTransferTarget = Readonly<{
+  id: string;
+  title: string;
+  author: string;
+}>;
 
 export function mapWorkView(value: unknown): WorkView {
   const root = record(value);
   const id = stringValue(root.id).trim();
   if (!id || !Array.isArray(root.mediaVersions)) throw new Error('作品响应缺少媒介版本结构');
   const recentMediaKind = mediaKind(root.recentMediaKind);
+  const mediaVersions = root.mediaVersions.map(mapMediaVersion).filter((item): item is MediaVersionResource => item !== null);
   const publicationStatus = root.publicationStatus === 'ONGOING' || root.publicationStatus === 'COMPLETED' || root.publicationStatus === 'HIATUS' || root.publicationStatus === 'CANCELLED' ? root.publicationStatus : 'UNKNOWN';
   const trackingStatus = root.trackingStatus === 'TRACKING' || root.trackingStatus === 'PAUSED' || root.trackingStatus === 'IGNORED' ? root.trackingStatus : 'NOT_TRACKING';
   return {
@@ -130,8 +177,11 @@ export function mapWorkView(value: unknown): WorkView {
     gradient: stringValue(root.gradient),
     recentMediaKind,
     continueVolumeId: nullableString(root.continueVolumeId),
+    availableMediaKinds: parseAvailableMediaKinds(root.availableMediaKinds, mediaVersions),
+    detailTabs: parseDetailTabs(root.detailTabs),
+    selectedDetailTab: detailTabKey(root.selectedDetailTab),
     completed: root.completed === true,
-    mediaVersions: root.mediaVersions.map(mapMediaVersion).filter((item): item is MediaVersionResource => item !== null)
+    mediaVersions
   };
 }
 
@@ -152,6 +202,112 @@ export async function fetchWork(workId: string, signal?: AbortSignal): Promise<W
   return mapWorkView(data.book ?? data.work ?? data);
 }
 
+export async function fetchMediaVersionVolumes(
+  workId: string,
+  mediaVersionId: string,
+  page: number,
+  pageSize: number,
+  signal?: AbortSignal
+): Promise<MediaVersionVolumePage> {
+  const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  const data = record(await apiJson(`/api/works/${encodeURIComponent(workId)}/media-versions/${encodeURIComponent(mediaVersionId)}/volumes?${query}`, { signal }));
+  const kind = mediaKind(data.mediaKind);
+  if (stringValue(data.mediaVersionId) !== mediaVersionId || !kind) throw new Error('卷册分页响应与请求不匹配');
+  const resolvedPageSize = positiveInteger(data.pageSize, pageSize);
+  const total = Math.max(0, finiteNumber(data.total));
+  return {
+    mediaVersionId,
+    mediaKind: kind,
+    volumes: (Array.isArray(data.volumes) ? data.volumes : []).map(mapVolume).filter((volume): volume is VolumeResource => volume !== null),
+    page: positiveInteger(data.page, page),
+    pageSize: resolvedPageSize,
+    total,
+    totalPages: positiveInteger(data.totalPages, Math.max(1, Math.ceil(total / resolvedPageSize)))
+  };
+}
+
+export async function fetchAllMediaVersionVolumes(
+  workId: string,
+  mediaVersionId: string,
+  signal?: AbortSignal
+): Promise<VolumeResource[]> {
+  const firstPage = await fetchMediaVersionVolumes(workId, mediaVersionId, 1, 100, signal);
+  const volumes = [...firstPage.volumes];
+  for (let page = 2; page <= firstPage.totalPages; page += 1) {
+    const nextPage = await fetchMediaVersionVolumes(workId, mediaVersionId, page, 100, signal);
+    volumes.push(...nextPage.volumes);
+  }
+  return volumes;
+}
+
+export async function searchWorkTransferTargets(
+  search: string,
+  excludedWorkId: string,
+  signal?: AbortSignal
+): Promise<WorkTransferTarget[]> {
+  const query = new URLSearchParams({
+    page: '1',
+    pageSize: '20',
+    view: 'bookshelf',
+    visibility: 'active',
+    search: search.trim()
+  });
+  const data = record(await apiJson(`/api/works?${query}`, { signal }));
+  if (!Array.isArray(data.books)) throw new Error('目标图书搜索响应无效');
+  return data.books.flatMap((value) => {
+    const item = record(value);
+    const id = stringValue(item.id).trim();
+    if (!id || id === excludedWorkId) return [];
+    return [{
+      id,
+      title: stringValue(item.title, id),
+      author: stringValue(item.author)
+    }];
+  });
+}
+
+function mapChapterUnit(value: unknown): ChapterDetailUnit | null {
+  const item = record(value);
+  const id = stringValue(item.id).trim();
+  if (!id) return null;
+  const metadata = record(item.metadataJson);
+  return {
+    id,
+    title: nullableString(item.title) ?? '',
+    href: nullableString(item.href),
+    sortOrder: finiteNumber(item.sortOrder),
+    unitType: stringValue(item.unitType, 'chapter'),
+    pageNumber: nullableNumber(metadata.pageNumber)
+  };
+}
+
+export async function fetchEbookChapterDetail(
+  workId: string,
+  volumeId: string,
+  page: number,
+  pageSize: number,
+  signal?: AbortSignal
+): Promise<EbookChapterDetail> {
+  const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  const data = record(await apiJson(`/api/works/${encodeURIComponent(workId)}/volumes/${encodeURIComponent(volumeId)}/reading-units?${query}`, { signal }));
+  const pageData = record(data.page);
+  const pageSizeValue = positiveInteger(pageData.pageSize, pageSize);
+  const total = Math.max(0, finiteNumber(pageData.total));
+  return {
+    units: (Array.isArray(data.units) ? data.units : []).map(mapChapterUnit).filter((unit): unit is ChapterDetailUnit => unit !== null),
+    page: {
+      page: positiveInteger(pageData.page, page),
+      pageSize: pageSizeValue,
+      total,
+      totalPages: positiveInteger(pageData.totalPages, Math.max(1, Math.ceil(total / pageSizeValue)))
+    },
+    currentHref: nullableString(data.currentHref),
+    currentChapterSortOrder: nullableNumber(data.currentChapterSortOrder),
+    currentPageNumber: nullableNumber(data.currentPageNumber),
+    progress: Math.max(0, Math.min(100, finiteNumber(data.progress)))
+  };
+}
+
 export async function updateVolume(workId: string, volumeId: string, body: Record<string, unknown>): Promise<void> {
   await apiJson(`/api/works/${encodeURIComponent(workId)}/volumes/${encodeURIComponent(volumeId)}`, {
     method: 'PATCH',
@@ -170,4 +326,62 @@ export async function runVolumeAction(workId: string, volumeId: string, action: 
 
 export async function deleteVolume(workId: string, volumeId: string): Promise<void> {
   await apiJson(`/api/works/${encodeURIComponent(workId)}/volumes/${encodeURIComponent(volumeId)}`, { method: 'DELETE' });
+}
+
+export async function updateWorkReadingStatus(workId: string, status: 'UNREAD' | 'FINISHED'): Promise<void> {
+  await apiJson('/api/works/bulk', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: [workId], action: 'reading_status', status })
+  });
+}
+
+export type WorkMetadataInput = Readonly<{
+  title: string;
+  author: string;
+  description: string;
+  seriesName: string | null;
+  seriesIndex: number | null;
+  tags: string[];
+}>;
+
+export async function updateWorkMetadata(workId: string, input: WorkMetadataInput): Promise<WorkView> {
+  const data = record(await apiJson(`/api/works/${encodeURIComponent(workId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...input, organized: true })
+  }));
+  return mapWorkView(data.book ?? data.work ?? data);
+}
+
+export async function uploadWorkCover(workId: string, file: File): Promise<void> {
+  const body = new FormData();
+  body.append('cover', file);
+  await apiJson(`/api/works/${encodeURIComponent(workId)}/cover/upload`, { method: 'POST', body });
+}
+
+export async function regenerateWorkCover(workId: string): Promise<void> {
+  await apiJson(`/api/works/${encodeURIComponent(workId)}/cover/regenerate`, { method: 'POST' });
+}
+
+export type DeletedWorkResult = Readonly<{
+  deletedSourceFiles: number;
+  failedFileDeletes: ReadonlyArray<Readonly<{ path: string; message: string }>>;
+}>;
+
+export async function deleteWorkRecord(workId: string): Promise<DeletedWorkResult> {
+  const data = record(await apiJson(`/api/works/${encodeURIComponent(workId)}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deleteSource: false })
+  }));
+  return {
+    deletedSourceFiles: Math.max(0, finiteNumber(data.deletedSourceFiles)),
+    failedFileDeletes: (Array.isArray(data.failedFileDeletes) ? data.failedFileDeletes : []).flatMap((entry) => {
+      const item = record(entry);
+      const path = nullableString(item.path);
+      const message = nullableString(item.message);
+      return path && message ? [{ path, message }] : [];
+    })
+  };
 }

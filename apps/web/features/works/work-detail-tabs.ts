@@ -38,15 +38,22 @@ export function normalizeWorkDetailTabOrder(value: unknown): WorkDetailTabKey[] 
 }
 
 export function detailTabsForBook(_work: WorkView): WorkDetailTab[] {
-  return DEFAULT_WORK_DETAIL_TAB_ORDER.map((key, sortOrder) => ({ key, label: WORK_DETAIL_TAB_LABELS[key], sortOrder }));
+  const available = new Set(_work.availableMediaKinds);
+  const supplied = _work.detailTabs.length ? _work.detailTabs : DEFAULT_WORK_DETAIL_TAB_ORDER.map((key, sortOrder) => ({ key, label: WORK_DETAIL_TAB_LABELS[key], sortOrder }));
+  const visible = supplied.filter((tab) => tab.key === 'STRUCTURE' || available.has(tab.key));
+  const missing = DEFAULT_WORK_DETAIL_TAB_ORDER
+    .filter((key) => (key === 'STRUCTURE' || available.has(key)) && !visible.some((tab) => tab.key === key))
+    .map((key, sortOrder) => ({ key, label: WORK_DETAIL_TAB_LABELS[key], sortOrder: supplied.length + sortOrder }));
+  return [...visible, ...missing]
+    .sort((left, right) => left.sortOrder - right.sortOrder || left.key.localeCompare(right.key));
 }
 
 export function resolvedDetailTab(work: WorkView, requested?: WorkDetailTabKey | null): WorkDetailTabKey {
   const visible = new Set(detailTabsForBook(work).map((tab) => tab.key));
   const candidates: Array<WorkDetailTabKey | null | undefined> = [
     requested,
+    work.selectedDetailTab,
     work.recentMediaKind,
-    DEFAULT_WORK_DETAIL_TAB_ORDER[0],
     'STRUCTURE'
   ];
   return candidates.find((candidate): candidate is WorkDetailTabKey => Boolean(candidate && visible.has(candidate))) ?? 'STRUCTURE';
@@ -61,6 +68,10 @@ export function volumesForDetailTab(work: WorkView, tab: WorkDetailTabKey): Volu
   return (mediaVersionForDetailTab(work, tab)?.volumes ?? [])
     .filter((volume) => !volume.hidden)
     .sort((left, right) => left.sortOrder - right.sortOrder || left.id.localeCompare(right.id));
+}
+
+export function displayVolumeNumber(volume: VolumeResource, position: number): number {
+  return volume.volumeIndex ?? position + 1;
 }
 
 export function selectedVolumeForDetailTab(

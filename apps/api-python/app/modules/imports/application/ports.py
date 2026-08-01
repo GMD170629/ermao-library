@@ -20,6 +20,10 @@ from app.modules.imports.application.dto import (
     ImportTaskDTO,
     StageImportCommand,
 )
+from app.modules.imports.application.pdf_types import (
+    PdfCoverPublication,
+    PdfInspection,
+)
 from app.modules.imports.application.query_ports import (
     ImportLibraryQueries,
 )
@@ -262,6 +266,16 @@ class ImportOrchestrationServices(Protocol):
         media_version_id: str,
         metadata: ReflowableBookMetadata,
     ) -> str | None: ...
+
+    def inspect_pdf(self, path: Path, original_name: str | None) -> PdfInspection: ...
+
+    def publish_pdf_cover(
+        self,
+        storage_root: Path,
+        source_path: Path,
+        work_id: str,
+        media_version_id: str,
+    ) -> PdfCoverPublication: ...
 
 
 class ImportSourceProbe(Protocol):

@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from app.modules.imports.application.import_pdf import parse_pdf_metadata
+from app.modules.imports.domain.pdf_content import PdfContentKind
+from app.modules.imports.infrastructure.pdf_inspection import inspect_pdf
 
 
 def _write_pdf_with_literal_metadata(
@@ -37,17 +38,18 @@ def test_pdf_metadata_decodes_utf16_and_rejects_a_generic_title(
         keywords=b"\xfe\xff" + "接力出版社".encode("utf-16-be"),
     )
 
-    metadata = parse_pdf_metadata(pdf_path, "怪物大师10冰封的时之轮.pdf")
+    metadata = inspect_pdf(pdf_path, "怪物大师10冰封的时之轮.pdf")
 
-    assert metadata["title"] == "怪物大师10冰封的时之轮"
-    assert metadata["author"] == "雷欧幻象"
-    assert metadata["tags"] == ["接力出版社"]
-    assert metadata["embeddedTitle"] is None
-    assert metadata["rawMetadata"]["Title"] == "封面"
-    assert metadata["rawMetadata"]["Author"] == "雷欧幻象"
-    assert metadata["rawMetadata"]["Keywords"] == "接力出版社"
+    assert metadata.title == "怪物大师10冰封的时之轮"
+    assert metadata.author == "雷欧幻象"
+    assert metadata.tags == ("接力出版社",)
+    assert metadata.embedded_title is None
+    assert metadata.raw_metadata["Title"] == "封面"
+    assert metadata.raw_metadata["Author"] == "雷欧幻象"
+    assert metadata.raw_metadata["Keywords"] == "接力出版社"
+    assert metadata.content_kind is PdfContentKind.IMAGE_ONLY
     assert "�" not in "".join(
-        str(metadata["rawMetadata"].get(field) or "")
+        str(metadata.raw_metadata.get(field) or "")
         for field in ("Title", "Author", "Subject", "Keywords")
     )
 
@@ -65,9 +67,53 @@ def test_pdf_metadata_rejects_truncated_utf16_and_decodes_octal_escapes(
         keywords=b"fiction",
     )
 
-    metadata = parse_pdf_metadata(pdf_path, "怪物大师10冰封的时之轮.pdf")
+    metadata = inspect_pdf(pdf_path, "怪物大师10冰封的时之轮.pdf")
 
-    assert metadata["title"] == "怪物大师10冰封的时之轮"
-    assert metadata["author"] == "雷欧幻象"
-    assert metadata["tags"] == ["fiction"]
-    assert metadata["embeddedTitle"] is None
+    assert metadata.title == "怪物大师10冰封的时之轮"
+    assert metadata.author == "雷欧幻象"
+    assert metadata.tags == ("fiction",)
+    assert metadata.embedded_title is None
+
+
+def test_pdf_inspection_timeout_is_unknown(tmp_path: Path) -> None:
+    pdf_path = tmp_path / "source.pdf"
+    _write_pdf_with_literal_metadata(
+        pdf_path,
+        title=b"manual",
+        author=b"author",
+        keywords=b"fiction",
+    )
+    ticks = iter((0.0, 4.0, 4.0, 4.0, 4.0))
+
+    metadata = inspect_pdf(pdf_path, clock=lambda: next(ticks))
+
+    assert metadata.content_kind is PdfContentKind.UNKNOWN
+    assert metadata.text_evidence.reason == "timeout"
+
+
+def test_invalid_pdf_inspection_is_unknown(tmp_path: Path) -> None:
+    pdf_path = tmp_path / "invalid.pdf"
+    pdf_path.write_bytes(b"not a PDF")
+
+    metadata = inspect_pdf(pdf_path)
+
+    assert metadata.content_kind is PdfContentKind.UNKNOWN
+    assert metadata.text_evidence.reason == "inspection-error"
+
+
+def test_large_image_only_pdf_scans_each_page_without_rendering(tmp_path: Path) -> None:
+    import pypdfium2 as pdfium
+
+    pdf_path = tmp_path / "large-image-only.pdf"
+    document = pdfium.PdfDocument.new()
+    for _ in range(500):
+        page = document.new_page(595, 842)
+        page.close()
+    document.save(pdf_path)
+    document.close()
+
+    metadata = inspect_pdf(pdf_path, clock=lambda: 0.0)
+
+    assert metadata.content_kind is PdfContentKind.IMAGE_ONLY
+    assert metadata.text_evidence.inspected_pages == 500
+    assert metadata.text_evidence.maximum_effective_characters == 0

@@ -485,7 +485,7 @@ export function LibraryPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1280px]">
+    <div>
       <header className="flex items-start justify-between gap-6">
         <div className="flex min-w-0 items-center gap-3 sm:gap-4">
           <MobileNavigationTrigger />

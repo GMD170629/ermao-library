@@ -12,7 +12,7 @@ from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
 
 from fastapi.responses import Response
-from sqlalchemy import inspect, select
+from sqlalchemy import func, inspect, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -484,10 +484,170 @@ def _volume_file_view(file: LibraryFile) -> dict[str, Any]:
     }
 
 
+def _volume_file_summary_view(file: LibraryFile) -> dict[str, Any]:
+    return {
+        "id": file.id,
+        "path": file.path,
+        "sizeBytes": file.size_bytes,
+        "size": _format_bytes(file.size_bytes),
+    }
+
+
+def _library_volume_view(
+    volume: LibraryVolume,
+    *,
+    media_version_id: str,
+    progress: LibraryReadingProgress | None,
+    files: list[LibraryFile],
+) -> dict[str, Any]:
+    percent = min(100.0, max(0.0, float(progress.percent if progress else 0)))
+    return {
+        "id": volume.id,
+        "mediaVersionId": media_version_id,
+        "title": volume.title,
+        "volumeIndex": volume.volume_index,
+        "sortOrder": volume.sort_order,
+        "format": volume.format,
+        "derivedFromVolumeId": volume.derived_from_volume_id,
+        "publisher": volume.publisher,
+        "publishedAt": _dt(volume.published_at),
+        "language": volume.language,
+        "isbn": volume.isbn,
+        "identifier": volume.identifier,
+        "narrator": volume.narrator,
+        "abridged": volume.abridged,
+        "origin": volume.origin,
+        "importStatus": volume.import_status,
+        "importError": volume.import_error,
+        "coverStatus": volume.cover_status,
+        "coverUrl": _cover_url(
+            "volumes",
+            volume.id,
+            {"coverPath": volume.cover_path, "updatedAt": volume.updated_at},
+        ),
+        "sizeBytes": volume.size_bytes,
+        "pageCount": volume.page_count,
+        "chapterCount": volume.chapter_count,
+        "durationMs": volume.duration_ms,
+        "trackCount": volume.track_count,
+        "progress": percent,
+        "completed": percent >= 100,
+        "lastReadAt": _dt(progress.updated_at) if progress else None,
+        "files": [_volume_file_view(file) for file in files],
+    }
+
+
+def _library_volume_page_view(
+    volume: LibraryVolume,
+    *,
+    media_version_id: str,
+    progress: LibraryReadingProgress | None,
+    files: list[LibraryFile],
+) -> dict[str, Any]:
+    legacy_view = _library_volume_view(
+        volume,
+        media_version_id=media_version_id,
+        progress=progress,
+        files=[],
+    )
+    return _work_detail_volume_view(
+        legacy_view,
+        files=[_volume_file_summary_view(file) for file in files],
+    )
+
+
+def _work_detail_volume_view(
+    volume: dict[str, Any],
+    *,
+    files: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": volume["id"],
+        "mediaVersionId": volume["mediaVersionId"],
+        "title": volume["title"],
+        "volumeIndex": volume.get("volumeIndex"),
+        "sortOrder": volume["sortOrder"],
+        "format": volume["format"],
+        "derivedFromVolumeId": volume.get("derivedFromVolumeId"),
+        "publisher": volume.get("publisher"),
+        "publishedAt": volume.get("publishedAt"),
+        "language": volume.get("language"),
+        "isbn": volume.get("isbn"),
+        "identifier": volume.get("identifier"),
+        "narrator": volume.get("narrator"),
+        "coverUrl": volume["coverUrl"],
+        "sizeBytes": volume["sizeBytes"],
+        "pageCount": volume.get("pageCount"),
+        "chapterCount": volume.get("chapterCount"),
+        "durationMs": volume.get("durationMs"),
+        "trackCount": volume.get("trackCount"),
+        "progress": volume["progress"],
+        "files": files if files is not None else volume.get("files", []),
+    }
+
+
+def _work_detail_summary_view(book: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": book["id"],
+        "title": book["title"],
+        "author": book["author"],
+        "description": book.get("description"),
+        "tags": book["tags"],
+        "seriesName": book.get("seriesName"),
+        "seriesIndex": book.get("seriesIndex"),
+        "coverStatus": book["coverStatus"],
+        "coverUrl": book["coverUrl"],
+        "recentMediaKind": book.get("recentMediaKind"),
+        "continueVolumeId": book.get("continueVolumeId"),
+        "completed": book["completed"],
+        "mediaVersions": [
+            {
+                "id": media_version["id"],
+                "mediaKind": media_version["mediaKind"],
+                "volumeCount": media_version["volumeCount"],
+                "sizeBytes": media_version["sizeBytes"],
+                "volumes": [
+                    _work_detail_volume_view(volume)
+                    for volume in media_version["volumes"]
+                ],
+            }
+            for media_version in book["mediaVersions"]
+        ],
+        "availableMediaKinds": book["availableMediaKinds"],
+        "detailTabs": book["detailTabs"],
+        "selectedDetailTab": book["selectedDetailTab"],
+    }
+
+
+def _reading_unit_view(unit: LibraryReadingUnit) -> dict[str, Any]:
+    return {
+        "id": unit.id,
+        "volumeId": unit.volume_id,
+        "fileId": unit.file_id,
+        "unitType": unit.unit_type,
+        "title": unit.title,
+        "href": unit.href,
+        "mediaType": unit.media_type,
+        "sortOrder": unit.sort_order,
+        "startMs": unit.start_ms,
+        "endMs": unit.end_ms,
+        "durationMs": unit.duration_ms,
+        "width": unit.width,
+        "height": unit.height,
+        "size": unit.size,
+        "metadataJson": _parse_json(unit.metadata_json, {}),
+        "createdAt": _dt(unit.created_at),
+        "updatedAt": _dt(unit.updated_at),
+    }
+
+
 def _work_view(
     db: Session,
     work: dict[str, Any],
     user_id: str | None = None,
+    *,
+    volume_limit_per_media: int | None = None,
+    include_files: bool = True,
 ) -> dict[str, Any]:
     work_id = str(work["id"])
     metadata_lookup = library_projections.latest_metadata_lookup_for_work(db, work_id)
@@ -523,14 +683,6 @@ def _work_view(
         if user_id and volume_ids
         else {}
     )
-    files: dict[str, list[LibraryFile]] = {volume_id: [] for volume_id in volume_ids}
-    if volume_ids:
-        for file in db.scalars(
-            select(LibraryFile)
-            .where(LibraryFile.volume_id.in_(volume_ids))
-            .order_by(LibraryFile.volume_id, LibraryFile.sort_order, LibraryFile.id)
-        ).all():
-            files[file.volume_id].append(file)
     histories = (
         {
             history.media_version_id: history
@@ -548,7 +700,6 @@ def _work_view(
     ordered = sorted(
         grouped.values(), key=lambda item: media_order.get(item[0].media_kind, 99)
     )
-    media_views: list[dict[str, Any]] = []
     incomplete: dict[str, list[LibraryVolume]] = {}
     all_volumes: list[LibraryVolume] = []
     for media_version, volumes in ordered:
@@ -559,58 +710,6 @@ def _work_view(
             if float(progresses[volume.id].percent if volume.id in progresses else 0)
             < 100
         ]
-        volume_views = []
-        for volume in volumes:
-            progress = progresses.get(volume.id)
-            percent = min(100.0, max(0.0, float(progress.percent if progress else 0)))
-            volume_views.append(
-                {
-                    "id": volume.id,
-                    "mediaVersionId": media_version.id,
-                    "title": volume.title,
-                    "volumeIndex": volume.volume_index,
-                    "sortOrder": volume.sort_order,
-                    "format": volume.format,
-                    "derivedFromVolumeId": volume.derived_from_volume_id,
-                    "publisher": volume.publisher,
-                    "language": volume.language,
-                    "isbn": volume.isbn,
-                    "identifier": volume.identifier,
-                    "narrator": volume.narrator,
-                    "abridged": volume.abridged,
-                    "origin": volume.origin,
-                    "importStatus": volume.import_status,
-                    "importError": volume.import_error,
-                    "coverStatus": volume.cover_status,
-                    "coverUrl": _cover_url(
-                        "volumes",
-                        volume.id,
-                        {
-                            "coverPath": volume.cover_path,
-                            "updatedAt": volume.updated_at,
-                        },
-                    ),
-                    "sizeBytes": volume.size_bytes,
-                    "pageCount": volume.page_count,
-                    "chapterCount": volume.chapter_count,
-                    "durationMs": volume.duration_ms,
-                    "trackCount": volume.track_count,
-                    "progress": percent,
-                    "completed": percent >= 100,
-                    "lastReadAt": _dt(progress.updated_at) if progress else None,
-                    "files": [
-                        _volume_file_view(file) for file in files.get(volume.id, [])
-                    ],
-                }
-            )
-        media_views.append(
-            {
-                "id": media_version.id,
-                "mediaKind": media_version.media_kind,
-                "completed": bool(volumes) and not incomplete[media_version.id],
-                "volumes": volume_views,
-            }
-        )
     candidates = [item for item in ordered if incomplete[item[0].id]]
     recent_media: LibraryMediaVersion | None = None
     continue_volume: LibraryVolume | None = None
@@ -639,6 +738,52 @@ def _work_view(
             ),
             recent_volumes[0],
         )
+    response_volumes: dict[str, list[LibraryVolume]] = {}
+    for media_version, volumes in ordered:
+        selected = (
+            list(volumes)
+            if volume_limit_per_media is None
+            else list(volumes[:volume_limit_per_media])
+        )
+        if (
+            continue_volume is not None
+            and continue_volume.media_version_id == media_version.id
+            and all(volume.id != continue_volume.id for volume in selected)
+        ):
+            selected.append(continue_volume)
+        response_volumes[media_version.id] = selected
+    response_volume_ids = [
+        volume.id for volumes in response_volumes.values() for volume in volumes
+    ]
+    files: dict[str, list[LibraryFile]] = {
+        volume_id: [] for volume_id in response_volume_ids
+    }
+    if include_files and response_volume_ids:
+        for file in db.scalars(
+            select(LibraryFile)
+            .where(LibraryFile.volume_id.in_(response_volume_ids))
+            .order_by(LibraryFile.volume_id, LibraryFile.sort_order, LibraryFile.id)
+        ).all():
+            files[file.volume_id].append(file)
+    media_views = [
+        {
+            "id": media_version.id,
+            "mediaKind": media_version.media_kind,
+            "completed": bool(volumes) and not incomplete[media_version.id],
+            "volumeCount": len(volumes),
+            "sizeBytes": sum(volume.size_bytes for volume in volumes),
+            "volumes": [
+                _library_volume_view(
+                    volume,
+                    media_version_id=media_version.id,
+                    progress=progresses.get(volume.id),
+                    files=files.get(volume.id, []),
+                )
+                for volume in response_volumes[media_version.id]
+            ],
+        }
+        for media_version, volumes in ordered
+    ]
     kinds = [str(item["mediaKind"]) for item in media_views]
     tabs = _detail_tabs(db, set(kinds))
     last_progress = max(
@@ -746,28 +891,7 @@ def _active_media_view(
     total_pages = max(1, (total + page_size - 1) // page_size)
     page = min(max(1, unit_page), total_pages)
     selected_rows = unit_rows[(page - 1) * page_size : page * page_size]
-    reading_units = [
-        {
-            "id": unit.id,
-            "volumeId": unit.volume_id,
-            "fileId": unit.file_id,
-            "unitType": unit.unit_type,
-            "title": unit.title,
-            "href": unit.href,
-            "mediaType": unit.media_type,
-            "sortOrder": unit.sort_order,
-            "startMs": unit.start_ms,
-            "endMs": unit.end_ms,
-            "durationMs": unit.duration_ms,
-            "width": unit.width,
-            "height": unit.height,
-            "size": unit.size,
-            "metadataJson": _parse_json(unit.metadata_json, {}),
-            "createdAt": _dt(unit.created_at),
-            "updatedAt": _dt(unit.updated_at),
-        }
-        for unit in selected_rows
-    ]
+    reading_units = [_reading_unit_view(unit) for unit in selected_rows]
     progress = db.scalar(
         select(LibraryReadingProgress).where(
             LibraryReadingProgress.user_id == user_id,
@@ -836,6 +960,169 @@ def _active_media_view(
         },
         **_progress_navigation(progress_view, reading_units),
     }, navigation
+
+
+def _work_volume_page_view(
+    db: Session,
+    *,
+    user: User,
+    work_id: str,
+    media_version_id: str,
+    page: int,
+    page_size: int,
+) -> dict[str, Any] | None:
+    context = authorization_context(db, user)
+    media_version = db.scalar(
+        select(LibraryMediaVersion).where(
+            LibraryMediaVersion.id == media_version_id,
+            LibraryMediaVersion.work_id == work_id,
+        )
+    )
+    if media_version is None:
+        return None
+    filters = [
+        LibraryVolume.media_version_id == media_version_id,
+        LibraryVolume.hidden.is_(False),
+        volume_visibility_predicate(context),
+    ]
+    total = int(
+        db.scalar(select(func.count(LibraryVolume.id)).where(*filters)) or 0
+    )
+    bounded_page_size = min(100, max(1, page_size))
+    total_pages = max(1, (total + bounded_page_size - 1) // bounded_page_size)
+    bounded_page = min(max(1, page), total_pages)
+    volumes = db.scalars(
+        select(LibraryVolume)
+        .where(*filters)
+        .order_by(
+            LibraryVolume.sort_order.asc(),
+            LibraryVolume.created_at.asc(),
+            LibraryVolume.id.asc(),
+        )
+        .limit(bounded_page_size)
+        .offset((bounded_page - 1) * bounded_page_size)
+    ).all()
+    volume_ids = [volume.id for volume in volumes]
+    progresses = (
+        {
+            progress.volume_id: progress
+            for progress in db.scalars(
+                select(LibraryReadingProgress).where(
+                    LibraryReadingProgress.user_id == user.id,
+                    LibraryReadingProgress.volume_id.in_(volume_ids),
+                )
+            ).all()
+        }
+        if volume_ids
+        else {}
+    )
+    files: dict[str, list[LibraryFile]] = {volume_id: [] for volume_id in volume_ids}
+    if volume_ids:
+        for file in db.scalars(
+            select(LibraryFile)
+            .where(LibraryFile.volume_id.in_(volume_ids))
+            .order_by(LibraryFile.volume_id, LibraryFile.sort_order, LibraryFile.id)
+        ).all():
+            files[file.volume_id].append(file)
+    return {
+        "mediaVersionId": media_version.id,
+        "mediaKind": media_version.media_kind,
+        "volumes": [
+            _library_volume_page_view(
+                volume,
+                media_version_id=media_version.id,
+                progress=progresses.get(volume.id),
+                files=files.get(volume.id, []),
+            )
+            for volume in volumes
+        ],
+        "page": bounded_page,
+        "pageSize": bounded_page_size,
+        "total": total,
+        "totalPages": total_pages,
+    }
+
+
+def _work_reading_units_view(
+    db: Session,
+    *,
+    user: User,
+    work_id: str,
+    volume_id: str,
+    page: int,
+    page_size: int,
+) -> dict[str, Any] | None:
+    context = authorization_context(db, user)
+    volume = db.scalar(
+        select(LibraryVolume)
+        .join(
+            LibraryMediaVersion,
+            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+        )
+        .where(
+            LibraryVolume.id == volume_id,
+            LibraryMediaVersion.work_id == work_id,
+            LibraryVolume.hidden.is_(False),
+            volume_visibility_predicate(context),
+        )
+    )
+    if volume is None:
+        return None
+    bounded_page_size = min(200, max(1, page_size))
+    total = int(
+        db.scalar(
+            select(func.count(LibraryReadingUnit.id)).where(
+                LibraryReadingUnit.volume_id == volume_id
+            )
+        )
+        or 0
+    )
+    total_pages = max(1, (total + bounded_page_size - 1) // bounded_page_size)
+    bounded_page = min(max(1, page), total_pages)
+    units = db.scalars(
+        select(LibraryReadingUnit)
+        .where(LibraryReadingUnit.volume_id == volume_id)
+        .order_by(LibraryReadingUnit.sort_order, LibraryReadingUnit.id)
+        .limit(bounded_page_size)
+        .offset((bounded_page - 1) * bounded_page_size)
+    ).all()
+    unit_views = [_reading_unit_view(unit) for unit in units]
+    progress = db.scalar(
+        select(LibraryReadingProgress).where(
+            LibraryReadingProgress.user_id == user.id,
+            LibraryReadingProgress.volume_id == volume_id,
+        )
+    )
+    progress_view = (
+        {
+            "volumeId": progress.volume_id,
+            "position": progress.position,
+            "page": progress.page,
+            "percent": progress.percent,
+            "extra": progress.extra,
+            "locationJson": progress.location_json,
+            "updatedAt": progress.updated_at,
+        }
+        if progress is not None
+        else None
+    )
+    navigation = _progress_navigation(progress_view, unit_views)
+    extra = _progress_extra(progress_view)
+    return {
+        "units": unit_views,
+        "page": {
+            "page": bounded_page,
+            "pageSize": bounded_page_size,
+            "total": total,
+            "totalPages": total_pages,
+        },
+        "progress": min(
+            100.0, max(0.0, float(progress.percent if progress is not None else 0))
+        ),
+        "currentHref": navigation.get("currentHref"),
+        "currentChapterSortOrder": navigation.get("currentChapterSortOrder"),
+        "currentPageNumber": extra.get("pageIndex"),
+    }
 
 
 def _empty_reading_units_page(page_size: int) -> dict[str, int]:
