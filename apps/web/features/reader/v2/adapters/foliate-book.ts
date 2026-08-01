@@ -11,9 +11,11 @@ export type FoliateSection = {
 };
 
 export type FoliateTocItem = {
+  id?: unknown;
   label?: unknown;
   href?: unknown;
   subitems?: unknown;
+  navigationKey?: unknown;
 };
 
 export type FoliateBook = {
@@ -22,6 +24,8 @@ export type FoliateBook = {
   dir?: unknown;
   metadata?: unknown;
   transformTarget?: EventTarget;
+  resolveHref?: (href: string) => unknown | Promise<unknown>;
+  splitTOCHref?: (href: string) => unknown;
   destroy?: () => void | Promise<void>;
 };
 

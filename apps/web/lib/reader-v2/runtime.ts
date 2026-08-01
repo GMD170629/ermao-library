@@ -24,7 +24,8 @@ export function toWireLocation(location: ReaderProgressLocation) {
       format: location.format,
       cfi: location.cfi,
       href: location.href,
-      progression: location.progression
+      progression: location.progression,
+      ...(location.foliate ? { foliate: location.foliate } : {})
     };
   }
   if (location.kind === 'epub') {

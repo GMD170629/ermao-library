@@ -34,9 +34,14 @@ import { useToast } from '../../components/ui/feedback';
 import { Select } from '../../components/ui/select';
 import { VolumeSelect } from '../../components/ui/volume-select';
 import { withBasePath } from '../../lib/base-path';
+import { getReaderV2Runtime } from '../../lib/reader-v2/runtime';
+import type { ProgressMutation } from '../../lib/reader-v2/model';
+import { READER_PROGRESS_CHANGED_EVENT, READER_PROGRESS_SYNC_CHANNEL } from '../../lib/reader-v2/sync-coordinator';
 import type { MediaKind, ReadingStatus, WorkDetailTabKey, WorkView } from '../../types/work';
 import { useAudioPlayback } from '../audio/audio-playback-provider';
 import { resolveChapterReadingStates } from './chapter-reading-state';
+import { chapterDeepLinkHref, hasEbookChapterNavigation } from './ebook-chapter-navigation';
+import { latestScopedProgress, localProgressProjection } from './local-reader-progress';
 import { MetadataLookupModal } from './metadata-lookup-modal';
 import { KindleSendModal } from './kindle-send-modal';
 import { I18nText } from '@/i18n/provider';
@@ -123,6 +128,8 @@ type VolumeSectionView = {
   currentChapterTitle?: string | null;
   currentChapterSortOrder?: number | null;
   durationMs?: number | null;
+  progressExtra?: Record<string, unknown>;
+  progressEstimated?: boolean;
 };
 
 type ActiveWorkMedia = {
@@ -140,6 +147,18 @@ type ActiveWorkMedia = {
   units: ReadingUnitView[];
   volumes: VolumeSectionView[];
   tracks?: WorkView['files'];
+  currentHref?: string | null;
+  currentChapterTitle?: string | null;
+  currentChapterSortOrder?: number | null;
+  progressExtra?: Record<string, unknown>;
+  progressEstimated?: boolean;
+  localProgressScope?: {
+    userId: string;
+    workId: string;
+    editionId: string;
+    volumeId: string | null;
+    contentFingerprint: string;
+  };
 };
 
 type PageMeta = { page: number; pageSize: number; total: number; totalPages: number };
@@ -152,6 +171,20 @@ const emptyReadingUnitsPage: PageMeta = {
   total: 0,
   totalPages: 1
 };
+
+function numericProgressMetric(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function detailLocationLabel(current: unknown, next: unknown, total: unknown) {
+  const currentLocation = numericProgressMetric(current);
+  const nextLocation = numericProgressMetric(next);
+  const totalLocations = numericProgressMetric(total);
+  if (currentLocation === null || nextLocation === null || totalLocations === null || totalLocations < 1) return null;
+  const start = Math.min(totalLocations, Math.floor(currentLocation) + 1);
+  const end = Math.min(totalLocations, Math.max(start, Math.floor(nextLocation) + 1));
+  return start === end ? `Loc ${start} / ${totalLocations}` : `Loc ${start}–${end} / ${totalLocations}`;
+}
 
 function readableEditionId(book: WorkView | null, preferredEditionId?: string | null) {
   if (!book) return null;
@@ -277,7 +310,7 @@ function inputClassName() {
 }
 
 export function BookDetailPage({ bookId }: { bookId: string }) {
-  const { t: i18nAttribute } = useAttributeI18n();
+  const { t: i18nAttribute, locale } = useAttributeI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
   const toast = useToast();
@@ -307,6 +340,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const [readingUnitsPage, setReadingUnitsPage] = useState<PageMeta>(emptyReadingUnitsPage);
   const [volumeSections, setVolumeSections] = useState<VolumeSectionView[]>([]);
   const [activeMedia, setActiveMedia] = useState<ActiveWorkMedia | null>(null);
+  const [localProgress, setLocalProgress] = useState<ProgressMutation | null>(null);
   const [selectedEditionId, setSelectedEditionId] = useState<string | null>(null);
   const [selectedVolumeId, setSelectedVolumeId] = useState<string | null>(null);
   const [chapterPage, setChapterPage] = useState(1);
@@ -440,6 +474,43 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         if (detailRequestRef.current === controller) setChapterLoading(false);
       });
   }, [activeTab, bookId, chapterPage, selectedEditionId, selectedVolumeId]);
+
+  const localProgressScope = activeMedia?.localProgressScope;
+
+  useEffect(() => {
+    const scope = localProgressScope;
+    if (!scope) {
+      setLocalProgress(null);
+      return undefined;
+    }
+    let active = true;
+    const loadLocalProgress = () => {
+      void getReaderV2Runtime().storage.listProgress().then((mutations) => {
+        if (active) setLocalProgress(latestScopedProgress(mutations, scope));
+      }).catch(() => {
+        if (active) setLocalProgress(null);
+      });
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') loadLocalProgress();
+    };
+    const channel = typeof BroadcastChannel === 'undefined'
+      ? null
+      : new BroadcastChannel(READER_PROGRESS_SYNC_CHANNEL);
+    channel?.addEventListener('message', loadLocalProgress);
+    window.addEventListener(READER_PROGRESS_CHANGED_EVENT, loadLocalProgress);
+    window.addEventListener('focus', loadLocalProgress);
+    document.addEventListener('visibilitychange', handleVisibility);
+    loadLocalProgress();
+    return () => {
+      active = false;
+      channel?.removeEventListener('message', loadLocalProgress);
+      channel?.close();
+      window.removeEventListener(READER_PROGRESS_CHANGED_EVENT, loadLocalProgress);
+      window.removeEventListener('focus', loadLocalProgress);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [localProgressScope]);
 
   useEffect(() => {
     const detailQueryKey = `${bookId}:${requestedDetailTab ?? ''}:${requestedEditionId ?? ''}`;
@@ -949,7 +1020,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const selectedEdition = selectedEditionForDetailTab(book, currentTab, activeMedia?.selectedEditionId ?? selectedEditionId);
   const readerEditionId = readableEditionId(book, selectedEdition?.id);
   const hasVolumeSections = volumeSections.length > 0;
-  const hasChapterNavigation = currentTab === 'EBOOK' && selectedEdition?.formatValue === 'EPUB';
+  const hasChapterNavigation = hasEbookChapterNavigation(currentTab, selectedEdition?.formatValue);
   const hasAudioNavigation = currentTab === 'AUDIOBOOK';
   const activeGroup = mediaKind ? book.mediaGroups?.find((candidate) => candidate.kind === mediaKind) : null;
   const activeVolumeId = resolveVolumeIdForSections(
@@ -966,8 +1037,38 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     ? fallbackReaderUrl
     : activeMedia?.primaryAction?.href ?? fallbackReaderUrl;
   const audioProjection = audioDetailProjection(currentTab, book.id, readerEditionId, audioPlayback);
-  const currentPosition = audioProjection?.positionLabel ?? (activeMedia?.positionLabel || currentPositionLabel(book));
-  const currentProgress = audioProjection?.progress ?? activeMedia?.progress ?? activeGroup?.progress ?? selectedEdition?.progress ?? book.progress;
+  const pendingProgress = localProgressProjection(localProgress);
+  const activeProgressExtra = activeMedia?.progressExtra
+    ?? activeVolume?.progressExtra
+    ?? (selectedEdition?.id === book.recentEditionId ? book.progressExtra : undefined)
+    ?? {};
+  const currentChapterIndex = 'currentChapterIndex' in (pendingProgress ?? {})
+    ? pendingProgress?.currentChapterIndex ?? null
+    : numericProgressMetric(activeProgressExtra.chapterIndex);
+  const currentProgress = audioProjection?.progress
+    ?? pendingProgress?.percent
+    ?? activeMedia?.progress
+    ?? activeGroup?.progress
+    ?? selectedEdition?.progress
+    ?? book.progress;
+  const currentPosition = audioProjection?.positionLabel
+    ?? ('currentChapterTitle' in (pendingProgress ?? {}) ? pendingProgress?.currentChapterTitle : null)
+    ?? activeMedia?.currentChapterTitle
+    ?? activeMedia?.positionLabel
+    ?? currentPositionLabel(book);
+  const currentLocationLabel = pendingProgress && 'locationCurrent' in pendingProgress
+    ? detailLocationLabel(pendingProgress.locationCurrent, pendingProgress.locationNext, pendingProgress.locationTotal)
+    : detailLocationLabel(activeProgressExtra.locationCurrent, activeProgressExtra.locationNext, activeProgressExtra.locationTotal);
+  const remainingSectionSeconds = (pendingProgress && 'remainingSectionSeconds' in pendingProgress
+    ? pendingProgress.remainingSectionSeconds
+    : numericProgressMetric(activeProgressExtra.remainingSectionSeconds)) ?? null;
+  const remainingTotalSeconds = (pendingProgress && 'remainingTotalSeconds' in pendingProgress
+    ? pendingProgress.remainingTotalSeconds
+    : numericProgressMetric(activeProgressExtra.remainingTotalSeconds)) ?? null;
+  const preciseProgressLabel = new Intl.NumberFormat(locale, {
+    minimumFractionDigits: currentTab === 'EBOOK' ? 1 : 0,
+    maximumFractionDigits: currentTab === 'EBOOK' ? 1 : 0
+  }).format(currentProgress);
   const copy = consumptionCopy(mediaKind);
   const currentStatusOptions = currentTab === 'AUDIOBOOK' ? listeningStatusOptions : currentTab === 'COMIC' ? comicStatusOptions : statusOptions;
   const selectedTargetBook = targetBooks.find((item) => item.id === targetBookId) ?? null;
@@ -988,10 +1089,25 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       ? '源版本将整体转入，并作为一种新的媒介保留'
       : '源版本将整体转入，并作为后备版本保留';
   const selectedIsGlobalRecent = selectedEdition?.id === book.recentEditionId;
-  const chapterCurrentHref = activeVolume?.currentHref ?? (selectedIsGlobalRecent && (!activeVolumeId || activeVolumeId === book.recentVolumeId) ? book.currentHref : null);
+  const chapterCurrentHref = pendingProgress && 'currentHref' in pendingProgress
+    ? pendingProgress.currentHref
+    : activeMedia?.currentHref
+      ?? activeVolume?.currentHref
+      ?? (selectedIsGlobalRecent && (!activeVolumeId || activeVolumeId === book.recentVolumeId) ? book.currentHref : null);
   const chapterCurrentSortOrder = activeVolume?.currentChapterSortOrder ?? (selectedIsGlobalRecent && (!activeVolumeId || activeVolumeId === book.recentVolumeId) ? book.currentChapterSortOrder : null);
   const chapterProgress = activeVolume?.progress ?? (activeVolumeId === activeGroup?.recentVolumeId || !activeVolumeId ? currentProgress : 0);
-  const chapterStates = resolveChapterReadingStates(readingUnits, chapterCurrentHref, chapterCurrentSortOrder, chapterProgress);
+  const chapterStates = resolveChapterReadingStates(
+    readingUnits,
+    chapterCurrentHref,
+    chapterCurrentSortOrder,
+    chapterProgress,
+    {
+      page: readingUnitsPage.page,
+      pageSize: readingUnitsPage.pageSize,
+      total: readingUnitsPage.total,
+      currentIndex: currentChapterIndex
+    }
+  );
   const effectiveReadingStatus = currentProgress >= 100 ? 'FINISHED' : activeMedia?.status ?? activeGroup?.status ?? book.statusValue;
   const primaryActionLabel = audioProjection
     ? currentProgress > 0 ? copy.resume : copy.start
@@ -1167,16 +1283,23 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
 
             {currentTab !== 'STRUCTURE' ? <div className="mt-7 max-w-3xl lg:mt-auto">
               <div className="flex items-center gap-4">
-                <span className="shrink-0 text-sm font-medium text-stone-700">{copy.progress}</span>
+                <span className="shrink-0 text-sm font-medium text-stone-700">{activeMedia?.localProgressScope?.volumeId ? i18nAttribute('本卷进度') : copy.progress}</span>
                 <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-stone-200">
                   <div className="h-full rounded-full bg-[#ff4f26] transition-[width]" style={{ width: `${Math.max(0, Math.min(100, currentProgress))}%` }} />
                 </div>
-                <span className="w-11 text-right text-sm font-medium tabular-nums text-stone-700">{Math.round(currentProgress)}%</span>
+                <span className="w-14 text-right text-sm font-medium tabular-nums text-stone-700">{preciseProgressLabel}%</span>
               </div>
               <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
                 <span className="font-medium text-stone-700">{copy.position}</span>
                 <span className="text-stone-800">{currentPosition}</span>
               </div>
+              {currentTab === 'EBOOK' && (currentLocationLabel || remainingSectionSeconds !== null || remainingTotalSeconds !== null) ? (
+                <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-stone-500">
+                  {currentLocationLabel ? <span className="tabular-nums">{currentLocationLabel}</span> : null}
+                  {remainingSectionSeconds !== null ? <span>{i18nAttribute('本节预计剩余 {value0} 分钟', { value0: Math.max(1, Math.ceil(remainingSectionSeconds / 60)) })}</span> : null}
+                  {remainingTotalSeconds !== null ? <span>{i18nAttribute('全书预计剩余 {value0} 分钟', { value0: Math.max(1, Math.ceil(remainingTotalSeconds / 60)) })}</span> : null}
+                </div>
+              ) : null}
               {currentTab === 'AUDIOBOOK' && (activeMedia?.durationMs || selectedEdition?.durationMs) ? (
                 <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-stone-500">
                   {formatDuration(activeMedia?.durationMs ?? selectedEdition?.durationMs) ? <span><I18nText>总时长 </I18nText>{formatDuration(activeMedia?.durationMs ?? selectedEdition?.durationMs)}</span> : null}
@@ -1436,7 +1559,12 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                 <div className={cn('divide-y divide-stone-100 border-y border-stone-100 transition', chapterLoading && 'opacity-65')} aria-busy={chapterLoading || undefined}>
                   {readingUnits.map((unit, index) => {
                     const state = chapterStates[index];
-                    const chapterUrl = readerUrlForChapter(book, readerEditionId, activeVolumeId, unit.href);
+                    const chapterUrl = readerUrlForChapter(
+                      book,
+                      readerEditionId,
+                      activeVolumeId,
+                      chapterDeepLinkHref(selectedEdition?.formatValue, unit.href)
+                    );
                     const displayIndex = (readingUnitsPage.page - 1) * readingUnitsPage.pageSize + index + 1;
                     return (
                       <button key={unit.id} type="button" disabled={!chapterUrl} onClick={() => chapterUrl && router.push(chapterUrl)} className={cn('grid min-h-14 w-full grid-cols-[48px_minmax(0,1fr)_100px_28px] items-center gap-3 px-1 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-50', state === 'current' ? 'bg-[#fff4ef] text-[#e84420]' : 'hover:bg-stone-50')}>
@@ -1470,6 +1598,11 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                       <span className="mt-2 block line-clamp-2 text-sm font-medium leading-5 text-stone-900">{volume.title}</span>
                     </button>
                   ))}
+                </div>
+              ) : hasChapterNavigation ? (
+                <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-stone-200 px-4 py-4 text-sm text-stone-600">
+                  <span><I18nText>暂无可定位章节</I18nText></span>
+                  <Button variant="secondary" disabled={!readerUrl} onClick={() => readerUrl && router.push(readerUrl)}><I18nText>打开阅读器</I18nText></Button>
                 </div>
               ) : selectedEdition && !selectedEdition.readable ? (
                 <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">

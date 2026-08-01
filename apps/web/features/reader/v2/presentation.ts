@@ -94,7 +94,20 @@ export function locationExtra(location: ReaderLocation | null) {
       format: location.format,
       cfi: location.cfi,
       currentHref: location.href,
-      progression: location.progression
+      progression: location.progression,
+      chapterIndex: location.foliate?.toc?.index,
+      chapterTitle: location.foliate?.toc?.title,
+      chapterHref: location.foliate?.toc?.href,
+      navigationKey: location.foliate?.toc?.navigationKey,
+      navigationFingerprint: location.foliate?.navigationFingerprint,
+      sectionIndex: location.foliate?.section?.current,
+      sectionTotal: location.foliate?.section?.total,
+      locationCurrent: location.foliate?.location?.current,
+      locationNext: location.foliate?.location?.next,
+      locationTotal: location.foliate?.location?.total,
+      remainingSectionSeconds: location.foliate?.remainingSeconds?.section,
+      remainingTotalSeconds: location.foliate?.remainingSeconds?.total,
+      progressEstimated: false
     };
   }
   if (location.kind === 'epub') {

@@ -454,7 +454,10 @@ def test_preferences_progress_bookmarks_and_shelves_are_isolated(
         },
     )
     assert bookmark.status_code == 200, bookmark.text
-    assert bookmark.json()["data"]["bookmarks"][0]["location"]["cfi"] == "epubcfi(/6/2!/4/1:0)"
+    assert (
+        bookmark.json()["data"]["bookmarks"][0]["location"]["cfi"]
+        == "epubcfi(/6/2!/4/1:0)"
+    )
     db_session.execute(
         text(
             "INSERT INTO `LibraryReadingProgress` "

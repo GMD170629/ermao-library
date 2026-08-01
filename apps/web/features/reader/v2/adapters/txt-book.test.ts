@@ -15,7 +15,7 @@ test('decodeTxt rejects empty and suspicious NUL-padded inputs', () => {
 
 test('splitTxtSections creates deterministic Chinese and English chapters', () => {
   const sections = splitTxtSections(`序言\n第一段\n\n第一章 开始\n章节正文\n\nChapter 2 End\nLast page`);
-  assert.deepEqual(sections.map((section) => section.title), ['正文', '第一章 开始', 'Chapter 2 End']);
+  assert.deepEqual(sections.map((section) => section.title), ['序言', '第一章 开始', 'Chapter 2 End']);
   assert.equal(sections[1]?.text, '章节正文');
 });
 

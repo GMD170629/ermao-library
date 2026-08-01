@@ -30,7 +30,7 @@ _UNKNOWN_VALUES = {
 class EmbeddedIdentityMetadata:
     title: str | None
     author: str | None
-    source: Literal["epub_opf", "pdf_metadata", "comic_info"]
+    source: Literal["epub_opf", "pdf_metadata", "comic_info", "reflowable_metadata"]
     confidence: float
 
 
@@ -43,11 +43,12 @@ def resolve_import_identity(
 ) -> BookIdentityDTO:
     """Choose title and author from explicit, embedded, and path evidence.
 
-    Existing-work and series-volume identities are structural decisions and
-    therefore remain path-owned. A complete, high-confidence path identity
-    also remains authoritative so misleading package metadata cannot merge an
-    unrelated book. Otherwise valid embedded metadata repairs incomplete or
-    low-confidence filenames. Explicit user fields are applied field by field.
+    Existing-work and series-volume titles are structural decisions and remain
+    path-owned; valid PDF metadata may still fill a placeholder path author. A
+    complete, high-confidence path identity also remains authoritative so
+    misleading package metadata cannot merge an unrelated book. Otherwise
+    valid embedded metadata repairs incomplete or low-confidence filenames.
+    Explicit user fields are applied field by field.
     """
 
     path_evidence = IdentityEvidenceDTO(
@@ -95,6 +96,21 @@ def resolve_import_identity(
             if path_identity.source == "existing_work"
             else "series_volume_path"
         )
+        embedded_author = (
+            _valid_author(embedded_evidence.author)
+            if embedded_evidence is not None
+            else None
+        )
+        if (
+            embedded_evidence is not None
+            and embedded_evidence.source == "pdf_metadata"
+            and _valid_author(author) is None
+            and embedded_author is not None
+        ):
+            author = embedded_author
+            source = embedded_evidence.source
+            confidence = embedded_evidence.confidence
+            reason = "embedded_author_over_incomplete_path"
     elif path_is_complete and confidence >= 0.9:
         reason = "complete_high_confidence_path"
     elif embedded_evidence is not None:

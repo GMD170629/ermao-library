@@ -160,10 +160,6 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
   private suppressClickUntil = 0;
   private resizeObserver: ResizeObserver | null = null;
   private viewportWidth = 0;
-  private readonly stopZoomPanPropagation = (event: Event) => {
-    if (this.zoom <= 1 || event.type === 'touchend') return;
-    event.stopPropagation();
-  };
   private readonly handlePointerDown = (event: PointerEvent) => {
     if (
       !this.onInputIntent
@@ -247,9 +243,6 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     viewport.addEventListener('lostpointercapture', this.handleLostPointerCapture);
     viewport.addEventListener('click', this.suppressCompatibilityClick, true);
     if (options.onViewModel) this.viewListeners.add(options.onViewModel);
-    this.container.addEventListener('touchstart', this.stopZoomPanPropagation, { passive: true });
-    this.container.addEventListener('touchmove', this.stopZoomPanPropagation, { passive: true });
-    this.container.addEventListener('touchend', this.stopZoomPanPropagation, { passive: true });
     const ResizeObserverConstructor = this.container.ownerDocument.defaultView?.ResizeObserver ?? globalThis.ResizeObserver;
     if (typeof ResizeObserverConstructor === 'function') {
       this.viewportWidth = viewport.clientWidth || this.container.clientWidth;
@@ -428,6 +421,7 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     this.emitView();
     try {
       await this.refreshVisiblePages(this.currentGeneration(), context.signal);
+      this.track.recenter(true);
       this.status = 'ready';
       this.emitLocation(context.operation);
       this.emitView();
@@ -475,9 +469,6 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.cleanupEngine();
-    this.container.removeEventListener('touchstart', this.stopZoomPanPropagation);
-    this.container.removeEventListener('touchmove', this.stopZoomPanPropagation);
-    this.container.removeEventListener('touchend', this.stopZoomPanPropagation);
     const viewport = this.track.getViewportElement();
     viewport.removeEventListener('pointerdown', this.handlePointerDown);
     viewport.removeEventListener('pointermove', this.handlePointerMove);

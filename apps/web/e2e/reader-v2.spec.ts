@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -147,6 +147,24 @@ async function currentEpubIframe(page: Page) {
   const iframe = engine.locator('iframe:visible').first();
   await expect(iframe).toBeVisible();
   return iframe;
+}
+
+async function clickVisibleReflowableZone(body: Locator, horizontalFraction: number) {
+  await body.evaluate((element, fraction) => {
+    const document = element.ownerDocument;
+    const frame = document.defaultView?.frameElement;
+    const readerViewport = frame?.ownerDocument.querySelector<HTMLElement>('[data-reader-viewport="stable"]');
+    if (!frame || !readerViewport) throw new Error('Visible reader geometry is unavailable');
+    const frameBounds = frame.getBoundingClientRect();
+    const viewportBounds = readerViewport.getBoundingClientRect();
+    const clientX = (
+      viewportBounds.left + (viewportBounds.width * fraction) - frameBounds.left
+    ) * frame.clientWidth / frameBounds.width;
+    const clientY = (
+      viewportBounds.top + (viewportBounds.height * 0.5) - frameBounds.top
+    ) * frame.clientHeight / frameBounds.height;
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX, clientY }));
+  }, horizontalFraction);
 }
 
 async function showReaderControls(page: Page) {
@@ -894,14 +912,7 @@ test('EPUB pointer tap navigates only when its click is emitted', async ({ page 
   expect(await page.evaluate(() => (
     window as typeof window & { __epubNavigationStarts?: number }
   ).__epubNavigationStarts ?? 0)).toBe(0);
-  await firstBody.evaluate((body) => {
-    const document = body.ownerDocument;
-    body.dispatchEvent(new MouseEvent('click', {
-      bubbles: true,
-      clientX: document.documentElement.clientWidth * 0.9,
-      clientY: document.documentElement.clientHeight * 0.5
-    }));
-  });
+  await clickVisibleReflowableZone(firstBody, 0.9);
   await expect.poll(() => page.evaluate(() => (
     window as typeof window & { __epubNavigationStarts?: number }
   ).__epubNavigationStarts ?? 0)).toBe(1);
@@ -910,6 +921,9 @@ test('EPUB pointer tap navigates only when its click is emitted', async ({ page 
     && typeof body.location.href === 'string'
     && body.location.href.endsWith('chapter2.xhtml')
   )), { timeout: 8_000 }).toBe(true);
+  const secondBody = (await currentEpubIframe(page)).contentFrame().locator('body');
+  await clickVisibleReflowableZone(secondBody, 0.9);
+  await expect(secondBody.getByText('第二章 翻页验证')).toBeVisible();
   await expect(page.locator('[data-shuku-epub-transition-placeholder="true"]')).toHaveCount(0);
   const currentFrame = await currentEpubIframe(page);
   await expect(page.locator('[data-reader-engine="reflowable-v2"]')).toHaveAttribute('data-reader-theme', 'ready');
@@ -923,7 +937,7 @@ test('EPUB pointer tap navigates only when its click is emitted', async ({ page 
   expect(transitionAudit).toEqual({ placeholderSeen: false, violations: 0 });
   expect(await page.evaluate(() => (
     window as typeof window & { __epubNavigationStarts?: number }
-  ).__epubNavigationStarts ?? 0)).toBe(1);
+  ).__epubNavigationStarts ?? 0)).toBe(2);
 });
 
 test('EPUB iframe is scriptless and receives the selected theme snapshot', async ({ page }) => {

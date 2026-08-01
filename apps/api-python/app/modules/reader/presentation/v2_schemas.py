@@ -85,12 +85,74 @@ class EpubLocation(ReaderWireModel):
         return self
 
 
+class FoliateTocProgress(ReaderWireModel):
+    index: int = Field(ge=0)
+    title: str = Field(min_length=1, max_length=1024)
+    href: str | None = Field(default=None, min_length=1, max_length=2048)
+    navigation_key: str | None = Field(
+        default=None,
+        alias="navigationKey",
+        min_length=1,
+        max_length=191,
+        exclude_if=lambda value: value is None,
+    )
+
+
+class FoliateSectionProgress(ReaderWireModel):
+    current: int = Field(ge=0)
+    total: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def require_current_in_range(self) -> FoliateSectionProgress:
+        if self.current >= self.total:
+            raise ValueError("Foliate section current must be less than total")
+        return self
+
+
+class FoliateLocationProgress(ReaderWireModel):
+    current: int = Field(ge=0)
+    next: int = Field(ge=0)
+    total: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def require_ordered_range(self) -> FoliateLocationProgress:
+        if self.current >= self.total or self.next < self.current or self.next > self.total:
+            raise ValueError("Foliate location range is invalid")
+        return self
+
+
+class FoliateRemainingSeconds(ReaderWireModel):
+    section: float = Field(ge=0)
+    total: float = Field(ge=0)
+
+
+class FoliateProgressSnapshot(ReaderWireModel):
+    toc: FoliateTocProgress | None = None
+    section: FoliateSectionProgress | None = None
+    location: FoliateLocationProgress | None = None
+    remaining_seconds: FoliateRemainingSeconds | None = Field(
+        default=None,
+        alias="remainingSeconds",
+    )
+    navigation_fingerprint: str | None = Field(
+        default=None,
+        alias="navigationFingerprint",
+        min_length=1,
+        max_length=191,
+        exclude_if=lambda value: value is None,
+    )
+
+
 class ReflowableLocation(ReaderWireModel):
     type: Literal["reflowable"]
     format: ReflowableFormat
     cfi: str | None = Field(default=None, min_length=1, max_length=4096)
     href: str | None = Field(default=None, min_length=1, max_length=2048)
     progression: float | None = Field(default=None, ge=0, le=1)
+    foliate: FoliateProgressSnapshot | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
     @model_validator(mode="after")
     def require_anchor(self) -> ReflowableLocation:
@@ -183,6 +245,10 @@ class ReaderUnitSummary(ReaderWireModel):
     index: int
     title: str
     href: str | None = None
+    level: int | None = Field(default=None, ge=0)
+    navigation_key: str | None = Field(
+        default=None, alias="navigationKey", min_length=1, max_length=191
+    )
     file_id: str | None = Field(default=None, alias="fileId")
     start_ms: int | None = Field(default=None, alias="startMs", ge=0)
     end_ms: int | None = Field(default=None, alias="endMs", ge=0)
@@ -250,6 +316,9 @@ class ReaderBootstrapData(ReaderWireModel):
     reader_type: ReaderFormat = Field(alias="readerType")
     source_format: ReflowableFormat | None = Field(default=None, alias="sourceFormat")
     content_fingerprint: str = Field(alias="contentFingerprint")
+    navigation_fingerprint: str | None = Field(
+        default=None, alias="navigationFingerprint", min_length=1, max_length=191
+    )
     book: ReaderBookSummary
     edition: ReaderEditionSummary
     available_editions: list[ReaderEditionOption] = Field(alias="availableEditions")

@@ -24,6 +24,30 @@ export type ReflowableLocation = {
   cfi?: string;
   href?: string;
   progression?: number;
+  foliate?: FoliateProgressSnapshot;
+};
+
+export type FoliateProgressSnapshot = {
+  toc?: {
+    index: number;
+    title: string;
+    href?: string;
+    navigationKey?: string;
+  };
+  navigationFingerprint?: string;
+  section?: {
+    current: number;
+    total: number;
+  };
+  location?: {
+    current: number;
+    next: number;
+    total: number;
+  };
+  remainingSeconds?: {
+    section: number;
+    total: number;
+  };
 };
 
 export type ComicLocation = {
@@ -41,9 +65,11 @@ export type ReaderLocation = ReflowableLocation | LegacyEpubLocation | ComicLoca
 
 export type ReaderNavigationEntry = {
   id: string;
+  navigationKey?: string;
   label: string;
   href?: string;
   index?: number;
+  level?: number;
   children?: ReaderNavigationEntry[];
 };
 
@@ -85,7 +111,12 @@ type ReaderSourceBase = {
 };
 
 export type ReaderSource = ReaderSourceBase & (
-  | { kind: 'reflowable'; sourceFormat: ReflowableFormat }
+  | {
+    kind: 'reflowable';
+    sourceFormat: ReflowableFormat;
+    navigation: ReaderNavigationEntry[];
+    navigationFingerprint?: string;
+  }
   | { kind: 'comic' | 'pdf'; sourceFormat?: never }
 );
 

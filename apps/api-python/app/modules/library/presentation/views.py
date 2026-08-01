@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -17,7 +16,6 @@ from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.bootstrap.library import (
-    library_facet_queries,
     library_join_queries,
     library_projections,
     library_storage,
@@ -25,36 +23,61 @@ from app.bootstrap.library import (
 )
 from app.bootstrap.organize import organize_jobs
 from app.bootstrap.system import get_setting
-from app.core.authorization import authorization_context, can_access_work, can_manage_system
+from app.core.authorization import (
+    authorization_context,
+    can_access_work,
+    can_manage_system,
+)
 from app.core.config import Settings
 from app.core.time import timestamp_ms_to_iso
 from app.models.auth import User
 from app.modules.reader.public import (
+    build_content_fingerprint,
+)
+from app.modules.reader.public import (
     choose_continue_volume as _choose_continue_volume,
+)
+from app.modules.reader.public import (
     continue_progress_for_edition as _continue_progress_for_edition,
+)
+from app.modules.reader.public import (
     display_progress_percent as _display_progress_percent,
+)
+from app.modules.reader.public import (
     latest_progress as _latest_progress,
+)
+from app.modules.reader.public import (
     number_or_none as _number_or_none,
+)
+from app.modules.reader.public import (
     progress_chapter_label as _progress_chapter_label,
+)
+from app.modules.reader.public import (
     progress_extra as _progress_extra,
+)
+from app.modules.reader.public import (
     progress_for_volume as _progress_for_volume,
+)
+from app.modules.reader.public import (
     progress_navigation as _progress_navigation,
+)
+from app.modules.reader.public import (
     progress_percent_with_navigation as _progress_percent_with_navigation,
 )
 from app.modules.system.public import (
     DETAIL_TAB_KEYS,
+)
+from app.modules.system.public import (
     normalize_detail_tab_order as _normalize_detail_tab_order,
 )
 from app.schemas.responses import fail
 from app.services.book_identity import normalize_identity_part
-from app.services.library_filters import library_filter_schema
-from app.services.library_management import list_categories
 from app.services.organize_service import context_for_job, ensure_organize_job_for_work
 from app.services.text_conversion import CONVERTIBLE_TEXT_EXTS
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _has_table(db: Session, table: str) -> bool:
@@ -123,6 +146,7 @@ def _require_work_manager(db: Session, user: User, work_id: str) -> Response | N
         return fail("需要系统管理权限", status_code=403, code="SYSTEM_MANAGER_REQUIRED")
     return None
 
+
 def _cover_url(kind: str, row_id: str, row: dict[str, Any] | None = None, **params: Any) -> str:
     query = {key: value for key, value in params.items() if value is not None}
     version_source = ""
@@ -159,16 +183,40 @@ def _coerce_int(value: Any, fallback: int = 0) -> int:
 def _labels() -> dict[str, dict[str, str]]:
     return {
         "format": {
-            "EPUB": "EPUB", "COMIC": "漫画", "PDF": "PDF", "AUDIO": "音频",
-            "MOBI": "MOBI", "AZW": "AZW", "AZW3": "AZW3", "PRC": "PRC", "FB2": "FB2", "TXT": "TXT",
+            "EPUB": "EPUB",
+            "COMIC": "漫画",
+            "PDF": "PDF",
+            "AUDIO": "音频",
+            "MOBI": "MOBI",
+            "AZW": "AZW",
+            "AZW3": "AZW3",
+            "PRC": "PRC",
+            "FB2": "FB2",
+            "TXT": "TXT",
         },
         "status": {"UNREAD": "未读", "READING": "在读", "FINISHED": "已读"},
-        "publication": {"UNKNOWN": "未知", "ONGOING": "连载中", "COMPLETED": "已完结", "HIATUS": "休刊", "CANCELLED": "已取消"},
-        "tracking": {"NOT_TRACKING": "未追踪", "TRACKING": "追踪中", "PAUSED": "已暂停", "IGNORED": "已忽略"},
+        "publication": {
+            "UNKNOWN": "未知",
+            "ONGOING": "连载中",
+            "COMPLETED": "已完结",
+            "HIATUS": "休刊",
+            "CANCELLED": "已取消",
+        },
+        "tracking": {
+            "NOT_TRACKING": "未追踪",
+            "TRACKING": "追踪中",
+            "PAUSED": "已暂停",
+            "IGNORED": "已忽略",
+        },
     }
 
 
-DETAIL_TAB_LABELS = {"EBOOK": "电子书", "COMIC": "漫画", "AUDIOBOOK": "有声书", "STRUCTURE": "内容结构"}
+DETAIL_TAB_LABELS = {
+    "EBOOK": "电子书",
+    "COMIC": "漫画",
+    "AUDIOBOOK": "有声书",
+    "STRUCTURE": "内容结构",
+}
 
 
 def _edition_media_kind(edition: dict[str, Any]) -> str:
@@ -180,7 +228,6 @@ def _edition_media_kind(edition: dict[str, Any]) -> str:
 
 
 def _detail_tab_order(db: Session) -> list[str]:
-    from app.bootstrap.system import get_setting
 
     value = get_setting(db, "workDetail.tabOrder")
     return _normalize_detail_tab_order(value)
@@ -253,9 +300,7 @@ def _set_consumption_status(
     )
     edition_changed = bool(edition_id and existing and edition_id != existing.get("lastEditionId"))
     volume_changed = bool(
-        volume_id is not None
-        and (existing or {}).get("lastVolumeId") is not None
-        and volume_id != (existing or {}).get("lastVolumeId")
+        volume_id is not None and (existing or {}).get("lastVolumeId") is not None and volume_id != (existing or {}).get("lastVolumeId")
     )
     library_projections.save_consumption_state(
         db,
@@ -264,19 +309,9 @@ def _set_consumption_status(
         media_kind=media_kind,
         status=status,
         last_edition_id=edition_id or (existing or {}).get("lastEditionId"),
-        last_volume_id=(
-            volume_id
-            if volume_id is not None
-            else None
-            if edition_changed
-            else (existing or {}).get("lastVolumeId")
-        ),
+        last_volume_id=(volume_id if volume_id is not None else None if edition_changed else (existing or {}).get("lastVolumeId")),
         last_unit_id=(
-            unit_id
-            if unit_id is not None
-            else None
-            if edition_changed or volume_changed
-            else (existing or {}).get("lastUnitId")
+            unit_id if unit_id is not None else None if edition_changed or volume_changed else (existing or {}).get("lastUnitId")
         ),
         now=now,
     )
@@ -346,9 +381,7 @@ def _project_work_status_for_user(db: Session, user_id: str, work_id: str) -> st
         return "UNREAD"
     user = db.get(User, user_id)
     context = authorization_context(db, user) if user is not None else None
-    edition_rows = library_works.list_visible_editions_for_work(
-        db, work_id=work_id, context=context
-    )
+    edition_rows = library_works.list_visible_editions_for_work(db, work_id=work_id, context=context)
     media_kinds = {_edition_media_kind(item) for item in edition_rows}
     states = {
         str(item.get("mediaKind")): _reading_status(item.get("status"))
@@ -367,8 +400,6 @@ def _project_work_status_for_user(db: Session, user_id: str, work_id: str) -> st
     return "UNREAD"
 
 
-
-
 def _format_duration(duration_ms: Any) -> str:
     total_seconds = max(0, int(float(duration_ms or 0) / 1000))
     hours, remainder = divmod(total_seconds, 3600)
@@ -381,7 +412,20 @@ def _media_position_label(db: Session, media_kind: str, progress: dict[str, Any]
         return "未开始"
     if media_kind != "AUDIOBOOK":
         page = progress.get("page")
-        return f"第 {page} 页" if page else "继续上次位置"
+        if page:
+            return f"第 {page} 页"
+        extra = _progress_extra(progress)
+        chapter_title = extra.get("chapterTitle")
+        if isinstance(chapter_title, str) and chapter_title:
+            return chapter_title
+        location_current = _number_or_none(extra.get("locationCurrent"))
+        location_next = _number_or_none(extra.get("locationNext"))
+        location_total = _number_or_none(extra.get("locationTotal"))
+        if location_current is not None and location_next is not None and location_total is not None and location_total > 0:
+            start = min(location_total, location_current + 1)
+            end = min(location_total, max(start, location_next + 1))
+            return f"Loc {start} / {location_total}" if start == end else f"Loc {start}–{end} / {location_total}"
+        return "继续上次位置"
     location = _parse_json(progress.get("locationJson"), {})
     extra = _progress_extra(progress)
     position_ms = _number_or_none(location.get("positionMs") if isinstance(location, dict) else None)
@@ -394,9 +438,7 @@ def _media_position_label(db: Session, media_kind: str, progress: dict[str, Any]
             position_ms = 0
     chapter_id = location.get("chapterId") if isinstance(location, dict) else extra.get("chapterId")
     chapter_title = (
-        library_projections.get_reading_unit_title(db, str(chapter_id))
-        if chapter_id and _has_table(db, "LibraryReadingUnit")
-        else None
+        library_projections.get_reading_unit_title(db, str(chapter_id)) if chapter_id and _has_table(db, "LibraryReadingUnit") else None
     )
     prefix = f"{chapter_title} · " if chapter_title else ""
     return f"{prefix}{_format_duration(position_ms)}"
@@ -456,14 +498,17 @@ def _management_work_views(
     editions_by_work: dict[str, list[dict[str, Any]]] = {work_id: [] for work_id in work_ids}
     if _has_table(db, "LibraryEdition"):
         for work_id in work_ids:
-            editions_by_work[work_id] = library_works.list_visible_editions_for_work(
-                db, work_id=work_id, context=context
-            )
+            editions_by_work[work_id] = library_works.list_visible_editions_for_work(db, work_id=work_id, context=context)
 
     states_by_work: dict[str, dict[str, str]] = {work_id: {} for work_id in work_ids}
     if _has_table(db, "LibraryConsumptionState") and work_ids:
         from sqlalchemy import select
-        from app.models.library import LibraryConsumptionState, LibraryEdition, LibraryReadingProgress
+
+        from app.models.library import (
+            LibraryConsumptionState,
+            LibraryEdition,
+            LibraryReadingProgress,
+        )
 
         for state in db.execute(
             select(
@@ -475,15 +520,14 @@ def _management_work_views(
                 LibraryConsumptionState.work_id.in_(work_ids),
             )
         ).all():
-            states_by_work.setdefault(str(state.work_id), {})[
-                str(state.media_kind or "").upper()
-            ] = _reading_status(state.status)
+            states_by_work.setdefault(str(state.work_id), {})[str(state.media_kind or "").upper()] = _reading_status(state.status)
 
     last_read_by_work: dict[str, str | None] = {}
     if _has_table(db, "LibraryReadingProgress") and _has_table(db, "LibraryEdition") and work_ids:
         from sqlalchemy import func, select
-        from app.models.library import LibraryEdition, LibraryReadingProgress
+
         from app.core.authorization import edition_visibility_predicate
+        from app.models.library import LibraryEdition, LibraryReadingProgress
 
         filters = [
             LibraryReadingProgress.user_id == user_id,
@@ -504,25 +548,22 @@ def _management_work_views(
             last_read_by_work[str(progress.work_id)] = _dt(progress.lastReadAt)
 
     labels = _labels()
-    media_kind_order = [
-        key for key in _detail_tab_order(db)
-        if key in {"EBOOK", "COMIC", "AUDIOBOOK"}
-    ]
+    media_kind_order = [key for key in _detail_tab_order(db) if key in {"EBOOK", "COMIC", "AUDIOBOOK"}]
     result = []
     for work in works:
         work_id = str(work["id"])
         editions = editions_by_work.get(work_id, [])
         primary_edition_id = work.get("primaryEditionId")
         display = (
-            next((edition for edition in editions if edition["id"] == primary_edition_id), None)
+            next(
+                (edition for edition in editions if edition["id"] == primary_edition_id),
+                None,
+            )
             or next((edition for edition in editions if bool(edition.get("primary"))), None)
             or (editions[0] if editions else None)
         )
         available_kinds = {_edition_media_kind(edition) for edition in editions}
-        available_media_kinds = [
-            media_kind for media_kind in media_kind_order
-            if media_kind in available_kinds
-        ]
+        available_media_kinds = [media_kind for media_kind in media_kind_order if media_kind in available_kinds]
         states = states_by_work.get(work_id, {})
         if available_kinds and all(states.get(kind) == "FINISHED" for kind in available_kinds):
             status_value = "FINISHED"
@@ -557,25 +598,17 @@ def _work_view(db: Session, work: dict[str, Any], user_id: str | None = None) ->
     if _has_table(db, "LibraryEdition"):
         user = db.get(User, user_id) if user_id else None
         context = authorization_context(db, user) if user is not None else None
-        editions = library_works.list_visible_editions_for_work(
-            db, work_id=str(work["id"]), context=context
-        )
+        editions = library_works.list_visible_editions_for_work(db, work_id=str(work["id"]), context=context)
     edition_ids = [item["id"] for item in editions]
     if edition_ids and _has_table(db, "LibraryFile"):
         for edition in editions:
-            files_by_edition[edition["id"]] = library_projections.list_files_for_edition(
-                db, str(edition["id"])
-            )
+            files_by_edition[edition["id"]] = library_projections.list_files_for_edition(db, str(edition["id"]))
     if edition_ids and _has_table(db, "LibraryVolume"):
         for edition in editions:
-            volumes_by_edition[edition["id"]] = library_projections.list_volumes_for_edition(
-                db, str(edition["id"])
-            )
+            volumes_by_edition[edition["id"]] = library_projections.list_volumes_for_edition(db, str(edition["id"]))
     if edition_ids and _has_table(db, "LibraryMetadata"):
         for edition in editions:
-            conversion_metadata = library_projections.latest_conversion_metadata(
-                db, str(edition["id"])
-            )
+            conversion_metadata = library_projections.latest_conversion_metadata(db, str(edition["id"]))
             raw_conversion = _parse_json((conversion_metadata or {}).get("rawJson"), {})
             if isinstance(raw_conversion, dict) and raw_conversion:
                 conversion_by_edition[edition["id"]] = {
@@ -595,37 +628,53 @@ def _work_view(db: Session, work: dict[str, Any], user_id: str | None = None) ->
             if progresses:
                 progresses_by_edition[edition["id"]] = progresses
 
-    primary = next((item for item in editions if item["id"] == work.get("primaryEditionId")), None) or next((item for item in editions if item.get("primary")), None)
+    primary = next((item for item in editions if item["id"] == work.get("primaryEditionId")), None) or next(
+        (item for item in editions if item.get("primary")), None
+    )
     display = primary or (editions[0] if editions else None)
     progress_by_edition = {
-        edition["id"]: _continue_progress_for_edition(edition, progresses_by_edition.get(edition["id"], []), volumes_by_edition.get(edition["id"], []))
+        edition["id"]: _continue_progress_for_edition(
+            edition,
+            progresses_by_edition.get(edition["id"], []),
+            volumes_by_edition.get(edition["id"], []),
+        )
         for edition in editions
         if progresses_by_edition.get(edition["id"])
     }
     latest_read_progress = _latest_progress([row for rows in progresses_by_edition.values() for row in rows])
-    recent = sorted((item for item in progress_by_edition.values() if item), key=lambda item: _dt(item.get("updatedAt")) or "", reverse=True)
+    recent = sorted(
+        (item for item in progress_by_edition.values() if item),
+        key=lambda item: _dt(item.get("updatedAt")) or "",
+        reverse=True,
+    )
     progress = recent[0] if recent else (progress_by_edition.get(display["id"]) if display else None)
-    progress_edition = next((item for item in editions if progress and item["id"] == progress.get("editionId")), None) or display
+    progress_edition = (
+        next(
+            (item for item in editions if progress and item["id"] == progress.get("editionId")),
+            None,
+        )
+        or display
+    )
     progress_volumes = volumes_by_edition.get(progress_edition["id"], []) if progress_edition else []
     progress_units = (
         library_projections.list_reading_units(
             db,
             edition_id=str(progress_edition["id"]),
-            volume_id=(
-                str(progress.get("volumeId"))
-                if progress and progress.get("volumeId") is not None
-                else None
-            ),
+            volume_id=(str(progress.get("volumeId")) if progress and progress.get("volumeId") is not None else None),
         )
         if progress_edition and _has_table(db, "LibraryReadingUnit")
         else []
     )
     progress_navigation = _progress_navigation(progress, progress_units)
-    percent = _progress_percent_with_navigation(progress, progress_units) if progress_edition and progress_edition.get("format") == "EPUB" else _display_progress_percent(
-        progress_edition,
-        progress,
-        progress_volumes,
-        progresses_by_edition.get(str(progress_edition["id"]), []) if progress_edition else [],
+    percent = (
+        _progress_percent_with_navigation(progress, progress_units)
+        if progress_edition and progress_edition.get("format") == "EPUB"
+        else _display_progress_percent(
+            progress_edition,
+            progress,
+            progress_volumes,
+            progresses_by_edition.get(str(progress_edition["id"]), []) if progress_edition else [],
+        )
     )
     labels = _labels()
     total_size = sum(int(file.get("sizeBytes") or 0) for files in files_by_edition.values() for file in files)
@@ -717,7 +766,18 @@ def _work_view(db: Session, work: dict[str, Any], user_id: str | None = None) ->
                 "coverUrl": _cover_url("editions", edition["id"], edition, size="medium"),
                 "conversion": conversion_by_edition.get(edition["id"]),
                 "readable": edition_format
-                in {"EPUB", "MOBI", "AZW", "AZW3", "PRC", "FB2", "TXT", "PDF", "COMIC", "AUDIO"},
+                in {
+                    "EPUB",
+                    "MOBI",
+                    "AZW",
+                    "AZW3",
+                    "PRC",
+                    "FB2",
+                    "TXT",
+                    "PDF",
+                    "COMIC",
+                    "AUDIO",
+                },
                 "conversionAvailable": f".{edition_format.lower()}" in CONVERTIBLE_TEXT_EXTS,
                 "files": [file_view(file) for file in edition_files],
                 "volumes": edition_volumes,
@@ -741,11 +801,7 @@ def _work_view(db: Session, work: dict[str, Any], user_id: str | None = None) ->
             continue
         group_views = [item for item in edition_views if item.get("mediaKind") == media_kind]
         group_primary = next((item for item in raw_group if bool(item.get("primary"))), None) or raw_group[0]
-        group_progresses = [
-            value
-            for edition in raw_group
-            for value in progresses_by_edition.get(str(edition["id"]), [])
-        ]
+        group_progresses = [value for edition in raw_group for value in progresses_by_edition.get(str(edition["id"]), [])]
         latest_group_progress = _latest_progress(group_progresses)
         state = consumption_by_kind.get(media_kind)
         selected_edition_id = (
@@ -753,7 +809,10 @@ def _work_view(db: Session, work: dict[str, Any], user_id: str | None = None) ->
             if any(item["id"] == (state or {}).get("lastEditionId") for item in raw_group)
             else (latest_group_progress or {}).get("editionId") or group_primary["id"]
         )
-        selected_edition = next((item for item in raw_group if item["id"] == selected_edition_id), group_primary)
+        selected_edition = next(
+            (item for item in raw_group if item["id"] == selected_edition_id),
+            group_primary,
+        )
         selected_progress = _continue_progress_for_edition(
             selected_edition,
             progresses_by_edition.get(str(selected_edition["id"]), []),
@@ -781,27 +840,15 @@ def _work_view(db: Session, work: dict[str, Any], user_id: str | None = None) ->
         }
     tabs = _detail_tabs(db, set(media_groups_by_kind))
     selected_detail_tab = _resolve_detail_tab(db, user_id, str(work["id"]), tabs)
-    media_groups = [
-        media_groups_by_kind[key]
-        for key in _detail_tab_order(db)
-        if key in media_groups_by_kind
-    ]
+    media_groups = [media_groups_by_kind[key] for key in _detail_tab_order(db) if key in media_groups_by_kind]
     available_media_kinds = [str(item["kind"]) for item in media_groups]
 
     first_files = files_by_edition.get(display["id"], []) if display else []
     first_file = first_files[0] if first_files else None
     volumes = [volume for edition in edition_views for volume in edition["volumes"]]
     work_type = (display.get("format") if display else None) or work.get("workType") or "EPUB"
-    lookup = (
-        library_projections.latest_metadata_lookup_for_work(db, str(work["id"]))
-        if _has_table(db, "MetadataLookupTask")
-        else None
-    )
-    reading_status = (
-        _project_work_status_for_user(db, user_id, str(work["id"]))
-        if user_id
-        else _reading_status(work.get("status"))
-    )
+    lookup = library_projections.latest_metadata_lookup_for_work(db, str(work["id"])) if _has_table(db, "MetadataLookupTask") else None
+    reading_status = _project_work_status_for_user(db, user_id, str(work["id"])) if user_id else _reading_status(work.get("status"))
     return {
         "id": work["id"],
         "workId": work["id"],
@@ -849,7 +896,9 @@ def _work_view(db: Session, work: dict[str, Any], user_id: str | None = None) ->
         "gradient": "from-slate-950 via-blue-800 to-cyan-500",
         "coverStatus": work.get("coverStatus") or "PENDING",
         "coverUrl": _cover_url("works", work["id"], work, size="medium"),
-        "totalUnits": (display.get("pageCount") if display and display.get("format") == "COMIC" else display.get("chapterCount")) if display else 0,
+        "totalUnits": (display.get("pageCount") if display and display.get("format") == "COMIC" else display.get("chapterCount"))
+        if display
+        else 0,
         "readingProgress": percent,
         "importStatus": display.get("importStatus") if display else "PENDING",
         "importError": display.get("importError") if display else None,
@@ -891,7 +940,10 @@ def _active_media_view(
             "volumeSections": [],
             "readingUnitsPage": _empty_reading_units_page(min(200, max(1, unit_page_size))),
         }
-    group = next((item for item in book.get("mediaGroups", []) if item.get("kind") == selected_tab), None)
+    group = next(
+        (item for item in book.get("mediaGroups", []) if item.get("kind") == selected_tab),
+        None,
+    )
     if not group:
         return None, {
             "readingUnits": [],
@@ -899,15 +951,19 @@ def _active_media_view(
             "readingUnitsPage": _empty_reading_units_page(min(200, max(1, unit_page_size))),
         }
     editions = list(group.get("editions") or [])
+    selected_edition = next((item for item in editions if item.get("id") == requested_edition_id), None) if requested_edition_id else None
     selected_edition = (
-        next((item for item in editions if item.get("id") == requested_edition_id), None)
-        if requested_edition_id
-        else None
+        selected_edition
+        or next(
+            (item for item in editions if item.get("id") == group.get("recentEditionId")),
+            None,
+        )
+        or next(
+            (item for item in editions if item.get("id") == group.get("primaryEditionId")),
+            None,
+        )
+        or (editions[0] if editions else None)
     )
-    selected_edition = selected_edition or next(
-        (item for item in editions if item.get("id") == group.get("recentEditionId")),
-        None,
-    ) or next((item for item in editions if item.get("id") == group.get("primaryEditionId")), None) or (editions[0] if editions else None)
     if not selected_edition:
         return None, {
             "readingUnits": [],
@@ -937,13 +993,29 @@ def _active_media_view(
     else:
         selected_progress = _latest_progress(selected_progress_rows)
     progress = float(selected_edition.get("progress") or 0)
+    selected_navigation = _progress_navigation(
+        selected_progress,
+        navigation.get("readingUnits", []),
+    )
+    fingerprint_files = library_projections.list_files_for_edition(db, edition_id)
+    scope_volume_id = requested_volume_id or (
+        str(selected_progress.get("volumeId")) if selected_progress and selected_progress.get("volumeId") is not None else None
+    )
+    local_progress_scope = {
+        "userId": user_id,
+        "workId": str(book["id"]),
+        "editionId": edition_id,
+        "volumeId": scope_volume_id,
+        "contentFingerprint": build_content_fingerprint(
+            selected_edition,
+            fingerprint_files,
+            scope_volume_id,
+        ),
+    }
     started = progress > 0
     if selected_tab == "AUDIOBOOK":
         action_label = "继续听" if started else "开始听"
-        action_href = (
-            f"/works/{quote(str(book['id']), safe='')}"
-            f"?detailTab=AUDIOBOOK&editionId={quote(edition_id, safe='')}"
-        )
+        action_href = f"/works/{quote(str(book['id']), safe='')}?detailTab=AUDIOBOOK&editionId={quote(edition_id, safe='')}"
     elif selected_tab == "COMIC":
         action_label = "继续看" if started else "开始看"
         action_href = f"/reader/{quote(edition_id, safe='')}"
@@ -965,46 +1037,82 @@ def _active_media_view(
         "units": navigation.get("readingUnits", []),
         "volumes": selected_edition.get("volumes", []),
         "tracks": selected_edition.get("files", []) if selected_tab == "AUDIOBOOK" else [],
+        "localProgressScope": local_progress_scope,
+        **selected_navigation,
     }, navigation
-
 
 
 def _reading_unit_view(unit: dict[str, Any]) -> dict[str, Any]:
     return {**unit, "metadataJson": _parse_json(unit.get("metadataJson"), {})}
 
 
+def _is_exact_reflowable_unit(unit: dict[str, Any], edition_format: str) -> bool:
+    if edition_format not in {"EPUB", "MOBI", "AZW", "AZW3", "PRC", "FB2", "TXT"}:
+        return True
+    href = unit.get("href")
+    if not isinstance(href, str) or not href or href.startswith(
+        ("mobi-section:", "txt-chapter:", "fb2-section:")
+    ):
+        return False
+    if edition_format == "EPUB":
+        return True
+    metadata = _parse_json(unit.get("metadataJson"), {})
+    return (
+        isinstance(metadata, dict)
+        and metadata.get("exactNavigation") is True
+        and isinstance(metadata.get("navigationKey"), str)
+        and bool(metadata.get("navigationKey"))
+    )
+
+
 def _empty_reading_units_page(page_size: int) -> dict[str, int]:
     return {"page": 1, "pageSize": page_size, "total": 0, "totalPages": 1}
 
 
-def _reading_units_page(db: Session, edition_id: str, page: int, page_size: int, volume_id: str | None = None) -> tuple[list[dict[str, Any]], dict[str, int]]:
+def _reading_units_page(
+    db: Session,
+    edition_id: str,
+    page: int,
+    page_size: int,
+    volume_id: str | None = None,
+    edition_format: str = "EPUB",
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
     resolved_page_size = min(200, max(1, int(page_size or 120)))
     requested_page = max(1, int(page or 1))
     if not _has_table(db, "LibraryReadingUnit"):
         return [], _empty_reading_units_page(resolved_page_size)
-    _initial_rows, total = library_projections.reading_units_page(
+    all_units = library_projections.list_reading_units(
         db,
         edition_id=edition_id,
         volume_id=volume_id,
-        limit=1,
-        offset=0,
     )
+    exact_units = [
+        _normalize_row(dict(unit))
+        for unit in all_units
+        if _is_exact_reflowable_unit(dict(unit), edition_format)
+    ]
+    total = len(exact_units)
     total_pages = max(1, (total + resolved_page_size - 1) // resolved_page_size)
     resolved_page = min(requested_page, total_pages)
     units: list[dict[str, Any]] = []
     if total > 0:
-        rows, _total = library_projections.reading_units_page(
-            db,
-            edition_id=edition_id,
-            volume_id=volume_id,
-            limit=resolved_page_size,
-            offset=(resolved_page - 1) * resolved_page_size,
-        )
-        units = [_normalize_row(dict(row)) for row in rows]
-    return units, {"page": resolved_page, "pageSize": resolved_page_size, "total": total, "totalPages": total_pages}
+        offset = (resolved_page - 1) * resolved_page_size
+        units = exact_units[offset : offset + resolved_page_size]
+    return units, {
+        "page": resolved_page,
+        "pageSize": resolved_page_size,
+        "total": total,
+        "totalPages": total_pages,
+    }
 
 
-def _volume_section_view(volume: dict[str, Any], fmt: str, count_override: int | None = None, progress: dict[str, Any] | None = None, units: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def _volume_section_view(
+    volume: dict[str, Any],
+    fmt: str,
+    count_override: int | None = None,
+    progress: dict[str, Any] | None = None,
+    units: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     count_key = "pageCount" if fmt in {"COMIC", "PDF"} else "chapterCount"
     return {
         "id": volume["id"],
@@ -1022,13 +1130,28 @@ def _volume_section_view(volume: dict[str, Any], fmt: str, count_override: int |
     }
 
 
-def _work_detail_navigation(db: Session, edition_id: str | None, user_id: str | None = None, requested_volume_id: str | None = None, chapter_page: int = 1, chapter_page_size: int = 120) -> dict[str, Any]:
+def _work_detail_navigation(
+    db: Session,
+    edition_id: str | None,
+    user_id: str | None = None,
+    requested_volume_id: str | None = None,
+    chapter_page: int = 1,
+    chapter_page_size: int = 120,
+) -> dict[str, Any]:
     resolved_page_size = min(200, max(1, int(chapter_page_size or 120)))
     if not edition_id or not _has_table(db, "LibraryEdition"):
-        return {"readingUnits": [], "volumeSections": [], "readingUnitsPage": _empty_reading_units_page(resolved_page_size)}
+        return {
+            "readingUnits": [],
+            "volumeSections": [],
+            "readingUnitsPage": _empty_reading_units_page(resolved_page_size),
+        }
     edition = library_projections.get_edition(db, edition_id)
     if not edition:
-        return {"readingUnits": [], "volumeSections": [], "readingUnitsPage": _empty_reading_units_page(resolved_page_size)}
+        return {
+            "readingUnits": [],
+            "volumeSections": [],
+            "readingUnitsPage": _empty_reading_units_page(resolved_page_size),
+        }
     progresses = (
         library_projections.list_progress_for_edition(
             db,
@@ -1042,28 +1165,55 @@ def _work_detail_navigation(db: Session, edition_id: str | None, user_id: str | 
         volumes = library_projections.list_volumes_for_edition(db, edition_id) if _has_table(db, "LibraryVolume") else []
         return {
             "readingUnits": [],
-            "volumeSections": [_volume_section_view(volume, "COMIC", progress=_progress_for_volume(progresses, volume["id"])) for volume in volumes],
+            "volumeSections": [
+                _volume_section_view(
+                    volume,
+                    "COMIC",
+                    progress=_progress_for_volume(progresses, volume["id"]),
+                )
+                for volume in volumes
+            ],
             "readingUnitsPage": _empty_reading_units_page(resolved_page_size),
         }
     if edition.get("format") == "PDF":
         volumes = library_projections.list_volumes_for_edition(db, edition_id) if _has_table(db, "LibraryVolume") else []
         return {
             "readingUnits": [],
-            "volumeSections": [_volume_section_view(volume, "PDF", progress=_progress_for_volume(progresses, volume["id"])) for volume in volumes],
+            "volumeSections": [
+                _volume_section_view(
+                    volume,
+                    "PDF",
+                    progress=_progress_for_volume(progresses, volume["id"]),
+                )
+                for volume in volumes
+            ],
             "readingUnitsPage": _empty_reading_units_page(resolved_page_size),
         }
     volumes = library_projections.list_volumes_for_edition(db, edition_id) if _has_table(db, "LibraryVolume") else []
     if len(volumes) > 1:
         selected_volume = next((item for item in volumes if item["id"] == requested_volume_id), None) if requested_volume_id else None
         selected_volume = selected_volume or _choose_continue_volume(volumes, progresses) or volumes[0]
-        units, units_page = _reading_units_page(db, edition_id, chapter_page, resolved_page_size, selected_volume["id"])
+        units, units_page = _reading_units_page(
+            db,
+            edition_id,
+            chapter_page,
+            resolved_page_size,
+            selected_volume["id"],
+            str(edition.get("format") or ""),
+        )
         units_by_volume = (
             {
-                volume["id"]: library_projections.list_reading_units(
-                    db,
-                    edition_id=edition_id,
-                    volume_id=str(volume["id"]),
-                )
+                volume["id"]: [
+                    unit
+                    for unit in library_projections.list_reading_units(
+                        db,
+                        edition_id=edition_id,
+                        volume_id=str(volume["id"]),
+                    )
+                    if _is_exact_reflowable_unit(
+                        dict(unit), str(edition.get("format") or "")
+                    )
+                ]
                 for volume in volumes
             }
             if _has_table(db, "LibraryReadingUnit")
@@ -1071,11 +1221,29 @@ def _work_detail_navigation(db: Session, edition_id: str | None, user_id: str | 
         )
         return {
             "readingUnits": [_reading_unit_view(unit) for unit in units],
-            "volumeSections": [_volume_section_view(volume, "EPUB", progress=_progress_for_volume(progresses, volume["id"]), units=units_by_volume.get(volume["id"], [])) for volume in volumes],
+            "volumeSections": [
+                _volume_section_view(
+                    volume,
+                    "EPUB",
+                    progress=_progress_for_volume(progresses, volume["id"]),
+                    units=units_by_volume.get(volume["id"], []),
+                )
+                for volume in volumes
+            ],
             "readingUnitsPage": units_page,
         }
-    units, units_page = _reading_units_page(db, edition_id, chapter_page, resolved_page_size)
-    return {"readingUnits": [_reading_unit_view(unit) for unit in units], "volumeSections": [], "readingUnitsPage": units_page}
+    units, units_page = _reading_units_page(
+        db,
+        edition_id,
+        chapter_page,
+        resolved_page_size,
+        edition_format=str(edition.get("format") or ""),
+    )
+    return {
+        "readingUnits": [_reading_unit_view(unit) for unit in units],
+        "volumeSections": [],
+        "readingUnitsPage": units_page,
+    }
 
 
 def _preferred_work_cover_path(db: Session, work_id: str) -> str | None:
@@ -1135,7 +1303,14 @@ def _finish_metadata_organize_work(db: Session, work_id: str) -> list[str]:
 def _apply_remote_cover(work_id: str, cover_url: str, settings: Settings) -> dict[str, Any]:
     if not cover_url.startswith(("http://", "https://")):
         return {}
-    request = UrlRequest(cover_url, headers={"Accept": "image/*,*/*", "User-Agent": "Shuku Starship Python", "Referer": "https://book.douban.com/"})
+    request = UrlRequest(
+        cover_url,
+        headers={
+            "Accept": "image/*,*/*",
+            "User-Agent": "Shuku Starship Python",
+            "Referer": "https://book.douban.com/",
+        },
+    )
     with urlopen(request, timeout=30) as response:
         content_type = response.headers.get("content-type") or ""
         data = response.read(8 * 1024 * 1024)
@@ -1150,5 +1325,8 @@ def _apply_remote_cover(work_id: str, cover_url: str, settings: Settings) -> dic
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / f"{work_id}{suffix}"
     target.write_bytes(data)
-    return {"coverPath": str(target.relative_to(settings.resolved_storage_root)), "coverStatus": "READY", "updatedAt": _now()}
-
+    return {
+        "coverPath": str(target.relative_to(settings.resolved_storage_root)),
+        "coverStatus": "READY",
+        "updatedAt": _now(),
+    }

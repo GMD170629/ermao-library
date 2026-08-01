@@ -36,3 +36,52 @@ test('marks every chapter including the final current chapter read when the book
     ['read', 'read', 'read']
   );
 });
+
+test('does not estimate chapters from percent when progress has no exact navigation', () => {
+  const mobiChapters = Array.from({ length: 10 }, (_, index) => ({
+    href: `mobi-section:${index}`,
+    sortOrder: index
+  }));
+  assert.deepEqual(
+    resolveChapterReadingStates(mobiChapters, null, null, 11, { total: 10, page: 1, pageSize: 10 }),
+    ['unread', 'unread', 'unread', 'unread', 'unread', 'unread', 'unread', 'unread', 'unread', 'unread']
+  );
+});
+
+test('does not derive paginated chapter state from overall percent', () => {
+  const pageTwo = [
+    { href: 'mobi-section:5', sortOrder: 5 },
+    { href: 'mobi-section:6', sortOrder: 6 }
+  ];
+  assert.deepEqual(
+    resolveChapterReadingStates(pageTwo, null, null, 45, { total: 10, page: 2, pageSize: 5 }),
+    ['unread', 'unread']
+  );
+  assert.deepEqual(
+    resolveChapterReadingStates(pageTwo, null, null, 55, { total: 10, page: 2, pageSize: 5 }),
+    ['unread', 'unread']
+  );
+});
+
+test('uses an exact foliate TOC index across paginated chapter rows', () => {
+  const pageTwo = [
+    { href: 'chapter-6.xhtml', sortOrder: 6 },
+    { href: 'chapter-7.xhtml', sortOrder: 7 }
+  ];
+  assert.deepEqual(
+    resolveChapterReadingStates(pageTwo, null, null, 55, {
+      total: 10,
+      page: 2,
+      pageSize: 5,
+      currentIndex: 5
+    }),
+    ['current', 'unread']
+  );
+});
+
+test('does not use percent fallback when an unresolved href was provided', () => {
+  assert.deepEqual(
+    resolveChapterReadingStates(anchoredChapters, 'Text/all.xhtml', null, 50),
+    ['unread', 'unread', 'unread']
+  );
+});

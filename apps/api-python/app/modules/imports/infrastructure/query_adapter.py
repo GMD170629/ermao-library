@@ -137,6 +137,9 @@ class SqlAlchemyImportLibraryQueries:
         self.list_library_files_by_paths = partial(
             library_queries.list_library_files_by_paths, db
         )
+        self.list_reflowable_chapters_for_edition = partial(
+            library_queries.list_reflowable_chapters_for_edition, db
+        )
         self.list_reading_progress_for_edition = partial(
             library_queries.list_reading_progress_for_edition, db
         )

@@ -86,22 +86,27 @@ def reader_unit_index(current_href: Any, units: list[dict[str, Any]]) -> int | N
     full_href = normalize_reader_href(current_href)
     if not full_href:
         return None
-    exact_matches = [
-        index
-        for index, unit in enumerate(units)
-        if normalize_reader_href(unit.get("href")) == full_href
-    ]
+    exact_matches = [index for index, unit in enumerate(units) if normalize_reader_href(unit.get("href")) == full_href]
     if len(exact_matches) == 1:
         return exact_matches[0]
     if "#" in full_href:
         return None
     resource_href = normalize_reader_href(current_href, include_fragment=False)
     resource_matches = [
-        index
-        for index, unit in enumerate(units)
-        if normalize_reader_href(unit.get("href"), include_fragment=False) == resource_href
+        index for index, unit in enumerate(units) if normalize_reader_href(unit.get("href"), include_fragment=False) == resource_href
     ]
     return resource_matches[0] if len(resource_matches) == 1 else None
+
+
+def _unit_navigation_key(unit: dict[str, Any]) -> str | None:
+    direct = unit.get("navigationKey")
+    if isinstance(direct, str) and direct:
+        return direct
+    metadata = _parse_json(unit.get("metadataJson"), {})
+    if not isinstance(metadata, dict) or metadata.get("exactNavigation") is not True:
+        return None
+    candidate = metadata.get("navigationKey")
+    return candidate if isinstance(candidate, str) and candidate else None
 
 
 def progress_extra(progress: dict[str, Any] | None) -> dict[str, Any]:
@@ -114,9 +119,18 @@ def progress_extra(progress: dict[str, Any] | None) -> dict[str, Any]:
 def progress_navigation(
     progress: dict[str, Any] | None,
     units: list[dict[str, Any]],
+    *,
+    navigation_fingerprint: str | None = None,
 ) -> dict[str, Any]:
     extra = progress_extra(progress)
     current_href = extra.get("chapterHref") or extra.get("currentHref")
+    navigation_key = extra.get("navigationKey")
+    stored_navigation_fingerprint = extra.get("navigationFingerprint")
+    fingerprint_mismatch = bool(
+        navigation_fingerprint
+        and isinstance(stored_navigation_fingerprint, str)
+        and stored_navigation_fingerprint != navigation_fingerprint
+    )
     section_index = number_or_none(
         extra.get("chapterSectionIndex")
         if extra.get("chapterSectionIndex") is not None
@@ -124,25 +138,29 @@ def progress_navigation(
         if extra.get("sectionIndex") is not None
         else extra.get("chapterIndex")
     )
-    sort_order = number_or_none(extra.get("chapterSortOrder"))
     unit = None
-    unit_index = reader_unit_index(current_href, units)
-    if unit_index is not None:
-        unit = units[unit_index]
-    if unit is None and sort_order is not None:
+    if not fingerprint_mismatch and isinstance(navigation_key, str) and navigation_key:
         unit = next(
-            (item for item in units if number_or_none(item.get("sortOrder")) == sort_order),
+            (item for item in units if _unit_navigation_key(item) == navigation_key),
             None,
         )
-    if unit is None and not current_href and section_index is not None and 0 <= section_index < len(units):
-        unit = units[section_index]
+    if unit is None and not fingerprint_mismatch:
+        unit_index = reader_unit_index(current_href, units)
+        if unit_index is not None:
+            unit = units[unit_index]
+    resolved_href = (
+        unit.get("href")
+        if unit and isinstance(unit.get("href"), str) and unit.get("href")
+        else current_href if isinstance(current_href, str) else None
+    )
     return {
         "progressExtra": extra,
-        "currentHref": unit.get("href") if unit else (current_href if isinstance(current_href, str) else None),
+        "currentHref": resolved_href,
         "currentSectionIndex": section_index,
         "currentChapterTitle": (unit.get("title") if unit else None)
-        or (extra.get("chapterTitle") if isinstance(extra.get("chapterTitle"), str) else None),
-        "currentChapterSortOrder": number_or_none(unit.get("sortOrder")) if unit else sort_order,
+        or None,
+        "currentChapterSortOrder": number_or_none(unit.get("sortOrder")) if unit else None,
+        "progressEstimated": False,
     }
 
 
@@ -150,41 +168,7 @@ def progress_percent_with_navigation(
     progress: dict[str, Any] | None,
     units: list[dict[str, Any]],
 ) -> int:
-    raw_percent = raw_progress_percent(progress)
-    if raw_percent > 0 or not progress or not units:
-        return raw_percent
-    extra = progress_extra(progress)
-    current_href = extra.get("chapterHref") or extra.get("currentHref")
-    sort_order = number_or_none(extra.get("chapterSortOrder"))
-    section_index = number_or_none(
-        extra.get("chapterSectionIndex")
-        if extra.get("chapterSectionIndex") is not None
-        else extra.get("sectionIndex")
-        if extra.get("sectionIndex") is not None
-        else extra.get("chapterIndex")
-    )
-    unit_index = reader_unit_index(current_href, units)
-    if unit_index is None and sort_order is not None:
-        unit_index = next(
-            (
-                index
-                for index, unit in enumerate(units)
-                if number_or_none(unit.get("sortOrder")) == sort_order
-            ),
-            None,
-        )
-    if unit_index is None and not current_href and section_index is not None and 0 <= section_index < len(units):
-        unit_index = section_index
-    if unit_index is None:
-        return raw_percent
-    section_page = number_or_none(extra.get("sectionPage"))
-    section_total = number_or_none(extra.get("sectionTotalPages"))
-    section_offset = (
-        (max(0, min(section_total - 1, section_page - 1)) / section_total)
-        if section_page and section_total and section_total > 1
-        else 0
-    )
-    return max(0, min(100, round(((unit_index + section_offset) / len(units)) * 100)))
+    return raw_progress_percent(progress)
 
 
 def _progress_updated_at_ms(progress: dict[str, Any]) -> int:
@@ -204,30 +188,19 @@ def choose_continue_volume(
 ) -> dict[str, Any] | None:
     if not volumes:
         return None
-    progress_by_volume = {
-        volume["id"]: raw_progress_percent(progress_for_volume(progresses, volume["id"]))
-        for volume in volumes
-    }
+    progress_by_volume = {volume["id"]: raw_progress_percent(progress_for_volume(progresses, volume["id"])) for volume in volumes}
     for volume in volumes:
         percent = progress_by_volume.get(volume["id"], 0)
         if 0 < percent < 100:
             return volume
     if not any(percent > 0 for percent in progress_by_volume.values()):
         latest_volume_progress = next(
-            (
-                item
-                for item in sorted(progresses, key=_progress_updated_at_ms, reverse=True)
-                if item.get("volumeId")
-            ),
+            (item for item in sorted(progresses, key=_progress_updated_at_ms, reverse=True) if item.get("volumeId")),
             None,
         )
         if latest_volume_progress:
             latest_volume = next(
-                (
-                    volume
-                    for volume in volumes
-                    if volume.get("id") == latest_volume_progress.get("volumeId")
-                ),
+                (volume for volume in volumes if volume.get("id") == latest_volume_progress.get("volumeId")),
                 None,
             )
             if latest_volume:
@@ -277,11 +250,7 @@ def progress_chapter_label(
         return "未开始"
     navigation = progress_navigation(progress, units or [])
     volume_id = progress.get("volumeId")
-    volume = (
-        next((item for item in volumes if item.get("id") == volume_id), None)
-        if volume_id
-        else None
-    )
+    volume = next((item for item in volumes if item.get("id") == volume_id), None) if volume_id else None
     prefix = f"{volume.get('title') or '未命名卷'} · " if volume and len(volumes) > 1 else ""
     if navigation.get("currentChapterTitle"):
         return f"{prefix}{navigation['currentChapterTitle']} · 第 {progress.get('page')} 页"

@@ -1,4 +1,4 @@
-import { normalizeReaderPreferences, type ReaderLocation, type ReaderSource } from '@shuku/reader-core';
+import { normalizeReaderPreferences, type ReaderLocation, type ReaderNavigationEntry, type ReaderSource } from '@shuku/reader-core';
 import type {
   ComicLocation,
   EpubLocation,
@@ -39,6 +39,53 @@ function isVisualReaderType(value: ReaderBootstrapData['readerType'] | ReaderEdi
   return value === 'reflowable' || value === 'comic' || value === 'pdf';
 }
 
+function wireFoliateToDomain(value: ReflowableLocation['foliate']) {
+  if (!value) return undefined;
+  return {
+    toc: value.toc ? {
+      index: value.toc.index,
+      title: value.toc.title,
+      href: value.toc.href ?? undefined,
+      navigationKey: value.toc.navigationKey ?? undefined
+    } : undefined,
+    navigationFingerprint: value.navigationFingerprint ?? undefined,
+    section: value.section ? { current: value.section.current, total: value.section.total } : undefined,
+    location: value.location ? {
+      current: value.location.current,
+      next: value.location.next,
+      total: value.location.total
+    } : undefined,
+    remainingSeconds: value.remainingSeconds ? {
+      section: value.remainingSeconds.section,
+      total: value.remainingSeconds.total
+    } : undefined
+  };
+}
+
+function serverNavigation(units: ReaderBootstrapData['units']): ReaderNavigationEntry[] {
+  const roots: ReaderNavigationEntry[] = [];
+  const parents: ReaderNavigationEntry[] = [];
+  for (const unit of units) {
+    if (!unit.href || !unit.navigationKey) continue;
+    const level = Math.max(0, unit.level ?? 0);
+    const entry: ReaderNavigationEntry = {
+      id: unit.navigationKey,
+      navigationKey: unit.navigationKey,
+      label: unit.title,
+      href: unit.href,
+      index: unit.index,
+      level
+    };
+    while (parents.length > level) parents.pop();
+    const parent = level > 0 ? parents[level - 1] : undefined;
+    if (parent) (parent.children ??= []).push(entry);
+    else roots.push(entry);
+    parents[level] = entry;
+    parents.length = level + 1;
+  }
+  return roots;
+}
+
 export function wireLocationToDomain(location: ReaderWireLocation | null | undefined): ReaderLocation | null {
   if (!location) return null;
   if (location.type === 'epub') {
@@ -51,12 +98,14 @@ export function wireLocationToDomain(location: ReaderWireLocation | null | undef
     };
   }
   if (location.type === 'reflowable') {
+    const foliate = wireFoliateToDomain(location.foliate);
     return {
       kind: 'reflowable',
       format: location.format,
       cfi: location.cfi ?? undefined,
       href: location.href ?? undefined,
-      progression: location.progression ?? undefined
+      progression: location.progression ?? undefined,
+      ...(foliate ? { foliate } : {})
     };
   }
   if (location.type === 'comic') return { kind: 'comic', volumeId: location.volumeId, pageIndex: location.pageIndex };
@@ -101,6 +150,8 @@ export async function fetchReaderBootstrap(
       sourceFormat,
       contentUrl: withBasePath(data.fileUrl),
       contentFingerprint: data.contentFingerprint,
+      navigation: serverNavigation(data.units),
+      navigationFingerprint: data.navigationFingerprint ?? undefined,
       volumeId: selectedVolumeId,
       totalPages: data.totalPages ?? data.edition.pageCount ?? null
     };

@@ -23,6 +23,7 @@ from app.modules.imports.application.dto import (
 from app.modules.imports.application.query_ports import (
     ImportLibraryQueries as ImportLibraryQueries,
 )
+from app.modules.imports.application.reflowable_types import ReflowableBookMetadata
 
 
 class ImportUnitOfWork(Protocol):
@@ -242,6 +243,18 @@ class ImportOrchestrationServices(Protocol):
         metadata_items: tuple[AudioFileMetadata, ...],
         *,
         bundle_root: Path | None = None,
+    ) -> str | None: ...
+
+    def inspect_reflowable_book(
+        self, path: Path, source_format: str
+    ) -> ReflowableBookMetadata: ...
+
+    def publish_reflowable_cover(
+        self,
+        storage_root: Path,
+        work_id: str,
+        edition_id: str,
+        metadata: ReflowableBookMetadata,
     ) -> str | None: ...
 
 

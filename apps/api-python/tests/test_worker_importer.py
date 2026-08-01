@@ -15,7 +15,14 @@ from app.bootstrap.imports import (
     process_import_task,
 )
 from app.db.base import Base
-from app.models.library import LibraryEdition, LibraryFile, LibraryMetadata
+from app.models.library import (
+    LibraryEdition,
+    LibraryFile,
+    LibraryMetadata,
+    LibraryReadingUnit,
+    LibraryVolume,
+    LibraryWork,
+)
 from app.models.settings import SystemEvent
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
@@ -2076,7 +2083,7 @@ def test_text_file_imports_raw_and_can_convert_later(
     )
     assert raw_edition["format"] == "TXT"
     assert not raw_edition["hidden"]
-    assert raw_edition["chapterCount"] == 0
+    assert raw_edition["chapterCount"] == 2
     assert Path(raw_file["path"]) == source.resolve()
     assert raw_file["kind"] == "TXT"
 
@@ -2172,6 +2179,89 @@ def test_native_reflowable_sources_do_not_require_automatic_conversion(
     assert json.loads(metadata.raw_json)["readable"] is True
 
 
+def test_reimport_backfills_legacy_reflowable_metadata_without_creating_epub(
+    db_session, test_settings, tmp_path
+) -> None:
+    create_worker_tables(db_session)
+    source = tmp_path / "legacy.fb2"
+    source.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0">
+  <description><title-info><author><first-name>测试</first-name><last-name>作者</last-name></author>
+  <book-title>真实标题</book-title><lang>zh-CN</lang></title-info></description>
+  <body><section><title><p>第一章</p></title><p>正文</p></section>
+  <section><title><p>第二章</p></title><p>正文</p></section></body>
+</FictionBook>""",
+        encoding="utf-8",
+    )
+    imported = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=source, origin="MANUAL", original_name=source.name
+        ),
+    )
+    edition = db_session.get(LibraryEdition, imported.edition_id)
+    work = db_session.get(LibraryWork, imported.work_id)
+    book_file = db_session.scalars(
+        select(LibraryFile).where(LibraryFile.edition_id == imported.edition_id)
+    ).one()
+    volumes = db_session.scalars(
+        select(LibraryVolume).where(LibraryVolume.edition_id == imported.edition_id)
+    ).all()
+    for unit in db_session.scalars(
+        select(LibraryReadingUnit).where(
+            LibraryReadingUnit.edition_id == imported.edition_id
+        )
+    ).all():
+        db_session.delete(unit)
+    book_file.volume_id = None
+    for volume in volumes:
+        db_session.delete(volume)
+    assert edition is not None
+    assert work is not None
+    edition.chapter_count = 0
+    work.title = source.stem
+    work.author = "未知作者"
+    db_session.commit()
+
+    refreshed = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=source, origin="MANUAL", original_name=source.name
+        ),
+    )
+
+    db_session.refresh(edition)
+    db_session.refresh(work)
+    assert refreshed.duplicate is True
+    assert refreshed.merge_reason == "refreshed-native-metadata"
+    assert edition.format == "FB2"
+    assert edition.chapter_count == 2
+    assert work.title == "真实标题"
+    assert work.author == "测试作者"
+    assert (
+        db_session.scalar(
+            select(LibraryEdition).where(
+                LibraryEdition.work_id == imported.work_id,
+                LibraryEdition.format == "EPUB",
+            )
+        )
+        is None
+    )
+    assert (
+        len(
+            db_session.scalars(
+                select(LibraryReadingUnit).where(
+                    LibraryReadingUnit.edition_id == imported.edition_id
+                )
+            ).all()
+        )
+        == 2
+    )
+
+
 def test_directory_scan_records_candidates_and_summary_in_system_log(
     db_session, tmp_path
 ):
@@ -2234,9 +2324,7 @@ def test_directory_scan_records_candidates_and_summary_in_system_log(
     assert completed["requestedAt"] == "2026-07-17T10:00:00Z"
 
 
-def test_directory_scan_filters_minimum_file_size_before_queue(
-    db_session, tmp_path
-):
+def test_directory_scan_filters_minimum_file_size_before_queue(db_session, tmp_path):
     create_worker_tables(db_session)
     root = tmp_path / "scan-size-filter"
     root.mkdir()

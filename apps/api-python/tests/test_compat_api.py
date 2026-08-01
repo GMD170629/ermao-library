@@ -4410,9 +4410,7 @@ def test_scan_selected_directory_reuses_monitor_rules_and_known_import_paths(
     assert rejected.status_code == 400
 
 
-def test_scan_job_list_cancel_and_resubmit_contract(
-    client, db_session, test_settings
-):
+def test_scan_job_list_cancel_and_resubmit_contract(client, db_session, test_settings):
     create_worker_tables(db_session)
     _login(client, db_session)
     scan_root = test_settings.resolved_monitor_root / "scan-cancel"
@@ -4514,9 +4512,7 @@ def test_scan_selected_audiobook_directory_queues_one_directory_bundle(
     work_item = runtime.claim_work("audio-scan-test", 900)
     assert work_item is not None and work_item.kind == "SCAN_DIRECTORY"
     assert runtime.process_scan(work_item) is True
-    job = client.get(f"/api/import-scan-jobs/{data['job']['id']}").json()["data"][
-        "job"
-    ]
+    job = client.get(f"/api/import-scan-jobs/{data['job']['id']}").json()["data"]["job"]
     assert job["filesScanned"] == len(tracks)
     assert job["candidatesFound"] == 1
     assert job["queuedCount"] == 1
@@ -4663,7 +4659,7 @@ def test_monitor_folder_create_ignores_retired_import_mode(
     monkeypatch.setattr(
         monitor_paths.os,
         "access",
-        lambda _path, mode: False if mode == monitor_paths.os.W_OK else True,
+        lambda _path, mode: mode != monitor_paths.os.W_OK,
     )
 
     created = client.post(
@@ -6357,7 +6353,7 @@ def test_backup_create_download_and_restore_database_export(
     backup_path = test_settings.resolved_storage_root / "backups" / backup["filename"]
     with zipfile.ZipFile(backup_path) as archive:
         names = set(archive.namelist())
-        assert set(["metadata.json", "database-export.json", "settings.json"]).issubset(
+        assert {"metadata.json", "database-export.json", "settings.json"}.issubset(
             names
         )
         assert "library-files.json" not in names

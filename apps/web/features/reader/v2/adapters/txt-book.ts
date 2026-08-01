@@ -34,7 +34,7 @@ export class TxtEncodingError extends Error {
 const utf8Bom = new Uint8Array([0xef, 0xbb, 0xbf]);
 const utf16LeBom = new Uint8Array([0xff, 0xfe]);
 const utf16BeBom = new Uint8Array([0xfe, 0xff]);
-const chapterHeading = /^\s*(?:第[0-9０-９一二三四五六七八九十百千万零〇两]+[章节卷部篇回]|(?:chapter|part|volume)\s+[0-9ivxlcdm]+\b).{0,80}$/iu;
+const chapterHeading = /^\s*(?:(?:第[零〇一二三四五六七八九十百千万两\d]{1,12}[章节卷回部篇集])|(?:序章|序言|楔子|引子|前言|后记|尾声|番外(?:\s*[零〇一二三四五六七八九十百千万两\d]+)?)|(?:(?:chapter|book|part|volume)\s+(?:\d+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten)))(?:[\s:：、.．-]+.{0,80})?\s*$/iu;
 const targetSectionCharacters = 128 * 1024;
 
 function startsWith(bytes: Uint8Array, prefix: Uint8Array) {

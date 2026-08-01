@@ -18,6 +18,7 @@ import { fetchReaderBootstrap, type ReaderBootstrap } from './api';
 import { resolveRequestedEpubHref } from './epub-direct-target';
 import { resolveStartupResume } from './local-resume';
 import { ReaderEngineRuntime } from './reader-engine-runtime';
+import { isEngineResolvableReflowableHref } from './reflowable-navigation-href';
 import { useReaderPwaSurface } from './use-reader-pwa-surface';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
@@ -211,11 +212,12 @@ export function ReaderV2Page({ editionId }: { editionId: string }) {
       if (controller.signal.aborted) return;
       let hasDirectTarget = false;
       if (bootstrap.readerType === 'reflowable' && requestedHref) {
+        const sourceFormat = requireReflowableSourceFormat(bootstrap);
         const targetHref = resolveRequestedEpubHref(bootstrap.units, requestedHref);
-        if (targetHref) {
+        if (targetHref && isEngineResolvableReflowableHref(sourceFormat, targetHref)) {
           bootstrap = {
             ...bootstrap,
-            initialLocation: { kind: 'reflowable', format: requireReflowableSourceFormat(bootstrap), href: targetHref }
+            initialLocation: { kind: 'reflowable', format: sourceFormat, href: targetHref }
           };
           hasDirectTarget = true;
         } else {

@@ -18,13 +18,7 @@ ScalarFilterValue = str | int | float | bool | None
 FilterValue = ScalarFilterValue | list[str] | list[float]
 MetadataCandidateRawValue = TypeAliasType(
     "MetadataCandidateRawValue",
-    str
-    | int
-    | float
-    | bool
-    | None
-    | list["MetadataCandidateRawValue"]
-    | dict[str, "MetadataCandidateRawValue"],
+    str | int | float | bool | None | list["MetadataCandidateRawValue"] | dict[str, "MetadataCandidateRawValue"],
 )
 
 
@@ -43,14 +37,18 @@ class ProgressNavigation(HttpContractModel):
     chapter_id: str | None = Field(default=None, alias="chapterId")
     position_ms: int | None = Field(default=None, alias="positionMs")
     volume_id: str | None = Field(default=None, alias="volumeId")
+    progress_estimated: bool = Field(default=False, alias="progressEstimated")
 
 
 class ProgressExtra(HttpContractModel):
     cfi: str | None = None
     progression: float | None = None
-    source_format: (
-        Literal["epub", "mobi", "azw", "azw3", "prc", "fb2", "txt"] | None
-    ) = Field(
+    navigation_key: str | None = Field(default=None, alias="navigationKey")
+    navigation_fingerprint: str | None = Field(
+        default=None,
+        alias="navigationFingerprint",
+    )
+    source_format: Literal["epub", "mobi", "azw", "azw3", "prc", "fb2", "txt"] | None = Field(
         default=None,
         alias="sourceFormat",
     )
@@ -77,6 +75,19 @@ class ProgressExtra(HttpContractModel):
         default=None,
         alias="sectionTotalPages",
     )
+    section_total: int | float | None = Field(default=None, alias="sectionTotal")
+    location_current: int | float | None = Field(default=None, alias="locationCurrent")
+    location_next: int | float | None = Field(default=None, alias="locationNext")
+    location_total: int | float | None = Field(default=None, alias="locationTotal")
+    remaining_section_seconds: int | float | None = Field(
+        default=None,
+        alias="remainingSectionSeconds",
+    )
+    remaining_total_seconds: int | float | None = Field(
+        default=None,
+        alias="remainingTotalSeconds",
+    )
+    progress_estimated: bool | None = Field(default=None, alias="progressEstimated")
 
 
 class LibraryFile(HttpContractModel):
@@ -119,9 +130,8 @@ class LibraryVolume(HttpContractModel):
         default=None,
         alias="currentChapterSortOrder",
     )
-    progress_extra: ProgressExtra = Field(
-        default_factory=ProgressExtra, alias="progressExtra"
-    )
+    progress_extra: ProgressExtra = Field(default_factory=ProgressExtra, alias="progressExtra")
+    progress_estimated: bool = Field(default=False, alias="progressEstimated")
     duration_ms: int | None = Field(default=None, alias="durationMs")
 
 
@@ -209,6 +219,7 @@ class WorkView(HttpContractModel):
         default=None,
         alias="currentChapterSortOrder",
     )
+    progress_estimated: bool = Field(default=False, alias="progressEstimated")
     status_value: ReadingStatus = Field(alias="statusValue")
     status: str
     publication_status_value: str = Field(alias="publicationStatusValue")
@@ -471,6 +482,9 @@ class WorksPayload(HttpContractModel):
 
 
 class ReadingUnitMetadata(HttpContractModel):
+    exact_navigation: bool | None = Field(default=None, alias="exactNavigation")
+    level: int | None = Field(default=None, ge=0)
+    navigation_key: str | None = Field(default=None, alias="navigationKey")
     zip_entry_name: str | None = Field(default=None, alias="zipEntryName")
     idref: str | None = None
     linear: bool | None = None
@@ -529,11 +543,20 @@ class VolumeSection(HttpContractModel):
         alias="currentChapterSortOrder",
     )
     progress_extra: ProgressExtra = Field(alias="progressExtra")
+    progress_estimated: bool = Field(default=False, alias="progressEstimated")
 
 
 class PrimaryAction(HttpContractModel):
     label: str
     href: str
+
+
+class LocalProgressScope(HttpContractModel):
+    user_id: str = Field(alias="userId")
+    work_id: str = Field(alias="workId")
+    edition_id: str = Field(alias="editionId")
+    volume_id: str | None = Field(default=None, alias="volumeId")
+    content_fingerprint: str = Field(alias="contentFingerprint")
 
 
 class ActiveMedia(HttpContractModel):
@@ -551,6 +574,16 @@ class ActiveMedia(HttpContractModel):
     units: list[ReadingUnit]
     volumes: list[LibraryVolume]
     tracks: list[LibraryFile]
+    local_progress_scope: LocalProgressScope = Field(alias="localProgressScope")
+    current_href: str | None = Field(default=None, alias="currentHref")
+    current_section_index: int | None = Field(default=None, alias="currentSectionIndex")
+    current_chapter_title: str | None = Field(default=None, alias="currentChapterTitle")
+    current_chapter_sort_order: int | None = Field(
+        default=None,
+        alias="currentChapterSortOrder",
+    )
+    progress_extra: ProgressExtra = Field(alias="progressExtra")
+    progress_estimated: bool = Field(default=False, alias="progressEstimated")
 
 
 class WorkDetailPayload(HttpContractModel):
@@ -843,9 +876,7 @@ class MetadataApplyPayload(HttpContractModel):
     finished_organize_job_ids: list[str] = Field(alias="finishedOrganizeJobIds")
 
 
-WorkStructurePayload = (
-    WorkStructureMutationPayload | SplitEditionPayload | MetadataApplyPayload
-)
+WorkStructurePayload = WorkStructureMutationPayload | SplitEditionPayload | MetadataApplyPayload
 
 
 DashboardSummaryResponse = SuccessEnvelope[DashboardSummaryPayload]

@@ -1,5 +1,6 @@
 import type {
   EpubLocation,
+  FoliateProgressSnapshot,
   OperationToken,
   ReaderAdapter,
   ReaderAdapterOpenContext,
@@ -18,12 +19,16 @@ import { hardenEpubIframe, sanitizeEpubDocument } from './epub-security';
 import { createEpubThemeSnapshot, epubSurfaceColor } from './epub-theme';
 import { fallbackEpubFont } from './epub-font';
 import type { ReaderAdapterInputHandler, ReaderInteractiveAdapter, ReaderInteractionPolicy } from './reader-interaction';
-import { hasActiveTextSelection, isReaderControlTarget, readerKeyIntent, readerPointerIntent } from '../input-router';
+import { hasActiveTextSelection, isReaderControlTarget, readerFramePointerIntent, readerKeyIntent, readerPointerIntent } from '../input-router';
+import { isEngineResolvableReflowableHref } from '../reflowable-navigation-href';
 
 type FoliateRelocateDetail = {
   cfi?: string;
   fraction?: number;
-  tocItem?: { href?: unknown };
+  tocItem?: Record<string, unknown>;
+  section?: { current: number; total: number };
+  location?: { current: number; next: number; total: number };
+  time?: { section: number; total: number };
 };
 
 type FoliateLoadDetail = {
@@ -33,6 +38,7 @@ type FoliateLoadDetail = {
 
 type FoliateRenderer = HTMLElement & {
   setStyles?: (css: string) => void;
+  goTo?: (target: unknown) => Promise<void>;
 };
 
 type FoliateView = HTMLElement & {
@@ -47,6 +53,7 @@ type FoliateView = HTMLElement & {
   goLeft: () => Promise<void>;
   goRight: () => Promise<void>;
   goTo: (target: string | number | { fraction: number }) => Promise<unknown>;
+  getTOCItemOf?: (target: string) => Promise<unknown>;
   goToFraction: (fraction: number) => Promise<void>;
   goToTextStart: () => Promise<unknown>;
 };
@@ -67,6 +74,71 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function nonNegativeNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function nonNegativeInteger(value: unknown): number | undefined {
+  const number = nonNegativeNumber(value);
+  return number !== undefined && Number.isInteger(number) ? number : undefined;
+}
+
+function progressPair(value: unknown) {
+  if (!isRecord(value)) return undefined;
+  const current = nonNegativeInteger(value.current);
+  const total = nonNegativeInteger(value.total);
+  return current !== undefined && total !== undefined && current < total ? { current, total } : undefined;
+}
+
+function locationProgress(value: unknown) {
+  if (!isRecord(value)) return undefined;
+  const current = nonNegativeInteger(value.current);
+  const next = nonNegativeInteger(value.next);
+  const total = nonNegativeInteger(value.total);
+  if (current === undefined || next === undefined || total === undefined || total < 1) return undefined;
+  return {
+    current: Math.min(current, total - 1),
+    next: Math.min(Math.max(current, next), total),
+    total
+  };
+}
+
+function remainingTime(value: unknown) {
+  if (!isRecord(value)) return undefined;
+  const section = nonNegativeNumber(value.section);
+  const total = nonNegativeNumber(value.total);
+  return section !== undefined && total !== undefined ? { section, total } : undefined;
+}
+
+export function foliateRemainingSeconds(value: FoliateRelocateDetail['time']) {
+  return value ? { section: value.section * 60, total: value.total * 60 } : undefined;
+}
+
+export async function resolveAsynchronousFoliateHref(book: FoliateBook, href: string) {
+  const candidate = book.resolveHref?.(href);
+  if (!isRecord(candidate) || typeof candidate.then !== 'function') {
+    return { asynchronous: false as const };
+  }
+  return { asynchronous: true as const, target: await candidate };
+}
+
+export async function foliateResolvedSectionIndex(book: FoliateBook, href: string) {
+  try {
+    const split = book.splitTOCHref?.(href);
+    if (Array.isArray(split) && Number.isInteger(split[0]) && split[0] >= 0) return split[0] as number;
+  } catch {
+    // Some MOBI/KF8 books contain TOC hrefs the fast splitter cannot parse.
+    // Fall through to Foliate's full public resolver for the same target.
+  }
+  const resolved = await Promise.resolve(book.resolveHref?.(href));
+  if (!isRecord(resolved)) return undefined;
+  return nonNegativeInteger(resolved.index);
+}
+
+export function foliateSectionIndexFromDisplayIndex(index: number) {
+  return Math.max(0, Math.floor(index) - 1);
+}
+
 export function parseFoliateRelocateDetail(value: unknown): FoliateRelocateDetail | null {
   if (!isRecord(value)) return null;
   const cfi = typeof value.cfi === 'string' && value.cfi ? value.cfi : undefined;
@@ -74,7 +146,17 @@ export function parseFoliateRelocateDetail(value: unknown): FoliateRelocateDetai
     ? clamp(value.fraction)
     : undefined;
   const tocItem = isRecord(value.tocItem) ? value.tocItem : undefined;
-  return cfi || fraction !== undefined ? { cfi, fraction, tocItem } : null;
+  const section = progressPair(value.section);
+  const location = locationProgress(value.location);
+  const time = remainingTime(value.time);
+  return cfi || fraction !== undefined ? {
+    ...(cfi ? { cfi } : {}),
+    ...(fraction !== undefined ? { fraction } : {}),
+    ...(tocItem ? { tocItem } : {}),
+    ...(section ? { section } : {}),
+    ...(location ? { location } : {}),
+    ...(time ? { time } : {})
+  } : null;
 }
 
 function loadDetail(value: unknown): FoliateLoadDetail | null {
@@ -113,8 +195,47 @@ export function foliateNavigationEntries(items: FoliateTocItem[] | undefined, pr
     const href = typeof candidate.href === 'string' ? candidate.href : undefined;
     if (!label) return [];
     const children = foliateNavigationEntries(Array.isArray(candidate.subitems) ? candidate.subitems as FoliateTocItem[] : undefined, `${prefix}-${index}`);
-    return [{ id: `${prefix}-${index}`, label, href, children: children.length ? children : undefined }];
+    const navigationKey = typeof candidate.navigationKey === 'string' ? candidate.navigationKey : undefined;
+    return [{
+      id: navigationKey ?? `${prefix}-${index}`,
+      ...(navigationKey ? { navigationKey } : {}),
+      label,
+      href,
+      children: children.length ? children : undefined
+    }];
   });
+}
+
+export async function validatedServerToc(
+  book: FoliateBook,
+  entries: ReaderNavigationEntry[]
+): Promise<FoliateTocItem[]> {
+  const validate = async (entry: ReaderNavigationEntry): Promise<FoliateTocItem | null> => {
+    if (!entry.href || !entry.navigationKey || !book.resolveHref) return null;
+    try {
+      const target = await Promise.resolve(book.resolveHref(entry.href));
+      if (!isRecord(target)) return null;
+      const sectionIndex = nonNegativeInteger(target.index);
+      if (sectionIndex === undefined || sectionIndex >= book.sections.length) return null;
+      const subitems = (await Promise.all((entry.children ?? []).map(validate)))
+        .filter((item): item is FoliateTocItem => item !== null);
+      return {
+        label: entry.label,
+        href: entry.href,
+        navigationKey: entry.navigationKey,
+        ...(subitems.length ? { subitems } : {})
+      };
+    } catch (reason) {
+      console.warn('reader.navigation-contract.invalid-target', {
+        navigationKey: entry.navigationKey,
+        href: entry.href,
+        reason: reason instanceof Error ? reason.message : String(reason)
+      });
+      return null;
+    }
+  };
+  return (await Promise.all(entries.map(validate)))
+    .filter((item): item is FoliateTocItem => item !== null);
 }
 
 function commandForInput(intent: ReturnType<typeof readerKeyIntent> | ReturnType<typeof readerPointerIntent>) {
@@ -162,6 +283,12 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
   private locationOperation: OperationToken | null = null;
   private lastPersistentOperation: OperationToken | null = null;
   private bridgedDocuments = new Map<Document, AbortController>();
+  private tocSnapshots = new WeakMap<object, NonNullable<FoliateProgressSnapshot['toc']>>();
+  private tocSnapshotsById = new Map<number, NonNullable<FoliateProgressSnapshot['toc']>>();
+  private tocSnapshotsByHref = new Map<string, NonNullable<FoliateProgressSnapshot['toc']>>();
+  private pendingTocSnapshot: NonNullable<FoliateProgressSnapshot['toc']> | null = null;
+  private relocateResolutionSequence = 0;
+  private navigationFingerprint: string | undefined;
 
   constructor(options: FoliateAdapterOptions) {
     super();
@@ -218,6 +345,12 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
       this.book = opened.book;
       this.destroyBook = opened.destroy;
       this.readingDirection = opened.book.dir === 'rtl' ? 'rtl' : 'ltr';
+      this.navigationFingerprint = context.source.kind === 'reflowable'
+        ? context.source.navigationFingerprint
+        : undefined;
+      opened.book.toc = context.source.kind === 'reflowable'
+        ? await validatedServerToc(opened.book, context.source.navigation)
+        : [];
       const view = document.createElement('foliate-view') as FoliateView;
       this.view = view;
       this.bindView(view, generation);
@@ -227,9 +360,8 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
       this.assertActive(generation, signal);
       this.applyRendererPreferences(context.preferences);
       const navigationItems = foliateNavigationEntries(opened.book.toc);
-      if (navigationItems.length) {
-        this.emit({ type: 'navigation-changed', items: navigationItems }, context.operation);
-      }
+      await this.indexToc(opened.book.toc);
+      this.emit({ type: 'navigation-changed', items: navigationItems }, context.operation);
       this.suppressRelocate = true;
       await this.restore(normalizeFoliateInitialLocation(context.initialLocation, this.format));
       await nextFrame();
@@ -237,7 +369,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
       this.suppressRelocate = false;
       const stable = this.pendingRelocate ?? parseFoliateRelocateDetail(view.lastLocation);
       this.pendingRelocate = null;
-      if (stable) this.applyRelocate(stable, context.operation);
+      if (stable) this.commitRelocate(stable, context.operation, generation);
       this.emit({ type: 'phase-changed', phase: null }, context.operation);
       this.emit({ type: 'ready', capabilities: this.getCapabilities(), location: this.currentLocation }, context.operation);
       this.emit({ type: 'capabilities-changed', capabilities: this.getCapabilities() }, context.operation);
@@ -266,8 +398,14 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
       else if (command.type === 'first') await view.goToTextStart();
       else if (command.type === 'last') await view.goToFraction(1);
       else if (command.type === 'go-to-progress') await view.goToFraction(clamp(command.progression));
-      else if (command.type === 'go-to-href') await view.goTo(command.href);
-      else if (command.type === 'go-to-index') await view.goTo(command.index);
+      else if (command.type === 'go-to-href') {
+        if (!isEngineResolvableReflowableHref(this.format, command.href)) {
+          return this.failOperation(context, 'Unsupported navigation href for this format');
+        }
+        this.pendingTocSnapshot = this.tocSnapshotsByHref.get(command.href) ?? null;
+        await this.goToHref(command.href);
+      }
+      else if (command.type === 'go-to-index') await view.goTo(foliateSectionIndexFromDisplayIndex(command.index));
       else if (command.type === 'go-to-location') {
         const location = normalizeFoliateInitialLocation(command.location, this.format);
         if (!location) return this.failOperation(context, 'Location does not belong to the novel reader');
@@ -277,6 +415,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
       throwIfAborted(context.signal);
       return this.ack(context.operation, true, { location: this.currentLocation ?? undefined });
     } catch (reason) {
+      this.pendingTocSnapshot = null;
       if (isAbortError(reason) || reason instanceof StaleReaderOperationError) throw reason;
       return this.failOperation(context, reason instanceof Error ? reason.message : 'Navigation failed');
     }
@@ -294,7 +433,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     this.suppressRelocate = false;
     const stable = this.pendingRelocate ?? parseFoliateRelocateDetail(this.view?.lastLocation);
     this.pendingRelocate = null;
-    if (stable) this.applyRelocate(stable, context.operation);
+    if (stable) this.commitRelocate(stable, context.operation);
     this.emit({ type: 'capabilities-changed', capabilities: this.getCapabilities() }, context.operation);
     this.locationOperation = this.lastPersistentOperation ?? context.operation;
     return this.ack(context.operation, true, { location: this.currentLocation ?? undefined });
@@ -311,7 +450,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
       const detail = parseFoliateRelocateDetail(event instanceof CustomEvent ? event.detail : null);
       if (!detail) return;
       if (this.suppressRelocate) this.pendingRelocate = detail;
-      else this.applyRelocate(detail, this.locationOperation ?? this.currentOperation());
+      else this.commitRelocate(detail, this.locationOperation ?? this.currentOperation(), generation);
     });
     view.addEventListener('load', (event) => {
       if (!this.isActive(generation)) return;
@@ -325,6 +464,19 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
       event.preventDefault();
       this.emit({ type: 'external-link', href });
     });
+  }
+
+  private commitRelocate(detail: FoliateRelocateDetail, operation: OperationToken, generation?: number) {
+    const sequence = ++this.relocateResolutionSequence;
+    const hasKnownToc = Boolean(detail.tocItem || this.pendingTocSnapshot);
+    const view = this.view;
+    this.applyRelocate(detail, operation);
+    if (hasKnownToc || !detail.cfi || !view?.getTOCItemOf) return;
+    void view.getTOCItemOf(detail.cfi).then((tocItem) => {
+      if (this.view !== view || (generation !== undefined && !this.isActive(generation))
+        || sequence !== this.relocateResolutionSequence || !isRecord(tocItem)) return;
+      this.applyRelocate({ ...detail, tocItem }, operation);
+    }).catch(() => undefined);
   }
 
   private bindDocument(document: Document) {
@@ -362,7 +514,17 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
         return;
       }
       const viewport = document.documentElement;
-      const intent = commandForInput(readerPointerIntent(event.clientX, event.clientY, viewport.clientWidth, viewport.clientHeight, this.readingDirection));
+      const intent = commandForInput(frame instanceof HTMLIFrameElement
+        ? readerFramePointerIntent(
+          event.clientX,
+          event.clientY,
+          frame.clientWidth || viewport.clientWidth,
+          frame.clientHeight || viewport.clientHeight,
+          frame.getBoundingClientRect(),
+          this.container.getBoundingClientRect(),
+          this.readingDirection
+        )
+        : readerPointerIntent(event.clientX, event.clientY, viewport.clientWidth, viewport.clientHeight, this.readingDirection));
       if (!intent) return;
       event.preventDefault();
       void this.onInputIntent(intent);
@@ -387,6 +549,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
   private async restore(location: ReflowableLocation | null) {
     const view = this.view;
     if (!view) return;
+    this.pendingTocSnapshot = location?.foliate?.toc ?? null;
     const href = location?.href;
     const normalizedHref = href?.replace(/^\.\//u, '');
     const matchingSection = normalizedHref
@@ -397,10 +560,15 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
       })?.id
       : undefined;
     const targets = [location?.cfi, matchingSection, href]
-      .filter((target, index, values): target is string => Boolean(target) && values.indexOf(target) === index);
+      .filter((target, index, values): target is string => Boolean(target) && values.indexOf(target) === index)
+      .filter((target) => {
+        // CFI and section ids are engine-native; only filter href-like pseudo targets.
+        if (target === location?.cfi || target === matchingSection) return true;
+        return isEngineResolvableReflowableHref(this.format, target);
+      });
     for (const target of targets) {
       try {
-        const resolved = await view.goTo(target);
+        const resolved = target === href ? await this.goToHref(target) : await view.goTo(target);
         if (resolved) return;
       } catch {
         // Continue to the next official navigation representation.
@@ -417,21 +585,99 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     await view.init({ showTextStart: true });
   }
 
+  private async goToHref(href: string) {
+    const view = this.view;
+    const book = this.book;
+    if (!view || !book) return undefined;
+    const asynchronous = await resolveAsynchronousFoliateHref(book, href);
+    if (asynchronous.asynchronous) {
+      const resolved = asynchronous.target;
+      if (!resolved || !view.renderer?.goTo) throw new Error('The chapter target could not be resolved');
+      await view.renderer.goTo(resolved);
+      return resolved;
+    }
+    return view.goTo(href);
+  }
+
   private applyRelocate(detail: FoliateRelocateDetail, operation: OperationToken) {
     const progression = detail.fraction ?? this.currentLocation?.progression ?? 0;
     const href = typeof detail.tocItem?.href === 'string' ? detail.tocItem.href : undefined;
+    // At an exact anchor boundary Foliate can briefly report the preceding TOC
+    // item. The explicit user target is authoritative for that first relocate.
+    const toc = this.pendingTocSnapshot
+      ?? this.resolveTocSnapshot(detail.tocItem)
+      ?? undefined;
+    this.pendingTocSnapshot = null;
+    const currentHref = toc?.href ?? href;
+    const foliate: FoliateProgressSnapshot = {
+      toc,
+      navigationFingerprint: this.navigationFingerprint,
+      section: detail.section,
+      location: detail.location,
+      // Foliate's SectionProgress exposes reading-time estimates in minutes.
+      remainingSeconds: foliateRemainingSeconds(detail.time)
+    };
+    const hasFoliateMetrics = Object.values(foliate).some(Boolean);
     this.currentLocation = {
       kind: 'reflowable',
       format: this.format,
       cfi: detail.cfi,
-      href,
-      progression
+      href: currentHref,
+      progression,
+      foliate: hasFoliateMetrics ? foliate : undefined
     };
     this.container.dataset.readerLocationCfi = detail.cfi ?? '';
-    this.container.dataset.readerLocationHref = href ?? '';
+    this.container.dataset.readerLocationHref = currentHref ?? '';
     this.container.dataset.readerLocationProgression = String(progression);
+    this.container.dataset.readerLocationTocIndex = toc ? String(toc.index) : '';
+    this.container.dataset.readerLocationTocTitle = toc?.title ?? '';
     this.emit({ type: 'location-changed', location: this.currentLocation, percent: progression * 100 }, operation);
     this.emit({ type: 'capabilities-changed', capabilities: this.getCapabilities() }, operation);
+  }
+
+  private async indexToc(items: FoliateTocItem[] | undefined) {
+    this.tocSnapshots = new WeakMap();
+    this.tocSnapshotsById.clear();
+    this.tocSnapshotsByHref.clear();
+    let index = 0;
+    const visit = (candidates: FoliateTocItem[] | undefined) => {
+      if (!Array.isArray(candidates)) return;
+      for (const candidate of candidates) {
+        if (!isRecord(candidate)) continue;
+        const title = typeof candidate.label === 'string' ? candidate.label.trim() : '';
+        if (title) {
+          const snapshot = {
+            index,
+            title,
+            href: typeof candidate.href === 'string' ? candidate.href : undefined,
+            navigationKey: typeof candidate.navigationKey === 'string'
+              ? candidate.navigationKey
+              : undefined
+          };
+          this.tocSnapshots.set(candidate, snapshot);
+          if (typeof candidate.id === 'number' && Number.isInteger(candidate.id)) {
+            this.tocSnapshotsById.set(candidate.id, snapshot);
+          }
+          if (snapshot.href && !this.tocSnapshotsByHref.has(snapshot.href)) {
+            this.tocSnapshotsByHref.set(snapshot.href, snapshot);
+          }
+          index += 1;
+        }
+        visit(Array.isArray(candidate.subitems) ? candidate.subitems as FoliateTocItem[] : undefined);
+      }
+    };
+    visit(items);
+  }
+
+  private resolveTocSnapshot(item: Record<string, unknown> | undefined) {
+    if (!item) return undefined;
+    const direct = this.tocSnapshots.get(item);
+    if (direct) return direct;
+    if (typeof item.id === 'number' && Number.isInteger(item.id)) {
+      const byId = this.tocSnapshotsById.get(item.id);
+      if (byId) return byId;
+    }
+    return typeof item.href === 'string' ? this.tocSnapshotsByHref.get(item.href) : undefined;
   }
 
   private async cleanupEngine() {
@@ -439,6 +685,12 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     this.lifecycleController = null;
     this.bridgedDocuments.forEach((controller) => controller.abort());
     this.bridgedDocuments.clear();
+    this.tocSnapshots = new WeakMap();
+    this.tocSnapshotsById.clear();
+    this.tocSnapshotsByHref.clear();
+    this.pendingTocSnapshot = null;
+    this.relocateResolutionSequence += 1;
+    this.navigationFingerprint = undefined;
     const view = this.view;
     const destroyBook = this.destroyBook;
     this.view = null;
@@ -456,6 +708,8 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     delete this.container.dataset.readerLocationCfi;
     delete this.container.dataset.readerLocationHref;
     delete this.container.dataset.readerLocationProgression;
+    delete this.container.dataset.readerLocationTocIndex;
+    delete this.container.dataset.readerLocationTocTitle;
     delete this.container.dataset.readerEngine;
     this.container.replaceChildren();
     try {

@@ -1,0 +1,54 @@
+import type { ProgressMutation } from '../../lib/reader-v2/model';
+
+export type LocalProgressScope = {
+  userId: string;
+  workId: string;
+  editionId: string;
+  volumeId: string | null;
+  contentFingerprint: string;
+};
+
+function sameVolume(left: string | null | undefined, right: string | null | undefined) {
+  return (left ?? null) === (right ?? null);
+}
+
+export function latestScopedProgress(
+  mutations: readonly ProgressMutation[],
+  scope: LocalProgressScope
+) {
+  return mutations
+    .filter((mutation) => (
+      mutation.userId === scope.userId
+      && mutation.workId === scope.workId
+      && mutation.editionId === scope.editionId
+      && sameVolume(mutation.volumeId, scope.volumeId)
+      && mutation.contentFingerprint === scope.contentFingerprint
+    ))
+    .sort((left, right) => right.clientSequence - left.clientSequence || right.updatedAt - left.updatedAt)[0] ?? null;
+}
+
+export function localProgressProjection(mutation: ProgressMutation | null) {
+  if (!mutation) return null;
+  const location = mutation.location;
+  if (location.kind === 'reflowable') {
+    const metrics = location.foliate;
+    return {
+      percent: mutation.percent,
+      currentHref: metrics?.toc?.href ?? location.href ?? null,
+      currentChapterIndex: metrics?.toc?.index ?? null,
+      currentChapterTitle: metrics?.toc?.title ?? null,
+      locationCurrent: metrics?.location?.current ?? null,
+      locationNext: metrics?.location?.next ?? null,
+      locationTotal: metrics?.location?.total ?? null,
+      remainingSectionSeconds: metrics?.remainingSeconds?.section ?? null,
+      remainingTotalSeconds: metrics?.remainingSeconds?.total ?? null
+    };
+  }
+  if (location.kind === 'pdf') {
+    return { percent: mutation.percent, pageNumber: location.pageNumber };
+  }
+  if (location.kind === 'comic') {
+    return { percent: mutation.percent, pageNumber: location.pageIndex };
+  }
+  return { percent: mutation.percent };
+}

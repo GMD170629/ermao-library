@@ -75,6 +75,37 @@ export type EpubPreferences = {
   flow?: "paginated" | "scrolled";
 };
 
+export type FoliateLocationProgress = {
+  current: number;
+  next: number;
+  total: number;
+};
+
+export type FoliateProgressSnapshot = {
+  toc?: FoliateTocProgress | null;
+  section?: FoliateSectionProgress | null;
+  location?: FoliateLocationProgress | null;
+  remainingSeconds?: FoliateRemainingSeconds | null;
+  navigationFingerprint?: string | null;
+};
+
+export type FoliateRemainingSeconds = {
+  section: number;
+  total: number;
+};
+
+export type FoliateSectionProgress = {
+  current: number;
+  total: number;
+};
+
+export type FoliateTocProgress = {
+  index: number;
+  title: string;
+  href?: string | null;
+  navigationKey?: string | null;
+};
+
 export type PdfLocation = {
   type: "pdf";
   pageNumber: number;
@@ -135,6 +166,7 @@ export type ReaderBootstrapData = {
   readerType: "reflowable" | "comic" | "pdf" | "audio";
   sourceFormat?: "epub" | "mobi" | "azw" | "azw3" | "prc" | "fb2" | "txt" | null;
   contentFingerprint: string;
+  navigationFingerprint?: string | null;
   book: ReaderBookSummary;
   edition: ReaderEditionSummary;
   availableEditions: Array<ReaderEditionOption>;
@@ -294,6 +326,8 @@ export type ReaderUnitSummary = {
   index: number;
   title: string;
   href?: string | null;
+  level?: number | null;
+  navigationKey?: string | null;
   fileId?: string | null;
   startMs?: number | null;
   endMs?: number | null;
@@ -315,4 +349,5 @@ export type ReflowableLocation = {
   cfi?: string | null;
   href?: string | null;
   progression?: number | null;
+  foliate?: FoliateProgressSnapshot | null;
 };

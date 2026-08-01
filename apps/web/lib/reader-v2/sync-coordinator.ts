@@ -14,6 +14,9 @@ type ReaderProgressSyncCoordinatorOptions = {
   now?: () => number;
 };
 
+export const READER_PROGRESS_CHANGED_EVENT = 'shuku:reader-progress-changed';
+export const READER_PROGRESS_SYNC_CHANNEL = 'shuku-reader-v2-sync';
+
 function runtimeId() {
   const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
@@ -61,7 +64,7 @@ export class ReaderProgressSyncCoordinator {
     if (this.started) return;
     this.started = true;
     if (typeof BroadcastChannel !== 'undefined') {
-      this.channel = new BroadcastChannel('shuku-reader-v2-sync');
+      this.channel = new BroadcastChannel(READER_PROGRESS_SYNC_CHANNEL);
       this.channel.addEventListener('message', this.handleBroadcast);
     }
     if (typeof window !== 'undefined') {
@@ -102,6 +105,9 @@ export class ReaderProgressSyncCoordinator {
       clientSequence: mutation.clientSequence
     });
     this.channel?.postMessage({ type: 'progress-enqueued' });
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(READER_PROGRESS_CHANGED_EVENT, { detail: mutation }));
+    }
     this.schedule(this.debounceMs);
     return mutation;
   }

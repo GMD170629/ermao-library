@@ -1,5 +1,6 @@
 """Stable reader capability contracts."""
 
+from app.modules.reader.application.content_fingerprint import build_content_fingerprint
 from app.modules.reader.application.progress import (
     ClaimClientSequence,
     ClaimClientSequenceCommand,
@@ -26,6 +27,7 @@ __all__ = [
     "ClaimClientSequence",
     "ClaimClientSequenceCommand",
     "ReaderProgressCursorPort",
+    "build_content_fingerprint",
     "choose_continue_volume",
     "continue_progress_for_edition",
     "display_progress_percent",
