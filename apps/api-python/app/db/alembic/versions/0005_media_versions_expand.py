@@ -1,7 +1,7 @@
 """Expand the library schema for singleton media versions and volume resources.
 
-Revision ID: 0004_media_versions_expand
-Revises: 0003_import_work_queue
+Revision ID: 0005_media_versions_expand
+Revises: 0004_schema_normalization
 """
 
 from __future__ import annotations
@@ -10,10 +10,11 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+
 from app.core.time import TimestampMilliseconds
 
-revision: str = "0004_media_versions_expand"
-down_revision: str | Sequence[str] | None = "0003_import_work_queue"
+revision: str = "0005_media_versions_expand"
+down_revision: str | Sequence[str] | None = "0004_schema_normalization"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

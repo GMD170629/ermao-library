@@ -5,10 +5,10 @@ from __future__ import annotations
 from alembic import context
 from sqlalchemy import create_engine
 
+import app.models  # noqa: F401 — register all mapped tables
 from app.core.config import get_settings
 from app.db.base import Base
 from app.db.sqlite import create_sqlite_engine
-import app.models  # noqa: F401 — register all mapped tables
 
 config = context.config
 
@@ -20,13 +20,32 @@ target_metadata = Base.metadata
 
 
 def _configure_and_run(connection) -> None:
+    driver_connection = connection.connection.driver_connection
+    foreign_keys_enabled = bool(
+        driver_connection.execute("PRAGMA foreign_keys").fetchone()[0]
+    )
+    if foreign_keys_enabled:
+        # SQLite cannot rebuild mutually-referencing tables while FK actions are
+        # active. This must happen before Alembic opens its transaction. SQLite
+        # has no SQLAlchemy schema construct for PRAGMA configuration.
+        driver_connection.execute("PRAGMA foreign_keys = OFF")
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
         render_as_batch=True,
     )
-    with context.begin_transaction():
-        context.run_migrations()
+    try:
+        with context.begin_transaction():
+            context.run_migrations()
+            violations = list(driver_connection.execute("PRAGMA foreign_key_check"))
+            if violations:
+                raise RuntimeError(
+                    "database migration produced foreign key violations: "
+                    f"{violations[:10]!r}"
+                )
+    finally:
+        if foreign_keys_enabled:
+            driver_connection.execute("PRAGMA foreign_keys = ON")
 
 
 def run_migrations_offline() -> None:

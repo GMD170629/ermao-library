@@ -1,7 +1,7 @@
 """Contract the library schema to media-version and volume-only identities.
 
-Revision ID: 0006_media_versions_contract
-Revises: 0005_media_versions_backfill
+Revision ID: 0007_media_versions_contract
+Revises: 0006_media_versions_backfill
 """
 
 from __future__ import annotations
@@ -11,8 +11,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0006_media_versions_contract"
-down_revision: str | Sequence[str] | None = "0005_media_versions_backfill"
+revision: str = "0007_media_versions_contract"
+down_revision: str | Sequence[str] | None = "0006_media_versions_backfill"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -20,12 +20,6 @@ NAMING_CONVENTION = {
     "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
     "uq": "uq_%(table_name)s_%(column_0_name)s",
 }
-
-LIBRARY_FILE_REFERENCES = (
-    "LibraryReadingUnit",
-    "KindleSendTask",
-    "ImportAsset",
-)
 
 
 def _columns(table_name: str) -> set[str]:
@@ -43,31 +37,6 @@ def _indexes(table_name: str) -> set[str]:
     }
 
 
-def _unique_constraints(table_name: str) -> set[str]:
-    return {
-        str(constraint["name"])
-        for constraint in sa.inspect(op.get_bind()).get_unique_constraints(table_name)
-        if constraint.get("name")
-    }
-
-
-def _foreign_key_name(
-    table_name: str, column_name: str, referred_table: str
-) -> str:
-    for foreign_key in sa.inspect(op.get_bind()).get_foreign_keys(table_name):
-        if foreign_key.get("constrained_columns") != [column_name]:
-            continue
-        if foreign_key.get("referred_table") != referred_table:
-            continue
-        name = foreign_key.get("name")
-        if name:
-            return str(name)
-        return f"fk_{table_name}_{column_name}_{referred_table}"
-    raise RuntimeError(
-        f"expected {table_name}.{column_name} foreign key to {referred_table}"
-    )
-
-
 def _assert_no_null(table_name: str, column_name: str) -> None:
     metadata = sa.MetaData()
     table = sa.Table(table_name, metadata, autoload_with=op.get_bind())
@@ -82,60 +51,9 @@ def _assert_no_null(table_name: str, column_name: str) -> None:
         )
 
 
-def _repair_conversion_tasks_without_source_volume() -> None:
-    connection = op.get_bind()
-    metadata = sa.MetaData()
-    conversion_tasks = sa.Table(
-        "BookConversionTask", metadata, autoload_with=connection
-    )
-    import_tasks = sa.Table("ImportTask", metadata, autoload_with=connection)
-    unbound_tasks = list(
-        connection.execute(
-            sa.select(conversion_tasks).where(
-                conversion_tasks.c.sourceVolumeId.is_(None)
-            )
-        ).mappings()
-    )
-    for task in unbound_tasks:
-        source_volume_id = connection.scalar(
-            sa.select(import_tasks.c.volumeId).where(
-                import_tasks.c.id == task["importTaskId"]
-            )
-        )
-        if source_volume_id is None:
-            connection.execute(
-                sa.delete(conversion_tasks).where(
-                    conversion_tasks.c.id == task["id"]
-                )
-            )
-            continue
-        source_hash = str(task["sourceHash"] or "missing")
-        target_format = str(task["targetFormat"] or "EPUB").upper()
-        connection.execute(
-            sa.update(conversion_tasks)
-            .where(conversion_tasks.c.id == task["id"])
-            .values(
-                sourceVolumeId=source_volume_id,
-                idempotencyKey=(
-                    task["idempotencyKey"]
-                    or f"{source_volume_id}:{source_hash}:{target_format}"
-                ),
-            )
-        )
-
-
 def _drop_index_if_present(batch_op, table_name: str, index_name: str) -> None:
     if index_name in _indexes(table_name):
         batch_op.drop_index(index_name)
-
-
-def _drop_unique_or_index_if_present(
-    batch_op, table_name: str, object_name: str
-) -> None:
-    if object_name in _unique_constraints(table_name):
-        batch_op.drop_constraint(object_name, type_="unique")
-    elif object_name in _indexes(table_name):
-        batch_op.drop_index(object_name)
 
 
 def _stage_binding(
@@ -172,31 +90,6 @@ def _restore_binding(
             .where(target.c.id == record_id)
             .values({target_column.name: target_id})
         )
-
-
-def _drop_library_file_references() -> None:
-    for table_name in LIBRARY_FILE_REFERENCES:
-        with op.batch_alter_table(
-            table_name, recreate="always", naming_convention=NAMING_CONVENTION
-        ) as batch_op:
-            batch_op.drop_constraint(
-                f"fk_{table_name}_fileId_LibraryFile", type_="foreignkey"
-            )
-
-
-def _restore_library_file_references() -> None:
-    for table_name in LIBRARY_FILE_REFERENCES:
-        with op.batch_alter_table(
-            table_name, recreate="always", naming_convention=NAMING_CONVENTION
-        ) as batch_op:
-            batch_op.create_foreign_key(
-                f"fk_{table_name}_fileId_LibraryFile",
-                "LibraryFile",
-                ["fileId"],
-                ["id"],
-                ondelete="SET NULL",
-                onupdate="CASCADE",
-            )
 
 
 def _create_import_task_contract(legacy: sa.Table) -> sa.Table:
@@ -262,13 +155,12 @@ def _create_import_task_contract(legacy: sa.Table) -> sa.Table:
 
 
 def _repoint_import_task_foreign_key(table_name: str) -> None:
-    legacy_constraint_name = _foreign_key_name(
-        table_name, "importTaskId", "LegacyImportTask"
-    )
     with op.batch_alter_table(
         table_name, recreate="always", naming_convention=NAMING_CONVENTION
     ) as batch_op:
-        batch_op.drop_constraint(legacy_constraint_name, type_="foreignkey")
+        batch_op.drop_constraint(
+            f"fk_{table_name}_importTaskId_LegacyImportTask", type_="foreignkey"
+        )
         batch_op.create_foreign_key(
             f"fk_{table_name}_importTaskId_ImportTask",
             "ImportTask",
@@ -284,7 +176,6 @@ def _repoint_import_task_foreign_key(table_name: str) -> None:
 
 
 def upgrade() -> None:
-    _repair_conversion_tasks_without_source_volume()
     for table_name, column_name in (
         ("LibraryVolume", "mediaVersionId"),
         ("LibraryVolume", "format"),
@@ -522,7 +413,6 @@ def upgrade() -> None:
         unique=False,
     )
 
-    _drop_library_file_references()
     with op.batch_alter_table(
         "LibraryFile", recreate="always", naming_convention=NAMING_CONVENTION
     ) as batch_op:
@@ -546,7 +436,6 @@ def upgrade() -> None:
             onupdate="CASCADE",
         )
 
-    _restore_library_file_references()
     for binding_name, table_name, column_name in binding_specs:
         if not binding_name.endswith(".fileId"):
             continue
@@ -649,10 +538,8 @@ def upgrade() -> None:
         _drop_index_if_present(
             batch_op, "ReaderBookmark", "ReaderBookmark_user_edition_idx"
         )
-        _drop_unique_or_index_if_present(
-            batch_op,
-            "ReaderBookmark",
-            "ReaderBookmark_user_edition_fingerprint_bookmark_key",
+        batch_op.drop_constraint(
+            "ReaderBookmark_user_edition_fingerprint_bookmark_key", type_="unique"
         )
         batch_op.drop_constraint(
             "fk_ReaderBookmark_workId_LibraryWork", type_="foreignkey"
@@ -790,5 +677,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     raise RuntimeError(
-        "0006_media_versions_contract is intentionally irreversible; restore the pre-migration SQLite snapshot"
+        "0007_media_versions_contract is intentionally irreversible; restore the pre-migration SQLite snapshot"
     )

@@ -1,7 +1,7 @@
 """Backfill edition data into singleton media versions and volume resources.
 
-Revision ID: 0005_media_versions_backfill
-Revises: 0004_media_versions_expand
+Revision ID: 0006_media_versions_backfill
+Revises: 0005_media_versions_expand
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.engine import RowMapping
 
-revision: str = "0005_media_versions_backfill"
-down_revision: str | Sequence[str] | None = "0004_media_versions_expand"
+revision: str = "0006_media_versions_backfill"
+down_revision: str | Sequence[str] | None = "0005_media_versions_expand"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

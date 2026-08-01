@@ -2,14 +2,16 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
+from sqlalchemy import MetaData, Table, insert, inspect, select
+
 from app.core.config import Settings
 from app.db.base import Base
 from app.db.runner import _run_alembic, apply_schema, head_revision
 from app.db.sqlite import create_sqlite_engine
-from sqlalchemy import MetaData, Table, insert, inspect, select
 
 
 def _table(engine, name: str) -> Table:
@@ -214,7 +216,7 @@ def test_0003_upgrade_merges_same_media_editions_without_losing_volumes(
 
         apply_schema(engine, settings)
 
-        assert head_revision(engine) == "0006_media_versions_contract"
+        assert head_revision(engine) == "0007_media_versions_contract"
         inspector = inspect(engine)
         assert "LibraryEdition" not in inspector.get_table_names()
         assert "LibraryEditionFacet" not in inspector.get_table_names()
@@ -300,8 +302,10 @@ def test_0003_upgrade_merges_same_media_editions_without_losing_volumes(
         engine.dispose()
 
 
-def test_0003_upgrade_discards_conversion_without_a_source_volume(tmp_path) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
+def test_contract_rejects_conversion_without_source_volume_without_deleting_it(
+    tmp_path,
+) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage-invalid-conversion"))
     settings.database_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_sqlite_engine(settings.database_path)
     now = datetime.now(UTC)
@@ -348,18 +352,18 @@ def test_0003_upgrade_discards_conversion_without_a_source_volume(tmp_path) -> N
                 )
             )
 
-        apply_schema(engine, settings)
+        with pytest.raises(RuntimeError, match="backfill incomplete"):
+            apply_schema(engine, settings)
 
-        assert head_revision(engine) == "0006_media_versions_contract"
         with engine.connect() as connection:
-            assert connection.scalar(select(_table(engine, "ImportTask").c.id)) == (
-                "orphaned-import"
+            assert (
+                connection.scalar(select(_table(engine, "BookConversionTask").c.id))
+                == "orphaned-conversion"
             )
-            assert connection.scalar(
-                select(_table(engine, "BookConversionTask").c.id)
-            ) is None
-
-        apply_schema(engine, settings)
-        assert head_revision(engine) == "0006_media_versions_contract"
+            assert (
+                MigrationContext.configure(connection).get_current_revision()
+                == "0006_media_versions_backfill"
+            )
+            assert "LibraryEdition" in inspect(connection).get_table_names()
     finally:
         engine.dispose()
