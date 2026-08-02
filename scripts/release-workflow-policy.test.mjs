@@ -5,6 +5,13 @@ import test from 'node:test';
 const releaseWorkflow = readFileSync('.github/workflows/fnos-package.yml', 'utf8');
 const maintenanceWorkflow = readFileSync('.github/workflows/sync-release-notes.yml', 'utf8');
 const dockerPublisher = readFileSync('scripts/publish-docker-hub.sh', 'utf8');
+const unifiedAppStartup = readFileSync('scripts/start-unified-app.sh', 'utf8');
+const gitAttributes = readFileSync('.gitattributes', 'utf8');
+
+test('repository text normalization protects container entrypoints', () => {
+  assert.doesNotMatch(unifiedAppStartup, /\r/u);
+  assert.match(gitAttributes, /^\* text=auto eol=lf$/mu);
+});
 
 test('formal publishing has no generated-note or manual-release bypass', () => {
   assert.doesNotMatch(releaseWorkflow, /--generate-notes/u);
