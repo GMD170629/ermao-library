@@ -16,7 +16,8 @@ const organizeJobs = {
 async function mockSettingsApi(page: Page, locale: 'zh-CN' | 'en-US' = 'zh-CN') {
   const counts: RequestCounts = {};
   await page.route('**/api/**', async (route) => {
-    const pathname = new URL(route.request().url()).pathname;
+    const url = new URL(route.request().url());
+    const pathname = url.pathname;
     counts[pathname] = (counts[pathname] ?? 0) + 1;
     const methodPath = `${route.request().method()} ${pathname}`;
     counts[methodPath] = (counts[methodPath] ?? 0) + 1;
@@ -141,7 +142,8 @@ async function mockSettingsApi(page: Page, locale: 'zh-CN' | 'en-US' = 'zh-CN') 
       return;
     }
     if (pathname.endsWith('/api/monitor-folders/tree')) {
-      await route.fulfill({ json: { ok: true, data: { node: { name: '/', path: '/', readable: true, children: [] } } } });
+      const requestedPath = url.searchParams.get('path');
+      await route.fulfill({ json: { ok: true, data: { node: requestedPath === '/monitor' ? { name: 'monitor', path: '/monitor', readable: true, children: [] } : { name: '/', path: '/', readable: true, children: [{ name: 'monitor', path: '/monitor', readable: true }] }, monitorRoot: null } } });
       return;
     }
     if (pathname.endsWith('/api/monitor-folders')) {
@@ -275,6 +277,14 @@ test('new monitor folder shows expanded scan rules with a 10 KB minimum by defau
   await page.getByRole('tab', { name: '文件管理' }).click();
   await page.getByRole('tab', { name: '监控文件夹' }).click();
   await page.getByRole('button', { name: '添加文件夹' }).click();
+
+  const folderPath = page.getByRole('combobox', { name: '监控文件夹路径' });
+  await folderPath.fill('/monitor');
+  await page.getByRole('button', { name: '展开文件夹路径树' }).click();
+  const directoryTree = page.getByRole('tree');
+  await expect(directoryTree.getByRole('button', { name: '/', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'monitor', exact: true }).click();
+  await expect(folderPath).toHaveValue('/monitor');
 
   const scanRules = page.getByRole('button', { name: /扫描规则/ });
   await expect(scanRules).toHaveAttribute('aria-expanded', 'true');

@@ -261,7 +261,7 @@ def test_password_reset_writes_local_file_is_hashed_single_use_and_revokes_sessi
     )
     assert missing.status_code == requested.status_code == 202
     assert missing.json()["data"]["message"] == requested.json()["data"]["message"]
-    reset_file = test_settings.resolved_monitor_root / "reset-password.html"
+    reset_file = test_settings.resolved_storage_root / "password-reset" / "reset-password.html"
     assert requested.json()["data"]["filePath"] == str(reset_file)
     document = reset_file.read_text(encoding="utf-8")
     assert '<html lang="en-US">' in document
@@ -291,4 +291,6 @@ def test_password_reset_writes_local_file_is_hashed_single_use_and_revokes_sessi
 def test_password_reset_capability_reports_local_file_path(client, test_settings):
     payload = client.get("/api/auth/capabilities").json()["data"]
     assert payload["localPasswordReset"] is True
-    assert payload["passwordResetFilePath"] == str(test_settings.resolved_monitor_root / "reset-password.html")
+    assert payload["passwordResetFilePath"] == str(
+        test_settings.resolved_storage_root / "password-reset" / "reset-password.html"
+    )

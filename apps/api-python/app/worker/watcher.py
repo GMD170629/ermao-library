@@ -104,7 +104,7 @@ class WorkerManager:
     def __init__(self, db_factory, settings: Settings) -> None:
         self.db_factory = db_factory
         self.settings = settings
-        self.security = PathSecurityService(settings)
+        self.security = PathSecurityService()
         self.watchers: dict[str, WatchState] = {}
         self._imports_paused = False
         self._pending_scan_recovery_folder_ids: set[str] = set()

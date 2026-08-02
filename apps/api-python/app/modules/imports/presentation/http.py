@@ -34,8 +34,9 @@ from app.modules.imports.presentation.schemas import (
 )
 from app.modules.imports.presentation.mappers import (
     import_task_view,
+    MonitorPathError,
     monitor_directory_tree_node,
-    normalize_monitor_root_path,
+    resolve_monitor_folder_path,
 )
 from app.modules.imports.public import (
     parse_release_title,
@@ -86,9 +87,7 @@ def list_monitor_folders(
     return ok(
         {
             "folders": folders,
-            "monitorRoot": str(settings.resolved_monitor_root.resolve())
-            if settings.resolved_monitor_root
-            else None,
+            "monitorRoot": None,
             "lastUploadTargetPath": _system_setting_value(
                 db, "library.lastUploadTargetPath"
             ),
@@ -109,15 +108,13 @@ def monitor_folder_tree(
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    node, error, status_code = monitor_directory_tree_node(settings, path)
+    node, error, status_code = monitor_directory_tree_node(path)
     if error:
         return fail(error, status_code=status_code)
     return ok(
         {
             "node": node,
-            "monitorRoot": str(settings.resolved_monitor_root.resolve())
-            if settings.resolved_monitor_root
-            else None,
+            "monitorRoot": None,
         }
     )
 
@@ -132,9 +129,10 @@ async def create_monitor_folder(
     if auth_error:
         return auth_error
     payload = await request.json()
-    root_path = normalize_monitor_root_path(payload.get("rootPath"))
-    if not root_path:
-        return fail("请填写监控文件夹路径", status_code=400)
+    try:
+        root_path = str(resolve_monitor_folder_path(payload.get("rootPath")))
+    except MonitorPathError as exc:
+        return fail(str(exc), status_code=exc.status_code, code=exc.code)
     if import_http_store.get_monitor_folder_by_root_path(db, root_path):
         return fail(
             "监控文件夹路径已存在", status_code=409, details={"rootPath": root_path}
@@ -224,9 +222,10 @@ async def update_monitor_folder(
     if not existing:
         return fail("监控文件夹不存在", status_code=404)
     if "rootPath" in values:
-        root_path = normalize_monitor_root_path(values["rootPath"])
-        if not root_path:
-            return fail("请填写监控文件夹路径", status_code=400)
+        try:
+            root_path = str(resolve_monitor_folder_path(values["rootPath"]))
+        except MonitorPathError as exc:
+            return fail(str(exc), status_code=exc.status_code, code=exc.code)
         if import_http_store.get_monitor_folder_by_root_path(
             db, root_path, exclude_id=folder_id
         ):

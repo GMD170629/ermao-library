@@ -184,7 +184,7 @@ if ! grep -Fq "image: $IMAGE_REFERENCE" "$compose" || \
    ! grep -Fq 'user: "${TRIM_UID}:${TRIM_GID}"' "$compose" || \
    ! grep -Fq '${TRIM_PKGVAR}/storage:/app/storage' "$compose" || \
    ! grep -Fq '${TRIM_DATA_SHARE_PATHS}:/monitor' "$compose" || \
-   ! grep -Fq 'MONITOR_ROOT: /monitor' "$compose"; then
+   grep -Fq 'MONITOR_ROOT' "$compose"; then
   echo "fnOS Compose is missing the versioned image, package user, or required data mounts" >&2
   exit 1
 fi

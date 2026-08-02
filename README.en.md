@@ -66,7 +66,6 @@ services:
     user: "${PUID:-1000}:${PGID:-1000}"
     environment:
       STORAGE_ROOT: /app/storage
-      MONITOR_ROOT: /monitor
       PORT: 3000
       HOSTNAME: 0.0.0.0
     ports:
@@ -74,6 +73,9 @@ services:
     volumes:
       - ${STORAGE_PATH:-./data/storage}:/app/storage
       - ${MONITOR_HOST_PATH:-./monitor}:/monitor
+      # Add more host directories as needed:
+      # - /srv/books:/libraries/books
+      # - /srv/comics:/libraries/comics
     command: ["./scripts/start-unified-app.sh"]
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
@@ -90,6 +92,8 @@ docker compose up -d
 ```
 
 When the installation is complete, open `http://your-server-address:3000`.
+
+Watched folders are selected from the in-app directory tree and are not limited to a fixed root. To expose additional host directories, add volume mappings such as `/srv/books:/libraries/books`; the container user must be able to read them.
 
 By default:
 
@@ -111,7 +115,7 @@ Updating or rebuilding the container does not clear the mounted library and data
 ## First-Time Setup
 
 1. Open the application and follow the setup wizard to create the initial administrator account.
-2. Add `/monitor` or one of its subdirectories as a watched folder in the wizard, or configure it later under **Settings → Library Sources and Import**.
+2. Select `/monitor` or any other mounted, readable directory from the wizard's path tree, or configure it later under **Settings → Library Sources and Import**.
 3. Place books in the corresponding host directory, or upload ebook, comic, or audiobook files from the **All Books** page.
 4. Track parsing or conversion progress in the import tasks. When processing is complete, open the library to read or listen.
 5. Configure Douban, Bangumi, or AI metadata sources under **Smart Organization** as needed.

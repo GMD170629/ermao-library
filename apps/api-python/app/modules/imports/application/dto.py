@@ -30,16 +30,11 @@ class IdentityEvidenceDTO:
 @dataclass(frozen=True)
 class ImportRuntimeConfig:
     storage_root: Path
-    monitor_root: Path | None
     audiobook_max_file_bytes: int
 
     @property
     def resolved_storage_root(self) -> Path:
         return self.storage_root
-
-    @property
-    def resolved_monitor_root(self) -> Path | None:
-        return self.monitor_root
 
 
 @dataclass(frozen=True)

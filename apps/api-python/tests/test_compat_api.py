@@ -3572,7 +3572,7 @@ def test_import_tasks_display_reverse_of_worker_timestamp_id_order(client, db_se
 
 
 def test_monitor_folder_and_system_settings_mutations(
-    client, db_session, test_settings
+    client, db_session, test_settings, monkeypatch
 ):
     test_settings.resolved_monitor_root.mkdir(parents=True)
     (test_settings.resolved_monitor_root / "zeta").mkdir()
@@ -3583,6 +3583,8 @@ def test_monitor_folder_and_system_settings_mutations(
     (test_settings.resolved_monitor_root / "alpha" / "nested").mkdir()
     second_root = test_settings.resolved_monitor_root.parent / "second-inbox"
     second_root.mkdir(parents=True)
+    monitor_alias = test_settings.resolved_monitor_root.parent / "monitor-alias"
+    monitor_alias.symlink_to(test_settings.resolved_monitor_root, target_is_directory=True)
     db_session.execute(
         text(
             "CREATE TABLE IF NOT EXISTS Shelf (id TEXT PRIMARY KEY, ownerUserId TEXT, name TEXT NOT NULL, description TEXT, kind TEXT NOT NULL DEFAULT 'STATIC', rulesJson TEXT NOT NULL DEFAULT '{}', pinned INTEGER NOT NULL DEFAULT 0, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)"
@@ -3596,12 +3598,18 @@ def test_monitor_folder_and_system_settings_mutations(
     db_session.commit()
     _login(client, db_session)
 
-    tree = client.get("/api/monitor-folders/tree")
+    root_tree = client.get("/api/monitor-folders/tree")
+    assert root_tree.status_code == 200
+    assert root_tree.json()["data"]["node"]["path"] == "/"
+    assert root_tree.json()["data"]["monitorRoot"] is None
+
+    tree = client.get(
+        "/api/monitor-folders/tree",
+        params={"path": str(test_settings.resolved_monitor_root)},
+    )
     assert tree.status_code == 200
     tree_data = tree.json()["data"]
-    assert tree_data["monitorRoot"] == str(
-        test_settings.resolved_monitor_root.resolve()
-    )
+    assert tree_data["monitorRoot"] is None
     assert tree_data["node"]["path"] == str(
         test_settings.resolved_monitor_root.resolve()
     )
@@ -3617,11 +3625,21 @@ def test_monitor_folder_and_system_settings_mutations(
     assert child_tree.status_code == 200
     assert child_tree.json()["data"]["node"]["children"][0]["name"] == "nested"
 
+    alias_tree = client.get(
+        "/api/monitor-folders/tree", params={"path": str(monitor_alias)}
+    )
+    assert alias_tree.status_code == 200
+    assert alias_tree.json()["data"]["node"]["path"] == str(
+        test_settings.resolved_monitor_root.resolve()
+    )
+
     outside_tree = client.get(
         "/api/monitor-folders/tree", params={"path": str(second_root)}
     )
-    assert outside_tree.status_code == 403
-    assert outside_tree.json()["ok"] is False
+    assert outside_tree.status_code == 200
+    assert outside_tree.json()["data"]["node"]["path"] == str(
+        second_root.resolve()
+    )
 
     missing_tree = client.get(
         "/api/monitor-folders/tree",
@@ -3669,11 +3687,48 @@ def test_monitor_folder_and_system_settings_mutations(
     assert duplicate.status_code == 409
     assert duplicate.json()["ok"] is False
 
+    symlink_duplicate = client.post(
+        "/api/monitor-folders",
+        json={"name": "Alias", "rootPath": str(monitor_alias), "enabled": True},
+    )
+    assert symlink_duplicate.status_code == 409
+
     empty_path = client.post(
         "/api/monitor-folders", json={"name": "No Path", "rootPath": " "}
     )
     assert empty_path.status_code == 400
     assert empty_path.json()["ok"] is False
+
+    relative_path = client.post(
+        "/api/monitor-folders",
+        json={"name": "Relative", "rootPath": "books"},
+    )
+    assert relative_path.status_code == 400
+    assert (
+        relative_path.json()["error"]["code"]
+        == "MONITOR_FOLDER_PATH_NOT_ABSOLUTE"
+    )
+
+    unavailable_path = client.post(
+        "/api/monitor-folders",
+        json={"name": "Missing", "rootPath": str(second_root / "missing")},
+    )
+    assert unavailable_path.status_code == 404
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            "app.modules.imports.application.monitor_paths.os.access",
+            lambda _path, _mode: False,
+        )
+        unreadable_path = client.post(
+            "/api/monitor-folders",
+            json={"name": "Unreadable", "rootPath": str(second_root)},
+        )
+    assert unreadable_path.status_code == 400
+    assert (
+        unreadable_path.json()["error"]["code"]
+        == "MONITOR_FOLDER_PATH_UNREADABLE"
+    )
 
     second = client.post(
         "/api/monitor-folders",
@@ -5756,7 +5811,7 @@ def test_upload_to_unmonitored_directory_only_saves_files(
     assert db_session.scalar(select(func.count()).select_from(ImportTask)) == 0
 
 
-def test_upload_rejects_a_directory_outside_the_monitor_root(
+def test_upload_allows_a_visible_directory_outside_configured_monitor_folders(
     client,
     db_session,
     test_settings,
@@ -5777,8 +5832,8 @@ def test_upload_rejects_a_directory_outside_the_monitor_root(
             files={"file": ("outside.epub", handle, "application/epub+zip")},
         )
 
-    assert response.status_code == 400
-    assert list(outside_directory.iterdir()) == []
+    assert response.status_code == 200
+    assert [path.name for path in outside_directory.iterdir()] == ["outside.epub"]
 
 
 def test_upload_requires_access_to_the_covering_monitor_folder(

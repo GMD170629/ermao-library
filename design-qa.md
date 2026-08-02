@@ -42,3 +42,30 @@
 - Focused ESLint, TypeScript typecheck, bilingual i18n validation (2715 messages), and all 239 Web tests passed.
 
 final result: passed
+
+## Setup language-switcher follow-up
+
+- Source visual truth: `codex-clipboard-93acc614-7683-46c5-9f93-7ac92f3b60dc.png` (1980 x 1231 px, setup completion state, language menu open).
+- Implementation capture: `artifacts/language-switcher-setup.png` (1980 x 1231 px, setup status-check state, language menu open); combined comparison: `artifacts/language-switcher-comparison.png`.
+- The surrounding setup stage differs because browser verification used a local status-check fixture, but the focused language-control region uses the same viewport, placement, locale, and open interaction state.
+- Fonts and copy: existing compact labels, icon, weights, and Chinese/English option text are unchanged; both locale transitions were exercised successfully.
+- Spacing and layout: the 144px menu is right-aligned to the trigger, uses consistent 16px rounding and 8px internal padding, and remains clear of the right setup panel.
+- Colors and tokens: trigger and menu both compute to `rgb(232, 220, 199)`; the menu border is `rgba(176, 139, 110, 0.45)`, while the selected option uses the setup orange at 15% opacity with dark orange text. The former white floating surface is removed.
+- Assets: the existing Lucide language, chevron, and check icons remain sharp and consistent with the rest of the setup controls; no new raster assets were needed.
+- Interaction and accessibility: listbox semantics, current-language check, right alignment, pointer selection, keyboard behavior, focus restoration, and Chinese/English switching remain intact.
+- TypeScript typecheck, ESLint, i18n validation (2726 messages), and all 248 Web tests passed.
+
+final result: passed
+
+## Monitor-folder tree follow-up
+
+- References: `codex-clipboard-8eb96d0a-0473-407d-865e-87ae81278436.png`, `codex-clipboard-bbd7276f-089e-4283-ac34-7b45ea564389.png`, and `codex-clipboard-b7d83d56-49b2-4626-937d-6b3bf13241b0.png`.
+- Implementation capture: `artifacts/monitor-folder-tree-setup.png`; side-by-side comparison: `artifacts/monitor-folder-tree-comparison.png`.
+- The editable combobox, directory panel, borders, focus color, surface color, and helper copy now use the initialization page's warm beige, olive, and orange visual system.
+- The setup variant participates in normal document layout, so its expanded panel remains inside the rounded setup card instead of being clipped by the card boundary.
+- The directory viewport measures 256px tall and remains scrollable. Its computed scrollbar color is `rgb(139, 157, 131)` on a transparent track; the selected node and panel remain inside the 1152px reference viewport.
+- A restored or typed absolute path keeps `/` as the visible tree root, loads every ancestor in order, expands the selected directory, and exposes its children. The verified path `/home/liumianti/books` rendered `/ > home > liumianti > books`, with `books` selected and expanded.
+- The input accepts typing and paste; the backend remains authoritative for absolute, existing, readable directory validation at save time.
+- TypeScript typecheck, ESLint, bilingual i18n validation (2726 messages), and all 248 Web tests passed.
+
+final result: passed

@@ -60,10 +60,12 @@ def _stored_path(path_value: Any, settings: Settings) -> Path | None:
         path = settings.resolved_storage_root / path
     try:
         resolved = path.expanduser().resolve()
-        roots = [settings.resolved_storage_root.resolve()]
-        if settings.resolved_monitor_root is not None:
-            roots.append(settings.resolved_monitor_root.resolve())
-        if any(resolved == root or root in resolved.parents for root in roots):
+        storage_root = settings.resolved_storage_root.resolve()
+        if (
+            resolved == storage_root
+            or storage_root in resolved.parents
+            or path.is_absolute()
+        ):
             return resolved
     except OSError:
         return None

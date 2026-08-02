@@ -112,7 +112,6 @@ def save_uploaded_files(
 def _runtime_config(settings: Settings) -> ImportRuntimeConfig:
     return ImportRuntimeConfig(
         storage_root=settings.resolved_storage_root,
-        monitor_root=settings.resolved_monitor_root,
         audiobook_max_file_bytes=settings.audiobook_max_file_bytes,
     )
 
@@ -292,8 +291,6 @@ def recover_interrupted_import_deletions(
         for root in import_http_store.list_monitor_root_paths(db)
         if root.strip()
     ]
-    if settings.resolved_monitor_root is not None:
-        monitor_roots.append(settings.resolved_monitor_root)
     files = LocalImportDeletionFiles(
         settings.resolved_storage_root,
         [settings.conversion_root, *monitor_roots],

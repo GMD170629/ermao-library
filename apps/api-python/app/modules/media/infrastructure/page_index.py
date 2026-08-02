@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import zipfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,7 +42,13 @@ def _json_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
-def _stored_path(path_value: str | None, settings: Settings) -> Path | None:
+def _stored_path(
+    path_value: str | None,
+    settings: Settings,
+    allowed_source_roots: Iterable[Path] = (),
+    *,
+    database_backed: bool = False,
+) -> Path | None:
     if not path_value:
         return None
     path = Path(path_value)
@@ -52,10 +59,11 @@ def _stored_path(path_value: str | None, settings: Settings) -> Path | None:
         storage = settings.resolved_storage_root.resolve()
         if resolved == storage or storage in resolved.parents:
             return resolved
-        monitor = settings.resolved_monitor_root
-        if monitor:
-            monitor = monitor.resolve()
-            if resolved == monitor or monitor in resolved.parents:
+        if database_backed and path.is_absolute():
+            return resolved
+        for source_root in allowed_source_roots:
+            root = source_root.resolve()
+            if resolved == root or root in resolved.parents:
                 return resolved
     except OSError:
         return None
@@ -204,7 +212,11 @@ def ensure_volume_page_index(db: Session, settings: Settings, volume_id: str) ->
         return 0
     volume = _VolumeProjection(*volume_row)
     file = _get_comic_file_for_volume(db, volume)
-    archive_path = _stored_path(file.path if file else None, settings)
+    archive_path = _stored_path(
+        file.path if file else None,
+        settings,
+        database_backed=True,
+    )
     if not file or not archive_path:
         return 0
 

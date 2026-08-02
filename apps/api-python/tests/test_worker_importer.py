@@ -49,7 +49,6 @@ from app.services.import_preferences import (
 from app.worker.path_security import (
     PathSecurityError,
     PathSecurityService,
-    normalize_configured_path,
 )
 from app.worker.watcher import (
     MonitorFolderConfig,
@@ -404,35 +403,21 @@ def write_pdf_metadata_fixture(path: Path):
     )
 
 
-def test_path_security_rejects_sensitive_paths(test_settings):
-    test_settings.resolved_monitor_root.mkdir(parents=True)
-    service = PathSecurityService(test_settings)
-
-    try:
-        service.validate_monitor_folder("/etc")
-    except PathSecurityError as error:
-        assert error.code == "SENSITIVE_PATH"
-    else:
-        raise AssertionError("expected sensitive path rejection")
-
-
-def test_path_security_accepts_monitor_root_child(test_settings):
-    monitor_root = test_settings.resolved_monitor_root
-    library = monitor_root / "library"
+def test_path_security_accepts_any_visible_absolute_directory(tmp_path):
+    library = tmp_path / "outside-former-monitor-root" / "library"
     library.mkdir(parents=True)
-    service = PathSecurityService(test_settings)
+    service = PathSecurityService()
 
     validation = service.validate_monitor_folder(str(library))
 
     assert validation.real_path == library.resolve()
-    assert validation.real_monitor_root == monitor_root.resolve()
 
 
-def test_normalize_configured_path_uses_workspace_root():
-    workspace_root = Path(__file__).resolve().parents[3]
-    assert normalize_configured_path("books") == str(
-        (workspace_root / "books").resolve()
-    )
+def test_path_security_rejects_relative_paths():
+    service = PathSecurityService()
+    with pytest.raises(PathSecurityError) as error:
+        service.validate_monitor_folder("books")
+    assert error.value.code == "NOT_ABSOLUTE"
 
 
 def test_work_merge_key_uses_only_nfkc_title_and_author():

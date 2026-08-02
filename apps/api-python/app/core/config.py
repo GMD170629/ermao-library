@@ -9,7 +9,6 @@ class Settings(BaseSettings):
     app_name: str = "二毛图书 API"
     app_version: str = "0.4.5"
     session_secret: str | None = None
-    monitor_root: str | None = "/monitor"
     storage_root: str = "/app/storage"
     secure_cookies: bool = False
     cookie_path: str = "/"
@@ -50,12 +49,6 @@ class Settings(BaseSettings):
     @property
     def database_path(self) -> Path:
         return self.resolved_storage_root / "database" / "shuku.sqlite3"
-
-    @property
-    def resolved_monitor_root(self) -> Path | None:
-        if not self.monitor_root:
-            return None
-        return Path(self.monitor_root).expanduser().resolve()
 
     @property
     def conversion_root(self) -> Path:

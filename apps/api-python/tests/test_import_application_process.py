@@ -132,7 +132,6 @@ def test_process_import_commits_final_writes_once_after_post_success_hooks() -> 
         pipeline,
         ImportRuntimeConfig(
             storage_root=Path("/tmp"),
-            monitor_root=None,
             audiobook_max_file_bytes=1,
         ),
         _task(),
@@ -162,7 +161,6 @@ def test_process_import_rolls_back_all_final_writes_when_post_hook_fails(
             pipeline,
             ImportRuntimeConfig(
                 storage_root=Path("/tmp"),
-                monitor_root=None,
                 audiobook_max_file_bytes=1,
             ),
             _task(),
@@ -187,7 +185,6 @@ def test_process_import_stops_before_pipeline_when_monitor_folder_was_deleted() 
             pipeline,
             ImportRuntimeConfig(
                 storage_root=Path("/tmp"),
-                monitor_root=None,
                 audiobook_max_file_bytes=1,
             ),
             _task(),
@@ -215,7 +212,6 @@ def test_process_import_rolls_back_when_monitor_folder_is_deleted_during_pipelin
             pipeline,
             ImportRuntimeConfig(
                 storage_root=Path("/tmp"),
-                monitor_root=None,
                 audiobook_max_file_bytes=1,
             ),
             _task(),
@@ -334,7 +330,6 @@ def test_process_import_rolls_back_publications_when_final_commit_fails() -> Non
             pipeline,
             ImportRuntimeConfig(
                 storage_root=Path("/tmp"),
-                monitor_root=None,
                 audiobook_max_file_bytes=1,
             ),
             _task(),

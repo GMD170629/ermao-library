@@ -16,9 +16,10 @@ from app.modules.imports.application.dto import (
 from app.modules.imports.application.file_types import is_supported_import_filename
 from app.modules.imports.application.import_support import parse_series_volume_info
 from app.modules.imports.application.monitor_paths import (
+    MonitorPathError,
     is_inside_path,
     monitor_directory_tree_node,
-    normalize_monitor_root_path,
+    resolve_monitor_folder_path,
     target_directory_from_path,
 )
 from app.modules.imports.application.ports import ImportUnitOfWork
@@ -42,6 +43,7 @@ __all__ = [
     "ImportResult",
     "ImportTaskDTO",
     "ImportUnitOfWork",
+    "MonitorPathError",
     "ParsedReleaseTitle",
     "SaveUploadedFiles",
     "SaveUploadedFilesCommand",
@@ -56,10 +58,10 @@ __all__ = [
     "is_inside_path",
     "is_supported_import_filename",
     "monitor_directory_tree_node",
-    "normalize_monitor_root_path",
     "parse_release_title",
     "parse_series_volume_info",
     "reset_failed_import_checkpoint",
+    "resolve_monitor_folder_path",
     "safe_upload_filename",
     "target_directory_from_path",
 ]

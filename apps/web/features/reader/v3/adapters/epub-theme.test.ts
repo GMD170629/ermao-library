@@ -20,6 +20,15 @@ test('EPUB theme keeps vertical page spacing enforced after epub.js writes layou
   assert.doesNotMatch(paginated, /scrollbar-width: none/);
 });
 
+test('EPUB theme repaints the Foliate paginator background on the current page', () => {
+  const snapshot = createEpubThemeSnapshot({
+    ...DEFAULT_READER_PREFERENCES,
+    appearance: { theme: 'black' }
+  });
+
+  assert.match(snapshot, /--theme-bg-color: #000000/);
+});
+
 test('EPUB theme keeps the selected line height on the body while descendants inherit it', () => {
   const snapshot = createEpubThemeSnapshot({
     ...DEFAULT_READER_PREFERENCES,

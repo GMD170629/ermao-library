@@ -10,6 +10,7 @@ import os
 import re
 import threading
 import zipfile
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from email.utils import format_datetime, parsedate_to_datetime
 from pathlib import Path
@@ -41,7 +42,13 @@ SMALL_COVER_CACHE_VERSION = 1
 SMALL_COVER_QUALITIES = (82, 74, 66, 58, 50, 42, 34, 26, 18, 10)
 
 
-def _stored_path(path_value: str | None, settings: Settings) -> Path | None:
+def _stored_path(
+    path_value: str | None,
+    settings: Settings,
+    allowed_source_roots: Iterable[Path] = (),
+    *,
+    database_backed: bool = False,
+) -> Path | None:
     if not path_value:
         return None
     path = Path(path_value)
@@ -52,10 +59,11 @@ def _stored_path(path_value: str | None, settings: Settings) -> Path | None:
         storage = settings.resolved_storage_root.resolve()
         if resolved == storage or storage in resolved.parents:
             return resolved
-        monitor = settings.resolved_monitor_root
-        if monitor:
-            monitor = monitor.resolve()
-            if resolved == monitor or monitor in resolved.parents:
+        if database_backed and path.is_absolute():
+            return resolved
+        for source_root in allowed_source_roots:
+            root = source_root.resolve()
+            if resolved == root or root in resolved.parents:
                 return resolved
     except OSError:
         return None
@@ -926,8 +934,19 @@ def _send_comic_page_zip_entry(
     )
 
 
-def stored_path(path_value: str | None, settings: Settings) -> Path | None:
-    return _stored_path(path_value, settings)
+def stored_path(
+    path_value: str | None,
+    settings: Settings,
+    allowed_source_roots: Iterable[Path] = (),
+    *,
+    database_backed: bool = False,
+) -> Path | None:
+    return _stored_path(
+        path_value,
+        settings,
+        allowed_source_roots,
+        database_backed=database_backed,
+    )
 
 
 def send_file(

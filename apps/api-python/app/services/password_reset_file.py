@@ -17,7 +17,7 @@ def password_reset_url(app_base_url: str, token: str) -> str:
 
 
 def password_reset_file_path(settings: Settings) -> Path:
-    return (settings.resolved_monitor_root or (settings.resolved_storage_root / "password-reset")) / RESET_FILE_NAME
+    return settings.resolved_storage_root / "password-reset" / RESET_FILE_NAME
 
 
 def write_password_reset_file(settings: Settings, reset_url: str, locale: str = DEFAULT_LOCALE) -> Path:

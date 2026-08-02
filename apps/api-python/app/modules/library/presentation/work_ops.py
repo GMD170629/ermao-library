@@ -100,8 +100,6 @@ def _delete_storage_paths(paths: list[Path], settings: Settings) -> dict[str, An
 
 def _monitor_source_roots(db: Session, settings: Settings) -> list[Path]:
     roots: list[Path] = []
-    if settings.resolved_monitor_root:
-        roots.append(settings.resolved_monitor_root)
     roots.extend(
         Path(root_path).expanduser()
         for root_path in import_http_store.list_monitor_root_paths(db)
@@ -139,6 +137,8 @@ def _source_delete_path(
         resolved = path.resolve()
     except OSError:
         return None
+    if roots is None and path.is_absolute():
+        return resolved
     allowed_roots = roots if roots is not None else _source_delete_roots(db, settings)
     if any(resolved != root and root in resolved.parents for root in allowed_roots):
         return resolved
@@ -149,15 +149,18 @@ def _collect_work_source_paths(
     db: Session, work_id: str, settings: Settings
 ) -> list[Path]:
     paths: list[Path] = []
-    delete_roots = _source_delete_roots(db, settings)
-
     def add(path_value: str | None, roots: list[Path]) -> None:
         path = _source_delete_path(path_value, db, settings, roots)
         if path:
             paths.append(path)
 
     for source_path in import_http_store.list_import_source_paths_for_work(db, work_id):
-        add(source_path, delete_roots)
+        try:
+            database_path = Path(source_path).expanduser().resolve()
+        except (OSError, RuntimeError):
+            continue
+        if database_path.is_absolute():
+            paths.append(database_path)
     # Older records may not retain an ImportTask link. In that case a library
     # file living in a monitor folder is the best available source-file signal.
     if not paths and _has_table(db, "LibraryFile"):

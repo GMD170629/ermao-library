@@ -112,7 +112,9 @@ def get_file(
         return fail("文件不存在", status_code=404, code="FILE_NOT_FOUND")
     file = media_resource_query(db).get_file(file_id)
     return media_streaming.send_file(
-        media_streaming.stored_path(file.path if file else None, settings),
+        media_streaming.stored_path(
+            file.path if file else None, settings, database_backed=True
+        ),
         request,
         user.id,
         media_type=file.mime_type if file else None,
@@ -140,7 +142,9 @@ def get_volume_file(
         return fail("卷册不存在", status_code=404, code="VOLUME_NOT_FOUND")
     file = media_resource_query(db).first_volume_file(volume_id)
     return media_streaming.send_file(
-        media_streaming.stored_path(file.path if file else None, settings),
+        media_streaming.stored_path(
+            file.path if file else None, settings, database_backed=True
+        ),
         request,
         user.id,
         media_type=file.mime_type if file else None,
@@ -176,7 +180,9 @@ def get_cover(
     cover_id = work_id or volume_id or "cover"
     if not work_id and not volume_id:
         return fail("条目不存在", status_code=404)
-    cover_path = media_streaming.stored_path(cover_path_value, settings)
+    cover_path = media_streaming.stored_path(
+        cover_path_value, settings, database_backed=True
+    )
     if (
         cover_path is None
         or not cover_path.is_file()
@@ -309,7 +315,9 @@ def get_volume_page(
         metadata = _parse_json(unit.get("metadataJson"), {})
         entry_name = metadata.get("zipEntryName") or unit.get("href")
         return media_streaming.send_comic_page_zip_entry(
-            media_streaming.stored_path(file.get("path"), settings),
+            media_streaming.stored_path(
+                file.get("path"), settings, database_backed=True
+            ),
             entry_name,
             request,
             user.id,
@@ -319,7 +327,9 @@ def get_volume_page(
             file_id=unit.get("id") or f"{volume_id}:{page_index}",
         )
     return media_streaming.send_comic_page_file(
-        media_streaming.stored_path(unit.get("href"), settings),
+        media_streaming.stored_path(
+            unit.get("href"), settings, database_backed=True
+        ),
         request,
         user.id,
         settings,

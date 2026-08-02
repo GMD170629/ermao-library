@@ -41,6 +41,9 @@ export function createEpubThemeSnapshot(preferences: ReaderPreferences, resolved
     ${hiddenScrollbar}
     :root {
       color-scheme: ${tokens.colorScheme} !important;
+      /* Foliate uses this public variable to repaint the paginator background
+         that surrounds the current iframe without waiting for a page turn. */
+      --theme-bg-color: ${tokens.background};
       --shuku-reader-background: ${tokens.background};
       --shuku-reader-color: ${tokens.color};
       --shuku-reader-link: ${tokens.link};

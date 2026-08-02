@@ -229,9 +229,7 @@ def main() -> None:
         for path in [monitor_root, storage_root, inbox, sample_dir]:
             path.mkdir(parents=True, exist_ok=True)
 
-        settings = Settings(
-            storage_root=str(storage_root), monitor_root=str(monitor_root)
-        )
+        settings = Settings(storage_root=str(storage_root))
         engine = create_sqlite_engine(settings.database_path)
         bootstrap_database(engine, settings)
         engine.dispose()
@@ -239,7 +237,6 @@ def main() -> None:
         env = {
             **os.environ,
             "SESSION_SECRET": "runtime-smoke-session-secret-32chars",
-            "MONITOR_ROOT": str(monitor_root),
             "STORAGE_ROOT": str(storage_root),
             "DOWNLOAD_INBOX_PATH": str(inbox),
         }

@@ -16,9 +16,10 @@ from app.core.time import timestamp_ms_to_iso
 from app.models.library import LibraryWork
 from app.modules.imports.application.dto import ImportTaskDTO
 from app.modules.imports.application.monitor_paths import (
+    MonitorPathError,
     is_inside_path,
     monitor_directory_tree_node,
-    normalize_monitor_root_path,
+    resolve_monitor_folder_path,
 )
 
 
@@ -179,8 +180,9 @@ __all__ = [
     "friendly_import_error",
     "import_task_view",
     "is_inside_path",
+    "MonitorPathError",
     "monitor_directory_tree_node",
-    "normalize_monitor_root_path",
+    "resolve_monitor_folder_path",
     "serialize_import_log",
 ]
 

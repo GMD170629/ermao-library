@@ -31,26 +31,18 @@ WEB_PORT="${WEB_PORT:-3000}"
 WEB_HOST="${WEB_HOST:-0.0.0.0}"
 NEXT_INTERNAL_PORT="${NEXT_INTERNAL_PORT:-3001}"
 WEB_MODE="${WEB_MODE:-dev}"
-MONITOR_ROOT="${MONITOR_ROOT:-$ROOT_DIR/books}"
 STORAGE_ROOT="${STORAGE_ROOT:-$ROOT_DIR/storage}"
 SESSION_SECRET="${SESSION_SECRET:-dev-test-session-secret-change-me-at-least-32-chars}"
 
-case "$MONITOR_ROOT" in
-  /*) ;;
-  *) MONITOR_ROOT="$ROOT_DIR/$MONITOR_ROOT" ;;
-esac
 case "$STORAGE_ROOT" in
   /*) ;;
   *) STORAGE_ROOT="$ROOT_DIR/$STORAGE_ROOT" ;;
 esac
 
-if [ ! -d "$MONITOR_ROOT" ]; then
-  mkdir -p "$MONITOR_ROOT"
-fi
 mkdir -p "$STORAGE_ROOT/database"
 DATABASE_PATH="$STORAGE_ROOT/database/shuku.sqlite3"
 
-export MONITOR_ROOT STORAGE_ROOT SESSION_SECRET WEB_PORT
+export STORAGE_ROOT SESSION_SECRET WEB_PORT
 
 (
   cd apps/api-python
@@ -63,7 +55,6 @@ echo "  Web mode:     $WEB_MODE"
 echo "  Health check: http://localhost:$WEB_PORT/api/health"
 echo "  Python API:   http://127.0.0.1:$PYTHON_API_PORT"
 echo "  Database:     $DATABASE_PATH"
-echo "  Monitor root: $MONITOR_ROOT"
 echo "  Storage root: $STORAGE_ROOT"
 if command -v ipconfig >/dev/null 2>&1; then
   LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || true)"
@@ -75,7 +66,6 @@ fi
 (
   cd apps/api-python
   exec env \
-  MONITOR_ROOT="$MONITOR_ROOT" \
     STORAGE_ROOT="$STORAGE_ROOT" \
     SESSION_SECRET="$SESSION_SECRET" \
     uv run --extra dev uvicorn app.main:app --host 127.0.0.1 --port "$PYTHON_API_PORT"
@@ -96,7 +86,6 @@ done
 (
   cd apps/api-python
   exec env \
-  MONITOR_ROOT="$MONITOR_ROOT" \
     STORAGE_ROOT="$STORAGE_ROOT" \
     SESSION_SECRET="$SESSION_SECRET" \
     MONITOR_REFRESH_INTERVAL_MS="${MONITOR_REFRESH_INTERVAL_MS:-10000}" \

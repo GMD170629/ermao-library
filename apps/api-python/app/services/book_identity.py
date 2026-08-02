@@ -81,9 +81,6 @@ def logical_import_path(db: Session, settings: Settings, path: Path, original_na
                     continue
     except Exception:
         roots = []
-    if settings.resolved_monitor_root is not None:
-        roots.append((settings.resolved_monitor_root.name or "monitor", settings.resolved_monitor_root))
-
     matching = [(name, root) for name, root in roots if resolved == root or root in resolved.parents]
     if matching:
         name, root = max(matching, key=lambda item: len(item[1].parts))

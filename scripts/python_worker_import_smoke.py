@@ -23,7 +23,7 @@ from tests.test_worker_importer import write_epub_fixture  # noqa: E402
 
 
 def setup_database(storage_root: Path, monitor_root: Path) -> str:
-    settings = Settings(storage_root=str(storage_root), monitor_root=str(monitor_root))
+    settings = Settings(storage_root=str(storage_root))
     engine = create_sqlite_engine(settings.database_path)
     bootstrap_database(engine, settings)
     with engine.begin() as db:
@@ -121,7 +121,6 @@ def main() -> None:
         env = {
             **os.environ,
             "SESSION_SECRET": "runtime-smoke-session-secret-32chars",
-            "MONITOR_ROOT": str(monitor_root),
             "STORAGE_ROOT": str(storage_root),
             "SCAN_WORKER_READY_FILE": str(ready_file),
             "MONITOR_REFRESH_INTERVAL_MS": "1000",

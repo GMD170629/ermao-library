@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.models.settings import MonitorFolder
 from app.modules.system.domain.health import health_check_item, overall_health_status
 from app.services.text_conversion import converter_capability
 
@@ -17,21 +18,30 @@ from app.services.text_conversion import converter_capability
 def _env_check(name: str, value: str | None, required: bool = True) -> dict[str, str]:
     if required and not value:
         return health_check_item(name, "error", f"{name} 未配置")
-    return health_check_item(name, "ok" if value else "unknown", "已配置" if value else "未配置")
+    return health_check_item(
+        name, "ok" if value else "unknown", "已配置" if value else "未配置"
+    )
 
 
-def _check_monitor_root(path: Path | None) -> dict[str, str] | None:
-    if path is None:
-        return None
-    if not path.exists():
-        return health_check_item("monitorRootReadable", "error", f"监控文件夹不存在：{path}")
-    if not path.is_dir():
-        return health_check_item("monitorRootReadable", "error", "监控文件夹不是目录")
-    try:
-        next(path.iterdir(), None)
-    except OSError as exc:
-        return health_check_item("monitorRootReadable", "error", f"监控文件夹不可读：{exc}")
-    return health_check_item("monitorRootReadable", "ok", "监控文件夹可读")
+def _check_monitor_folders(paths: list[Path]) -> dict[str, str]:
+    if not paths:
+        return health_check_item(
+            "monitorRootReadable", "unknown", "未启用监控文件夹"
+        )
+    for path in paths:
+        if not path.exists() or not path.is_dir():
+            return health_check_item(
+                "monitorRootReadable", "error", f"监控文件夹不存在：{path}"
+            )
+        try:
+            next(path.iterdir(), None)
+        except OSError as exc:
+            return health_check_item(
+                "monitorRootReadable", "error", f"监控文件夹不可读：{exc}"
+            )
+    return health_check_item(
+        "monitorRootReadable", "ok", f"{len(paths)} 个监控文件夹可读"
+    )
 
 
 def _check_storage_root(path: Path) -> dict[str, str]:
@@ -52,18 +62,22 @@ def probe_database(db: Session) -> None:
 def run_system_health_checks(db: Session, settings: Settings) -> dict[str, object]:
     checks: list[dict[str, Any]] = [
         _env_check("SESSION_SECRET", settings.session_secret, required=False),
-        _env_check("MONITOR_ROOT", settings.monitor_root),
     ]
 
     try:
         probe_database(db)
         checks.append(health_check_item("database", "ok", "数据库可连接"))
-    except Exception as exc:  # noqa: BLE001 - health checks should report the raw failure.
+    except Exception as exc:  # noqa: BLE001 - health checks report failures.
         checks.append(health_check_item("database", "error", f"数据库不可用：{exc}"))
 
-    monitor_check = _check_monitor_root(settings.resolved_monitor_root)
-    if monitor_check:
-        checks.append(monitor_check)
+    monitor_paths = [
+        Path(path)
+        for path in db.scalars(
+            select(MonitorFolder.root_path).where(MonitorFolder.enabled.is_(True))
+        ).all()
+        if path
+    ]
+    checks.append(_check_monitor_folders(monitor_paths))
     checks.append(_check_storage_root(settings.resolved_storage_root))
     conversion = converter_capability(settings)
     conversion_message = (
@@ -81,7 +95,4 @@ def run_system_health_checks(db: Session, settings: Settings) -> dict[str, objec
     conversion_check["details"] = conversion
     checks.append(conversion_check)
 
-    return {
-        "status": overall_health_status(checks),
-        "checks": checks,
-    }
+    return {"status": overall_health_status(checks), "checks": checks}

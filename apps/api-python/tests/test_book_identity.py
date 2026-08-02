@@ -263,7 +263,7 @@ def test_identity_cache_with_old_parser_version_is_refreshed(db_session, test_se
 
 
 def test_enabled_ai_is_fallback_for_incomplete_regex_and_receives_monitor_relative_path(db_session, test_settings, tmp_path, monkeypatch):
-    monitor = Path(test_settings.monitor_root)
+    monitor = test_settings.resolved_monitor_root
     source_dir = monitor / "novels"
     source_dir.mkdir(parents=True)
     source = source_dir / "messy-name.epub"
@@ -306,7 +306,7 @@ def test_enabled_ai_is_fallback_for_incomplete_regex_and_receives_monitor_relati
     assert identity.title == "星舰小说"
     assert identity.author == "作者甲"
     assert identity.volume_index == 2
-    assert identity.logical_path == f"{monitor.name}/novels/messy-name.epub"
+    assert identity.logical_path == "messy-name.epub"
     request_body = json.loads(requests[0][0].data.decode("utf-8"))
     assert request_body["messages"][1]["content"] == identity.logical_path
     assert str(tmp_path) not in request_body["messages"][1]["content"]
