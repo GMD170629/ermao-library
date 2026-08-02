@@ -202,6 +202,7 @@ class WorkDetailVolume(HttpContractModel):
 class WorkDetailMediaVersion(HttpContractModel):
     id: str
     media_kind: MediaKind = Field(alias="mediaKind")
+    completed: bool
     volume_count: int = Field(alias="volumeCount")
     size_bytes: int = Field(alias="sizeBytes")
     volumes: list[WorkDetailVolume]

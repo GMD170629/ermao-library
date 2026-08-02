@@ -1,5 +1,6 @@
-from app.services.book_identity import identity_merge_key
 from sqlalchemy import text
+
+from app.services.book_identity import identity_merge_key
 from tests.test_compat_api import _login, create_organize_detail_tables
 from tests.test_worker_importer import create_worker_tables
 
@@ -220,7 +221,7 @@ def test_work_and_organize_views_expose_optional_lookup_status(client, db_sessio
     db_session.commit()
     _login(client, db_session)
 
-    work = client.get("/api/works/work-status")
+    work = client.get("/api/works/work-status", params={"detailTab": "STRUCTURE"})
     job = client.get("/api/organize/jobs/job-status")
 
     assert work.status_code == 200

@@ -604,6 +604,7 @@ def _work_detail_summary_view(book: dict[str, Any]) -> dict[str, Any]:
             {
                 "id": media_version["id"],
                 "mediaKind": media_version["mediaKind"],
+                "completed": media_version["completed"],
                 "volumeCount": media_version["volumeCount"],
                 "sizeBytes": media_version["sizeBytes"],
                 "volumes": [
@@ -985,9 +986,7 @@ def _work_volume_page_view(
         LibraryVolume.hidden.is_(False),
         volume_visibility_predicate(context),
     ]
-    total = int(
-        db.scalar(select(func.count(LibraryVolume.id)).where(*filters)) or 0
-    )
+    total = int(db.scalar(select(func.count(LibraryVolume.id)).where(*filters)) or 0)
     bounded_page_size = min(100, max(1, page_size))
     total_pages = max(1, (total + bounded_page_size - 1) // bounded_page_size)
     bounded_page = min(max(1, page), total_pages)

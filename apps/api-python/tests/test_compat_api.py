@@ -14,6 +14,9 @@ from threading import Thread
 from urllib.parse import parse_qs, quote, urlparse
 
 import pytest
+from PIL import Image, ImageDraw
+from sqlalchemy import event, func, select, text
+
 from app.bootstrap.imports import (
     ImportWorkerRuntime,
     import_managed_book,
@@ -36,8 +39,6 @@ from app.services.organize_service import (
     douban_candidates,
     system_settings,
 )
-from PIL import Image, ImageDraw
-from sqlalchemy import event, func, select, text
 from tests.test_worker_importer import (
     create_worker_tables,
     write_comic_fixture,
@@ -1479,9 +1480,9 @@ def test_work_detail_empty_epub_and_comic_return_reading_units_page(client, db_s
             "total": 0,
             "totalPages": 1,
         }
-    comic = client.get(
-        "/api/works/comic-detail", params={"detailTab": "COMIC"}
-    ).json()["data"]
+    comic = client.get("/api/works/comic-detail", params={"detailTab": "COMIC"}).json()[
+        "data"
+    ]
     assert comic["activeMedia"]["selectedVolumeId"] == "comic-detail-volume"
 
 
@@ -3584,7 +3585,9 @@ def test_monitor_folder_and_system_settings_mutations(
     second_root = test_settings.resolved_monitor_root.parent / "second-inbox"
     second_root.mkdir(parents=True)
     monitor_alias = test_settings.resolved_monitor_root.parent / "monitor-alias"
-    monitor_alias.symlink_to(test_settings.resolved_monitor_root, target_is_directory=True)
+    monitor_alias.symlink_to(
+        test_settings.resolved_monitor_root, target_is_directory=True
+    )
     db_session.execute(
         text(
             "CREATE TABLE IF NOT EXISTS Shelf (id TEXT PRIMARY KEY, ownerUserId TEXT, name TEXT NOT NULL, description TEXT, kind TEXT NOT NULL DEFAULT 'STATIC', rulesJson TEXT NOT NULL DEFAULT '{}', pinned INTEGER NOT NULL DEFAULT 0, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)"
@@ -3637,9 +3640,7 @@ def test_monitor_folder_and_system_settings_mutations(
         "/api/monitor-folders/tree", params={"path": str(second_root)}
     )
     assert outside_tree.status_code == 200
-    assert outside_tree.json()["data"]["node"]["path"] == str(
-        second_root.resolve()
-    )
+    assert outside_tree.json()["data"]["node"]["path"] == str(second_root.resolve())
 
     missing_tree = client.get(
         "/api/monitor-folders/tree",
@@ -3704,10 +3705,7 @@ def test_monitor_folder_and_system_settings_mutations(
         json={"name": "Relative", "rootPath": "books"},
     )
     assert relative_path.status_code == 400
-    assert (
-        relative_path.json()["error"]["code"]
-        == "MONITOR_FOLDER_PATH_NOT_ABSOLUTE"
-    )
+    assert relative_path.json()["error"]["code"] == "MONITOR_FOLDER_PATH_NOT_ABSOLUTE"
 
     unavailable_path = client.post(
         "/api/monitor-folders",
@@ -3725,10 +3723,7 @@ def test_monitor_folder_and_system_settings_mutations(
             json={"name": "Unreadable", "rootPath": str(second_root)},
         )
     assert unreadable_path.status_code == 400
-    assert (
-        unreadable_path.json()["error"]["code"]
-        == "MONITOR_FOLDER_PATH_UNREADABLE"
-    )
+    assert unreadable_path.json()["error"]["code"] == "MONITOR_FOLDER_PATH_UNREADABLE"
 
     second = client.post(
         "/api/monitor-folders",
@@ -3763,9 +3758,10 @@ def test_monitor_folder_delete_rolls_back_when_audit_event_fails(
     test_settings,
     monkeypatch,
 ):
+    from sqlalchemy import select
+
     from app.bootstrap import system as system_bootstrap
     from app.models.settings import MonitorFolder
-    from sqlalchemy import select
 
     test_settings.resolved_monitor_root.mkdir(parents=True)
     _login(client, db_session)
@@ -3889,7 +3885,10 @@ def test_raw_text_detail_exposes_deferred_epub_conversion(
         ),
     )
 
-    detail = client.get(f"/api/works/{imported.work_id}")
+    detail = client.get(
+        f"/api/works/{imported.work_id}",
+        params={"detailTab": "EBOOK", "volumeId": imported.volume_id},
+    )
     assert detail.status_code == 200
     raw_media = detail.json()["data"]["book"]["mediaVersions"][0]
     raw_volume = raw_media["volumes"][0]
@@ -5747,8 +5746,9 @@ def test_backup_listing_keeps_legacy_automatic_files_manual_only(
 def test_upload_saves_to_monitored_directory_without_creating_import_task(
     client, db_session, test_settings, tmp_path
 ):
-    from app.models.import_pipeline import ImportTask
     from sqlalchemy import func, select
+
+    from app.models.import_pipeline import ImportTask
 
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
@@ -5785,8 +5785,9 @@ def test_upload_saves_to_monitored_directory_without_creating_import_task(
 def test_upload_to_unmonitored_directory_only_saves_files(
     client, db_session, test_settings, tmp_path
 ):
-    from app.models.import_pipeline import ImportTask
     from sqlalchemy import func, select
+
+    from app.models.import_pipeline import ImportTask
 
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
@@ -5923,11 +5924,12 @@ def test_upload_rolls_back_files_when_atomic_publication_fails(
     tmp_path,
     monkeypatch,
 ):
+    from sqlalchemy import func, select
+
     from app.models.import_pipeline import ImportTask
     from app.modules.imports.infrastructure.uploaded_file_publication import (
         AtomicUploadedFilePublisher,
     )
-    from sqlalchemy import func, select
 
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
