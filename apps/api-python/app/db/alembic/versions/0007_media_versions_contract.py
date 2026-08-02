@@ -51,6 +51,38 @@ def _assert_no_null(table_name: str, column_name: str) -> None:
         )
 
 
+def _discard_invalid_conversion_tasks() -> None:
+    """Drop legacy conversion jobs that cannot satisfy the volume contract."""
+
+    connection = op.get_bind()
+    metadata = sa.MetaData()
+    conversion = sa.Table(
+        "BookConversionTask", metadata, autoload_with=connection
+    )
+    import_task = sa.Table("ImportTask", metadata, autoload_with=connection)
+    volume = sa.Table("LibraryVolume", metadata, autoload_with=connection)
+    valid_import_tasks = sa.select(import_task.c.id)
+    valid_volumes = sa.select(volume.c.id)
+    connection.execute(
+        sa.delete(conversion).where(
+            sa.or_(
+                conversion.c.sourceVolumeId.is_(None),
+                conversion.c.idempotencyKey.is_(None),
+                conversion.c.importTaskId.not_in(valid_import_tasks),
+                conversion.c.sourceVolumeId.not_in(valid_volumes),
+            )
+        )
+    )
+    connection.execute(
+        sa.update(conversion)
+        .where(
+            conversion.c.derivedVolumeId.is_not(None),
+            conversion.c.derivedVolumeId.not_in(valid_volumes),
+        )
+        .values(derivedVolumeId=None)
+    )
+
+
 def _drop_index_if_present(batch_op, table_name: str, index_name: str) -> None:
     if index_name in _indexes(table_name):
         batch_op.drop_index(index_name)
@@ -176,6 +208,8 @@ def _repoint_import_task_foreign_key(table_name: str) -> None:
 
 
 def upgrade() -> None:
+    _discard_invalid_conversion_tasks()
+
     for table_name, column_name in (
         ("LibraryVolume", "mediaVersionId"),
         ("LibraryVolume", "format"),

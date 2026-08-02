@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-import pytest
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
@@ -302,7 +301,7 @@ def test_0003_upgrade_merges_same_media_editions_without_losing_volumes(
         engine.dispose()
 
 
-def test_contract_rejects_conversion_without_source_volume_without_deleting_it(
+def test_contract_discards_conversion_without_source_volume_and_completes_upgrade(
     tmp_path,
 ) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage-invalid-conversion"))
@@ -352,18 +351,29 @@ def test_contract_rejects_conversion_without_source_volume_without_deleting_it(
                 )
             )
 
-        with pytest.raises(RuntimeError, match="backfill incomplete"):
-            apply_schema(engine, settings)
-
+        _run_alembic(
+            engine,
+            lambda config: command.upgrade(config, "0006_media_versions_backfill"),
+        )
         with engine.connect() as connection:
-            assert (
-                connection.scalar(select(_table(engine, "BookConversionTask").c.id))
-                == "orphaned-conversion"
-            )
             assert (
                 MigrationContext.configure(connection).get_current_revision()
                 == "0006_media_versions_backfill"
             )
-            assert "LibraryEdition" in inspect(connection).get_table_names()
+
+        apply_schema(engine, settings)
+
+        with engine.connect() as connection:
+            assert connection.scalar(
+                select(_table(engine, "BookConversionTask").c.id)
+            ) is None
+            assert connection.scalar(select(_table(engine, "ImportTask").c.id)) == (
+                "orphaned-import"
+            )
+            assert head_revision(engine) == "0007_media_versions_contract"
+            assert "LibraryEdition" not in inspect(connection).get_table_names()
+
+        apply_schema(engine, settings)
+        assert head_revision(engine) == "0007_media_versions_contract"
     finally:
         engine.dispose()
