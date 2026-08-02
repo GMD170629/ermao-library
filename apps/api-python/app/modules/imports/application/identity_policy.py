@@ -4,8 +4,137 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from difflib import SequenceMatcher
 
 UNKNOWN_AUTHOR = "未知作者"
+DIRECTORY_TITLE_SIMILARITY_THRESHOLD = 0.70
+
+_CJK_VOLUME_MARKER = (
+    "(?:"
+    + "|".join(chr(codepoint) for codepoint in (0x5377, 0x518A, 0x518C, 0x96C6, 0x5DFB))
+    + ")"
+)
+_CJK_ORDINAL_PREFIX = chr(0x7B2C)
+_VOLUME_NUMBER = r"\d+(?:\.\d+)?"
+_EXPLICIT_VOLUME_PATTERN = re.compile(
+    rf"(?:vol(?:ume)?\.?|v)\s*(?P<latin_number>{_VOLUME_NUMBER})"
+    rf"|(?:{_CJK_ORDINAL_PREFIX}\s*)?(?P<suffixed_number>{_VOLUME_NUMBER})\s*{_CJK_VOLUME_MARKER}"
+    rf"|{_CJK_VOLUME_MARKER}\s*(?:{_CJK_ORDINAL_PREFIX}\s*)?(?P<prefixed_number>{_VOLUME_NUMBER})",
+    re.IGNORECASE,
+)
+_VOLUME_RANGE_SEPARATOR = rf"[-~{chr(0x81F3)}{chr(0x5230)}]"
+_VOLUME_RANGE_ENDPOINT = (
+    rf"(?:(?:vol(?:ume)?\.?|v|{_CJK_VOLUME_MARKER})\s*(?:{_CJK_ORDINAL_PREFIX}\s*)?{_VOLUME_NUMBER}"
+    rf"|(?:{_CJK_ORDINAL_PREFIX}\s*)?{_VOLUME_NUMBER}\s*{_CJK_VOLUME_MARKER}?"
+    rf"|{_VOLUME_NUMBER})"
+)
+_EXPLICIT_VOLUME_RANGE_PATTERN = re.compile(
+    rf"{_VOLUME_RANGE_ENDPOINT}\s*{_VOLUME_RANGE_SEPARATOR}\s*"
+    rf"{_VOLUME_RANGE_ENDPOINT}",
+    re.IGNORECASE,
+)
+_RANGE_VOLUME_UNIT = (
+    "(?:"
+    + "|".join(
+        chr(codepoint)
+        for codepoint in (0x5377, 0x518A, 0x518C, 0x96C6, 0x8BDD, 0x7AE0, 0x56DE)
+    )
+    + ")"
+)
+_VOLUME_RANGE_START_PATTERN = re.compile(
+    rf"(?P<prefix>vol(?:ume)?\.?|v|{_CJK_ORDINAL_PREFIX}|{_RANGE_VOLUME_UNIT})?\s*"
+    rf"(?P<start>{_VOLUME_NUMBER})\s*(?P<start_unit>{_RANGE_VOLUME_UNIT})?\s*"
+    rf"{_VOLUME_RANGE_SEPARATOR}\s*"
+    rf"(?P<end_prefix>vol(?:ume)?\.?|v|{_CJK_ORDINAL_PREFIX}|{_RANGE_VOLUME_UNIT})?\s*"
+    rf"(?P<end>{_VOLUME_NUMBER})\s*(?P<end_unit>{_RANGE_VOLUME_UNIT})?",
+    re.IGNORECASE,
+)
+
+
+def contains_explicit_volume_range(value: str) -> bool:
+    """Return whether a title describes a range rather than one volume."""
+
+    return _EXPLICIT_VOLUME_RANGE_PATTERN.search(value) is not None
+
+
+def explicit_volume_range_start(value: str) -> float | None:
+    """Return the first number of an explicitly marked publication range.
+
+    A range must contain an ordinal, volume, chapter, episode, or Latin volume
+    marker. This avoids treating ordinary year ranges as publication order.
+    Callers should apply this to a source filename, not a collection folder:
+    an explicitly marked episode range starts at volume 1, while an unmarked
+    numeric range remains a work title.
+    """
+
+    for match in _VOLUME_RANGE_START_PATTERN.finditer(value):
+        if not any(
+            match.group(group)
+            for group in ("prefix", "start_unit", "end_prefix", "end_unit")
+        ):
+            continue
+        start = float(match.group("start"))
+        end = float(match.group("end"))
+        if start > 0 and end >= start:
+            return start
+    return None
+
+
+def split_explicit_volume(value: str) -> tuple[str, float] | None:
+    """Remove and return an explicit volume marker wherever it appears.
+
+    Explicit numeric markers are unambiguous enough to occur before, inside,
+    or after a publication title.
+    A marker that belongs to a volume range describes a collection rather than
+    one publication and is therefore ignored.
+    """
+
+    if contains_explicit_volume_range(value):
+        return None
+    for match in _EXPLICIT_VOLUME_PATTERN.finditer(value):
+        if _explicit_marker_belongs_to_range(value, match.start(), match.end()):
+            continue
+        number = (
+            match.group("latin_number")
+            or match.group("suffixed_number")
+            or match.group("prefixed_number")
+        )
+        volume_index = float(number)
+        if volume_index <= 0:
+            continue
+        title = _title_without_marker(value, match.start(), match.end())
+        if title:
+            return title, volume_index
+    return None
+
+
+def _explicit_marker_belongs_to_range(value: str, start: int, end: int) -> bool:
+    marker_before_range = re.match(
+        rf"^\s*{_VOLUME_RANGE_SEPARATOR}\s*"
+        rf"(?:(?:vol(?:ume)?\.?|v|{_CJK_VOLUME_MARKER})\s*|(?:{_CJK_ORDINAL_PREFIX}\s*)?)?\d",
+        value[end:],
+        re.IGNORECASE,
+    )
+    marker_after_range = re.search(
+        rf"(?:{_VOLUME_NUMBER}\s*{_CJK_VOLUME_MARKER}?|"
+        rf"(?:vol(?:ume)?\.?|v|{_CJK_VOLUME_MARKER})\s*{_VOLUME_NUMBER})"
+        rf"\s*{_VOLUME_RANGE_SEPARATOR}\s*$",
+        value[:start],
+        re.IGNORECASE,
+    )
+    return marker_before_range is not None or marker_after_range is not None
+
+
+def _title_without_marker(value: str, start: int, end: int) -> str:
+    raw_left = value[:start]
+    raw_right = value[end:]
+    had_separator = bool(
+        re.search(r"[\s._-]$", raw_left) or re.match(r"^[\s._-]", raw_right)
+    )
+    left = raw_left.rstrip(" \t._-")
+    right = raw_right.lstrip(" \t._-")
+    separator = " " if left and right and had_separator else ""
+    return re.sub(r"\s+", " ", f"{left}{separator}{right}").strip()
 
 
 def split_standalone_numeric_volume(value: str) -> tuple[str, float] | None:
@@ -43,6 +172,40 @@ def normalize_identity_part(value: object) -> str:
     ).strip()
 
 
+def normalize_directory_merge_title(value: object) -> str:
+    """Normalize a watched title while treating numeric values as equivalent.
+
+    Numeric runs retain their position but not their value, so ``Series 01
+    Color`` and ``Series 31 Color`` share a directory merge key. Stored display
+    titles and non-watched identities keep their original numbers.
+    """
+
+    return re.sub(r"\d+", "{number}", normalize_identity_part(value))
+
+
+def directory_merge_title_similarity(left: object, right: object) -> float:
+    """Return character similarity for two watched-directory titles.
+
+    Both inputs use the same punctuation, case, width, whitespace, and numeric
+    normalization as directory merge keys. Empty titles never match.
+    """
+
+    left_key = normalize_directory_merge_title(left)
+    right_key = normalize_directory_merge_title(right)
+    if not left_key or not right_key:
+        return 0.0
+    return SequenceMatcher(None, left_key, right_key, autojunk=False).ratio()
+
+
+def directory_merge_titles_match(left: object, right: object) -> bool:
+    """Return whether watched-directory titles meet the merge threshold."""
+
+    return (
+        directory_merge_title_similarity(left, right)
+        >= DIRECTORY_TITLE_SIMILARITY_THRESHOLD
+    )
+
+
 def identity_merge_key(title: str, author: str | None) -> str:
     return (
         f"{normalize_identity_part(title)}:"
@@ -54,9 +217,7 @@ def parse_bracketed_series_identity(
     folder_name: str, filename: str | None = None
 ) -> tuple[str, str] | None:
     raw_parts = re.findall(r"\[([^\]]+)\]", folder_name)
-    if len(raw_parts) < 2 or not re.fullmatch(
-        r"\s*(?:\[[^\]]+\]\s*)+", folder_name
-    ):
+    if len(raw_parts) < 2 or not re.fullmatch(r"\s*(?:\[[^\]]+\]\s*)+", folder_name):
         return None
     parts = [_clean_title(part) for part in raw_parts]
     if not parts[0] or not parts[1]:
@@ -140,9 +301,7 @@ def _strip_volume_suffix(value: str) -> tuple[str, float | None]:
 
 
 def _clean_title(value: str) -> str:
-    cleaned = re.sub(
-        r"\.(?:epub|cbz|zip|pdf|m4b|m4a|mp3)$", "", value, flags=re.I
-    )
+    cleaned = re.sub(r"\.(?:epub|cbz|zip|pdf|m4b|m4a|mp3)$", "", value, flags=re.I)
     return re.sub(r"\s+", " ", cleaned.replace("_", " ")).strip(" ._-")
 
 

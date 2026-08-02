@@ -18,11 +18,17 @@ export type FoliateTocItem = {
   navigationKey?: unknown;
 };
 
+export type FoliateRendition = {
+  layout?: unknown;
+  viewport?: unknown;
+};
+
 export type FoliateBook = {
   sections: FoliateSection[];
   toc?: FoliateTocItem[];
   dir?: unknown;
   metadata?: unknown;
+  rendition?: FoliateRendition;
   transformTarget?: EventTarget;
   resolveHref?: (href: string) => unknown | Promise<unknown>;
   splitTOCHref?: (href: string) => unknown;
@@ -66,6 +72,36 @@ const mimeByFormat: Record<ReflowableFormat, string> = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function positiveDimension(value: unknown): boolean {
+  if (typeof value !== 'string' && typeof value !== 'number') return false;
+  const parsed = typeof value === 'number' ? value : Number.parseFloat(value);
+  return Number.isFinite(parsed) && parsed > 0;
+}
+
+function hasFixedLayoutViewportDimensions(value: unknown): boolean {
+  if (isRecord(value)) {
+    return positiveDimension(value.width) && positiveDimension(value.height);
+  }
+  if (typeof value !== 'string') return false;
+  const dimensions = Object.fromEntries(value
+    .split(/[,;\s]/u)
+    .filter(Boolean)
+    .map((part) => part.split('=').map((token) => token.trim()))
+    .filter((entry): entry is [string, string] => entry.length === 2));
+  return positiveDimension(dimensions.width) && positiveDimension(dimensions.height);
+}
+
+export function normalizeFoliateFixedLayoutViewport(book: FoliateBook): void {
+  const rendition = book.rendition;
+  if (!rendition || rendition.layout !== 'pre-paginated') return;
+  if (hasFixedLayoutViewportDimensions(rendition.viewport)) return;
+
+  // Foliate treats any viewport object, including an empty one, as authoritative.
+  // Removing invalid dimensions lets its fixed-layout renderer use the loaded
+  // page image's natural size instead of leaving the iframe at 300 x 150.
+  book.rendition = { ...rendition, viewport: undefined };
 }
 
 function isFoliateBook(value: unknown): value is FoliateBook {
@@ -160,6 +196,7 @@ export async function openFoliateBook(options: OpenFoliateBookOptions) {
     if (!isFoliateBook(candidate)) {
       throw new NovelOpenError('NOVEL_PARSE_FAILED', 'The parser returned an invalid book');
     }
+    normalizeFoliateFixedLayoutViewport(candidate);
     const removeSecurityTransform = installTransformSecurity(candidate);
     let destroyed = false;
     return {

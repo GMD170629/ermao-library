@@ -21,9 +21,11 @@ from app.modules.imports.application.import_support import (
     _finalize_work_cover,
     _hash_text,
     _id,
+    _import_work_merge_key,
     _insert_identity_metadata,
     _now,
-    _work_merge_key,
+    _source_filename_title,
+    _source_group_key,
 )
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
@@ -65,7 +67,15 @@ def _import_pdf(
     result_type = "comic" if is_image_only else "ebook"
     merge_format = "pdf-comic" if is_image_only else "pdf"
     tags = ["comic", "pdf"] if is_image_only else ["pdf"]
-    merge_key = _work_merge_key(merge_format, identity.title, identity.author)
+    merge_key = _import_work_merge_key(
+        merge_format,
+        identity.title,
+        identity.author,
+        options,
+        identity.volume_index,
+        grouping_key=identity.grouping_key,
+    )
+    source_group_key = _source_group_key(options, identity.title)
     work, created = _ensure_work(
         store,
         queries,
@@ -114,11 +124,7 @@ def _import_pdf(
             columns={
                 "id": _id(),
                 "mediaVersionId": media_version["id"],
-                "title": (
-                    f"第 {identity.volume_index:g} 卷"
-                    if identity.volume_index is not None
-                    else inspection.title or identity.title or source_path.stem
-                ),
+                "title": _source_filename_title(options),
                 "volumeIndex": identity.volume_index,
                 "sortOrder": (
                     int(identity.volume_index * 1000)
@@ -127,6 +133,7 @@ def _import_pdf(
                 ),
                 "format": "PDF",
                 "resourceKey": _file_resource_key("pdf", source_path),
+                "sourceGroupKey": source_group_key,
                 "monitorFolderId": options.monitor_folder_id,
                 "origin": options.origin,
                 "description": inspection.description,

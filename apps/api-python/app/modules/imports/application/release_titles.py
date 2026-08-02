@@ -5,6 +5,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from app.modules.imports.application.identity_policy import (
+    contains_explicit_volume_range,
+    split_explicit_volume,
+)
+
 
 @dataclass(frozen=True)
 class ParsedReleaseTitle:
@@ -13,6 +18,12 @@ class ParsedReleaseTitle:
 
 
 def parse_release_title(value: str) -> ParsedReleaseTitle | None:
+    explicit_volume = split_explicit_volume(value)
+    if explicit_volume is not None:
+        series_name, volume_index = explicit_volume
+        return ParsedReleaseTitle(series_name=series_name, volume_index=volume_index)
+    if contains_explicit_volume_range(value):
+        return None
     normalized = re.sub(r"\s+", " ", value.replace("_", " ").replace("-", " ")).strip()
     for pattern in (
         r"^(.+?)\s*(?:vol\.?|volume)\s*(\d+(?:\.\d+)?)$",

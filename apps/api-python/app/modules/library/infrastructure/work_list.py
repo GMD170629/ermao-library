@@ -25,6 +25,7 @@ from app.modules.library.application.work_list import (
     WorkListResult,
     resolve_page_size,
 )
+from app.modules.library.infrastructure.filter_query import compile_filter_expression
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
 
 
@@ -222,6 +223,15 @@ def _predicates(
                 )
             )
         )
+    if query.filter_expression is not None:
+        dynamic_filter = compile_filter_expression(
+            query.filter_expression,
+            context=context,
+            user_id=user.id,
+            shelf_owner_user_id=user.id,
+        )
+        if dynamic_filter is not None:
+            predicates.append(dynamic_filter)
     return predicates
 
 

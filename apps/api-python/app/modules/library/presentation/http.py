@@ -144,7 +144,9 @@ from app.modules.library.presentation.work_ops import (
     _source_folder_preview,
 )
 from app.modules.library.public import (
+    InvalidFilterExpression,
     WorkListQuery,
+    parse_filter_expression,
     parse_media_kinds,
 )
 from app.modules.system.presentation.mappers import (
@@ -755,12 +757,16 @@ def list_works(
     page = max(1, page)
     page_size = None if pageSize == 0 else pageSize
     raw_filters = (request.query_params.get("filters") or "").strip()
-    filter_rules: dict[str, Any] | None = None
+    filter_expression = None
     if raw_filters:
         try:
-            filter_rules = json.loads(raw_filters)
+            decoded_filters = json.loads(raw_filters)
         except json.JSONDecodeError:
             _raise_library_error("筛选规则格式不正确", status_code=400)
+        try:
+            filter_expression = parse_filter_expression(decoded_filters)
+        except InvalidFilterExpression as exc:
+            _raise_library_error(str(exc), status_code=400)
     status = (request.query_params.get("status") or "").strip().upper()
     if status == "WANT":
         status = "UNREAD"
@@ -804,7 +810,7 @@ def list_works(
         missing_cover=(request.query_params.get("missingCover") or "").lower()
         == "true",
         new_import=(request.query_params.get("newImport") or "").lower() == "true",
-        filter_rules=filter_rules,
+        filter_expression=filter_expression,
     )
     try:
         result = list_library_works(db, user, query)
@@ -899,12 +905,10 @@ def get_work(
         work,
         user.id,
         volume_limit_per_media=None if navigation_requested else 10,
-        include_files=navigation_requested,
+        include_files=True,
     )
     if not navigation_requested:
-        return WorkDetailSummaryResponse(
-            data={"book": _work_detail_summary_view(book)}
-        )
+        return WorkDetailSummaryResponse(data={"book": _work_detail_summary_view(book)})
     selected_tab = _resolve_detail_tab(
         db, user.id, work_id, book.get("detailTabs", []), detailTab
     )

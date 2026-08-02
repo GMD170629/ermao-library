@@ -556,6 +556,21 @@ def _ensure_audio_work(
     identity: BookIdentityDTO,
     merge_key: str,
 ) -> tuple[dict[str, Any], bool]:
+    if (
+        identity.reused_work_id is None
+        and queries.get_work_by_merge_key(merge_key) is None
+    ):
+        candidates = queries.list_works_by_normalized_identity(
+            _normalize_key(identity.title),
+            _normalize_key(identity.author),
+            limit=2,
+        )
+        if len(candidates) == 1:
+            identity = replace(
+                identity,
+                reused_work_id=str(candidates[0]["id"]),
+                selection_reason="unique_cross_media_identity",
+            )
     return _ensure_work(
         store,
         queries,

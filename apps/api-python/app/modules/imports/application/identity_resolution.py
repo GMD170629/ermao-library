@@ -86,6 +86,7 @@ def resolve_import_identity(
     path_is_structural = (
         path_identity.source == "existing_work"
         or path_identity.volume_index is not None
+        or path_identity.grouping_kind in {"folder", "explicit"}
     )
     path_is_complete = (
         _valid_title(title) is not None and _valid_author(author) is not None
@@ -101,12 +102,7 @@ def resolve_import_identity(
             if embedded_evidence is not None
             else None
         )
-        if (
-            embedded_evidence is not None
-            and embedded_evidence.source == "pdf_metadata"
-            and _valid_author(author) is None
-            and embedded_author is not None
-        ):
+        if _valid_author(author) is None and embedded_author is not None:
             author = embedded_author
             source = embedded_evidence.source
             confidence = embedded_evidence.confidence
@@ -128,9 +124,7 @@ def resolve_import_identity(
             confidence = embedded_evidence.confidence
             reason = "embedded_metadata_over_incomplete_path"
 
-    if not path_is_structural and (
-        requested_title_value is not None or requested_author_value is not None
-    ):
+    if requested_title_value is not None or requested_author_value is not None:
         if requested_title_value is not None:
             title = requested_title_value
         if requested_author_value is not None:

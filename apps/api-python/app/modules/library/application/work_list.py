@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+
+from app.modules.library.application.filter_ast import FilterExpression
 
 MAX_LIBRARY_PAGE_SIZE = 500
 
@@ -28,7 +29,7 @@ class WorkListQuery:
     tag: str | None = None
     missing_cover: bool = False
     new_import: bool = False
-    filter_rules: dict[str, Any] | None = None
+    filter_expression: FilterExpression | None = None
 
 
 @dataclass(frozen=True)

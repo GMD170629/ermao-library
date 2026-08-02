@@ -8,6 +8,7 @@ import {
   normalizeFoliateInitialLocation,
   parseFoliateRelocateDetail,
   resolveAsynchronousFoliateHref,
+  shouldResolveFoliateTocItem,
   validatedServerToc
 } from './foliate-adapter';
 
@@ -120,4 +121,23 @@ test('validatedServerToc keeps only targets resolved by the current book', async
   assert.deepEqual(toc, [
     { label: '第二节', href: 'filepos:20', navigationKey: 'mobi:valid' }
   ]);
+});
+
+test('does not resolve a fixed-layout section CFI as a text range', () => {
+  assert.equal(shouldResolveFoliateTocItem({
+    cfi: 'epubcfi(/6/2)',
+    fraction: 0.01
+  }, true), false);
+});
+
+test('keeps TOC lookup for reflowable content CFIs without an official TOC item', () => {
+  assert.equal(shouldResolveFoliateTocItem({
+    cfi: 'epubcfi(/6/2!/4/1:2)',
+    fraction: 0.01
+  }, false), true);
+  assert.equal(shouldResolveFoliateTocItem({
+    cfi: 'epubcfi(/6/2!/4/1:2)',
+    fraction: 0.01,
+    tocItem: { label: 'Chapter 1' }
+  }, false), false);
 });

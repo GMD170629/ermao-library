@@ -58,6 +58,10 @@ class BookIdentityDTO:
     reused_work_id: str | None = None
     selection_reason: str | None = None
     evidence: tuple[IdentityEvidenceDTO, ...] = ()
+    grouping_kind: Literal[
+        "folder", "standalone", "monitor_root_file", "explicit", "legacy"
+    ] = "legacy"
+    grouping_key: str | None = None
 
     def raw_metadata(self) -> dict[str, object]:
         return {
@@ -80,6 +84,8 @@ class BookIdentityDTO:
             "cacheHit": self.cache_hit,
             "reusedWorkId": self.reused_work_id,
             "selectionReason": self.selection_reason,
+            "groupingKind": self.grouping_kind,
+            "groupingKey": self.grouping_key,
             "evidence": [
                 {
                     "source": item.source,
@@ -90,6 +96,12 @@ class BookIdentityDTO:
                 for item in self.evidence
             ],
         }
+
+
+@dataclass(frozen=True)
+class DirectorySiblingSnapshotDTO:
+    paths: tuple[Path, ...]
+    complete: bool
 
 
 @dataclass(frozen=True)

@@ -159,6 +159,16 @@ export function parseFoliateRelocateDetail(value: unknown): FoliateRelocateDetai
   } : null;
 }
 
+export function shouldResolveFoliateTocItem(
+  detail: FoliateRelocateDetail,
+  fixedLayout: boolean
+): boolean {
+  if (fixedLayout || detail.tocItem || !detail.cfi) return false;
+  // A section-only CFI such as epubcfi(/6/2) has no content path after `!`.
+  // Foliate's text-range resolver requires that path and cannot resolve it.
+  return detail.cfi.includes('!');
+}
+
 function loadDetail(value: unknown): FoliateLoadDetail | null {
   if (!isRecord(value) || !isRecord(value.doc) || !Number.isInteger(value.index)) return null;
   const candidate = value.doc;
@@ -471,8 +481,10 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     const hasKnownToc = Boolean(detail.tocItem || this.pendingTocSnapshot);
     const view = this.view;
     this.applyRelocate(detail, operation);
-    if (hasKnownToc || !detail.cfi || !view?.getTOCItemOf) return;
-    void view.getTOCItemOf(detail.cfi).then((tocItem) => {
+    const fixedLayout = this.book?.rendition?.layout === 'pre-paginated';
+    const cfi = detail.cfi;
+    if (hasKnownToc || !cfi || !shouldResolveFoliateTocItem(detail, fixedLayout) || !view?.getTOCItemOf) return;
+    void view.getTOCItemOf(cfi).then((tocItem) => {
       if (this.view !== view || (generation !== undefined && !this.isActive(generation))
         || sequence !== this.relocateResolutionSequence || !isRecord(tocItem)) return;
       this.applyRelocate({ ...detail, tocItem }, operation);

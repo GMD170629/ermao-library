@@ -130,6 +130,43 @@ def test_regex_identity_does_not_treat_attached_title_digits_as_volume():
     assert identity.volume_index is None
 
 
+@pytest.mark.parametrize(
+    ("filename", "expected_title", "expected_volume"),
+    [
+        ("第01卷大雄的恐龙.pdf", "大雄的恐龙", 1),
+        ("大雄第02卷宇宙开拓史.pdf", "大雄宇宙开拓史", 2),
+        ("大雄的魔界大冒险 第03卷.pdf", "大雄的魔界大冒险", 3),
+        ("Vol.04 大雄的海底鬼岩城.pdf", "大雄的海底鬼岩城", 4),
+        ("[東京卍復仇者(全彩版)]卷05.pdf", "[東京卍復仇者(全彩版)]", 5),
+        ("册06 大雄的宇宙小战争.pdf", "大雄的宇宙小战争", 6),
+        ("大雄集07铁人兵团.pdf", "大雄铁人兵团", 7),
+        ("大雄与龙骑士 巻08.pdf", "大雄与龙骑士", 8),
+    ],
+)
+def test_regex_identity_recognizes_explicit_volume_at_any_filename_position(
+    filename, expected_title, expected_volume
+):
+    identity = recognize_book_identity_with_regex(f"comic/{filename}")
+
+    assert identity.title == expected_title
+    assert identity.volume_index == expected_volume
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "合集 Vol.01-Vol.24.pdf",
+        "合集 第01卷-第24卷.pdf",
+        "合集 卷01-卷24.pdf",
+        "合集 册01-24.pdf",
+    ],
+)
+def test_regex_identity_does_not_treat_volume_range_as_one_volume(filename):
+    identity = recognize_book_identity_with_regex(f"comic/{filename}")
+
+    assert identity.volume_index is None
+
+
 def test_regex_identity_supports_bracketed_filename_and_dash_filename():
     bracketed = recognize_book_identity_with_regex("电子书/[活着][余华].epub")
     dashed = recognize_book_identity_with_regex(

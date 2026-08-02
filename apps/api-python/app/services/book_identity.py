@@ -16,12 +16,14 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.modules.imports.application.identity_policy import (
+    contains_explicit_volume_range,
+    split_explicit_volume,
     split_standalone_numeric_volume,
 )
 from app.services.metadata_provider_registry import metadata_provider_runtime_config
 
 UNKNOWN_AUTHOR = "未知作者"
-IDENTITY_PARSER_VERSION = 6
+IDENTITY_PARSER_VERSION = 7
 
 
 @dataclass(frozen=True)
@@ -640,6 +642,11 @@ def _clean_download_title(value: str) -> str:
 
 
 def _volume_index(value: str) -> float | None:
+    explicit_volume = split_explicit_volume(value)
+    if explicit_volume is not None:
+        return explicit_volume[1]
+    if contains_explicit_volume_range(value):
+        return None
     for pattern in [
         r"(?:^|\s)(?:vol(?:ume)?\.?|v)\s*(\d+(?:\.\d+)?)\s*$",
         r"(?:^|\s)第\s*(\d+(?:\.\d+)?)\s*(?:卷|冊|册|集)\s*$",
@@ -656,6 +663,11 @@ def _volume_index(value: str) -> float | None:
 
 def _strip_volume_suffix(value: str) -> tuple[str, float | None]:
     cleaned = value.strip()
+    explicit_volume = split_explicit_volume(cleaned)
+    if explicit_volume is not None:
+        return explicit_volume
+    if contains_explicit_volume_range(cleaned):
+        return cleaned, None
     patterns = [
         r"^(.*?)\s*(?:vol(?:ume)?\.?|v)\s*(\d+(?:\.\d+)?)$",
         r"^(.*?)\s*第\s*(\d+(?:\.\d+)?)\s*(?:卷|冊|册|集)$",

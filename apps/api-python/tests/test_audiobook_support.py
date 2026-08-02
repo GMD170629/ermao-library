@@ -545,7 +545,7 @@ def test_audio_bundle_import_merges_with_existing_epub_and_orders_tracks(
         (row["mediaKind"], row["format"], row["title"]) for row in media_volumes
     ] == [
         ("AUDIOBOOK", "AUDIO", "正文"),
-        ("EBOOK", "EPUB", "三体"),
+        ("EBOOK", "EPUB", "[三体][刘慈欣]"),
     ]
     tracks = (
         db_session.execute(
@@ -588,6 +588,47 @@ def test_audio_bundle_import_merges_with_existing_epub_and_orders_tracks(
         ).scalar()
         == 2
     )
+
+
+def test_audio_bundle_does_not_guess_between_duplicate_path_scoped_works(
+    db_session, test_settings, monkeypatch, tmp_path
+) -> None:
+    _initialize_schema(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True, exist_ok=True)
+    first_dir = tmp_path / "edition-a"
+    second_dir = tmp_path / "edition-b"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    first_epub = first_dir / "[三体][刘慈欣].epub"
+    second_epub = second_dir / "[三体][刘慈欣].epub"
+    write_epub_metadata_fixture(first_epub, "三体", "刘慈欣", ["edition-a"])
+    write_epub_metadata_fixture(second_epub, "三体", "刘慈欣", ["edition-b"])
+
+    first = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=first_epub,
+            origin="MANUAL",
+            original_name=first_epub.name,
+        ),
+    )
+    second = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=second_epub,
+            origin="MANUAL",
+            original_name=second_epub.name,
+        ),
+    )
+    audio, _audio_dir = _import_audio_fixture(
+        db_session, test_settings, monkeypatch, tmp_path
+    )
+
+    assert first.work_id != second.work_id
+    assert audio.work_id not in {first.work_id, second.work_id}
+    assert db_session.execute(text("SELECT COUNT(*) FROM LibraryWork")).scalar() == 3
 
 
 def test_audio_moved_copy_runs_normal_import_without_content_hashing(

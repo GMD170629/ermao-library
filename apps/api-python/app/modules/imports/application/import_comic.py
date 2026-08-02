@@ -31,16 +31,17 @@ from app.modules.imports.application.import_support import (
     _hash_text,
     _id,
     _ignored_entry,
+    _import_work_merge_key,
     _insert_identity_metadata,
     _log_import,
     _natural_key,
     _now,
     _safe_entry_name,
     _select_volume_media_version,
+    _source_filename_title,
     _source_group_key,
     _split_tags,
     _title_from_file,
-    _work_merge_key,
 )
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
@@ -92,14 +93,17 @@ def _import_comic(
     )
     title = identity.title
     author = identity.author
-    merge_key = _work_merge_key("cbz", title, author)
+    merge_key = _import_work_merge_key(
+        "cbz",
+        title,
+        author,
+        options,
+        identity.volume_index,
+        grouping_key=identity.grouping_key,
+    )
     source_key = _source_group_key(options, title)
     volume_index = (volume_info or {}).get("seriesIndex")
-    volume_title = (
-        f"第 {volume_index:g} 卷"
-        if volume_index is not None
-        else ((parsed.get("comicInfo") or {}).get("title") or parsed["title"])
-    )
+    volume_title = _source_filename_title(options)
     work, created = _ensure_work(
         store,
         queries,

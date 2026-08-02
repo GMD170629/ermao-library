@@ -31,15 +31,16 @@ from app.modules.imports.application.import_support import (
     _first_text,
     _hash_text,
     _id,
+    _import_work_merge_key,
     _insert_identity_metadata,
     _now,
     _preferred_identifier,
     _sanitize_description,
     _select_volume_media_version,
+    _source_filename_title,
     _source_group_key,
     _texts,
     _title_from_file,
-    _work_merge_key,
 )
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
@@ -86,7 +87,7 @@ def _import_epub(
         SeriesVolumeInfo(
             identity.title,
             identity.volume_index,
-            f"第 {identity.volume_index:g} 卷",
+            _source_filename_title(options),
             identity.author,
         )
         if identity.volume_index is not None
@@ -104,12 +105,15 @@ def _import_epub(
         metadata["title"] = volume_info.series_name
         if volume_info.author:
             metadata["author"] = volume_info.author
-    merge_key = _work_merge_key(
+    merge_key = _import_work_merge_key(
         "epub",
         identity.title,
         identity.author,
+        options,
+        identity.volume_index,
         metadata.get("identifier"),
         metadata.get("isbn"),
+        grouping_key=identity.grouping_key,
     )
     work, created = _ensure_work(
         store,
@@ -319,9 +323,7 @@ def _import_epub(
             columns={
                 "id": _id(),
                 "mediaVersionId": media_version["id"],
-                "title": str(
-                    metadata.get("title") or identity.title or source_path.stem
-                ),
+                "title": _source_filename_title(options),
                 "sortOrder": 0,
                 "format": "EPUB",
                 "resourceKey": _file_resource_key("epub", source_path),

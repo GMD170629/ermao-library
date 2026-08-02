@@ -421,7 +421,7 @@ def release_title_parser_get(
         {
             "parsed": {
                 "title": title,
-                "volume": volume_info.series_index if volume_info else None,
+                "volume": volume_info.volume_index if volume_info else None,
                 "chapter": float(chapter.group(1)) if chapter else None,
             }
         }
@@ -449,7 +449,7 @@ async def release_title_parser(
         {
             "parsed": {
                 "title": title,
-                "volume": volume_info.series_index if volume_info else None,
+                "volume": volume_info.volume_index if volume_info else None,
                 "chapter": float(chapter.group(1)) if chapter else None,
             }
         }

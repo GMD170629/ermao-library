@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "二毛图书 API"
-    app_version: str = "0.4.6"
+    app_version: str = "0.4.7"
     session_secret: str | None = None
     storage_root: str = "/app/storage"
     secure_cookies: bool = False

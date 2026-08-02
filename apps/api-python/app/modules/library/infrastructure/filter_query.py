@@ -65,6 +65,10 @@ def _normalized_text(expression: ColumnElement[object]) -> ColumnElement[str]:
     return func.lower(func.trim(func.coalesce(expression, "")))
 
 
+def _literal_like_value(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _text(
     expression: ColumnElement[object], condition: FilterCondition
 ) -> ColumnElement[bool]:
@@ -73,14 +77,14 @@ def _text(
         return normalized == ""
     if condition.operator == "is_not_empty":
         return normalized != ""
-    value = str(condition.value or "").casefold()
+    value = _literal_like_value(str(condition.value or "").casefold())
     if condition.operator in {"contains", "not_contains"}:
-        result = normalized.like(f"%{value}%")
+        result = normalized.like(f"%{value}%", escape="\\")
         return not_(result) if condition.operator == "not_contains" else result
     if condition.operator == "starts_with":
-        return normalized.like(f"{value}%")
+        return normalized.like(f"{value}%", escape="\\")
     if condition.operator == "ends_with":
-        return normalized.like(f"%{value}")
+        return normalized.like(f"%{value}", escape="\\")
     result = normalized == value
     return not_(result) if condition.operator == "not_equals" else result
 
@@ -179,6 +183,10 @@ def _reading_status(
     progress = aliased(LibraryReadingProgress)
     visible = _visible_volume(context, volume, media_version)
     has_volume = exists(select(volume.id).where(visible))
+    if condition.operator == "is_empty":
+        return ~has_volume
+    if condition.operator == "is_not_empty":
+        return has_volume
     started = exists(
         select(progress.id)
         .join(volume, volume.id == progress.volume_id)

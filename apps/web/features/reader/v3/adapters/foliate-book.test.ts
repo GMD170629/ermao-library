@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { NovelOpenError, openFoliateBook } from './foliate-book';
+import {
+  NovelOpenError,
+  normalizeFoliateFixedLayoutViewport,
+  openFoliateBook
+} from './foliate-book';
 
 function signal() {
   return new AbortController().signal;
@@ -47,4 +51,38 @@ test('openFoliateBook preserves AbortError instead of translating it to parse fa
       return new Response('');
     }
   }), (reason: unknown) => reason instanceof DOMException && reason.name === 'AbortError');
+});
+
+test('normalizes an empty fixed-layout viewport so Foliate can use the page image size', () => {
+  const book = {
+    sections: [{ load: () => '' }],
+    rendition: { layout: 'pre-paginated', viewport: {} }
+  };
+
+  normalizeFoliateFixedLayoutViewport(book);
+
+  assert.deepEqual(book.rendition, {
+    layout: 'pre-paginated',
+    viewport: undefined
+  });
+});
+
+test('preserves valid fixed-layout and reflowable viewport metadata', () => {
+  const fixedLayout = {
+    sections: [{ load: () => '' }],
+    rendition: {
+      layout: 'pre-paginated',
+      viewport: { width: '1200', height: '1800' }
+    }
+  };
+  const reflowable = {
+    sections: [{ load: () => '' }],
+    rendition: { layout: 'reflowable', viewport: {} }
+  };
+
+  normalizeFoliateFixedLayoutViewport(fixedLayout);
+  normalizeFoliateFixedLayoutViewport(reflowable);
+
+  assert.deepEqual(fixedLayout.rendition.viewport, { width: '1200', height: '1800' });
+  assert.deepEqual(reflowable.rendition.viewport, {});
 });

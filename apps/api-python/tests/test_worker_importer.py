@@ -24,7 +24,7 @@ from app.models.library import (
     LibraryVolume,
     LibraryWork,
 )
-from app.models.settings import SystemEvent
+from app.models.settings import MonitorFolder, SystemEvent
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
     ImportOptions,
@@ -389,8 +389,16 @@ def write_text_pdf_fixture(path: Path, text_value: str) -> None:
     path.write_bytes(payload)
 
 
-def write_pdf_metadata_fixture(path: Path):
-    info = "/Title (星舰手册) /Author (作者甲) /Subject (PDF 简介) /Keywords (space,manual,science)"
+def write_pdf_metadata_fixture(
+    path: Path,
+    *,
+    title: str = "星舰手册",
+    author: str = "作者甲",
+):
+    info = (
+        f"/Title ({title}) /Author ({author}) "
+        "/Subject (PDF 简介) /Keywords (space,manual,science)"
+    )
     path.write_bytes(
         (
             "%PDF-1.4\n"
@@ -506,7 +514,7 @@ def test_import_records_ai_identity_and_result(
 
     monkeypatch.setattr(
         SessionImportOrchestrationServices,
-        "recognize_identity",
+        "recognize_filename_identity",
         lambda *_args, **_kwargs: BookIdentityDTO(
             title="AI 识别书名",
             author="AI 识别作者",
@@ -550,7 +558,7 @@ def test_import_records_path_identity_cache_hit(
 
     monkeypatch.setattr(
         SessionImportOrchestrationServices,
-        "recognize_identity",
+        "recognize_filename_identity",
         lambda *_args, **_kwargs: BookIdentityDTO(
             title="缓存书名",
             author="缓存作者",
@@ -598,7 +606,7 @@ def test_import_records_ai_failure_and_regex_fallback(
 
     monkeypatch.setattr(
         SessionImportOrchestrationServices,
-        "recognize_identity",
+        "recognize_filename_identity",
         lambda *_args, **_kwargs: BookIdentityDTO(
             title="回退书名",
             author="回退作者",
@@ -1112,14 +1120,14 @@ def test_watch_epub_import_merges_series_volumes_from_folder_layout(
         .all()
     )
     assert [dict(volume) for volume in volumes] == [
-        {"title": "第 1 卷", "volumeIndex": 1, "sortOrder": 1000, "chapterCount": 1},
-        {"title": "第 10 卷", "volumeIndex": 10, "sortOrder": 10000, "chapterCount": 1},
-        {"title": "第 10 卷", "volumeIndex": 10, "sortOrder": 10000, "chapterCount": 1},
+        {"title": first.stem, "volumeIndex": 1, "sortOrder": 1000, "chapterCount": 1},
+        {"title": tenth.stem, "volumeIndex": 10, "sortOrder": 10000, "chapterCount": 1},
+        {"title": tenth.stem, "volumeIndex": 10, "sortOrder": 10000, "chapterCount": 1},
     ]
 
 
-def test_explicit_series_directory_reuses_existing_work_without_recognition(
-    db_session, test_settings, tmp_path, monkeypatch
+def test_explicit_series_directory_groups_all_volumes_by_folder(
+    db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
@@ -1133,27 +1141,6 @@ def test_explicit_series_directory_reuses_existing_work_without_recognition(
     volume_30 = series_dir / f"{series_title} Vol.30.zip"
     write_comic_fixture(volume_26, volume=26)
     write_comic_fixture(volume_30, volume=30)
-    recognition_calls = []
-
-    def recognize_once(_services, source, _original_name):
-        recognition_calls.append(source.name)
-        if len(recognition_calls) > 1:
-            raise AssertionError(
-                "a later volume in an established series must not be recognized again"
-            )
-        return BookIdentityDTO(
-            title=series_title,
-            author=series_author,
-            volume_index=26,
-            source="ai",
-            confidence=0.95,
-            logical_path=f"{series_dir.name}/{source.name}",
-        )
-
-    monkeypatch.setattr(
-        SessionImportOrchestrationServices, "recognize_identity", recognize_once
-    )
-
     first = import_managed_book(
         db_session,
         test_settings,
@@ -1169,31 +1156,14 @@ def test_explicit_series_directory_reuses_existing_work_without_recognition(
         ),
     )
 
-    assert recognition_calls == [volume_26.name]
     assert first.work_id == second.work_id
     assert first.media_version_id == second.media_version_id
     assert db_session.execute(
         text("SELECT volumeIndex FROM LibraryVolume ORDER BY volumeIndex")
     ).scalars().all() == [26, 30]
-    assert db_session.execute(
-        text(
-            "SELECT source FROM LibraryMetadata WHERE source LIKE 'identity_%' ORDER BY createdAt"
-        )
-    ).scalars().all() == [
-        "identity_ai",
-        "identity_existing_work",
-    ]
     assert (
         db_session.execute(text("SELECT COUNT(*) FROM MetadataLookupTask")).scalar()
         == 0
-    )
-    assert (
-        db_session.execute(
-            text(
-                "SELECT COUNT(*) FROM SystemEvent WHERE action = 'identity.existing_work.reused'"
-            )
-        ).scalar()
-        == 1
     )
 
 
@@ -1239,8 +1209,8 @@ def test_numeric_comic_fallback_groups_parenthesized_volumes(
     ).scalars().all() == [1, 2]
 
 
-def test_author_first_tagged_directory_imports_later_file_as_new_volume_without_recognition(
-    db_session, test_settings, tmp_path, monkeypatch
+def test_author_first_tagged_directory_imports_later_file_as_new_volume(
+    db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
@@ -1256,27 +1226,6 @@ def test_author_first_tagged_directory_imports_later_file_as_new_volume_without_
     )
     write_comic_fixture(volume_8, volume=8)
     write_comic_fixture(volume_5, volume=5)
-    recognition_calls = []
-
-    def recognize_first(_services, source, _original_name):
-        recognition_calls.append(source.name)
-        if len(recognition_calls) > 1:
-            raise AssertionError(
-                "a later volume in the corroborated directory must reuse the existing work"
-            )
-        return BookIdentityDTO(
-            title=series_title,
-            author=series_author,
-            volume_index=8,
-            source="regex",
-            confidence=0.98,
-            logical_path=f"{series_dir.name}/{source.name}",
-        )
-
-    monkeypatch.setattr(
-        SessionImportOrchestrationServices, "recognize_identity", recognize_first
-    )
-
     first = import_managed_book(
         db_session,
         test_settings,
@@ -1292,7 +1241,6 @@ def test_author_first_tagged_directory_imports_later_file_as_new_volume_without_
         ),
     )
 
-    assert recognition_calls == [volume_8.name]
     assert first.work_id == second.work_id
     assert first.media_version_id == second.media_version_id
     assert db_session.execute(
@@ -1300,8 +1248,8 @@ def test_author_first_tagged_directory_imports_later_file_as_new_volume_without_
     ).scalars().all() == [5, 8]
 
 
-def test_filename_alias_reuses_existing_work_for_later_volume_in_same_directory(
-    db_session, test_settings, tmp_path, monkeypatch
+def test_filename_alias_groups_later_volume_by_same_directory(
+    db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
@@ -1313,27 +1261,6 @@ def test_filename_alias_reuses_existing_work_for_later_volume_in_same_directory(
     volume_16 = series_dir / "膽大黨 Vol.16.zip"
     write_comic_fixture(volume_14, volume=14)
     write_comic_fixture(volume_16, volume=16)
-    recognition_calls = []
-
-    def recognize_first(_services, source, _original_name):
-        recognition_calls.append(source.name)
-        if len(recognition_calls) > 1:
-            raise AssertionError(
-                "a matching filename alias in the same directory must reuse the established work"
-            )
-        return BookIdentityDTO(
-            title=series_title,
-            author=series_author,
-            volume_index=14,
-            source="ai",
-            confidence=0.95,
-            logical_path=f"{series_dir.name}/{source.name}",
-        )
-
-    monkeypatch.setattr(
-        SessionImportOrchestrationServices, "recognize_identity", recognize_first
-    )
-
     first = import_managed_book(
         db_session,
         test_settings,
@@ -1349,7 +1276,6 @@ def test_filename_alias_reuses_existing_work_for_later_volume_in_same_directory(
         ),
     )
 
-    assert recognition_calls == [volume_14.name]
     assert first.work_id == second.work_id
     assert first.media_version_id == second.media_version_id
     assert db_session.execute(
@@ -1357,8 +1283,8 @@ def test_filename_alias_reuses_existing_work_for_later_volume_in_same_directory(
     ).scalars().all() == [14, 16]
 
 
-def test_ambiguous_bracket_directory_keeps_different_filename_series_separate(
-    db_session, test_settings, tmp_path, monkeypatch
+def test_explicit_volumes_in_ambiguous_collection_still_group_by_folder(
+    db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
@@ -1368,24 +1294,6 @@ def test_ambiguous_bracket_directory_keeps_different_filename_series_separate(
     second_file = collection_dir / "作品乙 Vol.01.zip"
     write_comic_fixture(first_file, volume=1)
     write_comic_fixture(second_file, volume=1)
-    recognition_calls = []
-
-    def recognize_each(_services, source, _original_name):
-        recognition_calls.append(source.name)
-        title = "作品甲" if source == first_file else "作品乙"
-        return BookIdentityDTO(
-            title=title,
-            author="作者甲",
-            volume_index=1,
-            source="ai",
-            confidence=0.95,
-            logical_path=f"{collection_dir.name}/{source.name}",
-        )
-
-    monkeypatch.setattr(
-        SessionImportOrchestrationServices, "recognize_identity", recognize_each
-    )
-
     first = import_managed_book(
         db_session,
         test_settings,
@@ -1401,13 +1309,12 @@ def test_ambiguous_bracket_directory_keeps_different_filename_series_separate(
         ),
     )
 
-    assert recognition_calls == [first_file.name, second_file.name]
-    assert first.work_id != second.work_id
-    assert _count(db_session, "LibraryWork") == 2
+    assert first.work_id == second.work_id
+    assert _count(db_session, "LibraryWork") == 1
 
 
-def test_plain_author_directory_keeps_different_files_as_separate_works(
-    db_session, test_settings, tmp_path, monkeypatch
+def test_plain_author_directory_keeps_dissimilar_files_as_separate_works(
+    db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
@@ -1417,23 +1324,6 @@ def test_plain_author_directory_keeps_different_files_as_separate_works(
     second_file = author_dir / "b.epub"
     write_epub_fixture(first_file)
     write_epub_fixture(second_file)
-    recognition_calls = []
-
-    def recognize_each(_services, source, _original_name):
-        recognition_calls.append(source.name)
-        return BookIdentityDTO(
-            title="作品甲" if source.name == "a.epub" else "作品乙",
-            author="作者xxx",
-            volume_index=None,
-            source="ai",
-            confidence=0.95,
-            logical_path=f"作者xxx/{source.name}",
-        )
-
-    monkeypatch.setattr(
-        SessionImportOrchestrationServices, "recognize_identity", recognize_each
-    )
-
     first = import_managed_book(
         db_session,
         test_settings,
@@ -1449,11 +1339,10 @@ def test_plain_author_directory_keeps_different_files_as_separate_works(
         ),
     )
 
-    assert recognition_calls == ["a.epub", "b.epub"]
     assert first.work_id != second.work_id
     assert db_session.execute(
         text("SELECT title FROM LibraryWork ORDER BY title")
-    ).scalars().all() == ["作品乙", "作品甲"]
+    ).scalars().all() == ["目录测试", "目录测试"]
     assert (
         db_session.execute(text("SELECT COUNT(*) FROM MetadataLookupTask")).scalar()
         == 0
@@ -1497,16 +1386,17 @@ def test_watch_epub_import_uses_bracketed_folder_for_volume_filename(
         .mappings()
         .first()
     )
-    assert dict(volume) == {"title": "第 9 卷", "volumeIndex": 9, "sortOrder": 9000}
+    assert dict(volume) == {"title": "Vol.09", "volumeIndex": 9, "sortOrder": 9000}
     raw = json.loads(
         db_session.execute(text("SELECT rawJson FROM LibraryMetadata")).scalar()
     )
     assert raw["sourceSeriesTitle"] == "DRAWING 最強漫畫家利用繪畫技能在異世界開無雙 ！"
     assert raw["sourceSeriesAuthor"] == "金光铉"
     assert raw["sourceVolumeIndex"] == 9
+    assert raw["sourceVolumeTitle"] == "Vol.09"
 
 
-def test_import_epub_merges_same_title_author_despite_different_identifiers(
+def test_import_epub_keeps_same_title_in_different_directories_separate(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
@@ -1541,13 +1431,9 @@ def test_import_epub_merges_same_title_author_despite_different_identifiers(
 
     assert first_result.duplicate is False
     assert second_result.duplicate is False
-    assert first_result.work_id == second_result.work_id
-    assert _count(db_session, "LibraryWork") == 1
-    assert _count(db_session, "LibraryMediaVersion") == 1
-    assert (
-        db_session.execute(text("SELECT mergeKey FROM LibraryWork")).scalar()
-        == "斯泰尔斯庄园奇案:阿加莎克里斯蒂"
-    )
+    assert first_result.work_id != second_result.work_id
+    assert _count(db_session, "LibraryWork") == 2
+    assert _count(db_session, "LibraryMediaVersion") == 2
 
 
 def test_same_path_identity_groups_epub_pdf_and_comic_into_media_versions(
@@ -1555,14 +1441,11 @@ def test_same_path_identity_groups_epub_pdf_and_comic_into_media_versions(
 ):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
-    epub_dir = tmp_path / "epub"
-    pdf_dir = tmp_path / "pdf"
-    comic_dir = tmp_path / "comic"
-    for directory in [epub_dir, pdf_dir, comic_dir]:
-        directory.mkdir()
-    epub = epub_dir / "[跨格式作品][作者甲].epub"
-    pdf = pdf_dir / "[跨格式作品][作者甲].pdf"
-    comic = comic_dir / "[跨格式作品][作者甲].cbz"
+    work_dir = tmp_path / "[跨格式作品][作者甲]"
+    work_dir.mkdir()
+    epub = work_dir / "跨格式作品.epub"
+    pdf = work_dir / "跨格式作品.pdf"
+    comic = work_dir / "跨格式作品.cbz"
     write_epub_metadata_fixture(epub, "错误 EPUB 标题", "错误作者")
     write_pdf_fixture(pdf)
     write_comic_fixture(comic)
@@ -1633,9 +1516,381 @@ def test_pdf_series_volume_preserves_explicit_chinese_volume_index(
 
     volume = db_session.get(LibraryVolume, result.volume_id)
     assert volume is not None
-    assert volume.title == "\u7b2c 1 \u5377"
+    assert volume.title == "Series \u7b2c01\u5377"
     assert volume.volume_index == 1
     assert volume.sort_order == 1000
+
+
+def test_watched_pdf_volumes_in_same_directory_merge_despite_author_variation(
+    db_session, test_settings, tmp_path
+):
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    series_dir = tmp_path / "same-series"
+    series_dir.mkdir()
+    first = series_dir / "星舰漫画 Vol.01.pdf"
+    second = series_dir / "星舰漫画 Vol.02.pdf"
+    write_pdf_metadata_fixture(first, title="internal-01", author="")
+    write_pdf_metadata_fixture(second, title="internal-02", author="作者乙")
+
+    first_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=first,
+            origin="WATCH",
+            original_name=first.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+    second_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=second,
+            origin="WATCH",
+            original_name=second.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+
+    assert first_result.work_id == second_result.work_id
+    assert _count(db_session, "LibraryWork") == 1
+    work = db_session.get(LibraryWork, first_result.work_id)
+    assert work is not None
+    assert work.author == "作者乙"
+    assert sorted(db_session.scalars(select(LibraryVolume.volume_index)).all()) == [
+        1,
+        2,
+    ]
+
+
+def test_watched_cjk_marker_before_number_merges_by_directory_and_title(
+    db_session, test_settings, tmp_path
+):
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    series_dir = tmp_path / "东京复仇者全彩31卷 PDF格式"
+    series_dir.mkdir()
+    first = series_dir / "[東京卍復仇者(全彩版)]卷01.pdf"
+    second = series_dir / "[東京卍復仇者(全彩版)]卷02.pdf"
+    write_pdf_metadata_fixture(first)
+    write_pdf_metadata_fixture(second)
+
+    first_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=first,
+            origin="WATCH",
+            original_name=first.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+    second_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=second,
+            origin="WATCH",
+            original_name=second.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+
+    assert first_result.work_id == second_result.work_id
+    assert _count(db_session, "LibraryWork") == 1
+    assert sorted(db_session.scalars(select(LibraryVolume.volume_index)).all()) == [
+        1,
+        2,
+    ]
+
+
+def test_watched_pdf_volumes_in_different_directories_do_not_merge(
+    db_session, test_settings, tmp_path
+):
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    first_dir = tmp_path / "edition-a"
+    second_dir = tmp_path / "edition-b"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    first = first_dir / "同名漫画 Vol.01.pdf"
+    second = second_dir / "同名漫画 Vol.02.pdf"
+    write_pdf_metadata_fixture(first, title="internal-01", author="同一作者")
+    write_pdf_metadata_fixture(second, title="internal-02", author="同一作者")
+
+    first_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=first,
+            origin="WATCH",
+            original_name=first.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+    second_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=second,
+            origin="WATCH",
+            original_name=second.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+
+    assert first_result.work_id != second_result.work_id
+    assert _count(db_session, "LibraryWork") == 2
+
+
+def test_watched_pdf_files_without_volume_merge_by_directory_and_title(
+    db_session, test_settings, tmp_path
+):
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    first = tmp_path / "同名作品一.pdf"
+    second = tmp_path / "同名作品二.pdf"
+    write_pdf_metadata_fixture(first, title="同名作品", author="作者甲")
+    write_pdf_metadata_fixture(second, title="同名作品", author="作者乙")
+
+    first_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=first,
+            origin="WATCH",
+            original_name=first.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+    second_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=second,
+            origin="WATCH",
+            original_name=second.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+
+    assert first_result.work_id == second_result.work_id
+    assert _count(db_session, "LibraryWork") == 1
+    work = db_session.get(LibraryWork, first_result.work_id)
+    assert work is not None
+    assert work.author == "作者甲"
+
+
+def test_watched_pdf_numeric_title_values_do_not_split_directory_group(
+    db_session, test_settings, tmp_path
+):
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    first = tmp_path / "作品2023全彩版.pdf"
+    second = tmp_path / "作品2026全彩版.pdf"
+    write_pdf_metadata_fixture(first, title="作品2023全彩版", author="作者甲")
+    write_pdf_metadata_fixture(second, title="作品2026全彩版", author="作者乙")
+
+    first_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=first,
+            origin="WATCH",
+            original_name=first.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+    second_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=second,
+            origin="WATCH",
+            original_name=second.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+
+    assert first_result.work_id == second_result.work_id
+    assert _count(db_session, "LibraryWork") == 1
+
+
+def test_watched_pdf_similar_titles_at_threshold_merge_in_same_directory(
+    db_session, test_settings, tmp_path
+):
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    first = tmp_path / "abcdefghij.pdf"
+    second = tmp_path / "abcdefgxyz.pdf"
+    write_pdf_metadata_fixture(first, title="abcdefghij", author="Author A")
+    write_pdf_metadata_fixture(second, title="abcdefgxyz", author="Author B")
+
+    first_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=first,
+            origin="WATCH",
+            original_name=first.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+    second_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=second,
+            origin="WATCH",
+            original_name=second.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+
+    assert first_result.work_id == second_result.work_id
+    assert _count(db_session, "LibraryWork") == 1
+
+
+def test_watched_pdf_titles_below_threshold_do_not_merge(
+    db_session, test_settings, tmp_path
+):
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    first = tmp_path / "abcdefghij.pdf"
+    second = tmp_path / "abcdezzzzz.pdf"
+    write_pdf_metadata_fixture(first, title="abcdefghij", author="Author A")
+    write_pdf_metadata_fixture(second, title="abcdezzzzz", author="Author B")
+
+    first_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=first,
+            origin="WATCH",
+            original_name=first.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+    second_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=second,
+            origin="WATCH",
+            original_name=second.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+
+    assert first_result.work_id != second_result.work_id
+    assert _count(db_session, "LibraryWork") == 2
+
+
+def test_watched_pdf_similar_titles_in_different_directories_do_not_merge(
+    db_session, test_settings, tmp_path
+):
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    first_dir = tmp_path / "edition-a"
+    second_dir = tmp_path / "edition-b"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    first = first_dir / "abcdefghij.pdf"
+    second = second_dir / "abcdefgxyz.pdf"
+    write_pdf_metadata_fixture(first, title="abcdefghij", author="Author A")
+    write_pdf_metadata_fixture(second, title="abcdefgxyz", author="Author B")
+
+    first_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=first,
+            origin="WATCH",
+            original_name=first.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+    second_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=second,
+            origin="WATCH",
+            original_name=second.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+
+    assert first_result.work_id != second_result.work_id
+    assert _count(db_session, "LibraryWork") == 2
+
+
+def test_manual_pdf_files_follow_same_folder_grouping_rule(
+    db_session, test_settings, tmp_path
+):
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    work_dir = tmp_path / "[同名作品][作者甲]"
+    work_dir.mkdir()
+    first = work_dir / "同名作品一.pdf"
+    second = work_dir / "同名作品二.pdf"
+    write_pdf_metadata_fixture(first, title="同名作品", author="作者甲")
+    write_pdf_metadata_fixture(second, title="同名作品", author="作者乙")
+
+    first_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=first,
+            origin="MANUAL",
+            original_name=first.name,
+        ),
+    )
+    second_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=second,
+            origin="MANUAL",
+            original_name=second.name,
+        ),
+    )
+
+    assert first_result.work_id == second_result.work_id
+    assert _count(db_session, "LibraryWork") == 1
+
+
+def test_manual_title_and_author_override_folder_identity(
+    db_session, test_settings, tmp_path
+):
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    work_dir = tmp_path / "原目录作品"
+    work_dir.mkdir()
+    epub = work_dir / "原目录作品 Vol.01.epub"
+    write_epub_fixture(epub)
+
+    result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=epub,
+            origin="MANUAL",
+            original_name=epub.name,
+            requested_title="用户指定作品",
+            requested_author="用户指定作者",
+        ),
+    )
+
+    assert result.title == "用户指定作品"
+    work = (
+        db_session.execute(text("SELECT title, author FROM LibraryWork"))
+        .mappings()
+        .one()
+    )
+    assert dict(work) == {"title": "用户指定作品", "author": "用户指定作者"}
 
 
 def test_import_epub_leaves_metadata_queue_to_organizer_without_blocking_on_external_services(
@@ -1862,7 +2117,9 @@ def test_import_comic_defers_page_units_and_detects_duplicate(
 ):
     create_worker_tables(db_session)
     test_settings.resolved_storage_root.mkdir(parents=True)
-    comic = tmp_path / "星舰漫画 Vol.1.zip"
+    work_dir = tmp_path / "星舰漫画"
+    work_dir.mkdir()
+    comic = work_dir / "星舰漫画 Vol.1.zip"
     write_comic_fixture(comic)
 
     first = import_managed_book(
@@ -1907,7 +2164,7 @@ def test_import_comic_defers_page_units_and_detects_duplicate(
         .first()
     )
     assert work["title"] == "星舰漫画"
-    assert work["author"] == "未知作者"
+    assert work["author"] == "画师"
     assert work["description"] is None
     assert json.loads(work["tags"]) == ["comic", "zip"]
     edition = (
@@ -1929,7 +2186,7 @@ def test_import_comic_defers_page_units_and_detects_duplicate(
         .mappings()
         .first()
     )
-    assert volume["title"] == "第 1 卷"
+    assert volume["title"] == comic.stem
     assert volume["volumeIndex"] == 1
     raw_metadata = json.loads(
         db_session.execute(
@@ -2041,7 +2298,7 @@ def test_import_pdf_creates_library_records(db_session, test_settings, tmp_path)
     )
     assert work["workType"] == "COMIC"
     assert json.loads(work["tags"]) == ["comic", "pdf"]
-    assert work["mergeKey"] == _work_merge_key("pdf-comic", "Manual PDF", "未知作者")
+    assert work["mergeKey"].startswith("path-group:standalone:")
     assert (
         db_session.execute(text("SELECT mediaKind FROM LibraryMediaVersion")).scalar()
         == "COMIC"
@@ -2332,6 +2589,188 @@ def test_native_reflowable_sources_do_not_require_automatic_conversion(
     assert book_file.kind == source_format
     assert book_file.mime_type == mime_type
     assert json.loads(metadata.raw_json)["readable"] is True
+
+
+def test_native_reflowable_folder_work_keeps_filename_as_volume_title(
+    db_session, test_settings, tmp_path
+) -> None:
+    create_worker_tables(db_session)
+    work_dir = tmp_path / "吉林美术-哆啦A梦珍藏版1-45卷 MOBI格式"
+    work_dir.mkdir()
+    volume_43 = work_dir / "哆啦A梦珍藏版Vol_43卷.mobi"
+    volume_2 = work_dir / "哆啦A梦珍藏版Vol_02卷.mobi"
+    volume_43.write_bytes(b"not-a-real-mobi-43")
+    volume_2.write_bytes(b"not-a-real-mobi-02")
+
+    first = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=volume_43,
+            origin="WATCH",
+            original_name=volume_43.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+    second = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=volume_2,
+            origin="WATCH",
+            original_name=volume_2.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+
+    assert first.work_id == second.work_id
+    work = db_session.get(LibraryWork, first.work_id)
+    assert work is not None
+    assert work.title == work_dir.name
+    volumes = db_session.scalars(
+        select(LibraryVolume)
+        .join(
+            LibraryMediaVersion,
+            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+        )
+        .where(LibraryMediaVersion.work_id == first.work_id)
+        .order_by(LibraryVolume.sort_order)
+    ).all()
+    assert [volume.title for volume in volumes] == [volume_2.stem, volume_43.stem]
+    assert [volume.volume_index for volume in volumes] == [2, 43]
+    assert [volume.sort_order for volume in volumes] == [2000, 43000]
+
+
+def test_native_reflowable_ranges_sort_by_range_start(
+    db_session, test_settings, tmp_path
+) -> None:
+    create_worker_tables(db_session)
+    work_dir = tmp_path / "瑞克和莫蒂1-60话 MOBI格式"
+    work_dir.mkdir()
+    sources = [
+        work_dir / "瑞克与莫蒂 - 第016-020话.mobi",
+        work_dir / "瑞克与莫蒂 - 第001-005话.mobi",
+        work_dir / "瑞克与莫蒂 - 第006-010话.mobi",
+    ]
+    results = []
+    for source in sources:
+        source.write_bytes(f"fixture-{source.name}".encode())
+        results.append(
+            import_managed_book(
+                db_session,
+                test_settings,
+                ImportOptions(
+                    source_file_path=source,
+                    origin="WATCH",
+                    original_name=source.name,
+                    monitor_folder_id="folder-1",
+                ),
+            )
+        )
+
+    assert len({result.work_id for result in results}) == 1
+    volumes = db_session.scalars(
+        select(LibraryVolume)
+        .where(LibraryVolume.media_version_id == results[0].media_version_id)
+        .order_by(LibraryVolume.sort_order)
+    ).all()
+    assert [volume.title for volume in volumes] == [
+        sources[1].stem,
+        sources[2].stem,
+        sources[0].stem,
+    ]
+    assert [volume.volume_index for volume in volumes] == [1, 6, 16]
+    assert [volume.sort_order for volume in volumes] == [1000, 6000, 16000]
+
+
+def test_native_reflowable_without_volume_numbers_uses_natural_title_order(
+    db_session, test_settings, tmp_path
+) -> None:
+    create_worker_tables(db_session)
+    work_dir = tmp_path / "Appendix"
+    work_dir.mkdir()
+    sources = [work_dir / "Appendix B.mobi", work_dir / "Appendix A.mobi"]
+    results = []
+    for source in sources:
+        source.write_bytes(f"fixture-{source.name}".encode())
+        results.append(
+            import_managed_book(
+                db_session,
+                test_settings,
+                ImportOptions(
+                    source_file_path=source,
+                    origin="WATCH",
+                    original_name=source.name,
+                    monitor_folder_id="folder-1",
+                ),
+            )
+        )
+
+    assert len({result.work_id for result in results}) == 1
+    volumes = db_session.scalars(
+        select(LibraryVolume)
+        .where(LibraryVolume.media_version_id == results[0].media_version_id)
+        .order_by(LibraryVolume.sort_order)
+    ).all()
+    assert [volume.title for volume in volumes] == [
+        sources[1].stem,
+        sources[0].stem,
+    ]
+    assert [volume.volume_index for volume in volumes] == [None, None]
+    assert [volume.sort_order for volume in volumes] == [0, 1000]
+
+
+def test_direct_monitor_root_files_are_independent_works(
+    db_session, test_settings, tmp_path
+) -> None:
+    create_worker_tables(db_session)
+    monitor_root = tmp_path / "books"
+    monitor_root.mkdir()
+    db_session.add(
+        MonitorFolder(
+            id="monitor-root",
+            name="books",
+            root_path=str(monitor_root),
+            enabled=True,
+        )
+    )
+    db_session.commit()
+    volume_56 = monitor_root / "高桥留美子漫画 犬夜叉_第56卷.mobi"
+    volume_55 = monitor_root / "高桥留美子漫画 犬夜叉_第55卷.mobi"
+    volume_56.write_bytes(b"not-a-real-mobi-56")
+    volume_55.write_bytes(b"not-a-real-mobi-55")
+
+    first = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=volume_56,
+            origin="MANUAL",
+            original_name=volume_56.name,
+        ),
+    )
+    second = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=volume_55,
+            origin="MANUAL",
+            original_name=volume_55.name,
+        ),
+    )
+
+    assert first.work_id != second.work_id
+    works = db_session.scalars(select(LibraryWork).order_by(LibraryWork.id)).all()
+    assert [work.title for work in works] == [
+        "高桥留美子漫画 犬夜叉",
+        "高桥留美子漫画 犬夜叉",
+    ]
+    assert all(work.title != monitor_root.name for work in works)
+    volumes = db_session.scalars(
+        select(LibraryVolume).order_by(LibraryVolume.volume_index)
+    ).all()
+    assert [volume.title for volume in volumes] == [volume_55.stem, volume_56.stem]
+    assert [volume.volume_index for volume in volumes] == [55, 56]
 
 
 def test_reimport_backfills_legacy_reflowable_metadata_without_creating_epub(

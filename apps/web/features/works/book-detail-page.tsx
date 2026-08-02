@@ -251,7 +251,12 @@ function StructureVersionCard({
           <div key={volume.id} className="border-b border-stone-100 last:border-b-0">
             <div className="flex min-h-12 items-center gap-3 py-2">
               <span className="w-8 text-xs tabular-nums text-stone-400">{String(displayVolumeNumber(volume, index)).padStart(2, '0')}</span>
-              <span data-i18n-skip className="min-w-0 flex-1 truncate text-sm text-stone-800">{volume.title}</span>
+              <div className="min-w-0 flex-1">
+                <span data-i18n-skip className="block truncate text-sm text-stone-800" title={volume.title}>{volume.title}</span>
+                {volume.files.map((file) => (
+                  <span key={file.id} data-i18n-skip className="mt-0.5 block truncate text-xs text-stone-400" title={file.path}>{file.path}</span>
+                ))}
+              </div>
               <span className="text-xs text-stone-400">{volumeUnitLabel(volume, t)}</span>
               {managementMode ? <div className="flex items-center gap-1">
                 <button type="button" disabled={busyMoveId !== null || index === 0} onClick={() => void moveVolume(volume, 'up')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 disabled:opacity-30" aria-label={t('上移 {value0}', { value0: volume.title })}><ChevronUp size={16} /></button>

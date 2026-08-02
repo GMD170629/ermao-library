@@ -561,6 +561,7 @@ def _work_detail_volume_view(
     *,
     files: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    source_files = files if files is not None else volume.get("files", [])
     return {
         "id": volume["id"],
         "mediaVersionId": volume["mediaVersionId"],
@@ -582,7 +583,15 @@ def _work_detail_volume_view(
         "durationMs": volume.get("durationMs"),
         "trackCount": volume.get("trackCount"),
         "progress": volume["progress"],
-        "files": files if files is not None else volume.get("files", []),
+        "files": [
+            {
+                "id": file["id"],
+                "path": file["path"],
+                "sizeBytes": file["sizeBytes"],
+                "size": file["size"],
+            }
+            for file in source_files
+        ],
     }
 
 

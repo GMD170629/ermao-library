@@ -93,7 +93,7 @@ def _add_work_with_volumes(db_session, *, volume_count: int = 12) -> None:
     db_session.commit()
 
 
-def test_default_work_detail_is_bounded_and_omits_navigation(client, db_session):
+def test_default_work_detail_is_bounded_and_includes_file_paths(client, db_session):
     _login(client, db_session)
     _add_work_with_volumes(db_session)
 
@@ -126,7 +126,9 @@ def test_default_work_detail_is_bounded_and_omits_navigation(client, db_session)
     assert [volume["id"] for volume in media_version["volumes"]] == [
         f"detail-volume-{number:02d}" for number in range(1, 11)
     ]
-    assert all(volume["files"] == [] for volume in media_version["volumes"])
+    assert [volume["files"][0]["path"] for volume in media_version["volumes"]] == [
+        f"/library/detail-{number:02d}.zip" for number in range(1, 11)
+    ]
 
 
 def test_work_volume_query_pages_deterministically_and_includes_file_summaries(

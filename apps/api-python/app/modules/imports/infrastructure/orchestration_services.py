@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -15,6 +16,7 @@ from app.modules.imports.application.audio_types import (
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
     ConversionArtifactDTO,
+    DirectorySiblingSnapshotDTO,
     ImportPreferencesDTO,
     ImportSystemEvent,
 )
@@ -42,8 +44,12 @@ from app.modules.imports.infrastructure.reflowable_metadata import (
 )
 from app.modules.library.infrastructure.facets import sync_work_facets
 from app.modules.system.infrastructure.events import record_system_event
+from app.models.settings import MonitorFolder
 from app.services.audio_metadata import inspect_audio_bundle, parse_audio_metadata
-from app.services.book_identity import logical_import_path, recognize_book_identity
+from app.services.book_identity import (
+    recognize_book_identity,
+    recognize_book_identity_with_regex,
+)
 from app.services.default_cover import (
     cover_status,
     ensure_default_cover,
@@ -123,8 +129,62 @@ class SessionImportOrchestrationServices:
             reused_work_id=identity.reused_work_id,
         )
 
-    def logical_import_path(self, path: Path, original_name: str | None) -> str:
-        return logical_import_path(self._db, self._settings, path, original_name)
+    def recognize_filename_identity(self, filename: str) -> BookIdentityDTO:
+        safe_filename = Path(filename).name
+        identity = recognize_book_identity(
+            self._db,
+            self._settings,
+            Path(safe_filename),
+            safe_filename,
+        )
+        return BookIdentityDTO(
+            title=identity.title,
+            author=identity.author,
+            volume_index=identity.volume_index,
+            source=identity.source,
+            confidence=identity.confidence,
+            logical_path=identity.logical_path,
+            fallback_reason=identity.fallback_reason,
+            fallback_code=identity.fallback_code,
+            cache_hit=identity.cache_hit,
+            reused_work_id=identity.reused_work_id,
+        )
+
+    def parse_filename_identity(self, filename: str) -> BookIdentityDTO:
+        safe_filename = Path(filename).name
+        identity = recognize_book_identity_with_regex(safe_filename)
+        return BookIdentityDTO(
+            title=identity.title,
+            author=identity.author,
+            volume_index=identity.volume_index,
+            source=identity.source,
+            confidence=identity.confidence,
+            logical_path=identity.logical_path,
+            fallback_reason=identity.fallback_reason,
+            fallback_code=identity.fallback_code,
+            cache_hit=identity.cache_hit,
+            reused_work_id=identity.reused_work_id,
+        )
+
+    def is_monitor_root(self, path: Path) -> bool:
+        resolved_path = path.expanduser().resolve()
+        root_paths = self._db.scalars(select(MonitorFolder.root_path)).all()
+        return any(
+            Path(root_path).expanduser().resolve() == resolved_path
+            for root_path in root_paths
+        )
+
+    def list_sibling_files(self, path: Path) -> DirectorySiblingSnapshotDTO:
+        resolved = path.resolve()
+        try:
+            siblings = tuple(
+                candidate.resolve()
+                for candidate in resolved.parent.iterdir()
+                if candidate.is_file() and candidate.resolve() != resolved
+            )
+        except OSError:
+            return DirectorySiblingSnapshotDTO(paths=(), complete=False)
+        return DirectorySiblingSnapshotDTO(paths=siblings, complete=True)
 
     def sync_work_facets(self, work_id: str) -> None:
         sync_work_facets(self._db, work_id)

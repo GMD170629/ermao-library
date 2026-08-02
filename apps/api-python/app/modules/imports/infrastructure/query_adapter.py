@@ -129,9 +129,6 @@ class SqlAlchemyImportLibraryQueries:
         self.list_audiobook_consumption_for_works = partial(
             library_queries.list_audiobook_consumption_for_works, db
         )
-        self.list_media_version_file_paths_for_work = partial(
-            library_queries.list_media_version_file_paths_for_work, db
-        )
         self.list_media_versions_by_ids = partial(
             library_queries.list_media_versions_by_ids, db
         )
@@ -162,8 +159,14 @@ class SqlAlchemyImportLibraryQueries:
         self.list_volume_cover_paths_for_media_version = partial(
             library_queries.list_volume_cover_paths_for_media_version, db
         )
-        self.list_works_by_source_group_suffix = partial(
-            library_queries.list_works_by_source_group_suffix, db
+        self.list_volume_ordering_for_media_version = partial(
+            library_queries.list_volume_ordering_for_media_version, db
+        )
+        self.list_works_by_merge_key_prefix = partial(
+            library_queries.list_works_by_merge_key_prefix, db
+        )
+        self.list_works_by_normalized_identity = partial(
+            library_queries.list_works_by_normalized_identity, db
         )
         self.sum_audio_duration_for_media_version = partial(
             library_queries.sum_audio_duration_for_media_version, db

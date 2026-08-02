@@ -245,6 +245,40 @@ def get_work_by_merge_key(db: Session, merge_key: str) -> dict[str, Any] | None:
     return _get_work(db, LibraryWork.merge_key == merge_key)
 
 
+def list_works_by_merge_key_prefix(
+    db: Session, merge_key_prefix: str
+) -> list[dict[str, Any]]:
+    """List deterministic fuzzy-merge candidates within one source directory."""
+
+    return _records(
+        db,
+        select(LibraryWork.__table__)
+        .where(LibraryWork.merge_key.startswith(merge_key_prefix, autoescape=True))
+        .order_by(LibraryWork.created_at.asc(), LibraryWork.id.asc()),
+    )
+
+
+def list_works_by_normalized_identity(
+    db: Session,
+    normalized_title: str,
+    normalized_author: str,
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Return a bounded deterministic set for cross-media identity reuse."""
+
+    return _records(
+        db,
+        select(LibraryWork.__table__)
+        .where(
+            LibraryWork.normalized_title == normalized_title,
+            LibraryWork.normalized_author == normalized_author,
+        )
+        .order_by(LibraryWork.created_at.asc(), LibraryWork.id.asc())
+        .limit(limit),
+    )
+
+
 def get_media_version_by_id(
     db: Session, media_version_id: str
 ) -> dict[str, Any] | None:
@@ -407,6 +441,22 @@ def sum_volume_page_count_for_media_version(db: Session, media_version_id: str) 
 
 def count_volumes_for_media_version(db: Session, media_version_id: str) -> int:
     return _count_volumes(db, LibraryVolume.media_version_id == media_version_id)
+
+
+def list_volume_ordering_for_media_version(
+    db: Session, media_version_id: str
+) -> list[dict[str, Any]]:
+    return _records(
+        db,
+        select(
+            LibraryVolume.id.label("id"),
+            LibraryVolume.title.label("title"),
+            LibraryVolume.volume_index.label("volumeIndex"),
+            LibraryVolume.sort_order.label("sortOrder"),
+        )
+        .where(LibraryVolume.media_version_id == media_version_id)
+        .order_by(LibraryVolume.id.asc()),
+    )
 
 
 def count_media_versions_for_work(
@@ -998,48 +1048,6 @@ def find_deferred_source_volume(
         .limit(1)
     ).first()
     return {"id": row[0]} if row else None
-
-
-def list_works_by_source_group_suffix(
-    db: Session, source_group_suffix: str
-) -> list[dict[str, Any]]:
-    rows = db.execute(
-        select(LibraryWork.id, LibraryWork.title, LibraryWork.author)
-        .join(LibraryMediaVersion, LibraryMediaVersion.work_id == LibraryWork.id)
-        .join(
-            LibraryVolume,
-            LibraryVolume.media_version_id == LibraryMediaVersion.id,
-        )
-        .where(
-            LibraryVolume.source_group_key.like(f"%{source_group_suffix}"),
-            func.coalesce(LibraryVolume.hidden, 0) == 0,
-            func.coalesce(LibraryWork.hidden, 0) == 0,
-        )
-        .distinct()
-        .order_by(LibraryWork.created_at.asc(), LibraryWork.id.asc())
-    ).all()
-    return [{"id": row.id, "title": row.title, "author": row.author} for row in rows]
-
-
-def list_media_version_file_paths_for_work(
-    db: Session,
-    work_id: str,
-    source_group_suffix: str,
-) -> list[dict[str, Any]]:
-    rows = db.execute(
-        select(LibraryFile.path)
-        .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
-        .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
-        )
-        .where(
-            LibraryMediaVersion.work_id == work_id,
-            LibraryVolume.source_group_key.like(f"%{source_group_suffix}"),
-        )
-        .order_by(LibraryFile.created_at.asc())
-    ).all()
-    return [{"path": row.path} for row in rows]
 
 
 def existing_file_import_snapshot(db: Session, path: Path) -> dict[str, Any] | None:

@@ -20,7 +20,10 @@ from app.modules.imports.application.import_support import (
     _finalize_work_cover,
     _hash_text,
     _id,
+    _import_work_merge_key,
     _now,
+    _source_filename_title,
+    _source_group_key,
     _work_merge_key,
 )
 from app.modules.imports.application.ports import (
@@ -67,7 +70,7 @@ def refresh_existing_reflowable_source(
             columns={
                 "id": _id(),
                 "mediaVersionId": existing.media_version_id,
-                "title": metadata.title or existing.title,
+                "title": source_path.stem,
                 "format": source_format,
                 "resourceKey": _hash_text(str(source_path)),
                 "sortOrder": queries.count_volumes_for_media_version(
@@ -278,7 +281,14 @@ def _import_reflowable_source(
         requested_title=options.requested_title,
         requested_author=options.requested_author,
     )
-    merge_key = _work_merge_key("epub", identity.title, identity.author)
+    merge_key = _import_work_merge_key(
+        "epub",
+        identity.title,
+        identity.author,
+        options,
+        identity.volume_index,
+        grouping_key=identity.grouping_key,
+    )
     work, created = _ensure_work(
         store,
         queries,
@@ -294,6 +304,9 @@ def _import_reflowable_source(
             "monitorFolderId": options.monitor_folder_id,
         },
     )
+    volume_title = _source_filename_title(options)
+    volume_index = identity.volume_index
+    source_group_key = _source_group_key(options, identity.title)
     store.update_import_task(
         task_id, columns={"message": f"正在建立 {source_format} 原始文件卷册"}
     )
@@ -311,13 +324,17 @@ def _import_reflowable_source(
         columns={
             "id": _id(),
             "mediaVersionId": media_version["id"],
-            "title": identity.title,
-            "sortOrder": queries.count_volumes_for_media_version(
-                str(media_version["id"])
-            )
-            * 1000,
+            "title": volume_title,
+            "volumeIndex": volume_index,
+            "sortOrder": (
+                int(volume_index * 1000)
+                if volume_index is not None
+                else queries.count_volumes_for_media_version(str(media_version["id"]))
+                * 1000
+            ),
             "format": source_format,
             "resourceKey": _hash_text(str(source_path)),
+            "sourceGroupKey": source_group_key,
             "monitorFolderId": options.monitor_folder_id,
             "origin": options.origin,
             "description": metadata.description,

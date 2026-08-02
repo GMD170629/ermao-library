@@ -24,10 +24,7 @@ from app.modules.imports.application.dto import (
     ImportRuntimeConfig,
     ImportSystemEvent,
 )
-from app.modules.imports.application.identity import (
-    _existing_series_volume_identity,
-    _record_identity_system_events,
-)
+from app.modules.imports.application.identity import _record_identity_system_events
 from app.modules.imports.application.identity_resolution import (
     resolve_import_identity,
 )
@@ -62,6 +59,12 @@ from app.modules.imports.application.ports import (
     ImportOrchestrationServices,
     ImportUnitOfWork,
     LibraryImportStore,
+)
+from app.modules.imports.application.work_grouping import (
+    resolve_non_audio_work_identity,
+)
+from app.modules.imports.application.volume_ordering import (
+    normalize_media_version_volume_order,
 )
 
 
@@ -338,9 +341,11 @@ def import_managed_book(
                 audio_structure,
             )
         else:
-            identity = _existing_series_volume_identity(
-                queries, services, settings, effective_options
-            ) or services.recognize_identity(original_source, options.original_name)
+            identity = resolve_non_audio_work_identity(
+                services,
+                effective_options,
+                import_preferences,
+            )
             identity = resolve_import_identity(
                 identity,
                 requested_title=options.requested_title,
@@ -456,6 +461,12 @@ def import_managed_book(
                 stat.st_size,
                 ext,
                 identity,
+            )
+        if not audio_metadata:
+            normalize_media_version_volume_order(
+                store,
+                queries,
+                result.media_version_id,
             )
         services.sync_work_facets(result.work_id)
         if converted:

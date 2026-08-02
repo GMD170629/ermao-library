@@ -5950,14 +5950,14 @@ def test_epub_volume_file_and_bootstrap_use_requested_volume(
     assert data["readerType"] == "reflowable"
     assert data["sourceFormat"] == "epub"
     assert data["volume"]["id"] == second_result.volume_id
-    assert data["volume"]["title"] == "第 2 卷"
+    assert data["volume"]["title"] == "星舰小说 02"
     assert data["volume"]["chapterCount"] == 1
     assert [
         (item["id"], item["title"], item["chapterCount"])
         for item in data["availableVolumes"]
     ] == [
-        (first_result.volume_id, "第 1 卷", 2),
-        (second_result.volume_id, "第 2 卷", 1),
+        (first_result.volume_id, "星舰小说 01", 2),
+        (second_result.volume_id, "星舰小说 02", 1),
     ]
     assert [unit["title"] for unit in data["units"]] == ["第三节"]
 
