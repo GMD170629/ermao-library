@@ -1,6 +1,17 @@
 import time
-from datetime import datetime, timezone
+from collections.abc import Generator
+from datetime import UTC, datetime
 
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+
+from app import models as _models  # noqa: F401
+from app.core.config import Settings, get_settings
+from app.db.base import Base
+from app.db.session import get_db
+from app.main import create_app
 from app.models.import_pipeline import ImportTask
 from app.services.queue_runtime import queue_runtime_view, record_queue_heartbeat
 
@@ -8,16 +19,55 @@ from app.services.queue_runtime import queue_runtime_view, record_queue_heartbea
 def _setup_admin(client):
     response = client.post(
         "/api/auth/setup",
-        json={"name": "Administrator", "email": "admin@example.com", "password": "starshipnas"},
+        json={
+            "name": "Administrator",
+            "email": "admin@example.com",
+            "password": "starshipnas",
+        },
     )
     assert response.status_code == 201
 
 
+@pytest.fixture()
+def persistent_health_client(
+    test_settings: Settings,
+) -> Generator[tuple[TestClient, Session], None, None]:
+    """Use independent sessions against a real file for background health work."""
+
+    test_settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_engine(
+        f"sqlite+pysqlite:///{test_settings.database_path}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+    app = create_app(test_settings, session_factory=session_factory)
+
+    def override_settings() -> Settings:
+        return test_settings
+
+    def override_db() -> Generator[Session, None, None]:
+        with session_factory() as database_session:
+            yield database_session
+
+    app.dependency_overrides[get_settings] = override_settings
+    app.dependency_overrides[get_db] = override_db
+    with TestClient(app) as test_client, session_factory() as database_session:
+        yield test_client, database_session
+    Base.metadata.drop_all(bind=engine)
+    engine.dispose()
+
+
 def test_manual_health_run_exposes_initial_items_and_reaches_terminal_state(
-    client,
-    db_session,
+    persistent_health_client,
     test_settings,
 ):
+    client, db_session = persistent_health_client
     test_settings.resolved_monitor_root.mkdir(parents=True)
     for path in (
         test_settings.resolved_storage_root,
@@ -33,7 +83,7 @@ def test_manual_health_run_exposes_initial_items_and_reaches_terminal_state(
     ):
         path.mkdir(parents=True, exist_ok=True)
     _setup_admin(client)
-    pending_created_at = datetime(2026, 7, 31, 8, 30, tzinfo=timezone.utc)
+    pending_created_at = datetime(2026, 7, 31, 8, 30, tzinfo=UTC)
     db_session.add(
         ImportTask(
             id="health-pending-import",
@@ -59,20 +109,28 @@ def test_manual_health_run_exposes_initial_items_and_reaches_terminal_state(
         response = client.get(f"/api/system/health/runs/{run['runId']}")
         assert response.status_code == 200
         final = response.json()["data"]["run"]
-        if final["status"] != "running" and final["summary"]["completed"] == final["summary"]["total"]:
+        if (
+            final["status"] != "running"
+            and final["summary"]["completed"] == final["summary"]["total"]
+        ):
             break
         time.sleep(0.02)
 
     assert final["status"] in {"completed", "warning", "error"}
     assert final["summary"]["completed"] == final["summary"]["total"], final
-    assert all(item["status"] in {"ok", "warning", "error", "skipped"} for item in final["items"])
+    assert all(
+        item["status"] in {"ok", "warning", "error", "skipped"}
+        for item in final["items"]
+    )
     import_queue = next(item for item in final["items"] if item["id"] == "queue:import")
     assert import_queue["status"] == "ok"
     assert import_queue["messageCode"] == "health.queue.ok"
     assert import_queue["details"]["oldestPendingAt"] == "2026-07-31T08:30:00Z"
     assert isinstance(import_queue["details"]["runtime"]["heartbeatAt"], int)
 
-    with client.stream("GET", f"/api/system/health/runs/{run['runId']}/events?after=0") as stream:
+    with client.stream(
+        "GET", f"/api/system/health/runs/{run['runId']}/events?after=0"
+    ) as stream:
         assert stream.status_code == 200
         assert stream.headers["content-type"].startswith("text/event-stream")
         body = "".join(stream.iter_text())
@@ -82,7 +140,9 @@ def test_manual_health_run_exposes_initial_items_and_reaches_terminal_state(
 
 def test_log_capacity_can_be_updated_from_system_settings(client):
     _setup_admin(client)
-    response = client.put("/api/system/log-settings", json={"maxBytes": 2 * 1024 * 1024})
+    response = client.put(
+        "/api/system/log-settings", json={"maxBytes": 2 * 1024 * 1024}
+    )
     assert response.status_code == 200
     assert response.json()["data"]["storage"]["maxBytes"] == 2 * 1024 * 1024
 
