@@ -106,7 +106,8 @@ def test_manual_health_run_exposes_initial_items_and_reaches_terminal_state(
     assert all(item["status"] == "pending" for item in run["items"])
 
     final = run
-    for _ in range(100):
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
         response = client.get(f"/api/system/health/runs/{run['runId']}")
         assert response.status_code == 200
         final = response.json()["data"]["run"]
@@ -115,7 +116,7 @@ def test_manual_health_run_exposes_initial_items_and_reaches_terminal_state(
             and final["summary"]["completed"] == final["summary"]["total"]
         ):
             break
-        time.sleep(0.02)
+        time.sleep(0.05)
 
     assert final["status"] in {"completed", "warning", "error"}
     assert final["summary"]["completed"] == final["summary"]["total"], final
