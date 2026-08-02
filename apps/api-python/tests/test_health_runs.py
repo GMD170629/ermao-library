@@ -46,19 +46,20 @@ def persistent_health_client(
         autocommit=False,
         expire_on_commit=False,
     )
-    app = create_app(test_settings, session_factory=session_factory)
+    database_session = session_factory()
+    app = create_app(test_settings, session_factory=lambda: database_session)
 
     def override_settings() -> Settings:
         return test_settings
 
     def override_db() -> Generator[Session, None, None]:
-        with session_factory() as database_session:
-            yield database_session
+        yield database_session
 
     app.dependency_overrides[get_settings] = override_settings
     app.dependency_overrides[get_db] = override_db
-    with TestClient(app) as test_client, session_factory() as database_session:
+    with TestClient(app) as test_client:
         yield test_client, database_session
+    database_session.close()
     Base.metadata.drop_all(bind=engine)
     engine.dispose()
 
