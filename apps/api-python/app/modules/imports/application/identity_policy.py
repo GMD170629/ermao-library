@@ -8,6 +8,32 @@ import unicodedata
 UNKNOWN_AUTHOR = "未知作者"
 
 
+def split_standalone_numeric_volume(value: str) -> tuple[str, float] | None:
+    """Split a standalone numeric volume from a publication title.
+
+    This is a low-priority fallback for names that omit an explicit volume
+    marker, such as ``Title (1)``, ``Title [02]``, ``Title_003``, or
+    ``004 Title``. Digits attached directly to title text are intentionally not
+    treated as volumes.
+    """
+
+    cleaned = value.strip()
+    patterns = (
+        (r"^(.*?)\s*[\(（\[【]\s*(\d+(?:\.\d+)?)\s*[\)）\]】]\s*$", 1, 2),
+        (r"^[\(（\[【]\s*(\d+(?:\.\d+)?)\s*[\)）\]】]\s*(.*?)$", 2, 1),
+        (r"^(.*?)[\s._-]+(\d+(?:\.\d+)?)\s*$", 1, 2),
+        (r"^(\d+(?:\.\d+)?)[\s._-]+(.*?)$", 2, 1),
+    )
+    for pattern, title_group, volume_group in patterns:
+        match = re.match(pattern, cleaned)
+        if not match or not match.group(title_group).strip():
+            continue
+        volume_index = float(match.group(volume_group))
+        if volume_index > 0:
+            return match.group(title_group).strip(), volume_index
+    return None
+
+
 def normalize_identity_part(value: object) -> str:
     normalized = unicodedata.normalize("NFKC", str(value or "")).lower()
     return re.sub(
@@ -106,6 +132,10 @@ def _strip_volume_suffix(value: str) -> tuple[str, float | None]:
         match = re.match(pattern, cleaned, re.I)
         if match and match.group(1).strip():
             return _clean_title(match.group(1)), float(match.group(2))
+    numeric_fallback = split_standalone_numeric_volume(cleaned)
+    if numeric_fallback is not None:
+        title, volume_index = numeric_fallback
+        return _clean_title(title), volume_index
     return cleaned, None
 
 

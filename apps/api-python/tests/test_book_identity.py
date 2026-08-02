@@ -71,6 +71,39 @@ def test_regex_identity_infers_author_first_tagged_comic_directories(logical_pat
     assert identity.source == "regex"
 
 
+@pytest.mark.parametrize(
+    ("filename", "expected_volume"),
+    [
+        ("FX戦士久留美 (1).zip", 1),
+        ("FX戦士久留美 [02].zip", 2),
+        ("FX戦士久留美_003.zip", 3),
+        ("004 FX戦士久留美.zip", 4),
+    ],
+)
+def test_regex_identity_uses_standalone_number_as_volume_fallback(
+    filename, expected_volume
+):
+    identity = recognize_book_identity_with_regex(
+        "/monitor/comic/"
+        "[FX戦士久留美][ですにゃん×荒酸だいすき][角川][Vol.01-Vol.05][未完]/"
+        f"{filename}"
+    )
+
+    assert (identity.title, identity.author, identity.volume_index) == (
+        "FX戦士久留美",
+        "ですにゃん×荒酸だいすき",
+        expected_volume,
+    )
+    assert identity.source == "regex"
+
+
+def test_regex_identity_does_not_treat_attached_title_digits_as_volume():
+    identity = recognize_book_identity_with_regex("comic/作品2024版.zip")
+
+    assert identity.title == "作品2024版"
+    assert identity.volume_index is None
+
+
 def test_regex_identity_supports_bracketed_filename_and_dash_filename():
     bracketed = recognize_book_identity_with_regex("电子书/[活着][余华].epub")
     dashed = recognize_book_identity_with_regex("电子书/斯泰尔斯庄园奇案 - (英)阿加莎·克里斯蒂.epub")

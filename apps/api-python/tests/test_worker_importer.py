@@ -1197,6 +1197,48 @@ def test_explicit_series_directory_reuses_existing_work_without_recognition(
     )
 
 
+def test_numeric_comic_fallback_groups_parenthesized_volumes(
+    db_session, test_settings, tmp_path
+):
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    series_dir = (
+        tmp_path / "[FX戦士久留美][ですにゃん×荒酸だいすき][角川][Vol.01-Vol.05][未完]"
+    )
+    series_dir.mkdir()
+    first = series_dir / "FX戦士久留美 (1).zip"
+    second = series_dir / "FX戦士久留美 (2).zip"
+    write_comic_fixture(first, volume=1)
+    write_comic_fixture(second, volume=2)
+
+    first_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=first,
+            origin="WATCH",
+            original_name=first.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+    second_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=second,
+            origin="WATCH",
+            original_name=second.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+
+    assert first_result.work_id == second_result.work_id
+    assert first_result.media_version_id == second_result.media_version_id
+    assert db_session.execute(
+        text("SELECT volumeIndex FROM LibraryVolume ORDER BY volumeIndex")
+    ).scalars().all() == [1, 2]
+
+
 def test_author_first_tagged_directory_imports_later_file_as_new_volume_without_recognition(
     db_session, test_settings, tmp_path, monkeypatch
 ):
