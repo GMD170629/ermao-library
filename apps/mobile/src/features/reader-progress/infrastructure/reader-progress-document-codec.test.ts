@@ -15,8 +15,7 @@ test('round-trips a validated EPUB progress document', () => {
     connection,
     owner: { kind: 'local' },
     workId: 'work-1',
-    editionId: 'edition-1',
-    volumeId: null,
+    volumeId: 'volume-1',
     contentFingerprint: 'fingerprint-1',
     location: {
       kind: 'epub',
@@ -38,7 +37,54 @@ test('round-trips a validated EPUB progress document', () => {
   }
 });
 
-test('validates EPUB, comic and PDF locations at the file boundary', () => {
+test('migrates a legacy edition-scoped entry only when it has an explicit volume', () => {
+  const legacy = {
+    format: 'shuku.reader-progress',
+    schemaVersion: 1,
+    generation: 1,
+    connection,
+    client: { id: 'client-000001', lastSequence: 1 },
+    updatedAtMs: 1_000,
+    entries: [{
+      mutationId: 'mutation-000001',
+      clientSequence: 1,
+      owner: { kind: 'local' },
+      workId: 'work-1',
+      editionId: 'edition-1',
+      volumeId: 'volume-1',
+      contentFingerprint: 'fingerprint-1',
+      location: { kind: 'epub', progression: 0.42 },
+      percent: 42,
+      createdAtMs: 1_000,
+      updatedAtMs: 1_000,
+    }],
+  };
+
+  const migrated = readerProgressDocumentCodec.decode(legacy);
+  assert.equal(migrated.ok, true);
+  if (migrated.ok) {
+    assert.equal(migrated.value.schemaVersion, 2);
+    assert.equal(migrated.value.entries[0]?.volumeId, 'volume-1');
+    assert.equal('editionId' in (migrated.value.entries[0] ?? {}), false);
+  }
+
+  const ambiguous = {
+    ...legacy,
+    entries: [{ ...legacy.entries[0], volumeId: null }],
+  };
+  assert.equal(readerProgressDocumentCodec.decode(ambiguous).ok, false);
+});
+
+test('validates reflowable, legacy EPUB, comic and PDF locations at the file boundary', () => {
+  assert.equal(
+    decodeReaderLocation({
+      kind: 'reflowable',
+      format: 'mobi',
+      cfi: 'epubcfi(/6/4)',
+      progression: 0.5,
+    }).ok,
+    true,
+  );
   assert.equal(
     decodeReaderLocation({ kind: 'epub', progression: 0.5 }).ok,
     true,
@@ -57,6 +103,14 @@ test('validates EPUB, comic and PDF locations at the file boundary', () => {
   );
 
   assert.equal(decodeReaderLocation({ kind: 'epub' }).ok, false);
+  assert.equal(
+    decodeReaderLocation({
+      kind: 'reflowable',
+      format: 'docx',
+      progression: 0.5,
+    }).ok,
+    false,
+  );
   assert.equal(
     decodeReaderLocation({ kind: 'epub', progression: 42 }).ok,
     false,
@@ -80,7 +134,6 @@ test('rejects a comic entry whose top-level volume does not match', () => {
     connection,
     owner: { kind: 'local' },
     workId: 'work-1',
-    editionId: 'edition-1',
     volumeId: 'volume-1',
     contentFingerprint: 'fingerprint-1',
     location: {

@@ -1,5 +1,3 @@
-from sqlalchemy import func, select
-
 from app.bootstrap.imports import clear_import_queue_records
 from app.models.import_pipeline import (
     BookConversionTask,
@@ -7,7 +5,8 @@ from app.models.import_pipeline import (
     ImportLog,
     ImportTask,
 )
-from app.models.library import LibraryWork
+from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
+from sqlalchemy import func, select
 
 
 def test_clear_import_queue_deletes_every_status_and_preserves_content(
@@ -24,12 +23,27 @@ def test_clear_import_queue_deletes_every_status_and_preserves_content(
         work_type="EPUB",
         tags="[]",
     )
-    db_session.add(work)
+    media_version = LibraryMediaVersion(
+        id="preserved-media",
+        work_id=work.id,
+        media_kind="EBOOK",
+    )
+    volume = LibraryVolume(
+        id="preserved-volume",
+        media_version_id=media_version.id,
+        title="Preserved source",
+        sort_order=0,
+        format="MOBI",
+        resource_key="test:preserved-volume",
+        import_status="COMPLETED",
+    )
+    db_session.add_all([work, media_version, volume])
     for status in ("PENDING", "PARSING", "COMPLETED", "FAILED"):
         db_session.add(
             ImportTask(
                 id=f"clear-{status.lower()}",
                 work_id=work.id if status == "COMPLETED" else None,
+                volume_id=volume.id if status == "COMPLETED" else None,
                 origin="MANUAL",
                 status=status,
                 source_path=str(source_file),
@@ -51,6 +65,8 @@ def test_clear_import_queue_deletes_every_status_and_preserves_content(
             BookConversionTask(
                 id="clear-conversion",
                 import_task_id="clear-completed",
+                source_volume_id=volume.id,
+                idempotency_key="test:clear-conversion",
                 source_format="MOBI",
                 source_path=str(source_file),
             ),
@@ -64,9 +80,7 @@ def test_clear_import_queue_deletes_every_status_and_preserves_content(
     assert db_session.scalar(select(func.count()).select_from(ImportTask)) == 0
     assert db_session.scalar(select(func.count()).select_from(ImportAsset)) == 0
     assert db_session.scalar(select(func.count()).select_from(ImportLog)) == 0
-    assert (
-        db_session.scalar(select(func.count()).select_from(BookConversionTask)) == 0
-    )
+    assert db_session.scalar(select(func.count()).select_from(BookConversionTask)) == 0
     assert db_session.get(LibraryWork, work.id) is not None
     assert source_file.read_bytes() == b"source"
 

@@ -4,9 +4,9 @@ import test from 'node:test';
 import {
   MAXIMUM_READER_PROGRESS_ENTRIES,
   recordReaderProgress,
-  type LocalProgressEntryV1,
+  type LocalProgressEntryV2,
   type ProgressConnection,
-  type ReaderProgressDocumentV1,
+  type ReaderProgressDocumentV2,
   type RecordReaderProgressCommand,
 } from './reader-progress';
 
@@ -15,14 +15,13 @@ const connection: ProgressConnection = {
   baseUrl: 'https://library.example',
 };
 
-function progressEntry(index: number): LocalProgressEntryV1 {
+function progressEntry(index: number): LocalProgressEntryV2 {
   return {
     mutationId: `mutation-${index}`,
     clientSequence: index + 1,
     owner: { kind: 'local' },
     workId: `work-${index}`,
-    editionId: `edition-${index}`,
-    volumeId: null,
+    volumeId: `volume-${index}`,
     contentFingerprint: `fingerprint-${index}`,
     location: { kind: 'epub', progression: index / 10_000 },
     percent: index / 100,
@@ -31,10 +30,10 @@ function progressEntry(index: number): LocalProgressEntryV1 {
   };
 }
 
-function fullDocument(): ReaderProgressDocumentV1 {
+function fullDocument(): ReaderProgressDocumentV2 {
   return {
     format: 'shuku.reader-progress',
-    schemaVersion: 1,
+    schemaVersion: 2,
     generation: 1,
     connection,
     client: {
@@ -56,8 +55,7 @@ function recordCommand(
     connection,
     owner: { kind: 'local' },
     workId: `work-${workIndex}`,
-    editionId: `edition-${workIndex}`,
-    volumeId: null,
+    volumeId: `volume-${workIndex}`,
     contentFingerprint: `fingerprint-${workIndex}`,
     location: { kind: 'epub', progression: 0.5 },
     percent: 50,

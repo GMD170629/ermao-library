@@ -23,7 +23,6 @@ const allExtensions = formatGroups.flatMap((group) => [...group.formats]);
 type ImportPreferences = {
   stabilityEnabled: boolean;
   stabilitySeconds: number;
-  autoConvert: boolean;
   allowedExtensions: string[];
   ignorePatterns: string;
 };
@@ -31,7 +30,6 @@ type ImportPreferences = {
 const defaultPreferences: ImportPreferences = {
   stabilityEnabled: false,
   stabilitySeconds: 2,
-  autoConvert: true,
   allowedExtensions: allExtensions,
   ignorePatterns: ''
 };
@@ -52,7 +50,6 @@ function normalizePreferences(settings: Record<string, unknown> | undefined): Im
   return {
     stabilityEnabled: booleanSetting(settings?.[settingKeys.stabilityEnabled], false),
     stabilitySeconds: Number.isFinite(rawSeconds) ? Math.min(300, Math.max(0.5, rawSeconds)) : 2,
-    autoConvert: booleanSetting(settings?.[settingKeys.autoConvert], true),
     allowedExtensions: extensions,
     ignorePatterns: typeof settings?.[settingKeys.ignorePatterns] === 'string' ? settings[settingKeys.ignorePatterns] as string : ''
   };
@@ -130,14 +127,12 @@ export function ImportPreferencesPanel() {
       await saveImportPreferenceSettings({
         [settingKeys.stabilityEnabled]: preferences.stabilityEnabled,
         [settingKeys.stabilitySeconds]: preferences.stabilitySeconds,
-        [settingKeys.autoConvert]: preferences.autoConvert,
         [settingKeys.allowedExtensions]: preferences.allowedExtensions,
         [settingKeys.ignorePatterns]: preferences.ignorePatterns
       });
       const next = normalizePreferences({
         [settingKeys.stabilityEnabled]: preferences.stabilityEnabled,
         [settingKeys.stabilitySeconds]: preferences.stabilitySeconds,
-        [settingKeys.autoConvert]: preferences.autoConvert,
         [settingKeys.allowedExtensions]: preferences.allowedExtensions,
         [settingKeys.ignorePatterns]: preferences.ignorePatterns
       });
@@ -185,22 +180,6 @@ export function ImportPreferencesPanel() {
           </span>
           <span className="mt-2 block text-xs font-normal leading-5 text-[#77716A]"><I18nText>最短 0.5 秒，最长 300 秒；时间越长，越适合仍在复制中的大文件。</I18nText></span>
         </label>
-      </section>
-
-      <section aria-labelledby="conversion-title" className="border-b border-[#E5E0DA] pb-8">
-        <div className="flex items-start justify-between gap-5">
-          <div>
-            <h3 id="conversion-title" className="text-lg font-semibold text-[#2A2825]"><I18nText>导入后自动转换</I18nText></h3>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-[#77716A]"><I18nText>将 MOBI、AZW、AZW3、PRC、FB2 和 TXT 自动生成 EPUB 阅读版本，并永久保留原文件。</I18nText></p>
-          </div>
-          <Switch
-            checked={preferences.autoConvert}
-            onChange={(autoConvert) => editPreferences((current) => ({ ...current, autoConvert }))}
-            label={i18nAttribute("自动转换其他文本格式为 EPUB")}
-            disabled={loading}
-          />
-        </div>
-        {!preferences.autoConvert ? <p className="mt-4 rounded-xl bg-[#FFF6E8] px-4 py-3 text-sm leading-6 text-[#8A5A14]"><I18nText>关闭后，这些文本格式仍会以原始文件导入并显示在书库中；当前阅读器无法直接打开，可稍后在图书详情页转换为 EPUB。</I18nText></p> : null}
       </section>
 
       <section aria-labelledby="extensions-title" className="border-b border-[#E5E0DA] pb-8">

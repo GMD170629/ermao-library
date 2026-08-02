@@ -24,13 +24,15 @@ flowchart LR
 
 ## SQLite schema migrations (Alembic)
 
-- Authority: Alembic revisions under `apps/api-python/app/db/alembic/versions/`. The squashed baseline is `28bd57c8f2a9` (`baseline_v14`), matching the former `PRAGMA user_version = 14` target schema.
+- Authority: Alembic revisions under `apps/api-python/app/db/alembic/versions/`. Revisions `0001` through `0003` are immutable published history. `0004_schema_normalization` converts the Alembic-created and pre-Alembic v14 layouts to one immutable schema snapshot before later feature migrations run.
 - Startup path (`app/db/bootstrap.py` → `app/db/runner.py`):
   - empty DB → `alembic upgrade head`
   - existing DB with `alembic_version` → `upgrade head`
-  - pre-Alembic DB with `user_version == 14` → stamp head (no DDL replay)
-  - complete test DB created from `Base.metadata` → stamp head
+  - pre-Alembic DB with `user_version == 14` → stamp `0003_import_work_queue`, then `upgrade head`
+  - non-empty unversioned DB, including one created directly from runtime ORM metadata → reject as unsupported
   - any other populated DB, including `user_version < 14` → reject as unsupported
+- A revision number is a physical schema contract. `0004` rebuilds every baseline table from the checked-in `0004_baseline.json` snapshot, normalizes timestamp storage, and validates all foreign keys before commit. Migration tests compare complete table, column, default, key, index, and check-constraint fingerprints across distinct predecessor layouts.
+- A database left with partially applied DDL by an older failed media-version migration is not a valid `0003` source and is rejected. Restore the automatic `shuku-before-alembic-0003_import_work_queue-to-*.sqlite3` snapshot before starting the corrected image; `0004` does not delete rows or guess how to repair a malformed predecessor.
 - `app/db/seed.py` only inserts missing baseline records: `systemName`, `language`, `workDetail.tabOrder`, and the three built-in metadata Sources. It never overwrites existing records, runs historical backfills, repairs business state, or writes migration markers.
 - Timestamp normalization triggers are ensured after every schema apply (`app/db/timestamp_triggers.py`). Table and column discovery uses SQLAlchemy Inspector. SQLite has no SQLAlchemy schema construct for triggers, so the final `CREATE/DROP TRIGGER` DDL is a narrow dialect-specific exception owned by DB bootstrap; remove it once every non-legacy timestamp writer uses typed SQLAlchemy ORM/expression APIs.
 - Backup archives remain format version 2 and include `databaseRevision`. Restore is allowed only when that value equals the current Alembic head; archives without the field and archives from another revision remain listable/downloadable but fail before clearing data with `BACKUP_DATABASE_REVISION_UNSUPPORTED`.

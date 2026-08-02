@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import delete, inspect as sa_inspect, select
+from sqlalchemy import delete, select
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -15,33 +16,40 @@ from app.models import (
     ImportAsset,
     ImportLog,
     ImportTask,
-    LibraryConsumptionState,
-    LibraryEdition,
+    LibraryFacet,
     LibraryFile,
+    LibraryMediaVersion,
     LibraryMetadata,
     LibraryReadingProgress,
     LibraryReadingUnit,
     LibraryVolume,
+    LibraryVolumeFacet,
     LibraryWork,
+    LibraryWorkFacet,
+    MediaVersionMigrationEvent,
     MetadataLookupTask,
     MetadataSuggestion,
     MonitorFolder,
     OrganizeJob,
-    ReaderBookPreference,
     ReaderBookmark,
+    ReaderBookPreference,
     ReaderPreference,
     ReaderProgressCursor,
     Shelf,
     ShelfWork,
     SystemSetting,
     User,
+    UserMediaHistory,
     UserMonitorFolderAccess,
     UserPreference,
     WorkDetailPreference,
 )
+
+
 def _legacy_column_to_attr(model: type) -> dict[str, str]:
     mapper = sa_inspect(model)
     return {prop.columns[0].name: prop.key for prop in mapper.column_attrs}
+
 
 TABLE_MODELS: dict[str, type] = {
     "User": User,
@@ -50,14 +58,17 @@ TABLE_MODELS: dict[str, type] = {
     "MonitorFolder": MonitorFolder,
     "UserMonitorFolderAccess": UserMonitorFolderAccess,
     "LibraryWork": LibraryWork,
-    "LibraryEdition": LibraryEdition,
+    "LibraryMediaVersion": LibraryMediaVersion,
     "LibraryVolume": LibraryVolume,
     "LibraryFile": LibraryFile,
     "LibraryReadingUnit": LibraryReadingUnit,
     "LibraryMetadata": LibraryMetadata,
+    "LibraryFacet": LibraryFacet,
+    "LibraryWorkFacet": LibraryWorkFacet,
+    "LibraryVolumeFacet": LibraryVolumeFacet,
     "ShelfWork": ShelfWork,
     "LibraryReadingProgress": LibraryReadingProgress,
-    "LibraryConsumptionState": LibraryConsumptionState,
+    "UserMediaHistory": UserMediaHistory,
     "WorkDetailPreference": WorkDetailPreference,
     "ImportTask": ImportTask,
     "ImportAsset": ImportAsset,
@@ -73,6 +84,7 @@ TABLE_MODELS: dict[str, type] = {
     "ReaderBookPreference": ReaderBookPreference,
     "ReaderProgressCursor": ReaderProgressCursor,
     "ReaderBookmark": ReaderBookmark,
+    "MediaVersionMigrationEvent": MediaVersionMigrationEvent,
     "SystemSetting": SystemSetting,
 }
 
@@ -84,8 +96,7 @@ def model_columns(model: type) -> set[str]:
 def _entity_to_export_record(entity: object) -> dict[str, Any]:
     mapper = sa_inspect(entity).mapper
     return {
-        prop.columns[0].name: getattr(entity, prop.key)
-        for prop in mapper.column_attrs
+        prop.columns[0].name: getattr(entity, prop.key) for prop in mapper.column_attrs
     }
 
 
@@ -97,10 +108,7 @@ def fetch_table(db: Session, table: str) -> list[dict[str, Any]]:
     created_at = getattr(model, "created_at", None)
     if created_at is not None:
         stmt = stmt.order_by(created_at.asc())
-    return [
-        _entity_to_export_record(entity)
-        for entity in db.scalars(stmt).all()
-    ]
+    return [_entity_to_export_record(entity) for entity in db.scalars(stmt).all()]
 
 
 def _legacy_to_model_values(model: type, record: dict[str, Any]) -> dict[str, Any]:
@@ -140,7 +148,9 @@ def upsert_user_records(db: Session, records: list[dict[str, Any]]) -> int:
         if values.get("id"):
             existing_id = db.scalar(select(User.id).where(User.id == values["id"]))
         if not existing_id and values.get("email"):
-            existing_id = db.scalar(select(User.id).where(User.email == values["email"]))
+            existing_id = db.scalar(
+                select(User.id).where(User.email == values["email"])
+            )
         if existing_id:
             user = db.get(User, existing_id)
             if user is not None:

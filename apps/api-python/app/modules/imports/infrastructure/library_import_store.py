@@ -12,14 +12,14 @@ from sqlalchemy.orm import Session
 
 from app.models.import_pipeline import ImportAsset, ImportLog, ImportTask
 from app.models.library import (
-    LibraryConsumptionState,
-    LibraryEdition,
     LibraryFile,
+    LibraryMediaVersion,
     LibraryMetadata,
     LibraryReadingProgress,
     LibraryReadingUnit,
     LibraryVolume,
     LibraryWork,
+    UserMediaHistory,
 )
 from app.models.organize import MetadataLookupTask, OrganizeJob
 from app.modules.imports.infrastructure.source_keys import source_key
@@ -59,37 +59,73 @@ class SqlAlchemyLibraryImportStore:
         return dict(columns)
 
     def insert_library_work(self, *, columns: dict[str, object]) -> dict[str, object]:
-        self._db.execute(insert(LibraryWork.__table__).values(columns))
+        allowed = {column.name for column in LibraryWork.__table__.columns}
+        values = {key: value for key, value in columns.items() if key in allowed}
+        self._db.execute(insert(LibraryWork.__table__).values(values))
         self._db.flush()
-        return dict(columns)
+        return dict(values)
 
     def update_library_work(self, work_id: str, *, columns: dict[str, object]) -> None:
+        allowed = {column.name for column in LibraryWork.__table__.columns}
+        values = {key: value for key, value in columns.items() if key in allowed}
         self._db.execute(
             update(LibraryWork.__table__)
             .where(LibraryWork.id == work_id)
-            .values(columns)
+            .values(values)
         )
 
-    def insert_library_edition(
+    def ensure_library_media_version(
         self, *, columns: dict[str, object]
     ) -> dict[str, object]:
-        self._db.execute(insert(LibraryEdition.__table__).values(columns))
-        self._db.flush()
-        return dict(columns)
-
-    def update_library_edition(
-        self, edition_id: str, *, columns: dict[str, object]
-    ) -> None:
-        self._db.execute(
-            update(LibraryEdition.__table__)
-            .where(LibraryEdition.id == edition_id)
-            .values(columns)
+        work_id = str(columns["workId"])
+        media_kind = str(columns["mediaKind"])
+        existing = (
+            self._db.execute(
+                select(LibraryMediaVersion.__table__).where(
+                    LibraryMediaVersion.work_id == work_id,
+                    LibraryMediaVersion.media_kind == media_kind,
+                )
+            )
+            .mappings()
+            .first()
         )
+        if existing is not None:
+            return dict(existing)
+        values = {
+            key: columns[key]
+            for key in ("id", "workId", "mediaKind", "createdAt", "updatedAt")
+            if key in columns
+        }
+        self._db.execute(insert(LibraryMediaVersion.__table__).values(values))
+        self._db.flush()
+        return dict(values)
+
+    def update_library_media_version(
+        self, media_version_id: str, *, columns: dict[str, object]
+    ) -> None:
+        allowed = {column.name for column in LibraryMediaVersion.__table__.columns}
+        values = {key: value for key, value in columns.items() if key in allowed}
+        if values:
+            self._db.execute(
+                update(LibraryMediaVersion.__table__)
+                .where(LibraryMediaVersion.id == media_version_id)
+                .values(values)
+            )
 
     def insert_library_volume(self, *, columns: dict[str, object]) -> dict[str, object]:
-        self._db.execute(insert(LibraryVolume.__table__).values(columns))
+        media_version_id = str(columns.get("mediaVersionId") or "")
+        if not media_version_id:
+            raise ValueError("LibraryVolume.mediaVersionId is required")
+        if not columns.get("format"):
+            raise ValueError("LibraryVolume.format is required")
+        if not columns.get("resourceKey"):
+            raise ValueError("LibraryVolume.resourceKey is required")
+        normalized = {**columns, "mediaVersionId": media_version_id}
+        allowed = {column.name for column in LibraryVolume.__table__.columns}
+        normalized = {key: value for key, value in normalized.items() if key in allowed}
+        self._db.execute(insert(LibraryVolume.__table__).values(normalized))
         self._db.flush()
-        return dict(columns)
+        return dict(normalized)
 
     def update_library_volume(
         self, volume_id: str, *, columns: dict[str, object]
@@ -164,6 +200,8 @@ class SqlAlchemyLibraryImportStore:
     def insert_library_metadata(
         self, *, columns: dict[str, object]
     ) -> dict[str, object]:
+        if not columns.get("volumeId"):
+            raise ValueError("LibraryMetadata.volumeId is required")
         self._db.execute(insert(LibraryMetadata.__table__).values(columns))
         self._db.flush()
         return dict(columns)
@@ -180,15 +218,15 @@ class SqlAlchemyLibraryImportStore:
             .values(columns)
         )
 
-    def update_library_consumption_state(
+    def update_user_media_history(
         self,
-        state_id: str,
+        history_id: str,
         *,
         columns: dict[str, object],
     ) -> None:
         self._db.execute(
-            update(LibraryConsumptionState.__table__)
-            .where(LibraryConsumptionState.id == state_id)
+            update(UserMediaHistory.__table__)
+            .where(UserMediaHistory.id == history_id)
             .values(columns)
         )
 

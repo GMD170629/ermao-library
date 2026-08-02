@@ -144,7 +144,7 @@ async def create_download_task(request: Request, db: Session = Depends(get_db), 
         return auth_error
     payload = await request.json()
     try:
-        target_dir = _target_directory_from_path(settings, payload.get("targetPath"), "下载")
+        target_dir = _target_directory_from_path(payload.get("targetPath"), "下载")
     except ValueError as exc:
         return fail(str(exc), status_code=400)
     save_path = str(target_dir)

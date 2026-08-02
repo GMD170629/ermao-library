@@ -113,6 +113,31 @@ def test_series_volume_identity_is_not_replaced_by_volume_embedded_metadata() ->
     assert resolved.selection_reason == "series_volume_path"
 
 
+def test_series_volume_identity_fills_unknown_author_from_embedded_metadata() -> None:
+    resolved = resolve_import_identity(
+        _path_identity(
+            title="荒島求生記",
+            author="未知作者",
+            confidence=0.62,
+            volume_index=1,
+        ),
+        embedded=EmbeddedIdentityMetadata(
+            title=None,
+            author="高桥义广",
+            source="pdf_metadata",
+            confidence=0.9,
+        ),
+    )
+
+    assert (resolved.title, resolved.author, resolved.volume_index) == (
+        "荒島求生記",
+        "高桥义广",
+        1,
+    )
+    assert resolved.source == "pdf_metadata"
+    assert resolved.selection_reason == "embedded_author_over_incomplete_path"
+
+
 def test_placeholder_embedded_metadata_does_not_replace_path_identity() -> None:
     resolved = resolve_import_identity(
         _path_identity(title="活着", author="余华", confidence=0.88),

@@ -15,10 +15,16 @@ from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.modules.system.infrastructure.settings import get_settings_raw, parse_setting_value
+from app.modules.imports.application.identity_policy import (
+    split_standalone_numeric_volume,
+)
+from app.modules.system.infrastructure.settings import (
+    get_settings_raw,
+    parse_setting_value,
+)
 
 UNKNOWN_AUTHOR = "未知作者"
-IDENTITY_PARSER_VERSION = 5
+IDENTITY_PARSER_VERSION = 6
 
 
 @dataclass(frozen=True)
@@ -81,9 +87,6 @@ def logical_import_path(db: Session, settings: Settings, path: Path, original_na
                     continue
     except Exception:
         roots = []
-    if settings.resolved_monitor_root is not None:
-        roots.append((settings.resolved_monitor_root.name or "monitor", settings.resolved_monitor_root))
-
     matching = [(name, root) for name, root in roots if resolved == root or root in resolved.parents]
     if matching:
         name, root = max(matching, key=lambda item: len(item[1].parts))
@@ -595,6 +598,9 @@ def _volume_index(value: str) -> float | None:
         match = re.search(pattern, value, re.I)
         if match:
             return float(match.group(1))
+    numeric_fallback = split_standalone_numeric_volume(value)
+    if numeric_fallback is not None:
+        return numeric_fallback[1]
     return None
 
 
@@ -609,6 +615,10 @@ def _strip_volume_suffix(value: str) -> tuple[str, float | None]:
         match = re.match(pattern, cleaned, re.I)
         if match and match.group(1).strip():
             return _clean_title(match.group(1)), float(match.group(2))
+    numeric_fallback = split_standalone_numeric_volume(cleaned)
+    if numeric_fallback is not None:
+        title, volume_index = numeric_fallback
+        return _clean_title(title), volume_index
     return cleaned, None
 
 

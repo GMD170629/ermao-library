@@ -211,7 +211,7 @@ export function TargetDirectoryPicker({
         <div className="absolute left-0 right-0 top-full z-50 mt-2 rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-700 shadow-xl shadow-slate-200/60">
           <div className="mb-2 flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="font-medium text-slate-950"><I18nText>监控根目录</I18nText></div>
+              <div className="font-medium text-slate-950"><I18nText>可访问目录</I18nText></div>
               <div className="truncate text-xs text-slate-500">{monitorRoot || i18nExpression("读取中")}</div>
             </div>
             <button
@@ -284,11 +284,12 @@ function TargetDirectoryNodeRow({
         >
           <ChevronRight size={15} className={cn('transition', isExpanded && 'rotate-90')} />
         </button>
-        <button type="button" onClick={() => onSelect(node.path)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+        <button type="button" disabled={!node.readable} onClick={() => onSelect(node.path)} className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-not-allowed disabled:opacity-50">
           <FolderOpen size={15} className="shrink-0" />
           <span className="truncate">{node.path}</span>
         </button>
         {autoImport ? <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700"><I18nText>自动入库</I18nText></span> : null}
+        {!node.readable ? <span className="shrink-0 text-xs text-slate-400"><I18nText>不可读取</I18nText></span> : null}
         {loadingPath === node.path ? <span className="shrink-0 text-xs text-slate-400"><I18nText>读取中</I18nText></span> : null}
       </div>
       {isExpanded ? (

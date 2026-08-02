@@ -84,7 +84,7 @@ function isSensitiveApi(pathname) {
 
 function isLargeReaderPayload(pathname) {
   pathname = withoutBasePath(pathname);
-  return /\/api\/editions\/[^/]+\/file$/.test(pathname)
+  return /\/api\/volumes\/[^/]+\/file$/.test(pathname)
     || /\/api\/files\/[^/]+(?:\/(stream|audio))?$/.test(pathname)
     || /\/api\/audio\/[^/]+/.test(pathname)
     || /\/api\/volumes\/[^/]+\/pages\/[^/]+$/.test(pathname)
@@ -106,7 +106,6 @@ function isReaderFont(pathname) {
 function isCoverRequest(pathname) {
   pathname = withoutBasePath(pathname);
   return /\/api\/works\/[^/]+\/cover(\/|$)/.test(pathname)
-    || /\/api\/editions\/[^/]+\/cover(\/|$)/.test(pathname)
     || /\/api\/volumes\/[^/]+\/cover(\/|$)/.test(pathname);
 }
 

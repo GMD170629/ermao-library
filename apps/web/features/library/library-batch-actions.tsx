@@ -3,7 +3,6 @@
 import {
   BookCheck,
   Braces,
-  Building2,
   Check,
   Eye,
   Hash,
@@ -57,7 +56,7 @@ type FindReplacePreview = {
 };
 
 const actions: Array<{ value: LibraryBatchAction; label: string; shortLabel: string; description: string; icon: LucideIcon }> = [
-  { value: 'metadata', label: '批量更新元数据', shortLabel: '元数据', description: '作者、出版社、标签和系列', icon: Tags },
+  { value: 'metadata', label: '批量更新元数据', shortLabel: '元数据', description: '作者、标签和系列', icon: Tags },
   { value: 'find_replace', label: '查找替换', shortLabel: '查找替换', description: '支持安全 Jinja 变量和递增序列', icon: Replace },
   { value: 'shelves', label: '加入或移除书架', shortLabel: '书架', description: '管理普通书架中的批量归属', icon: LibraryBig },
   { value: 'reading_status', label: '设置阅读状态', shortLabel: '阅读状态', description: '清空进度或统一设为 100%', icon: BookCheck },
@@ -222,10 +221,8 @@ export function LibraryBatchDialog({
   const toast = useToast();
   const [saving, setSaving] = useState(false);
   const [authorEnabled, setAuthorEnabled] = useState(false);
-  const [publisherEnabled, setPublisherEnabled] = useState(false);
   const [seriesEnabled, setSeriesEnabled] = useState(false);
   const [author, setAuthor] = useState('');
-  const [publisher, setPublisher] = useState('');
   const [seriesName, setSeriesName] = useState('');
   const [addTags, setAddTags] = useState('');
   const [removeTags, setRemoveTags] = useState('');
@@ -253,19 +250,15 @@ export function LibraryBatchDialog({
   const activeAction = actions.find((item) => item.value === action);
   const findReplaceSignature = useMemo(() => JSON.stringify({ selectedIds, findField, findText, replacement, regex, caseSensitive, startNumber }), [caseSensitive, findField, findText, regex, replacement, selectedIds, startNumber]);
   const previewCurrent = preview !== null && previewSignature === findReplaceSignature;
-  const metadataReady = authorEnabled || publisherEnabled || seriesEnabled || splitValues(addTags).length > 0 || splitValues(removeTags).length > 0;
+  const metadataReady = authorEnabled || seriesEnabled || splitValues(addTags).length > 0 || splitValues(removeTags).length > 0;
   const findFieldOptions: SelectOption[] = [
     { value: 'title', label: '书名', group: '作品元数据' },
     { value: 'author', label: '作者', group: '作品元数据' },
     { value: 'description', label: '简介', group: '作品元数据' },
     { value: 'seriesName', label: '系列', group: '作品元数据' },
     { value: 'tags', label: '标签', group: '作品元数据' },
-    { value: 'publisher', label: '出版社（主版本）', group: '版本元数据' },
-    { value: 'versionName', label: '版本名称（主版本）', group: '版本元数据' },
-    { value: 'language', label: '语言（主版本）', group: '版本元数据' },
-    { value: 'isbn', label: 'ISBN（主版本）', group: '版本元数据' },
-    { value: 'identifier', label: '外部标识（主版本）', group: '版本元数据' },
-    { value: 'narrator', label: '演播者（主版本）', group: '版本元数据' }
+    { value: 'publishedYear', label: '出版年份', group: '作品元数据' },
+    { value: 'volumeTitle', label: '卷册名称', group: '卷册资源' }
   ];
 
   useEffect(() => {
@@ -320,7 +313,6 @@ export function LibraryBatchDialog({
   async function applyMetadata() {
     const fields: Record<string, string> = {};
     if (authorEnabled) fields.author = author;
-    if (publisherEnabled) fields.publisher = publisher;
     if (seriesEnabled) fields.seriesName = seriesName;
     const payload = await postJson({ action: 'update_metadata', fields, addTags: splitValues(addTags), removeTags: splitValues(removeTags) });
     return `已更新 ${payload.data?.updated ?? selectedIds.length} 本图书的元数据`;
@@ -469,12 +461,9 @@ export function LibraryBatchDialog({
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 md:px-6 md:py-6">
           {action === 'metadata' ? (
             <div className="space-y-3">
-              <div className="grid gap-3 md:grid-cols-3">
+              <div className="grid gap-3 md:grid-cols-2">
                 <FieldToggle checked={authorEnabled} onChange={setAuthorEnabled} icon={UserRound} label={i18nAttribute("作者")} hint={i18nAttribute("统一覆盖作品作者")}>
                   <input value={author} onChange={(event) => setAuthor(event.target.value)} className={inputClass} placeholder={i18nAttribute("例如：余华")} />
-                </FieldToggle>
-                <FieldToggle checked={publisherEnabled} onChange={setPublisherEnabled} icon={Building2} label={i18nAttribute("出版社")} hint={i18nAttribute("更新每本书的主版本")}>
-                  <input value={publisher} onChange={(event) => setPublisher(event.target.value)} className={inputClass} placeholder={i18nAttribute("例如：人民文学出版社")} />
                 </FieldToggle>
                 <FieldToggle checked={seriesEnabled} onChange={setSeriesEnabled} icon={LibraryBig} label={i18nAttribute("系列")} hint={i18nAttribute("统一设置或留空清除")}>
                   <input value={seriesName} onChange={(event) => setSeriesName(event.target.value)} className={inputClass} placeholder={i18nAttribute("例如：银河帝国")} />
@@ -571,7 +560,7 @@ export function LibraryBatchDialog({
               </button>
               <button type="button" onClick={() => setReadingStatus('FINISHED')} className={cn('rounded-2xl border p-5 text-left transition', readingStatus === 'FINISHED' ? 'border-[#EFAE9B] bg-[#FFF3EE] ring-2 ring-[#FFE2D8]' : 'border-black/[0.08] bg-white hover:bg-black/[0.02]')}>
                 <span className="flex items-center justify-between text-base font-semibold text-[#37322F]"><I18nText>设为已读</I18nText>{readingStatus === 'FINISHED' ? <Check size={18} className="text-[#EF4D2F]" /> : null}</span>
-                <span className="mt-3 block text-sm leading-6 text-[#746D67]"><I18nText>把电子书、漫画和有声书的阅读状态统一设为已完成，并将所有版本的阅读进度更新为 100%。</I18nText></span>
+                <span className="mt-3 block text-sm leading-6 text-[#746D67]"><I18nText>将所有可见卷册的阅读进度更新为 100%；作品完成状态会据此动态计算。</I18nText></span>
               </button>
             </div>
           ) : null}
@@ -581,7 +570,7 @@ export function LibraryBatchDialog({
               <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                 {([
                   ['crop', '封面裁剪', '按统一比例居中裁剪', Scissors],
-                  ['regenerate', '重新生成', '从主版本恢复封面', RotateCcw],
+                  ['regenerate', '重新生成', '从卷册资源恢复封面', RotateCcw],
                   ['compress', '封面压缩', '降低尺寸和文件体积', Minimize2],
                   ['replace', '替换封面', '使用同一张新图片', ImagePlus]
                 ] as const).map(([value, label, description, Icon]) => (
@@ -613,7 +602,7 @@ export function LibraryBatchDialog({
                   </label>
                 </div>
               ) : null}
-              {coverAction === 'regenerate' ? <div className="rounded-xl bg-[#F6F3EF] px-4 py-3 text-sm leading-6 text-[#706963]"><I18nText>系统会优先恢复主版本或卷册中已提取的封面；找不到可用封面时使用默认封面。上传的自定义封面会被替换。</I18nText></div> : null}
+              {coverAction === 'regenerate' ? <div className="rounded-xl bg-[#F6F3EF] px-4 py-3 text-sm leading-6 text-[#706963]"><I18nText>系统会按媒介优先级和卷册顺序恢复已提取的封面；找不到可用封面时使用默认封面。上传的自定义封面会被替换。</I18nText></div> : null}
             </div>
           ) : null}
 

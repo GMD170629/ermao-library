@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { UNAUTHORIZED_EVENT } from '../../lib/auth-session';
-import { activateReaderV2User, getReaderV2Runtime, type AudioProgressLocation } from '../../lib/reader-v2';
+import { activateReaderUser, getReaderRuntime, type AudioProgressLocation } from '../../lib/reader';
 import { withBasePath } from '../../lib/base-path';
 import { BEFORE_PWA_UPDATE_EVENT, type BeforePwaUpdateDetail } from '../../lib/pwa/update-coordination';
 import { AUDIO_DEVICE_PREFERENCES_KEY, readAudioDevicePreferences, writeAudioDevicePreferences } from '../../lib/audio-device-preferences';
@@ -11,10 +11,10 @@ import {
   absolutePositionForTrack,
   audioLocation,
   audioProgressPercent,
-  beginAudioEditionSwitch,
+  beginAudioVolumeSwitch,
   chapterAt,
   clamp,
-  failAudioEditionSwitch,
+  failAudioVolumeSwitch,
   mergeAudioLoadIntent,
   nextAudioTrackForMetadataPreload,
   normalizeResumeTarget,
@@ -29,26 +29,25 @@ import type {
   AudioPlaybackContextValue,
   AudioPlaybackState,
   AudioTrack,
-  LoadAudioEditionOptions
+  LoadAudioVolumeOptions
 } from './types';
 
 const PLAYBACK_CHANNEL = 'shuku-audio-playback';
 const PLAYBACK_CLAIM_KEY = 'shuku:audio:playback-claim';
 const PROGRESS_INTERVAL_MS = 15_000;
 
-type PendingAudioEditionLoad = AudioLoadIntent & {
-  editionId: string;
-  volumeId: string | null;
+type PendingAudioVolumeLoad = AudioLoadIntent & {
+  volumeId: string;
   summary: AudioLaunchSummary | null;
   promise: Promise<void>;
 };
-type FailedAudioEditionLoad = Omit<PendingAudioEditionLoad, 'autoplay' | 'promise'>;
+type FailedAudioVolumeLoad = Omit<PendingAudioVolumeLoad, 'autoplay' | 'promise'>;
 
 const initialState: AudioPlaybackState = {
   lifecycle: 'idle',
   bootstrap: null,
-  editionId: null,
-  pendingEditionId: null,
+  volumeId: null,
+  pendingVolumeId: null,
   pendingSummary: null,
   loadError: null,
   workId: null,
@@ -101,8 +100,8 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
   const trackIndexRef = useRef(-1);
   const loadAbortRef = useRef<AbortController | null>(null);
   const loadSequenceRef = useRef(0);
-  const pendingLoadRef = useRef<PendingAudioEditionLoad | null>(null);
-  const failedLoadRef = useRef<FailedAudioEditionLoad | null>(null);
+  const pendingLoadRef = useRef<PendingAudioVolumeLoad | null>(null);
+  const failedLoadRef = useRef<FailedAudioVolumeLoad | null>(null);
   const nextTrackPreloadAbortRef = useRef<AbortController | null>(null);
   const pendingSeekRef = useRef<number | null>(null);
   const pendingAutoplayRef = useRef(false);
@@ -113,7 +112,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
   const thisTabIdRef = useRef('');
   if (!thisTabIdRef.current) thisTabIdRef.current = tabId();
   const sleepTargetChapterRef = useRef<string | null>(null);
-  const runtime = getReaderV2Runtime();
+  const runtime = getReaderRuntime();
 
   const updateState = useCallback((patch: Partial<AudioPlaybackState> | ((current: AudioPlaybackState) => Partial<AudioPlaybackState>)) => {
     setState((current) => {
@@ -146,14 +145,13 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const absolutePositionMs = completed
       ? bootstrap.totalDurationMs
       : absolutePositionForTrack(bootstrap.tracks, trackIndex, positionMs);
-    const location = audioLocation(track, chapter, positionMs, bootstrap.volumeId);
+    const location = audioLocation(track, chapter, positionMs, bootstrap.volume.id);
     const domainLocation: AudioProgressLocation = { kind: 'audio', ...location };
     lastProgressEnqueueRef.current = Date.now();
     return runtime.progress.enqueue({
       userId: bootstrap.userId,
-      workId: bootstrap.edition.workId,
-      editionId: bootstrap.edition.id,
-      volumeId: bootstrap.volumeId,
+      workId: bootstrap.mediaVersion.workId,
+      volumeId: bootstrap.volume.id,
       contentFingerprint: bootstrap.contentFingerprint,
       location: domainLocation,
       percent: audioProgressPercent(absolutePositionMs, bootstrap.totalDurationMs, completed)
@@ -252,17 +250,12 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     }
   }, [playCurrentAudio, updateState]);
 
-  const loadEdition = useCallback((editionId: string, options: LoadAudioEditionOptions = {}): Promise<void> => {
-    const normalizedEditionId = editionId.trim();
-    if (!normalizedEditionId) return Promise.resolve();
+  const loadVolume = useCallback((volumeId: string, options: LoadAudioVolumeOptions = {}): Promise<void> => {
+    const normalizedVolumeId = volumeId.trim();
+    if (!normalizedVolumeId) return Promise.resolve();
 
     const pendingLoad = pendingLoadRef.current;
-    const requestedVolumeId = options.volumeId?.trim() || null;
-    if (
-      !options.force
-      && pendingLoad?.editionId === normalizedEditionId
-      && pendingLoad.volumeId === requestedVolumeId
-    ) {
+    if (!options.force && pendingLoad?.volumeId === normalizedVolumeId) {
       const merged = mergeAudioLoadIntent(pendingLoad, {
         autoplay: options.autoplay,
         chapterId: options.chapterId ?? undefined
@@ -278,10 +271,9 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
 
     if (
       !options.force
-      && bootstrapRef.current?.edition.id === normalizedEditionId
-      && (!requestedVolumeId || bootstrapRef.current.volumeId === requestedVolumeId)
+      && bootstrapRef.current?.volume.id === normalizedVolumeId
     ) {
-      if (pendingLoadRef.current || stateRef.current.pendingEditionId) {
+      if (pendingLoadRef.current || stateRef.current.pendingVolumeId) {
         loadSequenceRef.current += 1;
         loadAbortRef.current?.abort();
         loadAbortRef.current = null;
@@ -300,7 +292,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         }
       }
       updateState({
-        pendingEditionId: null,
+        pendingVolumeId: null,
         pendingSummary: null,
         loadError: null,
         lifecycle: audioRef.current?.paused === false ? 'playing' : 'paused'
@@ -314,9 +306,8 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     loadAbortRef.current?.abort();
     const controller = new AbortController();
     loadAbortRef.current = controller;
-    const request: PendingAudioEditionLoad = {
-      editionId: normalizedEditionId,
-      volumeId: requestedVolumeId,
+    const request: PendingAudioVolumeLoad = {
+      volumeId: normalizedVolumeId,
       autoplay: Boolean(options.autoplay),
       chapterId: options.chapterId?.trim() || null,
       summary: options.summary ?? null,
@@ -331,17 +322,17 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         suppressedPauseEventsRef.current += 1;
         audioRef.current.pause();
       }
-      updateState(beginAudioEditionSwitch(previousState, normalizedEditionId, request.summary));
+      updateState(beginAudioVolumeSwitch(previousState, normalizedVolumeId, request.summary));
       if (previousBootstrap) await persistProgress(false, true);
       if (controller.signal.aborted || requestId !== loadSequenceRef.current) return;
       try {
-        const bootstrap = await fetchAudioBootstrap(normalizedEditionId, request.volumeId, controller.signal);
+        const bootstrap = await fetchAudioBootstrap(normalizedVolumeId, controller.signal);
         if (controller.signal.aborted || requestId !== loadSequenceRef.current) return;
         loadAbortRef.current = null;
         failedLoadRef.current = null;
         bootstrapRef.current = bootstrap;
-        activateReaderV2User(bootstrap.userId);
-        const preferences = readAudioDevicePreferences(bootstrap.userId, bootstrap.edition.workId);
+        activateReaderUser(bootstrap.userId);
+        const preferences = readAudioDevicePreferences(bootstrap.userId, bootstrap.mediaVersion.workId);
         const playbackRate = clamp(preferences.playbackRate ?? bootstrap.preferences.playbackRate, 0.75, 3);
         const volume = clamp(preferences.volume ?? bootstrap.preferences.volume, 0, 1);
         const requestedChapter = request.chapterId
@@ -355,11 +346,11 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
           : normalizeResumeTarget(bootstrap);
         updateState({
           bootstrap,
-          editionId: bootstrap.edition.id,
-          pendingEditionId: null,
+          volumeId: bootstrap.volume.id,
+          pendingVolumeId: null,
           pendingSummary: null,
           loadError: null,
-          workId: bootstrap.edition.workId,
+          workId: bootstrap.mediaVersion.workId,
           totalDurationMs: bootstrap.totalDurationMs,
           playbackRate,
           skipBackwardSeconds: bootstrap.preferences.skipBackwardSeconds,
@@ -378,12 +369,11 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         bootstrapRef.current = previousBootstrap;
         trackIndexRef.current = previousTrackIndex;
         failedLoadRef.current = {
-          editionId: normalizedEditionId,
           volumeId: request.volumeId,
           chapterId: request.chapterId,
           summary: request.summary
         };
-        updateState(failAudioEditionSwitch(previousState, normalizedEditionId, message, request.summary));
+        updateState(failAudioVolumeSwitch(previousState, normalizedVolumeId, message, request.summary));
       }
     })();
     request.promise = operation.finally(() => {
@@ -399,12 +389,12 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
   }, [updateState]);
 
   const play = useCallback(async () => {
-    if (stateRef.current.lifecycle === 'error' && stateRef.current.editionId) {
-      await loadEdition(stateRef.current.editionId, { autoplay: true, force: true });
+    if (stateRef.current.lifecycle === 'error' && stateRef.current.volumeId) {
+      await loadVolume(stateRef.current.volumeId, { autoplay: true, force: true });
       return;
     }
     await playCurrentAudio();
-  }, [loadEdition, playCurrentAudio]);
+  }, [loadVolume, playCurrentAudio]);
 
   const toggle = useCallback(async () => {
     if (audioRef.current && !audioRef.current.paused) pause();
@@ -498,7 +488,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     if (audioRef.current) audioRef.current.playbackRate = normalized;
     updateState({ playbackRate: normalized });
     const bootstrap = bootstrapRef.current;
-    writeAudioDevicePreferences({ playbackRate: normalized, volume: stateRef.current.volume }, bootstrap?.userId, bootstrap?.edition.workId);
+    writeAudioDevicePreferences({ playbackRate: normalized, volume: stateRef.current.volume }, bootstrap?.userId, bootstrap?.mediaVersion.workId);
     void persistProgress();
   }, [persistProgress, updateState]);
 
@@ -507,7 +497,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     if (audioRef.current) audioRef.current.volume = normalized;
     updateState({ volume: normalized });
     const bootstrap = bootstrapRef.current;
-    writeAudioDevicePreferences({ playbackRate: stateRef.current.playbackRate, volume: normalized }, bootstrap?.userId, bootstrap?.edition.workId);
+    writeAudioDevicePreferences({ playbackRate: stateRef.current.playbackRate, volume: normalized }, bootstrap?.userId, bootstrap?.mediaVersion.workId);
   }, [updateState]);
 
   const setSleepTimer = useCallback((value: number | 'chapter' | null) => {
@@ -558,17 +548,16 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
 
   const retry = useCallback(async () => {
     const failedLoad = failedLoadRef.current;
-    const editionId = failedLoad?.editionId ?? stateRef.current.pendingEditionId ?? stateRef.current.editionId;
-    if (editionId) await loadEdition(editionId, {
+    const volumeId = failedLoad?.volumeId ?? stateRef.current.pendingVolumeId ?? stateRef.current.volumeId;
+    if (volumeId) await loadVolume(volumeId, {
       force: true,
       autoplay: true,
       chapterId: failedLoad?.chapterId ?? undefined,
-      volumeId: failedLoad?.volumeId ?? undefined,
       summary: failedLoad?.summary ?? stateRef.current.pendingSummary ?? undefined
     });
-  }, [loadEdition]);
+  }, [loadVolume]);
 
-  const cancelEditionSwitch = useCallback(() => {
+  const cancelVolumeSwitch = useCallback(() => {
     if (!bootstrapRef.current) return;
     loadSequenceRef.current += 1;
     loadAbortRef.current?.abort();
@@ -576,7 +565,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     pendingLoadRef.current = null;
     failedLoadRef.current = null;
     updateState({
-      pendingEditionId: null,
+      pendingVolumeId: null,
       pendingSummary: null,
       loadError: null,
       lifecycle: 'paused'
@@ -773,7 +762,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
       controller.abort();
       if (nextTrackPreloadAbortRef.current === controller) nextTrackPreloadAbortRef.current = null;
     };
-  }, [state.bootstrap?.edition.id, state.trackIndex]);
+  }, [state.bootstrap?.volume.id, state.trackIndex]);
 
   useEffect(() => {
     if (state.sleepTimerMode !== 'timer' || !state.sleepTimerEndsAt) return undefined;
@@ -899,7 +888,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     try {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: state.chapter?.title ?? state.track.title,
-        artist: bootstrap.edition.narrator ?? bootstrap.book.author ?? '',
+        artist: bootstrap.book.author ?? '',
         album: bootstrap.book.title,
         artwork: [{ src: cover }]
       });
@@ -910,9 +899,9 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AudioPlaybackContextValue>(() => ({
     ...state,
-    loadEdition,
+    loadVolume,
     retry,
-    cancelEditionSwitch,
+    cancelVolumeSwitch,
     play,
     pause,
     toggle,
@@ -928,9 +917,9 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     setVolume,
     setSleepTimer
   }), [
-    cancelEditionSwitch,
+    cancelVolumeSwitch,
     close,
-    loadEdition,
+    loadVolume,
     nextChapter,
     pause,
     play,

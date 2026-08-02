@@ -10,7 +10,7 @@ from typing import Any, cast
 from sqlalchemy import case, exists, func, inspect, literal, or_, select
 from sqlalchemy.orm import Session
 
-from app.models.library import LibraryEdition, LibraryWork
+from app.models.library import LibraryVolume, LibraryWork
 from app.models.organize import (
     MetadataLookupTask,
     MetadataProviderExecution,
@@ -324,14 +324,14 @@ def list_filtered_job_rows(
             LibraryWork.id.label("work_id"),
             LibraryWork.title,
             LibraryWork.author,
-            func.coalesce(LibraryEdition.format, LibraryWork.work_type).label(
+            func.coalesce(LibraryVolume.format, LibraryWork.work_type).label(
                 "work_format"
             ),
         )
         .join(LibraryWork, LibraryWork.id == OrganizeJob.work_id)
         .outerjoin(
-            LibraryEdition,
-            LibraryEdition.id == LibraryWork.primary_edition_id,
+            LibraryVolume,
+            LibraryVolume.id == OrganizeJob.volume_id,
         )
     )
     predicates = _filter_predicates(

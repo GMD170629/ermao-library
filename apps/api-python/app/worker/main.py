@@ -22,17 +22,7 @@ from app.services.system_events import record_system_event
 READY_FILE = Path(os.environ.get("SCAN_WORKER_READY_FILE") or "/tmp/scan-worker-ready")
 
 
-def startup_check() -> None:
-    settings = get_settings()
-    monitor_root = settings.resolved_monitor_root
-    if monitor_root is None or not monitor_root.is_dir():
-        raise RuntimeError(f"[import-worker] MONITOR_ROOT is not a directory: {monitor_root}")
-    if not os.access(monitor_root, os.R_OK):
-        raise RuntimeError(f"[import-worker] MONITOR_ROOT is not readable: {monitor_root}")
-
-
 def main() -> None:
-    startup_check()
     settings = get_settings()
     bootstrap_database(engine, settings)
     manager = WorkerManager(SessionLocal, settings)

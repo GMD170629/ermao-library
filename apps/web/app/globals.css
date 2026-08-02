@@ -9,6 +9,7 @@
   --shuku-safe-area-right: env(safe-area-inset-right, 0px);
   --shuku-safe-area-bottom: env(safe-area-inset-bottom, 0px);
   --shuku-safe-area-left: env(safe-area-inset-left, 0px);
+  --shuku-content-max-width: 80rem;
 }
 
 body {
@@ -17,6 +18,10 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   margin: 0;
+}
+
+html:has(.shuku-app-shell) {
+  scrollbar-gutter: stable;
 }
 
 .shuku-app-shell {
@@ -51,6 +56,30 @@ body {
 .shuku-app-shell *::-webkit-scrollbar-thumb:hover {
   background: #aba39a;
   background-clip: padding-box;
+}
+
+.shuku-setup-scrollbar {
+  scrollbar-color: #8b9d83 transparent;
+  scrollbar-width: thin;
+}
+
+.shuku-setup-scrollbar::-webkit-scrollbar {
+  width: 10px;
+}
+
+.shuku-setup-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.shuku-setup-scrollbar::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #8b9d83;
+  background-clip: content-box;
+}
+
+.shuku-setup-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #606c38;
 }
 
 /* The work detail page uses the document as its only scroll surface. Keep it
@@ -330,7 +359,7 @@ html[data-audio-mini-player='reader'] .shuku-pwa-bottom-overlay {
 }
 
 .shuku-content-frame {
-  width: min(100%, 1280px);
+  width: min(100%, var(--shuku-content-max-width));
   margin-inline: auto;
 }
 

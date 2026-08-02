@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReaderCapabilities, ReaderPreferences } from '@shuku/reader-core';
+import type { ReaderCapabilities, ReaderKind, ReaderPreferences } from '@shuku/reader-core';
 import { Bookmark, Check, ChevronLeft, ChevronRight, Gauge, Highlighter, ListTree, Minus, Plus, RotateCcw, Rows2, Rows3, Rows4, Settings, Trash2, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { Button } from '../../components/ui/button';
@@ -24,10 +24,10 @@ import {
   closestReaderOptionValue,
   type ReaderFontFamily
 } from './reader-preference-options';
-import type { ReaderBookmark } from './v2/bookmarks';
-import { resolveActiveEpubNavigationIndex } from './v2/epub-navigation';
-import type { ReaderInteractionPolicy } from './v2/adapters/reader-interaction';
-import { hasActiveTextSelection, isReaderControlTarget, readerKeyIntent, readerPinchZoom, readerPointerIntentInViewport, readerSwipeIntent, type ReaderInputIntent } from './v2/input-router';
+import type { ReaderBookmark } from './v3/bookmarks';
+import { resolveActiveEpubNavigationIndex } from './v3/epub-navigation';
+import type { ReaderInteractionPolicy } from './v3/adapters/reader-interaction';
+import { hasActiveTextSelection, isReaderControlTarget, readerKeyIntent, readerPinchZoom, readerPointerIntentInViewport, readerSwipeIntent, type ReaderInputIntent } from './v3/input-router';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
@@ -37,7 +37,6 @@ type ComicPageTurnAnimation = ReaderPreferences['comic']['pageTurnAnimation'];
 type ComicImageFit = ReaderPreferences['comic']['imageFit'];
 type ComicImageVariant = ReaderPreferences['comic']['imageVariant'];
 
-export type ReaderKind = 'epub' | 'comic' | 'pdf';
 export type ReaderTheme = ReaderPreferences['appearance']['theme'];
 export const readerFontFamilyOptions = READER_FONT_FAMILY_OPTIONS;
 const readerFontSizeOptions = READER_FONT_SIZE_OPTIONS;
@@ -123,24 +122,15 @@ export type ReaderNavigationItem = {
   index: number;
   title: string;
   href?: string;
+  navigationKey?: string;
   sectionIndex?: number;
 };
 
 export type ReaderVolumeNavigation = {
-  editions: Array<{
-    id: string;
-    versionName: string;
-    format: string;
-    progress: number;
-    lastReadAt: string | null;
-    volumes: Array<{ id: string; title: string; pageCount: number | null }>;
-  }>;
   volumeSections: Array<{ id: string; title: string; pageCount: number }>;
   pages: ReaderNavigationItem[];
-  currentEditionId: string;
-  currentVolumeId: string | null;
+  currentVolumeId: string;
   loading: boolean;
-  onSelectEdition: (editionId: string) => void;
   onSelectVolume: (volumeId: string) => void;
   onSelectItem: (item: ReaderNavigationItem) => void;
 };
@@ -174,11 +164,40 @@ function navigationItemKey(item: ReaderNavigationItem) {
 }
 
 function activeNavigationItem(readerType: ReaderKind, items: ReaderNavigationItem[], progress: ReaderProgress, progressExtra: Record<string, unknown>) {
-  if (readerType !== 'epub') return items.find((item) => item.index === progress.page) ?? null;
-  const sectionIndex = numberFromExtra(progressExtra.sectionIndex ?? progressExtra.chapterIndex);
+  if (readerType !== 'reflowable') return items.find((item) => item.index === progress.page) ?? null;
+  const navigationKey = typeof progressExtra.navigationKey === 'string'
+    ? progressExtra.navigationKey
+    : null;
+  if (navigationKey) {
+    return items.find((item) => item.navigationKey === navigationKey) ?? null;
+  }
   const href = progressExtra.currentHref ?? progressExtra.chapterHref;
-  const index = resolveActiveEpubNavigationIndex(items, href, sectionIndex);
+  const index = resolveActiveEpubNavigationIndex(items, href, null);
   return index === null ? null : items[index] ?? null;
+}
+
+function precisePercent(value: number, readerType: ReaderKind, locale: string) {
+  const safe = Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
+  return new Intl.NumberFormat(locale, {
+    minimumFractionDigits: readerType === 'reflowable' ? 1 : 0,
+    maximumFractionDigits: readerType === 'reflowable' ? 1 : 0
+  }).format(safe);
+}
+
+function foliateLocationLabel(extra: Record<string, unknown>) {
+  const current = numberFromExtra(extra.locationCurrent);
+  const next = numberFromExtra(extra.locationNext);
+  const total = numberFromExtra(extra.locationTotal);
+  if (current === null || next === null || total === null || total < 1) return null;
+  const start = Math.min(total, Math.floor(current) + 1);
+  const end = Math.min(total, Math.max(start, Math.floor(next) + 1));
+  return start === end ? `Loc ${start} / ${total}` : `Loc ${start}–${end} / ${total}`;
+}
+
+function remainingMinutesLabel(seconds: number | null, translate: (source: string, values?: Record<string, string | number>) => string) {
+  if (seconds === null) return null;
+  const minutes = Math.max(1, Math.ceil(seconds / 60));
+  return translate('预计 {value0} 分钟', { value0: minutes });
 }
 
 function stopControlEvent(event: MouseEvent) {
@@ -224,9 +243,16 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   const themeSurface = readerThemeSurfaces[settings.theme];
   const currentNavigationItem = activeNavigationItem(readerType, navItems, progress, progressExtra);
   const currentNavigationTitle = currentNavigationItem?.title ?? null;
-  const progressDetail = currentNavigationTitle ? `${currentNavigationTitle} · ${progress.label}` : progress.label;
+  const currentNavigationLabel = currentNavigationTitle;
+  const locationLabel = readerType === 'reflowable' ? foliateLocationLabel(progressExtra) : null;
+  const sectionRemaining = remainingMinutesLabel(numberFromExtra(progressExtra.remainingSectionSeconds), i18nAttribute);
+  const totalRemaining = remainingMinutesLabel(numberFromExtra(progressExtra.remainingTotalSeconds), i18nAttribute);
+  const progressDetail = [currentNavigationLabel, locationLabel, `${precisePercent(progress.percent, readerType, locale)}%`].filter(Boolean).join(' · ');
   const readerDirection: ComicDirection = readingDirection ?? (readerType === 'comic' ? settings.comicDirection : 'ltr');
-  const usesCompactPassiveProgress = readerType === 'epub' || readerType === 'comic';
+  const zoomedPannable = readerType === 'pdf'
+    ? settings.pdfZoom > 1
+    : readerType === 'comic' && settings.comicZoom > 1;
+  const usesCompactPassiveProgress = readerType === 'reflowable' || readerType === 'comic';
   const passiveProgressAreaHeight = usesCompactPassiveProgress ? 'calc(2.75rem + var(--shuku-safe-area-bottom))' : readerBottomAreaHeight;
   const supportsTextAnnotations = readerType !== 'comic';
   const accentColor = dark ? '#f59e0b' : '#b45309';
@@ -535,7 +561,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   return (
     <div
       className={cn('fixed inset-0 z-50 min-h-0 overflow-clip transition-colors', themeSurface.textClass)}
-      data-reader-shell="v2"
+      data-reader-shell="v3"
       data-reader-theme={settings.theme}
       data-reader-kind={readerType}
       data-reader-horizontal-paging={horizontalPaging}
@@ -595,14 +621,6 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
           updateSettings({ pdfZoom: nextZoom });
           return;
         }
-        if (readerType === 'pdf' && settings.pdfZoom > 1) {
-          suppressClickUntilRef.current = Date.now() + 450;
-          return;
-        }
-        if (readerType === 'comic' && settings.comicZoom > 1) {
-          suppressClickUntilRef.current = Date.now() + 450;
-          return;
-        }
         if (!touchRef.current.singleTouch) {
           suppressClickUntilRef.current = Date.now() + 450;
           return;
@@ -613,7 +631,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
         const deltaX = touch.clientX - touchRef.current.x;
         const deltaY = touch.clientY - touchRef.current.y;
         const elapsed = Date.now() - touchRef.current.time;
-        const swipeIntent = horizontalPaging === 'shell-discrete'
+        const swipeIntent = horizontalPaging === 'shell-discrete' && !zoomedPannable
           ? readerSwipeIntent(deltaX, deltaY, elapsed, readerDirectionRef.current)
           : null;
         if (swipeIntent) {
@@ -624,7 +642,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
         if (Math.abs(deltaX) < 12 && Math.abs(deltaY) < 12) {
           suppressClickUntilRef.current = Date.now() + 450;
           handleReaderTap(touch.clientX, touch.clientY);
-        } else if (horizontalPaging !== 'shell-discrete') {
+        } else if (horizontalPaging !== 'shell-discrete' || zoomedPannable) {
           suppressClickUntilRef.current = Date.now() + 450;
         }
       }}
@@ -707,8 +725,8 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
       >
         <div className={cn('mx-auto flex h-full flex-col gap-3', readerBottomControlsMaxWidth)}>
           <div className="flex items-center justify-between gap-3 text-[11px] opacity-60 md:text-xs">
-            <span className="truncate">{readerType === 'epub' ? (currentNavigationTitle ?? i18nAttribute("阅读中")) : progressPageLabel(progress)}</span>
-            <span className="shrink-0">{clampPercent(progress.percent)}%</span>
+            <span className="truncate">{readerType === 'reflowable' ? (currentNavigationLabel ?? locationLabel ?? i18nAttribute("阅读中")) : progressPageLabel(progress)}</span>
+            <span className="shrink-0 tabular-nums">{precisePercent(progress.percent, readerType, locale)}%</span>
           </div>
           <div className="min-h-0 flex-1" aria-hidden="true" />
         </div>
@@ -742,7 +760,9 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
           <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-current/10 md:hidden" aria-hidden="true">
             <div className="h-full" style={{ width: `${clampPercent(progress.percent)}%`, backgroundColor: accentColor }} />
           </div>
-          <ReaderDockButton icon={ListTree} label={i18nAttribute("目录")} selected={panel === 'toc'} expanded={panel === 'toc'} panelTrigger="toc" onClick={(event) => togglePanel('toc', event.currentTarget)} dark={dark} />
+          {readerType !== 'reflowable' || navItems.length > 0 || volumeNavigation ? (
+            <ReaderDockButton icon={ListTree} label={i18nAttribute("目录")} selected={panel === 'toc'} expanded={panel === 'toc'} panelTrigger="toc" onClick={(event) => togglePanel('toc', event.currentTarget)} dark={dark} />
+          ) : null}
           <ReaderDockButton
             icon={Bookmark}
             label={i18nAttribute("书签")}
@@ -761,8 +781,8 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
             </button>
             <div className="min-w-0 flex-1">
               <div className="mb-0.5 flex items-center justify-between gap-3 text-[11px] opacity-60">
-                <span className="truncate">{currentNavigationTitle ?? progressPageLabel(progress)}</span>
-                <span className="shrink-0 tabular-nums">{clampPercent(progress.percent)}%</span>
+                <span className="truncate">{currentNavigationLabel ?? locationLabel ?? progressPageLabel(progress)}</span>
+                <span className="shrink-0 tabular-nums">{precisePercent(progress.percent, readerType, locale)}%</span>
               </div>
               <input
                 aria-label={i18nAttribute("阅读进度")}
@@ -827,7 +847,13 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
           <div className="flex items-center justify-between gap-3">
             <div>
               <div id="reader-panel-title" className="text-sm font-semibold">
-                {panel === 'toc' ? i18nAttribute("目录") : panel === 'bookmarks' ? i18nAttribute("书签") : panel === 'settings' ? i18nAttribute("阅读设置") : panel === 'annotations' ? i18nAttribute("标注与批注") : i18nAttribute("阅读进度")}
+                {panel === 'toc'
+                  ? i18nAttribute("目录")
+                  : panel === 'bookmarks'
+                    ? i18nAttribute("书签")
+                    : panel === 'settings'
+                      ? readerType === 'reflowable' ? i18nAttribute("小说排版") : i18nAttribute("阅读设置")
+                      : panel === 'annotations' ? i18nAttribute("标注与批注") : i18nAttribute("阅读进度")}
               </div>
               {panel === 'settings' ? null : (
                 <div className="mt-0.5 text-xs opacity-60">
@@ -940,8 +966,15 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
           {panel === 'progress' ? (
             <div className="mt-6 space-y-5">
               <div className="text-center">
-                <div className="text-3xl font-semibold tabular-nums">{clampPercent(progress.percent)}%</div>
-                <div className="mt-1 text-xs opacity-60">{currentNavigationTitle ?? progressPageLabel(progress)}</div>
+                <div className="text-3xl font-semibold tabular-nums">{precisePercent(progress.percent, readerType, locale)}%</div>
+                <div className="mt-1 text-xs opacity-60">{currentNavigationLabel ?? progressPageLabel(progress)}</div>
+                {locationLabel ? <div className="mt-2 text-sm tabular-nums opacity-75">{locationLabel}</div> : null}
+                {sectionRemaining || totalRemaining ? (
+                  <div className="mt-2 flex flex-wrap justify-center gap-x-3 gap-y-1 text-xs opacity-60">
+                    {sectionRemaining ? <span>{i18nAttribute('本节剩余：{value0}', { value0: sectionRemaining })}</span> : null}
+                    {totalRemaining ? <span>{i18nAttribute('全书剩余：{value0}', { value0: totalRemaining })}</span> : null}
+                  </div>
+                ) : null}
               </div>
               <input
                 aria-label={i18nAttribute("阅读进度")}
@@ -982,7 +1015,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
 
           {panel === 'settings' ? (
             <div data-pwa-scroll="true" className="mt-3 min-h-0 flex-1 space-y-3 overflow-auto overscroll-contain pr-1 text-sm">
-              {readerType === 'epub' ? (
+              {readerType === 'reflowable' ? (
                 <>
                   <ThemeSwatches
                     value={settings.theme}
@@ -1253,7 +1286,6 @@ function CompactStepper({ label, value, onMinus, onPlus, dark }: { label: string
 
 function VolumeNavigationPanel({ navigation, readerType, activeItemKey, dark, onJumpItem }: { navigation: ReaderVolumeNavigation; readerType: ReaderKind; activeItemKey: string | null; dark: boolean; onJumpItem: (item: ReaderNavigationItem) => void }) {
   const { t: i18nAttribute } = useAttributeI18n();
-  const showEditions = navigation.editions.length > 1;
   const showVolumes = navigation.volumeSections.length > 1;
   const idleText = navigation.loading ? '正在切换...' : null;
   const isComic = readerType === 'comic';
@@ -1261,33 +1293,6 @@ function VolumeNavigationPanel({ navigation, readerType, activeItemKey, dark, on
   return (
     <div data-pwa-scroll="true" className="mt-5 min-h-0 flex-1 overflow-auto overscroll-contain pr-1">
       {idleText ? <div className="mb-3 rounded-xl bg-white/10 px-3 py-2 text-xs opacity-70">{idleText}</div> : null}
-      {showEditions ? (
-        <VolumeNavigationGroup title={i18nAttribute("版本")}>
-          {navigation.editions.map((edition) => {
-            const selected = edition.id === navigation.currentEditionId;
-            const detail = [
-              edition.format,
-              edition.volumes.length > 0 ? `${edition.volumes.length} ${isComic ? '卷/话' : '卷'}` : '',
-              edition.progress > 0 ? `${edition.progress}%` : ''
-            ].filter(Boolean).join(' · ');
-            return (
-              <button
-                key={edition.id}
-                type="button"
-                disabled={navigation.loading}
-                onClick={() => navigation.onSelectEdition(edition.id)}
-                className={comicNavButtonClass(selected, dark)}
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">{edition.versionName}</span>
-                  <span className="mt-0.5 block truncate text-xs opacity-65">{detail || i18nAttribute("默认版本")}</span>
-                </span>
-              </button>
-            );
-          })}
-        </VolumeNavigationGroup>
-      ) : null}
-
       {showVolumes && !isComic ? (
         <VolumeNavigationGroup title={i18nAttribute("卷册")}>
           <VolumeSelect

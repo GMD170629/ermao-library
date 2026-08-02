@@ -102,13 +102,6 @@ def _item(
 def _initial_items(db: Session, settings: Settings) -> list[dict[str, Any]]:
     items = [
         _item("database", "storage", "health.item.database", "database"),
-        _item(
-            "monitor-root",
-            "storage",
-            "health.item.monitorRoot",
-            "directory",
-            options={"path": str(settings.resolved_monitor_root or ""), "writable": False},
-        ),
     ]
     folders = db.scalars(
         select(MonitorFolder)

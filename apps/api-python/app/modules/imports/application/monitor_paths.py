@@ -6,14 +6,50 @@ import os
 from pathlib import Path
 from typing import Any
 
-from app.modules.imports.application.dto import ImportRuntimeConfig
+
+class MonitorPathError(ValueError):
+    def __init__(self, message: str, *, status_code: int, code: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.code = code
 
 
-def normalize_monitor_root_path(value: Any) -> str:
-    root_path = str(value or "").strip()
-    if not root_path:
-        return ""
-    return os.path.normpath(root_path)
+def resolve_monitor_folder_path(value: object) -> Path:
+    raw_path = str(value or "").strip()
+    if not raw_path:
+        raise MonitorPathError(
+            "请选择监控文件夹路径",
+            status_code=400,
+            code="MONITOR_FOLDER_PATH_REQUIRED",
+        )
+    target = Path(raw_path).expanduser()
+    if not target.is_absolute():
+        raise MonitorPathError(
+            "监控文件夹路径必须是绝对路径",
+            status_code=400,
+            code="MONITOR_FOLDER_PATH_NOT_ABSOLUTE",
+        )
+    try:
+        real_target = target.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise MonitorPathError(
+            "监控文件夹路径不存在或不可读",
+            status_code=404,
+            code="MONITOR_FOLDER_PATH_UNAVAILABLE",
+        ) from None
+    if not real_target.is_dir():
+        raise MonitorPathError(
+            "监控文件夹路径必须是目录",
+            status_code=400,
+            code="MONITOR_FOLDER_PATH_NOT_DIRECTORY",
+        )
+    if not os.access(real_target, os.R_OK):
+        raise MonitorPathError(
+            "监控文件夹路径不可读",
+            status_code=400,
+            code="MONITOR_FOLDER_PATH_UNREADABLE",
+        )
+    return real_target
 
 
 def is_inside_path(root: Path, target: Path) -> bool:
@@ -25,39 +61,24 @@ def is_inside_path(root: Path, target: Path) -> bool:
 
 
 def monitor_directory_tree_node(
-    settings: ImportRuntimeConfig,
     requested_path: str | None,
 ) -> tuple[dict[str, Any] | None, str | None, int]:
-    monitor_root = settings.resolved_monitor_root
-    if monitor_root is None:
-        return None, "监控根目录未配置", 400
-
-    try:
-        real_monitor_root = monitor_root.resolve()
-    except OSError:
-        return None, "监控根目录不存在或不可读", 400
-
-    if not real_monitor_root.exists() or not real_monitor_root.is_dir():
-        return None, "监控根目录不存在或不可读", 400
-
     raw_path = str(requested_path or "").strip()
     if raw_path:
         target = Path(raw_path).expanduser()
         if not target.is_absolute():
-            return None, "请输入监控根目录下的绝对路径", 400
+            return None, "目录路径必须是绝对路径", 400
     else:
-        target = real_monitor_root
+        target = Path("/")
 
     if not target.exists():
         return None, "路径不存在或不可读", 404
 
     try:
         real_target = target.resolve()
-    except OSError:
+    except (OSError, RuntimeError):
         return None, "路径不存在或不可读", 404
 
-    if not is_inside_path(real_monitor_root, real_target):
-        return None, "路径真实位置不在监控根目录内", 403
     if not real_target.is_dir():
         return None, "监控文件夹路径必须是目录", 400
 
@@ -71,12 +92,9 @@ def monitor_directory_tree_node(
             ):
                 try:
                     real_child = child.resolve()
-                except OSError:
+                except (OSError, RuntimeError):
                     continue
-                if (
-                    not is_inside_path(real_monitor_root, real_child)
-                    or not real_child.is_dir()
-                ):
+                if not real_child.is_dir():
                     continue
                 children.append(
                     {
@@ -105,30 +123,18 @@ def monitor_directory_tree_node(
 
 
 def target_directory_from_path(
-    settings: ImportRuntimeConfig, target_path: Any, action_label: str
+    target_path: Any, action_label: str
 ) -> Path:
     raw_path = str(target_path or "").strip()
     if not raw_path:
         raise ValueError(f"请选择{action_label}目录")
-    monitor_root = settings.resolved_monitor_root
-    if monitor_root is None:
-        raise ValueError("监控根目录未配置")
-    try:
-        real_monitor_root = monitor_root.expanduser().resolve()
-    except OSError:
-        raise ValueError("监控根目录不存在或不可读")
     target = Path(raw_path).expanduser()
     if not target.is_absolute():
-        raise ValueError(f"请选择监控根目录内的{action_label}目录")
+        raise ValueError(f"请选择绝对{action_label}目录")
     try:
         real_target = target.resolve()
     except OSError:
         raise ValueError(f"所选{action_label}目录不存在或不可读")
-    if not (
-        real_monitor_root == real_target
-        or is_inside_path(real_monitor_root, real_target)
-    ):
-        raise ValueError(f"请选择监控根目录内的{action_label}目录")
     if not real_target.exists() or not real_target.is_dir():
         raise ValueError(f"所选{action_label}目录不存在或不可读")
     if not os.access(real_target, os.W_OK):

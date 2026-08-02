@@ -286,9 +286,7 @@ async def import_work(
             details=ImportFileListDetails(files=disabled_extensions),
         )
     try:
-        upload_dir = _target_directory_from_path(
-            settings, form.get("targetPath"), "上传"
-        )
+        upload_dir = _target_directory_from_path(form.get("targetPath"), "上传")
     except ValueError as exc:
         _raise_import_error(str(exc), status_code=400)
     ignored_files = [
@@ -390,7 +388,7 @@ async def scan_import_directory(
         return auth_error
     payload = await _request_json_or_empty(request)
     requested_path = str(payload.get("path") or "").strip()
-    node, error, status_code = _monitor_directory_tree_node(settings, requested_path)
+    node, error, status_code = _monitor_directory_tree_node(requested_path)
     if error or not node:
         _raise_import_error(error or "目录不可用", status_code=status_code)
     target_path = Path(str(node["path"])).resolve()
@@ -565,9 +563,13 @@ async def delete_import_task(
         for root in import_http_store.list_monitor_root_paths(db)
         if root.strip()
     ]
-    if settings.resolved_monitor_root is not None:
-        monitor_roots.append(settings.resolved_monitor_root)
-
+    source_path_value = str(task.get("sourcePath") or "").strip()
+    if source_path_value:
+        try:
+            source_parent = Path(source_path_value).expanduser().resolve().parent
+            monitor_roots.append(source_parent)
+        except (OSError, RuntimeError):
+            pass
     def delete_database_records() -> tuple[bool, dict[str, Any]]:
         library_cleanup = (
             _delete_import_linked_library_scope(db, task, settings)

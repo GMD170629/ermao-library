@@ -66,7 +66,6 @@ services:
     user: "${PUID:-1000}:${PGID:-1000}"
     environment:
       STORAGE_ROOT: /app/storage
-      MONITOR_ROOT: /monitor
       PORT: 3000
       HOSTNAME: 0.0.0.0
     ports:
@@ -74,6 +73,9 @@ services:
     volumes:
       - ${STORAGE_PATH:-./data/storage}:/app/storage
       - ${MONITOR_HOST_PATH:-./monitor}:/monitor
+      # 可按需增加多个宿主机目录：
+      # - /srv/books:/libraries/books
+      # - /srv/comics:/libraries/comics
     command: ["./scripts/start-unified-app.sh"]
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
@@ -90,6 +92,8 @@ docker compose up -d
 ```
 
 安装完成后访问 `http://服务器地址:3000`。
+
+默认情况下，`MONITOR_HOST_PATH` 挂载为容器内的 `/monitor`。监控文件夹通过界面中的路径树选择，不受固定根目录限制；其他宿主机目录必须先增加对应的 `volumes` 映射，并确保容器用户有读取权限。
 
 默认情况下：
 
@@ -111,7 +115,7 @@ docker compose up -d
 ## 首次使用
 
 1. 打开系统并根据向导创建初始管理账户。
-2. 在向导中添加 `/monitor` 或其子目录作为监控文件夹，也可以稍后进入“设置 → 书库来源与导入”配置。
+2. 在向导的路径树中选择 `/monitor` 或其他已挂载、可读取的目录，也可以稍后进入“设置 → 书库来源与导入”配置。
 3. 将读物放入对应宿主机目录，或在“全部图书”页面上传电子书、漫画或有声书文件。
 4. 在导入任务中查看解析或转换进度；完成后进入书库阅读或收听。
 5. 按需在“智能整理”配置豆瓣、Bangumi 或 AI 元数据来源。

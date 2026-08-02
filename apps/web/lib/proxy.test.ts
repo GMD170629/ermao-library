@@ -26,12 +26,12 @@ test('proxy returns the stable unauthorized envelope for protected API routes', 
 });
 
 test('proxy redirects protected pages to login and preserves the requested URL', () => {
-  const response = proxy(createRequest('/works/book-1?detailTab=editions'));
+  const response = proxy(createRequest('/works/book-1?detailTab=EBOOK&volumeId=volume-1'));
 
   assert.equal(response.status, 307);
   const location = new URL(response.headers.get('location') ?? '');
   assert.equal(location.pathname, '/login');
-  assert.equal(location.searchParams.get('next'), '/works/book-1?detailTab=editions');
+  assert.equal(location.searchParams.get('next'), '/works/book-1?detailTab=EBOOK&volumeId=volume-1');
 });
 
 test('proxy allows protected routes with a session', () => {

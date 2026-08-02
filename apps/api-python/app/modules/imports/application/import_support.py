@@ -16,26 +16,24 @@ from xml.etree import ElementTree
 
 from app.core.time import now_timestamp_ms
 from app.modules.imports.application.dto import (
-    BookIdentityDTO,
     ImportOptions,
     ImportResult,
-    ImportRuntimeConfig,
     SeriesVolumeInfo,
 )
+from app.modules.imports.application.identity_policy import (
+    identity_merge_key,
+    normalize_identity_part,
+    parse_bracketed_series_identity,
+)
+from app.modules.imports.application.import_policy import REFLOWABLE_SOURCE_EXTS
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
     ImportOrchestrationServices,
     LibraryImportStore,
 )
 from app.modules.imports.application.release_titles import parse_release_title
-from app.modules.imports.application.identity_policy import (
-    identity_merge_key,
-    normalize_identity_part,
-    parse_bracketed_series_identity,
-)
-from app.modules.imports.application.import_policy import CONVERTIBLE_TEXT_EXTS
 
-SUPPORTED_EXTS = {".epub", ".cbz", ".zip", ".pdf", *CONVERTIBLE_TEXT_EXTS}
+SUPPORTED_EXTS = {".epub", ".cbz", ".zip", ".pdf", *REFLOWABLE_SOURCE_EXTS}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 MAX_EPUB_SIZE_BYTES = 512 * 1024 * 1024
 MAX_TEXT_EBOOK_SIZE_BYTES = 512 * 1024 * 1024
@@ -47,7 +45,7 @@ def import_file_size_limit_bytes_for_ext(ext: str) -> int | None:
     normalized = normalized.lower()
     if normalized == ".epub":
         return MAX_EPUB_SIZE_BYTES
-    if normalized in CONVERTIBLE_TEXT_EXTS:
+    if normalized in REFLOWABLE_SOURCE_EXTS:
         return MAX_TEXT_EBOOK_SIZE_BYTES
     if normalized in {".cbz", ".zip"}:
         return MAX_ARCHIVE_SIZE_BYTES
@@ -107,7 +105,7 @@ def _source_group_key(options: ImportOptions, _fallback_title: str) -> str:
     return f"{options.origin.lower()}:{_hash_text(source_directory)[:24]}"
 
 
-def _file_version_key(fmt: str, path: Path) -> str:
+def _file_resource_key(fmt: str, path: Path) -> str:
     return f"{fmt}:{_hash_text(str(path.resolve()))[:24]}"
 
 
@@ -239,7 +237,7 @@ def _volume_range_part(value: str) -> bool:
         re.search(
             r"(?:vol\.?|volume|v|第)?\s*\d+(?:\.\d+)?\s*[-~至到]\s*(?:vol\.?|volume|v|第)?\s*\d+(?:\.\d+)?",
             value,
-            re.I,
+            re.IGNORECASE,
         )
     )
 
@@ -254,7 +252,7 @@ def _volume_index_from_suffix(value: str) -> float | None:
         r"(?:^|\s)(?:第\s*)?(\d+(?:\.\d+)?)\s*(?:卷|冊|册|集)$",
         r"(?:^|\s)(\d+(?:\.\d+)?)$",
     ]:
-        match = re.search(pattern, suffix, re.I)
+        match = re.search(pattern, suffix, re.IGNORECASE)
         if match:
             return float(match.group(1))
     return None
@@ -307,7 +305,7 @@ def _texts(xml: str, tag: str) -> list[str]:
     for match in re.finditer(
         rf"<(?:[\w]+:)?{re.escape(tag)}\b[^>]*>([\s\S]*?)</(?:[\w]+:)?{re.escape(tag)}>",
         xml,
-        re.I,
+        re.IGNORECASE,
     ):
         text_value = _decode_xml_text(match.group(1))
         if text_value:
@@ -327,7 +325,7 @@ def _decode_xml_text(value: str) -> str:
 
 def _attrs(xml: str, name: str) -> list[dict[str, str]]:
     output = []
-    for match in re.finditer(rf"<{name}\b([^>]*)/?>(?:</{name}>)?", xml, re.I):
+    for match in re.finditer(rf"<{name}\b([^>]*)/?>(?:</{name}>)?", xml, re.IGNORECASE):
         output.append(
             {
                 item.group(1): item.group(2) or item.group(3) or ""
@@ -387,30 +385,16 @@ def _ensure_work(
     return row, True
 
 
-def _next_edition_name(
-    queries: ImportLibraryQueries,
-    work_id: str,
-    base: str,
-    media_kind: str | None = None,
-) -> str:
-    count = queries.count_editions_for_work(work_id, media_kind=media_kind)
-    return base if count == 0 else f"{base} {count + 1}"
-
-
-def _should_be_media_primary(
-    queries: ImportLibraryQueries, work_id: str, media_kind: str
-) -> bool:
-    return queries.count_audiobook_media_kind_editions(work_id, media_kind) == 0
-
-
 def _preferred_work_cover_path(
     queries: ImportLibraryQueries,
     work_id: str,
-    primary_edition_id: str | None,
+    media_version_id: str | None,
     services: ImportOrchestrationServices,
 ) -> str | None:
-    if primary_edition_id:
-        volumes = queries.list_volume_cover_paths_for_edition(str(primary_edition_id))
+    if media_version_id:
+        volumes = queries.list_volume_cover_paths_for_media_version(
+            str(media_version_id)
+        )
         volume = next(
             (
                 item
@@ -421,11 +405,15 @@ def _preferred_work_cover_path(
         )
         if volume and volume.get("coverPath"):
             return str(volume["coverPath"])
-        edition = queries.get_edition_cover_path(str(primary_edition_id))
-        if edition and edition.get("coverPath"):
-            return str(edition["coverPath"])
-    edition = queries.find_work_cover_edition(work_id)
-    return str(edition["coverPath"]) if edition and edition.get("coverPath") else None
+        media_version = queries.get_media_version_cover_path(str(media_version_id))
+        if media_version and media_version.get("coverPath"):
+            return str(media_version["coverPath"])
+    media_version = queries.find_work_cover_media_version(work_id)
+    return (
+        str(media_version["coverPath"])
+        if media_version and media_version.get("coverPath")
+        else None
+    )
 
 
 def _is_generated_work_cover_path(
@@ -434,21 +422,19 @@ def _is_generated_work_cover_path(
     return bool(queries.has_generated_cover_path(work_id, cover_path))
 
 
-def _finalize_work_primary(
+def _finalize_work_cover(
     store: LibraryImportStore,
     queries: ImportLibraryQueries,
     services: ImportOrchestrationServices,
     work_id: str,
-    edition_id: str,
+    media_version_id: str,
     cover_path: str | None,
 ) -> None:
     work = queries.get_work_by_id(work_id)
     if not work:
         return
-    primary_edition_id = work.get("primaryEditionId") or edition_id
-    primary_edition = queries.get_edition_format(str(primary_edition_id))
     preferred_cover_path = (
-        _preferred_work_cover_path(queries, work_id, primary_edition_id, services)
+        _preferred_work_cover_path(queries, work_id, media_version_id, services)
         or cover_path
         or services.ensure_default_cover()
     )
@@ -459,8 +445,6 @@ def _finalize_work_primary(
     store.update_library_work(
         work_id,
         columns={
-            "primaryEditionId": primary_edition_id,
-            "workType": (primary_edition or {}).get("format") or work.get("workType"),
             "coverPath": preferred_cover_path
             if should_update_cover
             else current_cover_path,
@@ -472,7 +456,7 @@ def _finalize_work_primary(
     )
 
 
-def _select_volume_edition(
+def _select_volume_media_version(
     queries: ImportLibraryQueries,
     work_id: str,
     fmt: str,
@@ -480,108 +464,31 @@ def _select_volume_edition(
     volume_index: float | None,
     volume_title: str,
 ) -> dict[str, Any] | None:
-    editions = queries.list_visible_editions_for_work_and_format(work_id, fmt)
-    for edition in editions:
+    media_versions = queries.list_visible_media_versions_for_work_and_format(
+        work_id, fmt
+    )
+    for media_version in media_versions:
         conflict = queries.find_volume_conflict(
-            str(edition["id"]), volume_index, volume_title
+            str(media_version["id"]), volume_index, volume_title
         )
-        if not conflict and edition.get("sourceGroupKey") == source_key:
-            return edition
+        if not conflict and media_version.get("sourceGroupKey") == source_key:
+            return media_version
     return None
 
 
 def _insert_identity_metadata(
-    store: LibraryImportStore, edition_id: str, identity: Any
+    store: LibraryImportStore, volume_id: str, identity: Any
 ) -> None:
     store.insert_library_metadata(
         columns={
             "id": _id(),
-            "editionId": edition_id,
+            "volumeId": volume_id,
             "source": f"identity_{identity.source}",
             "rawJson": json.dumps(identity.raw_metadata(), ensure_ascii=False),
             "createdAt": _now(),
             "updatedAt": _now(),
         }
     )
-
-
-def _enqueue_metadata_lookup(
-    store: LibraryImportStore,
-    queries: ImportLibraryQueries,
-    work_id: str,
-    edition_id: str,
-    import_task_id: str,
-    organize_job_id: str,
-    file_format: str,
-) -> None:
-    provider_order = (
-        ["bangumi", "douban"]
-        if file_format.lower() in {"comic", "cbz", "zip"}
-        else ["douban", "bangumi"]
-    )
-    existing = queries.get_metadata_lookup_task_id_by_import(import_task_id)
-    values = {
-        "workId": work_id,
-        "editionId": edition_id,
-        "organizeJobId": organize_job_id,
-        "status": "PENDING",
-        "providerOrder": json.dumps(provider_order, ensure_ascii=False),
-        "attempts": 0,
-        "nextAttemptAt": _now(),
-        "resultSource": None,
-        "candidateRawJson": None,
-        "appliedFields": None,
-        "errorSummary": None,
-        "startedAt": None,
-        "finishedAt": None,
-        "updatedAt": _now(),
-    }
-    if existing:
-        store.update_metadata_lookup_task(str(existing["id"]), columns=values)
-        return
-    store.insert_metadata_lookup_task(
-        columns={
-            "id": _id(),
-            "importTaskId": import_task_id,
-            "createdAt": _now(),
-            **values,
-        }
-    )
-
-
-def _create_or_refresh_organize_job(
-    store: LibraryImportStore,
-    queries: ImportLibraryQueries,
-    work_id: str,
-    edition_id: str,
-    task_id: str,
-) -> str:
-    existing = queries.get_organize_job_for_work_edition(work_id, edition_id)
-    if existing:
-        store.update_organize_job(
-            existing["id"],
-            columns={
-                "status": "LOOKUP_PENDING",
-                "summary": "等待豆瓣/Bangumi 元数据匹配",
-                "errorSummary": None,
-                "updatedAt": _now(),
-            },
-        )
-        return str(existing["id"])
-    job = store.insert_organize_job(
-        columns={
-            "id": _id(),
-            "workId": work_id,
-            "editionId": edition_id,
-            "importTaskId": task_id,
-            "status": "LOOKUP_PENDING",
-            "issueCodes": "[]",
-            "summary": "等待豆瓣/Bangumi 元数据匹配",
-            "createdAt": _now(),
-            "updatedAt": _now(),
-        }
-    )
-    return str(job["id"])
 
 
 def _log_import(
@@ -646,7 +553,7 @@ def _existing_file_result(
     return ImportResult(
         str(existing["workId"]),
         str(existing["workId"]),
-        str(existing["editionId"]),
+        str(existing["mediaVersionId"]),
         str(existing["volumeId"]) if existing.get("volumeId") else None,
         str(existing.get("title") or "未命名作品"),
         result_type,
@@ -664,7 +571,7 @@ def _existing_audio_bundle_result(
 ) -> ImportResult | None:
     if not paths:
         return None
-    rows = queries.list_file_editions_by_paths([str(path.resolve()) for path in paths])
-    if len(rows) != len(paths) or len({row.get("editionId") for row in rows}) != 1:
+    rows = queries.list_file_volumes_by_paths([str(path.resolve()) for path in paths])
+    if len(rows) != len(paths) or len({row.get("volumeId") for row in rows}) != 1:
         return None
     return _existing_file_result(queries, paths[0])

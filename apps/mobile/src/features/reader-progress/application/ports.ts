@@ -1,20 +1,20 @@
 import type {
   ProgressConnection,
-  ReaderProgressDocumentV1,
+  ReaderProgressDocumentV2,
 } from '../model/reader-progress';
 
 export type ProgressDocumentReadResult = Readonly<{
-  document: ReaderProgressDocumentV1 | null;
+  document: ReaderProgressDocumentV2 | null;
   recoveredFromCorruption: boolean;
 }>;
 
 export type ProgressDocumentMutation<Result> = Readonly<{
-  document: ReaderProgressDocumentV1;
+  document: ReaderProgressDocumentV2;
   result: Result;
 }>;
 
 export type ProgressDocumentWriteResult<Result> = Readonly<{
-  document: ReaderProgressDocumentV1;
+  document: ReaderProgressDocumentV2;
   result: Result;
   recoveredFromCorruption: boolean;
   maintenanceWarningCount: number;
@@ -27,7 +27,7 @@ export interface ReaderProgressDocumentStore {
   update<Result>(
     connection: ProgressConnection,
     mutate: (
-      current: ReaderProgressDocumentV1 | null,
+      current: ReaderProgressDocumentV2 | null,
     ) => ProgressDocumentMutation<Result>,
   ): Promise<ProgressDocumentWriteResult<Result>>;
 }

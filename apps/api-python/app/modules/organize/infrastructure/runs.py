@@ -54,7 +54,7 @@ def job_entity_as_legacy_dict(entity: OrganizeJob) -> dict[str, Any]:
         "id": entity.id,
         "runId": entity.run_id,
         "workId": entity.work_id,
-        "editionId": entity.edition_id,
+        "volumeId": entity.volume_id,
         "importTaskId": entity.import_task_id,
         "trigger": entity.trigger,
         "status": entity.status,
@@ -143,7 +143,11 @@ def get_job_row(db: Session, job_id: str) -> dict[str, Any] | None:
 
 def count_jobs_for_run(db: Session, run_id: str) -> int:
     return int(
-        db.scalar(select(func.count()).select_from(OrganizeJob).where(OrganizeJob.run_id == run_id))
+        db.scalar(
+            select(func.count())
+            .select_from(OrganizeJob)
+            .where(OrganizeJob.run_id == run_id)
+        )
         or 0
     )
 
@@ -181,12 +185,16 @@ def update_run_after_enqueue(
 def sync_organize_runs(db: Session) -> int:
     if not has_run_table(db) or not has_job_table(db):
         return 0
-    runs = db.scalars(select(OrganizeRun).where(OrganizeRun.status.in_(ACTIVE_RUN_STATUSES))).all()
+    runs = db.scalars(
+        select(OrganizeRun).where(OrganizeRun.status.in_(ACTIVE_RUN_STATUSES))
+    ).all()
     updated = 0
     now = _now()
     for run in runs:
         counts = job_status_counts_for_run(db, run.id)
-        completed = sum(counts.get(item, 0) for item in ("APPLIED", "COMPLETED", "DISMISSED"))
+        completed = sum(
+            counts.get(item, 0) for item in ("APPLIED", "COMPLETED", "DISMISSED")
+        )
         review = counts.get("REVIEWING", 0)
         failed = counts.get("FAILED", 0)
         cancelled = counts.get("CANCELLED", 0)

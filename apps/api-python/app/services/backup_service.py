@@ -28,14 +28,17 @@ BACKUP_TABLES: list[tuple[str, str]] = [
     ("monitorFolders", "MonitorFolder"),
     ("userMonitorFolderAccess", "UserMonitorFolderAccess"),
     ("works", "LibraryWork"),
-    ("editions", "LibraryEdition"),
+    ("mediaVersions", "LibraryMediaVersion"),
     ("volumes", "LibraryVolume"),
     ("files", "LibraryFile"),
     ("readingUnits", "LibraryReadingUnit"),
     ("metadataItems", "LibraryMetadata"),
+    ("facets", "LibraryFacet"),
+    ("workFacets", "LibraryWorkFacet"),
+    ("volumeFacets", "LibraryVolumeFacet"),
     ("shelfWorks", "ShelfWork"),
     ("readingProgresses", "LibraryReadingProgress"),
-    ("consumptionStates", "LibraryConsumptionState"),
+    ("userMediaHistories", "UserMediaHistory"),
     ("workDetailPreferences", "WorkDetailPreference"),
     ("importTasks", "ImportTask"),
     ("importAssets", "ImportAsset"),
@@ -51,11 +54,13 @@ BACKUP_TABLES: list[tuple[str, str]] = [
     ("readerBookPreferences", "ReaderBookPreference"),
     ("readerProgressCursors", "ReaderProgressCursor"),
     ("readerBookmarks", "ReaderBookmark"),
+    ("mediaVersionMigrationEvents", "MediaVersionMigrationEvent"),
     ("systemSettings", "SystemSetting"),
 ]
 
 RESTORE_ORDER = [
     "ReaderBookmark",
+    "MediaVersionMigrationEvent",
     "UserMonitorFolderAccess",
     "UserPreference",
     "BookIdentityCache",
@@ -69,7 +74,7 @@ RESTORE_ORDER = [
     "ReaderProgressCursor",
     "ReaderPreference",
     "WorkDetailPreference",
-    "LibraryConsumptionState",
+    "UserMediaHistory",
     "ImportLog",
     "BookConversionTask",
     "ImportTask",
@@ -80,8 +85,11 @@ RESTORE_ORDER = [
     "LibraryMetadata",
     "LibraryReadingUnit",
     "LibraryFile",
+    "LibraryVolumeFacet",
+    "LibraryWorkFacet",
+    "LibraryFacet",
     "LibraryVolume",
-    "LibraryEdition",
+    "LibraryMediaVersion",
     "LibraryWork",
     "MonitorFolder",
 ]
@@ -124,25 +132,34 @@ def json_default(value: Any) -> str:
 
 
 def json_bytes(value: Any) -> bytes:
-    return json.dumps(value, ensure_ascii=False, indent=2, default=json_default).encode("utf-8")
+    return json.dumps(value, ensure_ascii=False, indent=2, default=json_default).encode(
+        "utf-8"
+    )
 
 
-def counts_for_export(database_export: dict[str, list[dict[str, Any]]]) -> dict[str, int]:
+def counts_for_export(
+    database_export: dict[str, list[dict[str, Any]]],
+) -> dict[str, int]:
     return {
         "users": len(database_export.get("users", [])),
         "userPreferences": len(database_export.get("userPreferences", [])),
         "monitorFolders": len(database_export.get("monitorFolders", [])),
-        "userMonitorFolderAccess": len(database_export.get("userMonitorFolderAccess", [])),
+        "userMonitorFolderAccess": len(
+            database_export.get("userMonitorFolderAccess", [])
+        ),
         "works": len(database_export.get("works", [])),
-        "editions": len(database_export.get("editions", [])),
+        "mediaVersions": len(database_export.get("mediaVersions", [])),
         "volumes": len(database_export.get("volumes", [])),
         "files": len(database_export.get("files", [])),
         "readingUnits": len(database_export.get("readingUnits", [])),
         "metadataItems": len(database_export.get("metadataItems", [])),
+        "facets": len(database_export.get("facets", [])),
+        "workFacets": len(database_export.get("workFacets", [])),
+        "volumeFacets": len(database_export.get("volumeFacets", [])),
         "shelves": len(database_export.get("shelves", [])),
         "shelfWorks": len(database_export.get("shelfWorks", [])),
         "readingProgresses": len(database_export.get("readingProgresses", [])),
-        "consumptionStates": len(database_export.get("consumptionStates", [])),
+        "userMediaHistories": len(database_export.get("userMediaHistories", [])),
         "workDetailPreferences": len(database_export.get("workDetailPreferences", [])),
         "importTasks": len(database_export.get("importTasks", [])),
         "importAssets": len(database_export.get("importAssets", [])),
@@ -152,6 +169,9 @@ def counts_for_export(database_export: dict[str, list[dict[str, Any]]]) -> dict[
         "readerBookPreferences": len(database_export.get("readerBookPreferences", [])),
         "readerProgressCursors": len(database_export.get("readerProgressCursors", [])),
         "readerBookmarks": len(database_export.get("readerBookmarks", [])),
+        "mediaVersionMigrationEvents": len(
+            database_export.get("mediaVersionMigrationEvents", [])
+        ),
         "systemSettings": len(database_export.get("systemSettings", [])),
         "coverIndexEntries": len(database_export.get("coverIndex", [])),
     }
@@ -164,14 +184,22 @@ def current_database_revision(db: Session) -> str:
     return revision
 
 
-def create_backup(db: Session, settings: Settings, kind: str = "manual") -> BackupResult:
+def create_backup(
+    db: Session, settings: Settings, kind: str = "manual"
+) -> BackupResult:
     if kind != "manual":
         raise ValueError("BACKUP_KIND_UNSUPPORTED")
     created_at = datetime.now(timezone.utc)
     backup_id_value = backup_id(kind, created_at)
-    database_export = {export_key: fetch_table(db, table) for export_key, table in BACKUP_TABLES}
+    database_export = {
+        export_key: fetch_table(db, table) for export_key, table in BACKUP_TABLES
+    }
     database_export["coverIndex"] = [
-        {"workId": work.get("id"), "coverPath": work.get("coverPath"), "coverStatus": work.get("coverStatus")}
+        {
+            "workId": work.get("id"),
+            "coverPath": work.get("coverPath"),
+            "coverStatus": work.get("coverStatus"),
+        }
         for work in database_export.get("works", [])
     ]
     counts = counts_for_export(database_export)
@@ -180,12 +208,24 @@ def create_backup(db: Session, settings: Settings, kind: str = "manual") -> Back
         "id": backup_id_value,
         "kind": kind,
         "app": "ermao-books",
-        "version": 2,
+        "version": 3,
         "databaseRevision": current_database_revision(db),
         "createdAt": created_at.isoformat(),
         "format": "zip",
         "contents": ["metadata.json", "database-export.json", "settings.json"],
-        "scope": ["database-v2", "system-settings", "library-metadata", "reading-metadata", "tags", "reading-progress", "monitor-folder-settings", "multi-user-authorization", "user-preferences", "reader-bookmarks", "cover-cache-index"],
+        "scope": [
+            "database-v3",
+            "system-settings",
+            "library-metadata",
+            "reading-metadata",
+            "tags",
+            "volume-progress",
+            "monitor-folder-settings",
+            "multi-user-authorization",
+            "user-preferences",
+            "reader-bookmarks",
+            "cover-cache-index",
+        ],
         "excludes": ["reader-content-files", "cover-image-files", "library-files/"],
         "counts": counts,
     }
@@ -201,7 +241,9 @@ def create_backup(db: Session, settings: Settings, kind: str = "manual") -> Back
         archive.writestr("metadata.json", json_bytes(metadata))
         archive.writestr("database-export.json", json_bytes(database_export))
         archive.writestr("settings.json", json_bytes(settings_export))
-    result = BackupResult(backup_id_value, path.name, path.stat().st_size, created_at.isoformat(), counts)
+    result = BackupResult(
+        backup_id_value, path.name, path.stat().st_size, created_at.isoformat(), counts
+    )
     return result
 
 
@@ -225,11 +267,15 @@ def list_backups(settings: Settings) -> list[dict[str, Any]]:
                 "name": path.name,
                 "filename": path.name,
                 "sizeBytes": stat.st_size,
-                "createdAt": metadata.get("createdAt") if metadata else datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+                "createdAt": metadata.get("createdAt")
+                if metadata
+                else datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
                 "counts": metadata.get("counts") if metadata else None,
             }
         )
-    return sorted(backups, key=lambda item: str(item.get("createdAt") or ""), reverse=True)
+    return sorted(
+        backups, key=lambda item: str(item.get("createdAt") or ""), reverse=True
+    )
 
 
 def delete_backup_file(settings: Settings, backup_id_value: str) -> bool:
@@ -243,13 +289,17 @@ def delete_backup_file(settings: Settings, backup_id_value: str) -> bool:
 def parse_backup(path: Path) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]]]:
     with zipfile.ZipFile(path) as archive:
         metadata = json.loads(archive.read("metadata.json").decode("utf-8"))
-        database_export = json.loads(archive.read("database-export.json").decode("utf-8"))
-    if metadata.get("app") != "ermao-books" or metadata.get("version") != 2:
-        raise ValueError("BACKUP_VERSION_UNSUPPORTED")
+        database_export = json.loads(
+            archive.read("database-export.json").decode("utf-8")
+        )
+    if metadata.get("app") != "ermao-books" or metadata.get("version") != 3:
+        raise ValueError("BACKUP_REVISION_UNSUPPORTED")
     return metadata, database_export
 
 
-def restore_backup(db: Session, settings: Settings, backup_id_value: str) -> dict[str, Any]:
+def restore_backup(
+    db: Session, settings: Settings, backup_id_value: str
+) -> dict[str, Any]:
     path = backup_path(settings, backup_id_value)
     if not path.exists():
         raise FileNotFoundError("备份不存在")
@@ -259,7 +309,7 @@ def restore_backup(db: Session, settings: Settings, backup_id_value: str) -> dic
         metadata.get("databaseRevision") != supported_revision
         or current_database_revision(db) != supported_revision
     ):
-        raise ValueError("BACKUP_DATABASE_REVISION_UNSUPPORTED")
+        raise ValueError("BACKUP_REVISION_UNSUPPORTED")
     try:
         for table in RESTORE_ORDER:
             clear_table_if_present(db, table)
@@ -276,7 +326,13 @@ def restore_backup(db: Session, settings: Settings, backup_id_value: str) -> dic
         db.rollback()
         raise
     actual_counts = {
-        export_key: len(fetch_table(db, table))
-        for export_key, table in BACKUP_TABLES
+        export_key: len(fetch_table(db, table)) for export_key, table in BACKUP_TABLES
     }
-    return {"id": backup_id_value, "restored": True, "restoredAt": datetime.now(timezone.utc).isoformat(), "counts": metadata.get("counts"), "restoredCounts": restored, "actualCounts": actual_counts}
+    return {
+        "id": backup_id_value,
+        "restored": True,
+        "restoredAt": datetime.now(timezone.utc).isoformat(),
+        "counts": metadata.get("counts"),
+        "restoredCounts": restored,
+        "actualCounts": actual_counts,
+    }

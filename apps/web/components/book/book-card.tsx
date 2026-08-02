@@ -5,6 +5,7 @@ import type { KeyboardEvent, MouseEvent } from 'react';
 import { Progress } from '../ui/progress';
 import { Cover } from './cover';
 import type { CoverBook } from './cover';
+import { allWorkVolumes, volumeById, type WorkView } from '../../types/work';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type CardMediaKind = 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
@@ -33,19 +34,7 @@ export function BookCard({
   selected = false,
   onSelect
 }: {
-  book: CoverBook & {
-    tags: string[];
-    progress: number;
-    type: string;
-    format: string;
-    status?: string;
-    statusValue?: string;
-    totalUnits?: number;
-    versionCount?: number;
-    volumeCount?: number;
-    primaryEditionName?: string | null;
-    availableMediaKinds?: CardMediaKind[];
-  };
+  book: WorkView & CoverBook;
   compact?: boolean;
   priority?: boolean;
   onDelete?: () => void;
@@ -56,11 +45,10 @@ export function BookCard({
 }) {
   const { t: i18nAttribute } = useAttributeI18n();
   const authorLabel = book.author.trim() && book.author !== '未知作者' ? book.author.trim() : null;
-  const hasProgress = book.progress > 0 && book.progress < 100;
-  const mediaKinds = book.availableMediaKinds?.length
-    ? book.availableMediaKinds
-    : [book.type === 'comic' ? 'COMIC' : book.type === 'audiobook' ? 'AUDIOBOOK' : 'EBOOK'] as CardMediaKind[];
-  const readingLabel = consumptionStatusLabel(book.statusValue, mediaKinds);
+  const continueVolume = volumeById(book, book.continueVolumeId);
+  const mediaKinds = book.mediaVersions.map((mediaVersion) => mediaVersion.mediaKind) as CardMediaKind[];
+  const hasProgress = Boolean(continueVolume && continueVolume.progress > 0 && continueVolume.progress < 100);
+  const readingLabel = consumptionStatusLabel(book.completed ? 'FINISHED' : allWorkVolumes(book).some((volume) => volume.progress > 0) ? 'READING' : 'UNREAD', mediaKinds);
 
   function deleteBook(event: MouseEvent<HTMLButtonElement>) {
     event.stopPropagation();
@@ -115,10 +103,11 @@ export function BookCard({
         <div data-i18n-skip className={compact ? 'line-clamp-1 text-[13px] font-medium text-[#24211F]' : 'line-clamp-1 text-sm font-medium text-[#24211F]'}>{book.title}</div>
         {authorLabel ? <div data-i18n-skip className="mt-0.5 line-clamp-1 text-xs text-[#89837D]">{authorLabel}</div> : null}
         <div className="mt-1 line-clamp-1 text-[11px] text-[#9A948E]">{mediaKinds.map((kind) => mediaLabels[kind]).join(' · ')}</div>
-        {hasProgress ? (
+        {continueVolume ? <div data-i18n-skip className="mt-1 line-clamp-1 text-[11px] text-[#8B857F]">{continueVolume.title}</div> : null}
+        {hasProgress && continueVolume ? (
           <div className="mt-1.5 flex items-center gap-2">
-            <Progress value={book.progress} className="h-1 flex-1 bg-[#E4E0DC]" />
-            <span className="shrink-0 text-[11px] tabular-nums text-[#77716B]">{Math.round(book.progress)}%</span>
+            <Progress value={continueVolume.progress} className="h-1 flex-1 bg-[#E4E0DC]" />
+            <span className="shrink-0 text-[11px] tabular-nums text-[#77716B]">{Math.round(continueVolume.progress)}%</span>
           </div>
         ) : readingLabel ? (
           <div className="mt-1 text-xs text-[#8B857F]">{readingLabel}</div>

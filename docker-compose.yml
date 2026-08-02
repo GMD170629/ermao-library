@@ -9,7 +9,6 @@ services:
     user: "${PUID:-1000}:${PGID:-1000}"
     environment:
       STORAGE_ROOT: /app/storage
-      MONITOR_ROOT: /monitor
       PORT: 3000
       HOSTNAME: 0.0.0.0
     ports:
@@ -17,6 +16,8 @@ services:
     volumes:
       - ${STORAGE_PATH:-./data/storage}:/app/storage
       - ${MONITOR_HOST_PATH:-./monitor}:/monitor
+      # Add more host libraries as needed, for example:
+      # - /path/to/another-library:/libraries/another
     command: ["./scripts/start-unified-app.sh"]
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]

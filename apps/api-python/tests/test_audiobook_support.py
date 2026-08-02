@@ -4,6 +4,7 @@ import io
 import json
 import sys
 from contextlib import nullcontext
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,6 +27,13 @@ from app.core.auth import hash_password
 from app.db.base import Base
 from app.db.bootstrap import apply_schema
 from app.models.auth import User
+from app.models.library import (
+    LibraryMediaVersion,
+    LibraryReadingProgress,
+    LibraryVolume,
+    LibraryWork,
+    UserMediaHistory,
+)
 from app.modules.imports.application.audio_types import MAX_AUDIO_BUNDLE_TRACKS
 from app.modules.imports.application.dto import ImportOptions
 from app.modules.imports.application.errors import AudioTrackLimitExceededError
@@ -194,31 +202,41 @@ def _import_audio_fixture(db_session, test_settings, monkeypatch, tmp_path: Path
     return result, audio_dir
 
 
-def _insert_edition(
+def _insert_media_volume(
     db_session,
     *,
-    edition_id: str,
+    media_version_id: str,
+    volume_id: str,
     work_id: str,
     media_kind: str,
     fmt: str,
-    primary: bool = True,
 ) -> None:
     db_session.execute(
         text(
-            "INSERT INTO `LibraryEdition` "
-            "(`id`, `workId`, `origin`, `mediaKind`, `format`, `versionName`, `versionKey`, `importStatus`, "
-            "`sizeBytes`, `coverStatus`, `primary`, `hidden`, `createdAt`, `updatedAt`) "
-            "VALUES (:id, :work_id, 'MANUAL', :media_kind, :format, :name, :key, 'COMPLETED', "
-            "0, 'PENDING', :primary, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            "INSERT INTO `LibraryMediaVersion` "
+            "(`id`, `workId`, `mediaKind`, `createdAt`, `updatedAt`) "
+            "VALUES (:id, :work_id, :media_kind, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
         ),
         {
-            "id": edition_id,
+            "id": media_version_id,
             "work_id": work_id,
             "media_kind": media_kind,
+        },
+    )
+    db_session.execute(
+        text(
+            "INSERT INTO `LibraryVolume` "
+            "(`id`, `mediaVersionId`, `origin`, `title`, `sortOrder`, `format`, `resourceKey`, "
+            "`importStatus`, `sizeBytes`, `coverStatus`, `hidden`, `createdAt`, `updatedAt`) "
+            "VALUES (:id, :media_version_id, 'MANUAL', :title, 0, :format, :key, "
+            "'COMPLETED', 0, 'PENDING', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        ),
+        {
+            "id": volume_id,
+            "media_version_id": media_version_id,
+            "title": media_kind,
             "format": fmt,
-            "name": media_kind,
-            "key": f"test:{edition_id}",
-            "primary": 1 if primary else 0,
+            "key": f"test:{volume_id}",
         },
     )
     db_session.commit()
@@ -510,10 +528,13 @@ def test_audio_bundle_import_merges_with_existing_epub_and_orders_tracks(
     )
 
     assert audio_result.work_id == epub_result.work_id
-    editions = (
+    media_volumes = (
         db_session.execute(
             text(
-                "SELECT `mediaKind`, `format`, `versionName`, `primary` FROM `LibraryEdition` WHERE `workId` = :work_id ORDER BY `mediaKind`"
+                "SELECT media.mediaKind, volume.format, volume.title "
+                "FROM LibraryMediaVersion AS media "
+                "JOIN LibraryVolume AS volume ON volume.mediaVersionId = media.id "
+                "WHERE media.workId = :work_id ORDER BY media.mediaKind"
             ),
             {"work_id": audio_result.work_id},
         )
@@ -521,18 +542,17 @@ def test_audio_bundle_import_merges_with_existing_epub_and_orders_tracks(
         .all()
     )
     assert [
-        (row["mediaKind"], row["format"], row["versionName"], row["primary"])
-        for row in editions
+        (row["mediaKind"], row["format"], row["title"]) for row in media_volumes
     ] == [
-        ("AUDIOBOOK", "AUDIO", "有声书 · 演播者甲", 1),
-        ("EBOOK", "EPUB", "EPUB", 1),
+        ("AUDIOBOOK", "AUDIO", "正文"),
+        ("EBOOK", "EPUB", "三体"),
     ]
     tracks = (
         db_session.execute(
             text(
-                "SELECT `trackNumber`, `sortOrder`, `durationMs`, `codec` FROM `LibraryFile` WHERE `editionId` = :edition_id ORDER BY `sortOrder`"
+                "SELECT `trackNumber`, `sortOrder`, `durationMs`, `codec` FROM `LibraryFile` WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
             ),
-            {"edition_id": audio_result.edition_id},
+            {"volume_id": audio_result.volume_id},
         )
         .mappings()
         .all()
@@ -546,9 +566,9 @@ def test_audio_bundle_import_merges_with_existing_epub_and_orders_tracks(
     task = (
         db_session.execute(
             text(
-                "SELECT `taskKind`, `assetCount`, `processedAssetCount`, `status` FROM `ImportTask` WHERE `editionId` = :edition_id"
+                "SELECT `taskKind`, `assetCount`, `processedAssetCount`, `status` FROM `ImportTask` WHERE `volumeId` = :volume_id"
             ),
-            {"edition_id": audio_result.edition_id},
+            {"volume_id": audio_result.volume_id},
         )
         .mappings()
         .one()
@@ -562,9 +582,9 @@ def test_audio_bundle_import_merges_with_existing_epub_and_orders_tracks(
     assert (
         db_session.execute(
             text(
-                "SELECT COUNT(*) FROM `ImportAsset` WHERE `importTaskId` = (SELECT `id` FROM `ImportTask` WHERE `editionId` = :edition_id) AND `status` = 'COMPLETED'"
+                "SELECT COUNT(*) FROM `ImportAsset` WHERE `importTaskId` = (SELECT `id` FROM `ImportTask` WHERE `volumeId` = :volume_id) AND `status` = 'COMPLETED'"
             ),
-            {"edition_id": audio_result.edition_id},
+            {"volume_id": audio_result.volume_id},
         ).scalar()
         == 2
     )
@@ -587,7 +607,8 @@ def test_audio_moved_copy_runs_normal_import_without_content_hashing(
         ),
     )
     assert same_path.duplicate is True
-    assert same_path.edition_id == first.edition_id
+    assert same_path.media_version_id == first.media_version_id
+    assert same_path.volume_id == first.volume_id
 
     moved_dir = test_settings.resolved_monitor_root / "moved-copy"
     moved_dir.mkdir()
@@ -616,24 +637,25 @@ def test_audio_moved_copy_runs_normal_import_without_content_hashing(
     )
     assert moved.duplicate is False
     assert moved.work_id == first.work_id
-    assert moved.edition_id != first.edition_id
-    assert moved.merge_reason == "new-audio-edition"
+    assert moved.media_version_id == first.media_version_id
+    assert moved.volume_id != first.volume_id
+    assert moved.merge_reason == "new-audio-volume"
     assert (
         db_session.execute(
             text(
-                "SELECT COUNT(*) FROM `LibraryEdition` WHERE `workId` = :work_id AND `mediaKind` = 'AUDIOBOOK'"
+                "SELECT COUNT(*) FROM `LibraryMediaVersion` WHERE `workId` = :work_id AND `mediaKind` = 'AUDIOBOOK'"
             ),
             {"work_id": first.work_id},
         ).scalar()
-        == 2
+        == 1
     )
     files = (
         db_session.execute(
             text(
                 "SELECT `path`, `fingerprint`, `fullHash`, `hashStatus` "
-                "FROM `LibraryFile` WHERE `editionId` = :edition_id ORDER BY `sortOrder`"
+                "FROM `LibraryFile` WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
             ),
-            {"edition_id": moved.edition_id},
+            {"volume_id": moved.volume_id},
         )
         .mappings()
         .all()
@@ -669,14 +691,15 @@ def test_audio_partial_content_overlap_runs_normal_import(
     )
     assert result.duplicate is False
     assert result.work_id == first.work_id
-    assert result.edition_id != first.edition_id
+    assert result.media_version_id == first.media_version_id
+    assert result.volume_id != first.volume_id
     files = (
         db_session.execute(
             text(
                 "SELECT `fingerprint`, `fullHash` FROM `LibraryFile` "
-                "WHERE `editionId` = :edition_id ORDER BY `sortOrder`"
+                "WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
             ),
-            {"edition_id": result.edition_id},
+            {"volume_id": result.volume_id},
         )
         .mappings()
         .all()
@@ -716,9 +739,9 @@ def test_audio_bundle_keeps_byte_identical_tracks_as_distinct_chapters(
         db_session.execute(
             text(
                 "SELECT `id`, `path`, `fingerprint`, `sortOrder` FROM `LibraryFile` "
-                "WHERE `editionId` = :edition_id ORDER BY `sortOrder`"
+                "WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
             ),
-            {"edition_id": result.edition_id},
+            {"volume_id": result.volume_id},
         )
         .mappings()
         .all()
@@ -727,9 +750,9 @@ def test_audio_bundle_keeps_byte_identical_tracks_as_distinct_chapters(
         db_session.execute(
             text(
                 "SELECT `fileId`, `title`, `sortOrder` FROM `LibraryReadingUnit` "
-                "WHERE `editionId` = :edition_id AND `unitType` = 'audio_chapter' ORDER BY `sortOrder`"
+                "WHERE `volumeId` = :volume_id AND `unitType` = 'audio_chapter' ORDER BY `sortOrder`"
             ),
-            {"edition_id": result.edition_id},
+            {"volume_id": result.volume_id},
         )
         .mappings()
         .all()
@@ -777,8 +800,8 @@ def test_file_import_does_not_apply_browser_upload_bundle_byte_limit(
 
     assert (
         db_session.execute(
-            text("SELECT COUNT(*) FROM `LibraryFile` WHERE `editionId` = :edition_id"),
-            {"edition_id": result.edition_id},
+            text("SELECT COUNT(*) FROM `LibraryFile` WHERE `volumeId` = :volume_id"),
+            {"volume_id": result.volume_id},
         ).scalar_one()
         == 2
     )
@@ -820,29 +843,32 @@ def test_single_audio_file_task_imports_parent_directory_as_one_bundle(
         ),
     )
     assert first.work_id == second.work_id
-    assert first.edition_id == second.edition_id
+    assert first.media_version_id == second.media_version_id
+    assert first.volume_id == second.volume_id
     assert second.duplicate is True
-    editions = (
+    volumes = (
         db_session.execute(
             text(
-                "SELECT `id`, `trackCount`, `chapterCount` FROM `LibraryEdition` "
-                "WHERE `workId` = :work_id AND `hidden` = 0"
+                "SELECT volume.id, volume.trackCount, volume.chapterCount "
+                "FROM LibraryVolume AS volume "
+                "JOIN LibraryMediaVersion AS media ON media.id = volume.mediaVersionId "
+                "WHERE media.workId = :work_id AND volume.hidden = 0"
             ),
             {"work_id": first.work_id},
         )
         .mappings()
         .all()
     )
-    assert [dict(row) for row in editions] == [
-        {"id": first.edition_id, "trackCount": 2, "chapterCount": 2}
+    assert [dict(row) for row in volumes] == [
+        {"id": first.volume_id, "trackCount": 2, "chapterCount": 2}
     ]
 
 
-def test_audio_bootstrap_range_head_and_completion_requires_explicit_ended_signal(
+def test_audio_bootstrap_range_head_and_completion_follow_volume_progress(
     client, db_session, test_settings, monkeypatch, tmp_path
 ) -> None:
     _initialize_schema(db_session)
-    user = _login(client, db_session)
+    _login(client, db_session)
     result, _audio_dir = _import_audio_fixture(
         db_session, test_settings, monkeypatch, tmp_path
     )
@@ -850,9 +876,9 @@ def test_audio_bootstrap_range_head_and_completion_requires_explicit_ended_signa
         db_session.execute(
             text(
                 "SELECT `fingerprint`, `fullHash` FROM `LibraryFile` "
-                "WHERE `editionId` = :edition_id ORDER BY `sortOrder`"
+                "WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
             ),
-            {"edition_id": result.edition_id},
+            {"volume_id": result.volume_id},
         )
         .mappings()
         .all()
@@ -862,23 +888,23 @@ def test_audio_bootstrap_range_head_and_completion_requires_explicit_ended_signa
     assert all(row["fullHash"] is None for row in stored_hashes)
 
     bootstrap_response = client.get(
-        f"/api/reader/v2/editions/{result.edition_id}/bootstrap"
+        f"/api/reader/v3/volumes/{result.volume_id}/bootstrap"
     )
     assert bootstrap_response.status_code == 200
     bootstrap = bootstrap_response.json()["data"]
     assert bootstrap["readerType"] == "audio"
     assert bootstrap["contentFingerprint"].startswith("sha256:")
     assert (
-        client.get(f"/api/reader/v2/editions/{result.edition_id}/bootstrap").json()[
+        client.get(f"/api/reader/v3/volumes/{result.volume_id}/bootstrap").json()[
             "data"
         ]["contentFingerprint"]
         == bootstrap["contentFingerprint"]
     )
-    assert [track["trackNumber"] for track in bootstrap["tracks"]] == [2, 10]
-    assert bootstrap["totalDurationMs"] == 1_200_000
-    assert len(bootstrap["chapters"]) == 2
+    assert [track["trackNumber"] for track in bootstrap["files"]] == [2, 10]
+    assert bootstrap["volume"]["durationMs"] == 1_200_000
+    assert len(bootstrap["units"]) == 2
 
-    first_track = bootstrap["tracks"][0]
+    first_track = bootstrap["files"][0]
     full = client.get(first_track["url"])
     assert full.status_code == 200
     assert full.headers["accept-ranges"] == "bytes"
@@ -915,23 +941,20 @@ def test_audio_bootstrap_range_head_and_completion_requires_explicit_ended_signa
     )
     assert stale_date_if_range.status_code == 200
 
-    final_track = bootstrap["tracks"][-1]
+    final_track = bootstrap["files"][-1]
     common = {
-        "schemaVersion": 2,
-        "userId": user.id,
+        "schemaVersion": 3,
         "clientId": "audio-player",
         "contentFingerprint": bootstrap["contentFingerprint"],
-        "volumeId": result.volume_id,
         "location": {
             "type": "audio",
-            "volumeId": result.volume_id,
-            "fileId": final_track["fileId"],
-            "chapterId": bootstrap["chapters"][-1]["id"],
+            "fileId": final_track["id"],
+            "chapterId": bootstrap["units"][-1]["id"],
             "positionMs": final_track["durationMs"],
         },
     }
     seek = client.put(
-        f"/api/reader/v2/editions/{result.edition_id}/progress",
+        f"/api/reader/v3/volumes/{result.volume_id}/progress",
         json={
             **common,
             "mutationId": "seek-to-end",
@@ -942,17 +965,14 @@ def test_audio_bootstrap_range_head_and_completion_requires_explicit_ended_signa
     assert seek.status_code == 200
     assert seek.json()["data"]["progress"]["percent"] == 99.999
     assert (
-        db_session.execute(
-            text(
-                "SELECT `status` FROM `LibraryConsumptionState` WHERE `userId` = :user_id AND `workId` = :work_id AND `mediaKind` = 'AUDIOBOOK'"
-            ),
-            {"user_id": user.id, "work_id": result.work_id},
-        ).scalar()
-        == "READING"
+        client.get(f"/api/reader/v3/volumes/{result.volume_id}/bootstrap").json()[
+            "data"
+        ]["mediaVersion"]["completed"]
+        is False
     )
 
     ended = client.put(
-        f"/api/reader/v2/editions/{result.edition_id}/progress",
+        f"/api/reader/v3/volumes/{result.volume_id}/progress",
         json={
             **common,
             "mutationId": "media-ended",
@@ -963,17 +983,14 @@ def test_audio_bootstrap_range_head_and_completion_requires_explicit_ended_signa
     assert ended.status_code == 200
     assert ended.json()["data"]["progress"]["percent"] == 100
     assert (
-        db_session.execute(
-            text(
-                "SELECT `status` FROM `LibraryConsumptionState` WHERE `userId` = :user_id AND `workId` = :work_id AND `mediaKind` = 'AUDIOBOOK'"
-            ),
-            {"user_id": user.id, "work_id": result.work_id},
-        ).scalar()
-        == "FINISHED"
+        client.get(f"/api/reader/v3/volumes/{result.volume_id}/bootstrap").json()[
+            "data"
+        ]["mediaVersion"]["completed"]
+        is True
     )
 
     paused_after_finish = client.put(
-        f"/api/reader/v2/editions/{result.edition_id}/progress",
+        f"/api/reader/v3/volumes/{result.volume_id}/progress",
         json={
             **common,
             "mutationId": "pause-after-finish",
@@ -981,59 +998,52 @@ def test_audio_bootstrap_range_head_and_completion_requires_explicit_ended_signa
             "percent": 10,
             "location": {
                 "type": "audio",
-                "volumeId": result.volume_id,
-                "fileId": first_track["fileId"],
-                "chapterId": bootstrap["chapters"][0]["id"],
+                "fileId": first_track["id"],
+                "chapterId": bootstrap["units"][0]["id"],
                 "positionMs": 10_000,
             },
         },
     )
     assert paused_after_finish.status_code == 200
     assert (
-        db_session.execute(
-            text(
-                "SELECT `status` FROM `LibraryConsumptionState` WHERE `userId` = :user_id AND `workId` = :work_id AND `mediaKind` = 'AUDIOBOOK'"
-            ),
-            {"user_id": user.id, "work_id": result.work_id},
-        ).scalar()
-        == "FINISHED"
+        client.get(f"/api/reader/v3/volumes/{result.volume_id}/bootstrap").json()[
+            "data"
+        ]["mediaVersion"]["completed"]
+        is False
     )
 
 
-def test_three_media_filters_tabs_preferences_targets_and_user_status_are_isolated(
+def test_three_media_filters_tabs_preferences_and_completion_are_user_scoped(
     client, db_session
 ) -> None:
     _initialize_schema(db_session)
     user_a = _login(client, db_session, email="listener-a@example.com")
-    db_session.execute(
-        text(
-            "INSERT INTO `LibraryWork` "
-            "(`id`, `origin`, `title`, `normalizedTitle`, `author`, `normalizedAuthor`, `workType`, `status`, `tags`, `updatedAt`) "
-            "VALUES ('mixed-work', 'MANUAL', '三媒介作品', '三媒介作品', '作者', '作者', 'EPUB', 'UNREAD', '[]', CURRENT_TIMESTAMP)"
+    db_session.add(
+        LibraryWork(
+            id="mixed-work",
+            origin="MANUAL",
+            title="Mixed media work",
+            normalized_title="mixed media work",
+            author="Author",
+            normalized_author="author",
+            work_type="EPUB",
+            tags="[]",
         )
     )
     db_session.commit()
-    _insert_edition(
-        db_session,
-        edition_id="mixed-ebook",
-        work_id="mixed-work",
-        media_kind="EBOOK",
-        fmt="EPUB",
-    )
-    _insert_edition(
-        db_session,
-        edition_id="mixed-comic",
-        work_id="mixed-work",
-        media_kind="COMIC",
-        fmt="COMIC",
-    )
-    _insert_edition(
-        db_session,
-        edition_id="mixed-audio",
-        work_id="mixed-work",
-        media_kind="AUDIOBOOK",
-        fmt="AUDIO",
-    )
+    for media_version_id, volume_id, media_kind, fmt in (
+        ("mixed-ebook", "mixed-ebook-volume", "EBOOK", "EPUB"),
+        ("mixed-comic", "mixed-comic-volume", "COMIC", "COMIC"),
+        ("mixed-audio", "mixed-audio-volume", "AUDIOBOOK", "AUDIO"),
+    ):
+        _insert_media_volume(
+            db_session,
+            media_version_id=media_version_id,
+            volume_id=volume_id,
+            work_id="mixed-work",
+            media_kind=media_kind,
+            fmt=fmt,
+        )
 
     for filter_value in ("ebook", "COMIC", "audiobook"):
         response = client.get("/api/works", params={"type": filter_value})
@@ -1051,14 +1061,13 @@ def test_three_media_filters_tabs_preferences_targets_and_user_status_are_isolat
         {"value": '["AUDIOBOOK","COMIC","EBOOK","STRUCTURE"]'},
     )
     db_session.commit()
-    detail = client.get("/api/works/mixed-work").json()["data"]
-    assert [tab["key"] for tab in detail["book"]["detailTabs"]] == [
+    detail = client.get("/api/works/mixed-work").json()["data"]["book"]
+    assert [tab["key"] for tab in detail["detailTabs"]] == [
         "AUDIOBOOK",
         "COMIC",
         "EBOOK",
         "STRUCTURE",
     ]
-    assert detail["book"]["selectedDetailTab"] == "AUDIOBOOK"
     saved = client.put(
         "/api/works/mixed-work/detail-preference", json={"selectedTab": "COMIC"}
     )
@@ -1068,250 +1077,164 @@ def test_three_media_filters_tabs_preferences_targets_and_user_status_are_isolat
         == "COMIC"
     )
 
-    db_session.execute(
-        text(
-            "INSERT INTO `LibraryWork` (`id`, `origin`, `title`, `normalizedTitle`, `workType`, `status`, `tags`, `updatedAt`) "
-            "VALUES ('other-work', 'MANUAL', '其他作品', '其他作品', 'AUDIO', 'UNREAD', '[]', CURRENT_TIMESTAMP)"
+    for index, volume_id in enumerate(
+        ("mixed-ebook-volume", "mixed-comic-volume", "mixed-audio-volume"),
+        start=1,
+    ):
+        is_audio = volume_id == "mixed-audio-volume"
+        db_session.add(
+            LibraryReadingProgress(
+                id=f"progress-a-{index}",
+                user_id=user_a.id,
+                volume_id=volume_id,
+                reader_type="audio" if is_audio else "epub",
+                position="complete",
+                percent=100,
+                extra="{}",
+                schema_version=3,
+                location_type="audio" if is_audio else "epub",
+                location_json=json.dumps(
+                    {"type": "audio", "positionMs": 1}
+                    if is_audio
+                    else {"type": "epub", "href": "chapter.xhtml", "progression": 1}
+                ),
+            )
         )
-    )
     db_session.commit()
-    _insert_edition(
-        db_session,
-        edition_id="other-audio",
-        work_id="other-work",
-        media_kind="AUDIOBOOK",
-        fmt="AUDIO",
-    )
-    invalid = client.patch(
-        "/api/works/mixed-work",
-        json={
-            "mediaKind": "AUDIOBOOK",
-            "status": "READING",
-            "editionId": "other-audio",
-        },
-    )
-    assert invalid.status_code == 422
-    assert (
-        db_session.execute(
-            text(
-                "SELECT COUNT(*) FROM `LibraryConsumptionState` WHERE `userId` = :user_id AND `workId` = 'mixed-work'"
-            ),
-            {"user_id": user_a.id},
-        ).scalar()
-        == 0
-    )
+    completed_for_a = client.get("/api/works/mixed-work").json()["data"]["book"]
+    assert completed_for_a["completed"] is True
+    assert all(item["completed"] for item in completed_for_a["mediaVersions"])
 
-    started = client.patch(
-        "/api/works/mixed-work",
-        json={
-            "mediaKind": "AUDIOBOOK",
-            "status": "READING",
-            "editionId": "mixed-audio",
-        },
-    )
-    assert started.status_code == 200
-    assert started.json()["data"]["book"]["statusValue"] == "READING"
-    assert [
-        item["id"]
-        for item in client.get("/api/works", params={"status": "READING"}).json()[
-            "data"
-        ]["books"]
-    ] == ["mixed-work"]
-
-    user_b = _login(client, db_session, email="listener-b@example.com")
-    user_b_detail = client.get("/api/works/mixed-work").json()["data"]["book"]
-    assert user_b_detail["statusValue"] == "UNREAD"
-    assert user_b_detail["selectedDetailTab"] == "AUDIOBOOK"
-    assert (
-        client.get("/api/works", params={"status": "READING"}).json()["data"]["books"]
-        == []
-    )
-    assert {
-        item["id"]
-        for item in client.get("/api/works", params={"status": "UNREAD"}).json()[
-            "data"
-        ]["books"]
-    } == {"other-work", "mixed-work"}
-    assert (
-        db_session.execute(
-            text(
-                "SELECT COUNT(*) FROM `LibraryConsumptionState` WHERE `userId` = :user_id AND `workId` = 'mixed-work'"
-            ),
-            {"user_id": user_b.id},
-        ).scalar()
-        == 0
+    _login(client, db_session, email="listener-b@example.com")
+    detail_for_b = client.get("/api/works/mixed-work").json()["data"]["book"]
+    assert detail_for_b["completed"] is False
+    assert all(
+        volume["progress"] == 0
+        for media_version in detail_for_b["mediaVersions"]
+        for volume in media_version["volumes"]
     )
 
     _login(client, db_session, email="listener-a@example.com")
-    for media_kind, edition_id in (
-        ("AUDIOBOOK", "mixed-audio"),
-        ("EBOOK", "mixed-ebook"),
-    ):
-        response = client.patch(
-            "/api/works/mixed-work",
-            json={
-                "mediaKind": media_kind,
-                "status": "FINISHED",
-                "editionId": edition_id,
-            },
+    db_session.add(
+        LibraryVolume(
+            id="mixed-ebook-volume-2",
+            media_version_id="mixed-ebook",
+            origin="MANUAL",
+            title="Second ebook",
+            sort_order=1,
+            format="PDF",
+            resource_key="test:mixed-ebook-volume-2",
         )
-        assert response.status_code == 200
-        assert response.json()["data"]["book"]["statusValue"] == "READING"
-        assert (
-            client.get("/api/works", params={"status": "FINISHED"}).json()["data"][
-                "books"
-            ]
-            == []
-        )
-    final = client.patch(
-        "/api/works/mixed-work",
-        json={"mediaKind": "COMIC", "status": "FINISHED", "editionId": "mixed-comic"},
     )
-    assert final.status_code == 200
-    assert final.json()["data"]["book"]["statusValue"] == "FINISHED"
-    assert [
-        item["id"]
-        for item in client.get("/api/works", params={"status": "FINISHED"}).json()[
-            "data"
-        ]["books"]
-    ] == ["mixed-work"]
+    db_session.commit()
+    after_new_volume = client.get("/api/works/mixed-work").json()["data"]["book"]
+    assert after_new_volume["completed"] is False
+    assert after_new_volume["continueVolumeId"] == "mixed-ebook-volume-2"
 
 
-def test_active_media_and_consumption_hierarchy_follow_the_selected_audio_edition(
+def test_active_audio_volume_and_continue_reading_follow_volume_progress(
     client, db_session
 ) -> None:
     _initialize_schema(db_session)
-    user = _login(client, db_session, email="edition-switch@example.com")
-    db_session.execute(
-        text(
-            "INSERT INTO `LibraryWork` (`id`, `origin`, `title`, `normalizedTitle`, `workType`, `status`, `tags`, `updatedAt`) "
-            "VALUES ('switch-work', 'MANUAL', '双演播版', '双演播版', 'AUDIO', 'UNREAD', '[]', CURRENT_TIMESTAMP)"
+    user = _login(client, db_session, email="volume-switch@example.com")
+    work = LibraryWork(
+        id="switch-work",
+        origin="MANUAL",
+        title="Two audio volumes",
+        normalized_title="two audio volumes",
+        work_type="AUDIO",
+        tags="[]",
+    )
+    media_version = LibraryMediaVersion(
+        id="switch-audio", work_id=work.id, media_kind="AUDIOBOOK"
+    )
+    volumes = [
+        LibraryVolume(
+            id=f"audio-{suffix}-volume",
+            media_version_id=media_version.id,
+            origin="MANUAL",
+            title=f"Volume {suffix.upper()}",
+            sort_order=index,
+            format="AUDIO",
+            resource_key=f"test:audio-{suffix}-volume",
+            duration_ms=100_000,
         )
-    )
-    db_session.commit()
-    _insert_edition(
-        db_session,
-        edition_id="audio-a",
-        work_id="switch-work",
-        media_kind="AUDIOBOOK",
-        fmt="AUDIO",
-    )
-    _insert_edition(
-        db_session,
-        edition_id="audio-b",
-        work_id="switch-work",
-        media_kind="AUDIOBOOK",
-        fmt="AUDIO",
-        primary=False,
-    )
-    for suffix in ("a", "b"):
-        db_session.execute(
-            text(
-                "INSERT INTO `LibraryVolume` (`id`, `editionId`, `title`, `sortOrder`, `durationMs`, `updatedAt`) "
-                "VALUES (:volume_id, :edition_id, :title, 0, 100000, CURRENT_TIMESTAMP)"
+        for index, suffix in enumerate(("a", "b"))
+    ]
+    db_session.add_all([work, media_version, *volumes])
+    db_session.flush()
+    db_session.add_all(
+        [
+            LibraryReadingProgress(
+                id="progress-b",
+                user_id=user.id,
+                volume_id=volumes[1].id,
+                reader_type="audio",
+                position="50000",
+                percent=80,
+                extra='{"positionMs":50000}',
+                schema_version=3,
+                location_type="audio",
+                location_json=json.dumps({"type": "audio", "positionMs": 50_000}),
             ),
-            {
-                "volume_id": f"volume-{suffix}",
-                "edition_id": f"audio-{suffix}",
-                "title": f"版本 {suffix.upper()}",
-            },
-        )
-        db_session.execute(
-            text(
-                "INSERT INTO `LibraryReadingUnit` "
-                "(`id`, `editionId`, `volumeId`, `unitType`, `title`, `href`, `sortOrder`, `startMs`, `endMs`, `durationMs`, `metadataJson`, `updatedAt`) "
-                "VALUES (:unit_id, :edition_id, :volume_id, 'audio_chapter', :title, :href, 1, 0, 100000, 100000, '{}', CURRENT_TIMESTAMP)"
+            UserMediaHistory(
+                id="switch-history",
+                user_id=user.id,
+                media_version_id=media_version.id,
+                last_volume_id=volumes[1].id,
             ),
-            {
-                "unit_id": f"unit-{suffix}",
-                "edition_id": f"audio-{suffix}",
-                "volume_id": f"volume-{suffix}",
-                "title": f"章节 {suffix.upper()}",
-                "href": f"audio:file-{suffix}#t=0,100",
-            },
-        )
+        ]
+    )
     db_session.commit()
 
-    first = client.patch(
-        "/api/works/switch-work",
-        json={
-            "mediaKind": "AUDIOBOOK",
-            "status": "READING",
-            "editionId": "audio-a",
-            "volumeId": "volume-a",
-            "unitId": "unit-a",
-        },
-    )
-    assert first.status_code == 200
-    switched = client.patch(
-        "/api/works/switch-work",
-        json={"mediaKind": "AUDIOBOOK", "status": "FINISHED", "editionId": "audio-b"},
-    )
-    assert switched.status_code == 200
-    state = (
-        db_session.execute(
-            text(
-                "SELECT `lastEditionId`, `lastVolumeId`, `lastUnitId`, `status` FROM `LibraryConsumptionState` "
-                "WHERE `userId` = :user_id AND `workId` = 'switch-work' AND `mediaKind` = 'AUDIOBOOK'"
-            ),
-            {"user_id": user.id},
-        )
-        .mappings()
-        .one()
-    )
-    assert dict(state) == {
-        "lastEditionId": "audio-b",
-        "lastVolumeId": None,
-        "lastUnitId": None,
-        "status": "FINISHED",
-    }
-
-    db_session.execute(
-        text(
-            "INSERT INTO `LibraryReadingProgress` "
-            "(`id`, `userId`, `workId`, `editionId`, `volumeId`, `readerType`, `position`, `percent`, `extra`, "
-            "`schemaVersion`, `locationType`, `locationJson`, `updatedAt`) "
-            "VALUES ('progress-b', :user_id, 'switch-work', 'audio-b', 'volume-b', 'audio', '50000', 80, "
-            ":extra, 2, 'audio', :location, "
-            "CURRENT_TIMESTAMP)"
-        ),
-        {
-            "user_id": user.id,
-            "extra": '{"positionMs":50000}',
-            "location": '{"type":"audio","volumeId":"volume-b","fileId":"file-b","chapterId":"unit-b","positionMs":50000}',
-        },
-    )
-    db_session.commit()
+    detail = client.get("/api/works/switch-work").json()["data"]
+    assert len(detail["book"]["mediaVersions"]) == 1
+    assert [
+        volume["id"] for volume in detail["book"]["mediaVersions"][0]["volumes"]
+    ] == ["audio-a-volume", "audio-b-volume"]
+    assert detail["book"]["continueVolumeId"] == "audio-a-volume"
 
     selected_a = client.get(
         "/api/works/switch-work",
-        params={"detailTab": "AUDIOBOOK", "editionId": "audio-a"},
+        params={"detailTab": "AUDIOBOOK", "volumeId": "audio-a-volume"},
     ).json()["data"]["activeMedia"]
-    assert selected_a["selectedEditionId"] == "audio-a"
+    assert selected_a["mediaVersionId"] == "switch-audio"
+    assert selected_a["selectedVolumeId"] == "audio-a-volume"
     assert selected_a["progress"] == 0
-    assert selected_a["status"] == "FINISHED"
-    assert selected_a["progressStatus"] == "UNREAD"
-    assert selected_a["positionLabel"] == "未开始"
-    assert selected_a["primaryAction"]["label"] == "开始听"
-    assert (
-        selected_a["primaryAction"]["href"]
-        == "/works/switch-work?detailTab=AUDIOBOOK&editionId=audio-a"
-    )
+    assert selected_a["status"] == "UNREAD"
+    assert selected_a["primaryAction"]["href"] == "/listen/audio-a-volume"
 
     selected_b = client.get(
         "/api/works/switch-work",
-        params={"detailTab": "AUDIOBOOK", "editionId": "audio-b"},
+        params={"detailTab": "AUDIOBOOK", "volumeId": "audio-b-volume"},
     ).json()["data"]["activeMedia"]
-    assert selected_b["selectedEditionId"] == "audio-b"
+    assert selected_b["selectedVolumeId"] == "audio-b-volume"
     assert selected_b["progress"] == 80
-    assert selected_b["status"] == "FINISHED"
     assert selected_b["progressStatus"] == "READING"
-    assert selected_b["positionLabel"] == "章节 B · 0:50"
-    assert selected_b["primaryAction"]["label"] == "继续听"
-    assert (
-        selected_b["primaryAction"]["href"]
-        == "/works/switch-work?detailTab=AUDIOBOOK&editionId=audio-b"
+    assert selected_b["primaryAction"]["href"] == "/listen/audio-b-volume"
+
+    db_session.add(
+        LibraryReadingProgress(
+            id="progress-a",
+            user_id=user.id,
+            volume_id=volumes[0].id,
+            reader_type="audio",
+            position="100000",
+            percent=100,
+            extra='{"positionMs":100000}',
+            schema_version=3,
+            location_type="audio",
+            location_json=json.dumps({"type": "audio", "positionMs": 100_000}),
+        )
     )
+    db_session.query(LibraryReadingProgress).filter(
+        LibraryReadingProgress.id == "progress-b"
+    ).update({"percent": 100})
+    db_session.commit()
+    completed = client.get("/api/works/switch-work").json()["data"]["book"]
+    assert completed["completed"] is True
+    assert completed["mediaVersions"][0]["completed"] is True
+    assert completed["continueVolumeId"] == "audio-b-volume"
 
 
 def test_multi_audio_upload_saves_raw_tracks_without_creating_bundle_task(
@@ -1583,9 +1506,9 @@ def test_nested_author_directory_is_not_used_as_audiobook_author(
         db_session.execute(
             text(
                 "SELECT `discNumber`, `trackNumber`, `sortOrder` FROM `LibraryFile` "
-                "WHERE `editionId` = :edition_id ORDER BY `sortOrder`"
+                "WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
             ),
-            {"edition_id": result.edition_id},
+            {"volume_id": result.volume_id},
         )
         .mappings()
         .all()
@@ -1595,8 +1518,8 @@ def test_nested_author_directory_is_not_used_as_audiobook_author(
         for row in imported_tracks
     ] == [(1, 1, 0), (1, 2, 1), (2, 1, 2)]
     cover_path = db_session.execute(
-        text("SELECT `coverPath` FROM `LibraryEdition` WHERE `id` = :id"),
-        {"id": result.edition_id},
+        text("SELECT `coverPath` FROM `LibraryVolume` WHERE `id` = :id"),
+        {"id": result.volume_id},
     ).scalar_one()
     assert Path(cover_path).suffix == ".png"
     assert Path(cover_path).read_bytes() == cover.getvalue()
@@ -1665,34 +1588,37 @@ def test_multivolume_directory_uses_embedded_identity_and_filters_reader_bootstr
     volumes = (
         db_session.execute(
             text(
-                "SELECT `id`, `title`, `volumeIndex`, `sortOrder`, `chapterCount` "
-                "FROM `LibraryVolume` WHERE `editionId` = :edition_id ORDER BY `sortOrder`"
+                "SELECT `id`, `title`, `volumeIndex`, `sortOrder` "
+                "FROM `LibraryVolume` WHERE `mediaVersionId` = :media_version_id ORDER BY `sortOrder`"
             ),
-            {"edition_id": result.edition_id},
+            {"media_version_id": result.media_version_id},
         )
         .mappings()
         .all()
     )
     assert [
-        (row["title"], row["volumeIndex"], row["sortOrder"], row["chapterCount"])
-        for row in volumes
+        (row["title"], row["volumeIndex"], row["sortOrder"]) for row in volumes
     ] == [
-        ("Vol.1", 1, 0, 1),
-        ("Ghost Blows Out the Light Desert", None, 1, 1),
+        ("Vol.1", 1, 0),
+        ("Ghost Blows Out the Light Desert", None, 1),
     ]
 
-    first_bootstrap = client.get(
-        f"/api/reader/v2/editions/{result.edition_id}/bootstrap?volume={volumes[0]['id']}"
-    )
+    first_bootstrap = client.get(f"/api/reader/v3/volumes/{volumes[0]['id']}/bootstrap")
     second_bootstrap = client.get(
-        f"/api/reader/v2/editions/{result.edition_id}/bootstrap?volume={volumes[1]['id']}"
+        f"/api/reader/v3/volumes/{volumes[1]['id']}/bootstrap"
     )
     assert first_bootstrap.status_code == 200
     assert second_bootstrap.status_code == 200
-    assert [track["title"] for track in first_bootstrap.json()["data"]["tracks"]] == [
+    assert [
+        track["trackNumber"] for track in first_bootstrap.json()["data"]["files"]
+    ] == [1]
+    assert [
+        track["trackNumber"] for track in second_bootstrap.json()["data"]["files"]
+    ] == [2]
+    assert [unit["title"] for unit in first_bootstrap.json()["data"]["units"]] == [
         "Chapter 1"
     ]
-    assert [track["title"] for track in second_bootstrap.json()["data"]["tracks"]] == [
+    assert [unit["title"] for unit in second_bootstrap.json()["data"]["units"]] == [
         "Chapter 2"
     ]
 
@@ -1702,16 +1628,14 @@ def test_multivolume_directory_uses_embedded_identity_and_filters_reader_bootstr
         db_session.execute(
             text(
                 "INSERT INTO `LibraryReadingProgress` "
-                "(`id`, `userId`, `workId`, `editionId`, `volumeId`, `readerType`, `position`, `percent`, "
+                "(`id`, `userId`, `volumeId`, `readerType`, `position`, `percent`, "
                 "`extra`, `schemaVersion`, `locationType`, `locationJson`, `updatedAt`) "
-                "VALUES (:id, :user_id, :work_id, :edition_id, :volume_id, 'audio', '0', :percent, "
-                "'{}', 2, 'audio', '{}', :updated_at)"
+                "VALUES (:id, :user_id, :volume_id, 'audio', '0', :percent, "
+                "'{}', 3, 'audio', '{}', :updated_at)"
             ),
             {
                 "id": f"multi-volume-progress-{index}",
                 "user_id": user.id,
-                "work_id": result.work_id,
-                "edition_id": result.edition_id,
                 "volume_id": volume["id"],
                 "percent": percent,
                 "updated_at": f"2026-07-24T00:00:0{index}+00:00",
@@ -1720,13 +1644,20 @@ def test_multivolume_directory_uses_embedded_identity_and_filters_reader_bootstr
     db_session.commit()
     detail = client.get(
         f"/api/works/{result.work_id}",
-        params={"detailTab": "AUDIOBOOK", "editionId": result.edition_id},
+        params={"detailTab": "AUDIOBOOK", "volumeId": volumes[0]["id"]},
     ).json()["data"]
-    selected_edition = next(
-        item for item in detail["book"]["editions"] if item["id"] == result.edition_id
+    selected_media_version = next(
+        item
+        for item in detail["book"]["mediaVersions"]
+        if item["id"] == result.media_version_id
     )
-    assert selected_edition["progress"] == 50
-    assert detail["activeMedia"]["progress"] == 50
+    assert selected_media_version["completed"] is False
+    assert [volume["progress"] for volume in selected_media_version["volumes"]] == [
+        100,
+        0,
+    ]
+    assert detail["book"]["continueVolumeId"] == volumes[1]["id"]
+    assert detail["activeMedia"]["progress"] == 100
 
 
 def test_audio_directory_structure_rejects_mixed_tracks_and_keeps_unmatched_children_independent(
@@ -1798,7 +1729,7 @@ def test_audio_bundle_stops_buffering_at_track_limit_plus_one(
     assert yielded == 10_001
 
 
-def test_emby_flat_layout_appends_strictly_named_chapters_to_one_edition(
+def test_emby_flat_layout_appends_strictly_named_chapters_to_one_volume(
     client, db_session, test_settings, monkeypatch
 ) -> None:
     _initialize_schema(db_session)
@@ -1812,10 +1743,21 @@ def test_emby_flat_layout_appends_strictly_named_chapters_to_one_edition(
     ]
     for index, path in enumerate(paths, start=1):
         path.write_bytes((f"flat-track-{index}-" * index).encode())
+    ordinary = root / "01 - Ordinary Standalone.m4b"
+    missing_prefix = root / "Flat Book - Chapter 1.mp3"
+    sibling_epub = root / "Sibling Book.epub"
+    ordinary.write_bytes(b"ordinary")
+    missing_prefix.write_bytes(b"missing-prefix")
+    sibling_epub.write_bytes(b"sibling")
     monkeypatch.setattr(
         SessionImportOrchestrationServices,
         "parse_audio_metadata",
-        lambda _services, path: _emby_audio_metadata(path),
+        lambda _services, path: replace(
+            _emby_audio_metadata(path),
+            album="Flat Book",
+            author="Flat Author",
+            track_number=1,
+        ),
     )
 
     results = [
@@ -1830,7 +1772,7 @@ def test_emby_flat_layout_appends_strictly_named_chapters_to_one_edition(
     ]
 
     assert {result.work_id for result in results} == {results[0].work_id}
-    assert {result.edition_id for result in results} == {results[0].edition_id}
+    assert {result.volume_id for result in results} == {results[0].volume_id}
     work = (
         db_session.execute(
             text("SELECT `title`, `author` FROM `LibraryWork` WHERE `id` = :id"),
@@ -1840,27 +1782,29 @@ def test_emby_flat_layout_appends_strictly_named_chapters_to_one_edition(
         .one()
     )
     assert dict(work) == {"title": "Flat Book", "author": "未知作者"}
-    editions = (
+    volumes = (
         db_session.execute(
             text(
-                "SELECT `id`, `trackCount`, `chapterCount` FROM `LibraryEdition` "
-                "WHERE `workId` = :work_id AND `hidden` = 0"
+                "SELECT volume.`id`, volume.`trackCount`, volume.`chapterCount` "
+                "FROM `LibraryVolume` volume JOIN `LibraryMediaVersion` media "
+                "ON media.`id` = volume.`mediaVersionId` "
+                "WHERE media.`workId` = :work_id AND volume.`hidden` = 0"
             ),
             {"work_id": results[0].work_id},
         )
         .mappings()
         .all()
     )
-    assert [dict(row) for row in editions] == [
-        {"id": results[0].edition_id, "trackCount": 3, "chapterCount": 3}
+    assert [dict(row) for row in volumes] == [
+        {"id": results[0].volume_id, "trackCount": 3, "chapterCount": 3}
     ]
     tracks = (
         db_session.execute(
             text(
                 "SELECT `trackNumber`, `sortOrder` FROM `LibraryFile` "
-                "WHERE `editionId` = :edition_id ORDER BY `sortOrder`"
+                "WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
             ),
-            {"edition_id": results[0].edition_id},
+            {"volume_id": results[0].volume_id},
         )
         .mappings()
         .all()
@@ -1870,18 +1814,14 @@ def test_emby_flat_layout_appends_strictly_named_chapters_to_one_edition(
         (2, 1),
         (10, 2),
     ]
-    bootstrap = client.get(f"/api/reader/v2/editions/{results[0].edition_id}/bootstrap")
+    bootstrap = client.get(f"/api/reader/v3/volumes/{results[0].volume_id}/bootstrap")
     assert bootstrap.status_code == 200
-    assert [track["trackNumber"] for track in bootstrap.json()["data"]["tracks"]] == [
+    assert [track["trackNumber"] for track in bootstrap.json()["data"]["files"]] == [
         1,
         2,
         10,
     ]
 
-    ordinary = root / "01 - Ordinary Standalone.m4b"
-    missing_prefix = root / "Flat Book - Chapter 1.mp3"
-    ordinary.write_bytes(b"ordinary")
-    missing_prefix.write_bytes(b"missing-prefix")
     assert importer_module._flat_audio_filename_title(ordinary) is None
     assert importer_module._flat_audio_filename_title(missing_prefix) is None
 
@@ -1892,6 +1832,45 @@ class _RecordingQueue:
 
     def enqueue(self, path: Path, _folder: MonitorFolderConfig) -> None:
         self.paths.append(path.resolve())
+
+
+def test_mixed_monitor_root_does_not_swallow_standalone_audio_files(tmp_path) -> None:
+    root = tmp_path / "monitor"
+    root.mkdir()
+    flat_first = root / "01- Wiki Flat Book - Chapter 01.mp3"
+    flat_second = root / "02- Wiki Flat Book - Chapter 02.mp3"
+    standalone = root / "[Standalone Audiobook][Author].m4b"
+    sibling_epub = root / "Sibling Book.epub"
+    for path in (flat_first, flat_second, standalone, sibling_epub):
+        path.write_bytes(b"fixture")
+    folder = MonitorFolderConfig(
+        id="watch",
+        root_path=str(root),
+        min_file_size_bytes=0,
+    )
+
+    queue = _RecordingQueue()
+    summary = scan_directory_for_imports(root, folder, queue)
+
+    assert summary.candidates_found == 4
+    assert set(queue.paths) == {
+        flat_first.resolve(),
+        flat_second.resolve(),
+        standalone.resolve(),
+        sibling_epub.resolve(),
+    }
+
+    structure = audio_metadata_module.inspect_audio_bundle(root)
+    assert structure is not None
+    services = SimpleNamespace(inspect_audio_bundle=lambda _path: structure)
+    assert managed_book_module._resolve_audio_import_source(services, flat_first) == (
+        flat_first,
+        None,
+    )
+    assert managed_book_module._resolve_audio_import_source(services, standalone) == (
+        standalone,
+        None,
+    )
 
 
 def test_watcher_live_and_rescan_only_bundle_proven_book_directories(
@@ -2138,25 +2117,28 @@ def test_directory_first_episode_bundle_imports_as_one_ordered_audiobook(
     )
     assert work["title"] == book_dir.name
     assert work["author"] == "未知作者"
-    editions = (
+    volumes = (
         db_session.execute(
             text(
-                "SELECT `id`, `trackCount`, `chapterCount` FROM `LibraryEdition` WHERE `workId` = :work_id AND `hidden` = 0"
+                "SELECT volume.`id`, volume.`trackCount`, volume.`chapterCount` "
+                "FROM `LibraryVolume` volume JOIN `LibraryMediaVersion` media "
+                "ON media.`id` = volume.`mediaVersionId` "
+                "WHERE media.`workId` = :work_id AND volume.`hidden` = 0"
             ),
             {"work_id": result.work_id},
         )
         .mappings()
         .all()
     )
-    assert [dict(row) for row in editions] == [
-        {"id": result.edition_id, "trackCount": 3, "chapterCount": 3}
+    assert [dict(row) for row in volumes] == [
+        {"id": result.volume_id, "trackCount": 3, "chapterCount": 3}
     ]
     tracks = (
         db_session.execute(
             text(
-                "SELECT `trackNumber`, `sortOrder`, `path` FROM `LibraryFile` WHERE `editionId` = :edition_id ORDER BY `sortOrder`"
+                "SELECT `trackNumber`, `sortOrder`, `path` FROM `LibraryFile` WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
             ),
-            {"edition_id": result.edition_id},
+            {"volume_id": result.volume_id},
         )
         .mappings()
         .all()
@@ -2169,9 +2151,9 @@ def test_directory_first_episode_bundle_imports_as_one_ordered_audiobook(
     units = (
         db_session.execute(
             text(
-                "SELECT `title`, `sortOrder` FROM `LibraryReadingUnit` WHERE `editionId` = :edition_id ORDER BY `sortOrder`"
+                "SELECT `title`, `sortOrder` FROM `LibraryReadingUnit` WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
             ),
-            {"edition_id": result.edition_id},
+            {"volume_id": result.volume_id},
         )
         .mappings()
         .all()
@@ -2190,13 +2172,13 @@ def test_directory_first_episode_bundle_imports_as_one_ordered_audiobook(
             source_file_path=book_dir, origin="WATCH", original_name=book_dir.name
         ),
     )
-    assert updated.edition_id == result.edition_id
+    assert updated.volume_id == result.volume_id
     updated_tracks = (
         db_session.execute(
             text(
-                "SELECT `trackNumber`, `sortOrder` FROM `LibraryFile` WHERE `editionId` = :edition_id ORDER BY `sortOrder`"
+                "SELECT `trackNumber`, `sortOrder` FROM `LibraryFile` WHERE `volumeId` = :volume_id ORDER BY `sortOrder`"
             ),
-            {"edition_id": result.edition_id},
+            {"volume_id": result.volume_id},
         )
         .mappings()
         .all()
@@ -2209,7 +2191,7 @@ def test_directory_first_episode_bundle_imports_as_one_ordered_audiobook(
     ]
 
 
-def test_rescan_reconciles_tracks_split_across_versions_and_preserves_progress(
+def test_rescan_reconciles_tracks_split_across_volumes_and_preserves_progress(
     client, db_session, test_settings, monkeypatch
 ) -> None:
     _initialize_schema(db_session)
@@ -2258,8 +2240,8 @@ def test_rescan_reconciles_tracks_split_across_versions_and_preserves_progress(
     for index, result in enumerate(legacy_results, start=1):
         file_row = (
             db_session.execute(
-                text("SELECT `id` FROM `LibraryFile` WHERE `editionId` = :edition_id"),
-                {"edition_id": result.edition_id},
+                text("SELECT `id` FROM `LibraryFile` WHERE `volumeId` = :volume_id"),
+                {"volume_id": result.volume_id},
             )
             .mappings()
             .one()
@@ -2310,12 +2292,12 @@ def test_rescan_reconciles_tracks_split_across_versions_and_preserves_progress(
         row["id"]
         for row in db_session.execute(
             text(
-                "SELECT `id` FROM `LibraryReadingUnit` WHERE `editionId` IN (:first, :second, :third)"
+                "SELECT `id` FROM `LibraryReadingUnit` WHERE `volumeId` IN (:first, :second, :third)"
             ),
             {
-                "first": legacy_results[0].edition_id,
-                "second": legacy_results[1].edition_id,
-                "third": legacy_results[2].edition_id,
+                "first": legacy_results[0].volume_id,
+                "second": legacy_results[1].volume_id,
+                "third": legacy_results[2].volume_id,
             },
         ).mappings()
     }
@@ -2324,16 +2306,15 @@ def test_rescan_reconciles_tracks_split_across_versions_and_preserves_progress(
             text(
                 "SELECT file.`id` AS `fileId`, unit.`id` AS `unitId` "
                 "FROM `LibraryFile` file JOIN `LibraryReadingUnit` unit ON unit.`fileId` = file.`id` "
-                "WHERE file.`editionId` = :edition_id LIMIT 1"
+                "WHERE file.`volumeId` = :volume_id LIMIT 1"
             ),
-            {"edition_id": legacy_results[1].edition_id},
+            {"volume_id": legacy_results[1].volume_id},
         )
         .mappings()
         .one()
     )
     legacy_location = {
         "type": "audio",
-        "volumeId": legacy_results[1].volume_id,
         "fileId": legacy_resume["fileId"],
         "chapterId": legacy_resume["unitId"],
         "positionMs": 12_345,
@@ -2341,15 +2322,13 @@ def test_rescan_reconciles_tracks_split_across_versions_and_preserves_progress(
     db_session.execute(
         text(
             "INSERT INTO `LibraryReadingProgress` "
-            "(`id`, `userId`, `workId`, `editionId`, `volumeId`, `readerType`, `position`, `percent`, `extra`, "
+            "(`id`, `userId`, `volumeId`, `readerType`, `position`, `percent`, `extra`, "
             "`contentFingerprint`, `locationType`, `locationJson`, `createdAt`, `updatedAt`) "
-            "VALUES ('legacy-progress', :user_id, :work_id, :edition_id, :volume_id, 'audio', '12345', 42, :extra, "
+            "VALUES ('legacy-progress', :user_id, :volume_id, 'audio', '12345', 42, :extra, "
             "'sha256:legacy-single-track', 'audio', :location, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
         ),
         {
             "user_id": user.id,
-            "work_id": legacy_results[1].work_id,
-            "edition_id": legacy_results[1].edition_id,
             "volume_id": legacy_results[1].volume_id,
             "extra": json.dumps(
                 {key: value for key, value in legacy_location.items() if key != "type"}
@@ -2379,22 +2358,25 @@ def test_rescan_reconciles_tracks_split_across_versions_and_preserves_progress(
     assert [dict(row) for row in visible_works] == [
         {"id": reconciled.work_id, "title": book_dir.name}
     ]
-    visible_editions = (
+    visible_volumes = (
         db_session.execute(
             text(
-                "SELECT `id`, `trackCount`, `chapterCount` FROM `LibraryEdition` WHERE `hidden` = 0 AND `mediaKind` = 'AUDIOBOOK'"
+                "SELECT volume.`id`, volume.`trackCount`, volume.`chapterCount` "
+                "FROM `LibraryVolume` volume JOIN `LibraryMediaVersion` media "
+                "ON media.`id` = volume.`mediaVersionId` "
+                "WHERE volume.`hidden` = 0 AND media.`mediaKind` = 'AUDIOBOOK'"
             ),
         )
         .mappings()
         .all()
     )
-    assert [dict(row) for row in visible_editions] == [
-        {"id": reconciled.edition_id, "trackCount": 3, "chapterCount": 3}
+    assert [dict(row) for row in visible_volumes] == [
+        {"id": reconciled.volume_id, "trackCount": 3, "chapterCount": 3}
     ]
     tracks = (
         db_session.execute(
             text(
-                "SELECT `id`, `editionId`, `trackNumber`, `sortOrder`, "
+                "SELECT `id`, `volumeId`, `trackNumber`, `sortOrder`, "
                 "`fingerprint`, `fullHash`, `hashStatus` FROM `LibraryFile` "
                 "WHERE UPPER(`kind`) = 'AUDIO' ORDER BY `sortOrder`"
             ),
@@ -2402,7 +2384,7 @@ def test_rescan_reconciles_tracks_split_across_versions_and_preserves_progress(
         .mappings()
         .all()
     )
-    assert {(row["editionId"]) for row in tracks} == {reconciled.edition_id}
+    assert {(row["volumeId"]) for row in tracks} == {reconciled.volume_id}
     assert [(row["trackNumber"], row["sortOrder"]) for row in tracks] == [
         (1, 0),
         (2, 1),
@@ -2422,23 +2404,20 @@ def test_rescan_reconciles_tracks_split_across_versions_and_preserves_progress(
     assert {
         row["id"]
         for row in db_session.execute(
-            text(
-                "SELECT `id` FROM `LibraryReadingUnit` WHERE `editionId` = :edition_id"
-            ),
-            {"edition_id": reconciled.edition_id},
+            text("SELECT `id` FROM `LibraryReadingUnit` WHERE `volumeId` = :volume_id"),
+            {"volume_id": reconciled.volume_id},
         ).mappings()
     } == legacy_unit_ids
     progress = (
         db_session.execute(
             text(
-                "SELECT `workId`, `editionId`, `volumeId`, `percent`, `position`, `contentFingerprint`, `locationJson` FROM `LibraryReadingProgress` WHERE `id` = 'legacy-progress'"
+                "SELECT `volumeId`, `percent`, `position`, `contentFingerprint`, `locationJson` "
+                "FROM `LibraryReadingProgress` WHERE `id` = 'legacy-progress'"
             ),
         )
         .mappings()
         .one()
     )
-    assert progress["workId"] == reconciled.work_id
-    assert progress["editionId"] == reconciled.edition_id
     assert progress["volumeId"] == reconciled.volume_id
     assert progress["position"] == "12345"
     assert progress["percent"] == pytest.approx(
@@ -2446,15 +2425,18 @@ def test_rescan_reconciles_tracks_split_across_versions_and_preserves_progress(
     )
     assert progress["contentFingerprint"].startswith("sha256:")
     assert progress["contentFingerprint"] != "sha256:legacy-single-track"
-    assert json.loads(progress["locationJson"])["volumeId"] == reconciled.volume_id
     detail = client.get(f"/api/works/{reconciled.work_id}")
     assert detail.status_code == 200
-    assert detail.json()["data"]["book"]["versionCount"] == 1
-    bootstrap = client.get(f"/api/reader/v2/editions/{reconciled.edition_id}/bootstrap")
+    book = detail.json()["data"]["book"]
+    assert len(book["mediaVersions"]) == 1
+    assert [volume["id"] for volume in book["mediaVersions"][0]["volumes"]] == [
+        reconciled.volume_id
+    ]
+    bootstrap = client.get(f"/api/reader/v3/volumes/{reconciled.volume_id}/bootstrap")
     assert bootstrap.status_code == 200
     bootstrap_data = bootstrap.json()["data"]
-    assert [track["trackNumber"] for track in bootstrap_data["tracks"]] == [1, 2, 3]
+    assert [track["trackNumber"] for track in bootstrap_data["files"]] == [1, 2, 3]
     assert bootstrap_data["resumeFingerprintMismatch"] is False
     assert bootstrap_data["resumeLocation"] == legacy_location | {
         "volumeId": reconciled.volume_id
-    }
+    }, progress["locationJson"]

@@ -52,7 +52,6 @@ async function main() {
   const env = {
     ...process.env,
     SESSION_SECRET: 'runtime-smoke-session-secret-32chars',
-    MONITOR_ROOT: monitorRoot,
     STORAGE_ROOT: storageRoot,
     DOWNLOAD_INBOX_PATH: inbox,
     SCAN_WORKER_READY_FILE: readyFile,

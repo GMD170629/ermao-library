@@ -9,10 +9,15 @@ const input = path.resolve(inputArg);
 const output = path.resolve(outputArg);
 const document = JSON.parse(await readFile(input, 'utf8'));
 const schemas = document.components?.schemas ?? {};
-const included = Object.keys(schemas).filter((name) => /^(Appearance|Audio|Epub|Comic|Pdf|Reader)/.test(name)).sort();
+const included = Object.keys(schemas).filter((name) => /^(Appearance|Audio|Epub|Foliate|Reflowable|Comic|Pdf|Reader)/.test(name)).sort();
+
+function typeName(name) {
+  const normalized = String(name ?? '').replace(/[^A-Za-z0-9_$]/g, '_');
+  return /^[A-Za-z_$]/.test(normalized) ? normalized : `_${normalized}`;
+}
 
 function refName(ref) {
-  return ref.split('/').at(-1);
+  return typeName(ref.split('/').at(-1));
 }
 
 function propertyName(name) {
@@ -62,10 +67,10 @@ if (missingRefs.size) throw new Error(`Reader schemas reference excluded models:
 
 const generated = [
   '/* eslint-disable */',
-  '// AUTO-GENERATED from apps/api-python/app/schemas/reader_v2.py via FastAPI OpenAPI.',
+  '// AUTO-GENERATED from the Reader v3 FastAPI OpenAPI contract.',
   '// Run `pnpm --filter @shuku/web generate:reader-api`; do not edit by hand.',
   '',
-  ...included.flatMap((name) => [`export type ${name} = ${typeExpression(schemas[name])};`, ''])
+  ...included.flatMap((name) => [`export type ${typeName(name)} = ${typeExpression(schemas[name])};`, ''])
 ].join('\n');
 
 await writeFile(output, generated, 'utf8');

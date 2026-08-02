@@ -3,9 +3,10 @@ from __future__ import annotations
 import hashlib
 import logging
 import threading
-from datetime import datetime, timedelta, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from time import time_ns
-from typing import Any, Callable
+from typing import Any
 
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
@@ -30,10 +31,16 @@ from app.modules.organize.infrastructure import jobs as organize_jobs
 from app.modules.organize.infrastructure import runs as organize_runs
 from app.services.metadata_provider_registry import enabled_metadata_provider_ids
 
-
 LOGGER = logging.getLogger(__name__)
 DATABASE_BUSY_RETRY_DELAYS_SECONDS = (0.25, 1.0)
-ACTIVE_JOB_STATUSES = ("LOOKUP_PENDING", "PENDING", "QUEUED", "RUNNING", "RETRY_WAIT", "REVIEWING")
+ACTIVE_JOB_STATUSES = (
+    "LOOKUP_PENDING",
+    "PENDING",
+    "QUEUED",
+    "RUNNING",
+    "RETRY_WAIT",
+    "REVIEWING",
+)
 UNRESOLVED_JOB_STATUSES = organize_eligibility.UNRESOLVED_JOB_STATUSES
 TERMINAL_JOB_STATUSES = ("APPLIED", "COMPLETED", "DISMISSED", "CANCELLED", "FAILED")
 
@@ -65,7 +72,7 @@ __all__ = [
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _id(prefix: str) -> str:
@@ -123,10 +130,14 @@ def organize_candidate_summary(db: Session) -> dict[str, Any]:
     }
 
 
-def _run_dedupe_key(trigger: str, work_ids: list[str], supplied: str | None = None) -> str:
+def _run_dedupe_key(
+    trigger: str, work_ids: list[str], supplied: str | None = None
+) -> str:
     if supplied:
         return supplied
-    digest = hashlib.sha256("\n".join(sorted(work_ids)).encode("utf-8")).hexdigest()[:20]
+    digest = hashlib.sha256("\n".join(sorted(work_ids)).encode("utf-8")).hexdigest()[
+        :20
+    ]
     return f"{trigger.lower()}:{digest}:{time_ns()}"
 
 
@@ -138,7 +149,10 @@ def create_organize_run(
     dedupe_key: str | None = None,
     limit: int = 500,
 ) -> dict[str, Any]:
-    if not all(_has_table(db, table) for table in ("OrganizeRun", "OrganizeJob", "MetadataLookupTask")):
+    if not all(
+        _has_table(db, table)
+        for table in ("OrganizeRun", "OrganizeJob", "MetadataLookupTask")
+    ):
         raise ValueError("整理队列数据表尚未初始化")
     normalized_trigger = str(trigger or "MANUAL").upper()
     if normalized_trigger not in {"MANUAL", "SCHEDULE", "NEW"}:
@@ -154,7 +168,9 @@ def create_organize_run(
         force_selected=bool(selected) and normalized_trigger == "MANUAL",
     )
     provider_plans = {
-        str(work["id"]): enabled_metadata_provider_ids(db, str(work.get("workType") or ""))
+        str(work["id"]): enabled_metadata_provider_ids(
+            db, str(work.get("workType") or "")
+        )
         for work in works
     }
     ids = [str(work["id"]) for work in works]
@@ -184,7 +200,7 @@ def create_organize_run(
     )
     for work in works:
         work_id = str(work["id"])
-        edition_id = organize_eligibility.primary_edition_id_for_work(db, work)
+        volume_id = organize_eligibility.first_volume_id_for_work(db, work)
         provider_order = provider_plans[work_id]
         job_id = _id("organize_job")
         task_id = _id("metadata_lookup")
@@ -194,7 +210,7 @@ def create_organize_run(
             job_id=job_id,
             run_id=run_id,
             work_id=work_id,
-            edition_id=edition_id,
+            volume_id=volume_id,
             trigger=normalized_trigger,
             reasons=reasons,
             summary="等待元数据插件识别",
@@ -206,12 +222,14 @@ def create_organize_run(
             db,
             task_id=task_id,
             work_id=work_id,
-            edition_id=edition_id,
+            volume_id=volume_id,
             job_id=job_id,
             provider_order=provider_order,
             now=now,
         )
-        organize_jobs.mark_work_organize_status(db, work_id=work_id, status="LOOKUP_PENDING", now=now)
+        organize_jobs.mark_work_organize_status(
+            db, work_id=work_id, status="LOOKUP_PENDING", now=now
+        )
     queued_count = organize_jobs.finalize_run_enqueue(db, run_id=run_id, now=now)
     db.commit()
     return get_organize_run(db, run_id) or {
@@ -222,7 +240,9 @@ def create_organize_run(
 
 
 def cancel_organize_job(db: Session, job_id: str) -> dict[str, Any]:
-    job = organize_runs.get_job_row(db, job_id) if _has_table(db, "OrganizeJob") else None
+    job = (
+        organize_runs.get_job_row(db, job_id) if _has_table(db, "OrganizeJob") else None
+    )
     if not job:
         raise ValueError("整理任务不存在")
     if str(job.get("status")) in TERMINAL_JOB_STATUSES:
@@ -230,14 +250,18 @@ def cancel_organize_job(db: Session, job_id: str) -> dict[str, Any]:
     now = _now()
     organize_jobs.cancel_lookup_tasks_for_job(db, job_id=job_id, now=now)
     organize_jobs.cancel_job(db, job_id=job_id, now=now)
-    organize_jobs.mark_work_organize_status(db, work_id=str(job["workId"]), status="UNASSESSED", now=now)
+    organize_jobs.mark_work_organize_status(
+        db, work_id=str(job["workId"]), status="UNASSESSED", now=now
+    )
     sync_organize_runs(db)
     db.commit()
     return organize_runs.get_job_row(db, job_id) or {}
 
 
 def recognize_organize_job(db: Session, job_id: str) -> dict[str, Any]:
-    job = organize_runs.get_job_row(db, job_id) if _has_table(db, "OrganizeJob") else None
+    job = (
+        organize_runs.get_job_row(db, job_id) if _has_table(db, "OrganizeJob") else None
+    )
     if not job:
         raise ValueError("整理记录不存在")
     work = organize_jobs.get_work_row(db, str(job["workId"]))
@@ -265,7 +289,7 @@ def recognize_organize_job(db: Session, job_id: str) -> dict[str, Any]:
         db,
         task_id=_id("metadata_lookup"),
         work_id=str(job["workId"]),
-        edition_id=job.get("editionId"),
+        volume_id=job.get("volumeId"),
         job_id=job_id,
         provider_order=providers,
         now=now,
@@ -290,7 +314,9 @@ def retry_organize_job(db: Session, job_id: str) -> dict[str, Any]:
 
 
 def delete_organize_job(db: Session, job_id: str) -> dict[str, Any]:
-    job = organize_runs.get_job_row(db, job_id) if _has_table(db, "OrganizeJob") else None
+    job = (
+        organize_runs.get_job_row(db, job_id) if _has_table(db, "OrganizeJob") else None
+    )
     if not job:
         raise ValueError("整理记录不存在")
 
@@ -304,7 +330,9 @@ def delete_organize_job(db: Session, job_id: str) -> dict[str, Any]:
         remaining_status = organize_jobs.latest_job_status_for_work(db, work_id)
         organized = organize_jobs.work_is_organized(db, work_id)
         organize_status = remaining_status or ("APPLIED" if organized else "UNASSESSED")
-        organize_jobs.mark_work_organize_status(db, work_id=work_id, status=organize_status, now=now)
+        organize_jobs.mark_work_organize_status(
+            db, work_id=work_id, status=organize_status, now=now
+        )
     if run_id and _has_table(db, "OrganizeRun"):
         organize_jobs.refresh_run_queue_count(db, run_id=run_id, now=now)
     sync_organize_runs(db)
@@ -332,11 +360,11 @@ def process_organize_schedule_tick(db: Session) -> int:
     next_due = False
     if next_run:
         try:
-            next_due = datetime.fromisoformat(str(next_run).replace("Z", "+00:00")) <= now
+            next_due = datetime.fromisoformat(str(next_run)) <= now
         except ValueError:
             next_due = True
     if policy["enabled"] and policy["scheduleMode"] == "INTERVAL" and next_due:
-        due_key = f"schedule:{str(next_run)}"
+        due_key = f"schedule:{next_run!s}"
         result = create_organize_run(db, trigger="SCHEDULE", dedupe_key=due_key)
         queued += int(result.get("queuedCount") or 0)
         mark_policy_scheduled(
@@ -351,11 +379,15 @@ def process_organize_schedule_tick(db: Session) -> int:
 
 
 class OrganizerScheduler:
-    def __init__(self, db_factory: Callable[[], Session], poll_seconds: float = 5.0) -> None:
+    def __init__(
+        self, db_factory: Callable[[], Session], poll_seconds: float = 5.0
+    ) -> None:
         self._db_factory = db_factory
         self._poll_seconds = poll_seconds
         self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, name="organizer-scheduler", daemon=True)
+        self._thread = threading.Thread(
+            target=self._run, name="organizer-scheduler", daemon=True
+        )
 
     def start(self) -> None:
         self._thread.start()

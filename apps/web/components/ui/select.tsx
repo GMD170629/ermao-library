@@ -25,7 +25,7 @@ type SelectProps<TValue extends string> = {
   triggerClassName?: string;
   menuClassName?: string;
   size?: 'sm' | 'md';
-  tone?: 'light' | 'blue' | 'dark';
+  tone?: 'light' | 'blue' | 'dark' | 'setup';
   align?: 'left' | 'right';
   disabled?: boolean;
   menuWidth?: number;
@@ -34,13 +34,15 @@ type SelectProps<TValue extends string> = {
 const triggerTone = {
   light: 'border-[#ded8d1] bg-white text-[#4f4b47] hover:border-[#f2b7a6] hover:bg-[#fffaf8]',
   blue: 'border-[#f4c7b9] bg-white text-[#4f4b47] hover:border-[#ed9d86] hover:bg-[#fff5f1]',
-  dark: 'border-slate-700 bg-slate-900 text-slate-100 hover:border-slate-500 hover:bg-slate-800'
+  dark: 'border-slate-700 bg-slate-900 text-slate-100 hover:border-slate-500 hover:bg-slate-800',
+  setup: 'border-[#B08B6E]/55 bg-[#E8DCC7] text-[#606C38] hover:border-[#C66B3D] hover:bg-[#F2E8D5]/70'
 };
 
 const menuTone = {
   light: 'border-[#ded8d1] bg-white text-[#4f4b47] shadow-xl shadow-stone-200/60',
   blue: 'border-[#f4c7b9] bg-white text-[#4f4b47] shadow-xl shadow-orange-100/60',
-  dark: 'border-slate-700 bg-slate-900 text-slate-100 shadow-xl shadow-black/30'
+  dark: 'border-slate-700 bg-slate-900 text-slate-100 shadow-xl shadow-black/30',
+  setup: 'border-[#B08B6E]/45 bg-[#E8DCC7] text-[#606C38] shadow-xl shadow-[#606C38]/15'
 };
 
 const optionTone = {
@@ -58,13 +60,19 @@ const optionTone = {
     active: 'bg-slate-800 text-white',
     idle: 'text-slate-300 hover:bg-slate-800',
     selected: 'text-blue-300'
+  },
+  setup: {
+    active: 'bg-[#C66B3D]/15 text-[#9E4D29]',
+    idle: 'text-[#606C38] hover:bg-[#F2E8D5]/80',
+    selected: 'text-[#9E4D29]'
   }
 };
 
 const groupTone = {
   light: 'bg-white/95 text-[#9A928B]',
   blue: 'bg-white/95 text-[#A07D72]',
-  dark: 'bg-slate-900/95 text-slate-500'
+  dark: 'bg-slate-900/95 text-slate-500',
+  setup: 'bg-[#E8DCC7]/95 text-[#606C38]/65'
 };
 
 type MenuPosition = {

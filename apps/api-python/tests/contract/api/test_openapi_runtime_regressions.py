@@ -3,18 +3,18 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
-
 from app.bootstrap.system import record_system_event
 from app.core.auth import hash_password
 from app.models.auth import User
 from app.models.library import (
-    LibraryEdition,
     LibraryFacet,
+    LibraryMediaVersion,
+    LibraryVolume,
     LibraryWork,
 )
 from app.models.organize import OrganizeRun
 from app.services.library_management import sync_work_facets
+from sqlalchemy import select
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
@@ -66,25 +66,25 @@ def _seed_library(db_session: Session) -> tuple[LibraryWork, LibraryWork]:
     )
     db_session.add_all([target_work, source_work])
     db_session.flush()
+    target_media = LibraryMediaVersion(work_id=target_work.id, media_kind="EBOOK")
+    source_media = LibraryMediaVersion(work_id=source_work.id, media_kind="EBOOK")
+    db_session.add_all([target_media, source_media])
+    db_session.flush()
     db_session.add_all(
         [
-            LibraryEdition(
-                work_id=target_work.id,
+            LibraryVolume(
+                media_version_id=target_media.id,
+                title="初版",
                 format="EPUB",
-                media_kind="EBOOK",
-                version_name="初版",
-                version_key="openapi-target-edition",
+                resource_key="openapi-target-volume",
                 import_status="IMPORTED",
-                is_primary=True,
             ),
-            LibraryEdition(
-                work_id=source_work.id,
+            LibraryVolume(
+                media_version_id=source_media.id,
+                title="来源版",
                 format="EPUB",
-                media_kind="EBOOK",
-                version_name="来源版",
-                version_key="openapi-source-edition",
+                resource_key="openapi-source-volume",
                 import_status="IMPORTED",
-                is_primary=True,
             ),
         ]
     )
@@ -221,20 +221,20 @@ def test_library_management_endpoints_return_their_documented_contracts(
     assert target_after_undo is not None
     assert "待删除" in json.loads(target_after_undo.tags)
 
-    edition = db_session.scalar(
-        select(LibraryEdition).where(LibraryEdition.work_id == target_work.id)
+    volume = db_session.scalar(
+        select(LibraryVolume)
+        .join(
+            LibraryMediaVersion,
+            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+        )
+        .where(LibraryMediaVersion.work_id == target_work.id)
     )
-    assert edition is not None
-    edition_response = client.patch(
-        f"/api/works/{target_work.id}/editions/{edition.id}",
+    assert volume is not None
+    retired_edition_response = client.patch(
+        f"/api/works/{target_work.id}/editions/{volume.media_version_id}",
         json={"versionName": "修订版"},
     )
-    assert edition_response.status_code == 200
-    assert edition_response.json()["data"]["edition"]["versionName"] == "修订版"
-    db_session.expire_all()
-    updated_edition = db_session.get(LibraryEdition, edition.id)
-    assert updated_edition is not None
-    assert updated_edition.version_name == "修订版"
+    assert retired_edition_response.status_code == 410
 
     duplicate_response = client.post(
         "/api/library/duplicates/merge",
@@ -249,15 +249,31 @@ def test_library_management_endpoints_return_their_documented_contracts(
     assert duplicate_payload["sourceWorkIds"] == [source_work.id]
     db_session.expire_all()
     merged_source = db_session.get(LibraryWork, source_work.id)
-    assert merged_source is not None
-    assert merged_source.hidden is True
-    moved_edition = db_session.scalar(
-        select(LibraryEdition).where(
-            LibraryEdition.version_key == "openapi-source-edition"
+    assert merged_source is None
+    moved_volume = db_session.scalar(
+        select(LibraryVolume).where(
+            LibraryVolume.resource_key == "openapi-source-volume"
         )
     )
-    assert moved_edition is not None
-    assert moved_edition.work_id == target_work.id
+    assert moved_volume is not None
+    moved_media = db_session.get(LibraryMediaVersion, moved_volume.media_version_id)
+    assert moved_media is not None
+    assert moved_media.work_id == target_work.id
+    target_media = db_session.scalars(
+        select(LibraryMediaVersion).where(
+            LibraryMediaVersion.work_id == target_work.id,
+            LibraryMediaVersion.media_kind == "EBOOK",
+        )
+    ).all()
+    assert len(target_media) == 1
+    target_volume_ids = set(
+        db_session.scalars(
+            select(LibraryVolume.id).where(
+                LibraryVolume.media_version_id == target_media[0].id
+            )
+        )
+    )
+    assert target_volume_ids == {volume.id, moved_volume.id}
 
 
 def test_organize_runs_normalize_legacy_or_invalid_scope(

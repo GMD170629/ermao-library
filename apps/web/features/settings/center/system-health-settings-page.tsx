@@ -38,7 +38,7 @@ const LABELS: Record<string, string> = {
   'health.group.queues': '后台队列',
   'health.group.configuration': '功能配置',
   'health.item.database': '数据库连接',
-  'health.item.monitorRoot': '监控根目录',
+  'health.item.monitorRoot': '监控文件夹状态',
   'health.item.importFolder': '启用的导入目录',
   'health.item.storageRoot': '存储根目录',
   'health.item.databaseDirectory': '数据库目录',

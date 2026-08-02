@@ -9,9 +9,10 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app.models.library import (
-    LibraryEdition,
-    LibraryEditionFacet,
     LibraryFacet,
+    LibraryMediaVersion,
+    LibraryVolume,
+    LibraryVolumeFacet,
     LibraryWork,
     LibraryWorkFacet,
 )
@@ -25,7 +26,9 @@ def get_facet(db: Session, facet_id: str) -> dict[str, Any] | None:
 
 def get_facet_of_kind(db: Session, facet_id: str, kind: str) -> dict[str, Any] | None:
     facet = db.execute(
-        select(LibraryFacet).where(LibraryFacet.id == facet_id, LibraryFacet.kind == kind)
+        select(LibraryFacet).where(
+            LibraryFacet.id == facet_id, LibraryFacet.kind == kind
+        )
     ).scalar_one_or_none()
     return entity_as_legacy_dict(facet) if facet is not None else None
 
@@ -49,18 +52,26 @@ def find_normalized_name_conflict(
 def list_work_facet_links(db: Session, facet_ids: list[str]) -> list[dict[str, Any]]:
     if not facet_ids:
         return []
-    rows = db.execute(
-        select(LibraryWorkFacet).where(LibraryWorkFacet.facet_id.in_(facet_ids))
-    ).scalars().all()
+    rows = (
+        db.execute(
+            select(LibraryWorkFacet).where(LibraryWorkFacet.facet_id.in_(facet_ids))
+        )
+        .scalars()
+        .all()
+    )
     return [entity_as_legacy_dict(row) for row in rows]
 
 
-def list_edition_facet_links(db: Session, facet_ids: list[str]) -> list[dict[str, Any]]:
+def list_volume_facet_links(db: Session, facet_ids: list[str]) -> list[dict[str, Any]]:
     if not facet_ids:
         return []
-    rows = db.execute(
-        select(LibraryEditionFacet).where(LibraryEditionFacet.facet_id.in_(facet_ids))
-    ).scalars().all()
+    rows = (
+        db.execute(
+            select(LibraryVolumeFacet).where(LibraryVolumeFacet.facet_id.in_(facet_ids))
+        )
+        .scalars()
+        .all()
+    )
     return [entity_as_legacy_dict(row) for row in rows]
 
 
@@ -69,30 +80,48 @@ def get_work(db: Session, work_id: str) -> dict[str, Any] | None:
     return entity_as_legacy_dict(work) if work is not None else None
 
 
-def get_edition(db: Session, edition_id: str) -> dict[str, Any] | None:
-    edition = db.get(LibraryEdition, edition_id)
-    return entity_as_legacy_dict(edition) if edition is not None else None
+def get_volume(db: Session, volume_id: str) -> dict[str, Any] | None:
+    row = db.execute(
+        select(LibraryVolume, LibraryMediaVersion)
+        .join(
+            LibraryMediaVersion,
+            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+        )
+        .where(LibraryVolume.id == volume_id)
+    ).first()
+    if row is None:
+        return None
+    volume, media_version = row
+    result = entity_as_legacy_dict(volume)
+    result["workId"] = media_version.work_id
+    return result
 
 
 def list_work_ids_for_facet(db: Session, facet_id: str) -> list[str]:
     return [
         str(work_id)
         for work_id in db.execute(
-            select(LibraryWorkFacet.work_id).where(LibraryWorkFacet.facet_id == facet_id)
+            select(LibraryWorkFacet.work_id).where(
+                LibraryWorkFacet.facet_id == facet_id
+            )
         ).scalars()
     ]
 
 
-def list_edition_ids_for_facet(db: Session, facet_id: str) -> list[str]:
+def list_volume_ids_for_facet(db: Session, facet_id: str) -> list[str]:
     return [
-        str(edition_id)
-        for edition_id in db.execute(
-            select(LibraryEditionFacet.edition_id).where(LibraryEditionFacet.facet_id == facet_id)
+        str(volume_id)
+        for volume_id in db.execute(
+            select(LibraryVolumeFacet.volume_id).where(
+                LibraryVolumeFacet.facet_id == facet_id
+            )
         ).scalars()
     ]
 
 
-def update_work_tags(db: Session, *, work_id: str, tags_json: str, now: datetime) -> None:
+def update_work_tags(
+    db: Session, *, work_id: str, tags_json: str, now: datetime
+) -> None:
     db.execute(
         update(LibraryWork)
         .where(LibraryWork.id == work_id)
@@ -121,7 +150,9 @@ def update_work_author(
     )
 
 
-def update_work_series_name(db: Session, *, work_id: str, series_name: str, now: datetime) -> None:
+def update_work_series_name(
+    db: Session, *, work_id: str, series_name: str, now: datetime
+) -> None:
     db.execute(
         update(LibraryWork)
         .where(LibraryWork.id == work_id)
@@ -137,23 +168,27 @@ def clear_work_series(db: Session, *, work_id: str, now: datetime) -> None:
     )
 
 
-def update_edition_publisher(db: Session, *, edition_id: str, publisher: str, now: datetime) -> None:
+def update_volume_publisher(
+    db: Session, *, volume_id: str, publisher: str, now: datetime
+) -> None:
     db.execute(
-        update(LibraryEdition)
-        .where(LibraryEdition.id == edition_id)
+        update(LibraryVolume)
+        .where(LibraryVolume.id == volume_id)
         .values(publisher=publisher, updated_at=now)
     )
 
 
-def clear_edition_publisher(db: Session, *, edition_id: str, now: datetime) -> None:
+def clear_volume_publisher(db: Session, *, volume_id: str, now: datetime) -> None:
     db.execute(
-        update(LibraryEdition)
-        .where(LibraryEdition.id == edition_id)
+        update(LibraryVolume)
+        .where(LibraryVolume.id == volume_id)
         .values(publisher=None, updated_at=now)
     )
 
 
-def update_facet_aliases(db: Session, *, facet_id: str, aliases_json: str, now: datetime) -> None:
+def update_facet_aliases(
+    db: Session, *, facet_id: str, aliases_json: str, now: datetime
+) -> None:
     db.execute(
         update(LibraryFacet)
         .where(LibraryFacet.id == facet_id)

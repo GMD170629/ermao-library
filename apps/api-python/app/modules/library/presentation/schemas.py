@@ -43,11 +43,23 @@ class ProgressNavigation(HttpContractModel):
     chapter_id: str | None = Field(default=None, alias="chapterId")
     position_ms: int | None = Field(default=None, alias="positionMs")
     volume_id: str | None = Field(default=None, alias="volumeId")
+    progress_estimated: bool = Field(default=False, alias="progressEstimated")
 
 
 class ProgressExtra(HttpContractModel):
     cfi: str | None = None
     progression: float | None = None
+    navigation_key: str | None = Field(default=None, alias="navigationKey")
+    navigation_fingerprint: str | None = Field(
+        default=None,
+        alias="navigationFingerprint",
+    )
+    source_format: (
+        Literal["epub", "mobi", "azw", "azw3", "prc", "fb2", "txt"] | None
+    ) = Field(
+        default=None,
+        alias="sourceFormat",
+    )
     file_id: str | None = Field(default=None, alias="fileId")
     chapter_id: str | None = Field(default=None, alias="chapterId")
     position_ms: int | None = Field(default=None, alias="positionMs")
@@ -71,12 +83,24 @@ class ProgressExtra(HttpContractModel):
         default=None,
         alias="sectionTotalPages",
     )
+    section_total: int | float | None = Field(default=None, alias="sectionTotal")
+    location_current: int | float | None = Field(default=None, alias="locationCurrent")
+    location_next: int | float | None = Field(default=None, alias="locationNext")
+    location_total: int | float | None = Field(default=None, alias="locationTotal")
+    remaining_section_seconds: int | float | None = Field(
+        default=None,
+        alias="remainingSectionSeconds",
+    )
+    remaining_total_seconds: int | float | None = Field(
+        default=None,
+        alias="remainingTotalSeconds",
+    )
+    progress_estimated: bool | None = Field(default=None, alias="progressEstimated")
 
 
 class LibraryFile(HttpContractModel):
     id: str
-    edition_id: str = Field(alias="editionId")
-    volume_id: str | None = Field(default=None, alias="volumeId")
+    volume_id: str = Field(alias="volumeId")
     path: str
     mime_type: str = Field(alias="mimeType")
     kind: str
@@ -93,72 +117,45 @@ class LibraryFile(HttpContractModel):
     url: str | None = None
 
 
+class LibraryFileSummary(HttpContractModel):
+    id: str
+    path: str
+    size_bytes: int = Field(alias="sizeBytes")
+    size: str
+
+
 class LibraryVolume(HttpContractModel):
     id: str
-    edition_id: str = Field(alias="editionId")
+    media_version_id: str = Field(alias="mediaVersionId")
     title: str
     volume_index: float | None = Field(default=None, alias="volumeIndex")
     sort_order: int = Field(alias="sortOrder")
-    page_count: int | None = Field(default=None, alias="pageCount")
-    chapter_count: int | None = Field(default=None, alias="chapterCount")
-    cover_url: str = Field(alias="coverUrl")
-    progress: float = 0
-    last_read_at: datetime | None = Field(default=None, alias="lastReadAt")
-    position: str | None = None
-    current_page: int | None = Field(default=None, alias="currentPage")
-    current_href: str | None = Field(default=None, alias="currentHref")
-    current_section_index: int | None = Field(default=None, alias="currentSectionIndex")
-    current_chapter_title: str | None = Field(default=None, alias="currentChapterTitle")
-    current_chapter_sort_order: int | None = Field(
-        default=None,
-        alias="currentChapterSortOrder",
-    )
-    progress_extra: ProgressExtra = Field(
-        default_factory=ProgressExtra, alias="progressExtra"
-    )
-    duration_ms: int | None = Field(default=None, alias="durationMs")
-
-
-class EditionConversion(HttpContractModel):
-    source_format: str = Field(alias="sourceFormat")
-    target_format: str = Field(alias="targetFormat")
-    converter: str
-    converter_version: str | None = Field(default=None, alias="converterVersion")
-    cached: bool
-
-
-class LibraryEdition(HttpContractModel):
-    id: str
-    work_id: str = Field(alias="workId")
-    media_kind: MediaKind = Field(alias="mediaKind")
-    format_value: str = Field(alias="formatValue")
     format: str
-    version_name: str = Field(alias="versionName")
-    description: str | None = None
+    derived_from_volume_id: str | None = Field(
+        default=None,
+        alias="derivedFromVolumeId",
+    )
     publisher: str | None = None
     published_at: datetime | None = Field(default=None, alias="publishedAt")
     language: str | None = None
-    identifier: str | None = None
     isbn: str | None = None
-    origin: str | None = None
-    source_path: str | None = Field(default=None, alias="sourcePath")
-    primary: bool
-    hidden: bool
-    readable: bool
-    conversion_available: bool = Field(alias="conversionAvailable")
-    size: str
+    identifier: str | None = None
+    narrator: str | None = None
+    abridged: bool | None = None
+    origin: str
+    import_status: str = Field(alias="importStatus")
+    import_error: str | None = Field(default=None, alias="importError")
+    cover_status: str = Field(alias="coverStatus")
     page_count: int | None = Field(default=None, alias="pageCount")
     chapter_count: int | None = Field(default=None, alias="chapterCount")
-    duration_ms: int | None = Field(default=None, alias="durationMs")
-    narrator: str | None = None
     track_count: int | None = Field(default=None, alias="trackCount")
-    abridged: bool | None = None
-    progress: float
-    last_read_at: datetime | None = Field(default=None, alias="lastReadAt")
+    size_bytes: int = Field(alias="sizeBytes")
     cover_url: str = Field(alias="coverUrl")
-    conversion: EditionConversion | None
+    progress: float = 0
+    completed: bool
+    last_read_at: datetime | None = Field(default=None, alias="lastReadAt")
+    duration_ms: int | None = Field(default=None, alias="durationMs")
     files: list[LibraryFile]
-    volumes: list[LibraryVolume]
 
 
 class WorkDetailTab(HttpContractModel):
@@ -167,92 +164,100 @@ class WorkDetailTab(HttpContractModel):
     sort_order: int = Field(alias="sortOrder")
 
 
-class WorkMediaGroup(HttpContractModel):
-    kind: MediaKind
-    primary_edition_id: str | None = Field(alias="primaryEditionId")
-    recent_edition_id: str | None = Field(alias="recentEditionId")
-    recent_volume_id: str | None = Field(alias="recentVolumeId")
-    status: ReadingStatus
-    progress: float
-    position_label: str = Field(alias="positionLabel")
-    duration_ms: int | None = Field(alias="durationMs")
-    chapter_count: int | None = Field(alias="chapterCount")
+class LibraryMediaVersion(HttpContractModel):
+    id: str
+    media_kind: MediaKind = Field(alias="mediaKind")
+    completed: bool
     volume_count: int = Field(alias="volumeCount")
-    editions: list[LibraryEdition]
+    size_bytes: int = Field(alias="sizeBytes")
+    volumes: list[LibraryVolume]
+
+
+class WorkDetailVolume(HttpContractModel):
+    id: str
+    media_version_id: str = Field(alias="mediaVersionId")
+    title: str
+    volume_index: float | None = Field(default=None, alias="volumeIndex")
+    sort_order: int = Field(alias="sortOrder")
+    format: str
+    derived_from_volume_id: str | None = Field(
+        default=None, alias="derivedFromVolumeId"
+    )
+    publisher: str | None = None
+    published_at: datetime | None = Field(default=None, alias="publishedAt")
+    language: str | None = None
+    isbn: str | None = None
+    identifier: str | None = None
+    narrator: str | None = None
+    cover_url: str = Field(alias="coverUrl")
+    size_bytes: int = Field(alias="sizeBytes")
+    page_count: int | None = Field(default=None, alias="pageCount")
+    chapter_count: int | None = Field(default=None, alias="chapterCount")
+    duration_ms: int | None = Field(default=None, alias="durationMs")
+    track_count: int | None = Field(default=None, alias="trackCount")
+    progress: float
+    files: list[LibraryFileSummary]
+
+
+class WorkDetailMediaVersion(HttpContractModel):
+    id: str
+    media_kind: MediaKind = Field(alias="mediaKind")
+    completed: bool
+    volume_count: int = Field(alias="volumeCount")
+    size_bytes: int = Field(alias="sizeBytes")
+    volumes: list[WorkDetailVolume]
+
+
+class WorkDetailBook(HttpContractModel):
+    id: str
+    title: str
+    author: str
+    description: str | None = None
+    tags: list[str]
+    series_name: str | None = Field(default=None, alias="seriesName")
+    series_index: float | None = Field(default=None, alias="seriesIndex")
+    cover_status: str = Field(alias="coverStatus")
+    cover_url: str = Field(alias="coverUrl")
+    recent_media_kind: MediaKind | None = Field(alias="recentMediaKind")
+    continue_volume_id: str | None = Field(alias="continueVolumeId")
+    completed: bool
+    media_versions: list[WorkDetailMediaVersion] = Field(alias="mediaVersions")
+    available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
+    detail_tabs: list[WorkDetailTab] = Field(alias="detailTabs")
+    selected_detail_tab: DetailTabKey = Field(alias="selectedDetailTab")
 
 
 class WorkView(HttpContractModel):
     id: str
-    work_id: str = Field(alias="workId")
-    edition_id: str | None = Field(alias="editionId")
-    monitor_folder_id: str | None = Field(alias="monitorFolderId")
     title: str
     author: str
-    publisher: str | None
-    type: Literal["ebook", "comic", "audiobook"]
-    format_value: str = Field(alias="formatValue")
-    format: str
-    size: str
-    progress: float
-    progress_extra: ProgressExtra = Field(alias="progressExtra")
-    cfi: str | None = None
-    current_href: str | None = Field(default=None, alias="currentHref")
-    current_section_index: int | None = Field(default=None, alias="currentSectionIndex")
-    current_chapter_title: str | None = Field(default=None, alias="currentChapterTitle")
-    current_chapter_sort_order: int | None = Field(
-        default=None,
-        alias="currentChapterSortOrder",
-    )
-    status_value: ReadingStatus = Field(alias="statusValue")
-    status: str
-    publication_status_value: str = Field(alias="publicationStatusValue")
+    description: str | None = None
     publication_status: str = Field(alias="publicationStatus")
-    tracking_status_value: str = Field(alias="trackingStatusValue")
     tracking_status: str = Field(alias="trackingStatus")
-    local_latest_volume: float | None = Field(alias="localLatestVolume")
-    local_latest_chapter: float | None = Field(alias="localLatestChapter")
-    local_latest_title: str | None = Field(alias="localLatestTitle")
-    local_latest_at: datetime | None = Field(alias="localLatestAt")
-    ignored: bool
+    tags: list[str]
+    series_name: str | None = Field(default=None, alias="seriesName")
+    series_index: float | None = Field(default=None, alias="seriesIndex")
+    published_year: int | None = Field(default=None, alias="publishedYear")
     organized: bool
     organize_status: str = Field(alias="organizeStatus")
     metadata_quality: int = Field(alias="metadataQuality")
-    metadata_lookup_status: str | None = Field(alias="metadataLookupStatus")
-    metadata_lookup_source: str | None = Field(alias="metadataLookupSource")
-    metadata_lookup_error: str | None = Field(alias="metadataLookupError")
-    tags: list[str]
-    series_name: str | None = Field(alias="seriesName")
-    series_index: float | None = Field(alias="seriesIndex")
-    published_year: int | None = Field(alias="publishedYear")
-    added: str
-    last_read: str = Field(alias="lastRead")
-    last_read_at: datetime | None = Field(alias="lastReadAt")
-    chapter: str
-    chapter_count: int | None = Field(alias="chapterCount")
-    page_count: int | None = Field(alias="pageCount")
-    desc: str
-    path: str
-    file_hash: str | None = Field(alias="fileHash")
-    gradient: str
+    metadata_lookup_status: str | None = Field(
+        default=None, alias="metadataLookupStatus"
+    )
+    metadata_lookup_source: str | None = Field(
+        default=None, alias="metadataLookupSource"
+    )
+    metadata_lookup_error: str | None = Field(default=None, alias="metadataLookupError")
     cover_status: str = Field(alias="coverStatus")
     cover_url: str = Field(alias="coverUrl")
-    total_units: int | None = Field(alias="totalUnits")
-    reading_progress: float = Field(alias="readingProgress")
-    import_status: str = Field(alias="importStatus")
-    import_error: str | None = Field(alias="importError")
-    imported_at: datetime | None = Field(alias="importedAt")
-    files: list[LibraryFile]
-    version_count: int = Field(alias="versionCount")
-    volume_count: int = Field(alias="volumeCount")
-    primary_edition_id: str | None = Field(alias="primaryEditionId")
-    primary_edition_name: str | None = Field(alias="primaryEditionName")
-    recent_edition_id: str | None = Field(alias="recentEditionId")
-    recent_volume_id: str | None = Field(alias="recentVolumeId")
-    volumes: list[LibraryVolume]
-    editions: list[LibraryEdition]
+    recent_media_kind: MediaKind | None = Field(alias="recentMediaKind")
+    continue_volume_id: str | None = Field(alias="continueVolumeId")
+    continue_volume_title: str | None = Field(alias="continueVolumeTitle")
+    continue_volume_progress: float = Field(alias="continueVolumeProgress")
+    completed: bool
+    last_read_at: datetime | None = Field(alias="lastReadAt")
+    media_versions: list[LibraryMediaVersion] = Field(alias="mediaVersions")
     available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
-    default_media_kind: MediaKind | None = Field(alias="defaultMediaKind")
-    media_groups: list[WorkMediaGroup] = Field(alias="mediaGroups")
     detail_tabs: list[WorkDetailTab] = Field(alias="detailTabs")
     selected_detail_tab: DetailTabKey = Field(alias="selectedDetailTab")
 
@@ -279,7 +284,7 @@ class ManagementWorkSummary(HttpContractModel):
     hidden: bool
     updated_at: datetime | None = Field(alias="updatedAt")
     size_bytes: int = Field(default=0, alias="sizeBytes")
-    edition_count: int = Field(default=0, alias="editionCount")
+    volume_count: int = Field(default=0, alias="volumeCount")
 
 
 class ManagementListWorkSummary(HttpContractModel):
@@ -323,12 +328,11 @@ class ContinueReadingItem(HttpContractModel):
     author: str
     cover_url: str = Field(alias="coverUrl")
     media_kind: MediaKind = Field(alias="mediaKind")
-    resume_edition_id: str | None = Field(alias="resumeEditionId")
     resume_volume_id: str | None = Field(alias="resumeVolumeId")
     progress: float
     chapter: str | None
     last_read_at: datetime | None = Field(alias="lastReadAt")
-    version_name: str | None = Field(alias="versionName")
+    volume_title: str | None = Field(alias="volumeTitle")
     narrator: str | None
 
 
@@ -465,6 +469,9 @@ class WorksPayload(HttpContractModel):
 
 
 class ReadingUnitMetadata(HttpContractModel):
+    exact_navigation: bool | None = Field(default=None, alias="exactNavigation")
+    level: int | None = Field(default=None, ge=0)
+    navigation_key: str | None = Field(default=None, alias="navigationKey")
     zip_entry_name: str | None = Field(default=None, alias="zipEntryName")
     idref: str | None = None
     linear: bool | None = None
@@ -477,8 +484,7 @@ class ReadingUnitMetadata(HttpContractModel):
 
 class ReadingUnit(HttpContractModel):
     id: str
-    edition_id: str = Field(alias="editionId")
-    volume_id: str | None = Field(alias="volumeId")
+    volume_id: str = Field(alias="volumeId")
     file_id: str | None = Field(alias="fileId")
     unit_type: str = Field(alias="unitType")
     title: str | None
@@ -505,7 +511,7 @@ class ReadingUnitsPage(HttpContractModel):
 
 class VolumeSection(HttpContractModel):
     id: str
-    edition_id: str | None = Field(alias="editionId")
+    media_version_id: str = Field(alias="mediaVersionId")
     title: str
     index: float
     file_id: str = Field(alias="fileId")
@@ -523,6 +529,7 @@ class VolumeSection(HttpContractModel):
         alias="currentChapterSortOrder",
     )
     progress_extra: ProgressExtra = Field(alias="progressExtra")
+    progress_estimated: bool = Field(default=False, alias="progressEstimated")
 
 
 class PrimaryAction(HttpContractModel):
@@ -530,11 +537,18 @@ class PrimaryAction(HttpContractModel):
     href: str
 
 
+class LocalProgressScope(HttpContractModel):
+    user_id: str = Field(alias="userId")
+    volume_id: str = Field(alias="volumeId")
+    content_fingerprint: str = Field(alias="contentFingerprint")
+
+
 class ActiveMedia(HttpContractModel):
     key: MediaKind
     format_label: str = Field(alias="formatLabel")
-    selected_edition_id: str = Field(alias="selectedEditionId")
-    selected_edition_name: str = Field(alias="selectedEditionName")
+    media_version_id: str = Field(alias="mediaVersionId")
+    selected_volume_id: str = Field(alias="selectedVolumeId")
+    selected_volume_title: str = Field(alias="selectedVolumeTitle")
     status: ReadingStatus
     progress_status: ReadingStatus = Field(alias="progressStatus")
     progress: float
@@ -545,6 +559,16 @@ class ActiveMedia(HttpContractModel):
     units: list[ReadingUnit]
     volumes: list[LibraryVolume]
     tracks: list[LibraryFile]
+    local_progress_scope: LocalProgressScope = Field(alias="localProgressScope")
+    current_href: str | None = Field(default=None, alias="currentHref")
+    current_section_index: int | None = Field(default=None, alias="currentSectionIndex")
+    current_chapter_title: str | None = Field(default=None, alias="currentChapterTitle")
+    current_chapter_sort_order: int | None = Field(
+        default=None,
+        alias="currentChapterSortOrder",
+    )
+    progress_extra: ProgressExtra = Field(alias="progressExtra")
+    progress_estimated: bool = Field(default=False, alias="progressEstimated")
 
 
 class WorkDetailPayload(HttpContractModel):
@@ -557,6 +581,33 @@ class WorkDetailPayload(HttpContractModel):
 
 class WorkPayload(HttpContractModel):
     book: WorkView | None
+
+
+class WorkDetailSummaryPayload(HttpContractModel):
+    book: WorkDetailBook
+
+
+class WorkVolumePagePayload(HttpContractModel):
+    media_version_id: str = Field(alias="mediaVersionId")
+    media_kind: MediaKind = Field(alias="mediaKind")
+    volumes: list[WorkDetailVolume]
+    page: int
+    page_size: int = Field(alias="pageSize")
+    total: int
+    total_pages: int = Field(alias="totalPages")
+
+
+class WorkReadingUnitsPayload(HttpContractModel):
+    units: list[ReadingUnit]
+    page: ReadingUnitsPage
+    progress: float
+    current_href: str | None = Field(default=None, alias="currentHref")
+    current_chapter_sort_order: int | None = Field(
+        default=None, alias="currentChapterSortOrder"
+    )
+    current_page_number: int | float | None = Field(
+        default=None, alias="currentPageNumber"
+    )
 
 
 class DetailPreferencePayload(HttpContractModel):
@@ -789,9 +840,44 @@ class MetadataSearchPayload(HttpContractModel):
     message: str | None
 
 
-class EditionMutationPayload(HttpContractModel):
-    edition: LibraryEdition
-    book: WorkView | None
+MetadataApplyField = Literal[
+    "coverUrl",
+    "title",
+    "author",
+    "publisher",
+    "description",
+    "tags",
+    "seriesName",
+    "seriesIndex",
+    "publishedYear",
+]
+
+
+class MetadataApplyCandidate(HttpContractModel):
+    id: str | None = None
+    source: str | None = None
+    external_id: str | None = Field(default=None, alias="externalId")
+    title: str | None = None
+    title_aliases: list[str] | None = Field(default=None, alias="titleAliases")
+    author: str | None = None
+    publisher: str | None = None
+    published_year: int | None = Field(default=None, alias="publishedYear")
+    isbn: str | None = None
+    description: str | None = None
+    cover_url: str | None = Field(default=None, alias="coverUrl")
+    score: float | None = None
+    tags: list[str] | None = None
+    series_name: str | None = Field(default=None, alias="seriesName")
+    series_index: float | None = Field(default=None, alias="seriesIndex")
+    confidence: float | None = None
+    raw: dict[str, MetadataCandidateRawValue] | None = None
+
+
+class MetadataApplyRequest(HttpContractModel):
+    source: str | None = None
+    candidate: MetadataApplyCandidate
+    fields: list[MetadataApplyField] = Field(min_length=1)
+    volume_id: str | None = Field(default=None, alias="volumeId")
 
 
 class ConversionPayload(HttpContractModel):
@@ -799,47 +885,62 @@ class ConversionPayload(HttpContractModel):
     created: bool
 
 
+class UpdateVolumeRequest(HttpContractModel):
+    title: str | None = None
+    volume_index: float | None = Field(default=None, alias="volumeIndex")
+    sort_order: int | None = Field(default=None, alias="sortOrder")
+    description: str | None = None
+    publisher: str | None = None
+    published_at: datetime | None = Field(default=None, alias="publishedAt")
+    language: str | None = None
+    identifier: str | None = None
+    isbn: str | None = None
+    narrator: str | None = None
+    abridged: bool | None = None
+    hidden: bool | None = None
+
+
+class MoveVolumeRequest(HttpContractModel):
+    target_work_id: str = Field(alias="targetWorkId", min_length=1)
+
+
+class ReorderVolumeRequest(HttpContractModel):
+    direction: Literal["up", "down"]
+
+
+class SplitVolumeRequest(HttpContractModel):
+    title: str = Field(min_length=1)
+    author: str | None = None
+
+
 class WorkStructureMutationPayload(HttpContractModel):
     book: WorkView | None
     target_book: WorkView | None = Field(default=None, alias="targetBook")
     work_id: str = Field(alias="workId")
-    edition_id: str | None = Field(default=None, alias="editionId")
     volume_id: str | None = Field(default=None, alias="volumeId")
     target_work_id: str | None = Field(default=None, alias="targetWorkId")
-    target_edition_id: str | None = Field(default=None, alias="targetEditionId")
+    target_media_version_id: str | None = Field(
+        default=None,
+        alias="targetMediaVersionId",
+    )
     applied_fields: list[str] | None = Field(default=None, alias="appliedFields")
     finished_organize_job_ids: list[str] | None = Field(
         default=None,
         alias="finishedOrganizeJobIds",
     )
     transfer_mode: str | None = Field(default=None, alias="transferMode")
-
-
-class OperationSummary(HttpContractModel):
-    id: str
-    action: str
-    status: str
-    summary: str
-    expires_at: datetime = Field(alias="expiresAt")
-    undo_available: bool = Field(alias="undoAvailable")
-
-
-class SplitEditionPayload(HttpContractModel):
-    source_work_id: str = Field(alias="sourceWorkId")
-    new_work_id: str = Field(alias="newWorkId")
-    edition_id: str = Field(alias="editionId")
-    operation: OperationSummary
+    deleted_media_version: bool | None = Field(
+        default=None,
+        alias="deletedMediaVersion",
+    )
+    deleted_work: bool | None = Field(default=None, alias="deletedWork")
+    operation: LibraryOperationSummary | None = None
 
 
 class MetadataApplyPayload(HttpContractModel):
     book: WorkView
     applied_fields: list[str] = Field(alias="appliedFields")
     finished_organize_job_ids: list[str] = Field(alias="finishedOrganizeJobIds")
-
-
-WorkStructurePayload = (
-    WorkStructureMutationPayload | SplitEditionPayload | MetadataApplyPayload
-)
 
 
 DashboardSummaryResponse = SuccessEnvelope[DashboardSummaryPayload]
@@ -851,7 +952,10 @@ SeriesResponse = SuccessEnvelope[SeriesPayload]
 LibraryGroupingsResponse = SuccessEnvelope[LibraryGroupingsPayload]
 WorksResponse = SuccessEnvelope[WorksPayload]
 WorkResponse = SuccessEnvelope[WorkPayload]
+WorkDetailSummaryResponse = SuccessEnvelope[WorkDetailSummaryPayload]
 WorkDetailResponse = SuccessEnvelope[WorkDetailPayload]
+WorkVolumePageResponse = SuccessEnvelope[WorkVolumePagePayload]
+WorkReadingUnitsResponse = SuccessEnvelope[WorkReadingUnitsPayload]
 DetailPreferenceResponse = SuccessEnvelope[DetailPreferencePayload]
 DeletedWorkResponse = SuccessEnvelope[DeletedWorkPayload]
 BulkMutationResponse = SuccessEnvelope[BulkMutationPayload]
@@ -868,9 +972,9 @@ MergeDuplicatesResponse = SuccessEnvelope[MergeDuplicatesPayload]
 OperationsResponse = SuccessEnvelope[OperationsPayload]
 UndoOperationResponse = SuccessEnvelope[UndoOperationPayload]
 MetadataSearchResponse = SuccessEnvelope[MetadataSearchPayload]
-EditionMutationResponse = SuccessEnvelope[EditionMutationPayload]
 ConversionResponse = SuccessEnvelope[ConversionPayload]
-WorkStructureMutationResponse = SuccessEnvelope[WorkStructurePayload]
+MetadataApplyResponse = SuccessEnvelope[MetadataApplyPayload]
+WorkStructureMutationResponse = SuccessEnvelope[WorkStructureMutationPayload]
 
 
 class LibraryErrorBody(HttpContractModel):
@@ -895,6 +999,11 @@ class LibraryNotFoundError(HttpContractError[LibraryErrorBody]):
 
 class LibraryConflictError(HttpContractError[LibraryErrorBody]):
     status_code = 409
+    body_model = LibraryErrorBody
+
+
+class LibraryGoneError(HttpContractError[LibraryErrorBody]):
+    status_code = 410
     body_model = LibraryErrorBody
 
 

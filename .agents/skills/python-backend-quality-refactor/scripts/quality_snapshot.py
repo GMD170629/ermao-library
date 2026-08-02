@@ -51,8 +51,15 @@ def analyze(path: Path) -> tuple[int, Counter[str]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backend-root", help="Path containing app/, tests/, and pyproject.toml")
-    parser.add_argument("--top", type=int, default=15, help="Number of largest application files to show")
+    parser.add_argument(
+        "--backend-root", help="Path containing app/, tests/, and pyproject.toml"
+    )
+    parser.add_argument(
+        "--top",
+        type=int,
+        default=15,
+        help="Number of largest application files to show",
+    )
     args = parser.parse_args()
 
     backend = resolve_backend_root(args.backend_root)

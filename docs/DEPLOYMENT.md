@@ -15,7 +15,7 @@ curl -fsSL https://raw.githubusercontent.com/GMD170629/ermao-library/main/docker
 - `MONITOR_HOST_PATH`
 - `PUID` / `PGID`
 
-容器内监控根路径固定是 `/monitor`。`MONITOR_HOST_PATH` 是宿主机或 NAS 上的读物目录，默认 `./monitor`。读物原文件始终保留在所选保存目录中；上传和下载时可在 `MONITOR_ROOT` 内选择目录，系统会记住上次选择。只有保存到已启用监控文件夹范围内的文件才会由监控服务自动识别入库，因此 `PUID` / `PGID` 需要对 `MONITOR_HOST_PATH` 有读写权限。会话密钥由容器首次启动时生成并保存在 `STORAGE_PATH` 下。
+`MONITOR_HOST_PATH` 是默认挂载到容器 `/monitor` 的宿主机或 NAS 读物目录，默认 `./monitor`。应用允许从路径树选择任意容器内可见且可读的目录；额外宿主机目录必须先通过 Compose `volumes` 映射，例如 `/srv/books:/libraries/books`、`/srv/comics:/libraries/comics`。只有保存到已启用监控文件夹范围内的文件才会自动识别入库，因此 `PUID` / `PGID` 需要对相应挂载拥有所需权限。会话密钥由容器首次启动时生成并保存在 `STORAGE_PATH` 下。
 
 ## 迁移与初始化
 

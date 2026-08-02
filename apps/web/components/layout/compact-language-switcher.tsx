@@ -41,13 +41,15 @@ export function CompactLanguageSwitcher({
         ariaLabel="界面语言"
         onChange={changeLanguage}
         size="sm"
-        menuWidth={132}
+        tone={setup ? 'setup' : 'light'}
+        align="right"
         className="min-w-[6.5rem]"
         triggerClassName={`!h-10 !rounded-full !pl-9 !pr-3 !text-xs !font-semibold ${
           setup
-            ? '!border-[#B08B6E]/45 !bg-[#E8DCC7]/70 !text-[#606C38] hover:!border-[#C66B3D] hover:!bg-[#E8DCC7]'
+            ? '!border-[#B08B6E]/55 !bg-[#E8DCC7] !text-[#606C38] focus:!border-[#C66B3D] focus:!ring-[#C66B3D]/15'
             : '!border-black/[0.11] !bg-white/70 !text-[#514D48] hover:!border-[#EF4D2F]/35 hover:!bg-white/90'
         }`}
+        menuClassName={setup ? '!rounded-2xl !p-2' : undefined}
       />
     </div>
   );

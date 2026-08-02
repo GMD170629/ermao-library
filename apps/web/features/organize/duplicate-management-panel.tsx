@@ -89,7 +89,7 @@ export function DuplicateManagementPanel() {
       <div className="flex items-start justify-between gap-4 rounded-2xl border border-black/[0.07] bg-white/60 p-5">
         <div>
           <h2 className="text-base font-semibold text-[#2C2926]"><I18nText>重复作品治理</I18nText></h2>
-          <p className="mt-1 text-sm leading-6 text-[#817B75]"><I18nText>按规范化后的标题与作者识别候选。合并只移动版本、进度与书架关系，不删除源文件。</I18nText></p>
+          <p className="mt-1 text-sm leading-6 text-[#817B75]"><I18nText>按规范化后的标题与作者识别候选。合并只移动媒介版本、卷册、进度与书架关系，不删除源文件。</I18nText></p>
         </div>
         <Badge tone={groups.length ? 'amber' : 'green'}>{groups.length} <I18nText>组待处理</I18nText></Badge>
       </div>
@@ -106,7 +106,7 @@ export function DuplicateManagementPanel() {
         <div className="flex min-h-56 flex-col items-center justify-center rounded-2xl border border-dashed border-black/[0.1] bg-white/40 text-center">
           <Search size={24} className="text-[#A49E98]" />
           <div className="mt-3 font-medium text-[#3B3733]"><I18nText>没有发现重复作品</I18nText></div>
-          <p className="mt-1 text-sm text-[#8A847E]"><I18nText>导入新版本或修改标题、作者后，这里会自动重新计算。</I18nText></p>
+          <p className="mt-1 text-sm text-[#8A847E]"><I18nText>导入新卷册或修改标题、作者后，这里会自动重新计算。</I18nText></p>
         </div>
       ) : groups.map((group) => (
         <section key={group.id} className="rounded-2xl border border-black/[0.07] bg-white/65 p-5">
@@ -123,7 +123,7 @@ export function DuplicateManagementPanel() {
                 <input type="radio" name={group.id} value={work.id} checked={targets[group.id] === work.id} onChange={() => setTargets((current) => ({ ...current, [group.id]: work.id }))} className="mt-1 accent-[#EF4D2F]" />
                 <span className="min-w-0">
                   <span className="block font-medium text-[#302D2A]">{work.title}</span>
-                  <span className="mt-1 block text-sm text-[#746E68]">{work.author} · {work.versionCount} <I18nText>个版本 · </I18nText>{work.size}</span>
+                  <span className="mt-1 block text-sm text-[#746E68]">{work.author} · {work.mediaVersions.flatMap((mediaVersion) => mediaVersion.volumes).length} <I18nText>个卷册</I18nText></span>
                   <span className="mt-2 flex flex-wrap gap-1.5">{work.tags.slice(0, 4).map((tag) => <Badge key={tag}>{tag}</Badge>)}</span>
                   {targets[group.id] === work.id ? <span className="mt-3 block text-xs font-medium text-[#D34B32]"><I18nText>保留此记录的标题、封面与基础信息</I18nText></span> : null}
                 </span>

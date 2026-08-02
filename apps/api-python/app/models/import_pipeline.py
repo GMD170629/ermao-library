@@ -211,12 +211,6 @@ class KindleSendTask(Base):
         ForeignKey("LibraryWork.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
-    edition_id: Mapped[str | None] = mapped_column(
-        "editionId",
-        String(191),
-        ForeignKey("LibraryEdition.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-    )
     volume_id: Mapped[str | None] = mapped_column(
         "volumeId",
         String(191),
@@ -230,7 +224,6 @@ class KindleSendTask(Base):
         nullable=True,
     )
     book_title: Mapped[str] = mapped_column("bookTitle", Text, nullable=False)
-    edition_name: Mapped[str | None] = mapped_column("editionName", Text, nullable=True)
     volume_title: Mapped[str | None] = mapped_column("volumeTitle", Text, nullable=True)
     file_name: Mapped[str] = mapped_column("fileName", Text, nullable=False)
     format: Mapped[str] = mapped_column(String(191), nullable=False)
@@ -299,7 +292,6 @@ class ImportTask(Base):
         Index("ImportTask_status_createdAt_idx", "status", "createdAt"),
         Index("ImportTask_contentHash_idx", "contentHash"),
         Index("ImportTask_workId_idx", "workId"),
-        Index("ImportTask_editionId_idx", "editionId"),
         Index("ImportTask_volumeId_idx", "volumeId"),
         Index("ImportTask_status_leaseExpiresAt_idx", "status", "leaseExpiresAt"),
         Index("ImportTask_createdAt_id_idx", "createdAt", "id"),
@@ -322,12 +314,6 @@ class ImportTask(Base):
         "workId",
         String(191),
         ForeignKey("LibraryWork.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-    )
-    edition_id: Mapped[str | None] = mapped_column(
-        "editionId",
-        String(191),
-        ForeignKey("LibraryEdition.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
     volume_id: Mapped[str | None] = mapped_column(
@@ -634,6 +620,9 @@ class BookConversionTask(Base):
         UniqueConstraint("importTaskId"),
         Index("BookConversionTask_status_createdAt_idx", "status", "createdAt"),
         Index("BookConversionTask_sourceHash_idx", "sourceHash"),
+        UniqueConstraint(
+            "idempotencyKey", name="BookConversionTask_idempotencyKey_key"
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
@@ -642,6 +631,21 @@ class BookConversionTask(Base):
         String(191),
         ForeignKey("ImportTask.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
+    )
+    source_volume_id: Mapped[str] = mapped_column(
+        "sourceVolumeId",
+        String(191),
+        ForeignKey("LibraryVolume.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+    )
+    derived_volume_id: Mapped[str | None] = mapped_column(
+        "derivedVolumeId",
+        String(191),
+        ForeignKey("LibraryVolume.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+    )
+    idempotency_key: Mapped[str] = mapped_column(
+        "idempotencyKey", String(191), nullable=False
     )
     mode: Mapped[str] = mapped_column(
         String(191), nullable=False, default="AUTO", server_default="AUTO"

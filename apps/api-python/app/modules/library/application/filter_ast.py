@@ -48,7 +48,15 @@ BOOLEAN_OPERATORS = frozenset({"is_true", "is_false"})
 FIELD_OPERATORS = {
     **{
         field: TEXT_OPERATORS
-        for field in ("title", "description", "isbn", "identifier", "editionName", "narrator", "sourcePath")
+        for field in (
+            "title",
+            "description",
+            "isbn",
+            "identifier",
+            "volumeTitle",
+            "narrator",
+            "sourcePath",
+        )
     },
     **{
         field: SELECT_OPERATORS
@@ -80,7 +88,7 @@ FIELD_OPERATORS = {
             "pageCount",
             "chapterCount",
             "duration",
-            "versionCount",
+            "volumeCount",
             "progress",
         )
     },

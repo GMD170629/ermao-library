@@ -13,24 +13,33 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.typed_route import TypedContractRoute
-from app.core.auth import get_current_user
-from app.core.authorization import can_access_file, read_user_preferences, write_user_preference
-from app.core.config import Settings, get_settings
-from app.core.i18n import configured_locale
-from app.db.session import get_db
-from app.models.auth import User
 from app.bootstrap.kindle import (
     cancel_queued_kindle_task,
-    create_kindle_send_task as persist_kindle_send_task,
-    delete_kindle_send_task as delete_kindle_send_task_record,
     find_active_kindle_task,
     get_kindle_send_task,
     get_library_file_details_for_kindle,
     has_table,
-    list_kindle_send_tasks as query_kindle_send_tasks,
     retry_kindle_task,
 )
-from app.schemas.responses import fail, ok
+from app.bootstrap.kindle import (
+    create_kindle_send_task as persist_kindle_send_task,
+)
+from app.bootstrap.kindle import (
+    delete_kindle_send_task as delete_kindle_send_task_record,
+)
+from app.bootstrap.kindle import (
+    list_kindle_send_tasks as query_kindle_send_tasks,
+)
+from app.core.auth import get_current_user
+from app.core.authorization import (
+    can_access_file,
+    read_user_preferences,
+    write_user_preference,
+)
+from app.core.config import Settings, get_settings
+from app.core.i18n import configured_locale
+from app.db.session import get_db
+from app.models.auth import User
 from app.modules.kindle.presentation.schemas import (
     DeletedKindleTaskResponse,
     EmailSettingsResponse,
@@ -39,6 +48,7 @@ from app.modules.kindle.presentation.schemas import (
     KindleTasksResponse,
     SmtpTestResponse,
 )
+from app.schemas.responses import fail, ok
 from app.services.email_settings import (
     EmailSettingsError,
     candidate_email_settings,
@@ -48,15 +58,22 @@ from app.services.email_settings import (
     smtp_connection_settings,
     test_smtp_connection,
 )
-from app.services.kindle_queue import SUPPORTED_EXTENSIONS, SUPPORTED_FORMATS, TERMINAL_STATUSES, mask_email, safe_error_message
+from app.services.kindle_queue import (
+    SUPPORTED_EXTENSIONS,
+    SUPPORTED_FORMATS,
+    TERMINAL_STATUSES,
+    mask_email,
+    safe_error_message,
+)
 from app.services.system_events import record_system_event
-
 
 router = APIRouter(route_class=TypedContractRoute)
 EMAIL_ADAPTER = TypeAdapter(EmailStr)
 
 
-def _auth(db: Session, request: Request, settings: Settings) -> tuple[User | None, Response | None]:
+def _auth(
+    db: Session, request: Request, settings: Settings
+) -> tuple[User | None, Response | None]:
     user, _token, _refresh = get_current_user(db, request, settings)
     if user is None:
         return None, fail("UNAUTHORIZED", status_code=401)
@@ -115,7 +132,11 @@ def _event(
 
 
 @router.get("/email-settings")
-def read_email_settings(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> EmailSettingsResponse:
+def read_email_settings(
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> EmailSettingsResponse:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -126,7 +147,11 @@ def read_email_settings(request: Request, db: Session = Depends(get_db), setting
 
 
 @router.put("/email-settings")
-async def update_email_settings(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> EmailSettingsResponse:
+async def update_email_settings(
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> EmailSettingsResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -156,7 +181,11 @@ async def update_email_settings(request: Request, db: Session = Depends(get_db),
 
 
 @router.post("/email-settings/smtp-test")
-async def smtp_test(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> SmtpTestResponse:
+async def smtp_test(
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> SmtpTestResponse:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -171,12 +200,19 @@ async def smtp_test(request: Request, db: Session = Depends(get_db), settings: S
         candidate = candidate_email_settings(db, payload)
         test_smtp_connection(candidate)
     except (EmailSettingsError, OSError, smtplib.SMTPException) as exc:
-        return fail(safe_error_message(exc, [str(candidate.get("password") or "")]), status_code=400)
+        return fail(
+            safe_error_message(exc, [str(candidate.get("password") or "")]),
+            status_code=400,
+        )
     return ok({"connected": True, "message": "SMTP 连接、加密与认证均正常"})
 
 
 @router.get("/kindle-settings")
-def read_kindle_settings(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> KindleSettingsResponse:
+def read_kindle_settings(
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> KindleSettingsResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -186,17 +222,25 @@ def read_kindle_settings(request: Request, db: Session = Depends(get_db), settin
         return fail(str(exc), status_code=400, code="INVALID_EMAIL_SETTINGS")
     preferences = read_user_preferences(db, user.id)
     personal_email = str(preferences.get("kindle.email") or "").strip()
-    return ok({
-        "kindle": {"email": personal_email},
-        "smtp": {
-            "configured": bool(email_values.get("host") and email_values.get("fromEmail")),
-            "fromEmail": email_values.get("fromEmail") or "",
-        },
-    })
+    return ok(
+        {
+            "kindle": {"email": personal_email},
+            "smtp": {
+                "configured": bool(
+                    email_values.get("host") and email_values.get("fromEmail")
+                ),
+                "fromEmail": email_values.get("fromEmail") or "",
+            },
+        }
+    )
 
 
 @router.put("/kindle-settings")
-async def update_kindle_settings(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> KindleSettingsResponse:
+async def update_kindle_settings(
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> KindleSettingsResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -204,11 +248,19 @@ async def update_kindle_settings(request: Request, db: Session = Depends(get_db)
         payload = await request.json()
     except Exception:
         return fail("设置格式不正确", status_code=400, code="INVALID_KINDLE_SETTINGS")
-    raw_email = str((payload or {}).get("email") or "").strip() if isinstance(payload, dict) else ""
+    raw_email = (
+        str((payload or {}).get("email") or "").strip()
+        if isinstance(payload, dict)
+        else ""
+    )
     try:
-        email = str(EMAIL_ADAPTER.validate_python(raw_email)).lower() if raw_email else ""
+        email = (
+            str(EMAIL_ADAPTER.validate_python(raw_email)).lower() if raw_email else ""
+        )
     except ValidationError:
-        return fail("Kindle 邮箱格式不正确", status_code=400, code="INVALID_KINDLE_EMAIL")
+        return fail(
+            "Kindle 邮箱格式不正确", status_code=400, code="INVALID_KINDLE_EMAIL"
+        )
     write_user_preference(db, user.id, "kindle.email", email)
     db.commit()
     return ok({"kindle": {"email": email}})
@@ -227,7 +279,9 @@ def list_kindle_send_tasks(
     if auth_error:
         return auth_error
     if not has_table(db, "KindleSendTask"):
-        return ok({"tasks": [], "total": 0, "page": 1, "pageSize": pageSize, "totalPages": 1})
+        return ok(
+            {"tasks": [], "total": 0, "page": 1, "pageSize": pageSize, "totalPages": 1}
+        )
     page = max(1, page)
     page_size = min(200, max(1, pageSize))
     allowed_statuses = {"queued", "sending", "sent", "failed", "cancelled", "unknown"}
@@ -250,11 +304,23 @@ def list_kindle_send_tasks(
         limit=page_size,
         offset=(page - 1) * page_size,
     )
-    return ok({"tasks": [_task_view(row) for row in rows], "total": total, "page": page, "pageSize": page_size, "totalPages": total_pages})
+    return ok(
+        {
+            "tasks": [_task_view(row) for row in rows],
+            "total": total,
+            "page": page,
+            "pageSize": page_size,
+            "totalPages": total_pages,
+        }
+    )
 
 
 @router.post("/kindle-send-tasks")
-async def create_kindle_send_task(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> KindleTaskResponse:
+async def create_kindle_send_task(
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> KindleTaskResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -276,27 +342,48 @@ async def create_kindle_send_task(request: Request, db: Session = Depends(get_db
         email_values = get_email_settings(db, include_password=True)
         smtp_config = smtp_connection_settings(email_values)
     except EmailSettingsError as exc:
-        return fail(str(exc), status_code=400, details={"settingsHref": "/settings/email?tab=smtp"})
+        return fail(
+            str(exc),
+            status_code=400,
+            details={"settingsHref": "/settings/email?tab=smtp"},
+        )
     preferences = read_user_preferences(db, user.id)
     recipient = str(preferences.get("kindle.email") or "").strip()
     if not recipient:
-        return fail("请先配置 Kindle 邮箱", status_code=400, details={"settingsHref": "/settings/email?tab=kindle"})
+        return fail(
+            "请先配置 Kindle 邮箱",
+            status_code=400,
+            details={"settingsHref": "/settings/email?tab=kindle"},
+        )
 
     file_row = get_library_file_details_for_kindle(db, file_id)
     if not file_row or (work_id and str(file_row["workId"]) != work_id):
         return fail("选择的图书文件不存在", status_code=404)
-    file_format = str(file_row.get("editionFormat") or "").upper()
+    file_format = str(file_row.get("volumeFormat") or "").upper()
     file_name = Path(str(file_row.get("path") or "")).name
-    if file_format not in SUPPORTED_FORMATS or Path(file_name).suffix.lower() not in SUPPORTED_EXTENSIONS:
+    if (
+        file_format not in SUPPORTED_FORMATS
+        or Path(file_name).suffix.lower() not in SUPPORTED_EXTENSIONS
+    ):
         return fail("Kindle 邮件发送目前仅支持 EPUB 和 PDF", status_code=400)
     size_bytes = int(file_row.get("sizeBytes") or 0)
-    if smtp_config.max_attachment_mb is not None and size_bytes > smtp_config.max_attachment_mb * 1024 * 1024:
-        return fail(f"附件超过已配置的 {smtp_config.max_attachment_mb:g} MB 大小上限", status_code=400)
+    if (
+        smtp_config.max_attachment_mb is not None
+        and size_bytes > smtp_config.max_attachment_mb * 1024 * 1024
+    ):
+        return fail(
+            f"附件超过已配置的 {smtp_config.max_attachment_mb:g} MB 大小上限",
+            status_code=400,
+        )
 
     existing = find_active_kindle_task(db, file_id=file_id, recipient_email=recipient)
     if existing:
         if not _can_access_task(user, existing):
-            return fail("同一文件已有等待中或发送中的任务", status_code=409, code="KINDLE_TASK_ALREADY_ACTIVE")
+            return fail(
+                "同一文件已有等待中或发送中的任务",
+                status_code=409,
+                code="KINDLE_TASK_ALREADY_ACTIVE",
+            )
         return ok({"task": _task_view(existing), "alreadyQueued": True})
 
     now = datetime.now(timezone.utc)
@@ -310,15 +397,14 @@ async def create_kindle_send_task(request: Request, db: Session = Depends(get_db
         "id": task_id,
         "userId": user.id,
         "workId": file_row["workId"],
-        "editionId": file_row["editionId"],
         "volumeId": file_row.get("volumeId"),
         "fileId": file_id,
         "bookTitle": str(file_row.get("bookTitle") or fallback_book_title),
-        "editionName": file_row.get("versionName"),
         "volumeTitle": file_row.get("volumeTitle"),
         "fileName": file_name,
         "format": file_format,
-        "mimeType": file_row.get("mimeType") or ("application/epub+zip" if file_format == "EPUB" else "application/pdf"),
+        "mimeType": file_row.get("mimeType")
+        or ("application/epub+zip" if file_format == "EPUB" else "application/pdf"),
         "sizeBytes": size_bytes,
         "senderEmail": smtp_config.from_email,
         "recipientEmail": recipient,
@@ -337,19 +423,37 @@ async def create_kindle_send_task(request: Request, db: Session = Depends(get_db
         db.commit()
     except IntegrityError:
         db.rollback()
-        existing = find_active_kindle_task(db, file_id=file_id, recipient_email=recipient)
+        existing = find_active_kindle_task(
+            db, file_id=file_id, recipient_email=recipient
+        )
         if existing:
             if not _can_access_task(user, existing):
-                return fail("同一文件已有等待中或发送中的任务", status_code=409, code="KINDLE_TASK_ALREADY_ACTIVE")
+                return fail(
+                    "同一文件已有等待中或发送中的任务",
+                    status_code=409,
+                    code="KINDLE_TASK_ALREADY_ACTIVE",
+                )
             return ok({"task": _task_view(existing), "alreadyQueued": True})
         raise
     task = _task(db, task_id) or params
-    _event(db, user, task, action="send.queued", message=f"加入 Kindle 发送队列：{task.get('bookTitle')}", metadata={"status": "queued"})
+    _event(
+        db,
+        user,
+        task,
+        action="send.queued",
+        message=f"加入 Kindle 发送队列：{task.get('bookTitle')}",
+        metadata={"status": "queued"},
+    )
     return ok({"task": _task_view(task), "alreadyQueued": False}, status_code=201)
 
 
 @router.post("/kindle-send-tasks/{task_id}/cancel")
-def cancel_kindle_send_task(task_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> KindleTaskResponse:
+def cancel_kindle_send_task(
+    task_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> KindleTaskResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -365,12 +469,24 @@ def cancel_kindle_send_task(task_id: str, request: Request, db: Session = Depend
     if result_count != 1:
         return fail("任务状态已变化，请刷新后重试", status_code=409)
     task = _task(db, task_id) or task
-    _event(db, user, task, action="send.cancelled", level="warning", message=f"取消 Kindle 发送：{task.get('bookTitle')}")
+    _event(
+        db,
+        user,
+        task,
+        action="send.cancelled",
+        level="warning",
+        message=f"取消 Kindle 发送：{task.get('bookTitle')}",
+    )
     return ok({"task": _task_view(task)})
 
 
 @router.post("/kindle-send-tasks/{task_id}/retry")
-def retry_kindle_send_task(task_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> KindleTaskResponse:
+def retry_kindle_send_task(
+    task_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> KindleTaskResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -392,12 +508,23 @@ def retry_kindle_send_task(task_id: str, request: Request, db: Session = Depends
     retry_kindle_task(db, task_id, datetime.now(timezone.utc))
     db.commit()
     task = _task(db, task_id) or task
-    _event(db, user, task, action="send.retried", message=f"重新排队 Kindle 发送：{task.get('bookTitle')}")
+    _event(
+        db,
+        user,
+        task,
+        action="send.retried",
+        message=f"重新排队 Kindle 发送：{task.get('bookTitle')}",
+    )
     return ok({"task": _task_view(task)})
 
 
 @router.delete("/kindle-send-tasks/{task_id}")
-def delete_kindle_send_task(task_id: str, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> DeletedKindleTaskResponse:
+def delete_kindle_send_task(
+    task_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> DeletedKindleTaskResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -410,5 +537,13 @@ def delete_kindle_send_task(task_id: str, request: Request, db: Session = Depend
         return fail("等待中或发送中的任务不能删除", status_code=400)
     delete_kindle_send_task_record(db, task_id)
     db.commit()
-    _event(db, user, task, action="send.deleted", level="warning", message=f"删除 Kindle 发送记录：{task.get('bookTitle')}", metadata={"status": task.get("status")})
+    _event(
+        db,
+        user,
+        task,
+        action="send.deleted",
+        level="warning",
+        message=f"删除 Kindle 发送记录：{task.get('bookTitle')}",
+        metadata={"status": task.get("status")},
+    )
     return ok({"deleted": True, "id": task_id})

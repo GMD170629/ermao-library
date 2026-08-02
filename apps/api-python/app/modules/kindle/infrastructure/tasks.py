@@ -5,14 +5,26 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Table, delete, func, inspect as sa_inspect, or_, select, update
+from sqlalchemy import Table, delete, func, or_, select, update
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
 from app.core.time import timestamp_ms_to_datetime
 from app.db.base import Base
 from app.models.import_pipeline import KindleSendTask
-from app.models.library import LibraryEdition, LibraryFile, LibraryVolume, LibraryWork
-from app.modules.library.infrastructure.works import entity_as_legacy_dict
+from app.models.library import (
+    LibraryFile,
+    LibraryMediaVersion,
+    LibraryVolume,
+    LibraryWork,
+)
+
+
+def entity_as_legacy_dict(entity: object) -> dict[str, Any]:
+    mapper = sa_inspect(entity).mapper
+    return {
+        prop.columns[0].name: getattr(entity, prop.key) for prop in mapper.column_attrs
+    }
 
 
 def _legacy_column_to_attr(model: type) -> dict[str, str]:
@@ -56,13 +68,17 @@ def list_kindle_send_tasks(
     total = int(
         db.scalar(select(func.count()).select_from(KindleSendTask).where(*filters)) or 0
     )
-    rows = db.execute(
-        select(KindleSendTask)
-        .where(*filters)
-        .order_by(KindleSendTask.created_at.desc())
-        .limit(limit)
-        .offset(offset)
-    ).scalars().all()
+    rows = (
+        db.execute(
+            select(KindleSendTask)
+            .where(*filters)
+            .order_by(KindleSendTask.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        .scalars()
+        .all()
+    )
     return [entity_as_legacy_dict(row) for row in rows], total
 
 
@@ -83,14 +99,19 @@ def find_active_kindle_task(
     if exclude_task_id:
         filters.append(KindleSendTask.id != exclude_task_id)
     task = db.execute(
-        select(KindleSendTask).where(*filters).order_by(KindleSendTask.created_at.desc()).limit(1)
+        select(KindleSendTask)
+        .where(*filters)
+        .order_by(KindleSendTask.created_at.desc())
+        .limit(1)
     ).scalar_one_or_none()
     return entity_as_legacy_dict(task) if task is not None else None
 
 
 def create_kindle_send_task(db: Session, values: dict[str, Any]) -> KindleSendTask:
     name_to_attr = _legacy_column_to_attr(KindleSendTask)
-    payload = {name_to_attr[key]: value for key, value in values.items() if key in name_to_attr}
+    payload = {
+        name_to_attr[key]: value for key, value in values.items() if key in name_to_attr
+    }
     task = KindleSendTask(**payload)
     db.add(task)
     db.flush()
@@ -146,7 +167,9 @@ def next_queued_kindle_task(db: Session, now_ms: int) -> dict[str, Any] | None:
     return entity_as_legacy_dict(task) if task is not None else None
 
 
-def claim_kindle_send_task(db: Session, task_id: str, now: datetime) -> dict[str, Any] | None:
+def claim_kindle_send_task(
+    db: Session, task_id: str, now: datetime
+) -> dict[str, Any] | None:
     table = _legacy_table(db, "KindleSendTask")
     if table is None:
         return None
@@ -159,7 +182,9 @@ def claim_kindle_send_task(db: Session, task_id: str, now: datetime) -> dict[str
     if "attemptCount" in table.c:
         values["attemptCount"] = table.c.attemptCount + 1
     result = db.execute(
-        update(table).where(table.c.id == task_id, table.c.status == "queued").values(**values)
+        update(table)
+        .where(table.c.id == task_id, table.c.status == "queued")
+        .values(**values)
     )
     if int(result.rowcount or 0) != 1:
         return None
@@ -241,9 +266,11 @@ def mark_kindle_task_sent(db: Session, task_id: str, sent_at: datetime) -> None:
 def list_sending_kindle_tasks(db: Session) -> list[dict[str, Any]]:
     if not has_table(db, "KindleSendTask"):
         return []
-    rows = db.execute(
-        select(KindleSendTask).where(KindleSendTask.status == "sending")
-    ).scalars().all()
+    rows = (
+        db.execute(select(KindleSendTask).where(KindleSendTask.status == "sending"))
+        .scalars()
+        .all()
+    )
     return [entity_as_legacy_dict(row) for row in rows]
 
 
@@ -267,43 +294,50 @@ def get_library_file_for_kindle(db: Session, file_id: str) -> dict[str, Any] | N
     row = db.execute(
         select(
             LibraryFile,
-            LibraryEdition.work_id.label("workId"),
-            LibraryEdition.format.label("editionFormat"),
+            LibraryMediaVersion.work_id.label("workId"),
+            LibraryVolume.format.label("volumeFormat"),
         )
-        .join(LibraryEdition, LibraryEdition.id == LibraryFile.edition_id)
+        .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
+        .join(
+            LibraryMediaVersion,
+            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+        )
         .where(LibraryFile.id == file_id)
     ).first()
     if row is None:
         return None
     file_row = entity_as_legacy_dict(row[0])
     file_row["workId"] = row.workId
-    file_row["editionFormat"] = row.editionFormat
+    file_row["volumeFormat"] = row.volumeFormat
     return file_row
 
 
-def get_library_file_details_for_kindle(db: Session, file_id: str) -> dict[str, Any] | None:
+def get_library_file_details_for_kindle(
+    db: Session, file_id: str
+) -> dict[str, Any] | None:
     if not has_table(db, "LibraryFile"):
         return None
     row = db.execute(
         select(
             LibraryFile,
-            LibraryEdition.work_id.label("workId"),
-            LibraryEdition.format.label("editionFormat"),
-            LibraryEdition.version_name.label("versionName"),
+            LibraryMediaVersion.work_id.label("workId"),
+            LibraryVolume.format.label("volumeFormat"),
             LibraryWork.title.label("bookTitle"),
             LibraryVolume.title.label("volumeTitle"),
         )
-        .join(LibraryEdition, LibraryEdition.id == LibraryFile.edition_id)
-        .join(LibraryWork, LibraryWork.id == LibraryEdition.work_id)
-        .outerjoin(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
+        .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
+        .join(
+            LibraryMediaVersion,
+            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+        )
+        .join(LibraryWork, LibraryWork.id == LibraryMediaVersion.work_id)
         .where(LibraryFile.id == file_id)
     ).first()
     if row is None:
         return None
     file_row = entity_as_legacy_dict(row[0])
     file_row["workId"] = row.workId
-    file_row["editionFormat"] = row.editionFormat
-    file_row["versionName"] = row.versionName
+    file_row["volumeFormat"] = row.volumeFormat
     file_row["bookTitle"] = row.bookTitle
     file_row["volumeTitle"] = row.volumeTitle
     return file_row

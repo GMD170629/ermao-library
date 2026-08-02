@@ -16,11 +16,13 @@ from sqlalchemy.engine import Engine
 
 import app.models  # noqa: F401 — ensure metadata is complete
 from app.core.config import Settings
+from app.db.base import Base
 from app.db.timestamp_triggers import ensure_timestamp_triggers
 
 LOGGER = logging.getLogger(__name__)
 SCHEMA_LOCK_RETRY_SECONDS = 60.0
 BASELINE_USER_VERSION = 14
+V14_BASELINE_REVISION = "0003_import_work_queue"
 
 
 def alembic_config_for_engine(engine: Engine) -> Config:
@@ -66,20 +68,13 @@ def _run_alembic(engine: Engine, fn) -> None:
     """Run an Alembic CLI command using ``engine``'s live connection."""
 
     config = alembic_config_for_engine(engine)
-    with engine.begin() as connection:
+    with engine.connect() as connection:
         config.attributes["connection"] = connection
         fn(config)
 
 
 def _user_version(connection: sqlite3.Connection) -> int:
     return int(connection.execute("PRAGMA user_version").fetchone()[0])
-
-
-def _looks_like_baseline_schema(table_names: set[str]) -> bool:
-    """True when declared squashed-baseline tables are already present."""
-
-    required = ("User", "LibraryWork", "SystemHealthRun", "QueueControlOperation")
-    return set(required).issubset(table_names)
 
 
 def _schema_state(engine: Engine) -> tuple[str | None, set[str]]:
@@ -106,14 +101,27 @@ def _backup_before_migration(
     LOGGER.info("database migration backup created path=%s", backup_path)
 
 
-def _stamp_head(engine: Engine) -> None:
-    _run_alembic(engine, lambda config: command.stamp(config, "head"))
-    LOGGER.info("database alembic version stamped head=%s", head_revision(engine))
+def _stamp_revision(engine: Engine, revision: str) -> None:
+    _run_alembic(engine, lambda config: command.stamp(config, revision))
+    LOGGER.info("database alembic version stamped revision=%s", revision)
 
 
 def _upgrade_head(engine: Engine) -> None:
     _run_alembic(engine, lambda config: command.upgrade(config, "head"))
     LOGGER.info("database alembic upgraded to head=%s", head_revision(engine))
+
+
+def _rebuild_unversioned_in_memory_database(
+    engine: Engine, application_tables: set[str]
+) -> None:
+    declared_tables = set(Base.metadata.tables)
+    undeclared_tables = application_tables - declared_tables
+    if undeclared_tables:
+        raise RuntimeError(
+            f"不支持包含未声明表的内存数据库；tables={sorted(undeclared_tables)!r}"
+        )
+    Base.metadata.drop_all(engine)
+    _upgrade_head(engine)
 
 
 def _apply_schema_once(engine: Engine, settings: Settings | None = None) -> None:
@@ -132,9 +140,23 @@ def _apply_schema_once(engine: Engine, settings: Settings | None = None) -> None
         head = head_revision(engine)
 
         if current_alembic is not None:
-            raw_connection.close()
-            raw_connection = None
-            _upgrade_head(engine)
+            if current_alembic == head:
+                raw_connection.close()
+                raw_connection = None
+            else:
+                if settings is not None and engine.url.database not in (
+                    None,
+                    "",
+                    ":memory:",
+                ):
+                    _backup_before_migration(
+                        driver_connection,
+                        settings,
+                        f"{current_alembic}-to-{head}",
+                    )
+                raw_connection.close()
+                raw_connection = None
+                _upgrade_head(engine)
         elif not has_tables:
             if settings is not None and engine.url.database not in (
                 None,
@@ -145,19 +167,37 @@ def _apply_schema_once(engine: Engine, settings: Settings | None = None) -> None
             raw_connection.close()
             raw_connection = None
             _upgrade_head(engine)
-        elif user_version == BASELINE_USER_VERSION or (
-            user_version == 0 and _looks_like_baseline_schema(application_tables)
-        ):
-            # Stamp trusted v14 DBs, or test/create_all DBs that already match baseline.
+        elif user_version == BASELINE_USER_VERSION:
+            # v14 is the predecessor of the published Alembic history. Stamp only
+            # that boundary, then execute every deterministic migration after it.
             if settings is not None and engine.url.database not in (
                 None,
                 "",
                 ":memory:",
             ):
-                _backup_before_migration(driver_connection, settings, f"stamp-{head}")
+                _backup_before_migration(
+                    driver_connection,
+                    settings,
+                    f"v14-to-{head}",
+                )
             raw_connection.close()
             raw_connection = None
-            _stamp_head(engine)
+            _stamp_revision(engine, V14_BASELINE_REVISION)
+            _upgrade_head(engine)
+        elif (
+            user_version == 0 and settings is None and engine.url.database == ":memory:"
+        ):
+            # Tests may compose an ephemeral ORM schema before requesting the
+            # complete database. Rebuild it through Alembic instead of stamping
+            # an unverified layout, so its revision has the production schema.
+            raw_connection.close()
+            raw_connection = None
+            _rebuild_unversioned_in_memory_database(engine, application_tables)
+        elif user_version == 0:
+            raise RuntimeError(
+                "不支持 pre-v14 或未标记版本的非空数据库；"
+                "数据库必须从空库或已发布的 v14/Alembic 版本升级"
+            )
         elif user_version < BASELINE_USER_VERSION:
             raise RuntimeError(
                 f"不支持 pre-v14 数据库（user_version={user_version}）；"

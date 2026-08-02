@@ -1,8 +1,9 @@
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app.models.auth import User
-from app.models.settings import SystemHealthRun
+from app.models.settings import MonitorFolder, SystemHealthRun
 
 
 def _setup_admin(client) -> None:
@@ -30,19 +31,80 @@ def test_health_response_shape(client, test_settings):
     assert payload["ok"] is True
     assert payload["data"]["status"] == "ok"
     assert isinstance(payload["data"]["checks"], list)
+    monitor_check = next(
+        check
+        for check in payload["data"]["checks"]
+        if check["name"] == "monitorRootReadable"
+    )
+    assert monitor_check["status"] == "unknown"
     conversion = next(check for check in payload["data"]["checks"] if check["name"] == "ebookConversion")
     assert conversion["details"]["converter"] == "libmobi+shuku-internal"
     assert {engine["converter"] for engine in conversion["details"]["engines"]} == {"libmobi", "shuku-internal"}
 
 
-def test_health_reports_monitor_failure(client):
+def test_health_aggregates_enabled_monitor_folder_readability(
+    client, db_session, tmp_path
+):
+    _setup_admin(client)
+    first = tmp_path / "first-library"
+    second = tmp_path / "second-library"
+    first.mkdir()
+    second.mkdir()
+    db_session.add_all(
+        [
+            MonitorFolder(name="First", root_path=str(first), enabled=True),
+            MonitorFolder(name="Second", root_path=str(second), enabled=True),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/api/system/health")
+
+    monitor_check = next(
+        check
+        for check in response.json()["data"]["checks"]
+        if check["name"] == "monitorRootReadable"
+    )
+    assert monitor_check["status"] == "ok"
+    assert monitor_check["message"] == "2 个监控文件夹可读"
+
+
+def test_health_reports_an_unreadable_enabled_monitor_folder(
+    client, db_session, tmp_path, monkeypatch
+):
+    _setup_admin(client)
+    blocked = tmp_path / "blocked-library"
+    blocked.mkdir()
+    db_session.add(MonitorFolder(name="Blocked", root_path=str(blocked), enabled=True))
+    db_session.commit()
+    original_iterdir = Path.iterdir
+
+    def guarded_iterdir(path: Path):
+        if path == blocked:
+            raise PermissionError("permission denied")
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", guarded_iterdir)
+
+    response = client.get("/api/system/health")
+
+    monitor_check = next(
+        check
+        for check in response.json()["data"]["checks"]
+        if check["name"] == "monitorRootReadable"
+    )
+    assert monitor_check["status"] == "error"
+    assert "监控文件夹不可读" in monitor_check["message"]
+
+
+def test_health_allows_no_configured_monitor_folders(client):
     response = client.get("/api/health")
 
-    assert response.status_code == 503
+    assert response.status_code == 200
     payload = response.json()
     assert payload["ok"] is True
     assert payload["data"]["service"] == "ermao-books"
-    assert payload["data"]["status"] == "error"
+    assert payload["data"]["status"] == "ok"
 
 
 def test_db_ping_succeeds(client):

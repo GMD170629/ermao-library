@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from sqlalchemy.orm import Session
 
@@ -30,7 +31,25 @@ from app.modules.library.infrastructure.structural_operations import (
 from app.modules.library.infrastructure.structural_operations import (
     reorder_volume as _reorder_volume,
 )
+from app.modules.library.infrastructure.volume_commands import SqlAlchemyVolumeStructure
 from app.modules.library.infrastructure.work_list import list_works as _list_works
+
+__all__ = [
+    "library_dashboard",
+    "library_deletion",
+    "library_facet_queries",
+    "library_groupings",
+    "library_join_queries",
+    "library_operation_store",
+    "library_projections",
+    "library_storage",
+    "library_works",
+    "list_works",
+    "move_volume_to_work",
+    "reorder_volume",
+    "smart_shelf_work_ids",
+    "volume_structure_commands",
+]
 
 
 def smart_shelf_work_ids(
@@ -64,7 +83,6 @@ def move_volume_to_work(
     source_work_id: str,
     volume_id: str,
     target_work_id: str,
-    source_format: str,
     now: datetime,
 ) -> MoveVolumeResult:
     return _move_volume_to_work(
@@ -72,7 +90,6 @@ def move_volume_to_work(
         source_work_id=source_work_id,
         volume_id=volume_id,
         target_work_id=target_work_id,
-        source_format=source_format,
         now=now,
     )
 
@@ -81,14 +98,20 @@ def reorder_volume(
     db: Session,
     *,
     volume_id: str,
-    edition_id: str,
-    direction: str,
+    media_version_id: str,
+    direction: Literal["up", "down"],
     now: datetime,
 ) -> bool:
     return _reorder_volume(
         db,
         volume_id=volume_id,
-        edition_id=edition_id,
+        media_version_id=media_version_id,
         direction=direction,
         now=now,
     )
+
+
+def volume_structure_commands(db: Session) -> SqlAlchemyVolumeStructure:
+    from app.bootstrap.imports import stage_import_task_with_work_item
+
+    return SqlAlchemyVolumeStructure(db, stage_import_task_with_work_item)

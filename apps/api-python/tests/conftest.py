@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -16,11 +17,18 @@ from app import models as _models  # noqa: F401
 _TEST_ORM_TABLES = list(Base.metadata.sorted_tables)
 
 
+class TestSettings(Settings):
+    """Legacy test path fixture while production no longer has a monitor root."""
+
+    @property
+    def resolved_monitor_root(self) -> Path:
+        return self.resolved_storage_root.parent / "monitor"
+
+
 @pytest.fixture()
 def test_settings(tmp_path) -> Settings:
-    return Settings(
+    return TestSettings(
         session_secret="test-secret",
-        monitor_root=str(tmp_path / "monitor"),
         storage_root=str(tmp_path / "storage"),
         secure_cookies=False,
         download_queue_enabled=False,

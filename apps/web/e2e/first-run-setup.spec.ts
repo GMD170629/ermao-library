@@ -39,6 +39,20 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
     });
     await route.fulfill({ status: 201, json: { ok: true, data: { folder: { id: 'folder-1', name: '我的书库', rootPath: '/monitor', enabled: true } } } });
   });
+  await page.route('**/api/monitor-folders/tree**', async (route) => {
+    const requestedPath = new URL(route.request().url()).searchParams.get('path');
+    await route.fulfill({
+      json: {
+        ok: true,
+        data: {
+          node: requestedPath === '/monitor'
+            ? { name: 'monitor', path: '/monitor', readable: true, error: null, children: [] }
+            : { name: '/', path: '/', readable: true, error: null, children: [{ name: 'monitor', path: '/monitor', readable: true }] },
+          monitorRoot: null
+        }
+      }
+    });
+  });
 
   await page.goto('/login');
 
@@ -57,7 +71,13 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
   await page.getByRole('button', { name: '创建账户' }).click();
 
   await expect(page.getByRole('heading', { name: '添加监控文件夹' })).toBeVisible();
-  await expect(page.getByLabel('监控文件夹路径')).toHaveValue('/monitor');
+  const folderPath = page.getByRole('combobox', { name: '监控文件夹路径' });
+  await folderPath.fill('/monitor');
+  await page.getByRole('button', { name: '展开文件夹路径树' }).click();
+  const directoryTree = page.getByRole('tree');
+  await expect(directoryTree.getByRole('button', { name: '/', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'monitor', exact: true }).click();
+  await expect(folderPath).toHaveValue('/monitor');
   await page.getByRole('button', { name: '添加并继续' }).click();
 
   await expect(page.getByRole('heading', { name: '你的私人书库已准备好' })).toBeVisible();
@@ -99,7 +119,7 @@ test('an authenticated owner can resume unfinished library onboarding after refr
   await page.goto('/setup');
 
   await expect(page.getByRole('heading', { name: '添加监控文件夹' })).toBeVisible();
-  await expect(page.getByLabel('监控文件夹路径')).toHaveValue('/monitor');
+  await expect(page.getByRole('combobox', { name: '监控文件夹路径' })).toHaveValue('/monitor');
 });
 
 test('login shows password errors in the system feedback style and in Chinese', async ({ page }) => {

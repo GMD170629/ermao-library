@@ -99,8 +99,11 @@ export function LoginPage() {
         return;
       }
       const next = new URLSearchParams(window.location.search).get('next');
-      router.replace(safePostLoginPath(next));
-      router.refresh();
+      // A full navigation makes the session cookie issued by the API available to
+      // the Next proxy before it evaluates the protected destination. Calling
+      // router.refresh immediately after router.replace can instead refresh the
+      // still-mounted login route and leave a successful login stranded here.
+      window.location.assign(safePostLoginPath(next));
     } catch {
       setError('无法连接登录服务，请确认 Web 和 Python API 都已启动。');
     } finally {

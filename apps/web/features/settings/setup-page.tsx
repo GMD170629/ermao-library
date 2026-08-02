@@ -9,6 +9,7 @@ import { withBasePath } from '../../lib/base-path';
 import { PRODUCT_NAME } from '../../lib/brand';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
+import { DirectoryPathPicker } from './ui/directory-path-picker';
 
 type SetupStage = 'checking' | 'account' | 'creating-account' | 'folder' | 'saving-folder' | 'complete' | 'unavailable';
 type SetupPayload = {
@@ -53,7 +54,7 @@ export function SetupPage() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [folderName, setFolderName] = useState('我的书库');
-  const [folderPath, setFolderPath] = useState('/books');
+  const [folderPath, setFolderPath] = useState('');
   const [folderAdded, setFolderAdded] = useState(false);
   const [error, setError] = useState('');
 
@@ -88,7 +89,7 @@ export function SetupPage() {
           if (saved && ['folder', 'import', 'complete'].includes(saved.stage)) {
             setEmail(saved.email);
             setFolderAdded(saved.folderAdded);
-            setFolderPath(saved.folderPath || '/books');
+            setFolderPath(saved.folderPath || '');
             // Older in-progress sessions may still contain the removed import step.
             setStage(saved.stage === 'folder' ? 'folder' : 'complete');
             return;
@@ -163,15 +164,6 @@ export function SetupPage() {
       setEmail(accountEmail);
       setStage('folder');
       saveProgress({ stage: 'folder', email: accountEmail, folderAdded: false, folderPath });
-      void fetch('/api/monitor-folders', { cache: 'no-store' })
-        .then((result) => result.json())
-        .then((result: { ok?: boolean; data?: { monitorRoot?: string | null } }) => {
-          if (result.ok && result.data?.monitorRoot) {
-            setFolderPath(result.data.monitorRoot);
-            saveProgress({ stage: 'folder', email: accountEmail, folderAdded: false, folderPath: result.data.monitorRoot });
-          }
-        })
-        .catch(() => undefined);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '无法连接初始化服务');
       setStage('account');
@@ -270,11 +262,11 @@ export function SetupPage() {
                   <span className="text-sm font-semibold"><I18nText>文件夹名称</I18nText></span>
                   <input value={folderName} onChange={(event) => { setFolderName(event.target.value); setError(''); }} maxLength={100} className="mt-2 h-12 w-full rounded-2xl border border-[#B08B6E]/55 bg-[#E8DCC7] px-4 text-sm outline-none transition focus:border-[#C66B3D] focus:ring-4 focus:ring-[#C66B3D]/15" />
                 </label>
-                <label className="block">
+                <div className="block">
                   <span className="text-sm font-semibold"><I18nText>监控文件夹路径</I18nText></span>
-                  <input value={folderPath} onChange={(event) => { setFolderPath(event.target.value); setError(''); }} placeholder="/monitor" className="mt-2 h-12 w-full rounded-2xl border border-[#B08B6E]/55 bg-[#E8DCC7] px-4 text-sm outline-none transition placeholder:text-[#8B9D83] focus:border-[#C66B3D] focus:ring-4 focus:ring-[#C66B3D]/15" />
-                  <span className="mt-2 block text-xs leading-5 text-[#606C38]/65"><I18nText>路径必须位于应用可访问的监控根目录内；Docker 部署通常为 /monitor。</I18nText></span>
-                </label>
+                  <DirectoryPathPicker value={folderPath} onChange={(value) => { setFolderPath(value); setError(''); }} disabled={stage === 'saving-folder'} variant="setup" />
+                  <span className="mt-2 block text-xs leading-5 text-[#606C38]/65"><I18nText>路径必须是应用当前可访问且可读取的绝对目录。</I18nText></span>
+                </div>
                 {error ? <SetupError message={error} /> : null}
                 <button type="submit" disabled={stage === 'saving-folder'} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[#C66B3D] px-6 text-sm font-semibold text-[#E8DCC7] transition hover:bg-[#B08B6E] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#8B9D83]/40 disabled:cursor-not-allowed disabled:opacity-70">
                   {stage === 'saving-folder' ? <><Loader2 size={17} className="animate-spin" /> <I18nText>正在添加</I18nText></> : <><I18nText>添加并继续 </I18nText><ArrowRight size={17} /></>}

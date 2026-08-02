@@ -96,7 +96,7 @@ def _work_has_matching_source_series(
     source_group_suffix: str,
     series_name: str,
 ) -> bool:
-    files = queries.list_edition_file_paths_for_work(work_id, source_group_suffix)
+    files = queries.list_media_version_file_paths_for_work(work_id, source_group_suffix)
     expected = _normalize_key(series_name)
     for file in files:
         existing_path = Path(str(file.get("path") or ""))
@@ -158,9 +158,7 @@ def _record_identity_system_events(
         ai_failed = identity.fallback_code in {
             "AI_BILLING_REQUIRED",
             "AI_REQUEST_FAILED",
-        } or identity.fallback_reason.startswith(
-            "AI identity recognition failed:"
-        )
+        } or identity.fallback_reason.startswith("AI identity recognition failed:")
         services.stage_system_event(
             ImportSystemEvent(
                 source="import",

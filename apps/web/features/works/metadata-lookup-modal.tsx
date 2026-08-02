@@ -68,11 +68,17 @@ function candidateValue(candidate: MetadataCandidate | null, field: MetadataFiel
 }
 
 function bookValue(book: WorkView, field: MetadataField) {
+  const volumes = book.mediaVersions.flatMap((mediaVersion) => mediaVersion.volumes);
   if (field === 'coverUrl') return book.coverStatus === 'READY' ? book.coverUrl : null;
   if (field === 'author') return book.author === '未知作者' ? null : book.author;
-  if (field === 'description') return book.desc === '暂无简介，可在详情页补充元数据。' ? null : book.desc;
+  if (field === 'description') return book.description || null;
+  if (field === 'publisher') return volumes.find((volume) => volume.publisher)?.publisher ?? null;
+  if (field === 'publishedYear') {
+    const publishedAt = volumes.find((volume) => volume.publishedAt)?.publishedAt;
+    return publishedAt ? Number(publishedAt.slice(0, 4)) : null;
+  }
   if (field === 'tags') return book.tags;
-  return book[field];
+  return field === 'title' || field === 'seriesName' || field === 'seriesIndex' ? book[field] : null;
 }
 
 function hasCandidateValue(value: unknown) {
@@ -100,14 +106,16 @@ function defaultFields(book: WorkView, candidate: MetadataCandidate | null) {
 }
 
 function initialSource(book: WorkView): MetadataSource {
-  return book.type === 'comic' ? 'bangumi' : 'douban';
+  return book.mediaVersions.some((mediaVersion) => mediaVersion.mediaKind === 'COMIC') ? 'bangumi' : 'douban';
 }
 
 type MetadataProviderOption = { id: string; name: string; enabled: boolean; workTypes: string[]; mode: string };
 type MetadataProviderPipeline = { workType: string; providers: Array<{ providerId: string; enabled: boolean }> };
 
 function normalizedWorkType(book: WorkView) {
-  return book.type === 'comic' ? 'comic' : book.type === 'audiobook' ? 'audiobook' : 'ebook';
+  if (book.mediaVersions.some((mediaVersion) => mediaVersion.mediaKind === 'COMIC')) return 'comic';
+  if (book.mediaVersions.some((mediaVersion) => mediaVersion.mediaKind === 'AUDIOBOOK')) return 'audiobook';
+  return 'ebook';
 }
 
 export function MetadataLookupModal({ book, open, onClose, onApplied }: MetadataLookupModalProps) {
@@ -117,6 +125,16 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
   const [candidates, setCandidates] = useState<MetadataCandidate[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [selectedFields, setSelectedFields] = useState<MetadataField[]>([]);
+  const volumeOptions = useMemo(() => book.mediaVersions.flatMap((mediaVersion) =>
+    mediaVersion.volumes.map((volume) => ({
+      value: volume.id,
+      label: `${mediaVersion.mediaKind} · ${volume.title}`,
+      translate: false
+    }))
+  ), [book.mediaVersions]);
+  const [targetVolumeId, setTargetVolumeId] = useState(
+    () => book.continueVolumeId ?? volumeOptions[0]?.value ?? ''
+  );
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -140,6 +158,7 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
     setCandidates([]);
     setSelectedId('');
     setSelectedFields([]);
+    setTargetVolumeId(book.continueVolumeId ?? volumeOptions[0]?.value ?? '');
     setMessage('');
     setError('');
     fetch('/api/metadata/providers', { cache: 'no-store' })
@@ -155,7 +174,7 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
         if (applicable) setSource(applicable.id);
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : '读取元数据插件失败'));
-  }, [book, open]);
+  }, [book, open, volumeOptions]);
 
   useEffect(() => {
     setSelectedFields(defaultFields(book, selected));
@@ -193,7 +212,12 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
       const response = await fetch(`/api/works/${book.id}/metadata/apply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source, candidate: selected, fields: selectedFields })
+        body: JSON.stringify({
+          source,
+          candidate: selected,
+          fields: selectedFields,
+          volumeId: selectedFields.includes('publisher') ? targetVolumeId : null
+        })
       });
       const payload = (await response.json()) as { ok: boolean; data?: { book?: WorkView | null }; error?: { message: string } };
       if (!payload.ok) throw new Error(payload.error?.message ?? '元数据应用失败');
@@ -299,6 +323,18 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
           </div>
 
           <div className="min-w-0 rounded-2xl border border-slate-200">
+            {selectedFields.includes('publisher') ? (
+              <div className="border-b border-slate-100 bg-slate-50 px-3 py-3">
+                <div className="mb-2 text-xs font-medium text-slate-500"><I18nText>出版社应用到卷册</I18nText></div>
+                <Select
+                  value={targetVolumeId}
+                  options={volumeOptions}
+                  onChange={setTargetVolumeId}
+                  ariaLabel={i18nAttribute("出版社目标卷册")}
+                  className="w-full"
+                />
+              </div>
+            ) : null}
             <div className="hidden grid-cols-[44px_90px_minmax(0,1fr)_minmax(0,1fr)] gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-500 md:grid">
               <div />
               <div><I18nText>字段</I18nText></div>
@@ -337,7 +373,7 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
 
         <div className="flex flex-col gap-2 border-t border-slate-100 px-5 py-4 sm:flex-row sm:justify-end">
           <Button variant="secondary" onClick={onClose}><I18nText>取消</I18nText></Button>
-          <Button disabled={busy || !selected || selectedFields.length === 0} icon={CheckCircle2} onClick={() => void applySelected()}><I18nText>应用所选字段</I18nText></Button>
+          <Button disabled={busy || !selected || selectedFields.length === 0 || (selectedFields.includes('publisher') && !targetVolumeId)} icon={CheckCircle2} onClick={() => void applySelected()}><I18nText>应用所选字段</I18nText></Button>
         </div>
       </div>
     </div>

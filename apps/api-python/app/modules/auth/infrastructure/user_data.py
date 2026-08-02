@@ -3,27 +3,33 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
-
-from sqlalchemy import delete, inspect as sa_inspect, select, update
-from sqlalchemy.orm import Session
 
 from app.models.auth import (
     PasswordResetToken,
     ReaderBookmark,
-    Session as UserSession,
     UserMonitorFolderAccess,
     UserPreference,
 )
+from app.models.auth import (
+    Session as UserSession,
+)
 from app.models.import_pipeline import KindleSendTask
 from app.models.library import (
-    LibraryConsumptionState,
     LibraryOperation,
     LibraryReadingProgress,
+    UserMediaHistory,
     WorkDetailPreference,
 )
-from app.models.settings import ReaderBookPreference, ReaderPreference, ReaderProgressCursor, SystemEvent
+from app.models.settings import (
+    ReaderBookPreference,
+    ReaderPreference,
+    ReaderProgressCursor,
+    SystemEvent,
+)
 from app.models.shelf import Shelf, ShelfWork
+from sqlalchemy import delete, select, update
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.orm import Session
 
 
 def list_monitor_folder_ids(db: Session, user_id: str) -> list[str]:
@@ -52,8 +58,14 @@ def validate_monitor_folder_ids(db: Session, folder_ids: list[str]) -> list[str]
     return folder_ids
 
 
-def replace_monitor_folder_access(db: Session, user_id: str, folder_ids: list[str], now: datetime) -> None:
-    db.execute(delete(UserMonitorFolderAccess).where(UserMonitorFolderAccess.user_id == user_id))
+def replace_monitor_folder_access(
+    db: Session, user_id: str, folder_ids: list[str], now: datetime
+) -> None:
+    db.execute(
+        delete(UserMonitorFolderAccess).where(
+            UserMonitorFolderAccess.user_id == user_id
+        )
+    )
     for folder_id in folder_ids:
         db.add(
             UserMonitorFolderAccess(
@@ -64,14 +76,18 @@ def replace_monitor_folder_access(db: Session, user_id: str, folder_ids: list[st
         )
 
 
-def delete_personal_user_data(db: Session, user_id: str, anonymous_user_id: str) -> None:
+def delete_personal_user_data(
+    db: Session, user_id: str, anonymous_user_id: str
+) -> None:
     """Delete account-owned rows even on databases upgraded from pre-FK schemas."""
 
     tables = set(sa_inspect(db.connection()).get_table_names())
     if {"Shelf", "ShelfWork"}.issubset(tables):
         db.execute(
             delete(ShelfWork).where(
-                ShelfWork.shelf_id.in_(select(Shelf.id).where(Shelf.owner_user_id == user_id))
+                ShelfWork.shelf_id.in_(
+                    select(Shelf.id).where(Shelf.owner_user_id == user_id)
+                )
             )
         )
     if "Shelf" in tables:
@@ -79,7 +95,7 @@ def delete_personal_user_data(db: Session, user_id: str, anonymous_user_id: str)
     for model in (
         ReaderBookmark,
         WorkDetailPreference,
-        LibraryConsumptionState,
+        UserMediaHistory,
         LibraryReadingProgress,
         ReaderProgressCursor,
         ReaderBookPreference,
@@ -93,11 +109,17 @@ def delete_personal_user_data(db: Session, user_id: str, anonymous_user_id: str)
             db.execute(delete(model).where(model.user_id == user_id))
     for model in (KindleSendTask, LibraryOperation):
         if model.__tablename__ in tables:
-            db.execute(update(model).where(model.user_id == user_id).values(user_id=None))
+            db.execute(
+                update(model).where(model.user_id == user_id).values(user_id=None)
+            )
     if "SystemEvent" in tables:
         db.execute(
-            update(SystemEvent).where(SystemEvent.actor_id == user_id).values(actor_id=anonymous_user_id)
+            update(SystemEvent)
+            .where(SystemEvent.actor_id == user_id)
+            .values(actor_id=anonymous_user_id)
         )
         db.execute(
-            update(SystemEvent).where(SystemEvent.target_id == user_id).values(target_id=anonymous_user_id)
+            update(SystemEvent)
+            .where(SystemEvent.target_id == user_id)
+            .values(target_id=anonymous_user_id)
         )

@@ -47,11 +47,9 @@ class KindleTask(HttpContractModel):
     id: str
     user_id: str | None = Field(default=None, alias="userId")
     work_id: str | None = Field(default=None, alias="workId")
-    edition_id: str | None = Field(default=None, alias="editionId")
     volume_id: str | None = Field(default=None, alias="volumeId")
     file_id: str | None = Field(default=None, alias="fileId")
     book_title: str = Field(alias="bookTitle")
-    edition_name: str | None = Field(default=None, alias="editionName")
     volume_title: str | None = Field(default=None, alias="volumeTitle")
     file_name: str = Field(alias="fileName")
     format: str

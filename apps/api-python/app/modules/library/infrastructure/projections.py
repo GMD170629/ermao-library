@@ -1,24 +1,21 @@
-"""ORM queries used to build library work and reader projections."""
+"""Typed volume-scoped projections for the library capability."""
 
 from __future__ import annotations
 
 from datetime import datetime
 from uuid import uuid4
 
-from typing import Any
-
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.library import (
-    LibraryConsumptionState,
-    LibraryEdition,
     LibraryFile,
+    LibraryMediaVersion,
     LibraryMetadata,
     LibraryReadingProgress,
     LibraryReadingUnit,
     LibraryVolume,
+    UserMediaHistory,
     WorkDetailPreference,
 )
 from app.models.organize import MetadataLookupTask
@@ -26,10 +23,7 @@ from app.modules.library.infrastructure.works import entity_as_legacy_dict
 
 
 def get_detail_preference(
-    db: Session,
-    *,
-    user_id: str,
-    work_id: str,
+    db: Session, *, user_id: str, work_id: str
 ) -> dict[str, object] | None:
     preference = db.scalar(
         select(WorkDetailPreference).where(
@@ -71,84 +65,70 @@ def save_detail_preference(
     return entity_as_legacy_dict(preference)
 
 
-def get_consumption_state(
-    db: Session,
-    *,
-    user_id: str,
-    work_id: str,
-    media_kind: str,
+def get_media_history(
+    db: Session, *, user_id: str, media_version_id: str
 ) -> dict[str, object] | None:
-    state = db.scalar(
-        select(LibraryConsumptionState).where(
-            LibraryConsumptionState.user_id == user_id,
-            LibraryConsumptionState.work_id == work_id,
-            LibraryConsumptionState.media_kind == media_kind,
+    history = db.scalar(
+        select(UserMediaHistory).where(
+            UserMediaHistory.user_id == user_id,
+            UserMediaHistory.media_version_id == media_version_id,
         )
     )
-    return entity_as_legacy_dict(state) if state is not None else None
+    return entity_as_legacy_dict(history) if history is not None else None
 
 
-def save_consumption_state(
+def save_media_history(
     db: Session,
     *,
     user_id: str,
-    work_id: str,
-    media_kind: str,
-    status: str,
-    last_edition_id: str | None,
+    media_version_id: str,
     last_volume_id: str | None,
-    last_unit_id: str | None,
     now: datetime,
 ) -> dict[str, object]:
-    state = db.scalar(
-        select(LibraryConsumptionState).where(
-            LibraryConsumptionState.user_id == user_id,
-            LibraryConsumptionState.work_id == work_id,
-            LibraryConsumptionState.media_kind == media_kind,
+    history = db.scalar(
+        select(UserMediaHistory).where(
+            UserMediaHistory.user_id == user_id,
+            UserMediaHistory.media_version_id == media_version_id,
         )
     )
-    if state is None:
-        state = LibraryConsumptionState(
+    if history is None:
+        history = UserMediaHistory(
             id=f"py_{uuid4().hex}",
             user_id=user_id,
-            work_id=work_id,
-            media_kind=media_kind,
-            status=status,
-            last_edition_id=last_edition_id,
+            media_version_id=media_version_id,
             last_volume_id=last_volume_id,
-            last_unit_id=last_unit_id,
             created_at=now,
             updated_at=now,
         )
-        db.add(state)
+        db.add(history)
     else:
-        state.status = status
-        state.last_edition_id = last_edition_id
-        state.last_volume_id = last_volume_id
-        state.last_unit_id = last_unit_id
-        state.updated_at = now
+        history.last_volume_id = last_volume_id
+        history.updated_at = now
     db.flush()
-    return entity_as_legacy_dict(state)
+    return entity_as_legacy_dict(history)
 
 
-def get_edition(db: Session, edition_id: str) -> dict[str, object] | None:
-    edition = db.get(LibraryEdition, edition_id)
-    return entity_as_legacy_dict(edition) if edition is not None else None
-
-
-def list_consumption_states(
-    db: Session,
-    *,
-    user_id: str,
-    work_id: str,
+def list_media_histories_for_work(
+    db: Session, *, user_id: str, work_id: str
 ) -> list[dict[str, object]]:
-    states = db.scalars(
-        select(LibraryConsumptionState).where(
-            LibraryConsumptionState.user_id == user_id,
-            LibraryConsumptionState.work_id == work_id,
+    histories = db.scalars(
+        select(UserMediaHistory)
+        .join(
+            LibraryMediaVersion,
+            LibraryMediaVersion.id == UserMediaHistory.media_version_id,
         )
+        .where(
+            UserMediaHistory.user_id == user_id,
+            LibraryMediaVersion.work_id == work_id,
+        )
+        .order_by(UserMediaHistory.updated_at.desc(), UserMediaHistory.id.desc())
     ).all()
-    return [entity_as_legacy_dict(state) for state in states]
+    return [entity_as_legacy_dict(history) for history in histories]
+
+
+def get_media_version(db: Session, media_version_id: str) -> dict[str, object] | None:
+    media_version = db.get(LibraryMediaVersion, media_version_id)
+    return entity_as_legacy_dict(media_version) if media_version is not None else None
 
 
 def get_reading_unit_title(db: Session, unit_id: str) -> str | None:
@@ -157,56 +137,54 @@ def get_reading_unit_title(db: Session, unit_id: str) -> str | None:
     )
 
 
-def list_files_for_edition(
-    db: Session,
-    edition_id: str,
-) -> list[dict[str, object]]:
-    rows = db.scalars(
+def list_files_for_volume(db: Session, volume_id: str) -> list[dict[str, object]]:
+    files = db.scalars(
         select(LibraryFile)
-        .where(LibraryFile.edition_id == edition_id)
+        .where(LibraryFile.volume_id == volume_id)
         .order_by(LibraryFile.sort_order.asc(), LibraryFile.id.asc())
     ).all()
-    return [entity_as_legacy_dict(row) for row in rows]
+    return [entity_as_legacy_dict(file) for file in files]
 
 
-def list_volumes_for_edition(
-    db: Session,
-    edition_id: str,
+def list_volumes_for_media_version(
+    db: Session, media_version_id: str
 ) -> list[dict[str, object]]:
-    rows = db.scalars(
+    volumes = db.scalars(
         select(LibraryVolume)
-        .where(LibraryVolume.edition_id == edition_id)
-        .order_by(LibraryVolume.sort_order.asc(), LibraryVolume.id.asc())
+        .where(LibraryVolume.media_version_id == media_version_id)
+        .order_by(
+            LibraryVolume.sort_order.asc(),
+            LibraryVolume.created_at.asc(),
+            LibraryVolume.id.asc(),
+        )
     ).all()
-    return [entity_as_legacy_dict(row) for row in rows]
+    return [entity_as_legacy_dict(volume) for volume in volumes]
 
 
-def latest_conversion_metadata(
-    db: Session,
-    edition_id: str,
-) -> dict[str, object] | None:
-    row = db.scalar(
+def latest_conversion_metadata(db: Session, volume_id: str) -> dict[str, object] | None:
+    metadata = db.scalar(
         select(LibraryMetadata)
         .where(
-            LibraryMetadata.edition_id == edition_id,
+            LibraryMetadata.volume_id == volume_id,
             LibraryMetadata.source == "conversion",
         )
         .order_by(LibraryMetadata.created_at.desc(), LibraryMetadata.id.desc())
         .limit(1)
     )
-    return entity_as_legacy_dict(row) if row is not None else None
+    return entity_as_legacy_dict(metadata) if metadata is not None else None
 
 
-def list_progress_for_edition(
-    db: Session,
-    *,
-    edition_id: str,
-    user_id: str,
+def list_progress_for_media_version(
+    db: Session, *, media_version_id: str, user_id: str
 ) -> list[dict[str, object]]:
-    rows = db.scalars(
+    progress_rows = db.scalars(
         select(LibraryReadingProgress)
+        .join(
+            LibraryVolume,
+            LibraryVolume.id == LibraryReadingProgress.volume_id,
+        )
         .where(
-            LibraryReadingProgress.edition_id == edition_id,
+            LibraryVolume.media_version_id == media_version_id,
             LibraryReadingProgress.user_id == user_id,
         )
         .order_by(
@@ -214,53 +192,39 @@ def list_progress_for_edition(
             LibraryReadingProgress.id.desc(),
         )
     ).all()
-    return [entity_as_legacy_dict(row) for row in rows]
+    return [entity_as_legacy_dict(progress) for progress in progress_rows]
 
 
-def list_reading_units(
-    db: Session,
-    *,
-    edition_id: str,
-    volume_id: str | None = None,
-) -> list[dict[str, object]]:
-    filters: list[ColumnElement[bool]] = [
-        LibraryReadingUnit.edition_id == edition_id
-    ]
-    if volume_id is not None:
-        filters.append(LibraryReadingUnit.volume_id == volume_id)
-    rows = db.scalars(
+def list_reading_units(db: Session, *, volume_id: str) -> list[dict[str, object]]:
+    units = db.scalars(
         select(LibraryReadingUnit)
-        .where(*filters)
+        .where(LibraryReadingUnit.volume_id == volume_id)
         .order_by(
             LibraryReadingUnit.sort_order.asc(),
             LibraryReadingUnit.id.asc(),
         )
     ).all()
-    return [entity_as_legacy_dict(row) for row in rows]
+    return [entity_as_legacy_dict(unit) for unit in units]
 
 
 def reading_units_page(
     db: Session,
     *,
-    edition_id: str,
-    volume_id: str | None,
+    volume_id: str,
     limit: int,
     offset: int,
 ) -> tuple[list[dict[str, object]], int]:
-    filters: list[ColumnElement[bool]] = [
-        LibraryReadingUnit.edition_id == edition_id
-    ]
-    if volume_id is not None:
-        filters.append(LibraryReadingUnit.volume_id == volume_id)
     total = int(
         db.scalar(
-            select(func.count(LibraryReadingUnit.id)).where(*filters)
+            select(func.count(LibraryReadingUnit.id)).where(
+                LibraryReadingUnit.volume_id == volume_id
+            )
         )
         or 0
     )
-    rows = db.scalars(
+    units = db.scalars(
         select(LibraryReadingUnit)
-        .where(*filters)
+        .where(LibraryReadingUnit.volume_id == volume_id)
         .order_by(
             LibraryReadingUnit.sort_order.asc(),
             LibraryReadingUnit.id.asc(),
@@ -268,14 +232,13 @@ def reading_units_page(
         .limit(limit)
         .offset(offset)
     ).all()
-    return [entity_as_legacy_dict(row) for row in rows], total
+    return [entity_as_legacy_dict(unit) for unit in units], total
 
 
 def latest_metadata_lookup_for_work(
-    db: Session,
-    work_id: str,
+    db: Session, work_id: str
 ) -> dict[str, object] | None:
-    row = db.scalar(
+    task = db.scalar(
         select(MetadataLookupTask)
         .where(MetadataLookupTask.work_id == work_id)
         .order_by(
@@ -284,4 +247,4 @@ def latest_metadata_lookup_for_work(
         )
         .limit(1)
     )
-    return entity_as_legacy_dict(row) if row is not None else None
+    return entity_as_legacy_dict(task) if task is not None else None

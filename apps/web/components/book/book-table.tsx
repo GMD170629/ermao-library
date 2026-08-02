@@ -4,8 +4,8 @@ import { ArrowDown, ArrowUp, ArrowUpDown, Eye, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { useEffect, useRef } from 'react';
+import type { ManagementWorkSummary } from '../../features/library/public';
 import { useI18n } from '../../i18n/provider';
-import type { WorkView } from '../../types/work';
 import { Badge } from '../ui/badge';
 import type { BadgeTone } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -34,14 +34,14 @@ export function BookTable({
   sortDirection = 'asc',
   onSort
 }: {
-  books: WorkView[];
-  onDelete?: (book: WorkView) => void;
+  books: ManagementWorkSummary[];
+  onDelete?: (book: ManagementWorkSummary) => void;
   selectable?: boolean;
   selectedIds?: string[];
-  onSelect?: (book: WorkView) => void;
+  onSelect?: (book: ManagementWorkSummary) => void;
   onSelectAll?: (selected: boolean) => void;
   onSelectionChange?: (ids: string[]) => void;
-  onContextMenu?: (book: WorkView, position: { x: number; y: number }) => void;
+  onContextMenu?: (book: ManagementWorkSummary, position: { x: number; y: number }) => void;
   sort?: string;
   sortDirection?: SortDirection;
   onSort?: (sort: string, direction: SortDirection) => void;
@@ -89,7 +89,7 @@ export function BookTable({
     commitSelection(next);
   }
 
-  function beginRowSelection(event: ReactMouseEvent<HTMLTableRowElement>, book: WorkView, index: number) {
+  function beginRowSelection(event: ReactMouseEvent<HTMLTableRowElement>, book: ManagementWorkSummary, index: number) {
     if (!selectable || event.button !== 0) return;
     const target = event.target as HTMLElement;
     if (target.closest('button, a, input, select, textarea, [data-selection-ignore="true"]')) return;
@@ -109,24 +109,20 @@ export function BookTable({
     applyDragSelection(book.id);
   }
 
-  function openContextMenu(event: ReactMouseEvent<HTMLElement>, book: WorkView) {
+  function openContextMenu(event: ReactMouseEvent<HTMLElement>, book: ManagementWorkSummary) {
     if (!selectable || !onContextMenu) return;
     event.preventDefault();
     if (!selectedRef.current.has(book.id)) commitSelection(new Set([book.id]));
     onContextMenu(book, { x: event.clientX, y: event.clientY });
   }
 
-  function mediaLabel(book: WorkView) {
-    const kinds = book.availableMediaKinds?.length
-      ? book.availableMediaKinds
-      : [book.type === 'comic' ? 'COMIC' : book.type === 'audiobook' ? 'AUDIOBOOK' : 'EBOOK'];
+  function mediaLabel(book: ManagementWorkSummary) {
+    const kinds = book.availableMediaKinds;
     return kinds.map((kind) => kind === 'AUDIOBOOK' ? '有声书' : kind === 'COMIC' ? '漫画' : '电子书').join(' · ');
   }
 
-  function statusLabel(book: WorkView) {
-    const kinds = book.availableMediaKinds?.length
-      ? book.availableMediaKinds
-      : [book.type === 'comic' ? 'COMIC' : book.type === 'audiobook' ? 'AUDIOBOOK' : 'EBOOK'];
+  function statusLabel(book: ManagementWorkSummary) {
+    const kinds = book.availableMediaKinds;
     const status = book.statusValue;
     if (kinds.length !== 1) return status === 'FINISHED' ? '已完成' : status === 'READING' ? '进行中' : '未开始';
     if (kinds[0] === 'AUDIOBOOK') return status === 'FINISHED' ? '听完' : status === 'READING' ? '在听' : '未听';
@@ -134,8 +130,9 @@ export function BookTable({
     return status === 'FINISHED' ? '已读' : status === 'READING' ? '在读' : '未读';
   }
 
-  function statusTone(book: WorkView): BadgeTone {
-    return book.statusValue === 'FINISHED' ? 'green' : book.statusValue === 'READING' ? 'amber' : 'slate';
+  function statusTone(book: ManagementWorkSummary): BadgeTone {
+    if (book.statusValue === 'FINISHED') return 'green';
+    return book.statusValue === 'READING' ? 'amber' : 'slate';
   }
 
   function sortableHeader(label: string, sortKey: string, defaultDirection: SortDirection = 'asc') {
@@ -232,7 +229,7 @@ export function BookTable({
                   </div>
                 </td>
                 <td data-i18n-skip className="truncate px-2 text-[#5F5954]">{authorLabel ?? '—'}</td>
-                <td data-i18n-skip className="truncate px-2 text-[#5F5954]" title={book.publisher?.trim() || undefined}>{book.publisher?.trim() || '—'}</td>
+                <td data-i18n-skip className="truncate px-2 text-[#5F5954]">{book.publisher ?? '—'}</td>
                 <td data-i18n-skip className="truncate px-2 text-[#5F5954]" title={book.seriesName?.trim() || undefined}>{book.seriesName?.trim() || '—'}</td>
                 <td className="truncate px-2">{mediaLabel(book)}</td>
                 <td className="overflow-hidden px-2">
@@ -245,8 +242,8 @@ export function BookTable({
                 <td className="px-2">
                   <Badge tone={statusTone(book)}>{statusLabel(book)}</Badge>
                 </td>
-                <td className="truncate px-2 text-[#817B75]">{localDateLabel(book.lastReadAt, book.lastRead, locale)}</td>
-                <td className="truncate px-2 text-[#817B75]">{localDateLabel(book.importedAt, book.added, locale)}</td>
+                <td className="truncate px-2 text-[#817B75]">{localDateLabel(book.lastReadAt, '', locale)}</td>
+                <td className="truncate px-2 text-[#817B75]">{localDateLabel(book.importedAt, '', locale)}</td>
                 <td className="pr-3 text-right">
                   <div className="flex justify-end gap-1">
                     <Button variant="ghost" icon={Eye} className="h-9 min-h-9 px-2 py-1.5" aria-label={i18nAttribute("查看《{value0}》", { value0: book.title })} onClick={() => router.push(`/works/${book.id}`)}><span className="hidden 2xl:inline"><I18nText>查看</I18nText></span></Button>

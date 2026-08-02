@@ -41,7 +41,7 @@ function useBookshelfColumns() {
             ? 6
             : width >= 500
               ? 4
-              : 2;
+              : 3;
       setColumns(nextColumns);
     };
 

@@ -10,7 +10,11 @@ import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { useToast } from '../../components/ui/feedback';
 import { Select } from '../../components/ui/select';
-import type { WorkView } from '../../types/work';
+import {
+  fetchLibraryWorksPage,
+  type LibraryWorkSummary,
+  type ManagementWorkSummary
+} from './api/works';
 import { LibraryBatchContextMenu, LibraryBatchDialog, type LibraryBatchAction } from './library-batch-actions';
 import { canUseLibraryBatchAction } from './model/library-batch-action';
 import {
@@ -33,12 +37,6 @@ import {
   type LibrarySort,
   type LibrarySortDirection
 } from './model/library-sort-preference';
-
-type BooksResponse = {
-  ok: boolean;
-  data?: { books: WorkView[]; total: number; page: number; pageSize: number; totalPages: number };
-  error?: { message: string };
-};
 
 type FilterSchemaResponse = {
   ok: boolean;
@@ -103,7 +101,7 @@ export function LibraryPage() {
   const [smartFilterFields, setSmartFilterFields] = useState<SmartFilterField[]>([]);
   const [filterSchemaLoading, setFilterSchemaLoading] = useState(false);
   const [filterSchemaLoaded, setFilterSchemaLoaded] = useState(false);
-  const [books, setBooks] = useState<WorkView[]>([]);
+  const [books, setBooks] = useState<LibraryWorkSummary[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(String(DEFAULT_LIBRARY_PAGE_SIZE));
   const [meta, setMeta] = useState({ total: 0, pageSize: DEFAULT_LIBRARY_PAGE_SIZE, totalPages: 1 });
@@ -115,7 +113,7 @@ export function LibraryPage() {
   const [canManageSystem, setCanManageSystem] = useState(false);
   const [authorizationLoaded, setAuthorizationLoaded] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<WorkView | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<LibraryWorkSummary | null>(null);
   const [deleteSource, setDeleteSource] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [selectedWorkIds, setSelectedWorkIds] = useState<string[]>([]);
@@ -257,22 +255,22 @@ export function LibraryPage() {
     requestedReloadKeyRef.current = reloadKey;
     if (requestedPage !== page) setPage(requestedPage);
 
-    const params = new URLSearchParams(queryBase);
-    params.set('page', String(requestedPage));
-    params.set('pageSize', requestPageSize);
-    params.set('view', view === 'grid' ? 'bookshelf' : 'management');
+    const controller = new AbortController();
     setLoading(true);
-    fetch(`/api/works?${params.toString()}`)
-      .then((response) => response.json() as Promise<BooksResponse>)
-      .then((payload) => {
+    fetchLibraryWorksPage(
+      queryBase,
+      requestedPage,
+      requestPageSize,
+      view === 'grid' ? 'bookshelf' : 'management',
+      controller.signal
+    )
+      .then((data) => {
         if (!active) return;
-        if (!payload.ok) throw new Error(payload.error?.message ?? '读取书库失败');
-        const data = payload.data;
-        if (data && requestedPage > data.totalPages && data.totalPages > 0) {
+        if (requestedPage > data.totalPages && data.totalPages > 0) {
           setPage(data.totalPages);
           return;
         }
-        const nextBooks = data?.books ?? [];
+        const nextBooks = data.books;
         setBooks((current) => {
           if (view !== 'grid' || requestedPage <= 1) return nextBooks;
           const merged = new Map(current.map((book) => [book.id, book]));
@@ -280,9 +278,9 @@ export function LibraryPage() {
           return Array.from(merged.values());
         });
         setMeta({
-          total: data?.total ?? 0,
-          pageSize: data?.pageSize ?? Number(requestPageSize),
-          totalPages: data?.totalPages ?? 1
+          total: data.total,
+          pageSize: data.pageSize,
+          totalPages: data.totalPages
         });
         setError('');
       })
@@ -293,6 +291,7 @@ export function LibraryPage() {
       .finally(() => active && setLoading(false));
     return () => {
       active = false;
+      controller.abort();
     };
   }, [page, queryBase, reloadKey, requestPageSize, requestScope, sortPreferenceLoaded, view]);
 
@@ -397,7 +396,7 @@ export function LibraryPage() {
     clearUploadRoute();
   }
 
-  function openDeleteBook(book: WorkView) {
+  function openDeleteBook(book: LibraryWorkSummary) {
     setDeleteSource(false);
     setDeleteTarget(book);
   }
@@ -486,7 +485,7 @@ export function LibraryPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1280px]">
+    <div>
       <header className="flex items-start justify-between gap-6">
         <div className="flex min-w-0 items-center gap-3 sm:gap-4">
           <MobileNavigationTrigger />
@@ -663,7 +662,7 @@ export function LibraryPage() {
               </div>
             </div>
           ) : (
-            <div className="mt-8"><BookTable books={books} onDelete={canManageSystem ? openDeleteBook : undefined} selectable selectedIds={selectedWorkIds} onSelect={(book) => toggleSelection(book.id)} onSelectAll={togglePageSelection} onSelectionChange={setSelectedWorkIds} onContextMenu={(_book, position) => setBatchContextPosition(position)} sort={sort} sortDirection={sortDirection} onSort={updateSort} /></div>
+            <div className="mt-8"><BookTable books={books.filter((book): book is ManagementWorkSummary => book.projection === 'management')} onDelete={canManageSystem ? openDeleteBook : undefined} selectable selectedIds={selectedWorkIds} onSelect={(book) => toggleSelection(book.id)} onSelectAll={togglePageSelection} onSelectionChange={setSelectedWorkIds} onContextMenu={(_book, position) => setBatchContextPosition(position)} sort={sort} sortDirection={sortDirection} onSort={updateSort} /></div>
           )}
 
           {view === 'list' ? <Pagination page={page} totalPages={meta.totalPages} loading={loading} pageSize={pageSize} onPage={setPage} onPageSize={(nextPageSize) => { setPage(1); setPageSize(nextPageSize); }} /> : null}

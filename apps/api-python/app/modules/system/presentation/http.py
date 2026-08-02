@@ -133,6 +133,7 @@ async def update_system_settings(
             details=prepared.details,
         )
     saved, clear_keys = prepared
+
     def persist_settings_update() -> None:
         for key, value in saved.items():
             upsert_setting(db, key, value)
@@ -168,7 +169,9 @@ def dashboard_system_status(
         return auth_error
     health = run_system_health_checks(db, settings)
     enabled = import_http_store.list_enabled_monitor_folder_rows(db)
-    current_task, latest_task, failed_count = import_http_store.import_status_snapshot(db)
+    current_task, latest_task, failed_count = import_http_store.import_status_snapshot(
+        db
+    )
     return DashboardSystemStatusResponse(
         data=dashboard_system_status_payload(
             health=health,
@@ -318,6 +321,14 @@ def restore_backup(
     try:
         result = restore_backup_archive(db, settings, backup_id)
     except ValueError as exc:
+        if str(exc) == "BACKUP_REVISION_UNSUPPORTED":
+            return fail(
+                "备份数据库版本不受支持，请使用旧版应用恢复后再升级。 "
+                "/ Unsupported backup revision; restore it with the old "
+                "application before upgrading.",
+                status_code=400,
+                code="BACKUP_REVISION_UNSUPPORTED",
+            )
         return fail(str(exc), status_code=400)
     return ok(result)
 

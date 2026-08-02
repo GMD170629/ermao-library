@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -14,8 +14,8 @@ from app.models.settings import SystemEvent
 from app.modules.system.domain.events import (
     LAST_PRUNED_AT_SETTING,
     LOG_MAX_BYTES_SETTING,
-    PRUNE_LEVEL_ORDER,
     PROTECTED_ERROR_ACTIONS,
+    PRUNE_LEVEL_ORDER,
     normalize_event_level,
     parse_max_event_bytes,
     prepare_event_metadata,
@@ -47,20 +47,24 @@ def _event_size_expression() -> Any:
 
 
 def system_event_size_bytes(db: Session) -> int:
-    value = db.scalar(
-        select(func.coalesce(func.sum(_event_size_expression()), 0))
-    )
+    value = db.scalar(select(func.coalesce(func.sum(_event_size_expression()), 0)))
     return int(value or 0)
 
 
 def configured_max_event_bytes(db: Session) -> int:
-    return parse_max_event_bytes(setting_store.get_setting_raw(db, LOG_MAX_BYTES_SETTING))
+    return parse_max_event_bytes(
+        setting_store.get_setting_raw(db, LOG_MAX_BYTES_SETTING)
+    )
 
 
 def system_event_storage_view(db: Session) -> dict[str, Any]:
     max_bytes = configured_max_event_bytes(db)
     last_pruned = setting_store.get_setting(db, LAST_PRUNED_AT_SETTING)
-    return {"sizeBytes": system_event_size_bytes(db), "maxBytes": max_bytes, "lastPrunedAt": last_pruned}
+    return {
+        "sizeBytes": system_event_size_bytes(db),
+        "maxBytes": max_bytes,
+        "lastPrunedAt": last_pruned,
+    }
 
 
 def set_max_event_bytes(db: Session, max_bytes: int) -> dict[str, Any]:
@@ -117,14 +121,14 @@ def prune_system_events(
     deleted = 0
     for start in range(0, len(ids_to_delete), EVENT_PRUNE_DELETE_BATCH_SIZE):
         batch_ids = ids_to_delete[start : start + EVENT_PRUNE_DELETE_BATCH_SIZE]
-        result = db.execute(
-            delete(SystemEvent).where(SystemEvent.id.in_(batch_ids))
-        )
+        result = db.execute(delete(SystemEvent).where(SystemEvent.id.in_(batch_ids)))
         deleted += int(result.rowcount or 0)
 
     size_bytes = system_event_size_bytes(db)
     if deleted:
-        setting_store.upsert_setting(db, LAST_PRUNED_AT_SETTING, datetime.now(timezone.utc).isoformat())
+        setting_store.upsert_setting(
+            db, LAST_PRUNED_AT_SETTING, datetime.now(UTC).isoformat()
+        )
     return {"deleted": deleted, "sizeBytes": size_bytes, "maxBytes": max_bytes}
 
 
@@ -142,6 +146,12 @@ def record_system_event(
     metadata: dict[str, Any] | None = None,
 ) -> str | None:
     event_id = f"py_{uuid4().hex}"
+    created_at = db_timestamp()
+    latest_created_at = db.scalar(
+        select(SystemEvent.created_at).order_by(SystemEvent.created_at.desc()).limit(1)
+    )
+    if latest_created_at is not None and created_at <= latest_created_at:
+        created_at = latest_created_at + timedelta(milliseconds=1)
     db.add(
         SystemEvent(
             id=event_id,
@@ -154,7 +164,7 @@ def record_system_event(
             target_id=target_id,
             message=truncate_event_message(message),
             metadata_json=prepare_event_metadata(metadata),
-            created_at=db_timestamp(),
+            created_at=created_at,
         )
     )
     db.flush()

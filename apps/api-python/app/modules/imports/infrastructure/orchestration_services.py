@@ -7,6 +7,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.core.time import now_timestamp_ms
 from app.modules.imports.application.audio_types import (
     AudioBundleStructure,
     AudioFileMetadata,
@@ -21,7 +22,24 @@ from app.modules.imports.application.errors import (
     AudioTrackLimitExceededError,
     ImportExecutionError,
 )
+from app.modules.imports.application.pdf_types import (
+    PdfCoverPublication,
+    PdfInspection,
+)
+from app.modules.imports.application.reflowable_types import ReflowableBookMetadata
 from app.modules.imports.infrastructure.audio_cover import publish_audio_cover
+from app.modules.imports.infrastructure.conversion import bind_derived_volume
+from app.modules.imports.infrastructure.pdf_inspection import (
+    inspect_pdf,
+    publish_pdf_cover,
+)
+from app.modules.imports.infrastructure.reflowable_cover import (
+    publish_reflowable_cover,
+)
+from app.modules.imports.infrastructure.reflowable_metadata import (
+    ReflowableMetadataError,
+    inspect_reflowable_book,
+)
 from app.modules.library.infrastructure.facets import sync_work_facets
 from app.modules.system.infrastructure.events import record_system_event
 from app.services.audio_metadata import inspect_audio_bundle, parse_audio_metadata
@@ -73,6 +91,17 @@ class SessionImportOrchestrationServices:
             converter=artifact.converter,
             converter_version=artifact.converter_version,
             cached=artifact.cached,
+            idempotency_key=artifact.idempotency_key,
+        )
+
+    def bind_conversion_result(
+        self, idempotency_key: str, derived_volume_id: str
+    ) -> None:
+        bind_derived_volume(
+            self._db,
+            idempotency_key=idempotency_key,
+            derived_volume_id=derived_volume_id,
+            now=now_timestamp_ms(),
         )
 
     def recognize_identity(
@@ -140,20 +169,20 @@ class SessionImportOrchestrationServices:
         self,
         storage_root: Path,
         work_id: str,
-        edition_id: str,
+        media_version_id: str,
         metadata_items: tuple[AudioFileMetadata, ...],
         *,
         bundle_root: Path | None = None,
     ) -> str | None:
         possible_targets = {
-            storage_root / "books" / work_id / edition_id / f"cover{extension}"
+            storage_root / "books" / work_id / media_version_id / f"cover{extension}"
             for extension in (".jpg", ".png", ".webp", ".gif")
         }
         existing_targets = {path for path in possible_targets if path.exists()}
         published = publish_audio_cover(
             storage_root,
             work_id,
-            edition_id,
+            media_version_id,
             metadata_items,
             bundle_root=bundle_root,
         )
@@ -162,6 +191,67 @@ class SessionImportOrchestrationServices:
             if published_path not in existing_targets:
                 self._new_publications.add(published_path)
         return published
+
+    def inspect_reflowable_book(
+        self, path: Path, source_format: str
+    ) -> ReflowableBookMetadata:
+        try:
+            return inspect_reflowable_book(path, source_format)
+        except ReflowableMetadataError as exc:
+            return ReflowableBookMetadata(
+                title=path.stem,
+                authors=(),
+                language=None,
+                publisher=None,
+                published_at=None,
+                identifier=None,
+                isbn=None,
+                description=None,
+                subjects=(),
+                chapters=(),
+                cover=None,
+                raw_metadata={
+                    "sourceFormat": source_format,
+                    "inspectionWarning": str(exc),
+                },
+            )
+
+    def publish_reflowable_cover(
+        self,
+        storage_root: Path,
+        work_id: str,
+        media_version_id: str,
+        metadata: ReflowableBookMetadata,
+    ) -> str | None:
+        published = publish_reflowable_cover(
+            storage_root,
+            work_id,
+            media_version_id,
+            metadata.cover,
+        )
+        if published:
+            self._new_publications.add(Path(published))
+        return published
+
+    def inspect_pdf(self, path: Path, original_name: str | None) -> PdfInspection:
+        return inspect_pdf(path, original_name)
+
+    def publish_pdf_cover(
+        self,
+        storage_root: Path,
+        source_path: Path,
+        work_id: str,
+        media_version_id: str,
+    ) -> PdfCoverPublication:
+        publication = publish_pdf_cover(
+            storage_root,
+            source_path,
+            work_id,
+            media_version_id,
+        )
+        if publication.path:
+            self._new_publications.add(Path(publication.path))
+        return publication
 
     def finalize_publications(self) -> None:
         self._new_publications.clear()

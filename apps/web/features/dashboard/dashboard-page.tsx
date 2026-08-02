@@ -20,12 +20,11 @@ type ContinueItem = {
   author: string;
   coverUrl: string;
   mediaKind: 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
-  resumeEditionId: string | null;
-  resumeVolumeId: string | null;
+  continueVolumeId: string | null;
   progress: number;
   lastReadAt: string;
   chapter: string | null;
-  versionName: string | null;
+  volumeTitle: string | null;
   narrator: string | null;
 } | null;
 
@@ -143,26 +142,25 @@ export function DashboardPage() {
             <div className="flex shrink-0 flex-col items-start gap-3 sm:items-center sm:px-3">
               {(() => {
                 const kind = continueItem.mediaKind;
-                const editionId = continueItem.resumeEditionId;
-                const volumeQuery = continueItem.resumeVolumeId ? `?volume=${encodeURIComponent(continueItem.resumeVolumeId)}` : '';
-                const href = editionId ? `/reader/${editionId}${volumeQuery}` : null;
+                const volumeId = continueItem.continueVolumeId;
+                const href = volumeId ? `/reader/${encodeURIComponent(volumeId)}` : null;
                 const label = kind === 'AUDIOBOOK' ? '继续听' : kind === 'COMIC' ? '继续看' : '继续阅读';
                 const ContinueIcon = kind === 'AUDIOBOOK' ? Headphones : kind === 'COMIC' ? Images : BookOpen;
                 return <button
                 type="button"
-                disabled={!editionId}
+                disabled={!volumeId}
                 onClick={() => {
-                  if (!editionId) return;
+                  if (!volumeId) return;
                   if (kind === 'AUDIOBOOK') {
-                    void audioPlayback.loadEdition(editionId, {
+                    void audioPlayback.loadVolume(volumeId, {
                       autoplay: true,
                       summary: {
-                        editionId,
+                        volumeId,
                         workId: continueItem.workId,
                         title: continueItem.title,
                         author: continueItem.author === '未知作者' ? null : continueItem.author,
                         coverUrl: continueItem.coverUrl,
-                        versionName: continueItem.versionName,
+                        volumeTitle: continueItem.volumeTitle,
                         narrator: continueItem.narrator,
                         chapterTitle: continueItem.chapter
                       }

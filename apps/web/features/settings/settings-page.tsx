@@ -1,7 +1,7 @@
 'use client';
 
 import { CheckCircle2, ChevronDown, ChevronRight, Database, Download, FolderOpen, RotateCcw, Save, Settings2, SlidersHorizontal, Trash2 } from 'lucide-react';
-import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { useConfirm, useToast } from '../../components/ui/feedback';
@@ -10,7 +10,7 @@ import { PageTitle } from '../../components/ui/page-title';
 import { withBasePath } from '../../lib/base-path';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
-import { useI18n as useExpressionI18n } from '@/i18n/provider';
+import { DirectoryPathPicker as SharedDirectoryPathPicker } from './ui/directory-path-picker';
 
 type MonitorFolder = {
   id: string;
@@ -41,23 +41,6 @@ type BackupItem = {
     readingProgresses: number;
     monitorFolders: number;
   };
-};
-
-type DirectoryNode = {
-  name: string;
-  path: string;
-  readable: boolean;
-  error?: string | null;
-  children: Array<{
-    name: string;
-    path: string;
-    readable: boolean;
-  }>;
-};
-
-type DirectoryTreePayload = {
-  node: DirectoryNode;
-  monitorRoot?: string | null;
 };
 
 type AppSettings = Record<string, string>;
@@ -134,7 +117,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     'metadata.ai.model': ''
   });
   const [name, setName] = useState('我的监控文件夹');
-  const [rootPath, setRootPath] = useState('/books');
+  const [rootPath, setRootPath] = useState('');
   const [ignorePatterns, setIgnorePatterns] = useState('');
   const [ignoreHidden, setIgnoreHidden] = useState(true);
   const [minFileSizeKb, setMinFileSizeKb] = useState('10');
@@ -156,7 +139,6 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     const payload = (await response.json()) as { ok: boolean; data?: MonitorFoldersPayload; error?: { message: string } };
     if (payload.ok) {
       setFolders(payload.data?.folders ?? []);
-      setRootPath((current) => payload.data?.monitorRoot && current === '/books' ? payload.data.monitorRoot : current);
     } else {
       setError(payload.error?.message ?? '读取监控文件夹失败');
     }
@@ -462,7 +444,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                 </label>
                 <div className="md:col-span-7">
                   <span className="text-sm font-medium text-slate-700"><I18nText>监控文件夹路径</I18nText></span>
-                  <DirectoryPathPicker value={rootPath} onChange={setRootPath} compact />
+                  <SharedDirectoryPathPicker value={rootPath} onChange={setRootPath} compact />
                 </div>
                 <div className="md:col-span-2">
                   <Button className="h-10 w-full" icon={FolderOpen} loading={pathBusy === 'create'} loadingText={i18nAttribute("保存中")}><I18nText>保存</I18nText></Button>
@@ -674,195 +656,6 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   );
 }
 
-function DirectoryPathPicker({ value, onChange, compact = false }: { value: string; onChange: (value: string) => void; compact?: boolean }) {
-  const { t: i18nExpression } = useExpressionI18n();
-  const [open, setOpen] = useState(false);
-  const [monitorRoot, setMonitorRoot] = useState('');
-  const [nodes, setNodes] = useState<Record<string, DirectoryNode>>({});
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [loadingPath, setLoadingPath] = useState('');
-  const [treeError, setTreeError] = useState('');
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  async function loadNode(path?: string) {
-    setLoadingPath(path || '__root__');
-    setTreeError('');
-    try {
-      const query = path ? `?path=${encodeURIComponent(path)}` : '';
-      const response = await fetch(`/api/monitor-folders/tree${query}`);
-      const payload = (await response.json()) as { ok: boolean; data?: DirectoryTreePayload; error?: { message: string } };
-      if (!payload.ok || !payload.data?.node) {
-        setTreeError(payload.error?.message ?? '读取目录树失败');
-        return null;
-      }
-      const node = payload.data.node;
-      setMonitorRoot(payload.data.monitorRoot || node.path);
-      setNodes((current) => ({ ...current, [node.path]: node }));
-      return node;
-    } catch {
-      setTreeError('读取目录树失败');
-      return null;
-    } finally {
-      setLoadingPath('');
-    }
-  }
-
-  useEffect(() => {
-    loadNode();
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    function closeOnOutside(event: MouseEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    }
-    document.addEventListener('mousedown', closeOnOutside);
-    return () => document.removeEventListener('mousedown', closeOnOutside);
-  }, [open]);
-
-  async function toggleDirectory(path: string) {
-    const nextExpanded = !expanded[path];
-    setExpanded((current) => ({ ...current, [path]: nextExpanded }));
-    if (nextExpanded && !nodes[path]) await loadNode(path);
-  }
-
-  function selectPath(path: string) {
-    onChange(path);
-    setOpen(false);
-  }
-
-  const rootNode = monitorRoot ? nodes[monitorRoot] : Object.values(nodes)[0];
-
-  return (
-    <div ref={rootRef} className={cn('relative', compact ? 'mt-1.5' : 'mt-2')}>
-      <div className="flex gap-2">
-        <input
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          className={cn(
-            'min-w-0 flex-1 border border-slate-200 bg-white text-sm outline-none',
-            compact
-              ? 'h-10 rounded-xl px-3 focus:border-[#F19B84] focus:ring-2 focus:ring-[#FCE5DE]'
-              : 'h-11 rounded-2xl px-4 focus:border-blue-300 focus:ring-4 focus:ring-blue-100'
-          )}
-        />
-        <button
-          type="button"
-          onClick={() => setOpen((current) => !current)}
-          className={cn(
-            'inline-flex shrink-0 items-center gap-2 border border-slate-200 bg-white text-sm font-medium text-slate-700 shadow-sm hover:border-[#f4b6a4] hover:bg-[#fff5f1] hover:text-[#d94724]',
-            compact ? 'h-10 rounded-xl px-3' : 'h-11 rounded-2xl px-4'
-          )}
-          aria-expanded={open}
-        >
-          <FolderOpen size={16} />
-          <I18nText>选择</I18nText><ChevronDown size={16} className={cn('transition', open && 'rotate-180')} />
-        </button>
-      </div>
-      {open ? (
-        <div className="absolute left-0 right-0 top-full z-50 mt-2 rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-700 shadow-xl shadow-slate-200/60">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="font-medium text-slate-950"><I18nText>监控根目录</I18nText></div>
-              <div className="truncate text-xs text-slate-500">{monitorRoot || i18nExpression("读取中")}</div>
-            </div>
-            <button
-              type="button"
-              onClick={() => loadNode(value || monitorRoot || undefined)}
-              className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50"
-            >
-              <RotateCcw size={14} />
-              <I18nText>刷新</I18nText></button>
-          </div>
-          <div className="max-h-72 overflow-auto rounded-xl bg-slate-50 p-2">
-            {rootNode ? (
-              <DirectoryNodeRow
-                node={rootNode}
-                level={0}
-                selectedPath={value}
-                nodes={nodes}
-                expanded={expanded}
-                loadingPath={loadingPath}
-                onSelect={selectPath}
-                onToggle={toggleDirectory}
-              />
-            ) : (
-              <div className="px-3 py-2 text-slate-500">{loadingPath ? i18nExpression("正在读取目录...") : i18nExpression("暂无可选目录")}</div>
-            )}
-          </div>
-          {treeError ? <div className="mt-2 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{treeError}</div> : null}
-          <div className="mt-2 text-xs leading-5 text-slate-500"><I18nText>只能浏览监控根目录内的目录；也可以直接粘贴路径。</I18nText></div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function DirectoryNodeRow({
-  node,
-  level,
-  selectedPath,
-  nodes,
-  expanded,
-  loadingPath,
-  onSelect,
-  onToggle
-}: {
-  node: DirectoryNode;
-  level: number;
-  selectedPath: string;
-  nodes: Record<string, DirectoryNode>;
-  expanded: Record<string, boolean>;
-  loadingPath: string;
-  onSelect: (path: string) => void;
-  onToggle: (path: string) => void;
-}) {
-  const { t: i18nExpression } = useExpressionI18n();
-  const isExpanded = Boolean(expanded[node.path]);
-  const isSelected = selectedPath === node.path;
-  const children = node.children ?? [];
-
-  return (
-    <div>
-      <div className={cn('flex items-center gap-1 rounded-xl px-2 py-1.5', isSelected ? 'bg-[#fff0ea] text-[#d94724]' : 'text-slate-700 hover:bg-white')} style={{ paddingLeft: `${8 + level * 18}px` }}>
-        <button
-          type="button"
-          onClick={() => onToggle(node.path)}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
-          aria-label={isExpanded ? i18nExpression("收起目录") : i18nExpression("展开目录")}
-        >
-          <ChevronRight size={15} className={cn('transition', isExpanded && 'rotate-90')} />
-        </button>
-        <button type="button" onClick={() => onSelect(node.path)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-          <FolderOpen size={15} className="shrink-0" />
-          <span className="truncate">{node.name || node.path}</span>
-        </button>
-        {loadingPath === node.path ? <span className="text-xs text-slate-400"><I18nText>读取中</I18nText></span> : null}
-      </div>
-      {isExpanded ? (
-        <div>
-          {children.length > 0 ? children.map((child) => {
-            const childNode = nodes[child.path] ?? { ...child, children: [] };
-            return (
-              <DirectoryNodeRow
-                key={child.path}
-                node={childNode}
-                level={level + 1}
-                selectedPath={selectedPath}
-                nodes={nodes}
-                expanded={expanded}
-                loadingPath={loadingPath}
-                onSelect={onSelect}
-                onToggle={onToggle}
-              />
-            );
-          }) : <div className="px-3 py-1.5 text-xs text-slate-400" style={{ paddingLeft: `${42 + level * 18}px` }}><I18nText>没有子目录</I18nText></div>}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function MonitorFolderEditor({
   path,
   saving,
@@ -897,7 +690,7 @@ function MonitorFolderEditor({
         </label>
         <div className="md:col-span-8">
           <span className="text-sm font-medium text-slate-700"><I18nText>监控文件夹路径</I18nText></span>
-          <DirectoryPathPicker value={folderPath} onChange={setFolderPath} compact />
+          <SharedDirectoryPathPicker value={folderPath} onChange={setFolderPath} compact />
         </div>
         <label className="flex h-10 items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 md:col-span-4 md:mt-[26px]">
           <input type="checkbox" checked={hidden} onChange={(event) => setHidden(event.target.checked)} />

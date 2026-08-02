@@ -12,27 +12,24 @@ from pathlib import Path
 from time import time_ns
 from typing import Annotated, Any, Never
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from fastapi.responses import Response
 from PIL import Image, ImageOps, UnidentifiedImageError
-from sqlalchemy import inspect
+from sqlalchemy import delete, inspect, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_system_manager, require_user
 from app.api.typed_route import TypedContractRoute
-from app.bootstrap.imports import enqueue_import_task, import_http_store
+from app.bootstrap.imports import import_http_store
 from app.bootstrap.library import (
     library_dashboard,
-    library_deletion,
     library_facet_queries,
     library_groupings,
-    library_join_queries,
     library_operation_store,
     library_projections,
     library_storage,
     library_works,
-    move_volume_to_work,
-    reorder_volume,
+    volume_structure_commands,
 )
 from app.bootstrap.library import (
     list_works as list_library_works,
@@ -42,9 +39,9 @@ from app.bootstrap.shelf import shelf_store
 from app.bootstrap.system import record_system_event, system_event_storage_view
 from app.contracts.http_errors import AdditionalStatusCodes, ErrorResponses
 from app.contracts.imports import ImportTaskContract
+from app.contracts.retired_resources import RetiredResourceError, retired_resource_error
 from app.core.authorization import (
     authorization_context,
-    can_access_edition,
     can_access_volume,
     can_access_work,
     can_manage_system,
@@ -52,6 +49,29 @@ from app.core.authorization import (
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
+from app.models.common import cuid
+from app.models.library import (
+    LibraryMediaVersion,
+    LibraryReadingProgress,
+    LibraryVolume,
+)
+from app.modules.library.application.volume_commands import (
+    InvalidVolumeChangeError,
+    LibraryActor,
+    LibraryAuthorizationError,
+    NewWorkInput,
+    OperationSummary,
+    VolumeConversionUnsupportedError,
+    VolumeNotFoundError,
+    VolumeSourceMissingError,
+    WorkNotFoundError,
+    delete_volume_resource,
+    move_volume_resource,
+    queue_volume_epub_conversion,
+    reorder_volume_resource,
+    split_volume_resource,
+    update_volume_resource,
+)
 from app.modules.library.presentation.schemas import (
     BulkMutationResponse,
     CategoriesResponse,
@@ -63,7 +83,6 @@ from app.modules.library.presentation.schemas import (
     DeletedWorkResponse,
     DetailPreferenceResponse,
     DuplicatesResponse,
-    EditionMutationResponse,
     FacetsResponse,
     FilterSchemaResponse,
     FindReplacePreviewResponse,
@@ -79,16 +98,25 @@ from app.modules.library.presentation.schemas import (
     ManagementOverviewResponse,
     MergeCategoriesResponse,
     MergeDuplicatesResponse,
+    MetadataApplyRequest,
+    MetadataApplyResponse,
     MetadataSearchResponse,
+    MoveVolumeRequest,
     OperationsResponse,
+    ReorderVolumeRequest,
     RenameCategoryResponse,
     SeriesResponse,
+    SplitVolumeRequest,
     UndoOperationResponse,
+    UpdateVolumeRequest,
     WorkDetailResponse,
+    WorkDetailSummaryResponse,
+    WorkReadingUnitsResponse,
     WorkResponse,
     WorksResponse,
     WorkStructureMutationResponse,
     WorkSummariesResponse,
+    WorkVolumePageResponse,
 )
 from app.modules.library.presentation.views import (
     _active_media_view,
@@ -96,7 +124,6 @@ from app.modules.library.presentation.views import (
     _book_search_item_view,
     _bookshelf_item_view,
     _coerce_int,
-    _edition_media_kind,
     _finish_metadata_organize_work,
     _get_work,
     _management_work_views,
@@ -104,11 +131,12 @@ from app.modules.library.presentation.views import (
     _metadata_field_patch,
     _preferred_work_cover_path,
     _require_work_manager,
-    _resolve_consumption_target,
     _resolve_detail_tab,
-    _set_consumption_status,
     _visible_work_or_none,
+    _work_detail_summary_view,
+    _work_reading_units_view,
     _work_view,
+    _work_volume_page_view,
 )
 from app.modules.library.presentation.work_ops import (
     _delete_work_and_storage,
@@ -143,7 +171,6 @@ from app.services.library_management import (
     merge_works,
     operation_view,
     rename_category,
-    split_edition,
     sync_work_facets,
     undo_operation,
 )
@@ -151,9 +178,30 @@ from app.services.metadata_provider_registry import (
     metadata_provider_registry,
     search_with_metadata_provider,
 )
-from app.services.text_conversion import CONVERTIBLE_TEXT_EXTS
 
 router = APIRouter(tags=["library"], route_class=TypedContractRoute)
+
+
+def _library_actor(db: Session, user: User) -> LibraryActor:
+    context = authorization_context(db, user)
+    return LibraryActor(
+        user_id=context.user_id,
+        can_manage_system=context.can_manage_system,
+        is_admin=context.is_admin,
+        can_view_manual_imports=context.can_view_manual_imports,
+        monitor_folder_ids=context.monitor_folder_ids,
+    )
+
+
+def _operation_payload(operation: OperationSummary) -> dict[str, object]:
+    return {
+        "id": operation.id,
+        "action": operation.action,
+        "status": operation.status,
+        "summary": operation.summary,
+        "expiresAt": operation.expires_at,
+        "undoAvailable": operation.undo_available,
+    }
 
 
 def _raise_library_error(
@@ -174,6 +222,10 @@ def _raise_library_error(
     if status_code == 503:
         raise LibraryUnavailableError(body)
     raise LibraryBadRequestError(body)
+
+
+def _raise_edition_resource_retired() -> Never:
+    raise retired_resource_error("/api/works/{workId}/volumes/{volumeId}")
 
 
 logger = logging.getLogger(__name__)
@@ -374,69 +426,15 @@ def dashboard_continue_reading(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    progress = None
-    if all(
-        _has_table(db, table)
-        for table in ("LibraryReadingProgress", "LibraryWork", "LibraryEdition")
-    ):
-        context = authorization_context(db, user)
-        progress = library_dashboard.continue_reading_progress(db, context, user.id)
+    context = authorization_context(db, user)
+    progress = library_dashboard.continue_reading_progress(db, context, user.id)
     if not progress:
         return ContinueReadingResponse(data={"item": None})
-    work = _get_work(db, progress["workId"])
+    work_id = str(progress.get("workId") or "")
+    work = _get_work(db, work_id)
     if not work or work.get("hidden"):
         return ContinueReadingResponse(data={"item": None})
     book = _work_view(db, work, user.id)
-    recent_edition_id = book.get("recentEditionId")
-    media_group = next(
-        (
-            group
-            for group in book.get("mediaGroups") or []
-            if group.get("recentEditionId") == recent_edition_id
-        ),
-        None,
-    )
-    media_kind = (media_group or {}).get("kind") or (
-        "AUDIOBOOK"
-        if book.get("type") == "audiobook"
-        else "COMIC"
-        if book.get("type") == "comic"
-        else "EBOOK"
-    )
-    if media_kind == "AUDIOBOOK":
-        audio_group = next(
-            (
-                group
-                for group in book.get("mediaGroups") or []
-                if group.get("kind") == "AUDIOBOOK"
-            ),
-            None,
-        )
-        resume_edition_id = (
-            (audio_group or {}).get("recentEditionId")
-            or (audio_group or {}).get("primaryEditionId")
-            or next(
-                (
-                    edition.get("id")
-                    for edition in book.get("editions") or []
-                    if edition.get("mediaKind") == "AUDIOBOOK"
-                ),
-                None,
-            )
-        )
-    else:
-        resume_edition_id = recent_edition_id or book.get("editionId")
-    resume_edition = next(
-        (
-            edition
-            for edition in book.get("editions") or []
-            if edition.get("id") == resume_edition_id
-        ),
-        None,
-    )
-    chapter = book.get("chapter")
-    if chapter == "未开始":
-        chapter = None
     return ContinueReadingResponse(
         data={
             "item": {
@@ -444,14 +442,13 @@ def dashboard_continue_reading(
                 "title": book.get("title"),
                 "author": book.get("author"),
                 "coverUrl": book.get("coverUrl"),
-                "mediaKind": media_kind,
-                "resumeEditionId": resume_edition_id,
-                "resumeVolumeId": book.get("recentVolumeId"),
-                "progress": book.get("progress") or 0,
-                "chapter": chapter,
+                "mediaKind": progress.get("mediaKind"),
+                "resumeVolumeId": progress.get("volumeId"),
+                "progress": float(progress.get("percent") or 0),
+                "chapter": None,
                 "lastReadAt": _dt(progress.get("updatedAt")),
-                "versionName": (resume_edition or {}).get("versionName"),
-                "narrator": (resume_edition or {}).get("narrator"),
+                "volumeTitle": progress.get("volumeTitle"),
+                "narrator": progress.get("narrator"),
             }
         }
     )
@@ -529,39 +526,37 @@ def management_folders(
         for folder in monitor_folders
     ]
     works = library_dashboard.list_management_works(db, limit=300)
-    editions = []
-    if _has_table(db, "LibraryEdition"):
-        from sqlalchemy import func, select
+    from sqlalchemy import func
 
-        from app.models.library import LibraryEdition
-
-        editions = [
-            {
-                "workId": row.workId,
-                "sizeBytes": int(row.sizeBytes or 0),
-                "editionCount": int(row.editionCount or 0),
-            }
-            for row in db.execute(
-                select(
-                    LibraryEdition.work_id.label("workId"),
-                    func.coalesce(func.sum(LibraryEdition.size_bytes), 0).label(
-                        "sizeBytes"
-                    ),
-                    func.count().label("editionCount"),
-                )
-                .where(LibraryEdition.hidden.is_(False))
-                .group_by(LibraryEdition.work_id)
-            ).all()
-        ]
-    size_by_work = {row.get("workId"): row for row in editions}
+    volumes = [
+        {
+            "workId": row.workId,
+            "sizeBytes": int(row.sizeBytes or 0),
+            "volumeCount": int(row.volumeCount or 0),
+        }
+        for row in db.execute(
+            select(
+                LibraryMediaVersion.work_id.label("workId"),
+                func.coalesce(func.sum(LibraryVolume.size_bytes), 0).label("sizeBytes"),
+                func.count().label("volumeCount"),
+            )
+            .join(
+                LibraryMediaVersion,
+                LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            )
+            .where(LibraryVolume.hidden.is_(False))
+            .group_by(LibraryMediaVersion.work_id)
+        ).all()
+    ]
+    size_by_work = {row.get("workId"): row for row in volumes}
     work_items = [
         {
             **work,
             "sizeBytes": int(
                 (size_by_work.get(work.get("id")) or {}).get("sizeBytes") or 0
             ),
-            "editionCount": int(
-                (size_by_work.get(work.get("id")) or {}).get("editionCount") or 0
+            "volumeCount": int(
+                (size_by_work.get(work.get("id")) or {}).get("volumeCount") or 0
             ),
         }
         for work in works
@@ -882,21 +877,34 @@ def get_work(
     work_id: str,
     request: Request,
     detailTab: str | None = None,
-    editionId: str | None = None,
     volumeId: str | None = None,
     unitPage: int | None = None,
     chapterPage: int = 1,
     chapterPageSize: int = 120,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Annotated[WorkDetailResponse, ErrorResponses(LibraryNotFoundError)]:
+) -> Annotated[
+    WorkDetailSummaryResponse | WorkDetailResponse,
+    ErrorResponses(LibraryNotFoundError),
+]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     work = _visible_work_or_none(db, user, work_id)
     if not work:
         _raise_library_error("作品不存在", status_code=404)
-    book = _work_view(db, work, user.id)
+    navigation_requested = bool(request.query_params)
+    book = _work_view(
+        db,
+        work,
+        user.id,
+        volume_limit_per_media=None if navigation_requested else 10,
+        include_files=navigation_requested,
+    )
+    if not navigation_requested:
+        return WorkDetailSummaryResponse(
+            data={"book": _work_detail_summary_view(book)}
+        )
     selected_tab = _resolve_detail_tab(
         db, user.id, work_id, book.get("detailTabs", []), detailTab
     )
@@ -906,7 +914,6 @@ def get_work(
         book,
         selected_tab,
         user.id,
-        editionId,
         volumeId,
         unitPage if unitPage is not None else chapterPage,
         chapterPageSize,
@@ -914,6 +921,62 @@ def get_work(
     return WorkDetailResponse(
         data={"book": book, "activeMedia": active_media, **navigation}
     )
+
+
+@router.get("/works/{work_id}/media-versions/{media_version_id}/volumes")
+def get_work_media_version_volumes(
+    work_id: str,
+    media_version_id: str,
+    request: Request,
+    page: Annotated[int, Query(ge=1)] = 1,
+    pageSize: Annotated[int, Query(ge=1, le=100)] = 100,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[WorkVolumePageResponse, ErrorResponses(LibraryNotFoundError)]:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    if not _visible_work_or_none(db, user, work_id):
+        _raise_library_error("作品不存在", status_code=404)
+    result = _work_volume_page_view(
+        db,
+        user=user,
+        work_id=work_id,
+        media_version_id=media_version_id,
+        page=page,
+        page_size=pageSize,
+    )
+    if result is None:
+        _raise_library_error("媒介版本不存在", status_code=404)
+    return WorkVolumePageResponse(data=result)
+
+
+@router.get("/works/{work_id}/volumes/{volume_id}/reading-units")
+def get_work_volume_reading_units(
+    work_id: str,
+    volume_id: str,
+    request: Request,
+    page: Annotated[int, Query(ge=1)] = 1,
+    pageSize: Annotated[int, Query(ge=1, le=200)] = 120,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[WorkReadingUnitsResponse, ErrorResponses(LibraryNotFoundError)]:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    if not _visible_work_or_none(db, user, work_id):
+        _raise_library_error("作品不存在", status_code=404)
+    result = _work_reading_units_view(
+        db,
+        user=user,
+        work_id=work_id,
+        volume_id=volume_id,
+        page=page,
+        page_size=pageSize,
+    )
+    if result is None:
+        _raise_library_error("卷册不存在", status_code=404)
+    return WorkReadingUnitsResponse(data=result)
 
 
 @router.put("/works/{work_id}/detail-preference")
@@ -989,7 +1052,6 @@ async def update_work(
         "title",
         "author",
         "description",
-        "status",
         "publicationStatus",
         "trackingStatus",
         "tags",
@@ -1005,63 +1067,13 @@ async def update_work(
         for key, value in payload.items()
         if key in allowed
     }
-    global_fields = set(values) - {"status"}
+    global_fields = set(values)
     if "ignored" in payload:
         global_fields.add("hidden")
     if global_fields and not can_manage_system(user):
         _raise_library_error(
             "需要系统管理权限", status_code=403, code="SYSTEM_MANAGER_REQUIRED"
         )
-    media_kind = str(payload.get("mediaKind") or "").strip().upper()
-    if media_kind and media_kind not in {"EBOOK", "COMIC", "AUDIOBOOK"}:
-        _raise_library_error("媒介类型无效", status_code=400)
-    if "status" in values:
-        status = str(values["status"] or "").strip().upper()
-        if status == "WANT":
-            status = "UNREAD"
-        if status not in {"UNREAD", "READING", "FINISHED"}:
-            _raise_library_error("阅读状态无效", status_code=400)
-        book_before_update = _work_view(db, existing_work, user.id)
-        available = {
-            str(item) for item in book_before_update.get("availableMediaKinds", [])
-        }
-        target_media_kinds = [media_kind] if media_kind else sorted(available)
-        if not target_media_kinds or any(
-            kind not in available for kind in target_media_kinds
-        ):
-            _raise_library_error("该作品没有对应的媒介版本", status_code=409)
-        requested_edition_id = str(payload.get("editionId") or "").strip() or None
-        requested_volume_id = str(payload.get("volumeId") or "").strip() or None
-        if requested_edition_id and not can_access_edition(
-            db, user, requested_edition_id
-        ):
-            _raise_library_error("作品不存在", status_code=404, code="WORK_NOT_FOUND")
-        if requested_volume_id and not can_access_volume(db, user, requested_volume_id):
-            _raise_library_error("作品不存在", status_code=404, code="WORK_NOT_FOUND")
-        for target_media_kind in target_media_kinds:
-            target, target_error = _resolve_consumption_target(
-                db,
-                work_id,
-                target_media_kind,
-                edition_id=requested_edition_id
-                if len(target_media_kinds) == 1
-                else None,
-                volume_id=requested_volume_id if len(target_media_kinds) == 1 else None,
-                unit_id=str(payload.get("unitId") or "").strip() or None,
-            )
-            if target_error:
-                _raise_library_error(target_error, status_code=422)
-            _set_consumption_status(
-                db,
-                user.id,
-                work_id,
-                target_media_kind,
-                status,
-                edition_id=(target or {}).get("editionId"),
-                volume_id=(target or {}).get("volumeId"),
-                unit_id=(target or {}).get("unitId"),
-            )
-        values.pop("status", None)
     if "ignored" in payload:
         values["hidden"] = bool(payload.get("ignored"))
     try:
@@ -1147,12 +1159,6 @@ _BULK_TEXT_FIELDS: dict[str, tuple[str, str]] = {
     "description": ("LibraryWork", "description"),
     "seriesName": ("LibraryWork", "seriesName"),
     "tags": ("LibraryWork", "tags"),
-    "publisher": ("LibraryEdition", "publisher"),
-    "language": ("LibraryEdition", "language"),
-    "isbn": ("LibraryEdition", "isbn"),
-    "identifier": ("LibraryEdition", "identifier"),
-    "versionName": ("LibraryEdition", "versionName"),
-    "narrator": ("LibraryEdition", "narrator"),
 }
 _BULK_TEMPLATE_VARIABLES = {
     "value",
@@ -1176,8 +1182,22 @@ def _bulk_work_ids(raw_ids: Any, *, maximum: int = 500) -> list[str]:
     )[:maximum]
 
 
-def _primary_edition(db: Session, work_id: str) -> dict[str, Any] | None:
-    return library_join_queries.get_primary_edition_row(db, work_id)
+def _first_volume(db: Session, work_id: str) -> dict[str, Any] | None:
+    volume = db.scalar(
+        select(LibraryVolume)
+        .join(
+            LibraryMediaVersion,
+            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+        )
+        .where(LibraryMediaVersion.work_id == work_id, LibraryVolume.hidden.is_(False))
+        .order_by(
+            LibraryVolume.sort_order.asc(),
+            LibraryVolume.created_at.asc(),
+            LibraryVolume.id.asc(),
+        )
+        .limit(1)
+    )
+    return library_works.entity_as_legacy_dict(volume) if volume is not None else None
 
 
 def _sequence_letters(value: int) -> str:
@@ -1281,7 +1301,7 @@ def _bulk_find_replace_rows(
         work = _get_work(db, work_id)
         if not work:
             continue
-        target = work if table == "LibraryWork" else _primary_edition(db, work_id)
+        target = work
         if not target:
             continue
         raw_value = target.get(column)
@@ -1341,63 +1361,68 @@ def _apply_bulk_reading_status(
     db: Session, user: User, work_ids: list[str], status: str
 ) -> int:
     updated = 0
-    now = _now()
-    context = authorization_context(db, user)
     for work_id in work_ids:
-        work = _get_work(db, work_id)
-        if not work:
-            continue
-        editions = (
-            library_works.list_visible_editions_for_work(
-                db, work_id=work_id, context=context
+        volumes = db.scalars(
+            select(LibraryVolume)
+            .join(
+                LibraryMediaVersion,
+                LibraryMediaVersion.id == LibraryVolume.media_version_id,
             )
-            if _has_table(db, "LibraryEdition")
-            else []
-        )
-        if not editions:
+            .where(
+                LibraryMediaVersion.work_id == work_id,
+                LibraryVolume.hidden.is_(False),
+            )
+            .order_by(LibraryVolume.sort_order.asc(), LibraryVolume.id.asc())
+        ).all()
+        volumes = [
+            volume for volume in volumes if can_access_volume(db, user, volume.id)
+        ]
+        if not volumes:
             continue
-        media_editions: dict[str, dict[str, Any]] = {}
-        for edition in editions:
-            media_editions.setdefault(_edition_media_kind(edition), edition)
         if status == "UNREAD":
-            library_works.clear_reading_state_for_work(
-                db,
-                user_id=user.id,
-                work_id=work_id,
+            db.execute(
+                delete(LibraryReadingProgress).where(
+                    LibraryReadingProgress.user_id == user.id,
+                    LibraryReadingProgress.volume_id.in_(
+                        [volume.id for volume in volumes]
+                    ),
+                )
             )
         else:
-            for media_kind, edition in media_editions.items():
-                _set_consumption_status(
-                    db,
-                    user.id,
-                    work_id,
-                    media_kind,
-                    status,
-                    edition_id=str(edition["id"]),
+            target_percent = 100.0 if status == "FINISHED" else 0.01
+            now = _now()
+            for volume in volumes:
+                progress = db.scalar(
+                    select(LibraryReadingProgress).where(
+                        LibraryReadingProgress.user_id == user.id,
+                        LibraryReadingProgress.volume_id == volume.id,
+                    )
                 )
-            if status != "FINISHED":
-                updated += 1
-                continue
-            for edition in editions:
-                if not _has_table(db, "LibraryReadingProgress"):
-                    continue
-                media_kind = _edition_media_kind(edition)
-                library_works.mark_edition_finished(
-                    db,
-                    user_id=user.id,
-                    work_id=work_id,
-                    edition=edition,
-                    reader_type=(
-                        "comic"
-                        if media_kind == "COMIC"
-                        else "audio"
-                        if media_kind == "AUDIOBOOK"
-                        else "pdf"
-                        if str(edition.get("format")).upper() == "PDF"
-                        else "epub"
-                    ),
-                    now=now,
-                )
+                if progress is None:
+                    db.add(
+                        LibraryReadingProgress(
+                            id=cuid(),
+                            user_id=user.id,
+                            volume_id=volume.id,
+                            reader_type=(
+                                "audio"
+                                if volume.format.upper() in {"M4B", "M4A", "MP3"}
+                                else "comic"
+                                if volume.format.upper() in {"CBZ", "ZIP"}
+                                else "pdf"
+                                if volume.format.upper() == "PDF"
+                                else "epub"
+                            ),
+                            position="0",
+                            percent=target_percent,
+                            extra="{}",
+                            created_at=now,
+                            updated_at=now,
+                        )
+                    )
+                else:
+                    progress.percent = target_percent
+                    progress.updated_at = now
         updated += 1
     db.commit()
     return updated
@@ -1581,11 +1606,6 @@ async def bulk_works(
             changed_work_ids: set[str] = set()
             now = _now()
             for replacement in replacements:
-                if (
-                    replacement["column"] == "versionName"
-                    and not str(replacement["after"] or "").strip()
-                ):
-                    _raise_library_error("版本名称替换后不能为空", status_code=400)
                 value = (
                     _json_text(replacement["after"])
                     if replacement["column"] == "tags"
@@ -1627,18 +1647,11 @@ async def bulk_works(
                         replacement["column"]: value,
                         "updatedAt": now,
                     }
-                    if replacement["table"] == "LibraryWork":
-                        library_works.update_work_fields(
-                            db,
-                            str(replacement["targetId"]),
-                            update_values,
-                        )
-                    else:
-                        library_works.update_edition_fields(
-                            db,
-                            str(replacement["targetId"]),
-                            update_values,
-                        )
+                    library_works.update_work_fields(
+                        db,
+                        str(replacement["targetId"]),
+                        update_values,
+                    )
                 changed_work_ids.add(str(replacement["workId"]))
             for work_id in changed_work_ids:
                 sync_work_facets(db, work_id, commit=False)
@@ -1689,6 +1702,15 @@ async def bulk_works(
             if action == "update_metadata" and isinstance(payload.get("fields"), dict)
             else {}
         )
+        metadata_volume_id = str(payload.get("volumeId") or "").strip()
+        if "publisher" in metadata_fields and (
+            not metadata_volume_id or len(normalized_ids) != 1
+        ):
+            _raise_library_error(
+                "卷册元数据更新必须指定单个作品下的 volumeId",
+                status_code=400,
+                code="VOLUME_TARGET_REQUIRED",
+            )
         add_tags = [
             str(item).strip()
             for item in payload.get("addTags") or []
@@ -1764,18 +1786,26 @@ async def bulk_works(
                 if len(work_values) > 1:
                     library_works.update_work_fields(db, work_id, work_values)
                 if "publisher" in metadata_fields:
-                    edition = _primary_edition(db, work_id)
-                    if edition:
-                        library_works.update_edition_fields(
+                    try:
+                        update_volume_resource(
+                            volume_structure_commands(db),
                             db,
-                            str(edition["id"]),
-                            {
+                            actor=_library_actor(db, user),
+                            work_id=work_id,
+                            volume_id=metadata_volume_id,
+                            changes={
                                 "publisher": str(
                                     metadata_fields.get("publisher") or ""
                                 ).strip()
                                 or None,
-                                "updatedAt": _now(),
                             },
+                            now=_now(),
+                        )
+                    except (WorkNotFoundError, VolumeNotFoundError):
+                        _raise_library_error(
+                            "卷册不存在或不属于该作品",
+                            status_code=404,
+                            code="VOLUME_NOT_FOUND",
                         )
             elif fields:
                 library_works.update_work_fields(
@@ -2131,7 +2161,7 @@ def _scoped_filter_schema(db: Session, user: User) -> dict[str, Any]:
         options_by_source = {}
     else:
         work_rows = library_facet_queries.visible_work_option_rows(db, context)
-        edition_rows = library_facet_queries.visible_edition_option_rows(db, context)
+        volume_rows = library_facet_queries.visible_volume_option_rows(db, context)
 
         def counted(values: list[str]) -> list[dict[str, Any]]:
             counts: dict[str, int] = {}
@@ -2166,26 +2196,26 @@ def _scoped_filter_schema(db: Session, user: User) -> dict[str, Any]:
                     [str(row.get("seriesName") or "") for row in work_rows]
                 ),
                 "publishers": counted(
-                    [str(row.get("publisher") or "") for row in edition_rows]
+                    [str(row.get("publisher") or "") for row in volume_rows]
                 ),
                 "languages": counted(
-                    [str(row.get("language") or "") for row in edition_rows]
+                    [str(row.get("language") or "") for row in volume_rows]
                 ),
                 "formats": counted(
-                    [str(row.get("format") or "") for row in edition_rows]
+                    [str(row.get("format") or "") for row in volume_rows]
                 ),
                 "importStatuses": counted(
-                    [str(row.get("importStatus") or "") for row in edition_rows]
+                    [str(row.get("importStatus") or "") for row in volume_rows]
                 ),
                 "origins": counted(
                     [
                         *[str(row.get("origin") or "") for row in work_rows],
-                        *[str(row.get("origin") or "") for row in edition_rows],
+                        *[str(row.get("origin") or "") for row in volume_rows],
                     ]
                 ),
             }
         )
-        visible_media_kinds = {str(row.get("mediaKind") or "") for row in edition_rows}
+        visible_media_kinds = {str(row.get("mediaKind") or "") for row in volume_rows}
         existing_media = next(
             (
                 field.get("options", [])
@@ -2473,81 +2503,332 @@ async def metadata_search(
     )
 
 
-@router.patch("/works/{work_id}/editions/{edition_id}")
+@router.patch("/works/{work_id}/editions/{edition_id}", status_code=410)
+@router.post("/works/{work_id}/editions/{edition_id}/convert", status_code=410)
+@router.post("/works/{work_id}/editions/{edition_id}/primary", status_code=410)
+@router.post("/works/{work_id}/editions/{edition_id}/split", status_code=410)
 async def update_work_edition(
     work_id: str,
     edition_id: str,
+) -> Annotated[Never, ErrorResponses(RetiredResourceError)]:
+    _raise_edition_resource_retired()
+
+
+@router.patch("/works/{work_id}/volumes/{volume_id}")
+def update_work_volume(
+    work_id: str,
+    volume_id: str,
+    payload: UpdateVolumeRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Annotated[EditionMutationResponse, ErrorResponses(LibraryNotFoundError)]:
+) -> Annotated[
+    WorkStructureMutationResponse,
+    ErrorResponses(
+        LibraryForbiddenError,
+        LibraryNotFoundError,
+        LibraryUnprocessableError,
+    ),
+]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    permission_error = _require_work_manager(db, user, work_id)
-    if permission_error is not None:
-        return permission_error
-    if not can_access_edition(db, user, edition_id):
-        _raise_library_error(
-            "版本不存在或不属于该作品", status_code=404, code="EDITION_NOT_FOUND"
-        )
-    edition = (
-        library_works.get_visible_edition_for_work(
+    changes = payload.model_dump(exclude_unset=True)
+    if "title" in changes and changes["title"] is not None:
+        changes["title"] = str(changes["title"]).strip()
+    try:
+        update_volume_resource(
+            volume_structure_commands(db),
             db,
-            edition_id=edition_id,
+            actor=_library_actor(db, user),
             work_id=work_id,
+            volume_id=volume_id,
+            changes=changes,
+            now=_now(),
         )
-        if _has_table(db, "LibraryEdition")
-        else None
+    except WorkNotFoundError:
+        _raise_library_error(
+            "作品不存在或无权访问",
+            status_code=404,
+            code="WORK_NOT_FOUND",
+        )
+    except VolumeNotFoundError:
+        _raise_library_error(
+            "卷册不存在或不属于该作品",
+            status_code=404,
+            code="VOLUME_NOT_FOUND",
+        )
+    except LibraryAuthorizationError:
+        _raise_library_error(
+            "需要系统管理权限",
+            status_code=403,
+            code="SYSTEM_MANAGER_REQUIRED",
+        )
+    except InvalidVolumeChangeError as exc:
+        _raise_library_error(str(exc), status_code=422, code="VOLUME_TITLE_REQUIRED")
+    refreshed_work = _get_work(db, work_id)
+    return WorkStructureMutationResponse(
+        data={
+            "book": (
+                _work_view(db, refreshed_work, user.id) if refreshed_work else None
+            ),
+            "workId": work_id,
+            "volumeId": volume_id,
+        }
     )
-    if not edition:
-        _raise_library_error("版本不存在或不属于该作品", status_code=404)
-    payload = await request.json()
-    allowed = {
-        "versionName",
-        "description",
-        "publisher",
-        "publishedAt",
-        "language",
-        "identifier",
-        "isbn",
-        "narrator",
-        "abridged",
-    }
-    values = {key: payload.get(key) for key in allowed if key in payload}
-    for key in (
-        "versionName",
-        "publisher",
-        "language",
-        "identifier",
-        "isbn",
-        "narrator",
-    ):
-        if key in values:
-            values[key] = str(values[key] or "").strip() or None
-    values["updatedAt"] = _now()
-    library_works.update_edition_fields(db, edition_id, values)
-    sync_work_facets(db, work_id, commit=False)
-    db.commit()
-    work = _get_work(db, work_id)
-    book = _work_view(db, work, user.id) if work else None
-    updated_edition = next(
-        (
-            item
-            for item in (book or {}).get("editions", [])
-            if str(item.get("id")) == edition_id
-        ),
-        None,
-    )
-    if updated_edition is None:
-        _raise_library_error("版本不存在或不属于该作品", status_code=404)
-    return EditionMutationResponse(data={"edition": updated_edition, "book": book})
 
 
-@router.post("/works/{work_id}/editions/{edition_id}/convert")
-def convert_work_edition(
+@router.post("/works/{work_id}/volumes/{volume_id}/move")
+def reorder_work_volume(
     work_id: str,
-    edition_id: str,
+    volume_id: str,
+    payload: ReorderVolumeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    WorkStructureMutationResponse,
+    ErrorResponses(
+        LibraryForbiddenError,
+        LibraryNotFoundError,
+    ),
+]:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    try:
+        reorder_volume_resource(
+            volume_structure_commands(db),
+            db,
+            actor=_library_actor(db, user),
+            work_id=work_id,
+            volume_id=volume_id,
+            direction=payload.direction,
+            now=_now(),
+        )
+    except WorkNotFoundError:
+        _raise_library_error(
+            "作品不存在或无权访问",
+            status_code=404,
+            code="WORK_NOT_FOUND",
+        )
+    except VolumeNotFoundError:
+        _raise_library_error(
+            "卷册不存在或不属于该作品",
+            status_code=404,
+            code="VOLUME_NOT_FOUND",
+        )
+    except LibraryAuthorizationError:
+        _raise_library_error(
+            "需要系统管理权限",
+            status_code=403,
+            code="SYSTEM_MANAGER_REQUIRED",
+        )
+    refreshed_work = _get_work(db, work_id)
+    return WorkStructureMutationResponse(
+        data={
+            "book": (
+                _work_view(db, refreshed_work, user.id) if refreshed_work else None
+            ),
+            "workId": work_id,
+            "volumeId": volume_id,
+        }
+    )
+
+
+@router.post("/works/{work_id}/volumes/{volume_id}/move-to")
+def move_work_volume(
+    work_id: str,
+    volume_id: str,
+    payload: MoveVolumeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    WorkStructureMutationResponse,
+    ErrorResponses(
+        LibraryForbiddenError,
+        LibraryNotFoundError,
+    ),
+]:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    try:
+        outcome = move_volume_resource(
+            volume_structure_commands(db),
+            db,
+            actor=_library_actor(db, user),
+            source_work_id=work_id,
+            volume_id=volume_id,
+            target_work_id=payload.target_work_id,
+            now=_now(),
+        )
+    except WorkNotFoundError:
+        _raise_library_error(
+            "作品不存在或无权访问",
+            status_code=404,
+            code="WORK_NOT_FOUND",
+        )
+    except VolumeNotFoundError:
+        _raise_library_error(
+            "卷册不存在或不属于该作品",
+            status_code=404,
+            code="VOLUME_NOT_FOUND",
+        )
+    except LibraryAuthorizationError:
+        _raise_library_error(
+            "需要系统管理权限",
+            status_code=403,
+            code="SYSTEM_MANAGER_REQUIRED",
+        )
+    source_work = _get_work(db, work_id)
+    target_work = _get_work(db, payload.target_work_id)
+    return WorkStructureMutationResponse(
+        data={
+            "book": (_work_view(db, source_work, user.id) if source_work else None),
+            "targetBook": (
+                _work_view(db, target_work, user.id) if target_work else None
+            ),
+            "workId": work_id,
+            "targetWorkId": payload.target_work_id,
+            "volumeId": volume_id,
+            "targetMediaVersionId": outcome.move.target_media_version_id,
+            "transferMode": outcome.move.transfer_mode,
+            "operation": _operation_payload(outcome.operation),
+        }
+    )
+
+
+@router.post("/works/{work_id}/volumes/{volume_id}/split")
+def split_work_volume(
+    work_id: str,
+    volume_id: str,
+    payload: SplitVolumeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    WorkStructureMutationResponse,
+    ErrorResponses(
+        LibraryForbiddenError,
+        LibraryNotFoundError,
+        LibraryUnprocessableError,
+    ),
+]:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    try:
+        outcome = split_volume_resource(
+            volume_structure_commands(db),
+            db,
+            actor=_library_actor(db, user),
+            source_work_id=work_id,
+            volume_id=volume_id,
+            new_work=NewWorkInput(
+                title=payload.title.strip(),
+                author=payload.author,
+            ),
+            now=_now(),
+        )
+    except WorkNotFoundError:
+        _raise_library_error(
+            "作品不存在或无权访问",
+            status_code=404,
+            code="WORK_NOT_FOUND",
+        )
+    except VolumeNotFoundError:
+        _raise_library_error(
+            "卷册不存在或不属于该作品",
+            status_code=404,
+            code="VOLUME_NOT_FOUND",
+        )
+    except LibraryAuthorizationError:
+        _raise_library_error(
+            "需要系统管理权限",
+            status_code=403,
+            code="SYSTEM_MANAGER_REQUIRED",
+        )
+    except InvalidVolumeChangeError as exc:
+        _raise_library_error(str(exc), status_code=422, code="WORK_TITLE_REQUIRED")
+    new_work = _get_work(db, outcome.target_work_id)
+    return WorkStructureMutationResponse(
+        data={
+            "book": _work_view(db, new_work, user.id) if new_work else None,
+            "workId": work_id,
+            "targetWorkId": outcome.target_work_id,
+            "volumeId": volume_id,
+            "targetMediaVersionId": outcome.move.target_media_version_id,
+            "transferMode": outcome.move.transfer_mode,
+            "operation": _operation_payload(outcome.operation),
+        }
+    )
+
+
+@router.delete("/works/{work_id}/volumes/{volume_id}")
+def delete_work_volume(
+    work_id: str,
+    volume_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    WorkStructureMutationResponse,
+    ErrorResponses(
+        LibraryForbiddenError,
+        LibraryNotFoundError,
+    ),
+]:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    try:
+        outcome = delete_volume_resource(
+            volume_structure_commands(db),
+            db,
+            actor=_library_actor(db, user),
+            work_id=work_id,
+            volume_id=volume_id,
+            now=_now(),
+        )
+    except WorkNotFoundError:
+        _raise_library_error(
+            "作品不存在或无权访问",
+            status_code=404,
+            code="WORK_NOT_FOUND",
+        )
+    except VolumeNotFoundError:
+        _raise_library_error(
+            "卷册不存在或不属于该作品",
+            status_code=404,
+            code="VOLUME_NOT_FOUND",
+        )
+    except LibraryAuthorizationError:
+        _raise_library_error(
+            "需要系统管理权限",
+            status_code=403,
+            code="SYSTEM_MANAGER_REQUIRED",
+        )
+    remaining_work = _get_work(db, work_id)
+    return WorkStructureMutationResponse(
+        data={
+            "book": (
+                _work_view(db, remaining_work, user.id) if remaining_work else None
+            ),
+            "workId": work_id,
+            "volumeId": volume_id,
+            "deletedMediaVersion": outcome.deleted_media_version,
+            "deletedWork": outcome.deleted_work,
+            "operation": _operation_payload(outcome.operation),
+        }
+    )
+
+
+@router.post("/works/{work_id}/volumes/{volume_id}/convert")
+def convert_work_volume(
+    work_id: str,
+    volume_id: str,
     request: Request,
     response: Response,
     db: Session = Depends(get_db),
@@ -2555,86 +2836,73 @@ def convert_work_edition(
 ) -> Annotated[
     ConversionResponse,
     AdditionalStatusCodes(202),
-    ErrorResponses(LibraryBadRequestError, LibraryNotFoundError, LibraryConflictError),
+    ErrorResponses(
+        LibraryBadRequestError,
+        LibraryForbiddenError,
+        LibraryNotFoundError,
+        LibraryConflictError,
+    ),
 ]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    permission_error = _require_work_manager(db, user, work_id)
-    if permission_error is not None:
-        return permission_error
-    if not can_access_edition(db, user, edition_id):
-        _raise_library_error(
-            "版本不存在或不属于该作品", status_code=404, code="EDITION_NOT_FOUND"
+    try:
+        task, created = queue_volume_epub_conversion(
+            volume_structure_commands(db),
+            db,
+            actor=_library_actor(db, user),
+            work_id=work_id,
+            volume_id=volume_id,
+            now=_now(),
         )
-    work = _get_work(db, work_id)
-    edition = library_deletion.get_edition_for_work(
-        db,
-        edition_id=edition_id,
-        work_id=work_id,
-    )
-    if edition and bool(edition.get("hidden")):
-        edition = None
-    if not work or not edition:
-        _raise_library_error("版本不存在或不属于该作品", status_code=404)
-    source_format = str(edition.get("format") or "").strip().lower()
-    if f".{source_format}" not in CONVERTIBLE_TEXT_EXTS:
-        _raise_library_error("该版本不支持转换为 EPUB", status_code=400)
-    source_file = library_storage.first_file_for_edition(
-        db,
-        edition_id=edition_id,
-    )
-    source_path = Path(str((source_file or {}).get("path") or "")).expanduser()
-    if not source_file or not source_path.is_file():
-        _raise_library_error("原始文件不存在，无法转换", status_code=409)
-    task, created = enqueue_import_task(
-        db,
-        source_path,
-        origin="DEFERRED_CONVERSION",
-        original_name=source_path.name,
-        requested_title=str(work.get("title") or "").strip() or None,
-        requested_author=str(work.get("author") or "").strip() or None,
-        work_id=work_id,
-        monitor_folder_id=edition.get("monitorFolderId"),
-        message="已加入 EPUB 转换队列",
-        allow_terminal_requeue=True,
-    )
-    _record_system_event(
-        db,
-        level="info",
-        source="import",
-        actor_type="admin",
-        actor_id=user.id,
-        action="conversion.queued",
-        target_type="importTask",
-        target_id=task.id,
-        message=f"加入后置转换队列：{source_path.name}",
-        metadata={
-            "workId": work_id,
-            "editionId": edition_id,
-            "sourceFormat": source_format.upper(),
-        },
-    )
+    except WorkNotFoundError:
+        _raise_library_error(
+            "作品不存在或无权访问",
+            status_code=404,
+            code="WORK_NOT_FOUND",
+        )
+    except VolumeNotFoundError:
+        _raise_library_error(
+            "卷册不存在或不属于该作品",
+            status_code=404,
+            code="VOLUME_NOT_FOUND",
+        )
+    except LibraryAuthorizationError:
+        _raise_library_error(
+            "需要系统管理权限",
+            status_code=403,
+            code="SYSTEM_MANAGER_REQUIRED",
+        )
+    except VolumeConversionUnsupportedError:
+        _raise_library_error(
+            "该卷册不支持转换为 EPUB",
+            status_code=400,
+            code="CONVERSION_UNSUPPORTED",
+        )
+    except VolumeSourceMissingError:
+        _raise_library_error(
+            "原始文件不存在，无法转换",
+            status_code=409,
+            code="SOURCE_FILE_MISSING",
+        )
     response.status_code = 202
     return ConversionResponse(
-        data={"task": ImportTaskContract.from_dto(task).to_wire(), "created": created}
+        data={
+            "task": ImportTaskContract.from_dto(task).to_wire(),
+            "created": created,
+        }
     )
 
 
 @router.post("/works/{work_id}/metadata/apply")
-@router.post("/works/{work_id}/editions/{edition_id}/primary")
-@router.post("/works/{work_id}/editions/{edition_id}/split")
-@router.post("/works/{work_id}/volumes/{volume_id}/move-to")
-@router.post("/works/{work_id}/volumes/{volume_id}/move")
-async def compatible_work_action(
+async def apply_work_metadata(
     work_id: str,
+    payload: MetadataApplyRequest,
     request: Request,
-    edition_id: str | None = None,
-    volume_id: str | None = None,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
-    WorkStructureMutationResponse,
+    MetadataApplyResponse,
     ErrorResponses(LibraryBadRequestError, LibraryNotFoundError),
 ]:
     user, auth_error = _auth(db, request, settings)
@@ -2643,280 +2911,92 @@ async def compatible_work_action(
     permission_error = _require_work_manager(db, user, work_id)
     if permission_error is not None:
         return permission_error
-    if edition_id and not can_access_edition(db, user, edition_id):
-        _raise_library_error(
-            "版本不存在或不属于该作品", status_code=404, code="EDITION_NOT_FOUND"
-        )
-    if volume_id and not can_access_volume(db, user, volume_id):
-        _raise_library_error(
-            "卷不存在或不属于该作品", status_code=404, code="VOLUME_NOT_FOUND"
-        )
-    if request.url.path.endswith("/metadata/apply"):
-        payload = await request.json()
-        candidate = (
-            payload.get("candidate")
-            if isinstance(payload.get("candidate"), dict)
-            else {}
-        )
-        fields = [str(field) for field in payload.get("fields") or []]
-        if not candidate or not fields:
-            _raise_library_error("请选择要应用的元数据字段", status_code=400)
-        existing_work = _get_work(db, work_id)
-        if not existing_work:
-            _raise_library_error("作品不存在", status_code=404)
-        patch = _metadata_field_patch(candidate, fields)
-        if "title" in patch or "author" in patch:
-            title = str(patch.get("title", existing_work.get("title")) or "").strip()
-            author = (
-                str(patch.get("author", existing_work.get("author")) or "").strip()
-                or UNKNOWN_AUTHOR
+    candidate = payload.candidate.model_dump(by_alias=True)
+    fields = list(payload.fields)
+    existing_work = _get_work(db, work_id)
+    if not existing_work:
+        _raise_library_error("作品不存在", status_code=404)
+    publisher_selected = "publisher" in fields
+    target_volume: LibraryVolume | None = None
+    if publisher_selected:
+        if not payload.volume_id:
+            _raise_library_error(
+                "请选择要应用卷册元数据的目标卷册",
+                status_code=400,
+                code="VOLUME_TARGET_REQUIRED",
             )
-            merge_key = identity_merge_key(title, author)
-            patch.update(
-                {
-                    "title": title,
-                    "author": author,
-                    "normalizedTitle": normalize_identity_part(title),
-                    "normalizedAuthor": normalize_identity_part(author),
-                    "mergeKey": merge_key,
-                }
+        if not can_access_volume(db, user, payload.volume_id):
+            _raise_library_error("卷册不存在", status_code=404, code="VOLUME_NOT_FOUND")
+        target_volume = db.scalar(
+            select(LibraryVolume)
+            .join(
+                LibraryMediaVersion,
+                LibraryMediaVersion.id == LibraryVolume.media_version_id,
             )
-        publisher = (
-            str(candidate.get("publisher") or "").strip()
-            if "publisher" in fields
-            else ""
+            .where(
+                LibraryVolume.id == payload.volume_id,
+                LibraryMediaVersion.work_id == work_id,
+                LibraryVolume.hidden.is_(False),
+            )
         )
-        if (
-            "coverUrl" in fields
-            and isinstance(candidate.get("coverUrl"), str)
-            and candidate.get("coverUrl").strip()
-        ):
-            try:
-                patch.update(
-                    _apply_remote_cover(
-                        work_id, candidate["coverUrl"].strip(), settings
-                    )
-                )
-            except Exception as exc:
-                logger.warning(
-                    "failed to apply remote cover work=%s url=%s error=%s",
-                    work_id,
-                    candidate.get("coverUrl"),
-                    exc,
-                )
-        if not patch and not publisher:
-            _raise_library_error("候选中没有可应用的字段", status_code=400)
+        if target_volume is None:
+            _raise_library_error("卷册不存在", status_code=404, code="VOLUME_NOT_FOUND")
+    patch = _metadata_field_patch(candidate, fields)
+    if "title" in patch or "author" in patch:
+        title = str(patch.get("title", existing_work.get("title")) or "").strip()
+        author = (
+            str(patch.get("author", existing_work.get("author")) or "").strip()
+            or UNKNOWN_AUTHOR
+        )
         patch.update(
             {
-                "organized": True,
-                "organizeStatus": "APPLIED",
-                "metadataQuality": 85,
-                "updatedAt": _now(),
+                "title": title,
+                "author": author,
+                "normalizedTitle": normalize_identity_part(title),
+                "normalizedAuthor": normalize_identity_part(author),
+                "mergeKey": identity_merge_key(title, author),
             }
         )
-        work = library_works.update_work_fields(db, work_id, patch)
-        if not work:
-            _raise_library_error("作品不存在", status_code=404)
-        if publisher and _has_table(db, "LibraryEdition"):
-            primary_edition_id = str(work.get("primaryEditionId") or "")
-            if not primary_edition_id:
-                first_editions = library_works.list_visible_editions_for_work(
-                    db,
-                    work_id=work_id,
-                )
-                primary_edition_id = str(
-                    (first_editions[0] if first_editions else {}).get("id") or ""
-                )
-            if primary_edition_id:
-                library_works.update_edition_fields(
-                    db,
-                    primary_edition_id,
-                    {"publisher": publisher, "updatedAt": _now()},
-                )
-        sync_work_facets(db, work_id, commit=False)
-        finished_job_ids = _finish_metadata_organize_work(db, work_id)
-        db.commit()
-        return WorkStructureMutationResponse(
-            data={
-                "book": _work_view(db, work, user.id),
-                "appliedFields": fields,
-                "finishedOrganizeJobIds": finished_job_ids,
-            }
-        )
-    if request.url.path.endswith("/split"):
-        payload = await request.json()
+    publisher = str(candidate.get("publisher") or "").strip()
+    if (
+        "coverUrl" in fields
+        and isinstance(candidate.get("coverUrl"), str)
+        and candidate.get("coverUrl").strip()
+    ):
         try:
-            result = split_edition(
-                db,
+            patch.update(
+                _apply_remote_cover(work_id, candidate["coverUrl"].strip(), settings)
+            )
+        except Exception as exc:
+            logger.warning(
+                "failed to apply remote cover work=%s url=%s error=%s",
                 work_id,
-                str(edition_id or ""),
-                title=str(payload.get("title") or ""),
-                author=str(payload.get("author") or "").strip() or None,
-                copy_shelves=payload.get("copyShelves") is not False,
-                user_id=user.id,
+                candidate.get("coverUrl"),
+                exc,
             )
-        except ValueError as exc:
-            _raise_library_error(str(exc), status_code=400)
-        return WorkStructureMutationResponse(data=result)
-    if request.url.path.endswith("/primary") and edition_id:
-        edition = (
-            library_projections.get_edition(db, edition_id)
-            if _has_table(db, "LibraryEdition")
-            else None
-        )
-        if edition and (
-            str(edition.get("workId") or "") != work_id or bool(edition.get("hidden"))
-        ):
-            edition = None
-        if not edition:
-            _raise_library_error("版本不存在或不属于该作品", status_code=404)
-        if not _get_work(db, work_id):
-            _raise_library_error("作品不存在", status_code=404)
-        now = _now()
-        media_kind = _edition_media_kind(edition)
-        has_media_kind = _has_column(db, "LibraryEdition", "mediaKind")
-        compatible_formats = (
-            None
-            if has_media_kind
-            else (
-                ("EPUB", "PDF") if media_kind == "EBOOK" else (edition.get("format"),)
-            )
-        )
-        library_works.clear_primary_for_media_kind(
-            db,
-            work_id=work_id,
-            media_kind=media_kind,
-            formats=compatible_formats,
-            now=now,
-            has_media_kind_column=has_media_kind,
-        )
-        library_works.mark_edition_primary_for_work(
-            db,
-            work_id=work_id,
-            edition_id=edition_id,
-            work_type=edition.get("format") or "EPUB",
-            now=now,
-        )
-        db.commit()
-        _record_system_event(
-            db,
-            level="info",
-            source="library",
-            actor_type="admin",
-            actor_id=user.id,
-            action="edition.primary",
-            target_type="edition",
-            target_id=edition_id,
-            message="已更新主版本",
-            metadata={"workId": work_id, "editionId": edition_id},
-        )
-        work = _get_work(db, work_id)
-        return WorkStructureMutationResponse(
-            data={
-                "book": _work_view(db, work, user.id) if work else None,
-                "workId": work_id,
-                "editionId": edition_id,
-            }
-        )
-    if request.url.path.endswith("/move-to") and volume_id:
-        payload = await request.json()
-        target_edition_id = str(payload.get("targetEditionId") or "").strip()
-        if not target_edition_id:
-            _raise_library_error("请选择目标版本", status_code=400)
-        source = library_join_queries.get_volume_for_work(
-            db, volume_id=volume_id, work_id=work_id
-        )
-        if not source:
-            _raise_library_error("卷册不存在或不属于该作品", status_code=404)
-        target = library_join_queries.get_edition_with_work_title(db, target_edition_id)
-        if not target:
-            _raise_library_error("目标版本不存在", status_code=404)
-        target_work_id = target.get("workId")
-        if target_work_id == work_id:
-            _raise_library_error("请选择另一部目标图书", status_code=400)
-        result = move_volume_to_work(
-            db,
-            source_work_id=work_id,
-            volume_id=volume_id,
-            target_work_id=str(target_work_id),
-            source_format=str(source.get("sourceFormat") or ""),
-            now=_now(),
-        )
-        _record_system_event(
-            db,
-            level="info",
-            source="library",
-            actor_type="admin",
-            actor_id=user.id,
-            action="volume.moved" if result.merged_volume else "edition.moved",
-            target_type="volume" if result.merged_volume else "edition",
-            target_id=volume_id if result.merged_volume else result.source_edition_id,
-            message=("合并卷册" if result.merged_volume else "转移版本")
-            + f"到《{target.get('targetWorkTitle') or target_work_id}》",
-            metadata={
-                "sourceWorkId": work_id,
-                "targetWorkId": target_work_id,
-                "sourceEditionId": result.source_edition_id,
-                "targetEditionId": result.target_edition_id,
-                "transferMode": result.transfer_mode,
-            },
-        )
-        source_work = _get_work(db, work_id)
-        target_work = _get_work(db, target_work_id) if target_work_id else None
-        return WorkStructureMutationResponse(
-            data={
-                "book": _work_view(db, source_work, user.id) if source_work else None,
-                "targetBook": _work_view(db, target_work, user.id)
-                if target_work
-                else None,
-                "workId": work_id,
-                "targetWorkId": target_work_id,
-                "volumeId": volume_id,
-                "targetEditionId": result.target_edition_id,
-                "transferMode": result.transfer_mode,
-            }
-        )
-    if request.url.path.endswith("/move") and volume_id:
-        payload = await request.json()
-        direction = str(payload.get("direction") or "").lower()
-        if direction not in {"up", "down"}:
-            _raise_library_error("请选择上移或下移", status_code=400)
-        volume = library_join_queries.get_volume_belonging_to_work(
-            db, volume_id=volume_id, work_id=work_id
-        )
-        if not volume:
-            _raise_library_error("卷册不存在或不属于该作品", status_code=404)
-        changed = reorder_volume(
-            db,
-            volume_id=volume_id,
-            edition_id=str(volume["editionId"]),
-            direction=direction,
-            now=_now(),
-        )
-        if not changed:
-            work = _get_work(db, work_id)
-            return WorkStructureMutationResponse(
-                data={
-                    "book": _work_view(db, work, user.id) if work else None,
-                    "workId": work_id,
-                    "volumeId": volume_id,
-                }
-            )
-        db.commit()
-        work = _get_work(db, work_id)
-        return WorkStructureMutationResponse(
-            data={
-                "book": _work_view(db, work, user.id) if work else None,
-                "workId": work_id,
-                "volumeId": volume_id,
-            }
-        )
-    work = _get_work(db, work_id)
-    return WorkStructureMutationResponse(
+    if not patch and not publisher_selected:
+        _raise_library_error("候选中没有可应用的字段", status_code=400)
+    patch.update(
+        {
+            "organized": True,
+            "organizeStatus": "APPLIED",
+            "metadataQuality": 85,
+            "updatedAt": _now(),
+        }
+    )
+    work = library_works.update_work_fields(db, work_id, patch)
+    if not work:
+        _raise_library_error("作品不存在", status_code=404)
+    if target_volume is not None:
+        target_volume.publisher = publisher or None
+        target_volume.updated_at = _now()
+    sync_work_facets(db, work_id, commit=False)
+    finished_job_ids = _finish_metadata_organize_work(db, work_id)
+    db.commit()
+    return MetadataApplyResponse(
         data={
-            "book": _work_view(db, work, user.id) if work else None,
-            "workId": work_id,
-            "editionId": edition_id,
-            "volumeId": volume_id,
+            "book": _work_view(db, work, user.id),
+            "appliedFields": fields,
+            "finishedOrganizeJobIds": finished_job_ids,
         }
     )

@@ -41,7 +41,7 @@ def validated_audio_cover(data: bytes) -> tuple[bytes, str] | None:
 def publish_audio_cover(
     storage_root: Path,
     work_id: str,
-    edition_id: str,
+    media_version_id: str,
     metadata_items: tuple[AudioFileMetadata, ...],
     *,
     bundle_root: Path | None = None,
@@ -51,7 +51,7 @@ def publish_audio_cover(
         validated = validated_audio_cover(selected.cover_data)
         if validated:
             return _write_cover(
-                storage_root, work_id, edition_id, validated[0], validated[1]
+                storage_root, work_id, media_version_id, validated[0], validated[1]
             )
 
     source_root = bundle_root or metadata_items[0].path.parent
@@ -64,7 +64,7 @@ def publish_audio_cover(
         and item.suffix.lower() in {*_IMAGE_EXTENSIONS, ".tbn"}
         and (
             item.stem.casefold() in priorities
-            or re.search(r"^(?:cover|folder|front|封面)", item.stem, re.I)
+            or re.search(r"^(?:cover|folder|front|封面)", item.stem, re.IGNORECASE)
         )
     ]
     for source in sorted(
@@ -82,7 +82,7 @@ def publish_audio_cover(
             continue
         if validated:
             return _write_cover(
-                storage_root, work_id, edition_id, validated[0], validated[1]
+                storage_root, work_id, media_version_id, validated[0], validated[1]
             )
     return None
 
@@ -90,11 +90,11 @@ def publish_audio_cover(
 def _write_cover(
     storage_root: Path,
     work_id: str,
-    edition_id: str,
+    media_version_id: str,
     data: bytes,
     extension: str,
 ) -> str:
-    target = storage_root / "books" / work_id / edition_id / f"cover{extension}"
+    target = storage_root / "books" / work_id / media_version_id / f"cover{extension}"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(data)
     return str(target)

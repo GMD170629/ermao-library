@@ -1,41 +1,33 @@
 """Stable reader capability contracts."""
 
-from app.modules.reader.application.progress import (
-    ClaimClientSequence,
-    ClaimClientSequenceCommand,
-    ReaderProgressCursorPort,
+from app.modules.reader.application.content_fingerprint import (
+    build_volume_content_fingerprint,
 )
 from app.modules.reader.domain.progress import (
-    choose_continue_volume,
-    continue_progress_for_edition,
-    display_progress_percent,
-    empty_progress_for_volume,
-    latest_progress,
     normalize_reader_href,
     number_or_none,
-    progress_chapter_label,
     progress_extra,
-    progress_for_volume,
     progress_navigation,
     progress_percent_with_navigation,
     raw_progress_percent,
     reader_unit_index,
 )
+from app.modules.reader.domain.volume_progress import (
+    MediaKind,
+    VolumeReadingState,
+    choose_continue_volume_id,
+    completed_for_available_volumes,
+)
 
 __all__ = [
-    "ClaimClientSequence",
-    "ClaimClientSequenceCommand",
-    "ReaderProgressCursorPort",
-    "choose_continue_volume",
-    "continue_progress_for_edition",
-    "display_progress_percent",
-    "empty_progress_for_volume",
-    "latest_progress",
+    "MediaKind",
+    "VolumeReadingState",
+    "build_volume_content_fingerprint",
+    "choose_continue_volume_id",
+    "completed_for_available_volumes",
     "normalize_reader_href",
     "number_or_none",
-    "progress_chapter_label",
     "progress_extra",
-    "progress_for_volume",
     "progress_navigation",
     "progress_percent_with_navigation",
     "raw_progress_percent",

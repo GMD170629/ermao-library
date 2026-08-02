@@ -342,7 +342,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
         : deleteMode === 'converted'
           ? `已删除 ${targets.length} 条导入记录和对应转换文件`
           : `已删除 ${targets.length} 条导入记录`;
-      const successMessage = deletedLibraryRecords > 0 ? `${fileMessage}，并清理 ${deletedLibraryRecords} 个关联卷册或版本` : fileMessage;
+      const successMessage = deletedLibraryRecords > 0 ? `${fileMessage}，并清理 ${deletedLibraryRecords} 个关联卷册` : fileMessage;
       setDeleteTarget(null);
       setBulkDeleteOpen(false);
       setSelectedIds(new Set());
@@ -576,8 +576,8 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
             <div className="mt-5 space-y-2" role="radiogroup" aria-label={i18nAttribute("删除范围")}>
               {([
                 { value: 'record' as const, label: '仅删除导入记录', description: '保留源文件和转换后的文件。', available: true },
-                { value: 'source' as const, label: '同步删除源文件', description: '转换文件会保留；直接使用这些源文件的书库版本将无法继续阅读。', available: canDeleteSources },
-                { value: 'converted' as const, label: '同步删除转换后的文件', description: '源文件会保留；使用这些转换文件的书库版本将无法继续阅读。', available: canDeleteConverted }
+                { value: 'source' as const, label: '同步删除源文件', description: '转换文件会保留；直接使用这些源文件的卷册将无法继续阅读。', available: canDeleteSources },
+                { value: 'converted' as const, label: '同步删除转换后的文件', description: '源文件会保留；使用这些转换文件的卷册将无法继续阅读。', available: canDeleteConverted }
               ]).map((option) => (
                 <button
                   key={option.value}
@@ -600,8 +600,8 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
               <label className={`mt-4 flex cursor-pointer gap-3 rounded-2xl border p-4 transition ${deleteLibraryRecord ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}>
                 <input type="checkbox" checked={deleteLibraryRecord} disabled={Boolean(deletingTaskId)} onChange={(event) => setDeleteLibraryRecord(event.target.checked)} className="mt-0.5 h-4 w-4 accent-red-600" />
                 <span>
-                  <span className="block text-sm font-semibold text-slate-900"><I18nText>同步删除关联卷册或版本</I18nText></span>
-                  <span className="mt-1 block text-xs leading-5 text-slate-500"><I18nText>仅删除所选记录直接关联的卷册或版本及其阅读进度和系统生成文件；同一本书的其他卷册和版本会保留，全部清空后才删除图书记录。源文件是否删除由上方选项决定。</I18nText></span>
+                  <span className="block text-sm font-semibold text-slate-900"><I18nText>同步删除关联卷册</I18nText></span>
+                  <span className="mt-1 block text-xs leading-5 text-slate-500"><I18nText>仅删除所选记录直接关联的卷册及其阅读进度和系统生成文件；同一本书的其他卷册会保留，最后一个卷册删除后才移除作品。源文件是否删除由上方选项决定。</I18nText></span>
                 </span>
               </label>
             ) : (

@@ -20,7 +20,7 @@ export type AudioChapter = {
 
 export type AudioLocation = {
   type: 'audio';
-  volumeId: string | null;
+  volumeId: string;
   fileId: string;
   chapterId: string | null;
   positionMs: number;
@@ -33,11 +33,11 @@ export type AudioBookSummary = {
   coverUrl: string | null;
 };
 
-export type AudioEditionSummary = {
+export type AudioMediaVersionSummary = {
   id: string;
   workId: string;
-  versionName: string;
-  narrator: string | null;
+  mediaKind: 'AUDIOBOOK';
+  completed: boolean;
 };
 
 export type AudioVolumeSummary = {
@@ -49,28 +49,28 @@ export type AudioVolumeSummary = {
 };
 
 export type AudioLaunchSummary = {
-  editionId: string;
+  volumeId: string;
   workId: string;
   title: string;
   author: string | null;
   coverUrl: string | null;
-  versionName: string | null;
+  volumeTitle: string | null;
   narrator: string | null;
   chapterTitle?: string | null;
 };
 
 export type AudioBootstrap = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   userId: string;
   readerType: 'audio';
   contentFingerprint: string;
   book: AudioBookSummary;
-  edition: AudioEditionSummary;
-  volumes: AudioVolumeSummary[];
+  mediaVersion: AudioMediaVersionSummary;
+  volume: AudioVolumeSummary;
+  availableVolumes: AudioVolumeSummary[];
   tracks: AudioTrack[];
   chapters: AudioChapter[];
   totalDurationMs: number;
-  volumeId: string | null;
   resumeLocation: AudioLocation | null;
   progressPercent: number;
   preferences: {
@@ -87,8 +87,8 @@ export type AudioSleepTimerMode = 'timer' | 'chapter' | null;
 export type AudioPlaybackState = {
   lifecycle: AudioLifecycle;
   bootstrap: AudioBootstrap | null;
-  editionId: string | null;
-  pendingEditionId: string | null;
+  volumeId: string | null;
+  pendingVolumeId: string | null;
   pendingSummary: AudioLaunchSummary | null;
   loadError: string | null;
   workId: string | null;
@@ -108,18 +108,17 @@ export type AudioPlaybackState = {
   error: string | null;
 };
 
-export type LoadAudioEditionOptions = {
+export type LoadAudioVolumeOptions = {
   autoplay?: boolean;
   force?: boolean;
   chapterId?: string;
-  volumeId?: string | null;
   summary?: AudioLaunchSummary;
 };
 
 export type AudioPlaybackContextValue = AudioPlaybackState & {
-  loadEdition: (editionId: string, options?: LoadAudioEditionOptions) => Promise<void>;
+  loadVolume: (volumeId: string, options?: LoadAudioVolumeOptions) => Promise<void>;
   retry: () => Promise<void>;
-  cancelEditionSwitch: () => void;
+  cancelVolumeSwitch: () => void;
   play: () => Promise<void>;
   pause: () => void;
   toggle: () => Promise<void>;

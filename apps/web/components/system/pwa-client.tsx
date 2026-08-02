@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clearPrivatePwaData } from '../../lib/pwa/progressQueue';
 import { prepareForPwaUpdate } from '../../lib/pwa/update-coordination';
-import { activateReaderV2User, clearPrivateReaderV2Data, deactivateReaderV2User, getReaderV2Runtime, startReaderV2Runtime, stopReaderV2Runtime } from '../../lib/reader-v2';
+import { activateReaderUser, clearPrivateReaderData, deactivateReaderUser, getReaderRuntime, startReaderRuntime, stopReaderRuntime } from '../../lib/reader';
 import { withBasePath } from '../../lib/base-path';
 import { PRODUCT_NAME } from '../../lib/brand';
 import { clearCurrentUserNamespace, setCurrentUserNamespace, userDevicePreferenceKey } from '../../lib/user-preferences';
@@ -58,10 +58,10 @@ function canShowInstallHint() {
 export async function clearPrivatePwaStorage() {
   window.dispatchEvent(new CustomEvent('shuku:private-data-clearing'));
   navigator.serviceWorker?.controller?.postMessage({ type: 'CLEAR_PRIVATE_CACHES' });
-  deactivateReaderV2User();
+  deactivateReaderUser();
   clearCurrentUserNamespace();
-  const runtime = getReaderV2Runtime();
-  await Promise.all([clearPrivatePwaData(), clearPrivateReaderV2Data(runtime.storage)]);
+  const runtime = getReaderRuntime();
+  await Promise.all([clearPrivatePwaData(), clearPrivateReaderData(runtime.storage)]);
 }
 
 export function PwaClient() {
@@ -95,7 +95,7 @@ export function PwaClient() {
     const userId = session?.user?.id;
     if (!userId) return;
     const authzVersion = Number(session.authorization?.authzVersion ?? 1);
-    activateReaderV2User(userId);
+    activateReaderUser(userId);
     setCurrentUserNamespace(userId, authzVersion);
     navigator.serviceWorker?.controller?.postMessage({
       type: 'SET_PRIVATE_CACHE_NAMESPACE',
@@ -135,7 +135,7 @@ export function PwaClient() {
     window.addEventListener('offline', updateOnlineState);
     window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt);
     window.addEventListener('appinstalled', onAppInstalled);
-    startReaderV2Runtime();
+    startReaderRuntime();
 
     const canRegisterServiceWorker = process.env.NODE_ENV === 'production' && 'serviceWorker' in navigator;
     if (canRegisterServiceWorker) {
@@ -166,7 +166,7 @@ export function PwaClient() {
       window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt);
       window.removeEventListener('appinstalled', onAppInstalled);
       if (restoreTimerRef.current) window.clearTimeout(restoreTimerRef.current);
-      stopReaderV2Runtime();
+      stopReaderRuntime();
     };
   }, []);
 
@@ -378,7 +378,7 @@ function PwaDebugPanel() {
     function recordReaderDebug(event: Event) {
       const detail = (event as CustomEvent<{ level?: DebugLevel; message?: string; data?: unknown }>).detail;
       if (!detail) return;
-      appendLog(detail.level ?? 'info', 'reader-v2', [detail.message ?? 'event', detail.data].filter((item) => typeof item !== 'undefined'));
+      appendLog(detail.level ?? 'info', 'reader-v3', [detail.message ?? 'event', detail.data].filter((item) => typeof item !== 'undefined'));
     }
 
     appendLog('info', 'pwa', [
@@ -388,26 +388,26 @@ function PwaDebugPanel() {
       `sw=${'serviceWorker' in navigator ? 'supported' : 'unsupported'}`
     ]);
 
-    const readerRuntime = getReaderV2Runtime();
+    const readerRuntime = getReaderRuntime();
     void Promise.all([
       readerRuntime.storage.listProgress(),
       readerRuntime.storage.getProgressLease(),
       readerRuntime.storage.listDiagnostics(30),
       readerRuntime.storage.listQuarantine(30)
     ]).then(([outbox, lease, diagnostics, quarantine]) => {
-      appendLog('info', 'reader-v2/snapshot', [
+      appendLog('info', 'reader-v3/snapshot', [
         `outbox=${outbox.length}`,
         lease ? `lease=${lease.ownerId} expires=${new Date(lease.expiresAt).toISOString()}` : 'lease=none',
         `diagnostics=${diagnostics.length}`,
         `quarantine=${quarantine.length}`
       ]);
-      diagnostics.reverse().forEach((item) => appendLog(item.level === 'warning' ? 'warn' : item.level, `reader-v2/${item.code}`, [item.message, item.data]));
-      quarantine.reverse().forEach((item) => appendLog('warn', `reader-v2/quarantine/${item.reason}`, [item.message, {
+      diagnostics.reverse().forEach((item) => appendLog(item.level === 'warning' ? 'warn' : item.level, `reader-v3/${item.code}`, [item.message, item.data]));
+      quarantine.reverse().forEach((item) => appendLog('warn', `reader-v3/quarantine/${item.reason}`, [item.message, {
         mutationId: item.mutation.mutationId,
-        editionId: item.mutation.editionId,
+        volumeId: item.mutation.volumeId,
         fingerprint: item.mutation.contentFingerprint
       }]));
-    }).catch((error) => appendLog('warn', 'reader-v2/snapshot', ['读取本地诊断失败', error]));
+    }).catch((error) => appendLog('warn', 'reader-v3/snapshot', ['读取本地诊断失败', error]));
 
     navigator.serviceWorker?.getRegistration().then((registration) => {
       appendLog('info', 'service-worker', [

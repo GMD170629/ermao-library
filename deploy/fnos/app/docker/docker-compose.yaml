@@ -5,7 +5,6 @@ services:
     user: "${TRIM_UID}:${TRIM_GID}"
     environment:
       STORAGE_ROOT: /app/storage
-      MONITOR_ROOT: /monitor
       PORT: 3000
       HOSTNAME: 0.0.0.0
       COOKIE_PATH: /
