@@ -19,7 +19,6 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.media import media_page_index, media_resource_query, media_streaming
-from app.bootstrap.system import list_settings
 from app.contracts.http_errors import (
     BasicNotFoundError,
     BasicUnauthorizedError,
@@ -45,16 +44,12 @@ from app.modules.media.presentation.schemas import (
 )
 from app.schemas.responses import fail
 from app.services.default_cover import ensure_default_cover, is_default_cover_path
+from app.services.metadata_provider_registry import get_metadata_provider
 
 router = APIRouter(tags=["media"], route_class=TypedContractRoute)
 logger = logging.getLogger(__name__)
 DatabaseSession = Annotated[Session, Depends(get_db)]
 ApplicationSettings = Annotated[Settings, Depends(get_settings)]
-
-_METADATA_PROVIDER_BASE_URL_KEYS = (
-    "metadata.douban.baseUrl",
-    "metadata.bangumi.baseUrl",
-)
 
 
 class _SafeCoverRedirectHandler(HTTPRedirectHandler):
@@ -224,9 +219,12 @@ def metadata_cover_proxy(
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    provider_settings = list_settings(db)
+    provider_configs = [
+        (get_metadata_provider(db, provider_id) or {}).get("config", {})
+        for provider_id in ("douban", "bangumi")
+    ]
     allowed_origins = configured_cover_origins(
-        provider_settings.get(key) for key in _METADATA_PROVIDER_BASE_URL_KEYS
+        config.get("baseUrl") for config in provider_configs if isinstance(config, dict)
     )
     try:
         validate_cover_url(url, configured_origins=allowed_origins)
@@ -327,9 +325,7 @@ def get_volume_page(
             file_id=unit.get("id") or f"{volume_id}:{page_index}",
         )
     return media_streaming.send_comic_page_file(
-        media_streaming.stored_path(
-            unit.get("href"), settings, database_backed=True
-        ),
+        media_streaming.stored_path(unit.get("href"), settings, database_backed=True),
         request,
         user.id,
         settings,

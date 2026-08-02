@@ -1646,13 +1646,6 @@ def test_import_epub_leaves_metadata_queue_to_organizer_without_blocking_on_exte
     test_settings.resolved_storage_root.mkdir(parents=True)
     gateway = serve_import_metadata_gateways()
     try:
-        for key, value in {
-            "metadata.douban.mode": "api",
-            "metadata.douban.baseUrl": f"http://127.0.0.1:{gateway.server_port}",
-            "metadata.bangumi.baseUrl": f"http://127.0.0.1:{gateway.server_port}",
-            "metadata.bangumi.userAgent": "ShukuImportTest/1.0",
-        }.items():
-            set_system_setting(db_session, key, value)
         epub = tmp_path / "fallback.epub"
         write_epub_fixture(epub)
 
@@ -2041,14 +2034,14 @@ def test_import_pdf_creates_library_records(db_session, test_settings, tmp_path)
     )
     assert raw_metadata["coverRenderedFromPage"] == 1
     assert raw_metadata["contentClassification"]["kind"] == "IMAGE_ONLY"
-    work = db_session.execute(
-        text("SELECT workType, tags, mergeKey FROM LibraryWork")
-    ).mappings().one()
+    work = (
+        db_session.execute(text("SELECT workType, tags, mergeKey FROM LibraryWork"))
+        .mappings()
+        .one()
+    )
     assert work["workType"] == "COMIC"
     assert json.loads(work["tags"]) == ["comic", "pdf"]
-    assert work["mergeKey"] == _work_merge_key(
-        "pdf-comic", "Manual PDF", "未知作者"
-    )
+    assert work["mergeKey"] == _work_merge_key("pdf-comic", "Manual PDF", "未知作者")
     assert (
         db_session.execute(text("SELECT mediaKind FROM LibraryMediaVersion")).scalar()
         == "COMIC"
@@ -2073,16 +2066,14 @@ def test_import_text_pdf_remains_ebook(db_session, test_settings, tmp_path):
 
     assert result.type == "ebook"
     assert (
-        db_session.execute(text("SELECT workType FROM LibraryWork")).scalar()
-        == "PDF"
+        db_session.execute(text("SELECT workType FROM LibraryWork")).scalar() == "PDF"
     )
     assert (
         db_session.execute(text("SELECT mediaKind FROM LibraryMediaVersion")).scalar()
         == "EBOOK"
     )
     assert (
-        db_session.execute(text("SELECT format FROM LibraryVolume")).scalar()
-        == "PDF"
+        db_session.execute(text("SELECT format FROM LibraryVolume")).scalar() == "PDF"
     )
 
 

@@ -53,6 +53,12 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
         capabilities=("automatic", "manual-search", "cover"),
         config_fields=(
             ProviderConfigField(
+                key="baseUrl",
+                label="站点地址",
+                required=True,
+                default="https://book.douban.com",
+            ),
+            ProviderConfigField(
                 key="userAgent",
                 label="User-Agent",
                 required=True,

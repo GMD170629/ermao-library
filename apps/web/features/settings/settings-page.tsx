@@ -1,6 +1,6 @@
 'use client';
 
-import { CheckCircle2, ChevronDown, ChevronRight, Database, Download, FolderOpen, RotateCcw, Save, Settings2, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Database, Download, FolderOpen, RotateCcw, Save, Settings2, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
@@ -43,79 +43,19 @@ type BackupItem = {
   };
 };
 
-type AppSettings = Record<string, string>;
-
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function toggleExternalSettings(settings: AppSettings, enabled: boolean): AppSettings {
-  return {
-    ...settings,
-    'metadata.external.enabled': String(enabled),
-    'metadata.douban.enabled': String(enabled),
-    'metadata.bangumi.enabled': String(enabled)
-  };
-}
-
-function toggleExternalProvider(settings: AppSettings, providerKey: 'metadata.douban.enabled' | 'metadata.bangumi.enabled', enabled: boolean): AppSettings {
-  return {
-    ...settings,
-    'metadata.external.enabled': String(enabled || settings['metadata.external.enabled'] === 'true'),
-    [providerKey]: String(enabled)
-  };
-}
-
-const editableSystemSettingKeys = new Set([
-  'metadata.external.enabled',
-  'metadata.douban.enabled',
-  'metadata.douban.userAgent',
-  'metadata.bangumi.enabled',
-  'metadata.bangumi.baseUrl',
-  'metadata.bangumi.accessToken',
-  'metadata.bangumi.userAgent',
-  'metadata.ai.enabled',
-  'metadata.ai.baseUrl',
-  'metadata.ai.apiKey',
-  'metadata.ai.model'
-]);
-
-const sensitiveSystemSettingKeys = [
-  'metadata.bangumi.accessToken',
-  'metadata.ai.apiKey'
-] as const;
-
-function settingsForSave(settings: AppSettings) {
-  const next: Record<string, string> = {};
-  for (const [key, value] of Object.entries(settings)) {
-    if (!editableSystemSettingKeys.has(key)) continue;
-    if (sensitiveSystemSettingKeys.includes(key as (typeof sensitiveSystemSettingKeys)[number]) && !value.trim()) continue;
-    next[key] = value;
-  }
-  return next;
-}
-
 export function SettingsPage({ embedded = false, initialSection }: { embedded?: boolean; initialSection?: string }) {
   const { t: i18nAttribute } = useAttributeI18n();
   const { locale } = useI18n();
-  const groups = ['监控文件夹', '备份与恢复', '元数据'];
+  const groups = ['监控文件夹', '备份与恢复'];
   const [active, setActive] = useState(initialSection ?? '监控文件夹');
   const [folders, setFolders] = useState<MonitorFolder[]>([]);
   const [backups, setBackups] = useState<BackupItem[]>([]);
-  const [settings, setSettings] = useState<AppSettings>({
-    'metadata.external.enabled': 'false',
-    'metadata.douban.enabled': 'false',
-    'metadata.douban.userAgent': 'ShukuStarship/0.1 (+https://github.com/GMD170629/ermao-library)',
-    'metadata.bangumi.enabled': 'false',
-    'metadata.bangumi.accessToken': '',
-    'metadata.bangumi.userAgent': 'ShukuStarship/0.1 (https://github.com/GMD170629/ermao-library)',
-    'metadata.ai.enabled': 'false',
-    'metadata.ai.baseUrl': '',
-    'metadata.ai.apiKey': '',
-    'metadata.ai.model': ''
-  });
   const [name, setName] = useState('我的监控文件夹');
   const [rootPath, setRootPath] = useState('');
   const [ignorePatterns, setIgnorePatterns] = useState('');
@@ -124,12 +64,10 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [backupBusy, setBackupBusy] = useState('');
-  const [settingsBusy, setSettingsBusy] = useState(false);
   const [pathBusy, setPathBusy] = useState('');
   const [ruleBusy, setRuleBusy] = useState('');
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [showCreateRules, setShowCreateRules] = useState(true);
-  const [pendingSecretClears, setPendingSecretClears] = useState<string[]>([]);
   const [expandedRules, setExpandedRules] = useState<Record<string, boolean>>({});
   const confirm = useConfirm();
   const toast = useToast();
@@ -151,35 +89,6 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     else setError(payload.error?.message ?? '读取备份列表失败');
   }, []);
 
-  const loadSystemSettings = useCallback(async () => {
-    try {
-      const response = await fetch('/api/system-settings');
-      const payload = (await response.json()) as { ok: boolean; data?: { settings?: Record<string, unknown> }; error?: { message: string } };
-      if (!payload.ok) {
-        setError(payload.error?.message ?? '');
-        return;
-      }
-      const loaded = { ...(payload.data?.settings ?? {}) };
-      const secretState = Object.fromEntries(sensitiveSystemSettingKeys.flatMap((key) => {
-        const legacyValue = typeof loaded[key] === 'string' ? loaded[key].trim() : '';
-        const configured = loaded[`${key}Configured`] === true || loaded[`${key}Configured`] === 'true' || Boolean(legacyValue);
-        delete loaded[key];
-        delete loaded[`${key}Configured`];
-        return [[key, ''], [`${key}Configured`, String(configured)]];
-      }));
-      delete loaded.theme;
-      delete loaded.timezone;
-      delete loaded.language;
-      setSettings((current) => ({
-        ...current,
-        ...Object.fromEntries(Object.entries(loaded).map(([key, value]) => [key, typeof value === 'string' ? value : String(value ?? '')])),
-        ...secretState
-      }));
-    } catch {
-      // Keep the existing page available when the optional settings request fails.
-    }
-  }, []);
-
   useEffect(() => {
     if (active === '监控规则') setActive('监控文件夹');
   }, [active]);
@@ -195,10 +104,8 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
       void loadPaths();
     } else if (active === '备份与恢复') {
       void loadBackups();
-    } else {
-      void loadSystemSettings();
     }
-  }, [active, loadBackups, loadPaths, loadSystemSettings]);
+  }, [active, loadBackups, loadPaths]);
 
   async function savePath(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -363,57 +270,11 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     await loadBackups();
   }
 
-  async function saveSettings() {
-    setError('');
-    setMessage('');
-    setSettingsBusy(true);
-    const settingsToSave = settingsForSave(settings);
-    const clearSensitiveKeys = [...pendingSecretClears];
-    const response = await fetch('/api/system-settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ settings: settingsToSave, clearSensitiveKeys })
-    });
-    const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
-    setSettingsBusy(false);
-    if (!payload.ok) {
-      const nextError = payload.error?.message ?? '保存设置失败';
-      setError(nextError);
-      toast.error('保存设置失败', nextError);
-    } else {
-      const nextSecretState = Object.fromEntries(sensitiveSystemSettingKeys.flatMap((key) => [
-        [key, ''],
-        [`${key}Configured`, clearSensitiveKeys.includes(key) ? 'false' : settingsToSave[key] ? 'true' : settings[`${key}Configured`] ?? 'false']
-      ]));
-      setSettings((current) => ({
-        ...current,
-        ...settingsToSave,
-        ...nextSecretState
-      }));
-      setMessage('系统设置已保存');
-      toast.success('系统设置已保存');
-      setPendingSecretClears([]);
-      window.dispatchEvent(new Event('shuku:settings-changed'));
-    }
-  }
-
-  function updateSecret(key: (typeof sensitiveSystemSettingKeys)[number], value: string) {
-    setSettings((current) => ({ ...current, [key]: value }));
-    if (value.trim()) setPendingSecretClears((current) => current.filter((item) => item !== key));
-  }
-
-  function toggleSecretClear(key: (typeof sensitiveSystemSettingKeys)[number]) {
-    const pending = pendingSecretClears.includes(key);
-    setPendingSecretClears((current) => pending ? current.filter((item) => item !== key) : [...new Set([...current, key])]);
-    setSettings((current) => ({ ...current, [key]: '', [`${key}Configured`]: pending ? 'true' : 'false' }));
-  }
-
   return (
     <div className={embedded ? '' : 'space-y-6'}>
       {!embedded ? <PageTitle
         title={i18nAttribute("系统设置")}
         desc={i18nAttribute("配置监控导入、备份、智能整理和外部来源。")}
-        action={active === '元数据' ? <Button icon={CheckCircle2} loading={settingsBusy} loadingText={i18nAttribute("保存中")} onClick={saveSettings}><I18nText>保存设置</I18nText></Button> : undefined}
       /> : null}
       <div className={embedded ? 'block' : 'grid grid-cols-1 gap-6 lg:grid-cols-12'}>
         {!embedded ? <div className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm lg:col-span-3">
@@ -558,100 +419,11 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                 {backups.length === 0 ? <div className="rounded-3xl bg-slate-50 p-6 text-sm text-slate-500"><I18nText>尚未创建备份。</I18nText></div> : null}
               </div>
             </div>
-          ) : active === '元数据' ? (
-            <div className="mt-6 space-y-5">
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <div className="font-semibold"><I18nText>外部数据源</I18nText></div>
-                    <div className="mt-1 text-sm text-slate-500"><I18nText>电子书抓取豆瓣读书网页，漫画使用 Bangumi 官方 API。</I18nText></div>
-                  </div>
-                  <label className="flex items-center gap-3 rounded-2xl bg-white px-4 py-2 text-sm text-slate-700">
-                    <input type="checkbox" checked={settings['metadata.external.enabled'] === 'true'} onChange={(event) => setSettings(toggleExternalSettings(settings, event.target.checked))} />
-                    <I18nText>启用外部元数据</I18nText></label>
-                </div>
-              </div>
-
-              <div className="grid gap-5 md:grid-cols-2">
-                <section className="rounded-3xl border border-slate-200 bg-white p-5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h2 className="font-semibold"><I18nText>豆瓣图书</I18nText></h2>
-                      <p className="mt-1 text-sm text-slate-500"><I18nText>用于电子书，通过豆瓣读书网页抓取图书信息。</I18nText></p>
-                    </div>
-                    <label className="flex items-center gap-2 text-sm text-slate-700">
-                      <input type="checkbox" checked={settings['metadata.douban.enabled'] === 'true'} onChange={(event) => setSettings(toggleExternalProvider(settings, 'metadata.douban.enabled', event.target.checked))} />
-                      <I18nText>启用</I18nText></label>
-                  </div>
-                  <div className="mt-4 rounded-2xl bg-[#F7F4F0] px-4 py-3">
-                    <div className="text-xs text-slate-500"><I18nText>获取方式</I18nText></div>
-                    <div className="mt-1 text-sm font-medium text-slate-700"><I18nText>抓取网页</I18nText></div>
-                  </div>
-                  <label className="mt-4 block text-sm text-slate-600">
-                    User-Agent
-                    <input value={settings['metadata.douban.userAgent']} onChange={(event) => setSettings({ ...settings, 'metadata.douban.userAgent': event.target.value })} className="mt-2 h-11 w-full rounded-2xl border border-slate-200 px-4 text-sm outline-none" />
-                  </label>
-                </section>
-
-                <section className="rounded-3xl border border-slate-200 bg-white p-5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h2 className="font-semibold"><I18nText>Bangumi 漫画</I18nText></h2>
-                      <p className="mt-1 text-sm text-slate-500"><I18nText>用于漫画。User-Agent 为必填，Access Token 可选。</I18nText></p>
-                    </div>
-                    <label className="flex items-center gap-2 text-sm text-slate-700">
-                      <input type="checkbox" checked={settings['metadata.bangumi.enabled'] === 'true'} onChange={(event) => setSettings(toggleExternalProvider(settings, 'metadata.bangumi.enabled', event.target.checked))} />
-                      <I18nText>启用</I18nText></label>
-                  </div>
-                  <label className="mt-4 block text-sm text-slate-600">
-                    User-Agent
-                    <input value={settings['metadata.bangumi.userAgent']} onChange={(event) => setSettings({ ...settings, 'metadata.bangumi.userAgent': event.target.value })} className="mt-2 h-11 w-full rounded-2xl border border-slate-200 px-4 text-sm outline-none" />
-                  </label>
-                  <label className="mt-4 block text-sm text-slate-600">
-                    Access Token
-                    <input type="password" value={settings['metadata.bangumi.accessToken']} onChange={(event) => updateSecret('metadata.bangumi.accessToken', event.target.value)} placeholder={settings['metadata.bangumi.accessTokenConfigured'] === 'true' ? i18nAttribute("已配置；留空则保留原 Token") : i18nAttribute("输入 Access Token")} className="mt-2 h-11 w-full rounded-2xl border border-slate-200 px-4 text-sm outline-none" />
-                    {settings['metadata.bangumi.accessTokenConfigured'] === 'true' || pendingSecretClears.includes('metadata.bangumi.accessToken') ? <button type="button" onClick={() => toggleSecretClear('metadata.bangumi.accessToken')} className="mt-2 text-xs font-medium text-[#D94724] hover:text-[#B83A1F]">{pendingSecretClears.includes('metadata.bangumi.accessToken') ? i18nAttribute("撤销清除") : i18nAttribute("清除已配置 Token")}</button> : null}
-                  </label>
-                </section>
-              </div>
-
-              <section className="rounded-3xl border border-slate-200 bg-white p-5">
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <h2 className="font-semibold"><I18nText>AI 元数据识别</I18nText></h2>
-                    <p className="mt-1 text-sm text-slate-500"><I18nText>使用 OpenAI-compatible Chat Completions，仅发送文件相对路径与文件名，不读取正文全文。</I18nText></p>
-                  </div>
-                  <label className="flex items-center gap-2 text-sm text-slate-700">
-                    <input type="checkbox" checked={settings['metadata.ai.enabled'] === 'true'} onChange={(event) => setSettings({ ...settings, 'metadata.ai.enabled': String(event.target.checked) })} />
-                    <I18nText>启用</I18nText></label>
-                </div>
-                <div className="mt-4 grid gap-4 md:grid-cols-3">
-                  <label className="text-sm text-slate-600">
-                    <I18nText>API 地址</I18nText><input value={settings['metadata.ai.baseUrl']} onChange={(event) => setSettings({ ...settings, 'metadata.ai.baseUrl': event.target.value })} placeholder="https://api.openai.com/v1" className="mt-2 h-11 w-full rounded-2xl border border-slate-200 px-4 text-sm outline-none" />
-                  </label>
-                  <label className="text-sm text-slate-600">
-                    <I18nText>模型</I18nText><input value={settings['metadata.ai.model']} onChange={(event) => setSettings({ ...settings, 'metadata.ai.model': event.target.value })} placeholder="gpt-4.1-mini" className="mt-2 h-11 w-full rounded-2xl border border-slate-200 px-4 text-sm outline-none" />
-                  </label>
-                  <label className="text-sm text-slate-600">
-                    API Key
-                    <input type="password" value={settings['metadata.ai.apiKey']} onChange={(event) => updateSecret('metadata.ai.apiKey', event.target.value)} placeholder={settings['metadata.ai.apiKeyConfigured'] === 'true' ? i18nAttribute("已配置；留空则保留原 Key") : i18nAttribute("输入 API Key")} className="mt-2 h-11 w-full rounded-2xl border border-slate-200 px-4 text-sm outline-none" />
-                    {settings['metadata.ai.apiKeyConfigured'] === 'true' || pendingSecretClears.includes('metadata.ai.apiKey') ? <button type="button" onClick={() => toggleSecretClear('metadata.ai.apiKey')} className="mt-2 text-xs font-medium text-[#D94724] hover:text-[#B83A1F]">{pendingSecretClears.includes('metadata.ai.apiKey') ? i18nAttribute("撤销清除") : i18nAttribute("清除已配置 Key")}</button> : null}
-                  </label>
-                </div>
-              </section>
-              {message ? <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{message}</div> : null}
-              {error ? <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
-            </div>
           ) : (
             null
           )}
         </div>
       </div>
-      {embedded && active === '元数据' ? (
-        <div className="mt-6 flex justify-end border-t border-[#DEDAD4] pt-5">
-          <Button icon={CheckCircle2} loading={settingsBusy} loadingText={i18nAttribute("保存中")} onClick={saveSettings}><I18nText>保存更改</I18nText></Button>
-        </div>
-      ) : null}
     </div>
   );
 }

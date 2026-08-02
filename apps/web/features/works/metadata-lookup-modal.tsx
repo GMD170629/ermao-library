@@ -190,12 +190,12 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ source, query })
       });
-      const payload = (await response.json()) as { ok: boolean; data?: { candidates: MetadataCandidate[] }; error?: { message: string } };
+      const payload = (await response.json()) as { ok: boolean; data?: { candidates: MetadataCandidate[]; message?: string | null }; error?: { message: string } };
       if (!payload.ok) throw new Error(payload.error?.message ?? '元数据查询失败');
       const nextCandidates = payload.data?.candidates ?? [];
       setCandidates(nextCandidates);
       setSelectedId(nextCandidates[0]?.id ?? '');
-      setMessage(nextCandidates.length ? `找到 ${nextCandidates.length} 条候选` : '没有找到候选');
+      setMessage(nextCandidates.length ? `找到 ${nextCandidates.length} 条候选` : payload.data?.message ?? '没有找到候选');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '元数据查询失败');
     } finally {

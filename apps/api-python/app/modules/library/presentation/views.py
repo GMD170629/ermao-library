@@ -822,6 +822,7 @@ def _work_view(
             for volume in all_volumes
         ),
         "lastReadAt": _dt(last_progress.updated_at) if last_progress else None,
+        "addedAt": _dt(work.get("createdAt")),
         "mediaVersions": media_views,
         "availableMediaKinds": kinds,
         "detailTabs": tabs,

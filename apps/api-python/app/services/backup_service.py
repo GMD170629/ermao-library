@@ -55,10 +55,14 @@ BACKUP_TABLES: list[tuple[str, str]] = [
     ("readerProgressCursors", "ReaderProgressCursor"),
     ("readerBookmarks", "ReaderBookmark"),
     ("mediaVersionMigrationEvents", "MediaVersionMigrationEvent"),
+    ("sources", "Source"),
+    ("metadataProviderPipelines", "MetadataProviderPipeline"),
     ("systemSettings", "SystemSetting"),
 ]
 
 RESTORE_ORDER = [
+    "MetadataProviderPipeline",
+    "Source",
     "ReaderBookmark",
     "MediaVersionMigrationEvent",
     "UserMonitorFolderAccess",
@@ -171,6 +175,10 @@ def counts_for_export(
         "readerBookmarks": len(database_export.get("readerBookmarks", [])),
         "mediaVersionMigrationEvents": len(
             database_export.get("mediaVersionMigrationEvents", [])
+        ),
+        "sources": len(database_export.get("sources", [])),
+        "metadataProviderPipelines": len(
+            database_export.get("metadataProviderPipelines", [])
         ),
         "systemSettings": len(database_export.get("systemSettings", [])),
         "coverIndexEntries": len(database_export.get("coverIndex", [])),

@@ -50,8 +50,7 @@ def pipeline_to_dict(row: MetadataProviderPipeline) -> dict[str, Any]:
 
 
 def list_metadata_sources(db: Session) -> list[dict[str, Any]]:
-    bind = db.get_bind()
-    if bind is None or not inspect(bind).has_table("Source"):
+    if not inspect(db.connection()).has_table("Source"):
         return []
     rows = db.scalars(
         select(Source)
@@ -62,8 +61,7 @@ def list_metadata_sources(db: Session) -> list[dict[str, Any]]:
 
 
 def get_provider_source(db: Session, provider_id: str) -> dict[str, Any] | None:
-    bind = db.get_bind()
-    if bind is None or not inspect(bind).has_table("Source"):
+    if not inspect(db.connection()).has_table("Source"):
         return None
     row = db.scalars(
         select(Source)
@@ -96,15 +94,17 @@ def ensure_pipeline_row(
             updated_at=stamp,
         )
         .on_conflict_do_nothing(
-            index_elements=[MetadataProviderPipeline.work_type, MetadataProviderPipeline.provider_id]
+            index_elements=[
+                MetadataProviderPipeline.work_type,
+                MetadataProviderPipeline.provider_id,
+            ]
         )
     )
     db.execute(statement)
 
 
 def list_included_pipelines(db: Session) -> list[dict[str, Any]]:
-    bind = db.get_bind()
-    if bind is None or not inspect(bind).has_table("MetadataProviderPipeline"):
+    if not inspect(db.connection()).has_table("MetadataProviderPipeline"):
         return []
     rows = db.scalars(
         select(MetadataProviderPipeline)
@@ -119,8 +119,7 @@ def list_included_pipelines(db: Session) -> list[dict[str, Any]]:
 
 
 def list_pipelines_for_provider(db: Session, provider_id: str) -> list[dict[str, Any]]:
-    bind = db.get_bind()
-    if bind is None or not inspect(bind).has_table("MetadataProviderPipeline"):
+    if not inspect(db.connection()).has_table("MetadataProviderPipeline"):
         return []
     rows = db.scalars(
         select(MetadataProviderPipeline).where(
@@ -159,7 +158,9 @@ def update_pipeline_row(
     )
 
 
-def set_provider_pipelines_enabled(db: Session, provider_id: str, enabled: bool, now: datetime) -> None:
+def set_provider_pipelines_enabled(
+    db: Session, provider_id: str, enabled: bool, now: datetime
+) -> None:
     db.execute(
         update(MetadataProviderPipeline)
         .where(MetadataProviderPipeline.provider_id == provider_id)
@@ -219,8 +220,7 @@ def update_source_test_result(
 
 
 def list_enabled_provider_ids(db: Session, work_type: str | None = None) -> list[str]:
-    bind = db.get_bind()
-    if bind is None or not inspect(bind).has_table("MetadataProviderPipeline"):
+    if not inspect(db.connection()).has_table("MetadataProviderPipeline"):
         return []
     if work_type is None:
         position_col = func.min(MetadataProviderPipeline.position).label("position")
@@ -242,6 +242,8 @@ def list_enabled_provider_ids(db: Session, work_type: str | None = None) -> list
             MetadataProviderPipeline.included.is_(True),
             MetadataProviderPipeline.enabled.is_(True),
         )
-        .order_by(MetadataProviderPipeline.position, MetadataProviderPipeline.created_at)
+        .order_by(
+            MetadataProviderPipeline.position, MetadataProviderPipeline.created_at
+        )
     ).all()
     return [str(provider_id) for provider_id in rows]

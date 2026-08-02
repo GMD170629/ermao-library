@@ -18,10 +18,7 @@ from app.core.config import Settings
 from app.modules.imports.application.identity_policy import (
     split_standalone_numeric_volume,
 )
-from app.modules.system.infrastructure.settings import (
-    get_settings_raw,
-    parse_setting_value,
-)
+from app.services.metadata_provider_registry import metadata_provider_runtime_config
 
 UNKNOWN_AUTHOR = "未知作者"
 IDENTITY_PARSER_VERSION = 6
@@ -65,29 +62,45 @@ class BookIdentity:
 
 def normalize_identity_part(value: Any) -> str:
     normalized = unicodedata.normalize("NFKC", str(value or "")).lower()
-    return re.sub(r"[\s_\-.[\]()（）【】《》:：,，!！?？\"'“”‘’·・、/\\]+", "", normalized).strip()
+    return re.sub(
+        r"[\s_\-.[\]()（）【】《》:：,，!！?？\"'“”‘’·・、/\\]+", "", normalized
+    ).strip()
 
 
 def identity_merge_key(title: str, author: str | None) -> str:
     return f"{normalize_identity_part(title)}:{normalize_identity_part(author or UNKNOWN_AUTHOR)}"
 
 
-def logical_import_path(db: Session, settings: Settings, path: Path, original_name: str | None = None) -> str:
+def logical_import_path(
+    db: Session, settings: Settings, path: Path, original_name: str | None = None
+) -> str:
     resolved = path.expanduser().resolve()
     roots: list[tuple[str, Path]] = []
     try:
         if "MonitorFolder" in inspect(db.connection()).get_table_names():
             from app.models.settings import MonitorFolder
+
             for row in db.execute(
-                select(MonitorFolder.name, MonitorFolder.root_path).where(MonitorFolder.enabled.is_(True))
+                select(MonitorFolder.name, MonitorFolder.root_path).where(
+                    MonitorFolder.enabled.is_(True)
+                )
             ):
                 try:
-                    roots.append((str(row.name or Path(str(row.root_path)).name), Path(str(row.root_path)).expanduser().resolve()))
+                    roots.append(
+                        (
+                            str(row.name or Path(str(row.root_path)).name),
+                            Path(str(row.root_path)).expanduser().resolve(),
+                        )
+                    )
                 except OSError:
                     continue
     except Exception:
         roots = []
-    matching = [(name, root) for name, root in roots if resolved == root or root in resolved.parents]
+    matching = [
+        (name, root)
+        for name, root in roots
+        if resolved == root or root in resolved.parents
+    ]
     if matching:
         name, root = max(matching, key=lambda item: len(item[1].parts))
         relative = resolved.relative_to(root)
@@ -97,9 +110,15 @@ def logical_import_path(db: Session, settings: Settings, path: Path, original_na
 
     filename = Path(original_name or resolved.name).name
     parent_name = resolved.parent.name
-    parent_has_identity = parse_bracketed_series_identity(parent_name, filename) is not None
+    parent_has_identity = (
+        parse_bracketed_series_identity(parent_name, filename) is not None
+    )
     _parent_title, parent_volume = _directory_title_and_volume(parent_name)
-    return (Path(parent_name) / filename).as_posix() if parent_name and (parent_has_identity or parent_volume is not None) else filename
+    return (
+        (Path(parent_name) / filename).as_posix()
+        if parent_name and (parent_has_identity or parent_volume is not None)
+        else filename
+    )
 
 
 def recognize_book_identity(
@@ -163,18 +182,23 @@ def _load_identity_cache(db: Session, logical_path: str) -> BookIdentity | None:
     if not _identity_cache_available(db):
         return None
     from app.models.settings import BookIdentityCache
-    row = db.execute(
-        select(
-            BookIdentityCache.title,
-            BookIdentityCache.author,
-            BookIdentityCache.volume_index,
-            BookIdentityCache.source,
-            BookIdentityCache.confidence,
-        ).where(
-            BookIdentityCache.logical_path == logical_path,
-            BookIdentityCache.parser_version == IDENTITY_PARSER_VERSION,
+
+    row = (
+        db.execute(
+            select(
+                BookIdentityCache.title,
+                BookIdentityCache.author,
+                BookIdentityCache.volume_index,
+                BookIdentityCache.source,
+                BookIdentityCache.confidence,
+            ).where(
+                BookIdentityCache.logical_path == logical_path,
+                BookIdentityCache.parser_version == IDENTITY_PARSER_VERSION,
+            )
         )
-    ).mappings().first()
+        .mappings()
+        .first()
+    )
     if not row or row.get("source") not in {"ai", "regex"}:
         return None
     title = str(row.get("title") or "").strip()
@@ -188,7 +212,9 @@ def _load_identity_cache(db: Session, logical_path: str) -> BookIdentity | None:
     return BookIdentity(
         title=title,
         author=author,
-        volume_index=_number_or_none(row.get("volume_index") if "volume_index" in row else row.get("volumeIndex")),
+        volume_index=_number_or_none(
+            row.get("volume_index") if "volume_index" in row else row.get("volumeIndex")
+        ),
         source=row["source"],
         confidence=confidence,
         logical_path=logical_path,
@@ -206,6 +232,7 @@ def _save_identity_cache(db: Session, identity: BookIdentity) -> None:
         with db.begin_nested():
             from sqlalchemy.dialects.sqlite import insert as sqlite_insert
             from app.models.settings import BookIdentityCache
+
             statement = (
                 sqlite_insert(BookIdentityCache)
                 .values(
@@ -229,7 +256,9 @@ def _save_identity_cache(db: Session, identity: BookIdentity) -> None:
                         "source": identity.source,
                         "confidence": identity.confidence,
                         "parserVersion": IDENTITY_PARSER_VERSION,
-                        "rawJson": json.dumps(identity.raw_metadata(), ensure_ascii=False),
+                        "rawJson": json.dumps(
+                            identity.raw_metadata(), ensure_ascii=False
+                        ),
                         "updatedAt": now,
                     },
                 )
@@ -241,7 +270,11 @@ def _save_identity_cache(db: Session, identity: BookIdentity) -> None:
 
 def _identity_significant_text(value: Any) -> str:
     normalized = unicodedata.normalize("NFKC", str(value or "")).strip()
-    return "".join(character for character in normalized if unicodedata.category(character)[:1] in {"L", "N"})
+    return "".join(
+        character
+        for character in normalized
+        if unicodedata.category(character)[:1] in {"L", "N"}
+    )
 
 
 def _identity_value_is_abnormal(value: Any) -> bool:
@@ -312,7 +345,9 @@ def recognize_book_identity_with_regex(logical_path: str) -> BookIdentity:
             return BookIdentity(
                 title=title,
                 author=author or UNKNOWN_AUTHOR,
-                volume_index=volume_index if volume_index is not None else suffix_volume,
+                volume_index=volume_index
+                if volume_index is not None
+                else suffix_volume,
                 source="regex",
                 confidence=0.9 if author else 0.72,
                 logical_path=logical_path,
@@ -324,7 +359,9 @@ def recognize_book_identity_with_regex(logical_path: str) -> BookIdentity:
             return BookIdentity(
                 title=ancestor_title,
                 author=UNKNOWN_AUTHOR,
-                volume_index=volume_index if volume_index is not None else ancestor_volume,
+                volume_index=volume_index
+                if volume_index is not None
+                else ancestor_volume,
                 source="regex",
                 confidence=0.7,
                 logical_path=logical_path,
@@ -354,24 +391,20 @@ def recognize_book_identity_with_regex(logical_path: str) -> BookIdentity:
 
 
 def _ai_config(db: Session) -> tuple[dict[str, str] | None, str | None]:
-    try:
-        if "SystemSetting" not in inspect(db.connection()).get_table_names():
-            return None, None
-        keys = ["metadata.ai.enabled", "metadata.ai.baseUrl", "metadata.ai.apiKey", "metadata.ai.model"]
-        raw = get_settings_raw(db, keys)
-        values = {key: parse_setting_value(raw[key]) for key in keys if raw.get(key) is not None}
-    except Exception:
-        return None, None
-    if not _coerce_bool(values.get("metadata.ai.enabled")):
+    runtime_config = metadata_provider_runtime_config(db, "ai")
+    if runtime_config is None:
         return None, None
     config = {
-        "base_url": str(values.get("metadata.ai.baseUrl") or "").strip().rstrip("/"),
-        "api_key": str(values.get("metadata.ai.apiKey") or "").strip(),
-        "model": str(values.get("metadata.ai.model") or "").strip(),
+        "base_url": str(runtime_config.get("baseUrl") or "").strip().rstrip("/"),
+        "api_key": str(runtime_config.get("apiKey") or "").strip(),
+        "model": str(runtime_config.get("model") or "").strip(),
     }
     if all(config.values()):
         return config, None
-    return None, "AI identity recognition is enabled but its base URL, model, or API key is missing"
+    return (
+        None,
+        "AI identity recognition is enabled but its base URL, model, or API key is missing",
+    )
 
 
 def _recognize_with_ai(logical_path: str, config: dict[str, str]) -> BookIdentity:
@@ -440,17 +473,15 @@ def _ai_content(payload: Any) -> dict[str, Any]:
         message = choices[0].get("message")
         content = message.get("content") if isinstance(message, dict) else None
         if isinstance(content, str):
-            cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.I)
+            cleaned = re.sub(
+                r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.I
+            )
             parsed = json.loads(cleaned)
             if isinstance(parsed, dict):
                 return parsed
     if all(key in payload for key in ["title", "author"]):
         return payload
     raise ValueError("AI response does not contain identity JSON")
-
-
-def _coerce_bool(value: Any) -> bool:
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _bracket_identity(value: str, allow_volume_range: bool) -> tuple[str, str] | None:
@@ -466,7 +497,9 @@ def _bracket_identity(value: str, allow_volume_range: bool) -> tuple[str, str] |
     return (title, author or UNKNOWN_AUTHOR) if title else None
 
 
-def parse_bracketed_series_identity(folder_name: str, filename: str | None = None) -> tuple[str, str] | None:
+def parse_bracketed_series_identity(
+    folder_name: str, filename: str | None = None
+) -> tuple[str, str] | None:
     """Resolve title/author from an all-bracket series directory.
 
     Besides the conventional ``[title][author][Vol.01-Vol.10]`` layout, some
@@ -494,7 +527,11 @@ def parse_bracketed_series_identity(folder_name: str, filename: str | None = Non
                 author = _clean_author(parts[author_index]) or UNKNOWN_AUTHOR
                 return parts[title_index], author
 
-    volume_range_indexes = [index for index, part in enumerate(raw_parts) if index >= 2 and _looks_like_volume_range(part)]
+    volume_range_indexes = [
+        index
+        for index, part in enumerate(raw_parts)
+        if index >= 2 and _looks_like_volume_range(part)
+    ]
     if (
         len(parts) >= 4
         and volume_range_indexes
@@ -506,7 +543,9 @@ def parse_bracketed_series_identity(folder_name: str, filename: str | None = Non
         author = _clean_author(parts[2]) or UNKNOWN_AUTHOR
         return parts[1], author
 
-    if len(parts) == 2 or (len(raw_parts) > 2 and _looks_like_volume_range(raw_parts[2])):
+    if len(parts) == 2 or (
+        len(raw_parts) > 2 and _looks_like_volume_range(raw_parts[2])
+    ):
         author = _clean_author(parts[1]) or UNKNOWN_AUTHOR
         return parts[0], author
     return None
@@ -514,7 +553,10 @@ def parse_bracketed_series_identity(folder_name: str, filename: str | None = Non
 
 def _looks_like_latin_alias(value: str) -> bool:
     cleaned = unicodedata.normalize("NFKC", value).strip()
-    return bool(re.fullmatch(r"[A-Z][A-Z0-9 ._'’&:+-]*", cleaned, re.I) and re.search(r"[A-Z]", cleaned, re.I))
+    return bool(
+        re.fullmatch(r"[A-Z][A-Z0-9 ._'’&:+-]*", cleaned, re.I)
+        and re.search(r"[A-Z]", cleaned, re.I)
+    )
 
 
 def _filename_series_title(filename: str) -> str:
@@ -525,7 +567,13 @@ def _filename_series_title(filename: str) -> str:
 
 
 def _looks_like_volume_range(value: str) -> bool:
-    return bool(re.search(r"(?:vol(?:ume)?\.?|v|第)?\s*\d+(?:\.\d+)?\s*[-~至到]\s*(?:vol(?:ume)?\.?|v|第)?\s*\d+(?:\.\d+)?", value, re.I))
+    return bool(
+        re.search(
+            r"(?:vol(?:ume)?\.?|v|第)?\s*\d+(?:\.\d+)?\s*[-~至到]\s*(?:vol(?:ume)?\.?|v|第)?\s*\d+(?:\.\d+)?",
+            value,
+            re.I,
+        )
+    )
 
 
 def _download_filename_identity(value: str) -> tuple[str, str] | None:
@@ -569,7 +617,9 @@ def _looks_like_download_source(value: str) -> bool:
     parts = [part.strip() for part in re.split(r"[,，、]", value) if part.strip()]
     if not parts:
         return False
-    domain = re.compile(r"(?:https?://)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:/\S*)?", re.I)
+    domain = re.compile(
+        r"(?:https?://)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:/\S*)?", re.I
+    )
     return all(domain.fullmatch(part) is not None for part in parts)
 
 

@@ -20,7 +20,6 @@ from app.modules.metadata.infrastructure import external_cache as metadata_cache
 from app.modules.organize.infrastructure import duplicates as organize_duplicates
 from app.modules.organize.infrastructure import review as organize_review
 from app.modules.organize.infrastructure import suggestions as organize_suggestions
-from app.modules.system.infrastructure import settings as system_settings_store
 from app.services.book_identity import (
     UNKNOWN_AUTHOR,
     identity_merge_key,
@@ -68,10 +67,6 @@ def json_text(value: Any) -> str:
 
 def string_value(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
-
-
-def coerce_bool(value: Any) -> bool:
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def first_string(*values: Any) -> str | None:
@@ -228,24 +223,6 @@ def first_exact_title_candidate(
         ),
         None,
     )
-
-
-def system_settings(db: Session, keys: list[str]) -> dict[str, str | None]:
-    if not has_table(db, "SystemSetting"):
-        return {key: None for key in keys}
-    found_raw = system_settings_store.get_settings_raw(db, keys)
-    return {key: system_setting_string(found_raw.get(key)) for key in keys}
-
-
-def system_setting_string(value: Any) -> str | None:
-    parsed = parse_json_value(value)
-    if parsed is None:
-        return None
-    if isinstance(parsed, bool):
-        return "true" if parsed else "false"
-    if isinstance(parsed, (dict, list)):
-        return json_text(parsed)
-    return str(parsed).strip()
 
 
 def selected_suggestions(
@@ -993,23 +970,17 @@ def normalize_douban_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def douban_crawler_headers(settings: dict[str, str | None]) -> dict[str, str]:
+def douban_crawler_headers(config: dict[str, Any]) -> dict[str, str]:
     return {
         "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
-        "User-Agent": string_value(settings.get("metadata.douban.userAgent"))
+        "User-Agent": string_value(config.get("userAgent"))
         or "ShukuStarship/0.1 (+https://github.com/GMD170629/ermao-library)",
         "Referer": "https://book.douban.com",
     }
 
 
-def douban_base_url(settings: dict[str, str | None]) -> str:
-    # The address is no longer user-configurable. Reading the legacy value keeps
-    # existing deployments and isolated test gateways working without exposing
-    # it through the settings API or UI.
-    return (
-        string_value(settings.get("metadata.douban.baseUrl")).rstrip("/")
-        or "https://book.douban.com"
-    )
+def douban_base_url(config: dict[str, Any]) -> str:
+    return string_value(config.get("baseUrl")).rstrip("/") or "https://book.douban.com"
 
 
 def fetch_text(url: str, headers: dict[str, str]) -> str:
@@ -1031,13 +1002,13 @@ def fetch_douban_subject(
 
 def run_douban_crawler_provider(
     context: dict[str, Any],
-    settings: dict[str, str | None],
+    config: dict[str, Any],
     force: bool = True,
     query: str | None = None,
     match_title: str | None = None,
 ) -> dict[str, Any]:
-    base_url = douban_base_url(settings)
-    headers = douban_crawler_headers(settings)
+    base_url = douban_base_url(config)
+    headers = douban_crawler_headers(config)
     volume = next(iter(context["volumes"]), {})
     isbn = first_string(volume.get("isbn"), volume.get("identifier"))
     title = first_string(context["work"].get("title")) or ""
@@ -1386,29 +1357,11 @@ def ai_suggestions_from_payload(payload: Any) -> list[dict[str, Any]]:
 
 
 def run_ai_metadata_provider(
-    db: Session, context: dict[str, Any], force: bool = True
+    context: dict[str, Any], config: dict[str, Any], force: bool = True
 ) -> dict[str, Any]:
-    settings = system_settings(
-        db,
-        [
-            "metadata.ai.enabled",
-            "metadata.ai.baseUrl",
-            "metadata.ai.apiKey",
-            "metadata.ai.model",
-        ],
-    )
-    if not coerce_bool(settings.get("metadata.ai.enabled")):
-        return {
-            "provider": "ai",
-            "enabled": False,
-            "added": 0,
-            "cacheHit": False,
-            "message": "AI 元数据识别未启用",
-            "suggestions": [],
-        }
-    base_url = string_value(settings.get("metadata.ai.baseUrl")).rstrip("/")
-    api_key = string_value(settings.get("metadata.ai.apiKey"))
-    model = string_value(settings.get("metadata.ai.model"))
+    base_url = string_value(config.get("baseUrl")).rstrip("/")
+    api_key = string_value(config.get("apiKey"))
+    model = string_value(config.get("model"))
     if not base_url or not api_key or not model:
         return {
             "provider": "ai",
@@ -1453,24 +1406,14 @@ def run_ai_metadata_provider(
 
 
 def run_bangumi_metadata_provider(
-    db: Session,
     context: dict[str, Any],
-    settings: dict[str, str | None],
+    config: dict[str, Any],
     force: bool = True,
     query: str | None = None,
     match_title: str | None = None,
 ) -> dict[str, Any]:
-    if not coerce_bool(settings.get("metadata.bangumi.enabled")):
-        return {
-            "provider": "bangumi",
-            "enabled": False,
-            "added": 0,
-            "cacheHit": False,
-            "message": "Bangumi 元数据源未启用",
-            "suggestions": [],
-        }
     user_agent = (
-        string_value(settings.get("metadata.bangumi.userAgent"))
+        string_value(config.get("userAgent"))
         or "ShukuStarship/0.1 (https://github.com/GMD170629/ermao-library)"
     )
     if not user_agent:
@@ -1482,16 +1425,13 @@ def run_bangumi_metadata_provider(
             "message": "Bangumi User-Agent 未配置",
             "suggestions": [],
         }
-    base_url = (
-        string_value(settings.get("metadata.bangumi.baseUrl")).rstrip("/")
-        or "https://api.bgm.tv"
-    )
+    base_url = string_value(config.get("baseUrl")).rstrip("/") or "https://api.bgm.tv"
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json",
         "User-Agent": user_agent,
     }
-    access_token = string_value(settings.get("metadata.bangumi.accessToken"))
+    access_token = string_value(config.get("accessToken"))
     if access_token:
         headers["Authorization"] = f"Bearer {access_token}"
     title = (
@@ -1544,87 +1484,13 @@ def run_bangumi_metadata_provider(
 
 
 def run_douban_metadata_provider(
-    db: Session,
     context: dict[str, Any],
-    settings: dict[str, str | None],
+    config: dict[str, Any],
     force: bool = True,
     query: str | None = None,
     match_title: str | None = None,
 ) -> dict[str, Any]:
-    if not coerce_bool(settings.get("metadata.douban.enabled")):
-        return {
-            "provider": "douban",
-            "enabled": False,
-            "added": 0,
-            "cacheHit": False,
-            "message": "豆瓣元数据源未启用",
-            "suggestions": [],
-        }
-    return run_douban_crawler_provider(context, settings, force, query, match_title)
-
-
-def run_external_metadata_provider(
-    db: Session,
-    context: dict[str, Any],
-    force: bool = True,
-    query: str | None = None,
-    match_title: str | None = None,
-) -> dict[str, Any]:
-    work_type = string_value(context["work"].get("workType")).upper()
-    settings = system_settings(
-        db,
-        [
-            "metadata.external.enabled",
-            "metadata.douban.enabled",
-            "metadata.douban.baseUrl",
-            "metadata.douban.userAgent",
-            "metadata.bangumi.enabled",
-            "metadata.bangumi.baseUrl",
-            "metadata.bangumi.accessToken",
-            "metadata.bangumi.userAgent",
-        ],
-    )
-    if not coerce_bool(settings.get("metadata.external.enabled")):
-        return {
-            "provider": "external",
-            "enabled": False,
-            "added": 0,
-            "cacheHit": False,
-            "message": "外部数据源未启用",
-            "suggestions": [],
-        }
-    query_key = metadata_title_key(
-        query or first_string(context["work"].get("title")) or ""
-    )
-    if work_type == "COMIC":
-        cached = external_metadata_cache_get(db, "bangumi", query_key)
-        if cached is not None:
-            return {
-                "provider": "bangumi",
-                "enabled": True,
-                "added": 0,
-                "cacheHit": True,
-                **cached,
-            }
-        result = run_bangumi_metadata_provider(
-            db, context, settings, force, query, match_title
-        )
-    else:
-        cached = external_metadata_cache_get(db, "douban", query_key)
-        if cached is not None:
-            return {
-                "provider": "douban",
-                "enabled": True,
-                "added": 0,
-                "cacheHit": True,
-                **cached,
-            }
-        result = run_douban_metadata_provider(
-            db, context, settings, force, query, match_title
-        )
-    if result.get("enabled"):
-        external_metadata_cache_put(db, str(result.get("provider")), query_key, result)
-    return result
+    return run_douban_crawler_provider(context, config, force, query, match_title)
 
 
 def external_metadata_cache_get(
@@ -1705,33 +1571,11 @@ def metadata_search_candidates(
     source: str,
     query: str | None = None,
     *,
+    config: dict[str, Any],
     force: bool = False,
     use_cache: bool = True,
 ) -> dict[str, Any]:
-    settings = system_settings(
-        db,
-        [
-            "metadata.douban.enabled",
-            "metadata.douban.baseUrl",
-            "metadata.douban.userAgent",
-            "metadata.bangumi.enabled",
-            "metadata.bangumi.baseUrl",
-            "metadata.bangumi.accessToken",
-            "metadata.bangumi.userAgent",
-        ],
-    )
     search_text = query or first_string(context["work"].get("title")) or ""
-    enabled_key = f"metadata.{source}.enabled"
-    if source in {"bangumi", "douban"} and not coerce_bool(settings.get(enabled_key)):
-        label = "Bangumi" if source == "bangumi" else "豆瓣"
-        return {
-            "provider": source,
-            "enabled": False,
-            "added": 0,
-            "cacheHit": False,
-            "message": f"{label} 元数据源未启用",
-            "candidates": [],
-        }
     query_key = metadata_title_key(search_text)
     cached = (
         external_metadata_cache_get(db, source, query_key)
@@ -1748,14 +1592,12 @@ def metadata_search_candidates(
         }
     if source == "bangumi":
         result = run_bangumi_metadata_provider(
-            db, context, settings, force=force, query=query
+            context, config, force=force, query=query
         )
     elif source == "douban":
-        result = run_douban_metadata_provider(
-            db, context, settings, force=force, query=query
-        )
+        result = run_douban_metadata_provider(context, config, force=force, query=query)
     else:
-        ai_result = run_ai_metadata_provider(db, context, force=force)
+        ai_result = run_ai_metadata_provider(context, config, force=force)
         fields = {
             item["field"]: parse_json_value(item.get("suggestedValue"))
             for item in ai_result.get("suggestions") or []
@@ -1825,97 +1667,6 @@ def add_suggestions_to_job(
     if added:
         db.commit()
     return added
-
-
-def refresh_metadata_providers(
-    db: Session,
-    job_id: str,
-    providers: list[str],
-    force: bool = False,
-    query: str | None = None,
-    match_title: str | None = None,
-) -> dict[str, Any]:
-    from app.services.metadata_provider_registry import (
-        metadata_provider_registry,
-        search_with_metadata_provider,
-    )
-
-    registered_provider_ids = metadata_provider_registry().ids()
-    selected = []
-    for provider in providers:
-        if (
-            provider == "external" or provider in registered_provider_ids
-        ) and provider not in selected:
-            selected.append(provider)
-    if not selected:
-        raise ValueError("请选择要刷新的元数据来源")
-    job = organize_review.get_job(db, job_id)
-    if not job:
-        raise ValueError("整理任务不存在")
-    context = context_for_job(db, job)
-    if not context:
-        raise ValueError("读物不存在")
-    results = []
-    total_added = 0
-    for provider in selected:
-        try:
-            if provider == "external":
-                result = run_external_metadata_provider(
-                    db, context, force, query, match_title
-                )
-            else:
-                result = search_with_metadata_provider(
-                    db, context, provider, query, force=force, use_cache=True
-                )
-            added = add_suggestions_to_job(db, job_id, result.get("suggestions") or [])
-            total_added += added
-            results.append(
-                {
-                    key: value
-                    for key, value in {**result, "added": added}.items()
-                    if key not in {"suggestions", "candidates"}
-                }
-            )
-        # Each provider is an isolated integration boundary; one failure must not
-        # suppress usable results from the remaining configured providers.
-        except Exception as exc:
-            results.append(
-                {
-                    "provider": provider,
-                    "enabled": True,
-                    "added": 0,
-                    "cacheHit": False,
-                    "error": str(exc),
-                }
-            )
-    if total_added > 0:
-        work = (
-            organize_review.get_work(db, str(job["workId"]))
-            if job.get("workId")
-            else None
-        )
-        already_organized = (
-            bool((work or {}).get("organized"))
-            or (work or {}).get("organizeStatus") == "APPLIED"
-            or job.get("status") == "APPLIED"
-        )
-        organize_review.update_job(
-            db,
-            job_id,
-            {
-                "status": "APPLIED" if already_organized else "REVIEWING",
-                "summary": f"新增 {total_added} 条外部/AI 元数据建议",
-                "updatedAt": now(),
-            },
-        )
-        if job.get("workId") and has_table(db, "LibraryWork") and not already_organized:
-            organize_review.update_work(
-                db,
-                str(job["workId"]),
-                {"organizeStatus": "REVIEWING", "organized": False, "updatedAt": now()},
-            )
-        db.commit()
-    return {"added": total_added, "results": results}
 
 
 def refresh_duplicate_candidates(

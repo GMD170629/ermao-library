@@ -28,6 +28,7 @@ from app.models import (
     LibraryWorkFacet,
     MediaVersionMigrationEvent,
     MetadataLookupTask,
+    MetadataProviderPipeline,
     MetadataSuggestion,
     MonitorFolder,
     OrganizeJob,
@@ -37,6 +38,7 @@ from app.models import (
     ReaderProgressCursor,
     Shelf,
     ShelfWork,
+    Source,
     SystemSetting,
     User,
     UserMediaHistory,
@@ -85,6 +87,8 @@ TABLE_MODELS: dict[str, type] = {
     "ReaderProgressCursor": ReaderProgressCursor,
     "ReaderBookmark": ReaderBookmark,
     "MediaVersionMigrationEvent": MediaVersionMigrationEvent,
+    "Source": Source,
+    "MetadataProviderPipeline": MetadataProviderPipeline,
     "SystemSetting": SystemSetting,
 }
 

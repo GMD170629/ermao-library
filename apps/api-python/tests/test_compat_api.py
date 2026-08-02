@@ -34,10 +34,10 @@ from app.modules.imports.application.dto import ImportOptions
 from app.modules.imports.infrastructure.task_mapper import import_task_dto_from_row
 from app.modules.media.infrastructure import http_streaming as media_streaming
 from app.services.download_queue import process_next_download_task
+from app.services.metadata_provider_registry import update_metadata_provider
 from app.services.organize_service import (
     bangumi_candidates,
     douban_candidates,
-    system_settings,
 )
 from tests.test_worker_importer import (
     create_worker_tables,
@@ -738,62 +738,6 @@ def serve_priority_metadata_gateway(scenario: str):
     return server
 
 
-def insert_priority_metadata_fixture(db_session, gateway, title: str = "黑暗坡食人树"):
-    db_session.execute(
-        text(
-            "CREATE TABLE IF NOT EXISTS SystemSetting (`key` TEXT PRIMARY KEY, `value` TEXT, `createdAt` TEXT, `updatedAt` TEXT)"
-        )
-    )
-    work_columns = {
-        row[1]
-        for row in db_session.execute(text("PRAGMA table_info(LibraryWork)")).all()
-    }
-    if "seriesName" not in work_columns:
-        db_session.execute(text("ALTER TABLE LibraryWork ADD COLUMN seriesName TEXT"))
-    for key, value in {
-        "metadata.douban.mode": "crawler",
-        "metadata.douban.baseUrl": f"http://127.0.0.1:{gateway.server_port}",
-        "metadata.douban.userAgent": "ShukuPriorityTest/1.0",
-        "metadata.bangumi.baseUrl": f"http://127.0.0.1:{gateway.server_port}",
-        "metadata.bangumi.userAgent": "ShukuPriorityTest/1.0",
-        "metadata.ai.baseUrl": f"http://127.0.0.1:{gateway.server_port}",
-        "metadata.ai.apiKey": "ai-key",
-        "metadata.ai.model": "ai-model",
-    }.items():
-        db_session.execute(
-            text(
-                "INSERT INTO SystemSetting (`key`, `value`, `createdAt`, `updatedAt`) VALUES (:key, :value, 'now', 'now')"
-            ),
-            {"key": key, "value": value},
-        )
-    db_session.execute(
-        text(
-            """INSERT INTO LibraryWork (
-                id, title, normalizedTitle, author, normalizedAuthor, workType, publicationStatus,
-                trackingStatus, tags, metadataQuality, organizeStatus, coverStatus, hidden, organized,
-                mergeKey, createdAt, updatedAt
-            ) VALUES (
-                'work-priority', :title, :normalized, '', '', 'EPUB', 'UNKNOWN',
-                'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING', 0, 0, 'epub:priority', 'now', 'now'
-            )"""
-        ),
-        {"title": title, "normalized": title.lower()},
-    )
-    db_session.execute(
-        text(
-            """INSERT INTO LibraryVolume (
-                id, workId, origin, format, importStatus, sizeBytes, "primary", hidden, createdAt, updatedAt
-            ) VALUES ('edition-priority', 'work-priority', 'MANUAL', 'EPUB', 'IMPORTED', 10, 1, 0, 'now', 'now')"""
-        )
-    )
-    db_session.execute(
-        text(
-            "INSERT INTO OrganizeJob (id, workId, volumeId, status, issueCodes, summary, createdAt, updatedAt) VALUES ('job-priority', 'work-priority', 'edition-priority', 'REVIEWING', '[]', 'review', 'now', 'now')"
-        )
-    )
-    db_session.commit()
-
-
 def test_metadata_candidate_parsers_accept_common_provider_shapes():
     douban = douban_candidates(
         {
@@ -830,41 +774,6 @@ def test_metadata_candidate_parsers_accept_common_provider_shapes():
     assert douban[0]["coverUrl"] == "https://example.test/cover.jpg"
     assert bangumi[0]["title"] == "中文条目"
     assert bangumi[0]["coverUrl"] == "https://example.test/bgm.jpg"
-
-
-def test_metadata_system_settings_decode_json_saved_values(db_session):
-    db_session.execute(
-        text(
-            "CREATE TABLE IF NOT EXISTS SystemSetting (`key` TEXT PRIMARY KEY, `value` TEXT, `createdAt` TEXT, `updatedAt` TEXT)"
-        )
-    )
-    for key, value in {
-        "metadata.douban.baseUrl": '""',
-        "metadata.douban.enabled": "true",
-        "metadata.bangumi.userAgent": '"ShukuStarship/0.1 (https://github.com/GMD170629/ermao-library)"',
-    }.items():
-        db_session.execute(
-            text(
-                "INSERT INTO SystemSetting (`key`, `value`, `createdAt`, `updatedAt`) VALUES (:key, :value, 'now', 'now')"
-            ),
-            {"key": key, "value": value},
-        )
-    db_session.commit()
-
-    settings = system_settings(
-        db_session,
-        [
-            "metadata.douban.baseUrl",
-            "metadata.douban.enabled",
-            "metadata.bangumi.userAgent",
-        ],
-    )
-
-    assert settings == {
-        "metadata.douban.baseUrl": "",
-        "metadata.douban.enabled": "true",
-        "metadata.bangumi.userAgent": "ShukuStarship/0.1 (https://github.com/GMD170629/ermao-library)",
-    }
 
 
 def test_core_compat_endpoints_return_envelopes(client, db_session, test_settings):
@@ -4152,10 +4061,7 @@ def test_system_settings_hide_active_secrets_and_reject_retired_settings(
     client, db_session
 ):
     _login(client, db_session)
-    secrets = {
-        "metadata.bangumi.accessToken": "bangumi-secret",
-        "metadata.ai.apiKey": "ai-secret",
-    }
+    secrets = {"email.smtp.password": "smtp-secret"}
 
     saved = client.put("/api/system-settings", json={"settings": secrets})
     assert saved.status_code == 200
@@ -4173,7 +4079,7 @@ def test_system_settings_hide_active_secrets_and_reject_retired_settings(
         assert loaded_settings[f"{key}Configured"] is True
         assert secret not in loaded.text
 
-    cleared_key = "metadata.ai.apiKey"
+    cleared_key = "email.smtp.password"
     cleared = client.patch(
         "/api/system-settings",
         json={"settings": {}, "clearSensitiveKeys": [cleared_key]},
@@ -4197,6 +4103,8 @@ def test_system_settings_hide_active_secrets_and_reject_retired_settings(
             "settings": {
                 "systemName": "自定义书房",
                 "metadata.douban.apiKey": "removed-secret",
+                "metadata.bangumi.accessToken": "removed-secret",
+                "metadata.ai.apiKey": "removed-secret",
                 "download.qbittorrent.password": "removed-secret",
             }
         },
@@ -4205,6 +4113,8 @@ def test_system_settings_hide_active_secrets_and_reject_retired_settings(
     assert set(retired.json()["error"]["details"]["keys"]) == {
         "systemName",
         "metadata.douban.apiKey",
+        "metadata.bangumi.accessToken",
+        "metadata.ai.apiKey",
         "download.qbittorrent.password",
     }
     assert "removed-secret" not in retired.text
@@ -5295,25 +5205,19 @@ def test_ebook_metadata_search_returns_all_douban_crawler_candidates_and_proxy_c
 ):
     create_worker_tables(db_session)
     create_organize_detail_tables(db_session)
-    db_session.execute(
-        text(
-            "CREATE TABLE IF NOT EXISTS SystemSetting (`key` TEXT PRIMARY KEY, `value` TEXT, `createdAt` TEXT, `updatedAt` TEXT)"
-        )
-    )
     douban = serve_douban_crawler_gateway()
     try:
-        for key, value in {
-            "metadata.douban.enabled": "true",
-            "metadata.douban.mode": "crawler",
-            "metadata.douban.baseUrl": f"http://127.0.0.1:{douban.server_port}",
-            "metadata.douban.userAgent": "ShukuCrawlerTest/1.0",
-        }.items():
-            db_session.execute(
-                text(
-                    "INSERT INTO SystemSetting (`key`, `value`, `createdAt`, `updatedAt`) VALUES (:key, :value, 'now', 'now')"
-                ),
-                {"key": key, "value": value},
-            )
+        update_metadata_provider(
+            db_session,
+            "douban",
+            {
+                "enabled": True,
+                "config": {
+                    "baseUrl": f"http://127.0.0.1:{douban.server_port}",
+                    "userAgent": "ShukuCrawlerTest/1.0",
+                },
+            },
+        )
         db_session.execute(
             text(
                 """INSERT INTO LibraryWork (
@@ -5386,24 +5290,19 @@ def test_ebook_metadata_search_and_apply_can_use_bangumi_without_suggestion_refr
 ):
     create_worker_tables(db_session)
     create_organize_detail_tables(db_session)
-    db_session.execute(
-        text(
-            "CREATE TABLE IF NOT EXISTS SystemSetting (`key` TEXT PRIMARY KEY, `value` TEXT, `createdAt` TEXT, `updatedAt` TEXT)"
-        )
-    )
     bangumi = serve_bangumi_api_gateway()
     try:
-        for key, value in {
-            "metadata.bangumi.enabled": "true",
-            "metadata.bangumi.baseUrl": f"http://127.0.0.1:{bangumi.server_port}",
-            "metadata.bangumi.userAgent": "ShukuEbookTest/1.0",
-        }.items():
-            db_session.execute(
-                text(
-                    "INSERT INTO SystemSetting (`key`, `value`, `createdAt`, `updatedAt`) VALUES (:key, :value, 'now', 'now')"
-                ),
-                {"key": key, "value": value},
-            )
+        update_metadata_provider(
+            db_session,
+            "bangumi",
+            {
+                "enabled": True,
+                "config": {
+                    "baseUrl": f"http://127.0.0.1:{bangumi.server_port}",
+                    "userAgent": "ShukuEbookTest/1.0",
+                },
+            },
+        )
         db_session.execute(
             text(
                 """INSERT INTO LibraryWork (
@@ -5538,6 +5437,14 @@ def test_backup_create_download_and_restore_database_export(
     apply_schema(db_session.get_bind())
     test_settings.resolved_storage_root.mkdir(parents=True)
     _login(client, db_session)
+    update_metadata_provider(
+        db_session,
+        "bangumi",
+        {
+            "enabled": True,
+            "config": {"userAgent": "ShukuBackupTest/1.0"},
+        },
+    )
     stored_file = (
         test_settings.resolved_storage_root
         / "books"
@@ -5619,6 +5526,8 @@ def test_backup_create_download_and_restore_database_export(
     assert backup["counts"]["works"] == 1
     assert backup["counts"]["systemSettings"] == 1
     assert backup["counts"]["readerProgressCursors"] == 1
+    assert backup["counts"]["sources"] == 3
+    assert backup["counts"]["metadataProviderPipelines"] > 0
     assert backup["counts"]["libraryFiles"] == 0
     backup_path = test_settings.resolved_storage_root / "backups" / backup["filename"]
     with zipfile.ZipFile(backup_path) as archive:
@@ -5638,6 +5547,8 @@ def test_backup_create_download_and_restore_database_export(
         assert "reader-content-files" in metadata["excludes"]
         assert database_export["systemSettings"][0]["key"] == "backup.scope"
         assert database_export["readerProgressCursors"][0]["highWater"] == 12
+        assert len(database_export["sources"]) == 3
+        assert database_export["metadataProviderPipelines"]
         assert settings_export["backupMode"] == "manual"
 
     downloaded = client.get(
@@ -5651,6 +5562,8 @@ def test_backup_create_download_and_restore_database_export(
         text("DELETE FROM ReaderProgressCursor WHERE id = 'backup-cursor'")
     )
     db_session.execute(text("DELETE FROM LibraryWork WHERE id = 'backup-work'"))
+    db_session.execute(text("DELETE FROM MetadataProviderPipeline"))
+    db_session.execute(text("DELETE FROM Source WHERE kind = 'metadata'"))
     db_session.commit()
     assert (
         db_session.execute(
@@ -5667,6 +5580,8 @@ def test_backup_create_download_and_restore_database_export(
     assert restored.json()["data"]["restoredCounts"]["works"] == 1
     assert restored.json()["data"]["restoredCounts"]["systemSettings"] == 1
     assert restored.json()["data"]["restoredCounts"]["readerProgressCursors"] == 1
+    assert restored.json()["data"]["restoredCounts"]["sources"] == 3
+    assert restored.json()["data"]["restoredCounts"]["metadataProviderPipelines"] > 0
     assert restored.json()["data"]["restoredCounts"]["libraryFiles"] == 0
     assert restored.json()["data"]["actualCounts"]["works"] == 1
     db_session.commit()
@@ -5683,6 +5598,10 @@ def test_backup_create_download_and_restore_database_export(
     assert db_session.execute(
         text("SELECT `value` FROM SystemSetting WHERE `key` = 'backup.scope'")
     ).scalar() == json.dumps({"mode": "manual"})
+    bangumi_config = db_session.execute(
+        text("SELECT config FROM Source WHERE providerType = 'bangumi'")
+    ).scalar()
+    assert json.loads(bangumi_config)["userAgent"] == "ShukuBackupTest/1.0"
     assert (
         db_session.execute(
             text(

@@ -256,6 +256,7 @@ class WorkView(HttpContractModel):
     continue_volume_progress: float = Field(alias="continueVolumeProgress")
     completed: bool
     last_read_at: datetime | None = Field(alias="lastReadAt")
+    added_at: datetime | None = Field(alias="addedAt")
     media_versions: list[LibraryMediaVersion] = Field(alias="mediaVersions")
     available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
     detail_tabs: list[WorkDetailTab] = Field(alias="detailTabs")

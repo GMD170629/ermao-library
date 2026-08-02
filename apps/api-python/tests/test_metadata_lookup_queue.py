@@ -1,22 +1,38 @@
 import json
 
 import pytest
+from sqlalchemy import select, text
+from sqlalchemy.exc import OperationalError
+
+from app.models.import_pipeline import Source
+from app.models.organize import MetadataProviderPipeline
 from app.services import metadata_lookup_queue as queue
 from app.services.metadata_lookup_queue import (
     process_metadata_lookup_task,
     recover_stale_metadata_lookup_tasks,
+)
+from app.services.metadata_provider_registry import (
+    list_metadata_provider_pipelines,
+    list_metadata_providers,
+    search_with_metadata_provider,
 )
 from app.services.organize_service import (
     external_metadata_cache_get,
     external_metadata_cache_put,
     metadata_candidate_title_exact_match,
     metadata_search_candidates,
-    run_bangumi_metadata_provider,
-    run_douban_metadata_provider,
 )
-from sqlalchemy import text
-from sqlalchemy.exc import OperationalError
 from tests.test_worker_importer import create_worker_tables
+
+
+def _disable_all_metadata_providers(db) -> None:
+    list_metadata_providers(db)
+    list_metadata_provider_pipelines(db)
+    for source in db.scalars(select(Source).where(Source.kind == "metadata")):
+        source.enabled = False
+    for pipeline in db.scalars(select(MetadataProviderPipeline)):
+        pipeline.enabled = False
+    db.commit()
 
 
 def _insert_lookup_fixture(
@@ -411,6 +427,7 @@ def test_lookup_returns_no_provider_when_all_sources_are_disabled(
     db_session, test_settings
 ):
     create_worker_tables(db_session)
+    _disable_all_metadata_providers(db_session)
     task = _insert_lookup_fixture(db_session)
 
     assert (
@@ -439,6 +456,64 @@ def test_lookup_returns_no_provider_when_all_sources_are_disabled(
         ).scalar()
         == "FAILED"
     )
+
+
+def test_lookup_uses_enabled_source_without_legacy_system_settings(
+    db_session, test_settings, monkeypatch
+):
+    create_worker_tables(db_session)
+    list_metadata_providers(db_session)
+    list_metadata_provider_pipelines(db_session)
+    pipeline = db_session.get(MetadataProviderPipeline, ("ebook", "bangumi"))
+    assert pipeline is not None
+    pipeline.enabled = True
+    source = db_session.scalar(
+        select(Source).where(
+            Source.kind == "metadata", Source.provider_type == "bangumi"
+        )
+    )
+    assert source is not None
+    source.enabled = True
+    db_session.commit()
+    task = _insert_lookup_fixture(
+        db_session,
+        provider_order=["bangumi"],
+        local_cover=None,
+    )
+    candidate = {
+        "id": "bangumi-source-config",
+        "source": "bangumi",
+        "title": "黑暗坡食人树",
+        "author": "岛田庄司",
+        "description": "来自已启用数据源",
+        "confidence": 0.9,
+    }
+    calls: list[dict[str, object]] = []
+
+    def search_with_source_config(
+        _context, config, force=True, query=None, match_title=None
+    ):
+        calls.append(config)
+        return {
+            "provider": "bangumi",
+            "enabled": True,
+            "cacheHit": False,
+            "candidates": [candidate],
+            "suggestions": [],
+        }
+
+    monkeypatch.setattr(
+        "app.services.organize_service.run_bangumi_metadata_provider",
+        search_with_source_config,
+    )
+
+    assert process_metadata_lookup_task(db_session, test_settings, task) == "COMPLETED"
+    assert calls == [
+        {
+            "baseUrl": "https://api.bgm.tv",
+            "userAgent": "ShukuStarship/0.1 (https://github.com/GMD170629/ermao-library)",
+        }
+    ]
 
 
 def test_cancelled_lookup_and_parent_cannot_be_reopened_by_stale_worker(
@@ -627,6 +702,8 @@ def test_stale_running_lookup_is_recovered(db_session):
 
 
 def test_provider_enabled_flags_cannot_be_bypassed_with_force(db_session):
+    create_worker_tables(db_session)
+    _disable_all_metadata_providers(db_session)
     context = {
         "work": {"title": "测试图书", "workType": "EPUB"},
         "mediaVersions": [],
@@ -634,19 +711,11 @@ def test_provider_enabled_flags_cannot_be_bypassed_with_force(db_session):
         "metadata": [],
     }
 
-    douban = run_douban_metadata_provider(
-        db_session,
-        context,
-        {"metadata.douban.enabled": "false"},
-        force=True,
-        query="测试图书",
+    douban = search_with_metadata_provider(
+        db_session, context, "douban", "测试图书", force=True
     )
-    bangumi = run_bangumi_metadata_provider(
-        db_session,
-        context,
-        {"metadata.bangumi.enabled": "false"},
-        force=True,
-        query="测试图书",
+    bangumi = search_with_metadata_provider(
+        db_session, context, "bangumi", "测试图书", force=True
     )
 
     assert douban["enabled"] is False
@@ -755,8 +824,8 @@ def test_ai_metadata_cache_reuses_only_non_empty_successes(db_session, monkeypat
     monkeypatch.setattr(
         "app.services.organize_service.run_ai_metadata_provider", successful_ai
     )
-    first = metadata_search_candidates(db_session, context, "ai")
-    second = metadata_search_candidates(db_session, context, "ai")
+    first = metadata_search_candidates(db_session, context, "ai", config={})
+    second = metadata_search_candidates(db_session, context, "ai", config={})
 
     assert first["cacheHit"] is False
     assert second["cacheHit"] is True
@@ -774,7 +843,10 @@ def test_ai_metadata_cache_reuses_only_non_empty_successes(db_session, monkeypat
             "suggestions": [],
         },
     )
-    assert metadata_search_candidates(db_session, context, "ai")["candidates"] == []
+    assert (
+        metadata_search_candidates(db_session, context, "ai", config={})["candidates"]
+        == []
+    )
     assert external_metadata_cache_get(db_session, "ai", "ai测试图书") is None
 
     monkeypatch.setattr(
@@ -784,5 +856,5 @@ def test_ai_metadata_cache_reuses_only_non_empty_successes(db_session, monkeypat
         ),
     )
     with pytest.raises(TimeoutError, match="AI gateway timeout"):
-        metadata_search_candidates(db_session, context, "ai")
+        metadata_search_candidates(db_session, context, "ai", config={})
     assert external_metadata_cache_get(db_session, "ai", "ai测试图书") is None

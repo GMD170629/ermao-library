@@ -21,8 +21,7 @@ def _json_text(value: object) -> str:
 
 
 def _source_table_ready(db: Session) -> bool:
-    bind = db.get_bind()
-    return bind is not None and inspect(bind).has_table("Source")
+    return inspect(db.connection()).has_table("Source")
 
 
 def ensure_metadata_sources(db: Session, manifests: Iterable[ProviderManifest]) -> None:
