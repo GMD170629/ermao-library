@@ -1,55 +1,44 @@
-"""Comic (CBZ/ZIP) media import command."""
+"""Comic (CBZ/ZIP/CBR/RAR) media import command."""
 
 from __future__ import annotations
 
 import json
-import mimetypes
 import re
-import shutil
-import zipfile
 from pathlib import Path
-from typing import Any
 
+from app.modules.imports.application.comic_types import ComicArchiveInspection
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
     ImportOptions,
     ImportResult,
     ImportRuntimeConfig,
 )
+from app.modules.imports.application.errors import ComicArchiveError
 from app.modules.imports.application.identity_resolution import (
     EmbeddedIdentityMetadata,
     resolve_import_identity,
 )
 from app.modules.imports.application.import_support import (
-    IMAGE_EXTS,
     _bracketed_folder_metadata,
     _clean_title_part,
     _ensure_work,
     _file_resource_key,
     _finalize_work_cover,
-    _first_text,
     _hash_text,
     _id,
-    _ignored_entry,
     _import_work_merge_key,
     _insert_identity_metadata,
     _log_import,
-    _natural_key,
     _now,
-    _safe_entry_name,
     _select_volume_media_version,
     _source_filename_title,
     _source_group_key,
-    _split_tags,
-    _title_from_file,
 )
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
     ImportOrchestrationServices,
     LibraryImportStore,
 )
-
-MAX_COMIC_INFO_BYTES = 1024 * 1024
 
 
 def _import_comic(
@@ -63,7 +52,9 @@ def _import_comic(
     ext: str,
     identity: BookIdentityDTO,
 ) -> ImportResult:
-    parsed = parse_comic_archive(options.source_file_path, options.original_name)
+    parsed = services.inspect_comic_archive(
+        options.source_file_path, options.original_name
+    )
     comic_info = (
         parsed.get("comicInfo") if isinstance(parsed.get("comicInfo"), dict) else None
     )
@@ -183,9 +174,7 @@ def _import_comic(
                 "filePathHash": _hash_text(str(source_path)),
                 "hashStatus": "PARTIAL_PENDING",
                 "kind": "COMIC",
-                "mimeType": "application/vnd.comicbook+zip"
-                if parsed["format"] == "cbz"
-                else "application/zip",
+                "mimeType": _comic_archive_media_type(parsed["format"]),
                 "sizeBytes": file_size,
                 "mtimeMs": int(source_path.stat().st_mtime * 1000),
                 "sortOrder": sort_order,
@@ -194,14 +183,16 @@ def _import_comic(
             }
         )
         try:
-            cover_path = _extract_comic_cover(
-                settings,
+            cover_path = services.publish_comic_cover(
+                settings.resolved_storage_root,
                 source_path,
                 work["id"],
                 media_version["id"],
                 volume["id"],
                 parsed["coverEntryPath"],
             )
+        except ComicArchiveError:
+            raise
         except Exception as exc:
             cover_path = None
             _log_import(
@@ -281,95 +272,9 @@ def _import_comic(
         raise
 
 
-def parse_comic_archive(path: Path, original_name: str | None = None) -> dict[str, Any]:
-    fmt = "cbz" if path.suffix.lower() == ".cbz" else "zip"
-    with zipfile.ZipFile(path) as archive:
-        entries = [
-            info
-            for info in archive.infolist()
-            if not info.is_dir() and _safe_entry_name(info.filename)
-        ]
-        images = [
-            info
-            for info in entries
-            if Path(info.filename).suffix.lower() in IMAGE_EXTS
-            and not _ignored_entry(info.filename)
-        ]
-        if not images:
-            raise ValueError("漫画压缩包内没有可导入的图片")
-        images.sort(key=lambda item: _natural_key(item.filename))
-        comic_info_entry = next(
-            (
-                info
-                for info in entries
-                if info.filename.lower().endswith("comicinfo.xml")
-                and info.file_size <= MAX_COMIC_INFO_BYTES
-            ),
-            None,
-        )
-        comic_info = (
-            _parse_comic_info(archive.read(comic_info_entry).decode("utf-8", "replace"))
-            if comic_info_entry
-            else None
-        )
-        pages = [
-            {
-                "index": index + 1,
-                "title": f"第 {index + 1} 页",
-                "entryPath": info.filename,
-                "mediaType": mimetypes.guess_type(info.filename)[0]
-                or "application/octet-stream",
-                "size": info.file_size,
-            }
-            for index, info in enumerate(images)
-        ]
-        cover_index = (comic_info or {}).get("coverImageIndex")
-        cover = (
-            pages[cover_index]
-            if isinstance(cover_index, int) and 0 <= cover_index < len(pages)
-            else next(
-                (
-                    page
-                    for page in pages
-                    if re.search(
-                        r"(cover|folder|front|封面)",
-                        Path(page["entryPath"]).name,
-                        re.IGNORECASE,
-                    )
-                ),
-                pages[0],
-            )
-        )
-        image_formats = sorted(
-            {Path(page["entryPath"]).suffix.lower().lstrip(".") for page in pages}
-        )
-        raw_metadata = {
-            "hasComicInfo": comic_info is not None,
-            "pageCount": len(pages),
-            "imageFormats": image_formats,
-            "coverEntryPath": cover["entryPath"],
-        }
-        if comic_info:
-            raw_metadata["comicInfo"] = comic_info.get("raw") or {}
-        return {
-            "title": (comic_info or {}).get("title")
-            or _title_from_file(Path(original_name or path.name)),
-            "author": (comic_info or {}).get("writer")
-            or (comic_info or {}).get("penciller")
-            or "未知作者",
-            "description": (comic_info or {}).get("summary"),
-            "format": fmt,
-            "pageCount": len(pages),
-            "coverEntryPath": cover["entryPath"],
-            "pages": pages,
-            "comicInfo": comic_info,
-            "rawMetadata": raw_metadata,
-        }
-
-
 def parse_comic_volume_from_name(
     path: Path, original_name: str | None = None
-) -> dict[str, Any] | None:
+) -> dict[str, object] | None:
     source = original_name or path.name
     base = Path(source).stem
     parent = _comic_parent_title(path, "WATCH")
@@ -410,8 +315,8 @@ def parse_comic_volume_from_name(
 
 
 def parse_comic_volume_info(
-    parsed: dict[str, Any], path: Path, original_name: str | None = None
-) -> dict[str, Any] | None:
+    parsed: ComicArchiveInspection, path: Path, original_name: str | None = None
+) -> dict[str, object] | None:
     comic_info = (
         parsed.get("comicInfo") if isinstance(parsed.get("comicInfo"), dict) else {}
     )
@@ -424,71 +329,13 @@ def parse_comic_volume_info(
     return parse_comic_volume_from_name(path, original_name)
 
 
-def _parse_comic_info(xml: str) -> dict[str, Any]:
-    raw = {}
-    for tag in [
-        "Title",
-        "Series",
-        "Volume",
-        "Summary",
-        "Writer",
-        "Penciller",
-        "Publisher",
-        "Genre",
-        "Tags",
-    ]:
-        value = _first_text(xml, tag)
-        if value:
-            raw[tag] = value
-    volume = (
-        float(raw["Volume"])
-        if str(raw.get("Volume", "")).replace(".", "", 1).isdigit()
-        else None
-    )
-    cover_match = re.search(
-        r"<Page\b[^>]*(?:Type|type)=['\"](?:FrontCover|Cover)['\"][^>]*(?:Image|image)=['\"](\d+)['\"]",
-        xml,
-        re.IGNORECASE,
-    )
+def _comic_archive_media_type(fmt: str) -> str:
     return {
-        "title": raw.get("Title"),
-        "series": raw.get("Series"),
-        "volume": volume,
-        "summary": raw.get("Summary"),
-        "writer": raw.get("Writer"),
-        "penciller": raw.get("Penciller"),
-        "publisher": raw.get("Publisher"),
-        "tags": _split_tags(raw.get("Tags") or raw.get("Genre")),
-        "coverImageIndex": int(cover_match.group(1)) if cover_match else None,
-        "raw": raw,
-    }
-
-
-def _extract_comic_cover(
-    settings: ImportRuntimeConfig,
-    staged: Path,
-    work_id: str,
-    media_version_id: str,
-    volume_id: str,
-    entry: str,
-) -> str:
-    ext = Path(entry).suffix.lower() or ".jpg"
-    target = (
-        settings.resolved_storage_root
-        / "books"
-        / work_id
-        / media_version_id
-        / volume_id
-        / f"cover{ext}"
-    )
-    target.parent.mkdir(parents=True, exist_ok=True)
-    with (
-        zipfile.ZipFile(staged) as archive,
-        archive.open(entry, "r") as source,
-        target.open("wb") as destination,
-    ):
-        shutil.copyfileobj(source, destination, length=1024 * 1024)
-    return str(target)
+        "cbr": "application/vnd.comicbook-rar",
+        "cbz": "application/vnd.comicbook+zip",
+        "rar": "application/vnd.rar",
+        "zip": "application/zip",
+    }[fmt]
 
 
 def _comic_parent_title(path: Path, origin: str) -> str | None:

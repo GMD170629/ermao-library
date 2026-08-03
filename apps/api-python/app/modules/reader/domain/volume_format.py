@@ -14,7 +14,7 @@ class ReaderType(StrEnum):
 
 
 _REFLOWABLE = frozenset({"EPUB", "MOBI", "AZW", "AZW3", "PRC", "FB2", "TXT"})
-_COMIC = frozenset({"COMIC", "CBZ", "ZIP"})
+_COMIC = frozenset({"COMIC", "CBR", "CBZ", "RAR", "ZIP"})
 _AUDIO = frozenset({"AUDIO", "AUDIOBOOK", "M4B", "M4A", "MP3"})
 
 

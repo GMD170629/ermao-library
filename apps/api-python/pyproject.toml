@@ -20,6 +20,7 @@ dependencies = [
   "lxml>=5.2.0",
   "mutagen>=1.47.0",
   "pypdfium2>=4.30.0",
+  "rarfile>=4.4",
   "watchdog>=4.0.0",
   "python-multipart>=0.0.20"
 ]

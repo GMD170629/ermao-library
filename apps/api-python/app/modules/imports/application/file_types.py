@@ -9,6 +9,7 @@ SUPPORTED_IMPORT_FILE_EXTENSIONS = frozenset(
         ".azw",
         ".azw3",
         ".cbz",
+        ".cbr",
         ".epub",
         ".fb2",
         ".m4a",
@@ -17,6 +18,7 @@ SUPPORTED_IMPORT_FILE_EXTENSIONS = frozenset(
         ".mp3",
         ".pdf",
         ".prc",
+        ".rar",
         ".txt",
         ".zip",
     }

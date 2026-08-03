@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import logging
-import zipfile
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -24,12 +23,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.infrastructure.comic_archives import ComicArchiveError, inspect_comic_archive
 from app.models.library import (
     LibraryFile,
     LibraryReadingUnit,
     LibraryVolume,
 )
-from app.modules.imports.application.import_comic import parse_comic_archive
 
 logger = logging.getLogger(__name__)
 
@@ -221,11 +220,11 @@ def ensure_volume_page_index(db: Session, settings: Settings, volume_id: str) ->
         return 0
 
     try:
-        parsed = parse_comic_archive(
+        parsed = inspect_comic_archive(
             archive_path,
             Path(file.path or archive_path).name,
         )
-    except (OSError, ValueError, zipfile.BadZipFile) as exc:
+    except (OSError, ValueError, ComicArchiveError) as exc:
         logger.warning(
             "failed to rebuild comic page index volume=%s file=%s error=%s",
             volume_id,

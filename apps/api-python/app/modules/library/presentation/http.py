@@ -1412,7 +1412,8 @@ def _apply_bulk_reading_status(
                                 "audio"
                                 if volume.format.upper() in {"M4B", "M4A", "MP3"}
                                 else "comic"
-                                if volume.format.upper() in {"CBZ", "ZIP"}
+                                if volume.format.upper()
+                                in {"CBR", "CBZ", "RAR", "ZIP"}
                                 else "pdf"
                                 if volume.format.upper() == "PDF"
                                 else "epub"

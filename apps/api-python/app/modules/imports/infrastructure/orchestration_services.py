@@ -9,10 +9,15 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.core.time import now_timestamp_ms
+from app.infrastructure.comic_archives import (
+    extract_comic_cover,
+    inspect_comic_archive,
+)
 from app.modules.imports.application.audio_types import (
     AudioBundleStructure,
     AudioFileMetadata,
 )
+from app.modules.imports.application.comic_types import ComicArchiveInspection
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
     ConversionArtifactDTO,
@@ -211,6 +216,31 @@ class SessionImportOrchestrationServices:
 
     def is_default_cover_path(self, value: object) -> bool:
         return is_default_cover_path(value, self._settings)
+
+    def inspect_comic_archive(
+        self, path: Path, original_name: str | None
+    ) -> ComicArchiveInspection:
+        return inspect_comic_archive(path, original_name)
+
+    def publish_comic_cover(
+        self,
+        storage_root: Path,
+        source_path: Path,
+        work_id: str,
+        media_version_id: str,
+        volume_id: str,
+        entry_name: str,
+    ) -> str:
+        published = extract_comic_cover(
+            storage_root,
+            source_path,
+            work_id,
+            media_version_id,
+            volume_id,
+            entry_name,
+        )
+        self._new_publications.add(Path(published))
+        return published
 
     def inspect_audio_bundle(self, path: Path) -> AudioBundleStructure | None:
         try:

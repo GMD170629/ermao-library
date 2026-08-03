@@ -37,7 +37,15 @@ from app.modules.imports.application.ports import (
 )
 from app.modules.imports.application.release_titles import parse_release_title
 
-SUPPORTED_EXTS = {".epub", ".cbz", ".zip", ".pdf", *REFLOWABLE_SOURCE_EXTS}
+SUPPORTED_EXTS = {
+    ".epub",
+    ".cbr",
+    ".cbz",
+    ".rar",
+    ".zip",
+    ".pdf",
+    *REFLOWABLE_SOURCE_EXTS,
+}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 MAX_EPUB_SIZE_BYTES = 512 * 1024 * 1024
 MAX_TEXT_EBOOK_SIZE_BYTES = 512 * 1024 * 1024
@@ -51,7 +59,7 @@ def import_file_size_limit_bytes_for_ext(ext: str) -> int | None:
         return MAX_EPUB_SIZE_BYTES
     if normalized in REFLOWABLE_SOURCE_EXTS:
         return MAX_TEXT_EBOOK_SIZE_BYTES
-    if normalized in {".cbz", ".zip"}:
+    if normalized in {".cbr", ".cbz", ".rar", ".zip"}:
         return MAX_ARCHIVE_SIZE_BYTES
     return None
 

@@ -168,7 +168,7 @@ def import_managed_book(
             and ext != ".audio-bundle"
         ):
             raise ValueError(
-                "当前版本仅支持 EPUB、MOBI、AZW、AZW3、PRC、FB2、TXT、CBZ、ZIP、PDF、M4B、M4A、MP3 格式。"
+                "当前版本仅支持 EPUB、MOBI、AZW、AZW3、PRC、FB2、TXT、CBZ、ZIP、CBR、RAR、PDF、M4B、M4A、MP3 格式。"
             )
         _log_import(store, task_id, "info", f"import started: {source}")
         services.stage_system_event(
@@ -392,7 +392,15 @@ def import_managed_book(
             converted.source_hash
             if converted
             else None
-            if ext in {".cbz", ".zip", ".audio-bundle", *SUPPORTED_AUDIO_EXTS}
+            if ext
+            in {
+                ".cbr",
+                ".cbz",
+                ".rar",
+                ".zip",
+                ".audio-bundle",
+                *SUPPORTED_AUDIO_EXTS,
+            }
             else _content_hash(source)
         )
         task_update: dict[str, object] = {

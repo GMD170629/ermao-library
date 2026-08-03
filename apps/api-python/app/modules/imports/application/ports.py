@@ -9,6 +9,7 @@ from app.modules.imports.application.audio_types import (
     AudioBundleStructure,
     AudioFileMetadata,
 )
+from app.modules.imports.application.comic_types import ComicArchiveInspection
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
     ConversionArtifactDTO,
@@ -247,6 +248,20 @@ class ImportOrchestrationServices(Protocol):
     def cover_status(self, value: object) -> str: ...
 
     def is_default_cover_path(self, value: object) -> bool: ...
+
+    def inspect_comic_archive(
+        self, path: Path, original_name: str | None
+    ) -> ComicArchiveInspection: ...
+
+    def publish_comic_cover(
+        self,
+        storage_root: Path,
+        source_path: Path,
+        work_id: str,
+        media_version_id: str,
+        volume_id: str,
+        entry_name: str,
+    ) -> str: ...
 
     def inspect_audio_bundle(self, path: Path) -> AudioBundleStructure | None: ...
 

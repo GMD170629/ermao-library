@@ -213,6 +213,11 @@ def test_download_entry_accepts_all_convertible_text_formats(extension):
     assert_allowed_extension(f"novel.{extension}")
 
 
+@pytest.mark.parametrize("extension", ["cbr", "rar"])
+def test_download_entry_accepts_rar_comic_formats(extension):
+    assert_allowed_extension(f"comic.{extension}")
+
+
 def test_conversion_validates_output_and_reuses_versioned_cache(
     db_session, test_settings, tmp_path
 ):

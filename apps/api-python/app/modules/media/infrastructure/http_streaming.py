@@ -9,7 +9,6 @@ import mimetypes
 import os
 import re
 import threading
-import zipfile
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from email.utils import format_datetime, parsedate_to_datetime
@@ -22,6 +21,7 @@ from fastapi.responses import Response, StreamingResponse
 from PIL import Image, ImageChops, ImageOps, UnidentifiedImageError
 
 from app.core.config import Settings, get_settings
+from app.infrastructure.comic_archives import ComicArchiveError, open_comic_archive
 from app.schemas.responses import fail
 
 logger = logging.getLogger(__name__)
@@ -629,9 +629,9 @@ def _send_zip_entry(
     ):
         return fail("页面不存在", status_code=404)
     try:
-        with zipfile.ZipFile(archive_path) as archive:
+        with open_comic_archive(archive_path) as archive:
             info = archive.getinfo(entry_name)
-    except (KeyError, OSError, zipfile.BadZipFile):
+    except (KeyError, OSError, ComicArchiveError):
         return fail("页面不存在", status_code=404)
     request.state.user_id = user_id
     resolved_media_type = (
@@ -675,7 +675,7 @@ def _send_zip_entry(
     ):
         try:
             with (
-                zipfile.ZipFile(archive_path) as archive,
+                open_comic_archive(archive_path) as archive,
                 archive.open(entry_name, "r") as handle,
             ):
                 remaining_skip = start
@@ -873,7 +873,7 @@ def _send_comic_page_zip_entry(
         )
 
     try:
-        with zipfile.ZipFile(archive_path) as archive:
+        with open_comic_archive(archive_path) as archive:
             info = archive.getinfo(entry_name)
             resolved_media_type = (
                 media_type
@@ -893,7 +893,7 @@ def _send_comic_page_zip_entry(
             archive_stat = archive_path.stat()
             cache_key = (
                 f"zip:{archive_path}:{archive_stat.st_size}:{archive_stat.st_mtime_ns}:"
-                f"{entry_name}:{info.file_size}:{info.CRC}:"
+                f"{entry_name}:{info.file_size}:{info.checksum}:"
                 f"extreme-avif-v{COMIC_PAGE_DATA_SAVER_CACHE_VERSION}:"
                 f"q-{COMIC_PAGE_DATA_SAVER_QUALITY}:"
                 f"speed-{COMIC_PAGE_DATA_SAVER_SPEED}"
@@ -909,7 +909,7 @@ def _send_comic_page_zip_entry(
                     cache_key,
                 )
             source = archive.read(entry_name)
-    except (KeyError, OSError, zipfile.BadZipFile):
+    except (KeyError, OSError, ComicArchiveError):
         return fail("页面不存在", status_code=404)
 
     optimized = _comic_page_avif_bytes(source)

@@ -15,7 +15,7 @@ import {
 
 const formatGroups = [
   { label: '电子书', formats: ['.epub', '.mobi', '.azw', '.azw3', '.prc', '.fb2', '.txt'] },
-  { label: '文档与漫画', formats: ['.pdf', '.cbz', '.zip'] },
+  { label: '文档与漫画', formats: ['.pdf', '.cbz', '.zip', '.cbr', '.rar'] },
   { label: '有声书', formats: ['.m4b', '.m4a', '.mp3'] }
 ] as const;
 const allExtensions = formatGroups.flatMap((group) => [...group.formats]);

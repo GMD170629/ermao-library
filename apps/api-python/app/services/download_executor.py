@@ -24,7 +24,20 @@ from app.modules.download.infrastructure.tasks import (
     update_download_task,
 )
 from app.services.text_conversion import CONVERTIBLE_TEXT_EXTS
-ALLOWED_EXTENSIONS = {".epub", ".pdf", ".cbz", ".zip", ".rar", ".7z", ".torrent", ".m4b", ".m4a", ".mp3", *CONVERTIBLE_TEXT_EXTS}
+ALLOWED_EXTENSIONS = {
+    ".epub",
+    ".pdf",
+    ".cbr",
+    ".cbz",
+    ".zip",
+    ".rar",
+    ".7z",
+    ".torrent",
+    ".m4b",
+    ".m4a",
+    ".mp3",
+    *CONVERTIBLE_TEXT_EXTS,
+}
 BLOCKED_EXTENSIONS = {".exe", ".sh", ".bat", ".cmd", ".js", ".php", ".msi", ".com", ".scr", ".ps1", ".vbs"}
 ACTIVE_DOWNLOAD_STATUSES = {"queued", "downloading", "downloaded", "completed"}
 

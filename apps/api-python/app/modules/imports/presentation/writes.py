@@ -269,7 +269,7 @@ async def import_work(
     ]
     if unsupported:
         _raise_import_error(
-            "当前版本仅支持 EPUB、MOBI、AZW、AZW3、PRC、FB2、TXT、CBZ、ZIP、PDF、M4B、M4A、MP3 格式。",
+            "当前版本仅支持 EPUB、MOBI、AZW、AZW3、PRC、FB2、TXT、CBZ、ZIP、CBR、RAR、PDF、M4B、M4A、MP3 格式。",
             status_code=400,
             details=ImportFileListDetails(files=unsupported),
         )

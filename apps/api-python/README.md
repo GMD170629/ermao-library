@@ -8,6 +8,8 @@ Text ebook imports support EPUB directly and automatically convert MOBI, AZW, AZ
 
 The container images install `libmobi-tools` automatically. For local MOBI/AZW/AZW3/PRC development, install libmobi and make sure `mobitool` is on `PATH`, or set `LIBMOBI_BIN` to its executable path. FB2 and TXT conversion does not require this executable. Conversion can be disabled with `EBOOK_CONVERSION_ENABLED=false`; the libmobi timeout is controlled by `EBOOK_CONVERSION_TIMEOUT_SECONDS=600`.
 
+Comic imports support CBZ/ZIP and single-volume, unencrypted CBR/RAR archives. The container images install `unar` automatically. For local CBR/RAR development, install a decompressor supported by `rarfile` (`unrar`, `unar`, `7z`, or `bsdtar`) and make sure it is available on `PATH`.
+
 ## Local setup
 
 ```bash

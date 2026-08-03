@@ -2442,6 +2442,8 @@ def test_global_import_preferences_filter_extensions_conversion_and_patterns(
 def test_missing_import_preferences_keep_every_supported_extension_enabled(db_session):
     preferences = load_import_preferences(db_session)
     assert preferences.allowed_extensions == SUPPORTED_IMPORT_EXTENSIONS
+    assert ".cbr" in preferences.allowed_extensions
+    assert ".rar" in preferences.allowed_extensions
     assert not preferences.stability_check_enabled
     assert preferences.auto_convert_to_epub
 
