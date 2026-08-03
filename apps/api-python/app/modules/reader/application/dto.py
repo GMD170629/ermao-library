@@ -57,6 +57,7 @@ class ReaderFileDto:
     fingerprint: str | None
     full_hash: str | None
     mtime_ms: int
+    codec: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

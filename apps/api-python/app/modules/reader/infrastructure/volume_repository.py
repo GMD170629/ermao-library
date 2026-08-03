@@ -182,6 +182,7 @@ class SqlAlchemyReaderVolumeRepository:
                 fingerprint=file.fingerprint,
                 full_hash=file.full_hash,
                 mtime_ms=file.mtime_ms,
+                codec=file.codec,
             )
             for file in files
         ]

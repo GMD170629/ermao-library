@@ -16,6 +16,7 @@ from app.modules.imports.application.audio_types import (
     AudioChapterMetadata,
     AudioFileMetadata,
     audio_episode_number,
+    audio_mime_type,
     is_supported_audio_file,
     strict_flat_audio_title,
 )
@@ -277,9 +278,7 @@ def _import_audio(
             or ("COMPLETED" if existing_full_hash else "PARTIAL_PENDING"),
             "mtimeMs": int(stat.st_mtime * 1000),
             "kind": "AUDIO",
-            "mimeType": "audio/mpeg"
-            if item.path.suffix.lower() == ".mp3"
-            else "audio/mp4",
+            "mimeType": audio_mime_type(item.path),
             "sizeBytes": stat.st_size,
             "durationMs": item.duration_ms,
             "codec": item.codec,
@@ -349,9 +348,7 @@ def _import_audio(
                 or display_titles[item.path]
                 or f"第 {chapter_sort_order} 章",
                 "href": f"audio:{file_row['id']}#t={start_ms / 1000:g},{end_ms / 1000:g}",
-                "mediaType": "audio/mpeg"
-                if item.path.suffix.lower() == ".mp3"
-                else "audio/mp4",
+                "mediaType": audio_mime_type(item.path),
                 "sortOrder": chapter_sort_order,
                 "startMs": start_ms,
                 "endMs": end_ms,

@@ -12,6 +12,14 @@ class ImportExecutionError(RuntimeError):
         self.retryable = retryable
 
 
+class AudioInspectionError(ValueError):
+    """A source cannot satisfy the audiobook media-inspection contract."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 class AudioTrackLimitExceededError(RuntimeError):
     """A logical audiobook contains more tracks than one import may own."""
 

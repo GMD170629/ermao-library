@@ -1,5 +1,6 @@
 """Stable import capability contracts."""
 
+from app.modules.imports.application.audio_types import SUPPORTED_AUDIO_EXTS
 from app.modules.imports.application.commands import (
     commit_import_checkpoint,
     execute_import_checkpoint,
@@ -31,13 +32,14 @@ from app.modules.imports.application.save_uploaded_files import (
     SavedUploadFile,
     SaveUploadedFiles,
     SaveUploadedFilesCommand,
-    UploadSource,
     UploadFileTooLargeError,
     UploadPublicationError,
+    UploadSource,
     safe_upload_filename,
 )
 
 __all__ = [
+    "SUPPORTED_AUDIO_EXTS",
     "ImportFileQuarantineError",
     "ImportOptions",
     "ImportResult",
@@ -50,9 +52,9 @@ __all__ = [
     "SavedUploadFile",
     "SeriesVolumeInfo",
     "StageImportCommand",
-    "UploadSource",
     "UploadFileTooLargeError",
     "UploadPublicationError",
+    "UploadSource",
     "commit_import_checkpoint",
     "execute_import_checkpoint",
     "is_inside_path",

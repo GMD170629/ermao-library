@@ -123,6 +123,7 @@ export type ReaderFileSummary = {
   trackNumber?: number | null;
   sortOrder: number;
   url: string;
+  codec?: string | null;
 };
 
 export type ReaderJsonValue_Input = {

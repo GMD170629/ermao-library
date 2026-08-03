@@ -1,12 +1,24 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 from alembic import command
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from sqlalchemy import Column, Engine, Integer, MetaData, String, Table, Text, inspect
+from sqlalchemy import (
+    Column,
+    Engine,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    Text,
+    inspect,
+    select,
+    update,
+)
 
 from app.db.runner import _run_alembic, head_revision
 from app.db.sqlite import create_sqlite_engine
@@ -83,6 +95,54 @@ def _schema_fingerprint(engine: Engine) -> tuple[object, ...]:
     return tuple(tables)
 
 
+def test_0008_enables_new_audio_extensions_once_for_existing_preferences(
+    tmp_path: Path,
+) -> None:
+    engine = create_sqlite_engine(tmp_path / "audio-preferences.sqlite3")
+    try:
+        _upgrade(engine, "0007_media_versions_contract")
+        settings = Table("SystemSetting", MetaData(), autoload_with=engine)
+        with engine.begin() as connection:
+            connection.execute(
+                settings.insert().values(
+                    key="import.allowedExtensions",
+                    value=json.dumps([".epub", ".mp3"]),
+                    createdAt=1,
+                    updatedAt=1,
+                )
+            )
+        _upgrade(engine, "head")
+        with engine.begin() as connection:
+            migrated = json.loads(
+                connection.scalar(
+                    select(settings.c.value).where(
+                        settings.c.key == "import.allowedExtensions"
+                    )
+                )
+            )
+            assert migrated[:2] == [".epub", ".mp3"]
+            assert {".flac", ".opus", ".wma", ".xma"}.issubset(migrated)
+            connection.execute(
+                update(settings)
+                .where(settings.c.key == "import.allowedExtensions")
+                .values(
+                    value=json.dumps([item for item in migrated if item != ".flac"])
+                )
+            )
+        _upgrade(engine, "head")
+        with engine.connect() as connection:
+            retained = json.loads(
+                connection.scalar(
+                    select(settings.c.value).where(
+                        settings.c.key == "import.allowedExtensions"
+                    )
+                )
+            )
+            assert ".flac" not in retained
+    finally:
+        engine.dispose()
+
+
 def _make_v14_shape_diverge(engine: Engine) -> None:
     with engine.begin() as connection:
         operations = Operations(MigrationContext.configure(connection))
@@ -125,7 +185,7 @@ def test_0004_produces_identical_schema_from_distinct_0003_shapes(
 
         for engine in (canonical, legacy):
             _upgrade(engine, "head")
-            assert head_revision(engine) == "0007_media_versions_contract"
+            assert head_revision(engine) == "0008_audiobook_audio_formats"
 
         assert _schema_fingerprint(canonical) == _schema_fingerprint(legacy)
     finally:

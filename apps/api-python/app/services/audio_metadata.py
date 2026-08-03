@@ -13,6 +13,7 @@ from typing import Any
 
 from app.modules.imports.application.audio_types import (
     DISC_DIRECTORY_PATTERN,
+    LEGACY_AUDIO_EXTS,
     MAX_AUDIO_BUNDLE_TRACKS,
     MAX_AUDIO_CHAPTERS,
     AudioBundleStructure,
@@ -21,14 +22,16 @@ from app.modules.imports.application.audio_types import (
     AudioVolumeDirectory,
     is_supported_audio_file,
 )
-from app.modules.imports.application.errors import AudioTrackLimitExceededError
+from app.modules.imports.application.errors import (
+    AudioInspectionError,
+    AudioTrackLimitExceededError,
+)
 from app.services.book_identity import (
     UNKNOWN_AUTHOR,
     normalize_identity_part,
     recognize_book_identity_with_regex,
 )
 
-SUPPORTED_AUDIO_CODECS = {"aac", "mp3"}
 AAC_RFC6381_OBJECT_TYPES = {2, 5, 29}
 MAX_EMBEDDED_COVER_BYTES = 20 * 1024 * 1024
 MAX_FFPROBE_STDOUT_BYTES = 16 * 1024 * 1024
@@ -253,23 +256,41 @@ def parse_audio_metadata(path: str | Path, *, timeout_seconds: int = 60) -> Audi
         parser_errors.append(str(exc))
     try:
         probe_data = _read_with_ffprobe(source, timeout_seconds=timeout_seconds)
+    except AudioInspectionError as exc:
+        if exc.code in {"AUDIO_STREAM_NOT_FOUND", "AUDIO_VIDEO_STREAM_UNSUPPORTED"}:
+            raise
+        probe_data = {}
+        parser_errors.append(str(exc))
     except ValueError as exc:
         probe_data = {}
         parser_errors.append(str(exc))
+    if source.suffix.lower() not in LEGACY_AUDIO_EXTS and not probe_data:
+        if parser_errors:
+            raise AudioInspectionError("AUDIO_METADATA_INVALID", parser_errors[-1])
+        raise AudioInspectionError(
+            "AUDIO_PROBE_REQUIRED",
+            "该音频格式需要服务器安装 ffprobe 后才能导入",
+        )
     if not mutagen_data and not probe_data:
         detail = "；".join(parser_errors[-2:])
-        raise ValueError(detail or "无法读取音频元数据：服务器需要 Mutagen 或 ffprobe，请安装后重试")
+        raise AudioInspectionError(
+            "AUDIO_METADATA_INVALID",
+            detail or "无法读取音频元数据：服务器需要 Mutagen 或 ffprobe，请安装后重试",
+        )
 
     merged = _merge_metadata(mutagen_data, probe_data)
     raw_codec = str(merged.get("codec") or "").strip().lower()
     codec = _normalize_audio_codec(raw_codec)
     if not codec:
-        raise ValueError("音频文件没有可识别的音频流")
-    if codec not in SUPPORTED_AUDIO_CODECS:
-        raise ValueError(f"音频编码 {codec} 暂不支持；当前支持 MP3 与 AAC")
+        raise AudioInspectionError(
+            "AUDIO_STREAM_NOT_FOUND", "音频文件没有可识别的音频流"
+        )
     duration_ms = _positive_int(merged.get("duration_ms"))
     if duration_ms is None:
-        raise ValueError("无法读取音频时长，文件可能损坏或编码不受支持")
+        raise AudioInspectionError(
+            "AUDIO_METADATA_INVALID",
+            "无法读取音频时长，文件可能损坏或编码不受支持",
+        )
 
     chapters = tuple(
         AudioChapterMetadata(
@@ -281,7 +302,10 @@ def parse_audio_metadata(path: str | Path, *, timeout_seconds: int = 60) -> Audi
         if int(item.get("end_ms") or 0) > int(item.get("start_ms") or 0)
     )
     if len(chapters) > MAX_AUDIO_CHAPTERS:
-        raise ValueError(f"音频章节超过 {MAX_AUDIO_CHAPTERS} 个，文件可能损坏或标签异常")
+        raise AudioInspectionError(
+            "AUDIO_METADATA_INVALID",
+            f"音频章节超过 {MAX_AUDIO_CHAPTERS} 个，文件可能损坏或标签异常",
+        )
     return AudioFileMetadata(
         path=source,
         title=_clean_text(merged.get("title")),
@@ -323,15 +347,35 @@ def _read_with_ffprobe(path: Path, *, timeout_seconds: int) -> dict[str, Any]:
     returncode, stdout, stderr = _run_process_with_output_limit(command, timeout_seconds=max(1, timeout_seconds))
     if returncode != 0:
         detail = stderr.decode("utf-8", errors="replace").strip().splitlines()
-        raise ValueError(f"音频文件无法解析：{detail[-1] if detail else 'ffprobe 返回错误'}")
+        raise AudioInspectionError(
+            "AUDIO_METADATA_INVALID",
+            f"音频文件无法解析：{detail[-1] if detail else 'ffprobe 返回错误'}",
+        )
     try:
         payload = json.loads(stdout.decode("utf-8", errors="strict") or "{}")
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError("ffprobe 返回了无效的音频元数据") from exc
+        raise AudioInspectionError(
+            "AUDIO_METADATA_INVALID", "ffprobe 返回了无效的音频元数据"
+        ) from exc
     streams = payload.get("streams") if isinstance(payload.get("streams"), list) else []
     audio_stream = next((item for item in streams if item.get("codec_type") == "audio"), None)
     if not isinstance(audio_stream, dict):
-        raise ValueError("文件中没有音频流")
+        raise AudioInspectionError("AUDIO_STREAM_NOT_FOUND", "文件中没有音频流")
+    video_streams = [
+        item
+        for item in streams
+        if isinstance(item, dict)
+        and item.get("codec_type") == "video"
+        and not (
+            isinstance(item.get("disposition"), dict)
+            and bool(item["disposition"].get("attached_pic"))
+        )
+    ]
+    if video_streams:
+        raise AudioInspectionError(
+            "AUDIO_VIDEO_STREAM_UNSUPPORTED",
+            "文件包含视频流，不能作为有声书音频导入",
+        )
     format_data = payload.get("format") if isinstance(payload.get("format"), dict) else {}
     tags: dict[str, Any] = {}
     for source_tags in (format_data.get("tags"), audio_stream.get("tags")):
@@ -778,9 +822,9 @@ def _normalize_audio_codec(value: Any) -> str | None:
 
     Mutagen reports MPEG-4 Audio Object Types as RFC 6381 strings on some
     files (for example ``mp4a.40.2`` for AAC-LC) while ffprobe reports the
-    same stream as ``aac``.  Only the common AAC object types supported by
-    the browser playback boundary are admitted; unknown ``mp4a`` values stay
-    unsupported instead of being guessed from the .m4a/.m4b extension.
+    same stream as ``aac``. Known aliases are canonicalized for the Reader
+    contract; other ffprobe codec names remain intact for runtime playback
+    capability checks.
     """
 
     codec = str(value or "").strip().lower()
@@ -788,6 +832,8 @@ def _normalize_audio_codec(value: Any) -> str | None:
         return None
     if "alac" in codec or "apple lossless" in codec:
         return "alac"
+    if "e-ac-3" in codec or "eac3" in codec or "ec-3" in codec:
+        return "eac3"
     if "ac-3" in codec or "ac3" in codec:
         return "ac3"
     object_type = re.fullmatch(r"mp4a\.40\.(\d+)", codec)

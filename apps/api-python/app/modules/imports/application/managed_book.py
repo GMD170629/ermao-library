@@ -60,11 +60,11 @@ from app.modules.imports.application.ports import (
     ImportUnitOfWork,
     LibraryImportStore,
 )
-from app.modules.imports.application.work_grouping import (
-    resolve_non_audio_work_identity,
-)
 from app.modules.imports.application.volume_ordering import (
     normalize_media_version_volume_order,
+)
+from app.modules.imports.application.work_grouping import (
+    resolve_non_audio_work_identity,
 )
 
 
@@ -167,9 +167,7 @@ def import_managed_book(
             and ext not in SUPPORTED_AUDIO_EXTS
             and ext != ".audio-bundle"
         ):
-            raise ValueError(
-                "当前版本仅支持 EPUB、MOBI、AZW、AZW3、PRC、FB2、TXT、CBZ、ZIP、CBR、RAR、PDF、M4B、M4A、MP3 格式。"
-            )
+            raise ValueError(f"当前版本不支持此文件后缀：{ext or source.name}")
         _log_import(store, task_id, "info", f"import started: {source}")
         services.stage_system_event(
             ImportSystemEvent(

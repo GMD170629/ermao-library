@@ -8,6 +8,7 @@ import { cn } from '../../components/ui/cn';
 import { useToast } from '../../components/ui/feedback';
 import { saveSelectedFiles } from './application/save-selected-files';
 import { I18nText } from '@/i18n/provider';
+import { importFileInputAccept } from '../imports/public';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type UploadBookDialogProps = {
@@ -109,7 +110,7 @@ export function UploadBookDialog({ open, onClose, onImported, onError }: UploadB
               <input
                 type="file"
                 multiple
-                accept=".epub,.mobi,.azw,.azw3,.prc,.fb2,.txt,.cbz,.zip,.pdf,.m4b,.m4a,.mp3,application/epub+zip,application/zip,application/pdf,text/plain,audio/mp4,audio/mpeg"
+                accept={importFileInputAccept}
                 className="hidden"
                 disabled={saving}
                 onChange={(event) => {

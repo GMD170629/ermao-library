@@ -12,13 +12,18 @@ import {
   loadImportPreferenceSettings,
   saveImportPreferenceSettings
 } from '../api/import-preferences-client';
+import { allImportExtensions, importFormatGroups } from '../../imports/public';
 
-const formatGroups = [
-  { label: '电子书', formats: ['.epub', '.mobi', '.azw', '.azw3', '.prc', '.fb2', '.txt'] },
-  { label: '文档与漫画', formats: ['.pdf', '.cbz', '.zip', '.cbr', '.rar'] },
-  { label: '有声书', formats: ['.m4b', '.m4a', '.mp3'] }
-] as const;
-const allExtensions = formatGroups.flatMap((group) => [...group.formats]);
+const formatGroups = importFormatGroups;
+const allExtensions = allImportExtensions;
+type FormatGroupId = (typeof formatGroups)[number]['id'];
+
+function formatGroupLabel(id: FormatGroupId, translate: (message: string) => string) {
+  if (id === 'ebook') return translate('电子书');
+  if (id === 'document-comic') return translate('文档与漫画');
+  if (id === 'common-audio') return translate('常用 Web 音频');
+  return translate('专业/兼容音频');
+}
 
 type ImportPreferences = {
   stabilityEnabled: boolean;
@@ -199,8 +204,8 @@ export function ImportPreferencesPanel() {
         </div>
         <div className="mt-5 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
           {formatGroups.map((group) => (
-            <fieldset key={group.label}>
-              <legend className="mb-2 text-sm font-medium text-[#4F4B47]">{group.label}</legend>
+            <fieldset key={group.id}>
+              <legend className="mb-2 text-sm font-medium text-[#4F4B47]">{formatGroupLabel(group.id, i18nAttribute)}</legend>
               <div className="flex flex-wrap gap-2">
                 {group.formats.map((extension) => {
                   const selected = preferences.allowedExtensions.includes(extension);

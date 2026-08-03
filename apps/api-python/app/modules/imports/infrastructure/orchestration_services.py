@@ -13,6 +13,7 @@ from app.infrastructure.comic_archives import (
     extract_comic_cover,
     inspect_comic_archive,
 )
+from app.models.settings import MonitorFolder
 from app.modules.imports.application.audio_types import (
     AudioBundleStructure,
     AudioFileMetadata,
@@ -26,6 +27,7 @@ from app.modules.imports.application.dto import (
     ImportSystemEvent,
 )
 from app.modules.imports.application.errors import (
+    AudioInspectionError,
     AudioTrackLimitExceededError,
     ImportExecutionError,
 )
@@ -49,7 +51,6 @@ from app.modules.imports.infrastructure.reflowable_metadata import (
 )
 from app.modules.library.infrastructure.facets import sync_work_facets
 from app.modules.system.infrastructure.events import record_system_event
-from app.models.settings import MonitorFolder
 from app.services.audio_metadata import inspect_audio_bundle, parse_audio_metadata
 from app.services.book_identity import (
     recognize_book_identity,
@@ -253,7 +254,14 @@ class SessionImportOrchestrationServices:
             ) from exc
 
     def parse_audio_metadata(self, path: Path) -> AudioFileMetadata:
-        return parse_audio_metadata(path)
+        try:
+            return parse_audio_metadata(path)
+        except AudioInspectionError as exc:
+            raise ImportExecutionError(
+                exc.code,
+                str(exc),
+                retryable=False,
+            ) from exc
 
     def publish_audio_cover(
         self,

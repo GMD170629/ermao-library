@@ -290,6 +290,7 @@ def reader_bootstrap_v3(
                     trackNumber=file.track_number,
                     sortOrder=file.sort_order,
                     url=f"/api/files/{file.id}",
+                    codec=file.codec,
                 )
                 for file in bootstrap.files
             ],

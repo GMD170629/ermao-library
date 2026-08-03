@@ -215,7 +215,7 @@ def test_0003_upgrade_merges_same_media_editions_without_losing_volumes(
 
         apply_schema(engine, settings)
 
-        assert head_revision(engine) == "0007_media_versions_contract"
+        assert head_revision(engine) == "0008_audiobook_audio_formats"
         inspector = inspect(engine)
         assert "LibraryEdition" not in inspector.get_table_names()
         assert "LibraryEditionFacet" not in inspector.get_table_names()
@@ -370,10 +370,10 @@ def test_contract_discards_conversion_without_source_volume_and_completes_upgrad
             assert connection.scalar(select(_table(engine, "ImportTask").c.id)) == (
                 "orphaned-import"
             )
-            assert head_revision(engine) == "0007_media_versions_contract"
+            assert head_revision(engine) == "0008_audiobook_audio_formats"
             assert "LibraryEdition" not in inspect(connection).get_table_names()
 
         apply_schema(engine, settings)
-        assert head_revision(engine) == "0007_media_versions_contract"
+        assert head_revision(engine) == "0008_audiobook_audio_formats"
     finally:
         engine.dispose()

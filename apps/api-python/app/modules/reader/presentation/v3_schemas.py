@@ -156,6 +156,7 @@ class ReaderFileSummary(ReaderWireModel):
     track_number: int | None = Field(default=None, alias="trackNumber")
     sort_order: int = Field(alias="sortOrder")
     url: str
+    codec: str | None = None
 
 
 class ReaderCapabilities(ReaderWireModel):
