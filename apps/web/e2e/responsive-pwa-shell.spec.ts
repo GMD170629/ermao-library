@@ -55,6 +55,94 @@ test('PWA launch parameters keep the responsive web shell on mobile widths', asy
   await expect(page.getByRole('link', { name: '已读', exact: true })).toHaveCount(0);
 });
 
+test('work detail volume covers support selection, keyboard-accessible context management, and double-click open', async ({ page }) => {
+  const volume = (id: string, title: string, sortOrder: number, conversionAvailable: boolean) => ({
+    id,
+    mediaVersionId: 'context-media',
+    title,
+    volumeIndex: sortOrder + 1,
+    sortOrder,
+    format: 'CBZ',
+    derivedFromVolumeId: null,
+    publisher: null,
+    publishedAt: null,
+    language: null,
+    isbn: null,
+    identifier: null,
+    narrator: null,
+    abridged: null,
+    importStatus: 'READY',
+    importError: null,
+    coverUrl: '',
+    pageCount: 24,
+    chapterCount: null,
+    durationMs: null,
+    trackCount: null,
+    progress: 0,
+    lastReadAt: null,
+    hidden: false,
+    readable: true,
+    readerType: 'comic',
+    conversionAvailable,
+    kindleSendAvailable: false,
+    classification: { mediaKind: 'COMIC', suggestedMediaKind: null, source: 'USER', reason: null },
+    files: []
+  });
+  const volumes = [volume('context-volume-1', '第一卷', 0, false), volume('context-volume-2', '第二卷', 1, true)];
+  const work = {
+    id: 'context-work',
+    title: '右键菜单测试图书',
+    author: '测试作者',
+    description: '',
+    tags: [],
+    coverUrl: '',
+    coverStatus: 'MISSING',
+    gradient: 'from-orange-100 to-stone-200',
+    seriesName: null,
+    seriesIndex: null,
+    publicationStatus: 'UNKNOWN',
+    trackingStatus: 'NOT_TRACKING',
+    ignored: false,
+    organized: true,
+    addedAt: '2026-08-03T08:00:00.000Z',
+    updatedAt: '2026-08-03T08:00:00.000Z',
+    recentMediaKind: 'COMIC',
+    continueVolumeId: volumes[0].id,
+    availableMediaKinds: ['COMIC'],
+    detailTabs: ['STRUCTURE', 'COMIC'],
+    selectedDetailTab: 'COMIC',
+    completed: false,
+    mediaVersions: [{ id: 'context-media', mediaKind: 'COMIC', completed: false, volumeCount: 2, sizeBytes: 1024, volumes }]
+  };
+  await page.route('**/api/works/context-work', async (route) => {
+    await route.fulfill({ json: { ok: true, data: work } });
+  });
+
+  await page.goto('/works/context-work?detailTab=COMIC');
+  const first = page.getByRole('button', { name: '第 1 卷' });
+  const second = page.getByRole('button', { name: '第 2 卷' });
+  await first.click();
+  await expect(first).toHaveAttribute('aria-pressed', 'true');
+  await expect(second).toHaveAttribute('aria-pressed', 'false');
+
+  await second.click({ button: 'right' });
+  await expect(second).toHaveAttribute('aria-pressed', 'true');
+  const menu = page.getByRole('menu', { name: '管理卷册' });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: /上移卷册/ })).toHaveCount(0);
+  await expect(menu.getByRole('menuitem', { name: /下移卷册/ })).toHaveCount(0);
+  await expect(menu.getByRole('menuitem', { name: /转换为 EPUB/ })).toHaveCount(0);
+  await menu.getByRole('menuitem', { name: /设置媒体类型/ }).hover();
+  await expect(menu.getByRole('menuitem', { name: /设置为电子书/ })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: /设置为有声书/ })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: /设置为漫画/ })).toHaveCount(0);
+
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await second.dblclick();
+  await expect(page).toHaveURL(/\/reader\/context-volume-2$/);
+});
+
 test('mobile PWA shell and drawer consume safe-area insets without reserving bottom-nav space', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/?source=pwa');
