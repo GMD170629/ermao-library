@@ -11,6 +11,12 @@ import {
   type ReaderSyncDiagnostic,
   type ReaderSyncLease
 } from './model';
+import {
+  readerBookCacheKey,
+  type CachedReaderBookFile,
+  type ReaderBookCache,
+  type ReaderBookCacheIdentity
+} from './book-cache';
 
 const PREFERENCES_STORE = 'preferences';
 const OUTBOX_STORE = 'progress-outbox';
@@ -18,6 +24,7 @@ const META_STORE = 'meta';
 const LEASES_STORE = 'leases';
 const QUARANTINE_STORE = 'quarantine';
 const DIAGNOSTICS_STORE = 'diagnostics';
+const BOOK_FILES_STORE = 'book-files';
 
 type ReaderStoreName =
   | typeof PREFERENCES_STORE
@@ -25,7 +32,8 @@ type ReaderStoreName =
   | typeof META_STORE
   | typeof LEASES_STORE
   | typeof QUARANTINE_STORE
-  | typeof DIAGNOSTICS_STORE;
+  | typeof DIAGNOSTICS_STORE
+  | typeof BOOK_FILES_STORE;
 
 type ClientMeta = { key: 'client'; clientId: string; sequence: number };
 
@@ -149,6 +157,10 @@ function openDatabase() {
       if (!database.objectStoreNames.contains(LEASES_STORE)) database.createObjectStore(LEASES_STORE, { keyPath: 'key' });
       if (!database.objectStoreNames.contains(QUARANTINE_STORE)) database.createObjectStore(QUARANTINE_STORE, { keyPath: 'id' });
       if (!database.objectStoreNames.contains(DIAGNOSTICS_STORE)) database.createObjectStore(DIAGNOSTICS_STORE, { keyPath: 'id' });
+      if (!database.objectStoreNames.contains(BOOK_FILES_STORE)) {
+        const bookFiles = database.createObjectStore(BOOK_FILES_STORE, { keyPath: 'key' });
+        bookFiles.createIndex('by-user-volume', 'userVolumeKey', { unique: false });
+      }
       if (event.oldVersion > 0 && event.oldVersion < 2 && request.transaction) {
         const outbox = request.transaction.objectStore(OUTBOX_STORE);
         const quarantine = request.transaction.objectStore(QUARANTINE_STORE);
@@ -227,7 +239,33 @@ async function withTransaction<T>(
   }
 }
 
-export class IndexedDbReaderStorage implements ReaderStorage {
+export class IndexedDbReaderStorage implements ReaderStorage, ReaderBookCache {
+  async getBookFile(identity: ReaderBookCacheIdentity) {
+    return withTransaction(BOOK_FILES_STORE, 'readonly', async (stores) => {
+      const value = await requestResult(stores(BOOK_FILES_STORE).get(readerBookCacheKey(identity))) as CachedReaderBookFile | undefined;
+      if (!value || !(value.blob instanceof Blob) || value.blob.size <= 0) return null;
+      return value;
+    });
+  }
+
+  async putBookFile(file: CachedReaderBookFile) {
+    await withTransaction(BOOK_FILES_STORE, 'readwrite', async (stores) => {
+      const store = stores(BOOK_FILES_STORE);
+      const index = store.index('by-user-volume');
+      const oldKeys = await requestResult(index.getAllKeys(file.userVolumeKey));
+      await Promise.all(oldKeys
+        .filter((key) => key !== file.key)
+        .map((key) => requestResult(store.delete(key))));
+      await requestResult(store.put(file));
+    });
+  }
+
+  async deleteBookFile(identity: ReaderBookCacheIdentity) {
+    await withTransaction(BOOK_FILES_STORE, 'readwrite', async (stores) => {
+      await requestResult(stores(BOOK_FILES_STORE).delete(readerBookCacheKey(identity)));
+    });
+  }
+
   async getPreference(userId: string, workId: string) {
     return withTransaction(PREFERENCES_STORE, 'readwrite', async (stores) => {
       const store = stores(PREFERENCES_STORE);
@@ -404,7 +442,8 @@ export class IndexedDbReaderStorage implements ReaderStorage {
       META_STORE,
       LEASES_STORE,
       QUARANTINE_STORE,
-      DIAGNOSTICS_STORE
+      DIAGNOSTICS_STORE,
+      BOOK_FILES_STORE
     ];
     await withTransaction(
       storeNames,

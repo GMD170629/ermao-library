@@ -2733,5 +2733,11 @@
   "已撤销内容分类调整": "Classification change undone",
   "漫畫": "Comics",
   "内容分类或应用范围无效": "The content classification or scope is invalid",
-  "内容分类无效": "Invalid content classification"
+  "内容分类无效": "Invalid content classification",
+  "首次下载书籍": "Downloading book for the first time",
+  "书籍下载进度": "Book download progress",
+  "已下载 {value0}": "Downloaded {value0}",
+  "已下载 {value0} / {value1} · {value2}%": "Downloaded {value0} / {value1} · {value2}%",
+  "首次打开需要下载一次，之后将直接进入阅读。": "The book is downloaded once on first open. Future opens will load it directly.",
+  "书籍已打开，但本机存储空间不足；下次阅读时需要重新下载。": "The book is open, but there is not enough local storage to save it. It will need to be downloaded again next time."
 }

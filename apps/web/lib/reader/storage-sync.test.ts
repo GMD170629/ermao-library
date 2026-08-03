@@ -42,6 +42,39 @@ test('preference snapshots are isolated by user/work and reset to server inherit
   assert.equal((await repository.resolve('user-1', 'work-1', serverDefault)).source, 'inherited');
 });
 
+test('book files are isolated by content fingerprint and cleared with private reader data', async () => {
+  const storage = new MemoryReaderStorage();
+  const firstIdentity = { userId: 'user-1', volumeId: 'volume-1', contentFingerprint: 'sha256:first' };
+  await storage.putBookFile({
+    ...firstIdentity,
+    key: 'user-1::volume-1::sha256%3Afirst',
+    userVolumeKey: 'user-1::volume-1',
+    format: 'epub',
+    mimeType: 'application/epub+zip',
+    sizeBytes: 5,
+    blob: new Blob(['first']),
+    createdAt: 1
+  });
+  assert.equal((await storage.getBookFile(firstIdentity))?.blob.size, 5);
+
+  const nextIdentity = { ...firstIdentity, contentFingerprint: 'sha256:next' };
+  await storage.putBookFile({
+    ...nextIdentity,
+    key: 'user-1::volume-1::sha256%3Anext',
+    userVolumeKey: 'user-1::volume-1',
+    format: 'epub',
+    mimeType: 'application/epub+zip',
+    sizeBytes: 4,
+    blob: new Blob(['next']),
+    createdAt: 2
+  });
+  assert.equal(await storage.getBookFile(firstIdentity), null);
+  assert.equal((await storage.getBookFile(nextIdentity))?.blob.size, 4);
+
+  await storage.clearAll();
+  assert.equal(await storage.getBookFile(nextIdentity), null);
+});
+
 test('IndexedDB preference reads lazily rewrite V2 and malformed snapshots to one complete V3 snapshot', async () => {
   const legacy = {
     key: 'user-1::work-1',

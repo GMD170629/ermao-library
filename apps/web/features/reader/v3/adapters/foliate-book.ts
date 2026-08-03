@@ -1,4 +1,10 @@
 import type { ReflowableFormat } from '@shuku/reader-core';
+import {
+  readerBookCacheKey,
+  readerBookUserVolumeKey,
+  type ReaderBookCache,
+  type ReaderBookCacheIdentity
+} from '../../../../lib/reader/book-cache';
 import { sanitizeEpubMarkup } from './epub-security';
 import { decodeTxt, makeTxtBook } from './txt-book';
 
@@ -41,6 +47,19 @@ export type OpenFoliateBookOptions = {
   title: string;
   signal: AbortSignal;
   fetch?: typeof globalThis.fetch;
+  cache?: {
+    storage: ReaderBookCache;
+    identity: ReaderBookCacheIdentity;
+  };
+  onDownloadProgress?: (progress: FoliateDownloadProgress) => void;
+  onPhase?: (phase: 'downloading' | 'parsing') => void;
+  onCacheWarning?: (code: 'BOOK_CACHE_WRITE_FAILED') => void;
+};
+
+export type FoliateDownloadProgress = {
+  loadedBytes: number;
+  totalBytes: number | null;
+  percent: number | null;
 };
 
 export class NovelOpenError extends Error {
@@ -154,7 +173,91 @@ function classifyOpenError(reason: unknown) {
   return new NovelOpenError('NOVEL_PARSE_FAILED', 'The book could not be parsed', { cause: reason });
 }
 
-export async function openFoliateBook(options: OpenFoliateBookOptions) {
+const localBookLocks = new Map<string, Promise<void>>();
+
+async function withLocalBookLock<T>(key: string, action: () => Promise<T>): Promise<T> {
+  const previous = localBookLocks.get(key) ?? Promise.resolve();
+  let release: () => void = () => undefined;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const queued = previous.then(() => current);
+  localBookLocks.set(key, queued);
+  await previous;
+  try {
+    return await action();
+  } finally {
+    release();
+    if (localBookLocks.get(key) === queued) localBookLocks.delete(key);
+  }
+}
+
+async function withBookLock<T>(key: string, action: () => Promise<T>): Promise<T> {
+  const execute = () => withLocalBookLock(key, action);
+  if (typeof navigator !== 'undefined' && navigator.locks) {
+    return navigator.locks.request(`shuku-reader-book:${key}`, execute);
+  }
+  return execute();
+}
+
+function contentLength(response: Response) {
+  const value = Number.parseInt(response.headers.get('content-length') ?? '', 10);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function emitDownloadProgress(
+  callback: OpenFoliateBookOptions['onDownloadProgress'],
+  loadedBytes: number,
+  totalBytes: number | null
+) {
+  callback?.({
+    loadedBytes,
+    totalBytes,
+    percent: totalBytes === null ? null : Math.min(100, loadedBytes / totalBytes * 100)
+  });
+}
+
+async function responseBlobWithProgress(
+  response: Response,
+  signal: AbortSignal,
+  callback: OpenFoliateBookOptions['onDownloadProgress']
+) {
+  const totalBytes = contentLength(response);
+  emitDownloadProgress(callback, 0, totalBytes);
+  if (!response.body) {
+    const blob = await response.blob();
+    emitDownloadProgress(callback, blob.size, totalBytes ?? blob.size);
+    return blob;
+  }
+
+  const reader = response.body.getReader();
+  const chunks: ArrayBuffer[] = [];
+  let loadedBytes = 0;
+  try {
+    while (true) {
+      if (signal.aborted) throw new DOMException('The operation was aborted', 'AbortError');
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value?.byteLength) continue;
+      const chunk = new Uint8Array(value.byteLength);
+      chunk.set(value);
+      chunks.push(chunk.buffer);
+      loadedBytes += value.byteLength;
+      emitDownloadProgress(callback, loadedBytes, totalBytes);
+    }
+  } catch (reason) {
+    await reader.cancel(reason).catch(() => undefined);
+    throw reason;
+  } finally {
+    reader.releaseLock();
+  }
+  const blob = new Blob(chunks, { type: response.headers.get('content-type') ?? '' });
+  emitDownloadProgress(callback, blob.size, totalBytes ?? blob.size);
+  return blob;
+}
+
+async function downloadBookBlob(options: OpenFoliateBookOptions) {
+  options.onPhase?.('downloading');
   const fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
   let response: Response;
   try {
@@ -170,10 +273,14 @@ export async function openFoliateBook(options: OpenFoliateBookOptions) {
   if (!response.ok) {
     throw new NovelOpenError('NOVEL_RESOURCE_FAILED', `The book file request failed (${response.status})`);
   }
-  const blob = await response.blob();
+  const blob = await responseBlobWithProgress(response, options.signal, options.onDownloadProgress);
   if (options.signal.aborted) throw new DOMException('The operation was aborted', 'AbortError');
   if (!blob.size) throw new NovelOpenError('NOVEL_RESOURCE_FAILED', 'The book file is empty');
+  return blob;
+}
 
+async function parseBookBlob(options: OpenFoliateBookOptions, blob: Blob) {
+  options.onPhase?.('parsing');
   if (options.format === 'txt') {
     try {
       const book = makeTxtBook(decodeTxt(await blob.arrayBuffer()), options.title);
@@ -211,4 +318,48 @@ export async function openFoliateBook(options: OpenFoliateBookOptions) {
   } catch (reason) {
     throw classifyOpenError(reason);
   }
+}
+
+async function persistBookBlob(options: OpenFoliateBookOptions, blob: Blob) {
+  if (!options.cache) return;
+  const { identity, storage } = options.cache;
+  try {
+    await storage.putBookFile({
+      ...identity,
+      key: readerBookCacheKey(identity),
+      userVolumeKey: readerBookUserVolumeKey(identity),
+      format: options.format,
+      mimeType: blob.type || mimeByFormat[options.format],
+      sizeBytes: blob.size,
+      blob,
+      createdAt: Date.now()
+    });
+    if (typeof navigator !== 'undefined' && navigator.storage?.persist) {
+      void navigator.storage.persist().catch(() => undefined);
+    }
+  } catch {
+    options.onCacheWarning?.('BOOK_CACHE_WRITE_FAILED');
+  }
+}
+
+async function openFoliateBookLocked(options: OpenFoliateBookOptions) {
+  const cached = await options.cache?.storage.getBookFile(options.cache.identity).catch(() => null);
+  if (cached && cached.format === options.format && cached.blob.size === cached.sizeBytes) {
+    try {
+      return await parseBookBlob(options, cached.blob);
+    } catch (reason) {
+      if (options.signal.aborted) throw reason;
+      await options.cache?.storage.deleteBookFile(options.cache.identity).catch(() => undefined);
+    }
+  }
+
+  const blob = await downloadBookBlob(options);
+  const opened = await parseBookBlob(options, blob);
+  await persistBookBlob(options, blob);
+  return opened;
+}
+
+export async function openFoliateBook(options: OpenFoliateBookOptions) {
+  if (!options.cache) return openFoliateBookLocked(options);
+  return withBookLock(readerBookCacheKey(options.cache.identity), () => openFoliateBookLocked(options));
 }

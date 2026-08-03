@@ -2,7 +2,7 @@ import { READER_SCHEMA_VERSION, type ReaderLocation, type ReaderPreferences } fr
 
 // Keep the physical IndexedDB name so the v3 upgrader can quarantine or migrate legacy local records.
 export const READER_PROGRESS_DB_NAME = 'shuku-reader-v2';
-export const READER_DB_SCHEMA_VERSION = 2;
+export const READER_DB_SCHEMA_VERSION = 3;
 export const READER_PROGRESS_DEBOUNCE_MS = 1_500;
 
 /**
