@@ -35,7 +35,7 @@ type MetadataLookupModalProps = {
   book: WorkView;
   open: boolean;
   onClose: () => void;
-  onApplied: (book?: WorkView | null) => void;
+  onApplied: () => void | Promise<void>;
 };
 
 const fieldLabels: Record<MetadataField, string> = {
@@ -219,10 +219,10 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
           volumeId: selectedFields.includes('publisher') ? targetVolumeId : null
         })
       });
-      const payload = (await response.json()) as { ok: boolean; data?: { book?: WorkView | null }; error?: { message: string } };
+      const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
       if (!payload.ok) throw new Error(payload.error?.message ?? '元数据应用失败');
       setMessage('已应用所选字段');
-      onApplied(payload.data?.book ?? null);
+      await onApplied();
       onClose();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '元数据应用失败');

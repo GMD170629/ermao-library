@@ -11,22 +11,9 @@ import { Progress } from '../../components/ui/progress';
 import { useI18n } from '../../i18n/provider';
 import { useAudioPlayback } from '../audio/audio-playback-provider';
 import { UploadBookDialog } from '../library/public';
+import { mapContinueReadingItem, type ContinueReadingItem } from './model/continue-reading';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
-
-type ContinueItem = {
-  workId: string;
-  title: string;
-  author: string;
-  coverUrl: string;
-  mediaKind: 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
-  continueVolumeId: string | null;
-  progress: number;
-  lastReadAt: string;
-  chapter: string | null;
-  volumeTitle: string | null;
-  narrator: string | null;
-} | null;
 
 async function api<T>(path: string): Promise<T> {
   const response = await fetch(path);
@@ -35,7 +22,8 @@ async function api<T>(path: string): Promise<T> {
   return payload.data;
 }
 
-function shortReadTime(value: string, locale: string, t: (source: string, values?: Record<string, string>) => string) {
+function shortReadTime(value: string | null, locale: string, t: (source: string, values?: Record<string, string>) => string) {
+  if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
   const now = new Date();
@@ -54,7 +42,7 @@ export function DashboardPage() {
   const router = useRouter();
   const audioPlayback = useAudioPlayback();
   const { locale, t } = useI18n();
-  const [continueItem, setContinueItem] = useState<ContinueItem>(null);
+  const [continueItem, setContinueItem] = useState<ContinueReadingItem | null>(null);
   const [recentReading, setRecentReading] = useState<BookshelfItem[]>([]);
   const [recentBooks, setRecentBooks] = useState<BookshelfItem[]>([]);
   const [error, setError] = useState('');
@@ -64,12 +52,12 @@ export function DashboardPage() {
   useEffect(() => {
     let active = true;
     Promise.allSettled([
-      api<{ item: ContinueItem }>('/api/dashboard/continue-reading'),
+      api<{ item: unknown }>('/api/dashboard/continue-reading'),
       api<{ books: BookshelfItem[] }>('/api/dashboard/recent-reading?limit=10'),
       api<{ books: BookshelfItem[] }>('/api/dashboard/recent-books?limit=10')
     ]).then(([continueResult, readingResult, addedResult]) => {
       if (!active) return;
-      if (continueResult.status === 'fulfilled') setContinueItem(continueResult.value.item);
+      if (continueResult.status === 'fulfilled') setContinueItem(mapContinueReadingItem(continueResult.value.item));
       if (readingResult.status === 'fulfilled') {
         setRecentReading(readingResult.value.books.slice(0, 10));
       }
@@ -142,7 +130,7 @@ export function DashboardPage() {
             <div className="flex shrink-0 flex-col items-start gap-3 sm:items-center sm:px-3">
               {(() => {
                 const kind = continueItem.mediaKind;
-                const volumeId = continueItem.continueVolumeId;
+                const volumeId = continueItem.resumeVolumeId;
                 const href = volumeId ? `/reader/${encodeURIComponent(volumeId)}` : null;
                 const label = kind === 'AUDIOBOOK' ? '继续听' : kind === 'COMIC' ? '继续看' : '继续阅读';
                 const ContinueIcon = kind === 'AUDIOBOOK' ? Headphones : kind === 'COMIC' ? Images : BookOpen;

@@ -559,6 +559,14 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     }
   };
 
+  const refreshAfterMetadataApply = async () => {
+    try {
+      setWork(await fetchWork(bookId));
+    } catch (reason) {
+      feedback.error(reason instanceof Error ? reason.message : t('读取作品失败'));
+    }
+  };
+
   const runWorkAction = async (key: string, action: () => Promise<void>, success: string, refresh = true) => {
     setWorkActionBusy(key);
     try {
@@ -781,7 +789,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         </section>
       )}
 
-      <MetadataLookupModal book={work} open={metadataLookupOpen} onClose={() => setMetadataLookupOpen(false)} onApplied={(nextWork) => { if (nextWork) setWork(nextWork); else void fetchWork(bookId).then(setWork); setMetadataLookupOpen(false); }} />
+      <MetadataLookupModal book={work} open={metadataLookupOpen} onClose={() => setMetadataLookupOpen(false)} onApplied={refreshAfterMetadataApply} />
       <KindleSendModal book={work} open={kindleSendOpen} preferredVolumeId={selectedVolume?.id ?? null} onClose={() => setKindleSendOpen(false)} />
     </div>
   );
