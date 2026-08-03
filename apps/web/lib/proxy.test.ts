@@ -15,6 +15,13 @@ test('proxy allows public routes without a session', () => {
   assert.equal(response.headers.get('x-middleware-next'), '1');
 });
 
+test('proxy allows OPDS Basic authentication requests without a web session', () => {
+  const response = proxy(createRequest('/opds/v1.2/catalog'));
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('x-middleware-next'), '1');
+});
+
 test('proxy returns the stable unauthorized envelope for protected API routes', async () => {
   const response = proxy(createRequest('/api/books'));
 

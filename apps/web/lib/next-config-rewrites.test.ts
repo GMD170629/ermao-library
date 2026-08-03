@@ -22,12 +22,16 @@ async function loadRewrites() {
   }
 }
 
-test('always rewrites API requests to the local Python backend', async () => {
+test('always rewrites API and OPDS requests to the local Python backend', async () => {
   assert.deepEqual(await loadRewrites(), {
     beforeFiles: [
       {
         source: '/api/:path*',
         destination: 'http://127.0.0.1:8000/api/:path*'
+      },
+      {
+        source: '/opds/:path*',
+        destination: 'http://127.0.0.1:8000/opds/:path*'
       }
     ]
   });

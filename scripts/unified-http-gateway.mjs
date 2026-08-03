@@ -8,13 +8,15 @@ function normalizeBasePath(value) {
   return `/${trimmed.replace(/^\/+|\/+$/g, '')}`;
 }
 
-function apiUpstreamPath(requestUrl, basePath) {
+function backendUpstreamPath(requestUrl, basePath) {
   const parsed = new URL(requestUrl || '/', 'http://gateway.local');
   let pathname = parsed.pathname;
   if (basePath && (pathname === basePath || pathname.startsWith(`${basePath}/`))) {
     pathname = pathname.slice(basePath.length) || '/';
   }
-  if (pathname !== '/api' && !pathname.startsWith('/api/')) return null;
+  const isApi = pathname === '/api' || pathname.startsWith('/api/');
+  const isOpds = pathname === '/opds' || pathname.startsWith('/opds/');
+  if (!isApi && !isOpds) return null;
   return `${pathname}${parsed.search}`;
 }
 
@@ -87,9 +89,9 @@ export function createUnifiedGateway({
 } = {}) {
   const normalizedBasePath = normalizeBasePath(basePath);
   const resolveTarget = (requestUrl) => {
-    const apiPath = apiUpstreamPath(requestUrl, normalizedBasePath);
-    if (apiPath !== null) {
-      return { hostname: apiHostname, port: apiPort, path: apiPath };
+    const backendPath = backendUpstreamPath(requestUrl, normalizedBasePath);
+    if (backendPath !== null) {
+      return { hostname: apiHostname, port: apiPort, path: backendPath };
     }
     return { hostname: webHostname, port: webPort, path: requestUrl || '/' };
   };

@@ -12,7 +12,8 @@ const publicPaths = [
   '/api/auth/password-reset/request',
   '/api/auth/password-reset/confirm',
   '/api/app-config',
-  '/api/health'
+  '/api/health',
+  '/opds'
 ];
 
 export function proxy(request: NextRequest): NextResponse {
