@@ -32,6 +32,13 @@ class MonitorFolder(Base):
         nullable=True,
     )
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    media_kind_policy: Mapped[str] = mapped_column(
+        "mediaKindPolicy",
+        String(32),
+        nullable=False,
+        default="MIXED",
+        server_default="MIXED",
+    )
     ignore_patterns: Mapped[str | None] = mapped_column("ignorePatterns", Text, nullable=True)
     ignore_hidden: Mapped[bool] = mapped_column("ignoreHidden", Boolean, nullable=False, default=True, server_default="1")
     min_file_size_bytes: Mapped[int] = mapped_column("minFileSizeBytes", Integer, nullable=False, default=10240, server_default="10240")

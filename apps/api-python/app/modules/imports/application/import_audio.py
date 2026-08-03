@@ -28,6 +28,7 @@ from app.modules.imports.application.dto import (
 )
 from app.modules.imports.application.identity_policy import UNKNOWN_AUTHOR
 from app.modules.imports.application.import_support import (
+    _classification_columns,
     _ensure_work,
     _finalize_work_cover,
     _hash_text,
@@ -41,6 +42,11 @@ from app.modules.imports.application.ports import (
     ImportLibraryQueries,
     ImportOrchestrationServices,
     LibraryImportStore,
+)
+from app.modules.imports.domain.content_classification import (
+    ContentEvidence,
+    classify_content,
+    normalize_media_kind_policy,
 )
 
 _FLAT_AUDIO_FILENAME_PATTERN = re.compile(
@@ -63,6 +69,10 @@ def _import_audio(
 ) -> ImportResult:
     if not metadata_items:
         raise ValueError("有声书目录中没有可导入的音频文件")
+    classification = classify_content(
+        normalize_media_kind_policy(options.media_kind_policy),
+        ContentEvidence(volume_format="AUDIO"),
+    )
     chapter_total = sum(max(1, len(item.chapters)) for item in metadata_items)
     if chapter_total > MAX_AUDIO_CHAPTERS:
         raise ValueError(f"有声书章节总数超过 {MAX_AUDIO_CHAPTERS} 个，请拆分后导入")
@@ -176,7 +186,7 @@ def _import_audio(
                     "workId": work["id"],
                     "monitorFolderId": options.monitor_folder_id,
                     "origin": options.origin,
-                    "mediaKind": "AUDIOBOOK",
+                    "mediaKind": classification.media_kind,
                     "format": "AUDIO",
                     "createdAt": _now(),
                     "updatedAt": _now(),
@@ -224,6 +234,7 @@ def _import_audio(
                             "narrator": narrator,
                             "coverStatus": "PENDING",
                             "importStatus": "PARSING",
+                            **_classification_columns(classification),
                             "createdAt": _now(),
                             "updatedAt": _now(),
                         }
@@ -508,7 +519,7 @@ def _import_audio(
         media_version["id"],
         volume["id"],
         work["title"],
-        "audiobook",
+        str(media_version.get("mediaKind") or classification.media_kind).lower(),
         "audio",
         actual_chapters,
         "completed",
@@ -576,7 +587,6 @@ def _ensure_audio_work(
             "title": identity.title,
             "author": identity.author,
             "description": None,
-            "workType": "AUDIO",
             "tags": ["audiobook", "audio"],
             "mergeKey": merge_key,
             "origin": options.origin,

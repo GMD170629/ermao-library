@@ -1,5 +1,3 @@
-import type { MediaKind } from '../../../types/work';
-
 export type BookActionId =
   | 'edit'
   | 'metadata'
@@ -11,17 +9,17 @@ export type BookActionId =
 
 export function bookActionIds({
   canManage,
-  mediaKind,
-  hasDownload
+  hasDownload,
+  kindleSendAvailable
 }: {
   canManage: boolean;
-  mediaKind: MediaKind | null;
   hasDownload: boolean;
+  kindleSendAvailable: boolean;
 }): BookActionId[] {
   const actions: BookActionId[] = [];
   if (canManage) actions.push('edit', 'metadata', 'upload-cover', 'regenerate-cover');
-  if (mediaKind !== 'AUDIOBOOK' && hasDownload) actions.push('download');
-  if (mediaKind === 'EBOOK') actions.push('kindle');
+  if (hasDownload) actions.push('download');
+  if (kindleSendAvailable) actions.push('kindle');
   if (canManage) actions.push('delete');
   return actions;
 }

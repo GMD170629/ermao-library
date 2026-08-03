@@ -129,17 +129,17 @@ export function DashboardPage() {
             </div>
             <div className="flex shrink-0 flex-col items-start gap-3 sm:items-center sm:px-3">
               {(() => {
-                const kind = continueItem.mediaKind;
+                const readerType = continueItem.readerType;
                 const volumeId = continueItem.resumeVolumeId;
-                const href = volumeId ? `/reader/${encodeURIComponent(volumeId)}` : null;
-                const label = kind === 'AUDIOBOOK' ? '继续听' : kind === 'COMIC' ? '继续看' : '继续阅读';
-                const ContinueIcon = kind === 'AUDIOBOOK' ? Headphones : kind === 'COMIC' ? Images : BookOpen;
+                const href = volumeId ? (readerType === 'audio' ? `/listen/${encodeURIComponent(volumeId)}` : `/reader/${encodeURIComponent(volumeId)}`) : null;
+                const label = readerType === 'audio' ? '继续听' : readerType === 'comic' ? '继续看' : '继续阅读';
+                const ContinueIcon = readerType === 'audio' ? Headphones : readerType === 'comic' ? Images : BookOpen;
                 return <button
                 type="button"
                 disabled={!volumeId}
                 onClick={() => {
                   if (!volumeId) return;
-                  if (kind === 'AUDIOBOOK') {
+                  if (readerType === 'audio') {
                     void audioPlayback.loadVolume(volumeId, {
                       autoplay: true,
                       summary: {

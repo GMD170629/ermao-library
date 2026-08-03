@@ -46,7 +46,6 @@ def _insert_lookup_fixture(
     for statement in (
         "ALTER TABLE LibraryWork ADD COLUMN seriesName TEXT",
         "ALTER TABLE LibraryWork ADD COLUMN seriesIndex REAL",
-        "ALTER TABLE LibraryWork ADD COLUMN publishedYear INTEGER",
         "ALTER TABLE OrganizeJob ADD COLUMN startedAt TEXT",
         "ALTER TABLE OrganizeJob ADD COLUMN finishedAt TEXT",
     ):
@@ -58,12 +57,12 @@ def _insert_lookup_fixture(
         text(
             """
             INSERT INTO LibraryWork (
-                id, origin, title, normalizedTitle, author, normalizedAuthor, workType,
+                id, origin, title, normalizedTitle, author, normalizedAuthor,
                 publicationStatus, trackingStatus, tags, metadataQuality, organizeStatus, coverPath,
                 coverStatus, hidden, organized, mergeKey, createdAt, updatedAt
             ) VALUES (
                 'work-lookup', 'MANUAL', :title, :title, :author, :author,
-                'EPUB', 'UNKNOWN', 'NOT_TRACKING', '["epub"]', 0, 'LOOKUP_PENDING',
+                'UNKNOWN', 'NOT_TRACKING', '["epub"]', 0, 'LOOKUP_PENDING',
                 :cover_path, :cover_status, 0, 0, :merge_key, 'now', 'now'
             )
             """
@@ -159,9 +158,12 @@ def test_lookup_applies_exact_candidate_without_overwriting_identity_or_local_co
         "author": "岛田庄司",
         "description": "外部简介",
         "tags": ["推理", "本格"],
-        "publisher": "新星出版社",
         "seriesName": "午夜文库",
-        "publishedYear": 2024,
+        "volumeMetadata": {
+            "publishedAt": "2024-01-01T00:00:00+00:00",
+            "language": "zh-CN",
+            "isbn": "9787513340000",
+        },
         "coverUrl": "https://example.invalid/cover.jpg",
     }
     monkeypatch.setattr(
@@ -194,7 +196,6 @@ def test_lookup_applies_exact_candidate_without_overwriting_identity_or_local_co
     assert work["coverPath"] == "covers/local.jpg"
     assert json.loads(work["tags"]) == ["epub"]
     assert work["seriesName"] == "午夜文库"
-    assert work["publishedYear"] == 2024
     assert work["organized"] == 1
     assert work["organizeStatus"] == "APPLIED"
     assert (
@@ -203,12 +204,16 @@ def test_lookup_applies_exact_candidate_without_overwriting_identity_or_local_co
         ).scalar()
         == "APPLIED"
     )
-    assert (
-        db_session.execute(
-            text("SELECT publisher FROM LibraryVolume WHERE id = 'volume-lookup'")
-        ).scalar()
-        == "新星出版社"
-    )
+    volume = db_session.execute(
+        text(
+            "SELECT publisher, publishedAt, language, isbn FROM LibraryVolume "
+            "WHERE id = 'volume-lookup'"
+        )
+    ).mappings().one()
+    assert volume["publisher"] is None
+    assert volume["publishedAt"] is not None
+    assert volume["language"] == "zh-CN"
+    assert volume["isbn"] == "9787513340000"
     lookup = (
         db_session.execute(
             text(
@@ -220,7 +225,9 @@ def test_lookup_applies_exact_candidate_without_overwriting_identity_or_local_co
     )
     assert lookup["status"] == "COMPLETED"
     assert lookup["resultSource"] == "douban"
-    assert "publisher" in json.loads(lookup["appliedFields"])
+    assert {"publishedAt", "language", "isbn"} <= set(
+        json.loads(lookup["appliedFields"])
+    )
     assert (
         db_session.execute(
             text(
@@ -464,7 +471,7 @@ def test_lookup_uses_enabled_source_without_legacy_system_settings(
     create_worker_tables(db_session)
     list_metadata_providers(db_session)
     list_metadata_provider_pipelines(db_session)
-    pipeline = db_session.get(MetadataProviderPipeline, ("ebook", "bangumi"))
+    pipeline = db_session.get(MetadataProviderPipeline, ("EBOOK", "bangumi"))
     assert pipeline is not None
     pipeline.enabled = True
     source = db_session.scalar(
@@ -705,7 +712,8 @@ def test_provider_enabled_flags_cannot_be_bypassed_with_force(db_session):
     create_worker_tables(db_session)
     _disable_all_metadata_providers(db_session)
     context = {
-        "work": {"title": "测试图书", "workType": "EPUB"},
+        "work": {"title": "测试图书"},
+        "mediaVersion": {"mediaKind": "EBOOK"},
         "mediaVersions": [],
         "files": [],
         "metadata": [],
@@ -803,7 +811,8 @@ def test_ai_metadata_cache_reuses_only_non_empty_successes(db_session, monkeypat
     )
     db_session.commit()
     context = {
-        "work": {"title": "AI 测试图书", "workType": "EPUB"},
+        "work": {"title": "AI 测试图书"},
+        "mediaVersion": {"mediaKind": "EBOOK"},
         "mediaVersions": [],
         "files": [],
         "metadata": [],

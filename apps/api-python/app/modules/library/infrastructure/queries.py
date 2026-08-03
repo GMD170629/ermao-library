@@ -117,27 +117,6 @@ class SqlAlchemyLibraryQueries:
                     )
                 )
             )
-        if criteria.publishers:
-            media_version = aliased(LibraryMediaVersion)
-            volume = aliased(LibraryVolume)
-            publisher_predicates = [
-                media_version.work_id == LibraryWork.id,
-                volume.hidden.is_(False),
-                func.lower(func.coalesce(volume.publisher, "")).in_(
-                    tuple(item.casefold() for item in criteria.publishers)
-                ),
-            ]
-            if context is not None:
-                publisher_predicates.append(
-                    volume_visibility_predicate(context, volume)
-                )
-            predicates.append(
-                exists(
-                    select(volume.id)
-                    .join(media_version, media_version.id == volume.media_version_id)
-                    .where(*publisher_predicates)
-                )
-            )
         if criteria.filters.conditions:
             if context is None:
                 from app.core.authorization import AuthorizationContext

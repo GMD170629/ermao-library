@@ -202,7 +202,6 @@ def _add_comic_volume(db_session, volume_id: str) -> None:
                 normalized_title=work_id,
                 author="Test author",
                 normalized_author="test author",
-                work_type="COMIC",
                 tags="[]",
             ),
             LibraryMediaVersion(
@@ -829,8 +828,8 @@ def test_shelf_list_is_summary_and_detail_is_lightweight_paginated(client, db_se
         db_session.execute(
             text(
                 "INSERT INTO LibraryWork "
-                "(id, title, normalizedTitle, author, normalizedAuthor, workType, tags, hidden, createdAt, updatedAt) "
-                "VALUES (:id, :title, :title, '林川', '林川', 'EPUB', '[]', 0, 'now', 'now')"
+                "(id, title, normalizedTitle, author, normalizedAuthor, tags, hidden, createdAt, updatedAt) "
+                "VALUES (:id, :title, :title, '林川', '林川', '[]', 0, 'now', 'now')"
             ),
             {"id": f"work-{index + 1:02d}", "title": f"星海列车 {index + 1:02d}"},
         )
@@ -848,7 +847,13 @@ def test_shelf_list_is_summary_and_detail_is_lightweight_paginated(client, db_se
     assert shelf["bookIds"] == book_ids
     assert shelf["bookCount"] == 25
     assert len(shelf["books"]) == 24
-    assert set(shelf["books"][0]) == {"id", "title", "author", "coverUrl"}
+    assert set(shelf["books"][0]) == {
+        "id",
+        "title",
+        "author",
+        "coverUrl",
+        "availableMediaKinds",
+    }
 
     statements: list[str] = []
     engine = db_session.get_bind()
@@ -911,11 +916,11 @@ def test_series_endpoint_hides_single_book_series_by_default(client, db_session)
         db_session.execute(
             text(
                 """INSERT INTO LibraryWork (
-                    id, title, normalizedTitle, author, normalizedAuthor, workType, publicationStatus,
+                    id, title, normalizedTitle, author, normalizedAuthor, publicationStatus,
                     trackingStatus, tags, metadataQuality, organizeStatus, coverStatus, hidden, organized,
                     seriesName, mergeKey, createdAt, updatedAt
                 ) VALUES (
-                    :id, :title, :normalized_title, 'Author', 'author', 'EPUB', 'UNKNOWN',
+                    :id, :title, :normalized_title, 'Author', 'author', 'UNKNOWN',
                     'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING', :hidden, 0,
                     :series_name, :merge_key, '2026-06-10T00:00:00', :updated_at
                 )"""
@@ -970,11 +975,11 @@ def test_management_folders_series_group_hides_empty_and_single_book_series(
         db_session.execute(
             text(
                 """INSERT INTO LibraryWork (
-                    id, title, normalizedTitle, author, normalizedAuthor, workType, publicationStatus,
+                    id, title, normalizedTitle, author, normalizedAuthor, publicationStatus,
                     trackingStatus, tags, metadataQuality, organizeStatus, coverStatus, hidden, organized,
                     seriesName, mergeKey, createdAt, updatedAt
                 ) VALUES (
-                    :id, :title, :normalized_title, 'Author', 'author', 'EPUB', 'UNKNOWN',
+                    :id, :title, :normalized_title, 'Author', 'author', 'UNKNOWN',
                     'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING', 0, 0,
                     :series_name, :merge_key, '2026-06-10T00:00:00', '2026-06-10T00:00:00'
                 )"""
@@ -1022,11 +1027,11 @@ def test_works_series_filter_is_exact_and_accepts_unicode_names(client, db_sessi
         db_session.execute(
             text(
                 """INSERT INTO LibraryWork (
-                    id, title, normalizedTitle, author, normalizedAuthor, workType, publicationStatus,
+                    id, title, normalizedTitle, author, normalizedAuthor, publicationStatus,
                     trackingStatus, tags, metadataQuality, organizeStatus, coverStatus, hidden, organized,
                     seriesName, seriesIndex, mergeKey, createdAt, updatedAt
                 ) VALUES (
-                    :id, :title, :normalized_title, 'Author', 'author', 'EPUB', 'UNKNOWN',
+                    :id, :title, :normalized_title, 'Author', 'author', 'UNKNOWN',
                     'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING', 0, 0,
                     :series_name, :series_index, :merge_key, '2026-06-10T00:00:00', '2026-06-10T00:00:00'
                 )"""
@@ -1136,11 +1141,11 @@ def test_works_library_filters_cover_type_status_tags_and_import_state(
         db_session.execute(
             text(
                 """INSERT INTO LibraryWork (
-                    id, title, normalizedTitle, author, normalizedAuthor, workType, publicationStatus,
+                    id, title, normalizedTitle, author, normalizedAuthor, publicationStatus,
                     trackingStatus, tags, metadataQuality, organizeStatus, coverPath, coverStatus, hidden, organized,
                     mergeKey, createdAt, updatedAt
                 ) VALUES (
-                    :id, :title, :normalized_title, 'Author', 'author', :work_type, :publication_status,
+                    :id, :title, :normalized_title, 'Author', 'author', :publication_status,
                     :tracking_status, :tags, 0, :organize_status, :cover_path, :cover_status, 0, :organized,
                     :merge_key, :created_at, :created_at
                 )"""
@@ -1226,12 +1231,10 @@ def test_work_detail_epub_reading_units_are_paginated_and_clamped(client, db_ses
     db_session.execute(
         text(
             """INSERT INTO LibraryWork (
-                id, title, normalizedTitle, author, normalizedAuthor, workType,
-                publicationStatus, trackingStatus, tags, metadataQuality,
+                id, title, normalizedTitle, author, normalizedAuthor, publicationStatus, trackingStatus, tags, metadataQuality,
                 organizeStatus, coverStatus, hidden, organized, mergeKey, createdAt, updatedAt
             ) VALUES (
-                'paged-epub', 'Paged EPUB', 'pagedepub', 'Author', 'author', 'EPUB',
-                'UNKNOWN', 'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING', 0, 0,
+                'paged-epub', 'Paged EPUB', 'pagedepub', 'Author', 'author', 'UNKNOWN', 'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING', 0, 0,
                 'epub:paged-epub:author', 'now', 'now'
             )"""
         )
@@ -1332,12 +1335,10 @@ def test_work_detail_empty_epub_and_comic_return_reading_units_page(client, db_s
         db_session.execute(
             text(
                 """INSERT INTO LibraryWork (
-                    id, title, normalizedTitle, author, normalizedAuthor, workType,
-                    publicationStatus, trackingStatus, tags, metadataQuality,
+                    id, title, normalizedTitle, author, normalizedAuthor, publicationStatus, trackingStatus, tags, metadataQuality,
                     organizeStatus, coverStatus, hidden, organized, mergeKey, createdAt, updatedAt
                 ) VALUES (
-                    :work_id, :work_id, :work_id, 'Author', 'author', :work_type,
-                    'UNKNOWN', 'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING',
+                    :work_id, :work_id, :work_id, 'Author', 'author', 'UNKNOWN', 'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING',
                     0, 0, :merge_key, 'now', 'now'
                 )"""
             ),
@@ -1410,12 +1411,10 @@ def test_works_recent_read_sort_uses_latest_volume_progress_across_pages(
         db_session.execute(
             text(
                 """INSERT INTO LibraryWork (
-                    id, title, normalizedTitle, author, normalizedAuthor, workType,
-                    publicationStatus, trackingStatus, tags, metadataQuality,
+                    id, title, normalizedTitle, author, normalizedAuthor, publicationStatus, trackingStatus, tags, metadataQuality,
                     organizeStatus, coverStatus, hidden, organized, mergeKey, createdAt, updatedAt
                 ) VALUES (
-                    :id, :title, :normalized_title, 'Author', 'author', 'EPUB',
-                    'UNKNOWN', 'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING',
+                    :id, :title, :normalized_title, 'Author', 'author', 'UNKNOWN', 'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING',
                     0, 0, :merge_key, '2026-06-01T10:00:00', :updated_at
                 )"""
             ),
@@ -1550,11 +1549,11 @@ def test_works_sortable_metadata_fields_support_both_directions(client, db_sessi
         db_session.execute(
             text(
                 """INSERT INTO LibraryWork (
-                    id, title, normalizedTitle, author, normalizedAuthor, workType, publicationStatus,
+                    id, title, normalizedTitle, author, normalizedAuthor, publicationStatus,
                     trackingStatus, tags, metadataQuality, organizeStatus, coverStatus, hidden, organized,
                     seriesName, seriesIndex, mergeKey, createdAt, updatedAt
                 ) VALUES (
-                    :id, :title, :normalized_title, :author, :normalized_author, 'EPUB', 'UNKNOWN',
+                    :id, :title, :normalized_title, :author, :normalized_author, 'UNKNOWN',
                     'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING', 0, 0,
                     :series_name, :series_index, :merge_key, :created_at, :created_at
                 )"""
@@ -1613,13 +1612,11 @@ def test_works_sortable_metadata_fields_support_both_directions(client, db_sessi
     assert sorted_ids("title", "desc") == ["sort-gamma", "sort-beta", "sort-alpha"]
     assert sorted_ids("author", "asc") == ["sort-gamma", "sort-alpha", "sort-beta"]
     assert sorted_ids("author", "desc") == ["sort-beta", "sort-alpha", "sort-gamma"]
-    assert sorted_ids("publisher", "asc") == ["sort-beta", "sort-alpha", "sort-gamma"]
-    assert sorted_ids("publisher", "desc") == ["sort-gamma", "sort-alpha", "sort-beta"]
     assert sorted_ids("series", "asc") == ["sort-beta", "sort-alpha", "sort-gamma"]
     assert sorted_ids("series", "desc") == ["sort-gamma", "sort-alpha", "sort-beta"]
 
 
-def test_update_work_accepts_empty_numeric_metadata_from_forms(client, db_session):
+def test_update_work_accepts_empty_series_index_from_forms(client, db_session):
     create_worker_tables(db_session)
     work_columns = {
         row[1]
@@ -1629,43 +1626,37 @@ def test_update_work_accepts_empty_numeric_metadata_from_forms(client, db_sessio
         db_session.execute(text("ALTER TABLE LibraryWork ADD COLUMN seriesName TEXT"))
     if "seriesIndex" not in work_columns:
         db_session.execute(text("ALTER TABLE LibraryWork ADD COLUMN seriesIndex REAL"))
-    if "publishedYear" not in work_columns:
-        db_session.execute(
-            text("ALTER TABLE LibraryWork ADD COLUMN publishedYear INTEGER")
-        )
     _login(client, db_session)
     db_session.execute(
         text(
             """INSERT INTO LibraryWork (
-                id, title, normalizedTitle, author, normalizedAuthor, workType, publicationStatus,
+                id, title, normalizedTitle, author, normalizedAuthor, publicationStatus,
                 trackingStatus, tags, metadataQuality, organizeStatus, coverStatus, hidden, organized,
-                seriesName, seriesIndex, publishedYear, mergeKey, createdAt, updatedAt
+                seriesName, seriesIndex, mergeKey, createdAt, updatedAt
             ) VALUES (
-                'work-form-numeric', 'Form Numeric', 'formnumeric', 'Author', 'author', 'EPUB', 'UNKNOWN',
+                'work-form-numeric', 'Form Numeric', 'formnumeric', 'Author', 'author', 'UNKNOWN',
                 'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING', 0, 0,
-                'Series', 3.5, 2024, 'epub:form-numeric:author', '2026-06-10T00:00:00', '2026-06-10T00:00:00'
+                'Series', 3.5, 'epub:form-numeric:author', '2026-06-10T00:00:00', '2026-06-10T00:00:00'
             )"""
         )
     )
     db_session.commit()
 
     response = client.patch(
-        "/api/works/work-form-numeric", json={"seriesIndex": "", "publishedYear": ""}
+        "/api/works/work-form-numeric", json={"seriesIndex": ""}
     )
     assert response.status_code == 200
     assert response.json()["data"]["book"]["seriesIndex"] is None
-    assert response.json()["data"]["book"]["publishedYear"] is None
     row = (
         db_session.execute(
             text(
-                "SELECT seriesIndex, publishedYear FROM LibraryWork WHERE id = 'work-form-numeric'"
+                "SELECT seriesIndex FROM LibraryWork WHERE id = 'work-form-numeric'"
             )
         )
         .mappings()
         .first()
     )
     assert row["seriesIndex"] is None
-    assert row["publishedYear"] is None
 
     invalid = client.patch(
         "/api/works/work-form-numeric", json={"seriesIndex": "第 3 卷"}
@@ -1698,11 +1689,11 @@ def test_bulk_works_delete_records_removes_selected_books(
         db_session.execute(
             text(
                 """INSERT INTO LibraryWork (
-                    id, title, normalizedTitle, author, normalizedAuthor, workType, publicationStatus,
+                    id, title, normalizedTitle, author, normalizedAuthor, publicationStatus,
                     trackingStatus, tags, metadataQuality, organizeStatus, coverStatus, hidden, organized,
                     mergeKey, createdAt, updatedAt
                 ) VALUES (
-                    :id, :title, :normalized_title, 'Author', 'author', 'EPUB', 'UNKNOWN',
+                    :id, :title, :normalized_title, 'Author', 'author', 'UNKNOWN',
                     'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING', 0, 0,
                     :merge_key, '2026-06-11T00:00:00', '2026-06-11T00:00:00'
                 )"""
@@ -1800,7 +1791,6 @@ def _create_bulk_management_fixture(db_session):
     for column, statement in [
         ("seriesName", "ALTER TABLE LibraryWork ADD COLUMN seriesName TEXT"),
         ("seriesIndex", "ALTER TABLE LibraryWork ADD COLUMN seriesIndex REAL"),
-        ("publishedYear", "ALTER TABLE LibraryWork ADD COLUMN publishedYear INTEGER"),
     ]:
         if column not in work_columns:
             db_session.execute(text(statement))
@@ -1829,12 +1819,10 @@ def _create_bulk_management_fixture(db_session):
         db_session.execute(
             text(
                 """INSERT INTO LibraryWork (
-                    id, origin, title, normalizedTitle, author, normalizedAuthor, description, workType,
-                    publicationStatus, trackingStatus, tags, metadataQuality, organizeStatus, coverStatus,
+                    id, origin, title, normalizedTitle, author, normalizedAuthor, description, publicationStatus, trackingStatus, tags, metadataQuality, organizeStatus, coverStatus,
                     hidden, organized, mergeKey, createdAt, updatedAt
                 ) VALUES (
-                    :id, 'MANUAL', :title, :normalized_title, '旧作者', '旧作者', '旧简介', 'EPUB',
-                    'UNKNOWN', 'NOT_TRACKING', :tags, 0, 'REVIEWING', 'PENDING', 0, 0,
+                    :id, 'MANUAL', :title, :normalized_title, '旧作者', '旧作者', '旧简介', 'UNKNOWN', 'NOT_TRACKING', :tags, 0, 'REVIEWING', 'PENDING', 0, 0,
                     :merge_key, '2026-07-20T00:00:00', '2026-07-20T00:00:00'
                 )"""
             ),
@@ -2094,12 +2082,11 @@ def test_delete_work_removes_storage_managed_files_only(
     db_session.execute(
         text(
             """INSERT INTO LibraryWork (
-                id, title, normalizedTitle, author, normalizedAuthor, workType, publicationStatus,
+                id, title, normalizedTitle, author, normalizedAuthor, publicationStatus,
                 trackingStatus, tags, metadataQuality, organizeStatus, coverPath, coverStatus, hidden, organized,
                 mergeKey, createdAt, updatedAt
             ) VALUES (
-                'delete-with-files', 'Delete With Files', 'deletewithfiles', 'Author', 'author', 'EPUB',
-                'UNKNOWN', 'NOT_TRACKING', '[]', 0, 'REVIEWING', 'covers/delete/cover.jpg',
+                'delete-with-files', 'Delete With Files', 'deletewithfiles', 'Author', 'author', 'UNKNOWN', 'NOT_TRACKING', '[]', 0, 'REVIEWING', 'covers/delete/cover.jpg',
                 'READY', 0, 0, 'epub:delete-with-files:author',
                 '2026-06-11T00:00:00', '2026-06-11T00:00:00'
             )"""
@@ -2203,12 +2190,11 @@ def test_delete_work_can_also_remove_linked_source_files(
     db_session.execute(
         text(
             """INSERT INTO LibraryWork (
-                id, title, normalizedTitle, author, normalizedAuthor, workType, publicationStatus,
+                id, title, normalizedTitle, author, normalizedAuthor, publicationStatus,
                 trackingStatus, tags, metadataQuality, organizeStatus, coverStatus, hidden, organized,
                 mergeKey, createdAt, updatedAt
             ) VALUES (
-                'delete-source-work', 'Delete Source', 'deletesource', 'Author', 'author', 'EPUB',
-                'UNKNOWN', 'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING', 0, 0,
+                'delete-source-work', 'Delete Source', 'deletesource', 'Author', 'author', 'UNKNOWN', 'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING', 0, 0,
                 'delete-source-work:author', '2026-07-19T00:00:00', '2026-07-19T00:00:00'
             )"""
         )
@@ -2251,12 +2237,11 @@ def test_delete_work_preserves_linked_source_inside_storage_by_default(
     db_session.execute(
         text(
             """INSERT INTO LibraryWork (
-                id, title, normalizedTitle, author, normalizedAuthor, workType, publicationStatus,
+                id, title, normalizedTitle, author, normalizedAuthor, publicationStatus,
                 trackingStatus, tags, metadataQuality, organizeStatus, coverStatus, hidden, organized,
                 mergeKey, createdAt, updatedAt
             ) VALUES (
-                'preserve-source-work', 'Preserve Source', 'preservesource', 'Author', 'author', 'EPUB',
-                'UNKNOWN', 'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING', 0, 0,
+                'preserve-source-work', 'Preserve Source', 'preservesource', 'Author', 'author', 'UNKNOWN', 'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING', 0, 0,
                 'preserve-source:author',
                 '2026-07-19T00:00:00', '2026-07-19T00:00:00'
             )"""
@@ -2335,13 +2320,12 @@ def test_delete_import_task_supports_record_source_and_converted_scopes(
     db_session.execute(
         text(
             """INSERT INTO LibraryWork (
-                id, title, normalizedTitle, author, normalizedAuthor, workType,
-                publicationStatus, trackingStatus, tags, metadataQuality,
+                id, title, normalizedTitle, author, normalizedAuthor, publicationStatus, trackingStatus, tags, metadataQuality,
                 organizeStatus, coverStatus, hidden, organized, mergeKey,
                 createdAt, updatedAt
             ) VALUES (
                 'conversion-cleanup-work', 'Conversion Cleanup', 'conversioncleanup',
-                'Author', 'author', 'EPUB', 'UNKNOWN', 'NOT_TRACKING', '[]', 0,
+                'Author', 'author', 'UNKNOWN', 'NOT_TRACKING', '[]', 0,
                 'UNASSESSED', 'PENDING', 0, 0, 'conversion:cleanup',
                 '2026-07-19T00:00:00', '2026-07-19T00:00:00'
             )"""
@@ -2489,13 +2473,12 @@ def test_delete_import_task_only_deletes_its_linked_volume(
     db_session.execute(
         text(
             """INSERT INTO LibraryWork (
-                id, title, normalizedTitle, author, normalizedAuthor, workType,
-                publicationStatus, trackingStatus, tags, metadataQuality,
+                id, title, normalizedTitle, author, normalizedAuthor, publicationStatus, trackingStatus, tags, metadataQuality,
                 organizeStatus, coverStatus, hidden, organized, mergeKey,
                 createdAt, updatedAt
             ) VALUES (
                 'linked-delete-work', 'Linked Delete', 'linkeddelete', 'Author',
-                'author', 'EPUB', 'UNKNOWN', 'NOT_TRACKING', '[]', 0,
+                'author', 'UNKNOWN', 'NOT_TRACKING', '[]', 0,
                 'REVIEWING', 'PENDING', 0, 0, 'linked-delete:author',
                 '2026-07-19T00:00:00', '2026-07-19T00:00:00'
             )"""
@@ -2729,11 +2712,11 @@ def test_regenerate_cover_uses_first_sorted_volume(client, db_session, test_sett
         text(
             """INSERT INTO LibraryWork (
                 id, monitorFolderId, origin, title, normalizedTitle, author, normalizedAuthor, description,
-                workType, publicationStatus, trackingStatus, tags, metadataQuality, organizeStatus,
+                publicationStatus, trackingStatus, tags, metadataQuality, organizeStatus,
                 coverPath, coverStatus, hidden, organized, mergeKey, createdAt, updatedAt
             ) VALUES (
                 'work-cover', NULL, 'MANUAL', '星舰漫画', '星舰漫画', '画师', '画师', NULL,
-                'COMIC', 'UNKNOWN', 'NOT_TRACKING', '[]', 0, 'REVIEWING',
+                'UNKNOWN', 'NOT_TRACKING', '[]', 0, 'REVIEWING',
                 'books/work-cover/comic/volume-2/cover.jpg', 'READY', 0, 0,
                 'comic:cover', 'now', 'now'
             )"""
@@ -2805,12 +2788,10 @@ def test_cover_endpoints_serve_default_without_mutating_existing_entries(
     db_session.execute(
         text(
             """INSERT INTO LibraryWork (
-                id, origin, title, normalizedTitle, author, normalizedAuthor, workType,
-                publicationStatus, trackingStatus, tags, metadataQuality, organizeStatus, coverStatus,
+                id, origin, title, normalizedTitle, author, normalizedAuthor, publicationStatus, trackingStatus, tags, metadataQuality, organizeStatus, coverStatus,
                 hidden, organized, mergeKey, createdAt, updatedAt
             ) VALUES (
-                'work-default', 'MANUAL', '无封面读物', '无封面读物', '未知作者', '未知作者', 'EPUB',
-                'UNKNOWN', 'NOT_TRACKING', '[]', 0, 'LOOKUP_PENDING', 'PENDING',
+                'work-default', 'MANUAL', '无封面读物', '无封面读物', '未知作者', '未知作者', 'UNKNOWN', 'NOT_TRACKING', '[]', 0, 'LOOKUP_PENDING', 'PENDING',
                 0, 0, 'default:test', 'now', 'now'
             )"""
         )
@@ -2893,12 +2874,10 @@ def test_small_cover_endpoints_compress_cache_and_preserve_other_variants(
     db_session.execute(
         text(
             """INSERT INTO LibraryWork (
-                id, origin, title, normalizedTitle, author, normalizedAuthor, workType,
-                publicationStatus, trackingStatus, tags, metadataQuality, organizeStatus, coverStatus,
+                id, origin, title, normalizedTitle, author, normalizedAuthor, publicationStatus, trackingStatus, tags, metadataQuality, organizeStatus, coverStatus,
                 hidden, organized, mergeKey, createdAt, updatedAt
             ) VALUES (
-                'work-small-cover', 'MANUAL', 'Small Cover', 'smallcover', 'Author', 'author', 'EPUB',
-                'UNKNOWN', 'NOT_TRACKING', '[]', 0, 'REVIEWING', 'READY',
+                'work-small-cover', 'MANUAL', 'Small Cover', 'smallcover', 'Author', 'author', 'UNKNOWN', 'NOT_TRACKING', '[]', 0, 'REVIEWING', 'READY',
                 0, 0, 'small:cover', 'now', 'now'
             )"""
         )
@@ -3006,11 +2985,11 @@ def test_organize_jobs_return_frontend_contract(client, db_session):
     db_session.execute(
         text(
             """INSERT INTO LibraryWork (
-                id, title, normalizedTitle, author, normalizedAuthor, workType, publicationStatus,
+                id, title, normalizedTitle, author, normalizedAuthor, publicationStatus,
                 trackingStatus, tags, metadataQuality, organizeStatus, coverStatus, hidden, organized,
                 mergeKey, createdAt, updatedAt
             ) VALUES (
-                'work-contract', 'Contract Book', 'contractbook', '', '', 'EPUB', 'UNKNOWN', 'NOT_TRACKING',
+                'work-contract', 'Contract Book', 'contractbook', '', '', 'UNKNOWN', 'NOT_TRACKING',
                 '[]', 20, 'REVIEWING', 'PENDING', 0, 0, 'epub:contract:', '2026-06-11T00:00:00', '2026-06-11T00:00:00'
             )"""
         )
@@ -3018,12 +2997,11 @@ def test_organize_jobs_return_frontend_contract(client, db_session):
     db_session.execute(
         text(
             """INSERT INTO LibraryWork (
-                id, title, normalizedTitle, author, normalizedAuthor, workType, publicationStatus,
+                id, title, normalizedTitle, author, normalizedAuthor, publicationStatus,
                 trackingStatus, tags, metadataQuality, organizeStatus, coverStatus, hidden, organized,
                 mergeKey, createdAt, updatedAt
             ) VALUES (
-                'work-organized-history', 'Organized History', 'organizedhistory', 'Author', 'author', 'EPUB',
-                'UNKNOWN', 'NOT_TRACKING', '[]', 90, 'APPLIED', 'READY', 1, 1,
+                'work-organized-history', 'Organized History', 'organizedhistory', 'Author', 'author', 'UNKNOWN', 'NOT_TRACKING', '[]', 90, 'APPLIED', 'READY', 1, 1,
                 'epub:organized-history:author', '2026-06-10T00:00:00', '2026-06-10T00:00:00'
             )"""
         )
@@ -3031,14 +3009,13 @@ def test_organize_jobs_return_frontend_contract(client, db_session):
     db_session.execute(
         text(
             """INSERT INTO LibraryWork (
-                id, title, normalizedTitle, author, normalizedAuthor, workType, publicationStatus,
+                id, title, normalizedTitle, author, normalizedAuthor, publicationStatus,
                 trackingStatus, tags, metadataQuality, organizeStatus, coverStatus, hidden, organized,
                 mergeKey, createdAt, updatedAt
             ) VALUES
-                ('work-recognizing-history', 'Recognizing History', 'recognizinghistory', 'Author', 'author', 'EPUB',
-                 'UNKNOWN', 'NOT_TRACKING', '[]', 20, 'RUNNING', 'PENDING', 0, 0,
+                ('work-recognizing-history', 'Recognizing History', 'recognizinghistory', 'Author', 'author', 'UNKNOWN', 'NOT_TRACKING', '[]', 20, 'RUNNING', 'PENDING', 0, 0,
                  'epub:recognizing-history:author', '2026-06-09T00:00:00', '2026-06-09T00:00:00'),
-                ('work-waiting-history', 'Waiting History', 'waitinghistory', 'Author', 'author', 'EPUB',
+                ('work-waiting-history', 'Waiting History', 'waitinghistory', 'Author', 'author',
                  'UNKNOWN', 'NOT_TRACKING', '[]', 20, 'LOOKUP_PENDING', 'PENDING', 0, 0,
                  'epub:waiting-history:author', '2026-06-08T00:00:00', '2026-06-08T00:00:00')
             """
@@ -3051,6 +3028,16 @@ def test_organize_jobs_return_frontend_contract(client, db_session):
             ) VALUES (
                 'job-contract', 'work-contract', 'REVIEWING', '["MISSING_AUTHOR","SUGGEST_TITLE"]',
                 'needs metadata', '2026-06-11T00:00:00', '2026-06-11T00:00:00'
+            )"""
+        )
+    )
+    db_session.execute(
+        text(
+            """INSERT INTO LibraryMediaVersion (
+                id, workId, mediaKind, createdAt, updatedAt
+            ) VALUES (
+                'media-contract', 'work-contract', 'EBOOK', '2026-06-11T00:00:00',
+                '2026-06-11T00:00:00'
             )"""
         )
     )
@@ -3133,7 +3120,7 @@ def test_organize_jobs_return_frontend_contract(client, db_session):
         "id": "work-contract",
         "title": "Contract Book",
         "author": "未知作者",
-        "format": "EPUB",
+            "availableMediaKinds": ["EBOOK"],
     }
     assert job["statusCategory"] == "FAILED"
     assert job["metadataSources"] == []
@@ -3264,11 +3251,11 @@ def test_import_tasks_return_logs_summary_and_rescan_contract(client, db_session
     db_session.execute(
         text(
             """INSERT INTO LibraryWork (
-                id, title, normalizedTitle, author, normalizedAuthor, workType, publicationStatus,
+                id, title, normalizedTitle, author, normalizedAuthor, publicationStatus,
                 trackingStatus, tags, metadataQuality, organizeStatus, coverStatus, hidden, organized,
                 mergeKey, createdAt, updatedAt
             ) VALUES (
-                'work-import', 'Imported Book', 'importedbook', 'Author', 'author', 'EPUB', 'UNKNOWN',
+                'work-import', 'Imported Book', 'importedbook', 'Author', 'author', 'UNKNOWN',
                 'NOT_TRACKING', '[]', 80, 'APPLIED', 'READY', 0, 1, 'epub:import:', '2026-06-11T00:00:00', '2026-06-11T00:00:00'
             )"""
         )
@@ -5112,11 +5099,11 @@ def test_legacy_organize_suggestion_apply_route_is_removed(client, db_session):
     db_session.execute(
         text(
             """INSERT INTO LibraryWork (
-                id, title, normalizedTitle, author, normalizedAuthor, workType, publicationStatus,
+                id, title, normalizedTitle, author, normalizedAuthor, publicationStatus,
                 trackingStatus, tags, metadataQuality, organizeStatus, coverStatus, hidden, organized,
                 mergeKey, createdAt, updatedAt
             ) VALUES (
-                'work-1', 'old.pdf', 'oldpdf', '', '', 'PDF', 'UNKNOWN', 'NOT_TRACKING',
+                'work-1', 'old.pdf', 'oldpdf', '', '', 'UNKNOWN', 'NOT_TRACKING',
                 '[]', 0, 'REVIEWING', 'PENDING', 0, 0, 'pdf:old:', 'now', 'now'
             )"""
         )
@@ -5221,11 +5208,11 @@ def test_ebook_metadata_search_returns_all_douban_crawler_candidates_and_proxy_c
         db_session.execute(
             text(
                 """INSERT INTO LibraryWork (
-                    id, title, normalizedTitle, author, normalizedAuthor, workType, publicationStatus,
+                    id, title, normalizedTitle, author, normalizedAuthor, publicationStatus,
                     trackingStatus, tags, metadataQuality, organizeStatus, coverStatus, hidden, organized,
                     mergeKey, createdAt, updatedAt
                 ) VALUES (
-                    'work-douban-search', '活着', '活着', '', '', 'EPUB', 'UNKNOWN',
+                    'work-douban-search', '活着', '活着', '', '', 'UNKNOWN',
                     'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING', 0, 0, 'epub:douban-search', 'now', 'now'
                 )"""
             )
@@ -5306,11 +5293,11 @@ def test_ebook_metadata_search_and_apply_can_use_bangumi_without_suggestion_refr
         db_session.execute(
             text(
                 """INSERT INTO LibraryWork (
-                    id, title, normalizedTitle, author, normalizedAuthor, workType, publicationStatus,
+                    id, title, normalizedTitle, author, normalizedAuthor, publicationStatus,
                     trackingStatus, tags, metadataQuality, organizeStatus, coverStatus, hidden, organized,
                     mergeKey, createdAt, updatedAt
                 ) VALUES (
-                    'work-ebook-bangumi', 'Messy Ebook', 'messyebook', '', '', 'EPUB', 'UNKNOWN',
+                    'work-ebook-bangumi', 'Messy Ebook', 'messyebook', '', '', 'UNKNOWN',
                     'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING', 0, 0, 'epub:bangumi', 'now', 'now'
                 )"""
             )
@@ -5457,11 +5444,11 @@ def test_backup_create_download_and_restore_database_export(
     db_session.execute(
         text(
             """INSERT INTO LibraryWork (
-                id, title, normalizedTitle, author, normalizedAuthor, workType, publicationStatus,
+                id, title, normalizedTitle, author, normalizedAuthor, publicationStatus,
                 trackingStatus, tags, metadataQuality, organizeStatus, coverStatus, hidden, organized,
                 mergeKey, createdAt, updatedAt
             ) VALUES (
-                'backup-work', 'Backup Book', 'backupbook', 'Author', 'author', 'EPUB', 'UNKNOWN',
+                'backup-work', 'Backup Book', 'backupbook', 'Author', 'author', 'UNKNOWN',
                 'NOT_TRACKING', '[]', 80, 'APPLIED', 'PENDING', 0, 1, 'epub:backup:author', 'now', 'now'
             )"""
         )
@@ -5701,7 +5688,55 @@ def test_upload_saves_to_monitored_directory_without_creating_import_task(
     assert works.json()["data"]["total"] == 0
 
 
-def test_upload_to_unmonitored_directory_only_saves_files(
+def test_upload_saves_to_nested_directory_inside_enabled_monitor_folder(
+    client, db_session, test_settings, tmp_path
+):
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    _login(client, db_session)
+    epub = tmp_path / "nested.epub"
+    write_epub_fixture(epub)
+    monitor_root = _managed_fixture_dir(test_settings, "nested-upload-root")
+    upload_dir = monitor_root / "fiction" / "fantasy"
+    upload_dir.mkdir(parents=True)
+    monitored = client.post(
+        "/api/monitor-folders",
+        json={"name": "Nested upload monitor", "rootPath": str(monitor_root), "enabled": True},
+    )
+    assert monitored.status_code == 201
+    disabled_root = _managed_fixture_dir(test_settings, "disabled-upload-root")
+    disabled = client.post(
+        "/api/monitor-folders",
+        json={"name": "Disabled upload monitor", "rootPath": str(disabled_root), "enabled": False},
+    )
+    assert disabled.status_code == 201
+    selectable_folders = client.get(
+        "/api/monitor-folders", params={"purpose": "upload"}
+    )
+    assert selectable_folders.status_code == 200
+    assert [
+        folder["id"] for folder in selectable_folders.json()["data"]["folders"]
+    ] == [monitored.json()["data"]["folder"]["id"]]
+    nested_tree = client.get(
+        "/api/monitor-folders/tree",
+        params={"path": str(upload_dir), "purpose": "upload"},
+    )
+    assert nested_tree.status_code == 200
+    assert nested_tree.json()["data"]["node"]["path"] == str(upload_dir.resolve())
+
+    with epub.open("rb") as handle:
+        response = client.post(
+            "/api/works/import",
+            data={"targetPath": str(upload_dir)},
+            files={"file": ("nested.epub", handle, "application/epub+zip")},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["autoImport"] is True
+    assert (upload_dir / "nested.epub").read_bytes() == epub.read_bytes()
+
+
+def test_upload_rejects_unmonitored_directory(
     client, db_session, test_settings, tmp_path
 ):
     from sqlalchemy import func, select
@@ -5722,16 +5757,13 @@ def test_upload_to_unmonitored_directory_only_saves_files(
             files={"file": ("unmonitored.epub", handle, "application/epub+zip")},
         )
 
-    assert response.status_code == 200
-    payload = response.json()["data"]
-    assert payload["saved"] == 1
-    assert payload["autoImport"] is False
-    assert payload["results"][0]["monitoringStatus"] == "NOT_MONITORED"
-    assert Path(payload["results"][0]["sourcePath"]).read_bytes() == epub.read_bytes()
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "UPLOAD_TARGET_NOT_MONITORED"
+    assert list(upload_dir.iterdir()) == []
     assert db_session.scalar(select(func.count()).select_from(ImportTask)) == 0
 
 
-def test_upload_allows_a_visible_directory_outside_configured_monitor_folders(
+def test_upload_rejects_a_visible_directory_outside_configured_monitor_folders(
     client,
     db_session,
     test_settings,
@@ -5752,8 +5784,40 @@ def test_upload_allows_a_visible_directory_outside_configured_monitor_folders(
             files={"file": ("outside.epub", handle, "application/epub+zip")},
         )
 
-    assert response.status_code == 200
-    assert [path.name for path in outside_directory.iterdir()] == ["outside.epub"]
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "UPLOAD_TARGET_NOT_MONITORED"
+    assert list(outside_directory.iterdir()) == []
+
+
+def test_upload_rejects_symlink_escape_from_enabled_monitor_folder(
+    client, db_session, test_settings, tmp_path
+):
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    _login(client, db_session)
+    epub = tmp_path / "symlink-escape.epub"
+    write_epub_fixture(epub)
+    monitor_root = _managed_fixture_dir(test_settings, "symlink-upload-root")
+    outside_directory = tmp_path / "symlink-upload-outside"
+    outside_directory.mkdir()
+    escaped_directory = monitor_root / "escaped"
+    escaped_directory.symlink_to(outside_directory, target_is_directory=True)
+    monitored = client.post(
+        "/api/monitor-folders",
+        json={"name": "Symlink uploads", "rootPath": str(monitor_root), "enabled": True},
+    )
+    assert monitored.status_code == 201
+
+    with epub.open("rb") as handle:
+        response = client.post(
+            "/api/works/import",
+            data={"targetPath": str(escaped_directory)},
+            files={"file": ("symlink-escape.epub", handle, "application/epub+zip")},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "UPLOAD_TARGET_NOT_MONITORED"
+    assert list(outside_directory.iterdir()) == []
 
 
 def test_upload_requires_access_to_the_covering_monitor_folder(
@@ -5818,6 +5882,11 @@ def test_upload_uses_a_numbered_name_when_the_target_already_exists(
     write_epub_fixture(first)
     write_epub_fixture(second)
     upload_dir = _managed_fixture_dir(test_settings, "duplicate-uploads")
+    monitored = client.post(
+        "/api/monitor-folders",
+        json={"name": "Duplicate uploads", "rootPath": str(upload_dir), "enabled": True},
+    )
+    assert monitored.status_code == 201
 
     with first.open("rb") as first_handle, second.open("rb") as second_handle:
         response = client.post(
@@ -5858,6 +5927,11 @@ def test_upload_rolls_back_files_when_atomic_publication_fails(
     write_epub_fixture(first)
     write_epub_fixture(second)
     upload_dir = _managed_fixture_dir(test_settings, "atomic-uploads")
+    monitored = client.post(
+        "/api/monitor-folders",
+        json={"name": "Atomic uploads", "rootPath": str(upload_dir), "enabled": True},
+    )
+    assert monitored.status_code == 201
     original_copy = AtomicUploadedFilePublisher._copy_stream
     call_count = 0
 
@@ -6327,11 +6401,11 @@ def legacy_multi_volume_epub_detail_returns_selected_volume_chapters_and_scoped_
             """
             INSERT INTO LibraryWork (
                 id, monitorFolderId, origin, title, normalizedTitle, author, normalizedAuthor, description,
-                workType, publicationStatus, trackingStatus, tags, metadataQuality, organizeStatus,
+                publicationStatus, trackingStatus, tags, metadataQuality, organizeStatus,
                 coverPath, coverStatus, hidden, organized, continueVolumeId, mergeKey, createdAt, updatedAt
             ) VALUES (
                 'epub-work', NULL, 'MANUAL', '多卷 EPUB', '多卷 epub', '作者', '作者', NULL,
-                'EPUB', 'UNKNOWN', 'NOT_TRACKING', '[]', 0, 'REVIEWING',
+                'UNKNOWN', 'NOT_TRACKING', '[]', 0, 'REVIEWING',
                 NULL, 'PENDING', 0, 0, 'epub-edition', 'epub-work', 'now', 'now'
             )
             """
@@ -6637,7 +6711,7 @@ def test_imported_pdf_supports_stream_bootstrap_and_v3_progress(
     assert bootstrap.status_code == 200
     data = bootstrap.json()["data"]
     assert data["readerType"] == "pdf"
-    assert data["mediaVersion"]["mediaKind"] == "COMIC"
+    assert data["mediaVersion"]["mediaKind"] == "EBOOK"
     assert data["volume"]["format"] == "PDF"
     assert data["volume"]["pageCount"] >= 1
     assert len(data["units"]) == 1

@@ -18,12 +18,13 @@ test('isReflowableEbookFormat rejects comic, pdf, audio, and unknown values', ()
   }
 });
 
-test('hasEbookChapterNavigation requires EBOOK tab and a reflowable format', () => {
+test('hasEbookChapterNavigation follows format across classified media tabs', () => {
   assert.equal(hasEbookChapterNavigation('EBOOK', 'MOBI'), true);
   assert.equal(hasEbookChapterNavigation('EBOOK', 'EPUB'), true);
   assert.equal(hasEbookChapterNavigation('EBOOK', 'TXT'), true);
   assert.equal(hasEbookChapterNavigation('STRUCTURE', 'MOBI'), false);
-  assert.equal(hasEbookChapterNavigation('COMIC', 'EPUB'), false);
+  assert.equal(hasEbookChapterNavigation('COMIC', 'EPUB'), true);
+  assert.equal(hasEbookChapterNavigation('AUDIOBOOK', 'EPUB'), true);
   assert.equal(hasEbookChapterNavigation('EBOOK', 'PDF'), false);
   assert.equal(hasEbookChapterNavigation('EBOOK', null), false);
 });

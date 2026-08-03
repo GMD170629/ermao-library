@@ -16,7 +16,6 @@ from app.models.library import (
     LibraryFacet,
     LibraryMediaVersion,
     LibraryVolume,
-    LibraryVolumeFacet,
     LibraryWork,
     LibraryWorkFacet,
 )
@@ -59,52 +58,24 @@ def visible_categories(
     kind: str,
 ) -> list[dict[str, Any]]:
     normalized = kind.upper()
-    if normalized == "PUBLISHER":
-        rows = db.execute(
-            select(
-                LibraryFacet,
-                func.count(func.distinct(LibraryMediaVersion.work_id)).label(
-                    "bookCount"
-                ),
-            )
-            .join(LibraryVolumeFacet, LibraryVolumeFacet.facet_id == LibraryFacet.id)
-            .join(LibraryVolume, LibraryVolume.id == LibraryVolumeFacet.volume_id)
-            .join(
-                LibraryMediaVersion,
-                LibraryMediaVersion.id == LibraryVolume.media_version_id,
-            )
-            .join(LibraryWork, LibraryWork.id == LibraryMediaVersion.work_id)
-            .where(
-                LibraryFacet.kind == "PUBLISHER",
-                LibraryVolume.hidden.is_(False),
-                func.coalesce(LibraryWork.hidden, False).is_(False),
-                volume_visibility_predicate(context),
-            )
-            .group_by(LibraryFacet.id)
-            .order_by(
-                func.count(func.distinct(LibraryMediaVersion.work_id)).desc(),
-                LibraryFacet.name.asc(),
-            )
-        ).all()
-    else:
-        rows = db.execute(
-            select(
-                LibraryFacet,
-                func.count(func.distinct(LibraryWork.id)).label("bookCount"),
-            )
-            .join(LibraryWorkFacet, LibraryWorkFacet.facet_id == LibraryFacet.id)
-            .join(LibraryWork, LibraryWork.id == LibraryWorkFacet.work_id)
-            .where(
-                LibraryFacet.kind == normalized,
-                func.coalesce(LibraryWork.hidden, False).is_(False),
-                work_visibility_predicate(context),
-            )
-            .group_by(LibraryFacet.id)
-            .order_by(
-                func.count(func.distinct(LibraryWork.id)).desc(),
-                LibraryFacet.name.asc(),
-            )
-        ).all()
+    rows = db.execute(
+        select(
+            LibraryFacet,
+            func.count(func.distinct(LibraryWork.id)).label("bookCount"),
+        )
+        .join(LibraryWorkFacet, LibraryWorkFacet.facet_id == LibraryFacet.id)
+        .join(LibraryWork, LibraryWork.id == LibraryWorkFacet.work_id)
+        .where(
+            LibraryFacet.kind == normalized,
+            func.coalesce(LibraryWork.hidden, False).is_(False),
+            work_visibility_predicate(context),
+        )
+        .group_by(LibraryFacet.id)
+        .order_by(
+            func.count(func.distinct(LibraryWork.id)).desc(),
+            LibraryFacet.name.asc(),
+        )
+    ).all()
     result: list[dict[str, Any]] = []
     for facet, book_count in rows:
         row = entity_as_legacy_dict(facet)
@@ -143,8 +114,6 @@ def visible_volume_option_rows(
 ) -> list[dict[str, Any]]:
     rows = db.execute(
         select(
-            LibraryVolume.publisher,
-            LibraryVolume.language,
             LibraryVolume.format,
             LibraryVolume.import_status,
             LibraryVolume.origin,
@@ -161,8 +130,6 @@ def visible_volume_option_rows(
     ).all()
     return [
         {
-            "publisher": row.publisher,
-            "language": row.language,
             "format": row.format,
             "importStatus": row.import_status,
             "origin": row.origin,

@@ -1,1 +1,1 @@
-FACET_KINDS = frozenset({"AUTHOR", "TAG", "SERIES", "PUBLISHER"})
+FACET_KINDS = frozenset({"AUTHOR", "TAG", "SERIES"})

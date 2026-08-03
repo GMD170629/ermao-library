@@ -1029,7 +1029,10 @@ def find_deferred_source_volume(
     result_volume_id: str | None,
 ) -> dict[str, Any] | None:
     row = db.execute(
-        select(LibraryVolume.id)
+        select(
+            LibraryVolume.id,
+            LibraryMediaVersion.media_kind,
+        )
         .join(LibraryFile, LibraryFile.volume_id == LibraryVolume.id)
         .join(
             LibraryMediaVersion,
@@ -1047,7 +1050,7 @@ def find_deferred_source_volume(
         .order_by(LibraryVolume.created_at.asc())
         .limit(1)
     ).first()
-    return {"id": row[0]} if row else None
+    return {"id": row.id, "mediaKind": row.media_kind} if row else None
 
 
 def existing_file_import_snapshot(db: Session, path: Path) -> dict[str, Any] | None:
@@ -1061,7 +1064,6 @@ def existing_file_import_snapshot(db: Session, path: Path) -> dict[str, Any] | N
                 LibraryVolume.chapter_count,
                 LibraryWork.id.label("workId"),
                 LibraryWork.title,
-                LibraryWork.work_type,
             )
             .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
             .join(

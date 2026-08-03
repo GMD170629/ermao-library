@@ -81,7 +81,6 @@ def _prepare(
         normalized_title="kindle test book",
         author="Author",
         normalized_author="author",
-        work_type="EPUB",
         tags="[]",
     )
     media_version = LibraryMediaVersion(

@@ -17,9 +17,6 @@ from app.core.time import to_timestamp_ms
 from app.models.common import db_timestamp
 from app.models.library import (
     LibraryFacet,
-    LibraryMediaVersion,
-    LibraryVolume,
-    LibraryVolumeFacet,
     LibraryWork,
     LibraryWorkFacet,
 )
@@ -182,40 +179,6 @@ def sync_work_facets(db: Session, work_id: str) -> None:
                 )
             )
 
-    try:
-        with db.begin_nested():
-            volumes = db.execute(
-                select(LibraryVolume.id, LibraryVolume.publisher)
-                .join(
-                    LibraryMediaVersion,
-                    LibraryMediaVersion.id == LibraryVolume.media_version_id,
-                )
-                .where(LibraryMediaVersion.work_id == work_id)
-            ).all()
-    except OperationalError:
-        volumes = []
-    for volume in volumes:
-        volume_id = str(volume.id if hasattr(volume, "id") else volume[0])
-        publisher = volume.publisher if hasattr(volume, "publisher") else volume[1]
-        db.execute(
-            delete(LibraryVolumeFacet).where(LibraryVolumeFacet.volume_id == volume_id)
-        )
-        for publisher_name in unique_names([publisher]):
-            facet_id = ensure_facet(db, "PUBLISHER", publisher_name)
-            db.execute(
-                sqlite_insert(LibraryVolumeFacet)
-                .values(
-                    facet_id=facet_id,
-                    volume_id=volume_id,
-                    created_at=now,
-                )
-                .on_conflict_do_nothing(
-                    index_elements=[
-                        LibraryVolumeFacet.facet_id,
-                        LibraryVolumeFacet.volume_id,
-                    ]
-                )
-            )
     db.flush()
 
 
@@ -248,55 +211,24 @@ def list_categories(
     if limit is not None and (limit <= 0 or offset < 0):
         raise ValueError("分页参数无效")
 
-    if normalized_kind == "PUBLISHER":
-        book_count = func.count(
-            distinct(
-                case(
-                    (
-                        func.coalesce(LibraryWork.hidden, 0) == 0,
-                        LibraryMediaVersion.work_id,
-                    ),
-                )
+    book_count = func.count(
+        distinct(
+            case(
+                (
+                    func.coalesce(LibraryWork.hidden, 0) == 0,
+                    LibraryWorkFacet.work_id,
+                ),
             )
-        ).label("bookCount")
-        statement = (
-            select(LibraryFacet, book_count)
-            .outerjoin(
-                LibraryVolumeFacet,
-                LibraryVolumeFacet.facet_id == LibraryFacet.id,
-            )
-            .outerjoin(
-                LibraryVolume,
-                LibraryVolume.id == LibraryVolumeFacet.volume_id,
-            )
-            .outerjoin(
-                LibraryMediaVersion,
-                LibraryMediaVersion.id == LibraryVolume.media_version_id,
-            )
-            .outerjoin(LibraryWork, LibraryWork.id == LibraryMediaVersion.work_id)
-            .where(LibraryFacet.kind == normalized_kind)
-            .group_by(LibraryFacet.id)
-            .order_by(book_count.desc(), LibraryFacet.name.collate("NOCASE").asc())
         )
-    else:
-        book_count = func.count(
-            distinct(
-                case(
-                    (
-                        func.coalesce(LibraryWork.hidden, 0) == 0,
-                        LibraryWorkFacet.work_id,
-                    ),
-                )
-            )
-        ).label("bookCount")
-        statement = (
-            select(LibraryFacet, book_count)
-            .outerjoin(LibraryWorkFacet, LibraryWorkFacet.facet_id == LibraryFacet.id)
-            .outerjoin(LibraryWork, LibraryWork.id == LibraryWorkFacet.work_id)
-            .where(LibraryFacet.kind == normalized_kind)
-            .group_by(LibraryFacet.id)
-            .order_by(book_count.desc(), LibraryFacet.name.collate("NOCASE").asc())
-        )
+    ).label("bookCount")
+    statement = (
+        select(LibraryFacet, book_count)
+        .outerjoin(LibraryWorkFacet, LibraryWorkFacet.facet_id == LibraryFacet.id)
+        .outerjoin(LibraryWork, LibraryWork.id == LibraryWorkFacet.work_id)
+        .where(LibraryFacet.kind == normalized_kind)
+        .group_by(LibraryFacet.id)
+        .order_by(book_count.desc(), LibraryFacet.name.collate("NOCASE").asc())
+    )
 
     search_clause = _facet_search_clause(search)
     if search_clause is not None:

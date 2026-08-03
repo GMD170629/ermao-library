@@ -10,11 +10,11 @@ def _insert_work(db, work_id, title, author):
         text(
             """
             INSERT INTO LibraryWork (
-                id, origin, title, normalizedTitle, author, normalizedAuthor, workType,
+                id, origin, title, normalizedTitle, author, normalizedAuthor,
                 publicationStatus, trackingStatus, tags, metadataQuality, organizeStatus, coverStatus,
                 hidden, organized, mergeKey, createdAt, updatedAt
             ) VALUES (
-                :id, 'MANUAL', :title, :title, :author, :author, 'EPUB', 'UNKNOWN',
+                :id, 'MANUAL', :title, :title, :author, :author, 'UNKNOWN',
                 'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING', 0, 0, :merge_key, 'now', 'now'
             )
             """
@@ -72,7 +72,7 @@ def test_manual_identity_update_allows_same_title_and_author_without_merge_candi
     assert row["mergeKey"] == "新书名典藏版:作者甲"
 
 
-def test_manual_metadata_apply_writes_publisher_to_selected_volume(client, db_session):
+def test_metadata_recognition_rejects_publisher_for_selected_volume(client, db_session):
     create_worker_tables(db_session)
     create_organize_detail_tables(db_session)
     _insert_work(db_session, "work-publisher", "出版测试", "测试作者")
@@ -112,12 +112,12 @@ def test_manual_metadata_apply_writes_publisher_to_selected_volume(client, db_se
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 422
     assert (
         db_session.execute(
             text("SELECT publisher FROM LibraryVolume WHERE id = 'volume-publisher'")
         ).scalar()
-        == "新星出版社"
+        is None
     )
 
 

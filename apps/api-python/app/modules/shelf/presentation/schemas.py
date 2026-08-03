@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import Field
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
+from app.modules.reader.public import MediaKind
 
 FilterValue = str | int | float | bool | list[str] | None
 
@@ -48,6 +49,7 @@ class ShelfBook(HttpContractModel):
     title: str
     author: str
     cover_url: str = Field(alias="coverUrl")
+    available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
 
 
 class ShelfMemberView(HttpContractModel):
@@ -74,6 +76,8 @@ class ShelfView(HttpContractModel):
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
     rules: ShelfRules
+    rules_status: Literal["VALID", "UNSUPPORTED"] = Field(alias="rulesStatus")
+    unsupported_rule_fields: list[str] = Field(alias="unsupportedRuleFields")
     book_count: int | None = Field(
         default=None,
         alias="bookCount",

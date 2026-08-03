@@ -3,7 +3,6 @@ export const LIBRARY_SORTS = [
   'recent_import',
   'title',
   'author',
-  'publisher',
   'series'
 ] as const;
 

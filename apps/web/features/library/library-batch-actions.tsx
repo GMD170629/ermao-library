@@ -257,7 +257,6 @@ export function LibraryBatchDialog({
     { value: 'description', label: '简介', group: '作品元数据' },
     { value: 'seriesName', label: '系列', group: '作品元数据' },
     { value: 'tags', label: '标签', group: '作品元数据' },
-    { value: 'publishedYear', label: '出版年份', group: '作品元数据' },
     { value: 'volumeTitle', label: '卷册名称', group: '卷册资源' }
   ];
 

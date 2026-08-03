@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, BookOpen, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Database, Download, Edit3, Ellipsis, Headphones, ImageUp, Images, LoaderCircle, MoveRight, RefreshCw, Scissors, Send, Settings2, Trash2, X, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, BookOpen, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Database, Download, Edit3, Ellipsis, Headphones, ImageUp, Images, LoaderCircle, MoveRight, RefreshCw, RotateCcw, Scissors, Send, Settings2, Trash2, X, type LucideIcon } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Cover } from '../../components/book/cover';
@@ -9,11 +9,12 @@ import { cn } from '../../components/ui/cn';
 import { useToast } from '../../components/ui/feedback';
 import { useAppSession } from '../../components/layout/app-session-context';
 import { Select } from '../../components/ui/select';
-import type { MediaKind, MediaVersionResource, VolumeResource, WorkDetailTabKey, WorkView } from '../../types/work';
+import type { MediaKind, MediaVersionResource, ReaderType, VolumeResource, WorkDetailTabKey, WorkView } from '../../types/work';
 import { I18nText } from '@/i18n/provider';
 import { useI18n } from '@/i18n/provider';
-import { deleteVolume, deleteWorkRecord, fetchAllMediaVersionVolumes, fetchEbookChapterDetail, fetchWork, regenerateWorkCover, runVolumeAction, searchWorkTransferTargets, updateVolume, updateWorkReadingStatus, uploadWorkCover, type WorkTransferTarget } from './api/client';
+import { deleteVolume, deleteWorkRecord, fetchAllMediaVersionVolumes, fetchEbookChapterDetail, fetchWork, reclassifyVolume, regenerateWorkCover, runVolumeAction, searchWorkTransferTargets, undoLibraryOperation, updateVolume, updateWorkReadingStatus, uploadWorkCover, type WorkTransferTarget } from './api/client';
 import { detailTabsForBook, displayVolumeNumber, formatDuration, isWorkDetailTabKey, resolvedDetailTab, selectedVolumeForDetailTab, volumesForDetailTab, workDetailTabHref } from './work-detail-tabs';
+import { smallVolumeCoverUrl } from './volume-cover-url';
 import { KindleSendModal } from './kindle-send-modal';
 import { MetadataLookupModal } from './metadata-lookup-modal';
 import { bookActionIds, type BookActionId } from './model/book-action-menu';
@@ -57,8 +58,8 @@ function formForVolume(volume: VolumeResource): VolumeForm {
   };
 }
 
-function readerHref(volume: VolumeResource, mediaKind: MediaKind): string {
-  return mediaKind === 'AUDIOBOOK'
+function readerHref(volume: VolumeResource): string {
+  return volume.readerType === 'audio'
     ? `/listen/${encodeURIComponent(volume.id)}`
     : `/reader/${encodeURIComponent(volume.id)}`;
 }
@@ -68,27 +69,27 @@ function formatLabel(volume: VolumeResource): string {
   return details.join(' · ');
 }
 
-function consumptionCopy(mediaKind: MediaKind) {
-  if (mediaKind === 'AUDIOBOOK') return { progress: '收听进度', position: '当前收听', start: '开始听', resume: '继续听', status: '收听状态' } as const;
-  if (mediaKind === 'COMIC') return { progress: '阅读进度', position: '当前卷册', start: '开始看', resume: '继续看', status: '阅读状态' } as const;
+function consumptionCopy(readerType: ReaderType) {
+  if (readerType === 'audio') return { progress: '收听进度', position: '当前收听', start: '开始听', resume: '继续听', status: '收听状态' } as const;
+  if (readerType === 'comic') return { progress: '阅读进度', position: '当前卷册', start: '开始看', resume: '继续看', status: '阅读状态' } as const;
   return { progress: '阅读进度', position: '当前位置', start: '开始阅读', resume: '继续阅读', status: '阅读状态' } as const;
 }
 
-function currentPositionLabel(volume: VolumeResource, mediaKind: MediaKind, translate: (source: string, values?: Record<string, string | number>) => string): string {
-  if (mediaKind === 'AUDIOBOOK' && volume.durationMs) return formatDuration(volume.durationMs * volume.progress / 100);
-  if (mediaKind === 'COMIC' && volume.pageCount) return translate('第 {value0} 页', { value0: Math.max(1, Math.ceil(volume.pageCount * volume.progress / 100)) });
+function currentPositionLabel(volume: VolumeResource, translate: (source: string, values?: Record<string, string | number>) => string): string {
+  if (volume.readerType === 'audio' && volume.durationMs) return formatDuration(volume.durationMs * volume.progress / 100);
+  if ((volume.readerType === 'comic' || volume.readerType === 'pdf') && volume.pageCount) return translate('第 {value0} 页', { value0: Math.max(1, Math.ceil(volume.pageCount * volume.progress / 100)) });
   if (volume.chapterCount) return translate('第 {value0} 章', { value0: Math.max(1, Math.ceil(volume.chapterCount * volume.progress / 100)) });
   return volume.title;
 }
 
-function VolumeWallCard({ work, volume, mediaKind, position }: { work: WorkView; volume: VolumeResource; mediaKind: MediaKind; position: number }) {
+function VolumeWallCard({ work, volume, position }: { work: WorkView; volume: VolumeResource; position: number }) {
   const router = useRouter();
   const { t } = useI18n();
   const number = displayVolumeNumber(volume, position);
   return (
-    <button type="button" onClick={() => router.push(readerHref(volume, mediaKind))} disabled={!volume.readable} aria-label={t('第 {value0} 卷', { value0: number })} className="group min-w-0 text-left disabled:cursor-not-allowed disabled:opacity-50">
+    <button type="button" onClick={() => router.push(readerHref(volume))} disabled={!volume.readable} aria-label={t('第 {value0} 卷', { value0: number })} className="group min-w-0 text-left disabled:cursor-not-allowed disabled:opacity-50">
       <div className="relative overflow-hidden rounded-xl bg-stone-100 shadow-sm transition group-hover:-translate-y-0.5 group-hover:shadow-md group-focus-visible:outline group-focus-visible:outline-2 group-focus-visible:outline-offset-2 group-focus-visible:outline-[#ff4f2a]">
-        <Cover book={{ id: volume.id, title: volume.title, author: work.author, coverUrl: volume.coverUrl, gradient: work.gradient, coverStatus: '' }} className="aspect-[2/3] w-full rounded-none" size="small" />
+        <Cover book={{ id: volume.id, title: volume.title, author: work.author, coverUrl: smallVolumeCoverUrl(volume.id, volume.coverUrl), gradient: work.gradient, coverStatus: '' }} className="aspect-[2/3] w-full rounded-none" size="small" />
         <span className="absolute left-2 top-2 rounded-full bg-white/90 px-2 py-0.5 text-[11px] tabular-nums text-stone-600 shadow-sm">{String(number).padStart(2, '0')}</span>
       </div>
       <span data-i18n-skip className="mt-2 block line-clamp-2 text-sm font-medium leading-5 text-stone-900">{volume.title}</span>
@@ -106,6 +107,15 @@ function mediaKindLabel(mediaKind: MediaKind): string {
   if (mediaKind === 'COMIC') return '漫画';
   if (mediaKind === 'AUDIOBOOK') return '有声书';
   return '电子书';
+}
+
+function classificationLabel(volume: VolumeResource): string {
+  if (volume.classification.source === 'MONITOR_FOLDER') return '来自监控文件夹规则';
+  if (volume.classification.source === 'USER') return '手动设置';
+  if (volume.classification.reason === 'COMIC_SUBJECT') return '自动识别 · 包含漫画主题';
+  if (volume.classification.source === 'AUTO') return '自动识别 · 默认按电子书处理';
+  if (volume.classification.source === 'INHERITED') return '继承源卷册分类';
+  return '旧数据分类';
 }
 
 function volumeUnitLabel(volume: VolumeResource, translate: (source: string, values?: Record<string, string | number>) => string): string {
@@ -241,8 +251,8 @@ function StructureVersionCard({
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5" disabled={!firstReadableVolume} onClick={() => firstReadableVolume && router.push(readerHref(firstReadableVolume, mediaVersion.mediaKind))}>
-            {t(mediaVersion.mediaKind === 'AUDIOBOOK' ? '收听' : mediaVersion.mediaKind === 'COMIC' ? '查看' : '阅读')}
+          <Button variant="secondary" className="!min-h-9 !rounded-xl !px-3 !py-1.5" disabled={!firstReadableVolume} onClick={() => firstReadableVolume && router.push(readerHref(firstReadableVolume))}>
+            {t(firstReadableVolume?.readerType === 'audio' ? '收听' : firstReadableVolume?.readerType === 'comic' ? '查看' : '阅读')}
           </Button>
         </div>
       </div>
@@ -255,7 +265,7 @@ function StructureVersionCard({
               <div className="min-w-0 flex-1">
                 <span data-i18n-skip className="block truncate text-sm text-stone-800" title={volume.title}>{volume.title}</span>
                 {volume.files.map((file) => {
-                  const label = structureFileLabel(mediaVersion.mediaKind, file.path);
+                  const label = structureFileLabel(volume.readerType, file.path);
                   return <span key={file.id} data-i18n-skip className="mt-0.5 block truncate text-xs text-stone-400" title={label}>{label}</span>;
                 })}
               </div>
@@ -265,7 +275,7 @@ function StructureVersionCard({
                 <button type="button" disabled={busyMoveId !== null || index === mediaVersion.volumeCount - 1} onClick={() => void moveVolume(volume, 'down')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 disabled:opacity-30" aria-label={t('下移 {value0}', { value0: volume.title })}><ChevronDown size={16} /></button>
                 <button type="button" aria-expanded={managedVolumeId === volume.id} onClick={() => setManagedVolumeId((current) => current === volume.id ? null : volume.id)} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100" aria-label={t('编辑 {value0}', { value0: volume.title })}><Edit3 size={15} /></button>
                 <button type="button" onClick={() => openTransfer(volume)} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100" aria-label={t('转移 {value0}', { value0: volume.title })}><MoveRight size={16} /></button>
-              </div> : <button type="button" disabled={!volume.readable} onClick={() => router.push(readerHref(volume, mediaVersion.mediaKind))} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 disabled:opacity-30" aria-label={t('打开 {value0}', { value0: volume.title })}><ChevronRight size={16} /></button>}
+              </div> : <button type="button" disabled={!volume.readable} onClick={() => router.push(readerHref(volume))} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 disabled:opacity-30" aria-label={t('打开 {value0}', { value0: volume.title })}><ChevronRight size={16} /></button>}
             </div>
             {managementMode && managedVolumeId === volume.id ? <div className="pb-4 pt-2">
               <VolumeCard work={work} mediaKind={mediaVersion.mediaKind} volume={volume} canManage={canManage} onRefresh={onRefresh} />
@@ -329,8 +339,15 @@ function VolumeCard({
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<VolumeForm>(() => formForVolume(volume));
   const [busy, setBusy] = useState<string | null>(null);
+  const [targetMediaKind, setTargetMediaKind] = useState<MediaKind>(mediaKind);
+  const [applyToVersion, setApplyToVersion] = useState(false);
+  const [undoOperationId, setUndoOperationId] = useState<string | null>(null);
 
-  useEffect(() => setForm(formForVolume(volume)), [volume]);
+  useEffect(() => {
+    setForm(formForVolume(volume));
+    setTargetMediaKind(mediaKind);
+    setApplyToVersion(false);
+  }, [mediaKind, volume]);
 
   const run = useCallback(async (key: string, action: () => Promise<void>, success: string) => {
     setBusy(key);
@@ -348,6 +365,14 @@ function VolumeCard({
   }, [feedback, onRefresh, t]);
 
   const save = async () => {
+    if (applyToVersion && targetMediaKind !== mediaKind) {
+      const confirmed = await feedback.confirm({
+        title: '修改此版本全部卷册的内容分类',
+        description: '只调整内容分类，不改变文件、阅读进度、书签或阅读器。',
+        confirmLabel: '继续修改'
+      });
+      if (!confirmed) return;
+    }
     const saved = await run('save', () => updateVolume(work.id, volume.id, {
       title: form.title.trim(),
       volumeIndex: form.volumeIndex.trim() ? Number(form.volumeIndex) : null,
@@ -357,6 +382,10 @@ function VolumeCard({
       isbn: form.isbn.trim() || null,
       identifier: form.identifier.trim() || null,
       narrator: form.narrator.trim() || null
+    }).then(async () => {
+      if (targetMediaKind === mediaKind) return;
+      const operationId = await reclassifyVolume(work.id, volume.id, targetMediaKind, applyToVersion ? 'MEDIA_VERSION' : 'VOLUME');
+      setUndoOperationId(operationId);
     }), '卷册信息已保存');
     if (saved) setEditing(false);
   };
@@ -395,6 +424,7 @@ function VolumeCard({
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2 border-t border-stone-100 pt-4">
+          {undoOperationId ? <Button variant="secondary" icon={RotateCcw} loading={busy === 'undo-classification'} onClick={() => void run('undo-classification', async () => { await undoLibraryOperation(undoOperationId); setUndoOperationId(null); }, '已撤销内容分类调整')}>撤销分类调整</Button> : null}
           {canManage ? <><Button variant="secondary" icon={Download} onClick={() => { window.location.href = `/api/volumes/${encodeURIComponent(volume.id)}/file`; }}>
             下载
           </Button>
@@ -409,6 +439,8 @@ function VolumeCard({
           <div className="w-full max-w-xl rounded-t-3xl bg-white p-5 shadow-2xl md:rounded-3xl">
             <div className="flex items-center justify-between"><h2 className="text-lg font-semibold"><I18nText>编辑卷册</I18nText></h2><button type="button" onClick={() => setEditing(false)} aria-label={t('关闭')}><X size={20} /></button></div>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <label className="text-sm text-stone-600 sm:col-span-2"><I18nText>当前内容分类</I18nText><Select value={targetMediaKind} onChange={setTargetMediaKind} ariaLabel="当前内容分类" className="mt-1.5 w-full" options={[{ value: 'EBOOK', label: '电子书' }, { value: 'COMIC', label: '漫画' }, { value: 'AUDIOBOOK', label: '有声书' }]} /><span className="mt-1.5 block text-xs text-stone-500">{t(classificationLabel(volume))}</span>{volume.classification.suggestedMediaKind === 'COMIC' ? <button type="button" className="mt-2 rounded-lg bg-orange-50 px-2.5 py-1.5 text-xs font-medium text-orange-700" onClick={() => setTargetMediaKind('COMIC')}>{t('可能是漫画 · 改为漫画')}</button> : null}</label>
+              <label className="flex items-center gap-2 text-sm text-stone-600 sm:col-span-2"><input type="checkbox" checked={applyToVersion} onChange={(event) => setApplyToVersion(event.target.checked)} />{t('同时应用到此版本全部 {value0} 个卷册', { value0: work.mediaVersions.find((version) => version.id === volume.mediaVersionId)?.volumeCount ?? 1 })}</label>
               <label className="text-sm text-stone-600 sm:col-span-2"><I18nText>卷册名称</I18nText><input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
               <label className="text-sm text-stone-600"><I18nText>卷号（可选且可重复）</I18nText><input inputMode="decimal" value={form.volumeIndex} onChange={(event) => setForm({ ...form, volumeIndex: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
               <label className="text-sm text-stone-600"><I18nText>排序</I18nText><input inputMode="numeric" value={form.sortOrder} onChange={(event) => setForm({ ...form, sortOrder: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
@@ -416,7 +448,7 @@ function VolumeCard({
               <label className="text-sm text-stone-600"><I18nText>语言</I18nText><input value={form.language} onChange={(event) => setForm({ ...form, language: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
               <label className="text-sm text-stone-600"><I18nText>ISBN</I18nText><input value={form.isbn} onChange={(event) => setForm({ ...form, isbn: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
               <label className="text-sm text-stone-600"><I18nText>标识符</I18nText><input value={form.identifier} onChange={(event) => setForm({ ...form, identifier: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
-              {mediaKind === 'AUDIOBOOK' ? <label className="text-sm text-stone-600 sm:col-span-2"><I18nText>朗读者</I18nText><input value={form.narrator} onChange={(event) => setForm({ ...form, narrator: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label> : null}
+              {volume.readerType === 'audio' ? <label className="text-sm text-stone-600 sm:col-span-2"><I18nText>朗读者</I18nText><input value={form.narrator} onChange={(event) => setForm({ ...form, narrator: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label> : null}
             </div>
             <div className="mt-6 flex justify-end gap-2"><Button variant="secondary" onClick={() => setEditing(false)}>取消</Button><Button loading={busy === 'save'} onClick={() => void save()}>保存</Button></div>
           </div>
@@ -495,10 +527,14 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     : [], [work]);
   const activeMediaKind = tab === 'STRUCTURE' ? null : tab;
   const activeProgress = selectedVolume?.progress ?? 0;
-  const activeCopy = activeMediaKind ? consumptionCopy(activeMediaKind) : null;
-  const activeReaderHref = selectedVolume && activeMediaKind && selectedVolume.readable ? readerHref(selectedVolume, activeMediaKind) : null;
+  const activeCopy = selectedVolume ? consumptionCopy(selectedVolume.readerType) : null;
+  const activeReaderHref = selectedVolume?.readable ? readerHref(selectedVolume) : null;
   const readingStatus = activeProgress >= 100 ? 'FINISHED' : activeProgress > 0 ? 'READING' : 'UNREAD';
-  const workActions = bookActionIds({ canManage, mediaKind: activeMediaKind, hasDownload: Boolean(selectedVolume?.readable) });
+  const workActions = bookActionIds({
+    canManage,
+    hasDownload: Boolean(selectedVolume?.readable),
+    kindleSendAvailable: selectedVolume?.kindleSendAvailable === true
+  });
   const currentWorkId = work?.id;
 
   const loadAllVolumes = useCallback(async (mediaVersionId: string, signal?: AbortSignal) => {
@@ -680,7 +716,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
               </div>
               <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
                 <span className="font-medium text-stone-700">{t(activeCopy.position)}</span>
-                <span data-i18n-skip className="text-stone-800">{currentPositionLabel(selectedVolume, activeMediaKind, t)}</span>
+                <span data-i18n-skip className="text-stone-800">{currentPositionLabel(selectedVolume, t)}</span>
               </div>
             </div> : null}
             {error ? <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
@@ -786,7 +822,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
               <h2 className="text-lg font-semibold text-stone-950"><I18nText>卷册</I18nText></h2>
               <p className="mt-1 text-sm text-stone-500">{t('{value0} 个卷册', { value0: volumes.length })}</p>
             </div>
-            <div className="mt-5 grid grid-cols-[repeat(auto-fill,minmax(130px,160px))] gap-5">{volumes.map((volume, index) => <VolumeWallCard key={volume.id} work={work} mediaKind={tab} volume={volume} position={index} />)}</div>
+            <div className="mt-5 grid grid-cols-[repeat(auto-fill,minmax(130px,160px))] gap-5">{volumes.map((volume, index) => <VolumeWallCard key={volume.id} work={work} volume={volume} position={index} />)}</div>
           </> : <div className="rounded-2xl border border-dashed border-stone-300 p-10 text-center text-sm text-stone-500"><I18nText>该媒介还没有可见卷册</I18nText></div>}
         </section>
       )}

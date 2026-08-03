@@ -7,6 +7,7 @@ import { cn } from '../../components/ui/cn';
 import { useConfirm, useToast } from '../../components/ui/feedback';
 import { useI18n } from '../../i18n/provider';
 import { PageTitle } from '../../components/ui/page-title';
+import { Select } from '../../components/ui/select';
 import { withBasePath } from '../../lib/base-path';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
@@ -20,8 +21,11 @@ type MonitorFolder = {
   ignorePatterns?: string | null;
   ignoreHidden: boolean;
   minFileSizeBytes: number;
+  mediaKindPolicy: MediaKindPolicy;
   description?: string | null;
 };
+
+type MediaKindPolicy = 'MIXED' | 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
 
 type MonitorFoldersPayload = {
   folders: MonitorFolder[];
@@ -61,6 +65,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   const [ignorePatterns, setIgnorePatterns] = useState('');
   const [ignoreHidden, setIgnoreHidden] = useState(true);
   const [minFileSizeKb, setMinFileSizeKb] = useState('10');
+  const [mediaKindPolicy, setMediaKindPolicy] = useState<MediaKindPolicy>('MIXED');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [backupBusy, setBackupBusy] = useState('');
@@ -115,7 +120,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     const response = await fetch('/api/monitor-folders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, rootPath, enabled: true, ignorePatterns, ignoreHidden, minFileSizeBytes: Math.max(0, Math.round(Number(minFileSizeKb || 0) * 1024)) })
+      body: JSON.stringify({ name, rootPath, enabled: true, ignorePatterns, ignoreHidden, mediaKindPolicy, minFileSizeBytes: Math.max(0, Math.round(Number(minFileSizeKb || 0) * 1024)) })
     });
     const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
     if (!payload.ok) {
@@ -165,7 +170,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     setPathBusy('');
   }
 
-  async function saveFolderSettings(path: MonitorFolder, updates: Pick<MonitorFolder, 'name' | 'rootPath' | 'ignorePatterns' | 'ignoreHidden' | 'minFileSizeBytes'>) {
+  async function saveFolderSettings(path: MonitorFolder, updates: Pick<MonitorFolder, 'name' | 'rootPath' | 'ignorePatterns' | 'ignoreHidden' | 'minFileSizeBytes' | 'mediaKindPolicy'>) {
     setError('');
     setMessage('');
     setRuleBusy(path.id);
@@ -183,7 +188,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
       return;
     }
     setMessage('监控文件夹设置已保存');
-    toast.success('监控文件夹设置已保存');
+    toast.success('监控文件夹设置已保存', '新分类规则仅用于之后导入的文件，已有内容不会改变。');
     await loadPaths();
     setRuleBusy('');
   }
@@ -310,6 +315,11 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                 <div className="md:col-span-2">
                   <Button className="h-10 w-full" icon={FolderOpen} loading={pathBusy === 'create'} loadingText={i18nAttribute("保存中")}><I18nText>保存</I18nText></Button>
                 </div>
+                <label className="md:col-span-4">
+                  <span className="text-sm font-medium text-slate-700"><I18nText>内容分类</I18nText></span>
+                  <Select value={mediaKindPolicy} onChange={setMediaKindPolicy} ariaLabel="内容分类" className="mt-1.5 w-full" size="sm" options={[{ value: 'MIXED', label: '混合内容' }, { value: 'EBOOK', label: '电子书' }, { value: 'COMIC', label: '漫画' }, { value: 'AUDIOBOOK', label: '有声书' }]} />
+                </label>
+                <div className="self-end text-xs leading-5 text-slate-500 md:col-span-8"><I18nText>内容分类只决定书库标签和整理方式；阅读器与可用操作由实际文件格式决定。</I18nText></div>
                 <div className="text-xs leading-5 text-slate-500 md:col-span-12"><I18nText>图书会进入书库；每位用户可按来源文件夹创建自己的智能书架。</I18nText></div>
                 <button
                   type="button"
@@ -355,7 +365,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                       <div className="min-w-0 flex-1">
                         <div className="font-semibold">{path.name}</div>
                         <div className="break-words text-sm text-slate-500">{path.rootPath}</div>
-                        <div className="mt-2 text-xs text-slate-500"><I18nText>引用原文件</I18nText> · {path.ignoreHidden ? i18nAttribute("忽略隐藏文件") : i18nAttribute("包含隐藏文件")} <I18nText>· 小于 </I18nText>{Math.round((path.minFileSizeBytes ?? 0) / 1024)} <I18nText>KB 跳过</I18nText></div>
+                        <div className="mt-2 text-xs text-slate-500"><I18nText>引用原文件</I18nText> · {i18nAttribute(path.mediaKindPolicy === 'MIXED' ? '混合内容' : path.mediaKindPolicy === 'EBOOK' ? '电子书' : path.mediaKindPolicy === 'COMIC' ? '漫画' : '有声书')} · {path.ignoreHidden ? i18nAttribute("忽略隐藏文件") : i18nAttribute("包含隐藏文件")} <I18nText>· 小于 </I18nText>{Math.round((path.minFileSizeBytes ?? 0) / 1024)} <I18nText>KB 跳过</I18nText></div>
                       </div>
                       <button disabled={pathBusy === `toggle:${path.id}`} onClick={() => togglePath(path)} className={cn('h-7 w-12 rounded-full p-1 transition disabled:cursor-not-allowed disabled:opacity-60', path.enabled ? 'bg-[#ff4f26]' : 'bg-slate-300')} aria-label={i18nAttribute("启用监控文件夹")}>
                         <span className={cn('block h-5 w-5 rounded-full bg-white transition', path.enabled && 'translate-x-5')} />
@@ -436,7 +446,7 @@ function MonitorFolderEditor({
 }: {
   path: MonitorFolder;
   saving: boolean;
-  onSave: (path: MonitorFolder, updates: Pick<MonitorFolder, 'name' | 'rootPath' | 'ignorePatterns' | 'ignoreHidden' | 'minFileSizeBytes'>) => Promise<void>;
+  onSave: (path: MonitorFolder, updates: Pick<MonitorFolder, 'name' | 'rootPath' | 'ignorePatterns' | 'ignoreHidden' | 'minFileSizeBytes' | 'mediaKindPolicy'>) => Promise<void>;
   compact?: boolean;
 }) {
   const { t: i18nAttribute } = useAttributeI18n();
@@ -445,12 +455,14 @@ function MonitorFolderEditor({
   const [patterns, setPatterns] = useState(path.ignorePatterns ?? '');
   const [hidden, setHidden] = useState(path.ignoreHidden);
   const [minSizeKb, setMinSizeKb] = useState(String(Math.round((path.minFileSizeBytes ?? 0) / 1024)));
+  const [policy, setPolicy] = useState<MediaKindPolicy>(path.mediaKindPolicy ?? 'MIXED');
   useEffect(() => {
     setFolderName(path.name);
     setFolderPath(path.rootPath);
     setPatterns(path.ignorePatterns ?? '');
     setHidden(path.ignoreHidden);
     setMinSizeKb(String(Math.round((path.minFileSizeBytes ?? 0) / 1024)));
+    setPolicy(path.mediaKindPolicy ?? 'MIXED');
   }, [path]);
 
   return (
@@ -477,7 +489,12 @@ function MonitorFolderEditor({
             className="mt-1.5 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#F19B84] focus:ring-2 focus:ring-[#FCE5DE]"
           />
         </label>
+        <label className="md:col-span-4">
+          <span className="text-sm font-medium text-slate-700"><I18nText>内容分类</I18nText></span>
+          <Select value={policy} onChange={setPolicy} ariaLabel="内容分类" className="mt-1.5 w-full" size="sm" options={[{ value: 'MIXED', label: '混合内容' }, { value: 'EBOOK', label: '电子书' }, { value: 'COMIC', label: '漫画' }, { value: 'AUDIOBOOK', label: '有声书' }]} />
+        </label>
       </div>
+      <div className="mt-2 text-xs leading-5 text-slate-500"><I18nText>内容分类只决定书库标签和整理方式；阅读器与可用操作由实际文件格式决定。</I18nText></div>
       <label className="mt-4 block">
         <span className="text-sm font-medium text-slate-700"><I18nText>自定义忽略规则</I18nText></span>
         <textarea
@@ -501,6 +518,7 @@ function MonitorFolderEditor({
             rootPath: folderPath,
             ignorePatterns: patterns,
             ignoreHidden: hidden,
+            mediaKindPolicy: policy,
             minFileSizeBytes: Math.max(0, Math.round(Number(minSizeKb || 0) * 1024))
           })}
         >

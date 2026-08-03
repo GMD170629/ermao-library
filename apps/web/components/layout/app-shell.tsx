@@ -38,6 +38,8 @@ import { clearPrivatePwaStorage, PwaClient } from '../system/pwa-client';
 import { cn } from '../ui/cn';
 import { useToast } from '../ui/feedback';
 import { useAudioPlayback } from '../../features/audio/audio-playback-provider';
+import { mediaKindsLabel } from '../../features/library/public';
+import type { MediaKind } from '../../types/work';
 import {
   fetchShelves,
   topLevelShelves,
@@ -86,7 +88,7 @@ type BookSearchItem = {
   title: string;
   author: string;
   coverUrl: string;
-  format: string;
+  availableMediaKinds: MediaKind[];
 };
 
 type SessionStatus = 'checking' | 'authenticated' | 'unavailable' | 'redirecting';
@@ -126,7 +128,7 @@ function isActive(pathname: string, currentSearch: URLSearchParams, href: string
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { t: i18nAttribute, setLocale } = useAttributeI18n();
+  const { t: i18nAttribute, setLocale, locale } = useAttributeI18n();
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -759,7 +761,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     <Cover book={book} size="small" className="h-14 w-10 shrink-0 rounded-md shadow-sm" small />
                     <span data-i18n-skip className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-[#252321]">{book.title}</span>
-                      <span className="mt-1 block truncate text-xs text-[#817C76]">{book.author} · {book.format}</span>
+                      <span className="mt-1 block truncate text-xs text-[#817C76]">{book.author} · {mediaKindsLabel(book.availableMediaKinds, locale)}</span>
                     </span>
                   </button>
                 ))}

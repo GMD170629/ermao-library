@@ -20,7 +20,6 @@ from app.bootstrap.system import record_system_event
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.modules.metadata.presentation.schemas import (
-    MetadataPipeline,
     MetadataProvider,
     ProviderPayload,
     ProviderResponse,
@@ -68,9 +67,9 @@ def list_registered_metadata_providers(
     )
 
 
-@router.put("/metadata/provider-pipelines/{work_type}")
+@router.put("/metadata/provider-pipelines/{media_kind}")
 async def update_registered_metadata_provider_pipeline(
-    work_type: str,
+    media_kind: str,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -82,7 +81,7 @@ async def update_registered_metadata_provider_pipeline(
     payload = await request.json()
     items = payload.get("items") if isinstance(payload, dict) else None
     try:
-        pipelines = update_metadata_provider_pipeline(db, work_type, items)
+        pipelines = update_metadata_provider_pipeline(db, media_kind, items)
     except ValueError as exc:
         raise BasicBadRequestError(MessageError(message=str(exc))) from exc
     record_system_event(
@@ -93,8 +92,8 @@ async def update_registered_metadata_provider_pipeline(
         actor_id=user.id,
         action="metadata_provider_pipeline.updated",
         target_type="metadataProviderPipeline",
-        target_id=work_type,
-        message=f"更新{work_type}数据源组合",
+        target_id=media_kind,
+        message=f"更新{media_kind}数据源组合",
         metadata={"providerIds": [item.get("providerId") for item in items or []]},
         commit=True,
     )

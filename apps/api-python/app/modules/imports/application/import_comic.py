@@ -20,6 +20,8 @@ from app.modules.imports.application.identity_resolution import (
 )
 from app.modules.imports.application.import_support import (
     _bracketed_folder_metadata,
+    _classification_columns,
+    _classification_result_type,
     _clean_title_part,
     _ensure_work,
     _file_resource_key,
@@ -39,6 +41,11 @@ from app.modules.imports.application.ports import (
     ImportOrchestrationServices,
     LibraryImportStore,
 )
+from app.modules.imports.domain.content_classification import (
+    ContentEvidence,
+    classify_content,
+    normalize_media_kind_policy,
+)
 
 
 def _import_comic(
@@ -57,6 +64,16 @@ def _import_comic(
     )
     comic_info = (
         parsed.get("comicInfo") if isinstance(parsed.get("comicInfo"), dict) else None
+    )
+    archive_format = str(
+        parsed.get("format") or ext.removeprefix(".") or "COMIC"
+    ).upper()
+    classification = classify_content(
+        normalize_media_kind_policy(options.media_kind_policy),
+        ContentEvidence(
+            volume_format=archive_format,
+            has_comic_info=comic_info is not None,
+        ),
     )
     identity = resolve_import_identity(
         identity,
@@ -103,7 +120,6 @@ def _import_comic(
             "title": title,
             "author": author,
             "description": None,
-            "workType": "COMIC",
             "tags": ["comic", parsed["format"]],
             "mergeKey": merge_key,
             "origin": options.origin,
@@ -112,11 +128,18 @@ def _import_comic(
     )
     media_version = (
         _select_volume_media_version(
-            queries, work["id"], "COMIC", source_key, volume_index, volume_title
+            queries,
+            work["id"],
+            archive_format,
+            source_key,
+            volume_index,
+            volume_title,
         )
         if volume_index is not None
         else None
     )
+    if media_version and media_version.get("mediaKind") != classification.media_kind:
+        media_version = None
     created_media_version = False
     if not media_version:
         created_media_version = True
@@ -126,8 +149,8 @@ def _import_comic(
                 "workId": work["id"],
                 "monitorFolderId": options.monitor_folder_id,
                 "origin": options.origin,
-                "mediaKind": "COMIC",
-                "format": "COMIC",
+                "mediaKind": classification.media_kind,
+                "format": archive_format,
                 "createdAt": _now(),
                 "updatedAt": _now(),
             }
@@ -146,7 +169,7 @@ def _import_comic(
                 "title": volume_title,
                 "volumeIndex": volume_index,
                 "sortOrder": sort_order,
-                "format": "COMIC",
+                "format": archive_format,
                 "resourceKey": _file_resource_key(
                     "comic", options.source_file_path.resolve()
                 ),
@@ -154,12 +177,12 @@ def _import_comic(
                 "origin": options.origin,
                 "sourceGroupKey": source_key,
                 "description": parsed.get("description"),
-                "publisher": (parsed.get("comicInfo") or {}).get("publisher"),
                 "sizeBytes": file_size,
                 "pageCount": parsed["pageCount"],
                 "coverPath": None,
                 "coverStatus": "PENDING",
                 "importStatus": "PARSING",
+                **_classification_columns(classification),
                 "createdAt": _now(),
                 "updatedAt": _now(),
             }
@@ -254,7 +277,7 @@ def _import_comic(
             media_version["id"],
             volume["id"],
             work["title"],
-            "comic",
+            _classification_result_type(classification),
             parsed["format"],
             parsed["pageCount"],
             "completed",

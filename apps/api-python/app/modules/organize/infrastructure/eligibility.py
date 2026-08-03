@@ -32,7 +32,6 @@ def work_entity_as_legacy_dict(entity: LibraryWork) -> dict[str, Any]:
         "author": entity.author,
         "normalizedAuthor": entity.normalized_author,
         "description": entity.description,
-        "workType": entity.work_type,
         "publicationStatus": entity.publication_status,
         "trackingStatus": entity.tracking_status,
         "localLatestVolume": entity.local_latest_volume,
@@ -42,7 +41,6 @@ def work_entity_as_legacy_dict(entity: LibraryWork) -> dict[str, Any]:
         "tags": entity.tags,
         "seriesName": entity.series_name,
         "seriesIndex": entity.series_index,
-        "publishedYear": entity.published_year,
         "metadataQuality": entity.metadata_quality,
         "organizeStatus": entity.organize_status,
         "coverPath": entity.cover_path,
@@ -139,24 +137,49 @@ def select_eligible_works(
     result: list[dict[str, Any]] = []
     for entity in works:
         work = work_entity_as_legacy_dict(entity)
+        work["availableMediaKinds"] = list(
+            db.scalars(
+                select(LibraryMediaVersion.media_kind)
+                .where(LibraryMediaVersion.work_id == entity.id)
+                .order_by(
+                    case(
+                        (LibraryMediaVersion.media_kind == "EBOOK", 0),
+                        (LibraryMediaVersion.media_kind == "COMIC", 1),
+                        (LibraryMediaVersion.media_kind == "AUDIOBOOK", 2),
+                        else_=3,
+                    ),
+                    LibraryMediaVersion.id.asc(),
+                )
+            ).all()
+        )
         reasons = reason_codes_for_work(work, rules, force_selected=force_selected)
         if reasons:
             result.append({**work, "reasonCodes": reasons})
     return result
 
 
-def first_volume_id_for_work(db: Session, work: dict[str, Any]) -> str | None:
+def first_media_selection_for_work(
+    db: Session, work_id: str, preferred_media_version_id: str | None = None
+) -> tuple[str, str, str | None] | None:
     if not inspect(db.connection()).has_table("LibraryVolume"):
         return None
-    volume_id = db.scalar(
-        select(LibraryVolume.id)
-        .join(
-            LibraryMediaVersion,
+    filters = [LibraryMediaVersion.work_id == work_id]
+    if preferred_media_version_id:
+        filters.append(LibraryMediaVersion.id == preferred_media_version_id)
+    row = db.execute(
+        select(
+            LibraryMediaVersion.id,
+            LibraryMediaVersion.media_kind,
+            LibraryVolume.id.label("volume_id"),
+        )
+        .select_from(LibraryMediaVersion)
+        .outerjoin(
+            LibraryVolume,
             LibraryMediaVersion.id == LibraryVolume.media_version_id,
         )
         .where(
-            LibraryMediaVersion.work_id == str(work["id"]),
-            LibraryVolume.hidden.is_(False),
+            *filters,
+            (LibraryVolume.hidden.is_(False) | LibraryVolume.id.is_(None)),
         )
         .order_by(
             case(
@@ -165,10 +188,13 @@ def first_volume_id_for_work(db: Session, work: dict[str, Any]) -> str | None:
                 (LibraryMediaVersion.media_kind == "AUDIOBOOK", 2),
                 else_=3,
             ),
+            LibraryMediaVersion.id.asc(),
             LibraryVolume.sort_order.asc(),
             LibraryVolume.created_at.asc(),
             LibraryVolume.id.asc(),
         )
         .limit(1)
-    )
-    return str(volume_id) if volume_id else None
+    ).first()
+    if row is None:
+        return None
+    return str(row.id), str(row.media_kind), str(row.volume_id) if row.volume_id else None

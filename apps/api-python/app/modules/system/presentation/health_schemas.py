@@ -67,7 +67,7 @@ class QueueOptions(HttpContractModel):
 
 
 class ProviderOptions(HttpContractModel):
-    work_type: Literal["ebook", "comic", "audiobook"] = Field(alias="workType")
+    media_kind: Literal["EBOOK", "COMIC", "AUDIOBOOK"] = Field(alias="mediaKind")
 
 
 class DirectoryHealthDetails(HttpContractModel):
@@ -118,7 +118,7 @@ class ProviderProbe(HttpContractModel):
 
 
 class ProviderHealthDetails(HttpContractModel):
-    work_type: str = Field(alias="workType")
+    media_kind: str = Field(alias="mediaKind")
     providers: list[ProviderProbe]
 
 

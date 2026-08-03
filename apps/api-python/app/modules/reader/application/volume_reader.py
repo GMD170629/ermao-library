@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 
@@ -13,9 +14,11 @@ from app.modules.reader.application.dto import (
     ReaderBookmarkDto,
     ReaderBootstrapDto,
     ReaderProgressDto,
+    ReaderUnitDto,
     ReaderVolumeContextDto,
 )
 from app.modules.reader.application.ports import (
+    ReaderEpubNavigationParser,
     ReaderUnitOfWork,
     ReaderVolumeRepository,
 )
@@ -28,6 +31,14 @@ class ReaderVolumeNotFound(Exception):
 
 class ReaderVolumeFormatUnsupported(Exception):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class ReaderEpubNavigationParseError(Exception):
+    source_path: str
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,9 +70,11 @@ class VolumeReaderService:
         self,
         repository: ReaderVolumeRepository,
         unit_of_work: ReaderUnitOfWork,
+        epub_navigation_parser: ReaderEpubNavigationParser,
     ) -> None:
         self._repository = repository
         self._unit_of_work = unit_of_work
+        self._epub_navigation_parser = epub_navigation_parser
 
     def get_context(self, volume_id: str) -> ReaderVolumeContextDto | None:
         return self._repository.get_context(volume_id)
@@ -85,6 +98,11 @@ class VolumeReaderService:
             raise ReaderVolumeNotFound
         files = self._repository.list_files(volume_id)
         units = self._repository.list_units(volume_id)
+        if (
+            context.volume.format.upper() == "EPUB"
+            and self._repository.epub_navigation_needs_repair(volume_id)
+        ):
+            units = self._repair_epub_navigation(volume_id, units)
         progresses = self._repository.list_progresses(
             user_id, [volume.id for volume in available_volumes]
         )
@@ -125,6 +143,61 @@ class VolumeReaderService:
             resume_fingerprint_mismatch=fingerprint_mismatch,
             media_completed=media_completed,
         )
+
+    def _repair_epub_navigation(
+        self,
+        volume_id: str,
+        existing_units: list[ReaderUnitDto],
+    ) -> list[ReaderUnitDto]:
+        source = self._repository.get_epub_source(volume_id)
+        if source is None:
+            return existing_units
+        try:
+            chapters = self._epub_navigation_parser.parse(source.path)
+        except ReaderEpubNavigationParseError:
+            self._unit_of_work.rollback()
+            logger.warning(
+                "reader.epub_navigation_recovery.failed",
+                extra={
+                    "volume_id": volume_id,
+                    "source_file_id": source.file_id,
+                    "stage": "parse",
+                    "outcome": "failed",
+                },
+            )
+            return existing_units
+        if not chapters:
+            logger.info(
+                "reader.epub_navigation_recovery.empty",
+                extra={
+                    "volume_id": volume_id,
+                    "stage": "parse",
+                    "outcome": "empty",
+                },
+            )
+            return existing_units
+        try:
+            self._repository.replace_epub_navigation_units(
+                volume_id=volume_id,
+                file_id=source.file_id,
+                chapters=chapters,
+                now=datetime.now(UTC),
+            )
+            self._unit_of_work.commit()
+        except Exception:
+            self._unit_of_work.rollback()
+            raise
+        units = self._repository.list_units(volume_id)
+        logger.info(
+            "reader.epub_navigation_recovery.completed",
+            extra={
+                "volume_id": volume_id,
+                "chapter_count": len(units),
+                "stage": "persist",
+                "outcome": "completed",
+            },
+        )
+        return units
 
     def save_progress(self, command: SaveProgressCommand) -> SaveProgressResult:
         context = self._repository.get_context(command.volume_id)

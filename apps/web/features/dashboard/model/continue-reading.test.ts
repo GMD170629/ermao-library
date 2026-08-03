@@ -9,6 +9,8 @@ test('maps the dashboard resume volume from the API contract', () => {
     author: 'Author',
     coverUrl: '/cover',
     mediaKind: 'EBOOK',
+    volumeFormat: 'EPUB',
+    readerType: 'reflowable',
     resumeVolumeId: 'volume-1',
     progress: 42,
     lastReadAt: '2026-08-03T10:00:00Z',

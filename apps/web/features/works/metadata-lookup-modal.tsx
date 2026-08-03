@@ -13,19 +13,18 @@ import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type MetadataSource = string;
-type MetadataField = 'coverUrl' | 'title' | 'author' | 'publisher' | 'description' | 'tags' | 'seriesName' | 'seriesIndex' | 'publishedYear';
+type MetadataField = 'coverUrl' | 'title' | 'author' | 'description' | 'tags' | 'seriesName' | 'seriesIndex' | 'publishedAt' | 'language' | 'isbn';
 
 type MetadataCandidate = {
   id: string;
   source: MetadataSource;
   title?: string | null;
   author?: string | null;
-  publisher?: string | null;
   description?: string | null;
   tags?: string[];
   seriesName?: string | null;
   seriesIndex?: number | null;
-  publishedYear?: number | null;
+  volumeMetadata?: { publishedAt?: string | null; language?: string | null; isbn?: string | null } | null;
   coverUrl?: string | null;
   confidence: number;
   raw: unknown;
@@ -42,15 +41,17 @@ const fieldLabels: Record<MetadataField, string> = {
   coverUrl: '封面',
   title: '标题',
   author: '作者',
-  publisher: '出版社',
   description: '简介',
   tags: '标签',
   seriesName: '系列',
   seriesIndex: '卷号',
-  publishedYear: '出版年'
+  publishedAt: '出版时间',
+  language: '语言',
+  isbn: 'ISBN'
 };
 
-const fields: MetadataField[] = ['coverUrl', 'title', 'author', 'publisher', 'description', 'tags', 'seriesName', 'seriesIndex', 'publishedYear'];
+const fields: MetadataField[] = ['coverUrl', 'title', 'author', 'description', 'tags', 'seriesName', 'seriesIndex', 'publishedAt', 'language', 'isbn'];
+const volumeFields = new Set<MetadataField>(['publishedAt', 'language', 'isbn']);
 
 function valueLabel(value: unknown) {
   if (Array.isArray(value)) return value.join(', ');
@@ -64,19 +65,19 @@ function normalized(value: unknown) {
 
 function candidateValue(candidate: MetadataCandidate | null, field: MetadataField) {
   if (!candidate) return null;
+  if (field === 'publishedAt' || field === 'language' || field === 'isbn') {
+    return candidate.volumeMetadata?.[field] ?? null;
+  }
   return candidate[field];
 }
 
-function bookValue(book: WorkView, field: MetadataField) {
+function bookValue(book: WorkView, field: MetadataField, targetVolumeId?: string) {
   const volumes = book.mediaVersions.flatMap((mediaVersion) => mediaVersion.volumes);
+  const targetVolume = volumes.find((volume) => volume.id === targetVolumeId) ?? volumes[0];
   if (field === 'coverUrl') return book.coverStatus === 'READY' ? book.coverUrl : null;
   if (field === 'author') return book.author === '未知作者' ? null : book.author;
   if (field === 'description') return book.description || null;
-  if (field === 'publisher') return volumes.find((volume) => volume.publisher)?.publisher ?? null;
-  if (field === 'publishedYear') {
-    const publishedAt = volumes.find((volume) => volume.publishedAt)?.publishedAt;
-    return publishedAt ? Number(publishedAt.slice(0, 4)) : null;
-  }
+  if (field === 'publishedAt' || field === 'language' || field === 'isbn') return targetVolume?.[field] ?? null;
   if (field === 'tags') return book.tags;
   return field === 'title' || field === 'seriesName' || field === 'seriesIndex' ? book[field] : null;
 }
@@ -106,16 +107,14 @@ function defaultFields(book: WorkView, candidate: MetadataCandidate | null) {
 }
 
 function initialSource(book: WorkView): MetadataSource {
-  return book.mediaVersions.some((mediaVersion) => mediaVersion.mediaKind === 'COMIC') ? 'bangumi' : 'douban';
+  return book.availableMediaKinds[0] === 'COMIC' ? 'bangumi' : 'douban';
 }
 
-type MetadataProviderOption = { id: string; name: string; enabled: boolean; workTypes: string[]; mode: string };
-type MetadataProviderPipeline = { workType: string; providers: Array<{ providerId: string; enabled: boolean }> };
+type MetadataProviderOption = { id: string; name: string; enabled: boolean; mediaKinds: string[]; mode: string };
+type MetadataProviderPipeline = { mediaKind: string; providers: Array<{ providerId: string; enabled: boolean }> };
 
-function normalizedWorkType(book: WorkView) {
-  if (book.mediaVersions.some((mediaVersion) => mediaVersion.mediaKind === 'COMIC')) return 'comic';
-  if (book.mediaVersions.some((mediaVersion) => mediaVersion.mediaKind === 'AUDIOBOOK')) return 'audiobook';
-  return 'ebook';
+function selectedMediaKind(book: WorkView) {
+  return book.availableMediaKinds[0] ?? 'EBOOK';
 }
 
 export function MetadataLookupModal({ book, open, onClose, onApplied }: MetadataLookupModalProps) {
@@ -146,7 +145,7 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
     value: provider.id,
     label: provider.name,
     translate: false,
-    disabled: !enabledProviderIds.includes(provider.id) || !provider.workTypes.includes(normalizedWorkType(book))
+    disabled: !enabledProviderIds.includes(provider.id) || !provider.mediaKinds.includes(selectedMediaKind(book))
   })), [book, enabledProviderIds, providers]);
   const sourceReady = options.some((option) => option.value === source && !option.disabled);
 
@@ -166,11 +165,11 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
       .then((payload) => {
         if (!payload.ok) throw new Error(payload.error?.message ?? '读取元数据插件失败');
         const nextProviders = payload.data?.providers ?? [];
-        const pipeline = (payload.data?.pipelines ?? []).find((item) => item.workType === normalizedWorkType(book));
+        const pipeline = (payload.data?.pipelines ?? []).find((item) => item.mediaKind === selectedMediaKind(book));
         const nextEnabledProviderIds = (pipeline?.providers ?? []).filter((item) => item.enabled).map((item) => item.providerId);
         setProviders(nextProviders);
         setEnabledProviderIds(nextEnabledProviderIds);
-        const applicable = nextProviders.find((provider) => nextEnabledProviderIds.includes(provider.id) && provider.workTypes.includes(normalizedWorkType(book)));
+        const applicable = nextProviders.find((provider) => nextEnabledProviderIds.includes(provider.id) && provider.mediaKinds.includes(selectedMediaKind(book)));
         if (applicable) setSource(applicable.id);
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : '读取元数据插件失败'));
@@ -216,7 +215,7 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
           source,
           candidate: selected,
           fields: selectedFields,
-          volumeId: selectedFields.includes('publisher') ? targetVolumeId : null
+          volumeId: selectedFields.some((field) => volumeFields.has(field)) ? targetVolumeId : null
         })
       });
       const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
@@ -313,7 +312,7 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
                       <div className="line-clamp-2 font-medium text-slate-900">{candidate.title || i18nAttribute("未命名候选")}</div>
                       <Badge tone={candidate.confidence >= 0.8 ? 'green' : 'blue'}>{Math.round(candidate.confidence * 100)}%</Badge>
                     </div>
-                    <div className="mt-1 line-clamp-1 text-xs text-slate-500">{candidate.author || candidate.publisher || candidate.seriesName || valueLabel(candidate.publishedYear)}</div>
+                    <div className="mt-1 line-clamp-1 text-xs text-slate-500">{candidate.author || candidate.seriesName || valueLabel(candidate.volumeMetadata?.isbn)}</div>
                     {candidate.description ? <div className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">{candidate.description}</div> : null}
                   </div>
                 </div>
@@ -323,14 +322,14 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
           </div>
 
           <div className="min-w-0 rounded-2xl border border-slate-200">
-            {selectedFields.includes('publisher') ? (
+            {selectedFields.some((field) => volumeFields.has(field)) ? (
               <div className="border-b border-slate-100 bg-slate-50 px-3 py-3">
-                <div className="mb-2 text-xs font-medium text-slate-500"><I18nText>出版社应用到卷册</I18nText></div>
+                <div className="mb-2 text-xs font-medium text-slate-500"><I18nText>卷册元数据应用到</I18nText></div>
                 <Select
                   value={targetVolumeId}
                   options={volumeOptions}
                   onChange={setTargetVolumeId}
-                  ariaLabel={i18nAttribute("出版社目标卷册")}
+                  ariaLabel={i18nAttribute("卷册元数据目标卷册")}
                   className="w-full"
                 />
               </div>
@@ -343,7 +342,7 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
             </div>
             <div className="divide-y divide-slate-100">
               {fields.map((field) => {
-                const currentValue = bookValue(book, field);
+                const currentValue = bookValue(book, field, targetVolumeId);
                 const nextValue = candidateValue(selected, field);
                 const available = hasCandidateValue(nextValue);
                 return (
@@ -373,7 +372,7 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
 
         <div className="flex flex-col gap-2 border-t border-slate-100 px-5 py-4 sm:flex-row sm:justify-end">
           <Button variant="secondary" onClick={onClose}><I18nText>取消</I18nText></Button>
-          <Button disabled={busy || !selected || selectedFields.length === 0 || (selectedFields.includes('publisher') && !targetVolumeId)} icon={CheckCircle2} onClick={() => void applySelected()}><I18nText>应用所选字段</I18nText></Button>
+          <Button disabled={busy || !selected || selectedFields.length === 0 || (selectedFields.some((field) => volumeFields.has(field)) && !targetVolumeId)} icon={CheckCircle2} onClick={() => void applySelected()}><I18nText>应用所选字段</I18nText></Button>
         </div>
       </div>
     </div>

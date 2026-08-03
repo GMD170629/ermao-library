@@ -68,6 +68,7 @@ from app.modules.library.application.volume_commands import (
     delete_volume_resource,
     move_volume_resource,
     queue_volume_epub_conversion,
+    reclassify_volume_resource,
     reorder_volume_resource,
     split_volume_resource,
     update_volume_resource,
@@ -104,6 +105,7 @@ from app.modules.library.presentation.schemas import (
     MoveVolumeRequest,
     OperationsResponse,
     ReorderVolumeRequest,
+    ReclassifyVolumeRequest,
     RenameCategoryResponse,
     SeriesResponse,
     SplitVolumeRequest,
@@ -373,8 +375,9 @@ def dashboard_summary(
     return DashboardSummaryResponse(
         data={
             "totalBooks": summary["totalBooks"],
+            "ebookBooks": summary["ebookBooks"],
             "comicBooks": summary["comicBooks"],
-            "novelBooks": summary["novelBooks"],
+            "audiobookBooks": summary["audiobookBooks"],
             "storageUsedBytes": int(summary["storageUsedBytes"] or 0),
             "monitorFolderCount": summary["monitorFolderCount"],
             "lastImportAt": _dt(summary.get("lastImportAt")),
@@ -397,7 +400,7 @@ def dashboard_recent_books(
     context = authorization_context(db, user)
     works = library_dashboard.recent_books(db, context, limit=take)
     return WorkSummariesResponse(
-        data={"books": [_bookshelf_item_view(work) for work in works]}
+        data={"books": [_bookshelf_item_view(db, work) for work in works]}
     )
 
 
@@ -415,7 +418,7 @@ def dashboard_recent_reading(
     context = authorization_context(db, user)
     works = library_dashboard.recent_reading(db, context, user.id, limit=take)
     return WorkSummariesResponse(
-        data={"books": [_bookshelf_item_view(work) for work in works]}
+        data={"books": [_bookshelf_item_view(db, work) for work in works]}
     )
 
 
@@ -445,6 +448,8 @@ def dashboard_continue_reading(
                 "author": book.get("author"),
                 "coverUrl": book.get("coverUrl"),
                 "mediaKind": progress.get("mediaKind"),
+                "volumeFormat": progress.get("volumeFormat"),
+                "readerType": progress.get("readerType"),
                 "resumeVolumeId": progress.get("volumeId"),
                 "progress": float(progress.get("percent") or 0),
                 "chapter": None,
@@ -597,6 +602,21 @@ def management_folders(
             if len(items) >= 2
         ]
 
+    def grouped_media_kinds() -> list[dict[str, Any]]:
+        buckets: dict[str, list[dict[str, Any]]] = {}
+        for work in work_items:
+            for media_kind in work.get("availableMediaKinds") or []:
+                buckets.setdefault(str(media_kind), []).append(work)
+        return [
+            {
+                "name": name,
+                "count": len(items),
+                "sizeBytes": sum(int(item.get("sizeBytes") or 0) for item in items),
+                "items": items[:20],
+            }
+            for name, items in sorted(buckets.items(), key=lambda item: item[0])
+        ]
+
     source_names = {folder.get("id"): folder.get("name") for folder in monitor_folders}
     by_source: dict[str, list[dict[str, Any]]] = {}
     for work in work_items:
@@ -617,7 +637,7 @@ def management_folders(
             "logical": {
                 "series": grouped_series(),
                 "authors": grouped("author", "未知作者"),
-                "formats": grouped("workType", "未知格式"),
+                "formats": grouped_media_kinds(),
                 "sources": [
                     {
                         "name": name,
@@ -766,7 +786,16 @@ def list_works(
         try:
             filter_expression = parse_filter_expression(decoded_filters)
         except InvalidFilterExpression as exc:
-            _raise_library_error(str(exc), status_code=400)
+            message = str(exc)
+            _raise_library_error(
+                message,
+                status_code=400,
+                code=(
+                    "UNSUPPORTED_FILTER_DIMENSION"
+                    if message.startswith("不支持的筛选维度：")
+                    else "INVALID_FILTER_EXPRESSION"
+                ),
+            )
     status = (request.query_params.get("status") or "").strip().upper()
     if status == "WANT":
         status = "UNREAD"
@@ -844,9 +873,9 @@ def list_works(
         start = (page - 1) * result_page_size
         page_items = work_views[start : start + result_page_size]
         book_views = (
-            [_bookshelf_item_view(work) for work, _item_view in page_items]
+            [_bookshelf_item_view(db, work) for work, _item_view in page_items]
             if bookshelf_view
-            else [_book_search_item_view(work) for work, _item_view in page_items]
+            else [_book_search_item_view(db, work) for work, _item_view in page_items]
             if search_view
             else _management_work_views(
                 db, [work for work, _item_view in page_items], user.id
@@ -857,9 +886,9 @@ def list_works(
     else:
         works = result.works
         book_views = (
-            [_bookshelf_item_view(work) for work in works]
+            [_bookshelf_item_view(db, work) for work in works]
             if bookshelf_view
-            else [_book_search_item_view(work) for work in works]
+            else [_book_search_item_view(db, work) for work in works]
             if search_view
             else _management_work_views(db, works, user.id)
             if management_view
@@ -1061,7 +1090,6 @@ async def update_work(
         "tags",
         "seriesName",
         "seriesIndex",
-        "publishedYear",
         "hidden",
         "organized",
         "metadataQuality",
@@ -1083,8 +1111,6 @@ async def update_work(
     try:
         if "seriesIndex" in values:
             values["seriesIndex"] = _nullable_float(values["seriesIndex"], "系列序号")
-        if "publishedYear" in values:
-            values["publishedYear"] = _nullable_int(values["publishedYear"], "出版年")
     except ValueError as exc:
         _raise_library_error(str(exc), status_code=400)
     if "title" in values or "author" in values:
@@ -1598,7 +1624,6 @@ async def bulk_works(
             "trackingStatus",
             "seriesName",
             "seriesIndex",
-            "publishedYear",
         }
         raw_fields = (
             payload.get("fields") if isinstance(payload.get("fields"), dict) else {}
@@ -1707,14 +1732,15 @@ async def bulk_works(
             if action == "update_metadata" and isinstance(payload.get("fields"), dict)
             else {}
         )
-        metadata_volume_id = str(payload.get("volumeId") or "").strip()
-        if "publisher" in metadata_fields and (
-            not metadata_volume_id or len(normalized_ids) != 1
-        ):
+        unsupported_metadata_fields = set(metadata_fields) - {
+            "author",
+            "seriesName",
+        }
+        if unsupported_metadata_fields:
             _raise_library_error(
-                "卷册元数据更新必须指定单个作品下的 volumeId",
+                "批量元数据更新包含不支持的字段",
                 status_code=400,
-                code="VOLUME_TARGET_REQUIRED",
+                code="UNSUPPORTED_METADATA_FIELD",
             )
         add_tags = [
             str(item).strip()
@@ -1790,28 +1816,6 @@ async def bulk_works(
                     work_values["tags"] = _json_text(current_tags)
                 if len(work_values) > 1:
                     library_works.update_work_fields(db, work_id, work_values)
-                if "publisher" in metadata_fields:
-                    try:
-                        update_volume_resource(
-                            volume_structure_commands(db),
-                            db,
-                            actor=_library_actor(db, user),
-                            work_id=work_id,
-                            volume_id=metadata_volume_id,
-                            changes={
-                                "publisher": str(
-                                    metadata_fields.get("publisher") or ""
-                                ).strip()
-                                or None,
-                            },
-                            now=_now(),
-                        )
-                    except (WorkNotFoundError, VolumeNotFoundError):
-                        _raise_library_error(
-                            "卷册不存在或不属于该作品",
-                            status_code=404,
-                            code="VOLUME_NOT_FOUND",
-                        )
             elif fields:
                 library_works.update_work_fields(
                     db,
@@ -2121,7 +2125,7 @@ def library_facets(
         return auth_error
     facets = {
         kind.lower(): _visible_categories(db, user, kind)
-        for kind in ("AUTHOR", "TAG", "SERIES", "PUBLISHER")
+        for kind in ("AUTHOR", "TAG", "SERIES")
     }
     context = authorization_context(db, user)
     visible_works = library_facet_queries.list_visible_works(db, context)
@@ -2199,12 +2203,6 @@ def _scoped_filter_schema(db: Session, user: User) -> dict[str, Any]:
                 "tags": counted(tags),
                 "series": counted(
                     [str(row.get("seriesName") or "") for row in work_rows]
-                ),
-                "publishers": counted(
-                    [str(row.get("publisher") or "") for row in volume_rows]
-                ),
-                "languages": counted(
-                    [str(row.get("language") or "") for row in volume_rows]
                 ),
                 "formats": counted(
                     [str(row.get("format") or "") for row in volume_rows]
@@ -2496,7 +2494,33 @@ async def metadata_search(
         result = search_with_metadata_provider(db, context, source, query)
     except Exception as exc:
         _raise_library_error(str(exc), status_code=400)
-    candidates = result.get("candidates") or []
+    candidates = []
+    for raw_candidate in result.get("candidates") or []:
+        if not isinstance(raw_candidate, dict):
+            continue
+        volume_metadata = {
+            "publishedAt": raw_candidate.get("publishedAt"),
+            "language": raw_candidate.get("language"),
+            "isbn": raw_candidate.get("isbn"),
+        }
+        candidates.append(
+            {
+                key: value
+                for key, value in {
+                    **raw_candidate,
+                    "publisher": None,
+                    "publishedYear": None,
+                    "isbn": None,
+                    "volumeMetadata": {
+                        key: value
+                        for key, value in volume_metadata.items()
+                        if value not in (None, "")
+                    }
+                    or None,
+                }.items()
+                if key not in {"publisher", "publishedYear", "isbn"}
+            }
+        )
     return MetadataSearchResponse(
         data={
             "candidates": candidates,
@@ -2579,6 +2603,75 @@ def update_work_volume(
             ),
             "workId": work_id,
             "volumeId": volume_id,
+        }
+    )
+
+
+@router.post("/works/{work_id}/volumes/{volume_id}/reclassify")
+def reclassify_work_volume(
+    work_id: str,
+    volume_id: str,
+    payload: ReclassifyVolumeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    WorkStructureMutationResponse,
+    ErrorResponses(
+        LibraryBadRequestError,
+        LibraryForbiddenError,
+        LibraryNotFoundError,
+    ),
+]:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    try:
+        outcome = reclassify_volume_resource(
+            volume_structure_commands(db),
+            db,
+            actor=_library_actor(db, user),
+            work_id=work_id,
+            volume_id=volume_id,
+            target_media_kind=payload.target_media_kind.strip().upper(),
+            apply_to=payload.apply_to.strip().upper(),
+            now=_now(),
+        )
+    except WorkNotFoundError:
+        _raise_library_error(
+            "作品不存在或无权访问",
+            status_code=404,
+            code="WORK_NOT_FOUND",
+        )
+    except VolumeNotFoundError:
+        _raise_library_error(
+            "卷册不存在或不属于该作品",
+            status_code=404,
+            code="VOLUME_NOT_FOUND",
+        )
+    except LibraryAuthorizationError:
+        _raise_library_error(
+            "需要系统管理权限",
+            status_code=403,
+            code="SYSTEM_MANAGER_REQUIRED",
+        )
+    except InvalidVolumeChangeError as exc:
+        code = str(exc)
+        _raise_library_error(
+            "内容分类或应用范围无效",
+            status_code=400,
+            code=code,
+        )
+    refreshed_work = _get_work(db, work_id)
+    return WorkStructureMutationResponse(
+        data={
+            "book": (
+                _work_view(db, refreshed_work, user.id) if refreshed_work else None
+            ),
+            "workId": work_id,
+            "volumeId": volume_id,
+            "targetMediaVersionId": outcome.target_media_version_id,
+            "operation": _operation_payload(outcome.operation),
         }
     )
 
@@ -2921,9 +3014,10 @@ async def apply_work_metadata(
     existing_work = _get_work(db, work_id)
     if not existing_work:
         _raise_library_error("作品不存在", status_code=404)
-    publisher_selected = "publisher" in fields
+    volume_fields = {"publishedAt", "language", "isbn"}
+    volume_selected = bool(volume_fields.intersection(fields))
     target_volume: LibraryVolume | None = None
-    if publisher_selected:
+    if volume_selected:
         if not payload.volume_id:
             _raise_library_error(
                 "请选择要应用卷册元数据的目标卷册",
@@ -2962,7 +3056,7 @@ async def apply_work_metadata(
                 "mergeKey": identity_merge_key(title, author),
             }
         )
-    publisher = str(candidate.get("publisher") or "").strip()
+    volume_metadata = candidate.get("volumeMetadata") or {}
     if (
         "coverUrl" in fields
         and isinstance(candidate.get("coverUrl"), str)
@@ -2979,7 +3073,7 @@ async def apply_work_metadata(
                 candidate.get("coverUrl"),
                 exc,
             )
-    if not patch and not publisher_selected:
+    if not patch and not volume_selected:
         _raise_library_error("候选中没有可应用的字段", status_code=400)
     patch.update(
         {
@@ -2993,7 +3087,14 @@ async def apply_work_metadata(
     if not work:
         _raise_library_error("作品不存在", status_code=404)
     if target_volume is not None:
-        target_volume.publisher = publisher or None
+        if "publishedAt" in fields:
+            target_volume.published_at = volume_metadata.get("publishedAt")
+        if "language" in fields:
+            target_volume.language = (
+                str(volume_metadata.get("language") or "").strip() or None
+            )
+        if "isbn" in fields:
+            target_volume.isbn = str(volume_metadata.get("isbn") or "").strip() or None
         target_volume.updated_at = _now()
     sync_work_facets(db, work_id, commit=False)
     finished_job_ids = _finish_metadata_organize_work(db, work_id)

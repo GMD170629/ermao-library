@@ -70,6 +70,13 @@ class VolumeDeleteOutcome:
     operation: OperationSummary
 
 
+@dataclass(frozen=True, slots=True)
+class VolumeReclassifyOutcome:
+    target_media_version_id: str
+    moved_volume_ids: tuple[str, ...]
+    operation: OperationSummary
+
+
 class VolumeStructurePort(Protocol):
     def can_access_work(self, *, actor: LibraryActor, work_id: str) -> bool: ...
 
@@ -123,6 +130,17 @@ class VolumeStructurePort(Protocol):
         self, *, context: VolumeContext, now: datetime
     ) -> tuple[object, bool]: ...
 
+    def reclassify_volume(
+        self,
+        *,
+        actor_id: str,
+        work_id: str,
+        volume_id: str,
+        target_media_kind: str,
+        apply_to: Literal["VOLUME", "MEDIA_VERSION"],
+        now: datetime,
+    ) -> VolumeReclassifyOutcome: ...
+
 
 class UnitOfWork(Protocol):
     def commit(self) -> None: ...
@@ -144,6 +162,40 @@ class LibraryAuthorizationError(Exception):
 
 class InvalidVolumeChangeError(Exception):
     pass
+
+
+def reclassify_volume_resource(
+    port: VolumeStructurePort,
+    unit_of_work: UnitOfWork,
+    *,
+    actor: LibraryActor,
+    work_id: str,
+    volume_id: str,
+    target_media_kind: str,
+    apply_to: str,
+    now: datetime,
+) -> VolumeReclassifyOutcome:
+    _require_work_access(port, actor=actor, work_id=work_id)
+    _require_manager(actor)
+    _require_volume(port, actor=actor, work_id=work_id, volume_id=volume_id)
+    if target_media_kind not in {"EBOOK", "COMIC", "AUDIOBOOK"}:
+        raise InvalidVolumeChangeError("INVALID_MEDIA_KIND")
+    if apply_to not in {"VOLUME", "MEDIA_VERSION"}:
+        raise InvalidVolumeChangeError("INVALID_RECLASSIFY_SCOPE")
+    try:
+        outcome = port.reclassify_volume(
+            actor_id=actor.user_id,
+            work_id=work_id,
+            volume_id=volume_id,
+            target_media_kind=target_media_kind,
+            apply_to=apply_to,
+            now=now,
+        )
+        unit_of_work.commit()
+        return outcome
+    except Exception:
+        unit_of_work.rollback()
+        raise
 
 
 class VolumeConversionUnsupportedError(Exception):

@@ -1,4 +1,4 @@
-import type { MediaKind } from '../../../types/work';
+import type { MediaKind, ReaderType } from '../../../types/work';
 
 export type ContinueReadingItem = Readonly<{
   workId: string;
@@ -6,6 +6,8 @@ export type ContinueReadingItem = Readonly<{
   author: string;
   coverUrl: string;
   mediaKind: MediaKind;
+  volumeFormat: string;
+  readerType: ReaderType;
   resumeVolumeId: string | null;
   progress: number;
   lastReadAt: string | null;
@@ -32,12 +34,17 @@ function mediaKind(value: unknown): MediaKind | null {
   return value === 'EBOOK' || value === 'COMIC' || value === 'AUDIOBOOK' ? value : null;
 }
 
+function readerType(value: unknown): ReaderType | null {
+  return value === 'reflowable' || value === 'comic' || value === 'pdf' || value === 'audio' ? value : null;
+}
+
 export function mapContinueReadingItem(value: unknown): ContinueReadingItem | null {
   if (value === null) return null;
   const item = record(value);
   const workId = stringValue(item.workId).trim();
   const kind = mediaKind(item.mediaKind);
-  if (!workId || !kind) return null;
+  const reader = readerType(item.readerType);
+  if (!workId || !kind || !reader) return null;
   const progress = typeof item.progress === 'number' && Number.isFinite(item.progress)
     ? Math.max(0, Math.min(100, item.progress))
     : 0;
@@ -47,6 +54,8 @@ export function mapContinueReadingItem(value: unknown): ContinueReadingItem | nu
     author: stringValue(item.author),
     coverUrl: stringValue(item.coverUrl),
     mediaKind: kind,
+    volumeFormat: stringValue(item.volumeFormat),
+    readerType: reader,
     resumeVolumeId: nullableString(item.resumeVolumeId),
     progress,
     lastReadAt: nullableString(item.lastReadAt),

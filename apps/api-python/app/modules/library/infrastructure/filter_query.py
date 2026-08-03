@@ -41,7 +41,6 @@ WORK_TEXT_FIELDS = {
     "origin": LibraryWork.origin,
 }
 WORK_NUMBER_FIELDS = {
-    "publishedYear": LibraryWork.published_year,
     "seriesIndex": LibraryWork.series_index,
     "metadataQuality": LibraryWork.metadata_quality,
 }
@@ -50,10 +49,6 @@ WORK_DATE_FIELDS = {
     "updatedAt": LibraryWork.updated_at,
 }
 VOLUME_TEXT_FIELDS = {
-    "publisher": "publisher",
-    "language": "language",
-    "isbn": "isbn",
-    "identifier": "identifier",
     "volumeTitle": "title",
     "narrator": "narrator",
     "format": "format",

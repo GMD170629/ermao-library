@@ -36,6 +36,7 @@ from app.modules.imports.application.ports import (
     LibraryImportStore,
 )
 from app.modules.imports.application.release_titles import parse_release_title
+from app.modules.imports.domain.content_classification import ContentClassification
 
 SUPPORTED_EXTS = {
     ".epub",
@@ -154,6 +155,23 @@ def _import_work_merge_key(
 
 def _file_resource_key(fmt: str, path: Path) -> str:
     return f"{fmt}:{_hash_text(str(path.resolve()))[:24]}"
+
+
+def _classification_columns(
+    classification: ContentClassification,
+) -> dict[str, object]:
+    return {
+        "classificationSource": classification.source.value,
+        "classificationReason": classification.reason,
+        "suggestedMediaKind": classification.suggested_media_kind,
+    }
+
+
+def _classification_result_type(classification: ContentClassification) -> str:
+    return {
+        "COMIC": "comic",
+        "AUDIOBOOK": "audiobook",
+    }.get(classification.media_kind, "ebook")
 
 
 def _extract_isbn(ids: list[str]) -> str | None:
@@ -429,7 +447,6 @@ def _ensure_work(
             "author": data["author"],
             "normalizedAuthor": _normalize_key(data["author"]),
             "description": data.get("description"),
-            "workType": data["workType"],
             "status": "UNREAD",
             "publicationStatus": "UNKNOWN",
             "trackingStatus": "NOT_TRACKING",

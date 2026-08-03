@@ -241,19 +241,30 @@ def _apply_candidate(
             applied.append("seriesIndex")
         except (TypeError, ValueError):
             pass
-    if work.get("publishedYear") is None and candidate.get("publishedYear") is not None:
-        try:
-            work_patch["publishedYear"] = int(candidate["publishedYear"])
-            applied.append("publishedYear")
-        except (TypeError, ValueError):
-            pass
-    if (
-        volume
-        and not str(volume.get("publisher") or "").strip()
-        and str(candidate.get("publisher") or "").strip()
-    ):
-        volume_patch["publisher"] = str(candidate["publisher"]).strip()
-        applied.append("publisher")
+    volume_metadata = candidate.get("volumeMetadata")
+    if not isinstance(volume_metadata, dict):
+        volume_metadata = {
+            key: candidate.get(key) for key in ("publishedAt", "language", "isbn")
+        }
+    if volume:
+        if (
+            volume.get("publishedAt") is None
+            and isinstance(volume_metadata.get("publishedAt"), str)
+        ):
+            try:
+                published_at = datetime.fromisoformat(
+                    str(volume_metadata["publishedAt"]).replace("Z", "+00:00")
+                )
+            except ValueError:
+                published_at = None
+            if published_at is not None:
+                volume_patch["publishedAt"] = published_at
+                applied.append("publishedAt")
+        for field in ("language", "isbn"):
+            value = str(volume_metadata.get(field) or "").strip()
+            if not str(volume.get(field) or "").strip() and value:
+                volume_patch[field] = value
+                applied.append(field)
     if (
         not _local_cover_exists(db, work, volume_id)
         and str(candidate.get("coverUrl") or "").strip()

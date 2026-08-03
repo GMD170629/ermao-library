@@ -84,8 +84,8 @@ def _current_user(db: Session, request: Request, settings: Settings) -> User:
     return user
 
 
-def _service(db: Session) -> VolumeReaderService:
-    return reader_volume_service(db)
+def _service(db: Session, settings: Settings) -> VolumeReaderService:
+    return reader_volume_service(db, settings)
 
 
 def _not_found() -> ReaderNotFoundError:
@@ -234,7 +234,7 @@ def reader_bootstrap_v3(
     if not can_access_volume(db, user, volume_id):
         raise _not_found()
     try:
-        bootstrap = _service(db).load_bootstrap(
+        bootstrap = _service(db, settings).load_bootstrap(
             user_id=user.id,
             volume_id=volume_id,
             access_scope=_access_scope(db, user),
@@ -353,7 +353,7 @@ def save_progress_v3(
         raise _not_found()
     location_json = _location_json(payload.location, volume_id)
     try:
-        result = _service(db).save_progress(
+        result = _service(db, settings).save_progress(
             SaveProgressCommand(
                 user_id=user.id,
                 volume_id=volume_id,
@@ -371,7 +371,7 @@ def save_progress_v3(
         ReaderFingerprintMismatch,
     ) as error:
         _raise_service_error(error)
-    context = _service(db).get_context(volume_id)
+    context = _service(db, settings).get_context(volume_id)
     if context is None:
         raise _not_found()
     return ReaderProgressResponse(
@@ -412,7 +412,7 @@ def list_bookmarks_v3(
     if not can_access_volume(db, user, volume_id):
         raise _not_found()
     try:
-        bookmarks = _service(db).list_bookmarks(
+        bookmarks = _service(db, settings).list_bookmarks(
             user_id=user.id,
             volume_id=volume_id,
             content_fingerprint=content_fingerprint,
@@ -470,7 +470,7 @@ def replace_bookmarks_v3(
         for bookmark in payload.bookmarks
     ]
     try:
-        bookmarks = _service(db).replace_bookmarks(
+        bookmarks = _service(db, settings).replace_bookmarks(
             user_id=user.id,
             volume_id=volume_id,
             content_fingerprint=payload.content_fingerprint,

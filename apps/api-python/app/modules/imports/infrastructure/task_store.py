@@ -19,6 +19,13 @@ class SqlAlchemyImportTaskStore:
         self._db = db
 
     def stage(self, command: StageImportCommand) -> tuple[ImportTaskDTO, bool]:
+        media_kind_policy = command.media_kind_policy
+        if media_kind_policy is None and command.monitor_folder_id is not None:
+            media_kind_policy = self._db.scalar(
+                select(MonitorFolder.media_kind_policy).where(
+                    MonitorFolder.id == command.monitor_folder_id
+                )
+            )
         row, created = task_rows.stage_import_task(
             self._db,
             command.source_path,
@@ -28,6 +35,7 @@ class SqlAlchemyImportTaskStore:
             requested_author=command.requested_author,
             work_id=command.work_id,
             monitor_folder_id=command.monitor_folder_id,
+            media_kind_policy=str(media_kind_policy or "MIXED"),
             message=command.message,
             allow_terminal_requeue=command.allow_terminal_requeue,
         )

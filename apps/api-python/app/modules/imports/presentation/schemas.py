@@ -15,12 +15,43 @@ class MonitorFolder(HttpContractModel):
     root_path: str = Field(alias="rootPath")
     shelf_id: str | None = Field(default=None, alias="shelfId")
     enabled: bool
+    media_kind_policy: Literal["MIXED", "EBOOK", "COMIC", "AUDIOBOOK"] = Field(
+        alias="mediaKindPolicy"
+    )
     ignore_patterns: str | None = Field(default=None, alias="ignorePatterns")
     ignore_hidden: bool = Field(alias="ignoreHidden")
     min_file_size_bytes: int = Field(alias="minFileSizeBytes")
     description: str | None
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
+
+
+class CreateMonitorFolderRequest(HttpContractModel):
+    root_path: str = Field(alias="rootPath", min_length=1)
+    name: str | None = None
+    shelf_id: str | None = Field(default=None, alias="shelfId")
+    enabled: bool = True
+    media_kind_policy: str = Field(default="MIXED", alias="mediaKindPolicy")
+    ignore_patterns: str | None = Field(default=None, alias="ignorePatterns")
+    ignore_hidden: bool = Field(default=True, alias="ignoreHidden")
+    min_file_size_bytes: int = Field(default=10240, ge=0, alias="minFileSizeBytes")
+    description: str | None = None
+    import_mode: str | None = Field(default=None, alias="importMode")
+
+
+class UpdateMonitorFolderRequest(HttpContractModel):
+    root_path: str | None = Field(default=None, alias="rootPath")
+    name: str | None = None
+    shelf_id: str | None = Field(default=None, alias="shelfId")
+    enabled: bool | None = None
+    media_kind_policy: str | None = Field(default=None, alias="mediaKindPolicy")
+    ignore_patterns: str | None = Field(default=None, alias="ignorePatterns")
+    ignore_hidden: bool | None = Field(default=None, alias="ignoreHidden")
+    min_file_size_bytes: int | None = Field(
+        default=None, ge=0, alias="minFileSizeBytes"
+    )
+    description: str | None = None
+    import_mode: str | None = Field(default=None, alias="importMode")
 
 
 class MonitorFoldersPayload(HttpContractModel):
@@ -121,6 +152,9 @@ class ImportTask(HttpContractModel):
     work_id: str | None = Field(alias="workId")
     volume_id: str | None = Field(alias="volumeId")
     origin: str
+    media_kind_policy: Literal["MIXED", "EBOOK", "COMIC", "AUDIOBOOK"] = Field(
+        alias="mediaKindPolicy"
+    )
     status: str
     original_name: str | None = Field(alias="originalName")
     requested_title: str | None = Field(alias="requestedTitle")

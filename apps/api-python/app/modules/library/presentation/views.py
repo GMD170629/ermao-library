@@ -12,7 +12,7 @@ from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
 
 from fastapi.responses import Response
-from sqlalchemy import func, inspect, select
+from sqlalchemy import case, func, inspect, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -23,6 +23,11 @@ from app.bootstrap.library import (
 )
 from app.bootstrap.organize import organize_jobs
 from app.bootstrap.system import get_setting
+from app.contracts.media_capabilities import (
+    conversion_available_for_format,
+    kindle_send_available_for_format,
+    reader_type_for_format,
+)
 from app.core.authorization import (
     authorization_context,
     can_access_work,
@@ -278,11 +283,11 @@ def _format_duration(duration_ms: Any) -> str:
 
 
 def _media_position_label(
-    db: Session, media_kind: str, progress: dict[str, Any] | None
+    db: Session, reader_type: str, progress: dict[str, Any] | None
 ) -> str:
     if not progress:
         return "未开始"
-    if media_kind != "AUDIOBOOK":
+    if reader_type != "audio":
         page = progress.get("page")
         if page:
             return f"第 {page} 页"
@@ -340,35 +345,50 @@ def _reading_status(value: Any) -> str:
     return normalized if normalized in {"UNREAD", "READING", "FINISHED"} else "UNREAD"
 
 
-def _bookshelf_work_view(work: dict[str, Any]) -> dict[str, Any]:
-    work_type = str(work.get("workType") or "EPUB").upper()
-    labels = _labels()
+def _available_media_kinds(db: Session, work_id: str) -> list[str]:
+    return list(
+        db.scalars(
+            select(LibraryMediaVersion.media_kind)
+            .where(LibraryMediaVersion.work_id == work_id)
+            .order_by(
+                case(
+                    (LibraryMediaVersion.media_kind == "EBOOK", 0),
+                    (LibraryMediaVersion.media_kind == "COMIC", 1),
+                    (LibraryMediaVersion.media_kind == "AUDIOBOOK", 2),
+                    else_=3,
+                ),
+                LibraryMediaVersion.id.asc(),
+            )
+        ).all()
+    )
+
+
+def _bookshelf_work_view(
+    work: dict[str, Any], media_kinds: list[str]
+) -> dict[str, Any]:
     return {
         "id": work["id"],
         "title": work.get("title") or "未命名作品",
         "author": work.get("author") or "未知作者",
-        "format": labels["format"].get(work_type, "未知"),
+        "availableMediaKinds": media_kinds,
         "gradient": "from-slate-950 via-blue-800 to-cyan-500",
         "coverStatus": work.get("coverStatus") or "PENDING",
         "coverUrl": _cover_url("works", work["id"], work, size="medium"),
     }
 
 
-def _bookshelf_item_view(work: dict[str, Any]) -> dict[str, Any]:
+def _bookshelf_item_view(db: Session, work: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": work["id"],
         "title": work.get("title") or "未命名作品",
         "author": work.get("author") or "未知作者",
         "coverUrl": _cover_url("works", work["id"], work, size="medium"),
+        "availableMediaKinds": _available_media_kinds(db, str(work["id"])),
     }
 
 
-def _book_search_item_view(work: dict[str, Any]) -> dict[str, Any]:
-    work_type = str(work.get("workType") or "EPUB").upper()
-    return {
-        **_bookshelf_item_view(work),
-        "format": _labels()["format"].get(work_type, "未知"),
-    }
+def _book_search_item_view(db: Session, work: dict[str, Any]) -> dict[str, Any]:
+    return _bookshelf_item_view(db, work)
 
 
 def _management_work_views(
@@ -421,7 +441,6 @@ def _management_work_views(
     result: list[dict[str, Any]] = []
     for work in works:
         work_resources = resources.get(str(work["id"]), [])
-        display = work_resources[0][1] if work_resources else None
         media_kinds = list(
             dict.fromkeys(media.media_kind for media, _volume in work_resources)
         )
@@ -439,22 +458,11 @@ def _management_work_views(
         )
         completed = bool(percents) and all(percent >= 100 for percent in percents)
         reading = any(percent > 0 for percent in percents)
-        work_type = str(
-            display.format if display else work.get("workType") or "EPUB"
-        ).upper()
         result.append(
             {
-                **_bookshelf_work_view(work),
-                "publisher": display.publisher if display else None,
+                **_bookshelf_work_view(work, media_kinds),
                 "seriesName": work.get("seriesName"),
                 "tags": _parse_json(work.get("tags"), []),
-                "type": "audiobook"
-                if media_kinds == ["AUDIOBOOK"]
-                else "comic"
-                if media_kinds == ["COMIC"]
-                else "ebook",
-                "format": _labels()["format"].get(work_type, work_type),
-                "availableMediaKinds": media_kinds,
                 "statusValue": "FINISHED"
                 if completed
                 else "READING"
@@ -501,6 +509,7 @@ def _library_volume_view(
     files: list[LibraryFile],
 ) -> dict[str, Any]:
     percent = min(100.0, max(0.0, float(progress.percent if progress else 0)))
+    reader_type = reader_type_for_format(volume.format)
     return {
         "id": volume.id,
         "mediaVersionId": media_version_id,
@@ -508,6 +517,15 @@ def _library_volume_view(
         "volumeIndex": volume.volume_index,
         "sortOrder": volume.sort_order,
         "format": volume.format,
+        "readerType": reader_type.value if reader_type else "reflowable",
+        "classification": {
+            "source": volume.classification_source,
+            "reason": volume.classification_reason,
+            "suggestedMediaKind": volume.suggested_media_kind,
+        },
+        "readable": reader_type is not None,
+        "conversionAvailable": conversion_available_for_format(volume.format),
+        "kindleSendAvailable": kindle_send_available_for_format(volume.format),
         "derivedFromVolumeId": volume.derived_from_volume_id,
         "publisher": volume.publisher,
         "publishedAt": _dt(volume.published_at),
@@ -569,6 +587,11 @@ def _work_detail_volume_view(
         "volumeIndex": volume.get("volumeIndex"),
         "sortOrder": volume["sortOrder"],
         "format": volume["format"],
+        "readerType": volume["readerType"],
+        "classification": volume["classification"],
+        "readable": volume["readable"],
+        "conversionAvailable": volume["conversionAvailable"],
+        "kindleSendAvailable": volume["kindleSendAvailable"],
         "derivedFromVolumeId": volume.get("derivedFromVolumeId"),
         "publisher": volume.get("publisher"),
         "publishedAt": volume.get("publishedAt"),
@@ -809,7 +832,6 @@ def _work_view(
         "tags": _parse_json(work.get("tags"), []),
         "seriesName": work.get("seriesName"),
         "seriesIndex": work.get("seriesIndex"),
-        "publishedYear": work.get("publishedYear"),
         "organized": bool(work.get("organized")),
         "organizeStatus": work.get("organizeStatus") or "REVIEWING",
         "metadataQuality": int(work.get("metadataQuality") or 0),
@@ -924,9 +946,10 @@ def _active_media_view(
     )
     percent = float(selected_volume.get("progress") or 0)
     files = list(selected_volume.get("files") or [])
+    reader_type = str(selected_volume.get("readerType") or "reflowable")
     action_href = (
         f"/listen/{quote(volume_id, safe='')}"
-        if selected_tab == "AUDIOBOOK"
+        if reader_type == "audio"
         else f"/reader/{quote(volume_id, safe='')}"
     )
     navigation = {
@@ -952,16 +975,16 @@ def _active_media_view(
         else "UNREAD",
         "progressStatus": _status_from_progress(progress_view),
         "progress": percent,
-        "positionLabel": _media_position_label(db, selected_tab, progress_view),
+        "positionLabel": _media_position_label(db, reader_type, progress_view),
         "durationMs": selected_volume.get("durationMs"),
-        "narrator": selected_volume.get("narrator"),
+        "narrator": selected_volume.get("narrator") if reader_type == "audio" else None,
         "primaryAction": {
             "label": "继续" if percent > 0 else "开始",
             "href": action_href,
         },
         "units": reading_units,
         "volumes": volumes,
-        "tracks": files if selected_tab == "AUDIOBOOK" else [],
+        "tracks": files if reader_type == "audio" else [],
         "localProgressScope": {
             "userId": user_id,
             "volumeId": volume_id,
@@ -1186,11 +1209,6 @@ def _metadata_field_patch(
     if "seriesIndex" in selected and candidate.get("seriesIndex") is not None:
         try:
             patch["seriesIndex"] = float(candidate["seriesIndex"])
-        except (TypeError, ValueError):
-            pass
-    if "publishedYear" in selected and candidate.get("publishedYear") is not None:
-        try:
-            patch["publishedYear"] = int(candidate["publishedYear"])
         except (TypeError, ValueError):
             pass
     return patch

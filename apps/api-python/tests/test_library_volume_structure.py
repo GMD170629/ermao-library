@@ -2,6 +2,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
 from app.core.auth import hash_password
 from app.core.config import Settings
 from app.models.auth import ReaderBookmark, User, UserMonitorFolderAccess
@@ -23,9 +27,6 @@ from app.modules.library.application.volume_commands import (
 from app.modules.library.presentation.work_ops import (
     _delete_import_linked_library_scope,
 )
-from fastapi.testclient import TestClient
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
 
 
 def _login_admin(client: TestClient, db: Session) -> User:
@@ -54,7 +55,6 @@ def _volume_aggregate(db: Session, user: User) -> None:
         normalized_title="deletevolume",
         author="Author",
         normalized_author="author",
-        work_type="BOOK",
         tags="[]",
     )
     media_version = LibraryMediaVersion(
@@ -158,6 +158,148 @@ def test_delete_last_volume_cascades_and_undo_restores_volume_resources(
     assert restored_task.volume_id == "delete-volume-resource"
 
 
+def test_reclassify_volume_preserves_volume_data_merges_history_and_undoes(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    user = _login_admin(client, db_session)
+    now = datetime.now(UTC)
+    work = LibraryWork(
+        id="reclassify-work",
+        origin="MANUAL",
+        title="Reclassify",
+        normalized_title="reclassify",
+        author="Author",
+        normalized_author="author",
+        tags="[]",
+    )
+    ebook = LibraryMediaVersion(
+        id="reclassify-ebook", work_id=work.id, media_kind="EBOOK"
+    )
+    comic = LibraryMediaVersion(
+        id="reclassify-comic", work_id=work.id, media_kind="COMIC"
+    )
+    moved = LibraryVolume(
+        id="reclassify-moved",
+        media_version_id=ebook.id,
+        title="Moved",
+        sort_order=0,
+        format="EPUB",
+        resource_key="reclassify:moved",
+        import_status="COMPLETED",
+        classification_source="AUTO",
+        classification_reason="FORMAT_DEFAULT",
+        suggested_media_kind="COMIC",
+    )
+    remaining = LibraryVolume(
+        id="reclassify-remaining",
+        media_version_id=ebook.id,
+        title="Remaining",
+        sort_order=1000,
+        format="EPUB",
+        resource_key="reclassify:remaining",
+        import_status="COMPLETED",
+    )
+    existing_target = LibraryVolume(
+        id="reclassify-target",
+        media_version_id=comic.id,
+        title="Target",
+        sort_order=0,
+        format="CBZ",
+        resource_key="reclassify:target",
+        import_status="COMPLETED",
+    )
+    progress = LibraryReadingProgress(
+        id="reclassify-progress",
+        user_id=user.id,
+        volume_id=moved.id,
+        reader_type="epub",
+        position="epubcfi(/6/2)",
+        percent=42,
+        extra="{}",
+    )
+    bookmark = ReaderBookmark(
+        id="reclassify-bookmark",
+        user_id=user.id,
+        volume_id=moved.id,
+        content_fingerprint="reclassify",
+        bookmark_id="bookmark-reclassify",
+        location_json="{}",
+        label="Saved",
+        percent=42,
+        bookmark_created_at="2026-08-03T00:00:00Z",
+    )
+    source_history = UserMediaHistory(
+        id="reclassify-source-history",
+        user_id=user.id,
+        media_version_id=ebook.id,
+        last_volume_id=moved.id,
+        created_at=now - timedelta(days=2),
+        updated_at=now,
+    )
+    target_history = UserMediaHistory(
+        id="reclassify-target-history",
+        user_id=user.id,
+        media_version_id=comic.id,
+        last_volume_id=existing_target.id,
+        created_at=now - timedelta(days=2),
+        updated_at=now - timedelta(days=1),
+    )
+    db_session.add_all(
+        [
+            work,
+            ebook,
+            comic,
+            moved,
+            remaining,
+            existing_target,
+            progress,
+            bookmark,
+            source_history,
+            target_history,
+        ]
+    )
+    db_session.commit()
+
+    response = client.post(
+        f"/api/works/{work.id}/volumes/{moved.id}/reclassify",
+        json={"targetMediaKind": "COMIC", "applyTo": "VOLUME"},
+    )
+    assert response.status_code == 200
+    operation_id = response.json()["data"]["operation"]["id"]
+    db_session.expire_all()
+    moved_after = db_session.get(LibraryVolume, moved.id)
+    assert moved_after is not None
+    assert moved_after.media_version_id == comic.id
+    assert moved_after.classification_source == "USER"
+    assert moved_after.classification_reason == "USER_OVERRIDE"
+    assert moved_after.suggested_media_kind is None
+    assert db_session.get(LibraryReadingProgress, progress.id) is not None
+    assert db_session.get(ReaderBookmark, bookmark.id) is not None
+    source_history_after = db_session.get(UserMediaHistory, source_history.id)
+    target_history_after = db_session.get(UserMediaHistory, target_history.id)
+    assert source_history_after is not None
+    assert source_history_after.last_volume_id == remaining.id
+    assert target_history_after is not None
+    assert target_history_after.last_volume_id == moved.id
+
+    undo = client.post(f"/api/library/operations/{operation_id}/undo")
+    assert undo.status_code == 200
+    db_session.expire_all()
+    restored = db_session.get(LibraryVolume, moved.id)
+    assert restored is not None
+    assert restored.media_version_id == ebook.id
+    assert restored.classification_source == "AUTO"
+    assert restored.suggested_media_kind == "COMIC"
+    assert (
+        db_session.get(UserMediaHistory, source_history.id).last_volume_id == moved.id
+    )
+    assert (
+        db_session.get(UserMediaHistory, target_history.id).last_volume_id
+        == existing_target.id
+    )
+
+
 def test_volume_structure_openapi_has_explicit_volume_only_contract(
     client: TestClient,
 ) -> None:
@@ -167,13 +309,16 @@ def test_volume_structure_openapi_has_explicit_volume_only_contract(
     assert "requestBody" in schema["paths"][path]["patch"]
     move = schema["paths"][f"{path}/move"]["post"]
     split = schema["paths"][f"{path}/split"]["post"]
+    reclassify = schema["paths"][f"{path}/reclassify"]["post"]
     assert "requestBody" in move
     assert "requestBody" in split
+    assert "requestBody" in reclassify
     volume_contract = str(
         {
             path: schema["paths"][path],
             f"{path}/move": schema["paths"][f"{path}/move"],
             f"{path}/split": schema["paths"][f"{path}/split"],
+            f"{path}/reclassify": schema["paths"][f"{path}/reclassify"],
         }
     )
     assert "editionId" not in volume_contract
@@ -193,7 +338,6 @@ def test_continue_reading_uses_recent_unfinished_media_and_includes_zero_percent
         normalized_title="continue",
         author="Author",
         normalized_author="author",
-        work_type="BOOK",
         tags="[]",
     )
     ebook = LibraryMediaVersion(
@@ -298,7 +442,6 @@ def test_import_task_cleanup_uses_volume_target_and_removes_empty_parents(
         normalized_title="importcleanup",
         author="Author",
         normalized_author="author",
-        work_type="BOOK",
         tags="[]",
     )
     media = LibraryMediaVersion(
@@ -388,7 +531,6 @@ def test_move_volume_hides_an_unauthorized_target_work(
             normalized_title=prefix,
             author="Author",
             normalized_author="author",
-            work_type="BOOK",
             tags="[]",
         )
         media = LibraryMediaVersion(
@@ -500,7 +642,6 @@ def test_move_and_split_operations_restore_the_original_volume_parent(
             normalized_title=prefix,
             author="Author",
             normalized_author="author",
-            work_type="BOOK",
             tags="[]",
         )
         media = LibraryMediaVersion(

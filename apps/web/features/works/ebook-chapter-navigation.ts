@@ -15,12 +15,13 @@ export function isReflowableEbookFormat(format: string | null | undefined): form
   return Boolean(format && REFLOWABLE_EBOOK_FORMATS.has(format as ReadingFormat));
 }
 
-/** Whether the ebook detail tab should render chapter navigation for this volume. */
+/** Whether a classified media tab should render reflowable chapter navigation. */
 export function hasEbookChapterNavigation(
   detailTab: WorkDetailTabKey | null | undefined,
   format: string | null | undefined
 ): boolean {
-  return detailTab === 'EBOOK' && isReflowableEbookFormat(format);
+  return detailTab !== null && detailTab !== undefined && detailTab !== 'STRUCTURE'
+    && isReflowableEbookFormat(format);
 }
 
 /**

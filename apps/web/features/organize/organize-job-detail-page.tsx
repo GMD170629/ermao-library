@@ -28,14 +28,14 @@ function valueLabel(value: unknown) {
 function metadataChecks(job: OrganizeJobView) {
   const book = job.book;
   const volumes = book.mediaVersions.flatMap((mediaVersion) => mediaVersion.volumes);
-  const publishedYear = volumes.map((volume) => volume.publishedAt).find(Boolean)?.slice(0, 4) ?? null;
+  const publishedAt = volumes.map((volume) => volume.publishedAt).find(Boolean) ?? null;
   return [
     { key: 'title', label: '标题', complete: Boolean(book.title.trim()), value: book.title },
     { key: 'author', label: '作者', complete: Boolean(book.author.trim() && book.author !== '未知作者'), value: book.author },
     { key: 'cover', label: '封面', complete: Boolean(book.coverUrl && book.coverStatus === 'READY'), value: book.coverStatus === 'READY' ? '已生成' : '缺少或待生成' },
     { key: 'seriesName', label: '系列', complete: Boolean(book.seriesName), value: book.seriesName },
     { key: 'seriesIndex', label: '卷号', complete: book.seriesIndex !== null, value: book.seriesIndex },
-    { key: 'publishedYear', label: '出版年', complete: publishedYear !== null, value: publishedYear },
+    { key: 'publishedAt', label: '出版时间', complete: publishedAt !== null, value: publishedAt },
     { key: 'tags', label: '标签', complete: book.tags.length > 0, value: book.tags },
     { key: 'description', label: '简介', complete: Boolean(book.description), value: book.description }
   ];

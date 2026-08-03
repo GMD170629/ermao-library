@@ -1,7 +1,7 @@
-import type { MediaKind } from '../../../types/work';
+import type { ReaderType } from '../../../types/work';
 
-export function structureFileLabel(mediaKind: MediaKind, path: string): string {
-  if (mediaKind !== 'AUDIOBOOK') return path;
+export function structureFileLabel(readerType: ReaderType, path: string): string {
+  if (readerType !== 'audio') return path;
 
   const segments = path.split(/[\\/]/u);
   return segments.at(-1) || path;

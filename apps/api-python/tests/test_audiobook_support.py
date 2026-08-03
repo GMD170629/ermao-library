@@ -111,6 +111,14 @@ def _login(
     return user
 
 
+def _enable_upload_monitor(client, target: Path, name: str) -> None:
+    response = client.post(
+        "/api/monitor-folders",
+        json={"name": name, "rootPath": str(target), "enabled": True},
+    )
+    assert response.status_code == 201
+
+
 def _fake_audio_metadata(
     path: Path, *, album: str = "三体", author: str = "刘慈欣"
 ) -> AudioFileMetadata:
@@ -1178,7 +1186,6 @@ def test_three_media_filters_tabs_preferences_and_completion_are_user_scoped(
             normalized_title="mixed media work",
             author="Author",
             normalized_author="author",
-            work_type="EPUB",
             tags="[]",
         )
     )
@@ -1294,7 +1301,6 @@ def test_active_audio_volume_and_continue_reading_follow_volume_progress(
         origin="MANUAL",
         title="Two audio volumes",
         normalized_title="two audio volumes",
-        work_type="AUDIO",
         tags="[]",
     )
     media_version = LibraryMediaVersion(
@@ -1396,6 +1402,7 @@ def test_multi_audio_upload_saves_raw_tracks_without_creating_bundle_task(
     _login(client, db_session)
     target = test_settings.resolved_monitor_root / "uploads"
     target.mkdir(parents=True, exist_ok=True)
+    _enable_upload_monitor(client, target, "Audio uploads")
     response = client.post(
         "/api/works/import",
         data={"targetPath": str(target)},
@@ -1407,7 +1414,7 @@ def test_multi_audio_upload_saves_raw_tracks_without_creating_bundle_task(
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["saved"] == 2
-    assert data["autoImport"] is False
+    assert data["autoImport"] is True
     assert [item["file"] for item in data["results"]] == ["01.mp3", "02.mp3"]
     assert (target / "01.mp3").read_bytes() == b"first-track"
     assert (target / "02.mp3").read_bytes() == b"second-track"
@@ -1424,6 +1431,7 @@ def test_manual_multi_audio_upload_keeps_aggregate_byte_limit(
     _login(client, db_session)
     target = test_settings.resolved_monitor_root / "limited-upload"
     target.mkdir(parents=True, exist_ok=True)
+    _enable_upload_monitor(client, target, "Limited audio uploads")
     test_settings.audiobook_max_file_bytes = 1024
     test_settings.audiobook_max_bundle_bytes = 20
 
@@ -1451,6 +1459,7 @@ def test_failed_audio_upload_removes_staging_files_and_never_creates_task(
     _login(client, db_session)
     target = test_settings.resolved_monitor_root / "failed-upload"
     target.mkdir(parents=True, exist_ok=True)
+    _enable_upload_monitor(client, target, "Failed audio uploads")
 
     def fail_after_partial_write(_source, staged_target: Path, *, max_bytes):
         staged_target.write_bytes(b"partial")
@@ -2501,7 +2510,9 @@ def test_rescan_reconciles_tracks_split_across_volumes_and_preserves_progress(
     visible_works = (
         db_session.execute(
             text(
-                "SELECT `id`, `title` FROM `LibraryWork` WHERE `hidden` = 0 AND `workType` = 'AUDIO'"
+                    "SELECT work.`id`, work.`title` FROM `LibraryWork` work "
+                    "JOIN `LibraryMediaVersion` media ON media.`workId` = work.`id` "
+                    "WHERE work.`hidden` = 0 AND media.`mediaKind` = 'AUDIOBOOK'"
             ),
         )
         .mappings()

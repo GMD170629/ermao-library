@@ -1,10 +1,15 @@
 'use client';
 
 import { ChevronDown, ChevronRight, FolderOpen, RotateCcw } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { cn } from '../ui/cn';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useExpressionI18n } from '@/i18n/provider';
+import {
+  enabledMonitorRootPaths,
+  isAllowedTargetPath,
+  isDirectoryInside
+} from './target-directory-policy';
 
 type MonitorFolder = {
   id: string;
@@ -42,18 +47,8 @@ export type TargetDirectoryStatus = {
   label: string;
 };
 
-function normalizePath(path: string) {
-  return path.replace(/\/+$/, '') || path;
-}
-
-function isPathInside(rootPath: string, targetPath: string) {
-  const root = normalizePath(rootPath);
-  const target = normalizePath(targetPath);
-  return target === root || target.startsWith(`${root}/`);
-}
-
 function autoImportFor(path: string, folders: MonitorFolder[]) {
-  return folders.some((folder) => folder.enabled && isPathInside(folder.rootPath, path));
+  return folders.some((folder) => folder.enabled && isDirectoryInside(folder.rootPath, path));
 }
 
 export function TargetDirectoryPicker({
@@ -64,6 +59,7 @@ export function TargetDirectoryPicker({
   requiredMessage,
   showRequiredState = true,
   processingMode = 'monitor',
+  restrictToEnabledMonitorFolders = false,
   onStatusChange,
   className
 }: {
@@ -74,6 +70,7 @@ export function TargetDirectoryPicker({
   requiredMessage: string;
   showRequiredState?: boolean;
   processingMode?: 'monitor' | 'queue';
+  restrictToEnabledMonitorFolders?: boolean;
   onStatusChange?: (status: TargetDirectoryStatus) => void;
   className?: string;
 }) {
@@ -87,11 +84,14 @@ export function TargetDirectoryPicker({
   const [treeError, setTreeError] = useState('');
   const rootRef = useRef<HTMLDivElement>(null);
 
-  async function loadNode(path?: string) {
+  const loadNode = useCallback(async (path?: string) => {
     setLoadingPath(path || '__root__');
     setTreeError('');
     try {
-      const query = path ? `?path=${encodeURIComponent(path)}` : '';
+      const params = new URLSearchParams();
+      if (path) params.set('path', path);
+      if (restrictToEnabledMonitorFolders) params.set('purpose', 'upload');
+      const query = params.size > 0 ? `?${params.toString()}` : '';
       const response = await fetch(`/api/monitor-folders/tree${query}`);
       const payload = (await response.json()) as { ok: boolean; data?: DirectoryTreePayload; error?: { message: string } };
       if (!payload.ok || !payload.data?.node) {
@@ -99,7 +99,9 @@ export function TargetDirectoryPicker({
         return null;
       }
       const node = payload.data.node;
-      setMonitorRoot(payload.data.monitorRoot || node.path);
+      if (!restrictToEnabledMonitorFolders) {
+        setMonitorRoot(payload.data.monitorRoot || node.path);
+      }
       setNodes((current) => ({ ...current, [node.path]: node }));
       return node;
     } catch {
@@ -108,19 +110,31 @@ export function TargetDirectoryPicker({
     } finally {
       setLoadingPath('');
     }
-  }
+  }, [restrictToEnabledMonitorFolders]);
 
   useEffect(() => {
     let active = true;
     async function loadInitialState() {
       try {
-        const response = await fetch('/api/monitor-folders');
+        const response = await fetch(`/api/monitor-folders${restrictToEnabledMonitorFolders ? '?purpose=upload' : ''}`);
         const payload = (await response.json()) as { ok: boolean; data?: MonitorFoldersPayload; error?: { message: string } };
         if (!active) return;
         if (payload.ok) {
           const nextFolders = payload.data?.folders ?? [];
           setFolders(nextFolders);
           const lastPath = memory === 'upload' ? payload.data?.lastUploadTargetPath : payload.data?.lastDownloadTargetPath;
+          if (restrictToEnabledMonitorFolders) {
+            const allowedRoots = enabledMonitorRootPaths(nextFolders);
+            await Promise.all(allowedRoots.map((rootPath) => loadNode(rootPath)));
+            if (!active) return;
+            if (lastPath && isAllowedTargetPath(lastPath, allowedRoots)) {
+              const lastNode = await loadNode(lastPath);
+              if (active && lastNode) onChange(lastNode.path);
+            } else {
+              onChange('');
+            }
+            return;
+          }
           const rootNode = await loadNode();
           if (!active) return;
           if (lastPath) {
@@ -140,7 +154,7 @@ export function TargetDirectoryPicker({
     return () => {
       active = false;
     };
-  }, [memory, onChange]);
+  }, [loadNode, memory, onChange, restrictToEnabledMonitorFolders]);
 
   useEffect(() => {
     if (!open) return;
@@ -173,11 +187,16 @@ export function TargetDirectoryPicker({
   }
 
   function selectPath(path: string) {
+    if (restrictToEnabledMonitorFolders && !isAllowedTargetPath(path, allowedRootPaths)) return;
     onChange(path);
     setOpen(false);
   }
 
+  const allowedRootPaths = restrictToEnabledMonitorFolders ? enabledMonitorRootPaths(folders) : [];
   const rootNode = monitorRoot ? nodes[monitorRoot] : Object.values(nodes)[0];
+  const rootNodes = restrictToEnabledMonitorFolders
+    ? allowedRootPaths.map((rootPath) => nodes[rootPath]).filter((node): node is DirectoryNode => Boolean(node))
+    : rootNode ? [rootNode] : [];
   const selectedAutoImport = processingMode === 'queue' ? Boolean(value) : value ? autoImportFor(value, folders) : false;
 
   return (
@@ -211,32 +230,42 @@ export function TargetDirectoryPicker({
         <div className="absolute left-0 right-0 top-full z-50 mt-2 rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-700 shadow-xl shadow-slate-200/60">
           <div className="mb-2 flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="font-medium text-slate-950"><I18nText>可访问目录</I18nText></div>
-              <div className="truncate text-xs text-slate-500">{monitorRoot || i18nExpression("读取中")}</div>
+              <div className="font-medium text-slate-950">{restrictToEnabledMonitorFolders ? <I18nText>已启用的监控文件夹</I18nText> : <I18nText>可访问目录</I18nText>}</div>
+              <div className="truncate text-xs text-slate-500">{restrictToEnabledMonitorFolders ? i18nExpression('可选择监控文件夹及其任意子文件夹') : monitorRoot || i18nExpression("读取中")}</div>
             </div>
             <button
               type="button"
-              onClick={() => loadNode(value || monitorRoot || undefined)}
+              onClick={() => {
+                if (restrictToEnabledMonitorFolders) {
+                  void Promise.all(allowedRootPaths.map((rootPath) => loadNode(rootPath)));
+                  return;
+                }
+                void loadNode(value || monitorRoot || undefined);
+              }}
               className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50"
             >
               <RotateCcw size={14} />
               <I18nText>刷新</I18nText></button>
           </div>
           <div className="max-h-72 overflow-auto rounded-xl bg-slate-50 p-2">
-            {rootNode ? (
-              <TargetDirectoryNodeRow
-                node={rootNode}
-                level={0}
-                selectedPath={value}
-                folders={folders}
-                nodes={nodes}
-                expanded={expanded}
-                loadingPath={loadingPath}
-                onSelect={selectPath}
-                onToggle={toggleDirectory}
-              />
+            {rootNodes.length > 0 ? (
+              rootNodes.map((node) => (
+                <TargetDirectoryNodeRow
+                  key={node.path}
+                  node={node}
+                  level={0}
+                  selectedPath={value}
+                  folders={folders}
+                  allowedRootPaths={allowedRootPaths}
+                  nodes={nodes}
+                  expanded={expanded}
+                  loadingPath={loadingPath}
+                  onSelect={selectPath}
+                  onToggle={toggleDirectory}
+                />
+              ))
             ) : (
-              <div className="px-3 py-2 text-slate-500">{loadingPath ? i18nExpression("正在读取目录...") : i18nExpression("暂无可选目录")}</div>
+              <div className="px-3 py-2 text-slate-500">{loadingPath ? i18nExpression("正在读取目录...") : restrictToEnabledMonitorFolders ? i18nExpression('暂无已启用的监控文件夹') : i18nExpression("暂无可选目录")}</div>
             )}
           </div>
           {treeError ? <div className="mt-2 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{treeError}</div> : null}
@@ -251,6 +280,7 @@ function TargetDirectoryNodeRow({
   level,
   selectedPath,
   folders,
+  allowedRootPaths,
   nodes,
   expanded,
   loadingPath,
@@ -261,6 +291,7 @@ function TargetDirectoryNodeRow({
   level: number;
   selectedPath: string;
   folders: MonitorFolder[];
+  allowedRootPaths: string[];
   nodes: Record<string, DirectoryNode>;
   expanded: Record<string, boolean>;
   loadingPath: string;
@@ -270,7 +301,7 @@ function TargetDirectoryNodeRow({
   const { t: i18nExpression } = useExpressionI18n();
   const isExpanded = Boolean(expanded[node.path]);
   const isSelected = selectedPath === node.path;
-  const children = node.children ?? [];
+  const children = (node.children ?? []).filter((child) => allowedRootPaths.length === 0 || isAllowedTargetPath(child.path, allowedRootPaths));
   const autoImport = autoImportFor(node.path, folders);
 
   return (
@@ -303,6 +334,7 @@ function TargetDirectoryNodeRow({
                 level={level + 1}
                 selectedPath={selectedPath}
                 folders={folders}
+                allowedRootPaths={allowedRootPaths}
                 nodes={nodes}
                 expanded={expanded}
                 loadingPath={loadingPath}

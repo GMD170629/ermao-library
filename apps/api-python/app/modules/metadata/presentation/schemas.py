@@ -30,7 +30,7 @@ class MetadataProvider(HttpContractModel):
     version: str
     description: str
     mode: str
-    work_types: list[str] = Field(alias="workTypes")
+    media_kinds: list[str] = Field(alias="mediaKinds")
     fields: list[str]
     capabilities: list[str]
     config_fields: list[ProviderConfigField] = Field(alias="configFields")
@@ -54,7 +54,7 @@ class PipelineProvider(HttpContractModel):
 
 
 class MetadataPipeline(HttpContractModel):
-    work_type: str = Field(alias="workType")
+    media_kind: str = Field(alias="mediaKind")
     providers: list[PipelineProvider]
 
 

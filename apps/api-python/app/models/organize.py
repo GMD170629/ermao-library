@@ -146,6 +146,7 @@ class OrganizeJob(Base):
         ),
         Index("OrganizeJob_runId_status_idx", "runId", "status"),
         Index("OrganizeJob_volumeId_idx", "volumeId"),
+        Index("OrganizeJob_mediaVersionId_idx", "mediaVersionId"),
         Index("OrganizeJob_importTaskId_idx", "importTaskId"),
         Index("OrganizeJob_status_updatedAt_idx", "status", "updatedAt"),
     )
@@ -167,6 +168,12 @@ class OrganizeJob(Base):
         "volumeId",
         String(191),
         ForeignKey("LibraryVolume.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+    )
+    media_version_id: Mapped[str | None] = mapped_column(
+        "mediaVersionId",
+        String(191),
+        ForeignKey("LibraryMediaVersion.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
     import_task_id: Mapped[str | None] = mapped_column(
@@ -217,6 +224,7 @@ class MetadataLookupTask(Base):
         Index("MetadataLookupTask_status_nextAttemptAt_idx", "status", "nextAttemptAt"),
         Index("MetadataLookupTask_workId_createdAt_idx", "workId", "createdAt"),
         Index("MetadataLookupTask_volumeId_idx", "volumeId"),
+        Index("MetadataLookupTask_mediaVersionId_idx", "mediaVersionId"),
         UniqueConstraint("importTaskId", name="MetadataLookupTask_importTaskId_key"),
     )
 
@@ -231,6 +239,12 @@ class MetadataLookupTask(Base):
         "volumeId",
         String(191),
         ForeignKey("LibraryVolume.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+    )
+    media_version_id: Mapped[str | None] = mapped_column(
+        "mediaVersionId",
+        String(191),
+        ForeignKey("LibraryMediaVersion.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
     import_task_id: Mapped[str | None] = mapped_column(
@@ -348,14 +362,14 @@ class MetadataProviderPipeline(Base):
     __tablename__ = "MetadataProviderPipeline"
     __table_args__ = (
         Index(
-            "MetadataProviderPipeline_workType_position_idx",
-            "workType",
+            "MetadataProviderPipeline_mediaKind_position_idx",
+            "mediaKind",
             "included",
             "position",
         ),
     )
 
-    work_type: Mapped[str] = mapped_column("workType", String(191), primary_key=True)
+    media_kind: Mapped[str] = mapped_column("mediaKind", String(191), primary_key=True)
     provider_id: Mapped[str] = mapped_column(
         "providerId", String(191), primary_key=True
     )

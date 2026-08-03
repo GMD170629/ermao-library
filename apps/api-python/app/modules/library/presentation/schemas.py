@@ -124,6 +124,14 @@ class LibraryFileSummary(HttpContractModel):
     size: str
 
 
+class VolumeClassification(HttpContractModel):
+    source: Literal["AUTO", "MONITOR_FOLDER", "USER", "INHERITED", "LEGACY"]
+    reason: str
+    suggested_media_kind: MediaKind | None = Field(
+        default=None, alias="suggestedMediaKind"
+    )
+
+
 class LibraryVolume(HttpContractModel):
     id: str
     media_version_id: str = Field(alias="mediaVersionId")
@@ -131,6 +139,13 @@ class LibraryVolume(HttpContractModel):
     volume_index: float | None = Field(default=None, alias="volumeIndex")
     sort_order: int = Field(alias="sortOrder")
     format: str
+    reader_type: Literal["reflowable", "comic", "pdf", "audio"] = Field(
+        alias="readerType"
+    )
+    classification: VolumeClassification
+    readable: bool
+    conversion_available: bool = Field(alias="conversionAvailable")
+    kindle_send_available: bool = Field(alias="kindleSendAvailable")
     derived_from_volume_id: str | None = Field(
         default=None,
         alias="derivedFromVolumeId",
@@ -180,6 +195,13 @@ class WorkDetailVolume(HttpContractModel):
     volume_index: float | None = Field(default=None, alias="volumeIndex")
     sort_order: int = Field(alias="sortOrder")
     format: str
+    reader_type: Literal["reflowable", "comic", "pdf", "audio"] = Field(
+        alias="readerType"
+    )
+    classification: VolumeClassification
+    readable: bool
+    conversion_available: bool = Field(alias="conversionAvailable")
+    kindle_send_available: bool = Field(alias="kindleSendAvailable")
     derived_from_volume_id: str | None = Field(
         default=None, alias="derivedFromVolumeId"
     )
@@ -237,7 +259,6 @@ class WorkView(HttpContractModel):
     tags: list[str]
     series_name: str | None = Field(default=None, alias="seriesName")
     series_index: float | None = Field(default=None, alias="seriesIndex")
-    published_year: int | None = Field(default=None, alias="publishedYear")
     organized: bool
     organize_status: str = Field(alias="organizeStatus")
     metadata_quality: int = Field(alias="metadataQuality")
@@ -268,10 +289,11 @@ class WorkSummary(HttpContractModel):
     title: str
     author: str
     cover_url: str = Field(alias="coverUrl")
+    available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
 
 
 class WorkSearchSummary(WorkSummary):
-    format: str
+    pass
 
 
 class ManagementWorkSummary(HttpContractModel):
@@ -279,7 +301,7 @@ class ManagementWorkSummary(HttpContractModel):
     title: str
     author: str
     monitor_folder_id: str | None = Field(alias="monitorFolderId")
-    work_type: str = Field(alias="workType")
+    available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
     series_name: str | None = Field(alias="seriesName")
     organize_status: str | None = Field(alias="organizeStatus")
     hidden: bool
@@ -292,14 +314,11 @@ class ManagementListWorkSummary(HttpContractModel):
     id: str
     title: str
     author: str
-    format: str
     gradient: str
     cover_status: str = Field(alias="coverStatus")
     cover_url: str = Field(alias="coverUrl")
-    publisher: str | None
     series_name: str | None = Field(alias="seriesName")
     tags: list[str]
-    type: Literal["ebook", "comic", "audiobook"]
     available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
     status_value: ReadingStatus = Field(alias="statusValue")
     last_read_at: datetime | None = Field(alias="lastReadAt")
@@ -311,8 +330,9 @@ WorkListItem = WorkView | WorkSummary | WorkSearchSummary | ManagementListWorkSu
 
 class DashboardSummaryPayload(HttpContractModel):
     total_books: int = Field(alias="totalBooks")
+    ebook_books: int = Field(alias="ebookBooks")
     comic_books: int = Field(alias="comicBooks")
-    novel_books: int = Field(alias="novelBooks")
+    audiobook_books: int = Field(alias="audiobookBooks")
     storage_used_bytes: int = Field(alias="storageUsedBytes")
     monitor_folder_count: int = Field(alias="monitorFolderCount")
     last_import_at: datetime | None = Field(alias="lastImportAt")
@@ -329,6 +349,10 @@ class ContinueReadingItem(HttpContractModel):
     author: str
     cover_url: str = Field(alias="coverUrl")
     media_kind: MediaKind = Field(alias="mediaKind")
+    volume_format: str = Field(alias="volumeFormat")
+    reader_type: Literal["reflowable", "comic", "pdf", "audio"] = Field(
+        alias="readerType"
+    )
     resume_volume_id: str | None = Field(alias="resumeVolumeId")
     progress: float
     chapter: str | None
@@ -384,6 +408,9 @@ class SourceFolderNode(HttpContractModel):
     root_path: str = Field(alias="rootPath")
     shelf_id: str | None = Field(alias="shelfId")
     enabled: bool
+    media_kind_policy: Literal["MIXED", "EBOOK", "COMIC", "AUDIOBOOK"] = Field(
+        alias="mediaKindPolicy"
+    )
     ignore_patterns: str | None = Field(alias="ignorePatterns")
     ignore_hidden: bool = Field(alias="ignoreHidden")
     min_file_size_bytes: int = Field(alias="minFileSizeBytes")
@@ -481,6 +508,11 @@ class ReadingUnitMetadata(HttpContractModel):
     track_index: int | None = Field(default=None, alias="trackIndex")
     page_number: int | None = Field(default=None, alias="pageNumber")
     source_file_name: str | None = Field(default=None, alias="sourceFileName")
+    href_base: Literal["publication-root"] | None = Field(
+        default=None,
+        alias="hrefBase",
+    )
+    recovered: bool | None = None
 
 
 class ReadingUnit(HttpContractModel):
@@ -735,7 +767,6 @@ class FacetGroups(HttpContractModel):
     author: list[LibraryCategory]
     tag: list[LibraryCategory]
     series: list[LibraryCategory]
-    publisher: list[LibraryCategory]
 
 
 class FacetsPayload(HttpContractModel):
@@ -813,6 +844,12 @@ class UndoOperationPayload(HttpContractModel):
     restored: bool
 
 
+class MetadataCandidateVolume(HttpContractModel):
+    published_at: datetime | None = Field(default=None, alias="publishedAt")
+    language: str | None = None
+    isbn: str | None = None
+
+
 class MetadataCandidate(HttpContractModel):
     id: str
     source: str
@@ -820,9 +857,9 @@ class MetadataCandidate(HttpContractModel):
     title: str | None
     title_aliases: list[str] | None = Field(default=None, alias="titleAliases")
     author: str | None = None
-    publisher: str | None = None
-    published_year: int | None = Field(default=None, alias="publishedYear")
-    isbn: str | None = None
+    volume_metadata: MetadataCandidateVolume | None = Field(
+        default=None, alias="volumeMetadata"
+    )
     description: str | None = None
     cover_url: str | None = Field(default=None, alias="coverUrl")
     score: float | None = None
@@ -845,12 +882,13 @@ MetadataApplyField = Literal[
     "coverUrl",
     "title",
     "author",
-    "publisher",
     "description",
     "tags",
     "seriesName",
     "seriesIndex",
-    "publishedYear",
+    "publishedAt",
+    "language",
+    "isbn",
 ]
 
 
@@ -861,9 +899,9 @@ class MetadataApplyCandidate(HttpContractModel):
     title: str | None = None
     title_aliases: list[str] | None = Field(default=None, alias="titleAliases")
     author: str | None = None
-    publisher: str | None = None
-    published_year: int | None = Field(default=None, alias="publishedYear")
-    isbn: str | None = None
+    volume_metadata: MetadataCandidateVolume | None = Field(
+        default=None, alias="volumeMetadata"
+    )
     description: str | None = None
     cover_url: str | None = Field(default=None, alias="coverUrl")
     score: float | None = None
@@ -907,6 +945,11 @@ class MoveVolumeRequest(HttpContractModel):
 
 class ReorderVolumeRequest(HttpContractModel):
     direction: Literal["up", "down"]
+
+
+class ReclassifyVolumeRequest(HttpContractModel):
+    target_media_kind: str = Field(alias="targetMediaKind", min_length=1)
+    apply_to: str = Field(alias="applyTo", min_length=1)
 
 
 class SplitVolumeRequest(HttpContractModel):

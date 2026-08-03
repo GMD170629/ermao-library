@@ -16,6 +16,8 @@ from app.modules.imports.application.identity_resolution import (
     resolve_import_identity,
 )
 from app.modules.imports.application.import_support import (
+    _classification_columns,
+    _classification_result_type,
     _ensure_work,
     _file_resource_key,
     _finalize_work_cover,
@@ -31,6 +33,11 @@ from app.modules.imports.application.ports import (
     ImportLibraryQueries,
     ImportOrchestrationServices,
     LibraryImportStore,
+)
+from app.modules.imports.domain.content_classification import (
+    ContentEvidence,
+    classify_content,
+    normalize_media_kind_policy,
 )
 from app.modules.imports.domain.pdf_content import PdfContentKind
 
@@ -62,11 +69,14 @@ def _import_pdf(
         requested_author=options.requested_author,
     )
     is_image_only = inspection.content_kind is PdfContentKind.IMAGE_ONLY
-    work_type = "COMIC" if is_image_only else "PDF"
-    media_kind = "COMIC" if is_image_only else "EBOOK"
-    result_type = "comic" if is_image_only else "ebook"
-    merge_format = "pdf-comic" if is_image_only else "pdf"
-    tags = ["comic", "pdf"] if is_image_only else ["pdf"]
+    classification = classify_content(
+        normalize_media_kind_policy(options.media_kind_policy),
+        ContentEvidence(volume_format="PDF", image_only=is_image_only),
+    )
+    media_kind = classification.media_kind
+    result_type = _classification_result_type(classification)
+    merge_format = "pdf"
+    tags = ["pdf"]
     merge_key = _import_work_merge_key(
         merge_format,
         identity.title,
@@ -84,7 +94,6 @@ def _import_pdf(
             "title": identity.title,
             "author": identity.author,
             "description": None,
-            "workType": work_type,
             "tags": tags,
             "mergeKey": merge_key,
             "origin": options.origin,
@@ -143,6 +152,7 @@ def _import_pdf(
                 "coverPath": stored_cover_path,
                 "coverStatus": services.cover_status(stored_cover_path),
                 "importStatus": "PARSING",
+                **_classification_columns(classification),
                 "createdAt": _now(),
                 "updatedAt": _now(),
             }

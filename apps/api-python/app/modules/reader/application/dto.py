@@ -61,6 +61,21 @@ class ReaderFileDto:
 
 
 @dataclass(frozen=True, slots=True)
+class ReaderEpubSourceDto:
+    file_id: str
+    path: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReaderRecoveredEpubChapterDto:
+    title: str
+    href: str
+    sort_order: int
+    idref: str | None
+    media_type: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class ReaderUnitDto:
     id: str
     volume_id: str

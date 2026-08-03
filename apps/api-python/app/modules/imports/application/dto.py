@@ -139,6 +139,7 @@ class ImportTaskDTO:
     requested_title: str | None = None
     requested_author: str | None = None
     monitor_folder_id: str | None = None
+    media_kind_policy: str = "MIXED"
     work_id: str | None = None
     volume_id: str | None = None
     task_kind: str = "FILE"
@@ -165,6 +166,7 @@ class StageImportCommand:
     requested_author: str | None = None
     work_id: str | None = None
     monitor_folder_id: str | None = None
+    media_kind_policy: str | None = None
     message: str = "等待后台处理"
     allow_terminal_requeue: bool = False
 
@@ -177,6 +179,7 @@ class ImportOptions:
     requested_title: str | None = None
     requested_author: str | None = None
     monitor_folder_id: str | None = None
+    media_kind_policy: str = "MIXED"
     import_task_id: str | None = None
     original_source_file_path: Path | None = None
     requested_work_id: str | None = None
@@ -205,3 +208,12 @@ class SeriesVolumeInfo:
     series_index: float
     title: str
     author: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EpubNavigationChapterDTO:
+    title: str
+    href: str
+    sort_order: int
+    idref: str | None
+    media_type: str | None

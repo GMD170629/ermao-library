@@ -38,6 +38,9 @@ def import_task_dto_from_row(row: Mapping[str, object]) -> ImportTaskDTO:
             if "monitorFolderId" in row
             else row.get("monitor_folder_id")
         ),
+        media_kind_policy=str(
+            row.get("mediaKindPolicy") or row.get("media_kind_policy") or "MIXED"
+        ),
         work_id=_optional_str(
             row.get("workId") if "workId" in row else row.get("work_id")
         ),

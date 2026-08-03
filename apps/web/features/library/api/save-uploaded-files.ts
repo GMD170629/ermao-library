@@ -14,7 +14,7 @@ export type SaveUploadedFilesResult =
     autoImport: boolean;
     files: SavedUploadFile[];
   }
-  | { kind: 'rejected'; message: string }
+  | { kind: 'rejected'; code: string | null; message: string }
   | { kind: 'transport-failed' }
   | { kind: 'invalid-response' };
 
@@ -41,12 +41,16 @@ function parseSavedUploadFile(value: unknown): SavedUploadFile | null {
   };
 }
 
-function parseResponse(payload: unknown): SaveUploadedFilesResult {
+export function parseSaveUploadedFilesResponse(payload: unknown): SaveUploadedFilesResult {
   if (!isRecord(payload)) return { kind: 'invalid-response' };
   if (payload.ok !== true) {
     const error = isRecord(payload.error) ? payload.error : null;
     return typeof error?.message === 'string'
-      ? { kind: 'rejected', message: error.message }
+      ? {
+          kind: 'rejected',
+          code: typeof error.code === 'string' ? error.code : null,
+          message: error.message
+        }
       : { kind: 'invalid-response' };
   }
   if (!isRecord(payload.data) || !Array.isArray(payload.data.results)) {
@@ -72,7 +76,7 @@ export async function postUploadedFiles(form: FormData): Promise<SaveUploadedFil
   try {
     const response = await fetch('/api/works/import', { method: 'POST', body: form });
     const payload: unknown = await response.json();
-    return parseResponse(payload);
+    return parseSaveUploadedFilesResponse(payload);
   } catch {
     return { kind: 'transport-failed' };
   }

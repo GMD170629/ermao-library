@@ -37,7 +37,7 @@ class OrganizeCandidate(HttpContractModel):
     id: str
     title: str | None
     author: str | None
-    work_type: str | None = Field(alias="workType")
+    available_media_kinds: list[str] = Field(alias="availableMediaKinds")
     cover_path: str | None = Field(alias="coverPath")
     metadata_quality: int = Field(alias="metadataQuality")
     reason_codes: list[str] = Field(alias="reasonCodes")
@@ -98,6 +98,7 @@ class OrganizeJob(HttpContractModel):
     id: str
     run_id: str | None = Field(alias="runId")
     volume_id: str | None = Field(alias="volumeId")
+    media_version_id: str | None = Field(default=None, alias="mediaVersionId")
     trigger: str
     status: str
     status_category: Literal["SUCCESS", "FAILED", "RECOGNIZING", "WAITING"] = Field(
@@ -124,7 +125,7 @@ class OrganizeJobListBook(HttpContractModel):
     id: str
     title: str
     author: str
-    format: str
+    available_media_kinds: list[str] = Field(alias="availableMediaKinds")
 
 
 class OrganizeJobListItem(HttpContractModel):

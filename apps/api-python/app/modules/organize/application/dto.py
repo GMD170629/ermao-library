@@ -14,7 +14,7 @@ class OrganizeBookListItem:
     id: str
     title: str
     author: str
-    format: str
+    available_media_kinds: list[str]
 
 
 @dataclass(frozen=True)

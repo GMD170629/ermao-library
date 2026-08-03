@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.contracts.media_capabilities import reader_type_for_format
 from app.core.authorization import (
     AuthorizationContext,
     monitor_folder_visibility_predicate,
@@ -44,30 +45,28 @@ def dashboard_summary(
         )
         or 0
     )
-    comic_books = int(
-        db.scalar(
-            select(func.count())
-            .select_from(LibraryWork)
-            .where(
-                LibraryWork.hidden.is_(False),
-                LibraryWork.work_type == "COMIC",
-                work_visible,
+
+    def media_kind_work_count(media_kind: MediaKind) -> int:
+        return int(
+            db.scalar(
+                select(func.count(func.distinct(LibraryWork.id)))
+                .select_from(LibraryWork)
+                .join(
+                    LibraryMediaVersion,
+                    LibraryMediaVersion.work_id == LibraryWork.id,
+                )
+                .where(
+                    LibraryWork.hidden.is_(False),
+                    LibraryMediaVersion.media_kind == media_kind.value,
+                    work_visible,
+                )
             )
+            or 0
         )
-        or 0
-    )
-    novel_books = int(
-        db.scalar(
-            select(func.count())
-            .select_from(LibraryWork)
-            .where(
-                LibraryWork.hidden.is_(False),
-                LibraryWork.work_type == "EPUB",
-                work_visible,
-            )
-        )
-        or 0
-    )
+
+    ebook_books = media_kind_work_count(MediaKind.EBOOK)
+    comic_books = media_kind_work_count(MediaKind.COMIC)
+    audiobook_books = media_kind_work_count(MediaKind.AUDIOBOOK)
 
     storage = int(
         db.scalar(
@@ -114,8 +113,9 @@ def dashboard_summary(
 
     return {
         "totalBooks": total_books,
+        "ebookBooks": ebook_books,
         "comicBooks": comic_books,
-        "novelBooks": novel_books,
+        "audiobookBooks": audiobook_books,
         "storageUsedBytes": storage,
         "monitorFolderCount": monitor_folder_count,
         "lastImportAt": (last_import or {}).get("finishedAt")
@@ -211,6 +211,7 @@ def continue_reading_progress(
             LibraryVolume.title.label("volume_title"),
             LibraryVolume.sort_order,
             LibraryVolume.narrator,
+            LibraryVolume.format.label("volume_format"),
             LibraryMediaVersion.media_kind,
             LibraryWork.id.label("work_id"),
             LibraryWork.title.label("work_title"),
@@ -309,6 +310,7 @@ def continue_reading_progress(
     selected = next(
         row for row in selected_media_rows if row.volume_id == selected_volume_id
     )
+    reader_type = reader_type_for_format(str(selected.volume_format))
     return {
         "workId": selected.work_id,
         "title": selected.work_title,
@@ -316,6 +318,8 @@ def continue_reading_progress(
         "coverPath": selected.cover_path,
         "coverStatus": selected.cover_status,
         "mediaKind": selected.media_kind,
+        "volumeFormat": selected.volume_format,
+        "readerType": reader_type.value if reader_type else "reflowable",
         "volumeId": selected.volume_id,
         "volumeTitle": selected.volume_title,
         "narrator": selected.narrator,
@@ -380,7 +384,6 @@ def list_management_works(db: Session, *, limit: int = 300) -> list[dict[str, An
             LibraryWork.title,
             LibraryWork.author,
             LibraryWork.series_name,
-            LibraryWork.work_type,
             LibraryWork.monitor_folder_id,
             LibraryWork.organize_status,
             LibraryWork.hidden,
@@ -390,13 +393,29 @@ def list_management_works(db: Session, *, limit: int = 300) -> list[dict[str, An
         .order_by(LibraryWork.updated_at.desc(), LibraryWork.id.desc())
         .limit(limit)
     ).all()
+    work_ids = [str(row.id) for row in rows]
+    kinds_by_work: dict[str, list[str]] = {work_id: [] for work_id in work_ids}
+    if work_ids:
+        media_rows = db.execute(
+            select(LibraryMediaVersion.work_id, LibraryMediaVersion.media_kind)
+            .where(LibraryMediaVersion.work_id.in_(work_ids))
+            .order_by(
+                LibraryMediaVersion.work_id.asc(),
+                LibraryMediaVersion.id.asc(),
+            )
+        ).all()
+        priority = {"EBOOK": 0, "COMIC": 1, "AUDIOBOOK": 2}
+        for work_id, media_kind in media_rows:
+            kinds_by_work[str(work_id)].append(str(media_kind))
+        for media_kinds in kinds_by_work.values():
+            media_kinds.sort(key=lambda kind: (priority.get(kind, 3), kind))
     return [
         {
             "id": row.id,
             "title": row.title,
             "author": row.author,
             "seriesName": row.series_name,
-            "workType": row.work_type,
+            "availableMediaKinds": kinds_by_work[str(row.id)],
             "monitorFolderId": row.monitor_folder_id,
             "organizeStatus": row.organize_status,
             "hidden": row.hidden,

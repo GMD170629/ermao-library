@@ -13,6 +13,8 @@ function shelf(
     kind,
     name: id,
     description: null,
+    rulesStatus: 'VALID',
+    unsupportedRuleFields: [],
     collectionIds,
     createdAt: '2026-07-29T00:00:00Z',
     updatedAt: '2026-07-29T00:00:00Z'

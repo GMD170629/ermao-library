@@ -29,7 +29,6 @@ class SmartShelfCriteria:
     media_kinds: tuple[str, ...]
     tags: tuple[str, ...]
     authors: tuple[str, ...]
-    publishers: tuple[str, ...]
     included_work_ids: tuple[str, ...]
     filters: FilterExpression
 
@@ -53,7 +52,6 @@ class SmartShelfCriteria:
             media_kinds=media_kinds,
             tags=_strings(value.get("tags")),
             authors=_strings(value.get("authors")),
-            publishers=_strings(value.get("publishers")),
             included_work_ids=_strings(value.get("includedWorkIds")),
             filters=parse_filter_expression(
                 {

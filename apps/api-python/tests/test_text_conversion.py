@@ -92,7 +92,6 @@ def insert_import_task(
                 id=work_id,
                 title=source.stem,
                 normalized_title=source.stem.casefold(),
-                work_type="NOVEL",
                 tags="[]",
             )
         )
@@ -808,6 +807,11 @@ def test_watched_azw3_task_can_be_retried_after_upload_only_saves_the_source(
 
     upload_dir = test_settings.resolved_monitor_root / "uploads"
     upload_dir.mkdir()
+    monitored = client.post(
+        "/api/monitor-folders",
+        json={"name": "Conversion uploads", "rootPath": str(upload_dir), "enabled": True},
+    )
+    assert monitored.status_code == 201
     response = client.post(
         "/api/works/import",
         data={"targetPath": str(upload_dir)},
@@ -816,7 +820,7 @@ def test_watched_azw3_task_can_be_retried_after_upload_only_saves_the_source(
     assert response.status_code == 200
     payload = response.json()["data"]
     assert payload["saved"] == 1
-    assert payload["autoImport"] is False
+    assert payload["autoImport"] is True
     assert db_session.execute(text("SELECT COUNT(*) FROM ImportTask")).scalar_one() == 0
     source_path = Path(payload["results"][0]["sourcePath"])
     task, created = enqueue_import_task(

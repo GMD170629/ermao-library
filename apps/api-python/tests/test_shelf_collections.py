@@ -139,7 +139,6 @@ def test_collection_rejects_books_nesting_and_nonempty_deletion(
             id="collection-guard-work",
             title="不能加入合集",
             normalized_title="不能加入合集",
-            work_type="EPUB",
             tags="[]",
         )
     )

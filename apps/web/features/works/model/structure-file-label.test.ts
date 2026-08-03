@@ -4,23 +4,23 @@ import { structureFileLabel } from './structure-file-label';
 
 test('audiobook structure labels hide POSIX source directories', () => {
   assert.equal(
-    structureFileLabel('AUDIOBOOK', '/monitor/listen-book/鬼吹灯/01. 精绝古城 01.mp3'),
+    structureFileLabel('audio', '/monitor/listen-book/鬼吹灯/01. 精绝古城 01.mp3'),
     '01. 精绝古城 01.mp3'
   );
 });
 
 test('audiobook structure labels hide Windows source directories', () => {
   assert.equal(
-    structureFileLabel('AUDIOBOOK', String.raw`D:\audiobooks\Example\track 01.m4b`),
+    structureFileLabel('audio', String.raw`D:\audiobooks\Example\track 01.m4b`),
     'track 01.m4b'
   );
 });
 
 test('audiobook structure labels preserve a bare file name', () => {
-  assert.equal(structureFileLabel('AUDIOBOOK', 'track 01.mp3'), 'track 01.mp3');
+  assert.equal(structureFileLabel('audio', 'track 01.mp3'), 'track 01.mp3');
 });
 
 test('non-audiobook structure labels retain their existing path display', () => {
-  assert.equal(structureFileLabel('EBOOK', '/books/example.epub'), '/books/example.epub');
-  assert.equal(structureFileLabel('COMIC', '/comics/example.cbz'), '/comics/example.cbz');
+  assert.equal(structureFileLabel('reflowable', '/books/example.epub'), '/books/example.epub');
+  assert.equal(structureFileLabel('comic', '/comics/example.cbz'), '/comics/example.cbz');
 });

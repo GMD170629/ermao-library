@@ -31,12 +31,15 @@ from app.modules.library.application.volume_commands import (
     VolumeContext,
     VolumeDeleteOutcome,
     VolumeMoveOutcome,
+    VolumeReclassifyOutcome,
     VolumeSplitOutcome,
 )
 from app.modules.library.infrastructure import operations as operation_store
 from app.modules.library.infrastructure.deletion import delete_volume_scope
 from app.modules.library.infrastructure.structural_operations import (
     move_volume_to_work,
+)
+from app.modules.library.infrastructure.structural_operations import (
     reorder_volume as reorder_volume_within_media_version,
 )
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
@@ -257,6 +260,170 @@ class SqlAlchemyVolumeStructure:
             now=now,
         )
 
+    def reclassify_volume(
+        self,
+        *,
+        actor_id: str,
+        work_id: str,
+        volume_id: str,
+        target_media_kind: str,
+        apply_to: Literal["VOLUME", "MEDIA_VERSION"],
+        now: datetime,
+    ) -> VolumeReclassifyOutcome:
+        volume = self._db.get(LibraryVolume, volume_id)
+        if volume is None:
+            raise ValueError("Volume does not exist")
+        source_media = self._db.get(LibraryMediaVersion, volume.media_version_id)
+        if source_media is None or source_media.work_id != work_id:
+            raise ValueError("Volume does not belong to work")
+        selected = (
+            list(
+                self._db.scalars(
+                    select(LibraryVolume)
+                    .where(LibraryVolume.media_version_id == source_media.id)
+                    .order_by(
+                        LibraryVolume.sort_order.asc(),
+                        LibraryVolume.created_at.asc(),
+                        LibraryVolume.id.asc(),
+                    )
+                ).all()
+            )
+            if apply_to == "MEDIA_VERSION"
+            else [volume]
+        )
+        target_media = self._db.scalar(
+            select(LibraryMediaVersion).where(
+                LibraryMediaVersion.work_id == work_id,
+                LibraryMediaVersion.media_kind == target_media_kind,
+            )
+        )
+        target_created = target_media is None
+        if target_media is None:
+            target_media = LibraryMediaVersion(
+                id=cuid(),
+                work_id=work_id,
+                media_kind=target_media_kind,
+                created_at=now,
+                updated_at=now,
+            )
+            self._db.add(target_media)
+            self._db.flush()
+
+        history_media_ids = list(dict.fromkeys([source_media.id, target_media.id]))
+        histories = list(
+            self._db.scalars(
+                select(UserMediaHistory).where(
+                    UserMediaHistory.media_version_id.in_(history_media_ids)
+                )
+            ).all()
+        )
+        inverse = {
+            "sourceMediaVersion": entity_as_legacy_dict(source_media),
+            "targetMediaVersion": (
+                None if target_created else entity_as_legacy_dict(target_media)
+            ),
+            "targetMediaVersionId": target_media.id,
+            "targetMediaVersionCreated": target_created,
+            "volumes": [entity_as_legacy_dict(row) for row in selected],
+            "mediaHistories": [entity_as_legacy_dict(row) for row in histories],
+            "historyMediaVersionIds": history_media_ids,
+        }
+        moved_ids = {row.id for row in selected}
+        source_id = source_media.id
+        target_id = target_media.id
+        if source_id != target_id:
+            target_count = int(
+                self._db.scalar(
+                    select(func.count(LibraryVolume.id)).where(
+                        LibraryVolume.media_version_id == target_id
+                    )
+                )
+                or 0
+            )
+            for offset, selected_volume in enumerate(selected):
+                selected_volume.media_version_id = target_id
+                selected_volume.sort_order = (target_count + offset) * 1000
+                selected_volume.classification_source = "USER"
+                selected_volume.classification_reason = "USER_OVERRIDE"
+                selected_volume.suggested_media_kind = None
+                selected_volume.updated_at = now
+            self._db.flush()
+            remaining = list(
+                self._db.scalars(
+                    select(LibraryVolume)
+                    .where(LibraryVolume.media_version_id == source_id)
+                    .order_by(LibraryVolume.sort_order, LibraryVolume.id)
+                ).all()
+            )
+            for index, remaining_volume in enumerate(remaining):
+                remaining_volume.sort_order = index * 1000
+            source_histories = [
+                row for row in histories if row.media_version_id == source_id
+            ]
+            target_by_user = {
+                row.user_id: row
+                for row in histories
+                if row.media_version_id == target_id
+            }
+            preferred_target_volume_id = selected[-1].id
+            for source_history in source_histories:
+                target_history = target_by_user.get(source_history.user_id)
+                if target_history is None and not remaining:
+                    source_history.media_version_id = target_id
+                    source_history.last_volume_id = preferred_target_volume_id
+                    source_history.updated_at = now
+                else:
+                    if target_history is None:
+                        target_history = UserMediaHistory(
+                            id=cuid(),
+                            user_id=source_history.user_id,
+                            media_version_id=target_id,
+                            last_volume_id=preferred_target_volume_id,
+                            created_at=now,
+                            updated_at=now,
+                        )
+                        self._db.add(target_history)
+                    elif source_history.updated_at > target_history.updated_at:
+                        target_history.last_volume_id = preferred_target_volume_id
+                        target_history.updated_at = source_history.updated_at
+                    if remaining:
+                        if source_history.last_volume_id in moved_ids:
+                            source_history.last_volume_id = remaining[0].id
+                            source_history.updated_at = now
+                    else:
+                        self._db.delete(source_history)
+            if not remaining:
+                self._db.delete(source_media)
+        else:
+            for selected_volume in selected:
+                selected_volume.classification_source = "USER"
+                selected_volume.classification_reason = "USER_OVERRIDE"
+                selected_volume.suggested_media_kind = None
+                selected_volume.updated_at = now
+        target_media.updated_at = now
+        self._db.flush()
+        operation = operation_store.create_operation(
+            self._db,
+            user_id=actor_id,
+            action="RECLASSIFY_VOLUME",
+            target_type="volume",
+            target_id=volume_id,
+            summary=f"Reclassified {len(selected)} volume(s) as {target_media_kind}",
+            payload={
+                "workId": work_id,
+                "volumeId": volume_id,
+                "targetMediaKind": target_media_kind,
+                "applyTo": apply_to,
+            },
+            inverse=inverse,
+            now=now,
+        )
+        return VolumeReclassifyOutcome(
+            target_media_version_id=target_id,
+            moved_volume_ids=tuple(row.id for row in selected),
+            operation=operation_store.operation_summary(operation),
+        )
+
     def create_work_from_volume(
         self,
         *,
@@ -280,7 +447,6 @@ class SqlAlchemyVolumeStructure:
                 author=author,
                 normalized_author=normalize_identity_part(author),
                 description=source.description,
-                work_type=source.work_type,
                 tags=source.tags,
                 cover_status="PENDING",
                 merge_key=identity_merge_key(new_work.title, author),

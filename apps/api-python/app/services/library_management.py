@@ -10,10 +10,12 @@ from functools import wraps
 from hashlib import sha1
 from typing import Any, Concatenate, ParamSpec, TypeVar
 
+from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from app.bootstrap.library import smart_shelf_work_ids as _query_smart_shelf_work_ids
 from app.core.time import now_timestamp_ms, timestamp_ms_to_iso, to_timestamp_ms
+from app.models.library import UserMediaHistory
 from app.modules.library.application.commands import execute_library_write
 from app.modules.library.infrastructure import categories as library_categories
 from app.modules.library.infrastructure import operations as library_operations
@@ -640,6 +642,36 @@ def undo_operation(
         new_work_id = str(inverse.get("newWorkId") or "")
         if new_work_id:
             library_operations.delete_work_if_empty(db, new_work_id)
+        source_work_id = str(source_media.get("workId") or "")
+        if source_work_id:
+            sync_work_facets(db, source_work_id, commit=False)
+    elif action == "RECLASSIFY_VOLUME":
+        source_media = inverse.get("sourceMediaVersion") or {}
+        target_media = inverse.get("targetMediaVersion") or {}
+        volumes = inverse.get("volumes") or []
+        if not source_media or not volumes:
+            raise ValueError("撤销数据不完整")
+        library_operations.insert_snapshot(db, "LibraryMediaVersion", source_media)
+        if isinstance(target_media, dict) and target_media:
+            library_operations.insert_snapshot(db, "LibraryMediaVersion", target_media)
+        for volume in volumes:
+            library_operations.insert_snapshot(db, "LibraryVolume", volume)
+        history_media_ids = [
+            str(value) for value in inverse.get("historyMediaVersionIds") or [] if value
+        ]
+        if history_media_ids:
+            db.execute(
+                delete(UserMediaHistory).where(
+                    UserMediaHistory.media_version_id.in_(history_media_ids)
+                )
+            )
+        for history in inverse.get("mediaHistories") or []:
+            library_operations.insert_snapshot(db, "UserMediaHistory", history)
+        target_media_version_id = str(inverse.get("targetMediaVersionId") or "")
+        if inverse.get("targetMediaVersionCreated") and target_media_version_id:
+            library_operations.delete_media_version_if_empty(
+                db, target_media_version_id
+            )
         source_work_id = str(source_media.get("workId") or "")
         if source_work_id:
             sync_work_facets(db, source_work_id, commit=False)

@@ -3,19 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
 
-
-class ReaderType(StrEnum):
-    REFLOWABLE = "reflowable"
-    COMIC = "comic"
-    PDF = "pdf"
-    AUDIO = "audio"
-
-
-_REFLOWABLE = frozenset({"EPUB", "MOBI", "AZW", "AZW3", "PRC", "FB2", "TXT"})
-_COMIC = frozenset({"COMIC", "CBR", "CBZ", "RAR", "ZIP"})
-_AUDIO = frozenset({"AUDIO", "AUDIOBOOK", "M4B", "M4A", "MP3"})
+from app.contracts.media_capabilities import ReaderType, reader_type_for_format
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,16 +22,7 @@ class ReaderCapabilities:
 
 
 def reader_type_for_volume_format(volume_format: str) -> ReaderType | None:
-    normalized = volume_format.strip().upper()
-    if normalized in _REFLOWABLE:
-        return ReaderType.REFLOWABLE
-    if normalized == "PDF":
-        return ReaderType.PDF
-    if normalized in _COMIC:
-        return ReaderType.COMIC
-    if normalized in _AUDIO:
-        return ReaderType.AUDIO
-    return None
+    return reader_type_for_format(volume_format)
 
 
 def capabilities_for_reader_type(reader_type: ReaderType) -> ReaderCapabilities:

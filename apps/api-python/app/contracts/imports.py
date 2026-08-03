@@ -13,6 +13,7 @@ class ImportTaskContract(BaseModel):
     id: str
     source_path: str = Field(alias="sourcePath")
     origin: str
+    media_kind_policy: str = Field(default="MIXED", alias="mediaKindPolicy")
     status: str
     original_name: str | None = Field(default=None, alias="originalName")
     requested_title: str | None = Field(default=None, alias="requestedTitle")

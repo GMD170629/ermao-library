@@ -16,6 +16,8 @@ from app.modules.imports.application.identity_resolution import (
     resolve_import_identity,
 )
 from app.modules.imports.application.import_support import (
+    _classification_columns,
+    _classification_result_type,
     _ensure_work,
     _finalize_work_cover,
     _hash_text,
@@ -32,6 +34,12 @@ from app.modules.imports.application.ports import (
     LibraryImportStore,
 )
 from app.modules.imports.application.reflowable_types import ReflowableBookMetadata
+from app.modules.imports.domain.content_classification import (
+    ContentEvidence,
+    classify_content,
+    inherited_classification,
+    normalize_media_kind_policy,
+)
 
 REFLOWABLE_MIME_TYPES = {
     "MOBI": "application/x-mobipocket-ebook",
@@ -120,7 +128,6 @@ def refresh_existing_reflowable_source(
     volume_values: dict[str, object] = {
         "description": metadata.description,
         "language": metadata.language,
-        "publisher": metadata.publisher,
         "publishedAt": metadata.published_at,
         "identifier": metadata.identifier,
         "isbn": metadata.isbn,
@@ -233,7 +240,6 @@ def _reflowable_metadata_json(
             "title": metadata.title,
             "authors": metadata.authors,
             "language": metadata.language,
-            "publisher": metadata.publisher,
             "publishedAt": metadata.published_at,
             "identifier": metadata.identifier,
             "isbn": metadata.isbn,
@@ -281,6 +287,14 @@ def _import_reflowable_source(
         requested_title=options.requested_title,
         requested_author=options.requested_author,
     )
+    classification = classify_content(
+        normalize_media_kind_policy(options.media_kind_policy),
+        ContentEvidence(
+            volume_format=source_format,
+            subjects=tuple(metadata.subjects),
+            title=identity.title,
+        ),
+    )
     merge_key = _import_work_merge_key(
         "epub",
         identity.title,
@@ -297,7 +311,6 @@ def _import_reflowable_source(
             "title": identity.title,
             "author": identity.author,
             "description": metadata.description,
-            "workType": source_format,
             "tags": ["ebook", source_format.lower(), *metadata.subjects],
             "mergeKey": merge_key,
             "origin": options.origin,
@@ -314,7 +327,7 @@ def _import_reflowable_source(
         columns={
             "id": _id(),
             "workId": work["id"],
-            "mediaKind": "EBOOK",
+            "mediaKind": classification.media_kind,
             "createdAt": _now(),
             "updatedAt": _now(),
         }
@@ -339,7 +352,6 @@ def _import_reflowable_source(
             "origin": options.origin,
             "description": metadata.description,
             "language": metadata.language,
-            "publisher": metadata.publisher,
             "publishedAt": metadata.published_at,
             "identifier": metadata.identifier,
             "isbn": metadata.isbn,
@@ -348,6 +360,7 @@ def _import_reflowable_source(
             "coverPath": None,
             "coverStatus": "PENDING",
             "importStatus": "COMPLETED",
+            **_classification_columns(classification),
             "createdAt": _now(),
             "updatedAt": _now(),
         }
@@ -420,7 +433,7 @@ def _import_reflowable_source(
         str(media_version["id"]),
         str(volume["id"]),
         str(work["title"]),
-        "ebook",
+        _classification_result_type(classification),
         source_format.lower(),
         len(metadata.chapters),
         "completed",
@@ -443,10 +456,24 @@ def _complete_deferred_source_conversion(
     )
     if not source_volume or not result.volume_id:
         return
+    inherited = inherited_classification(str(source_volume.get("mediaKind") or "EBOOK"))
+    media_version = store.ensure_library_media_version(
+        columns={
+            "id": _id(),
+            "workId": result.work_id,
+            "mediaKind": inherited.media_kind,
+            "createdAt": _now(),
+            "updatedAt": _now(),
+        }
+    )
     store.update_library_volume(
         result.volume_id,
         columns={
             "derivedFromVolumeId": source_volume["id"],
+            "mediaVersionId": media_version["id"],
+            **_classification_columns(inherited),
             "updatedAt": _now(),
         },
     )
+    if result.media_version_id != str(media_version["id"]):
+        store.delete_library_media_version_if_empty(result.media_version_id)

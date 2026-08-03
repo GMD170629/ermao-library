@@ -123,10 +123,34 @@ def test_regex_identity_uses_standalone_number_as_volume_fallback(
     assert identity.source == "regex"
 
 
-def test_regex_identity_does_not_treat_attached_title_digits_as_volume():
-    identity = recognize_book_identity_with_regex("comic/作品2024版.zip")
+@pytest.mark.parametrize(
+    ("filename", "expected_volume"),
+    [
+        ("龙与猫之国.Vlo.1.册-穿越时空的木乃伊之眼.pdf", 1),
+        ("怪物大师10冰封的时之轮.pdf", 10),
+        ("作品前传12特别篇.pdf", 12),
+    ],
+)
+def test_regex_identity_uses_short_number_at_any_filename_position(
+    filename, expected_volume
+):
+    identity = recognize_book_identity_with_regex(f"comic/{filename}")
 
-    assert identity.title == "作品2024版"
+    assert identity.volume_index == expected_volume
+
+
+@pytest.mark.parametrize("filename", ["作品2024版.zip", "作品123456特别篇.zip"])
+def test_regex_identity_does_not_treat_long_attached_digits_as_volume(filename):
+    identity = recognize_book_identity_with_regex(f"comic/{filename}")
+
+    assert identity.volume_index is None
+
+
+def test_regex_identity_ignores_short_numbers_in_download_source_suffix():
+    identity = recognize_book_identity_with_regex(
+        "白夜行_(东野圭吾)_(z-library.sk_1lib.sk_z-lib.sk).epub"
+    )
+
     assert identity.volume_index is None
 
 

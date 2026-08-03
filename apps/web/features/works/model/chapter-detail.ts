@@ -29,7 +29,8 @@ export type EbookChapterDetail = Readonly<{
 }>;
 
 export function singleVolumeEbook(tab: WorkDetailTabKey, volumes: readonly VolumeResource[]): VolumeResource | null {
-  return tab === 'EBOOK' && volumes.length === 1 ? volumes[0] ?? null : null;
+  const volume = tab !== 'STRUCTURE' && volumes.length === 1 ? volumes[0] ?? null : null;
+  return volume && (volume.readerType === 'reflowable' || volume.readerType === 'pdf') ? volume : null;
 }
 
 export function detailReaderHref(volume: VolumeResource, unit: ChapterDetailUnit): string | null {

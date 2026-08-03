@@ -12,6 +12,7 @@ import { useConfirm, useToast } from '../../components/ui/feedback';
 import { PageTitle } from '../../components/ui/page-title';
 import {
   applicableSmartFilterRules,
+  mediaKindsLabel,
   serializableSmartFilterRules,
   SmartFilterBuilder,
   type SmartFilterField,
@@ -30,7 +31,7 @@ import { summarizeSmartShelfRules } from './smart-shelf-rules';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
-type BookSearchItem = BookshelfItem & { format: string };
+type BookSearchItem = BookshelfItem;
 
 type BooksPayload = {
   ok: boolean;
@@ -60,7 +61,7 @@ async function readPayload<T extends { ok: boolean; error?: { message: string } 
 }
 
 export function ShelvesPage() {
-  const { t: i18nAttribute } = useAttributeI18n();
+  const { t: i18nAttribute, locale } = useAttributeI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
   const currentSearch = searchParams.toString();
@@ -364,7 +365,23 @@ export function ShelvesPage() {
       if (!append) {
         setForm({ name: shelf.name, description: shelf.description ?? '' });
         setDraftKind(shelf.kind ?? 'STATIC');
-        setSmartFilterRules(emptySmartFilterRules);
+        setSmartFilterRules({
+          combinator: shelf.rules?.combinator === 'ANY' ? 'ANY' : 'ALL',
+          conditions: [
+            ...(shelf.rules?.conditions ?? []).map((condition, index) => ({
+              id: `shelf-rule-${index}`,
+              field: condition.field,
+              operator: condition.operator,
+              value: condition.value
+            })),
+            ...(shelf.rules?.publishers ?? []).map((publisher, index) => ({
+              id: `shelf-legacy-publisher-${index}`,
+              field: 'publisher',
+              operator: 'equals',
+              value: publisher
+            }))
+          ]
+        });
         setSelectedBookIds(shelf.bookIds ?? (shelf.books ?? []).map((book) => book.id));
         setSelectedMemberShelfIds(shelf.memberShelfIds ?? (shelf.shelves ?? []).map((member) => member.id));
         setSelectedCollectionIds(shelf.collectionIds ?? []);
@@ -426,7 +443,7 @@ export function ShelvesPage() {
       setError('请填写书架名称');
       return;
     }
-    if (activeIsNew && activeIsSmart && incompleteSmartFilterCount > 0) {
+    if (activeIsSmart && incompleteSmartFilterCount > 0) {
       setError(i18nAttribute("还有 {value0} 条条件没有填写完整，请补全后再创建。", { value0: incompleteSmartFilterCount }));
       return;
     }
@@ -441,7 +458,7 @@ export function ShelvesPage() {
           ? { memberShelfIds: selectedMemberShelfIds }
           : {
               collectionIds: selectedCollectionIds,
-              ...(activeIsNew && activeIsSmart
+              ...(activeIsSmart
                 ? { rules: serializableSmartFilterRules(applicableRules), pinned: true }
                 : !activeIsSmart
                   ? { bookIds: selectedBookIds }
@@ -516,7 +533,7 @@ export function ShelvesPage() {
         {editing ? i18nAttribute("取消") : i18nAttribute("全部书架")}
       </Button>
       {!editing && activeShelf ? <Button icon={Edit3} onClick={() => router.push(`/shelves?shelf=${encodeURIComponent(activeShelf.id)}&edit=1`, { scroll: false })}>{activeIsCollection ? <I18nText>管理合集</I18nText> : <I18nText>管理书架</I18nText>}</Button> : null}
-      {editing ? <Button icon={Save} loading={saving} loadingText={i18nAttribute("保存中")} disabled={detailLoading || (activeIsNew && activeIsSmart && incompleteSmartFilterCount > 0)} onClick={saveShelf}>{activeIsNew ? i18nAttribute(activeIsCollection ? "创建合集" : activeIsSmart ? "创建智能书架" : "创建书架") : i18nAttribute("保存更改")}</Button> : null}
+      {editing ? <Button icon={Save} loading={saving} loadingText={i18nAttribute("保存中")} disabled={detailLoading || (activeIsSmart && incompleteSmartFilterCount > 0)} onClick={saveShelf}>{activeIsNew ? i18nAttribute(activeIsCollection ? "创建合集" : activeIsSmart ? "创建智能书架" : "创建书架") : i18nAttribute("保存更改")}</Button> : null}
     </div>
   ) : <Button icon={Plus} onClick={() => router.push('/shelves?create=1', { scroll: false })}><I18nText>创建书架</I18nText></Button>;
 
@@ -546,6 +563,13 @@ export function ShelvesPage() {
         translateDescription={!activeShelf}
         action={pageAction}
       />
+
+      {activeShelf?.rulesStatus === 'UNSUPPORTED' ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900" role="status">
+          <div className="font-semibold"><I18nText>这个智能书架包含已停止支持的筛选条件</I18nText></div>
+          <div className="mt-1"><I18nText>请编辑书架并删除这些条件后再保存。</I18nText> <span data-i18n-skip>{activeShelf.unsupportedRuleFields.join(', ')}</span></div>
+        </div>
+      ) : null}
 
       {error ? <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">{error}</div> : null}
 
@@ -702,7 +726,7 @@ export function ShelvesPage() {
                 </fieldset>
               )}
 
-              {activeIsCollection ? null : activeIsNew && activeIsSmart ? (
+              {activeIsCollection ? null : activeIsSmart ? (
                 <div className="border-t border-[#EEE8E3] pt-3">
                   {filterSchemaError ? (
                     <div className="mt-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-5 text-sm text-red-700" role="alert">
@@ -797,7 +821,7 @@ export function ShelvesPage() {
                       <Cover book={book} className="h-16 w-11 shrink-0" small />
                       <div data-i18n-skip className="min-w-0 flex-1">
                         <div className="line-clamp-1 text-sm font-medium text-[#2A2825]">{book.title}</div>
-                        <div className="mt-1 line-clamp-1 text-xs text-[#8B847E]">{book.author || i18nAttribute("未知作者")} · {book.format}</div>
+                        <div className="mt-1 line-clamp-1 text-xs text-[#8B847E]">{book.author || i18nAttribute("未知作者")} · {mediaKindsLabel(book.availableMediaKinds ?? [], locale)}</div>
                       </div>
                       {checked ? <Check size={16} className="shrink-0 text-[#D94724]" /> : null}
                     </label>

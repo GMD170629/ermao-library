@@ -1492,10 +1492,10 @@ def test_same_path_identity_groups_epub_pdf_and_comic_into_media_versions(
     )
     assert set(
         db_session.execute(text("SELECT format FROM LibraryVolume")).scalars()
-    ) == {"EPUB", "PDF", "COMIC"}
-    assert (
-        db_session.execute(text("SELECT workType FROM LibraryWork")).scalar() == "EPUB"
-    )
+    ) == {"EPUB", "PDF", "CBZ"}
+    assert set(
+        db_session.execute(text("SELECT mediaKind FROM LibraryMediaVersion")).scalars()
+    ) == {"EBOOK", "COMIC"}
 
 
 def test_pdf_series_volume_preserves_explicit_chinese_volume_index(
@@ -1559,6 +1559,47 @@ def test_watched_pdf_volumes_in_same_directory_merge_despite_author_variation(
     work = db_session.get(LibraryWork, first_result.work_id)
     assert work is not None
     assert work.author == "作者乙"
+    assert sorted(db_session.scalars(select(LibraryVolume.volume_index)).all()) == [
+        1,
+        2,
+    ]
+
+
+def test_watched_pdf_volumes_recognize_short_numbers_inside_titles(
+    db_session, test_settings, tmp_path
+):
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    series_dir = tmp_path / "PDF格式-龙与猫之国.6卷"
+    series_dir.mkdir()
+    first = series_dir / "龙与猫之国.Vlo.1.册-穿越时空的木乃伊之眼.pdf"
+    second = series_dir / "龙与猫之国.Vlo.2.册-鬼影迷城的百慕大航班.pdf"
+    write_pdf_metadata_fixture(first)
+    write_pdf_metadata_fixture(second)
+
+    first_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=first,
+            origin="WATCH",
+            original_name=first.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+    second_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=second,
+            origin="WATCH",
+            original_name=second.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+
+    assert first_result.work_id == second_result.work_id
+    assert first_result.media_version_id == second_result.media_version_id
     assert sorted(db_session.scalars(select(LibraryVolume.volume_index)).all()) == [
         1,
         2,
@@ -1947,21 +1988,21 @@ def test_parse_epub_nav_uses_toc_block_and_preserves_raw_opf_metadata(tmp_path):
     assert metadata["chapters"] == [
         {
             "title": "第一节",
-            "href": "chapters/one.xhtml",
+            "href": "OEBPS/chapters/one.xhtml",
             "idref": "c1",
             "mediaType": "application/xhtml+xml",
             "sortOrder": 1,
         },
         {
             "title": "第二节",
-            "href": "chapters/two.xhtml#p2",
+            "href": "OEBPS/chapters/two.xhtml#p2",
             "idref": "c2",
             "mediaType": "application/xhtml+xml",
             "sortOrder": 2,
         },
     ]
     assert metadata["isbn"] == "9787111111115"
-    assert metadata["publisher"] == "测试出版社"
+    assert "publisher" not in metadata
     assert metadata["subjects"] == ["悬疑", "推理"]
     assert metadata["coverPath"] == "cover.jpg"
     assert metadata["rawMetadata"]["dc:subject"] == ["悬疑", "推理"]
@@ -2003,14 +2044,14 @@ def test_parse_epub_ncx_titles_take_priority_over_headings(tmp_path):
     assert metadata["chapters"] == [
         {
             "title": "序幕 苏格兰",
-            "href": "Text/chapter01.xhtml#start",
+            "href": "OEBPS/Text/chapter01.xhtml#start",
             "idref": "c1",
             "mediaType": "application/xhtml+xml",
             "sortOrder": 1,
         },
         {
             "title": "食人树",
-            "href": "Text/chapter02.xhtml",
+            "href": "OEBPS/Text/chapter02.xhtml",
             "idref": "c2",
             "mediaType": "application/xhtml+xml",
             "sortOrder": 2,
@@ -2176,7 +2217,7 @@ def test_import_comic_defers_page_units_and_detects_duplicate(
         .mappings()
         .first()
     )
-    assert edition["publisher"] == "星舰出版社"
+    assert edition["publisher"] is None
     assert edition["pageCount"] == 2
     assert edition["coverPath"]
     assert Path(edition["coverPath"]).read_bytes() == b"one"
@@ -2257,7 +2298,7 @@ def test_import_pdf_creates_library_records(db_session, test_settings, tmp_path)
     )
 
     assert result.import_status == "completed"
-    assert result.type == "comic"
+    assert result.type == "ebook"
     assert result.format == "pdf"
     assert result.total_units == 1
     assert _count(db_session, "LibraryWork") == 1
@@ -2292,16 +2333,19 @@ def test_import_pdf_creates_library_records(db_session, test_settings, tmp_path)
     assert raw_metadata["coverRenderedFromPage"] == 1
     assert raw_metadata["contentClassification"]["kind"] == "IMAGE_ONLY"
     work = (
-        db_session.execute(text("SELECT workType, tags, mergeKey FROM LibraryWork"))
+        db_session.execute(text("SELECT tags, mergeKey FROM LibraryWork"))
         .mappings()
         .one()
     )
-    assert work["workType"] == "COMIC"
-    assert json.loads(work["tags"]) == ["comic", "pdf"]
+    assert (
+        db_session.execute(text("SELECT mediaKind FROM LibraryMediaVersion")).scalar()
+        == "EBOOK"
+    )
+    assert json.loads(work["tags"]) == ["pdf"]
     assert work["mergeKey"].startswith("path-group:standalone:")
     assert (
         db_session.execute(text("SELECT mediaKind FROM LibraryMediaVersion")).scalar()
-        == "COMIC"
+        == "EBOOK"
     )
     assert _count(db_session, "LibraryReadingUnit") == 1
 
@@ -2323,7 +2367,8 @@ def test_import_text_pdf_remains_ebook(db_session, test_settings, tmp_path):
 
     assert result.type == "ebook"
     assert (
-        db_session.execute(text("SELECT workType FROM LibraryWork")).scalar() == "PDF"
+        db_session.execute(text("SELECT mediaKind FROM LibraryMediaVersion")).scalar()
+        == "EBOOK"
     )
     assert (
         db_session.execute(text("SELECT mediaKind FROM LibraryMediaVersion")).scalar()
@@ -2365,7 +2410,7 @@ def test_import_pdf_maps_subject_keywords_metadata(db_session, test_settings, tm
     assert work["title"] == "星舰手册"
     assert work["author"] == "作者甲"
     assert work["description"] is None
-    assert json.loads(work["tags"]) == ["comic", "pdf"]
+    assert json.loads(work["tags"]) == ["pdf"]
     edition = (
         db_session.execute(text("SELECT description FROM LibraryVolume"))
         .mappings()

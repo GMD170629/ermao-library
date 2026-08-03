@@ -1,5 +1,7 @@
 import json
+import zipfile
 from datetime import UTC, datetime
+from pathlib import Path
 
 from app.core.auth import hash_password
 from app.core.config import Settings
@@ -8,6 +10,7 @@ from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
     LibraryReadingProgress,
+    LibraryReadingUnit,
     LibraryVolume,
     LibraryWork,
 )
@@ -40,7 +43,6 @@ def _ebook_volume(db_session: Session) -> LibraryVolume:
         normalized_title="reader v3",
         author="测试作者",
         normalized_author="测试作者",
-        work_type="BOOK",
         tags="[]",
     )
     media_version = LibraryMediaVersion(
@@ -73,6 +75,38 @@ def _ebook_volume(db_session: Session) -> LibraryVolume:
     db_session.add_all([work, media_version, volume, file])
     db_session.commit()
     return volume
+
+
+def _write_reader_epub(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip")
+        archive.writestr(
+            "META-INF/container.xml",
+            '<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>',
+        )
+        archive.writestr(
+            "OEBPS/content.opf",
+            """<package><metadata><title>Recovered EPUB</title></metadata><manifest>
+            <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+            <item id="one" href="Text/one.xhtml" media-type="application/xhtml+xml"/>
+            <item id="two" href="Text/two.xhtml" media-type="application/xhtml+xml"/>
+            </manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>""",
+        )
+        archive.writestr(
+            "OEBPS/nav.xhtml",
+            """<html><body><nav epub:type="toc">
+            <a href="Text/one.xhtml#start">第一章</a>
+            <a href="Text/two.xhtml">第二章</a>
+            </nav></body></html>""",
+        )
+        archive.writestr(
+            "OEBPS/Text/one.xhtml",
+            '<html><body><h1 id="start">第一章</h1></body></html>',
+        )
+        archive.writestr(
+            "OEBPS/Text/two.xhtml", "<html><body><h1>第二章</h1></body></html>"
+        )
 
 
 def test_reader_v3_bootstrap_and_progress_are_volume_scoped(
@@ -120,6 +154,107 @@ def test_reader_v3_bootstrap_and_progress_are_volume_scoped(
     assert stored.user_id == user.id
     assert stored.volume_id == volume.id
     assert stored.percent == 50
+
+
+def test_reader_v3_bootstrap_recovers_missing_epub_chapters_once(
+    client: TestClient,
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    _login(client, db_session)
+    volume = _ebook_volume(db_session)
+    epub = tmp_path / "legacy-without-units.epub"
+    _write_reader_epub(epub)
+    source_file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
+    source_file.path = str(epub)
+    source_file.size_bytes = epub.stat().st_size
+    volume.chapter_count = None
+    db_session.commit()
+
+    first_response = client.get(f"/api/reader/v3/volumes/{volume.id}/bootstrap")
+    second_response = client.get(f"/api/reader/v3/volumes/{volume.id}/bootstrap")
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert [unit["href"] for unit in first_response.json()["data"]["units"]] == [
+        "OEBPS/Text/one.xhtml#start",
+        "OEBPS/Text/two.xhtml",
+    ]
+    assert db_session.query(LibraryReadingUnit).count() == 2
+    db_session.refresh(volume)
+    assert volume.chapter_count == 2
+
+
+def test_reader_v3_bootstrap_repairs_legacy_epub_hrefs_and_preserves_unit_ids(
+    client: TestClient,
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    _login(client, db_session)
+    volume = _ebook_volume(db_session)
+    epub = tmp_path / "legacy-relative-hrefs.epub"
+    _write_reader_epub(epub)
+    source_file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
+    source_file.path = str(epub)
+    source_file.size_bytes = epub.stat().st_size
+    db_session.add_all(
+        [
+            LibraryReadingUnit(
+                id="legacy-unit-one",
+                volume_id=volume.id,
+                file_id=source_file.id,
+                unit_type="chapter",
+                title="第一章",
+                href="Text/one.xhtml#start",
+                media_type="application/xhtml+xml",
+                sort_order=1,
+                metadata_json=json.dumps({"idref": "one"}),
+            ),
+            LibraryReadingUnit(
+                id="legacy-unit-two",
+                volume_id=volume.id,
+                file_id=source_file.id,
+                unit_type="chapter",
+                title="第二章",
+                href="Text/two.xhtml",
+                media_type="application/xhtml+xml",
+                sort_order=2,
+                metadata_json=json.dumps({"idref": "two"}),
+            ),
+        ]
+    )
+    volume.chapter_count = 2
+    db_session.commit()
+
+    response = client.get(f"/api/reader/v3/volumes/{volume.id}/bootstrap")
+
+    assert response.status_code == 200
+    assert [unit["href"] for unit in response.json()["data"]["units"]] == [
+        "OEBPS/Text/one.xhtml#start",
+        "OEBPS/Text/two.xhtml",
+    ]
+    repaired_units = (
+        db_session.query(LibraryReadingUnit)
+        .order_by(LibraryReadingUnit.sort_order)
+        .all()
+    )
+    assert [unit.id for unit in repaired_units] == [
+        "legacy-unit-one",
+        "legacy-unit-two",
+    ]
+    assert [unit.href for unit in repaired_units] == [
+        "OEBPS/Text/one.xhtml#start",
+        "OEBPS/Text/two.xhtml",
+    ]
+    assert all(
+        json.loads(unit.metadata_json)["hrefBase"] == "publication-root"
+        for unit in repaired_units
+    )
+    detail_units_response = client.get(
+        f"/api/works/work-reader-v3/volumes/{volume.id}/reading-units",
+        params={"page": 1, "pageSize": 120},
+    )
+    assert detail_units_response.status_code == 200
 
 
 def test_reader_v2_and_edition_file_routes_are_gone(client: TestClient) -> None:

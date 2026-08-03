@@ -6,9 +6,9 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from time import time_ns
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -21,23 +21,28 @@ from app.core.authorization import authorization_context, can_access_monitor_fol
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
-from app.modules.imports.presentation.writes import router as writes_router
+from app.modules.imports.presentation.mappers import (
+    MonitorPathError,
+    import_task_view,
+    monitor_directory_tree_node,
+    resolve_monitor_folder_path,
+)
+from app.modules.imports.presentation.path_helpers import (
+    enabled_monitor_folder_for_path,
+)
 from app.modules.imports.presentation.schemas import (
+    CreateMonitorFolderRequest,
     DeletedMonitorFolderResponse,
+    ImportLogsResponse,
+    ImportTaskResponse,
+    ImportTasksResponse,
     MonitorDirectoryResponse,
     MonitorFolderResponse,
     MonitorFoldersResponse,
     ParsedReleaseTitleResponse,
-    ImportLogsResponse,
-    ImportTaskResponse,
-    ImportTasksResponse,
+    UpdateMonitorFolderRequest,
 )
-from app.modules.imports.presentation.mappers import (
-    import_task_view,
-    MonitorPathError,
-    monitor_directory_tree_node,
-    resolve_monitor_folder_path,
-)
+from app.modules.imports.presentation.writes import router as writes_router
 from app.modules.imports.public import (
     parse_release_title,
     reset_failed_import_checkpoint,
@@ -77,13 +82,23 @@ def _visible_import_task_or_none(
 @router.get("/monitor-folders")
 def list_monitor_folders(
     request: Request,
+    purpose: Literal["upload"] | None = Query(default=None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> MonitorFoldersResponse:
-    _user, auth_error = _auth(db, request, settings)
+    user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     folders = import_http_store.list_monitor_folders(db)
+    if purpose == "upload" and user is not None:
+        context = authorization_context(db, user)
+        allowed_folder_ids = set(context.monitor_folder_ids)
+        folders = [
+            folder
+            for folder in folders
+            if bool(folder.get("enabled"))
+            and (context.is_admin or str(folder.get("id") or "") in allowed_folder_ids)
+        ]
     return ok(
         {
             "folders": folders,
@@ -102,12 +117,28 @@ def list_monitor_folders(
 def monitor_folder_tree(
     request: Request,
     path: str | None = None,
+    purpose: Literal["upload"] | None = Query(default=None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> MonitorDirectoryResponse:
-    _user, auth_error = _auth(db, request, settings)
+    user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    if purpose == "upload":
+        monitor_folder = (
+            enabled_monitor_folder_for_path(db, Path(path)) if path else None
+        )
+        monitor_folder_id = str((monitor_folder or {}).get("id") or "") or None
+        if (
+            monitor_folder is None
+            or user is None
+            or not can_access_monitor_folder(db, user, monitor_folder_id)
+        ):
+            return fail(
+                "目标文件夹不存在或无权访问",
+                status_code=404,
+                code="MONITOR_FOLDER_NOT_FOUND",
+            )
     node, error, status_code = monitor_directory_tree_node(path)
     if error:
         return fail(error, status_code=status_code)
@@ -121,6 +152,7 @@ def monitor_folder_tree(
 
 @router.post("/monitor-folders")
 async def create_monitor_folder(
+    payload: CreateMonitorFolderRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -128,43 +160,37 @@ async def create_monitor_folder(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    payload = await request.json()
     try:
-        root_path = str(resolve_monitor_folder_path(payload.get("rootPath")))
+        root_path = str(resolve_monitor_folder_path(payload.root_path))
     except MonitorPathError as exc:
         return fail(str(exc), status_code=exc.status_code, code=exc.code)
     if import_http_store.get_monitor_folder_by_root_path(db, root_path):
         return fail(
             "监控文件夹路径已存在", status_code=409, details={"rootPath": root_path}
         )
-    if payload.get("shelfId"):
+    if payload.shelf_id:
         return fail(
             "监控文件夹不再绑定全局书架，请创建个人来源文件夹智能书架",
             status_code=400,
             code="MONITOR_FOLDER_SHELF_RETIRED",
         )
-    raw_min_file_size = payload.get("minFileSizeBytes")
-    try:
-        min_file_size_bytes = int(
-            10240 if raw_min_file_size is None else raw_min_file_size
-        )
-    except (TypeError, ValueError):
-        return fail("最小文件大小必须是非负整数", status_code=400)
-    if min_file_size_bytes < 0:
-        return fail("最小文件大小必须是非负整数", status_code=400)
+    media_kind_policy = payload.media_kind_policy.strip().upper()
+    if media_kind_policy not in {"MIXED", "EBOOK", "COMIC", "AUDIOBOOK"}:
+        return fail("内容分类无效", status_code=400, code="INVALID_MEDIA_KIND")
     try:
         folder = import_http_store.create_monitor_folder(
             db,
             {
                 "id": f"py_{time_ns()}",
-                "name": payload.get("name") or Path(root_path).name or "监控文件夹",
+                "name": payload.name or Path(root_path).name or "监控文件夹",
                 "rootPath": root_path,
                 "shelfId": None,
-                "enabled": bool(payload.get("enabled", True)),
-                "ignorePatterns": payload.get("ignorePatterns"),
-                "ignoreHidden": bool(payload.get("ignoreHidden", True)),
-                "minFileSizeBytes": min_file_size_bytes,
-                "description": payload.get("description"),
+                "enabled": payload.enabled,
+                "mediaKindPolicy": media_kind_policy,
+                "ignorePatterns": payload.ignore_patterns,
+                "ignoreHidden": payload.ignore_hidden,
+                "minFileSizeBytes": payload.min_file_size_bytes,
+                "description": payload.description,
                 "createdAt": _now(),
                 "updatedAt": _now(),
             },
@@ -194,6 +220,7 @@ async def create_monitor_folder(
 @router.patch("/monitor-folders/{folder_id}")
 async def update_monitor_folder(
     folder_id: str,
+    payload: UpdateMonitorFolderRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -201,23 +228,22 @@ async def update_monitor_folder(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    payload = await request.json()
-    if payload.get("shelfId"):
+    if payload.shelf_id:
         return fail(
             "监控文件夹不再绑定全局书架，请创建个人来源文件夹智能书架",
             status_code=400,
             code="MONITOR_FOLDER_SHELF_RETIRED",
         )
-    mapping = {
-        "rootPath": "rootPath",
-        "minFileSizeBytes": "minFileSizeBytes",
-        "ignorePatterns": "ignorePatterns",
-        "ignoreHidden": "ignoreHidden",
-        "enabled": "enabled",
-        "name": "name",
-        "description": "description",
-    }
-    values = {mapping[key]: value for key, value in payload.items() if key in mapping}
+    values = payload.model_dump(
+        by_alias=True,
+        exclude_unset=True,
+        exclude={"shelf_id", "import_mode"},
+    )
+    if "mediaKindPolicy" in values and values["mediaKindPolicy"] is not None:
+        media_kind_policy = str(values["mediaKindPolicy"]).strip().upper()
+        if media_kind_policy not in {"MIXED", "EBOOK", "COMIC", "AUDIOBOOK"}:
+            return fail("内容分类无效", status_code=400, code="INVALID_MEDIA_KIND")
+        values["mediaKindPolicy"] = media_kind_policy
     existing = import_http_store.get_monitor_folder(db, folder_id)
     if not existing:
         return fail("监控文件夹不存在", status_code=404)
@@ -233,13 +259,6 @@ async def update_monitor_folder(
                 "监控文件夹路径已存在", status_code=409, details={"rootPath": root_path}
             )
         values["rootPath"] = root_path
-    if "minFileSizeBytes" in values:
-        try:
-            values["minFileSizeBytes"] = int(values["minFileSizeBytes"])
-        except (TypeError, ValueError):
-            return fail("最小文件大小必须是非负整数", status_code=400)
-        if values["minFileSizeBytes"] < 0:
-            return fail("最小文件大小必须是非负整数", status_code=400)
     if values:
         values["updatedAt"] = _now()
     try:

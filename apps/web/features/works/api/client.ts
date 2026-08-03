@@ -1,4 +1,4 @@
-import type { MediaKind, MediaVersionResource, VolumeFormat, VolumeResource, WorkDetailTab, WorkDetailTabKey, WorkView } from '../../../types/work';
+import type { ClassificationSource, MediaKind, MediaVersionResource, ReaderType, VolumeFormat, VolumeResource, WorkDetailTab, WorkDetailTabKey, WorkView } from '../../../types/work';
 import type { ChapterDetailUnit, EbookChapterDetail } from '../model/chapter-detail';
 
 function record(value: unknown): Record<string, unknown> {
@@ -54,7 +54,19 @@ function parseDetailTabs(value: unknown): WorkDetailTab[] {
 }
 
 function volumeFormat(value: unknown): VolumeFormat | null {
-  return value === 'COMIC' || value === 'EPUB' || value === 'PDF' || value === 'AUDIO' || value === 'MOBI' || value === 'AZW' || value === 'AZW3' || value === 'PRC' || value === 'FB2' || value === 'TXT' ? value : null;
+  return value === 'COMIC' || value === 'CBZ' || value === 'CBR' || value === 'RAR' || value === 'ZIP' || value === 'EPUB' || value === 'PDF' || value === 'AUDIO' || value === 'MP3' || value === 'M4A' || value === 'M4B' || value === 'MOBI' || value === 'AZW' || value === 'AZW3' || value === 'PRC' || value === 'FB2' || value === 'TXT' ? value : null;
+}
+
+function readerType(value: unknown, format: VolumeFormat): ReaderType {
+  if (value === 'reflowable' || value === 'comic' || value === 'pdf' || value === 'audio') return value;
+  if (format === 'PDF') return 'pdf';
+  if (format === 'COMIC' || format === 'CBZ' || format === 'CBR' || format === 'RAR' || format === 'ZIP') return 'comic';
+  if (format === 'AUDIO' || format === 'MP3' || format === 'M4A' || format === 'M4B') return 'audio';
+  return 'reflowable';
+}
+
+function classificationSource(value: unknown): ClassificationSource {
+  return value === 'AUTO' || value === 'MONITOR_FOLDER' || value === 'USER' || value === 'INHERITED' || value === 'LEGACY' ? value : 'LEGACY';
 }
 
 function mapVolume(value: unknown): VolumeResource | null {
@@ -86,6 +98,7 @@ function mapVolume(value: unknown): VolumeResource | null {
       url: nullableString(file.url) ?? undefined
     }];
   });
+  const classification = record(item.classification);
   return {
     id,
     mediaVersionId,
@@ -93,6 +106,12 @@ function mapVolume(value: unknown): VolumeResource | null {
     volumeIndex: nullableNumber(item.volumeIndex),
     sortOrder: finiteNumber(item.sortOrder),
     format,
+    readerType: readerType(item.readerType, format),
+    classification: {
+      source: classificationSource(classification.source),
+      reason: stringValue(classification.reason, 'LEGACY'),
+      suggestedMediaKind: mediaKind(classification.suggestedMediaKind)
+    },
     derivedFromVolumeId: nullableString(item.derivedFromVolumeId),
     publisher: nullableString(item.publisher),
     publishedAt: nullableString(item.publishedAt),
@@ -114,6 +133,7 @@ function mapVolume(value: unknown): VolumeResource | null {
     hidden: item.hidden === true,
     readable: item.readable !== false,
     conversionAvailable: item.conversionAvailable === true,
+    kindleSendAvailable: item.kindleSendAvailable === true,
     files
   };
 }
@@ -322,6 +342,24 @@ export async function runVolumeAction(workId: string, volumeId: string, action: 
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined
   });
+}
+
+export async function reclassifyVolume(
+  workId: string,
+  volumeId: string,
+  targetMediaKind: MediaKind,
+  applyTo: 'VOLUME' | 'MEDIA_VERSION'
+): Promise<string | null> {
+  const data = record(await apiJson(`/api/works/${encodeURIComponent(workId)}/volumes/${encodeURIComponent(volumeId)}/reclassify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ targetMediaKind, applyTo })
+  }));
+  return nullableString(record(data.operation).id);
+}
+
+export async function undoLibraryOperation(operationId: string): Promise<void> {
+  await apiJson(`/api/library/operations/${encodeURIComponent(operationId)}/undo`, { method: 'POST' });
 }
 
 export async function deleteVolume(workId: string, volumeId: string): Promise<void> {

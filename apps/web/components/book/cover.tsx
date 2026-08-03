@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { withBasePath } from '../../lib/base-path';
 import { cn } from '../ui/cn';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
+import type { MediaKind } from '../../types/work';
 
 export type CoverBook = {
   id?: string | number;
@@ -14,6 +15,7 @@ export type CoverBook = {
   format?: string;
   gradient?: string;
   coverStatus?: string;
+  availableMediaKinds?: MediaKind[];
 };
 
 export function Cover({

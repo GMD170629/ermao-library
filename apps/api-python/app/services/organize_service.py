@@ -276,12 +276,6 @@ def work_patch_from_suggestions(
             and "seriesIndex" in allowed
         ):
             patch["seriesIndex"] = value
-        elif (
-            field == "publishedYear"
-            and isinstance(value, int)
-            and "publishedYear" in allowed
-        ):
-            patch["publishedYear"] = value
     return patch
 
 
@@ -554,7 +548,6 @@ def local_metadata_summary(context: dict[str, Any]) -> dict[str, Any]:
         "author": work.get("author"),
         "seriesName": work.get("seriesName"),
         "seriesIndex": work.get("seriesIndex"),
-        "publishedYear": work.get("publishedYear"),
         "tags": parse_json_value(work.get("tags")) or [],
         "fileNames": [str(file.get("path") or "").rsplit("/", 1)[-1] for file in files],
         "parentPaths": sorted(
@@ -585,7 +578,6 @@ def suggestion_from_ai_item(item: dict[str, Any]) -> dict[str, Any] | None:
         "tags",
         "seriesName",
         "seriesIndex",
-        "publishedYear",
     }:
         return None
     value = item.get("value")
@@ -613,7 +605,6 @@ def suggestion_from_external(
         "tags",
         "seriesName",
         "seriesIndex",
-        "publishedYear",
     }:
         return None
     if value is None or value == "" or value == []:
@@ -653,9 +644,6 @@ def douban_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
     for index, item in enumerate(books):
         if not isinstance(item, dict):
             continue
-        pubdate = first_string(
-            item.get("pubdate"), item.get("publishedAt"), item.get("date")
-        )
         tags = string_array(item.get("tags")) or string_array(item.get("tag"))
         candidates.append(
             {
@@ -669,7 +657,6 @@ def douban_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
                 "source": "douban",
                 "title": first_string(item.get("title"), item.get("subtitle")),
                 "author": first_string(item.get("author"), item.get("authors")),
-                "publisher": first_string(item.get("publisher")),
                 "description": first_string(
                     item.get("summary"), item.get("description")
                 ),
@@ -677,9 +664,6 @@ def douban_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
                 "seriesName": first_string(
                     item.get("seriesName"), item.get("series"), item.get("series_name")
                 ),
-                "publishedYear": item.get("publishedYear")
-                if isinstance(item.get("publishedYear"), int)
-                else extract_year(pubdate),
                 "coverUrl": first_url(
                     item.get("image"),
                     item.get("coverUrl"),
@@ -715,15 +699,6 @@ def douban_abstract_parts(value: Any) -> list[str]:
         if text_value
         else []
     )
-
-
-def douban_publisher_from_abstract(value: Any) -> str | None:
-    parts = douban_abstract_parts(value)
-    if len(parts) >= 5:
-        return parts[-3]
-    if len(parts) >= 4:
-        return parts[1]
-    return None
 
 
 def strip_html(value: str) -> str:
@@ -838,13 +813,6 @@ def parse_douban_subject_html(
         if isinstance(fallback.get("raw"), dict)
         else None,
     )
-    publisher = first_string(
-        info.get("出版社"),
-        fallback.get("publisher"),
-        (fallback.get("raw") or {}).get("publisher")
-        if isinstance(fallback.get("raw"), dict)
-        else None,
-    )
     series_name = first_string(
         info.get("丛书"),
         fallback.get("seriesName"),
@@ -868,11 +836,9 @@ def parse_douban_subject_html(
         "source": "douban",
         "title": title,
         "author": author,
-        "publisher": publisher,
         "description": description,
         "tags": fallback.get("tags") if isinstance(fallback.get("tags"), list) else [],
         "seriesName": series_name,
-        "publishedYear": extract_year(pubdate),
         "coverUrl": cover_url,
         "confidence": float(fallback.get("confidence") or 0.78),
         "raw": {
@@ -881,7 +847,6 @@ def parse_douban_subject_html(
             "url": url,
             "isbn": isbn,
             "pubdate": pubdate,
-            "publisher": publisher,
             "seriesName": series_name,
             "coverUrl": cover_url,
         },
@@ -926,10 +891,8 @@ def parse_douban_search_html(html: str, confidence: float) -> list[dict[str, Any
                 "source": "douban",
                 "title": first_string(item.get("title")),
                 "author": abstract_parts[0] if abstract_parts else None,
-                "publisher": douban_publisher_from_abstract(abstract),
                 "description": first_string(item.get("abstract_2")),
                 "tags": [],
-                "publishedYear": extract_year(abstract),
                 "coverUrl": cover_url,
                 "confidence": confidence,
                 "raw": {
@@ -950,11 +913,6 @@ def normalize_douban_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
     raw = candidate.get("raw") if isinstance(candidate.get("raw"), dict) else {}
     return {
         **candidate,
-        "publisher": first_string(
-            candidate.get("publisher"),
-            raw.get("publisher"),
-            douban_publisher_from_abstract(raw.get("abstract")),
-        ),
         "seriesName": first_string(
             candidate.get("seriesName"),
             raw.get("seriesName"),
@@ -1161,13 +1119,6 @@ def douban_book_suggestions(payload: Any, confidence: float) -> list[dict[str, A
             "外部数据源 · 豆瓣：补全丛书",
             "douban",
         ),
-        suggestion_from_external(
-            "publishedYear",
-            book.get("publishedYear"),
-            min(confidence, 0.82),
-            "外部数据源 · 豆瓣：补全出版年",
-            "douban",
-        ),
     ]
     return [item for item in raw if item]
 
@@ -1216,7 +1167,6 @@ def bangumi_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
             *_metadata_title_strings(item.get("name")),
             *_metadata_title_strings(item.get("name_cn")),
         ]
-        publisher = None
         volume = None
         for entry in infobox:
             if not isinstance(entry, dict):
@@ -1231,11 +1181,8 @@ def bangumi_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
                 re.IGNORECASE,
             ):
                 title_aliases.extend(_metadata_title_strings(value))
-            if publisher is None and re.search(r"出版社|发行|发售|厂牌|连载杂志", key):
-                publisher = value
             if volume is None and re.search(r"册数|卷数|话数", key):
                 volume = value
-        date = first_string(item.get("date"), item.get("air_date"))
         images = item.get("images") if isinstance(item.get("images"), dict) else {}
         candidates.append(
             {
@@ -1248,12 +1195,10 @@ def bangumi_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
                     )
                 ),
                 "author": authors[0] if authors else None,
-                "publisher": first_string(publisher),
                 "description": first_string(item.get("summary")),
                 "tags": tags[:8],
                 "seriesName": first_string(item.get("name_cn"), item.get("name")),
                 "seriesIndex": number_or_none(volume),
-                "publishedYear": extract_year(date),
                 "coverUrl": first_url(
                     images.get("large"),
                     images.get("common"),
@@ -1311,13 +1256,6 @@ def bangumi_candidate_suggestions(
             subject.get("seriesName"),
             min(confidence, 0.82),
             "外部数据源 · Bangumi：补全系列名",
-            "bangumi",
-        ),
-        suggestion_from_external(
-            "publishedYear",
-            subject.get("publishedYear"),
-            min(confidence, 0.78),
-            "外部数据源 · Bangumi：补全出版年",
             "bangumi",
         ),
     ]
@@ -1379,7 +1317,7 @@ def run_ai_metadata_provider(
         "messages": [
             {
                 "role": "system",
-                "content": '你是图书元数据整理助手。只返回 JSON，格式为 {"suggestions":[{"field":"title|author|description|tags|seriesName|seriesIndex|publishedYear","value":...,"confidence":0-1,"reason":"..."}]}。不要编造不确定信息。',
+                "content": '你是图书元数据整理助手。只返回 JSON，格式为 {"suggestions":[{"field":"title|author|description|tags|seriesName|seriesIndex","value":...,"confidence":0-1,"reason":"..."}]}。不要编造不确定信息。',
             },
             {"role": "user", "content": json_text(summary)},
         ],
@@ -1518,12 +1456,10 @@ def external_metadata_result_cacheable(result: dict[str, Any]) -> bool:
     useful_fields = (
         "title",
         "author",
-        "publisher",
         "description",
         "tags",
         "seriesName",
         "seriesIndex",
-        "publishedYear",
         "coverUrl",
     )
     return any(
@@ -1611,7 +1547,6 @@ def metadata_search_candidates(
             "tags": fields.get("tags") if isinstance(fields.get("tags"), list) else [],
             "seriesName": fields.get("seriesName"),
             "seriesIndex": fields.get("seriesIndex"),
-            "publishedYear": fields.get("publishedYear"),
             "confidence": max(
                 [
                     float(item.get("confidence") or 0)
