@@ -12,6 +12,7 @@ dist
 .fnos-build
 .turbo
 .tmp
+/tmp/
 tmp-worker-smoke
 .env
 .env.production
