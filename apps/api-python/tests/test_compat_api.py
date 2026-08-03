@@ -3731,13 +3731,38 @@ def test_system_settings_roll_back_when_audit_event_fails(
     assert get_setting(db_session, "readerTheme") is None
 
 
-def test_application_locale_is_public_validated_and_persisted(client, db_session):
+def test_application_locale_is_public_validated_and_persisted(
+    client, db_session, test_settings
+):
     initial = client.get("/api/app-config")
     assert initial.status_code == 200
+    assert initial.headers["cache-control"] == "private, no-store"
     assert initial.json()["data"] == {
         "language": "zh-CN",
         "supportedLocales": ["zh-CN", "en-US"],
+        "frontendResources": {
+            "latestVersion": test_settings.app_version,
+            "updateRequired": False,
+        },
     }
+
+    current = client.get(
+        "/api/app-config",
+        headers={"X-Shuku-Frontend-Resource-Version": test_settings.app_version},
+    )
+    assert current.json()["data"]["frontendResources"]["updateRequired"] is False
+
+    stale = client.get(
+        "/api/app-config",
+        headers={"X-Shuku-Frontend-Resource-Version": "0.0.0"},
+    )
+    assert stale.json()["data"]["frontendResources"]["updateRequired"] is True
+
+    invalid = client.get(
+        "/api/app-config",
+        headers={"X-Shuku-Frontend-Resource-Version": "legacy-cache"},
+    )
+    assert invalid.json()["data"]["frontendResources"]["updateRequired"] is True
 
     _login(client, db_session)
     saved = client.patch(

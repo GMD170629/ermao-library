@@ -5,6 +5,7 @@ from __future__ import annotations
 from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 
+from app.core.authorization import AuthorizationContext, volume_visibility_predicate
 from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
@@ -12,6 +13,10 @@ from app.models.library import (
     LibraryWork,
 )
 from app.modules.media.application.resource_query import MediaFileResource
+from app.modules.media.application.volume_archive import (
+    VolumeArchiveSelection,
+    VolumeArchiveSource,
+)
 
 
 class SqlAlchemyMediaResourceRepository:
@@ -34,6 +39,57 @@ class SqlAlchemyMediaResourceRepository:
             .limit(1)
         ).first()
         return self._file_resource(file)
+
+    def get_volume_archive_selection(
+        self,
+        *,
+        actor: AuthorizationContext,
+        work_id: str,
+        volume_ids: tuple[str, ...],
+    ) -> VolumeArchiveSelection | None:
+        rows = self._session.execute(
+            select(LibraryWork.title, LibraryVolume, LibraryFile)
+            .join(
+                LibraryMediaVersion,
+                LibraryMediaVersion.work_id == LibraryWork.id,
+            )
+            .join(
+                LibraryVolume,
+                LibraryVolume.media_version_id == LibraryMediaVersion.id,
+            )
+            .outerjoin(LibraryFile, LibraryFile.volume_id == LibraryVolume.id)
+            .where(
+                LibraryWork.id == work_id,
+                LibraryVolume.id.in_(volume_ids),
+                LibraryVolume.hidden.is_(False),
+                volume_visibility_predicate(actor),
+            )
+            .order_by(
+                LibraryMediaVersion.media_kind,
+                LibraryVolume.sort_order,
+                LibraryVolume.created_at,
+                LibraryVolume.id,
+                LibraryFile.sort_order,
+                LibraryFile.created_at,
+                LibraryFile.id,
+            )
+        ).all()
+        if not rows:
+            return None
+        sources_by_volume: dict[str, VolumeArchiveSource] = {}
+        for work_title, volume, file in rows:
+            existing = sources_by_volume.get(volume.id)
+            if existing is not None and (existing.source_path or file is None):
+                continue
+            sources_by_volume[volume.id] = VolumeArchiveSource(
+                volume_id=volume.id,
+                volume_title=volume.title,
+                source_path=file.path if file is not None else "",
+            )
+        return VolumeArchiveSelection(
+            work_title=str(rows[0][0]),
+            sources=tuple(sources_by_volume.values()),
+        )
 
     def work_cover_path(self, work_id: str) -> str | None:
         explicit_cover = self._session.scalar(

@@ -56,6 +56,7 @@ from app.models.library import (
     LibraryVolume,
 )
 from app.modules.library.application.volume_commands import (
+    BatchVolumeCommand,
     InvalidVolumeChangeError,
     LibraryActor,
     LibraryAuthorizationError,
@@ -65,6 +66,7 @@ from app.modules.library.application.volume_commands import (
     VolumeNotFoundError,
     VolumeSourceMissingError,
     WorkNotFoundError,
+    batch_volume_resources,
     delete_volume_resource,
     move_volume_resource,
     queue_volume_epub_conversion,
@@ -74,6 +76,10 @@ from app.modules.library.application.volume_commands import (
     update_volume_resource,
 )
 from app.modules.library.presentation.schemas import (
+    BatchSetMediaKindRequest,
+    BatchTransferVolumesRequest,
+    BatchVolumeMutationResponse,
+    BatchVolumeRequest,
     BulkMutationResponse,
     CategoriesResponse,
     ContinueReadingResponse,
@@ -104,9 +110,9 @@ from app.modules.library.presentation.schemas import (
     MetadataSearchResponse,
     MoveVolumeRequest,
     OperationsResponse,
-    ReorderVolumeRequest,
     ReclassifyVolumeRequest,
     RenameCategoryResponse,
+    ReorderVolumeRequest,
     SeriesResponse,
     SplitVolumeRequest,
     UndoOperationResponse,
@@ -2603,6 +2609,83 @@ def update_work_volume(
             ),
             "workId": work_id,
             "volumeId": volume_id,
+        }
+    )
+
+
+@router.post("/works/{work_id}/volumes/batch")
+def batch_work_volumes(
+    work_id: str,
+    payload: BatchVolumeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    BatchVolumeMutationResponse,
+    ErrorResponses(
+        LibraryBadRequestError,
+        LibraryForbiddenError,
+        LibraryNotFoundError,
+    ),
+]:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    try:
+        outcome = batch_volume_resources(
+            volume_structure_commands(db),
+            db,
+            actor=_library_actor(db, user),
+            work_id=work_id,
+            command=BatchVolumeCommand(
+                action=payload.action,
+                volume_ids=tuple(payload.volume_ids),
+                target_media_kind=(
+                    payload.target_media_kind
+                    if isinstance(payload, BatchSetMediaKindRequest)
+                    else None
+                ),
+                target_work_id=(
+                    payload.target_work_id
+                    if isinstance(payload, BatchTransferVolumesRequest)
+                    else None
+                ),
+            ),
+            now=_now(),
+        )
+    except WorkNotFoundError:
+        _raise_library_error(
+            "作品不存在或无权访问",
+            status_code=404,
+            code="WORK_NOT_FOUND",
+        )
+    except VolumeNotFoundError:
+        _raise_library_error(
+            "卷册不存在或不属于该作品",
+            status_code=404,
+            code="VOLUME_NOT_FOUND",
+        )
+    except LibraryAuthorizationError:
+        _raise_library_error(
+            "需要系统管理权限",
+            status_code=403,
+            code="SYSTEM_MANAGER_REQUIRED",
+        )
+    except InvalidVolumeChangeError as exc:
+        _raise_library_error(
+            "批量卷册操作请求无效",
+            status_code=400,
+            code=str(exc),
+        )
+    refreshed_work = _get_work(db, work_id)
+    return BatchVolumeMutationResponse(
+        data={
+            "book": _work_view(db, refreshed_work, user.id) if refreshed_work else None,
+            "workId": work_id,
+            "affectedVolumeIds": list(outcome.affected_volume_ids),
+            "targetWorkIds": list(outcome.target_work_ids),
+            "operationIds": list(outcome.operation_ids),
+            "deletedWork": outcome.deleted_work,
         }
     )
 

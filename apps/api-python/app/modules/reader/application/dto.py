@@ -102,7 +102,20 @@ class ReaderProgressDto:
     mutation_id: str | None
     client_id: str | None
     client_sequence: int | None
+    progressed_at: datetime
+    source_protocol: str
+    source_device_name: str | None
     updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ReaderExternalProgressDto:
+    volume_id: str
+    progression: float
+    modified_at: datetime
+    device_id: str
+    device_name: str
+    references: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)

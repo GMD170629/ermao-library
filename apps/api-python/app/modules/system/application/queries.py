@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,10 +28,32 @@ class SettingsUpdateError:
     details: object | None = None
 
 
-def app_config_payload(db: Any) -> dict[str, Any]:
+_STABLE_VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
+
+
+def frontend_resource_status(
+    current_version: str | None, latest_version: str
+) -> dict[str, str | bool]:
+    normalized_current = (current_version or "").strip()
+    return {
+        "latestVersion": latest_version,
+        "updateRequired": bool(normalized_current)
+        and (
+            _STABLE_VERSION_PATTERN.fullmatch(normalized_current) is None
+            or normalized_current != latest_version
+        ),
+    }
+
+
+def app_config_payload(
+    db: Any, *, current_frontend_resource_version: str | None, latest_version: str
+) -> dict[str, Any]:
     return {
         "language": configured_locale(db),
         "supportedLocales": list(SUPPORTED_LOCALES),
+        "frontendResources": frontend_resource_status(
+            current_frontend_resource_version, latest_version
+        ),
     }
 
 

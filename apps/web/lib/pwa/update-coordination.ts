@@ -17,10 +17,13 @@ export function createPwaUpdatePreparation() {
   };
 }
 
-export async function prepareForPwaUpdate(target: Window = window) {
+export async function prepareForPwaUpdate(target: Window = window, timeoutMs = 5_000) {
   const preparation = createPwaUpdatePreparation();
   target.dispatchEvent(new CustomEvent<BeforePwaUpdateDetail>(BEFORE_PWA_UPDATE_EVENT, {
     detail: preparation.detail
   }));
-  await preparation.wait();
+  await Promise.race([
+    preparation.wait(),
+    new Promise<void>((resolve) => { setTimeout(resolve, timeoutMs); })
+  ]);
 }

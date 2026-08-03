@@ -32,7 +32,8 @@ test('service worker caches the shared web shell without a dedicated mobile entr
   assert.match(source, /'\/login'/);
   assert.match(source, /'\/setup'/);
   assert.doesNotMatch(source, /'\/mobile/);
-  assert.match(source, /const VERSION = 'shuku-pwa-v2\.4\.0'/);
+  assert.match(source, /const FRONTEND_RESOURCE_VERSION = '0\.4\.7'/);
+  assert.match(source, /const VERSION = `shuku-pwa-v\$\{FRONTEND_RESOURCE_VERSION\}`/);
 });
 
 test('localized web manifest is never pinned in a service-worker cache', () => {
@@ -41,10 +42,24 @@ test('localized web manifest is never pinned in a service-worker cache', () => {
 });
 
 test('private API and cover caches are partitioned by user and authorization version', () => {
-  assert.match(source, /const PRIVATE_CACHE_PREFIX = `\$\{VERSION\}-private-`/);
+  assert.match(source, /const PRIVATE_CACHE_PREFIX = 'shuku-pwa-private-v1-'/);
   assert.match(source, /event\.data\?\.type === 'SET_PRIVATE_CACHE_NAMESPACE'/);
   assert.match(source, /const nextNamespace = userId && authzVersion \? `\$\{userId\}-\$\{authzVersion\}` : ''/);
   assert.match(source, /privateCacheName\('api'\)/);
   assert.match(source, /privateCacheName\('cover'\)/);
   assert.match(source, /event\.data\?\.type === 'CLEAR_PRIVATE_CACHES'/);
+});
+
+test('forced updates only purge versioned frontend resources and preserve reader storage', () => {
+  assert.match(source, /event\.data\?\.type === 'GET_FRONTEND_RESOURCE_VERSION'/);
+  assert.match(source, /event\.data\?\.type === 'PURGE_FRONTEND_RESOURCES_AND_ACTIVATE'/);
+  assert.match(source, /function clearOldFrontendResourceCaches/);
+  assert.match(source, /isFrontendResourceCache\(cacheName\)/);
+  assert.match(source, /migrateLegacyPrivateCaches/);
+  assert.doesNotMatch(source, /indexedDB/);
+  assert.doesNotMatch(source, /keys\.filter\(\(key\) => !key\.startsWith\(VERSION\)\)/);
+});
+
+test('the backend resource-version contract always bypasses service-worker API caches', () => {
+  assert.match(source, /withoutBasePath\(url\.pathname\) === '\/api\/app-config'/);
 });

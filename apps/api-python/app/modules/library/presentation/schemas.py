@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field
 from typing_extensions import TypeAliasType
@@ -957,6 +957,46 @@ class SplitVolumeRequest(HttpContractModel):
     author: str | None = None
 
 
+class BatchVolumeRequestBase(HttpContractModel):
+    volume_ids: list[str] = Field(alias="volumeIds", min_length=1)
+
+
+class BatchSetMediaKindRequest(BatchVolumeRequestBase):
+    action: Literal["SET_MEDIA_KIND"]
+    target_media_kind: MediaKind = Field(alias="targetMediaKind")
+
+
+class BatchSplitVolumesRequest(BatchVolumeRequestBase):
+    action: Literal["SPLIT"]
+
+
+class BatchTransferVolumesRequest(BatchVolumeRequestBase):
+    action: Literal["TRANSFER"]
+    target_work_id: str = Field(alias="targetWorkId", min_length=1)
+
+
+class BatchDeleteVolumesRequest(BatchVolumeRequestBase):
+    action: Literal["DELETE"]
+
+
+BatchVolumeRequest = Annotated[
+    BatchSetMediaKindRequest
+    | BatchSplitVolumesRequest
+    | BatchTransferVolumesRequest
+    | BatchDeleteVolumesRequest,
+    Field(discriminator="action"),
+]
+
+
+class BatchVolumeMutationPayload(HttpContractModel):
+    book: WorkView | None
+    work_id: str = Field(alias="workId")
+    affected_volume_ids: list[str] = Field(alias="affectedVolumeIds")
+    target_work_ids: list[str] = Field(alias="targetWorkIds")
+    operation_ids: list[str] = Field(alias="operationIds")
+    deleted_work: bool = Field(alias="deletedWork")
+
+
 class WorkStructureMutationPayload(HttpContractModel):
     book: WorkView | None
     target_book: WorkView | None = Field(default=None, alias="targetBook")
@@ -1019,6 +1059,7 @@ MetadataSearchResponse = SuccessEnvelope[MetadataSearchPayload]
 ConversionResponse = SuccessEnvelope[ConversionPayload]
 MetadataApplyResponse = SuccessEnvelope[MetadataApplyPayload]
 WorkStructureMutationResponse = SuccessEnvelope[WorkStructureMutationPayload]
+BatchVolumeMutationResponse = SuccessEnvelope[BatchVolumeMutationPayload]
 
 
 class LibraryErrorBody(HttpContractModel):

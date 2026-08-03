@@ -215,7 +215,7 @@ def test_0003_upgrade_merges_same_media_editions_without_losing_volumes(
 
         apply_schema(engine, settings)
 
-        assert head_revision(engine) == "0010_content_classification"
+        assert head_revision(engine) == "0011_reader_progress_sources"
         upgraded_volume = _table(engine, "LibraryVolume")
         upgraded_task = _table(engine, "ImportTask")
         upgraded_folder = _table(engine, "MonitorFolder")
@@ -296,6 +296,16 @@ def test_0003_upgrade_merges_same_media_editions_without_losing_volumes(
                 )
             ).all()
             assert progress_rows == [("progress-new", "volume-a", 75.0)]
+            progression_source = connection.execute(
+                select(
+                    migrated_progress.c.progressedAt,
+                    migrated_progress.c.sourceProtocol,
+                    migrated_progress.c.sourceDeviceName,
+                ).where(migrated_progress.c.id == "progress-new")
+            ).one()
+            assert progression_source.progressedAt is not None
+            assert progression_source.sourceProtocol == "SHUKU_WEB"
+            assert progression_source.sourceDeviceName == "Shuku Web Reader"
             migration_event = _table(engine, "MediaVersionMigrationEvent")
             assert (
                 connection.scalar(
@@ -389,10 +399,10 @@ def test_contract_discards_conversion_without_source_volume_and_completes_upgrad
             assert connection.scalar(select(_table(engine, "ImportTask").c.id)) == (
                 "orphaned-import"
             )
-            assert head_revision(engine) == "0010_content_classification"
+            assert head_revision(engine) == "0011_reader_progress_sources"
             assert "LibraryEdition" not in inspect(connection).get_table_names()
 
         apply_schema(engine, settings)
-        assert head_revision(engine) == "0010_content_classification"
+        assert head_revision(engine) == "0011_reader_progress_sources"
     finally:
         engine.dispose()

@@ -1,5 +1,20 @@
 """Public application and domain contracts for the library capability."""
 
+from app.modules.library.application.catalog import (
+    CATALOG_FACET_KINDS,
+    CatalogFacet,
+    CatalogFacetPage,
+    CatalogFile,
+    CatalogQueryPort,
+    CatalogVolume,
+    CatalogWork,
+    CatalogWorkFacet,
+    CatalogWorkFilter,
+    CatalogWorkPage,
+    GetCatalogWork,
+    ListCatalogFacets,
+    ListCatalogWorks,
+)
 from app.modules.library.application.commands import (
     LibraryUnitOfWork,
     execute_library_write,
@@ -59,16 +74,29 @@ from app.modules.library.presentation.work_ops import (
 )
 
 __all__ = [
+    "CATALOG_FACET_KINDS",
     "FACET_KINDS",
     "LIBRARY_GROUPING_KINDS",
+    "CatalogFacet",
+    "CatalogFacetPage",
+    "CatalogFile",
+    "CatalogQueryPort",
+    "CatalogVolume",
+    "CatalogWork",
+    "CatalogWorkFacet",
+    "CatalogWorkFilter",
+    "CatalogWorkPage",
     "FilterCondition",
     "FilterExpression",
+    "GetCatalogWork",
     "GetSmartShelfWorkIds",
     "InvalidFilterExpression",
     "LibraryGrouping",
     "LibraryGroupingPage",
     "LibraryGroupingQueryPort",
     "LibraryUnitOfWork",
+    "ListCatalogFacets",
+    "ListCatalogWorks",
     "ListLibraryGroupings",
     "MoveVolumeResult",
     "SmartShelfCriteria",

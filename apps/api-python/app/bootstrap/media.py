@@ -16,6 +16,7 @@ from app.modules.media.infrastructure.page_index import (
 from app.modules.media.infrastructure.resource_repository import (
     SqlAlchemyMediaResourceRepository,
 )
+from app.modules.media.infrastructure.volume_archive import ZipVolumeArchiveWriter
 from app.modules.media.public import execute_media_write
 
 
@@ -44,9 +45,16 @@ def media_resource_query(db: Session) -> MediaResourceQuery:
     return MediaResourceQuery(SqlAlchemyMediaResourceRepository(db))
 
 
+def volume_archive_dependencies(
+    db: Session, settings: Settings
+) -> tuple[SqlAlchemyMediaResourceRepository, ZipVolumeArchiveWriter]:
+    return SqlAlchemyMediaResourceRepository(db), ZipVolumeArchiveWriter(settings)
+
+
 __all__ = [
     "ensure_volume_page_index",
     "media_page_index",
     "media_resource_query",
     "media_streaming",
+    "volume_archive_dependencies",
 ]

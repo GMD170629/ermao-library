@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from pydantic import Field
 
 from app.contracts.http import HttpContractModel
@@ -15,6 +15,14 @@ class MediaFileResponse(Response):
 
 class MediaImageResponse(Response):
     media_type = "image/jpeg"
+
+
+class MediaArchiveResponse(FileResponse):
+    media_type = "application/zip"
+
+
+class VolumeArchiveRequest(HttpContractModel):
+    volume_ids: list[str] = Field(alias="volumeIds", min_length=1)
 
 
 class VolumePage(HttpContractModel):

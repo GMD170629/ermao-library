@@ -26,9 +26,11 @@ class VolumeContext:
     media_version_id: str
     media_kind: str
     title: str
+    sort_order: int
     format: str
     monitor_folder_id: str | None
     author: str | None
+    work_title: str
     source_path: Path | None
 
 
@@ -75,6 +77,26 @@ class VolumeReclassifyOutcome:
     target_media_version_id: str
     moved_volume_ids: tuple[str, ...]
     operation: OperationSummary
+
+
+BatchVolumeAction = Literal["SET_MEDIA_KIND", "SPLIT", "TRANSFER", "DELETE"]
+
+
+@dataclass(frozen=True, slots=True)
+class BatchVolumeCommand:
+    action: BatchVolumeAction
+    volume_ids: tuple[str, ...]
+    target_media_kind: str | None = None
+    target_work_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class BatchVolumeOutcome:
+    work_id: str
+    affected_volume_ids: tuple[str, ...]
+    target_work_ids: tuple[str, ...]
+    operation_ids: tuple[str, ...]
+    deleted_work: bool
 
 
 class VolumeStructurePort(Protocol):
@@ -162,6 +184,112 @@ class LibraryAuthorizationError(Exception):
 
 class InvalidVolumeChangeError(Exception):
     pass
+
+
+def batch_volume_resources(
+    port: VolumeStructurePort,
+    unit_of_work: UnitOfWork,
+    *,
+    actor: LibraryActor,
+    work_id: str,
+    command: BatchVolumeCommand,
+    now: datetime,
+) -> BatchVolumeOutcome:
+    """Apply one volume-management intention atomically to an explicit selection."""
+    _require_work_access(port, actor=actor, work_id=work_id)
+    _require_manager(actor)
+    if not command.volume_ids:
+        raise InvalidVolumeChangeError("VOLUME_SELECTION_REQUIRED")
+    if len(set(command.volume_ids)) != len(command.volume_ids):
+        raise InvalidVolumeChangeError("DUPLICATE_VOLUME_IDS")
+
+    contexts = [
+        _require_volume(port, actor=actor, work_id=work_id, volume_id=volume_id)
+        for volume_id in command.volume_ids
+    ]
+    contexts.sort(
+        key=lambda value: (value.media_version_id, value.sort_order, value.id)
+    )
+
+    target_media_kind = (command.target_media_kind or "").strip().upper()
+    target_work_id = (command.target_work_id or "").strip()
+    if command.action == "SET_MEDIA_KIND" and target_media_kind not in {
+        "EBOOK",
+        "COMIC",
+        "AUDIOBOOK",
+    }:
+        raise InvalidVolumeChangeError("INVALID_MEDIA_KIND")
+    if command.action == "TRANSFER":
+        if not target_work_id or target_work_id == work_id:
+            raise InvalidVolumeChangeError("INVALID_TARGET_WORK")
+        _require_work_access(port, actor=actor, work_id=target_work_id)
+
+    target_work_ids: list[str] = []
+    operation_ids: list[str] = []
+    deleted_work = False
+    try:
+        for context in contexts:
+            if command.action == "SET_MEDIA_KIND":
+                outcome = port.reclassify_volume(
+                    actor_id=actor.user_id,
+                    work_id=work_id,
+                    volume_id=context.id,
+                    target_media_kind=target_media_kind,
+                    apply_to="VOLUME",
+                    now=now,
+                )
+                operation_ids.append(outcome.operation.id)
+            elif command.action == "SPLIT":
+                outcome = port.split_volume(
+                    actor_id=actor.user_id,
+                    source_work_id=work_id,
+                    volume_id=context.id,
+                    new_work=NewWorkInput(
+                        title=f"{context.work_title}（{context.title}）",
+                        author=context.author,
+                    ),
+                    now=now,
+                )
+                target_work_ids.append(outcome.target_work_id)
+                operation_ids.append(outcome.operation.id)
+            elif command.action == "TRANSFER":
+                outcome = port.move_volume(
+                    actor_id=actor.user_id,
+                    source_work_id=work_id,
+                    volume_id=context.id,
+                    target_work_id=target_work_id,
+                    now=now,
+                )
+                operation_ids.append(outcome.operation.id)
+            else:
+                outcome = port.delete_volume(
+                    actor_id=actor.user_id,
+                    work_id=work_id,
+                    volume_id=context.id,
+                    now=now,
+                )
+                deleted_work = deleted_work or outcome.deleted_work
+                operation_ids.append(outcome.operation.id)
+        deleted_work = deleted_work or not port.can_access_work(
+            actor=actor, work_id=work_id
+        )
+        unit_of_work.commit()
+    except ValueError as exc:
+        unit_of_work.rollback()
+        raise VolumeNotFoundError(str(exc)) from exc
+    except Exception:
+        unit_of_work.rollback()
+        raise
+
+    if command.action == "TRANSFER":
+        target_work_ids.append(target_work_id)
+    return BatchVolumeOutcome(
+        work_id=work_id,
+        affected_volume_ids=tuple(context.id for context in contexts),
+        target_work_ids=tuple(target_work_ids),
+        operation_ids=tuple(operation_ids),
+        deleted_work=deleted_work,
+    )
 
 
 def reclassify_volume_resource(

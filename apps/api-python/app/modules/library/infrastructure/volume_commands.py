@@ -116,9 +116,11 @@ class SqlAlchemyVolumeStructure:
             media_version_id=volume.media_version_id,
             media_kind=media_version.media_kind,
             title=volume.title,
+            sort_order=volume.sort_order,
             format=volume.format,
             monitor_folder_id=volume.monitor_folder_id,
             author=work.author,
+            work_title=work.title,
             source_path=Path(source_path).expanduser() if source_path else None,
         )
 

@@ -69,6 +69,9 @@ def _progress_dto(progress: LibraryReadingProgress) -> ReaderProgressDto:
         mutation_id=progress.mutation_id,
         client_id=progress.client_id,
         client_sequence=progress.client_sequence,
+        progressed_at=progress.progressed_at,
+        source_protocol=progress.source_protocol,
+        source_device_name=progress.source_device_name,
         updated_at=progress.updated_at,
     )
 
@@ -414,6 +417,9 @@ class SqlAlchemyReaderVolumeRepository:
                 mutation_id=mutation_id,
                 client_id=client_id,
                 client_sequence=client_sequence,
+                progressed_at=now,
+                source_protocol="SHUKU_WEB",
+                source_device_name="Shuku Web Reader",
                 created_at=now,
                 updated_at=now,
             )
@@ -428,6 +434,92 @@ class SqlAlchemyReaderVolumeRepository:
             progress.mutation_id = mutation_id
             progress.client_id = client_id
             progress.client_sequence = client_sequence
+            progress.progressed_at = now
+            progress.source_protocol = "SHUKU_WEB"
+            progress.source_device_name = "Shuku Web Reader"
+            progress.updated_at = now
+
+        history = self._session.scalar(
+            select(UserMediaHistory).where(
+                UserMediaHistory.user_id == user_id,
+                UserMediaHistory.media_version_id == context.media_version.id,
+            )
+        )
+        if history is None:
+            self._session.add(
+                UserMediaHistory(
+                    user_id=user_id,
+                    media_version_id=context.media_version.id,
+                    last_volume_id=context.volume.id,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        else:
+            history.last_volume_id = context.volume.id
+            history.updated_at = now
+        self._session.flush()
+        return _progress_dto(progress)
+
+    def save_external_progress(
+        self,
+        *,
+        user_id: str,
+        context: ReaderVolumeContextDto,
+        reader_type: str,
+        percent: float,
+        location_json: str,
+        content_fingerprint: str,
+        mutation_id: str,
+        client_id: str,
+        client_sequence: int,
+        progressed_at: datetime,
+        source_protocol: str,
+        source_device_name: str,
+        now: datetime,
+    ) -> ReaderProgressDto:
+        progress = self._session.scalar(
+            select(LibraryReadingProgress).where(
+                LibraryReadingProgress.user_id == user_id,
+                LibraryReadingProgress.volume_id == context.volume.id,
+            )
+        )
+        if progress is None:
+            progress = LibraryReadingProgress(
+                user_id=user_id,
+                volume_id=context.volume.id,
+                reader_type=reader_type,
+                position="0",
+                page=None,
+                percent=percent,
+                extra="{}",
+                schema_version=3,
+                location_type=reader_type,
+                location_json=location_json,
+                content_fingerprint=content_fingerprint,
+                mutation_id=mutation_id,
+                client_id=client_id,
+                client_sequence=client_sequence,
+                progressed_at=progressed_at,
+                source_protocol=source_protocol,
+                source_device_name=source_device_name,
+                created_at=now,
+                updated_at=now,
+            )
+            self._session.add(progress)
+        else:
+            progress.reader_type = reader_type
+            progress.percent = percent
+            progress.schema_version = 3
+            progress.location_type = reader_type
+            progress.location_json = location_json
+            progress.content_fingerprint = content_fingerprint
+            progress.mutation_id = mutation_id
+            progress.client_id = client_id
+            progress.client_sequence = client_sequence
+            progress.progressed_at = progressed_at
+            progress.source_protocol = source_protocol
+            progress.source_device_name = source_device_name
             progress.updated_at = now
 
         history = self._session.scalar(

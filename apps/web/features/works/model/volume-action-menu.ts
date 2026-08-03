@@ -1,5 +1,4 @@
 export type VolumeActionId =
-  | 'open'
   | 'download'
   | 'edit'
   | 'set-media-kind'
@@ -18,17 +17,18 @@ export type VolumeActionAvailability = Readonly<{
 export function volumeActionAvailability({
   canManage,
   readable,
-  mediaKind
+  mediaKind,
+  selectionCount = 1
 }: {
   canManage: boolean;
   readable: boolean;
   mediaKind: 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
+  selectionCount?: number;
 }): VolumeActionAvailability[] {
   if (!canManage) return [];
   const actions: VolumeActionAvailability[] = [
-    { action: 'open', disabled: !readable },
     { action: 'download', disabled: !readable },
-    { action: 'edit', disabled: false },
+    { action: 'edit', disabled: selectionCount !== 1 },
     { action: 'set-media-kind', disabled: false }
   ];
   if (mediaKind !== 'EBOOK') actions.push({ action: 'set-ebook', disabled: false });

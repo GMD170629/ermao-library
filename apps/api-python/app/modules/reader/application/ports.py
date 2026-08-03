@@ -65,6 +65,24 @@ class ReaderVolumeRepository(Protocol):
         now: datetime,
     ) -> ReaderProgressDto: ...
 
+    def save_external_progress(
+        self,
+        *,
+        user_id: str,
+        context: ReaderVolumeContextDto,
+        reader_type: str,
+        percent: float,
+        location_json: str,
+        content_fingerprint: str,
+        mutation_id: str,
+        client_id: str,
+        client_sequence: int,
+        progressed_at: datetime,
+        source_protocol: str,
+        source_device_name: str,
+        now: datetime,
+    ) -> ReaderProgressDto: ...
+
     def list_bookmarks(
         self, user_id: str, volume_id: str, content_fingerprint: str
     ) -> list[ReaderBookmarkDto]: ...

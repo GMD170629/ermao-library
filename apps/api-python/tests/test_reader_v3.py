@@ -3,6 +3,9 @@ import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
 from app.core.auth import hash_password
 from app.core.config import Settings
 from app.models.auth import ReaderBookmark, User
@@ -14,8 +17,6 @@ from app.models.library import (
     LibraryVolume,
     LibraryWork,
 )
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
 
 
 def _login(client: TestClient, db_session: Session) -> User:

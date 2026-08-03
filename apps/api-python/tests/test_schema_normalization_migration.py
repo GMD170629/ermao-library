@@ -185,7 +185,7 @@ def test_0004_produces_identical_schema_from_distinct_0003_shapes(
 
         for engine in (canonical, legacy):
             _upgrade(engine, "head")
-            assert head_revision(engine) == "0010_content_classification"
+            assert head_revision(engine) == "0011_reader_progress_sources"
 
         assert _schema_fingerprint(canonical) == _schema_fingerprint(legacy)
     finally:

@@ -686,6 +686,23 @@ class LibraryReadingProgress(Base):
     client_sequence: Mapped[int | None] = mapped_column(
         "clientSequence", Integer, nullable=True
     )
+    progressed_at: Mapped[datetime] = mapped_column(
+        "progressedAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
+    source_protocol: Mapped[str] = mapped_column(
+        "sourceProtocol",
+        String(32),
+        nullable=False,
+        default="SHUKU_WEB",
+        server_default="SHUKU_WEB",
+    )
+    source_device_name: Mapped[str | None] = mapped_column(
+        "sourceDeviceName", String(191), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         "createdAt",
         TimestampMilliseconds(),

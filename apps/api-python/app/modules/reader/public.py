@@ -3,6 +3,17 @@
 from app.modules.reader.application.content_fingerprint import (
     build_volume_content_fingerprint,
 )
+from app.modules.reader.application.dto import (
+    ReaderAccessScope,
+    ReaderExternalProgressDto,
+)
+from app.modules.reader.application.volume_reader import (
+    ReaderProgressDateConflict,
+    ReaderVolumeFormatUnsupported,
+    ReaderVolumeNotFound,
+    SaveExternalProgressCommand,
+    VolumeReaderService,
+)
 from app.modules.reader.domain.progress import (
     normalize_reader_href,
     number_or_none,
@@ -21,6 +32,13 @@ from app.modules.reader.domain.volume_progress import (
 
 __all__ = [
     "MediaKind",
+    "ReaderAccessScope",
+    "ReaderExternalProgressDto",
+    "ReaderProgressDateConflict",
+    "ReaderVolumeFormatUnsupported",
+    "ReaderVolumeNotFound",
+    "SaveExternalProgressCommand",
+    "VolumeReaderService",
     "VolumeReadingState",
     "build_volume_content_fingerprint",
     "choose_continue_volume_id",

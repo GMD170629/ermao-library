@@ -9,6 +9,21 @@ const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
 const sourceCatalog = JSON.parse(readFileSync(sourceCatalogPath, 'utf8'));
 
 const exactOverrides = {
+  '检测到必须安装的前端资源更新': 'A required frontend update was detected',
+  '前端资源更新失败': 'Frontend update failed',
+  '正在保存当前位置并安装最新版，请勿关闭应用。': 'Saving your current position and installing the latest version. Keep the app open.',
+  '应用必须完成更新后才能继续使用。': 'The app must finish updating before you can continue.',
+  '重试更新': 'Retry update',
+  '安装新版前端资源超时': 'Installing the frontend update timed out',
+  '读取前端资源版本超时': 'Reading the frontend resource version timed out',
+  '激活新版前端资源超时': 'Activating the frontend update timed out',
+  '前端资源版本无效': 'The frontend resource version is invalid',
+  '前端资源版本响应无效': 'The frontend resource version response is invalid',
+  '前后端资源版本不一致': 'The frontend and backend resource versions do not match',
+  '清理旧前端资源失败': 'Failed to clear old frontend resources',
+  '下载新版前端资源超时': 'Downloading the frontend update timed out',
+  '新版前端资源安装失败': 'The frontend update could not be installed',
+  '暂时无法检查前端资源版本': 'Unable to check the frontend resource version right now',
   '二毛图书': 'Ermao Books',
   '二毛': 'Ermao',
   '自托管私人图书馆与沉浸阅读应用': 'A self-hosted private library and immersive reading app',

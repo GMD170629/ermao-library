@@ -13,6 +13,7 @@ import {
 import { migrateLegacyBrowserReaderState } from '../../../lib/reader/browser-migration';
 import { readDeviceReaderPreferences } from '../../../lib/reader-device-preferences';
 import { withBasePath } from '../../../lib/base-path';
+import { BEFORE_PWA_UPDATE_EVENT, type BeforePwaUpdateDetail } from '../../../lib/pwa/update-coordination';
 import { DEFAULT_READER_THEME, readerThemeSurfaces } from '../reader-theme';
 import { fetchReaderBootstrap, type ReaderBootstrap } from './api';
 import { requestedPdfPage } from './direct-page-target';
@@ -218,6 +219,7 @@ export function ReaderV3Page({ volumeId }: { volumeId: string }) {
   const [storageError, setStorageError] = useState('');
   const [openingContext] = useState<OpeningContext | null>(() => readOpeningContext(volumeId));
   const requestSequenceRef = useRef(0);
+  const pendingLocationWriteRef = useRef<Promise<unknown>>(Promise.resolve());
   const runtime = getReaderRuntime();
   const activeTheme = state.status === 'error'
     ? 'night'
@@ -407,7 +409,7 @@ export function ReaderV3Page({ volumeId }: { volumeId: string }) {
   const saveLocation = useCallback((location: Parameters<ReaderV3PageLocationHandler>[0], percent: number) => {
     const bootstrap = state.bootstrap;
     if (!bootstrap) return;
-    void runtime.progress.enqueue({
+    const write = runtime.progress.enqueue({
       userId: bootstrap.userId,
       workId: bootstrap.mediaVersion.workId,
       volumeId: bootstrap.volume.id,
@@ -417,7 +419,20 @@ export function ReaderV3Page({ volumeId }: { volumeId: string }) {
     }).catch((reason) => {
       setStorageError(reason instanceof Error ? reason.message : '阅读进度无法写入本机');
     });
+    pendingLocationWriteRef.current = write;
   }, [runtime.progress, state.bootstrap]);
+
+  useEffect(() => {
+    const handleBeforePwaUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<BeforePwaUpdateDetail>).detail;
+      if (!detail?.waitUntil) return;
+      detail.waitUntil(
+        pendingLocationWriteRef.current.then(() => runtime.progress.flushNow())
+      );
+    };
+    window.addEventListener(BEFORE_PWA_UPDATE_EVENT, handleBeforePwaUpdate);
+    return () => window.removeEventListener(BEFORE_PWA_UPDATE_EVENT, handleBeforePwaUpdate);
+  }, [runtime.progress]);
 
   if (state.status === 'error') {
     return (

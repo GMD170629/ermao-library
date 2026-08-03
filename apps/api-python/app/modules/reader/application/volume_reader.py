@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -13,6 +15,7 @@ from app.modules.reader.application.dto import (
     ReaderAccessScope,
     ReaderBookmarkDto,
     ReaderBootstrapDto,
+    ReaderExternalProgressDto,
     ReaderProgressDto,
     ReaderUnitDto,
     ReaderVolumeContextDto,
@@ -63,6 +66,23 @@ class SaveProgressCommand:
 class SaveProgressResult:
     applied: bool
     progress: ReaderProgressDto
+
+
+@dataclass(frozen=True, slots=True)
+class SaveExternalProgressCommand:
+    user_id: str
+    volume_id: str
+    access_scope: ReaderAccessScope
+    progression: float
+    modified_at: datetime
+    device_id: str
+    device_name: str
+    references: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ReaderProgressDateConflict(Exception):
+    current: ReaderExternalProgressDto
 
 
 class VolumeReaderService:
@@ -243,6 +263,90 @@ class VolumeReaderService:
             raise
         return SaveProgressResult(applied=True, progress=progress)
 
+    def get_external_progress(
+        self,
+        *,
+        user_id: str,
+        volume_id: str,
+        access_scope: ReaderAccessScope,
+    ) -> ReaderExternalProgressDto | None:
+        self._require_visible_context(volume_id, access_scope)
+        progress = self._repository.get_progress(user_id, volume_id)
+        return _external_progress_dto(progress) if progress is not None else None
+
+    def save_external_progress(
+        self, command: SaveExternalProgressCommand
+    ) -> ReaderExternalProgressDto:
+        if not 0 <= command.progression <= 1:
+            raise ValueError("progression must be between zero and one")
+        context = self._require_visible_context(command.volume_id, command.access_scope)
+        reader_type = reader_type_for_volume_format(context.volume.format)
+        if reader_type is None or reader_type.value == "audio":
+            raise ReaderVolumeFormatUnsupported
+        modified_at = _aware_utc(command.modified_at)
+        existing = self._repository.get_progress(command.user_id, command.volume_id)
+        if existing is not None and _aware_utc(existing.progressed_at) > modified_at:
+            raise ReaderProgressDateConflict(_external_progress_dto(existing))
+        files = self._repository.list_files(command.volume_id)
+        fingerprint = build_volume_content_fingerprint(
+            asdict(context.volume), [asdict(file) for file in files]
+        )
+        location_json = _external_location_json(
+            reader_type=reader_type.value,
+            volume_id=command.volume_id,
+            progression=command.progression,
+            page_count=context.volume.page_count,
+            references=command.references,
+        )
+        mutation_source = "\0".join(
+            (
+                command.user_id,
+                command.volume_id,
+                command.device_id,
+                modified_at.isoformat(),
+                f"{command.progression:.12f}",
+                *command.references,
+            )
+        )
+        mutation_id = (
+            "opds-" + hashlib.sha256(mutation_source.encode("utf-8")).hexdigest()[:48]
+        )
+        now = datetime.now(UTC)
+        try:
+            progress = self._repository.save_external_progress(
+                user_id=command.user_id,
+                context=context,
+                reader_type=reader_type.value,
+                percent=command.progression * 100,
+                location_json=location_json,
+                content_fingerprint=fingerprint,
+                mutation_id=mutation_id,
+                client_id=command.device_id,
+                client_sequence=int(modified_at.timestamp() * 1000),
+                progressed_at=modified_at,
+                source_protocol="OPDS_PROGRESSION_1",
+                source_device_name=command.device_name,
+                now=now,
+            )
+            self._unit_of_work.commit()
+        except Exception:
+            self._unit_of_work.rollback()
+            raise
+        return _external_progress_dto(progress)
+
+    def _require_visible_context(
+        self, volume_id: str, access_scope: ReaderAccessScope
+    ) -> ReaderVolumeContextDto:
+        context = self._repository.get_context(volume_id)
+        if context is None:
+            raise ReaderVolumeNotFound
+        visible = self._repository.list_visible_volumes_for_work(
+            context.work.id, access_scope
+        )
+        if all(volume.id != volume_id for volume in visible):
+            raise ReaderVolumeNotFound
+        return context
+
     def list_bookmarks(
         self,
         *,
@@ -291,3 +395,102 @@ class VolumeReaderService:
                 expected=expected,
                 received=received_fingerprint,
             )
+
+
+def _aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _page_from_references(references: tuple[str, ...]) -> int | None:
+    for reference in references:
+        marker = reference.rpartition("#page=")[2]
+        if marker.isdigit():
+            page = int(marker)
+            if page >= 1:
+                return page
+    return None
+
+
+def _external_page(
+    progression: float,
+    page_count: int | None,
+    references: tuple[str, ...],
+) -> int:
+    referenced = _page_from_references(references)
+    if page_count and referenced is not None:
+        return min(page_count, referenced)
+    if not page_count or page_count <= 1:
+        return 1
+    return min(
+        page_count,
+        max(1, int(progression * (page_count - 1) + 0.5) + 1),
+    )
+
+
+def _external_location_json(
+    *,
+    reader_type: str,
+    volume_id: str,
+    progression: float,
+    page_count: int | None,
+    references: tuple[str, ...],
+) -> str:
+    if reader_type == "comic":
+        location: dict[str, object] = {
+            "type": "comic",
+            "volumeId": volume_id,
+            "pageIndex": _external_page(progression, page_count, references),
+        }
+    elif reader_type == "pdf":
+        location = {
+            "type": "pdf",
+            "volumeId": volume_id,
+            "pageNumber": _external_page(progression, page_count, references),
+        }
+    else:
+        href = next(
+            (value for value in references if value and not value.startswith("#")),
+            None,
+        )
+        location = {
+            "type": "reflowable",
+            "volumeId": volume_id,
+            "format": "epub",
+            "progression": progression,
+        }
+        if href is not None:
+            location["href"] = href
+    return json.dumps(location, ensure_ascii=False, separators=(",", ":"))
+
+
+def _progress_references(progress: ReaderProgressDto) -> tuple[str, ...]:
+    if not progress.location_json:
+        return ()
+    try:
+        location: object = json.loads(progress.location_json)
+    except json.JSONDecodeError:
+        return ()
+    if not isinstance(location, dict):
+        return ()
+    location_type = location.get("type")
+    if location_type == "comic":
+        page = location.get("pageIndex")
+        return (f"#page={page}",) if isinstance(page, int) and page >= 1 else ()
+    if location_type == "pdf":
+        page = location.get("pageNumber")
+        return (f"#page={page}",) if isinstance(page, int) and page >= 1 else ()
+    href = location.get("href")
+    return (href,) if isinstance(href, str) and href else ()
+
+
+def _external_progress_dto(progress: ReaderProgressDto) -> ReaderExternalProgressDto:
+    return ReaderExternalProgressDto(
+        volume_id=progress.volume_id,
+        progression=max(0, min(1, progress.percent / 100)),
+        modified_at=progress.progressed_at,
+        device_id=progress.client_id or "urn:shuku:web",
+        device_name=progress.source_device_name or "Shuku Web Reader",
+        references=_progress_references(progress),
+    )

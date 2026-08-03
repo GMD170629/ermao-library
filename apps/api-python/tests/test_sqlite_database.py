@@ -436,7 +436,7 @@ def test_bootstrap_runs_normalization_after_stamping_v14_boundary(tmp_path) -> N
         bootstrap_database(engine, settings)
 
         with engine.connect() as connection:
-            assert _alembic_version(connection) == "0010_content_classification"
+            assert _alembic_version(connection) == "0011_reader_progress_sources"
             assert (
                 connection.execute(
                     text(

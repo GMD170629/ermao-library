@@ -366,6 +366,55 @@ export async function deleteVolume(workId: string, volumeId: string): Promise<vo
   await apiJson(`/api/works/${encodeURIComponent(workId)}/volumes/${encodeURIComponent(volumeId)}`, { method: 'DELETE' });
 }
 
+export type VolumeBatchRequest =
+  | Readonly<{ action: 'SET_MEDIA_KIND'; volumeIds: string[]; targetMediaKind: MediaKind }>
+  | Readonly<{ action: 'SPLIT'; volumeIds: string[] }>
+  | Readonly<{ action: 'TRANSFER'; volumeIds: string[]; targetWorkId: string }>
+  | Readonly<{ action: 'DELETE'; volumeIds: string[] }>;
+
+export type VolumeBatchResult = Readonly<{
+  affectedVolumeIds: string[];
+  targetWorkIds: string[];
+  operationIds: string[];
+  deletedWork: boolean;
+}>;
+
+export async function runVolumeBatchAction(workId: string, request: VolumeBatchRequest): Promise<VolumeBatchResult> {
+  const data = record(await apiJson(`/api/works/${encodeURIComponent(workId)}/volumes/batch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request)
+  }));
+  return {
+    affectedVolumeIds: Array.isArray(data.affectedVolumeIds) ? data.affectedVolumeIds.filter((value): value is string => typeof value === 'string') : [],
+    targetWorkIds: Array.isArray(data.targetWorkIds) ? data.targetWorkIds.filter((value): value is string => typeof value === 'string') : [],
+    operationIds: Array.isArray(data.operationIds) ? data.operationIds.filter((value): value is string => typeof value === 'string') : [],
+    deletedWork: data.deletedWork === true
+  };
+}
+
+export async function downloadVolumeArchive(workId: string, volumeIds: string[]): Promise<{ blob: Blob; filename: string }> {
+  const response = await fetch(`/api/works/${encodeURIComponent(workId)}/volumes/download`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ volumeIds })
+  });
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    const error = record(payload);
+    const nestedError = record(error.error);
+    throw new Error(stringValue(nestedError.message) || stringValue(error.detail) || `请求失败（${response.status}）`);
+  }
+  const disposition = response.headers.get('content-disposition') ?? '';
+  const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  return {
+    blob: await response.blob(),
+    filename: encodedName ? decodeURIComponent(encodedName) : 'volumes.zip'
+  };
+}
+
 export async function updateWorkReadingStatus(workId: string, status: 'UNREAD' | 'FINISHED'): Promise<void> {
   await apiJson('/api/works/bulk', {
     method: 'POST',

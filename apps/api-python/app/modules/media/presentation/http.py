@@ -15,16 +15,24 @@ from urllib.request import Request as UrlRequest
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
 
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
-from app.bootstrap.media import media_page_index, media_resource_query, media_streaming
+from app.bootstrap.media import (
+    media_page_index,
+    media_resource_query,
+    media_streaming,
+    volume_archive_dependencies,
+)
 from app.contracts.http_errors import (
+    BasicBadRequestError,
     BasicNotFoundError,
     BasicUnauthorizedError,
     ErrorResponses,
 )
 from app.core.authorization import (
+    authorization_context,
     can_access_file,
     can_access_volume,
     can_access_work,
@@ -36,9 +44,16 @@ from app.modules.media.application.cover_proxy import (
     configured_cover_origins,
     validate_cover_url,
 )
+from app.modules.media.application.volume_archive import (
+    InvalidVolumeArchiveSelectionError,
+    VolumeArchiveSourceMissingError,
+    prepare_volume_archive,
+)
 from app.modules.media.presentation.schemas import (
+    MediaArchiveResponse,
     MediaFileResponse,
     MediaImageResponse,
+    VolumeArchiveRequest,
     VolumePagesPayload,
     VolumePagesResponse,
 )
@@ -146,6 +161,57 @@ def get_volume_file(
         name=Path(file.path if file else "file").name,
         route="volume-file",
         file_id=file.id if file else volume_id,
+    )
+
+
+@router.post("/works/{work_id}/volumes/download", response_class=MediaArchiveResponse)
+def download_volume_archive(
+    work_id: str,
+    payload: VolumeArchiveRequest,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> Annotated[
+    Response,
+    ErrorResponses(
+        BasicBadRequestError,
+        BasicUnauthorizedError,
+        BasicNotFoundError,
+    ),
+]:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    repository, writer = volume_archive_dependencies(db, settings)
+    try:
+        prepared = prepare_volume_archive(
+            repository,
+            writer,
+            actor=authorization_context(db, user),
+            work_id=work_id,
+            volume_ids=tuple(payload.volume_ids),
+        )
+    except InvalidVolumeArchiveSelectionError as exc:
+        code = str(exc)
+        return fail(
+            "卷册不存在或不属于该作品"
+            if code == "VOLUME_NOT_FOUND"
+            else "批量下载请求无效",
+            status_code=404 if code == "VOLUME_NOT_FOUND" else 400,
+            code=code,
+        )
+    except VolumeArchiveSourceMissingError:
+        return fail(
+            "部分卷册缺少可下载的源文件",
+            status_code=404,
+            code="VOLUME_SOURCE_MISSING",
+        )
+    archive_path = Path(prepared.path)
+    return MediaArchiveResponse(
+        archive_path,
+        media_type="application/zip",
+        filename=prepared.download_name,
+        background=BackgroundTask(archive_path.unlink, missing_ok=True),
     )
 
 
