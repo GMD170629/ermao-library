@@ -100,13 +100,6 @@ FILTER_FIELDS: list[dict[str, Any]] = [
         "operators": TEXT_OPERATORS,
     },
     {
-        "key": "publishedYear",
-        "label": "出版年份",
-        "group": "作品元数据",
-        "type": "number",
-        "operators": NUMBER_OPERATORS,
-    },
-    {
         "key": "seriesIndex",
         "label": "丛书序号",
         "group": "作品元数据",
@@ -120,38 +113,6 @@ FILTER_FIELDS: list[dict[str, Any]] = [
         "type": "number",
         "operators": NUMBER_OPERATORS,
         "unit": "%",
-    },
-    {
-        "key": "publisher",
-        "label": "出版社",
-        "group": "卷册元数据",
-        "type": "select",
-        "operators": SELECT_OPERATORS,
-        "optionSource": "publishers",
-        "allowCustom": True,
-    },
-    {
-        "key": "language",
-        "label": "语言",
-        "group": "卷册元数据",
-        "type": "select",
-        "operators": SELECT_OPERATORS,
-        "optionSource": "languages",
-        "allowCustom": True,
-    },
-    {
-        "key": "isbn",
-        "label": "ISBN",
-        "group": "卷册元数据",
-        "type": "text",
-        "operators": TEXT_OPERATORS,
-    },
-    {
-        "key": "identifier",
-        "label": "外部标识",
-        "group": "卷册元数据",
-        "type": "text",
-        "operators": TEXT_OPERATORS,
     },
     {
         "key": "volumeTitle",
@@ -437,7 +398,6 @@ def library_filter_schema(db: Session) -> dict[str, Any]:
             "AUTHOR": "authors",
             "TAG": "tags",
             "SERIES": "series",
-            "PUBLISHER": "publishers",
         }
         for source in facet_sources.values():
             options[source] = []
@@ -450,7 +410,6 @@ def library_filter_schema(db: Session) -> dict[str, Any]:
             source = facet_sources.get(str(row.kind or "").upper())
             if source:
                 options[source].append(_option(row.name))
-    options["languages"] = _distinct_volume_options(db, LibraryVolume.language)
     options["formats"] = _distinct_volume_options(db, LibraryVolume.format)
     options["importStatuses"] = _distinct_volume_options(
         db, LibraryVolume.import_status

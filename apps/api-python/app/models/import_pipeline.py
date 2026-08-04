@@ -310,6 +310,13 @@ class ImportTask(Base):
         ForeignKey("MonitorFolder.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
+    media_kind_policy: Mapped[str] = mapped_column(
+        "mediaKindPolicy",
+        String(32),
+        nullable=False,
+        default="MIXED",
+        server_default="MIXED",
+    )
     work_id: Mapped[str | None] = mapped_column(
         "workId",
         String(191),
@@ -334,6 +341,9 @@ class ImportTask(Base):
     )
     requested_author: Mapped[str | None] = mapped_column(
         "requestedAuthor", Text, nullable=True
+    )
+    recognized_metadata: Mapped[dict[str, object] | None] = mapped_column(
+        "recognizedMetadata", JSON, nullable=True
     )
     source_path: Mapped[str] = mapped_column("sourcePath", Text, nullable=False)
     source_key: Mapped[str | None] = mapped_column(

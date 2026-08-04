@@ -1,7 +1,13 @@
+import zipfile
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
 from app.core.auth import hash_password
 from app.core.config import Settings
 from app.models.auth import ReaderBookmark, User, UserMonitorFolderAccess
@@ -16,16 +22,17 @@ from app.models.library import (
 )
 from app.models.settings import MonitorFolder
 from app.modules.library.application.volume_commands import (
+    BatchVolumeCommand,
     LibraryActor,
+    OperationSummary,
     VolumeContext,
+    VolumeDeleteOutcome,
+    batch_volume_resources,
     delete_volume_resource,
 )
 from app.modules.library.presentation.work_ops import (
     _delete_import_linked_library_scope,
 )
-from fastapi.testclient import TestClient
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
 
 
 def _login_admin(client: TestClient, db: Session) -> User:
@@ -54,7 +61,6 @@ def _volume_aggregate(db: Session, user: User) -> None:
         normalized_title="deletevolume",
         author="Author",
         normalized_author="author",
-        work_type="BOOK",
         tags="[]",
     )
     media_version = LibraryMediaVersion(
@@ -158,6 +164,148 @@ def test_delete_last_volume_cascades_and_undo_restores_volume_resources(
     assert restored_task.volume_id == "delete-volume-resource"
 
 
+def test_reclassify_volume_preserves_volume_data_merges_history_and_undoes(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    user = _login_admin(client, db_session)
+    now = datetime.now(UTC)
+    work = LibraryWork(
+        id="reclassify-work",
+        origin="MANUAL",
+        title="Reclassify",
+        normalized_title="reclassify",
+        author="Author",
+        normalized_author="author",
+        tags="[]",
+    )
+    ebook = LibraryMediaVersion(
+        id="reclassify-ebook", work_id=work.id, media_kind="EBOOK"
+    )
+    comic = LibraryMediaVersion(
+        id="reclassify-comic", work_id=work.id, media_kind="COMIC"
+    )
+    moved = LibraryVolume(
+        id="reclassify-moved",
+        media_version_id=ebook.id,
+        title="Moved",
+        sort_order=0,
+        format="EPUB",
+        resource_key="reclassify:moved",
+        import_status="COMPLETED",
+        classification_source="AUTO",
+        classification_reason="FORMAT_DEFAULT",
+        suggested_media_kind="COMIC",
+    )
+    remaining = LibraryVolume(
+        id="reclassify-remaining",
+        media_version_id=ebook.id,
+        title="Remaining",
+        sort_order=1000,
+        format="EPUB",
+        resource_key="reclassify:remaining",
+        import_status="COMPLETED",
+    )
+    existing_target = LibraryVolume(
+        id="reclassify-target",
+        media_version_id=comic.id,
+        title="Target",
+        sort_order=0,
+        format="CBZ",
+        resource_key="reclassify:target",
+        import_status="COMPLETED",
+    )
+    progress = LibraryReadingProgress(
+        id="reclassify-progress",
+        user_id=user.id,
+        volume_id=moved.id,
+        reader_type="epub",
+        position="epubcfi(/6/2)",
+        percent=42,
+        extra="{}",
+    )
+    bookmark = ReaderBookmark(
+        id="reclassify-bookmark",
+        user_id=user.id,
+        volume_id=moved.id,
+        content_fingerprint="reclassify",
+        bookmark_id="bookmark-reclassify",
+        location_json="{}",
+        label="Saved",
+        percent=42,
+        bookmark_created_at="2026-08-03T00:00:00Z",
+    )
+    source_history = UserMediaHistory(
+        id="reclassify-source-history",
+        user_id=user.id,
+        media_version_id=ebook.id,
+        last_volume_id=moved.id,
+        created_at=now - timedelta(days=2),
+        updated_at=now,
+    )
+    target_history = UserMediaHistory(
+        id="reclassify-target-history",
+        user_id=user.id,
+        media_version_id=comic.id,
+        last_volume_id=existing_target.id,
+        created_at=now - timedelta(days=2),
+        updated_at=now - timedelta(days=1),
+    )
+    db_session.add_all(
+        [
+            work,
+            ebook,
+            comic,
+            moved,
+            remaining,
+            existing_target,
+            progress,
+            bookmark,
+            source_history,
+            target_history,
+        ]
+    )
+    db_session.commit()
+
+    response = client.post(
+        f"/api/works/{work.id}/volumes/{moved.id}/reclassify",
+        json={"targetMediaKind": "COMIC", "applyTo": "VOLUME"},
+    )
+    assert response.status_code == 200
+    operation_id = response.json()["data"]["operation"]["id"]
+    db_session.expire_all()
+    moved_after = db_session.get(LibraryVolume, moved.id)
+    assert moved_after is not None
+    assert moved_after.media_version_id == comic.id
+    assert moved_after.classification_source == "USER"
+    assert moved_after.classification_reason == "USER_OVERRIDE"
+    assert moved_after.suggested_media_kind is None
+    assert db_session.get(LibraryReadingProgress, progress.id) is not None
+    assert db_session.get(ReaderBookmark, bookmark.id) is not None
+    source_history_after = db_session.get(UserMediaHistory, source_history.id)
+    target_history_after = db_session.get(UserMediaHistory, target_history.id)
+    assert source_history_after is not None
+    assert source_history_after.last_volume_id == remaining.id
+    assert target_history_after is not None
+    assert target_history_after.last_volume_id == moved.id
+
+    undo = client.post(f"/api/library/operations/{operation_id}/undo")
+    assert undo.status_code == 200
+    db_session.expire_all()
+    restored = db_session.get(LibraryVolume, moved.id)
+    assert restored is not None
+    assert restored.media_version_id == ebook.id
+    assert restored.classification_source == "AUTO"
+    assert restored.suggested_media_kind == "COMIC"
+    assert (
+        db_session.get(UserMediaHistory, source_history.id).last_volume_id == moved.id
+    )
+    assert (
+        db_session.get(UserMediaHistory, target_history.id).last_volume_id
+        == existing_target.id
+    )
+
+
 def test_volume_structure_openapi_has_explicit_volume_only_contract(
     client: TestClient,
 ) -> None:
@@ -167,17 +315,189 @@ def test_volume_structure_openapi_has_explicit_volume_only_contract(
     assert "requestBody" in schema["paths"][path]["patch"]
     move = schema["paths"][f"{path}/move"]["post"]
     split = schema["paths"][f"{path}/split"]["post"]
+    reclassify = schema["paths"][f"{path}/reclassify"]["post"]
     assert "requestBody" in move
     assert "requestBody" in split
+    assert "requestBody" in reclassify
     volume_contract = str(
         {
             path: schema["paths"][path],
             f"{path}/move": schema["paths"][f"{path}/move"],
             f"{path}/split": schema["paths"][f"{path}/split"],
+            f"{path}/reclassify": schema["paths"][f"{path}/reclassify"],
         }
     )
     assert "editionId" not in volume_contract
     assert "SplitEdition" not in volume_contract
+
+
+def _batch_volume_aggregate(
+    db: Session,
+    *,
+    work_id: str,
+    volume_ids: tuple[str, ...],
+) -> tuple[LibraryWork, list[LibraryVolume]]:
+    work = LibraryWork(
+        id=work_id,
+        origin="MANUAL",
+        title="Batch work",
+        normalized_title=f"batch-{work_id}",
+        author="Author",
+        normalized_author="author",
+        tags="[]",
+    )
+    media = LibraryMediaVersion(
+        id=f"{work_id}-ebook",
+        work_id=work.id,
+        media_kind="EBOOK",
+    )
+    volumes = [
+        LibraryVolume(
+            id=volume_id,
+            media_version_id=media.id,
+            title=f"Volume {index}",
+            sort_order=index * 1000,
+            format="EPUB",
+            resource_key=f"batch:{volume_id}",
+            import_status="COMPLETED",
+        )
+        for index, volume_id in enumerate(volume_ids, start=1)
+    ]
+    db.add_all([work, media, *volumes])
+    db.commit()
+    return work, volumes
+
+
+def test_batch_reclassify_updates_every_selected_volume_in_one_contract(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login_admin(client, db_session)
+    work, volumes = _batch_volume_aggregate(
+        db_session,
+        work_id="batch-reclassify-work",
+        volume_ids=("batch-reclassify-one", "batch-reclassify-two"),
+    )
+
+    response = client.post(
+        f"/api/works/{work.id}/volumes/batch",
+        json={
+            "action": "SET_MEDIA_KIND",
+            "volumeIds": [volumes[1].id, volumes[0].id],
+            "targetMediaKind": "COMIC",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["affectedVolumeIds"] == [volumes[0].id, volumes[1].id]
+    assert len(payload["operationIds"]) == 2
+    db_session.expire_all()
+    media_kinds = db_session.scalars(
+        select(LibraryMediaVersion.media_kind)
+        .join(LibraryVolume)
+        .where(LibraryVolume.id.in_([volume.id for volume in volumes]))
+    ).all()
+    assert media_kinds == ["COMIC", "COMIC"]
+
+
+def test_batch_prevalidation_rejects_cross_work_selection_without_mutation(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login_admin(client, db_session)
+    source, source_volumes = _batch_volume_aggregate(
+        db_session,
+        work_id="batch-source-work",
+        volume_ids=("batch-source-volume",),
+    )
+    _foreign, foreign_volumes = _batch_volume_aggregate(
+        db_session,
+        work_id="batch-foreign-work",
+        volume_ids=("batch-foreign-volume",),
+    )
+
+    response = client.post(
+        f"/api/works/{source.id}/volumes/batch",
+        json={
+            "action": "DELETE",
+            "volumeIds": [source_volumes[0].id, foreign_volumes[0].id],
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "VOLUME_NOT_FOUND"
+    db_session.expire_all()
+    assert db_session.get(LibraryVolume, source_volumes[0].id) is not None
+    assert db_session.get(LibraryVolume, foreign_volumes[0].id) is not None
+
+
+def test_batch_volume_download_returns_one_ordered_zip(
+    client: TestClient,
+    db_session: Session,
+    test_settings: Settings,
+) -> None:
+    _login_admin(client, db_session)
+    work, volumes = _batch_volume_aggregate(
+        db_session,
+        work_id="batch-download-work",
+        volume_ids=("batch-download-one", "batch-download-two"),
+    )
+    source_dir = test_settings.resolved_storage_root / "library"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    for index, volume in enumerate(volumes, start=1):
+        source = source_dir / f"source-{index}.epub"
+        source.write_bytes(f"volume-{index}".encode())
+        db_session.add(
+            LibraryFile(
+                id=f"batch-download-file-{index}",
+                volume_id=volume.id,
+                path=f"library/{source.name}",
+                fingerprint=f"batch-download-{index}",
+                hash_status="COMPLETED",
+                mtime_ms=index,
+                kind="EPUB",
+                mime_type="application/epub+zip",
+                size_bytes=source.stat().st_size,
+                sort_order=0,
+            )
+        )
+    db_session.commit()
+
+    response = client.post(
+        f"/api/works/{work.id}/volumes/download",
+        json={"volumeIds": [volumes[1].id, volumes[0].id]},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(BytesIO(response.content)) as archive:
+        assert archive.namelist() == [
+            "001-Volume 1.epub",
+            "002-Volume 2.epub",
+        ]
+        assert archive.read("001-Volume 1.epub") == b"volume-1"
+        assert archive.read("002-Volume 2.epub") == b"volume-2"
+
+
+def test_batch_volume_download_rejects_a_missing_source_without_partial_archive(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login_admin(client, db_session)
+    work, volumes = _batch_volume_aggregate(
+        db_session,
+        work_id="batch-download-missing-work",
+        volume_ids=("batch-download-missing-volume",),
+    )
+
+    response = client.post(
+        f"/api/works/{work.id}/volumes/download",
+        json={"volumeIds": [volumes[0].id]},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "VOLUME_SOURCE_MISSING"
 
 
 def test_continue_reading_uses_recent_unfinished_media_and_includes_zero_percent(
@@ -193,7 +513,6 @@ def test_continue_reading_uses_recent_unfinished_media_and_includes_zero_percent
         normalized_title="continue",
         author="Author",
         normalized_author="author",
-        work_type="BOOK",
         tags="[]",
     )
     ebook = LibraryMediaVersion(
@@ -298,7 +617,6 @@ def test_import_task_cleanup_uses_volume_target_and_removes_empty_parents(
         normalized_title="importcleanup",
         author="Author",
         normalized_author="author",
-        work_type="BOOK",
         tags="[]",
     )
     media = LibraryMediaVersion(
@@ -388,7 +706,6 @@ def test_move_volume_hides_an_unauthorized_target_work(
             normalized_title=prefix,
             author="Author",
             normalized_author="author",
-            work_type="BOOK",
             tags="[]",
         )
         media = LibraryMediaVersion(
@@ -444,9 +761,11 @@ def test_delete_volume_rolls_back_when_persistence_fails() -> None:
                 media_version_id="media",
                 media_kind="EBOOK",
                 title="Volume",
+                sort_order=0,
                 format="EPUB",
                 monitor_folder_id=None,
                 author=None,
+                work_title="Work",
                 source_path=Path("volume.epub"),
             )
 
@@ -486,6 +805,84 @@ def test_delete_volume_rolls_back_when_persistence_fails() -> None:
     assert unit_of_work.committed is False
 
 
+def test_batch_volume_operation_rolls_back_after_a_mid_batch_failure() -> None:
+    class FailingBatchPort:
+        def can_access_work(self, **_kwargs: object) -> bool:
+            return True
+
+        def get_volume_context(
+            self, *, volume_id: str, **_kwargs: object
+        ) -> VolumeContext:
+            return VolumeContext(
+                id=volume_id,
+                work_id="work",
+                media_version_id="media",
+                media_kind="EBOOK",
+                title=volume_id,
+                sort_order=0 if volume_id == "one" else 1000,
+                format="EPUB",
+                monitor_folder_id=None,
+                author="Author",
+                work_title="Work",
+                source_path=Path(f"{volume_id}.epub"),
+            )
+
+        def delete_volume(
+            self, *, volume_id: str, **_kwargs: object
+        ) -> VolumeDeleteOutcome:
+            if volume_id == "two":
+                raise RuntimeError("second mutation failed")
+            return VolumeDeleteOutcome(
+                work_id="work",
+                volume_id=volume_id,
+                deleted_media_version=False,
+                deleted_work=False,
+                operation=OperationSummary(
+                    id="operation-one",
+                    action="DELETE_VOLUME",
+                    status="COMPLETED",
+                    summary="deleted",
+                    expires_at=datetime.now(UTC),
+                    undo_available=True,
+                ),
+            )
+
+    class UnitOfWork:
+        committed = False
+        rolled_back = False
+
+        def commit(self) -> None:
+            self.committed = True
+
+        def rollback(self) -> None:
+            self.rolled_back = True
+
+    unit_of_work = UnitOfWork()
+    actor = LibraryActor(
+        user_id="actor",
+        can_manage_system=True,
+        is_admin=True,
+        can_view_manual_imports=True,
+        monitor_folder_ids=(),
+    )
+
+    with pytest.raises(RuntimeError, match="second mutation failed"):
+        batch_volume_resources(
+            FailingBatchPort(),
+            unit_of_work,
+            actor=actor,
+            work_id="work",
+            command=BatchVolumeCommand(
+                action="DELETE",
+                volume_ids=("one", "two"),
+            ),
+            now=datetime.now(UTC),
+        )
+
+    assert unit_of_work.rolled_back is True
+    assert unit_of_work.committed is False
+
+
 def test_move_and_split_operations_restore_the_original_volume_parent(
     client: TestClient,
     db_session: Session,
@@ -500,7 +897,6 @@ def test_move_and_split_operations_restore_the_original_volume_parent(
             normalized_title=prefix,
             author="Author",
             normalized_author="author",
-            work_type="BOOK",
             tags="[]",
         )
         media = LibraryMediaVersion(

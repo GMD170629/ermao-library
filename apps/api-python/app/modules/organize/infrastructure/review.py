@@ -170,7 +170,6 @@ def update_work(
         "tags": "tags",
         "seriesName": "series_name",
         "seriesIndex": "series_index",
-        "publishedYear": "published_year",
         "mergeKey": "merge_key",
         "organized": "organized",
         "organizeStatus": "organize_status",

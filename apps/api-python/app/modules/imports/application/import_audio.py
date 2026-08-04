@@ -9,6 +9,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from app.contracts.publication_metadata import PublicationMetadata
+from app.contracts.publication_titles import titles_from_local_source
 from app.modules.imports.application.audio_types import (
     DISC_DIRECTORY_PATTERN,
     MAX_AUDIO_CHAPTERS,
@@ -16,6 +18,7 @@ from app.modules.imports.application.audio_types import (
     AudioChapterMetadata,
     AudioFileMetadata,
     audio_episode_number,
+    audio_mime_type,
     is_supported_audio_file,
     strict_flat_audio_title,
 )
@@ -27,6 +30,7 @@ from app.modules.imports.application.dto import (
 )
 from app.modules.imports.application.identity_policy import UNKNOWN_AUTHOR
 from app.modules.imports.application.import_support import (
+    _classification_columns,
     _ensure_work,
     _finalize_work_cover,
     _hash_text,
@@ -36,10 +40,16 @@ from app.modules.imports.application.import_support import (
     _title_from_file,
     _work_merge_key,
 )
+from app.modules.imports.application.local_metadata import ResolvedLocalMetadata
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
     ImportOrchestrationServices,
     LibraryImportStore,
+)
+from app.modules.imports.domain.content_classification import (
+    ContentEvidence,
+    classify_content,
+    normalize_media_kind_policy,
 )
 
 _FLAT_AUDIO_FILENAME_PATTERN = re.compile(
@@ -59,9 +69,14 @@ def _import_audio(
     identity: BookIdentityDTO,
     metadata_items: list[AudioFileMetadata],
     structure: AudioBundleStructure | None = None,
+    resolved_local: ResolvedLocalMetadata | None = None,
 ) -> ImportResult:
     if not metadata_items:
         raise ValueError("有声书目录中没有可导入的音频文件")
+    classification = classify_content(
+        normalize_media_kind_policy(options.media_kind_policy),
+        ContentEvidence(volume_format="AUDIO"),
+    )
     chapter_total = sum(max(1, len(item.chapters)) for item in metadata_items)
     if chapter_total > MAX_AUDIO_CHAPTERS:
         raise ValueError(f"有声书章节总数超过 {MAX_AUDIO_CHAPTERS} 个，请拆分后导入")
@@ -109,7 +124,7 @@ def _import_audio(
         strict=not directory_bundle,
     )
     narrator = narrator_values[0] if narrator_values else None
-    merge_key = _work_merge_key("audio", identity.title, identity.author)
+    merge_key = _work_merge_key(identity.title)
     # A directory identifies one split-track bundle. An explicitly structured
     # Emby flat filename joins its sibling chapters; every other single file
     # remains keyed by the file itself so independent M4Bs cannot collide.
@@ -145,12 +160,8 @@ def _import_audio(
             else None
         )
         if flat_media_version:
-            identity = replace(
-                identity, reused_work_id=str(flat_media_version["workId"])
-            )
-            merge_key = _work_merge_key("audio", identity.title, identity.author)
-            work, _unused_created = _ensure_audio_work(
-                store, queries, options, identity, merge_key
+            work = _reuse_existing_audio_work(
+                store, queries, str(flat_media_version["workId"])
             )
             created = False
             media_version, volume = _prepare_flat_audio_bundle(
@@ -175,7 +186,7 @@ def _import_audio(
                     "workId": work["id"],
                     "monitorFolderId": options.monitor_folder_id,
                     "origin": options.origin,
-                    "mediaKind": "AUDIOBOOK",
+                    "mediaKind": classification.media_kind,
                     "format": "AUDIO",
                     "createdAt": _now(),
                     "updatedAt": _now(),
@@ -223,6 +234,7 @@ def _import_audio(
                             "narrator": narrator,
                             "coverStatus": "PENDING",
                             "importStatus": "PARSING",
+                            **_classification_columns(classification),
                             "createdAt": _now(),
                             "updatedAt": _now(),
                         }
@@ -277,9 +289,7 @@ def _import_audio(
             or ("COMPLETED" if existing_full_hash else "PARTIAL_PENDING"),
             "mtimeMs": int(stat.st_mtime * 1000),
             "kind": "AUDIO",
-            "mimeType": "audio/mpeg"
-            if item.path.suffix.lower() == ".mp3"
-            else "audio/mp4",
+            "mimeType": audio_mime_type(item.path),
             "sizeBytes": stat.st_size,
             "durationMs": item.duration_ms,
             "codec": item.codec,
@@ -349,9 +359,7 @@ def _import_audio(
                 or display_titles[item.path]
                 or f"第 {chapter_sort_order} 章",
                 "href": f"audio:{file_row['id']}#t={start_ms / 1000:g},{end_ms / 1000:g}",
-                "mediaType": "audio/mpeg"
-                if item.path.suffix.lower() == ".mp3"
-                else "audio/mp4",
+                "mediaType": audio_mime_type(item.path),
                 "sortOrder": chapter_sort_order,
                 "startMs": start_ms,
                 "endMs": end_ms,
@@ -511,7 +519,7 @@ def _import_audio(
         media_version["id"],
         volume["id"],
         work["title"],
-        "audiobook",
+        str(media_version.get("mediaKind") or classification.media_kind).lower(),
         "audio",
         actual_chapters,
         "completed",
@@ -522,6 +530,49 @@ def _import_audio(
         else "new-audio-work"
         if created
         else "new-audio-volume",
+        resolved_metadata=resolved_local.metadata if resolved_local else None,
+        metadata_field_sources=resolved_local.field_sources if resolved_local else (),
+        metadata_source_order=resolved_local.source_order if resolved_local else (),
+    )
+
+
+def audio_embedded_metadata(
+    identity: BookIdentityDTO,
+    metadata_items: list[AudioFileMetadata],
+) -> PublicationMetadata:
+    """Map consistent album-level audio tags to the common metadata contract."""
+
+    albums = _consistent_audio_values(
+        metadata_items, "album", "专辑/书名", strict=False
+    )
+    authors = _consistent_audio_values(metadata_items, "author", "作者", strict=False)
+    series_names = _consistent_audio_values(
+        metadata_items, "series_name", "系列", strict=False
+    )
+    volume_indexes = _consistent_audio_values(
+        metadata_items, "volume_index", "卷号", strict=False
+    )
+    series_name = series_names[0] if series_names else None
+    volume_index = float(volume_indexes[0]) if volume_indexes else None
+    publication_titles = titles_from_local_source(
+        albums[0] if albums else identity.title,
+        series_name=series_name,
+        volume_index=volume_index,
+    )
+    single_file_title = (
+        metadata_items[0].title
+        if len(metadata_items) == 1 and metadata_items[0].title
+        else None
+    )
+    return PublicationMetadata(
+        title=publication_titles.work_title,
+        volume_title=single_file_title or publication_titles.volume_title,
+        authors=(authors[0],)
+        if authors
+        else ((identity.author,) if identity.author else ()),
+        series_name=series_name,
+        series_index=volume_index,
+        volume_index=publication_titles.volume_index,
     )
 
 
@@ -556,36 +607,36 @@ def _ensure_audio_work(
     identity: BookIdentityDTO,
     merge_key: str,
 ) -> tuple[dict[str, Any], bool]:
-    if (
-        identity.reused_work_id is None
-        and queries.get_work_by_merge_key(merge_key) is None
-    ):
-        candidates = queries.list_works_by_normalized_identity(
-            _normalize_key(identity.title),
-            _normalize_key(identity.author),
-            limit=2,
-        )
-        if len(candidates) == 1:
-            identity = replace(
-                identity,
-                reused_work_id=str(candidates[0]["id"]),
-                selection_reason="unique_cross_media_identity",
-            )
     return _ensure_work(
         store,
         queries,
         {
-            "workId": identity.reused_work_id,
             "title": identity.title,
             "author": identity.author,
             "description": None,
-            "workType": "AUDIO",
             "tags": ["audiobook", "audio"],
             "mergeKey": merge_key,
             "origin": options.origin,
             "monitorFolderId": options.monitor_folder_id,
         },
     )
+
+
+def _reuse_existing_audio_work(
+    store: LibraryImportStore,
+    queries: ImportLibraryQueries,
+    work_id: str,
+) -> dict[str, Any]:
+    """Reuse a work proven by existing stored audio structure, not recognition."""
+
+    existing = queries.get_work_by_id(work_id)
+    if existing is None:
+        raise ValueError("有声书关联的作品不存在")
+    store.update_library_work(
+        work_id,
+        columns={"hidden": False, "updatedAt": _now()},
+    )
+    return queries.get_work_by_id(work_id) or existing
 
 
 def _audio_flat_media_version(

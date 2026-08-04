@@ -1,0 +1,1 @@
+"""OPDS application contracts."""

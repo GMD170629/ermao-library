@@ -29,8 +29,8 @@ def _insert_work(
 ) -> None:
     db.execute(
         text(
-            "INSERT INTO `LibraryWork` (`id`, `title`, `normalizedTitle`, `author`, `normalizedAuthor`, `workType`, `tags`, `mergeKey`, `updatedAt`) "
-            "VALUES (:id, :title, :normalized_title, :author, :normalized_author, 'EPUB', :tags, :merge_key, '2026-07-22T00:00:00')"
+            "INSERT INTO `LibraryWork` (`id`, `title`, `normalizedTitle`, `author`, `normalizedAuthor`, `tags`, `mergeKey`, `updatedAt`) "
+            "VALUES (:id, :title, :normalized_title, :author, :normalized_author, :tags, :merge_key, '2026-07-22T00:00:00')"
         ),
         {
             "id": work_id,
@@ -199,7 +199,6 @@ def test_category_delete_clears_all_metadata_kinds_and_supports_undo(tmp_path) -
                 ("TAG", "科幻"),
                 ("AUTHOR", "林川"),
                 ("SERIES", "星海丛书"),
-                ("PUBLISHER", "星海出版社"),
             ):
                 category = next(
                     item for item in list_categories(db, kind) if item["name"] == name
@@ -245,16 +244,6 @@ def test_category_delete_clears_all_metadata_kinds_and_supports_undo(tmp_path) -
                         ).scalar()
                         is None
                     )
-                else:
-                    assert (
-                        db.execute(
-                            text(
-                                "SELECT `publisher` FROM `LibraryVolume` WHERE `id` = 'volume-work-a'"
-                            )
-                        ).scalar()
-                        is None
-                    )
-
                 undo_operation(db, deleted["operation"]["id"], None)
                 assert any(
                     item["id"] == category["id"] for item in list_categories(db, kind)
@@ -453,7 +442,7 @@ def test_dynamic_filters_cover_metadata_files_shelves_folders_and_free_combinati
             db.execute(
                 text(
                     "UPDATE `LibraryWork` SET `monitorFolderId` = 'folder-a', `origin` = 'WATCH', "
-                    "`publishedYear` = 2026, `metadataQuality` = 92, `createdAt` = '2026-07-01T10:00:00' WHERE `id` = 'work-a'"
+                    "`metadataQuality` = 92, `createdAt` = '2026-07-01T10:00:00' WHERE `id` = 'work-a'"
                 )
             )
             db.execute(
@@ -497,7 +486,6 @@ def test_dynamic_filters_cover_metadata_files_shelves_folders_and_free_combinati
                 "combinator": "ALL",
                 "conditions": [
                     {"field": "tag", "operator": "equals", "value": "科幻"},
-                    {"field": "publisher", "operator": "equals", "value": "星海出版社"},
                     {"field": "mediaKind", "operator": "equals", "value": "EBOOK"},
                     {"field": "shelf", "operator": "equals", "value": "shelf-a"},
                     {
@@ -536,13 +524,13 @@ def test_dynamic_filters_cover_metadata_files_shelves_folders_and_free_combinati
             fields = {item["key"]: item for item in schema["fields"]}
             assert {
                 "title",
-                "publisher",
                 "format",
                 "progress",
                 "shelf",
                 "monitorFolder",
                 "createdAt",
             }.issubset(fields)
+            assert {"publishedYear", "publisher", "language", "isbn", "identifier"}.isdisjoint(fields)
             assert {option["value"] for option in fields["shelf"]["options"]} == {
                 "shelf-a"
             }

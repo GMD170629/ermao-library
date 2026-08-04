@@ -68,7 +68,6 @@ class SqlAlchemyImportLibraryQueries:
         self.find_media_version_resource_key_conflict = partial(
             library_queries.find_media_version_resource_key_conflict, db
         )
-        self.find_volume_conflict = partial(library_queries.find_volume_conflict, db)
         self.find_work_cover_media_version = partial(
             library_queries.find_work_cover_media_version, db
         )
@@ -108,6 +107,9 @@ class SqlAlchemyImportLibraryQueries:
         )
         self.get_work_by_id = partial(library_queries.get_work_by_id, db)
         self.get_work_by_merge_key = partial(library_queries.get_work_by_merge_key, db)
+        self.get_work_by_normalized_title = partial(
+            library_queries.get_work_by_normalized_title, db
+        )
         self.has_generated_cover_path = partial(
             library_queries.has_generated_cover_path, db
         )
@@ -164,9 +166,6 @@ class SqlAlchemyImportLibraryQueries:
         )
         self.list_works_by_merge_key_prefix = partial(
             library_queries.list_works_by_merge_key_prefix, db
-        )
-        self.list_works_by_normalized_identity = partial(
-            library_queries.list_works_by_normalized_identity, db
         )
         self.sum_audio_duration_for_media_version = partial(
             library_queries.sum_audio_duration_for_media_version, db

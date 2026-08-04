@@ -215,7 +215,25 @@ def test_0003_upgrade_merges_same_media_editions_without_losing_volumes(
 
         apply_schema(engine, settings)
 
-        assert head_revision(engine) == "0007_media_versions_contract"
+        assert head_revision(engine) == "0013_local_metadata_resolution"
+        upgraded_volume = _table(engine, "LibraryVolume")
+        upgraded_task = _table(engine, "ImportTask")
+        upgraded_folder = _table(engine, "MonitorFolder")
+        with engine.connect() as connection:
+            assert (
+                connection.scalar(
+                    select(upgraded_volume.c.classificationSource).limit(1)
+                )
+                == "LEGACY"
+            )
+            assert (
+                connection.scalar(
+                    select(upgraded_volume.c.classificationReason).limit(1)
+                )
+                == "LEGACY"
+            )
+            assert "mediaKindPolicy" in upgraded_task.c
+            assert "mediaKindPolicy" in upgraded_folder.c
         inspector = inspect(engine)
         assert "LibraryEdition" not in inspector.get_table_names()
         assert "LibraryEditionFacet" not in inspector.get_table_names()
@@ -278,6 +296,16 @@ def test_0003_upgrade_merges_same_media_editions_without_losing_volumes(
                 )
             ).all()
             assert progress_rows == [("progress-new", "volume-a", 75.0)]
+            progression_source = connection.execute(
+                select(
+                    migrated_progress.c.progressedAt,
+                    migrated_progress.c.sourceProtocol,
+                    migrated_progress.c.sourceDeviceName,
+                ).where(migrated_progress.c.id == "progress-new")
+            ).one()
+            assert progression_source.progressedAt is not None
+            assert progression_source.sourceProtocol == "SHUKU_WEB"
+            assert progression_source.sourceDeviceName == "Shuku Web Reader"
             migration_event = _table(engine, "MediaVersionMigrationEvent")
             assert (
                 connection.scalar(
@@ -364,16 +392,17 @@ def test_contract_discards_conversion_without_source_volume_and_completes_upgrad
         apply_schema(engine, settings)
 
         with engine.connect() as connection:
-            assert connection.scalar(
-                select(_table(engine, "BookConversionTask").c.id)
-            ) is None
+            assert (
+                connection.scalar(select(_table(engine, "BookConversionTask").c.id))
+                is None
+            )
             assert connection.scalar(select(_table(engine, "ImportTask").c.id)) == (
                 "orphaned-import"
             )
-            assert head_revision(engine) == "0007_media_versions_contract"
+            assert head_revision(engine) == "0013_local_metadata_resolution"
             assert "LibraryEdition" not in inspect(connection).get_table_names()
 
         apply_schema(engine, settings)
-        assert head_revision(engine) == "0007_media_versions_contract"
+        assert head_revision(engine) == "0013_local_metadata_resolution"
     finally:
         engine.dispose()

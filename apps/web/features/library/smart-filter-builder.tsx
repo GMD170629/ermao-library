@@ -224,8 +224,15 @@ export function SmartFilterBuilder({ fields, rules, loading = false, actions, on
           </button>
         ) : null}
         {!loading && rules.conditions.map((condition, index) => {
-          const field = fields.find((item) => item.key === condition.field) ?? fields[0];
-          if (!field) return null;
+          const field = fields.find((item) => item.key === condition.field);
+          if (!field) {
+            return (
+              <div key={condition.id} className="flex items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                <span><I18nText>已不支持的筛选条件</I18nText>：<span data-i18n-skip>{condition.field}</span></span>
+                <button type="button" onClick={() => removeCondition(condition.id)} className="flex h-10 w-10 items-center justify-center rounded-xl text-amber-800 hover:bg-amber-100" aria-label={i18nAttribute("删除不支持的筛选条件")}><Trash2 size={16} /></button>
+              </div>
+            );
+          }
           return (
             <div key={condition.id} className="grid gap-2 rounded-2xl border border-black/[0.055] bg-[#FCFBF9] p-3 md:grid-cols-[34px_minmax(170px,0.85fr)_minmax(132px,0.62fr)_minmax(190px,1.35fr)_42px] md:items-center">
               <span className="hidden h-7 w-7 items-center justify-center rounded-lg bg-black/[0.04] text-xs font-semibold text-[#7B746E] md:flex">{index + 1}</span>

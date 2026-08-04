@@ -5,10 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
+from app.contracts.local_metadata import LocalMetadataSource
 from app.modules.imports.application.audio_types import (
     AudioBundleStructure,
     AudioFileMetadata,
 )
+from app.modules.imports.application.comic_types import ComicArchiveInspection
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
     ConversionArtifactDTO,
@@ -19,6 +21,7 @@ from app.modules.imports.application.dto import (
     ImportRuntimeConfig,
     ImportSystemEvent,
     ImportTaskDTO,
+    SidecarMetadataDTO,
     StageImportCommand,
 )
 from app.modules.imports.application.pdf_types import (
@@ -136,6 +139,8 @@ class LibraryImportStore(Protocol):
         self, media_version_id: str, *, columns: dict[str, object]
     ) -> None: ...
 
+    def delete_library_media_version_if_empty(self, media_version_id: str) -> None: ...
+
     def insert_library_volume(
         self, *, columns: dict[str, object]
     ) -> dict[str, object]: ...
@@ -218,6 +223,8 @@ class ImportPipeline(Protocol):
 class ImportOrchestrationServices(Protocol):
     def load_preferences(self) -> ImportPreferencesDTO: ...
 
+    def load_local_metadata_priority(self) -> tuple[LocalMetadataSource, ...]: ...
+
     def convert_text(
         self, import_task_id: str, source_path: Path
     ) -> ConversionArtifactDTO: ...
@@ -234,9 +241,13 @@ class ImportOrchestrationServices(Protocol):
 
     def parse_filename_identity(self, filename: str) -> BookIdentityDTO: ...
 
-    def is_monitor_root(self, path: Path) -> bool: ...
+    def monitor_root_path(self, monitor_folder_id: str | None) -> Path | None: ...
 
     def list_sibling_files(self, path: Path) -> DirectorySiblingSnapshotDTO: ...
+
+    def read_sidecar_metadata(
+        self, path: Path, *, directory_fallback: bool
+    ) -> SidecarMetadataDTO | None: ...
 
     def sync_work_facets(self, work_id: str) -> None: ...
 
@@ -247,6 +258,29 @@ class ImportOrchestrationServices(Protocol):
     def cover_status(self, value: object) -> str: ...
 
     def is_default_cover_path(self, value: object) -> bool: ...
+
+    def inspect_comic_archive(
+        self, path: Path, original_name: str | None
+    ) -> ComicArchiveInspection: ...
+
+    def publish_comic_cover(
+        self,
+        storage_root: Path,
+        source_path: Path,
+        work_id: str,
+        media_version_id: str,
+        volume_id: str,
+        entry_name: str,
+    ) -> str: ...
+
+    def publish_sidecar_cover(
+        self,
+        storage_root: Path,
+        source_path: Path,
+        work_id: str,
+        media_version_id: str,
+        volume_id: str,
+    ) -> str: ...
 
     def inspect_audio_bundle(self, path: Path) -> AudioBundleStructure | None: ...
 

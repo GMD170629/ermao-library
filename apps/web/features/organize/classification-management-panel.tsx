@@ -9,12 +9,12 @@ import { Select } from '../../components/ui/select';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
-type Kind = 'AUTHOR' | 'TAG' | 'SERIES' | 'PUBLISHER';
+type Kind = 'AUTHOR' | 'TAG' | 'SERIES';
 type Category = { id: string; kind: Kind; name: string; aliases: string[]; bookCount: number };
 type CategoryPage = { categories: Category[]; page: number; pageSize: number; total: number; totalPages: number };
 type ApiPayload<T> = { ok: boolean; data?: T; error?: { message: string } };
 const tabs: Array<{ key: Kind; label: string }> = [
-  { key: 'AUTHOR', label: '作者' }, { key: 'TAG', label: '标签' }, { key: 'SERIES', label: '丛书' }, { key: 'PUBLISHER', label: '出版社' }
+  { key: 'AUTHOR', label: '作者' }, { key: 'TAG', label: '标签' }, { key: 'SERIES', label: '丛书' }
 ];
 
 async function payload<T>(response: Response, fallback: string) {

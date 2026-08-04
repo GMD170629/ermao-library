@@ -21,6 +21,7 @@ import { fallbackEpubFont } from './epub-font';
 import type { ReaderAdapterInputHandler, ReaderInteractiveAdapter, ReaderInteractionPolicy } from './reader-interaction';
 import { hasActiveTextSelection, isReaderControlTarget, readerFramePointerIntent, readerKeyIntent, readerPointerIntent } from '../input-router';
 import { isEngineResolvableReflowableHref } from '../reflowable-navigation-href';
+import type { ReaderBookCache } from '../../../../lib/reader/book-cache';
 
 type FoliateRelocateDetail = {
   cfi?: string;
@@ -64,6 +65,9 @@ export type FoliateAdapterOptions = {
   onInputIntent?: ReaderAdapterInputHandler;
   onEndOfVolume?: () => void;
   fetch?: typeof globalThis.fetch;
+  userId: string;
+  bookCache: ReaderBookCache;
+  onCacheWarning?: (code: 'BOOK_CACHE_WRITE_FAILED') => void;
 };
 
 function clamp(value: number, minimum = 0, maximum = 1) {
@@ -280,6 +284,9 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
   private readonly onEndOfVolume?: () => void;
   private readonly fetcher?: typeof globalThis.fetch;
   private readonly title?: string;
+  private readonly userId: string;
+  private readonly bookCache: ReaderBookCache;
+  private readonly onCacheWarning?: (code: 'BOOK_CACHE_WRITE_FAILED') => void;
   private lifecycleController: AbortController | null = null;
   private view: FoliateView | null = null;
   private book: FoliateBook | null = null;
@@ -307,6 +314,9 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     this.onInputIntent = options.onInputIntent;
     this.onEndOfVolume = options.onEndOfVolume;
     this.fetcher = options.fetch;
+    this.userId = options.userId;
+    this.bookCache = options.bookCache;
+    this.onCacheWarning = options.onCacheWarning;
   }
 
   getInteractionPolicy(): ReaderInteractionPolicy {
@@ -349,7 +359,25 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
         format: this.format,
         title: this.title ?? context.source.volumeId,
         signal,
-        fetch: this.fetcher
+        fetch: this.fetcher,
+        cache: {
+          storage: this.bookCache,
+          identity: {
+            userId: this.userId,
+            volumeId: context.source.volumeId,
+            contentFingerprint: context.source.contentFingerprint
+          }
+        },
+        onPhase: (phase) => {
+          this.emit({
+            type: 'phase-changed',
+            phase: phase === 'downloading' ? 'downloading-content' : 'loading-content'
+          }, context.operation);
+        },
+        onDownloadProgress: (progress) => {
+          this.emit({ type: 'download-progress', ...progress }, context.operation);
+        },
+        onCacheWarning: this.onCacheWarning
       });
       this.assertActive(generation, signal);
       this.book = opened.book;

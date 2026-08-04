@@ -7,6 +7,7 @@ from pydantic import Field
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.http_errors import HttpContractError
+from app.contracts.metadata_writeback import MetadataWritebackOperationContract
 from app.modules.library.public import WorkView
 
 
@@ -23,7 +24,11 @@ class OrganizePolicy(HttpContractModel):
     auto_run_on_new: bool = Field(alias="autoRunOnNew")
     auto_run_on_new_since: datetime | None = Field(alias="autoRunOnNewSince")
     rules: OrganizeRules
-    overwrite_title_author: bool = Field(alias="overwriteTitleAuthor")
+    write_metadata_to_files: bool = Field(alias="writeMetadataToFiles")
+    prefer_local_metadata: bool = Field(alias="preferLocalMetadata")
+    local_metadata_priority: list[Literal["SIDECAR_OPF", "EMBEDDED", "PATH"]] = Field(
+        alias="localMetadataPriority"
+    )
     last_scheduled_at: datetime | None = Field(alias="lastScheduledAt")
     next_run_at: datetime | None = Field(alias="nextRunAt")
     updated_at: datetime = Field(alias="updatedAt")
@@ -37,7 +42,7 @@ class OrganizeCandidate(HttpContractModel):
     id: str
     title: str | None
     author: str | None
-    work_type: str | None = Field(alias="workType")
+    available_media_kinds: list[str] = Field(alias="availableMediaKinds")
     cover_path: str | None = Field(alias="coverPath")
     metadata_quality: int = Field(alias="metadataQuality")
     reason_codes: list[str] = Field(alias="reasonCodes")
@@ -98,6 +103,7 @@ class OrganizeJob(HttpContractModel):
     id: str
     run_id: str | None = Field(alias="runId")
     volume_id: str | None = Field(alias="volumeId")
+    media_version_id: str | None = Field(default=None, alias="mediaVersionId")
     trigger: str
     status: str
     status_category: Literal["SUCCESS", "FAILED", "RECOGNIZING", "WAITING"] = Field(
@@ -113,6 +119,9 @@ class OrganizeJob(HttpContractModel):
     metadata_sources: list[str] = Field(alias="metadataSources")
     metadata_lookup_error: str | None = Field(alias="metadataLookupError")
     provider_executions: list[ProviderExecution] = Field(alias="providerExecutions")
+    metadata_writeback: MetadataWritebackOperationContract | None = Field(
+        default=None, alias="metadataWriteback"
+    )
     started_at: datetime | None = Field(alias="startedAt")
     finished_at: datetime | None = Field(alias="finishedAt")
     created_at: datetime | None = Field(alias="createdAt")
@@ -124,7 +133,7 @@ class OrganizeJobListBook(HttpContractModel):
     id: str
     title: str
     author: str
-    format: str
+    available_media_kinds: list[str] = Field(alias="availableMediaKinds")
 
 
 class OrganizeJobListItem(HttpContractModel):

@@ -5,6 +5,7 @@ import {
   normalizeFoliateFixedLayoutViewport,
   openFoliateBook
 } from './foliate-book';
+import { MemoryReaderStorage } from '../../../../lib/reader/memory-storage';
 
 function signal() {
   return new AbortController().signal;
@@ -26,6 +27,121 @@ test('openFoliateBook builds TXT through the official book interface boundary', 
   );
   assert.equal(result.book.sections.length, 1);
   await result.destroy();
+});
+
+test('downloads a Foliate book once, reports byte progress, and reopens it from the private cache', async () => {
+  const storage = new MemoryReaderStorage();
+  const progress: Array<{ loadedBytes: number; totalBytes: number | null; percent: number | null }> = [];
+  let requests = 0;
+  const options = {
+    url: '/book.txt',
+    format: 'txt' as const,
+    title: 'Cached TXT',
+    signal: signal(),
+    cache: {
+      storage,
+      identity: { userId: 'user-1', volumeId: 'volume-1', contentFingerprint: 'sha256:first' }
+    }
+  };
+
+  const first = await openFoliateBook({
+    ...options,
+    fetch: async () => {
+      requests += 1;
+      return new Response('第一章\n缓存正文', {
+        status: 200,
+        headers: { 'Content-Length': String(new TextEncoder().encode('第一章\n缓存正文').byteLength) }
+      });
+    },
+    onDownloadProgress: (value) => progress.push(value)
+  });
+  await first.destroy();
+
+  const second = await openFoliateBook({
+    ...options,
+    fetch: async () => {
+      requests += 1;
+      throw new Error('cache miss');
+    }
+  });
+
+  assert.equal(requests, 1);
+  assert.equal(second.book.sections.length, 1);
+  assert.equal(progress.at(-1)?.percent, 100);
+  assert.ok((progress.at(-1)?.loadedBytes ?? 0) > 0);
+  await second.destroy();
+});
+
+test('keeps the downloaded book usable when persistent storage rejects the cache write', async () => {
+  const storage = new MemoryReaderStorage();
+  storage.putBookFile = async () => {
+    throw new DOMException('quota', 'QuotaExceededError');
+  };
+  const warnings: string[] = [];
+  const result = await openFoliateBook({
+    url: '/book.txt',
+    format: 'txt',
+    title: 'No storage',
+    signal: signal(),
+    cache: {
+      storage,
+      identity: { userId: 'user-1', volumeId: 'volume-1', contentFingerprint: 'sha256:no-space' }
+    },
+    fetch: async () => new Response('正文'),
+    onCacheWarning: (code) => warnings.push(code)
+  });
+
+  assert.equal(result.book.sections.length, 1);
+  assert.deepEqual(warnings, ['BOOK_CACHE_WRITE_FAILED']);
+  await result.destroy();
+});
+
+test('serializes concurrent opens so only one tab-local request downloads the same book', async () => {
+  const storage = new MemoryReaderStorage();
+  let requests = 0;
+  const options = {
+    url: '/book.txt',
+    format: 'txt' as const,
+    title: 'Concurrent TXT',
+    signal: signal(),
+    cache: {
+      storage,
+      identity: { userId: 'user-1', volumeId: 'volume-concurrent', contentFingerprint: 'sha256:concurrent' }
+    },
+    fetch: async () => {
+      requests += 1;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return new Response('并发正文');
+    }
+  };
+
+  const [first, second] = await Promise.all([openFoliateBook(options), openFoliateBook(options)]);
+  assert.equal(requests, 1);
+  await Promise.all([first.destroy(), second.destroy()]);
+});
+
+test('does not persist a partial file when the reader cancels the first download', async () => {
+  const storage = new MemoryReaderStorage();
+  const controller = new AbortController();
+  const identity = { userId: 'user-1', volumeId: 'volume-abort', contentFingerprint: 'sha256:abort' };
+  const body = new ReadableStream<Uint8Array>({
+    start(streamController) {
+      streamController.enqueue(new TextEncoder().encode('部分正文'));
+    }
+  });
+
+  await assert.rejects(openFoliateBook({
+    url: '/book.txt',
+    format: 'txt',
+    title: 'Cancelled TXT',
+    signal: controller.signal,
+    cache: { storage, identity },
+    fetch: async () => new Response(body),
+    onDownloadProgress: (progress) => {
+      if (progress.loadedBytes > 0) controller.abort();
+    }
+  }), (reason: unknown) => reason instanceof DOMException && reason.name === 'AbortError');
+  assert.equal(await storage.getBookFile(identity), null);
 });
 
 test('openFoliateBook returns a stable resource error for HTTP failures', async () => {

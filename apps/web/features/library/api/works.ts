@@ -9,6 +9,7 @@ export type BookshelfWorkSummary = Readonly<{
   title: string;
   author: string;
   coverUrl: string;
+  availableMediaKinds: MediaKind[];
 }>;
 
 export type ManagementWorkSummary = Readonly<{
@@ -16,14 +17,11 @@ export type ManagementWorkSummary = Readonly<{
   id: string;
   title: string;
   author: string;
-  format: string;
   gradient: string;
   coverStatus: string;
   coverUrl: string;
-  publisher: string | null;
   seriesName: string | null;
   tags: string[];
-  type: 'ebook' | 'comic' | 'audiobook';
   availableMediaKinds: MediaKind[];
   statusValue: ReadingStatus;
   lastReadAt: string | null;
@@ -76,17 +74,14 @@ function mapBookshelfWork(value: unknown): BookshelfWorkSummary {
     id: requiredString(item.id, 'id'),
     title: requiredString(item.title, 'title'),
     author: requiredString(item.author, 'author'),
-    coverUrl: requiredString(item.coverUrl, 'coverUrl')
+    coverUrl: requiredString(item.coverUrl, 'coverUrl'),
+    availableMediaKinds: parseMediaKinds(item.availableMediaKinds)
   };
 }
 
 function mapManagementWork(value: unknown): ManagementWorkSummary {
   const item = record(value);
-  const type = item.type;
   const statusValue = item.statusValue;
-  if (type !== 'ebook' && type !== 'comic' && type !== 'audiobook') {
-    throw new Error('LIBRARY_WORK_SUMMARY_INVALID_type');
-  }
   if (statusValue !== 'UNREAD' && statusValue !== 'READING' && statusValue !== 'FINISHED') {
     throw new Error('LIBRARY_WORK_SUMMARY_INVALID_statusValue');
   }
@@ -95,16 +90,13 @@ function mapManagementWork(value: unknown): ManagementWorkSummary {
     id: requiredString(item.id, 'id'),
     title: requiredString(item.title, 'title'),
     author: requiredString(item.author, 'author'),
-    format: requiredString(item.format, 'format'),
     gradient: requiredString(item.gradient, 'gradient'),
     coverStatus: requiredString(item.coverStatus, 'coverStatus'),
     coverUrl: requiredString(item.coverUrl, 'coverUrl'),
-    publisher: optionalString(item.publisher),
     seriesName: optionalString(item.seriesName),
     tags: Array.isArray(item.tags)
       ? item.tags.filter((tag): tag is string => typeof tag === 'string')
       : [],
-    type,
     availableMediaKinds: parseMediaKinds(item.availableMediaKinds),
     statusValue,
     lastReadAt: optionalString(item.lastReadAt),

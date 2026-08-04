@@ -39,7 +39,7 @@ def source_to_dict(source: Source) -> dict[str, Any]:
 
 def pipeline_to_dict(row: MetadataProviderPipeline) -> dict[str, Any]:
     return {
-        "workType": row.work_type,
+        "mediaKind": row.media_kind,
         "providerId": row.provider_id,
         "included": row.included,
         "enabled": row.enabled,
@@ -75,7 +75,7 @@ def get_provider_source(db: Session, provider_id: str) -> dict[str, Any] | None:
 def ensure_pipeline_row(
     db: Session,
     *,
-    work_type: str,
+    media_kind: str,
     provider_id: str,
     enabled: bool,
     position: int,
@@ -85,7 +85,7 @@ def ensure_pipeline_row(
     statement = (
         sqlite_insert(MetadataProviderPipeline)
         .values(
-            work_type=work_type,
+            media_kind=media_kind,
             provider_id=provider_id,
             included=True,
             enabled=enabled,
@@ -95,7 +95,7 @@ def ensure_pipeline_row(
         )
         .on_conflict_do_nothing(
             index_elements=[
-                MetadataProviderPipeline.work_type,
+                MetadataProviderPipeline.media_kind,
                 MetadataProviderPipeline.provider_id,
             ]
         )
@@ -110,7 +110,7 @@ def list_included_pipelines(db: Session) -> list[dict[str, Any]]:
         select(MetadataProviderPipeline)
         .where(MetadataProviderPipeline.included.is_(True))
         .order_by(
-            MetadataProviderPipeline.work_type,
+            MetadataProviderPipeline.media_kind,
             MetadataProviderPipeline.position,
             MetadataProviderPipeline.created_at,
         )
@@ -130,10 +130,10 @@ def list_pipelines_for_provider(db: Session, provider_id: str) -> list[dict[str,
     return [pipeline_to_dict(row) for row in rows]
 
 
-def clear_work_type_pipelines(db: Session, work_type: str, now: datetime) -> None:
+def clear_media_kind_pipelines(db: Session, media_kind: str, now: datetime) -> None:
     db.execute(
         update(MetadataProviderPipeline)
-        .where(MetadataProviderPipeline.work_type == work_type)
+        .where(MetadataProviderPipeline.media_kind == media_kind)
         .values(included=False, enabled=False, updated_at=now)
     )
 
@@ -141,7 +141,7 @@ def clear_work_type_pipelines(db: Session, work_type: str, now: datetime) -> Non
 def update_pipeline_row(
     db: Session,
     *,
-    work_type: str,
+    media_kind: str,
     provider_id: str,
     included: bool,
     enabled: bool,
@@ -151,7 +151,7 @@ def update_pipeline_row(
     db.execute(
         update(MetadataProviderPipeline)
         .where(
-            MetadataProviderPipeline.work_type == work_type,
+            MetadataProviderPipeline.media_kind == media_kind,
             MetadataProviderPipeline.provider_id == provider_id,
         )
         .values(included=included, enabled=enabled, position=position, updated_at=now)
@@ -219,10 +219,10 @@ def update_source_test_result(
     )
 
 
-def list_enabled_provider_ids(db: Session, work_type: str | None = None) -> list[str]:
+def list_enabled_provider_ids(db: Session, media_kind: str | None = None) -> list[str]:
     if not inspect(db.connection()).has_table("MetadataProviderPipeline"):
         return []
-    if work_type is None:
+    if media_kind is None:
         position_col = func.min(MetadataProviderPipeline.position).label("position")
         rows = db.execute(
             select(MetadataProviderPipeline.provider_id, position_col)
@@ -238,7 +238,7 @@ def list_enabled_provider_ids(db: Session, work_type: str | None = None) -> list
     rows = db.scalars(
         select(MetadataProviderPipeline.provider_id)
         .where(
-            MetadataProviderPipeline.work_type == work_type,
+            MetadataProviderPipeline.media_kind == media_kind,
             MetadataProviderPipeline.included.is_(True),
             MetadataProviderPipeline.enabled.is_(True),
         )

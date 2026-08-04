@@ -1032,6 +1032,28 @@ test('EPUB iframe is scriptless and receives the selected theme snapshot', async
       }, resizedEngineWidth);
     }).toEqual({ fitsViewport: true, horizontallyContained: true });
     iframe = await currentEpubIframe(page);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    const mobileIframe = await currentEpubIframe(page);
+    await expect.poll(() => mobileIframe.contentFrame().locator('body').evaluate((body) => {
+      const style = getComputedStyle(body);
+      const viewportHeight = body.ownerDocument.documentElement.clientHeight;
+      const expectedTop = Math.max(16, Math.min(32, viewportHeight * 0.025));
+      const expectedBottom = Math.max(32, Math.min(64, viewportHeight * 0.05));
+      return {
+        paddingLeft: Number.parseFloat(style.paddingLeft),
+        paddingRight: Number.parseFloat(style.paddingRight),
+        topIsHalved: Math.abs(Number.parseFloat(style.paddingTop) - expectedTop) < 0.1,
+        bottomIsUnchanged: Math.abs(Number.parseFloat(style.paddingBottom) - expectedBottom) < 0.1
+      };
+    })).toEqual({
+      paddingLeft: 8,
+      paddingRight: 8,
+      topIsHalved: true,
+      bottomIsUnchanged: true
+    });
+    await page.setViewportSize(initialViewport);
+    iframe = await currentEpubIframe(page);
   }
 
   await showReaderControls(page);

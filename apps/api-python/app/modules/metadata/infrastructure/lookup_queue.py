@@ -43,7 +43,6 @@ _WORK_CAMEL_TO_SNAKE: dict[str, str] = {
     "tags": "tags",
     "seriesName": "series_name",
     "seriesIndex": "series_index",
-    "publishedYear": "published_year",
     "coverPath": "cover_path",
     "coverStatus": "cover_status",
     "normalizedTitle": "normalized_title",
@@ -57,6 +56,9 @@ _WORK_CAMEL_TO_SNAKE: dict[str, str] = {
 
 _VOLUME_CAMEL_TO_SNAKE: dict[str, str] = {
     "publisher": "publisher",
+    "publishedAt": "published_at",
+    "language": "language",
+    "isbn": "isbn",
     "updatedAt": "updated_at",
 }
 
@@ -72,6 +74,7 @@ def lookup_task_to_dict(task: MetadataLookupTask) -> dict[str, Any]:
         "id": task.id,
         "workId": task.work_id,
         "volumeId": task.volume_id,
+        "mediaVersionId": task.media_version_id,
         "importTaskId": task.import_task_id,
         "organizeJobId": task.organize_job_id,
         "status": task.status,
@@ -87,6 +90,16 @@ def lookup_task_to_dict(task: MetadataLookupTask) -> dict[str, Any]:
         "createdAt": task.created_at,
         "updatedAt": task.updated_at,
     }
+
+
+def automatic_rate_limit_applies(db: Session, task: dict[str, Any]) -> bool:
+    """Manual recognition is explicit; legacy and background triggers stay safe."""
+
+    job_id = str(task.get("organizeJobId") or "").strip()
+    if not job_id or not _has_table(db, "OrganizeJob"):
+        return True
+    trigger = db.scalar(select(OrganizeJob.trigger).where(OrganizeJob.id == job_id))
+    return str(trigger or "LEGACY").upper() != "MANUAL"
 
 
 def work_row_to_dict(row: Any) -> dict[str, Any]:
@@ -105,7 +118,6 @@ def work_row_to_dict(row: Any) -> dict[str, Any]:
         "tags": data.get("tags"),
         "seriesName": data.get("series_name", data.get("seriesName")),
         "seriesIndex": data.get("series_index", data.get("seriesIndex")),
-        "publishedYear": data.get("published_year", data.get("publishedYear")),
         "coverPath": data.get("cover_path", data.get("coverPath")),
         "coverStatus": data.get("cover_status", data.get("coverStatus")),
         "metadataQuality": data.get("metadata_quality", data.get("metadataQuality")),
@@ -127,7 +139,10 @@ def volume_row_to_dict(row: Any) -> dict[str, Any]:
     return {
         "id": data.get("id"),
         "coverPath": data.get("cover_path", data.get("coverPath")),
+        "publishedAt": data.get("published_at", data.get("publishedAt")),
         "publisher": data.get("publisher"),
+        "language": data.get("language"),
+        "isbn": data.get("isbn"),
     }
 
 
@@ -143,11 +158,36 @@ def lookup_task_is_active(db: Session, task_id: str) -> bool:
     )
 
 
-def overwrite_title_author_enabled(db: Session) -> bool:
+def write_metadata_to_files_enabled(db: Session) -> bool:
+    if not _has_table(db, "OrganizePolicy"):
+        return False
+    columns = {
+        str(column.get("name"))
+        for column in inspect(db.connection()).get_columns("OrganizePolicy")
+    }
+    if "writeMetadataToFiles" not in columns:
+        return False
+    value = db.scalar(
+        select(OrganizePolicy.write_metadata_to_files).where(
+            OrganizePolicy.id == "default"
+        )
+    )
+    return bool(value)
+
+
+def prefer_local_metadata_enabled(db: Session) -> bool:
+    """Return the safe default when the policy migration is not installed yet."""
+
     if not _has_table(db, "OrganizePolicy"):
         return True
+    columns = {
+        str(column.get("name"))
+        for column in inspect(db.connection()).get_columns("OrganizePolicy")
+    }
+    if "preferLocalMetadata" not in columns:
+        return True
     value = db.scalar(
-        select(OrganizePolicy.overwrite_title_author).where(
+        select(OrganizePolicy.prefer_local_metadata).where(
             OrganizePolicy.id == "default"
         )
     )
@@ -310,7 +350,6 @@ def get_work(db: Session, work_id: str | None) -> dict[str, Any] | None:
             LibraryWork.tags,
             LibraryWork.series_name,
             LibraryWork.series_index,
-            LibraryWork.published_year,
             LibraryWork.cover_path,
             LibraryWork.cover_status,
             LibraryWork.metadata_quality,
@@ -347,7 +386,9 @@ def get_volume(db: Session, volume_id: str | None) -> dict[str, Any] | None:
         select(
             LibraryVolume.id,
             LibraryVolume.cover_path,
-            LibraryVolume.publisher,
+            LibraryVolume.published_at,
+            LibraryVolume.language,
+            LibraryVolume.isbn,
         ).where(LibraryVolume.id == volume_id)
     ).one_or_none()
     return volume_row_to_dict(row) if row else None

@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass, replace
-from typing import Literal
+from dataclasses import replace
+from pathlib import Path
 
+from app.contracts.local_metadata import LocalMetadataSource
+from app.contracts.publication_metadata import PublicationMetadata
+from app.contracts.publication_titles import titles_from_local_source
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
     IdentityEvidenceDTO,
+    IdentitySource,
+)
+from app.modules.imports.application.local_metadata import (
+    LocalMetadataCandidate,
+    ResolvedLocalMetadata,
+    resolve_local_metadata,
 )
 
 UNKNOWN_AUTHOR = "未知作者"
@@ -26,30 +35,175 @@ _UNKNOWN_VALUES = {
 }
 
 
-@dataclass(frozen=True)
-class EmbeddedIdentityMetadata:
-    title: str | None
-    author: str | None
-    source: Literal["epub_opf", "pdf_metadata", "comic_info", "reflowable_metadata"]
-    confidence: float
-
-
-def resolve_import_identity(
+def resolve_import_metadata(
     path_identity: BookIdentityDTO,
     *,
-    embedded: EmbeddedIdentityMetadata | None = None,
+    embedded: PublicationMetadata | None,
+    sidecar: PublicationMetadata | None,
+    source_order: tuple[LocalMetadataSource, ...],
+    path_metadata: PublicationMetadata | None = None,
+    path_publication_title: str | None = None,
+    requested_title: str | None = None,
+    requested_author: str | None = None,
+) -> tuple[BookIdentityDTO, ResolvedLocalMetadata]:
+    """Resolve one complete local snapshot before database identity decisions."""
+
+    resolved_path_metadata = path_metadata or _legacy_path_metadata(
+        path_identity,
+        path_publication_title=path_publication_title,
+    )
+    candidates = [
+        LocalMetadataCandidate(
+            source="PATH",
+            metadata=resolved_path_metadata,
+        )
+    ]
+    if embedded is not None:
+        candidates.append(
+            LocalMetadataCandidate(
+                source="EMBEDDED", metadata=_normalize_source_metadata(embedded)
+            )
+        )
+    if sidecar is not None:
+        candidates.append(
+            LocalMetadataCandidate(
+                source="SIDECAR_OPF", metadata=_normalize_source_metadata(sidecar)
+            )
+        )
+    resolved = resolve_local_metadata(
+        tuple(candidates),
+        source_order,
+        requested_title=requested_title,
+        requested_author=requested_author,
+    )
+    publication = resolved.metadata
+    title = publication.title or publication.series_name or path_identity.title
+    author = publication.author or UNKNOWN_AUTHOR
+    selected_source = (
+        resolved.source_for("title") or resolved.source_for("author") or "PATH"
+    )
+    source_mapping: dict[str, IdentitySource] = {
+        "SIDECAR_OPF": "sidecar_opf",
+        "EMBEDDED": "epub_opf",
+        "PATH": path_identity.source,
+        "REQUESTED": "requested",
+    }
+    identity_source = source_mapping[selected_source]
+    path_owned_identity = selected_source == "PATH"
+    identity = replace(
+        path_identity,
+        title=title,
+        author=author,
+        volume_index=publication.volume_index,
+        source=identity_source,
+        confidence=1.0
+        if selected_source in {"SIDECAR_OPF", "REQUESTED"}
+        else path_identity.confidence,
+        selection_reason="resolved_local_metadata",
+        grouping_key=path_identity.grouping_key if path_owned_identity else None,
+        grouping_kind=(
+            path_identity.grouping_kind if path_owned_identity else "standalone"
+        ),
+    )
+    return identity, resolved
+
+
+def _legacy_path_metadata(
+    path_identity: BookIdentityDTO,
+    *,
+    path_publication_title: str | None,
+) -> PublicationMetadata:
+    """Keep the unchanged audio/direct-call PATH behavior outside this refactor."""
+
+    uses_ai_fallback = (
+        path_identity.source == "ai"
+        and path_identity.volume_index is None
+        and path_identity.grouping_kind != "folder"
+    )
+    resolved_path_title = (
+        path_identity.title
+        if uses_ai_fallback
+        else path_publication_title
+        if path_publication_title is not None
+        else path_identity.title
+    )
+    path_series_name: str | None = None
+    if path_identity.grouping_kind == "folder":
+        if path_publication_title is not None:
+            resolved_path_title = path_publication_title
+        else:
+            logical_name = Path(path_identity.logical_path.replace("\\", "/")).name
+            resolved_path_title = Path(logical_name).stem or path_identity.title
+        path_series_name = _valid_title(path_identity.title)
+    path_author = (
+        _valid_author(path_identity.author)
+        if path_identity.source != "ai"
+        or path_identity.grouping_kind == "folder"
+        or uses_ai_fallback
+        else None
+    )
+    if (
+        path_identity.grouping_kind != "folder"
+        and path_identity.volume_index is not None
+        and _looks_like_volume_label(path_author)
+    ):
+        path_author = None
+    path_titles = titles_from_local_source(
+        resolved_path_title,
+        series_name=path_series_name,
+        volume_index=path_identity.volume_index,
+    )
+    return PublicationMetadata(
+        title=path_titles.work_title,
+        volume_title=path_titles.volume_title,
+        authors=(path_author,) if path_author else (),
+        series_name=path_series_name,
+        volume_index=path_titles.volume_index,
+    )
+
+
+def _normalize_source_metadata(
+    metadata: PublicationMetadata,
+) -> PublicationMetadata:
+    """Normalize compatibility candidates before any cross-source comparison."""
+
+    if metadata.volume_title is not None or metadata.title is None:
+        return metadata
+    titles = titles_from_local_source(
+        metadata.title,
+        series_name=metadata.series_name,
+        volume_index=metadata.volume_index,
+    )
+    return replace(
+        metadata,
+        title=titles.work_title,
+        volume_title=titles.volume_title,
+        volume_index=titles.volume_index,
+    )
+
+
+def _looks_like_volume_label(value: str | None) -> bool:
+    if value is None:
+        return False
+    return bool(
+        re.fullmatch(
+            r"(?:vol[._\s-]*\d+(?:\.\d+)?|"
+            r"\u7b2c?\s*\d+(?:\.\d+)?"
+            r"(?:\s*[-~\uff5e\u2014]\s*\d+(?:\.\d+)?)?"
+            r"\s*[\u8bdd\u7ae0\u5377\u518c\u96c6]?)",
+            value.strip(),
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def apply_requested_identity(
+    path_identity: BookIdentityDTO,
+    *,
     requested_title: str | None = None,
     requested_author: str | None = None,
 ) -> BookIdentityDTO:
-    """Choose title and author from explicit, embedded, and path evidence.
-
-    Existing-work and series-volume titles are structural decisions and remain
-    path-owned; valid PDF metadata may still fill a placeholder path author. A
-    complete, high-confidence path identity also remains authoritative so
-    misleading package metadata cannot merge an unrelated book. Otherwise
-    valid embedded metadata repairs incomplete or low-confidence filenames.
-    Explicit user fields are applied field by field.
-    """
+    """Apply only explicit user intent before format metadata is available."""
 
     path_evidence = IdentityEvidenceDTO(
         source=path_identity.source,
@@ -58,106 +212,31 @@ def resolve_import_identity(
         confidence=_confidence(path_identity.confidence),
     )
     evidence = _merge_evidence(path_identity.evidence, (path_evidence,))
-    embedded_evidence = _embedded_evidence(embedded)
-    if embedded_evidence is not None:
-        evidence = _merge_evidence(evidence, (embedded_evidence,))
 
     requested_title_value = _valid_title(requested_title)
     requested_author_value = _valid_author(requested_author)
-    if requested_title_value is not None or requested_author_value is not None:
-        evidence = _merge_evidence(
-            evidence,
-            (
-                IdentityEvidenceDTO(
-                    source="requested",
-                    title=requested_title_value,
-                    author=requested_author_value,
-                    confidence=1.0,
-                ),
+    if requested_title_value is None and requested_author_value is None:
+        return replace(path_identity, evidence=evidence)
+    evidence = _merge_evidence(
+        evidence,
+        (
+            IdentityEvidenceDTO(
+                source="requested",
+                title=requested_title_value,
+                author=requested_author_value,
+                confidence=1.0,
             ),
-        )
-
-    title = _valid_title(path_identity.title) or _clean_value(path_identity.title)
-    author = _valid_author(path_identity.author) or UNKNOWN_AUTHOR
-    source = path_identity.source
-    confidence = _confidence(path_identity.confidence)
-    reason = "path_fallback"
-
-    path_is_structural = (
-        path_identity.source == "existing_work"
-        or path_identity.volume_index is not None
-        or path_identity.grouping_kind in {"folder", "explicit"}
+        ),
     )
-    path_is_complete = (
-        _valid_title(title) is not None and _valid_author(author) is not None
-    )
-    if path_is_structural:
-        reason = (
-            "existing_work_path"
-            if path_identity.source == "existing_work"
-            else "series_volume_path"
-        )
-        embedded_author = (
-            _valid_author(embedded_evidence.author)
-            if embedded_evidence is not None
-            else None
-        )
-        if _valid_author(author) is None and embedded_author is not None:
-            author = embedded_author
-            source = embedded_evidence.source
-            confidence = embedded_evidence.confidence
-            reason = "embedded_author_over_incomplete_path"
-    elif path_is_complete and confidence >= 0.9:
-        reason = "complete_high_confidence_path"
-    elif embedded_evidence is not None:
-        embedded_title = _valid_title(embedded_evidence.title)
-        embedded_author = _valid_author(embedded_evidence.author)
-        used_embedded = False
-        if embedded_title is not None:
-            title = embedded_title
-            used_embedded = True
-        if embedded_author is not None:
-            author = embedded_author
-            used_embedded = True
-        if used_embedded:
-            source = embedded_evidence.source
-            confidence = embedded_evidence.confidence
-            reason = "embedded_metadata_over_incomplete_path"
-
-    if requested_title_value is not None or requested_author_value is not None:
-        if requested_title_value is not None:
-            title = requested_title_value
-        if requested_author_value is not None:
-            author = requested_author_value
-        source = "requested"
-        confidence = 1.0
-        reason = "explicit_user_fields"
 
     return replace(
         path_identity,
-        title=title or path_identity.title,
-        author=author or UNKNOWN_AUTHOR,
-        source=source,
-        confidence=confidence,
-        selection_reason=reason,
+        title=requested_title_value or path_identity.title,
+        author=requested_author_value or path_identity.author,
+        source="requested",
+        confidence=1.0,
+        selection_reason="explicit_user_fields",
         evidence=evidence,
-    )
-
-
-def _embedded_evidence(
-    embedded: EmbeddedIdentityMetadata | None,
-) -> IdentityEvidenceDTO | None:
-    if embedded is None:
-        return None
-    title = _valid_title(embedded.title)
-    author = _valid_author(embedded.author)
-    if title is None and author is None:
-        return None
-    return IdentityEvidenceDTO(
-        source=embedded.source,
-        title=title,
-        author=author,
-        confidence=_confidence(embedded.confidence),
     )
 
 

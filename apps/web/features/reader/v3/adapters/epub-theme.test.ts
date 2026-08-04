@@ -10,14 +10,30 @@ test('EPUB theme keeps vertical page spacing enforced after epub.js writes layou
     epub: { ...DEFAULT_READER_PREFERENCES.epub, flow: 'scrolled' }
   });
 
-  assert.match(paginated, /padding-top: clamp\(32px, 5vh, 64px\) !important/);
-  assert.match(paginated, /padding-bottom: clamp\(32px, 5vh, 64px\) !important/);
+  assert.match(paginated, /--shuku-reader-padding-top: clamp\(32px, 5vh, 64px\)/);
+  assert.match(paginated, /--shuku-reader-padding-bottom: clamp\(32px, 5vh, 64px\)/);
+  assert.match(paginated, /padding-top: var\(--shuku-reader-padding-top\) !important/);
+  assert.match(paginated, /padding-bottom: var\(--shuku-reader-padding-bottom\) !important/);
   assert.match(paginated, /--shuku-reader-page-width: 1350px/);
   assert.match(paginated, /html \{\s+font-size: var\(--shuku-reader-font-size\) !important/);
-  assert.match(scrolled, /padding-top: clamp\(28px, 4vh, 56px\) !important/);
+  assert.match(scrolled, /--shuku-reader-padding-top: clamp\(28px, 4vh, 56px\)/);
   assert.match(scrolled, /scrollbar-width: none !important/);
   assert.match(scrolled, /::-webkit-scrollbar/);
   assert.doesNotMatch(paginated, /scrollbar-width: none/);
+});
+
+test('EPUB theme reduces only mobile inline and top page spacing', () => {
+  const paginated = createEpubThemeSnapshot(DEFAULT_READER_PREFERENCES);
+  const scrolled = createEpubThemeSnapshot({
+    ...DEFAULT_READER_PREFERENCES,
+    epub: { ...DEFAULT_READER_PREFERENCES.epub, flow: 'scrolled' }
+  });
+
+  assert.match(paginated, /@media \(max-width: 640px\)/);
+  assert.match(paginated, /--shuku-reader-padding-inline: 8px/);
+  assert.match(paginated, /--shuku-reader-padding-top: clamp\(16px, 2\.5vh, 32px\)/);
+  assert.match(scrolled, /--shuku-reader-padding-top: clamp\(14px, 2vh, 28px\)/);
+  assert.doesNotMatch(paginated, /@media \(max-width: 640px\)[\s\S]*--shuku-reader-padding-bottom:/);
 });
 
 test('EPUB theme repaints the Foliate paginator background on the current page', () => {

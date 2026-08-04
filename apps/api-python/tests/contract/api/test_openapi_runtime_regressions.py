@@ -51,7 +51,6 @@ def _seed_library(db_session: Session) -> tuple[LibraryWork, LibraryWork]:
         normalized_title="openapi 回归作品",
         author="测试作者",
         normalized_author="测试作者",
-        work_type="NOVEL",
         tags=json.dumps(["科幻", "收藏", "待删除"], ensure_ascii=False),
         merge_key="openapi-regression-target",
     )
@@ -60,7 +59,6 @@ def _seed_library(db_session: Session) -> tuple[LibraryWork, LibraryWork]:
         normalized_title="openapi 回归作品",
         author="测试作者",
         normalized_author="测试作者",
-        work_type="NOVEL",
         tags=json.dumps(["科幻小说"], ensure_ascii=False),
         merge_key="openapi-regression-source",
     )
@@ -149,7 +147,6 @@ def test_library_management_endpoints_return_their_documented_contracts(
     assert facets_response.status_code == 200
     assert set(facets_response.json()["data"]["facets"]) == {
         "author",
-        "publisher",
         "series",
         "tag",
     }

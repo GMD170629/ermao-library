@@ -17,3 +17,4 @@ export type {
   LibraryWorkSummary,
   ManagementWorkSummary
 } from './api/works';
+export { mediaKindsLabel, orderedMediaKinds } from './model/media-kind-label';

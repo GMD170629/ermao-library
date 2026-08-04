@@ -50,6 +50,7 @@ test('keeps server totals when the lean work detail contains only the first volu
   assert.equal(work.mediaVersions[0]?.volumeCount, 12);
   assert.equal(work.mediaVersions[0]?.sizeBytes, 4096);
   assert.equal(work.mediaVersions[0]?.volumes.length, 1);
+  assert.equal(work.mediaVersions[0]?.volumes[0]?.readable, true);
 });
 
 test('searches transfer targets and excludes the current work', async () => {

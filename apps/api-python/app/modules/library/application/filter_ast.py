@@ -51,8 +51,6 @@ FIELD_OPERATORS = {
         for field in (
             "title",
             "description",
-            "isbn",
-            "identifier",
             "volumeTitle",
             "narrator",
             "sourcePath",
@@ -64,8 +62,6 @@ FIELD_OPERATORS = {
             "author",
             "tag",
             "series",
-            "publisher",
-            "language",
             "mediaKind",
             "format",
             "readingStatus",
@@ -81,7 +77,6 @@ FIELD_OPERATORS = {
     **{
         field: NUMBER_OPERATORS
         for field in (
-            "publishedYear",
             "seriesIndex",
             "metadataQuality",
             "fileSize",

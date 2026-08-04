@@ -4,21 +4,23 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from app.modules.imports.application.audio_types import SUPPORTED_AUDIO_EXTS
+
 SUPPORTED_IMPORT_FILE_EXTENSIONS = frozenset(
     {
         ".azw",
         ".azw3",
         ".cbz",
+        ".cbr",
         ".epub",
         ".fb2",
-        ".m4a",
-        ".m4b",
         ".mobi",
-        ".mp3",
         ".pdf",
         ".prc",
+        ".rar",
         ".txt",
         ".zip",
+        *SUPPORTED_AUDIO_EXTS,
     }
 )
 

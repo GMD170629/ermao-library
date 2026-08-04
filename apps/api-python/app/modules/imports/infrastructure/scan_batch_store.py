@@ -12,6 +12,7 @@ from app.core.time import now_timestamp_ms
 from app.models.common import db_timestamp
 from app.models.import_pipeline import ImportAsset, ImportTask, ImportWorkItem
 from app.models.library import LibraryFile
+from app.models.settings import MonitorFolder
 from app.modules.imports.application.work_queue_dto import ScanBatchResult
 from app.modules.imports.infrastructure.source_keys import source_key
 from app.modules.imports.infrastructure.tasks import build_import_task_values
@@ -66,6 +67,14 @@ def stage_scan_candidate_batch(
     work_values: list[dict[str, object]] = []
     now_ms = now_timestamp_ms()
     now = db_timestamp()
+    media_kind_policy = (
+        db.scalar(
+            select(MonitorFolder.media_kind_policy).where(
+                MonitorFolder.id == monitor_folder_id
+            )
+        )
+        or "MIXED"
+    )
     unique_batch_keys: set[str] = set()
     for index, path in enumerate(canonical_paths):
         key = keys_by_path[path]
@@ -84,8 +93,8 @@ def stage_scan_candidate_batch(
             original_name=path.name,
             requested_title=None,
             requested_author=None,
-            work_id=None,
             monitor_folder_id=monitor_folder_id,
+            media_kind_policy=str(media_kind_policy),
             message="扫描文件已进入导入队列",
             now=now_ms,
         )

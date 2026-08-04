@@ -13,6 +13,8 @@ import { useI18n } from '../../i18n/provider';
 import type { WorkView } from '../../types/work';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
+import { mediaKindsLabel } from '../library/public';
+import type { MediaKind } from '../../types/work';
 
 type ProviderExecution = {
   id: string;
@@ -50,7 +52,7 @@ type OrganizeBookSummary = {
   id: string;
   title: string;
   author: string;
-  format: string;
+  availableMediaKinds: MediaKind[];
 };
 
 export type OrganizeJobSummaryView = {
@@ -350,7 +352,7 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
                       <Cover book={job.book} className="h-16 w-12 shrink-0 rounded-lg" small />
                       <span data-i18n-skip className="min-w-0 flex-1">
                         <span className="line-clamp-2 font-semibold leading-5 text-slate-900">{job.book.title}</span>
-                        <span className="mt-1 block truncate text-xs text-slate-500">{job.book.author} · {job.book.format}</span>
+                        <span className="mt-1 block truncate text-xs text-slate-500">{job.book.author} · {mediaKindsLabel(job.book.availableMediaKinds, locale)}</span>
                       </span>
                       <StatusBadge category={category} />
                     </button>
@@ -391,7 +393,7 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
                         <td className="px-5 py-4 align-middle">
                           <button type="button" onClick={() => router.push(`${jobBasePath}/${job.id}`)} className="flex w-full min-w-0 items-center gap-3 text-left">
                             <Cover book={job.book} className="h-12 w-9 shrink-0 rounded-lg" small />
-                            <span data-i18n-skip className="min-w-0"><span className="block truncate font-semibold text-slate-900">{job.book.title}</span><span className="mt-1 block truncate text-xs text-slate-500">{job.book.author} · {job.book.format}</span></span>
+                            <span data-i18n-skip className="min-w-0"><span className="block truncate font-semibold text-slate-900">{job.book.title}</span><span className="mt-1 block truncate text-xs text-slate-500">{job.book.author} · {mediaKindsLabel(job.book.availableMediaKinds, locale)}</span></span>
                           </button>
                         </td>
                         <td className="px-3 py-4 align-middle"><div className="flex min-w-0 flex-wrap gap-1">{reasons.slice(0, 2).map((reason) => <Badge key={reason} tone="slate">{reason}</Badge>)}{reasons.length > 2 ? <span className="text-xs text-slate-400">+{reasons.length - 2}</span> : null}</div></td>

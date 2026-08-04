@@ -20,7 +20,6 @@ def test_clear_import_queue_deletes_every_status_and_preserves_content(
         id="preserved-work",
         title="Preserved",
         normalized_title="preserved",
-        work_type="EPUB",
         tags="[]",
     )
     media_version = LibraryMediaVersion(

@@ -10,13 +10,19 @@ import {
   type ReaderSyncLease
 } from './model';
 import type { ReaderStorage } from './storage';
+import {
+  readerBookCacheKey,
+  type CachedReaderBookFile,
+  type ReaderBookCache,
+  type ReaderBookCacheIdentity
+} from './book-cache';
 
 function createId(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
 }
 
 /** Deterministic-enough in-memory implementation for Node tests and non-browser previews. */
-export class MemoryReaderStorage implements ReaderStorage {
+export class MemoryReaderStorage implements ReaderStorage, ReaderBookCache {
   private readonly preferences = new Map<string, ReaderPreferenceSnapshot>();
   private readonly progress = new Map<string, ProgressMutation>();
   private readonly slotMutationIds = new Map<string, string>();
@@ -25,6 +31,24 @@ export class MemoryReaderStorage implements ReaderStorage {
   private clientId = createId('client');
   private sequence = 0;
   private lease: ReaderSyncLease | null = null;
+  private readonly bookFiles = new Map<string, CachedReaderBookFile>();
+
+  async getBookFile(identity: ReaderBookCacheIdentity) {
+    return this.bookFiles.get(readerBookCacheKey(identity)) ?? null;
+  }
+
+  async putBookFile(file: CachedReaderBookFile) {
+    for (const [key, current] of this.bookFiles) {
+      if (current.userId === file.userId && current.volumeId === file.volumeId && key !== file.key) {
+        this.bookFiles.delete(key);
+      }
+    }
+    this.bookFiles.set(file.key, file);
+  }
+
+  async deleteBookFile(identity: ReaderBookCacheIdentity) {
+    this.bookFiles.delete(readerBookCacheKey(identity));
+  }
 
   async getPreference(userId: string, workId: string) {
     return this.preferences.get(preferenceKey(userId, workId)) ?? null;
@@ -136,6 +160,7 @@ export class MemoryReaderStorage implements ReaderStorage {
     this.slotMutationIds.clear();
     this.diagnostics.length = 0;
     this.quarantine.length = 0;
+    this.bookFiles.clear();
     this.clientId = createId('client');
     this.sequence = 0;
     this.lease = null;

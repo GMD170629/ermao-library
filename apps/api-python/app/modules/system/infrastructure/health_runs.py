@@ -21,7 +21,6 @@ from app.models.organize import MetadataLookupTask
 from app.models.settings import MonitorFolder, SystemHealthRun
 from app.modules.system.domain.health import (
     HealthRunSnapshot,
-    TERMINAL_CHECK_STATUSES,
     normalize_health_run_snapshot,
     summarize_health_items,
 )
@@ -169,21 +168,21 @@ def _initial_items(db: Session, settings: Settings) -> list[dict[str, Any]]:
                 "configuration",
                 "health.item.ebookProviders",
                 "providers",
-                options={"workType": "ebook"},
+                options={"mediaKind": "EBOOK"},
             ),
             _item(
                 "config:providers:comic",
                 "configuration",
                 "health.item.comicProviders",
                 "providers",
-                options={"workType": "comic"},
+                options={"mediaKind": "COMIC"},
             ),
             _item(
                 "config:providers:audiobook",
                 "configuration",
                 "health.item.audiobookProviders",
                 "providers",
-                options={"workType": "audiobook"},
+                options={"mediaKind": "AUDIOBOOK"},
             ),
         ]
     )
@@ -400,9 +399,9 @@ def _providers_result(db: Session, options: dict[str, Any]) -> tuple[str, str, d
         test_metadata_provider,
     )
 
-    work_type = str(options["workType"])
-    provider_ids = enabled_metadata_provider_ids(db, work_type)
-    details: dict[str, Any] = {"workType": work_type, "providers": []}
+    media_kind = str(options["mediaKind"])
+    provider_ids = enabled_metadata_provider_ids(db, media_kind)
+    details: dict[str, Any] = {"mediaKind": media_kind, "providers": []}
     if not provider_ids:
         return "warning", "health.providers.noneEnabled", details
     failed = 0

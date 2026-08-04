@@ -1,5 +1,6 @@
-from sqlalchemy import text
+from sqlalchemy import select, text
 
+from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
 from app.services.book_identity import identity_merge_key
 from tests.test_compat_api import _login, create_organize_detail_tables
 from tests.test_worker_importer import create_worker_tables
@@ -10,11 +11,11 @@ def _insert_work(db, work_id, title, author):
         text(
             """
             INSERT INTO LibraryWork (
-                id, origin, title, normalizedTitle, author, normalizedAuthor, workType,
+                id, origin, title, normalizedTitle, author, normalizedAuthor,
                 publicationStatus, trackingStatus, tags, metadataQuality, organizeStatus, coverStatus,
                 hidden, organized, mergeKey, createdAt, updatedAt
             ) VALUES (
-                :id, 'MANUAL', :title, :title, :author, :author, 'EPUB', 'UNKNOWN',
+                :id, 'MANUAL', :title, :title, :author, :author, 'UNKNOWN',
                 'NOT_TRACKING', '[]', 0, 'REVIEWING', 'PENDING', 0, 0, :merge_key, 'now', 'now'
             )
             """
@@ -72,7 +73,7 @@ def test_manual_identity_update_allows_same_title_and_author_without_merge_candi
     assert row["mergeKey"] == "新书名典藏版:作者甲"
 
 
-def test_manual_metadata_apply_writes_publisher_to_selected_volume(client, db_session):
+def test_metadata_recognition_applies_publisher_to_selected_volume(client, db_session):
     create_worker_tables(db_session)
     create_organize_detail_tables(db_session)
     _insert_work(db_session, "work-publisher", "出版测试", "测试作者")
@@ -119,6 +120,86 @@ def test_manual_metadata_apply_writes_publisher_to_selected_volume(client, db_se
         ).scalar()
         == "新星出版社"
     )
+
+
+def test_manual_metadata_uses_representative_volume_to_update_entire_media_version(
+    client, db_session
+):
+    create_worker_tables(db_session)
+    create_organize_detail_tables(db_session)
+    work = LibraryWork(
+        id="work-version-metadata",
+        title="多卷作品",
+        normalized_title="多卷作品",
+        author="作者",
+        normalized_author="作者",
+        tags="[]",
+        merge_key=identity_merge_key("多卷作品", "作者"),
+    )
+    media_version = LibraryMediaVersion(
+        id="media-version-metadata",
+        work_id=work.id,
+        media_kind="COMIC",
+    )
+    volumes = [
+        LibraryVolume(
+            id=f"volume-version-{index}",
+            media_version_id=media_version.id,
+            title=f"第 {index} 卷",
+            sort_order=index,
+            format="CBZ",
+            resource_key=f"volume-version-{index}",
+            import_status="READY",
+        )
+        for index in (1, 2)
+    ]
+    db_session.add_all([work, media_version, *volumes])
+    db_session.commit()
+    _login(client, db_session)
+
+    response = client.post(
+        "/api/works/work-version-metadata/metadata/apply",
+        json={
+            "candidate": {
+                "volumeMetadata": {
+                    "publisher": "全卷出版社",
+                    "publishedAt": "2024-03-01T00:00:00Z",
+                    "language": "ja",
+                    "isbn": "9781234567897",
+                }
+            },
+            "fields": ["publisher", "publishedAt", "language", "isbn"],
+            "volumeId": "volume-version-1",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    refreshed_volumes = list(
+        db_session.scalars(
+            select(LibraryVolume)
+            .where(LibraryVolume.media_version_id == media_version.id)
+            .order_by(LibraryVolume.sort_order.asc())
+        ).all()
+    )
+    assert len(refreshed_volumes) == 2
+    assert all(volume.publisher == "全卷出版社" for volume in refreshed_volumes)
+    assert all(volume.language == "ja" for volume in refreshed_volumes)
+    assert all(volume.isbn == "9781234567897" for volume in refreshed_volumes)
+    assert all(volume.published_at is not None for volume in refreshed_volumes)
+
+    single_response = client.post(
+        "/api/works/work-version-metadata/metadata/apply?applyToAllVolumes=false",
+        json={
+            "candidate": {"volumeMetadata": {"publisher": "第一卷出版社"}},
+            "fields": ["publisher"],
+            "volumeId": "volume-version-1",
+        },
+    )
+
+    assert single_response.status_code == 200, single_response.text
+    db_session.expire_all()
+    assert db_session.get(LibraryVolume, "volume-version-1").publisher == "第一卷出版社"
+    assert db_session.get(LibraryVolume, "volume-version-2").publisher == "全卷出版社"
 
 
 def test_manual_metadata_apply_remains_available_after_organize_suggestion_apply_is_removed(

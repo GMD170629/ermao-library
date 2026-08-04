@@ -32,7 +32,6 @@ def _add_volume_series(db: Session) -> None:
         normalized_title="reorderwork",
         author="Author",
         normalized_author="author",
-        work_type="BOOK",
         tags="[]",
     )
     media_version = LibraryMediaVersion(
@@ -124,7 +123,6 @@ def test_volume_move_rejects_a_volume_outside_the_requested_work(
         normalized_title="otherwork",
         author="Author",
         normalized_author="author",
-        work_type="BOOK",
         tags="[]",
     )
     db_session.add(other_work)

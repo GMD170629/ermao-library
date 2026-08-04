@@ -1,6 +1,6 @@
 'use client';
 
-import { Clock3, Save, Sparkles } from 'lucide-react';
+import { ArrowDown, ArrowUp, Clock3, Save, Sparkles } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { useToast } from '../../components/ui/feedback';
@@ -17,11 +17,15 @@ export type OrganizePolicy = {
   autoRunOnNew: boolean;
   autoRunOnNewSince: string | null;
   rules: { unrecognized: boolean; missingMetadata: boolean };
-  overwriteTitleAuthor: boolean;
+  writeMetadataToFiles: boolean;
+  preferLocalMetadata: boolean;
+  localMetadataPriority: LocalMetadataSource[];
   lastScheduledAt: string | null;
   nextRunAt: string | null;
   updatedAt: string | null;
 };
+
+type LocalMetadataSource = 'SIDECAR_OPF' | 'EMBEDDED' | 'PATH';
 
 type PolicyResponse = { ok: boolean; data?: { policy: OrganizePolicy }; error?: { message: string } };
 type CandidateResponse = { ok: boolean; data?: { candidates: { total: number } }; error?: { message: string } };
@@ -34,7 +38,9 @@ const defaultPolicy: OrganizePolicy = {
   autoRunOnNew: false,
   autoRunOnNewSince: null,
   rules: { unrecognized: true, missingMetadata: true },
-  overwriteTitleAuthor: true,
+  writeMetadataToFiles: false,
+  preferLocalMetadata: true,
+  localMetadataPriority: ['SIDECAR_OPF', 'EMBEDDED', 'PATH'],
   lastScheduledAt: null,
   nextRunAt: null,
   updatedAt: null
@@ -130,6 +136,18 @@ export function RecognitionSettingsPanel({ compact = false, onSaved }: { compact
           : i18nAttribute('每 {value0} 小时', { value0: value / 60 }),
     translate: false
   }));
+  const sourceLabels: Record<LocalMetadataSource, string> = {
+    SIDECAR_OPF: i18nAttribute('OPF 文件'),
+    EMBEDDED: i18nAttribute('文件内部元数据'),
+    PATH: i18nAttribute('文件路径')
+  };
+  function moveSource(index: number, offset: -1 | 1) {
+    const target = index + offset;
+    if (target < 0 || target >= policy.localMetadataPriority.length) return;
+    const next = [...policy.localMetadataPriority];
+    [next[index], next[target]] = [next[target], next[index]];
+    setPolicy({ ...policy, localMetadataPriority: next });
+  }
   return (
     <div className={cardClass}>
       {!compact ? (
@@ -143,7 +161,23 @@ export function RecognitionSettingsPanel({ compact = false, onSaved }: { compact
         {settingRow('定时执行识别', '开启后按固定间隔扫描书库；导入流程本身不会直接创建整理任务。', <Toggle checked={policy.enabled && policy.scheduleMode === 'INTERVAL'} disabled={loading} label={i18nAttribute("定时执行识别")} onChange={(checked) => setPolicy({ ...policy, enabled: checked, scheduleMode: checked ? 'INTERVAL' : 'MANUAL' })} />)}
         {policy.enabled && policy.scheduleMode === 'INTERVAL' ? settingRow('执行间隔', '建议至少 30 分钟，避免对外部数据源产生过密请求。', <Select value={String(policy.intervalMinutes)} options={intervalOptions} ariaLabel="识别任务执行间隔" onChange={(value) => setPolicy({ ...policy, intervalMinutes: Number(value) })} className="min-w-36" triggerClassName="!border-[#DCD7D1] !text-[#393632]" />) : null}
         {settingRow('新增后自动执行', '仅处理开启此设置之后新增的读物，历史书库不会被一次性加入。', <Toggle checked={policy.autoRunOnNew} disabled={loading} label={i18nAttribute("新增后自动执行")} onChange={(autoRunOnNew) => setPolicy({ ...policy, autoRunOnNew })} />)}
-        {settingRow('覆盖已有标题和作者', '开启后，识别结果会更新已有标题和作者；其他元数据仍只补全缺失字段。', <Toggle checked={policy.overwriteTitleAuthor} disabled={loading} label={i18nAttribute("覆盖已有标题和作者")} onChange={(overwriteTitleAuthor) => setPolicy({ ...policy, overwriteTitleAuthor })} />)}
+        {settingRow(i18nAttribute('识别结果保存到文件'), i18nAttribute('开启后，源文件可能被修改。不支持在源文件中写入元数据的，会创建同名opf保存元数据。'), <Toggle checked={policy.writeMetadataToFiles} disabled={loading} label={i18nAttribute('识别结果保存到文件')} onChange={(writeMetadataToFiles) => setPolicy({ ...policy, writeMetadataToFiles })} />)}
+        {settingRow(i18nAttribute('本地元数据优先'), i18nAttribute('开启后远程数据仅作为补充'), <Toggle checked={policy.preferLocalMetadata} disabled={loading} label={i18nAttribute('本地元数据优先')} onChange={(preferLocalMetadata) => setPolicy({ ...policy, preferLocalMetadata })} />)}
+      </div>
+
+      <div className="mt-5 rounded-2xl border border-[#E8E3DD] p-4">
+        <div className="text-sm font-semibold text-[#3B3834]"><I18nText>本地元数据识别顺序</I18nText></div>
+        <p className="mt-1 text-sm leading-6 text-[#7B756E]"><I18nText>按字段从上到下选择；高优先级来源缺少字段时，才由下一来源补充。</I18nText></p>
+        <ol className="mt-3 space-y-2">
+          {policy.localMetadataPriority.map((source, index) => (
+            <li key={source} className="flex items-center gap-3 rounded-xl bg-[#F8F6F3] px-3 py-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white text-xs font-semibold text-[#7B756E]">{index + 1}</span>
+              <span className="min-w-0 flex-1 text-sm font-medium text-[#3B3834]">{sourceLabels[source]}</span>
+              <Button variant="ghost" className="!min-h-9 !px-2" icon={ArrowUp} disabled={loading || index === 0} aria-label={i18nAttribute('上移{value0}', { value0: sourceLabels[source] })} onClick={() => moveSource(index, -1)} />
+              <Button variant="ghost" className="!min-h-9 !px-2" icon={ArrowDown} disabled={loading || index === policy.localMetadataPriority.length - 1} aria-label={i18nAttribute('下移{value0}', { value0: sourceLabels[source] })} onClick={() => moveSource(index, 1)} />
+            </li>
+          ))}
+        </ol>
       </div>
 
       <div className="mt-5 rounded-2xl bg-[#F8F6F3] p-4">

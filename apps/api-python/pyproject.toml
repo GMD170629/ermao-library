@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ermao-books-api-python"
-version = "0.4.7"
+version = "0.5.0"
 description = "Python FastAPI backend for 二毛图书"
 requires-python = "==3.11.*"
 dependencies = [
@@ -20,6 +20,8 @@ dependencies = [
   "lxml>=5.2.0",
   "mutagen>=1.47.0",
   "pypdfium2>=4.30.0",
+  "pypdf>=5.7.0",
+  "rarfile>=4.4",
   "watchdog>=4.0.0",
   "python-multipart>=0.0.20"
 ]

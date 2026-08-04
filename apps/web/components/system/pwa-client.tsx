@@ -5,6 +5,11 @@ import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clearPrivatePwaData } from '../../lib/pwa/progressQueue';
+import {
+  checkFrontendResourceVersion,
+  purgeFrontendResourcesAndActivate,
+  waitForLatestWorker
+} from '../../lib/pwa/frontend-resource-update';
 import { prepareForPwaUpdate } from '../../lib/pwa/update-coordination';
 import { activateReaderUser, clearPrivateReaderData, deactivateReaderUser, getReaderRuntime, startReaderRuntime, stopReaderRuntime } from '../../lib/reader';
 import { withBasePath } from '../../lib/base-path';
@@ -73,7 +78,11 @@ export function PwaClient() {
   const [showIosHint, setShowIosHint] = useState(false);
   const [updateWorker, setUpdateWorker] = useState<ServiceWorker | null>(null);
   const [activatingUpdate, setActivatingUpdate] = useState(false);
+  const [forcedUpdate, setForcedUpdate] = useState<{ phase: 'updating' | 'failed' } | null>(null);
   const refreshingRef = useRef(false);
+  const forcedUpdateRef = useRef(false);
+  const registrationRef = useRef<ServiceWorkerRegistration | null>(null);
+  const latestVersionRef = useRef('');
   const restoreTimerRef = useRef<number | null>(null);
   const installPromptAllowed = useMemo(
     () => !(
@@ -90,6 +99,43 @@ export function PwaClient() {
     () => installPromptAllowed && (Boolean(installEvent) || showIosHint),
     [installEvent, installPromptAllowed, showIosHint]
   );
+
+  const performForcedUpdate = useCallback(async (registration: ServiceWorkerRegistration, latestVersion: string) => {
+    if (forcedUpdateRef.current) return;
+    forcedUpdateRef.current = true;
+    latestVersionRef.current = latestVersion;
+    setUpdateWorker(null);
+    setForcedUpdate({ phase: 'updating' });
+    try {
+      const latestWorker = await waitForLatestWorker(registration, latestVersion);
+      await prepareForPwaUpdate();
+      await Promise.race([
+        getReaderRuntime().progress.flushNow(),
+        new Promise<void>((resolve) => { window.setTimeout(resolve, 5_000); })
+      ]);
+      refreshingRef.current = true;
+      await purgeFrontendResourcesAndActivate(latestWorker);
+      window.setTimeout(() => window.location.reload(), 5_000);
+    } catch (reason) {
+      refreshingRef.current = false;
+      forcedUpdateRef.current = false;
+      console.error('forced frontend resource update failed', reason);
+      setForcedUpdate({ phase: 'failed' });
+    }
+  }, []);
+
+  const checkForForcedUpdate = useCallback(async (registration: ServiceWorkerRegistration) => {
+    if (!navigator.onLine || forcedUpdateRef.current || !navigator.serviceWorker.controller) return;
+    try {
+      const { status } = await checkFrontendResourceVersion(
+        navigator.serviceWorker.controller,
+        withBasePath('/api/app-config')
+      );
+      if (status.updateRequired) await performForcedUpdate(registration, status.latestVersion);
+    } catch {
+      // A transient version-check failure must not break an otherwise usable offline client.
+    }
+  }, [performForcedUpdate]);
 
   useEffect(() => {
     const userId = session?.user?.id;
@@ -115,6 +161,7 @@ export function PwaClient() {
         setRecentlyRestored(true);
         if (restoreTimerRef.current) window.clearTimeout(restoreTimerRef.current);
         restoreTimerRef.current = window.setTimeout(() => setRecentlyRestored(false), 4200);
+        if (registrationRef.current) void checkForForcedUpdate(registrationRef.current);
       }
     }
 
@@ -139,7 +186,8 @@ export function PwaClient() {
 
     const canRegisterServiceWorker = process.env.NODE_ENV === 'production' && 'serviceWorker' in navigator;
     if (canRegisterServiceWorker) {
-      navigator.serviceWorker.register(withBasePath('/sw.js')).then((registration) => {
+      navigator.serviceWorker.register(withBasePath('/sw.js'), { updateViaCache: 'none' }).then((registration) => {
+        registrationRef.current = registration;
         if (registration.waiting && navigator.serviceWorker.controller) {
           setUpdateWorker(registration.waiting);
         }
@@ -152,12 +200,35 @@ export function PwaClient() {
             }
           });
         });
+        void checkForForcedUpdate(registration);
       }).catch(() => undefined);
 
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
+      const handleControllerChange = () => {
         if (!refreshingRef.current) return;
         window.location.reload();
-      });
+      };
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible' && registrationRef.current) {
+          void checkForForcedUpdate(registrationRef.current);
+        }
+      };
+      navigator.serviceWorker.addEventListener('controllerchange', handleControllerChange);
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      const versionCheckTimer = window.setInterval(() => {
+        if (registrationRef.current) void checkForForcedUpdate(registrationRef.current);
+      }, 60_000);
+
+      return () => {
+        window.removeEventListener('online', updateOnlineState);
+        window.removeEventListener('offline', updateOnlineState);
+        window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt);
+        window.removeEventListener('appinstalled', onAppInstalled);
+        navigator.serviceWorker.removeEventListener('controllerchange', handleControllerChange);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        window.clearInterval(versionCheckTimer);
+        if (restoreTimerRef.current) window.clearTimeout(restoreTimerRef.current);
+        stopReaderRuntime();
+      };
     }
 
     return () => {
@@ -168,7 +239,7 @@ export function PwaClient() {
       if (restoreTimerRef.current) window.clearTimeout(restoreTimerRef.current);
       stopReaderRuntime();
     };
-  }, []);
+  }, [checkForForcedUpdate]);
 
   async function installPwa() {
     if (!installEvent) return;
@@ -209,6 +280,15 @@ export function PwaClient() {
         />
       ) : null}
       {updateWorker ? <UpdateAvailableToast activating={activatingUpdate} onRefresh={() => { void activateUpdate(); }} /> : null}
+      {forcedUpdate ? (
+        <ForcedUpdateOverlay
+          phase={forcedUpdate.phase}
+          onRetry={() => {
+            const registration = registrationRef.current;
+            if (registration && latestVersionRef.current) void performForcedUpdate(registration, latestVersionRef.current);
+          }}
+        />
+      ) : null}
       <PwaDebugPanel />
     </>
   );
@@ -274,6 +354,33 @@ function UpdateAvailableToast({ activating, onRefresh }: { activating: boolean; 
         <RefreshCw size={17} className={activating ? 'animate-spin motion-reduce:animate-none' : undefined} />
         {activating ? i18nExpression("正在保存当前位置…") : i18nExpression("保存当前位置并升级")}
       </button>
+    </div>
+  );
+}
+
+function ForcedUpdateOverlay({ phase, onRetry }: { phase: 'updating' | 'failed'; onRetry: () => void }) {
+  const { t: i18nExpression } = useExpressionI18n();
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm" role="alertdialog" aria-modal="true" aria-labelledby="forced-update-title" aria-describedby="forced-update-description">
+      <div className="w-full max-w-md rounded-3xl border border-blue-200 bg-white p-6 text-slate-900 shadow-2xl">
+        <div className="flex items-center gap-3">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-700">
+            <RefreshCw size={21} className={phase === 'updating' ? 'animate-spin motion-reduce:animate-none' : undefined} />
+          </span>
+          <h2 id="forced-update-title" className="text-base font-semibold">
+            {phase === 'updating' ? i18nExpression("检测到必须安装的前端资源更新") : i18nExpression("前端资源更新失败")}
+          </h2>
+        </div>
+        <p id="forced-update-description" className="mt-4 text-sm leading-6 text-slate-600">
+          {phase === 'updating' ? i18nExpression("正在保存当前位置并安装最新版，请勿关闭应用。") : i18nExpression("应用必须完成更新后才能继续使用。")}
+        </p>
+        {phase === 'failed' ? (
+          <button type="button" onClick={onRetry} className="mt-5 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 active:scale-[0.99]">
+            <RefreshCw size={17} />
+            <I18nText>重试更新</I18nText>
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -8,8 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode, urlparse
 from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
 
@@ -23,8 +22,21 @@ from app.modules.download.infrastructure.tasks import (
     system_setting_value,
     update_download_task,
 )
+from app.modules.imports.public import SUPPORTED_AUDIO_EXTS
 from app.services.text_conversion import CONVERTIBLE_TEXT_EXTS
-ALLOWED_EXTENSIONS = {".epub", ".pdf", ".cbz", ".zip", ".rar", ".7z", ".torrent", ".m4b", ".m4a", ".mp3", *CONVERTIBLE_TEXT_EXTS}
+
+ALLOWED_EXTENSIONS = {
+    ".epub",
+    ".pdf",
+    ".cbr",
+    ".cbz",
+    ".zip",
+    ".rar",
+    ".7z",
+    ".torrent",
+    *SUPPORTED_AUDIO_EXTS,
+    *CONVERTIBLE_TEXT_EXTS,
+}
 BLOCKED_EXTENSIONS = {".exe", ".sh", ".bat", ".cmd", ".js", ".php", ".msi", ".com", ".scr", ".ps1", ".vbs"}
 ACTIVE_DOWNLOAD_STATUSES = {"queued", "downloading", "downloaded", "completed"}
 

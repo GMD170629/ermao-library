@@ -16,6 +16,12 @@ function epubVerticalSpacing(preferences: ReaderPreferences) {
     : 'clamp(28px, 4vh, 56px)';
 }
 
+function epubMobileTopSpacing(preferences: ReaderPreferences) {
+  return preferences.epub.flow === 'paginated'
+    ? 'clamp(16px, 2.5vh, 32px)'
+    : 'clamp(14px, 2vh, 28px)';
+}
+
 export function createEpubThemeSnapshot(preferences: ReaderPreferences, resolvedFont = fallbackEpubFont(preferences.epub.fontFamily)) {
   const tokens = readerThemeSurfaces[preferences.appearance.theme];
   const maxWidth = Math.max(600, Math.min(1350, Math.round(preferences.epub.pageWidth)));
@@ -51,6 +57,15 @@ export function createEpubThemeSnapshot(preferences: ReaderPreferences, resolved
       --shuku-reader-line-height: ${lineHeight};
       --shuku-reader-page-width: ${maxWidth}px;
       --shuku-reader-font-family: ${resolvedFont.stack};
+      --shuku-reader-padding-inline: 24px;
+      --shuku-reader-padding-top: ${verticalSpacing};
+      --shuku-reader-padding-bottom: ${verticalSpacing};
+    }
+    @media (max-width: 640px) {
+      :root {
+        --shuku-reader-padding-inline: 8px;
+        --shuku-reader-padding-top: ${epubMobileTopSpacing(preferences)};
+      }
     }
     html, ${protectedBody} {
       background: var(--shuku-reader-background) !important;
@@ -63,9 +78,9 @@ export function createEpubThemeSnapshot(preferences: ReaderPreferences, resolved
       box-sizing: border-box !important;
       margin: 0 !important;
       max-width: none !important;
-      padding-inline: 24px !important;
-      padding-top: ${verticalSpacing} !important;
-      padding-bottom: ${verticalSpacing} !important;
+      padding-inline: var(--shuku-reader-padding-inline) !important;
+      padding-top: var(--shuku-reader-padding-top) !important;
+      padding-bottom: var(--shuku-reader-padding-bottom) !important;
       font-family: var(--shuku-reader-font-family) !important;
       font-size: var(--shuku-reader-font-size) !important;
       font-synthesis: none !important;
@@ -126,7 +141,7 @@ export function applyEpubDocumentSpacing(document: Document, preferences: Reader
   body.style.setProperty('margin-left', '0', 'important');
   body.style.setProperty('margin-right', '0', 'important');
   body.style.setProperty('max-width', 'none', 'important');
-  body.style.setProperty('padding-top', verticalSpacing, 'important');
-  body.style.setProperty('padding-bottom', verticalSpacing, 'important');
+  body.style.setProperty('padding-top', `var(--shuku-reader-padding-top, ${verticalSpacing})`, 'important');
+  body.style.setProperty('padding-bottom', `var(--shuku-reader-padding-bottom, ${verticalSpacing})`, 'important');
   body.dataset.shukuPageLayout = preferences.epub.flow === 'paginated' ? 'single-centered' : 'scrolled-centered';
 }

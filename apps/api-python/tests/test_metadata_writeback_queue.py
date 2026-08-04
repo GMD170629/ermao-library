@@ -1,0 +1,212 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from sqlalchemy import select
+
+from app.models.import_pipeline import ImportTask
+from app.models.library import (
+    LibraryFile,
+    LibraryMediaVersion,
+    LibraryVolume,
+    LibraryWork,
+)
+from app.models.organize import MetadataWritebackTarget
+from app.modules.metadata.application.opf import parse_opf_metadata
+from app.services.metadata_file_writeback import (
+    enqueue_metadata_writeback,
+    metadata_writeback_view,
+    process_next_metadata_writeback,
+)
+
+
+def _library_source(
+    db_session, source: Path, *, volume_index: float | None = None
+) -> None:
+    stat = source.stat()
+    db_session.add_all(
+        [
+            LibraryWork(
+                id="work-1",
+                title="快照标题",
+                normalized_title="快照标题",
+                author="作者",
+                normalized_author="作者",
+                description="简介",
+                tags='["科幻"]',
+            ),
+            LibraryMediaVersion(id="media-1", work_id="work-1", media_kind="EBOOK"),
+            LibraryVolume(
+                id="volume-1",
+                media_version_id="media-1",
+                title="第一卷",
+                volume_index=volume_index,
+                format="TXT",
+                resource_key="volume-1",
+                import_status="READY",
+            ),
+            LibraryFile(
+                id="file-1",
+                volume_id="volume-1",
+                path=str(source),
+                hash_status="READY",
+                mtime_ms=int(stat.st_mtime * 1000),
+                kind="BOOK",
+                mime_type="text/plain",
+                size_bytes=stat.st_size,
+            ),
+            ImportTask(
+                id="import-1",
+                volume_id="volume-1",
+                work_id="work-1",
+                origin="MANUAL",
+                status="COMPLETED",
+                source_path=str(source),
+            ),
+        ]
+    )
+    db_session.commit()
+
+
+def test_writeback_uses_immutable_snapshot_and_finishes_after_background_processing(
+    db_session, test_settings, tmp_path: Path
+) -> None:
+    source = tmp_path / "book.txt"
+    source.write_text("正文")
+    _library_source(db_session, source)
+    work = db_session.get(LibraryWork, "work-1")
+    assert work is not None
+    work.series_index = 23
+    operation_id = enqueue_metadata_writeback(
+        db_session,
+        work_id="work-1",
+        media_version_id="media-1",
+        source="MANUAL",
+    )
+    db_session.commit()
+
+    work.title = "后续编辑标题"
+    db_session.commit()
+
+    assert process_next_metadata_writeback(db_session, test_settings) is True
+    view = metadata_writeback_view(db_session, operation_id)
+    assert view is not None
+    assert view["status"] == "COMPLETED"
+    assert view["completedTargets"] == 1
+    assert "sourcePath" not in view["targets"][0]
+    metadata = parse_opf_metadata(source.with_suffix(".opf").read_bytes())
+    assert metadata.title == "快照标题"
+    assert metadata.author == "作者"
+    assert metadata.series_index is None
+
+
+def test_external_change_is_contained_as_warning_after_last_attempt(
+    db_session, test_settings, tmp_path: Path
+) -> None:
+    source = tmp_path / "changed.txt"
+    source.write_text("原正文")
+    _library_source(db_session, source)
+    operation_id = enqueue_metadata_writeback(
+        db_session,
+        work_id="work-1",
+        media_version_id="media-1",
+        source="AUTOMATIC",
+    )
+    target = db_session.scalar(select(MetadataWritebackTarget))
+    assert target is not None
+    target.attempts = 2
+    db_session.commit()
+    source.write_text("用户在识别后修改的正文")
+
+    assert process_next_metadata_writeback(db_session, test_settings) is True
+
+    view = metadata_writeback_view(db_session, operation_id)
+    assert view is not None
+    assert view["status"] == "COMPLETED_WITH_WARNINGS"
+    assert view["warningTargets"] == 1
+    assert source.read_text() == "用户在识别后修改的正文"
+    assert not source.with_suffix(".opf").exists()
+
+
+def test_writeback_adds_explicit_volume_number_to_publication_title(
+    db_session, test_settings, tmp_path: Path
+) -> None:
+    source = tmp_path / "numbered.txt"
+    source.write_text("正文")
+    _library_source(db_session, source, volume_index=2)
+    work = db_session.get(LibraryWork, "work-1")
+    assert work is not None
+    work.series_index = 23
+    enqueue_metadata_writeback(
+        db_session,
+        work_id="work-1",
+        media_version_id="media-1",
+        source="MANUAL",
+    )
+    db_session.commit()
+
+    assert process_next_metadata_writeback(db_session, test_settings) is True
+    metadata = parse_opf_metadata(source.with_suffix(".opf").read_bytes())
+    assert metadata.title == "快照标题"
+    assert metadata.volume_title == "第一卷"
+    assert metadata.series_index == 2
+
+
+def test_writeback_can_target_one_volume_in_media_version(
+    db_session, test_settings, tmp_path: Path
+) -> None:
+    first_source = tmp_path / "first.txt"
+    second_source = tmp_path / "second.txt"
+    first_source.write_text("第一卷")
+    second_source.write_text("第二卷")
+    _library_source(db_session, first_source, volume_index=1)
+    second_stat = second_source.stat()
+    db_session.add_all(
+        [
+            LibraryVolume(
+                id="volume-2",
+                media_version_id="media-1",
+                title="第二卷",
+                volume_index=2,
+                sort_order=2,
+                format="TXT",
+                resource_key="volume-2",
+                import_status="READY",
+            ),
+            LibraryFile(
+                id="file-2",
+                volume_id="volume-2",
+                path=str(second_source),
+                hash_status="READY",
+                mtime_ms=int(second_stat.st_mtime * 1000),
+                kind="BOOK",
+                mime_type="text/plain",
+                size_bytes=second_stat.st_size,
+            ),
+            ImportTask(
+                id="import-2",
+                volume_id="volume-2",
+                work_id="work-1",
+                origin="MANUAL",
+                status="COMPLETED",
+                source_path=str(second_source),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    operation_id = enqueue_metadata_writeback(
+        db_session,
+        work_id="work-1",
+        media_version_id="media-1",
+        source="MANUAL",
+        volume_id="volume-1",
+    )
+    db_session.commit()
+
+    view = metadata_writeback_view(db_session, operation_id)
+    assert view is not None
+    assert view["totalTargets"] == 1
+    assert process_next_metadata_writeback(db_session, test_settings) is True
+    assert first_source.with_suffix(".opf").exists()
+    assert not second_source.with_suffix(".opf").exists()

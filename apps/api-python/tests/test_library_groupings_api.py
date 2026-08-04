@@ -39,7 +39,6 @@ def _work(
         normalized_title=title.casefold(),
         author=author,
         normalized_author=author.casefold(),
-        work_type="EPUB",
         tags="[]",
         series_name=series,
         series_index=series_index,

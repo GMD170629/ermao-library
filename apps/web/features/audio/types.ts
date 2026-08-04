@@ -3,6 +3,7 @@ export type AudioTrack = {
   title: string;
   url: string;
   mimeType: string;
+  codec: string | null;
   durationMs: number;
   discNumber: number | null;
   trackNumber: number | null;

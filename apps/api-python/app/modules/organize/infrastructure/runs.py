@@ -55,6 +55,7 @@ def job_entity_as_legacy_dict(entity: OrganizeJob) -> dict[str, Any]:
         "runId": entity.run_id,
         "workId": entity.work_id,
         "volumeId": entity.volume_id,
+        "mediaVersionId": entity.media_version_id,
         "importTaskId": entity.import_task_id,
         "trigger": entity.trigger,
         "status": entity.status,

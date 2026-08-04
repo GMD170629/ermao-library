@@ -3,7 +3,7 @@ import test from 'node:test';
 import { bookActionIds } from './book-action-menu';
 
 test('restores the original manager menu without the library-hide action', () => {
-  assert.deepEqual(bookActionIds({ canManage: true, mediaKind: 'EBOOK', hasDownload: true }), [
+  assert.deepEqual(bookActionIds({ canManage: true, hasDownload: true, kindleSendAvailable: true }), [
     'edit',
     'metadata',
     'upload-cover',
@@ -14,7 +14,7 @@ test('restores the original manager menu without the library-hide action', () =>
   ]);
 });
 
-test('keeps member actions bounded to available reading operations', () => {
-  assert.deepEqual(bookActionIds({ canManage: false, mediaKind: 'COMIC', hasDownload: true }), ['download']);
-  assert.deepEqual(bookActionIds({ canManage: false, mediaKind: 'AUDIOBOOK', hasDownload: true }), []);
+test('derives member actions from concrete file capabilities', () => {
+  assert.deepEqual(bookActionIds({ canManage: false, hasDownload: true, kindleSendAvailable: false }), ['download']);
+  assert.deepEqual(bookActionIds({ canManage: false, hasDownload: false, kindleSendAvailable: true }), ['kindle']);
 });

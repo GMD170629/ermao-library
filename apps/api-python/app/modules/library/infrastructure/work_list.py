@@ -89,7 +89,9 @@ def _type_predicate(
         "PRC",
         "FB2",
         "TXT",
+        "CBR",
         "CBZ",
+        "RAR",
         "ZIP",
         "M4B",
         "M4A",
@@ -235,22 +237,6 @@ def _predicates(
     return predicates
 
 
-def _publisher() -> ColumnElement[str | None]:
-    media_version = aliased(LibraryMediaVersion)
-    volume = aliased(LibraryVolume)
-    return (
-        select(volume.publisher)
-        .join(media_version, media_version.id == volume.media_version_id)
-        .where(
-            media_version.work_id == LibraryWork.id,
-            volume.hidden.is_(False),
-        )
-        .order_by(volume.sort_order.asc(), volume.id.asc())
-        .limit(1)
-        .scalar_subquery()
-    )
-
-
 def _order(query: WorkListQuery) -> list[ColumnElement[object]]:
     descending = (query.sort_direction or "").lower() == "desc" or (
         not query.sort_direction
@@ -265,8 +251,6 @@ def _order(query: WorkListQuery) -> list[ColumnElement[object]]:
             LibraryWork.title.asc(),
             LibraryWork.id.asc(),
         ]
-    if query.sort == "publisher":
-        return [direction(_publisher()), LibraryWork.title.asc(), LibraryWork.id.asc()]
     if query.sort == "series":
         return [
             direction(LibraryWork.series_name),

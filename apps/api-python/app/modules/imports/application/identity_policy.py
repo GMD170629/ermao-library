@@ -16,8 +16,10 @@ _CJK_VOLUME_MARKER = (
 )
 _CJK_ORDINAL_PREFIX = chr(0x7B2C)
 _VOLUME_NUMBER = r"\d+(?:\.\d+)?"
+_SHORT_VOLUME_NUMBER = r"\d{1,3}(?:\.\d{1,2})?"
 _EXPLICIT_VOLUME_PATTERN = re.compile(
-    rf"(?:vol(?:ume)?\.?|v)\s*(?P<latin_number>{_VOLUME_NUMBER})"
+    rf"(?:vol(?:ume)?\.?|v)[\s._-]*(?P<latin_number>{_VOLUME_NUMBER})"
+    rf"\s*{_CJK_VOLUME_MARKER}?"
     rf"|(?:{_CJK_ORDINAL_PREFIX}\s*)?(?P<suffixed_number>{_VOLUME_NUMBER})\s*{_CJK_VOLUME_MARKER}"
     rf"|{_CJK_VOLUME_MARKER}\s*(?:{_CJK_ORDINAL_PREFIX}\s*)?(?P<prefixed_number>{_VOLUME_NUMBER})",
     re.IGNORECASE,
@@ -137,21 +139,29 @@ def _title_without_marker(value: str, start: int, end: int) -> str:
     return re.sub(r"\s+", " ", f"{left}{separator}{right}").strip()
 
 
-def split_standalone_numeric_volume(value: str) -> tuple[str, float] | None:
-    """Split a standalone numeric volume from a publication title.
+def split_numeric_volume_fallback(value: str) -> tuple[str, float] | None:
+    """Split a short numeric volume from anywhere in a publication title.
 
     This is a low-priority fallback for names that omit an explicit volume
     marker, such as ``Title (1)``, ``Title [02]``, ``Title_003``, or
-    ``004 Title``. Digits attached directly to title text are intentionally not
-    treated as volumes.
+    ``Series10Subtitle``. Integer parts are limited to three digits so years and
+    long identifiers are not treated as volume numbers.
     """
 
     cleaned = value.strip()
     patterns = (
-        (r"^(.*?)\s*[\(（\[【]\s*(\d+(?:\.\d+)?)\s*[\)）\]】]\s*$", 1, 2),
-        (r"^[\(（\[【]\s*(\d+(?:\.\d+)?)\s*[\)）\]】]\s*(.*?)$", 2, 1),
-        (r"^(.*?)[\s._-]+(\d+(?:\.\d+)?)\s*$", 1, 2),
-        (r"^(\d+(?:\.\d+)?)[\s._-]+(.*?)$", 2, 1),
+        (
+            rf"^(.*?)\s*[\(（\[【]\s*({_SHORT_VOLUME_NUMBER})\s*[\)）\]】]\s*$",
+            1,
+            2,
+        ),
+        (
+            rf"^[\(（\[【]\s*({_SHORT_VOLUME_NUMBER})\s*[\)）\]】]\s*(.*?)$",
+            2,
+            1,
+        ),
+        (rf"^(.*?)[\s._-]+({_SHORT_VOLUME_NUMBER})\s*$", 1, 2),
+        (rf"^({_SHORT_VOLUME_NUMBER})[\s._-]+(.*?)$", 2, 1),
     )
     for pattern, title_group, volume_group in patterns:
         match = re.match(pattern, cleaned)
@@ -160,6 +170,23 @@ def split_standalone_numeric_volume(value: str) -> tuple[str, float] | None:
         volume_index = float(match.group(volume_group))
         if volume_index > 0:
             return match.group(title_group).strip(), volume_index
+    source_suffix_start = _download_source_suffix_start(cleaned)
+    for match in re.finditer(rf"(?<!\d)({_SHORT_VOLUME_NUMBER})(?!\d)", cleaned):
+        if source_suffix_start is not None and match.start() >= source_suffix_start:
+            continue
+        volume_index = float(match.group(1))
+        title = _title_without_marker(cleaned, match.start(), match.end())
+        if volume_index > 0 and title:
+            return title, volume_index
+    return None
+
+
+def _download_source_suffix_start(value: str) -> int | None:
+    suffix = re.search(r"[\(（]([^()（）]*)[\)）]\s*$", value)
+    if suffix is None:
+        return None
+    if re.search(r"[a-z0-9-]+\.[a-z0-9-]+", suffix.group(1), re.IGNORECASE):
+        return suffix.start()
     return None
 
 
@@ -260,8 +287,8 @@ def parse_bracketed_series_identity(
 def _looks_like_latin_alias(value: str) -> bool:
     cleaned = unicodedata.normalize("NFKC", value).strip()
     return bool(
-        re.fullmatch(r"[A-Z][A-Z0-9 ._'’&:+-]*", cleaned, re.I)
-        and re.search(r"[A-Z]", cleaned, re.I)
+        re.fullmatch(r"[A-Z][A-Z0-9 ._'’&:+-]*", cleaned, re.IGNORECASE)
+        and re.search(r"[A-Z]", cleaned, re.IGNORECASE)
     )
 
 
@@ -278,7 +305,7 @@ def _looks_like_volume_range(value: str) -> bool:
             r"(?:vol(?:ume)?\.?|v|第)?\s*\d+(?:\.\d+)?\s*[-~至到]\s*"
             r"(?:vol(?:ume)?\.?|v|第)?\s*\d+(?:\.\d+)?",
             value,
-            re.I,
+            re.IGNORECASE,
         )
     )
 
@@ -290,10 +317,10 @@ def _strip_volume_suffix(value: str) -> tuple[str, float | None]:
         r"^(.*?)\s*第\s*(\d+(?:\.\d+)?)\s*(?:卷|冊|册|集)$",
         r"^(.*?)\s+(\d+(?:\.\d+)?)$",
     ):
-        match = re.match(pattern, cleaned, re.I)
+        match = re.match(pattern, cleaned, re.IGNORECASE)
         if match and match.group(1).strip():
             return _clean_title(match.group(1)), float(match.group(2))
-    numeric_fallback = split_standalone_numeric_volume(cleaned)
+    numeric_fallback = split_numeric_volume_fallback(cleaned)
     if numeric_fallback is not None:
         title, volume_index = numeric_fallback
         return _clean_title(title), volume_index
@@ -301,7 +328,12 @@ def _strip_volume_suffix(value: str) -> tuple[str, float | None]:
 
 
 def _clean_title(value: str) -> str:
-    cleaned = re.sub(r"\.(?:epub|cbz|zip|pdf|m4b|m4a|mp3)$", "", value, flags=re.I)
+    cleaned = re.sub(
+        r"\.(?:epub|cbz|zip|pdf|m4b|m4a|mp3)$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    )
     return re.sub(r"\s+", " ", cleaned.replace("_", " ")).strip(" ._-")
 
 

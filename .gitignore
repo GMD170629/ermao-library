@@ -12,7 +12,13 @@ dist
 .fnos-build
 .turbo
 .tmp
+/tmp/
 tmp-worker-smoke
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.py[cod]
 .env
 .env.production
 storage
@@ -22,5 +28,6 @@ data
 /books
 
 # Local reports, visual QA, and comparison outputs
+/output/
 /artifacts/
 /validation-artifacts/

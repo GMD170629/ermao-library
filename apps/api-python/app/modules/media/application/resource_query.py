@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from app.core.authorization import AuthorizationContext
+from app.modules.media.application.volume_archive import VolumeArchiveSelection
+
 
 @dataclass(frozen=True, slots=True)
 class MediaFileResource:
@@ -21,6 +24,14 @@ class MediaResourceRepository(Protocol):
     def work_cover_path(self, work_id: str) -> str | None: ...
 
     def volume_cover_path(self, volume_id: str) -> str | None: ...
+
+    def get_volume_archive_selection(
+        self,
+        *,
+        actor: AuthorizationContext,
+        work_id: str,
+        volume_ids: tuple[str, ...],
+    ) -> VolumeArchiveSelection | None: ...
 
 
 class MediaResourceQuery:

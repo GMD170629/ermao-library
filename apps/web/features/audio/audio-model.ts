@@ -5,6 +5,16 @@ export type AudioLoadIntent = {
   chapterId: string | null;
 };
 
+const browserCodecIdentifiers: Readonly<Record<string, string>> = {
+  ac3: 'ac-3',
+  alac: 'alac',
+  eac3: 'ec-3',
+  flac: 'flac',
+  mp3: 'mp3',
+  opus: 'opus',
+  vorbis: 'vorbis'
+};
+
 export function mergeAudioLoadIntent(current: AudioLoadIntent, next: Partial<AudioLoadIntent>): AudioLoadIntent {
   return {
     autoplay: current.autoplay || Boolean(next.autoplay),
@@ -14,11 +24,24 @@ export function mergeAudioLoadIntent(current: AudioLoadIntent, next: Partial<Aud
 
 export function unsupportedAudioMimeType(
   mimeType: string,
+  codec: string | null,
   canPlayType: (mime: string) => CanPlayTypeResult
 ) {
   const normalized = mimeType.split(';', 1)[0]?.trim().toLowerCase() ?? '';
   if (!normalized.startsWith('audio/')) return null;
+  const normalizedCodec = codec?.trim().toLowerCase() ?? '';
+  const codecIdentifier = browserCodecIdentifiers[normalizedCodec]
+    ?? (normalized.startsWith('audio/wav') && normalizedCodec.startsWith('pcm_') ? '1' : null);
+  if (codecIdentifier) {
+    const capabilityType = `${normalized}; codecs="${codecIdentifier}"`;
+    return canPlayType(capabilityType) ? null : capabilityType;
+  }
+  if (normalizedCodec) return null;
   return canPlayType(normalized) ? null : normalized;
+}
+
+export function audioFormatLabel(track: Pick<AudioTrack, 'mimeType' | 'codec'>) {
+  return track.codec ? `${track.mimeType} · ${track.codec}` : track.mimeType;
 }
 
 export function nextAudioTrackForMetadataPreload(tracks: AudioTrack[], trackIndex: number) {

@@ -8,24 +8,23 @@ import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { Select } from '../../components/ui/select';
 import { withBasePath } from '../../lib/base-path';
-import type { WorkView } from '../../types/work';
+import type { VolumeResource, WorkView } from '../../types/work';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
+import { fetchAllMediaVersionVolumes } from './api/client';
 
 type MetadataSource = string;
-type MetadataField = 'coverUrl' | 'title' | 'author' | 'publisher' | 'description' | 'tags' | 'seriesName' | 'seriesIndex' | 'publishedYear';
+type MetadataField = 'coverUrl' | 'title' | 'author' | 'description' | 'tags' | 'seriesName' | 'publisher' | 'publishedAt' | 'language' | 'isbn';
 
 type MetadataCandidate = {
   id: string;
   source: MetadataSource;
   title?: string | null;
   author?: string | null;
-  publisher?: string | null;
   description?: string | null;
   tags?: string[];
   seriesName?: string | null;
-  seriesIndex?: number | null;
-  publishedYear?: number | null;
+  volumeMetadata?: { publisher?: string | null; publishedAt?: string | null; language?: string | null; isbn?: string | null } | null;
   coverUrl?: string | null;
   confidence: number;
   raw: unknown;
@@ -33,24 +32,28 @@ type MetadataCandidate = {
 
 type MetadataLookupModalProps = {
   book: WorkView;
+  currentMediaVersionId?: string | null;
   open: boolean;
   onClose: () => void;
-  onApplied: (book?: WorkView | null) => void;
+  onApplied: () => void | Promise<void>;
 };
 
 const fieldLabels: Record<MetadataField, string> = {
   coverUrl: '封面',
   title: '标题',
   author: '作者',
-  publisher: '出版社',
   description: '简介',
   tags: '标签',
   seriesName: '系列',
-  seriesIndex: '卷号',
-  publishedYear: '出版年'
+  publisher: '出版社',
+  publishedAt: '出版时间',
+  language: '语言',
+  isbn: 'ISBN'
 };
 
-const fields: MetadataField[] = ['coverUrl', 'title', 'author', 'publisher', 'description', 'tags', 'seriesName', 'seriesIndex', 'publishedYear'];
+const fields: MetadataField[] = ['coverUrl', 'title', 'author', 'description', 'tags', 'seriesName', 'publisher', 'publishedAt', 'language', 'isbn'];
+const volumeFields = new Set<MetadataField>(['publisher', 'publishedAt', 'language', 'isbn']);
+const ALL_VOLUMES = '__all_volumes__';
 
 function valueLabel(value: unknown) {
   if (Array.isArray(value)) return value.join(', ');
@@ -64,21 +67,19 @@ function normalized(value: unknown) {
 
 function candidateValue(candidate: MetadataCandidate | null, field: MetadataField) {
   if (!candidate) return null;
+  if (field === 'publisher' || field === 'publishedAt' || field === 'language' || field === 'isbn') {
+    return candidate.volumeMetadata?.[field] ?? null;
+  }
   return candidate[field];
 }
 
-function bookValue(book: WorkView, field: MetadataField) {
-  const volumes = book.mediaVersions.flatMap((mediaVersion) => mediaVersion.volumes);
+function bookValue(book: WorkView, field: MetadataField, targetVolume?: VolumeResource) {
   if (field === 'coverUrl') return book.coverStatus === 'READY' ? book.coverUrl : null;
   if (field === 'author') return book.author === '未知作者' ? null : book.author;
   if (field === 'description') return book.description || null;
-  if (field === 'publisher') return volumes.find((volume) => volume.publisher)?.publisher ?? null;
-  if (field === 'publishedYear') {
-    const publishedAt = volumes.find((volume) => volume.publishedAt)?.publishedAt;
-    return publishedAt ? Number(publishedAt.slice(0, 4)) : null;
-  }
+  if (field === 'publisher' || field === 'publishedAt' || field === 'language' || field === 'isbn') return targetVolume?.[field] ?? null;
   if (field === 'tags') return book.tags;
-  return field === 'title' || field === 'seriesName' || field === 'seriesIndex' ? book[field] : null;
+  return field === 'title' || field === 'seriesName' ? book[field] : null;
 }
 
 function hasCandidateValue(value: unknown) {
@@ -95,58 +96,76 @@ function previewCoverUrl(value: string) {
   return withBasePath(`/api/metadata/cover-proxy?url=${encodeURIComponent(value)}`);
 }
 
-function defaultFields(book: WorkView, candidate: MetadataCandidate | null) {
+function defaultFields(book: WorkView, candidate: MetadataCandidate | null, targetVolume?: VolumeResource) {
   if (!candidate) return [];
   return fields.filter((field) => {
     const next = candidateValue(candidate, field);
     if (!hasCandidateValue(next)) return false;
     if (isCoverField(field)) return book.coverStatus !== 'READY';
-    return normalized(next) !== normalized(bookValue(book, field));
+    return normalized(next) !== normalized(bookValue(book, field, targetVolume));
   });
 }
 
 function initialSource(book: WorkView): MetadataSource {
-  return book.mediaVersions.some((mediaVersion) => mediaVersion.mediaKind === 'COMIC') ? 'bangumi' : 'douban';
+  return book.availableMediaKinds[0] === 'COMIC' ? 'bangumi' : 'douban';
 }
 
-type MetadataProviderOption = { id: string; name: string; enabled: boolean; workTypes: string[]; mode: string };
-type MetadataProviderPipeline = { workType: string; providers: Array<{ providerId: string; enabled: boolean }> };
+type MetadataProviderOption = { id: string; name: string; enabled: boolean; mediaKinds: string[]; mode: string };
+type MetadataProviderPipeline = { mediaKind: string; providers: Array<{ providerId: string; enabled: boolean }> };
+type MetadataWritebackOperation = {
+  id: string;
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'COMPLETED_WITH_WARNINGS';
+  totalTargets: number;
+  completedTargets: number;
+  warningTargets: number;
+};
 
-function normalizedWorkType(book: WorkView) {
-  if (book.mediaVersions.some((mediaVersion) => mediaVersion.mediaKind === 'COMIC')) return 'comic';
-  if (book.mediaVersions.some((mediaVersion) => mediaVersion.mediaKind === 'AUDIOBOOK')) return 'audiobook';
-  return 'ebook';
+function selectedMediaKind(book: WorkView) {
+  return book.availableMediaKinds[0] ?? 'EBOOK';
 }
 
-export function MetadataLookupModal({ book, open, onClose, onApplied }: MetadataLookupModalProps) {
-  const { t: i18nAttribute } = useAttributeI18n();
+export function MetadataLookupModal({ book, currentMediaVersionId, open, onClose, onApplied }: MetadataLookupModalProps) {
+  const { t: i18nAttribute, formatDate } = useAttributeI18n();
   const [source, setSource] = useState<MetadataSource>(() => initialSource(book));
   const [query, setQuery] = useState(book.title);
   const [candidates, setCandidates] = useState<MetadataCandidate[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [selectedFields, setSelectedFields] = useState<MetadataField[]>([]);
-  const volumeOptions = useMemo(() => book.mediaVersions.flatMap((mediaVersion) =>
-    mediaVersion.volumes.map((volume) => ({
-      value: volume.id,
-      label: `${mediaVersion.mediaKind} · ${volume.title}`,
+  const targetMediaVersion = useMemo(() => {
+    const continuationVolume = book.mediaVersions
+      .flatMap((mediaVersion) => mediaVersion.volumes)
+      .find((volume) => volume.id === book.continueVolumeId);
+    const fallbackMediaVersionId = continuationVolume?.mediaVersionId ?? book.mediaVersions[0]?.id;
+    return book.mediaVersions.find((mediaVersion) => mediaVersion.id === (currentMediaVersionId ?? fallbackMediaVersionId)) ?? book.mediaVersions[0] ?? null;
+  }, [book.continueVolumeId, book.mediaVersions, currentMediaVersionId]);
+  const [targetVolumes, setTargetVolumes] = useState<VolumeResource[]>([]);
+  const [volumeTarget, setVolumeTarget] = useState(ALL_VOLUMES);
+  const selectedTargetVolume = volumeTarget === ALL_VOLUMES
+    ? targetVolumes[0]
+    : targetVolumes.find((volume) => volume.id === volumeTarget);
+  const targetVolumeId = selectedTargetVolume?.id ?? null;
+  const volumeTargetOptions = useMemo(() => [
+    {
+      value: ALL_VOLUMES,
+      label: i18nAttribute('当前媒体版本的全部 {value0} 个卷册', { value0: targetMediaVersion?.volumeCount ?? targetVolumes.length }),
       translate: false
-    }))
-  ), [book.mediaVersions]);
-  const [targetVolumeId, setTargetVolumeId] = useState(
-    () => book.continueVolumeId ?? volumeOptions[0]?.value ?? ''
-  );
+    },
+    ...targetVolumes.map((volume) => ({ value: volume.id, label: volume.title, translate: false }))
+  ], [i18nAttribute, targetMediaVersion?.volumeCount, targetVolumes]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [providers, setProviders] = useState<MetadataProviderOption[]>([]);
   const [enabledProviderIds, setEnabledProviderIds] = useState<string[]>([]);
+  const [writeMetadataToFiles, setWriteMetadataToFiles] = useState(false);
+  const [writebackOperation, setWritebackOperation] = useState<MetadataWritebackOperation | null>(null);
 
   const selected = useMemo(() => candidates.find((candidate) => candidate.id === selectedId) ?? candidates[0] ?? null, [candidates, selectedId]);
   const options = useMemo(() => providers.map((provider) => ({
     value: provider.id,
     label: provider.name,
     translate: false,
-    disabled: !enabledProviderIds.includes(provider.id) || !provider.workTypes.includes(normalizedWorkType(book))
+    disabled: !enabledProviderIds.includes(provider.id) || !provider.mediaKinds.includes(selectedMediaKind(book))
   })), [book, enabledProviderIds, providers]);
   const sourceReady = options.some((option) => option.value === source && !option.disabled);
 
@@ -158,27 +177,74 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
     setCandidates([]);
     setSelectedId('');
     setSelectedFields([]);
-    setTargetVolumeId(book.continueVolumeId ?? volumeOptions[0]?.value ?? '');
     setMessage('');
     setError('');
+    setWriteMetadataToFiles(false);
+    setWritebackOperation(null);
+    fetch('/api/organize/policy', { cache: 'no-store' })
+      .then((response) => response.json() as Promise<{ ok: boolean; data?: { policy?: { writeMetadataToFiles?: boolean } } }>)
+      .then((payload) => setWriteMetadataToFiles(Boolean(payload.ok && payload.data?.policy?.writeMetadataToFiles)))
+      .catch(() => setWriteMetadataToFiles(false));
     fetch('/api/metadata/providers', { cache: 'no-store' })
       .then((response) => response.json() as Promise<{ ok: boolean; data?: { providers: MetadataProviderOption[]; pipelines?: MetadataProviderPipeline[] }; error?: { message: string } }>)
       .then((payload) => {
         if (!payload.ok) throw new Error(payload.error?.message ?? '读取元数据插件失败');
         const nextProviders = payload.data?.providers ?? [];
-        const pipeline = (payload.data?.pipelines ?? []).find((item) => item.workType === normalizedWorkType(book));
+        const pipeline = (payload.data?.pipelines ?? []).find((item) => item.mediaKind === selectedMediaKind(book));
         const nextEnabledProviderIds = (pipeline?.providers ?? []).filter((item) => item.enabled).map((item) => item.providerId);
         setProviders(nextProviders);
         setEnabledProviderIds(nextEnabledProviderIds);
-        const applicable = nextProviders.find((provider) => nextEnabledProviderIds.includes(provider.id) && provider.workTypes.includes(normalizedWorkType(book)));
+        const applicable = nextProviders.find((provider) => nextEnabledProviderIds.includes(provider.id) && provider.mediaKinds.includes(selectedMediaKind(book)));
         if (applicable) setSource(applicable.id);
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : '读取元数据插件失败'));
-  }, [book, open, volumeOptions]);
+  }, [book, open]);
 
   useEffect(() => {
-    setSelectedFields(defaultFields(book, selected));
-  }, [book, selected]);
+    if (!open || !targetMediaVersion) return;
+    const controller = new AbortController();
+    setVolumeTarget(ALL_VOLUMES);
+    setTargetVolumes(targetMediaVersion.volumes);
+    void fetchAllMediaVersionVolumes(book.id, targetMediaVersion.id, controller.signal)
+      .then(setTargetVolumes)
+      .catch((reason) => {
+        if (!(reason instanceof DOMException && reason.name === 'AbortError')) {
+          setError(i18nAttribute('无法读取当前媒体版本的卷册'));
+        }
+      });
+    return () => controller.abort();
+  }, [book.id, i18nAttribute, open, targetMediaVersion]);
+
+  useEffect(() => {
+    setSelectedFields(defaultFields(book, selected, targetVolumes[0]));
+  }, [book, selected, targetVolumes]);
+
+  useEffect(() => {
+    if (!open || !writebackOperation || writebackOperation.status === 'COMPLETED' || writebackOperation.status === 'COMPLETED_WITH_WARNINGS') return;
+    const controller = new AbortController();
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/metadata/writebacks/${encodeURIComponent(writebackOperation.id)}`, {
+          cache: 'no-store',
+          signal: controller.signal
+        });
+        const payload = (await response.json()) as { ok: boolean; data?: { operation?: MetadataWritebackOperation } };
+        const operation = payload.ok ? payload.data?.operation : undefined;
+        if (!operation) return;
+        setWritebackOperation(operation);
+        if (operation.status === 'COMPLETED') setMessage(i18nAttribute('元数据已保存，图书文件写回完成'));
+        if (operation.status === 'COMPLETED_WITH_WARNINGS') setMessage(i18nAttribute('元数据已保存，{value0} 个文件写回失败', { value0: operation.warningTargets }));
+      } catch (reason) {
+        if (!(reason instanceof DOMException && reason.name === 'AbortError')) setError(i18nAttribute('无法读取文件写回进度'));
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 1500);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [i18nAttribute, open, writebackOperation]);
 
   async function searchCandidates() {
     setBusy(true);
@@ -209,21 +275,24 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
     setError('');
     setMessage('');
     try {
-      const response = await fetch(`/api/works/${book.id}/metadata/apply`, {
+      const response = await fetch(`/api/works/${book.id}/metadata/apply?applyToAllVolumes=${volumeTarget === ALL_VOLUMES ? 'true' : 'false'}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           source,
           candidate: selected,
           fields: selectedFields,
-          volumeId: selectedFields.includes('publisher') ? targetVolumeId : null
+          volumeId: selectedFields.some((field) => volumeFields.has(field)) || writeMetadataToFiles ? targetVolumeId : null,
+          writeMetadataToFiles
         })
       });
-      const payload = (await response.json()) as { ok: boolean; data?: { book?: WorkView | null }; error?: { message: string } };
+      const payload = (await response.json()) as { ok: boolean; data?: { metadataWriteback?: MetadataWritebackOperation | null }; error?: { message: string } };
       if (!payload.ok) throw new Error(payload.error?.message ?? '元数据应用失败');
-      setMessage('已应用所选字段');
-      onApplied(payload.data?.book ?? null);
-      onClose();
+      const operation = payload.data?.metadataWriteback ?? null;
+      setWritebackOperation(operation);
+      setMessage(operation ? i18nAttribute('已应用所选字段，正在后台写回图书文件') : i18nAttribute('已应用所选字段'));
+      await onApplied();
+      if (!operation) onClose();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '元数据应用失败');
     } finally {
@@ -236,6 +305,14 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
   }
 
   function renderFieldValue(field: MetadataField, value: unknown, kind: 'current' | 'candidate') {
+    if (!hasCandidateValue(value) && kind === 'candidate') return i18nAttribute('候选未提供该字段');
+    if (field === 'publishedAt' && typeof value === 'string') {
+      try {
+        return formatDate(value, { dateStyle: 'medium' });
+      } catch {
+        return value;
+      }
+    }
     if (!isCoverField(field)) return valueLabel(value);
     if (typeof value !== 'string' || !value.trim()) return '未生成';
     return (
@@ -313,7 +390,7 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
                       <div className="line-clamp-2 font-medium text-slate-900">{candidate.title || i18nAttribute("未命名候选")}</div>
                       <Badge tone={candidate.confidence >= 0.8 ? 'green' : 'blue'}>{Math.round(candidate.confidence * 100)}%</Badge>
                     </div>
-                    <div className="mt-1 line-clamp-1 text-xs text-slate-500">{candidate.author || candidate.publisher || candidate.seriesName || valueLabel(candidate.publishedYear)}</div>
+                    <div className="mt-1 line-clamp-1 text-xs text-slate-500">{candidate.author || candidate.seriesName || valueLabel(candidate.volumeMetadata?.isbn)}</div>
                     {candidate.description ? <div className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">{candidate.description}</div> : null}
                   </div>
                 </div>
@@ -323,16 +400,10 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
           </div>
 
           <div className="min-w-0 rounded-2xl border border-slate-200">
-            {selectedFields.includes('publisher') ? (
+            {selectedFields.some((field) => volumeFields.has(field)) || writeMetadataToFiles ? (
               <div className="border-b border-slate-100 bg-slate-50 px-3 py-3">
-                <div className="mb-2 text-xs font-medium text-slate-500"><I18nText>出版社应用到卷册</I18nText></div>
-                <Select
-                  value={targetVolumeId}
-                  options={volumeOptions}
-                  onChange={setTargetVolumeId}
-                  ariaLabel={i18nAttribute("出版社目标卷册")}
-                  className="w-full"
-                />
+                <div className="mb-2 text-xs font-medium text-slate-500"><I18nText>卷册元数据应用范围</I18nText></div>
+                <Select value={volumeTarget} options={volumeTargetOptions} onChange={setVolumeTarget} ariaLabel={i18nAttribute('卷册元数据应用范围')} className="w-full" />
               </div>
             ) : null}
             <div className="hidden grid-cols-[44px_90px_minmax(0,1fr)_minmax(0,1fr)] gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-500 md:grid">
@@ -343,11 +414,11 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
             </div>
             <div className="divide-y divide-slate-100">
               {fields.map((field) => {
-                const currentValue = bookValue(book, field);
+                const currentValue = bookValue(book, field, selectedTargetVolume);
                 const nextValue = candidateValue(selected, field);
                 const available = hasCandidateValue(nextValue);
                 return (
-                  <label key={field} className={cn('grid grid-cols-[28px_minmax(0,1fr)] gap-2 px-3 py-3 text-sm md:grid-cols-[44px_90px_minmax(0,1fr)_minmax(0,1fr)]', !available && 'text-slate-400')}>
+                  <label key={field} title={!available ? i18nAttribute('候选未提供该字段') : undefined} className={cn('grid grid-cols-[28px_minmax(0,1fr)] gap-2 px-3 py-3 text-sm md:grid-cols-[44px_90px_minmax(0,1fr)_minmax(0,1fr)]', !available && 'text-slate-400')}>
                     <input
                       type="checkbox"
                       disabled={!available}
@@ -371,9 +442,16 @@ export function MetadataLookupModal({ book, open, onClose, onApplied }: Metadata
           </div>
         </div>
 
-        <div className="flex flex-col gap-2 border-t border-slate-100 px-5 py-4 sm:flex-row sm:justify-end">
+        <div className="border-t border-slate-100 px-5 pt-4">
+          <label className="flex items-start gap-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            <input type="checkbox" checked={writeMetadataToFiles} onChange={(event) => setWriteMetadataToFiles(event.target.checked)} className="mt-0.5 h-4 w-4 accent-blue-600" />
+            <span><span className="block font-medium"><I18nText>同时覆盖图书文件元数据</I18nText></span><span className="mt-1 block text-xs text-slate-500"><I18nText>本次选择不会修改系统识别设置；文件将在后台安全写回。</I18nText></span></span>
+          </label>
+          {writebackOperation ? <div className="mt-2 text-xs text-slate-500"><I18nText>文件写回进度：</I18nText>{writebackOperation.completedTargets}/{writebackOperation.totalTargets}</div> : null}
+        </div>
+        <div className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:justify-end">
           <Button variant="secondary" onClick={onClose}><I18nText>取消</I18nText></Button>
-          <Button disabled={busy || !selected || selectedFields.length === 0 || (selectedFields.includes('publisher') && !targetVolumeId)} icon={CheckCircle2} onClick={() => void applySelected()}><I18nText>应用所选字段</I18nText></Button>
+          <Button disabled={busy || !selected || selectedFields.length === 0 || ((selectedFields.some((field) => volumeFields.has(field)) || writeMetadataToFiles) && !targetVolumeId)} icon={CheckCircle2} onClick={() => void applySelected()}><I18nText>应用所选字段</I18nText></Button>
         </div>
       </div>
     </div>

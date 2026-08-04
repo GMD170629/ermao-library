@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { normalizeAudioBootstrap } from './api';
-import { absolutePositionForTrack, beginAudioVolumeSwitch, failAudioVolumeSwitch, targetForAbsolutePosition } from './audio-model';
+import { absolutePositionForTrack, beginAudioVolumeSwitch, failAudioVolumeSwitch, targetForAbsolutePosition, unsupportedAudioMimeType } from './audio-model';
 import type { AudioPlaybackState } from './types';
 
 const payload = {
@@ -19,7 +19,7 @@ const payload = {
       { id: 'volume-2', mediaVersionId: 'media-audio', title: '第二卷', sortOrder: 1 }
     ],
     files: [
-      { id: 'file-1', mimeType: 'audio/mpeg', durationMs: 10_000, sortOrder: 0, url: '/api/files/file-1' },
+      { id: 'file-1', mimeType: 'audio/mpeg', codec: 'mp3', durationMs: 10_000, sortOrder: 0, url: '/api/files/file-1' },
       { id: 'file-2', mimeType: 'audio/mpeg', durationMs: 20_000, sortOrder: 1, url: '/api/files/file-2' }
     ],
     units: [{ id: 'chapter-1', title: '第一章', fileId: 'file-1', startMs: 0, endMs: 10_000, index: 0 }],
@@ -34,12 +34,34 @@ test('normalizes the volume-first Reader v3 audio bootstrap', () => {
   assert.equal(bootstrap.volume.id, 'volume-1');
   assert.deepEqual(bootstrap.availableVolumes.map((volume) => volume.id), ['volume-1', 'volume-2']);
   assert.equal(bootstrap.resumeLocation?.volumeId, 'volume-1');
+  assert.equal(bootstrap.tracks[0]?.codec, 'mp3');
+  assert.equal(bootstrap.tracks[1]?.codec, null);
 });
 
 test('maps between track and absolute time', () => {
   const tracks = normalizeAudioBootstrap(payload, 'volume-1').tracks;
   assert.equal(absolutePositionForTrack(tracks, 1, 5_000), 15_000);
   assert.deepEqual(targetForAbsolutePosition(tracks, 15_000), { trackIndex: 1, positionMs: 5_000 });
+});
+
+test('checks known codecs with a codec-qualified MIME type', () => {
+  const checked: string[] = [];
+  const unsupported = unsupportedAudioMimeType('audio/ogg', 'opus', (value) => {
+    checked.push(value);
+    return '';
+  });
+  assert.equal(unsupported, 'audio/ogg; codecs="opus"');
+  assert.deepEqual(checked, ['audio/ogg; codecs="opus"']);
+});
+
+test('lets the media element decide unknown codec support', () => {
+  let checks = 0;
+  const unsupported = unsupportedAudioMimeType('audio/x-ape', 'ape', () => {
+    checks += 1;
+    return '';
+  });
+  assert.equal(unsupported, null);
+  assert.equal(checks, 0);
 });
 
 test('volume switching keeps the previous playback until the request commits or fails', () => {

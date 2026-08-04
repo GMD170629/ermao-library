@@ -19,10 +19,11 @@ import {
   X
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
+import { ContextActionMenu } from '../../components/ui/context-action-menu';
 import { useToast } from '../../components/ui/feedback';
 import { Select, type SelectOption } from '../../components/ui/select';
 import { I18nText } from '@/i18n/provider';
@@ -89,84 +90,22 @@ export function LibraryBatchContextMenu({
   onSelect: (action: LibraryBatchAction) => void;
 }) {
   const { t: i18nAttribute } = useAttributeI18n();
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!position) return;
-    function closeOnPointer(event: MouseEvent) {
-      if (!menuRef.current?.contains(event.target as Node)) onClose();
-    }
-    function closeOnKey(event: KeyboardEvent) {
-      if (event.key === 'Escape') onClose();
-    }
-    function closeOnViewportChange() {
-      onClose();
-    }
-    document.addEventListener('mousedown', closeOnPointer);
-    document.addEventListener('keydown', closeOnKey);
-    window.addEventListener('resize', closeOnViewportChange);
-    window.addEventListener('scroll', closeOnViewportChange, true);
-    return () => {
-      document.removeEventListener('mousedown', closeOnPointer);
-      document.removeEventListener('keydown', closeOnKey);
-      window.removeEventListener('resize', closeOnViewportChange);
-      window.removeEventListener('scroll', closeOnViewportChange, true);
-    };
-  }, [onClose, position]);
-
-  if (!position || typeof document === 'undefined') return null;
-  const width = 316;
-  const height = 456;
-  const left = Math.max(12, Math.min(position.x, window.innerWidth - width - 12));
-  const top = Math.max(12, Math.min(position.y, window.innerHeight - height - 12));
-
-  return createPortal(
-    <div
-      ref={menuRef}
-      role="menu"
-      aria-label={i18nAttribute("批量管理图书")}
-      style={{ left, top, width }}
-      className="fixed z-[130] overflow-hidden rounded-2xl border border-black/[0.1] bg-[#FFFEFC] p-2 shadow-[0_22px_70px_rgba(47,37,31,0.24)]"
-    >
-      <div className="flex items-center justify-between px-3 pb-2 pt-1.5">
-        <span className="text-xs font-semibold text-[#625C56]"><I18nText>批量管理</I18nText></span>
-        <span className="rounded-full bg-[#FFF0EA] px-2 py-1 text-[11px] font-medium text-[#D7462B]"><I18nText>已选 </I18nText>{selectedCount} <I18nText>本</I18nText></span>
-      </div>
-      <div className="space-y-0.5">
-        {actions.filter((item) => canUseLibraryBatchAction(item.value, canManageSystem)).map((item) => {
-          const Icon = item.icon;
-          const destructive = item.value === 'delete';
-          return (
-            <button
-              key={item.value}
-              type="button"
-              role="menuitem"
-              onClick={() => onSelect(item.value)}
-              className={cn(
-                'group flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left outline-none transition',
-                destructive
-                  ? 'hover:bg-red-50 focus-visible:bg-red-50'
-                  : 'hover:bg-[#FFF2ED] focus-visible:bg-[#FFF2ED]'
-              )}
-            >
-              <span className={cn(
-                'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition group-hover:bg-white',
-                destructive ? 'bg-red-50 text-red-600' : 'bg-black/[0.035] text-[#746D67] group-hover:text-[#EF4D2F]'
-              )}>
-                <Icon size={16} />
-              </span>
-              <span className="min-w-0">
-                <span className={cn('block text-sm font-medium', destructive ? 'text-red-700' : 'text-[#302C29]')}>{i18nAttribute(item.label)}</span>
-                <span className="mt-0.5 block truncate text-[11px] text-[#8B847D]">{item.description}</span>
-              </span>
-            </button>
-          );
-        })}
-      </div>
-      <div className="mt-2 border-t border-black/[0.06] px-3 pt-2 text-[11px] leading-5 text-[#948D86]"><I18nText>拖动经过行可连续选择；按 Shift 点击可选择区间。</I18nText></div>
-    </div>,
-    document.body
-  );
+  return <ContextActionMenu
+    position={position}
+    ariaLabel={i18nAttribute('批量管理图书')}
+    title={i18nAttribute('批量管理')}
+    badge={i18nAttribute('已选 {value0} 本', { value0: selectedCount })}
+    items={actions.filter((item) => canUseLibraryBatchAction(item.value, canManageSystem)).map((item) => ({
+      action: item.value,
+      label: i18nAttribute(item.label),
+      description: i18nAttribute(item.description),
+      icon: item.icon,
+      destructive: item.value === 'delete'
+    }))}
+    footer={i18nAttribute('拖动经过行可连续选择；按 Shift 点击可选择区间。')}
+    onClose={onClose}
+    onSelect={onSelect}
+  />;
 }
 
 function FieldToggle({
@@ -257,7 +196,6 @@ export function LibraryBatchDialog({
     { value: 'description', label: '简介', group: '作品元数据' },
     { value: 'seriesName', label: '系列', group: '作品元数据' },
     { value: 'tags', label: '标签', group: '作品元数据' },
-    { value: 'publishedYear', label: '出版年份', group: '作品元数据' },
     { value: 'volumeTitle', label: '卷册名称', group: '卷册资源' }
   ];
 

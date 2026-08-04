@@ -9,6 +9,7 @@ import { AUDIO_DEVICE_PREFERENCES_KEY, readAudioDevicePreferences, writeAudioDev
 import { fetchAudioBootstrap } from './api';
 import {
   absolutePositionForTrack,
+  audioFormatLabel,
   audioLocation,
   audioProgressPercent,
   beginAudioVolumeSwitch,
@@ -77,7 +78,7 @@ function tabId() {
 }
 
 function mediaErrorMessage(audio: HTMLAudioElement, track: AudioTrack | null) {
-  const format = track?.mimeType || '未知格式';
+  const format = track ? audioFormatLabel(track) : '未知格式';
   switch (audio.error?.code) {
     case MediaError.MEDIA_ERR_ABORTED:
       return '音频加载已取消，可以重试播放';
@@ -199,7 +200,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const index = Math.max(0, Math.min(bootstrap.tracks.length - 1, trackIndex));
     const track = bootstrap.tracks[index];
     const nextPosition = clamp(positionMs, 0, Math.max(0, track.durationMs));
-    const unsupportedMime = unsupportedAudioMimeType(track.mimeType, (mime) => audio.canPlayType(mime));
+    const unsupportedMime = unsupportedAudioMimeType(track.mimeType, track.codec, (mime) => audio.canPlayType(mime));
     if (unsupportedMime) {
       if (!audio.paused) suppressedPauseEventsRef.current += 1;
       audio.pause();
@@ -217,7 +218,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         positionMs: nextPosition,
         durationMs: track.durationMs,
         absolutePositionMs: absolutePositionForTrack(bootstrap.tracks, index, nextPosition),
-        error: `当前浏览器不支持这个音频格式（${unsupportedMime}）`
+        error: `当前浏览器不支持这个音频格式（${audioFormatLabel(track)}）`
       });
       return;
     }
@@ -747,7 +748,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const bootstrap = bootstrapRef.current;
     const audio = audioRef.current;
     const nextTrack = bootstrap ? nextAudioTrackForMetadataPreload(bootstrap.tracks, state.trackIndex) : null;
-    if (!nextTrack || !audio || unsupportedAudioMimeType(nextTrack.mimeType, (mime) => audio.canPlayType(mime))) return undefined;
+    if (!nextTrack || !audio || unsupportedAudioMimeType(nextTrack.mimeType, nextTrack.codec, (mime) => audio.canPlayType(mime))) return undefined;
     const controller = new AbortController();
     nextTrackPreloadAbortRef.current = controller;
     // A HEAD request primes authenticated file metadata without downloading

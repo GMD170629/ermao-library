@@ -29,6 +29,7 @@ function normalizeTrack(value: unknown, index: number): AudioTrack | null {
     title: stringValue(item.title, `音轨 ${index + 1}`),
     url: withBasePath(stringValue(item.url, `/api/files/${encodeURIComponent(fileId)}`)),
     mimeType: stringValue(item.mimeType, 'audio/mpeg'),
+    codec: nullableString(item.codec),
     durationMs: Math.max(0, numberValue(item.durationMs)),
     discNumber: typeof item.discNumber === 'number' ? numberValue(item.discNumber) : null,
     trackNumber: typeof item.trackNumber === 'number' ? numberValue(item.trackNumber) : null,

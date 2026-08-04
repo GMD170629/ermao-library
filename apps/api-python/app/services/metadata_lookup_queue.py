@@ -16,6 +16,7 @@ from app.core.config import Settings
 from app.infrastructure.sqlite_retry import execute_with_sqlite_busy_retry
 from app.models.common import db_timestamp
 from app.modules.metadata.application.commands import execute_metadata_transaction
+from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.infrastructure import lookup_queue as lookup_persist
 from app.services.book_identity import (
     UNKNOWN_AUTHOR,
@@ -23,6 +24,11 @@ from app.services.book_identity import (
     normalize_identity_part,
 )
 from app.services.library_management import sync_work_facets
+from app.services.metadata_file_writeback import (
+    enqueue_metadata_writeback,
+    process_next_metadata_writeback,
+    recover_interrupted_metadata_writebacks,
+)
 from app.services.metadata_provider_registry import (
     metadata_provider_registry,
     search_with_metadata_provider,
@@ -67,10 +73,20 @@ def _provider_order(task: dict[str, Any]) -> list[str]:
 
 
 def _search_provider(
-    db: Session, context: dict[str, Any], provider: str, query: str
+    db: Session,
+    context: dict[str, Any],
+    provider: str,
+    query: str,
+    automatic_request_gate: AutomaticMetadataRequestGate | None,
 ) -> dict[str, Any]:
     return search_with_metadata_provider(
-        db, context, provider, query, force=False, use_cache=True
+        db,
+        context,
+        provider,
+        query,
+        force=False,
+        use_cache=True,
+        automatic_request_gate=automatic_request_gate,
     )
 
 
@@ -198,66 +214,82 @@ def _apply_candidate(
     work_patch: dict[str, Any] = {}
     volume_patch: dict[str, Any] = {}
     applied: list[str] = []
+    prefer_local = lookup_persist.prefer_local_metadata_enabled(db)
 
-    overwrite_title_author = lookup_persist.overwrite_title_author_enabled(db)
     candidate_title = str(candidate.get("title") or "").strip()
     candidate_author = str(candidate.get("author") or "").strip()
     current_title = str(work.get("title") or "").strip()
     current_author = str(work.get("author") or "").strip()
-    if candidate_title and (
-        not current_title
-        or (overwrite_title_author and candidate_title != current_title)
+    if (
+        candidate_title
+        and candidate_title != current_title
+        and (not prefer_local or not current_title)
     ):
         work_patch["title"] = candidate_title
         applied.append("title")
-    if candidate_author and (
-        not current_author
-        or current_author == UNKNOWN_AUTHOR
-        or (overwrite_title_author and candidate_author != current_author)
+    local_author_is_missing = not current_author or current_author in {
+        UNKNOWN_AUTHOR,
+        "unknown",
+        "Unknown",
+    }
+    if (
+        candidate_author
+        and candidate_author != current_author
+        and (not prefer_local or local_author_is_missing)
     ):
         work_patch["author"] = candidate_author
         applied.append("author")
-    if (
-        not str(work.get("description") or "").strip()
-        and str(candidate.get("description") or "").strip()
-    ):
+    if (not prefer_local or not str(work.get("description") or "").strip()) and str(
+        candidate.get("description") or ""
+    ).strip():
         work_patch["description"] = str(candidate["description"]).strip()
         applied.append("description")
     candidate_tags = _parse_tags(candidate.get("tags"))
-    if not _parse_tags(work.get("tags")) and candidate_tags:
+    if candidate_tags and (not prefer_local or not _parse_tags(work.get("tags"))):
         work_patch["tags"] = json.dumps(
             list(dict.fromkeys(candidate_tags)), ensure_ascii=False
         )
         applied.append("tags")
-    if (
-        not str(work.get("seriesName") or "").strip()
-        and str(candidate.get("seriesName") or "").strip()
-    ):
+    if (not prefer_local or not str(work.get("seriesName") or "").strip()) and str(
+        candidate.get("seriesName") or ""
+    ).strip():
         work_patch["seriesName"] = str(candidate["seriesName"]).strip()
         applied.append("seriesName")
-    if work.get("seriesIndex") is None and candidate.get("seriesIndex") is not None:
+    if (not prefer_local or work.get("seriesIndex") is None) and candidate.get(
+        "seriesIndex"
+    ) is not None:
         try:
             work_patch["seriesIndex"] = float(candidate["seriesIndex"])
             applied.append("seriesIndex")
         except (TypeError, ValueError):
             pass
-    if work.get("publishedYear") is None and candidate.get("publishedYear") is not None:
-        try:
-            work_patch["publishedYear"] = int(candidate["publishedYear"])
-            applied.append("publishedYear")
-        except (TypeError, ValueError):
-            pass
-    if (
-        volume
-        and not str(volume.get("publisher") or "").strip()
-        and str(candidate.get("publisher") or "").strip()
-    ):
-        volume_patch["publisher"] = str(candidate["publisher"]).strip()
-        applied.append("publisher")
-    if (
-        not _local_cover_exists(db, work, volume_id)
-        and str(candidate.get("coverUrl") or "").strip()
-    ):
+    volume_metadata = candidate.get("volumeMetadata")
+    if not isinstance(volume_metadata, dict):
+        volume_metadata = {
+            key: candidate.get(key)
+            for key in ("publisher", "publishedAt", "language", "isbn")
+        }
+    if volume:
+        if (not prefer_local or volume.get("publishedAt") is None) and isinstance(
+            volume_metadata.get("publishedAt"), str
+        ):
+            try:
+                published_at = datetime.fromisoformat(
+                    str(volume_metadata["publishedAt"])
+                )
+            except ValueError:
+                published_at = None
+            if published_at is not None:
+                volume_patch["publishedAt"] = published_at
+                applied.append("publishedAt")
+        for field in ("publisher", "language", "isbn"):
+            value = str(volume_metadata.get(field) or "").strip()
+            if value and (not prefer_local or not str(volume.get(field) or "").strip()):
+                volume_patch[field] = value
+                applied.append(field)
+    if (not prefer_local or not _local_cover_exists(db, work, volume_id)) and str(
+        candidate.get("coverUrl") or ""
+    ).strip():
         try:
             cover_path = _download_remote_cover(
                 str(work["id"]), str(candidate["coverUrl"]).strip(), settings
@@ -321,6 +353,16 @@ def _apply_candidate(
             raw_json=json.dumps(
                 {"candidate": candidate, "appliedFields": applied}, ensure_ascii=False
             ),
+        )
+    if lookup_persist.write_metadata_to_files_enabled(db) and task.get(
+        "mediaVersionId"
+    ):
+        enqueue_metadata_writeback(
+            db,
+            work_id=str(work["id"]),
+            media_version_id=str(task["mediaVersionId"]),
+            source="AUTOMATIC",
+            lookup_task_id=str(task["id"]),
         )
     return applied
 
@@ -412,7 +454,10 @@ def _schedule_retry(
 
 
 def process_metadata_lookup_task(
-    db: Session, settings: Settings, task: dict[str, Any]
+    db: Session,
+    settings: Settings,
+    task: dict[str, Any],
+    automatic_request_gate: AutomaticMetadataRequestGate | None = None,
 ) -> str:
     import_status = lookup_persist.get_import_task_status(db, task.get("importTaskId"))
     if import_status is not None and import_status != "COMPLETED":
@@ -426,6 +471,11 @@ def process_metadata_lookup_task(
     if not context:
         _finish_without_match(db, task, "FAILED", [], "无法建立元数据查询上下文")
         return "FAILED"
+    effective_request_gate = (
+        automatic_request_gate
+        if lookup_persist.automatic_rate_limit_applies(db, task)
+        else None
+    )
 
     enabled_providers = 0
     errors: list[str] = []
@@ -434,7 +484,11 @@ def process_metadata_lookup_task(
         execution_id = _start_provider_execution(db, task, provider)
         try:
             result = _search_provider(
-                db, context, provider, str(work.get("title") or "")
+                db,
+                context,
+                provider,
+                str(work.get("title") or ""),
+                effective_request_gate,
             )
         except Exception as exc:
             _finish_provider_execution(
@@ -524,11 +578,17 @@ def process_metadata_lookup_task(
     return "NO_MATCH"
 
 
-def process_next_metadata_lookup_task(db: Session, settings: Settings) -> bool:
+def process_next_metadata_lookup_task(
+    db: Session,
+    settings: Settings,
+    automatic_request_gate: AutomaticMetadataRequestGate | None = None,
+) -> bool:
+    if process_next_metadata_writeback(db, settings):
+        return True
     task = claim_next_metadata_lookup_task(db)
     if not task:
         return False
-    process_metadata_lookup_task(db, settings, task)
+    process_metadata_lookup_task(db, settings, task, automatic_request_gate)
     return True
 
 
@@ -539,10 +599,12 @@ class MetadataLookupWorker:
         settings: Settings,
         poll_seconds: float = 2.0,
         heartbeat_db_factory: Callable[[], Session] | None = None,
+        automatic_request_gate: AutomaticMetadataRequestGate | None = None,
     ) -> None:
         self._db_factory = db_factory
         self._settings = settings
         self._poll_seconds = poll_seconds
+        self._automatic_request_gate = automatic_request_gate
         self._stop = threading.Event()
         self._thread = threading.Thread(
             target=self._run, name="metadata-lookup-worker", daemon=True
@@ -560,6 +622,12 @@ class MetadataLookupWorker:
             recovered = recover_stale_metadata_lookup_tasks(db)
             if recovered:
                 LOGGER.warning("recovered %s stale metadata lookup tasks", recovered)
+            recovered_writebacks = recover_interrupted_metadata_writebacks(db)
+            if recovered_writebacks:
+                LOGGER.warning(
+                    "recovered %s interrupted metadata writeback targets",
+                    recovered_writebacks,
+                )
         self._thread.start()
 
     def shutdown(self) -> None:
@@ -570,7 +638,9 @@ class MetadataLookupWorker:
     def _process_iteration(self) -> bool | None:
         result = execute_with_sqlite_busy_retry(
             self._db_factory,
-            lambda db: process_next_metadata_lookup_task(db, self._settings),
+            lambda db: process_next_metadata_lookup_task(
+                db, self._settings, self._automatic_request_gate
+            ),
             retry_delays_seconds=DATABASE_BUSY_RETRY_DELAYS_SECONDS,
             stop_wait=self._stop.wait,
         )

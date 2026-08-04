@@ -119,7 +119,7 @@ def organize_candidate_summary(db: Session) -> dict[str, Any]:
                 "id": work.get("id"),
                 "title": work.get("title"),
                 "author": work.get("author"),
-                "workType": work.get("workType"),
+                "availableMediaKinds": work.get("availableMediaKinds") or [],
                 "coverPath": work.get("coverPath"),
                 "metadataQuality": int(work.get("metadataQuality") or 0),
                 "reasonCodes": work.get("reasonCodes") or [],
@@ -167,9 +167,16 @@ def create_organize_run(
         limit=limit,
         force_selected=bool(selected) and normalized_trigger == "MANUAL",
     )
+    selections = {
+        str(work["id"]): organize_eligibility.first_media_selection_for_work(
+            db, str(work["id"])
+        )
+        for work in works
+    }
+    works = [work for work in works if selections[str(work["id"])] is not None]
     provider_plans = {
         str(work["id"]): enabled_metadata_provider_ids(
-            db, str(work.get("workType") or "")
+            db, selections[str(work["id"])][1]
         )
         for work in works
     }
@@ -200,7 +207,9 @@ def create_organize_run(
     )
     for work in works:
         work_id = str(work["id"])
-        volume_id = organize_eligibility.first_volume_id_for_work(db, work)
+        selection = selections[work_id]
+        assert selection is not None
+        media_version_id, _media_kind, volume_id = selection
         provider_order = provider_plans[work_id]
         job_id = _id("organize_job")
         task_id = _id("metadata_lookup")
@@ -211,6 +220,7 @@ def create_organize_run(
             run_id=run_id,
             work_id=work_id,
             volume_id=volume_id,
+            media_version_id=media_version_id,
             trigger=normalized_trigger,
             reasons=reasons,
             summary="等待元数据插件识别",
@@ -223,6 +233,7 @@ def create_organize_run(
             task_id=task_id,
             work_id=work_id,
             volume_id=volume_id,
+            media_version_id=media_version_id,
             job_id=job_id,
             provider_order=provider_order,
             now=now,
@@ -278,7 +289,15 @@ def recognize_organize_job(db: Session, job_id: str) -> dict[str, Any]:
         job = current_unresolved
         job_id = str(current_unresolved["id"])
     now = _now()
-    providers = enabled_metadata_provider_ids(db, str(work.get("workType") or ""))
+    selection = organize_eligibility.first_media_selection_for_work(
+        db,
+        str(job["workId"]),
+        str(job.get("mediaVersionId") or "") or None,
+    )
+    if selection is None:
+        raise ValueError("作品没有可整理的媒介版本")
+    media_version_id, media_kind, volume_id = selection
+    providers = enabled_metadata_provider_ids(db, media_kind)
     task_ids = organize_jobs.list_lookup_task_ids_for_job(db, job_id)
 
     # A new recognition pass owns a clean set of provider executions. Keep the
@@ -289,7 +308,8 @@ def recognize_organize_job(db: Session, job_id: str) -> dict[str, Any]:
         db,
         task_id=_id("metadata_lookup"),
         work_id=str(job["workId"]),
-        volume_id=job.get("volumeId"),
+        volume_id=volume_id,
+        media_version_id=media_version_id,
         job_id=job_id,
         provider_order=providers,
         now=now,

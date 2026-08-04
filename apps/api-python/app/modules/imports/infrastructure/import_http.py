@@ -315,6 +315,7 @@ def create_monitor_folder(db: Session, values: dict[str, Any]) -> dict[str, Any]
         root_path=str(values["rootPath"]),
         shelf_id=str(values["shelfId"]) if values.get("shelfId") is not None else None,
         enabled=bool(values.get("enabled", True)),
+        media_kind_policy=str(values.get("mediaKindPolicy") or "MIXED"),
         ignore_patterns=str(values["ignorePatterns"])
         if values.get("ignorePatterns") is not None
         else None,
@@ -342,6 +343,7 @@ def update_monitor_folder(
         "rootPath": "root_path",
         "shelfId": "shelf_id",
         "enabled": "enabled",
+        "mediaKindPolicy": "media_kind_policy",
         "ignorePatterns": "ignore_patterns",
         "ignoreHidden": "ignore_hidden",
         "minFileSizeBytes": "min_file_size_bytes",

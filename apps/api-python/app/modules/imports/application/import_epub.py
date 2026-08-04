@@ -10,19 +10,25 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import unquote
 
+from app.contracts.epub_navigation import (
+    EPUB_HREF_BASE_METADATA_KEY,
+    EPUB_PUBLICATION_ROOT_HREF_BASE,
+)
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
+    EpubNavigationChapterDTO,
     ImportOptions,
     ImportResult,
     ImportRuntimeConfig,
     SeriesVolumeInfo,
 )
 from app.modules.imports.application.identity_resolution import (
-    EmbeddedIdentityMetadata,
-    resolve_import_identity,
+    resolve_import_metadata,
 )
 from app.modules.imports.application.import_support import (
     _attrs,
+    _classification_columns,
+    _classification_result_type,
     _decode_xml_text,
     _ensure_work,
     _extract_isbn,
@@ -31,7 +37,6 @@ from app.modules.imports.application.import_support import (
     _first_text,
     _hash_text,
     _id,
-    _import_work_merge_key,
     _insert_identity_metadata,
     _now,
     _preferred_identifier,
@@ -41,12 +46,19 @@ from app.modules.imports.application.import_support import (
     _source_group_key,
     _texts,
     _title_from_file,
+    _work_merge_key,
 )
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
     ImportOrchestrationServices,
     LibraryImportStore,
 )
+from app.modules.imports.domain.content_classification import (
+    ContentEvidence,
+    classify_content,
+    normalize_media_kind_policy,
+)
+from app.modules.metadata.application.opf import parse_opf_metadata
 
 
 def _import_epub(
@@ -62,32 +74,44 @@ def _import_epub(
 ) -> ImportResult:
     metadata = parse_epub_metadata(options.source_file_path)
     raw_metadata = metadata.get("rawMetadata")
-    opf_title = (
-        next(iter(raw_metadata.get("dc:title") or []), None)
-        if isinstance(raw_metadata, dict)
-        else None
-    )
-    opf_author = (
-        next(iter(raw_metadata.get("dc:creator") or []), None)
-        if isinstance(raw_metadata, dict)
-        else None
-    )
-    identity = resolve_import_identity(
+    embedded_metadata = metadata["publicationMetadata"]
+    identity, resolved_local = resolve_import_metadata(
         identity,
-        embedded=EmbeddedIdentityMetadata(
-            title=str(opf_title or "").strip() or None,
-            author=str(opf_author or "").strip() or None,
-            source="epub_opf",
-            confidence=0.95,
+        embedded=(
+            None if options.original_source_file_path is not None else embedded_metadata
         ),
+        sidecar=options.sidecar_metadata,
+        source_order=options.local_metadata_priority,
+        path_metadata=options.path_metadata,
         requested_title=options.requested_title,
         requested_author=options.requested_author,
+    )
+    classification = classify_content(
+        normalize_media_kind_policy(options.media_kind_policy),
+        ContentEvidence(
+            volume_format="EPUB",
+            subjects=tuple(str(value) for value in metadata.get("subjects") or ()),
+            title=identity.title,
+            publisher=(
+                str(
+                    next(
+                        iter(
+                            (metadata.get("rawMetadata") or {}).get("dc:publisher")
+                            or ()
+                        ),
+                        "",
+                    )
+                )
+                or None
+            ),
+            fixed_layout=bool(metadata.get("fixedLayout")),
+        ),
     )
     volume_info = (
         SeriesVolumeInfo(
             identity.title,
             identity.volume_index,
-            _source_filename_title(options),
+            resolved_local.metadata.volume_title or _source_filename_title(options),
             identity.author,
         )
         if identity.volume_index is not None
@@ -105,31 +129,31 @@ def _import_epub(
         metadata["title"] = volume_info.series_name
         if volume_info.author:
             metadata["author"] = volume_info.author
-    merge_key = _import_work_merge_key(
-        "epub",
-        identity.title,
-        identity.author,
-        options,
-        identity.volume_index,
-        metadata.get("identifier"),
-        metadata.get("isbn"),
-        grouping_key=identity.grouping_key,
-    )
+    merge_key = _work_merge_key(identity.title)
     work, created = _ensure_work(
         store,
         queries,
         {
-            "workId": identity.reused_work_id,
             "title": identity.title,
             "author": identity.author,
-            "description": None,
-            "workType": "EPUB",
-            "tags": ["epub"],
+            "description": metadata.get("description"),
+            "tags": list(
+                dict.fromkeys(
+                    (
+                        "epub",
+                        *(str(value) for value in metadata.get("subjects") or ()),
+                    )
+                )
+            ),
             "mergeKey": merge_key,
             "origin": options.origin,
             "monitorFolderId": options.monitor_folder_id,
         },
     )
+    work_updates = _missing_epub_work_metadata(work, metadata)
+    if work_updates:
+        store.update_library_work(work["id"], columns=work_updates)
+        work = queries.get_work_by_id(str(work["id"])) or {**work, **work_updates}
     if volume_info:
         source_key = _source_group_key(options, metadata["title"])
         source_path = options.source_file_path.resolve()
@@ -138,9 +162,12 @@ def _import_epub(
             work["id"],
             "EPUB",
             source_key,
-            volume_info.series_index,
-            volume_info.title,
         )
+        if (
+            media_version
+            and media_version.get("mediaKind") != classification.media_kind
+        ):
+            media_version = None
         created_media_version = False
         if not media_version:
             created_media_version = True
@@ -148,7 +175,7 @@ def _import_epub(
                 columns={
                     "id": _id(),
                     "workId": work["id"],
-                    "mediaKind": "EBOOK",
+                    "mediaKind": classification.media_kind,
                     "createdAt": _now(),
                     "updatedAt": _now(),
                 },
@@ -179,6 +206,7 @@ def _import_epub(
                     "coverPath": None,
                     "coverStatus": "PENDING",
                     "importStatus": "PARSING",
+                    **_classification_columns(classification),
                     "createdAt": _now(),
                     "updatedAt": _now(),
                 }
@@ -227,6 +255,7 @@ def _import_epub(
                             {
                                 "idref": chapter.get("idref"),
                                 "volumeIndex": volume_info.series_index,
+                                EPUB_HREF_BASE_METADATA_KEY: EPUB_PUBLICATION_ROOT_HREF_BASE,
                             },
                             ensure_ascii=False,
                         ),
@@ -282,7 +311,7 @@ def _import_epub(
                 media_version["id"],
                 volume["id"],
                 work["title"],
-                "ebook",
+                _classification_result_type(classification),
                 "epub",
                 metadata["chapterCount"],
                 "completed",
@@ -293,6 +322,9 @@ def _import_epub(
                 else "new-epub-version"
                 if created_media_version
                 else "same-epub-series",
+                resolved_metadata=resolved_local.metadata,
+                metadata_field_sources=resolved_local.field_sources,
+                metadata_source_order=resolved_local.source_order,
             )
         except Exception:
             if cover_path:
@@ -308,7 +340,7 @@ def _import_epub(
                 "workId": work["id"],
                 "monitorFolderId": options.monitor_folder_id,
                 "origin": options.origin,
-                "mediaKind": "EBOOK",
+                "mediaKind": classification.media_kind,
                 "format": "EPUB",
                 "createdAt": _now(),
                 "updatedAt": _now(),
@@ -323,7 +355,7 @@ def _import_epub(
             columns={
                 "id": _id(),
                 "mediaVersionId": media_version["id"],
-                "title": _source_filename_title(options),
+                "title": resolved_local.metadata.volume_title or identity.title,
                 "sortOrder": 0,
                 "format": "EPUB",
                 "resourceKey": _file_resource_key("epub", source_path),
@@ -340,6 +372,7 @@ def _import_epub(
                 "coverPath": stored_cover_path,
                 "coverStatus": services.cover_status(stored_cover_path),
                 "importStatus": "PARSING",
+                **_classification_columns(classification),
                 "createdAt": _now(),
                 "updatedAt": _now(),
             }
@@ -373,7 +406,11 @@ def _import_epub(
                     "mediaType": chapter.get("mediaType"),
                     "sortOrder": chapter["sortOrder"],
                     "metadataJson": json.dumps(
-                        {"idref": chapter.get("idref")}, ensure_ascii=False
+                        {
+                            "idref": chapter.get("idref"),
+                            EPUB_HREF_BASE_METADATA_KEY: EPUB_PUBLICATION_ROOT_HREF_BASE,
+                        },
+                        ensure_ascii=False,
                     ),
                     "createdAt": _now(),
                     "updatedAt": _now(),
@@ -413,13 +450,16 @@ def _import_epub(
             media_version["id"],
             volume["id"],
             work["title"],
-            "ebook",
+            _classification_result_type(classification),
             "epub",
             metadata["chapterCount"],
             "completed",
             False,
             not created,
             "new-work" if created else "same-epub-work",
+            resolved_metadata=resolved_local.metadata,
+            metadata_field_sources=resolved_local.field_sources,
+            metadata_source_order=resolved_local.source_order,
         )
     except Exception:
         if cover_path:
@@ -435,8 +475,9 @@ def parse_epub_metadata(path: Path) -> dict[str, Any]:
             raise ValueError("container.xml 缺少 rootfile full-path")
         opf_path = match.group(1)
         opf_xml = archive.read(opf_path).decode("utf-8", "replace")
-        title = _first_text(opf_xml, "title") or _title_from_file(path)
-        author = _first_text(opf_xml, "creator") or "未知作者"
+        publication = parse_opf_metadata(opf_xml.encode("utf-8"))
+        title = publication.title or _title_from_file(path)
+        author = publication.author or "未知作者"
         identifiers = _texts(opf_xml, "identifier")
         manifest = _opf_items(opf_xml)
         spine = _opf_itemrefs(opf_xml)
@@ -454,23 +495,117 @@ def parse_epub_metadata(path: Path) -> dict[str, Any]:
             "dc:subject": _texts(opf_xml, "subject"),
             "meta": _attrs(opf_xml, "meta"),
         }
+        fixed_layout = _epub_is_fixed_layout(opf_xml)
         return {
             "title": title,
             "author": author,
-            "language": _first_text(opf_xml, "language"),
+            "authors": publication.authors,
+            "language": publication.language,
+            "publisher": publication.publisher,
             "identifier": _preferred_identifier(identifiers),
             "isbn": _extract_isbn(identifiers),
-            "publisher": _first_text(opf_xml, "publisher"),
-            "publishedAt": _first_text(opf_xml, "date"),
-            "description": _sanitize_description(_first_text(opf_xml, "description")),
-            "subjects": _texts(opf_xml, "subject"),
+            "publishedAt": publication.published_at,
+            "description": _sanitize_description(publication.description),
+            "subjects": list(publication.subjects),
+            "seriesName": publication.series_name,
+            "seriesIndex": publication.series_index,
+            "volumeIndex": publication.volume_index,
+            "fixedLayout": fixed_layout,
             "coverPath": cover.get("href") if cover else None,
             "coverMediaType": cover.get("mediaType") if cover else None,
             "chapterCount": len(chapters),
             "chapters": chapters,
             "opfPath": opf_path,
             "rawMetadata": raw_metadata,
+            "publicationMetadata": publication,
         }
+
+
+def _missing_epub_work_metadata(
+    work: dict[str, object], metadata: dict[str, Any]
+) -> dict[str, object]:
+    """Fill work fields that were absent before importing embedded EPUB metadata."""
+
+    columns: dict[str, object] = {}
+    description = str(metadata.get("description") or "").strip()
+    if description and not str(work.get("description") or "").strip():
+        columns["description"] = description
+
+    incoming_tags = [
+        str(value).strip()
+        for value in ("epub", *(metadata.get("subjects") or ()))
+        if str(value).strip()
+    ]
+    try:
+        stored_tags = json.loads(str(work.get("tags") or "[]"))
+    except (TypeError, ValueError):
+        stored_tags = []
+    current_tags = (
+        [str(value).strip() for value in stored_tags if str(value).strip()]
+        if isinstance(stored_tags, list)
+        else []
+    )
+    merged_tags = list(dict.fromkeys((*current_tags, *incoming_tags)))
+    if merged_tags != current_tags:
+        columns["tags"] = json.dumps(merged_tags, ensure_ascii=False)
+
+    if columns:
+        columns["updatedAt"] = _now()
+    return columns
+
+
+def _epub_is_fixed_layout(opf_xml: str) -> bool:
+    for metadata in _attrs(opf_xml, "meta"):
+        key = str(metadata.get("property") or metadata.get("name") or "").casefold()
+        value = str(metadata.get("content") or metadata.get("value") or "").casefold()
+        if key in {"rendition:layout", "fixed-layout"} and value in {
+            "pre-paginated",
+            "true",
+            "yes",
+        }:
+            return True
+    return bool(
+        re.search(
+            r"<meta\b[^>]*(?:property|name)=[\"'](?:rendition:layout|fixed-layout)[\"'][^>]*>\s*(?:pre-paginated|true|yes)\s*</meta>",
+            opf_xml,
+            re.IGNORECASE,
+        )
+    )
+
+
+def inspect_epub_navigation(path: Path) -> tuple[EpubNavigationChapterDTO, ...]:
+    """Return validated, publication-root-relative EPUB navigation entries."""
+    metadata = parse_epub_metadata(path)
+    chapters = metadata.get("chapters")
+    if not isinstance(chapters, list):
+        return ()
+    result: list[EpubNavigationChapterDTO] = []
+    for chapter in chapters:
+        if not isinstance(chapter, dict):
+            continue
+        title = chapter.get("title")
+        href = chapter.get("href")
+        sort_order = chapter.get("sortOrder")
+        if (
+            not isinstance(title, str)
+            or not title.strip()
+            or not isinstance(href, str)
+            or not href.strip()
+            or not isinstance(sort_order, int)
+        ):
+            continue
+        idref = chapter.get("idref")
+        media_type = chapter.get("mediaType")
+        result.append(
+            EpubNavigationChapterDTO(
+                title=title,
+                href=href,
+                sort_order=sort_order,
+                idref=idref if isinstance(idref, str) else None,
+                media_type=media_type if isinstance(media_type, str) else None,
+            )
+        )
+    return tuple(result)
 
 
 def _opf_items(opf_xml: str) -> list[dict[str, str]]:
@@ -548,7 +683,7 @@ def _epub_chapters(
             chapters.append(
                 {
                     "title": title,
-                    "href": item["href"],
+                    "href": _epub_publication_href(opf_path, item["href"]),
                     "idref": ref.get("idref"),
                     "mediaType": item.get("mediaType"),
                     "sortOrder": index,
@@ -632,7 +767,7 @@ def _chapter_from_toc(
             "\\", "/"
         )
     )
-    full_href = f"{relative}#{fragment}" if fragment else relative
+    full_href = f"{absolute}#{fragment}" if fragment else absolute
     item = href_items.get(_normalize_epub_path(relative))
     return {
         "title": title,
@@ -692,6 +827,12 @@ def _epub_cover(manifest: list[dict[str, str]], opf_xml: str) -> dict[str, str] 
 def _epub_zip_path(opf_path: str, href: str) -> str:
     path = href.split("#", 1)[0]
     return _normalize_epub_path(str(PurePosixPath(opf_path).parent / path))
+
+
+def _epub_publication_href(base_path: str, href: str) -> str:
+    path, separator, fragment = href.partition("#")
+    absolute = _normalize_epub_path(str(PurePosixPath(base_path).parent / path))
+    return f"{absolute}#{fragment}" if separator else absolute
 
 
 def _normalize_epub_path(value: str) -> str:

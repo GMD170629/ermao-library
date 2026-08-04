@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import Response
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
@@ -14,6 +16,7 @@ from app.bootstrap.library import library_dashboard
 from app.bootstrap.media import media_streaming
 from app.bootstrap.system import (
     delete_settings,
+    get_setting,
     list_event_level_facets,
     list_event_source_facets,
     list_settings,
@@ -22,8 +25,17 @@ from app.bootstrap.system import (
     system_event_storage_view,
     upsert_setting,
 )
+from app.core.authorization import can_manage_system
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
+from app.modules.opds.public import (
+    OPDS_ENABLED_SETTING_KEY,
+    OPDS_PUBLIC_BASE_URL_SETTING_KEY,
+    OpdsPublicBaseUrlInvalid,
+    OpdsPublicBaseUrlRequired,
+    resolve_opds_settings,
+    validate_opds_activation,
+)
 from app.modules.system.application.queries import (
     SettingsUpdateError,
     app_config_payload,
@@ -37,6 +49,7 @@ from app.modules.system.application.queries import (
     system_settings_payload,
 )
 from app.modules.system.presentation.schemas import (
+    AppConfigPayload,
     AppConfigResponse,
     BackupArchiveResponse,
     BackupDeleteResponse,
@@ -46,7 +59,10 @@ from app.modules.system.presentation.schemas import (
     ClearedEventsResponse,
     DashboardSystemStatusResponse,
     ManagementEventsResponse,
+    OpdsSystemSettingsPayload,
+    OpdsSystemSettingsResponse,
     SystemSettingsResponse,
+    UpdateOpdsSystemSettingsRequest,
 )
 from app.modules.system.public import execute_system_transaction
 from app.schemas.responses import fail, ok
@@ -82,8 +98,24 @@ def _auth(db: Session, request: Request, settings: Settings):
 
 
 @router.get("/app-config")
-def get_public_app_config(db: Session = Depends(get_db)) -> AppConfigResponse:
-    return ok(app_config_payload(db))
+def get_public_app_config(
+    http_response: Response,
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    current_frontend_resource_version: Annotated[
+        str | None, Header(alias="X-Shuku-Frontend-Resource-Version")
+    ] = None,
+) -> AppConfigResponse:
+    http_response.headers["Cache-Control"] = "private, no-store"
+    return AppConfigResponse(
+        data=AppConfigPayload.model_validate(
+            app_config_payload(
+                db,
+                current_frontend_resource_version=current_frontend_resource_version,
+                latest_version=settings.app_version,
+            )
+        )
+    )
 
 
 @router.get("/system-settings")
@@ -96,6 +128,90 @@ def get_system_settings(
     if auth_error:
         return auth_error
     return ok(system_settings_payload(list_settings(db)))
+
+
+def _opds_settings_payload(db: Session) -> OpdsSystemSettingsPayload:
+    snapshot = resolve_opds_settings(
+        get_setting(db, OPDS_ENABLED_SETTING_KEY, None),
+        stored_public_base_url=get_setting(db, OPDS_PUBLIC_BASE_URL_SETTING_KEY, None),
+    )
+    return OpdsSystemSettingsPayload(
+        enabled=snapshot.enabled,
+        configured=snapshot.configured,
+        publicBaseUrl=snapshot.public_base_url,
+        catalogUrl=snapshot.catalog_url,
+    )
+
+
+@router.get("/system-settings/opds")
+def get_opds_system_settings(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> OpdsSystemSettingsResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    if not can_manage_system(user):
+        return fail(
+            "需要系统管理权限",
+            status_code=403,
+            code="SYSTEM_MANAGER_REQUIRED",
+        )
+    return ok(_opds_settings_payload(db))
+
+
+@router.put("/system-settings/opds")
+def update_opds_system_settings(
+    payload: UpdateOpdsSystemSettingsRequest,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> OpdsSystemSettingsResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    if not can_manage_system(user):
+        return fail(
+            "需要系统管理权限",
+            status_code=403,
+            code="SYSTEM_MANAGER_REQUIRED",
+        )
+    try:
+        normalized_public_base_url = validate_opds_activation(
+            payload.enabled, payload.public_base_url
+        )
+    except OpdsPublicBaseUrlRequired:
+        return fail(
+            "启用 OPDS 前必须填写公开 URL",
+            status_code=409,
+            code="OPDS_PUBLIC_BASE_URL_REQUIRED",
+        )
+    except OpdsPublicBaseUrlInvalid:
+        return fail(
+            "OPDS 公开 URL 必须是有效的 HTTP 或 HTTPS 地址，且不能包含凭据、查询参数或片段",
+            status_code=400,
+            code="OPDS_PUBLIC_BASE_URL_INVALID",
+        )
+
+    def persist_opds_setting() -> None:
+        upsert_setting(db, OPDS_ENABLED_SETTING_KEY, payload.enabled)
+        upsert_setting(db, OPDS_PUBLIC_BASE_URL_SETTING_KEY, normalized_public_base_url)
+        record_system_event(
+            db,
+            level="info",
+            source="system",
+            actor_type="admin",
+            actor_id=user.id,
+            action="opds.settings.updated",
+            target_type="settings",
+            message="已开启 OPDS" if payload.enabled else "已关闭 OPDS",
+            metadata={"enabled": payload.enabled},
+            commit=False,
+        )
+
+    execute_system_transaction(db, persist_opds_setting)
+    return ok(_opds_settings_payload(db))
 
 
 @router.put("/system-settings")

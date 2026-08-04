@@ -46,7 +46,10 @@
 - 电子书：EPUB、MOBI、AZW、AZW3、PRC、FB2、TXT
 - 文档：PDF
 - 漫画：CBZ、ZIP 图片包
-- 有声书：M4B、M4A、MP3
+- 有声书（常用）：M4B、M4A、M4R、MP3、MP2、AAC、FLAC、WAV、RF64、W64、OGG、OGA、OPUS、WEBA
+- 有声书（兼容导入）：AC3、E-AC-3、AIFF、AMR、APE、CAF、DTS、DSD、MKA、WMA、WavPack 等 ffprobe 可识别的音频格式
+
+有声书保持原编码直接播放，不会在服务器转码。可导入不代表每台设备的浏览器都能解码；播放器会按当前浏览器能力检查，并在不支持时显示具体容器与编码。通用视频容器和 DRM 音频容器不会作为有声书导入。
 
 不支持带 DRM 的 Kindle 文件。
 

@@ -4,7 +4,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, Eye, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { useEffect, useRef } from 'react';
-import type { ManagementWorkSummary } from '../../features/library/public';
+import { mediaKindsLabel, type ManagementWorkSummary } from '../../features/library/public';
 import { useI18n } from '../../i18n/provider';
 import { Badge } from '../ui/badge';
 import type { BadgeTone } from '../ui/badge';
@@ -117,8 +117,7 @@ export function BookTable({
   }
 
   function mediaLabel(book: ManagementWorkSummary) {
-    const kinds = book.availableMediaKinds;
-    return kinds.map((kind) => kind === 'AUDIOBOOK' ? '有声书' : kind === 'COMIC' ? '漫画' : '电子书').join(' · ');
+    return mediaKindsLabel(book.availableMediaKinds, locale) || '—';
   }
 
   function statusLabel(book: ManagementWorkSummary) {
@@ -193,7 +192,6 @@ export function BookTable({
             {selectable ? <th className="w-12 p-4"><input type="checkbox" checked={allSelected} onChange={(event) => onSelectAll?.(event.target.checked)} className="h-4 w-4 accent-[#EF4D2F]" aria-label={allSelected ? i18nAttribute("取消全选当前页") : i18nAttribute("全选当前页")} /></th> : null}
             <th className="w-[250px] p-2">{sortableHeader('标题', 'title')}</th>
             <th className="w-[86px]">{sortableHeader('作者', 'author')}</th>
-            <th className="w-[120px]">{sortableHeader('出版社', 'publisher')}</th>
             <th className="w-[140px]">{sortableHeader('系列', 'series')}</th>
             <th className="w-[66px]"><I18nText>类型</I18nText></th>
             <th className="w-[118px]"><I18nText>标签</I18nText></th>
@@ -229,7 +227,6 @@ export function BookTable({
                   </div>
                 </td>
                 <td data-i18n-skip className="truncate px-2 text-[#5F5954]">{authorLabel ?? '—'}</td>
-                <td data-i18n-skip className="truncate px-2 text-[#5F5954]">{book.publisher ?? '—'}</td>
                 <td data-i18n-skip className="truncate px-2 text-[#5F5954]" title={book.seriesName?.trim() || undefined}>{book.seriesName?.trim() || '—'}</td>
                 <td className="truncate px-2">{mediaLabel(book)}</td>
                 <td className="overflow-hidden px-2">

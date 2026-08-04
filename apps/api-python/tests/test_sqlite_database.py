@@ -49,6 +49,8 @@ EXPECTED_TABLES = {
     "LibraryWorkFacet",
     "MetadataSuggestion",
     "MetadataLookupTask",
+    "MetadataWritebackOperation",
+    "MetadataWritebackTarget",
     "MetadataProviderExecution",
     "MetadataProviderPipeline",
     "MonitorFolder",
@@ -436,7 +438,7 @@ def test_bootstrap_runs_normalization_after_stamping_v14_boundary(tmp_path) -> N
         bootstrap_database(engine, settings)
 
         with engine.connect() as connection:
-            assert _alembic_version(connection) == "0007_media_versions_contract"
+            assert _alembic_version(connection) == "0013_local_metadata_resolution"
             assert (
                 connection.execute(
                     text(

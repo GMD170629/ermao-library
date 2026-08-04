@@ -53,7 +53,8 @@ def test_fb2_inspection_reads_metadata_sections_and_cover(tmp_path: Path) -> Non
 <FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0"
  xmlns:l="http://www.w3.org/1999/xlink">
  <description><title-info><genre>detective</genre><author><first-name>东野</first-name>
- <last-name>圭吾</last-name></author><book-title>放学后</book-title><lang>zh-CN</lang>
+ <last-name>圭吾</last-name></author><book-title>魔法石</book-title><lang>zh-CN</lang>
+ <sequence name="哈利波特" number="1"/>
  <coverpage><image l:href="#cover"/></coverpage></title-info>
  <publish-info><publisher>测试出版社</publisher></publish-info></description>
  <body><section id="one"><title><p>第一章</p></title><p>正文</p></section>
@@ -65,7 +66,9 @@ def test_fb2_inspection_reads_metadata_sections_and_cover(tmp_path: Path) -> Non
 
     metadata = inspect_reflowable_book(source, "FB2")
 
-    assert metadata.title == "放学后"
+    assert metadata.title == "魔法石"
+    assert metadata.series_name == "哈利波特"
+    assert metadata.series_index == 1
     assert metadata.authors == ("东野圭吾",)
     assert metadata.publisher == "测试出版社"
     assert [chapter.title for chapter in metadata.chapters] == ["第一章", "第二章"]
@@ -101,7 +104,49 @@ def test_mobi_inspection_only_publishes_valid_filepos_navigation(
     assert metadata.cover.media_type == "image/jpeg"
 
 
-def _synthetic_mobi() -> bytes:
+def test_mobi_inspection_reads_paired_structured_series_records(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "book.azw3"
+    source.write_bytes(
+        _synthetic_mobi(
+            extra_exth_records=[
+                _exth_text(112, "银河帝国"),
+                _exth_text(113, "2.5"),
+            ]
+        )
+    )
+
+    metadata = inspect_reflowable_book(source, "AZW3")
+
+    assert metadata.series_name == "银河帝国"
+    assert metadata.series_index == 2.5
+    assert metadata.identifier == "42"
+    assert metadata.raw_metadata["seriesName"] == "银河帝国"
+    assert metadata.raw_metadata["seriesIndex"] == "2.5"
+
+
+def test_mobi_source_and_asin_are_not_misclassified_as_series(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "book.mobi"
+    source.write_bytes(
+        _synthetic_mobi(
+            extra_exth_records=[
+                _exth_text(112, "calibre:550e8400-e29b-41d4-a716-446655440000"),
+                _exth_text(113, "B012345678"),
+            ]
+        )
+    )
+
+    metadata = inspect_reflowable_book(source, "MOBI")
+
+    assert metadata.series_name is None
+    assert metadata.series_index is None
+    assert metadata.identifier == "B012345678"
+
+
+def _synthetic_mobi(*, extra_exth_records: list[bytes] | None = None) -> bytes:
     record_zero = bytearray(420)
     struct.pack_into(">H", record_zero, 0, 1)
     struct.pack_into(">H", record_zero, 8, 1)
@@ -118,6 +163,7 @@ def _synthetic_mobi() -> bytes:
         _exth_text(101, "测试出版社"),
         _exth_text(524, "zh-CN"),
         _exth_uint(201, 0),
+        *(extra_exth_records or []),
     ]
     exth = b"EXTH" + struct.pack(
         ">II", 12 + sum(map(len, exth_records)), len(exth_records)

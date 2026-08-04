@@ -269,7 +269,7 @@ async def import_work(
     ]
     if unsupported:
         _raise_import_error(
-            "当前版本仅支持 EPUB、MOBI、AZW、AZW3、PRC、FB2、TXT、CBZ、ZIP、PDF、M4B、M4A、MP3 格式。",
+            "当前版本不支持以下文件后缀。",
             status_code=400,
             details=ImportFileListDetails(files=unsupported),
         )
@@ -303,6 +303,12 @@ async def import_work(
             details=ImportFileListDetails(files=ignored_files),
         )
     monitor_folder = _enabled_monitor_folder_for_path(db, upload_dir)
+    if monitor_folder is None:
+        _raise_import_error(
+            "上传目录必须位于已启用的监控文件夹中",
+            status_code=400,
+            code="UPLOAD_TARGET_NOT_MONITORED",
+        )
     monitor_folder_id = str((monitor_folder or {}).get("id") or "") or None
     if not can_access_monitor_folder(db, user, monitor_folder_id):
         _raise_import_error(
@@ -846,7 +852,6 @@ def retry_import_task(
             original_name=str(task.get("originalName") or source_path.name),
             requested_title=task.get("requestedTitle"),
             requested_author=task.get("requestedAuthor"),
-            work_id=task.get("workId"),
             monitor_folder_id=task.get("monitorFolderId"),
             message="等待后台重试",
         )

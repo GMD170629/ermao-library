@@ -23,6 +23,8 @@ export type ShelfView = {
   total?: number;
   totalPages?: number;
   rules?: SmartShelfRules;
+  rulesStatus: 'VALID' | 'UNSUPPORTED';
+  unsupportedRuleFields: string[];
 };
 
 export type ShelfWriteInput = {

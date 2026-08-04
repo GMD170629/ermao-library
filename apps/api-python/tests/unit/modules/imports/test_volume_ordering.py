@@ -61,3 +61,17 @@ def test_unnumbered_volumes_follow_numbered_volumes_in_natural_order() -> None:
         "appendix-a": 3000,
         "appendix-b": 4000,
     }
+
+
+def test_duplicate_volume_numbers_are_kept_and_tied_by_natural_title() -> None:
+    entries = [
+        _entry("second", "第 2 卷 特装版 10", 2),
+        _entry("first", "第 2 卷 特装版 2", 2),
+        _entry("appendix", "Appendix 1", None),
+    ]
+
+    assert desired_volume_sort_orders(entries) == {
+        "first": 2000,
+        "second": 2001,
+        "appendix": 3000,
+    }

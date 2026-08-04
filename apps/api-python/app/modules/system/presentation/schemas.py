@@ -16,13 +16,33 @@ class BackupArchiveResponse(Response):
     media_type = "application/zip"
 
 
+class FrontendResources(HttpContractModel):
+    latest_version: str = Field(alias="latestVersion")
+    update_required: bool = Field(alias="updateRequired")
+
+
 class AppConfigPayload(HttpContractModel):
     language: Literal["zh-CN", "en-US"]
     supported_locales: list[Literal["zh-CN", "en-US"]] = Field(alias="supportedLocales")
+    frontend_resources: FrontendResources = Field(alias="frontendResources")
 
 
 class SystemSettingsPayload(HttpContractModel):
     settings: dict[str, SystemSettingValue]
+
+
+class OpdsSystemSettingsPayload(HttpContractModel):
+    enabled: bool
+    configured: bool
+    public_base_url: str | None = Field(alias="publicBaseUrl")
+    catalog_url: str | None = Field(alias="catalogUrl")
+
+
+class UpdateOpdsSystemSettingsRequest(HttpContractModel):
+    enabled: bool
+    public_base_url: str | None = Field(
+        default=None, alias="publicBaseUrl", max_length=2048
+    )
 
 
 class Backup(HttpContractModel):
@@ -162,6 +182,7 @@ class ClearedEventsPayload(HttpContractModel):
 
 AppConfigResponse = SuccessEnvelope[AppConfigPayload]
 SystemSettingsResponse = SuccessEnvelope[SystemSettingsPayload]
+OpdsSystemSettingsResponse = SuccessEnvelope[OpdsSystemSettingsPayload]
 BackupsResponse = SuccessEnvelope[BackupsPayload]
 BackupResponse = SuccessEnvelope[BackupPayload]
 BackupRestoreResponse = SuccessEnvelope[BackupRestorePayload]

@@ -11,7 +11,11 @@ from sqlalchemy import inspect
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.modules.system.infrastructure.settings import existing_setting_keys, get_settings_raw
+from app.modules.imports.application.audio_types import SUPPORTED_AUDIO_EXTS
+from app.modules.system.infrastructure.settings import (
+    existing_setting_keys,
+    get_settings_raw,
+)
 
 
 IMPORT_STABILITY_ENABLED_KEY = "import.stabilityCheck.enabled"
@@ -37,10 +41,10 @@ SUPPORTED_IMPORT_EXTENSIONS = (
     ".txt",
     ".pdf",
     ".cbz",
+    ".cbr",
     ".zip",
-    ".m4b",
-    ".m4a",
-    ".mp3",
+    ".rar",
+    *sorted(SUPPORTED_AUDIO_EXTS),
 )
 DEFAULT_STABILITY_SECONDS = 2.0
 MAX_STABILITY_SECONDS = 300.0

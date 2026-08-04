@@ -19,7 +19,9 @@ def _resource(path: str, index: float | None) -> CreateVolumeResource:
 def test_every_supported_format_maps_to_exactly_one_media_kind() -> None:
     assert VolumeFormat.PDF.media_kind is MediaKind.EBOOK
     assert VolumeFormat.AZW3.media_kind is MediaKind.EBOOK
+    assert VolumeFormat.CBR.media_kind is MediaKind.COMIC
     assert VolumeFormat.CBZ.media_kind is MediaKind.COMIC
+    assert VolumeFormat.RAR.media_kind is MediaKind.COMIC
     assert VolumeFormat.MP3.media_kind is MediaKind.AUDIOBOOK
 
 

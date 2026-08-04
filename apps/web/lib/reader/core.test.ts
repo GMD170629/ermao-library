@@ -119,9 +119,33 @@ test('session reducer rejects stale operations and events from another session',
       sessionId: state.sessionId,
       operation: bootstrap,
       occurredAt: 1,
+      phase: 'downloading-content'
+    }
+  });
+  state = readerSessionReducer(state, {
+    type: 'adapter/event',
+    event: {
+      type: 'download-progress',
+      sessionId: state.sessionId,
+      operation: bootstrap,
+      occurredAt: 1,
+      loadedBytes: 512,
+      totalBytes: 1024,
+      percent: 50
+    }
+  });
+  assert.deepEqual(state.downloadProgress, { loadedBytes: 512, totalBytes: 1024, percent: 50 });
+  state = readerSessionReducer(state, {
+    type: 'adapter/event',
+    event: {
+      type: 'phase-changed',
+      sessionId: state.sessionId,
+      operation: bootstrap,
+      occurredAt: 1,
       phase: 'generating-pagination'
     }
   });
+  assert.equal(state.downloadProgress, null);
   state = readerSessionReducer(state, {
     type: 'adapter/event',
     event: {

@@ -33,6 +33,7 @@ from app.core.config import Settings, get_settings
 from app.core.i18n import configured_locale
 from app.db.session import get_db
 from app.models.auth import PasswordResetToken, Session as UserSession, User, cuid, db_timestamp
+from app.modules.auth.application.password_authentication import normalize_login_email
 from app.modules.auth.presentation.requests import (
     LoginRequest,
     PasswordResetConfirmRequest,
@@ -94,7 +95,7 @@ ALLOWED_AVATAR_FORMATS = {"JPEG", "PNG", "WEBP"}
 
 
 def _normalized_email(value: object) -> str:
-    return str(value).strip().lower()
+    return normalize_login_email(str(value))
 
 
 def _authenticated_user(db: Session, request: Request, settings: Settings) -> User | None:

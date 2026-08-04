@@ -57,6 +57,22 @@ class ReaderFileDto:
     fingerprint: str | None
     full_hash: str | None
     mtime_ms: int
+    codec: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ReaderEpubSourceDto:
+    file_id: str
+    path: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReaderRecoveredEpubChapterDto:
+    title: str
+    href: str
+    sort_order: int
+    idref: str | None
+    media_type: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,7 +102,20 @@ class ReaderProgressDto:
     mutation_id: str | None
     client_id: str | None
     client_sequence: int | None
+    progressed_at: datetime
+    source_protocol: str
+    source_device_name: str | None
     updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ReaderExternalProgressDto:
+    volume_id: str
+    progression: float
+    modified_at: datetime
+    device_id: str
+    device_name: str
+    references: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)

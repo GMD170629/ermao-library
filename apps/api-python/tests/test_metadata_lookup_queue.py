@@ -5,7 +5,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import OperationalError
 
 from app.models.import_pipeline import Source
-from app.models.organize import MetadataProviderPipeline
+from app.models.organize import MetadataProviderPipeline, OrganizePolicy
 from app.services import metadata_lookup_queue as queue
 from app.services.metadata_lookup_queue import (
     process_metadata_lookup_task,
@@ -42,11 +42,11 @@ def _insert_lookup_fixture(
     author="岛田庄司",
     provider_order=None,
     local_cover="covers/local.jpg",
+    trigger="SCHEDULE",
 ):
     for statement in (
         "ALTER TABLE LibraryWork ADD COLUMN seriesName TEXT",
         "ALTER TABLE LibraryWork ADD COLUMN seriesIndex REAL",
-        "ALTER TABLE LibraryWork ADD COLUMN publishedYear INTEGER",
         "ALTER TABLE OrganizeJob ADD COLUMN startedAt TEXT",
         "ALTER TABLE OrganizeJob ADD COLUMN finishedAt TEXT",
     ):
@@ -58,12 +58,12 @@ def _insert_lookup_fixture(
         text(
             """
             INSERT INTO LibraryWork (
-                id, origin, title, normalizedTitle, author, normalizedAuthor, workType,
+                id, origin, title, normalizedTitle, author, normalizedAuthor,
                 publicationStatus, trackingStatus, tags, metadataQuality, organizeStatus, coverPath,
                 coverStatus, hidden, organized, mergeKey, createdAt, updatedAt
             ) VALUES (
                 'work-lookup', 'MANUAL', :title, :title, :author, :author,
-                'EPUB', 'UNKNOWN', 'NOT_TRACKING', '["epub"]', 0, 'LOOKUP_PENDING',
+                'UNKNOWN', 'NOT_TRACKING', '["epub"]', 0, 'LOOKUP_PENDING',
                 :cover_path, :cover_status, 0, 0, :merge_key, 'now', 'now'
             )
             """
@@ -117,13 +117,14 @@ def _insert_lookup_fixture(
         text(
             """
             INSERT INTO OrganizeJob (
-                id, workId, volumeId, importTaskId, status, issueCodes, summary, createdAt, updatedAt
+                id, workId, volumeId, importTaskId, trigger, status, issueCodes, summary, createdAt, updatedAt
             ) VALUES (
-                'job-lookup', 'work-lookup', 'volume-lookup', 'import-lookup', 'LOOKUP_PENDING', '[]',
+                'job-lookup', 'work-lookup', 'volume-lookup', 'import-lookup', :trigger, 'LOOKUP_PENDING', '[]',
                 '等待元数据', 'now', 'now'
             )
             """
-        )
+        ),
+        {"trigger": trigger},
     )
     db.execute(
         text(
@@ -159,9 +160,12 @@ def test_lookup_applies_exact_candidate_without_overwriting_identity_or_local_co
         "author": "岛田庄司",
         "description": "外部简介",
         "tags": ["推理", "本格"],
-        "publisher": "新星出版社",
         "seriesName": "午夜文库",
-        "publishedYear": 2024,
+        "volumeMetadata": {
+            "publishedAt": "2024-01-01T00:00:00+00:00",
+            "language": "zh-CN",
+            "isbn": "9787513340000",
+        },
         "coverUrl": "https://example.invalid/cover.jpg",
     }
     monkeypatch.setattr(
@@ -194,7 +198,6 @@ def test_lookup_applies_exact_candidate_without_overwriting_identity_or_local_co
     assert work["coverPath"] == "covers/local.jpg"
     assert json.loads(work["tags"]) == ["epub"]
     assert work["seriesName"] == "午夜文库"
-    assert work["publishedYear"] == 2024
     assert work["organized"] == 1
     assert work["organizeStatus"] == "APPLIED"
     assert (
@@ -203,12 +206,20 @@ def test_lookup_applies_exact_candidate_without_overwriting_identity_or_local_co
         ).scalar()
         == "APPLIED"
     )
-    assert (
+    volume = (
         db_session.execute(
-            text("SELECT publisher FROM LibraryVolume WHERE id = 'volume-lookup'")
-        ).scalar()
-        == "新星出版社"
+            text(
+                "SELECT publisher, publishedAt, language, isbn FROM LibraryVolume "
+                "WHERE id = 'volume-lookup'"
+            )
+        )
+        .mappings()
+        .one()
     )
+    assert volume["publisher"] is None
+    assert volume["publishedAt"] is not None
+    assert volume["language"] == "zh-CN"
+    assert volume["isbn"] == "9787513340000"
     lookup = (
         db_session.execute(
             text(
@@ -220,7 +231,9 @@ def test_lookup_applies_exact_candidate_without_overwriting_identity_or_local_co
     )
     assert lookup["status"] == "COMPLETED"
     assert lookup["resultSource"] == "douban"
-    assert "publisher" in json.loads(lookup["appliedFields"])
+    assert {"publishedAt", "language", "isbn"} <= set(
+        json.loads(lookup["appliedFields"])
+    )
     assert (
         db_session.execute(
             text(
@@ -307,7 +320,7 @@ def test_lookup_applies_bangumi_candidate_when_local_title_is_an_exact_alias(
         .one()
     )
     assert dict(work) == {
-        "title": "拜托请穿上，鹰峰同学",
+        "title": "鹰峰同学请穿上衣服",
         "description": "Bangumi 条目简介",
         "organized": 1,
         "organizeStatus": "APPLIED",
@@ -387,6 +400,54 @@ def test_lookup_uses_provider_order_and_author_to_disambiguate(
     )
 
 
+def test_automatic_lookup_passes_request_gate_to_builtin_provider(
+    db_session, test_settings, monkeypatch
+):
+    create_worker_tables(db_session)
+    task = _insert_lookup_fixture(db_session, provider_order=["douban"])
+    gate = object()
+    received_gates: list[object | None] = []
+
+    def search(_db, _context, _provider, *_args, **kwargs):
+        received_gates.append(kwargs.get("automatic_request_gate"))
+        return {"enabled": True, "candidates": []}
+
+    monkeypatch.setattr(queue, "search_with_metadata_provider", search)
+
+    assert (
+        process_metadata_lookup_task(
+            db_session, test_settings, task, automatic_request_gate=gate
+        )
+        == "NO_MATCH"
+    )
+    assert received_gates == [gate]
+
+
+def test_manual_rerecognition_does_not_pass_automatic_request_gate(
+    db_session, test_settings, monkeypatch
+):
+    create_worker_tables(db_session)
+    task = _insert_lookup_fixture(
+        db_session, provider_order=["douban"], trigger="MANUAL"
+    )
+    gate = object()
+    received_gates: list[object | None] = []
+
+    def search(_db, _context, _provider, *_args, **kwargs):
+        received_gates.append(kwargs.get("automatic_request_gate"))
+        return {"enabled": True, "candidates": []}
+
+    monkeypatch.setattr(queue, "search_with_metadata_provider", search)
+
+    assert (
+        process_metadata_lookup_task(
+            db_session, test_settings, task, automatic_request_gate=gate
+        )
+        == "NO_MATCH"
+    )
+    assert received_gates == [None]
+
+
 def test_lookup_keeps_ambiguous_exact_candidates_for_review(
     db_session, test_settings, monkeypatch
 ):
@@ -464,7 +525,7 @@ def test_lookup_uses_enabled_source_without_legacy_system_settings(
     create_worker_tables(db_session)
     list_metadata_providers(db_session)
     list_metadata_provider_pipelines(db_session)
-    pipeline = db_session.get(MetadataProviderPipeline, ("ebook", "bangumi"))
+    pipeline = db_session.get(MetadataProviderPipeline, ("EBOOK", "bangumi"))
     assert pipeline is not None
     pipeline.enabled = True
     source = db_session.scalar(
@@ -600,26 +661,20 @@ def test_lookup_uses_three_retry_delays_then_fails(
     )
 
 
-def test_lookup_keeps_existing_identity_when_overwrite_is_disabled_and_fills_other_gaps(
+def test_lookup_updates_identity_and_fills_other_gaps(
     db_session, test_settings, monkeypatch
 ):
     create_worker_tables(db_session)
+    policy = db_session.get(OrganizePolicy, "default")
+    if policy is None:
+        policy = OrganizePolicy(id="default", prefer_local_metadata=False)
+        db_session.add(policy)
+    else:
+        policy.prefer_local_metadata = False
+    db_session.commit()
     task = _insert_lookup_fixture(
         db_session, title="鹰峰同学请穿上衣服", author="柊裕一"
     )
-    db_session.execute(
-        text(
-            "CREATE TABLE IF NOT EXISTS OrganizePolicy (id TEXT PRIMARY KEY, overwriteTitleAuthor INTEGER NOT NULL DEFAULT 1)"
-        )
-    )
-    db_session.execute(
-        text(
-            "INSERT INTO OrganizePolicy "
-            "(id, overwriteTitleAuthor, createdAt, updatedAt) "
-            "VALUES ('default', 0, 'now', 'now')"
-        )
-    )
-    db_session.commit()
     candidate = {
         "id": "douban-auto-apply-off",
         "source": "douban",
@@ -651,16 +706,16 @@ def test_lookup_keeps_existing_identity_when_overwrite_is_disabled_and_fills_oth
         .one()
     )
     assert dict(work) == {
-        "title": "鹰峰同学请穿上衣服",
-        "author": "柊裕一",
+        "title": "拜托请穿上，鹰峰同学",
+        "author": "柊裕二",
         "description": "应自动补全的简介",
-        "tags": '["epub"]',
+        "tags": '["推理"]',
         "organized": 1,
     }
     lookup = db_session.execute(
         text("SELECT appliedFields FROM MetadataLookupTask WHERE id = 'lookup-1'")
     ).scalar()
-    assert json.loads(lookup) == ["description"]
+    assert json.loads(lookup) == ["title", "author", "description", "tags"]
     assert (
         db_session.execute(
             text("SELECT status FROM OrganizeJob WHERE id = 'job-lookup'")
@@ -705,7 +760,8 @@ def test_provider_enabled_flags_cannot_be_bypassed_with_force(db_session):
     create_worker_tables(db_session)
     _disable_all_metadata_providers(db_session)
     context = {
-        "work": {"title": "测试图书", "workType": "EPUB"},
+        "work": {"title": "测试图书"},
+        "mediaVersion": {"mediaKind": "EBOOK"},
         "mediaVersions": [],
         "files": [],
         "metadata": [],
@@ -803,7 +859,8 @@ def test_ai_metadata_cache_reuses_only_non_empty_successes(db_session, monkeypat
     )
     db_session.commit()
     context = {
-        "work": {"title": "AI 测试图书", "workType": "EPUB"},
+        "work": {"title": "AI 测试图书"},
+        "mediaVersion": {"mediaKind": "EBOOK"},
         "mediaVersions": [],
         "files": [],
         "metadata": [],

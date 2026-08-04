@@ -7,7 +7,7 @@ from datetime import datetime
 from pydantic import Field
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
-
+from app.contracts.metadata_writeback import MetadataWritebackOperationContract
 
 ProviderConfigValue = str | bool | int | float | list[str] | None
 
@@ -23,6 +23,11 @@ class ProviderConfigField(HttpContractModel):
     default: ProviderConfigValue
 
 
+class ProviderAutomaticRateLimit(HttpContractModel):
+    requests: int
+    period_seconds: float = Field(alias="periodSeconds")
+
+
 class MetadataProvider(HttpContractModel):
     id: str
     source_id: str | None = Field(alias="sourceId")
@@ -30,9 +35,12 @@ class MetadataProvider(HttpContractModel):
     version: str
     description: str
     mode: str
-    work_types: list[str] = Field(alias="workTypes")
+    media_kinds: list[str] = Field(alias="mediaKinds")
     fields: list[str]
     capabilities: list[str]
+    automatic_rate_limit: ProviderAutomaticRateLimit | None = Field(
+        alias="automaticRateLimit"
+    )
     config_fields: list[ProviderConfigField] = Field(alias="configFields")
     config: dict[str, ProviderConfigValue]
     configured_secrets: dict[str, bool] = Field(alias="configuredSecrets")
@@ -54,7 +62,7 @@ class PipelineProvider(HttpContractModel):
 
 
 class MetadataPipeline(HttpContractModel):
-    work_type: str = Field(alias="workType")
+    media_kind: str = Field(alias="mediaKind")
     providers: list[PipelineProvider]
 
 
@@ -77,6 +85,11 @@ class ProviderTestPayload(HttpContractModel):
     provider: MetadataProvider
 
 
+class MetadataWritebackPayload(HttpContractModel):
+    operation: MetadataWritebackOperationContract
+
+
 ProvidersResponse = SuccessEnvelope[ProvidersPayload]
 ProviderResponse = SuccessEnvelope[ProviderPayload]
 ProviderTestResponse = SuccessEnvelope[ProviderTestPayload]
+MetadataWritebackResponse = SuccessEnvelope[MetadataWritebackPayload]

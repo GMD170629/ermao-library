@@ -17,3 +17,16 @@ test('a failed preparation task does not strand an already accepted app update',
   preparation.detail.waitUntil(Promise.reject(new Error('offline')));
   await assert.doesNotReject(preparation.wait());
 });
+
+test('a stalled preparation task is bounded by the forced-update timeout', async () => {
+  const target = new EventTarget();
+  target.addEventListener('shuku:before-pwa-update', (event) => {
+    const detail = (event as CustomEvent<{ waitUntil(task: Promise<unknown>): void }>).detail;
+    detail.waitUntil(new Promise(() => undefined));
+  });
+  const startedAt = Date.now();
+  await import('./update-coordination').then(({ prepareForPwaUpdate }) =>
+    prepareForPwaUpdate(target as unknown as Window, 10)
+  );
+  assert.ok(Date.now() - startedAt < 500);
+});

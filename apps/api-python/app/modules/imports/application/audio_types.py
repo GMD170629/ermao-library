@@ -7,7 +7,94 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-SUPPORTED_AUDIO_EXTS = {".m4b", ".m4a", ".mp3"}
+LEGACY_AUDIO_EXTS = frozenset({".m4b", ".m4a", ".mp3"})
+SUPPORTED_AUDIO_EXTS = frozenset(
+    {
+        ".aac",
+        ".ac3",
+        ".adx",
+        ".aif",
+        ".aifc",
+        ".aiff",
+        ".amr",
+        ".ape",
+        ".aptx",
+        ".aptxhd",
+        ".au",
+        ".caf",
+        ".dff",
+        ".dsf",
+        ".dts",
+        ".eac3",
+        ".flac",
+        ".g722",
+        ".g726",
+        ".gsm",
+        ".lbc",
+        ".m4a",
+        ".m4b",
+        ".m4r",
+        ".mka",
+        ".mlp",
+        ".mp2",
+        ".mp3",
+        ".mpc",
+        ".oga",
+        ".ogg",
+        ".oma",
+        ".opus",
+        ".qcp",
+        ".ra",
+        ".rf64",
+        ".shn",
+        ".snd",
+        ".sph",
+        ".spx",
+        ".tak",
+        ".thd",
+        ".tta",
+        ".voc",
+        ".w64",
+        ".wav",
+        ".wave",
+        ".weba",
+        ".wma",
+        ".wv",
+        ".xma",
+    }
+)
+NEW_AUDIO_EXTS = SUPPORTED_AUDIO_EXTS - LEGACY_AUDIO_EXTS
+
+_AUDIO_MIME_TYPES = {
+    ".aac": "audio/aac",
+    ".ac3": "audio/ac3",
+    ".aif": "audio/aiff",
+    ".aifc": "audio/aiff",
+    ".aiff": "audio/aiff",
+    ".amr": "audio/amr",
+    ".au": "audio/basic",
+    ".dts": "audio/vnd.dts",
+    ".eac3": "audio/eac3",
+    ".flac": "audio/flac",
+    ".m4a": "audio/mp4",
+    ".m4b": "audio/mp4",
+    ".m4r": "audio/mp4",
+    ".mka": "audio/x-matroska",
+    ".mp2": "audio/mpeg",
+    ".mp3": "audio/mpeg",
+    ".oga": "audio/ogg",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".ra": "audio/vnd.rn-realaudio",
+    ".rf64": "audio/wav",
+    ".snd": "audio/basic",
+    ".spx": "audio/ogg",
+    ".w64": "audio/wav",
+    ".wav": "audio/wav",
+    ".wave": "audio/wav",
+    ".weba": "audio/webm",
+    ".wma": "audio/x-ms-wma",
+}
 MAX_AUDIO_CHAPTERS = 10_000
 MAX_AUDIO_BUNDLE_TRACKS = 10_000
 DISC_DIRECTORY_PATTERN = re.compile(
@@ -62,6 +149,8 @@ class AudioFileMetadata:
     channels: int | None
     disc_number: int | None
     track_number: int | None
+    series_name: str | None = None
+    volume_index: float | None = None
     chapters: tuple[AudioChapterMetadata, ...] = ()
     raw_tags: Mapping[str, object] = field(default_factory=dict)
     cover_data: bytes | None = None
@@ -97,6 +186,18 @@ class AudioBundleStructure:
 
 def is_supported_audio_file(path: str | Path) -> bool:
     return Path(path).suffix.lower() in SUPPORTED_AUDIO_EXTS
+
+
+def audio_mime_type(path: str | Path) -> str:
+    """Return the stable HTTP media type for an admitted audio container."""
+
+    extension = Path(path).suffix.lower()
+    return _AUDIO_MIME_TYPES.get(
+        extension,
+        f"audio/x-{extension.removeprefix('.')}"
+        if extension in SUPPORTED_AUDIO_EXTS
+        else "application/octet-stream",
+    )
 
 
 def audio_episode_number(path: str | Path) -> int | None:

@@ -1,10 +1,14 @@
 import json
 
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session
+
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
 from app.models.library import LibraryMediaVersion, LibraryVolume
 from app.models.organize import MetadataLookupTask, OrganizeJob
+from app.modules.metadata.presentation.schemas import MetadataProvider
 from app.services.metadata_provider_registry import (
     enabled_metadata_provider_ids,
     get_metadata_provider,
@@ -23,28 +27,39 @@ from app.services.organize_scheduler import (
     update_organize_policy,
 )
 from app.services.organize_service import merge_works
-from sqlalchemy import select, text
-from sqlalchemy.orm import Session
 
 
 def _insert_work(
-    db: Session, work_id: str, *, created_at: str = "2026-07-21T00:00:00+00:00"
+    db: Session,
+    work_id: str,
+    *,
+    created_at: str = "2026-07-21T00:00:00+00:00",
+    with_media_version: bool = True,
 ) -> None:
     db.execute(
         text(
             """
             INSERT INTO `LibraryWork`
                 (`id`, `origin`, `title`, `normalizedTitle`, `author`, `normalizedAuthor`,
-                 `workType`, `tags`, `metadataQuality`, `organizeStatus`, `hidden`, `organized`,
+                 `tags`, `metadataQuality`, `organizeStatus`, `hidden`, `organized`,
                  `createdAt`, `updatedAt`)
             VALUES
-                (:id, 'MANUAL', :title, :title, '未知作者', '未知作者', 'EPUB', '[]', 0,
+                (:id, 'MANUAL', :title, :title, '未知作者', '未知作者', '[]', 0,
                  'UNASSESSED', 0, 0, :created_at, :created_at)
             """
         ),
         {"id": work_id, "title": f"测试作品 {work_id}", "created_at": created_at},
     )
     db.commit()
+    if with_media_version:
+        _insert_volume(
+            db,
+            work_id=work_id,
+            media_version_id=f"media-{work_id}",
+            media_kind="EBOOK",
+            volume_id=f"volume-{work_id}",
+            volume_format="EPUB",
+        )
 
 
 def _insert_volume(
@@ -83,7 +98,7 @@ def test_organize_jobs_target_the_first_stably_ordered_volume(tmp_path) -> None:
     try:
         bootstrap_database(engine, settings)
         with Session(engine) as db:
-            _insert_work(db, "volume-target-work")
+            _insert_work(db, "volume-target-work", with_media_version=False)
             _insert_volume(
                 db,
                 work_id="volume-target-work",
@@ -136,8 +151,8 @@ def test_merge_works_coalesces_media_versions_and_appends_volumes(tmp_path) -> N
     try:
         bootstrap_database(engine, settings)
         with Session(engine) as db:
-            _insert_work(db, "target-work")
-            _insert_work(db, "source-work")
+            _insert_work(db, "target-work", with_media_version=False)
+            _insert_work(db, "source-work", with_media_version=False)
             _insert_volume(
                 db,
                 work_id="target-work",
@@ -449,10 +464,38 @@ def test_provider_registry_seeds_builtins_and_never_returns_secret_values(
     try:
         bootstrap_database(engine, settings)
         with Session(engine) as db:
-            assert {provider["id"] for provider in list_metadata_providers(db)} == {
+            providers = {
+                provider["id"]: provider for provider in list_metadata_providers(db)
+            }
+            assert set(providers) == {
                 "douban",
                 "bangumi",
                 "ai",
+            }
+            assert providers["douban"]["automaticRateLimit"] == {
+                "requests": 1,
+                "period_seconds": 5.0,
+            }
+            assert providers["bangumi"]["automaticRateLimit"] == {
+                "requests": 4,
+                "period_seconds": 1.0,
+            }
+            assert providers["ai"]["automaticRateLimit"] is None
+            douban_contract = MetadataProvider.model_validate(
+                providers["douban"]
+            ).model_dump(by_alias=True)
+            assert douban_contract["automaticRateLimit"] == {
+                "requests": 1,
+                "periodSeconds": 5.0,
+            }
+            unchanged_douban = update_metadata_provider(
+                db,
+                "douban",
+                {"automaticRateLimit": {"requests": 999, "periodSeconds": 0.01}},
+            )
+            assert unchanged_douban["automaticRateLimit"] == {
+                "requests": 1,
+                "period_seconds": 5.0,
             }
             updated = update_metadata_provider(
                 db,
@@ -473,7 +516,14 @@ def test_provider_registry_seeds_builtins_and_never_returns_secret_values(
             )
             policy = get_organize_policy(db)
             assert policy["scheduleMode"] == "MANUAL"
-            assert policy["overwriteTitleAuthor"] is True
+            assert policy["writeMetadataToFiles"] is False
+            assert policy["preferLocalMetadata"] is True
+            assert policy["localMetadataPriority"] == [
+                "SIDECAR_OPF",
+                "EMBEDDED",
+                "PATH",
+            ]
+            assert "overwriteTitleAuthor" not in policy
             assert policy["rules"] == {"unrecognized": True, "missingMetadata": True}
     finally:
         engine.dispose()
@@ -486,29 +536,31 @@ def test_provider_pipelines_are_independent_ordered_and_composable(tmp_path) -> 
         bootstrap_database(engine, settings)
         with Session(engine) as db:
             pipelines = {
-                item["workType"]: item["providers"]
+                item["mediaKind"]: item["providers"]
                 for item in list_metadata_provider_pipelines(db)
             }
-            assert [item["providerId"] for item in pipelines["ebook"]] == [
+            assert [item["providerId"] for item in pipelines["EBOOK"]] == [
                 "douban",
                 "bangumi",
                 "ai",
             ]
-            assert [item["providerId"] for item in pipelines["comic"]] == [
+            assert [item["providerId"] for item in pipelines["COMIC"]] == [
                 "bangumi",
                 "ai",
             ]
-            assert [item["providerId"] for item in pipelines["audiobook"]] == [
+            assert [item["providerId"] for item in pipelines["AUDIOBOOK"]] == [
                 "douban",
                 "ai",
             ]
             assert {
-                work_type: [item["providerId"] for item in providers if item["enabled"]]
-                for work_type, providers in pipelines.items()
+                media_kind: [
+                    item["providerId"] for item in providers if item["enabled"]
+                ]
+                for media_kind, providers in pipelines.items()
             } == {
-                "ebook": ["douban", "bangumi"],
-                "comic": ["bangumi"],
-                "audiobook": ["douban"],
+                "EBOOK": ["douban", "bangumi"],
+                "COMIC": ["bangumi"],
+                "AUDIOBOOK": ["douban"],
             }
 
             update_metadata_provider(
@@ -524,25 +576,25 @@ def test_provider_pipelines_are_independent_ordered_and_composable(tmp_path) -> 
             )
             update_metadata_provider_pipeline(
                 db,
-                "ebook",
+                "EBOOK",
                 [
                     {"providerId": "ai", "enabled": True},
                     {"providerId": "douban", "enabled": True},
                 ],
             )
             update_metadata_provider_pipeline(
-                db, "comic", [{"providerId": "bangumi", "enabled": True}]
+                db, "COMIC", [{"providerId": "bangumi", "enabled": True}]
             )
 
-            assert enabled_metadata_provider_ids(db, "EPUB") == ["ai", "douban"]
+            assert enabled_metadata_provider_ids(db, "EBOOK") == ["ai", "douban"]
             assert enabled_metadata_provider_ids(db, "COMIC") == ["bangumi"]
-            assert enabled_metadata_provider_ids(db, "AUDIO") == ["douban"]
+            assert enabled_metadata_provider_ids(db, "AUDIOBOOK") == ["douban"]
             pipelines = {
-                item["workType"]: item["providers"]
+                item["mediaKind"]: item["providers"]
                 for item in list_metadata_provider_pipelines(db)
             }
-            assert [item["providerId"] for item in pipelines["comic"]] == ["bangumi"]
-            assert [item["providerId"] for item in pipelines["audiobook"]] == [
+            assert [item["providerId"] for item in pipelines["COMIC"]] == ["bangumi"]
+            assert [item["providerId"] for item in pipelines["AUDIOBOOK"]] == [
                 "douban",
                 "ai",
             ]

@@ -92,7 +92,6 @@ def insert_import_task(
                 id=work_id,
                 title=source.stem,
                 normalized_title=source.stem.casefold(),
-                work_type="NOVEL",
                 tags="[]",
             )
         )
@@ -211,6 +210,11 @@ def test_txt_encoding_detection_rejects_nul_inside_content(tmp_path: Path) -> No
 @pytest.mark.parametrize("extension", ["mobi", "azw", "azw3", "prc", "fb2", "txt"])
 def test_download_entry_accepts_all_convertible_text_formats(extension):
     assert_allowed_extension(f"novel.{extension}")
+
+
+@pytest.mark.parametrize("extension", ["cbr", "rar"])
+def test_download_entry_accepts_rar_comic_formats(extension):
+    assert_allowed_extension(f"comic.{extension}")
 
 
 def test_conversion_validates_output_and_reuses_versioned_cache(
@@ -412,7 +416,6 @@ def test_explicit_conversion_records_text_ebook_provenance(
             source_file_path=source,
             origin="DEFERRED_CONVERSION",
             original_name=source.name,
-            requested_work_id=source_result.work_id,
         ),
     )
 
@@ -444,7 +447,6 @@ def test_explicit_conversion_records_text_ebook_provenance(
             source_file_path=source,
             origin="DEFERRED_CONVERSION",
             original_name=source.name,
-            requested_work_id=source_result.work_id,
         ),
     )
     assert retried.volume_id == result.volume_id
@@ -803,6 +805,11 @@ def test_watched_azw3_task_can_be_retried_after_upload_only_saves_the_source(
 
     upload_dir = test_settings.resolved_monitor_root / "uploads"
     upload_dir.mkdir()
+    monitored = client.post(
+        "/api/monitor-folders",
+        json={"name": "Conversion uploads", "rootPath": str(upload_dir), "enabled": True},
+    )
+    assert monitored.status_code == 201
     response = client.post(
         "/api/works/import",
         data={"targetPath": str(upload_dir)},
@@ -811,7 +818,7 @@ def test_watched_azw3_task_can_be_retried_after_upload_only_saves_the_source(
     assert response.status_code == 200
     payload = response.json()["data"]
     assert payload["saved"] == 1
-    assert payload["autoImport"] is False
+    assert payload["autoImport"] is True
     assert db_session.execute(text("SELECT COUNT(*) FROM ImportTask")).scalar_one() == 0
     source_path = Path(payload["results"][0]["sourcePath"])
     task, created = enqueue_import_task(

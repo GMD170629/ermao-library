@@ -18,18 +18,35 @@ class ProviderConfigField:
 
 
 @dataclass(frozen=True)
+class AutomaticRateLimit:
+    requests: int
+    period_seconds: float
+
+    def __post_init__(self) -> None:
+        if self.requests <= 0:
+            raise ValueError("requests must be greater than zero")
+        if self.period_seconds <= 0:
+            raise ValueError("period_seconds must be greater than zero")
+
+    @property
+    def minimum_interval_seconds(self) -> float:
+        return self.period_seconds / self.requests
+
+
+@dataclass(frozen=True)
 class ProviderManifest:
     id: str
     name: str
     version: str
     description: str
     mode: str
-    work_types: tuple[str, ...]
+    media_kinds: tuple[str, ...]
     fields: tuple[str, ...]
     capabilities: tuple[str, ...]
     config_fields: tuple[ProviderConfigField, ...]
     default_priority: int
     enabled_by_default: bool = False
+    automatic_rate_limit: AutomaticRateLimit | None = None
 
 
 BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
@@ -39,15 +56,13 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
         version="builtin",
         description="用于电子书和有声书，通过豆瓣读书网页获取图书信息。",
         mode="search",
-        work_types=("ebook", "audiobook"),
+        media_kinds=("EBOOK", "AUDIOBOOK"),
         fields=(
             "title",
             "author",
-            "publisher",
             "description",
             "tags",
             "seriesName",
-            "publishedYear",
             "coverUrl",
         ),
         capabilities=("automatic", "manual-search", "cover"),
@@ -68,6 +83,9 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
         ),
         default_priority=100,
         enabled_by_default=True,
+        # Douban's robots policy publishes Crawl-delay: 5 guidance.
+        # https://www.douban.com/robots.txt
+        automatic_rate_limit=AutomaticRateLimit(requests=1, period_seconds=5.0),
     ),
     ProviderManifest(
         id="bangumi",
@@ -75,15 +93,13 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
         version="builtin",
         description="用于电子书和漫画，通过 Bangumi 官方 API 获取条目与别名。",
         mode="search",
-        work_types=("ebook", "comic"),
+        media_kinds=("EBOOK", "COMIC"),
         fields=(
             "title",
             "author",
-            "publisher",
             "description",
             "tags",
             "seriesName",
-            "publishedYear",
             "coverUrl",
         ),
         capabilities=("automatic", "manual-search", "cover", "aliases"),
@@ -110,6 +126,10 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
         ),
         default_priority=110,
         enabled_by_default=True,
+        # Bangumi's server defaults to 3,000 requests per 10 minutes. Keep
+        # 20% headroom below that published implementation ceiling.
+        # https://github.com/bangumi/server/blob/master/config/config.go
+        automatic_rate_limit=AutomaticRateLimit(requests=4, period_seconds=1.0),
     ),
     ProviderManifest(
         id="ai",
@@ -117,7 +137,7 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
         version="builtin",
         description="使用 OpenAI-compatible Chat Completions 推断缺失元数据。",
         mode="infer",
-        work_types=("ebook", "comic", "audiobook"),
+        media_kinds=("EBOOK", "COMIC", "AUDIOBOOK"),
         fields=(
             "title",
             "author",
@@ -125,7 +145,6 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
             "tags",
             "seriesName",
             "seriesIndex",
-            "publishedYear",
         ),
         capabilities=("automatic", "manual-search", "fallback"),
         config_fields=(

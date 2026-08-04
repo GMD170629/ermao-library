@@ -18,12 +18,12 @@ from app.core.config import Settings
 from app.modules.imports.application.identity_policy import (
     contains_explicit_volume_range,
     split_explicit_volume,
-    split_standalone_numeric_volume,
+    split_numeric_volume_fallback,
 )
 from app.services.metadata_provider_registry import metadata_provider_runtime_config
 
 UNKNOWN_AUTHOR = "未知作者"
-IDENTITY_PARSER_VERSION = 7
+IDENTITY_PARSER_VERSION = 8
 
 
 @dataclass(frozen=True)
@@ -31,13 +31,12 @@ class BookIdentity:
     title: str
     author: str
     volume_index: float | None
-    source: Literal["ai", "regex", "existing_work"]
+    source: Literal["ai", "regex"]
     confidence: float
     logical_path: str
     fallback_reason: str | None = None
     fallback_code: str | None = None
     cache_hit: bool = False
-    reused_work_id: str | None = None
 
     def raw_metadata(self) -> dict[str, Any]:
         return {
@@ -58,7 +57,6 @@ class BookIdentity:
             "fallbackReason": self.fallback_reason,
             "fallbackCode": self.fallback_code,
             "cacheHit": self.cache_hit,
-            "reusedWorkId": self.reused_work_id,
         }
 
 
@@ -655,7 +653,7 @@ def _volume_index(value: str) -> float | None:
         match = re.search(pattern, value, re.I)
         if match:
             return float(match.group(1))
-    numeric_fallback = split_standalone_numeric_volume(value)
+    numeric_fallback = split_numeric_volume_fallback(value)
     if numeric_fallback is not None:
         return numeric_fallback[1]
     return None
@@ -677,7 +675,7 @@ def _strip_volume_suffix(value: str) -> tuple[str, float | None]:
         match = re.match(pattern, cleaned, re.I)
         if match and match.group(1).strip():
             return _clean_title(match.group(1)), float(match.group(2))
-    numeric_fallback = split_standalone_numeric_volume(cleaned)
+    numeric_fallback = split_numeric_volume_fallback(cleaned)
     if numeric_fallback is not None:
         title, volume_index = numeric_fallback
         return _clean_title(title), volume_index

@@ -1,6 +1,8 @@
-export type VolumeFormat = 'COMIC' | 'EPUB' | 'PDF' | 'AUDIO' | 'MOBI' | 'AZW' | 'AZW3' | 'PRC' | 'FB2' | 'TXT';
+export type VolumeFormat = 'COMIC' | 'CBZ' | 'CBR' | 'RAR' | 'ZIP' | 'EPUB' | 'PDF' | 'AUDIO' | 'MP3' | 'M4A' | 'M4B' | 'MOBI' | 'AZW' | 'AZW3' | 'PRC' | 'FB2' | 'TXT';
 export type ReadingFormat = VolumeFormat;
 export type MediaKind = 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
+export type ReaderType = 'reflowable' | 'comic' | 'pdf' | 'audio';
+export type ClassificationSource = 'AUTO' | 'MONITOR_FOLDER' | 'USER' | 'INHERITED' | 'LEGACY';
 export type WorkDetailTabKey = MediaKind | 'STRUCTURE';
 export type PublicationStatus = 'UNKNOWN' | 'ONGOING' | 'COMPLETED' | 'HIATUS' | 'CANCELLED';
 export type TrackingStatus = 'NOT_TRACKING' | 'TRACKING' | 'PAUSED' | 'IGNORED';
@@ -37,6 +39,12 @@ export type VolumeResource = Readonly<{
   volumeIndex: number | null;
   sortOrder: number;
   format: VolumeFormat;
+  readerType: ReaderType;
+  classification: Readonly<{
+    source: ClassificationSource;
+    reason: string;
+    suggestedMediaKind: MediaKind | null;
+  }>;
   derivedFromVolumeId: string | null;
   publisher: string | null;
   publishedAt: string | null;
@@ -58,6 +66,7 @@ export type VolumeResource = Readonly<{
   hidden: boolean;
   readable: boolean;
   conversionAvailable: boolean;
+  kindleSendAvailable: boolean;
   files: LibraryFileResource[];
 }>;
 

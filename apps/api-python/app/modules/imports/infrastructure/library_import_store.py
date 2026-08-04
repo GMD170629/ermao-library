@@ -7,7 +7,7 @@ transactions.
 
 from __future__ import annotations
 
-from sqlalchemy import delete, insert, select, update
+from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.orm import Session
 
 from app.models.import_pipeline import ImportAsset, ImportLog, ImportTask
@@ -110,6 +110,19 @@ class SqlAlchemyLibraryImportStore:
                 update(LibraryMediaVersion.__table__)
                 .where(LibraryMediaVersion.id == media_version_id)
                 .values(values)
+            )
+
+    def delete_library_media_version_if_empty(self, media_version_id: str) -> None:
+        volume_count = self._db.scalar(
+            select(func.count(LibraryVolume.id)).where(
+                LibraryVolume.media_version_id == media_version_id
+            )
+        )
+        if int(volume_count or 0) == 0:
+            self._db.execute(
+                delete(LibraryMediaVersion).where(
+                    LibraryMediaVersion.id == media_version_id
+                )
             )
 
     def insert_library_volume(self, *, columns: dict[str, object]) -> dict[str, object]:

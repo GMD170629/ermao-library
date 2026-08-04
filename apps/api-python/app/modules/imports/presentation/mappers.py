@@ -53,6 +53,61 @@ def _conversion_options_view(value: object) -> dict[str, bool]:
     return {"preserveOriginal": preserve_original}
 
 
+def _recognized_metadata_view(value: object) -> dict[str, object] | None:
+    parsed_value: object = value
+    if isinstance(value, str):
+        try:
+            parsed_value = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(parsed_value, dict):
+        return None
+    title = parsed_value.get("title")
+    source = parsed_value.get("source")
+    if not isinstance(title, str) or source not in {
+        "REQUESTED",
+        "SIDECAR_OPF",
+        "EMBEDDED",
+        "PATH",
+    }:
+        return None
+    author = parsed_value.get("author")
+    fields = parsed_value.get("fields")
+    field_sources = parsed_value.get("fieldSources")
+    source_order = parsed_value.get("sourceOrder")
+    allowed_sources = {"REQUESTED", "SIDECAR_OPF", "EMBEDDED", "PATH"}
+    return {
+        "title": title,
+        "volumeTitle": (
+            parsed_value.get("volumeTitle")
+            if isinstance(parsed_value.get("volumeTitle"), str)
+            else title
+        ),
+        "author": author if isinstance(author, str) else None,
+        "volumeIndex": parsed_value.get("volumeIndex")
+        if isinstance(parsed_value.get("volumeIndex"), (int, float))
+        else None,
+        "fields": [field for field in fields if isinstance(field, str)]
+        if isinstance(fields, list)
+        else [],
+        "fieldSources": {
+            str(field): item_source
+            for field, item_source in field_sources.items()
+            if isinstance(field, str) and item_source in allowed_sources
+        }
+        if isinstance(field_sources, dict)
+        else {},
+        "sourceOrder": [
+            item_source
+            for item_source in source_order
+            if item_source in {"SIDECAR_OPF", "EMBEDDED", "PATH"}
+        ]
+        if isinstance(source_order, list)
+        else [],
+        "source": source,
+    }
+
+
 def friendly_import_error(
     message: str | None, error_code: str | None = None
 ) -> str | None:
@@ -168,6 +223,9 @@ def import_task_view(
             "book": book,
             "logs": [serialize_import_log(log) for log in logs],
             "conversion": conversion,
+            "recognizedMetadata": _recognized_metadata_view(
+                task.get("recognizedMetadata")
+            ),
         }
     )
     view.pop("duplicate", None)
@@ -176,11 +234,11 @@ def import_task_view(
 
 
 __all__ = [
+    "MonitorPathError",
     "display_path_name",
     "friendly_import_error",
     "import_task_view",
     "is_inside_path",
-    "MonitorPathError",
     "monitor_directory_tree_node",
     "resolve_monitor_folder_path",
     "serialize_import_log",

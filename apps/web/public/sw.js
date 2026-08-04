@@ -1,7 +1,10 @@
-const VERSION = 'shuku-pwa-v2.4.0';
+const FRONTEND_RESOURCE_VERSION = '0.5.0';
+const VERSION = `shuku-pwa-v${FRONTEND_RESOURCE_VERSION}`;
 const SHELL_CACHE = `${VERSION}-app-shell`;
 const STATIC_CACHE = `${VERSION}-static`;
-const PRIVATE_CACHE_PREFIX = `${VERSION}-private-`;
+const PRIVATE_CACHE_PREFIX = 'shuku-pwa-private-v1-';
+const LEGACY_PRIVATE_CACHE_PATTERN = /^shuku-pwa-v\d+\.\d+\.\d+-private-(.+)$/;
+const FRONTEND_RESOURCE_CACHE_PATTERN = /^shuku-pwa-v\d+\.\d+\.\d+-(?:app-shell|static)$/;
 let privateCacheNamespace = '';
 const BASE_PATH = new URL(self.registration.scope).pathname.replace(/\/$/, '');
 const CACHE_LIMITS = {
@@ -82,6 +85,10 @@ function isSensitiveApi(pathname) {
     || pathname.includes('/token');
 }
 
+function isFrontendResourceCache(cacheName) {
+  return FRONTEND_RESOURCE_CACHE_PATTERN.test(cacheName);
+}
+
 function isLargeReaderPayload(pathname) {
   pathname = withoutBasePath(pathname);
   return /\/api\/volumes\/[^/]+\/file$/.test(pathname)
@@ -118,6 +125,7 @@ function shouldBypass(request) {
   // an old reader bundle and make source fixes appear to have no effect.
   if (isLocalDevelopmentHost(url.hostname)) return true;
   if (isSensitiveApi(url.pathname)) return true;
+  if (withoutBasePath(url.pathname) === '/api/app-config') return true;
   if (withoutBasePath(url.pathname).startsWith('/api/reader/v2/')) return true;
   if (isLargeReaderPayload(url.pathname)) return true;
   if (isReaderFont(url.pathname)) return true;
@@ -198,7 +206,32 @@ async function staleWhileRevalidate(request, cacheName) {
 
 async function clearPrivateCaches() {
   const keys = await caches.keys();
-  await Promise.all(keys.filter((cacheName) => cacheName.startsWith(PRIVATE_CACHE_PREFIX)).map((cacheName) => caches.delete(cacheName)));
+  await Promise.all(keys
+    .filter((cacheName) => cacheName.startsWith(PRIVATE_CACHE_PREFIX) || LEGACY_PRIVATE_CACHE_PATTERN.test(cacheName))
+    .map((cacheName) => caches.delete(cacheName)));
+}
+
+async function migrateLegacyPrivateCaches() {
+  const keys = await caches.keys();
+  for (const legacyName of keys) {
+    const match = LEGACY_PRIVATE_CACHE_PATTERN.exec(legacyName);
+    if (!match) continue;
+    const targetName = `${PRIVATE_CACHE_PREFIX}${match[1]}`;
+    const [legacyCache, targetCache] = await Promise.all([caches.open(legacyName), caches.open(targetName)]);
+    const requests = await legacyCache.keys();
+    for (const request of requests) {
+      const response = await legacyCache.match(request);
+      if (response) await targetCache.put(request, response);
+    }
+    await caches.delete(legacyName);
+  }
+}
+
+async function clearOldFrontendResourceCaches() {
+  const keys = await caches.keys();
+  await Promise.all(keys
+    .filter((cacheName) => isFrontendResourceCache(cacheName) && cacheName !== SHELL_CACHE && cacheName !== STATIC_CACHE)
+    .map((cacheName) => caches.delete(cacheName)));
 }
 
 self.addEventListener('install', (event) => {
@@ -223,8 +256,8 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   debugLog('info', 'activate', VERSION);
   event.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(keys.filter((key) => !key.startsWith(VERSION)).map((key) => caches.delete(key))))
+    migrateLegacyPrivateCaches()
+      .then(() => clearOldFrontendResourceCaches())
       .then(() => self.clients.claim())
       .then(() => debugLog('info', 'clients claimed', VERSION))
       .catch((error) => {
@@ -256,6 +289,19 @@ self.addEventListener('fetch', (event) => {
 });
 
 self.addEventListener('message', (event) => {
+  if (event.data?.type === 'GET_FRONTEND_RESOURCE_VERSION') {
+    event.ports[0]?.postMessage({ version: FRONTEND_RESOURCE_VERSION });
+  }
+  if (event.data?.type === 'PURGE_FRONTEND_RESOURCES_AND_ACTIVATE') {
+    debugLog('info', 'forced frontend resource purge requested');
+    event.waitUntil(
+      clearOldFrontendResourceCaches()
+        .then(() => {
+          event.ports[0]?.postMessage({ ok: true });
+          return self.skipWaiting();
+        })
+    );
+  }
   if (event.data?.type === 'SKIP_WAITING') {
     debugLog('info', 'skip waiting requested');
     self.skipWaiting();

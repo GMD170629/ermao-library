@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from importlib import metadata as importlib_metadata
 from typing import Any, Protocol
 from urllib.request import Request as UrlRequest
@@ -12,9 +12,10 @@ from urllib.request import urlopen
 from sqlalchemy.orm import Session
 
 from app.bootstrap.metadata import ensure_metadata_sources
+from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.domain.providers import BUILTIN_MANIFESTS, ProviderManifest
 from app.modules.metadata.infrastructure.providers import (
-    clear_work_type_pipelines,
+    clear_media_kind_pipelines,
     ensure_pipeline_row,
     get_provider_source,
     list_enabled_provider_ids,
@@ -30,11 +31,11 @@ from app.modules.metadata.infrastructure.providers import (
 
 LOGGER = logging.getLogger(__name__)
 ENTRY_POINT_GROUP = "shuku_starship.metadata_providers"
-METADATA_WORK_TYPES = ("ebook", "comic", "audiobook")
+METADATA_MEDIA_KINDS = ("EBOOK", "COMIC", "AUDIOBOOK")
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _json_value(value: Any, fallback: Any = None) -> Any:
@@ -82,6 +83,7 @@ class BuiltinMetadataProvider:
         config: dict[str, Any] | None = None,
         force: bool = False,
         use_cache: bool = True,
+        automatic_request_gate: AutomaticMetadataRequestGate | None = None,
     ) -> dict[str, Any]:
         from app.services.organize_service import metadata_search_candidates
 
@@ -93,6 +95,7 @@ class BuiltinMetadataProvider:
             config=config or {},
             force=force,
             use_cache=use_cache,
+            automatic_request_gate=automatic_request_gate,
         )
 
     def test(self, config: dict[str, Any]) -> dict[str, Any]:
@@ -234,10 +237,10 @@ def ensure_metadata_provider_pipelines(db: Session) -> None:
     now = _now()
     for plugin in metadata_provider_registry().all():
         source = source_by_provider.get(plugin.manifest.id) or {}
-        for work_type in plugin.manifest.work_types:
+        for media_kind in plugin.manifest.media_kinds:
             ensure_pipeline_row(
                 db,
-                work_type=work_type,
+                media_kind=media_kind,
                 provider_id=plugin.manifest.id,
                 enabled=bool(source.get("enabled")),
                 position=int(
@@ -252,15 +255,15 @@ def list_metadata_provider_pipelines(db: Session) -> list[dict[str, Any]]:
     ensure_metadata_provider_pipelines(db)
     providers = {str(item["id"]): item for item in list_metadata_providers(db)}
     rows = list_included_pipelines(db)
-    by_type: dict[str, list[dict[str, Any]]] = {
-        work_type: [] for work_type in METADATA_WORK_TYPES
+    by_kind: dict[str, list[dict[str, Any]]] = {
+        media_kind: [] for media_kind in METADATA_MEDIA_KINDS
     }
     for row in rows:
         provider = providers.get(str(row.get("providerId")))
-        work_type = str(row.get("workType") or "")
-        if not provider or work_type not in by_type:
+        media_kind = str(row.get("mediaKind") or "")
+        if not provider or media_kind not in by_kind:
             continue
-        by_type[work_type].append(
+        by_kind[media_kind].append(
             {
                 "providerId": provider["id"],
                 "name": provider["name"],
@@ -272,8 +275,8 @@ def list_metadata_provider_pipelines(db: Session) -> list[dict[str, Any]]:
             }
         )
     return [
-        {"workType": work_type, "providers": by_type[work_type]}
-        for work_type in METADATA_WORK_TYPES
+        {"mediaKind": media_kind, "providers": by_kind[media_kind]}
+        for media_kind in METADATA_MEDIA_KINDS
     ]
 
 
@@ -297,10 +300,10 @@ def _sync_provider_source_from_pipelines(
 
 
 def update_metadata_provider_pipeline(
-    db: Session, work_type: str, items: list[dict[str, Any]]
+    db: Session, media_kind: str, items: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    normalized = str(work_type or "").strip().lower()
-    if normalized not in METADATA_WORK_TYPES:
+    normalized = str(media_kind or "").strip().upper()
+    if normalized not in METADATA_MEDIA_KINDS:
         raise ValueError("不支持的读物类型")
     if not isinstance(items, list):
         raise ValueError("数据源顺序格式不正确")
@@ -319,7 +322,7 @@ def update_metadata_provider_pipeline(
         raise ValueError("数据源列表包含无效或重复项目")
     for item, provider_id in zip(items, provider_ids):
         plugin = registry.get(provider_id)
-        if not plugin or normalized not in plugin.manifest.work_types:
+        if not plugin or normalized not in plugin.manifest.media_kinds:
             raise ValueError(f"数据源 {provider_id} 不支持{normalized}")
         if bool(item.get("enabled")):
             source = _provider_source(db, provider_id)
@@ -329,11 +332,11 @@ def update_metadata_provider_pipeline(
             if errors:
                 raise ValueError(f"{plugin.manifest.name}：{'；'.join(errors)}")
     now = _now()
-    clear_work_type_pipelines(db, normalized, now)
+    clear_media_kind_pipelines(db, normalized, now)
     for index, (item, provider_id) in enumerate(zip(items, provider_ids), start=1):
         update_pipeline_row(
             db,
-            work_type=normalized,
+            media_kind=normalized,
             provider_id=provider_id,
             included=True,
             enabled=bool(item.get("enabled")),
@@ -379,9 +382,14 @@ def _provider_public_view(
         "version": manifest.version,
         "description": manifest.description,
         "mode": manifest.mode,
-        "workTypes": list(manifest.work_types),
+        "mediaKinds": list(manifest.media_kinds),
         "fields": list(manifest.fields),
         "capabilities": list(manifest.capabilities),
+        "automaticRateLimit": (
+            asdict(manifest.automatic_rate_limit)
+            if manifest.automatic_rate_limit is not None
+            else None
+        ),
         "configFields": [asdict(field) for field in manifest.config_fields],
         "config": public_config,
         "configuredSecrets": configured_secrets,
@@ -515,22 +523,15 @@ def test_metadata_provider(
     return result, provider or {}
 
 
-def provider_supports_work_type(
-    manifest: ProviderManifest, work_type: str | None
+def provider_supports_media_kind(
+    manifest: ProviderManifest, media_kind: str | None
 ) -> bool:
-    value = str(work_type or "").strip().lower()
-    normalized = (
-        "comic"
-        if value in {"comic", "cbz", "zip"}
-        else "audiobook"
-        if value in {"audiobook", "audio", "m4b", "m4a", "mp3"}
-        else "ebook"
-    )
-    return normalized in manifest.work_types
+    value = str(media_kind or "").strip().upper()
+    return value in manifest.media_kinds
 
 
 def enabled_metadata_provider_ids(
-    db: Session, work_type: str | None = None
+    db: Session, media_kind: str | None = None
 ) -> list[str]:
     from sqlalchemy import inspect
 
@@ -542,28 +543,20 @@ def enabled_metadata_provider_ids(
             for provider in providers
             if provider.get("enabled")
             and (
-                work_type is None
-                or provider_supports_work_type(
-                    registry.require(str(provider["id"])).manifest, work_type
+                media_kind is None
+                or provider_supports_media_kind(
+                    registry.require(str(provider["id"])).manifest, media_kind
                 )
             )
         ]
     ensure_metadata_provider_pipelines(db)
-    if work_type is None:
+    if media_kind is None:
         return list_enabled_provider_ids(db)
-    value = str(work_type or "").strip().lower()
-    normalized = (
-        "comic"
-        if value in {"comic", "cbz", "zip"}
-        else "audiobook"
-        if value in {"audiobook", "audio", "m4b", "m4a", "mp3"}
-        else "ebook"
-    )
-    return list_enabled_provider_ids(db, normalized)
+    return list_enabled_provider_ids(db, str(media_kind).strip().upper())
 
 
 def metadata_provider_runtime_config(
-    db: Session, provider_id: str, work_type: str | None = None
+    db: Session, provider_id: str, media_kind: str | None = None
 ) -> dict[str, Any] | None:
     """Return the canonical configuration only when the provider is enabled."""
 
@@ -572,8 +565,8 @@ def metadata_provider_runtime_config(
     if not source:
         return None
     enabled = (
-        provider_id in enabled_metadata_provider_ids(db, work_type)
-        if work_type
+        provider_id in enabled_metadata_provider_ids(db, media_kind)
+        if media_kind
         else bool(source.get("enabled"))
     )
     return _source_config(source, plugin.manifest) if enabled else None
@@ -587,23 +580,34 @@ def search_with_metadata_provider(
     *,
     force: bool = False,
     use_cache: bool = True,
+    automatic_request_gate: AutomaticMetadataRequestGate | None = None,
 ) -> dict[str, Any]:
     from sqlalchemy import inspect
 
     plugin = metadata_provider_registry().require(provider_id)
     if not inspect(db.connection()).has_table("Source"):
+        config = _default_config(plugin.manifest)
+        if isinstance(plugin, BuiltinMetadataProvider):
+            return plugin.search(
+                db,
+                context,
+                query,
+                config=config,
+                force=force,
+                use_cache=use_cache,
+                automatic_request_gate=automatic_request_gate,
+            )
         return plugin.search(
-            db,
-            context,
-            query,
-            config=_default_config(plugin.manifest),
-            force=force,
-            use_cache=use_cache,
+            db, context, query, config=config, force=force, use_cache=use_cache
         )
-    work = context.get("work") if isinstance(context.get("work"), dict) else {}
-    work_type = work.get("workType") if isinstance(work, dict) else None
+    media_version = (
+        context.get("mediaVersion")
+        if isinstance(context.get("mediaVersion"), dict)
+        else {}
+    )
+    media_kind = media_version.get("mediaKind")
     config = metadata_provider_runtime_config(
-        db, provider_id, str(work_type) if work_type else None
+        db, provider_id, str(media_kind) if media_kind else None
     )
     if config is None:
         return {
@@ -615,13 +619,18 @@ def search_with_metadata_provider(
             "candidates": [],
             "suggestions": [],
         }
+    if isinstance(plugin, BuiltinMetadataProvider):
+        return plugin.search(
+            db,
+            context,
+            query,
+            config=config,
+            force=force,
+            use_cache=use_cache,
+            automatic_request_gate=automatic_request_gate,
+        )
     return plugin.search(
-        db,
-        context,
-        query,
-        config=config,
-        force=force,
-        use_cache=use_cache,
+        db, context, query, config=config, force=force, use_cache=use_cache
     )
 
 

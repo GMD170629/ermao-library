@@ -58,7 +58,7 @@ def test_registered_api_endpoints_are_owned_by_capability_presentations() -> Non
         if isinstance(route, APIRoute) and route.path.startswith("/api")
     ]
 
-    assert len(api_routes) == 197
+    assert len(api_routes) == 203
     legacy = [
         (next(iter(route.methods or ())), route.path, route.endpoint.__module__)
         for route in api_routes
@@ -109,5 +109,5 @@ def test_registered_api_method_path_pairs_are_unique() -> None:
         if method in HTTP_METHODS
     ]
 
-    assert len(pairs) == 194
+    assert len(pairs) == 200
     assert len(pairs) == len(set(pairs))

@@ -245,6 +245,19 @@ def get_work_by_merge_key(db: Session, merge_key: str) -> dict[str, Any] | None:
     return _get_work(db, LibraryWork.merge_key == merge_key)
 
 
+def get_work_by_normalized_title(
+    db: Session, normalized_title: str
+) -> dict[str, Any] | None:
+    """Return the earliest existing work with the final normalized title."""
+
+    return _first_record(
+        db,
+        select(LibraryWork.__table__)
+        .where(LibraryWork.normalized_title == normalized_title)
+        .order_by(LibraryWork.created_at.asc(), LibraryWork.id.asc()),
+    )
+
+
 def list_works_by_merge_key_prefix(
     db: Session, merge_key_prefix: str
 ) -> list[dict[str, Any]]:
@@ -255,27 +268,6 @@ def list_works_by_merge_key_prefix(
         select(LibraryWork.__table__)
         .where(LibraryWork.merge_key.startswith(merge_key_prefix, autoescape=True))
         .order_by(LibraryWork.created_at.asc(), LibraryWork.id.asc()),
-    )
-
-
-def list_works_by_normalized_identity(
-    db: Session,
-    normalized_title: str,
-    normalized_author: str,
-    *,
-    limit: int,
-) -> list[dict[str, Any]]:
-    """Return a bounded deterministic set for cross-media identity reuse."""
-
-    return _records(
-        db,
-        select(LibraryWork.__table__)
-        .where(
-            LibraryWork.normalized_title == normalized_title,
-            LibraryWork.normalized_author == normalized_author,
-        )
-        .order_by(LibraryWork.created_at.asc(), LibraryWork.id.asc())
-        .limit(limit),
     )
 
 
@@ -818,16 +810,6 @@ def get_volume_context_by_id(db: Session, volume_id: str) -> dict[str, Any] | No
     return dict(row) if row is not None else None
 
 
-def find_volume_conflict(
-    db: Session,
-    media_version_id: str,
-    volume_index: float | None,
-    volume_title: str,
-) -> dict[str, Any] | None:
-    del db, media_version_id, volume_index, volume_title
-    return None
-
-
 def find_audio_media_version_by_resource_key(
     db: Session, resource_key: str
 ) -> dict[str, Any] | None:
@@ -1029,7 +1011,10 @@ def find_deferred_source_volume(
     result_volume_id: str | None,
 ) -> dict[str, Any] | None:
     row = db.execute(
-        select(LibraryVolume.id)
+        select(
+            LibraryVolume.id,
+            LibraryMediaVersion.media_kind,
+        )
         .join(LibraryFile, LibraryFile.volume_id == LibraryVolume.id)
         .join(
             LibraryMediaVersion,
@@ -1047,7 +1032,7 @@ def find_deferred_source_volume(
         .order_by(LibraryVolume.created_at.asc())
         .limit(1)
     ).first()
-    return {"id": row[0]} if row else None
+    return {"id": row.id, "mediaKind": row.media_kind} if row else None
 
 
 def existing_file_import_snapshot(db: Session, path: Path) -> dict[str, Any] | None:
@@ -1061,7 +1046,6 @@ def existing_file_import_snapshot(db: Session, path: Path) -> dict[str, Any] | N
                 LibraryVolume.chapter_count,
                 LibraryWork.id.label("workId"),
                 LibraryWork.title,
-                LibraryWork.work_type,
             )
             .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
             .join(

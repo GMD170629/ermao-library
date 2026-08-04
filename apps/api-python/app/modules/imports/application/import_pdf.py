@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from app.contracts.publication_metadata import PublicationMetadata
+from app.contracts.publication_titles import titles_from_local_source
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
     ImportOptions,
@@ -12,25 +14,30 @@ from app.modules.imports.application.dto import (
     ImportRuntimeConfig,
 )
 from app.modules.imports.application.identity_resolution import (
-    EmbeddedIdentityMetadata,
-    resolve_import_identity,
+    resolve_import_metadata,
 )
 from app.modules.imports.application.import_support import (
+    _classification_columns,
+    _classification_result_type,
     _ensure_work,
     _file_resource_key,
     _finalize_work_cover,
     _hash_text,
     _id,
-    _import_work_merge_key,
     _insert_identity_metadata,
     _now,
-    _source_filename_title,
     _source_group_key,
+    _work_merge_key,
 )
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
     ImportOrchestrationServices,
     LibraryImportStore,
+)
+from app.modules.imports.domain.content_classification import (
+    ContentEvidence,
+    classify_content,
+    normalize_media_kind_policy,
 )
 from app.modules.imports.domain.pdf_content import PdfContentKind
 
@@ -50,41 +57,56 @@ def _import_pdf(
         options.source_file_path,
         options.original_name,
     )
-    identity = resolve_import_identity(
+    embedded_series_name = str(inspection.raw_metadata.get("Series") or "").strip()
+    embedded_volume_raw = inspection.raw_metadata.get("Volume")
+    try:
+        embedded_volume_index = (
+            float(str(embedded_volume_raw))
+            if embedded_volume_raw not in (None, "")
+            else None
+        )
+    except ValueError:
+        embedded_volume_index = None
+    embedded_titles = titles_from_local_source(
+        inspection.embedded_title,
+        series_name=embedded_series_name or None,
+        volume_index=embedded_volume_index,
+    )
+    identity, resolved_local = resolve_import_metadata(
         identity,
-        embedded=EmbeddedIdentityMetadata(
-            title=inspection.embedded_title,
-            author=inspection.embedded_author,
-            source="pdf_metadata",
-            confidence=0.9,
+        embedded=PublicationMetadata(
+            title=embedded_titles.work_title,
+            volume_title=embedded_titles.volume_title,
+            authors=(inspection.embedded_author,) if inspection.embedded_author else (),
+            description=inspection.description,
+            subjects=inspection.tags,
+            series_name=embedded_series_name or None,
+            series_index=embedded_volume_index,
+            volume_index=embedded_titles.volume_index,
         ),
+        sidecar=options.sidecar_metadata,
+        source_order=options.local_metadata_priority,
+        path_metadata=options.path_metadata,
         requested_title=options.requested_title,
         requested_author=options.requested_author,
     )
     is_image_only = inspection.content_kind is PdfContentKind.IMAGE_ONLY
-    work_type = "COMIC" if is_image_only else "PDF"
-    media_kind = "COMIC" if is_image_only else "EBOOK"
-    result_type = "comic" if is_image_only else "ebook"
-    merge_format = "pdf-comic" if is_image_only else "pdf"
-    tags = ["comic", "pdf"] if is_image_only else ["pdf"]
-    merge_key = _import_work_merge_key(
-        merge_format,
-        identity.title,
-        identity.author,
-        options,
-        identity.volume_index,
-        grouping_key=identity.grouping_key,
+    classification = classify_content(
+        normalize_media_kind_policy(options.media_kind_policy),
+        ContentEvidence(volume_format="PDF", image_only=is_image_only),
     )
+    media_kind = classification.media_kind
+    result_type = _classification_result_type(classification)
+    tags = ["pdf"]
+    merge_key = _work_merge_key(identity.title)
     source_group_key = _source_group_key(options, identity.title)
     work, created = _ensure_work(
         store,
         queries,
         {
-            "workId": identity.reused_work_id,
             "title": identity.title,
             "author": identity.author,
             "description": None,
-            "workType": work_type,
             "tags": tags,
             "mergeKey": merge_key,
             "origin": options.origin,
@@ -124,7 +146,7 @@ def _import_pdf(
             columns={
                 "id": _id(),
                 "mediaVersionId": media_version["id"],
-                "title": _source_filename_title(options),
+                "title": resolved_local.metadata.volume_title or identity.title,
                 "volumeIndex": identity.volume_index,
                 "sortOrder": (
                     int(identity.volume_index * 1000)
@@ -143,6 +165,7 @@ def _import_pdf(
                 "coverPath": stored_cover_path,
                 "coverStatus": services.cover_status(stored_cover_path),
                 "importStatus": "PARSING",
+                **_classification_columns(classification),
                 "createdAt": _now(),
                 "updatedAt": _now(),
             }
@@ -226,7 +249,10 @@ def _import_pdf(
             "completed",
             False,
             not created,
-            f"new-{merge_format}-work" if created else f"same-{merge_format}-work",
+            "new-pdf-work" if created else "same-pdf-work",
+            resolved_metadata=resolved_local.metadata,
+            metadata_field_sources=resolved_local.field_sources,
+            metadata_source_order=resolved_local.source_order,
         )
     except Exception:
         if cover_path:

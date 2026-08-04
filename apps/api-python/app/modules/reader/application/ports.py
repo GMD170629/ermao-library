@@ -8,8 +8,10 @@ from typing import Protocol
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
     ReaderBookmarkDto,
+    ReaderEpubSourceDto,
     ReaderFileDto,
     ReaderProgressDto,
+    ReaderRecoveredEpubChapterDto,
     ReaderUnitDto,
     ReaderVolumeContextDto,
     ReaderVolumeDto,
@@ -26,6 +28,19 @@ class ReaderVolumeRepository(Protocol):
     def list_files(self, volume_id: str) -> list[ReaderFileDto]: ...
 
     def list_units(self, volume_id: str) -> list[ReaderUnitDto]: ...
+
+    def get_epub_source(self, volume_id: str) -> ReaderEpubSourceDto | None: ...
+
+    def epub_navigation_needs_repair(self, volume_id: str) -> bool: ...
+
+    def replace_epub_navigation_units(
+        self,
+        *,
+        volume_id: str,
+        file_id: str,
+        chapters: tuple[ReaderRecoveredEpubChapterDto, ...],
+        now: datetime,
+    ) -> None: ...
 
     def get_progress(
         self, user_id: str, volume_id: str
@@ -50,6 +65,24 @@ class ReaderVolumeRepository(Protocol):
         now: datetime,
     ) -> ReaderProgressDto: ...
 
+    def save_external_progress(
+        self,
+        *,
+        user_id: str,
+        context: ReaderVolumeContextDto,
+        reader_type: str,
+        percent: float,
+        location_json: str,
+        content_fingerprint: str,
+        mutation_id: str,
+        client_id: str,
+        client_sequence: int,
+        progressed_at: datetime,
+        source_protocol: str,
+        source_device_name: str,
+        now: datetime,
+    ) -> ReaderProgressDto: ...
+
     def list_bookmarks(
         self, user_id: str, volume_id: str, content_fingerprint: str
     ) -> list[ReaderBookmarkDto]: ...
@@ -69,3 +102,7 @@ class ReaderUnitOfWork(Protocol):
     def commit(self) -> None: ...
 
     def rollback(self) -> None: ...
+
+
+class ReaderEpubNavigationParser(Protocol):
+    def parse(self, source_path: str) -> tuple[ReaderRecoveredEpubChapterDto, ...]: ...

@@ -12,6 +12,7 @@ import { useReaderSession } from './use-reader-session';
 import { isReaderInteractiveAdapter, type ReaderAdapterInputIntent } from './adapters/reader-interaction';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
+import type { ReaderBookCache } from '../../../lib/reader/book-cache';
 
 type ReaderEngineRuntimeProps = {
   bootstrap: ReaderBootstrap;
@@ -23,7 +24,10 @@ type ReaderEngineRuntimeProps = {
   onRetry: () => void;
   onSelectVolume: (volumeId: string, pageIndex?: number) => void;
   onIndexProgress: (progress: { completed: number; total: number; percent: number } | null) => void;
+  onDownloadProgress: (progress: { loadedBytes: number; totalBytes: number | null; percent: number | null } | null) => void;
   onReady: () => void;
+  bookCache: ReaderBookCache;
+  onStorageWarning: (message: string) => void;
 };
 
 type PasswordCapableAdapter = ReaderAdapter & { providePassword: (password: string | null) => boolean };
@@ -67,6 +71,7 @@ function novelErrorMessage(code: string | undefined, translate: (source: string)
 }
 
 function phaseLabel(phase: string | null, kind: ReaderBootstrap['readerType']) {
+  if (phase === 'downloading-content') return '首次下载书籍';
   if (phase === 'generating-pagination') return '正在建立全书位置索引';
   if (phase === 'loading-font') return '正在准备阅读字体';
   if (phase === 'rendering') return kind === 'pdf' ? '正在渲染 PDF' : '正在排版正文';
@@ -83,7 +88,10 @@ export function ReaderEngineRuntime({
   onRetry,
   onSelectVolume,
   onIndexProgress,
-  onReady
+  onDownloadProgress,
+  onReady,
+  bookCache,
+  onStorageWarning
 }: ReaderEngineRuntimeProps) {
   const { t: i18nAttribute } = useAttributeI18n();
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
@@ -131,6 +139,9 @@ export function ReaderEngineRuntime({
         created = adapterModule.createFoliateAdapter({
           container,
           title: bootstrap.book.title,
+          userId: bootstrap.userId,
+          bookCache,
+          onCacheWarning: () => onStorageWarning(i18nAttribute('书籍已打开，但本机存储空间不足；下次阅读时需要重新下载。')),
           onEndOfVolume: openNextVolume,
           onInputIntent: handleAdapterInputIntent
         });
@@ -170,7 +181,7 @@ export function ReaderEngineRuntime({
       if (created) void created.dispose();
       container.replaceChildren();
     };
-  }, [bootstrap.availableVolumes, bootstrap.book.title, bootstrap.contentFingerprint, bootstrap.pages, bootstrap.readerType, bootstrap.volume.id, container]);
+  }, [bookCache, bootstrap.availableVolumes, bootstrap.book.title, bootstrap.contentFingerprint, bootstrap.pages, bootstrap.readerType, bootstrap.userId, bootstrap.volume.id, container, i18nAttribute, onStorageWarning]);
 
   const session = useReaderSession({
     adapter,
@@ -213,6 +224,12 @@ export function ReaderEngineRuntime({
       ? session.state.paginationProgress ?? { completed: 0, total: 0, percent: 0 }
       : null);
   }, [onIndexProgress, session.state.paginationProgress, session.state.phase]);
+
+  useEffect(() => {
+    onDownloadProgress(session.state.phase === 'downloading-content'
+      ? session.state.downloadProgress ?? { loadedBytes: 0, totalBytes: null, percent: null }
+      : null);
+  }, [onDownloadProgress, session.state.downloadProgress, session.state.phase]);
 
   const totalHint = bootstrap.readerType === 'reflowable'
     ? null

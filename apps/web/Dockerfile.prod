@@ -29,7 +29,7 @@ ENV NODE_ENV=production \
 COPY --from=deps /usr/local/bin/node /usr/local/bin/node
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssl ca-certificates libmobi-tools libstdc++6 \
+  && apt-get install -y --no-install-recommends openssl ca-certificates libmobi-tools libstdc++6 unar \
   && rm -rf /var/lib/apt/lists/* \
   && node --version \
   && python --version

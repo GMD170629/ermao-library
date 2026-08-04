@@ -9,7 +9,6 @@ import mimetypes
 import os
 import re
 import threading
-import zipfile
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from email.utils import format_datetime, parsedate_to_datetime
@@ -22,6 +21,7 @@ from fastapi.responses import Response, StreamingResponse
 from PIL import Image, ImageChops, ImageOps, UnidentifiedImageError
 
 from app.core.config import Settings, get_settings
+from app.infrastructure.comic_archives import ComicArchiveError, open_comic_archive
 from app.schemas.responses import fail
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,8 @@ SMALL_COVER_MAX_DIMENSION = 600
 SMALL_COVER_MEDIA_TYPE = "image/webp"
 SMALL_COVER_CACHE_VERSION = 1
 SMALL_COVER_QUALITIES = (82, 74, 66, 58, 50, 42, 34, 26, 18, 10)
+PSE_PAGE_CACHE_VERSION = 1
+PSE_PAGE_JPEG_QUALITY = 88
 
 
 def _stored_path(
@@ -248,6 +250,131 @@ def _comic_page_cache_path(settings: Settings, cache_key: str) -> Path:
         / digest[:2]
         / f"{digest}.avif"
     )
+
+
+def _pse_page_cache_path(settings: Settings, cache_key: str, media_type: str) -> Path:
+    digest = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()
+    extension = {"image/png": ".png", "image/gif": ".gif"}.get(media_type, ".jpg")
+    return (
+        settings.resolved_storage_root
+        / "cache"
+        / "opds-pse"
+        / digest[:2]
+        / f"{digest}{extension}"
+    )
+
+
+def _pse_image_bytes(
+    data: bytes, max_width: int | None, media_type: str
+) -> bytes | None:
+    if media_type == "image/gif" and max_width is None:
+        return data
+    try:
+        with Image.open(io.BytesIO(data)) as source:
+            if getattr(source, "is_animated", False):
+                source.seek(0)
+            prepared = ImageOps.exif_transpose(source)
+            if max_width is not None and prepared.width > max_width:
+                height = max(1, round(prepared.height * max_width / prepared.width))
+                prepared = prepared.resize(
+                    (max_width, height), Image.Resampling.LANCZOS
+                )
+            if media_type == "image/png":
+                output = io.BytesIO()
+                prepared.save(output, format="PNG", optimize=True)
+                return output.getvalue()
+            if _image_has_alpha(prepared):
+                rgba = prepared.convert("RGBA")
+                background = Image.new("RGB", rgba.size, "white")
+                background.paste(rgba, mask=rgba.getchannel("A"))
+                prepared = background
+            elif prepared.mode != "RGB":
+                prepared = prepared.convert("RGB")
+            output = io.BytesIO()
+            prepared.save(
+                output,
+                format="JPEG",
+                quality=PSE_PAGE_JPEG_QUALITY,
+                optimize=True,
+            )
+            return output.getvalue()
+    except (OSError, ValueError, UnidentifiedImageError) as exc:
+        logger.debug("failed to create OPDS PSE JPEG page: %s", exc)
+        return None
+
+
+def _pse_image_response_unlimited(
+    *,
+    source: bytes,
+    request: Request,
+    user_id: str,
+    settings: Settings,
+    cache_key: str,
+    source_mtime: float,
+    name: str,
+    max_width: int | None,
+    media_type: str,
+) -> Response:
+    cache_path = _pse_page_cache_path(settings, cache_key, media_type)
+    data = cache_path.read_bytes() if cache_path.is_file() else None
+    if data is None:
+        data = _pse_image_bytes(source, max_width, media_type)
+        if data is None:
+            return fail("页面无法转换", status_code=415, code="PSE_PAGE_UNSUPPORTED")
+        _write_cache_bytes(cache_path, data)
+    request.state.user_id = user_id
+    if request.method == "HEAD":
+        headers = _response_headers(
+            len(data),
+            source_mtime,
+            media_type,
+            str(Path(name or "page").with_suffix(cache_path.suffix)),
+            extra=hashlib.sha256(cache_key.encode("utf-8")).hexdigest()[:24],
+        )
+        headers["Content-Length"] = str(len(data))
+        headers["X-OPDS-PSE-Width"] = str(max_width or "original")
+        return Response(status_code=200, headers=headers, media_type=media_type)
+    response = _bytes_response(
+        data,
+        request,
+        media_type,
+        str(Path(name or "page").with_suffix(cache_path.suffix)),
+        mtime=source_mtime,
+        extra=hashlib.sha256(cache_key.encode("utf-8")).hexdigest()[:24],
+    )
+    response.headers["X-OPDS-PSE-Width"] = str(max_width or "original")
+    return response
+
+
+def _pse_image_response(
+    *,
+    source: bytes,
+    request: Request,
+    user_id: str,
+    settings: Settings,
+    cache_key: str,
+    source_mtime: float,
+    name: str,
+    max_width: int | None,
+    media_type: str,
+) -> Response:
+    release = _acquire_file_stream_slot(user_id)
+    if release is None:
+        return _file_stream_limit_response()
+    try:
+        return _pse_image_response_unlimited(
+            source=source,
+            request=request,
+            user_id=user_id,
+            settings=settings,
+            cache_key=cache_key,
+            source_mtime=source_mtime,
+            name=name,
+            max_width=max_width,
+            media_type=media_type,
+        )
+    finally:
+        release()
 
 
 def _write_cache_bytes(path: Path, data: bytes) -> None:
@@ -629,9 +756,9 @@ def _send_zip_entry(
     ):
         return fail("页面不存在", status_code=404)
     try:
-        with zipfile.ZipFile(archive_path) as archive:
+        with open_comic_archive(archive_path) as archive:
             info = archive.getinfo(entry_name)
-    except (KeyError, OSError, zipfile.BadZipFile):
+    except (KeyError, OSError, ComicArchiveError):
         return fail("页面不存在", status_code=404)
     request.state.user_id = user_id
     resolved_media_type = (
@@ -675,7 +802,7 @@ def _send_zip_entry(
     ):
         try:
             with (
-                zipfile.ZipFile(archive_path) as archive,
+                open_comic_archive(archive_path) as archive,
                 archive.open(entry_name, "r") as handle,
             ):
                 remaining_skip = start
@@ -873,7 +1000,7 @@ def _send_comic_page_zip_entry(
         )
 
     try:
-        with zipfile.ZipFile(archive_path) as archive:
+        with open_comic_archive(archive_path) as archive:
             info = archive.getinfo(entry_name)
             resolved_media_type = (
                 media_type
@@ -893,7 +1020,7 @@ def _send_comic_page_zip_entry(
             archive_stat = archive_path.stat()
             cache_key = (
                 f"zip:{archive_path}:{archive_stat.st_size}:{archive_stat.st_mtime_ns}:"
-                f"{entry_name}:{info.file_size}:{info.CRC}:"
+                f"{entry_name}:{info.file_size}:{info.checksum}:"
                 f"extreme-avif-v{COMIC_PAGE_DATA_SAVER_CACHE_VERSION}:"
                 f"q-{COMIC_PAGE_DATA_SAVER_QUALITY}:"
                 f"speed-{COMIC_PAGE_DATA_SAVER_SPEED}"
@@ -909,7 +1036,7 @@ def _send_comic_page_zip_entry(
                     cache_key,
                 )
             source = archive.read(entry_name)
-    except (KeyError, OSError, zipfile.BadZipFile):
+    except (KeyError, OSError, ComicArchiveError):
         return fail("页面不存在", status_code=404)
 
     optimized = _comic_page_avif_bytes(source)
@@ -1014,4 +1141,74 @@ def send_comic_page_zip_entry(
         media_type=media_type,
         route=route,
         file_id=file_id,
+    )
+
+
+def send_pse_page_file(
+    path: Path | None,
+    request: Request,
+    user_id: str,
+    settings: Settings,
+    *,
+    max_width: int | None,
+    file_id: str,
+    output_media_type: str = "image/jpeg",
+) -> Response:
+    if path is None or not path.is_file():
+        return fail("页面不存在", status_code=404, code="PAGE_NOT_FOUND")
+    stat = path.stat()
+    cache_key = (
+        f"file:{path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}:"
+        f"pse-v{PSE_PAGE_CACHE_VERSION}:{output_media_type}:w-{max_width or 'original'}:"
+        f"q-{PSE_PAGE_JPEG_QUALITY}"
+    )
+    return _pse_image_response(
+        source=path.read_bytes(),
+        request=request,
+        user_id=user_id,
+        settings=settings,
+        cache_key=cache_key,
+        source_mtime=stat.st_mtime,
+        name=path.name,
+        max_width=max_width,
+        media_type=output_media_type,
+    )
+
+
+def send_pse_page_zip_entry(
+    archive_path: Path | None,
+    entry_name: str | None,
+    request: Request,
+    user_id: str,
+    settings: Settings,
+    *,
+    max_width: int | None,
+    file_id: str,
+    output_media_type: str = "image/jpeg",
+) -> Response:
+    if archive_path is None or not archive_path.is_file() or not entry_name:
+        return fail("页面不存在", status_code=404, code="PAGE_NOT_FOUND")
+    try:
+        with open_comic_archive(archive_path) as archive:
+            info = archive.getinfo(entry_name)
+            source = archive.read(entry_name)
+        stat = archive_path.stat()
+    except (KeyError, OSError, ComicArchiveError):
+        return fail("页面不存在", status_code=404, code="PAGE_NOT_FOUND")
+    cache_key = (
+        f"zip:{archive_path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}:"
+        f"{entry_name}:{info.file_size}:{info.checksum}:"
+        f"pse-v{PSE_PAGE_CACHE_VERSION}:{output_media_type}:w-{max_width or 'original'}:"
+        f"q-{PSE_PAGE_JPEG_QUALITY}"
+    )
+    return _pse_image_response(
+        source=source,
+        request=request,
+        user_id=user_id,
+        settings=settings,
+        cache_key=cache_key,
+        source_mtime=stat.st_mtime,
+        name=Path(entry_name).name,
+        max_width=max_width,
+        media_type=output_media_type,
     )

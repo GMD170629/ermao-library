@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from app.contracts.publication_metadata import PublicationMetadata
+from app.contracts.publication_titles import titles_from_local_source
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
     ImportOptions,
@@ -12,17 +14,16 @@ from app.modules.imports.application.dto import (
     ImportRuntimeConfig,
 )
 from app.modules.imports.application.identity_resolution import (
-    EmbeddedIdentityMetadata,
-    resolve_import_identity,
+    resolve_import_metadata,
 )
 from app.modules.imports.application.import_support import (
+    _classification_columns,
+    _classification_result_type,
     _ensure_work,
     _finalize_work_cover,
     _hash_text,
     _id,
-    _import_work_merge_key,
     _now,
-    _source_filename_title,
     _source_group_key,
     _work_merge_key,
 )
@@ -32,6 +33,12 @@ from app.modules.imports.application.ports import (
     LibraryImportStore,
 )
 from app.modules.imports.application.reflowable_types import ReflowableBookMetadata
+from app.modules.imports.domain.content_classification import (
+    ContentEvidence,
+    classify_content,
+    inherited_classification,
+    normalize_media_kind_policy,
+)
 
 REFLOWABLE_MIME_TYPES = {
     "MOBI": "application/x-mobipocket-ebook",
@@ -120,7 +127,6 @@ def refresh_existing_reflowable_source(
     volume_values: dict[str, object] = {
         "description": metadata.description,
         "language": metadata.language,
-        "publisher": metadata.publisher,
         "publishedAt": metadata.published_at,
         "identifier": metadata.identifier,
         "isbn": metadata.isbn,
@@ -155,7 +161,7 @@ def refresh_existing_reflowable_source(
     )
     work_values: dict[str, object] = {"updatedAt": _now()}
     if selected_title != current_title or selected_author != current_author:
-        merge_key = _work_merge_key("epub", selected_title, selected_author)
+        merge_key = _work_merge_key(selected_title)
         merge_conflict = queries.get_work_by_merge_key(merge_key)
         work_values.update(
             title=selected_title,
@@ -233,7 +239,6 @@ def _reflowable_metadata_json(
             "title": metadata.title,
             "authors": metadata.authors,
             "language": metadata.language,
-            "publisher": metadata.publisher,
             "publishedAt": metadata.published_at,
             "identifier": metadata.identifier,
             "isbn": metadata.isbn,
@@ -270,41 +275,60 @@ def _import_reflowable_source(
     source_path = options.source_file_path.resolve()
     source_format = ext.removeprefix(".").upper()
     metadata = services.inspect_reflowable_book(source_path, source_format)
-    identity = resolve_import_identity(
+    embedded_title = (
+        None if metadata.raw_metadata.get("inspectionWarning") else metadata.title
+    )
+    embedded_titles = titles_from_local_source(
+        embedded_title,
+        series_name=metadata.series_name,
+        volume_index=metadata.series_index,
+    )
+    identity, resolved_local = resolve_import_metadata(
         identity,
-        embedded=EmbeddedIdentityMetadata(
-            title=metadata.title,
-            author=metadata.author,
-            source="reflowable_metadata",
-            confidence=0.95,
+        embedded=PublicationMetadata(
+            title=embedded_titles.work_title,
+            volume_title=embedded_titles.volume_title,
+            authors=metadata.authors,
+            description=metadata.description,
+            subjects=metadata.subjects,
+            series_name=metadata.series_name,
+            series_index=metadata.series_index,
+            volume_index=embedded_titles.volume_index,
+            language=metadata.language,
+            publisher=metadata.publisher,
+            published_at=metadata.published_at,
+            identifier=metadata.identifier,
+            isbn=metadata.isbn,
         ),
+        sidecar=options.sidecar_metadata,
+        source_order=options.local_metadata_priority,
+        path_metadata=options.path_metadata,
         requested_title=options.requested_title,
         requested_author=options.requested_author,
     )
-    merge_key = _import_work_merge_key(
-        "epub",
-        identity.title,
-        identity.author,
-        options,
-        identity.volume_index,
-        grouping_key=identity.grouping_key,
+    classification = classify_content(
+        normalize_media_kind_policy(options.media_kind_policy),
+        ContentEvidence(
+            volume_format=source_format,
+            subjects=tuple(metadata.subjects),
+            title=identity.title,
+        ),
     )
+    merge_key = _work_merge_key(identity.title)
     work, created = _ensure_work(
         store,
         queries,
         {
-            "workId": identity.reused_work_id,
             "title": identity.title,
             "author": identity.author,
             "description": metadata.description,
-            "workType": source_format,
             "tags": ["ebook", source_format.lower(), *metadata.subjects],
             "mergeKey": merge_key,
             "origin": options.origin,
             "monitorFolderId": options.monitor_folder_id,
         },
     )
-    volume_title = _source_filename_title(options)
+    volume_title = resolved_local.metadata.volume_title or identity.title
     volume_index = identity.volume_index
     source_group_key = _source_group_key(options, identity.title)
     store.update_import_task(
@@ -314,7 +338,7 @@ def _import_reflowable_source(
         columns={
             "id": _id(),
             "workId": work["id"],
-            "mediaKind": "EBOOK",
+            "mediaKind": classification.media_kind,
             "createdAt": _now(),
             "updatedAt": _now(),
         }
@@ -339,7 +363,6 @@ def _import_reflowable_source(
             "origin": options.origin,
             "description": metadata.description,
             "language": metadata.language,
-            "publisher": metadata.publisher,
             "publishedAt": metadata.published_at,
             "identifier": metadata.identifier,
             "isbn": metadata.isbn,
@@ -348,6 +371,7 @@ def _import_reflowable_source(
             "coverPath": None,
             "coverStatus": "PENDING",
             "importStatus": "COMPLETED",
+            **_classification_columns(classification),
             "createdAt": _now(),
             "updatedAt": _now(),
         }
@@ -420,13 +444,16 @@ def _import_reflowable_source(
         str(media_version["id"]),
         str(volume["id"]),
         str(work["title"]),
-        "ebook",
+        _classification_result_type(classification),
         source_format.lower(),
         len(metadata.chapters),
         "completed",
         False,
         not created,
         "native-reflowable-metadata",
+        resolved_metadata=resolved_local.metadata,
+        metadata_field_sources=resolved_local.field_sources,
+        metadata_source_order=resolved_local.source_order,
     )
 
 
@@ -443,10 +470,24 @@ def _complete_deferred_source_conversion(
     )
     if not source_volume or not result.volume_id:
         return
+    inherited = inherited_classification(str(source_volume.get("mediaKind") or "EBOOK"))
+    media_version = store.ensure_library_media_version(
+        columns={
+            "id": _id(),
+            "workId": result.work_id,
+            "mediaKind": inherited.media_kind,
+            "createdAt": _now(),
+            "updatedAt": _now(),
+        }
+    )
     store.update_library_volume(
         result.volume_id,
         columns={
             "derivedFromVolumeId": source_volume["id"],
+            "mediaVersionId": media_version["id"],
+            **_classification_columns(inherited),
             "updatedAt": _now(),
         },
     )
+    if result.media_version_id != str(media_version["id"]):
+        store.delete_library_media_version_if_empty(result.media_version_id)

@@ -34,9 +34,21 @@ from app.models.library import (
     LibraryWork,
     UserMediaHistory,
 )
-from app.modules.imports.application.audio_types import MAX_AUDIO_BUNDLE_TRACKS
+from app.modules.imports.application.audio_types import (
+    LEGACY_AUDIO_EXTS,
+    MAX_AUDIO_BUNDLE_TRACKS,
+    NEW_AUDIO_EXTS,
+    SUPPORTED_AUDIO_EXTS,
+    audio_mime_type,
+    is_supported_audio_file,
+)
 from app.modules.imports.application.dto import ImportOptions
-from app.modules.imports.application.errors import AudioTrackLimitExceededError
+from app.modules.imports.application.errors import (
+    AudioInspectionError,
+    AudioTrackLimitExceededError,
+    ImportExecutionError,
+)
+from app.modules.imports.infrastructure import orchestration_services as orchestration
 from app.modules.imports.infrastructure.orchestration_services import (
     SessionImportOrchestrationServices,
 )
@@ -97,6 +109,14 @@ def _login(
     )
     assert response.status_code == 200
     return user
+
+
+def _enable_upload_monitor(client, target: Path, name: str) -> None:
+    response = client.post(
+        "/api/monitor-folders",
+        json={"name": name, "rootPath": str(target), "enabled": True},
+    )
+    assert response.status_code == 201
 
 
 def _fake_audio_metadata(
@@ -242,7 +262,7 @@ def _insert_media_volume(
     db_session.commit()
 
 
-def test_m4a_alac_is_rejected_and_container_extension_never_implies_aac(
+def test_m4a_alac_is_accepted_and_container_extension_never_implies_aac(
     tmp_path, monkeypatch
 ) -> None:
     source = tmp_path / "lossless.m4a"
@@ -258,8 +278,8 @@ def test_m4a_alac_is_rejected_and_container_extension_never_implies_aac(
         lambda _path, timeout_seconds: {"duration_ms": 1_000, "codec": "alac"},
     )
 
-    with pytest.raises(ValueError, match="alac"):
-        parse_audio_metadata(source)
+    parsed = parse_audio_metadata(source)
+    assert parsed.codec == "alac"
 
     assert audio_metadata_module._mutagen_codec(source, SimpleNamespace()) is None
     assert (
@@ -298,6 +318,131 @@ def test_m4a_alac_is_rejected_and_container_extension_never_implies_aac(
         )
         == "mp4a.40.36"
     )
+
+
+def test_audio_parser_reads_explicit_series_and_volume_without_reusing_disc(
+    tmp_path, monkeypatch
+) -> None:
+    source = tmp_path / "book.mp3"
+    source.write_bytes(b"fake-audio")
+    monkeypatch.setattr(
+        audio_metadata_module,
+        "_read_with_mutagen",
+        lambda _path: {
+            "duration_ms": 1_000,
+            "codec": "mp3",
+            "series_name": "银河帝国",
+            "volume_index": "第 2 卷",
+            "disc_number": "4/6",
+        },
+    )
+    monkeypatch.setattr(
+        audio_metadata_module, "_read_with_ffprobe", lambda _path, timeout_seconds: {}
+    )
+
+    parsed = parse_audio_metadata(source)
+
+    assert parsed.series_name == "银河帝国"
+    assert parsed.volume_index == 2
+    assert parsed.disc_number == 4
+
+
+def test_audio_format_catalog_admits_every_declared_audio_extension() -> None:
+    assert LEGACY_AUDIO_EXTS == {".m4a", ".m4b", ".mp3"}
+    assert SUPPORTED_AUDIO_EXTS == NEW_AUDIO_EXTS | LEGACY_AUDIO_EXTS
+    assert all(
+        is_supported_audio_file(f"track{extension}")
+        for extension in SUPPORTED_AUDIO_EXTS
+    )
+    assert audio_mime_type("book.m4b") == "audio/mp4"
+    assert audio_mime_type("book.flac") == "audio/flac"
+    assert audio_mime_type("book.opus") == "audio/ogg"
+    assert audio_mime_type("book.wav") == "audio/wav"
+    assert audio_mime_type("book.ape") == "audio/x-ape"
+
+
+def test_ffprobe_confirmed_codec_is_accepted_for_new_audio_format(
+    tmp_path, monkeypatch
+) -> None:
+    source = tmp_path / "chapter.wma"
+    source.write_bytes(b"audio")
+    monkeypatch.setattr(audio_metadata_module, "_read_with_mutagen", lambda _path: {})
+    monkeypatch.setattr(
+        audio_metadata_module,
+        "_read_with_ffprobe",
+        lambda _path, timeout_seconds: {"duration_ms": 1_000, "codec": "wmav2"},
+    )
+
+    assert parse_audio_metadata(source).codec == "wmav2"
+
+
+def test_new_audio_format_requires_ffprobe_confirmation(tmp_path, monkeypatch) -> None:
+    source = tmp_path / "chapter.flac"
+    source.write_bytes(b"audio")
+    monkeypatch.setattr(audio_metadata_module, "_read_with_mutagen", lambda _path: {})
+    monkeypatch.setattr(
+        audio_metadata_module,
+        "_read_with_ffprobe",
+        lambda _path, timeout_seconds: {},
+    )
+
+    with pytest.raises(AudioInspectionError) as captured:
+        parse_audio_metadata(source)
+
+    assert captured.value.code == "AUDIO_PROBE_REQUIRED"
+
+
+def test_audio_inspection_error_keeps_stable_import_error_code(
+    db_session, test_settings, monkeypatch, tmp_path
+) -> None:
+    source = tmp_path / "chapter.flac"
+    source.write_bytes(b"audio")
+
+    def reject(_path: Path) -> AudioFileMetadata:
+        raise AudioInspectionError("AUDIO_METADATA_INVALID", "invalid audio")
+
+    monkeypatch.setattr(orchestration, "parse_audio_metadata", reject)
+    services = SessionImportOrchestrationServices(db_session, test_settings)
+
+    with pytest.raises(ImportExecutionError) as captured:
+        services.parse_audio_metadata(source)
+
+    assert captured.value.code == "AUDIO_METADATA_INVALID"
+    assert captured.value.retryable is False
+
+
+@pytest.mark.parametrize("attached_picture", [False, True])
+def test_ffprobe_rejects_video_but_allows_attached_cover(
+    tmp_path, monkeypatch, attached_picture: bool
+) -> None:
+    source = tmp_path / "chapter.mka"
+    source.write_bytes(b"audio")
+    payload = {
+        "streams": [
+            {"codec_type": "audio", "codec_name": "flac", "duration": "1"},
+            {
+                "codec_type": "video",
+                "disposition": {"attached_pic": 1 if attached_picture else 0},
+            },
+        ],
+        "format": {"duration": "1"},
+    }
+    monkeypatch.setattr(audio_metadata_module.shutil, "which", lambda _name: "/ffprobe")
+    monkeypatch.setattr(
+        audio_metadata_module,
+        "_run_process_with_output_limit",
+        lambda *_args, **_kwargs: (0, json.dumps(payload).encode(), b""),
+    )
+
+    if attached_picture:
+        assert (
+            audio_metadata_module._read_with_ffprobe(source, timeout_seconds=1)["codec"]
+            == "flac"
+        )
+    else:
+        with pytest.raises(AudioInspectionError) as captured:
+            audio_metadata_module._read_with_ffprobe(source, timeout_seconds=1)
+        assert captured.value.code == "AUDIO_VIDEO_STREAM_UNSUPPORTED"
 
 
 def test_m4a_rfc6381_aac_codec_is_accepted_without_ffprobe(
@@ -590,7 +735,7 @@ def test_audio_bundle_import_merges_with_existing_epub_and_orders_tracks(
     )
 
 
-def test_audio_bundle_does_not_guess_between_duplicate_path_scoped_works(
+def test_audio_bundle_groups_with_same_title_works_across_media(
     db_session, test_settings, monkeypatch, tmp_path
 ) -> None:
     _initialize_schema(db_session)
@@ -626,9 +771,8 @@ def test_audio_bundle_does_not_guess_between_duplicate_path_scoped_works(
         db_session, test_settings, monkeypatch, tmp_path
     )
 
-    assert first.work_id != second.work_id
-    assert audio.work_id not in {first.work_id, second.work_id}
-    assert db_session.execute(text("SELECT COUNT(*) FROM LibraryWork")).scalar() == 3
+    assert first.work_id == second.work_id == audio.work_id
+    assert db_session.execute(text("SELECT COUNT(*) FROM LibraryWork")).scalar() == 1
 
 
 def test_audio_moved_copy_runs_normal_import_without_content_hashing(
@@ -942,6 +1086,7 @@ def test_audio_bootstrap_range_head_and_completion_follow_volume_progress(
         == bootstrap["contentFingerprint"]
     )
     assert [track["trackNumber"] for track in bootstrap["files"]] == [2, 10]
+    assert {track["codec"] for track in bootstrap["files"]} == {"mp3"}
     assert bootstrap["volume"]["durationMs"] == 1_200_000
     assert len(bootstrap["units"]) == 2
 
@@ -1067,7 +1212,6 @@ def test_three_media_filters_tabs_preferences_and_completion_are_user_scoped(
             normalized_title="mixed media work",
             author="Author",
             normalized_author="author",
-            work_type="EPUB",
             tags="[]",
         )
     )
@@ -1183,7 +1327,6 @@ def test_active_audio_volume_and_continue_reading_follow_volume_progress(
         origin="MANUAL",
         title="Two audio volumes",
         normalized_title="two audio volumes",
-        work_type="AUDIO",
         tags="[]",
     )
     media_version = LibraryMediaVersion(
@@ -1285,6 +1428,7 @@ def test_multi_audio_upload_saves_raw_tracks_without_creating_bundle_task(
     _login(client, db_session)
     target = test_settings.resolved_monitor_root / "uploads"
     target.mkdir(parents=True, exist_ok=True)
+    _enable_upload_monitor(client, target, "Audio uploads")
     response = client.post(
         "/api/works/import",
         data={"targetPath": str(target)},
@@ -1296,7 +1440,7 @@ def test_multi_audio_upload_saves_raw_tracks_without_creating_bundle_task(
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["saved"] == 2
-    assert data["autoImport"] is False
+    assert data["autoImport"] is True
     assert [item["file"] for item in data["results"]] == ["01.mp3", "02.mp3"]
     assert (target / "01.mp3").read_bytes() == b"first-track"
     assert (target / "02.mp3").read_bytes() == b"second-track"
@@ -1313,6 +1457,7 @@ def test_manual_multi_audio_upload_keeps_aggregate_byte_limit(
     _login(client, db_session)
     target = test_settings.resolved_monitor_root / "limited-upload"
     target.mkdir(parents=True, exist_ok=True)
+    _enable_upload_monitor(client, target, "Limited audio uploads")
     test_settings.audiobook_max_file_bytes = 1024
     test_settings.audiobook_max_bundle_bytes = 20
 
@@ -1340,6 +1485,7 @@ def test_failed_audio_upload_removes_staging_files_and_never_creates_task(
     _login(client, db_session)
     target = test_settings.resolved_monitor_root / "failed-upload"
     target.mkdir(parents=True, exist_ok=True)
+    _enable_upload_monitor(client, target, "Failed audio uploads")
 
     def fail_after_partial_write(_source, staged_target: Path, *, max_bytes):
         staged_target.write_bytes(b"partial")
@@ -1640,8 +1786,8 @@ def test_multivolume_directory_uses_embedded_identity_and_filters_reader_bootstr
     assert [
         (row["title"], row["volumeIndex"], row["sortOrder"]) for row in volumes
     ] == [
-        ("Vol.1", 1, 0),
-        ("Ghost Blows Out the Light Desert", None, 1),
+        ("Vol.1", 1, 1000),
+        ("Ghost Blows Out the Light Desert", None, 2000),
     ]
 
     first_bootstrap = client.get(f"/api/reader/v3/volumes/{volumes[0]['id']}/bootstrap")
@@ -1822,7 +1968,7 @@ def test_emby_flat_layout_appends_strictly_named_chapters_to_one_volume(
         .mappings()
         .one()
     )
-    assert dict(work) == {"title": "Flat Book", "author": "未知作者"}
+    assert dict(work) == {"title": "Flat Book", "author": "Flat Author"}
     volumes = (
         db_session.execute(
             text(
@@ -2390,7 +2536,9 @@ def test_rescan_reconciles_tracks_split_across_volumes_and_preserves_progress(
     visible_works = (
         db_session.execute(
             text(
-                "SELECT `id`, `title` FROM `LibraryWork` WHERE `hidden` = 0 AND `workType` = 'AUDIO'"
+                "SELECT work.`id`, work.`title` FROM `LibraryWork` work "
+                "JOIN `LibraryMediaVersion` media ON media.`workId` = work.`id` "
+                "WHERE work.`hidden` = 0 AND media.`mediaKind` = 'AUDIOBOOK'"
             ),
         )
         .mappings()

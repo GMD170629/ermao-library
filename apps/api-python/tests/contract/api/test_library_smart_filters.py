@@ -42,14 +42,20 @@ def _login_admin(client: TestClient, db: Session) -> User:
     return user
 
 
-def _add_work(db: Session, *, work_id: str, title: str, source_path: str) -> None:
+def _add_work(
+    db: Session,
+    *,
+    work_id: str,
+    title: str,
+    source_path: str,
+    author: str | None = None,
+) -> None:
     work = LibraryWork(
         id=work_id,
         title=title,
         normalized_title=title.casefold(),
-        author=None,
-        normalized_author=None,
-        work_type="BOOK",
+        author=author,
+        normalized_author=author.casefold() if author else None,
         tags="[]",
     )
     media_version = LibraryMediaVersion(
@@ -98,13 +104,11 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
         author="林川",
         normalized_author="林川",
         description="Alpha 太空冒险 Suffix",
-        work_type="BOOK",
         publication_status="COMPLETED",
         tracking_status="TRACKING",
         tags='["科幻"]',
         series_name="星海系列",
         series_index=2,
-        published_year=2026,
         metadata_quality=92,
         organize_status="APPLIED",
         cover_path="covers/alpha.webp",
@@ -122,13 +126,11 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
         author="周秋",
         normalized_author="周秋",
         description=None,
-        work_type="COMIC",
         publication_status="ONGOING",
         tracking_status="NOT_TRACKING",
         tags="[]",
         series_name=None,
         series_index=None,
-        published_year=2020,
         metadata_quality=10,
         organize_status="REVIEWING",
         cover_path=None,
@@ -145,11 +147,9 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
         author=None,
         normalized_author=None,
         description=None,
-        work_type="BOOK",
         tags="[]",
         series_name=None,
         series_index=None,
-        published_year=None,
         metadata_quality=0,
     )
     alpha_media = LibraryMediaVersion(
@@ -363,6 +363,51 @@ def test_work_list_applies_source_path_smart_filter(
     ) == ["鸡皮疙瘩系列"]
 
 
+def test_author_empty_filter_treats_unknown_author_placeholder_as_empty(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login_admin(client, db_session)
+    _add_work(
+        db_session,
+        work_id="missing-author",
+        title="缺失作者",
+        source_path="/books/missing-author.epub",
+    )
+    _add_work(
+        db_session,
+        work_id="unknown-author",
+        title="未知作者占位",
+        source_path="/books/unknown-author.epub",
+        author="未知作者",
+    )
+    _add_work(
+        db_session,
+        work_id="known-author",
+        title="已知作者",
+        source_path="/books/known-author.epub",
+        author="林川",
+    )
+    db_session.commit()
+
+    assert set(
+        _filtered_titles(
+            client,
+            {
+                "combinator": "ALL",
+                "conditions": [{"field": "author", "operator": "is_empty"}],
+            },
+        )
+    ) == {"缺失作者", "未知作者占位"}
+    assert _filtered_titles(
+        client,
+        {
+            "combinator": "ALL",
+            "conditions": [{"field": "author", "operator": "is_not_empty"}],
+        },
+    ) == ["已知作者"]
+
+
 def test_work_list_applies_every_smart_filter_field(
     client: TestClient,
     db_session: Session,
@@ -375,13 +420,8 @@ def test_work_list_applies_every_smart_filter_field(
         "tag": {"operator": "equals", "value": "科幻"},
         "series": {"operator": "equals", "value": "星海系列"},
         "description": {"operator": "contains", "value": "太空冒险"},
-        "publishedYear": {"operator": "equals", "value": "2026"},
         "seriesIndex": {"operator": "equals", "value": "2"},
         "metadataQuality": {"operator": "greater_or_equal", "value": "90"},
-        "publisher": {"operator": "equals", "value": "星海出版社"},
-        "language": {"operator": "equals", "value": "zh-CN"},
-        "isbn": {"operator": "contains", "value": "9780000000001"},
-        "identifier": {"operator": "equals", "value": "urn:starship:alpha"},
         "volumeTitle": {"operator": "contains", "value": "旗舰卷"},
         "narrator": {"operator": "contains", "value": "演播甲"},
         "mediaKind": {"operator": "equals", "value": "EBOOK"},
@@ -507,11 +547,6 @@ def test_work_list_applies_all_operator_families_and_combinators(
             {"平凡日记", "空白样本"},
         ),
         (
-            "relation empty",
-            {"field": "publisher", "operator": "is_empty"},
-            {"空白样本"},
-        ),
-        (
             "reading status empty",
             {"field": "readingStatus", "operator": "is_empty"},
             set(),
@@ -634,7 +669,7 @@ def test_work_list_applies_all_operator_families_and_combinators(
                 "combinator": "ALL",
                 "conditions": [
                     {"field": "title", "operator": "contains", "value": "星海"},
-                    {"field": "publisher", "operator": "equals", "value": "星海出版社"},
+                        {"field": "format", "operator": "equals", "value": "EPUB"},
                 ],
             },
         )
@@ -721,3 +756,87 @@ def test_work_list_rejects_invalid_smart_filter_expression(
 
     assert response.status_code == 400
     assert response.json()["ok"] is False
+
+
+def test_work_list_rejects_removed_filter_dimensions_with_stable_code(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login_admin(client, db_session)
+
+    for field in ("publishedYear", "publisher", "language", "isbn", "identifier"):
+        response = client.get(
+            "/api/works",
+            params={
+                "filters": json.dumps(
+                    {
+                        "combinator": "ALL",
+                        "conditions": [
+                            {"field": field, "operator": "equals", "value": "legacy"}
+                        ],
+                    }
+                )
+            },
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "UNSUPPORTED_FILTER_DIMENSION"
+
+
+def test_legacy_smart_shelf_is_empty_and_can_remove_unsupported_rules(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    user = _login_admin(client, db_session)
+    db_session.add(
+        Shelf(
+            id="legacy-publisher-shelf",
+            owner_user_id=user.id,
+            name="旧出版社书架",
+            kind="SMART",
+            rules_json=json.dumps(
+                {
+                    "combinator": "ALL",
+                    "conditions": [
+                        {
+                            "field": "publisher",
+                            "operator": "equals",
+                            "value": "旧出版社",
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/api/shelves/legacy-publisher-shelf")
+    assert response.status_code == 200
+    shelf = response.json()["data"]["shelf"]
+    assert shelf["rulesStatus"] == "UNSUPPORTED"
+    assert shelf["unsupportedRuleFields"] == ["publisher"]
+    assert shelf["books"] == []
+
+    repaired = client.patch(
+        "/api/shelves/legacy-publisher-shelf",
+        json={"rules": {"combinator": "ALL", "conditions": []}},
+    )
+    assert repaired.status_code == 200
+    assert repaired.json()["data"]["shelf"]["rulesStatus"] == "VALID"
+
+    rejected = client.post(
+        "/api/shelves",
+        json={
+            "name": "不支持的书架",
+            "kind": "SMART",
+            "rules": {
+                "combinator": "ALL",
+                "conditions": [
+                    {"field": "publisher", "operator": "equals", "value": "旧出版社"}
+                ],
+            },
+        },
+    )
+    assert rejected.status_code == 400
+    assert rejected.json()["error"]["code"] == "UNSUPPORTED_FILTER_DIMENSION"

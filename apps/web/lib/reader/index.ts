@@ -1,5 +1,6 @@
 export * from './debug';
 export * from './browser-migration';
+export * from './book-cache';
 export * from './memory-storage';
 export * from './migrations';
 export * from './model';

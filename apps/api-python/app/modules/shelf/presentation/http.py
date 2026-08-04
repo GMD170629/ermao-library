@@ -44,6 +44,22 @@ from app.services.library_management import smart_shelf_work_ids
 
 router = APIRouter(tags=["shelf"], route_class=TypedContractRoute)
 
+UNSUPPORTED_SMART_SHELF_FIELDS = frozenset(
+    {"publishedYear", "publisher", "language", "isbn", "identifier"}
+)
+
+
+def _unsupported_rule_fields(rules: dict[str, Any]) -> list[str]:
+    fields = {
+        str(condition.get("field"))
+        for condition in rules.get("conditions") or []
+        if isinstance(condition, dict)
+        and str(condition.get("field")) in UNSUPPORTED_SMART_SHELF_FIELDS
+    }
+    if rules.get("publishers"):
+        fields.add("publisher")
+    return sorted(fields)
+
 
 def _now() -> datetime:
     return datetime.now(UTC)
@@ -84,8 +100,8 @@ def _validated_shelf_payload(value: object) -> dict[str, Any]:
     )
 
 
-def _bookshelf_item_view(work: dict[str, Any]) -> dict[str, Any]:
-    return bookshelf_item_view(work)
+def _bookshelf_item_view(db: Session, work: dict[str, Any]) -> dict[str, Any]:
+    return bookshelf_item_view(db, work)
 
 
 def _get_work(db: Session, work_id: str) -> dict[str, Any] | None:
@@ -144,6 +160,8 @@ def _shelf_work_ids(db: Session, shelf: dict[str, Any], user: User) -> list[str]
     if kind == ShelfKind.COLLECTION:
         return []
     rules = _parse_json(shelf.get("rulesJson"), {})
+    if kind == "SMART" and _unsupported_rule_fields(rules):
+        return []
     work_ids = (
         smart_shelf_work_ids(db, rules, user.id)
         if kind == "SMART"
@@ -157,15 +175,19 @@ def _shelf_work_ids(db: Session, shelf: dict[str, Any], user: User) -> list[str]
 
 def _shelf_book_views(db: Session, work_ids: list[str]) -> list[dict[str, Any]]:
     works = shelf_store.list_work_cards(db, work_ids)
-    return [_bookshelf_item_view(work) for work in works]
+    return [_bookshelf_item_view(db, work) for work in works]
 
 
 def _shelf_base_view(shelf: dict[str, Any]) -> dict[str, Any]:
     kind = str(shelf.get("kind") or "STATIC").upper()
+    rules = _parse_json(shelf.get("rulesJson"), {})
+    unsupported_fields = _unsupported_rule_fields(rules) if kind == "SMART" else []
     return {
         **shelf,
         "kind": kind,
-        "rules": _parse_json(shelf.get("rulesJson"), {}),
+        "rules": rules,
+        "rulesStatus": "UNSUPPORTED" if unsupported_fields else "VALID",
+        "unsupportedRuleFields": unsupported_fields,
     }
 
 
@@ -341,7 +363,9 @@ def _normalized_smart_shelf_rules(value: Any) -> tuple[dict[str, Any], str | Non
         return {}, "媒介类型规则无效"
     if media_kinds:
         rules["mediaKinds"] = list(dict.fromkeys(media_kinds))
-    for key in ("tags", "authors", "publishers"):
+    if value.get("publishers"):
+        return {}, "不支持的筛选维度：publisher"
+    for key in ("tags", "authors"):
         values = [
             str(item).strip() for item in value.get(key) or [] if str(item).strip()
         ]
@@ -547,7 +571,15 @@ async def create_shelf(
         return _collection_policy_response(error)
     rules, rules_error = _normalized_smart_shelf_rules(payload.get("rules"))
     if rules_error:
-        return fail(rules_error, status_code=400)
+        return fail(
+            rules_error,
+            status_code=400,
+            code=(
+                "UNSUPPORTED_FILTER_DIMENSION"
+                if rules_error.startswith("不支持的筛选维度：")
+                else "INVALID_SHELF_RULES"
+            ),
+        )
     raw_work_ids = payload.get("bookIds", payload.get("workIds", []))
     if kind is ShelfKind.COLLECTION:
         supplied_work_ids = _normalized_ids(raw_work_ids)
@@ -679,7 +711,15 @@ async def update_shelf(
         payload.get("rules", _parse_json(existing_shelf.get("rulesJson"), {}))
     )
     if rules_error:
-        return fail(rules_error, status_code=400)
+        return fail(
+            rules_error,
+            status_code=400,
+            code=(
+                "UNSUPPORTED_FILTER_DIMENSION"
+                if rules_error.startswith("不支持的筛选维度：")
+                else "INVALID_SHELF_RULES"
+            ),
+        )
     values.update({"kind": kind.value, "rulesJson": _json_text(rules)})
     works = payload.get("bookIds", payload.get("workIds"))
     work_ids: list[str] | None = None

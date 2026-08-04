@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app/apps/api-python
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends libmobi-tools ffmpeg ca-certificates \
+  && apt-get install -y --no-install-recommends libmobi-tools ffmpeg unar ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
 COPY apps/api-python/pyproject.toml apps/api-python/uv.lock ./

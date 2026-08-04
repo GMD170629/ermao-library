@@ -29,7 +29,9 @@ class VolumeFormat(StrEnum):
     FB2 = "FB2"
     TXT = "TXT"
     PDF = "PDF"
+    CBR = "CBR"
     CBZ = "CBZ"
+    RAR = "RAR"
     ZIP = "ZIP"
     M4B = "M4B"
     M4A = "M4A"
@@ -37,7 +39,12 @@ class VolumeFormat(StrEnum):
 
     @property
     def media_kind(self) -> MediaKind:
-        if self in {VolumeFormat.CBZ, VolumeFormat.ZIP}:
+        if self in {
+            VolumeFormat.CBR,
+            VolumeFormat.CBZ,
+            VolumeFormat.RAR,
+            VolumeFormat.ZIP,
+        }:
             return MediaKind.COMIC
         if self in {VolumeFormat.M4B, VolumeFormat.M4A, VolumeFormat.MP3}:
             return MediaKind.AUDIOBOOK

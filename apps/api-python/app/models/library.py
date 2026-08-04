@@ -22,14 +22,12 @@ from app.models.common import cuid, db_timestamp, timestamp_ms_server_default
 class LibraryWork(Base):
     __tablename__ = "LibraryWork"
     __table_args__ = (
-        Index("LibraryWork_workType_idx", "workType"),
         Index("LibraryWork_publicationStatus_idx", "publicationStatus"),
         Index("LibraryWork_trackingStatus_idx", "trackingStatus"),
         Index("LibraryWork_title_idx", "title"),
         Index("LibraryWork_normalizedTitle_idx", "normalizedTitle"),
         Index("LibraryWork_normalizedAuthor_idx", "normalizedAuthor"),
         Index("LibraryWork_seriesName_idx", "seriesName"),
-        Index("LibraryWork_publishedYear_idx", "publishedYear"),
         Index("LibraryWork_organizeStatus_idx", "organizeStatus"),
         Index("LibraryWork_hidden_idx", "hidden"),
         Index("LibraryWork_organized_idx", "organized"),
@@ -57,7 +55,6 @@ class LibraryWork(Base):
         "normalizedAuthor", Text, nullable=True
     )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    work_type: Mapped[str] = mapped_column("workType", String(191), nullable=False)
     publication_status: Mapped[str] = mapped_column(
         "publicationStatus",
         String(191),
@@ -88,9 +85,6 @@ class LibraryWork(Base):
     series_name: Mapped[str | None] = mapped_column("seriesName", Text, nullable=True)
     series_index: Mapped[float | None] = mapped_column(
         "seriesIndex", Float, nullable=True
-    )
-    published_year: Mapped[int | None] = mapped_column(
-        "publishedYear", Integer, nullable=True
     )
     metadata_quality: Mapped[int] = mapped_column(
         "metadataQuality", Integer, nullable=False, default=0, server_default="0"
@@ -215,6 +209,23 @@ class LibraryVolume(Base):
         "sortOrder", Integer, nullable=False, default=0, server_default="0"
     )
     format: Mapped[str] = mapped_column(String(191), nullable=False)
+    classification_source: Mapped[str] = mapped_column(
+        "classificationSource",
+        String(32),
+        nullable=False,
+        default="LEGACY",
+        server_default="LEGACY",
+    )
+    classification_reason: Mapped[str] = mapped_column(
+        "classificationReason",
+        String(64),
+        nullable=False,
+        default="LEGACY",
+        server_default="LEGACY",
+    )
+    suggested_media_kind: Mapped[str | None] = mapped_column(
+        "suggestedMediaKind", String(32), nullable=True
+    )
     resource_key: Mapped[str] = mapped_column(
         "resourceKey", String(191), nullable=False
     )
@@ -674,6 +685,23 @@ class LibraryReadingProgress(Base):
     )
     client_sequence: Mapped[int | None] = mapped_column(
         "clientSequence", Integer, nullable=True
+    )
+    progressed_at: Mapped[datetime] = mapped_column(
+        "progressedAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
+    source_protocol: Mapped[str] = mapped_column(
+        "sourceProtocol",
+        String(32),
+        nullable=False,
+        default="SHUKU_WEB",
+        server_default="SHUKU_WEB",
+    )
+    source_device_name: Mapped[str | None] = mapped_column(
+        "sourceDeviceName", String(191), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         "createdAt",

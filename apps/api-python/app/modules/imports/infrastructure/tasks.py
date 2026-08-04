@@ -88,8 +88,8 @@ def stage_import_task(
     original_name: str | None = None,
     requested_title: str | None = None,
     requested_author: str | None = None,
-    work_id: str | None = None,
     monitor_folder_id: str | None = None,
+    media_kind_policy: str = "MIXED",
     message: str = "等待后台处理",
     allow_terminal_requeue: bool = False,
 ) -> tuple[dict[str, Any], bool]:
@@ -111,8 +111,8 @@ def stage_import_task(
         original_name=original_name,
         requested_title=requested_title,
         requested_author=requested_author,
-        work_id=work_id,
         monitor_folder_id=monitor_folder_id,
+        media_kind_policy=media_kind_policy,
         message=message,
         now=now,
     )
@@ -258,8 +258,8 @@ def build_import_task_values(
     original_name: str | None,
     requested_title: str | None,
     requested_author: str | None,
-    work_id: str | None,
     monitor_folder_id: str | None,
+    media_kind_policy: str,
     message: str,
     now: Any,
 ) -> tuple[dict[str, Any], list[Path]]:
@@ -268,7 +268,8 @@ def build_import_task_values(
     values: dict[str, Any] = {
         "id": task_id,
         "monitorFolderId": monitor_folder_id,
-        "workId": work_id,
+        "mediaKindPolicy": media_kind_policy,
+        "workId": None,
         "origin": origin,
         "status": "PENDING",
         "originalName": original_name or source.name,

@@ -34,6 +34,13 @@ type ImportTask = {
   friendlyError?: string | null;
   createdAt: string;
   finishedAt?: string | null;
+  recognizedMetadata?: {
+    title: string;
+    volumeTitle: string;
+    author?: string | null;
+    fields: string[];
+    source: 'REQUESTED' | 'SIDECAR_OPF' | 'EMBEDDED' | 'PATH';
+  } | null;
   monitorFolder?: { name: string; rootPath: string } | null;
   book?: { id: string; title: string } | null;
   conversion?: {
@@ -526,7 +533,15 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
                   <Badge tone={statusTone(task.status) as BadgeTone}>{statusLabel(task.status)}</Badge>
                   <Badge>{originLabel(task.origin)}</Badge>
                   {task.conversion ? <Badge tone="blue">{task.conversion.sourceFormat} → {task.conversion.targetFormat}</Badge> : null}
+                  {task.recognizedMetadata?.source === 'SIDECAR_OPF' ? <Badge tone="blue"><I18nText>OPF 元数据</I18nText></Badge> : null}
                 </div>
+                {task.recognizedMetadata ? (
+                  <div className="mt-2 text-sm text-[#554F49]">
+                    <span className="font-medium">{task.recognizedMetadata.title}</span>
+                    {task.recognizedMetadata.volumeTitle !== task.recognizedMetadata.title ? <span> · {task.recognizedMetadata.volumeTitle}</span> : null}
+                    {task.recognizedMetadata.author ? <span> · {task.recognizedMetadata.author}</span> : null}
+                  </div>
+                ) : null}
                 <div className="mt-2 break-words text-sm text-slate-500">{task.monitorFolder?.name ? `${task.monitorFolder.name} · ` : ''}{task.sourcePath}</div>
                 {task.conversion && task.status !== 'FAILED' ? <div className="mt-2 text-sm font-medium text-[#B45336]">{conversionStage(task)}</div> : null}
                 {task.errorSummary ? (

@@ -35,7 +35,6 @@ def _add_work_with_volumes(db_session, *, volume_count: int = 12) -> None:
         normalized_title="detail work",
         author="Author",
         normalized_author="author",
-        work_type="COMIC",
         tags="[]",
     )
     media_version = LibraryMediaVersion(

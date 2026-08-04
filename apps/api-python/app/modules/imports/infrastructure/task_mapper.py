@@ -33,10 +33,18 @@ def import_task_dto_from_row(row: Mapping[str, object]) -> ImportTaskDTO:
             if "requestedAuthor" in row
             else row.get("requested_author")
         ),
+        recognized_metadata=_optional_mapping(
+            row.get("recognizedMetadata")
+            if "recognizedMetadata" in row
+            else row.get("recognized_metadata")
+        ),
         monitor_folder_id=_optional_str(
             row.get("monitorFolderId")
             if "monitorFolderId" in row
             else row.get("monitor_folder_id")
+        ),
+        media_kind_policy=str(
+            row.get("mediaKindPolicy") or row.get("media_kind_policy") or "MIXED"
         ),
         work_id=_optional_str(
             row.get("workId") if "workId" in row else row.get("work_id")
@@ -76,3 +84,7 @@ def _optional_str(value: object | None) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _optional_mapping(value: object | None) -> Mapping[str, object] | None:
+    return value if isinstance(value, Mapping) else None

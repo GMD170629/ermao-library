@@ -10,7 +10,7 @@ from typing import Any, cast
 from sqlalchemy import case, exists, func, inspect, literal, or_, select
 from sqlalchemy.orm import Session
 
-from app.models.library import LibraryVolume, LibraryWork
+from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
 from app.models.organize import (
     MetadataLookupTask,
     MetadataProviderExecution,
@@ -324,9 +324,6 @@ def list_filtered_job_rows(
             LibraryWork.id.label("work_id"),
             LibraryWork.title,
             LibraryWork.author,
-            func.coalesce(LibraryVolume.format, LibraryWork.work_type).label(
-                "work_format"
-            ),
         )
         .join(LibraryWork, LibraryWork.id == OrganizeJob.work_id)
         .outerjoin(
@@ -348,6 +345,25 @@ def list_filtered_job_rows(
         .limit(page_size)
         .offset((page - 1) * page_size)
     ).all()
+    work_ids = list(dict.fromkeys(str(row.work_id) for row in rows))
+    media_kinds_by_work: dict[str, list[str]] = {work_id: [] for work_id in work_ids}
+    if work_ids:
+        media_rows = db.execute(
+            select(LibraryMediaVersion.work_id, LibraryMediaVersion.media_kind)
+            .where(LibraryMediaVersion.work_id.in_(work_ids))
+            .order_by(
+                LibraryMediaVersion.work_id.asc(),
+                case(
+                    (LibraryMediaVersion.media_kind == "EBOOK", 0),
+                    (LibraryMediaVersion.media_kind == "COMIC", 1),
+                    (LibraryMediaVersion.media_kind == "AUDIOBOOK", 2),
+                    else_=3,
+                ),
+                LibraryMediaVersion.id.asc(),
+            )
+        ).all()
+        for work_id, media_kind in media_rows:
+            media_kinds_by_work[str(work_id)].append(str(media_kind))
     return [
         OrganizeJobListItem(
             id=str(row.id),
@@ -365,7 +381,7 @@ def list_filtered_job_rows(
                 id=str(row.work_id),
                 title=str(row.title or "未命名作品"),
                 author=str(row.author or "未知作者"),
-                format=str(row.work_format or "UNKNOWN"),
+                available_media_kinds=media_kinds_by_work[str(row.work_id)],
             ),
         )
         for row in rows
