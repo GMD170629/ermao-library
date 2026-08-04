@@ -43,6 +43,7 @@ from tests.test_worker_importer import (
     create_worker_tables,
     write_comic_fixture,
     write_epub_fixture,
+    write_epub_metadata_fixture,
     write_pdf_fixture,
 )
 
@@ -746,8 +747,10 @@ def test_metadata_candidate_parsers_accept_common_provider_shapes():
                     "title": "搜索结果书名",
                     "authors": [{"name": "作者甲"}],
                     "summary": "简介",
-                    "cover_url": "https://example.test/cover.jpg",
-                    "pubdate": "2024-01",
+                    "publisher": "测试出版社",
+                    "pubdate": "2019-12-30",
+                        "isbn13": "9781234567897",
+                        "cover_url": "https://example.test/cover.jpg",
                 }
             ]
         },
@@ -762,6 +765,7 @@ def test_metadata_candidate_parsers_accept_common_provider_shapes():
                     "name_cn": "中文条目",
                     "summary": "简介",
                     "images": {"common": "https://example.test/bgm.jpg"},
+                    "infobox": [{"key": "册数", "value": "23"}],
                 }
             ]
         },
@@ -771,8 +775,12 @@ def test_metadata_candidate_parsers_accept_common_provider_shapes():
     assert douban[0]["title"] == "搜索结果书名"
     assert douban[0]["author"] == "作者甲"
     assert douban[0]["coverUrl"] == "https://example.test/cover.jpg"
+    assert douban[0]["publisher"] == "测试出版社"
+    assert douban[0]["publishedAt"] == "2019-12-30T00:00:00+00:00"
+    assert douban[0]["isbn"] == "9781234567897"
     assert bangumi[0]["title"] == "中文条目"
     assert bangumi[0]["coverUrl"] == "https://example.test/bgm.jpg"
+    assert "seriesIndex" not in bangumi[0]
 
 
 def test_core_compat_endpoints_return_envelopes(client, db_session, test_settings):
@@ -1642,16 +1650,12 @@ def test_update_work_accepts_empty_series_index_from_forms(client, db_session):
     )
     db_session.commit()
 
-    response = client.patch(
-        "/api/works/work-form-numeric", json={"seriesIndex": ""}
-    )
+    response = client.patch("/api/works/work-form-numeric", json={"seriesIndex": ""})
     assert response.status_code == 200
     assert response.json()["data"]["book"]["seriesIndex"] is None
     row = (
         db_session.execute(
-            text(
-                "SELECT seriesIndex FROM LibraryWork WHERE id = 'work-form-numeric'"
-            )
+            text("SELECT seriesIndex FROM LibraryWork WHERE id = 'work-form-numeric'")
         )
         .mappings()
         .first()
@@ -3120,7 +3124,7 @@ def test_organize_jobs_return_frontend_contract(client, db_session):
         "id": "work-contract",
         "title": "Contract Book",
         "author": "未知作者",
-            "availableMediaKinds": ["EBOOK"],
+        "availableMediaKinds": ["EBOOK"],
     }
     assert job["statusCategory"] == "FAILED"
     assert job["metadataSources"] == []
@@ -5726,13 +5730,21 @@ def test_upload_saves_to_nested_directory_inside_enabled_monitor_folder(
     upload_dir.mkdir(parents=True)
     monitored = client.post(
         "/api/monitor-folders",
-        json={"name": "Nested upload monitor", "rootPath": str(monitor_root), "enabled": True},
+        json={
+            "name": "Nested upload monitor",
+            "rootPath": str(monitor_root),
+            "enabled": True,
+        },
     )
     assert monitored.status_code == 201
     disabled_root = _managed_fixture_dir(test_settings, "disabled-upload-root")
     disabled = client.post(
         "/api/monitor-folders",
-        json={"name": "Disabled upload monitor", "rootPath": str(disabled_root), "enabled": False},
+        json={
+            "name": "Disabled upload monitor",
+            "rootPath": str(disabled_root),
+            "enabled": False,
+        },
     )
     assert disabled.status_code == 201
     selectable_folders = client.get(
@@ -5829,7 +5841,11 @@ def test_upload_rejects_symlink_escape_from_enabled_monitor_folder(
     escaped_directory.symlink_to(outside_directory, target_is_directory=True)
     monitored = client.post(
         "/api/monitor-folders",
-        json={"name": "Symlink uploads", "rootPath": str(monitor_root), "enabled": True},
+        json={
+            "name": "Symlink uploads",
+            "rootPath": str(monitor_root),
+            "enabled": True,
+        },
     )
     assert monitored.status_code == 201
 
@@ -5909,7 +5925,11 @@ def test_upload_uses_a_numbered_name_when_the_target_already_exists(
     upload_dir = _managed_fixture_dir(test_settings, "duplicate-uploads")
     monitored = client.post(
         "/api/monitor-folders",
-        json={"name": "Duplicate uploads", "rootPath": str(upload_dir), "enabled": True},
+        json={
+            "name": "Duplicate uploads",
+            "rootPath": str(upload_dir),
+            "enabled": True,
+        },
     )
     assert monitored.status_code == 201
 
@@ -6001,7 +6021,7 @@ def test_epub_volume_file_and_bootstrap_use_requested_volume(
     series_dir.mkdir()
     first = series_dir / "星舰小说 01.epub"
     second = series_dir / "星舰小说 02.epub"
-    write_epub_fixture(first)
+    write_epub_metadata_fixture(first, "第一卷", "作者甲")
     with zipfile.ZipFile(second, "w") as archive:
         archive.writestr("mimetype", "application/epub+zip")
         archive.writestr(
@@ -6049,14 +6069,14 @@ def test_epub_volume_file_and_bootstrap_use_requested_volume(
     assert data["readerType"] == "reflowable"
     assert data["sourceFormat"] == "epub"
     assert data["volume"]["id"] == second_result.volume_id
-    assert data["volume"]["title"] == "星舰小说 02"
+    assert data["volume"]["title"] == "第二卷"
     assert data["volume"]["chapterCount"] == 1
     assert [
         (item["id"], item["title"], item["chapterCount"])
         for item in data["availableVolumes"]
     ] == [
-        (first_result.volume_id, "星舰小说 01", 2),
-        (second_result.volume_id, "星舰小说 02", 1),
+        (first_result.volume_id, "第一卷", 1),
+        (second_result.volume_id, "第二卷", 1),
     ]
     assert [unit["title"] for unit in data["units"]] == ["第三节"]
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -664,6 +663,13 @@ def douban_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
                 "seriesName": first_string(
                     item.get("seriesName"), item.get("series"), item.get("series_name")
                 ),
+                "publisher": first_string(item.get("publisher")),
+                "publishedAt": publication_datetime_or_none(
+                    item.get("pubdate"), item.get("publishedAt")
+                ),
+                "isbn": first_string(
+                    item.get("isbn13"), item.get("isbn10"), item.get("isbn")
+                ),
                 "coverUrl": first_url(
                     item.get("image"),
                     item.get("coverUrl"),
@@ -683,6 +689,28 @@ def douban_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
         or candidate.get("author")
         or candidate.get("description")
     ]
+
+
+def publication_datetime_or_none(*values: Any) -> str | None:
+    value = first_string(*values)
+    if not value:
+        return None
+    match = re.search(
+        r"(?P<year>\d{4})(?:[-/.\u5e74](?P<month>\d{1,2}))?(?:[-/.\u6708](?P<day>\d{1,2}))?",
+        value,
+    )
+    if match is None:
+        return None
+    try:
+        parsed = datetime(
+            int(match.group("year")),
+            int(match.group("month") or 1),
+            int(match.group("day") or 1),
+            tzinfo=UTC,
+        )
+    except ValueError:
+        return None
+    return parsed.isoformat()
 
 
 def first_url(*values: Any) -> str | None:
@@ -813,6 +841,12 @@ def parse_douban_subject_html(
         if isinstance(fallback.get("raw"), dict)
         else None,
     )
+    publisher = first_string(
+        info.get("出版社"),
+        (fallback.get("raw") or {}).get("publisher")
+        if isinstance(fallback.get("raw"), dict)
+        else None,
+    )
     series_name = first_string(
         info.get("丛书"),
         fallback.get("seriesName"),
@@ -847,6 +881,7 @@ def parse_douban_subject_html(
             "url": url,
             "isbn": isbn,
             "pubdate": pubdate,
+            "publisher": publisher,
             "seriesName": series_name,
             "coverUrl": cover_url,
         },
@@ -918,6 +953,13 @@ def normalize_douban_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
             raw.get("seriesName"),
             raw.get("series"),
             raw.get("series_name"),
+        ),
+        "publisher": first_string(candidate.get("publisher"), raw.get("publisher")),
+        "publishedAt": publication_datetime_or_none(
+            candidate.get("publishedAt"), raw.get("pubdate")
+        ),
+        "isbn": first_string(
+            candidate.get("isbn"), raw.get("isbn"), raw.get("isbn13"), raw.get("isbn10")
         ),
         "coverUrl": first_url(
             candidate.get("coverUrl"),
@@ -1123,16 +1165,6 @@ def douban_book_suggestions(payload: Any, confidence: float) -> list[dict[str, A
     return [item for item in raw if item]
 
 
-def number_or_none(value: Any) -> int | float | None:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        return None
-    if not parsed or not math.isfinite(parsed):
-        return None
-    return int(parsed) if parsed.is_integer() else parsed
-
-
 def bangumi_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
     raw = payload if isinstance(payload, dict) else {}
     data = (
@@ -1167,7 +1199,6 @@ def bangumi_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
             *_metadata_title_strings(item.get("name")),
             *_metadata_title_strings(item.get("name_cn")),
         ]
-        volume = None
         for entry in infobox:
             if not isinstance(entry, dict):
                 continue
@@ -1181,8 +1212,6 @@ def bangumi_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
                 re.IGNORECASE,
             ):
                 title_aliases.extend(_metadata_title_strings(value))
-            if volume is None and re.search(r"册数|卷数|话数", key):
-                volume = value
         images = item.get("images") if isinstance(item.get("images"), dict) else {}
         candidates.append(
             {
@@ -1198,7 +1227,6 @@ def bangumi_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
                 "description": first_string(item.get("summary")),
                 "tags": tags[:8],
                 "seriesName": first_string(item.get("name_cn"), item.get("name")),
-                "seriesIndex": number_or_none(volume),
                 "coverUrl": first_url(
                     images.get("large"),
                     images.get("common"),

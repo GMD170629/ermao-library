@@ -852,7 +852,6 @@ def retry_import_task(
             original_name=str(task.get("originalName") or source_path.name),
             requested_title=task.get("requestedTitle"),
             requested_author=task.get("requestedAuthor"),
-            work_id=task.get("workId"),
             monitor_folder_id=task.get("monitorFolderId"),
             message="等待后台重试",
         )

@@ -486,7 +486,14 @@ def test_provider_registry_seeds_builtins_and_never_returns_secret_values(
             )
             policy = get_organize_policy(db)
             assert policy["scheduleMode"] == "MANUAL"
-            assert policy["overwriteTitleAuthor"] is True
+            assert policy["writeMetadataToFiles"] is False
+            assert policy["preferLocalMetadata"] is True
+            assert policy["localMetadataPriority"] == [
+                "SIDECAR_OPF",
+                "EMBEDDED",
+                "PATH",
+            ]
+            assert "overwriteTitleAuthor" not in policy
             assert policy["rules"] == {"unrecognized": True, "missingMetadata": True}
     finally:
         engine.dispose()
@@ -516,7 +523,9 @@ def test_provider_pipelines_are_independent_ordered_and_composable(tmp_path) -> 
                 "ai",
             ]
             assert {
-                media_kind: [item["providerId"] for item in providers if item["enabled"]]
+                media_kind: [
+                    item["providerId"] for item in providers if item["enabled"]
+                ]
                 for media_kind, providers in pipelines.items()
             } == {
                 "EBOOK": ["douban", "bangumi"],

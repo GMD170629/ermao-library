@@ -33,7 +33,6 @@ class SqlAlchemyImportTaskStore:
             original_name=command.original_name,
             requested_title=command.requested_title,
             requested_author=command.requested_author,
-            work_id=command.work_id,
             monitor_folder_id=command.monitor_folder_id,
             media_kind_policy=str(media_kind_policy or "MIXED"),
             message=command.message,

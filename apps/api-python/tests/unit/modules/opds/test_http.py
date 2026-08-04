@@ -103,19 +103,29 @@ def _authorization() -> dict[str, str]:
     return {"Authorization": f"Basic {token}"}
 
 
+def _invalid_authorization() -> dict[str, str]:
+    token = base64.b64encode(b"reader@example.com:wrong-password").decode()
+    return {"Authorization": f"Basic {token}"}
+
+
 def test_catalog_requires_basic_and_partitions_cache_by_authorization() -> None:
     client, catalog, _ = _client()
 
     unauthorized = client.get("/opds/v1.2/catalog")
+    invalid_credentials = client.get(
+        "/opds/v1.2/catalog", headers=_invalid_authorization()
+    )
     response = client.get("/opds/v1.2/catalog?pageSize=25", headers=_authorization())
 
     assert unauthorized.status_code == 401
-    assert (
-        unauthorized.headers["www-authenticate"]
-        == 'Basic realm="Shuku OPDS", charset="UTF-8"'
-    )
+    assert unauthorized.headers["www-authenticate"] == 'Basic realm="Shuku OPDS"'
     assert unauthorized.headers["content-type"].startswith(
         "application/opds-authentication+json"
+    )
+    assert invalid_credentials.status_code == 401
+    assert (
+        invalid_credentials.headers["www-authenticate"]
+        == 'Basic realm="Shuku OPDS"'
     )
     assert response.status_code == 200
     assert response.headers["vary"] == "Authorization"

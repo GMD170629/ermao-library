@@ -21,11 +21,7 @@ from app.modules.imports.application.dto import (
     SeriesVolumeInfo,
 )
 from app.modules.imports.application.identity_policy import (
-    DIRECTORY_TITLE_SIMILARITY_THRESHOLD,
     UNKNOWN_AUTHOR,
-    directory_merge_title_similarity,
-    identity_merge_key,
-    normalize_directory_merge_title,
     normalize_identity_part,
     parse_bracketed_series_identity,
 )
@@ -36,6 +32,7 @@ from app.modules.imports.application.ports import (
     LibraryImportStore,
 )
 from app.modules.imports.application.release_titles import parse_release_title
+from app.modules.imports.application.work_resolution import resolve_work_identity
 from app.modules.imports.domain.content_classification import ContentClassification
 
 SUPPORTED_EXTS = {
@@ -90,13 +87,19 @@ def _normalize_key(value: Any) -> str:
 
 
 def _work_merge_key(
-    fmt: str,
     title: str,
     author: str | None = None,
     identifier: str | None = None,
     isbn: str | None = None,
+    series_name: str | None = None,
 ) -> str:
-    return identity_merge_key(title, author)
+    return resolve_work_identity(
+        title=title,
+        author=author,
+        identifier=identifier,
+        isbn=isbn,
+        series_name=series_name,
+    ).merge_key
 
 
 def _usable_merge_identifier(identifier: str | None) -> bool:
@@ -124,33 +127,6 @@ def _source_filename_title(options: ImportOptions) -> str:
     original_name = str(options.original_name or "").replace("\\", "/")
     filename = original_name.rsplit("/", 1)[-1] or options.source_file_path.name
     return Path(filename).stem.strip() or options.source_file_path.stem
-
-
-def _import_work_merge_key(
-    fmt: str,
-    title: str,
-    author: str | None,
-    options: ImportOptions,
-    _volume_index: float | None,
-    identifier: str | None = None,
-    isbn: str | None = None,
-    grouping_key: str | None = None,
-) -> str:
-    """Choose a work identity for one import source.
-
-    A source discovered inside a monitor folder belongs to a directory-scoped
-    title group whether or not its volume number was recognized. Author
-    metadata may vary between files and must not split that group. Non-watched
-    imports retain the title-and-author identity.
-    """
-
-    if grouping_key:
-        return f"path-group:{grouping_key}"
-    if options.origin == "WATCH" and options.monitor_folder_id is not None:
-        source_group_key = _source_group_key(options, title)
-        title_key = normalize_directory_merge_title(title)
-        return f"directory-volume:{source_group_key}:{title_key}"
-    return _work_merge_key(fmt, title, author, identifier, isbn)
 
 
 def _file_resource_key(fmt: str, path: Path) -> str:
@@ -407,23 +383,8 @@ def _ensure_work(
     queries: ImportLibraryQueries,
     data: dict[str, Any],
 ) -> tuple[dict[str, Any], bool]:
-    if data.get("workId"):
-        existing_by_id = queries.get_work_by_id(str(data["workId"]))
-        if existing_by_id:
-            store.update_library_work(
-                existing_by_id["id"], columns={"hidden": False, "updatedAt": _now()}
-            )
-            return queries.get_work_by_id(
-                str(existing_by_id["id"])
-            ) or existing_by_id, False
     merge_key = str(data["mergeKey"])
     existing = queries.get_work_by_merge_key(merge_key)
-    if existing is None:
-        existing = _find_similar_directory_work(
-            queries,
-            merge_key=merge_key,
-            incoming_title=data["title"],
-        )
     if existing:
         incoming_author = str(data.get("author") or "").strip()
         current_author = str(existing.get("author") or "").strip()
@@ -462,35 +423,6 @@ def _ensure_work(
         }
     )
     return row, True
-
-
-_DIRECTORY_MERGE_KEY_PATTERN = re.compile(
-    r"^(?P<prefix>directory-volume:watch:[0-9a-f]{24}:).+$"
-)
-
-
-def _find_similar_directory_work(
-    queries: ImportLibraryQueries,
-    *,
-    merge_key: str,
-    incoming_title: object,
-) -> dict[str, object] | None:
-    match = _DIRECTORY_MERGE_KEY_PATTERN.fullmatch(merge_key)
-    if match is None:
-        return None
-
-    candidates: list[tuple[float, str, dict[str, object]]] = []
-    for candidate in queries.list_works_by_merge_key_prefix(match.group("prefix")):
-        similarity = directory_merge_title_similarity(
-            incoming_title, candidate.get("title")
-        )
-        if similarity >= DIRECTORY_TITLE_SIMILARITY_THRESHOLD:
-            candidates.append((similarity, str(candidate.get("id") or ""), candidate))
-    if not candidates:
-        return None
-
-    candidates.sort(key=lambda item: (-item[0], item[1]))
-    return candidates[0][2]
 
 
 def _author_is_missing(value: object) -> bool:

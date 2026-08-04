@@ -342,6 +342,9 @@ class ImportTask(Base):
     requested_author: Mapped[str | None] = mapped_column(
         "requestedAuthor", Text, nullable=True
     )
+    recognized_metadata: Mapped[dict[str, object] | None] = mapped_column(
+        "recognizedMetadata", JSON, nullable=True
+    )
     source_path: Mapped[str] = mapped_column("sourcePath", Text, nullable=False)
     source_key: Mapped[str | None] = mapped_column(
         "sourceKey", String(64), nullable=True

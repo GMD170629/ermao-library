@@ -66,7 +66,7 @@ def authentication_required_response(
         content=document.model_dump(mode="json", exclude_none=True),
         media_type="application/opds-authentication+json",
         headers={
-            "WWW-Authenticate": 'Basic realm="Shuku OPDS", charset="UTF-8"',
+            "WWW-Authenticate": 'Basic realm="Shuku OPDS"',
             "Link": '</opds/authentication.json>; rel="http://opds-spec.org/auth/document"; type="application/opds-authentication+json"',
             "Cache-Control": "no-store",
             "Vary": "Authorization",

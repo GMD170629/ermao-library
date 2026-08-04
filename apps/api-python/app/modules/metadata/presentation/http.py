@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
+from app.bootstrap.system import record_system_event
 from app.contracts.http import MessageError
 from app.contracts.http_errors import (
     BasicBadRequestError,
@@ -16,17 +17,23 @@ from app.contracts.http_errors import (
     BasicUnauthorizedError,
     ErrorResponses,
 )
-from app.bootstrap.system import record_system_event
+from app.core.authorization import can_access_work
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.modules.metadata.presentation.schemas import (
     MetadataProvider,
+    MetadataWritebackPayload,
+    MetadataWritebackResponse,
     ProviderPayload,
     ProviderResponse,
     ProvidersPayload,
     ProvidersResponse,
     ProviderTestPayload,
     ProviderTestResponse,
+)
+from app.services.metadata_file_writeback import (
+    metadata_writeback_view,
+    metadata_writeback_work_id,
 )
 from app.services.metadata_provider_registry import (
     get_metadata_provider,
@@ -45,6 +52,28 @@ def _auth(db: Session, request: Request, settings: Settings):
     if auth_error is not None or user is None:
         raise BasicUnauthorizedError(MessageError(message="UNAUTHORIZED"))
     return user
+
+
+@router.get("/metadata/writebacks/{operation_id}")
+def get_metadata_writeback(
+    operation_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    MetadataWritebackResponse,
+    ErrorResponses(BasicUnauthorizedError, BasicNotFoundError),
+]:
+    user = _auth(db, request, settings)
+    work_id = metadata_writeback_work_id(db, operation_id)
+    if work_id is None or not can_access_work(db, user, work_id):
+        raise BasicNotFoundError(MessageError(message="元数据文件写回任务不存在"))
+    operation = metadata_writeback_view(db, operation_id)
+    if operation is None:
+        raise BasicNotFoundError(MessageError(message="元数据文件写回任务不存在"))
+    return MetadataWritebackResponse(
+        data=MetadataWritebackPayload.model_validate({"operation": operation})
+    )
 
 
 @router.get("/metadata/providers")
@@ -122,9 +151,7 @@ def get_registered_metadata_provider(
     if not provider:
         raise BasicNotFoundError(MessageError(message="元数据插件不存在"))
     return ProviderResponse(
-        data=ProviderPayload(
-            provider=MetadataProvider.model_validate(provider)
-        )
+        data=ProviderPayload(provider=MetadataProvider.model_validate(provider))
     )
 
 
@@ -150,7 +177,9 @@ async def update_registered_metadata_provider(
     try:
         provider = update_metadata_provider(db, provider_id, payload)
     except ValueError as exc:
-        error_type = BasicNotFoundError if "不存在" in str(exc) else BasicBadRequestError
+        error_type = (
+            BasicNotFoundError if "不存在" in str(exc) else BasicBadRequestError
+        )
         raise error_type(MessageError(message=str(exc))) from exc
     record_system_event(
         db,
@@ -162,13 +191,14 @@ async def update_registered_metadata_provider(
         target_type="metadataProvider",
         target_id=provider_id,
         message=f"更新元数据插件：{provider.get('name') or provider_id}",
-        metadata={"enabled": provider.get("enabled"), "priority": provider.get("priority")},
+        metadata={
+            "enabled": provider.get("enabled"),
+            "priority": provider.get("priority"),
+        },
         commit=True,
     )
     return ProviderResponse(
-        data=ProviderPayload(
-            provider=MetadataProvider.model_validate(provider)
-        )
+        data=ProviderPayload(provider=MetadataProvider.model_validate(provider))
     )
 
 
@@ -190,7 +220,9 @@ def test_registered_metadata_provider(
     try:
         result, provider = test_metadata_provider(db, provider_id)
     except ValueError as exc:
-        error_type = BasicNotFoundError if "不存在" in str(exc) else BasicBadRequestError
+        error_type = (
+            BasicNotFoundError if "不存在" in str(exc) else BasicBadRequestError
+        )
         raise error_type(MessageError(message=str(exc))) from exc
     return ProviderTestResponse(
         data=ProviderTestPayload.model_validate(

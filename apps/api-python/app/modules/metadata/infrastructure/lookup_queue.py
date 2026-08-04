@@ -55,6 +55,7 @@ _WORK_CAMEL_TO_SNAKE: dict[str, str] = {
 }
 
 _VOLUME_CAMEL_TO_SNAKE: dict[str, str] = {
+    "publisher": "publisher",
     "publishedAt": "published_at",
     "language": "language",
     "isbn": "isbn",
@@ -129,6 +130,7 @@ def volume_row_to_dict(row: Any) -> dict[str, Any]:
         "id": data.get("id"),
         "coverPath": data.get("cover_path", data.get("coverPath")),
         "publishedAt": data.get("published_at", data.get("publishedAt")),
+        "publisher": data.get("publisher"),
         "language": data.get("language"),
         "isbn": data.get("isbn"),
     }
@@ -146,11 +148,36 @@ def lookup_task_is_active(db: Session, task_id: str) -> bool:
     )
 
 
-def overwrite_title_author_enabled(db: Session) -> bool:
+def write_metadata_to_files_enabled(db: Session) -> bool:
+    if not _has_table(db, "OrganizePolicy"):
+        return False
+    columns = {
+        str(column.get("name"))
+        for column in inspect(db.connection()).get_columns("OrganizePolicy")
+    }
+    if "writeMetadataToFiles" not in columns:
+        return False
+    value = db.scalar(
+        select(OrganizePolicy.write_metadata_to_files).where(
+            OrganizePolicy.id == "default"
+        )
+    )
+    return bool(value)
+
+
+def prefer_local_metadata_enabled(db: Session) -> bool:
+    """Return the safe default when the policy migration is not installed yet."""
+
     if not _has_table(db, "OrganizePolicy"):
         return True
+    columns = {
+        str(column.get("name"))
+        for column in inspect(db.connection()).get_columns("OrganizePolicy")
+    }
+    if "preferLocalMetadata" not in columns:
+        return True
     value = db.scalar(
-        select(OrganizePolicy.overwrite_title_author).where(
+        select(OrganizePolicy.prefer_local_metadata).where(
             OrganizePolicy.id == "default"
         )
     )

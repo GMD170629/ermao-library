@@ -20,6 +20,7 @@ from app.modules.imports.application.reflowable_types import (
     ReflowableBookMetadata,
     ReflowableChapter,
 )
+from app.modules.imports.domain.volume_index import parse_structured_volume_index
 from app.services.text_conversion import ConversionFailure, detect_txt_encoding
 
 _KINDLE_FORMATS = {"MOBI", "AZW", "AZW3", "PRC"}
@@ -136,6 +137,13 @@ def _inspect_fb2(path: Path) -> ReflowableBookMetadata:
         for node in _direct_children(title_info, "genre")
         if (value := _element_text(node))
     )
+    sequence = _first_descendant(title_info, "sequence")
+    series_name = _attribute(sequence, "name") or None
+    series_index_raw = _attribute(sequence, "number") or None
+    try:
+        series_index = float(series_index_raw) if series_index_raw else None
+    except ValueError:
+        series_index = None
     chapters = _fb2_chapters(root)
     cover = _fb2_cover(root, title_info)
     return ReflowableBookMetadata(
@@ -156,7 +164,11 @@ def _inspect_fb2(path: Path) -> ReflowableBookMetadata:
             "navigationCount": len(chapters),
             "navigationFingerprint": _navigation_fingerprint(chapters),
             "coverEmbedded": cover is not None,
+            "seriesName": series_name,
+            "seriesIndex": series_index_raw,
         },
+        series_name=_clean(series_name),
+        series_index=series_index,
     )
 
 
@@ -189,7 +201,21 @@ def _inspect_kindle(path: Path, source_format: str) -> ReflowableBookMetadata:
     publisher = _first(exth, 101)
     description = _first(exth, 103)
     isbn = _first(exth, 104)
-    identifier = _first(exth, 113) or str(uid)
+    series_source = _first(exth, 112)
+    series_index_raw = _first(exth, 113)
+    series_index = parse_structured_volume_index(series_index_raw)
+    has_structured_series = bool(
+        series_source
+        and series_index is not None
+        and not series_source.casefold().startswith(("calibre:", "urn:"))
+    )
+    series_name = series_source if has_structured_series else None
+    if not has_structured_series:
+        series_index = None
+    identifier = _first(exth, 504)
+    if identifier is None and not has_structured_series:
+        identifier = _first(exth, 113)
+    identifier = identifier or str(uid)
     published_at = _first(exth, 106)
     language = _first(exth, 524) or _mobi_language(header)
     subjects = tuple(
@@ -201,8 +227,10 @@ def _inspect_kindle(path: Path, source_format: str) -> ReflowableBookMetadata:
         _kindle_navigation_chapters(text, text_byte_length, version) if text else ()
     )
     chapter_source = (
-        "kindle_pos" if chapters and chapters[0].href.startswith("kindle:pos:")
-        else "mobi_filepos" if chapters
+        "kindle_pos"
+        if chapters and chapters[0].href.startswith("kindle:pos:")
+        else "mobi_filepos"
+        if chapters
         else "none"
     )
     return ReflowableBookMetadata(
@@ -226,7 +254,11 @@ def _inspect_kindle(path: Path, source_format: str) -> ReflowableBookMetadata:
             "navigationCount": len(chapters),
             "navigationFingerprint": _navigation_fingerprint(chapters),
             "coverEmbedded": cover is not None,
+            "seriesName": series_name,
+            "seriesIndex": series_index_raw if has_structured_series else None,
         },
+        series_name=_clean(series_name),
+        series_index=series_index,
     )
 
 

@@ -23,6 +23,11 @@ from app.services.book_identity import (
     normalize_identity_part,
 )
 from app.services.library_management import sync_work_facets
+from app.services.metadata_file_writeback import (
+    enqueue_metadata_writeback,
+    process_next_metadata_writeback,
+    recover_interrupted_metadata_writebacks,
+)
 from app.services.metadata_provider_registry import (
     metadata_provider_registry,
     search_with_metadata_provider,
@@ -198,44 +203,44 @@ def _apply_candidate(
     work_patch: dict[str, Any] = {}
     volume_patch: dict[str, Any] = {}
     applied: list[str] = []
+    prefer_local = lookup_persist.prefer_local_metadata_enabled(db)
 
-    overwrite_title_author = lookup_persist.overwrite_title_author_enabled(db)
     candidate_title = str(candidate.get("title") or "").strip()
     candidate_author = str(candidate.get("author") or "").strip()
     current_title = str(work.get("title") or "").strip()
     current_author = str(work.get("author") or "").strip()
-    if candidate_title and (
-        not current_title
-        or (overwrite_title_author and candidate_title != current_title)
-    ):
+    if candidate_title and candidate_title != current_title and (not prefer_local or not current_title):
         work_patch["title"] = candidate_title
         applied.append("title")
-    if candidate_author and (
-        not current_author
-        or current_author == UNKNOWN_AUTHOR
-        or (overwrite_title_author and candidate_author != current_author)
+    local_author_is_missing = not current_author or current_author in {
+        UNKNOWN_AUTHOR,
+        "unknown",
+        "Unknown",
+    }
+    if candidate_author and candidate_author != current_author and (
+        not prefer_local or local_author_is_missing
     ):
         work_patch["author"] = candidate_author
         applied.append("author")
     if (
-        not str(work.get("description") or "").strip()
+        (not prefer_local or not str(work.get("description") or "").strip())
         and str(candidate.get("description") or "").strip()
     ):
         work_patch["description"] = str(candidate["description"]).strip()
         applied.append("description")
     candidate_tags = _parse_tags(candidate.get("tags"))
-    if not _parse_tags(work.get("tags")) and candidate_tags:
+    if candidate_tags and (not prefer_local or not _parse_tags(work.get("tags"))):
         work_patch["tags"] = json.dumps(
             list(dict.fromkeys(candidate_tags)), ensure_ascii=False
         )
         applied.append("tags")
     if (
-        not str(work.get("seriesName") or "").strip()
+        (not prefer_local or not str(work.get("seriesName") or "").strip())
         and str(candidate.get("seriesName") or "").strip()
     ):
         work_patch["seriesName"] = str(candidate["seriesName"]).strip()
         applied.append("seriesName")
-    if work.get("seriesIndex") is None and candidate.get("seriesIndex") is not None:
+    if (not prefer_local or work.get("seriesIndex") is None) and candidate.get("seriesIndex") is not None:
         try:
             work_patch["seriesIndex"] = float(candidate["seriesIndex"])
             applied.append("seriesIndex")
@@ -244,29 +249,29 @@ def _apply_candidate(
     volume_metadata = candidate.get("volumeMetadata")
     if not isinstance(volume_metadata, dict):
         volume_metadata = {
-            key: candidate.get(key) for key in ("publishedAt", "language", "isbn")
+            key: candidate.get(key)
+            for key in ("publisher", "publishedAt", "language", "isbn")
         }
     if volume:
-        if (
-            volume.get("publishedAt") is None
-            and isinstance(volume_metadata.get("publishedAt"), str)
+        if (not prefer_local or volume.get("publishedAt") is None) and isinstance(
+            volume_metadata.get("publishedAt"), str
         ):
             try:
                 published_at = datetime.fromisoformat(
-                    str(volume_metadata["publishedAt"]).replace("Z", "+00:00")
+                    str(volume_metadata["publishedAt"])
                 )
             except ValueError:
                 published_at = None
             if published_at is not None:
                 volume_patch["publishedAt"] = published_at
                 applied.append("publishedAt")
-        for field in ("language", "isbn"):
+        for field in ("publisher", "language", "isbn"):
             value = str(volume_metadata.get(field) or "").strip()
-            if not str(volume.get(field) or "").strip() and value:
+            if value and (not prefer_local or not str(volume.get(field) or "").strip()):
                 volume_patch[field] = value
                 applied.append(field)
     if (
-        not _local_cover_exists(db, work, volume_id)
+        (not prefer_local or not _local_cover_exists(db, work, volume_id))
         and str(candidate.get("coverUrl") or "").strip()
     ):
         try:
@@ -332,6 +337,16 @@ def _apply_candidate(
             raw_json=json.dumps(
                 {"candidate": candidate, "appliedFields": applied}, ensure_ascii=False
             ),
+        )
+    if lookup_persist.write_metadata_to_files_enabled(db) and task.get(
+        "mediaVersionId"
+    ):
+        enqueue_metadata_writeback(
+            db,
+            work_id=str(work["id"]),
+            media_version_id=str(task["mediaVersionId"]),
+            source="AUTOMATIC",
+            lookup_task_id=str(task["id"]),
         )
     return applied
 
@@ -536,6 +551,8 @@ def process_metadata_lookup_task(
 
 
 def process_next_metadata_lookup_task(db: Session, settings: Settings) -> bool:
+    if process_next_metadata_writeback(db, settings):
+        return True
     task = claim_next_metadata_lookup_task(db)
     if not task:
         return False
@@ -571,6 +588,12 @@ class MetadataLookupWorker:
             recovered = recover_stale_metadata_lookup_tasks(db)
             if recovered:
                 LOGGER.warning("recovered %s stale metadata lookup tasks", recovered)
+            recovered_writebacks = recover_interrupted_metadata_writebacks(db)
+            if recovered_writebacks:
+                LOGGER.warning(
+                    "recovered %s interrupted metadata writeback targets",
+                    recovered_writebacks,
+                )
         self._thread.start()
 
     def shutdown(self) -> None:

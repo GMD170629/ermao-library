@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,37 @@ def test_parse_comic_archive_reuses_existing_pipeline_for_rar(
         "favicon-32x32.png",
     ]
     assert parsed["coverEntryPath"] == "favicon-16x16.png"
+
+
+@pytest.mark.parametrize(
+    ("volume_tag", "number_tag", "expected"),
+    [
+        ("<Volume>1 of 23</Volume>", "", 1),
+        ("<Volume>第 2 卷</Volume>", "", 2),
+        ("<Volume>无效</Volume>", "<Number>Vol. 3</Number>", 3),
+    ],
+)
+def test_comic_info_accepts_decorated_current_volume_numbers(
+    tmp_path: Path,
+    volume_tag: str,
+    number_tag: str,
+    expected: float,
+) -> None:
+    archive = tmp_path / "comic.cbz"
+    image = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+    with zipfile.ZipFile(archive, "w") as output:
+        output.writestr("001.png", image)
+        output.writestr(
+            "ComicInfo.xml",
+            f"<ComicInfo><Series>作品</Series>{volume_tag}{number_tag}</ComicInfo>",
+        )
+
+    parsed = inspect_comic_archive(archive)
+
+    assert parsed["comicInfo"] is not None
+    assert parsed["comicInfo"]["volume"] == expected
 
 
 def test_rar_page_stream_reuses_existing_original_range_and_data_saver_paths(

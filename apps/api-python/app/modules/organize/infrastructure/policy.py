@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import inspect, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
+from app.contracts.local_metadata import (
+    DEFAULT_LOCAL_METADATA_PRIORITY,
+    validate_local_metadata_priority,
+)
 from app.models.organize import OrganizePolicy
 
 DEFAULT_POLICY_ID = "default"
@@ -23,7 +27,7 @@ DEFAULT_RULES = {
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def has_policy_table(db: Session) -> bool:
@@ -41,7 +45,9 @@ def entity_as_legacy_dict(entity: OrganizePolicy) -> dict[str, Any]:
         "autoRunOnNew": entity.auto_run_on_new,
         "autoRunOnNewSince": entity.auto_run_on_new_since,
         "rulesJson": entity.rules_json,
-        "overwriteTitleAuthor": entity.overwrite_title_author,
+        "writeMetadataToFiles": entity.write_metadata_to_files,
+        "preferLocalMetadata": entity.prefer_local_metadata,
+        "localMetadataPriorityJson": entity.local_metadata_priority_json,
         "lastScheduledAt": entity.last_scheduled_at,
         "nextRunAt": entity.next_run_at,
         "createdAt": entity.created_at,
@@ -72,14 +78,20 @@ def policy_view(row: dict[str, Any]) -> dict[str, Any]:
             "unrecognized": bool(stored_rules.get("unrecognized", True)),
             "missingMetadata": bool(stored_rules.get("missingMetadata", True)),
         },
-        "overwriteTitleAuthor": bool(row.get("overwriteTitleAuthor", True)),
+        "writeMetadataToFiles": bool(row.get("writeMetadataToFiles", False)),
+        "preferLocalMetadata": bool(row.get("preferLocalMetadata", True)),
+        "localMetadataPriority": list(
+            _stored_local_metadata_priority(row.get("localMetadataPriorityJson"))
+        ),
         "lastScheduledAt": row.get("lastScheduledAt"),
         "nextRunAt": row.get("nextRunAt"),
         "updatedAt": row.get("updatedAt"),
     }
 
 
-def get_policy_row(db: Session, policy_id: str = DEFAULT_POLICY_ID) -> dict[str, Any] | None:
+def get_policy_row(
+    db: Session, policy_id: str = DEFAULT_POLICY_ID
+) -> dict[str, Any] | None:
     entity = db.scalar(select(OrganizePolicy).where(OrganizePolicy.id == policy_id))
     return entity_as_legacy_dict(entity) if entity is not None else None
 
@@ -96,7 +108,11 @@ def insert_default_policy_if_missing(db: Session) -> None:
             auto_run_on_new=False,
             auto_run_on_new_since=None,
             rules_json=json.dumps(DEFAULT_RULES, ensure_ascii=False),
-            overwrite_title_author=True,
+            write_metadata_to_files=False,
+            prefer_local_metadata=True,
+            local_metadata_priority_json=json.dumps(
+                DEFAULT_LOCAL_METADATA_PRIORITY, ensure_ascii=False
+            ),
             last_scheduled_at=None,
             next_run_at=None,
             created_at=now,
@@ -131,17 +147,29 @@ def update_organize_policy(db: Session, payload: dict[str, Any]) -> dict[str, An
     except (TypeError, ValueError):
         raise ValueError("执行间隔格式不正确") from None
     if interval < MIN_INTERVAL_MINUTES or interval > MAX_INTERVAL_MINUTES:
-        raise ValueError(f"执行间隔需在 {MIN_INTERVAL_MINUTES} 到 {MAX_INTERVAL_MINUTES} 分钟之间")
+        raise ValueError(
+            f"执行间隔需在 {MIN_INTERVAL_MINUTES} 到 {MAX_INTERVAL_MINUTES} 分钟之间"
+        )
 
     enabled = bool(payload.get("enabled", current["enabled"]))
     auto_run_on_new = bool(payload.get("autoRunOnNew", current["autoRunOnNew"]))
     rules_payload = payload.get("rules", current["rules"])
     if not isinstance(rules_payload, dict):
-        raise ValueError("识别范围配置格式不正确")
+        raise TypeError("识别范围配置格式不正确")
     rules = {
-        "unrecognized": bool(rules_payload.get("unrecognized", current["rules"]["unrecognized"])),
-        "missingMetadata": bool(rules_payload.get("missingMetadata", current["rules"]["missingMetadata"])),
+        "unrecognized": bool(
+            rules_payload.get("unrecognized", current["rules"]["unrecognized"])
+        ),
+        "missingMetadata": bool(
+            rules_payload.get("missingMetadata", current["rules"]["missingMetadata"])
+        ),
     }
+    try:
+        local_metadata_priority = validate_local_metadata_priority(
+            payload.get("localMetadataPriority", current["localMetadataPriority"])
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(str(exc)) from exc
     now = _now()
     newly_enabled_for_new = auto_run_on_new and not current["autoRunOnNew"]
     auto_since = now if newly_enabled_for_new else current.get("autoRunOnNewSince")
@@ -155,7 +183,11 @@ def update_organize_policy(db: Session, payload: dict[str, Any]) -> dict[str, An
             or current["scheduleMode"] != schedule_mode
             or current["intervalMinutes"] != interval
         )
-        next_run_at = now + timedelta(minutes=interval) if settings_changed or not old_next else old_next
+        next_run_at = (
+            now + timedelta(minutes=interval)
+            if settings_changed or not old_next
+            else old_next
+        )
 
     db.execute(
         update(OrganizePolicy)
@@ -167,13 +199,40 @@ def update_organize_policy(db: Session, payload: dict[str, Any]) -> dict[str, An
             auto_run_on_new=auto_run_on_new,
             auto_run_on_new_since=auto_since,
             rules_json=json.dumps(rules, ensure_ascii=False),
-            overwrite_title_author=bool(payload.get("overwriteTitleAuthor", current["overwriteTitleAuthor"])),
+            write_metadata_to_files=bool(
+                payload.get("writeMetadataToFiles", current["writeMetadataToFiles"])
+            ),
+            prefer_local_metadata=bool(
+                payload.get("preferLocalMetadata", current["preferLocalMetadata"])
+            ),
+            local_metadata_priority_json=json.dumps(
+                local_metadata_priority, ensure_ascii=False
+            ),
             next_run_at=next_run_at,
             updated_at=now,
         )
     )
     db.flush()
     return policy_view(get_policy_row(db) or {})
+
+
+def _json_list(value: Any, fallback: list[str]) -> list[object]:
+    if isinstance(value, list):
+        return value
+    try:
+        parsed = json.loads(str(value or "[]"))
+    except (TypeError, ValueError):
+        return list(fallback)
+    return parsed if isinstance(parsed, list) else list(fallback)
+
+
+def _stored_local_metadata_priority(value: object) -> tuple[str, ...]:
+    try:
+        return validate_local_metadata_priority(
+            _json_list(value, list(DEFAULT_LOCAL_METADATA_PRIORITY))
+        )
+    except (TypeError, ValueError):
+        return DEFAULT_LOCAL_METADATA_PRIORITY
 
 
 def mark_policy_scheduled(

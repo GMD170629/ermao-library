@@ -8,7 +8,7 @@ import shutil
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, cast
+from typing import BinaryIO, Self, cast
 
 import rarfile
 
@@ -32,6 +32,7 @@ from app.modules.imports.application.import_support import (
     _split_tags,
     _title_from_file,
 )
+from app.modules.imports.domain.volume_index import parse_structured_volume_index
 
 MAX_COMIC_INFO_BYTES = 1024 * 1024
 
@@ -56,7 +57,7 @@ class ComicArchiveStream:
     def __init__(self, source: BinaryIO) -> None:
         self._source = source
 
-    def __enter__(self) -> ComicArchiveStream:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *_exc: object) -> None:
@@ -102,9 +103,7 @@ class ComicArchive:
             except ComicArchiveError:
                 raise
             except (rarfile.PasswordRequired, rarfile.RarWrongPassword) as exc:
-                raise ComicArchiveEncryptedError(
-                    "RAR 漫画压缩包需要密码"
-                ) from exc
+                raise ComicArchiveEncryptedError("RAR 漫画压缩包需要密码") from exc
             except rarfile.NeedFirstVolume as exc:
                 raise ComicArchiveMultiVolumeError(
                     "暂不支持分卷 RAR 漫画压缩包"
@@ -118,13 +117,15 @@ class ComicArchive:
             except rarfile.Error as exc:
                 if archive is not None:
                     archive.close()
-                raise ComicArchiveInvalidError("RAR 漫画压缩包已损坏或不受支持") from exc
+                raise ComicArchiveInvalidError(
+                    "RAR 漫画压缩包已损坏或不受支持"
+                ) from exc
         try:
             return zipfile.ZipFile(path)
         except zipfile.BadZipFile as exc:
             raise ComicArchiveInvalidError("ZIP 漫画压缩包已损坏") from exc
 
-    def __enter__(self) -> ComicArchive:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *_exc: object) -> None:
@@ -303,6 +304,7 @@ def _parse_comic_info(xml: str) -> ComicInfoMetadata:
         "Title",
         "Series",
         "Volume",
+        "Number",
         "Summary",
         "Writer",
         "Penciller",
@@ -313,11 +315,9 @@ def _parse_comic_info(xml: str) -> ComicInfoMetadata:
         value = _first_text(xml, tag)
         if value:
             raw[tag] = value
-    volume = (
-        float(raw["Volume"])
-        if str(raw.get("Volume", "")).replace(".", "", 1).isdigit()
-        else None
-    )
+    volume = parse_structured_volume_index(raw.get("Volume"))
+    if volume is None:
+        volume = parse_structured_volume_index(raw.get("Number"))
     cover_match = re.search(
         r"<Page\b[^>]*(?:Type|type)=['\"](?:FrontCover|Cover)['\"][^>]*(?:Image|image)=['\"](\d+)['\"]",
         xml,

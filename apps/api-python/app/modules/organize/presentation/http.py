@@ -31,6 +31,9 @@ from app.modules.organize.presentation.schemas import (
     PendingOrganizeJobsResponse,
 )
 from app.schemas.responses import fail
+from app.services.metadata_file_writeback import (
+    metadata_writeback_view_for_lookup_task,
+)
 from app.services.metadata_provider_registry import list_metadata_providers
 from app.services.organize_scheduler import (
     delete_organize_job,
@@ -155,6 +158,7 @@ def _organize_job_view(
         "id": job.get("id"),
         "runId": job.get("runId"),
         "volumeId": job.get("volumeId"),
+        "mediaVersionId": job.get("mediaVersionId"),
         "trigger": job.get("trigger") or "LEGACY",
         "status": raw_status,
         "statusCategory": status_category,
@@ -168,6 +172,9 @@ def _organize_job_view(
         "metadataSources": metadata_sources,
         "metadataLookupError": (lookup or {}).get("errorSummary"),
         "providerExecutions": executions,
+        "metadataWriteback": metadata_writeback_view_for_lookup_task(
+            db, str((lookup or {}).get("id") or "") or None
+        ),
         "startedAt": _dt(job.get("startedAt")),
         "finishedAt": _dt(job.get("finishedAt")),
         "createdAt": _dt(job.get("createdAt")),
@@ -205,7 +212,7 @@ async def update_organize_policy_route(
         policy = update_organize_policy(db, payload)
         db.commit()
         return OrganizePolicyResponse(data={"policy": policy})
-    except ValueError as exc:
+    except (TypeError, ValueError) as exc:
         return fail(str(exc), status_code=400)
 
 

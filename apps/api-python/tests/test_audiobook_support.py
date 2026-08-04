@@ -15,7 +15,6 @@ from sqlalchemy import text
 import app.modules.imports.application.import_audio as importer_module
 import app.modules.imports.application.managed_book as managed_book_module
 import app.modules.imports.infrastructure.audio_cover as audio_cover_module
-from app.modules.imports.infrastructure import orchestration_services as orchestration
 import app.services.audio_metadata as audio_metadata_module
 import app.worker.watcher as watcher_module
 from app.bootstrap.imports import (
@@ -49,6 +48,7 @@ from app.modules.imports.application.errors import (
     AudioTrackLimitExceededError,
     ImportExecutionError,
 )
+from app.modules.imports.infrastructure import orchestration_services as orchestration
 from app.modules.imports.infrastructure.orchestration_services import (
     SessionImportOrchestrationServices,
 )
@@ -318,6 +318,33 @@ def test_m4a_alac_is_accepted_and_container_extension_never_implies_aac(
         )
         == "mp4a.40.36"
     )
+
+
+def test_audio_parser_reads_explicit_series_and_volume_without_reusing_disc(
+    tmp_path, monkeypatch
+) -> None:
+    source = tmp_path / "book.mp3"
+    source.write_bytes(b"fake-audio")
+    monkeypatch.setattr(
+        audio_metadata_module,
+        "_read_with_mutagen",
+        lambda _path: {
+            "duration_ms": 1_000,
+            "codec": "mp3",
+            "series_name": "银河帝国",
+            "volume_index": "第 2 卷",
+            "disc_number": "4/6",
+        },
+    )
+    monkeypatch.setattr(
+        audio_metadata_module, "_read_with_ffprobe", lambda _path, timeout_seconds: {}
+    )
+
+    parsed = parse_audio_metadata(source)
+
+    assert parsed.series_name == "银河帝国"
+    assert parsed.volume_index == 2
+    assert parsed.disc_number == 4
 
 
 def test_audio_format_catalog_admits_every_declared_audio_extension() -> None:
@@ -1942,7 +1969,7 @@ def test_emby_flat_layout_appends_strictly_named_chapters_to_one_volume(
         .mappings()
         .one()
     )
-    assert dict(work) == {"title": "Flat Book", "author": "未知作者"}
+    assert dict(work) == {"title": "Flat Book", "author": "Flat Author"}
     volumes = (
         db_session.execute(
             text(
@@ -2510,9 +2537,9 @@ def test_rescan_reconciles_tracks_split_across_volumes_and_preserves_progress(
     visible_works = (
         db_session.execute(
             text(
-                    "SELECT work.`id`, work.`title` FROM `LibraryWork` work "
-                    "JOIN `LibraryMediaVersion` media ON media.`workId` = work.`id` "
-                    "WHERE work.`hidden` = 0 AND media.`mediaKind` = 'AUDIOBOOK'"
+                "SELECT work.`id`, work.`title` FROM `LibraryWork` work "
+                "JOIN `LibraryMediaVersion` media ON media.`workId` = work.`id` "
+                "WHERE work.`hidden` = 0 AND media.`mediaKind` = 'AUDIOBOOK'"
             ),
         )
         .mappings()

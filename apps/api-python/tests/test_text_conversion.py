@@ -416,7 +416,6 @@ def test_explicit_conversion_records_text_ebook_provenance(
             source_file_path=source,
             origin="DEFERRED_CONVERSION",
             original_name=source.name,
-            requested_work_id=source_result.work_id,
         ),
     )
 
@@ -448,7 +447,6 @@ def test_explicit_conversion_records_text_ebook_provenance(
             source_file_path=source,
             origin="DEFERRED_CONVERSION",
             original_name=source.name,
-            requested_work_id=source_result.work_id,
         ),
     )
     assert retried.volume_id == result.volume_id

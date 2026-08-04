@@ -52,7 +52,6 @@ def process_import_task(
                 monitor_folder_id=task.monitor_folder_id,
                 media_kind_policy=task.media_kind_policy,
                 import_task_id=task.id,
-                requested_work_id=task.work_id,
                 expected_lease_owner=task.lease_owner,
             ),
         )

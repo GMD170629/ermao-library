@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from app.contracts.publication_metadata import PublicationMetadata
+from app.contracts.publication_titles import titles_from_local_source
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
     ImportOptions,
@@ -12,8 +14,7 @@ from app.modules.imports.application.dto import (
     ImportRuntimeConfig,
 )
 from app.modules.imports.application.identity_resolution import (
-    EmbeddedIdentityMetadata,
-    resolve_import_identity,
+    resolve_import_metadata,
 )
 from app.modules.imports.application.import_support import (
     _classification_columns,
@@ -22,9 +23,7 @@ from app.modules.imports.application.import_support import (
     _finalize_work_cover,
     _hash_text,
     _id,
-    _import_work_merge_key,
     _now,
-    _source_filename_title,
     _source_group_key,
     _work_merge_key,
 )
@@ -162,7 +161,7 @@ def refresh_existing_reflowable_source(
     )
     work_values: dict[str, object] = {"updatedAt": _now()}
     if selected_title != current_title or selected_author != current_author:
-        merge_key = _work_merge_key("epub", selected_title, selected_author)
+        merge_key = _work_merge_key(selected_title, selected_author)
         merge_conflict = queries.get_work_by_merge_key(merge_key)
         work_values.update(
             title=selected_title,
@@ -276,14 +275,34 @@ def _import_reflowable_source(
     source_path = options.source_file_path.resolve()
     source_format = ext.removeprefix(".").upper()
     metadata = services.inspect_reflowable_book(source_path, source_format)
-    identity = resolve_import_identity(
+    embedded_title = (
+        None if metadata.raw_metadata.get("inspectionWarning") else metadata.title
+    )
+    embedded_titles = titles_from_local_source(
+        embedded_title,
+        series_name=metadata.series_name,
+        volume_index=metadata.series_index,
+    )
+    identity, resolved_local = resolve_import_metadata(
         identity,
-        embedded=EmbeddedIdentityMetadata(
-            title=metadata.title,
-            author=metadata.author,
-            source="reflowable_metadata",
-            confidence=0.95,
+        embedded=PublicationMetadata(
+            title=embedded_titles.work_title,
+            volume_title=embedded_titles.volume_title,
+            authors=metadata.authors,
+            description=metadata.description,
+            subjects=metadata.subjects,
+            series_name=metadata.series_name,
+            series_index=metadata.series_index,
+            volume_index=embedded_titles.volume_index,
+            language=metadata.language,
+            publisher=metadata.publisher,
+            published_at=metadata.published_at,
+            identifier=metadata.identifier,
+            isbn=metadata.isbn,
         ),
+        sidecar=options.sidecar_metadata,
+        source_order=options.local_metadata_priority,
+        path_metadata=options.path_metadata,
         requested_title=options.requested_title,
         requested_author=options.requested_author,
     )
@@ -295,19 +314,17 @@ def _import_reflowable_source(
             title=identity.title,
         ),
     )
-    merge_key = _import_work_merge_key(
-        "epub",
+    merge_key = _work_merge_key(
         identity.title,
         identity.author,
-        options,
-        identity.volume_index,
-        grouping_key=identity.grouping_key,
+        resolved_local.metadata.identifier,
+        resolved_local.metadata.isbn,
+        series_name=resolved_local.metadata.series_name,
     )
     work, created = _ensure_work(
         store,
         queries,
         {
-            "workId": identity.reused_work_id,
             "title": identity.title,
             "author": identity.author,
             "description": metadata.description,
@@ -317,7 +334,7 @@ def _import_reflowable_source(
             "monitorFolderId": options.monitor_folder_id,
         },
     )
-    volume_title = _source_filename_title(options)
+    volume_title = resolved_local.metadata.volume_title or identity.title
     volume_index = identity.volume_index
     source_group_key = _source_group_key(options, identity.title)
     store.update_import_task(
@@ -440,6 +457,9 @@ def _import_reflowable_source(
         False,
         not created,
         "native-reflowable-metadata",
+        resolved_metadata=resolved_local.metadata,
+        metadata_field_sources=resolved_local.field_sources,
+        metadata_source_order=resolved_local.source_order,
     )
 
 

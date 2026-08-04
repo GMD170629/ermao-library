@@ -184,6 +184,10 @@ from app.services.library_management import (
     sync_work_facets,
     undo_operation,
 )
+from app.services.metadata_file_writeback import (
+    enqueue_metadata_writeback,
+    metadata_writeback_view,
+)
 from app.services.metadata_provider_registry import (
     metadata_provider_registry,
     search_with_metadata_provider,
@@ -1444,8 +1448,7 @@ def _apply_bulk_reading_status(
                                 "audio"
                                 if volume.format.upper() in {"M4B", "M4A", "MP3"}
                                 else "comic"
-                                if volume.format.upper()
-                                in {"CBR", "CBZ", "RAR", "ZIP"}
+                                if volume.format.upper() in {"CBR", "CBZ", "RAR", "ZIP"}
                                 else "pdf"
                                 if volume.format.upper() == "PDF"
                                 else "epub"
@@ -2505,6 +2508,7 @@ async def metadata_search(
         if not isinstance(raw_candidate, dict):
             continue
         volume_metadata = {
+            "publisher": raw_candidate.get("publisher"),
             "publishedAt": raw_candidate.get("publishedAt"),
             "language": raw_candidate.get("language"),
             "isbn": raw_candidate.get("isbn"),
@@ -3080,6 +3084,7 @@ async def apply_work_metadata(
     work_id: str,
     payload: MetadataApplyRequest,
     request: Request,
+    apply_to_all_volumes: Annotated[bool, Query(alias="applyToAllVolumes")] = True,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
@@ -3097,32 +3102,76 @@ async def apply_work_metadata(
     existing_work = _get_work(db, work_id)
     if not existing_work:
         _raise_library_error("作品不存在", status_code=404)
-    volume_fields = {"publishedAt", "language", "isbn"}
+    volume_fields = {"publisher", "publishedAt", "language", "isbn"}
     volume_selected = bool(volume_fields.intersection(fields))
-    target_volume: LibraryVolume | None = None
-    if volume_selected:
-        if not payload.volume_id:
+    volume_required = volume_selected or payload.write_metadata_to_files
+    target_media_version: LibraryMediaVersion | None = None
+    target_volumes: list[LibraryVolume] = []
+    if volume_required:
+        if payload.media_version_id:
+            target_media_version = db.scalar(
+                select(LibraryMediaVersion).where(
+                    LibraryMediaVersion.id == payload.media_version_id,
+                    LibraryMediaVersion.work_id == work_id,
+                )
+            )
+        elif payload.volume_id:
+            if not can_access_volume(db, user, payload.volume_id):
+                _raise_library_error(
+                    "卷册不存在", status_code=404, code="VOLUME_NOT_FOUND"
+                )
+            target_media_version = db.scalar(
+                select(LibraryMediaVersion)
+                .join(
+                    LibraryVolume,
+                    LibraryVolume.media_version_id == LibraryMediaVersion.id,
+                )
+                .where(
+                    LibraryVolume.id == payload.volume_id,
+                    LibraryMediaVersion.work_id == work_id,
+                )
+            )
+        else:
+            media_versions = list(
+                db.scalars(
+                    select(LibraryMediaVersion)
+                    .where(LibraryMediaVersion.work_id == work_id)
+                    .order_by(LibraryMediaVersion.created_at.asc())
+                ).all()
+            )
+            if len(media_versions) == 1:
+                target_media_version = media_versions[0]
+        if target_media_version is None:
             _raise_library_error(
-                "请选择要应用卷册元数据的目标卷册",
+                "无法确定当前媒体版本",
                 status_code=400,
-                code="VOLUME_TARGET_REQUIRED",
+                code="MEDIA_VERSION_TARGET_REQUIRED",
             )
-        if not can_access_volume(db, user, payload.volume_id):
-            _raise_library_error("卷册不存在", status_code=404, code="VOLUME_NOT_FOUND")
-        target_volume = db.scalar(
-            select(LibraryVolume)
-            .join(
-                LibraryMediaVersion,
-                LibraryMediaVersion.id == LibraryVolume.media_version_id,
-            )
-            .where(
-                LibraryVolume.id == payload.volume_id,
-                LibraryMediaVersion.work_id == work_id,
-                LibraryVolume.hidden.is_(False),
-            )
+        volume_query = select(LibraryVolume).where(
+            LibraryVolume.media_version_id == target_media_version.id,
+            LibraryVolume.hidden.is_(False),
         )
-        if target_volume is None:
-            _raise_library_error("卷册不存在", status_code=404, code="VOLUME_NOT_FOUND")
+        if not apply_to_all_volumes:
+            if not payload.volume_id:
+                _raise_library_error(
+                    "请选择要应用元数据的卷册",
+                    status_code=400,
+                    code="VOLUME_TARGET_REQUIRED",
+                )
+            volume_query = volume_query.where(LibraryVolume.id == payload.volume_id)
+        target_volumes = list(
+            db.scalars(
+                volume_query.order_by(
+                    LibraryVolume.sort_order.asc(), LibraryVolume.id.asc()
+                )
+            ).all()
+        )
+        if not target_volumes:
+            _raise_library_error(
+                "当前媒体版本没有可应用的卷册",
+                status_code=400,
+                code="MEDIA_VERSION_HAS_NO_VOLUMES",
+            )
     patch = _metadata_field_patch(candidate, fields)
     if "title" in patch or "author" in patch:
         title = str(patch.get("title", existing_work.get("title")) or "").strip()
@@ -3139,7 +3188,15 @@ async def apply_work_metadata(
                 "mergeKey": identity_merge_key(title, author),
             }
         )
-    volume_metadata = candidate.get("volumeMetadata") or {}
+    nested_volume_metadata = candidate.get("volumeMetadata")
+    volume_metadata = (
+        dict(nested_volume_metadata)
+        if isinstance(nested_volume_metadata, dict)
+        else {}
+    )
+    for volume_field in volume_fields:
+        if volume_metadata.get(volume_field) is None:
+            volume_metadata[volume_field] = candidate.get(volume_field)
     if (
         "coverUrl" in fields
         and isinstance(candidate.get("coverUrl"), str)
@@ -3169,7 +3226,11 @@ async def apply_work_metadata(
     work = library_works.update_work_fields(db, work_id, patch)
     if not work:
         _raise_library_error("作品不存在", status_code=404)
-    if target_volume is not None:
+    for target_volume in target_volumes:
+        if "publisher" in fields:
+            target_volume.publisher = (
+                str(volume_metadata.get("publisher") or "").strip() or None
+            )
         if "publishedAt" in fields:
             target_volume.published_at = volume_metadata.get("publishedAt")
         if "language" in fields:
@@ -3181,11 +3242,25 @@ async def apply_work_metadata(
         target_volume.updated_at = _now()
     sync_work_facets(db, work_id, commit=False)
     finished_job_ids = _finish_metadata_organize_work(db, work_id)
+    writeback_operation_id = None
+    if payload.write_metadata_to_files and target_media_version is not None:
+        writeback_operation_id = enqueue_metadata_writeback(
+            db,
+            work_id=work_id,
+            media_version_id=target_media_version.id,
+            source="MANUAL",
+            volume_id=(target_volumes[0].id if not apply_to_all_volumes else None),
+        )
     db.commit()
     return MetadataApplyResponse(
         data={
             "book": _work_view(db, work, user.id),
             "appliedFields": fields,
             "finishedOrganizeJobIds": finished_job_ids,
+            "metadataWriteback": (
+                metadata_writeback_view(db, writeback_operation_id)
+                if writeback_operation_id
+                else None
+            ),
         }
     )

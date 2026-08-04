@@ -93,7 +93,6 @@ def stage_scan_candidate_batch(
             original_name=path.name,
             requested_title=None,
             requested_author=None,
-            work_id=None,
             monitor_folder_id=monitor_folder_id,
             media_kind_policy=str(media_kind_policy),
             message="扫描文件已进入导入队列",

@@ -563,7 +563,6 @@ class SqlAlchemyVolumeStructure:
             original_name=context.source_path.name,
             requested_title=context.title,
             requested_author=context.author,
-            work_id=context.work_id,
             monitor_folder_id=context.monitor_folder_id,
             message="已加入 EPUB 转换队列",
             allow_terminal_requeue=True,

@@ -125,6 +125,7 @@ function VolumeWallCard({
   return (
     <button
       type="button"
+      data-volume-wall-card="true"
       onMouseDown={(event) => { if (canManage) onBeginSelection(event); }}
       onMouseEnter={() => { if (canManage) onEnterSelection(); }}
       onClick={() => {
@@ -1093,7 +1094,16 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
           error={chapterError}
           requestedPage={chapterPage}
           onPageChange={(page) => setChapterPagination({ volumeId: singleEbookVolume.id, page })}
-        /> : <section className="mt-6">
+        /> : <section
+          className="mt-6"
+          data-volume-wall-selection-surface="true"
+          onMouseDown={(event) => {
+            if (event.button !== 0 || !(event.target instanceof Element) || event.target.closest('[data-volume-wall-card="true"]')) return;
+            setVolumeMenuPosition(null);
+            setVolumeMenuAnchor(null);
+            wallSelection.clear();
+          }}
+        >
           {volumes.length ? <>
             <div>
               <h2 className="text-lg font-semibold text-stone-950"><I18nText>卷册</I18nText></h2>
@@ -1171,7 +1181,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         }}
       />
 
-      <MetadataLookupModal book={work} open={metadataLookupOpen} onClose={() => setMetadataLookupOpen(false)} onApplied={refreshAfterMetadataApply} />
+      <MetadataLookupModal book={work} currentMediaVersionId={selectedVolume?.mediaVersionId ?? null} open={metadataLookupOpen} onClose={() => setMetadataLookupOpen(false)} onApplied={refreshAfterMetadataApply} />
       <KindleSendModal book={work} open={kindleSendOpen} preferredVolumeId={selectedVolume?.id ?? null} onClose={() => setKindleSendOpen(false)} />
     </div>
   );

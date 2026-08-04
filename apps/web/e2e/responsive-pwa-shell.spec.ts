@@ -125,6 +125,16 @@ test('work detail volume covers support selection, keyboard-accessible context m
   await expect(first).toHaveAttribute('aria-pressed', 'true');
   await expect(second).toHaveAttribute('aria-pressed', 'false');
 
+  const selectionSurface = page.locator('[data-volume-wall-selection-surface="true"]');
+  const selectionSurfaceBounds = await selectionSurface.boundingBox();
+  if (!selectionSurfaceBounds) throw new Error('Volume selection surface is not visible');
+  await selectionSurface.click({ position: { x: selectionSurfaceBounds.width - 4, y: selectionSurfaceBounds.height / 2 } });
+  await expect(first).toHaveAttribute('aria-pressed', 'false');
+  await expect(second).toHaveAttribute('aria-pressed', 'false');
+
+  await first.click();
+  await expect(first).toHaveAttribute('aria-pressed', 'true');
+
   await second.click({ button: 'right' });
   await expect(second).toHaveAttribute('aria-pressed', 'true');
   const menu = page.getByRole('menu', { name: '管理卷册' });

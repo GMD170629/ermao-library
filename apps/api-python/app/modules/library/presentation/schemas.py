@@ -9,6 +9,7 @@ from typing_extensions import TypeAliasType
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.http_errors import HttpContractError
 from app.contracts.imports import ImportTaskContract
+from app.contracts.metadata_writeback import MetadataWritebackOperationContract
 from app.contracts.system_events import SystemEvent
 
 MediaKind = Literal["EBOOK", "COMIC", "AUDIOBOOK"]
@@ -845,6 +846,7 @@ class UndoOperationPayload(HttpContractModel):
 
 
 class MetadataCandidateVolume(HttpContractModel):
+    publisher: str | None = None
     published_at: datetime | None = Field(default=None, alias="publishedAt")
     language: str | None = None
     isbn: str | None = None
@@ -866,6 +868,10 @@ class MetadataCandidate(HttpContractModel):
     tags: list[str] | None = None
     series_name: str | None = Field(default=None, alias="seriesName")
     series_index: float | None = Field(default=None, alias="seriesIndex")
+    publisher: str | None = None
+    published_at: datetime | None = Field(default=None, alias="publishedAt")
+    language: str | None = None
+    isbn: str | None = None
     confidence: float
     raw: dict[str, MetadataCandidateRawValue]
 
@@ -886,6 +892,7 @@ MetadataApplyField = Literal[
     "tags",
     "seriesName",
     "seriesIndex",
+    "publisher",
     "publishedAt",
     "language",
     "isbn",
@@ -908,6 +915,10 @@ class MetadataApplyCandidate(HttpContractModel):
     tags: list[str] | None = None
     series_name: str | None = Field(default=None, alias="seriesName")
     series_index: float | None = Field(default=None, alias="seriesIndex")
+    publisher: str | None = None
+    published_at: datetime | None = Field(default=None, alias="publishedAt")
+    language: str | None = None
+    isbn: str | None = None
     confidence: float | None = None
     raw: dict[str, MetadataCandidateRawValue] | None = None
 
@@ -916,7 +927,9 @@ class MetadataApplyRequest(HttpContractModel):
     source: str | None = None
     candidate: MetadataApplyCandidate
     fields: list[MetadataApplyField] = Field(min_length=1)
+    media_version_id: str | None = Field(default=None, alias="mediaVersionId")
     volume_id: str | None = Field(default=None, alias="volumeId")
+    write_metadata_to_files: bool = Field(default=False, alias="writeMetadataToFiles")
 
 
 class ConversionPayload(HttpContractModel):
@@ -1025,6 +1038,9 @@ class MetadataApplyPayload(HttpContractModel):
     book: WorkView
     applied_fields: list[str] = Field(alias="appliedFields")
     finished_organize_job_ids: list[str] = Field(alias="finishedOrganizeJobIds")
+    metadata_writeback: MetadataWritebackOperationContract | None = Field(
+        default=None, alias="metadataWriteback"
+    )
 
 
 DashboardSummaryResponse = SuccessEnvelope[DashboardSummaryPayload]

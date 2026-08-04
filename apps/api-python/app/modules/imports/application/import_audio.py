@@ -9,6 +9,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from app.contracts.publication_metadata import PublicationMetadata
+from app.contracts.publication_titles import titles_from_local_source
 from app.modules.imports.application.audio_types import (
     DISC_DIRECTORY_PATTERN,
     MAX_AUDIO_CHAPTERS,
@@ -38,6 +40,7 @@ from app.modules.imports.application.import_support import (
     _title_from_file,
     _work_merge_key,
 )
+from app.modules.imports.application.local_metadata import ResolvedLocalMetadata
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
     ImportOrchestrationServices,
@@ -66,6 +69,7 @@ def _import_audio(
     identity: BookIdentityDTO,
     metadata_items: list[AudioFileMetadata],
     structure: AudioBundleStructure | None = None,
+    resolved_local: ResolvedLocalMetadata | None = None,
 ) -> ImportResult:
     if not metadata_items:
         raise ValueError("有声书目录中没有可导入的音频文件")
@@ -120,7 +124,7 @@ def _import_audio(
         strict=not directory_bundle,
     )
     narrator = narrator_values[0] if narrator_values else None
-    merge_key = _work_merge_key("audio", identity.title, identity.author)
+    merge_key = _work_merge_key(identity.title, identity.author)
     # A directory identifies one split-track bundle. An explicitly structured
     # Emby flat filename joins its sibling chapters; every other single file
     # remains keyed by the file itself so independent M4Bs cannot collide.
@@ -156,12 +160,8 @@ def _import_audio(
             else None
         )
         if flat_media_version:
-            identity = replace(
-                identity, reused_work_id=str(flat_media_version["workId"])
-            )
-            merge_key = _work_merge_key("audio", identity.title, identity.author)
-            work, _unused_created = _ensure_audio_work(
-                store, queries, options, identity, merge_key
+            work = _reuse_existing_audio_work(
+                store, queries, str(flat_media_version["workId"])
             )
             created = False
             media_version, volume = _prepare_flat_audio_bundle(
@@ -530,6 +530,49 @@ def _import_audio(
         else "new-audio-work"
         if created
         else "new-audio-volume",
+        resolved_metadata=resolved_local.metadata if resolved_local else None,
+        metadata_field_sources=resolved_local.field_sources if resolved_local else (),
+        metadata_source_order=resolved_local.source_order if resolved_local else (),
+    )
+
+
+def audio_embedded_metadata(
+    identity: BookIdentityDTO,
+    metadata_items: list[AudioFileMetadata],
+) -> PublicationMetadata:
+    """Map consistent album-level audio tags to the common metadata contract."""
+
+    albums = _consistent_audio_values(
+        metadata_items, "album", "专辑/书名", strict=False
+    )
+    authors = _consistent_audio_values(metadata_items, "author", "作者", strict=False)
+    series_names = _consistent_audio_values(
+        metadata_items, "series_name", "系列", strict=False
+    )
+    volume_indexes = _consistent_audio_values(
+        metadata_items, "volume_index", "卷号", strict=False
+    )
+    series_name = series_names[0] if series_names else None
+    volume_index = float(volume_indexes[0]) if volume_indexes else None
+    publication_titles = titles_from_local_source(
+        albums[0] if albums else identity.title,
+        series_name=series_name,
+        volume_index=volume_index,
+    )
+    single_file_title = (
+        metadata_items[0].title
+        if len(metadata_items) == 1 and metadata_items[0].title
+        else None
+    )
+    return PublicationMetadata(
+        title=publication_titles.work_title,
+        volume_title=single_file_title or publication_titles.volume_title,
+        authors=(authors[0],)
+        if authors
+        else ((identity.author,) if identity.author else ()),
+        series_name=series_name,
+        series_index=volume_index,
+        volume_index=publication_titles.volume_index,
     )
 
 
@@ -564,26 +607,21 @@ def _ensure_audio_work(
     identity: BookIdentityDTO,
     merge_key: str,
 ) -> tuple[dict[str, Any], bool]:
-    if (
-        identity.reused_work_id is None
-        and queries.get_work_by_merge_key(merge_key) is None
-    ):
+    if queries.get_work_by_merge_key(merge_key) is None:
         candidates = queries.list_works_by_normalized_identity(
             _normalize_key(identity.title),
             _normalize_key(identity.author),
             limit=2,
         )
         if len(candidates) == 1:
-            identity = replace(
-                identity,
-                reused_work_id=str(candidates[0]["id"]),
-                selection_reason="unique_cross_media_identity",
+            return (
+                _reuse_existing_audio_work(store, queries, str(candidates[0]["id"])),
+                False,
             )
     return _ensure_work(
         store,
         queries,
         {
-            "workId": identity.reused_work_id,
             "title": identity.title,
             "author": identity.author,
             "description": None,
@@ -593,6 +631,23 @@ def _ensure_audio_work(
             "monitorFolderId": options.monitor_folder_id,
         },
     )
+
+
+def _reuse_existing_audio_work(
+    store: LibraryImportStore,
+    queries: ImportLibraryQueries,
+    work_id: str,
+) -> dict[str, Any]:
+    """Reuse a work proven by existing stored audio structure, not recognition."""
+
+    existing = queries.get_work_by_id(work_id)
+    if existing is None:
+        raise ValueError("有声书关联的作品不存在")
+    store.update_library_work(
+        work_id,
+        columns={"hidden": False, "updatedAt": _now()},
+    )
+    return queries.get_work_by_id(work_id) or existing
 
 
 def _audio_flat_media_version(

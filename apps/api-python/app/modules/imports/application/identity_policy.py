@@ -18,7 +18,8 @@ _CJK_ORDINAL_PREFIX = chr(0x7B2C)
 _VOLUME_NUMBER = r"\d+(?:\.\d+)?"
 _SHORT_VOLUME_NUMBER = r"\d{1,3}(?:\.\d{1,2})?"
 _EXPLICIT_VOLUME_PATTERN = re.compile(
-    rf"(?:vol(?:ume)?\.?|v)\s*(?P<latin_number>{_VOLUME_NUMBER})"
+    rf"(?:vol(?:ume)?\.?|v)[\s._-]*(?P<latin_number>{_VOLUME_NUMBER})"
+    rf"\s*{_CJK_VOLUME_MARKER}?"
     rf"|(?:{_CJK_ORDINAL_PREFIX}\s*)?(?P<suffixed_number>{_VOLUME_NUMBER})\s*{_CJK_VOLUME_MARKER}"
     rf"|{_CJK_VOLUME_MARKER}\s*(?:{_CJK_ORDINAL_PREFIX}\s*)?(?P<prefixed_number>{_VOLUME_NUMBER})",
     re.IGNORECASE,
@@ -286,8 +287,8 @@ def parse_bracketed_series_identity(
 def _looks_like_latin_alias(value: str) -> bool:
     cleaned = unicodedata.normalize("NFKC", value).strip()
     return bool(
-        re.fullmatch(r"[A-Z][A-Z0-9 ._'’&:+-]*", cleaned, re.I)
-        and re.search(r"[A-Z]", cleaned, re.I)
+        re.fullmatch(r"[A-Z][A-Z0-9 ._'’&:+-]*", cleaned, re.IGNORECASE)
+        and re.search(r"[A-Z]", cleaned, re.IGNORECASE)
     )
 
 
@@ -304,7 +305,7 @@ def _looks_like_volume_range(value: str) -> bool:
             r"(?:vol(?:ume)?\.?|v|第)?\s*\d+(?:\.\d+)?\s*[-~至到]\s*"
             r"(?:vol(?:ume)?\.?|v|第)?\s*\d+(?:\.\d+)?",
             value,
-            re.I,
+            re.IGNORECASE,
         )
     )
 
@@ -316,7 +317,7 @@ def _strip_volume_suffix(value: str) -> tuple[str, float | None]:
         r"^(.*?)\s*第\s*(\d+(?:\.\d+)?)\s*(?:卷|冊|册|集)$",
         r"^(.*?)\s+(\d+(?:\.\d+)?)$",
     ):
-        match = re.match(pattern, cleaned, re.I)
+        match = re.match(pattern, cleaned, re.IGNORECASE)
         if match and match.group(1).strip():
             return _clean_title(match.group(1)), float(match.group(2))
     numeric_fallback = split_numeric_volume_fallback(cleaned)
@@ -327,7 +328,12 @@ def _strip_volume_suffix(value: str) -> tuple[str, float | None]:
 
 
 def _clean_title(value: str) -> str:
-    cleaned = re.sub(r"\.(?:epub|cbz|zip|pdf|m4b|m4a|mp3)$", "", value, flags=re.I)
+    cleaned = re.sub(
+        r"\.(?:epub|cbz|zip|pdf|m4b|m4a|mp3)$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    )
     return re.sub(r"\s+", " ", cleaned.replace("_", " ")).strip(" ._-")
 
 

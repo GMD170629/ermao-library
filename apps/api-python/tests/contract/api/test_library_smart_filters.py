@@ -42,13 +42,20 @@ def _login_admin(client: TestClient, db: Session) -> User:
     return user
 
 
-def _add_work(db: Session, *, work_id: str, title: str, source_path: str) -> None:
+def _add_work(
+    db: Session,
+    *,
+    work_id: str,
+    title: str,
+    source_path: str,
+    author: str | None = None,
+) -> None:
     work = LibraryWork(
         id=work_id,
         title=title,
         normalized_title=title.casefold(),
-        author=None,
-        normalized_author=None,
+        author=author,
+        normalized_author=author.casefold() if author else None,
         tags="[]",
     )
     media_version = LibraryMediaVersion(
@@ -354,6 +361,51 @@ def test_work_list_applies_source_path_smart_filter(
             ],
         },
     ) == ["鸡皮疙瘩系列"]
+
+
+def test_author_empty_filter_treats_unknown_author_placeholder_as_empty(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login_admin(client, db_session)
+    _add_work(
+        db_session,
+        work_id="missing-author",
+        title="缺失作者",
+        source_path="/books/missing-author.epub",
+    )
+    _add_work(
+        db_session,
+        work_id="unknown-author",
+        title="未知作者占位",
+        source_path="/books/unknown-author.epub",
+        author="未知作者",
+    )
+    _add_work(
+        db_session,
+        work_id="known-author",
+        title="已知作者",
+        source_path="/books/known-author.epub",
+        author="林川",
+    )
+    db_session.commit()
+
+    assert set(
+        _filtered_titles(
+            client,
+            {
+                "combinator": "ALL",
+                "conditions": [{"field": "author", "operator": "is_empty"}],
+            },
+        )
+    ) == {"缺失作者", "未知作者占位"}
+    assert _filtered_titles(
+        client,
+        {
+            "combinator": "ALL",
+            "conditions": [{"field": "author", "operator": "is_not_empty"}],
+        },
+    ) == ["已知作者"]
 
 
 def test_work_list_applies_every_smart_filter_field(

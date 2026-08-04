@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from app.modules.imports.application.dto import (
+    ImportOptions,
     ImportResult,
     ImportRuntimeConfig,
     ImportTaskDTO,
@@ -76,15 +77,17 @@ class RecordingPipeline:
         self.fail = fail
         self.after_import = after_import
         self.imports = 0
+        self.options: ImportOptions | None = None
         self.finalized = 0
         self.rolled_back = 0
 
     def import_managed_book(
         self,
         settings: object,
-        options: object,
+        options: ImportOptions,
     ) -> ImportResult:
         self.imports += 1
+        self.options = options
         if self.fail:
             raise RuntimeError("final import synchronization failed")
         if self.after_import is not None:
@@ -144,6 +147,31 @@ def test_process_import_commits_final_writes_once_after_post_success_hooks() -> 
     assert unit_of_work.rollbacks == 0
     assert pipeline.finalized == 1
     assert pipeline.rolled_back == 0
+
+
+def test_previous_task_result_work_id_is_not_an_import_identity_input() -> None:
+    unit_of_work = RecordingUnitOfWork()
+    store = RecordingStore()
+    pipeline = RecordingPipeline()
+    task = ImportTaskDTO(
+        id="task-retry",
+        source_path="/tmp/book.epub",
+        origin="MANUAL",
+        status="PARSING",
+        work_id="previous-result-work",
+    )
+
+    process_import_task(
+        store,
+        unit_of_work,
+        pipeline,
+        ImportRuntimeConfig(storage_root=Path("/tmp"), audiobook_max_file_bytes=1),
+        task,
+        now=123,
+    )
+
+    assert pipeline.options is not None
+    assert not hasattr(pipeline.options, "requested_work_id")
 
 
 @pytest.mark.parametrize("failure", ["shelf", "download"])

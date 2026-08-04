@@ -149,6 +149,8 @@ class AudioFileMetadata:
     channels: int | None
     disc_number: int | None
     track_number: int | None
+    series_name: str | None = None
+    volume_index: float | None = None
     chapters: tuple[AudioChapterMetadata, ...] = ()
     raw_tags: Mapping[str, object] = field(default_factory=dict)
     cover_data: bytes | None = None

@@ -824,8 +824,23 @@ def find_volume_conflict(
     volume_index: float | None,
     volume_title: str,
 ) -> dict[str, Any] | None:
-    del db, media_version_id, volume_index, volume_title
-    return None
+    if volume_index is None:
+        return None
+    row = (
+        db.execute(
+            select(LibraryVolume.__table__)
+            .where(
+                LibraryVolume.media_version_id == media_version_id,
+                LibraryVolume.volume_index == volume_index,
+                func.coalesce(LibraryVolume.hidden, False).is_(False),
+            )
+            .order_by(LibraryVolume.created_at.asc(), LibraryVolume.id.asc())
+            .limit(1)
+        )
+        .mappings()
+        .first()
+    )
+    return dict(row) if row is not None else None
 
 
 def find_audio_media_version_by_resource_key(

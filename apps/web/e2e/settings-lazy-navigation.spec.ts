@@ -61,7 +61,8 @@ async function mockSettingsApi(page: Page, locale: 'zh-CN' | 'en-US' = 'zh-CN') 
           data: {
             policy: {
               id: 'default', enabled: false, scheduleMode: 'MANUAL', intervalMinutes: 60, autoRunOnNew: false,
-              autoRunOnNewSince: null, rules: { unrecognized: true, missingMetadata: true }, overwriteTitleAuthor: true,
+              autoRunOnNewSince: null, rules: { unrecognized: true, missingMetadata: true }, writeMetadataToFiles: false,
+              preferLocalMetadata: true, localMetadataPriority: ['SIDECAR_OPF', 'EMBEDDED', 'PATH'],
               lastScheduledAt: null, nextRunAt: null, updatedAt: null
             }
           }

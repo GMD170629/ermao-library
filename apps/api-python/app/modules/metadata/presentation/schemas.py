@@ -7,7 +7,7 @@ from datetime import datetime
 from pydantic import Field
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
-
+from app.contracts.metadata_writeback import MetadataWritebackOperationContract
 
 ProviderConfigValue = str | bool | int | float | list[str] | None
 
@@ -77,6 +77,11 @@ class ProviderTestPayload(HttpContractModel):
     provider: MetadataProvider
 
 
+class MetadataWritebackPayload(HttpContractModel):
+    operation: MetadataWritebackOperationContract
+
+
 ProvidersResponse = SuccessEnvelope[ProvidersPayload]
 ProviderResponse = SuccessEnvelope[ProviderPayload]
 ProviderTestResponse = SuccessEnvelope[ProviderTestPayload]
+MetadataWritebackResponse = SuccessEnvelope[MetadataWritebackPayload]

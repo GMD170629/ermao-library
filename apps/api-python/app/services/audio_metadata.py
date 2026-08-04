@@ -26,6 +26,7 @@ from app.modules.imports.application.errors import (
     AudioInspectionError,
     AudioTrackLimitExceededError,
 )
+from app.modules.imports.domain.volume_index import parse_structured_volume_index
 from app.services.book_identity import (
     UNKNOWN_AUTHOR,
     normalize_identity_part,
@@ -36,13 +37,21 @@ AAC_RFC6381_OBJECT_TYPES = {2, 5, 29}
 MAX_EMBEDDED_COVER_BYTES = 20 * 1024 * 1024
 MAX_FFPROBE_STDOUT_BYTES = 16 * 1024 * 1024
 MAX_FFPROBE_STDERR_BYTES = 256 * 1024
-MISDECLARED_TEXT_ENCODING_CANDIDATES = ("utf-8", "gb18030", "big5", "shift_jis", "cp1252")
+MISDECLARED_TEXT_ENCODING_CANDIDATES = (
+    "utf-8",
+    "gb18030",
+    "big5",
+    "shift_jis",
+    "cp1252",
+)
 MUTAGEN_TEXT_ENCODINGS = {
     0: "latin-1",
     1: "utf-16",
     2: "utf-16-be",
     3: "utf-8",
 }
+
+
 def read_audio_group_identity(path: str | Path) -> tuple[str | None, str | None]:
     """Read only the tags needed by the watcher to prove bundle membership.
 
@@ -59,13 +68,26 @@ def read_audio_group_identity(path: str | Path) -> tuple[str | None, str | None]
         import mutagen  # type: ignore[import-not-found]
 
         audio = mutagen.File(str(source), easy=False)
-    except Exception:
+    # Mutagen plugins may raise format-specific exceptions that do not share a
+    # stable public base class; this read-only probe boundary treats all as no tag evidence.
+    except Exception:  # noqa: BLE001
         return None, None
     if audio is None:
         return None, None
     values = _normalized_mutagen_tags(getattr(audio, "tags", None))
     album = _clean_text(_first_tag(values, "album", "©alb", "talb"))
-    author = _clean_text(_first_tag(values, "albumartist", "album artist", "aart", "©art", "artist", "tpe1", "tpe2"))
+    author = _clean_text(
+        _first_tag(
+            values,
+            "albumartist",
+            "album artist",
+            "aart",
+            "©art",
+            "artist",
+            "tpe1",
+            "tpe2",
+        )
+    )
     return album.casefold() if album else None, author.casefold() if author else None
 
 
@@ -105,8 +127,7 @@ def _direct_audio_files(path: Path, counter: _AudioTrackCounter) -> list[Path]:
     return [
         counter.add(Path(entry.path))
         for entry in _iter_directory_entries(path)
-        if entry.is_file(follow_symlinks=False)
-        and is_supported_audio_file(entry.name)
+        if entry.is_file(follow_symlinks=False) and is_supported_audio_file(entry.name)
     ]
 
 
@@ -158,7 +179,9 @@ def inspect_audio_bundle(path: str | Path) -> AudioBundleStructure | None:
             continue
         child_title, child_author, volume_index = _directory_identity(child)
         child_key = normalize_identity_part(child_title)
-        title_contains_parent = bool(root_key and child_key and root_key != child_key and root_key in child_key)
+        title_contains_parent = bool(
+            root_key and child_key and root_key != child_key and root_key in child_key
+        )
         if volume_index is None and not title_contains_parent:
             continue
         child_files = _directory_audio_files(child, counter)
@@ -175,12 +198,16 @@ def inspect_audio_bundle(path: str | Path) -> AudioBundleStructure | None:
         )
 
     if direct_files and matched_volumes:
-        raise ValueError("有声书书名目录不能同时包含直属音轨和卷目录，请整理为单卷或多卷结构后重试")
+        raise ValueError(
+            "有声书书名目录不能同时包含直属音轨和卷目录，请整理为单卷或多卷结构后重试"
+        )
     if matched_volumes:
         matched_volumes.sort(
             key=lambda volume: (
                 volume.volume_index is None,
-                volume.volume_index if volume.volume_index is not None else float("inf"),
+                volume.volume_index
+                if volume.volume_index is not None
+                else float("inf"),
                 _natural_audio_key(volume.path),
             )
         )
@@ -234,16 +261,15 @@ def audio_bundle_root(path: str | Path, monitor_root: str | Path | None = None) 
         root_key = normalize_identity_part(root_title)
         child_key = normalize_identity_part(child_title)
         if child_volume is not None or bool(
-            root_key
-            and child_key
-            and root_key != child_key
-            and root_key in child_key
+            root_key and child_key and root_key != child_key and root_key in child_key
         ):
             return grandparent
     return parent
 
 
-def parse_audio_metadata(path: str | Path, *, timeout_seconds: int = 60) -> AudioFileMetadata:
+def parse_audio_metadata(
+    path: str | Path, *, timeout_seconds: int = 60
+) -> AudioFileMetadata:
     source = Path(path).expanduser().resolve()
     if not source.is_file() or not is_supported_audio_file(source):
         raise ValueError("音频文件不存在或格式不受支持")
@@ -319,16 +345,26 @@ def parse_audio_metadata(path: str | Path, *, timeout_seconds: int = 60) -> Audi
         channels=_positive_int(merged.get("channels")),
         disc_number=_tag_number(merged.get("disc_number")),
         track_number=_tag_number(merged.get("track_number")),
+        series_name=_clean_text(merged.get("series_name")),
+        volume_index=parse_structured_volume_index(merged.get("volume_index")),
         chapters=chapters,
-        raw_tags=merged.get("raw_tags") if isinstance(merged.get("raw_tags"), dict) else {},
-        cover_data=merged.get("cover_data") if isinstance(merged.get("cover_data"), bytes) else None,
+        raw_tags=merged.get("raw_tags")
+        if isinstance(merged.get("raw_tags"), dict)
+        else {},
+        cover_data=merged.get("cover_data")
+        if isinstance(merged.get("cover_data"), bytes)
+        else None,
         cover_extension=_clean_text(merged.get("cover_extension")),
     )
 
 
 def _read_with_ffprobe(path: Path, *, timeout_seconds: int) -> dict[str, Any]:
     configured = os.environ.get("FFPROBE_PATH")
-    executable = configured if configured and Path(configured).is_file() else shutil.which("ffprobe")
+    executable = (
+        configured
+        if configured and Path(configured).is_file()
+        else shutil.which("ffprobe")
+    )
     if not executable and Path("/opt/homebrew/bin/ffprobe").is_file():
         executable = "/opt/homebrew/bin/ffprobe"
     if not executable:
@@ -344,7 +380,9 @@ def _read_with_ffprobe(path: Path, *, timeout_seconds: int) -> dict[str, Any]:
         "-show_chapters",
         str(path),
     ]
-    returncode, stdout, stderr = _run_process_with_output_limit(command, timeout_seconds=max(1, timeout_seconds))
+    returncode, stdout, stderr = _run_process_with_output_limit(
+        command, timeout_seconds=max(1, timeout_seconds)
+    )
     if returncode != 0:
         detail = stderr.decode("utf-8", errors="replace").strip().splitlines()
         raise AudioInspectionError(
@@ -358,7 +396,9 @@ def _read_with_ffprobe(path: Path, *, timeout_seconds: int) -> dict[str, Any]:
             "AUDIO_METADATA_INVALID", "ffprobe 返回了无效的音频元数据"
         ) from exc
     streams = payload.get("streams") if isinstance(payload.get("streams"), list) else []
-    audio_stream = next((item for item in streams if item.get("codec_type") == "audio"), None)
+    audio_stream = next(
+        (item for item in streams if item.get("codec_type") == "audio"), None
+    )
     if not isinstance(audio_stream, dict):
         raise AudioInspectionError("AUDIO_STREAM_NOT_FOUND", "文件中没有音频流")
     video_streams = [
@@ -376,7 +416,9 @@ def _read_with_ffprobe(path: Path, *, timeout_seconds: int) -> dict[str, Any]:
             "AUDIO_VIDEO_STREAM_UNSUPPORTED",
             "文件包含视频流，不能作为有声书音频导入",
         )
-    format_data = payload.get("format") if isinstance(payload.get("format"), dict) else {}
+    format_data = (
+        payload.get("format") if isinstance(payload.get("format"), dict) else {}
+    )
     tags: dict[str, Any] = {}
     for source_tags in (format_data.get("tags"), audio_stream.get("tags")):
         if isinstance(source_tags, dict):
@@ -386,11 +428,19 @@ def _read_with_ffprobe(path: Path, *, timeout_seconds: int) -> dict[str, Any]:
     for index, chapter in enumerate(payload.get("chapters") or []):
         if not isinstance(chapter, dict):
             continue
-        chapter_tags = chapter.get("tags") if isinstance(chapter.get("tags"), dict) else {}
+        chapter_tags = (
+            chapter.get("tags") if isinstance(chapter.get("tags"), dict) else {}
+        )
         start_ms = _seconds_to_ms(chapter.get("start_time"))
         end_ms = _seconds_to_ms(chapter.get("end_time"))
         if end_ms > start_ms:
-            chapters.append({"title": chapter_tags.get("title") or f"第 {index + 1} 章", "start_ms": start_ms, "end_ms": end_ms})
+            chapters.append(
+                {
+                    "title": chapter_tags.get("title") or f"第 {index + 1} 章",
+                    "start_ms": start_ms,
+                    "end_ms": end_ms,
+                }
+            )
     result = {
         "title": _first_tag(tags, "title"),
         "album": _first_tag(tags, "album"),
@@ -403,6 +453,17 @@ def _read_with_ffprobe(path: Path, *, timeout_seconds: int) -> dict[str, Any]:
         "channels": audio_stream.get("channels"),
         "disc_number": _first_tag(tags, "disc", "discnumber"),
         "track_number": _first_tag(tags, "track", "tracknumber"),
+        "series_name": _first_tag(tags, "series", "series_name", "seriesname"),
+        "volume_index": _first_tag(
+            tags,
+            "volume",
+            "volume_number",
+            "volumenumber",
+            "series_index",
+            "seriesindex",
+            "series-part",
+            "series_part",
+        ),
         "chapters": chapters,
         "raw_tags": {"ffprobe": tags},
     }
@@ -420,7 +481,9 @@ def _run_process_with_output_limit(
     """Run ffprobe without allowing a malformed file to exhaust RAM."""
 
     try:
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
     except OSError as exc:
         raise ValueError(f"ffprobe 读取音频失败：{exc}") from exc
     if process.stdout is None or process.stderr is None:
@@ -429,8 +492,12 @@ def _run_process_with_output_limit(
         raise ValueError("ffprobe 读取音频失败：无法捕获子进程输出")
 
     selector = selectors.DefaultSelector()
-    selector.register(process.stdout, selectors.EVENT_READ, ("stdout", max_stdout_bytes))
-    selector.register(process.stderr, selectors.EVENT_READ, ("stderr", max_stderr_bytes))
+    selector.register(
+        process.stdout, selectors.EVENT_READ, ("stdout", max_stdout_bytes)
+    )
+    selector.register(
+        process.stderr, selectors.EVENT_READ, ("stderr", max_stderr_bytes)
+    )
     buffers = {"stdout": bytearray(), "stderr": bytearray()}
     deadline = time.monotonic() + max(1, timeout_seconds)
     try:
@@ -443,7 +510,9 @@ def _run_process_with_output_limit(
             events = selector.select(timeout=min(0.25, remaining))
             if not events and process.poll() is not None:
                 # Pipes can still contain buffered bytes after process exit.
-                events = [(key, selectors.EVENT_READ) for key in selector.get_map().values()]
+                events = [
+                    (key, selectors.EVENT_READ) for key in selector.get_map().values()
+                ]
             for key, _mask in events:
                 stream_name, limit = key.data
                 chunk = os.read(key.fd, 64 * 1024)
@@ -454,7 +523,9 @@ def _run_process_with_output_limit(
                 if len(buffer) + len(chunk) > limit:
                     process.kill()
                     process.wait()
-                    raise ValueError(f"ffprobe {stream_name} 输出超过 {limit} bytes，文件元数据异常")
+                    raise ValueError(
+                        f"ffprobe {stream_name} 输出超过 {limit} bytes，文件元数据异常"
+                    )
                 buffer.extend(chunk)
         remaining = max(0.01, deadline - time.monotonic())
         try:
@@ -494,21 +565,32 @@ def _read_with_mutagen(path: Path) -> dict[str, Any]:
         start_ms = _seconds_to_ms(getattr(chapter, "start", None))
         end_ms = _seconds_to_ms(getattr(chapter, "end", None))
         if end_ms > start_ms:
-            chapter_title, repair = _repair_misdecoded_text(str(getattr(chapter, "title", None) or f"第 {index + 1} 章"))
+            chapter_title, repair = _repair_misdecoded_text(
+                str(getattr(chapter, "title", None) or f"第 {index + 1} 章")
+            )
             if repair:
                 encoding_repairs.append({"tag": f"chapter:{index + 1}", **repair})
-            chapters.append({"title": chapter_title, "start_ms": start_ms, "end_ms": end_ms})
+            chapters.append(
+                {"title": chapter_title, "start_ms": start_ms, "end_ms": end_ms}
+            )
     id3_chapters = []
     if tags is not None and hasattr(tags, "getall"):
         try:
             id3_chapters = list(tags.getall("CHAP"))
-        except Exception:
+        # ID3 implementations can raise plugin-specific errors at this adapter boundary.
+        except Exception:  # noqa: BLE001
             id3_chapters = []
     if id3_chapters:
         chapters = []
-        for index, chapter in enumerate(sorted(id3_chapters, key=lambda item: int(getattr(item, "start_time", 0)))):
+        for index, chapter in enumerate(
+            sorted(id3_chapters, key=lambda item: int(getattr(item, "start_time", 0)))
+        ):
             sub_frames = getattr(chapter, "sub_frames", None) or {}
-            title_frame = next(iter(sub_frames.getall("TIT2")), None) if hasattr(sub_frames, "getall") else None
+            title_frame = (
+                next(iter(sub_frames.getall("TIT2")), None)
+                if hasattr(sub_frames, "getall")
+                else None
+            )
             raw_title = str(getattr(title_frame, "text", [f"第 {index + 1} 章"])[0])
             chapter_title, repair = _repair_misdecoded_text(
                 raw_title,
@@ -525,7 +607,9 @@ def _read_with_mutagen(path: Path) -> dict[str, Any]:
             )
     cover_data, cover_extension = _mutagen_cover(tags)
     if cover_data and len(cover_data) > MAX_EMBEDDED_COVER_BYTES:
-        raw_tags["coverWarning"] = f"embedded cover ignored: {len(cover_data)} bytes exceeds {MAX_EMBEDDED_COVER_BYTES}"
+        raw_tags["coverWarning"] = (
+            f"embedded cover ignored: {len(cover_data)} bytes exceeds {MAX_EMBEDDED_COVER_BYTES}"
+        )
         cover_data = None
         cover_extension = None
     if encoding_repairs:
@@ -533,8 +617,19 @@ def _read_with_mutagen(path: Path) -> dict[str, Any]:
     return {
         "title": _first_tag(values, "title", "©nam", "tit2"),
         "album": _first_tag(values, "album", "©alb", "talb"),
-        "author": _first_tag(values, "albumartist", "album artist", "aart", "©art", "artist", "tpe1", "tpe2"),
-        "narrator": _first_tag(values, "narrator", "readby", "reader", "composer", "tcom"),
+        "author": _first_tag(
+            values,
+            "albumartist",
+            "album artist",
+            "aart",
+            "©art",
+            "artist",
+            "tpe1",
+            "tpe2",
+        ),
+        "narrator": _first_tag(
+            values, "narrator", "readby", "reader", "composer", "tcom"
+        ),
         "duration_ms": _seconds_to_ms(getattr(info, "length", None)),
         "codec": _mutagen_codec(path, info),
         "bitrate": getattr(info, "bitrate", None),
@@ -542,6 +637,17 @@ def _read_with_mutagen(path: Path) -> dict[str, Any]:
         "channels": getattr(info, "channels", None),
         "disc_number": _first_tag(values, "discnumber", "disk", "tpos"),
         "track_number": _first_tag(values, "tracknumber", "trkn", "trck"),
+        "series_name": _first_tag(values, "series", "series_name", "seriesname"),
+        "volume_index": _first_tag(
+            values,
+            "volume",
+            "volume_number",
+            "volumenumber",
+            "series_index",
+            "seriesindex",
+            "series-part",
+            "series_part",
+        ),
         "chapters": chapters,
         "raw_tags": {"mutagen": raw_tags},
         "cover_data": cover_data,
@@ -549,7 +655,9 @@ def _read_with_mutagen(path: Path) -> dict[str, Any]:
     }
 
 
-def _merge_metadata(primary: dict[str, Any], fallback: dict[str, Any]) -> dict[str, Any]:
+def _merge_metadata(
+    primary: dict[str, Any], fallback: dict[str, Any]
+) -> dict[str, Any]:
     output = dict(fallback)
     for key, value in primary.items():
         if value not in (None, "", [], {}, ()):
@@ -584,7 +692,7 @@ def _normalized_mutagen_tags(
         if normalized_key.startswith("txxx:"):
             normalized_key = normalized_key.split(":", 1)[1].strip().lower()
         if hasattr(value, "text"):
-            value = getattr(value, "text")
+            value = value.text
         if isinstance(value, (list, tuple)) and value:
             value = value[0]
         if isinstance(value, tuple) and value:
@@ -629,7 +737,9 @@ def _repair_audio_metadata_text(metadata: dict[str, Any], *, source: str) -> Non
         return
     raw_tags = metadata.setdefault("raw_tags", {})
     if isinstance(raw_tags, dict):
-        raw_tags.setdefault("encodingRepairs", []).extend({"source": source, **repair} for repair in repairs)
+        raw_tags.setdefault("encodingRepairs", []).extend(
+            {"source": source, **repair} for repair in repairs
+        )
 
 
 def _repair_misdecoded_text(
@@ -681,7 +791,9 @@ def _repair_misdecoded_text(
     # all-ideograph value is equally plausible as GB18030 and Shift-JIS, there
     # is not enough evidence to choose safely (for example a Japanese name
     # with no kana), so retain the declared value for manual correction.
-    shift_jis_candidate = next((candidate for candidate in candidates if candidate[2] == "shift_jis"), None)
+    shift_jis_candidate = next(
+        (candidate for candidate in candidates if candidate[2] == "shift_jis"), None
+    )
     if (
         encoding == "gb18030"
         and shift_jis_candidate
@@ -702,10 +814,16 @@ def _repair_misdecoded_text(
 def _mojibake_suspicion(value: str) -> int:
     score = 0
     score += value.count("\ufffd") * 10
-    score += sum(8 for character in value if unicodedata.category(character) == "Cc" and character not in "\t\r\n")
+    score += sum(
+        8
+        for character in value
+        if unicodedata.category(character) == "Cc" and character not in "\t\r\n"
+    )
     score += len(re.findall(r"(?:Ã.|Â.|â..|ð.|Ð.|Ñ.|¡[¶·])", value)) * 4
     score += len(re.findall(r"[\u00c0-\u00ff]{4,}", value)) * 5
-    latin1_non_ascii = sum(1 for character in value if "\u00a0" <= character <= "\u00ff")
+    latin1_non_ascii = sum(
+        1 for character in value if "\u00a0" <= character <= "\u00ff"
+    )
     if latin1_non_ascii >= 4 and latin1_non_ascii / max(1, len(value)) >= 0.35:
         score += 5
     return score
@@ -757,7 +875,9 @@ def _candidate_decoding_quality(value: str, encoding: str) -> float:
 
 def _contains_only_cjk_letters(value: str) -> bool:
     significant = [character for character in value if not character.isspace()]
-    return bool(significant) and all(_is_cjk_character(character) for character in significant)
+    return bool(significant) and all(
+        _is_cjk_character(character) for character in significant
+    )
 
 
 def _is_cjk_character(character: str) -> bool:
@@ -773,7 +893,7 @@ def _serializable_tags(tags: Any) -> dict[str, Any]:
             output[str(key)] = "<embedded cover>"
             continue
         if hasattr(value, "text"):
-            value = getattr(value, "text")
+            value = value.text
         if isinstance(value, bytes):
             output[str(key)] = f"<bytes:{len(value)}>"
         elif isinstance(value, (str, int, float, bool)) or value is None:
@@ -791,7 +911,8 @@ def _mutagen_cover(tags: Any) -> tuple[bytes | None, str | None]:
     if hasattr(tags, "getall"):
         try:
             picture = next(iter(tags.getall("APIC")), None)
-        except Exception:
+        # Cover frames come from third-party tag implementations with no common error type.
+        except Exception:  # noqa: BLE001
             picture = None
         data = getattr(picture, "data", None)
         if isinstance(data, bytes):
@@ -813,7 +934,11 @@ def _mutagen_codec(path: Path, info: Any) -> str | None:
     # MP4 is a container: .m4a/.m4b may contain AAC, ALAC, AC-3, or another
     # stream. Never infer AAC from the extension because that would silently
     # admit codecs outside the V1 playback boundary.
-    codec = str(getattr(info, "codec", "") or getattr(info, "codec_description", "")).strip().lower()
+    codec = (
+        str(getattr(info, "codec", "") or getattr(info, "codec_description", ""))
+        .strip()
+        .lower()
+    )
     return _normalize_audio_codec(codec)
 
 
@@ -890,5 +1015,8 @@ def _clean_text(value: Any) -> str | None:
 def _natural_audio_key(path: Path) -> tuple[Any, ...]:
     parts: list[Any] = []
     for segment in path.parts[-2:]:
-        parts.extend(int(item) if item.isdigit() else item.casefold() for item in re.split(r"(\d+)", segment))
+        parts.extend(
+            int(item) if item.isdigit() else item.casefold()
+            for item in re.split(r"(\d+)", segment)
+        )
     return tuple(parts)

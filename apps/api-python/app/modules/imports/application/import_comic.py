@@ -6,6 +6,8 @@ import json
 import re
 from pathlib import Path
 
+from app.contracts.publication_metadata import PublicationMetadata
+from app.contracts.publication_titles import titles_from_local_source
 from app.modules.imports.application.comic_types import ComicArchiveInspection
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
@@ -15,8 +17,7 @@ from app.modules.imports.application.dto import (
 )
 from app.modules.imports.application.errors import ComicArchiveError
 from app.modules.imports.application.identity_resolution import (
-    EmbeddedIdentityMetadata,
-    resolve_import_identity,
+    resolve_import_metadata,
 )
 from app.modules.imports.application.import_support import (
     _bracketed_folder_metadata,
@@ -28,13 +29,12 @@ from app.modules.imports.application.import_support import (
     _finalize_work_cover,
     _hash_text,
     _id,
-    _import_work_merge_key,
     _insert_identity_metadata,
     _log_import,
     _now,
     _select_volume_media_version,
-    _source_filename_title,
     _source_group_key,
+    _work_merge_key,
 )
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
@@ -75,18 +75,38 @@ def _import_comic(
             has_comic_info=comic_info is not None,
         ),
     )
-    identity = resolve_import_identity(
+    comic_titles = (
+        titles_from_local_source(
+            str(comic_info.get("title") or "").strip() or None,
+            series_name=str(comic_info.get("series") or "").strip() or None,
+            volume_index=comic_info.get("volume"),
+        )
+        if comic_info is not None
+        else None
+    )
+    embedded_metadata = (
+        PublicationMetadata(
+            title=comic_titles.work_title,
+            volume_title=comic_titles.volume_title,
+            authors=(str(parsed.get("author") or "").strip(),)
+            if str(parsed.get("author") or "").strip()
+            else (),
+            description=str(parsed.get("description") or "").strip() or None,
+            subjects=tuple(comic_info.get("tags") or ()),
+            series_name=str(comic_info.get("series") or "").strip() or None,
+            series_index=comic_info.get("volume"),
+            volume_index=comic_titles.volume_index,
+            publisher=str(comic_info.get("publisher") or "").strip() or None,
+        )
+        if comic_info is not None
+        else None
+    )
+    identity, resolved_local = resolve_import_metadata(
         identity,
-        embedded=(
-            EmbeddedIdentityMetadata(
-                title=str(parsed.get("title") or "").strip() or None,
-                author=str(parsed.get("author") or "").strip() or None,
-                source="comic_info",
-                confidence=0.9,
-            )
-            if comic_info is not None
-            else None
-        ),
+        embedded=embedded_metadata,
+        sidecar=options.sidecar_metadata,
+        source_order=options.local_metadata_priority,
+        path_metadata=options.path_metadata,
         requested_title=options.requested_title,
         requested_author=options.requested_author,
     )
@@ -101,22 +121,20 @@ def _import_comic(
     )
     title = identity.title
     author = identity.author
-    merge_key = _import_work_merge_key(
-        "cbz",
+    merge_key = _work_merge_key(
         title,
         author,
-        options,
-        identity.volume_index,
-        grouping_key=identity.grouping_key,
+        resolved_local.metadata.identifier,
+        resolved_local.metadata.isbn,
+        series_name=resolved_local.metadata.series_name,
     )
     source_key = _source_group_key(options, title)
     volume_index = (volume_info or {}).get("seriesIndex")
-    volume_title = _source_filename_title(options)
+    volume_title = resolved_local.metadata.volume_title or identity.title
     work, created = _ensure_work(
         store,
         queries,
         {
-            "workId": identity.reused_work_id,
             "title": title,
             "author": author,
             "description": None,
@@ -216,7 +234,9 @@ def _import_comic(
             )
         except ComicArchiveError:
             raise
-        except Exception as exc:
+        # Optional cover publication is a containment boundary for heterogeneous
+        # archive/image adapter failures; the imported comic remains readable.
+        except Exception as exc:  # noqa: BLE001
             cover_path = None
             _log_import(
                 store, task_id, "warning", f"comic cover extraction skipped: {exc}"
@@ -288,6 +308,9 @@ def _import_comic(
             else "new-comic-version"
             if created_media_version
             else "same-comic-series",
+            resolved_metadata=resolved_local.metadata,
+            metadata_field_sources=resolved_local.field_sources,
+            metadata_source_order=resolved_local.source_order,
         )
     except Exception:
         if cover_path:

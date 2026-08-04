@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 from app.modules.imports.application.audio_types import (
@@ -26,9 +27,14 @@ from app.modules.imports.application.dto import (
 )
 from app.modules.imports.application.identity import _record_identity_system_events
 from app.modules.imports.application.identity_resolution import (
-    resolve_import_identity,
+    apply_requested_identity,
+    resolve_import_metadata,
 )
-from app.modules.imports.application.import_audio import _audio_identity, _import_audio
+from app.modules.imports.application.import_audio import (
+    _audio_identity,
+    _import_audio,
+    audio_embedded_metadata,
+)
 from app.modules.imports.application.import_comic import _import_comic
 from app.modules.imports.application.import_epub import _import_epub
 from app.modules.imports.application.import_pdf import _import_pdf
@@ -66,6 +72,22 @@ from app.modules.imports.application.volume_ordering import (
 from app.modules.imports.application.work_grouping import (
     resolve_non_audio_work_identity,
 )
+
+
+def _publication_date(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    normalized = (
+        f"{value}-01-01"
+        if len(value) == 4
+        else f"{value}-01"
+        if len(value) == 7
+        else value
+    )
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
 
 
 def _resolve_audio_import_source(
@@ -187,6 +209,10 @@ def import_managed_book(
         )
         commit_import_checkpoint(unit_of_work)
         import_preferences = services.load_preferences()
+        effective_options = replace(
+            effective_options,
+            local_metadata_priority=services.load_local_metadata_priority(),
+        )
         preference_sources = audio_sources if audio_sources else [original_source]
         disallowed_sources = [
             item
@@ -314,6 +340,17 @@ def import_managed_book(
             return existing_file
 
         audio_metadata: list[AudioFileMetadata] = []
+        sidecar = services.read_sidecar_metadata(
+            original_source,
+            directory_fallback=bool(audio_sources or original_source.is_dir()),
+        )
+        if sidecar is not None:
+            effective_options = replace(
+                effective_options,
+                sidecar_metadata=sidecar.metadata,
+                sidecar_cover_path=sidecar.cover_path,
+                sidecar_source_kind=sidecar.source_kind,
+            )
         if audio_sources:
             store.update_import_task(
                 task_id,
@@ -338,26 +375,37 @@ def import_managed_book(
                 audio_metadata,
                 audio_structure,
             )
+            identity, audio_resolved_local = resolve_import_metadata(
+                identity,
+                embedded=audio_embedded_metadata(identity, audio_metadata),
+                sidecar=sidecar.metadata if sidecar is not None else None,
+                source_order=effective_options.local_metadata_priority,
+                path_publication_title=Path(options.original_name or source.name).stem,
+                requested_title=options.requested_title,
+                requested_author=options.requested_author,
+            )
         else:
-            identity = resolve_non_audio_work_identity(
+            audio_resolved_local = None
+            path_resolution = resolve_non_audio_work_identity(
                 services,
                 effective_options,
                 import_preferences,
             )
-            identity = resolve_import_identity(
+            identity = path_resolution.identity
+            effective_options = replace(
+                effective_options,
+                path_metadata=path_resolution.metadata,
+            )
+            identity = apply_requested_identity(
                 identity,
                 requested_title=options.requested_title,
                 requested_author=options.requested_author,
             )
-        if options.requested_work_id:
-            identity = replace(identity, reused_work_id=options.requested_work_id)
         if identity.fallback_reason:
             _log_import(store, task_id, "warning", identity.fallback_reason)
         _record_identity_system_events(services, task_id, identity, original_source)
         identity_method = (
-            "现有作品卷册关系"
-            if identity.source == "existing_work"
-            else "识别缓存"
+            "识别缓存"
             if identity.cache_hit
             else {
                 "ai": "AI",
@@ -367,6 +415,7 @@ def import_managed_book(
                 "pdf_metadata": "PDF 元数据",
                 "comic_info": "ComicInfo 元数据",
                 "reflowable_metadata": "原文件元数据",
+                "sidecar_opf": "OPF 元数据",
             }.get(identity.source, "多来源裁决")
         )
         store.update_import_task(
@@ -374,6 +423,37 @@ def import_managed_book(
             columns={
                 "progress": 88 if converted else 20,
                 "message": f"已通过{identity_method}获取书名与作者",
+                "recognizedMetadata": {
+                    "title": identity.title,
+                    "volumeTitle": (
+                        effective_options.path_metadata.volume_title
+                        if effective_options.path_metadata is not None
+                        else identity.title
+                    ),
+                    "volumeIndex": (
+                        effective_options.path_metadata.volume_index
+                        if effective_options.path_metadata is not None
+                        else identity.volume_index
+                    ),
+                    "author": identity.author,
+                    "fields": list(sidecar.metadata.populated_fields)
+                    if sidecar is not None
+                    else [
+                        field
+                        for field, value in (
+                            ("title", identity.title),
+                            ("author", identity.author),
+                        )
+                        if value
+                    ],
+                    "source": "REQUESTED"
+                    if identity.source == "requested"
+                    else "SIDECAR_OPF"
+                    if identity.source == "sidecar_opf"
+                    else "PATH"
+                    if identity.source in {"regex", "path"}
+                    else "EMBEDDED",
+                },
             },
         )
         commit_import_checkpoint(unit_of_work)
@@ -455,6 +535,7 @@ def import_managed_book(
                 identity,
                 audio_metadata,
                 audio_structure,
+                audio_resolved_local,
             )
         else:
             result = _import_comic(
@@ -468,12 +549,94 @@ def import_managed_book(
                 ext,
                 identity,
             )
+        if (
+            result.volume_id
+            and result.resolved_metadata is not None
+            and result.resolved_metadata.volume_index is not None
+        ):
+            matching_volume = queries.find_volume_conflict(
+                result.media_version_id,
+                result.resolved_metadata.volume_index,
+                result.resolved_metadata.title or result.title,
+            )
+            matching_volume_id = str((matching_volume or {}).get("id") or "")
+            if matching_volume_id and matching_volume_id != result.volume_id:
+                store.update_import_task(
+                    task_id, columns={"volumeId": matching_volume_id}
+                )
+                store.merge_imported_volume_sources(
+                    result.volume_id, matching_volume_id
+                )
+                result = replace(
+                    result,
+                    volume_id=matching_volume_id,
+                    merged=True,
+                    merge_reason="same-explicit-volume-multi-source",
+                )
         if not audio_metadata:
             normalize_media_version_volume_order(
                 store,
                 queries,
                 result.media_version_id,
             )
+        if result.resolved_metadata is not None:
+            publication = result.resolved_metadata
+            field_sources = dict(result.metadata_field_sources)
+            work_values: dict[str, object] = {"updatedAt": _now()}
+            volume_values: dict[str, object] = {"updatedAt": _now()}
+            if publication.description:
+                work_values["description"] = publication.description
+                volume_values["description"] = publication.description
+            if publication.subjects:
+                kind_tag = (
+                    "audiobook"
+                    if audio_metadata
+                    else "comic"
+                    if ext in {".cbz", ".cbr", ".zip", ".rar"}
+                    else ext.removeprefix(".") or "ebook"
+                )
+                work_values["tags"] = json.dumps(
+                    list(dict.fromkeys((kind_tag, *publication.subjects))),
+                    ensure_ascii=False,
+                )
+            if publication.series_name:
+                work_values["seriesName"] = publication.series_name
+            if publication.series_index is not None:
+                work_values["seriesIndex"] = publication.series_index
+            if publication.volume_index is not None:
+                volume_values["volumeIndex"] = publication.volume_index
+                volume_values["sortOrder"] = int(publication.volume_index * 1000)
+            if publication.volume_title and not (
+                audio_metadata and (source.is_dir() or len(audio_metadata) > 1)
+            ):
+                volume_values["title"] = publication.volume_title
+            for column, value in (
+                ("language", publication.language),
+                ("publisher", publication.publisher),
+                ("publishedAt", _publication_date(publication.published_at)),
+                ("identifier", publication.identifier),
+                ("isbn", publication.isbn),
+            ):
+                if value not in (None, ""):
+                    volume_values[column] = value
+            if (
+                sidecar is not None
+                and sidecar.cover_path is not None
+                and field_sources.get("cover") == "SIDECAR_OPF"
+                and result.volume_id
+            ):
+                cover_path = services.publish_sidecar_cover(
+                    settings.resolved_storage_root,
+                    sidecar.cover_path,
+                    result.work_id,
+                    result.media_version_id,
+                    result.volume_id,
+                )
+                work_values.update({"coverPath": cover_path, "coverStatus": "READY"})
+                volume_values.update({"coverPath": cover_path, "coverStatus": "READY"})
+            store.update_library_work(result.work_id, columns=work_values)
+            if result.volume_id:
+                store.update_library_volume(result.volume_id, columns=volume_values)
         services.sync_work_facets(result.work_id)
         if converted:
             conversion_row = queries.get_conversion_by_import_task_id(task_id)
@@ -506,6 +669,91 @@ def import_managed_book(
                     store, queries, original_source, result
                 )
             services.bind_conversion_result(converted.idempotency_key, result.volume_id)
+        if sidecar is not None and result.volume_id:
+            store.insert_library_metadata(
+                columns={
+                    "id": _id(),
+                    "volumeId": result.volume_id,
+                    "source": "sidecar_opf",
+                    "rawJson": json.dumps(
+                        {
+                            "sourceKind": sidecar.source_kind,
+                            "fieldSources": dict(sidecar.field_sources),
+                            "fields": list(sidecar.metadata.populated_fields),
+                            "title": sidecar.metadata.title,
+                            "volumeTitle": sidecar.metadata.volume_title,
+                            "authors": list(sidecar.metadata.authors),
+                            "description": sidecar.metadata.description,
+                            "subjects": list(sidecar.metadata.subjects),
+                            "seriesName": sidecar.metadata.series_name,
+                            "seriesIndex": sidecar.metadata.series_index,
+                            "language": sidecar.metadata.language,
+                            "publisher": sidecar.metadata.publisher,
+                            "publishedAt": sidecar.metadata.published_at,
+                            "identifier": sidecar.metadata.identifier,
+                            "isbn": sidecar.metadata.isbn,
+                            "cover": sidecar.cover_path is not None,
+                            "unparsed": dict(sidecar.metadata.unparsed_values),
+                        },
+                        ensure_ascii=False,
+                    ),
+                    "createdAt": _now(),
+                    "updatedAt": _now(),
+                }
+            )
+        if result.resolved_metadata is not None and result.volume_id:
+            publication = result.resolved_metadata
+            store.insert_library_metadata(
+                columns={
+                    "id": _id(),
+                    "volumeId": result.volume_id,
+                    "source": "local_resolution",
+                    "rawJson": json.dumps(
+                        {
+                            "sourceOrder": list(result.metadata_source_order),
+                            "fieldSources": dict(result.metadata_field_sources),
+                            "fields": list(publication.populated_fields),
+                            "title": publication.title,
+                            "authors": list(publication.authors),
+                            "description": publication.description,
+                            "subjects": list(publication.subjects),
+                            "seriesName": publication.series_name,
+                            "seriesIndex": publication.series_index,
+                            "volumeTitle": publication.volume_title,
+                            "volumeIndex": publication.volume_index,
+                            "language": publication.language,
+                            "publisher": publication.publisher,
+                            "publishedAt": publication.published_at,
+                            "identifier": publication.identifier,
+                            "isbn": publication.isbn,
+                            "cover": bool(publication.cover_href),
+                            "unparsed": dict(publication.unparsed_values),
+                        },
+                        ensure_ascii=False,
+                    ),
+                    "createdAt": _now(),
+                    "updatedAt": _now(),
+                }
+            )
+            store.update_import_task(
+                task_id,
+                columns={
+                    "recognizedMetadata": {
+                        "title": publication.title or result.title,
+                        "volumeTitle": publication.volume_title
+                        or publication.title
+                        or result.title,
+                        "author": publication.author,
+                        "volumeIndex": publication.volume_index,
+                        "fields": list(publication.populated_fields),
+                        "fieldSources": dict(result.metadata_field_sources),
+                        "sourceOrder": list(result.metadata_source_order),
+                        "source": field_sources.get("title")
+                        or field_sources.get("author")
+                        or next(iter(field_sources.values()), "PATH"),
+                    }
+                },
+            )
         store.update_import_task(
             task_id,
             columns={

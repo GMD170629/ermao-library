@@ -35,6 +35,8 @@ class ReflowableBookMetadata:
     chapters: tuple[ReflowableChapter, ...]
     cover: EmbeddedBookCover | None
     raw_metadata: Mapping[str, object]
+    series_name: str | None = None
+    series_index: float | None = None
 
     @property
     def author(self) -> str | None:

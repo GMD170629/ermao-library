@@ -5,7 +5,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import OperationalError
 
 from app.models.import_pipeline import Source
-from app.models.organize import MetadataProviderPipeline
+from app.models.organize import MetadataProviderPipeline, OrganizePolicy
 from app.services import metadata_lookup_queue as queue
 from app.services.metadata_lookup_queue import (
     process_metadata_lookup_task,
@@ -204,12 +204,16 @@ def test_lookup_applies_exact_candidate_without_overwriting_identity_or_local_co
         ).scalar()
         == "APPLIED"
     )
-    volume = db_session.execute(
-        text(
-            "SELECT publisher, publishedAt, language, isbn FROM LibraryVolume "
-            "WHERE id = 'volume-lookup'"
+    volume = (
+        db_session.execute(
+            text(
+                "SELECT publisher, publishedAt, language, isbn FROM LibraryVolume "
+                "WHERE id = 'volume-lookup'"
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     assert volume["publisher"] is None
     assert volume["publishedAt"] is not None
     assert volume["language"] == "zh-CN"
@@ -314,7 +318,7 @@ def test_lookup_applies_bangumi_candidate_when_local_title_is_an_exact_alias(
         .one()
     )
     assert dict(work) == {
-        "title": "拜托请穿上，鹰峰同学",
+        "title": "鹰峰同学请穿上衣服",
         "description": "Bangumi 条目简介",
         "organized": 1,
         "organizeStatus": "APPLIED",
@@ -607,26 +611,20 @@ def test_lookup_uses_three_retry_delays_then_fails(
     )
 
 
-def test_lookup_keeps_existing_identity_when_overwrite_is_disabled_and_fills_other_gaps(
+def test_lookup_updates_identity_and_fills_other_gaps(
     db_session, test_settings, monkeypatch
 ):
     create_worker_tables(db_session)
+    policy = db_session.get(OrganizePolicy, "default")
+    if policy is None:
+        policy = OrganizePolicy(id="default", prefer_local_metadata=False)
+        db_session.add(policy)
+    else:
+        policy.prefer_local_metadata = False
+    db_session.commit()
     task = _insert_lookup_fixture(
         db_session, title="鹰峰同学请穿上衣服", author="柊裕一"
     )
-    db_session.execute(
-        text(
-            "CREATE TABLE IF NOT EXISTS OrganizePolicy (id TEXT PRIMARY KEY, overwriteTitleAuthor INTEGER NOT NULL DEFAULT 1)"
-        )
-    )
-    db_session.execute(
-        text(
-            "INSERT INTO OrganizePolicy "
-            "(id, overwriteTitleAuthor, createdAt, updatedAt) "
-            "VALUES ('default', 0, 'now', 'now')"
-        )
-    )
-    db_session.commit()
     candidate = {
         "id": "douban-auto-apply-off",
         "source": "douban",
@@ -658,16 +656,16 @@ def test_lookup_keeps_existing_identity_when_overwrite_is_disabled_and_fills_oth
         .one()
     )
     assert dict(work) == {
-        "title": "鹰峰同学请穿上衣服",
-        "author": "柊裕一",
+        "title": "拜托请穿上，鹰峰同学",
+        "author": "柊裕二",
         "description": "应自动补全的简介",
-        "tags": '["epub"]',
+        "tags": '["推理"]',
         "organized": 1,
     }
     lookup = db_session.execute(
         text("SELECT appliedFields FROM MetadataLookupTask WHERE id = 'lookup-1'")
     ).scalar()
-    assert json.loads(lookup) == ["description"]
+    assert json.loads(lookup) == ["title", "author", "description", "tags"]
     assert (
         db_session.execute(
             text("SELECT status FROM OrganizeJob WHERE id = 'job-lookup'")

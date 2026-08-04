@@ -29,6 +29,7 @@ from app.models.library import (
 )
 from app.models.shelf import Shelf, ShelfWork
 from app.modules.library.application.filter_ast import FilterCondition, FilterExpression
+from app.modules.library.domain.authors import UNKNOWN_AUTHOR_PLACEHOLDER
 
 WORK_TEXT_FIELDS = {
     "title": LibraryWork.title,
@@ -65,13 +66,19 @@ def _literal_like_value(value: str) -> str:
 
 
 def _text(
-    expression: ColumnElement[object], condition: FilterCondition
+    expression: ColumnElement[object],
+    condition: FilterCondition,
+    *,
+    empty_values: tuple[str, ...] = (),
 ) -> ColumnElement[bool]:
     normalized = _normalized_text(expression)
+    empty_predicate = normalized.in_(
+        ("", *(value.casefold() for value in empty_values))
+    )
     if condition.operator == "is_empty":
-        return normalized == ""
+        return empty_predicate
     if condition.operator == "is_not_empty":
-        return normalized != ""
+        return not_(empty_predicate)
     value = _literal_like_value(str(condition.value or "").casefold())
     if condition.operator in {"contains", "not_contains"}:
         result = normalized.like(f"%{value}%", escape="\\")
@@ -218,6 +225,12 @@ def _condition(
     field = condition.field
     if field == "readingStatus" and user_id:
         return _reading_status(context, user_id, condition)
+    if field == "author":
+        return _text(
+            LibraryWork.author,
+            condition,
+            empty_values=(UNKNOWN_AUTHOR_PLACEHOLDER,),
+        )
     if field in WORK_TEXT_FIELDS:
         return _text(WORK_TEXT_FIELDS[field], condition)
     if field in WORK_NUMBER_FIELDS:

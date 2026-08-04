@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
+from app.contracts.publication_metadata import PublicationMetadata
 from app.modules.imports.application.dto import BookIdentityDTO
 from app.modules.imports.application.identity_resolution import (
-    EmbeddedIdentityMetadata,
-    resolve_import_identity,
+    apply_requested_identity,
+    resolve_import_metadata,
 )
 
 
@@ -25,130 +28,149 @@ def _path_identity(
     )
 
 
-def test_complete_embedded_metadata_replaces_low_confidence_sanitized_filename() -> (
-    None
-):
-    resolved = resolve_import_identity(
-        _path_identity(title="白夜行 (东野圭吾) (z-library.sk 1lib.sk z-lib.sk)"),
-        embedded=EmbeddedIdentityMetadata(
-            title="白夜行",
-            author="(日)东野圭吾",
-            source="epub_opf",
-            confidence=0.95,
-        ),
+def test_explicit_fields_are_the_only_pre_format_identity_override() -> None:
+    resolved = apply_requested_identity(
+        _path_identity(title="路径标题", author="路径作者", volume_index=3),
+        requested_title="用户标题",
     )
 
-    assert (resolved.title, resolved.author) == ("白夜行", "(日)东野圭吾")
-    assert resolved.source == "epub_opf"
-    assert resolved.selection_reason == "embedded_metadata_over_incomplete_path"
+    assert (resolved.title, resolved.author, resolved.volume_index) == (
+        "用户标题",
+        "路径作者",
+        3,
+    )
+    assert resolved.source == "requested"
+    assert resolved.selection_reason == "explicit_user_fields"
     assert [evidence.source for evidence in resolved.evidence] == [
         "regex",
-        "epub_opf",
+        "requested",
     ]
 
 
-def test_high_confidence_complete_filename_beats_conflicting_embedded_metadata() -> (
-    None
-):
-    resolved = resolve_import_identity(
-        _path_identity(
-            title="斯泰尔斯庄园奇案",
-            author="阿加莎·克里斯蒂",
-            confidence=0.9,
-        ),
-        embedded=EmbeddedIdentityMetadata(
-            title="岛田庄司精选作品合集共14册",
-            author="岛田庄司",
-            source="epub_opf",
-            confidence=0.95,
-        ),
-    )
+def test_no_explicit_fields_preserve_unmodified_path_identity() -> None:
+    path_identity = _path_identity(title="路径标题", author="路径作者", volume_index=3)
 
-    assert (resolved.title, resolved.author) == (
-        "斯泰尔斯庄园奇案",
-        "阿加莎·克里斯蒂",
-    )
-    assert resolved.source == "regex"
-    assert resolved.selection_reason == "complete_high_confidence_path"
-
-
-def test_explicit_fields_override_other_sources_field_by_field() -> None:
-    resolved = resolve_import_identity(
-        _path_identity(title="损坏文件名"),
-        embedded=EmbeddedIdentityMetadata(
-            title="白夜行",
-            author="东野圭吾",
-            source="epub_opf",
-            confidence=0.95,
-        ),
-        requested_title="白夜行·典藏版",
-    )
-
-    assert (resolved.title, resolved.author) == ("白夜行·典藏版", "东野圭吾")
-    assert resolved.source == "requested"
-    assert resolved.selection_reason == "explicit_user_fields"
-
-
-def test_series_volume_identity_is_not_replaced_by_volume_embedded_metadata() -> None:
-    resolved = resolve_import_identity(
-        _path_identity(
-            title="系列作品",
-            author="系列作者",
-            confidence=0.98,
-            volume_index=3,
-        ),
-        embedded=EmbeddedIdentityMetadata(
-            title="第三卷 独立标题",
-            author="系列作者",
-            source="epub_opf",
-            confidence=0.95,
-        ),
-    )
+    resolved = apply_requested_identity(path_identity)
 
     assert (resolved.title, resolved.author, resolved.volume_index) == (
-        "系列作品",
-        "系列作者",
+        "路径标题",
+        "路径作者",
         3,
     )
-    assert resolved.selection_reason == "series_volume_path"
-
-
-def test_series_volume_identity_fills_unknown_author_from_embedded_metadata() -> None:
-    resolved = resolve_import_identity(
-        _path_identity(
-            title="荒島求生記",
-            author="未知作者",
-            confidence=0.62,
-            volume_index=1,
-        ),
-        embedded=EmbeddedIdentityMetadata(
-            title=None,
-            author="高桥义广",
-            source="pdf_metadata",
-            confidence=0.9,
-        ),
-    )
-
-    assert (resolved.title, resolved.author, resolved.volume_index) == (
-        "荒島求生記",
-        "高桥义广",
-        1,
-    )
-    assert resolved.source == "pdf_metadata"
-    assert resolved.selection_reason == "embedded_author_over_incomplete_path"
-
-
-def test_placeholder_embedded_metadata_does_not_replace_path_identity() -> None:
-    resolved = resolve_import_identity(
-        _path_identity(title="活着", author="余华", confidence=0.88),
-        embedded=EmbeddedIdentityMetadata(
-            title="Unknown",
-            author="未知作者",
-            source="epub_opf",
-            confidence=0.95,
-        ),
-    )
-
-    assert (resolved.title, resolved.author) == ("活着", "余华")
     assert resolved.source == "regex"
-    assert resolved.selection_reason == "path_fallback"
+    assert resolved.selection_reason is None
+
+
+def test_path_priority_uses_path_title_and_volume_then_fills_missing_author() -> None:
+    identity, resolved = resolve_import_metadata(
+        _path_identity(title="路径作品", volume_index=9),
+        embedded=PublicationMetadata(
+            title="内嵌作品 Vol.8",
+            authors=("内嵌作者",),
+            description="内嵌简介",
+            volume_index=8,
+        ),
+        sidecar=PublicationMetadata(
+            title="OPF作品 Vol.2",
+            authors=("OPF作者",),
+            publisher="OPF出版社",
+            volume_index=2,
+        ),
+        source_order=("PATH", "EMBEDDED", "SIDECAR_OPF"),
+        path_publication_title="路径作品 Vol.9",
+    )
+
+    assert (identity.title, identity.author, identity.volume_index) == (
+        "路径作品",
+        "内嵌作者",
+        9,
+    )
+    assert resolved.metadata.description == "内嵌简介"
+    assert resolved.metadata.publisher == "OPF出版社"
+    assert dict(resolved.field_sources) == {
+        "title": "PATH",
+        "author": "EMBEDDED",
+        "description": "EMBEDDED",
+        "volumeIndex": "PATH",
+        "publisher": "SIDECAR_OPF",
+        "volumeTitle": "PATH",
+    }
+
+
+def test_lower_priority_series_does_not_replace_higher_priority_title() -> None:
+    identity, resolved = resolve_import_metadata(
+        _path_identity(title="路径作品", author="路径作者", volume_index=4),
+        embedded=None,
+        sidecar=PublicationMetadata(
+            title="OPF作品 Vol.2",
+            authors=("OPF作者",),
+            series_name="OPF系列",
+            volume_index=2,
+        ),
+        source_order=("PATH", "EMBEDDED", "SIDECAR_OPF"),
+        path_publication_title="路径作品 Vol.4",
+    )
+
+    assert (identity.title, identity.author, identity.volume_index) == (
+        "路径作品",
+        "路径作者",
+        4,
+    )
+    assert resolved.metadata.series_name == "OPF系列"
+    assert resolved.source_for("title") == "PATH"
+    assert resolved.source_for("seriesName") == "SIDECAR_OPF"
+
+
+def test_default_priority_still_uses_sidecar_for_every_populated_field() -> None:
+    identity, resolved = resolve_import_metadata(
+        _path_identity(title="路径作品", author="路径作者", volume_index=9),
+        embedded=PublicationMetadata(
+            title="内嵌作品 Vol.8", authors=("内嵌作者",), volume_index=8
+        ),
+        sidecar=PublicationMetadata(
+            title="OPF作品 Vol.2", authors=("OPF作者",), volume_index=2
+        ),
+        source_order=("SIDECAR_OPF", "EMBEDDED", "PATH"),
+        path_publication_title="路径作品 Vol.9",
+    )
+
+    assert (identity.title, identity.author, identity.volume_index) == (
+        "OPF作品",
+        "OPF作者",
+        2,
+    )
+    assert resolved.metadata.volume_title == "OPF作品 Vol.2"
+    assert resolved.source_for("title") == "SIDECAR_OPF"
+    assert resolved.source_for("author") == "SIDECAR_OPF"
+    assert resolved.source_for("volumeIndex") == "SIDECAR_OPF"
+
+
+@pytest.mark.parametrize(
+    ("volume_title", "volume_index"),
+    [
+        ("作品 (3)", 3.0),
+        ("Vol.4 作品", 4.0),
+        ("作品_005", 5.0),
+        ("作品 6", 6.0),
+    ],
+)
+def test_complete_path_snapshot_is_not_split_or_rewritten_again(
+    volume_title: str,
+    volume_index: float,
+) -> None:
+    identity, resolved = resolve_import_metadata(
+        _path_identity(title="作品", author="路径作者", volume_index=volume_index),
+        embedded=None,
+        sidecar=None,
+        source_order=("PATH", "EMBEDDED", "SIDECAR_OPF"),
+        path_metadata=PublicationMetadata(
+            title="作品",
+            volume_title=volume_title,
+            authors=("路径作者",),
+            volume_index=volume_index,
+        ),
+    )
+
+    assert identity.title == "作品"
+    assert resolved.metadata.volume_title == volume_title
+    assert resolved.metadata.volume_index == volume_index

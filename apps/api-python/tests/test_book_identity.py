@@ -165,6 +165,7 @@ def test_regex_identity_ignores_short_numbers_in_download_source_suffix():
         ("册06 大雄的宇宙小战争.pdf", "大雄的宇宙小战争", 6),
         ("大雄集07铁人兵团.pdf", "大雄铁人兵团", 7),
         ("大雄与龙骑士 巻08.pdf", "大雄与龙骑士", 8),
+        ("哆啦A梦珍藏版Vol_43卷.mobi", "哆啦A梦珍藏版", 43),
     ],
 )
 def test_regex_identity_recognizes_explicit_volume_at_any_filename_position(

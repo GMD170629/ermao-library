@@ -146,6 +146,21 @@ class ImportConversion(HttpContractModel):
     options: ConversionOptions
 
 
+class RecognizedImportMetadata(HttpContractModel):
+    title: str
+    volume_title: str = Field(alias="volumeTitle")
+    author: str | None
+    volume_index: float | None = Field(alias="volumeIndex")
+    fields: list[str]
+    field_sources: dict[
+        str, Literal["REQUESTED", "SIDECAR_OPF", "EMBEDDED", "PATH"]
+    ] = Field(alias="fieldSources")
+    source_order: list[Literal["SIDECAR_OPF", "EMBEDDED", "PATH"]] = Field(
+        alias="sourceOrder"
+    )
+    source: Literal["REQUESTED", "SIDECAR_OPF", "EMBEDDED", "PATH"]
+
+
 class ImportTask(HttpContractModel):
     id: str
     monitor_folder_id: str | None = Field(alias="monitorFolderId")
@@ -159,6 +174,9 @@ class ImportTask(HttpContractModel):
     original_name: str | None = Field(alias="originalName")
     requested_title: str | None = Field(alias="requestedTitle")
     requested_author: str | None = Field(alias="requestedAuthor")
+    recognized_metadata: RecognizedImportMetadata | None = Field(
+        alias="recognizedMetadata"
+    )
     source_path: str = Field(alias="sourcePath")
     content_hash: str | None = Field(alias="contentHash")
     task_kind: str = Field(alias="taskKind")

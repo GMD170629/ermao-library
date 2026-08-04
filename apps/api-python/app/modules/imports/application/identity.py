@@ -28,20 +28,7 @@ def _record_identity_system_events(
         "fallbackReason": identity.fallback_reason,
         "fallbackCode": identity.fallback_code,
         "cacheHit": identity.cache_hit,
-        "reusedWorkId": identity.reused_work_id,
     }
-    if identity.source == "existing_work":
-        services.stage_system_event(
-            ImportSystemEvent(
-                source="import",
-                action="identity.existing_work.reused",
-                target_type="importTask",
-                target_id=task_id,
-                message=f"识别为现有作品的新卷册：{source_path.name} → 《{identity.title}》第 {identity.volume_index:g} 卷",
-                metadata=metadata,
-            )
-        )
-        return
     if identity.cache_hit:
         services.stage_system_event(
             ImportSystemEvent(

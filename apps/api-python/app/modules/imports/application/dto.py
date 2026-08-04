@@ -7,15 +7,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from app.contracts.local_metadata import (
+    DEFAULT_LOCAL_METADATA_PRIORITY,
+    LocalMetadataSource,
+)
+from app.contracts.publication_metadata import PublicationMetadata
+
 IdentitySource = Literal[
     "ai",
     "regex",
-    "existing_work",
     "requested",
     "epub_opf",
     "pdf_metadata",
     "comic_info",
     "reflowable_metadata",
+    "sidecar_opf",
 ]
 
 
@@ -55,7 +61,6 @@ class BookIdentityDTO:
     fallback_reason: str | None = None
     fallback_code: str | None = None
     cache_hit: bool = False
-    reused_work_id: str | None = None
     selection_reason: str | None = None
     evidence: tuple[IdentityEvidenceDTO, ...] = ()
     grouping_kind: Literal[
@@ -82,7 +87,6 @@ class BookIdentityDTO:
             "fallbackReason": self.fallback_reason,
             "fallbackCode": self.fallback_code,
             "cacheHit": self.cache_hit,
-            "reusedWorkId": self.reused_work_id,
             "selectionReason": self.selection_reason,
             "groupingKind": self.grouping_kind,
             "groupingKey": self.grouping_key,
@@ -96,6 +100,14 @@ class BookIdentityDTO:
                 for item in self.evidence
             ],
         }
+
+
+@dataclass(frozen=True, slots=True)
+class NonAudioPathResolutionDTO:
+    """Complete PATH candidate plus the identity used for grouping."""
+
+    identity: BookIdentityDTO
+    metadata: PublicationMetadata
 
 
 @dataclass(frozen=True)
@@ -138,6 +150,7 @@ class ImportTaskDTO:
     original_name: str | None = None
     requested_title: str | None = None
     requested_author: str | None = None
+    recognized_metadata: Mapping[str, object] | None = None
     monitor_folder_id: str | None = None
     media_kind_policy: str = "MIXED"
     work_id: str | None = None
@@ -164,7 +177,6 @@ class StageImportCommand:
     original_name: str | None = None
     requested_title: str | None = None
     requested_author: str | None = None
-    work_id: str | None = None
     monitor_folder_id: str | None = None
     media_kind_policy: str | None = None
     message: str = "等待后台处理"
@@ -182,8 +194,22 @@ class ImportOptions:
     media_kind_policy: str = "MIXED"
     import_task_id: str | None = None
     original_source_file_path: Path | None = None
-    requested_work_id: str | None = None
     expected_lease_owner: str | None = None
+    sidecar_metadata: PublicationMetadata | None = None
+    sidecar_cover_path: Path | None = None
+    sidecar_source_kind: str | None = None
+    path_metadata: PublicationMetadata | None = None
+    local_metadata_priority: tuple[LocalMetadataSource, ...] = (
+        DEFAULT_LOCAL_METADATA_PRIORITY
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class SidecarMetadataDTO:
+    metadata: PublicationMetadata
+    cover_path: Path | None
+    source_kind: str
+    field_sources: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -200,6 +226,9 @@ class ImportResult:
     duplicate: bool
     merged: bool
     merge_reason: str
+    resolved_metadata: PublicationMetadata | None = None
+    metadata_field_sources: tuple[tuple[str, str], ...] = ()
+    metadata_source_order: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

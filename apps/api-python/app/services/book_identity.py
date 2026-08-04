@@ -31,13 +31,12 @@ class BookIdentity:
     title: str
     author: str
     volume_index: float | None
-    source: Literal["ai", "regex", "existing_work"]
+    source: Literal["ai", "regex"]
     confidence: float
     logical_path: str
     fallback_reason: str | None = None
     fallback_code: str | None = None
     cache_hit: bool = False
-    reused_work_id: str | None = None
 
     def raw_metadata(self) -> dict[str, Any]:
         return {
@@ -58,7 +57,6 @@ class BookIdentity:
             "fallbackReason": self.fallback_reason,
             "fallbackCode": self.fallback_code,
             "cacheHit": self.cache_hit,
-            "reusedWorkId": self.reused_work_id,
         }
 
 
