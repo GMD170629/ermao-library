@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from importlib import metadata as importlib_metadata
 from typing import Any, Protocol
 from urllib.request import Request as UrlRequest
@@ -12,6 +12,7 @@ from urllib.request import urlopen
 from sqlalchemy.orm import Session
 
 from app.bootstrap.metadata import ensure_metadata_sources
+from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.domain.providers import BUILTIN_MANIFESTS, ProviderManifest
 from app.modules.metadata.infrastructure.providers import (
     clear_media_kind_pipelines,
@@ -34,7 +35,7 @@ METADATA_MEDIA_KINDS = ("EBOOK", "COMIC", "AUDIOBOOK")
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _json_value(value: Any, fallback: Any = None) -> Any:
@@ -82,6 +83,7 @@ class BuiltinMetadataProvider:
         config: dict[str, Any] | None = None,
         force: bool = False,
         use_cache: bool = True,
+        automatic_request_gate: AutomaticMetadataRequestGate | None = None,
     ) -> dict[str, Any]:
         from app.services.organize_service import metadata_search_candidates
 
@@ -93,6 +95,7 @@ class BuiltinMetadataProvider:
             config=config or {},
             force=force,
             use_cache=use_cache,
+            automatic_request_gate=automatic_request_gate,
         )
 
     def test(self, config: dict[str, Any]) -> dict[str, Any]:
@@ -382,6 +385,11 @@ def _provider_public_view(
         "mediaKinds": list(manifest.media_kinds),
         "fields": list(manifest.fields),
         "capabilities": list(manifest.capabilities),
+        "automaticRateLimit": (
+            asdict(manifest.automatic_rate_limit)
+            if manifest.automatic_rate_limit is not None
+            else None
+        ),
         "configFields": [asdict(field) for field in manifest.config_fields],
         "config": public_config,
         "configuredSecrets": configured_secrets,
@@ -572,18 +580,25 @@ def search_with_metadata_provider(
     *,
     force: bool = False,
     use_cache: bool = True,
+    automatic_request_gate: AutomaticMetadataRequestGate | None = None,
 ) -> dict[str, Any]:
     from sqlalchemy import inspect
 
     plugin = metadata_provider_registry().require(provider_id)
     if not inspect(db.connection()).has_table("Source"):
+        config = _default_config(plugin.manifest)
+        if isinstance(plugin, BuiltinMetadataProvider):
+            return plugin.search(
+                db,
+                context,
+                query,
+                config=config,
+                force=force,
+                use_cache=use_cache,
+                automatic_request_gate=automatic_request_gate,
+            )
         return plugin.search(
-            db,
-            context,
-            query,
-            config=_default_config(plugin.manifest),
-            force=force,
-            use_cache=use_cache,
+            db, context, query, config=config, force=force, use_cache=use_cache
         )
     media_version = (
         context.get("mediaVersion")
@@ -604,13 +619,18 @@ def search_with_metadata_provider(
             "candidates": [],
             "suggestions": [],
         }
+    if isinstance(plugin, BuiltinMetadataProvider):
+        return plugin.search(
+            db,
+            context,
+            query,
+            config=config,
+            force=force,
+            use_cache=use_cache,
+            automatic_request_gate=automatic_request_gate,
+        )
     return plugin.search(
-        db,
-        context,
-        query,
-        config=config,
-        force=force,
-        use_cache=use_cache,
+        db, context, query, config=config, force=force, use_cache=use_cache
     )
 
 

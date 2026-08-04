@@ -11,16 +11,20 @@ from app.modules.metadata.application.opf import (
     parse_opf_metadata,
     serialize_opf_metadata,
 )
+from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.domain.providers import (
     BUILTIN_MANIFESTS,
+    AutomaticRateLimit,
     ProviderConfigField,
     ProviderManifest,
 )
 
 __all__ = [
     "BUILTIN_MANIFESTS",
-    "MetadataUnitOfWork",
     "MAX_OPF_BYTES",
+    "AutomaticMetadataRequestGate",
+    "AutomaticRateLimit",
+    "MetadataUnitOfWork",
     "OpfMetadataError",
     "ProviderConfigField",
     "ProviderManifest",

@@ -42,6 +42,7 @@ def _insert_lookup_fixture(
     author="岛田庄司",
     provider_order=None,
     local_cover="covers/local.jpg",
+    trigger="SCHEDULE",
 ):
     for statement in (
         "ALTER TABLE LibraryWork ADD COLUMN seriesName TEXT",
@@ -116,13 +117,14 @@ def _insert_lookup_fixture(
         text(
             """
             INSERT INTO OrganizeJob (
-                id, workId, volumeId, importTaskId, status, issueCodes, summary, createdAt, updatedAt
+                id, workId, volumeId, importTaskId, trigger, status, issueCodes, summary, createdAt, updatedAt
             ) VALUES (
-                'job-lookup', 'work-lookup', 'volume-lookup', 'import-lookup', 'LOOKUP_PENDING', '[]',
+                'job-lookup', 'work-lookup', 'volume-lookup', 'import-lookup', :trigger, 'LOOKUP_PENDING', '[]',
                 '等待元数据', 'now', 'now'
             )
             """
-        )
+        ),
+        {"trigger": trigger},
     )
     db.execute(
         text(
@@ -396,6 +398,54 @@ def test_lookup_uses_provider_order_and_author_to_disambiguate(
         ).scalar()
         == "bangumi"
     )
+
+
+def test_automatic_lookup_passes_request_gate_to_builtin_provider(
+    db_session, test_settings, monkeypatch
+):
+    create_worker_tables(db_session)
+    task = _insert_lookup_fixture(db_session, provider_order=["douban"])
+    gate = object()
+    received_gates: list[object | None] = []
+
+    def search(_db, _context, _provider, *_args, **kwargs):
+        received_gates.append(kwargs.get("automatic_request_gate"))
+        return {"enabled": True, "candidates": []}
+
+    monkeypatch.setattr(queue, "search_with_metadata_provider", search)
+
+    assert (
+        process_metadata_lookup_task(
+            db_session, test_settings, task, automatic_request_gate=gate
+        )
+        == "NO_MATCH"
+    )
+    assert received_gates == [gate]
+
+
+def test_manual_rerecognition_does_not_pass_automatic_request_gate(
+    db_session, test_settings, monkeypatch
+):
+    create_worker_tables(db_session)
+    task = _insert_lookup_fixture(
+        db_session, provider_order=["douban"], trigger="MANUAL"
+    )
+    gate = object()
+    received_gates: list[object | None] = []
+
+    def search(_db, _context, _provider, *_args, **kwargs):
+        received_gates.append(kwargs.get("automatic_request_gate"))
+        return {"enabled": True, "candidates": []}
+
+    monkeypatch.setattr(queue, "search_with_metadata_provider", search)
+
+    assert (
+        process_metadata_lookup_task(
+            db_session, test_settings, task, automatic_request_gate=gate
+        )
+        == "NO_MATCH"
+    )
+    assert received_gates == [None]
 
 
 def test_lookup_keeps_ambiguous_exact_candidates_for_review(

@@ -92,6 +92,16 @@ def lookup_task_to_dict(task: MetadataLookupTask) -> dict[str, Any]:
     }
 
 
+def automatic_rate_limit_applies(db: Session, task: dict[str, Any]) -> bool:
+    """Manual recognition is explicit; legacy and background triggers stay safe."""
+
+    job_id = str(task.get("organizeJobId") or "").strip()
+    if not job_id or not _has_table(db, "OrganizeJob"):
+        return True
+    trigger = db.scalar(select(OrganizeJob.trigger).where(OrganizeJob.id == job_id))
+    return str(trigger or "LEGACY").upper() != "MANUAL"
+
+
 def work_row_to_dict(row: Any) -> dict[str, Any]:
     mapping = getattr(row, "_mapping", None)
     if mapping is not None:

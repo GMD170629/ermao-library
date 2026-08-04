@@ -6,18 +6,19 @@ import threading
 import time
 from pathlib import Path
 
+from app.bootstrap.metadata import build_automatic_metadata_request_gate
 from app.core.config import get_settings
 from app.db.bootstrap import bootstrap_database
 from app.db.session import HeartbeatSessionLocal, SessionLocal, engine
 from app.services.metadata_lookup_queue import MetadataLookupWorker
 from app.services.organize_scheduler import OrganizerScheduler
-from app.worker.watcher import WorkerManager
-from app.worker.persistent_import_queue import start_persistent_import_worker
 from app.services.queue_runtime import (
     active_queue_operation,
     update_queue_operation,
 )
 from app.services.system_events import record_system_event
+from app.worker.persistent_import_queue import start_persistent_import_worker
+from app.worker.watcher import WorkerManager
 
 READY_FILE = Path(os.environ.get("SCAN_WORKER_READY_FILE") or "/tmp/scan-worker-ready")
 
@@ -35,6 +36,7 @@ def main() -> None:
         SessionLocal,
         settings,
         heartbeat_db_factory=HeartbeatSessionLocal,
+        automatic_request_gate=build_automatic_metadata_request_gate(),
     )
     organizer_scheduler = OrganizerScheduler(SessionLocal)
     stopping = False
@@ -62,7 +64,9 @@ def main() -> None:
     READY_FILE.write_text(str(os.getpid()), encoding="utf-8")
     print("[import-worker] ready", flush=True)
 
-    refresh_interval = int(os.environ.get("MONITOR_REFRESH_INTERVAL_MS") or "30000") / 1000
+    refresh_interval = (
+        int(os.environ.get("MONITOR_REFRESH_INTERVAL_MS") or "30000") / 1000
+    )
     next_refresh = time.monotonic() + refresh_interval
     queue_operation_id: str | None = None
     queue_operation_action: str | None = None
@@ -78,9 +82,7 @@ def main() -> None:
                 if operation and queue_operation_id is None:
                     queue_operation_id = str(operation["id"])
                     queue_operation_action = str(operation["action"])
-                    queue_operation_actor_id = str(
-                        operation.get("actorUserId") or ""
-                    )
+                    queue_operation_actor_id = str(operation.get("actorUserId") or "")
                     persistent_import_worker.request_stop()
                     update_queue_operation(
                         db,

@@ -1,10 +1,14 @@
 import json
 
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session
+
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
 from app.models.library import LibraryMediaVersion, LibraryVolume
 from app.models.organize import MetadataLookupTask, OrganizeJob
+from app.modules.metadata.presentation.schemas import MetadataProvider
 from app.services.metadata_provider_registry import (
     enabled_metadata_provider_ids,
     get_metadata_provider,
@@ -23,8 +27,6 @@ from app.services.organize_scheduler import (
     update_organize_policy,
 )
 from app.services.organize_service import merge_works
-from sqlalchemy import select, text
-from sqlalchemy.orm import Session
 
 
 def _insert_work(
@@ -462,10 +464,38 @@ def test_provider_registry_seeds_builtins_and_never_returns_secret_values(
     try:
         bootstrap_database(engine, settings)
         with Session(engine) as db:
-            assert {provider["id"] for provider in list_metadata_providers(db)} == {
+            providers = {
+                provider["id"]: provider for provider in list_metadata_providers(db)
+            }
+            assert set(providers) == {
                 "douban",
                 "bangumi",
                 "ai",
+            }
+            assert providers["douban"]["automaticRateLimit"] == {
+                "requests": 1,
+                "period_seconds": 5.0,
+            }
+            assert providers["bangumi"]["automaticRateLimit"] == {
+                "requests": 4,
+                "period_seconds": 1.0,
+            }
+            assert providers["ai"]["automaticRateLimit"] is None
+            douban_contract = MetadataProvider.model_validate(
+                providers["douban"]
+            ).model_dump(by_alias=True)
+            assert douban_contract["automaticRateLimit"] == {
+                "requests": 1,
+                "periodSeconds": 5.0,
+            }
+            unchanged_douban = update_metadata_provider(
+                db,
+                "douban",
+                {"automaticRateLimit": {"requests": 999, "periodSeconds": 0.01}},
+            )
+            assert unchanged_douban["automaticRateLimit"] == {
+                "requests": 1,
+                "period_seconds": 5.0,
             }
             updated = update_metadata_provider(
                 db,

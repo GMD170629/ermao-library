@@ -18,6 +18,22 @@ class ProviderConfigField:
 
 
 @dataclass(frozen=True)
+class AutomaticRateLimit:
+    requests: int
+    period_seconds: float
+
+    def __post_init__(self) -> None:
+        if self.requests <= 0:
+            raise ValueError("requests must be greater than zero")
+        if self.period_seconds <= 0:
+            raise ValueError("period_seconds must be greater than zero")
+
+    @property
+    def minimum_interval_seconds(self) -> float:
+        return self.period_seconds / self.requests
+
+
+@dataclass(frozen=True)
 class ProviderManifest:
     id: str
     name: str
@@ -30,6 +46,7 @@ class ProviderManifest:
     config_fields: tuple[ProviderConfigField, ...]
     default_priority: int
     enabled_by_default: bool = False
+    automatic_rate_limit: AutomaticRateLimit | None = None
 
 
 BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
@@ -66,6 +83,9 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
         ),
         default_priority=100,
         enabled_by_default=True,
+        # Douban's robots policy publishes Crawl-delay: 5 guidance.
+        # https://www.douban.com/robots.txt
+        automatic_rate_limit=AutomaticRateLimit(requests=1, period_seconds=5.0),
     ),
     ProviderManifest(
         id="bangumi",
@@ -106,6 +126,10 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
         ),
         default_priority=110,
         enabled_by_default=True,
+        # Bangumi's server defaults to 3,000 requests per 10 minutes. Keep
+        # 20% headroom below that published implementation ceiling.
+        # https://github.com/bangumi/server/blob/master/config/config.go
+        automatic_rate_limit=AutomaticRateLimit(requests=4, period_seconds=1.0),
     ),
     ProviderManifest(
         id="ai",

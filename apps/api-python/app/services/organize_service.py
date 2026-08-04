@@ -15,6 +15,7 @@ from urllib.request import urlopen
 from sqlalchemy.orm import Session
 
 from app.core.time import now_timestamp_ms
+from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.infrastructure import external_cache as metadata_cache
 from app.modules.organize.infrastructure import duplicates as organize_duplicates
 from app.modules.organize.infrastructure import review as organize_review
@@ -983,21 +984,42 @@ def douban_base_url(config: dict[str, Any]) -> str:
     return string_value(config.get("baseUrl")).rstrip("/") or "https://book.douban.com"
 
 
-def fetch_text(url: str, headers: dict[str, str]) -> str:
+def fetch_text(
+    url: str,
+    headers: dict[str, str],
+    *,
+    provider_id: str | None = None,
+    automatic_request_gate: AutomaticMetadataRequestGate | None = None,
+) -> str:
+    if provider_id is not None and automatic_request_gate is not None:
+        automatic_request_gate.wait(provider_id)
     request = UrlRequest(url, headers=headers)
     with urlopen(request, timeout=30) as response:
         return response.read().decode("utf-8", errors="replace")
 
 
 def fetch_douban_subject(
-    base_url: str, subject_url: str, headers: dict[str, str], fallback: dict[str, Any]
+    base_url: str,
+    subject_url: str,
+    headers: dict[str, str],
+    fallback: dict[str, Any],
+    *,
+    automatic_request_gate: AutomaticMetadataRequestGate | None = None,
 ) -> dict[str, Any] | None:
     url = (
         subject_url
         if subject_url.startswith(("http://", "https://"))
         else urljoin(f"{base_url}/", subject_url.lstrip("/"))
     )
-    return parse_douban_subject_html(fetch_text(url, headers), fallback)
+    return parse_douban_subject_html(
+        fetch_text(
+            url,
+            headers,
+            provider_id="douban",
+            automatic_request_gate=automatic_request_gate,
+        ),
+        fallback,
+    )
 
 
 def run_douban_crawler_provider(
@@ -1006,6 +1028,7 @@ def run_douban_crawler_provider(
     force: bool = True,
     query: str | None = None,
     match_title: str | None = None,
+    automatic_request_gate: AutomaticMetadataRequestGate | None = None,
 ) -> dict[str, Any]:
     base_url = douban_base_url(config)
     headers = douban_crawler_headers(config)
@@ -1034,12 +1057,15 @@ def run_douban_crawler_provider(
             f"/subject/{subject_match.group(1)}/",
             headers,
             {"confidence": confidence},
+            automatic_request_gate=automatic_request_gate,
         )
         candidates = [normalize_douban_candidate(candidate)] if candidate else []
     else:
         search_html = fetch_text(
             f"{base_url}/subject_search?{urlencode({'search_text': query_text})}",
             headers,
+            provider_id="douban",
+            automatic_request_gate=automatic_request_gate,
         )
         candidates = sort_candidates_for_title(
             [
@@ -1060,7 +1086,13 @@ def run_douban_crawler_provider(
         )
         try:
             subject_candidate = (
-                fetch_douban_subject(base_url, subject_url, headers, selected)
+                fetch_douban_subject(
+                    base_url,
+                    subject_url,
+                    headers,
+                    selected,
+                    automatic_request_gate=automatic_request_gate,
+                )
                 if selected and subject_url
                 else None
             )
@@ -1377,6 +1409,7 @@ def run_bangumi_metadata_provider(
     force: bool = True,
     query: str | None = None,
     match_title: str | None = None,
+    automatic_request_gate: AutomaticMetadataRequestGate | None = None,
 ) -> dict[str, Any]:
     user_agent = (
         string_value(config.get("userAgent"))
@@ -1423,6 +1456,8 @@ def run_bangumi_metadata_provider(
         headers=headers,
         method="POST",
     )
+    if automatic_request_gate is not None:
+        automatic_request_gate.wait("bangumi")
     with urlopen(request, timeout=30) as response:
         payload = json.loads(response.read().decode("utf-8"))
     candidates = sort_candidates_for_title(
@@ -1455,8 +1490,16 @@ def run_douban_metadata_provider(
     force: bool = True,
     query: str | None = None,
     match_title: str | None = None,
+    automatic_request_gate: AutomaticMetadataRequestGate | None = None,
 ) -> dict[str, Any]:
-    return run_douban_crawler_provider(context, config, force, query, match_title)
+    return run_douban_crawler_provider(
+        context,
+        config,
+        force=force,
+        query=query,
+        match_title=match_title,
+        automatic_request_gate=automatic_request_gate,
+    )
 
 
 def external_metadata_cache_get(
@@ -1538,6 +1581,7 @@ def metadata_search_candidates(
     config: dict[str, Any],
     force: bool = False,
     use_cache: bool = True,
+    automatic_request_gate: AutomaticMetadataRequestGate | None = None,
 ) -> dict[str, Any]:
     search_text = query or first_string(context["work"].get("title")) or ""
     query_key = metadata_title_key(search_text)
@@ -1555,11 +1599,31 @@ def metadata_search_candidates(
             **cached,
         }
     if source == "bangumi":
-        result = run_bangumi_metadata_provider(
-            context, config, force=force, query=query
-        )
+        if automatic_request_gate is None:
+            result = run_bangumi_metadata_provider(
+                context, config, force=force, query=query
+            )
+        else:
+            result = run_bangumi_metadata_provider(
+                context,
+                config,
+                force=force,
+                query=query,
+                automatic_request_gate=automatic_request_gate,
+            )
     elif source == "douban":
-        result = run_douban_metadata_provider(context, config, force=force, query=query)
+        if automatic_request_gate is None:
+            result = run_douban_metadata_provider(
+                context, config, force=force, query=query
+            )
+        else:
+            result = run_douban_metadata_provider(
+                context,
+                config,
+                force=force,
+                query=query,
+                automatic_request_gate=automatic_request_gate,
+            )
     else:
         ai_result = run_ai_metadata_provider(context, config, force=force)
         fields = {

@@ -32,7 +32,7 @@ test('service worker caches the shared web shell without a dedicated mobile entr
   assert.match(source, /'\/login'/);
   assert.match(source, /'\/setup'/);
   assert.doesNotMatch(source, /'\/mobile/);
-  assert.match(source, /const FRONTEND_RESOURCE_VERSION = '0\.4\.7'/);
+  assert.match(source, /const FRONTEND_RESOURCE_VERSION = '0\.5\.0'/);
   assert.match(source, /const VERSION = `shuku-pwa-v\$\{FRONTEND_RESOURCE_VERSION\}`/);
 });
 

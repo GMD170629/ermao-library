@@ -23,6 +23,11 @@ class ProviderConfigField(HttpContractModel):
     default: ProviderConfigValue
 
 
+class ProviderAutomaticRateLimit(HttpContractModel):
+    requests: int
+    period_seconds: float = Field(alias="periodSeconds")
+
+
 class MetadataProvider(HttpContractModel):
     id: str
     source_id: str | None = Field(alias="sourceId")
@@ -33,6 +38,9 @@ class MetadataProvider(HttpContractModel):
     media_kinds: list[str] = Field(alias="mediaKinds")
     fields: list[str]
     capabilities: list[str]
+    automatic_rate_limit: ProviderAutomaticRateLimit | None = Field(
+        alias="automaticRateLimit"
+    )
     config_fields: list[ProviderConfigField] = Field(alias="configFields")
     config: dict[str, ProviderConfigValue]
     configured_secrets: dict[str, bool] = Field(alias="configuredSecrets")

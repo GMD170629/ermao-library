@@ -29,6 +29,7 @@ type MetadataProvider = {
   description: string;
   mediaKinds: MediaKind[];
   configFields: ConfigField[];
+  automaticRateLimit: { requests: number; periodSeconds: number } | null;
   config: Record<string, unknown>;
   configuredSecrets: Record<string, boolean>;
   lastTestAt: string | null;
@@ -61,6 +62,19 @@ const MEDIA_KIND_META: Record<MediaKind, { label: string; description: string; i
 
 function mediaKindLabel(value: MediaKind) {
   return MEDIA_KIND_META[value]?.label ?? value;
+}
+
+function automaticRateLimitLabel(
+  rateLimit: NonNullable<MetadataProvider['automaticRateLimit']>,
+  translate: (message: string, values?: Record<string, string | number>) => string
+) {
+  if (rateLimit.periodSeconds === 1) {
+    return translate('每秒最多 {value0} 次', { value0: rateLimit.requests });
+  }
+  return translate('每 {value0} 秒最多 {value1} 次', {
+    value0: rateLimit.periodSeconds,
+    value1: rateLimit.requests
+  });
 }
 
 function ProviderIcon({ id, small = false }: { id: string; small?: boolean }) {
@@ -277,6 +291,7 @@ export function MetadataProvidersPanel() {
         <section className="max-h-[calc(100dvh-2rem)] w-full max-w-[640px] overflow-y-auto rounded-[26px] border border-[#E2DDD7] bg-[#FCFBF9] p-5 shadow-2xl shadow-stone-950/15 sm:max-h-[calc(100dvh-3rem)] sm:p-7">
           <div className="flex items-start justify-between gap-4 border-b border-[#E4DFD9] pb-5"><div className="flex gap-3"><ProviderIcon id={editing.id} /><div><h2 className="text-xl font-semibold text-[#292724]">{editing.name}</h2><p className="mt-1 text-sm text-[#77716A]"><I18nText>连接参数与访问凭据</I18nText></p></div></div><button type="button" aria-label={i18nAttribute("关闭数据源配置")} onClick={() => setEditingId(null)} className="flex h-10 w-10 items-center justify-center rounded-full border border-[#DED9D3] bg-white text-[#6D6760] hover:text-[#D94A2B]"><X size={18} /></button></div>
           <div className="mt-6 space-y-5">
+            {editing.automaticRateLimit ? <label className="block text-sm font-medium text-[#5E5953]"><I18nText>自动识别限流</I18nText><input value={automaticRateLimitLabel(editing.automaticRateLimit, i18nAttribute)} type="text" readOnly aria-readonly="true" className="mt-2 h-11 w-full cursor-not-allowed rounded-xl border border-[#DCD7D1] bg-[#F3F0EC] px-4 text-sm text-[#6F6962] outline-none" /><span className="mt-1.5 block text-xs font-normal leading-5 text-[#88817A]"><I18nText>仅影响自动识别，手动识别不受限。</I18nText></span></label> : null}
             {editing.configFields.length === 0 ? <p className="rounded-2xl bg-[#F6F3EF] px-4 py-5 text-sm text-[#77716A]"><I18nText>此数据源无需额外配置。</I18nText></p> : null}
             {editing.configFields.map((field) => {
               const configured = field.secret && editing.configuredSecrets[field.key];
