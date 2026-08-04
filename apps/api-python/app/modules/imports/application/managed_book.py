@@ -549,36 +549,6 @@ def import_managed_book(
                 ext,
                 identity,
             )
-        if (
-            result.volume_id
-            and result.resolved_metadata is not None
-            and result.resolved_metadata.volume_index is not None
-        ):
-            matching_volume = queries.find_volume_conflict(
-                result.media_version_id,
-                result.resolved_metadata.volume_index,
-                result.resolved_metadata.title or result.title,
-            )
-            matching_volume_id = str((matching_volume or {}).get("id") or "")
-            if matching_volume_id and matching_volume_id != result.volume_id:
-                store.update_import_task(
-                    task_id, columns={"volumeId": matching_volume_id}
-                )
-                store.merge_imported_volume_sources(
-                    result.volume_id, matching_volume_id
-                )
-                result = replace(
-                    result,
-                    volume_id=matching_volume_id,
-                    merged=True,
-                    merge_reason="same-explicit-volume-multi-source",
-                )
-        if not audio_metadata:
-            normalize_media_version_volume_order(
-                store,
-                queries,
-                result.media_version_id,
-            )
         if result.resolved_metadata is not None:
             publication = result.resolved_metadata
             field_sources = dict(result.metadata_field_sources)
@@ -605,7 +575,6 @@ def import_managed_book(
                 work_values["seriesIndex"] = publication.series_index
             if publication.volume_index is not None:
                 volume_values["volumeIndex"] = publication.volume_index
-                volume_values["sortOrder"] = int(publication.volume_index * 1000)
             if publication.volume_title and not (
                 audio_metadata and (source.is_dir() or len(audio_metadata) > 1)
             ):
@@ -637,6 +606,11 @@ def import_managed_book(
             store.update_library_work(result.work_id, columns=work_values)
             if result.volume_id:
                 store.update_library_volume(result.volume_id, columns=volume_values)
+        normalize_media_version_volume_order(
+            store,
+            queries,
+            result.media_version_id,
+        )
         services.sync_work_facets(result.work_id)
         if converted:
             conversion_row = queries.get_conversion_by_import_task_id(task_id)

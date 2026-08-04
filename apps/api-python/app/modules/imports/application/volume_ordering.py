@@ -1,4 +1,4 @@
-"""Deterministic ordering policy for imported non-audio volumes."""
+"""Deterministic ordering policy for imported volumes."""
 
 from __future__ import annotations
 
@@ -46,11 +46,20 @@ def desired_volume_sort_orders(
         (entry for entry in entries if entry.volume_index is None),
         key=lambda entry: (natural_title_key(entry.title), entry.volume_id),
     )
-    desired = {
-        entry.volume_id: int(float(entry.volume_index or 0) * 1000)
-        for entry in numbered
-    }
-    next_order = max(desired.values(), default=-1000) + 1000
+    desired: dict[str, int] = {}
+    previous_order: int | None = None
+    for entry in numbered:
+        numeric_order = int(float(entry.volume_index or 0) * 1000)
+        sort_order = (
+            numeric_order
+            if previous_order is None
+            else max(numeric_order, previous_order + 1)
+        )
+        desired[entry.volume_id] = sort_order
+        previous_order = sort_order
+
+    highest_numbered_order = max(desired.values(), default=-1000)
+    next_order = ((highest_numbered_order // 1000) + 1) * 1000
     for entry in unnumbered:
         desired[entry.volume_id] = next_order
         next_order += 1000

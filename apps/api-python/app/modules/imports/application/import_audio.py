@@ -124,7 +124,7 @@ def _import_audio(
         strict=not directory_bundle,
     )
     narrator = narrator_values[0] if narrator_values else None
-    merge_key = _work_merge_key(identity.title, identity.author)
+    merge_key = _work_merge_key(identity.title)
     # A directory identifies one split-track bundle. An explicitly structured
     # Emby flat filename joins its sibling chapters; every other single file
     # remains keyed by the file itself so independent M4Bs cannot collide.
@@ -607,17 +607,6 @@ def _ensure_audio_work(
     identity: BookIdentityDTO,
     merge_key: str,
 ) -> tuple[dict[str, Any], bool]:
-    if queries.get_work_by_merge_key(merge_key) is None:
-        candidates = queries.list_works_by_normalized_identity(
-            _normalize_key(identity.title),
-            _normalize_key(identity.author),
-            limit=2,
-        )
-        if len(candidates) == 1:
-            return (
-                _reuse_existing_audio_work(store, queries, str(candidates[0]["id"])),
-                False,
-            )
     return _ensure_work(
         store,
         queries,

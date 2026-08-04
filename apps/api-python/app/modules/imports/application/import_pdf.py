@@ -98,13 +98,7 @@ def _import_pdf(
     media_kind = classification.media_kind
     result_type = _classification_result_type(classification)
     tags = ["pdf"]
-    merge_key = _work_merge_key(
-        identity.title,
-        identity.author,
-        resolved_local.metadata.identifier,
-        resolved_local.metadata.isbn,
-        series_name=resolved_local.metadata.series_name,
-    )
+    merge_key = _work_merge_key(identity.title)
     source_group_key = _source_group_key(options, identity.title)
     work, created = _ensure_work(
         store,

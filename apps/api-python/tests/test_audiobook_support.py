@@ -735,7 +735,7 @@ def test_audio_bundle_import_merges_with_existing_epub_and_orders_tracks(
     )
 
 
-def test_audio_bundle_does_not_guess_between_duplicate_path_scoped_works(
+def test_audio_bundle_groups_with_same_title_works_across_media(
     db_session, test_settings, monkeypatch, tmp_path
 ) -> None:
     _initialize_schema(db_session)
@@ -771,9 +771,8 @@ def test_audio_bundle_does_not_guess_between_duplicate_path_scoped_works(
         db_session, test_settings, monkeypatch, tmp_path
     )
 
-    assert first.work_id != second.work_id
-    assert audio.work_id not in {first.work_id, second.work_id}
-    assert db_session.execute(text("SELECT COUNT(*) FROM LibraryWork")).scalar() == 3
+    assert first.work_id == second.work_id == audio.work_id
+    assert db_session.execute(text("SELECT COUNT(*) FROM LibraryWork")).scalar() == 1
 
 
 def test_audio_moved_copy_runs_normal_import_without_content_hashing(
@@ -1787,8 +1786,8 @@ def test_multivolume_directory_uses_embedded_identity_and_filters_reader_bootstr
     assert [
         (row["title"], row["volumeIndex"], row["sortOrder"]) for row in volumes
     ] == [
-        ("Vol.1", 1, 0),
-        ("Ghost Blows Out the Light Desert", None, 1),
+        ("Vol.1", 1, 1000),
+        ("Ghost Blows Out the Light Desert", None, 2000),
     ]
 
     first_bootstrap = client.get(f"/api/reader/v3/volumes/{volumes[0]['id']}/bootstrap")

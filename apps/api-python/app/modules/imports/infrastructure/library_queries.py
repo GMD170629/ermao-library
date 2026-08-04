@@ -245,6 +245,19 @@ def get_work_by_merge_key(db: Session, merge_key: str) -> dict[str, Any] | None:
     return _get_work(db, LibraryWork.merge_key == merge_key)
 
 
+def get_work_by_normalized_title(
+    db: Session, normalized_title: str
+) -> dict[str, Any] | None:
+    """Return the earliest existing work with the final normalized title."""
+
+    return _first_record(
+        db,
+        select(LibraryWork.__table__)
+        .where(LibraryWork.normalized_title == normalized_title)
+        .order_by(LibraryWork.created_at.asc(), LibraryWork.id.asc()),
+    )
+
+
 def list_works_by_merge_key_prefix(
     db: Session, merge_key_prefix: str
 ) -> list[dict[str, Any]]:
@@ -255,27 +268,6 @@ def list_works_by_merge_key_prefix(
         select(LibraryWork.__table__)
         .where(LibraryWork.merge_key.startswith(merge_key_prefix, autoescape=True))
         .order_by(LibraryWork.created_at.asc(), LibraryWork.id.asc()),
-    )
-
-
-def list_works_by_normalized_identity(
-    db: Session,
-    normalized_title: str,
-    normalized_author: str,
-    *,
-    limit: int,
-) -> list[dict[str, Any]]:
-    """Return a bounded deterministic set for cross-media identity reuse."""
-
-    return _records(
-        db,
-        select(LibraryWork.__table__)
-        .where(
-            LibraryWork.normalized_title == normalized_title,
-            LibraryWork.normalized_author == normalized_author,
-        )
-        .order_by(LibraryWork.created_at.asc(), LibraryWork.id.asc())
-        .limit(limit),
     )
 
 
@@ -811,31 +803,6 @@ def get_volume_context_by_id(db: Session, volume_id: str) -> dict[str, Any] | No
                 LibraryMediaVersion.id == LibraryVolume.media_version_id,
             )
             .where(LibraryVolume.id == volume_id)
-        )
-        .mappings()
-        .first()
-    )
-    return dict(row) if row is not None else None
-
-
-def find_volume_conflict(
-    db: Session,
-    media_version_id: str,
-    volume_index: float | None,
-    volume_title: str,
-) -> dict[str, Any] | None:
-    if volume_index is None:
-        return None
-    row = (
-        db.execute(
-            select(LibraryVolume.__table__)
-            .where(
-                LibraryVolume.media_version_id == media_version_id,
-                LibraryVolume.volume_index == volume_index,
-                func.coalesce(LibraryVolume.hidden, False).is_(False),
-            )
-            .order_by(LibraryVolume.created_at.asc(), LibraryVolume.id.asc())
-            .limit(1)
         )
         .mappings()
         .first()

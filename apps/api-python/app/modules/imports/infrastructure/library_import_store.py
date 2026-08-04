@@ -149,42 +149,6 @@ class SqlAlchemyLibraryImportStore:
             .values(columns)
         )
 
-    def merge_imported_volume_sources(
-        self, source_volume_id: str, target_volume_id: str
-    ) -> None:
-        """Keep one canonical volume while attaching another source file to it."""
-
-        target_unit_count = self._db.scalar(
-            select(func.count(LibraryReadingUnit.id)).where(
-                LibraryReadingUnit.volume_id == target_volume_id
-            )
-        )
-        if int(target_unit_count or 0) == 0:
-            self._db.execute(
-                update(LibraryReadingUnit)
-                .where(LibraryReadingUnit.volume_id == source_volume_id)
-                .values(volume_id=target_volume_id)
-            )
-        else:
-            self._db.execute(
-                delete(LibraryReadingUnit).where(
-                    LibraryReadingUnit.volume_id == source_volume_id
-                )
-            )
-        self._db.execute(
-            update(LibraryFile)
-            .where(LibraryFile.volume_id == source_volume_id)
-            .values(volume_id=target_volume_id)
-        )
-        self._db.execute(
-            update(LibraryMetadata)
-            .where(LibraryMetadata.volume_id == source_volume_id)
-            .values(volume_id=target_volume_id)
-        )
-        self._db.execute(
-            delete(LibraryVolume).where(LibraryVolume.id == source_volume_id)
-        )
-
     def insert_library_file(self, *, columns: dict[str, object]) -> dict[str, object]:
         path = columns.get("path")
         if isinstance(path, str):

@@ -149,10 +149,6 @@ class LibraryImportStore(Protocol):
         self, volume_id: str, *, columns: dict[str, object]
     ) -> None: ...
 
-    def merge_imported_volume_sources(
-        self, source_volume_id: str, target_volume_id: str
-    ) -> None: ...
-
     def insert_library_file(
         self, *, columns: dict[str, object]
     ) -> dict[str, object]: ...

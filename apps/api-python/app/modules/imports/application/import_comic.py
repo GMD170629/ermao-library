@@ -121,13 +121,7 @@ def _import_comic(
     )
     title = identity.title
     author = identity.author
-    merge_key = _work_merge_key(
-        title,
-        author,
-        resolved_local.metadata.identifier,
-        resolved_local.metadata.isbn,
-        series_name=resolved_local.metadata.series_name,
-    )
+    merge_key = _work_merge_key(title)
     source_key = _source_group_key(options, title)
     volume_index = (volume_info or {}).get("seriesIndex")
     volume_title = resolved_local.metadata.volume_title or identity.title
@@ -150,8 +144,6 @@ def _import_comic(
             work["id"],
             archive_format,
             source_key,
-            volume_index,
-            volume_title,
         )
         if volume_index is not None
         else None

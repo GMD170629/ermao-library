@@ -454,19 +454,9 @@ def test_path_security_rejects_relative_paths():
     assert error.value.code == "NOT_ABSOLUTE"
 
 
-def test_work_merge_key_prefers_strong_identifier_then_title_and_author():
-    expected = "斯泰尔斯庄园奇案午夜文库:阿加莎克里斯蒂"
-    assert (
-        _work_merge_key(
-            "斯泰尔斯庄园奇案 (午夜文库)",
-            "阿加莎·克里斯蒂",
-            "B00T238N28",
-            "9787111111115",
-        )
-        == "isbn:9787111111115"
-    )
-    assert _work_merge_key("斯泰尔斯庄园奇案 (午夜文库)", "阿加莎·克里斯蒂") == expected
-    assert _work_merge_key("斯泰尔斯庄园奇案 (午夜文库)", "阿加莎·克里斯蒂") == expected
+def test_work_merge_key_uses_only_normalized_work_title():
+    expected = "斯泰尔斯庄园奇案午夜文库"
+    assert _work_merge_key("斯泰尔斯庄园奇案 (午夜文库)") == expected
 
 
 def test_import_epub_creates_library_records(db_session, test_settings, tmp_path):
@@ -1225,7 +1215,7 @@ def test_parse_series_volume_info_supports_author_first_tagged_directories(
     assert parsed.title == f"第 {expected_volume} 卷"
 
 
-def test_watch_epub_import_merges_series_volumes_from_folder_layout(
+def test_watch_epub_import_keeps_duplicate_volume_numbers_from_distinct_files(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
@@ -1287,11 +1277,12 @@ def test_watch_epub_import_merges_series_volumes_from_folder_layout(
     assert first_result.media_version_id == tenth_result.media_version_id
     assert duplicate_result.media_version_id == first_result.media_version_id
     assert first_result.volume_id != tenth_result.volume_id
-    assert duplicate_result.volume_id == tenth_result.volume_id
+    assert duplicate_result.volume_id != tenth_result.volume_id
     assert duplicate_result.duplicate is False
     assert _count(db_session, "LibraryWork") == 1
     assert _count(db_session, "LibraryMediaVersion") == 1
-    assert _count(db_session, "LibraryVolume") == 2
+    assert _count(db_session, "LibraryVolume") == 3
+    assert _count(db_session, "LibraryFile") == 3
     work = (
         db_session.execute(text("SELECT title, author FROM LibraryWork"))
         .mappings()
@@ -1322,7 +1313,89 @@ def test_watch_epub_import_merges_series_volumes_from_folder_layout(
     assert [dict(volume) for volume in volumes] == [
         {"title": "第 1 卷", "volumeIndex": 1, "sortOrder": 1000, "chapterCount": 1},
         {"title": "第 10 卷", "volumeIndex": 10, "sortOrder": 10000, "chapterCount": 1},
+        {"title": "第 10 卷", "volumeIndex": 10, "sortOrder": 10001, "chapterCount": 1},
     ]
+
+
+def test_pdf_and_comic_imports_keep_duplicate_volume_numbers(
+    db_session, test_settings, tmp_path
+):
+    create_worker_tables(db_session)
+    add_monitor_folder(db_session, tmp_path)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+
+    pdf_dir = tmp_path / "同一作品"
+    pdf_dir.mkdir()
+    first_pdf = pdf_dir / "同一作品 Vol.01 A.pdf"
+    second_pdf = pdf_dir / "同一作品 Vol.01 B.pdf"
+    write_pdf_metadata_fixture(first_pdf, title="同一作品", author="作者甲")
+    write_pdf_metadata_fixture(second_pdf, title="同一作品", author="作者乙")
+    first_pdf_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=first_pdf,
+            origin="WATCH",
+            original_name=first_pdf.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+    second_pdf_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=second_pdf,
+            origin="WATCH",
+            original_name=second_pdf.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+
+    comic_dir = tmp_path / "星舰漫画"
+    comic_dir.mkdir()
+    first_comic = comic_dir / "星舰漫画 Vol.01 A.cbz"
+    second_comic = comic_dir / "星舰漫画 Vol.01 B.cbz"
+    write_comic_fixture(first_comic, volume=1, cover_bytes=b"first-cover")
+    write_comic_fixture(second_comic, volume=1, cover_bytes=b"second-cover")
+    first_comic_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=first_comic,
+            origin="WATCH",
+            original_name=first_comic.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+    second_comic_result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=second_comic,
+            origin="WATCH",
+            original_name=second_comic.name,
+            monitor_folder_id="folder-1",
+        ),
+    )
+
+    for first_result, second_result in (
+        (first_pdf_result, second_pdf_result),
+        (first_comic_result, second_comic_result),
+    ):
+        assert first_result.work_id == second_result.work_id
+        assert first_result.media_version_id == second_result.media_version_id
+        assert first_result.volume_id != second_result.volume_id
+        volumes = list(
+            db_session.scalars(
+                select(LibraryVolume)
+                .where(
+                    LibraryVolume.media_version_id == first_result.media_version_id
+                )
+                .order_by(LibraryVolume.sort_order)
+            )
+        )
+        assert [volume.volume_index for volume in volumes] == [1, 1]
+        assert [volume.sort_order for volume in volumes] == [1000, 1001]
 
 
 def test_explicit_series_directory_groups_all_volumes_by_folder(
@@ -1596,7 +1669,7 @@ def test_watch_epub_import_uses_bracketed_folder_for_volume_filename(
     assert raw["sourceVolumeTitle"] == "Vol.09"
 
 
-def test_import_epub_keeps_same_title_in_different_directories_separate(
+def test_import_epub_groups_same_work_title_across_directories(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
@@ -1631,9 +1704,10 @@ def test_import_epub_keeps_same_title_in_different_directories_separate(
 
     assert first_result.duplicate is False
     assert second_result.duplicate is False
-    assert first_result.work_id != second_result.work_id
-    assert _count(db_session, "LibraryWork") == 2
-    assert _count(db_session, "LibraryMediaVersion") == 2
+    assert first_result.work_id == second_result.work_id
+    assert _count(db_session, "LibraryWork") == 1
+    assert _count(db_session, "LibraryMediaVersion") == 1
+    assert _count(db_session, "LibraryFile") == 2
 
 
 def test_embedded_metadata_prevents_directory_from_forcing_cross_format_grouping(
@@ -1876,7 +1950,7 @@ def test_watched_pdf_volumes_in_different_directories_do_not_merge(
     assert _count(db_session, "LibraryWork") == 2
 
 
-def test_watched_pdf_files_without_volume_respect_complete_embedded_identity(
+def test_watched_pdf_files_with_same_title_ignore_different_authors(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
@@ -1907,8 +1981,45 @@ def test_watched_pdf_files_without_volume_respect_complete_embedded_identity(
         ),
     )
 
-    assert first_result.work_id != second_result.work_id
-    assert _count(db_session, "LibraryWork") == 2
+    assert first_result.work_id == second_result.work_id
+    assert _count(db_session, "LibraryWork") == 1
+    assert _count(db_session, "LibraryFile") == 2
+
+
+def test_import_reuses_legacy_work_by_title_and_replaces_old_merge_key(
+    db_session, test_settings, tmp_path
+):
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    db_session.add(
+        LibraryWork(
+            id="legacy-work",
+            title="同一作品",
+            normalized_title="同一作品",
+            author="旧作者",
+            normalized_author="旧作者",
+            tags="[]",
+            merge_key="isbn:9787111111115",
+        )
+    )
+    db_session.commit()
+    source = tmp_path / "同一作品.pdf"
+    write_pdf_metadata_fixture(source, title="同一作品", author="新作者")
+
+    result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=source,
+            origin="MANUAL",
+            original_name=source.name,
+        ),
+    )
+
+    work = db_session.get(LibraryWork, "legacy-work")
+    assert result.work_id == "legacy-work"
+    assert work is not None
+    assert work.merge_key == "同一作品"
 
 
 def test_watched_pdf_numeric_embedded_titles_remain_distinct(
@@ -2055,7 +2166,7 @@ def test_watched_pdf_similar_titles_in_different_directories_do_not_merge(
     assert _count(db_session, "LibraryWork") == 2
 
 
-def test_manual_pdf_files_respect_embedded_identity_over_folder_grouping(
+def test_manual_pdf_files_with_same_title_ignore_different_authors(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
@@ -2086,8 +2197,9 @@ def test_manual_pdf_files_respect_embedded_identity_over_folder_grouping(
         ),
     )
 
-    assert first_result.work_id != second_result.work_id
-    assert _count(db_session, "LibraryWork") == 2
+    assert first_result.work_id == second_result.work_id
+    assert _count(db_session, "LibraryWork") == 1
+    assert _count(db_session, "LibraryFile") == 2
 
 
 def test_manual_title_and_author_override_folder_identity(
@@ -2529,7 +2641,7 @@ def test_import_pdf_creates_library_records(db_session, test_settings, tmp_path)
         == "EBOOK"
     )
     assert json.loads(work["tags"]) == ["pdf"]
-    assert work["mergeKey"] == "manualpdf:未知作者"
+    assert work["mergeKey"] == "manualpdf"
     assert (
         db_session.execute(text("SELECT mediaKind FROM LibraryMediaVersion")).scalar()
         == "EBOOK"

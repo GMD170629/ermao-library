@@ -129,13 +129,7 @@ def _import_epub(
         metadata["title"] = volume_info.series_name
         if volume_info.author:
             metadata["author"] = volume_info.author
-    merge_key = _work_merge_key(
-        identity.title,
-        identity.author,
-        resolved_local.metadata.identifier,
-        resolved_local.metadata.isbn,
-        series_name=resolved_local.metadata.series_name,
-    )
+    merge_key = _work_merge_key(identity.title)
     work, created = _ensure_work(
         store,
         queries,
@@ -168,8 +162,6 @@ def _import_epub(
             work["id"],
             "EPUB",
             source_key,
-            volume_info.series_index,
-            volume_info.title,
         )
         if (
             media_version

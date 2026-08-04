@@ -86,20 +86,8 @@ def _normalize_key(value: Any) -> str:
     return normalize_identity_part(value)
 
 
-def _work_merge_key(
-    title: str,
-    author: str | None = None,
-    identifier: str | None = None,
-    isbn: str | None = None,
-    series_name: str | None = None,
-) -> str:
-    return resolve_work_identity(
-        title=title,
-        author=author,
-        identifier=identifier,
-        isbn=isbn,
-        series_name=series_name,
-    ).merge_key
+def _work_merge_key(title: str) -> str:
+    return resolve_work_identity(title=title).merge_key
 
 
 def _usable_merge_identifier(identifier: str | None) -> bool:
@@ -384,11 +372,17 @@ def _ensure_work(
     data: dict[str, Any],
 ) -> tuple[dict[str, Any], bool]:
     merge_key = str(data["mergeKey"])
-    existing = queries.get_work_by_merge_key(merge_key)
+    existing = queries.get_work_by_merge_key(
+        merge_key
+    ) or queries.get_work_by_normalized_title(_normalize_key(data["title"]))
     if existing:
         incoming_author = str(data.get("author") or "").strip()
         current_author = str(existing.get("author") or "").strip()
-        columns: dict[str, object] = {"hidden": False, "updatedAt": _now()}
+        columns: dict[str, object] = {
+            "hidden": False,
+            "mergeKey": merge_key,
+            "updatedAt": _now(),
+        }
         if _author_is_missing(current_author) and not _author_is_missing(
             incoming_author
         ):
@@ -510,17 +504,12 @@ def _select_volume_media_version(
     work_id: str,
     fmt: str,
     source_key: str,
-    volume_index: float | None,
-    volume_title: str,
 ) -> dict[str, Any] | None:
     media_versions = queries.list_visible_media_versions_for_work_and_format(
         work_id, fmt
     )
     for media_version in media_versions:
-        conflict = queries.find_volume_conflict(
-            str(media_version["id"]), volume_index, volume_title
-        )
-        if not conflict and media_version.get("sourceGroupKey") == source_key:
+        if media_version.get("sourceGroupKey") == source_key:
             return media_version
     return None
 

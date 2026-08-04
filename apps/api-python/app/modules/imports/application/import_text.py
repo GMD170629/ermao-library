@@ -161,7 +161,7 @@ def refresh_existing_reflowable_source(
     )
     work_values: dict[str, object] = {"updatedAt": _now()}
     if selected_title != current_title or selected_author != current_author:
-        merge_key = _work_merge_key(selected_title, selected_author)
+        merge_key = _work_merge_key(selected_title)
         merge_conflict = queries.get_work_by_merge_key(merge_key)
         work_values.update(
             title=selected_title,
@@ -314,13 +314,7 @@ def _import_reflowable_source(
             title=identity.title,
         ),
     )
-    merge_key = _work_merge_key(
-        identity.title,
-        identity.author,
-        resolved_local.metadata.identifier,
-        resolved_local.metadata.isbn,
-        series_name=resolved_local.metadata.series_name,
-    )
+    merge_key = _work_merge_key(identity.title)
     work, created = _ensure_work(
         store,
         queries,
