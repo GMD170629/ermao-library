@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import String, case, cast, delete, func, select
+from sqlalchemy import BigInteger, String, case, cast, delete, func, select
 from sqlalchemy.orm import Session
 
 from app.models.common import db_timestamp
@@ -27,6 +28,16 @@ from app.modules.system.infrastructure import settings as setting_store
 EVENT_PRUNE_DELETE_BATCH_SIZE = 1_000
 
 
+@dataclass(frozen=True, slots=True)
+class SystemEventPageSnapshot:
+    events: list[dict[str, Any]]
+    total: int
+    page: int
+    sources: list[dict[str, Any]]
+    levels: list[dict[str, Any]]
+    size_bytes: int
+
+
 def _column_length(column: Any) -> Any:
     return func.length(func.coalesce(cast(column, String), ""))
 
@@ -43,6 +54,18 @@ def _event_size_expression() -> Any:
         + _column_length(SystemEvent.target_id)
         + _column_length(SystemEvent.message)
         + _column_length(SystemEvent.metadata_json)
+    )
+
+
+def _event_created_at_ms_expression() -> Any:
+    """Normalize legacy textual timestamps inside the database date filter."""
+
+    return case(
+        (
+            func.typeof(SystemEvent.created_at) == "text",
+            cast(func.strftime("%s", SystemEvent.created_at), BigInteger) * 1000,
+        ),
+        else_=cast(SystemEvent.created_at, BigInteger),
     )
 
 
@@ -191,3 +214,113 @@ def list_event_level_facets(db: Session) -> list[dict[str, Any]]:
             .order_by(SystemEvent.level.asc())
         ).all()
     ]
+
+
+def list_system_events_page(
+    db: Session,
+    *,
+    page: int,
+    page_size: int,
+    level: str | None = None,
+    source: str | None = None,
+    target_type: str | None = None,
+    search: str | None = None,
+    date_from_ms: int | None = None,
+    date_to_ms: int | None = None,
+) -> SystemEventPageSnapshot:
+    aggregate_rows = db.execute(
+        select(
+            SystemEvent.source,
+            SystemEvent.level,
+            func.count().label("event_count"),
+            func.coalesce(func.sum(_event_size_expression()), 0).label(
+                "size_bytes"
+            ),
+        )
+        .group_by(SystemEvent.source, SystemEvent.level)
+        .order_by(SystemEvent.source.asc(), SystemEvent.level.asc())
+    ).all()
+    source_counts: dict[str, int] = {}
+    level_counts: dict[str, int] = {}
+    size_bytes = 0
+    for row in aggregate_rows:
+        count = int(row.event_count or 0)
+        source_counts[str(row.source)] = source_counts.get(str(row.source), 0) + count
+        level_counts[str(row.level)] = level_counts.get(str(row.level), 0) + count
+        size_bytes += int(row.size_bytes or 0)
+
+    filters: list[Any] = []
+    if level:
+        filters.append(SystemEvent.level == ("warning" if level == "warn" else level))
+    if source:
+        filters.append(SystemEvent.source == source)
+    if target_type:
+        filters.append(SystemEvent.target_type == target_type)
+    if search:
+        term = f"%{search.strip()}%"
+        filters.append(
+            SystemEvent.message.like(term)
+            | SystemEvent.action.like(term)
+            | func.coalesce(SystemEvent.target_id, "").like(term)
+        )
+    created_at_ms = _event_created_at_ms_expression()
+    if date_from_ms is not None:
+        filters.append(created_at_ms >= date_from_ms)
+    if date_to_ms is not None:
+        filters.append(created_at_ms < date_to_ms)
+
+    total = (
+        int(
+            db.scalar(
+                select(func.count()).select_from(SystemEvent).where(*filters)
+            )
+            or 0
+        )
+        if filters
+        else sum(source_counts.values())
+    )
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    clamped_page = min(max(1, page), total_pages)
+    rows = db.scalars(
+        select(SystemEvent)
+        .where(*filters)
+        .order_by(SystemEvent.created_at.desc(), SystemEvent.id.desc())
+        .limit(page_size)
+        .offset((clamped_page - 1) * page_size)
+    ).all()
+    return SystemEventPageSnapshot(
+        events=[
+            {
+                "id": row.id,
+                "level": row.level,
+                "source": row.source,
+                "actorType": row.actor_type,
+                "actorId": row.actor_id,
+                "action": row.action,
+                "targetType": row.target_type,
+                "targetId": row.target_id,
+                "message": row.message,
+                "metadata": row.metadata_json,
+                "createdAt": row.created_at,
+            }
+            for row in rows
+        ],
+        total=total,
+        page=clamped_page,
+        sources=[
+            {"source": source_name, "count": count}
+            for source_name, count in source_counts.items()
+        ],
+        levels=[
+            {"level": level_name, "count": count}
+            for level_name, count in sorted(level_counts.items())
+        ],
+        size_bytes=size_bytes,
+    )
+
+
+def clear_info_warning_events(db: Session) -> int:
+    result = db.execute(
+        delete(SystemEvent).where(SystemEvent.level.in_(("info", "warning")))
+    )
+    return int(result.rowcount or 0)

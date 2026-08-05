@@ -42,6 +42,12 @@ test('normalizes a complete V3 preference snapshot from legacy and invalid input
   assert.deepEqual(preferences, {
     schemaVersion: 3,
     appearance: { theme: 'warm' },
+    interaction: {
+      tapZones: 'standard',
+      swipePageTurn: true,
+      keyboardPageTurn: true,
+      volumeKeyPageTurn: false
+    },
     epub: {
       fontSize: 30,
       lineHeight: 1.9,
@@ -49,7 +55,20 @@ test('normalizes a complete V3 preference snapshot from legacy and invalid input
       fontFamily: 'pingfang',
       spreadMode: 'single',
       pageTurnAnimation: 'off',
-      flow: 'paginated'
+      flow: 'paginated',
+      typography: {
+        paragraphIndent: 2,
+        paragraphSpacing: 0,
+        textAlign: 'publisher',
+        preservePublisherStyles: false,
+        allowPublisherColors: false,
+        allowPublisherFonts: false
+      },
+      optimization: {
+        enabled: true,
+        deduplicateIndent: true,
+        indentUnindented: true
+      }
     },
     comic: {
       direction: 'rtl',
@@ -106,6 +125,52 @@ test('preserves valid V3 spread and animation preferences', () => {
   assert.equal(preferences.epub.spreadMode, 'double');
   assert.equal(preferences.epub.pageTurnAnimation, 'slide');
   assert.equal(preferences.comic.pageTurnAnimation, 'off');
+});
+
+test('normalizes interaction and smart typography preferences without weakening safe defaults', () => {
+  const preferences = normalizeReaderPreferences({
+    interaction: {
+      tapZones: 'reversed',
+      swipePageTurn: false,
+      keyboardPageTurn: false,
+      volumeKeyPageTurn: true
+    },
+    epub: {
+      typography: {
+        paragraphIndent: 8,
+        paragraphSpacing: 0.76,
+        textAlign: 'justify',
+        preservePublisherStyles: true,
+        allowPublisherColors: true,
+        allowPublisherFonts: true
+      },
+      optimization: {
+        enabled: false,
+        deduplicateIndent: false,
+        indentUnindented: false
+      }
+    }
+  });
+
+  assert.deepEqual(preferences.interaction, {
+    tapZones: 'reversed',
+    swipePageTurn: false,
+    keyboardPageTurn: false,
+    volumeKeyPageTurn: true
+  });
+  assert.deepEqual(preferences.epub.typography, {
+    paragraphIndent: 4,
+    paragraphSpacing: 0.8,
+    textAlign: 'justify',
+    preservePublisherStyles: true,
+    allowPublisherColors: true,
+    allowPublisherFonts: true
+  });
+  assert.deepEqual(preferences.epub.optimization, {
+    enabled: false,
+    deduplicateIndent: false,
+    indentUnindented: false
+  });
 });
 
 test('session reducer rejects stale operations and events from another session', () => {

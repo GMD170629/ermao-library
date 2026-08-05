@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from sqlalchemy import inspect
@@ -21,6 +23,8 @@ from app.modules.imports.application.monitor_paths import (
     monitor_directory_tree_node,
     resolve_monitor_folder_path,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _has_table(db: Session, table: str) -> bool:
@@ -164,13 +168,22 @@ def serialize_import_log(log: dict[str, Any]) -> dict[str, Any]:
 def import_task_view(
     db: Session, task: dict[str, Any], log_limit: int = 20
 ) -> dict[str, Any]:
-    monitor_folder = None
-    if task.get("monitorFolderId") and _has_table(db, "MonitorFolder"):
+    page_hydrated = "_pageLogs" in task
+    monitor_folder = task.get("_pageMonitorFolder") if page_hydrated else None
+    if (
+        not page_hydrated
+        and task.get("monitorFolderId")
+        and _has_table(db, "MonitorFolder")
+    ):
         monitor_folder = import_http_store.get_monitor_folder(
             db, str(task.get("monitorFolderId"))
         )
     book = None
-    if task.get("workId") and _has_table(db, "LibraryWork"):
+    if page_hydrated:
+        work = task.get("_pageWork")
+        if isinstance(work, dict):
+            book = {"id": work.get("id"), "title": work.get("title") or "未命名作品"}
+    elif task.get("workId") and _has_table(db, "LibraryWork"):
         work_row = db.get(LibraryWork, str(task.get("workId")))
         work = (
             {"id": work_row.id, "title": work_row.title}
@@ -179,20 +192,35 @@ def import_task_view(
         )
         if work:
             book = {"id": work.get("id"), "title": work.get("title") or "未命名作品"}
-    logs = import_http_store.list_import_logs(
-        db, str(task.get("id") or ""), limit=log_limit
-    )[0]
-    conversion = (
-        import_http_store.get_conversion_for_import(db, str(task.get("id") or ""))
-        if _has_table(db, "BookConversionTask")
-        else None
+    logs = (
+        list(task.get("_pageLogs") or [])
+        if page_hydrated
+        else import_http_store.list_import_logs(
+            db, str(task.get("id") or ""), limit=log_limit
+        )[0]
     )
+    conversion = task.get("_pageConversion") if page_hydrated else None
+    if not page_hydrated and _has_table(db, "BookConversionTask"):
+        conversion = import_http_store.get_conversion_for_import(
+            db, str(task.get("id") or "")
+        )
+    file_state_started_at = perf_counter()
     source_file_exists = Path(str(task.get("sourcePath") or "")).is_file()
     converted_file_exists = bool(
         conversion
         and conversion.get("outputPath")
         and Path(str(conversion.get("outputPath"))).is_file()
     )
+    file_state_elapsed_ms = (perf_counter() - file_state_started_at) * 1000
+    if file_state_elapsed_ms >= 100:
+        logger.warning(
+            "import_task.file_state.slow",
+            extra={
+                "event": "import_task.file_state.slow",
+                "taskId": str(task.get("id") or ""),
+                "elapsedMs": round(file_state_elapsed_ms, 2),
+            },
+        )
     if conversion:
         conversion = {
             **conversion,
@@ -230,6 +258,10 @@ def import_task_view(
     )
     view.pop("duplicate", None)
     view.pop("sourceKey", None)
+    view.pop("_pageMonitorFolder", None)
+    view.pop("_pageWork", None)
+    view.pop("_pageLogs", None)
+    view.pop("_pageConversion", None)
     return view
 
 

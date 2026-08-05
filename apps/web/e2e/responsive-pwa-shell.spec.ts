@@ -331,7 +331,12 @@ test('series and author groupings open the existing library with exact facet fil
     && url.searchParams.get('sortDirection') === 'desc'
   ))).toBe(true);
   await page.getByRole('button', { name: '管理图书', exact: true }).click();
-  await page.getByRole('button', { name: '更多筛选', exact: true }).click();
+  const authorMoreFilters = page.getByRole('button', { name: '更多筛选', exact: true });
+  await expect(authorMoreFilters).toHaveCSS('width', '48px');
+  const authorFilterCount = page.getByTestId('library-advanced-filter-count');
+  await expect(authorFilterCount).toHaveText('1');
+  await expect(authorFilterCount).toHaveCSS('position', 'absolute');
+  await authorMoreFilters.click();
   await page.getByRole('button', { name: '清除作者筛选', exact: true }).click();
   await expect(page).toHaveURL(/\/library$/);
 });
@@ -703,8 +708,8 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
     title: '用于验证移动端卡片布局的超长读物标题',
     author: '未知作者',
     description: '',
-    tags: ['移动端'],
-    coverUrl: '',
+    tags: ['用于验证窄屏单行截断的超长格式标签'],
+    coverUrl: '/api/works/mobile-work/cover',
     coverStatus: 'MISSING',
     gradient: 'from-orange-100 to-stone-200',
     seriesName: null,
@@ -717,8 +722,12 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
     addedAt: '2026-07-17T08:30:00.000Z',
     updatedAt: '2026-07-17T08:30:00.000Z',
     recentMediaKind: 'EBOOK',
+    availableMediaKinds: ['EBOOK'],
     continueVolumeId: 'mobile-volume',
     completed: false,
+    statusValue: 'UNREAD',
+    lastReadAt: '2026-07-17T08:30:00.000Z',
+    importedAt: '2026-07-17T08:30:00.000Z',
     mediaVersions: [{
       id: 'mobile-media',
       mediaKind: 'EBOOK',
@@ -730,16 +739,101 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
   await page.route('**/api/works?**', async (route) => {
     await route.fulfill({ json: { ok: true, data: { books: [mobileBook], total: 1, page: 1, pageSize: 24, totalPages: 1 } } });
   });
-  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 320, height: 844 });
 
   await page.goto('/library');
   await page.getByRole('button', { name: '管理图书', exact: true }).click();
-  await expect(page.getByTestId('book-list-mobile-card')).toBeVisible();
+  const mobileTypeSelect = page.getByRole('button', { name: '图书类型', exact: true });
+  await expect(mobileTypeSelect).toBeVisible();
+  await expect(page.getByRole('group', { name: '图书类型', exact: true })).toBeHidden();
+  await mobileTypeSelect.click();
+  await page.getByRole('option', { name: '电子书', exact: true }).click();
+  await expect(mobileTypeSelect).toContainText('电子书');
+  await mobileTypeSelect.click();
+  await page.getByRole('option', { name: '全部', exact: true }).click();
+  const mobileMoreFilters = page.getByRole('button', { name: '更多筛选', exact: true });
+  const mobileSearch = page.getByPlaceholder('搜索书名、作者或标签');
+  const [searchBox, typeSelectBox, moreFiltersBox] = await Promise.all([
+    mobileSearch.boundingBox(),
+    mobileTypeSelect.boundingBox(),
+    mobileMoreFilters.boundingBox()
+  ]);
+  expect(searchBox?.width).toBeGreaterThan(0);
+  expect(typeSelectBox?.width).toBe(112);
+  expect(moreFiltersBox?.width).toBe(48);
+  expect(moreFiltersBox?.height).toBe(48);
+  const searchCenter = (searchBox?.y ?? 0) + (searchBox?.height ?? 0) / 2;
+  const typeSelectCenter = (typeSelectBox?.y ?? 0) + (typeSelectBox?.height ?? 0) / 2;
+  const moreFiltersCenter = (moreFiltersBox?.y ?? 0) + (moreFiltersBox?.height ?? 0) / 2;
+  expect(Math.abs(searchCenter - typeSelectCenter)).toBeLessThan(1);
+  expect(Math.abs(typeSelectCenter - moreFiltersCenter)).toBeLessThan(1);
+  await mobileMoreFilters.click();
+  await expect(page.getByText('智能组合筛选', { exact: true })).toBeVisible();
+  await expect(page.getByText('所有作品、卷册、文件、阅读和书架维度都可以自由组合，修改后实时生效。', { exact: true })).toHaveCount(0);
+  await mobileMoreFilters.click();
+  const mobileCard = page.getByTestId('book-list-mobile-card');
+  await expect(mobileCard).toBeVisible();
   await expect(page.getByTestId('book-list-desktop-table')).toBeHidden();
-  await expect(page.getByRole('button', { name: `查看《${mobileBook.title}》`, exact: true })).toHaveCSS('width', '44px');
-  await expect(page.getByRole('button', { name: `删除《${mobileBook.title}》`, exact: true })).toHaveCSS('width', '44px');
-  await expect(page.getByRole('button', { name: '更多筛选', exact: true })).toHaveCSS('width', '44px');
+  const mobileSelection = mobileCard.getByRole('checkbox');
+  await expect(mobileSelection).toHaveAttribute('aria-label', `选择《${mobileBook.title}》`);
+  await expect(mobileSelection).toHaveClass('sr-only');
+  await expect(mobileSelection).not.toBeChecked();
+  const mobileMetadata = page.getByTestId('book-list-mobile-metadata');
+  await expect(mobileMetadata).toHaveCSS('flex-wrap', 'nowrap');
+  const metadataBadges = mobileMetadata.locator(':scope > span');
+  await expect(metadataBadges).toHaveCount(3);
+  const badgeTopEdges = await metadataBadges.evaluateAll((badges) => badges.map((badge) => badge.getBoundingClientRect().top));
+  expect(new Set(badgeTopEdges).size).toBe(1);
+  await expect(page.getByRole('button', { name: `查看《${mobileBook.title}》`, exact: true })).toHaveCount(0);
+  await mobileMetadata.click();
+  await expect(mobileSelection).toBeChecked();
+  await expect(page.getByTestId('book-list-mobile-swipe-surface')).toHaveCSS('background-color', 'rgb(255, 248, 245)');
+  expect(await page.getByTestId('book-list-mobile-swipe-surface').evaluate((element) => getComputedStyle(element).boxShadow)).toContain('rgb(239, 77, 47) 1px 0px 0px 0px inset');
+  await mobileMetadata.click();
+  await expect(mobileSelection).not.toBeChecked();
+  const mobileDeleteButton = page.getByRole('button', { name: `删除《${mobileBook.title}》`, exact: true });
+  await expect(mobileDeleteButton).toHaveClass('sr-only');
+
+  const swipeSurface = page.getByTestId('book-list-mobile-swipe-surface');
+  const dispatchTouchPointer = (type: string, pointerId: number, clientX: number, clientY: number, buttons: number) => swipeSurface.evaluate((element, pointerState) => {
+    const view = element.ownerDocument.defaultView;
+    if (!view) throw new Error('mobile swipe test requires a window');
+    element.dispatchEvent(new view.PointerEvent(pointerState.type, {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      buttons: pointerState.buttons,
+      clientX: pointerState.clientX,
+      clientY: pointerState.clientY,
+      isPrimary: true,
+      pointerId: pointerState.pointerId,
+      pointerType: 'touch'
+    }));
+  }, { type, pointerId, clientX, clientY, buttons });
+  const dispatchTouchSwipe = async (pointerId: number, startX: number, endX: number, endY = 304) => {
+    await dispatchTouchPointer('pointerdown', pointerId, startX, 300, 1);
+    await dispatchTouchPointer('pointermove', pointerId, endX, endY, 1);
+    await dispatchTouchPointer('pointerup', pointerId, endX, endY, 0);
+  };
+
+  await dispatchTouchPointer('pointerdown', 4, 260, 300, 1);
+  await expect(mobileDeleteButton).toHaveClass('sr-only');
+  await dispatchTouchPointer('pointerup', 4, 260, 300, 0);
+
+  await dispatchTouchSwipe(1, 260, 160);
+  await expect(mobileDeleteButton).not.toHaveClass('sr-only');
+  await expect(mobileDeleteButton).toHaveCSS('width', '80px');
+  await expect(swipeSurface).toHaveCSS('transform', 'matrix(1, 0, 0, 1, -80, 0)');
+
+  await dispatchTouchSwipe(2, 160, 260);
+  await expect(mobileDeleteButton).toHaveClass('sr-only');
+  await dispatchTouchSwipe(3, 260, 254, 390);
+  await expect(mobileDeleteButton).toHaveClass('sr-only');
+  await expect(page.getByRole('button', { name: '更多筛选', exact: true })).toHaveCSS('width', '48px');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await page.waitForTimeout(550);
+  await page.getByRole('button', { name: `查看《${mobileBook.title}》详情`, exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/works/${mobileBook.id}$`));
 
   const organizePage = await context.newPage();
   await mockWebAppApi(organizePage);
@@ -848,6 +942,7 @@ test('all-books shelves load the next batch while scrolling down', async ({ page
 
 test('desktop book list opens details from both the cover and title', async ({ page }) => {
   const requestedPageSizes: string[] = [];
+  const requestedPages: string[] = [];
   const requestedSorts: Array<{ sort: string; direction: string }> = [];
   const requestedViews: string[] = [];
   const book = {
@@ -865,12 +960,23 @@ test('desktop book list opens details from both the cover and title', async ({ p
     tags: [],
     publisher: '测试出版社',
     seriesName: '测试系列',
-    coverUrl: '',
+    coverUrl: '/api/works/desktop-list-work/cover',
+    coverStatus: 'READY',
+    availableMediaKinds: ['EBOOK'],
+    lastReadAt: null,
+    importedAt: '2026-07-20T00:00:00.000Z',
     gradient: 'from-orange-100 to-stone-200'
   };
+  const managementBooks = Array.from({ length: 20 }, (_, index) => index === 0 ? book : {
+    ...book,
+    id: `desktop-list-work-${index + 1}`,
+    title: `桌面列表入口测试 ${index + 1}`,
+    coverUrl: `/api/works/desktop-list-work-${index + 1}/cover`
+  });
   await page.route('**/api/works?**', async (route) => {
     const requestUrl = new URL(route.request().url());
     const requestedPageSize = requestUrl.searchParams.get('pageSize') ?? '';
+    const requestedPage = requestUrl.searchParams.get('page') ?? '1';
     const requestedSort = requestUrl.searchParams.get('sort') ?? '';
     const requestedDirection = requestUrl.searchParams.get('sortDirection') ?? '';
     const responseBook = requestUrl.searchParams.get('view') === 'bookshelf'
@@ -881,13 +987,17 @@ test('desktop book list opens details from both the cover and title', async ({ p
           format: book.format,
           gradient: book.gradient,
           coverStatus: 'PENDING',
-          coverUrl: book.coverUrl
-        }
+          coverUrl: book.coverUrl,
+          availableMediaKinds: book.availableMediaKinds
+      }
       : book;
+    const responseBooks = requestUrl.searchParams.get('view') === 'bookshelf' ? [responseBook] : managementBooks;
     requestedPageSizes.push(requestedPageSize);
+    requestedPages.push(requestedPage);
     requestedSorts.push({ sort: requestedSort, direction: requestedDirection });
     requestedViews.push(requestUrl.searchParams.get('view') ?? '');
-    await route.fulfill({ json: { ok: true, data: { books: [responseBook], total: 1, page: 1, pageSize: Number(requestedPageSize), totalPages: 1 } } });
+    const numericPageSize = Number(requestedPageSize);
+    await route.fulfill({ json: { ok: true, data: { books: responseBooks, total: 240, page: Number(requestedPage), pageSize: numericPageSize, totalPages: numericPageSize > 0 ? Math.ceil(240 / numericPageSize) : 1 } } });
   });
   await page.setViewportSize({ width: 1280, height: 900 });
 
@@ -895,9 +1005,39 @@ test('desktop book list opens details from both the cover and title', async ({ p
   await expect(page.getByRole('button', { name: '保存筛选' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '更多筛选' })).toHaveCount(0);
   await page.getByRole('button', { name: '管理图书', exact: true }).click();
-  await page.getByRole('button', { name: '更多筛选' }).click();
-  await expect(page.getByRole('button', { name: '保存筛选' })).toBeVisible();
+  const desktopMoreFilters = page.getByRole('button', { name: '更多筛选' });
+  await expect(desktopMoreFilters).toHaveCSS('height', '48px');
+  await desktopMoreFilters.click();
+  await expect(page.getByRole('button', { name: '保存筛选' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '网格排序方式' })).toHaveCount(0);
+  await desktopMoreFilters.click();
+  const managementViewport = page.getByTestId('library-management-viewport');
+  const tableViewport = page.getByTestId('book-list-desktop-table');
+  const titleHeader = page.getByRole('columnheader', { name: '标题排序' });
+  const initialHeaderTop = await titleHeader.evaluate((element) => element.getBoundingClientRect().top);
+  await expect.poll(() => tableViewport.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+  await tableViewport.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await expect.poll(() => tableViewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  const scrolledHeaderTop = await titleHeader.evaluate((element) => element.getBoundingClientRect().top);
+  expect(Math.abs(scrolledHeaderTop - initialHeaderTop)).toBeLessThan(1);
+  await expect(managementViewport).toBeInViewport();
+  await expect(page.getByTestId('library-pagination')).toBeInViewport();
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  const pagination = page.getByTestId('library-pagination');
+  await expect(pagination.getByText('共 240 本图书', { exact: true })).toBeVisible();
+  await expect(pagination.getByText('第 1 / 12 页', { exact: true })).toBeVisible();
+  await expect(pagination.getByRole('button', { name: '上一页' })).toBeDisabled();
+  await expect(pagination.getByRole('button', { name: '下一页' })).toBeEnabled();
+  await expect(pagination.getByRole('button', { name: '第 1 页' })).toHaveAttribute('aria-current', 'page');
+  await expect(pagination.getByText('…', { exact: true })).toBeVisible();
+  await pagination.getByRole('button', { name: '下一页' }).click();
+  await expect.poll(() => requestedPages.at(-1)).toBe('2');
+  await expect(pagination.getByRole('button', { name: '第 2 页' })).toHaveAttribute('aria-current', 'page');
+  await pagination.getByRole('button', { name: '第 12 页' }).click();
+  await expect.poll(() => requestedPages.at(-1)).toBe('12');
+  await expect(pagination.getByRole('button', { name: '第 12 页' })).toHaveAttribute('aria-current', 'page');
+  await expect(pagination.getByRole('button', { name: '下一页' })).toBeDisabled();
+  await expect(pagination.getByRole('button', { name: '第 11 页' })).toBeVisible();
   await expect(page.getByRole('button', { name: '每页数量' })).toContainText('20 本/页');
   await page.getByRole('button', { name: '每页数量' }).click();
   await page.getByRole('option', { name: '100 本/页' }).click();
@@ -913,7 +1053,6 @@ test('desktop book list opens details from both the cover and title', async ({ p
   await expect(page.getByRole('button', { name: '进度排序' })).toHaveCount(0);
   await expect(page.getByRole('columnheader', { name: '标题排序' })).toBeVisible();
   await expect(page.getByRole('columnheader', { name: '作者排序' })).toBeVisible();
-  await expect(page.getByRole('columnheader', { name: '出版社排序' })).toBeVisible();
   await expect(page.getByRole('columnheader', { name: '系列排序' })).toBeVisible();
   await page.getByRole('button', { name: '标题排序' }).click();
   await expect.poll(() => requestedSorts.at(-1)).toEqual({ sort: 'title', direction: 'asc' });
@@ -923,8 +1062,6 @@ test('desktop book list opens details from both the cover and title', async ({ p
   await expect(page).toHaveURL(/sortDirection=desc/);
   await page.getByRole('button', { name: '作者排序' }).click();
   await expect.poll(() => requestedSorts.at(-1)).toEqual({ sort: 'author', direction: 'asc' });
-  await page.getByRole('button', { name: '出版社排序' }).click();
-  await expect.poll(() => requestedSorts.at(-1)).toEqual({ sort: 'publisher', direction: 'asc' });
   await page.getByRole('button', { name: '系列排序' }).click();
   await expect.poll(() => requestedSorts.at(-1)).toEqual({ sort: 'series', direction: 'asc' });
   await page.getByRole('button', { name: '加入时间排序' }).click();
@@ -933,6 +1070,8 @@ test('desktop book list opens details from both the cover and title', async ({ p
   await expect.poll(() => requestedSorts.at(-1)).toEqual({ sort: 'recent_import', direction: 'asc' });
 
   const managedBookRow = page.locator('[data-work-id="desktop-list-work"]');
+  await expect(managedBookRow.getByRole('button', { name: '查看《桌面列表入口测试》', exact: true })).toHaveCount(0);
+  await expect(managedBookRow.getByRole('button', { name: '删除《桌面列表入口测试》', exact: true })).toBeVisible();
   await managedBookRow.getByRole('checkbox').check();
   await page.getByRole('button', { name: '批量操作', exact: true }).click();
   const batchDialog = page.getByRole('dialog', { name: '批量更新元数据' });

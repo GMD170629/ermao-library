@@ -78,18 +78,21 @@ class SqlAlchemyLibraryQueries:
         if criteria.media_kinds:
             media_version = aliased(LibraryMediaVersion)
             volume = aliased(LibraryVolume)
-            media_predicates = [
-                media_version.work_id == LibraryWork.id,
-                media_version.media_kind.in_(criteria.media_kinds),
-                volume.hidden.is_(False),
-            ]
+            volume_predicates = [volume.hidden.is_(False)]
             if context is not None:
-                media_predicates.append(volume_visibility_predicate(context, volume))
+                volume_predicates.append(volume_visibility_predicate(context, volume))
             predicates.append(
                 exists(
-                    select(volume.id)
-                    .join(media_version, media_version.id == volume.media_version_id)
-                    .where(*media_predicates)
+                    select(media_version.id).where(
+                        media_version.work_id == LibraryWork.id,
+                        media_version.media_kind.in_(criteria.media_kinds),
+                        exists(
+                            select(volume.id).where(
+                                volume.media_version_id == media_version.id,
+                                *volume_predicates,
+                            )
+                        ),
+                    )
                 )
             )
         for tag in criteria.tags:

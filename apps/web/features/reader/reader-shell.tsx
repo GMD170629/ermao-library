@@ -1,9 +1,8 @@
 'use client';
 
 import type { ReaderCapabilities, ReaderKind, ReaderPreferences } from '@shuku/reader-core';
-import { Bookmark, Check, ChevronLeft, ChevronRight, Gauge, Highlighter, ListTree, Minus, Plus, RotateCcw, Rows2, Rows3, Rows4, Settings, Trash2, X, type LucideIcon } from 'lucide-react';
-import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type SyntheticEvent } from 'react';
-import { Button } from '../../components/ui/button';
+import { BookOpen, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Highlighter, LayoutTemplate, ListTree, Minus, MousePointer2, NotebookPen, Palette, Plus, RotateCcw, Rows2, Rows3, Rows4, Settings, SlidersHorizontal, Sparkles, Trash2, Type, X, type LucideIcon } from 'lucide-react';
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { cn } from '../../components/ui/cn';
 import { VolumeSelect } from '../../components/ui/volume-select';
 import { useI18n } from '../../i18n/provider';
@@ -16,11 +15,16 @@ import {
   READER_FONT_FAMILY_OPTIONS,
   READER_FONT_SIZE_OPTIONS,
   READER_LINE_HEIGHT_OPTIONS,
+  READER_PARAGRAPH_INDENT_OPTIONS,
+  READER_PARAGRAPH_SPACING_OPTIONS,
   READER_PAGE_TURN_ANIMATION_OPTIONS,
   READER_PAGE_WIDTH_OPTIONS,
   READER_PDF_FIT_OPTIONS,
   READER_SPREAD_MODE_OPTIONS,
   READER_THEME_OPTIONS,
+  READER_TAP_ZONE_OPTIONS,
+  READER_TEXT_ALIGN_OPTIONS,
+  adjacentReaderOptionValue,
   closestReaderOptionValue,
   type ReaderFontFamily
 } from './reader-preference-options';
@@ -30,6 +34,7 @@ import type { ReaderInteractionPolicy } from './v3/adapters/reader-interaction';
 import { hasActiveTextSelection, isReaderControlTarget, readerKeyIntent, readerPinchZoom, readerPointerIntentInViewport, readerSwipeIntent, type ReaderInputIntent } from './v3/input-router';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
+import { ReaderControlNavButton, ReaderQuickActionButton, ReaderSegmentedControl } from './ui/reader-control-primitives';
 
 type ComicDirection = ReaderPreferences['comic']['direction'];
 type ComicMode = ReaderPreferences['comic']['mode'];
@@ -68,6 +73,10 @@ export type ReaderControls = {
 
 export type ReaderSettings = {
   theme: ReaderTheme;
+  tapZones: ReaderPreferences['interaction']['tapZones'];
+  swipePageTurn: boolean;
+  keyboardPageTurn: boolean;
+  volumeKeyPageTurn: boolean;
   fontSize: number;
   lineHeight: number;
   pageWidth: number;
@@ -75,6 +84,15 @@ export type ReaderSettings = {
   ebookPageTurnAnimation: EbookPageTurnAnimation;
   ebookSpreadMode: EbookSpreadMode;
   ebookFlow: EbookFlow;
+  paragraphIndent: number;
+  paragraphSpacing: number;
+  textAlign: ReaderPreferences['epub']['typography']['textAlign'];
+  preservePublisherStyles: boolean;
+  allowPublisherColors: boolean;
+  allowPublisherFonts: boolean;
+  smartOptimization: boolean;
+  deduplicateIndent: boolean;
+  indentUnindented: boolean;
   comicZoom: number;
   pdfZoom: number;
   comicDirection: ComicDirection;
@@ -138,8 +156,7 @@ export type ReaderVolumeNavigation = {
 const readerBottomAreaHeight = 'calc(5.75rem + var(--shuku-safe-area-bottom))';
 const readerBottomControlsMaxWidth = 'max-w-5xl';
 const progressJumpDebounceMs = 160;
-type ReaderPanel = 'toc' | 'bookmarks' | 'settings' | 'annotations' | 'progress';
-type ReaderPanelPlacement = { left: number; bottom: number };
+type ReaderPanel = 'toc' | 'bookmarks' | 'notes' | 'appearance' | 'settings' | 'annotations';
 
 function clampPercent(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
@@ -194,12 +211,6 @@ function foliateLocationLabel(extra: Record<string, unknown>) {
   return start === end ? `Loc ${start} / ${total}` : `Loc ${start}–${end} / ${total}`;
 }
 
-function remainingMinutesLabel(seconds: number | null, translate: (source: string, values?: Record<string, string | number>) => string) {
-  if (seconds === null) return null;
-  const minutes = Math.max(1, Math.ceil(seconds / 60));
-  return translate('预计 {value0} 分钟', { value0: minutes });
-}
-
 function stopControlEvent(event: MouseEvent) {
   event.stopPropagation();
 }
@@ -228,13 +239,15 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   const readerDirectionRef = useRef<ComicDirection>('ltr');
   const interactionBlockedRef = useRef(interactionBlocked);
   const capabilitiesRef = useRef<ReaderCapabilities | null>(capabilities);
+  const settingsRef = useRef(settings);
   const handleInputIntentRef = useRef<(intent: ReaderInputIntent | null) => void>(() => undefined);
-  const panelElementRef = useRef<HTMLElement | null>(null);
+  const panelElementRef = useRef<HTMLDivElement | null>(null);
   const panelReturnFocusRef = useRef<HTMLElement | null>(null);
   const [controlsVisible, setControlsVisible] = useState(false);
   const [panel, setPanel] = useState<ReaderPanel | null>(null);
-  const [panelPlacement, setPanelPlacement] = useState<ReaderPanelPlacement | null>(null);
   const [annotationTab, setAnnotationTab] = useState<'book' | 'mine'>('book');
+  const [notesTab, setNotesTab] = useState<'bookmarks' | 'annotations'>('bookmarks');
+  const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
   const [bookmarkNotice, setBookmarkNotice] = useState('');
   const navItems = navigationItems ?? [];
   const orderedBookmarks = [...bookmarks].sort((left, right) => left.percent - right.percent || left.createdAt.localeCompare(right.createdAt));
@@ -245,8 +258,6 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   const currentNavigationTitle = currentNavigationItem?.title ?? null;
   const currentNavigationLabel = currentNavigationTitle;
   const locationLabel = readerType === 'reflowable' ? foliateLocationLabel(progressExtra) : null;
-  const sectionRemaining = remainingMinutesLabel(numberFromExtra(progressExtra.remainingSectionSeconds), i18nAttribute);
-  const totalRemaining = remainingMinutesLabel(numberFromExtra(progressExtra.remainingTotalSeconds), i18nAttribute);
   const progressDetail = [currentNavigationLabel, locationLabel, `${precisePercent(progress.percent, readerType, locale)}%`].filter(Boolean).join(' · ');
   const readerDirection: ComicDirection = readingDirection ?? (readerType === 'comic' ? settings.comicDirection : 'ltr');
   const zoomedPannable = readerType === 'pdf'
@@ -259,6 +270,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   panelRef.current = panel;
   interactionBlockedRef.current = interactionBlocked;
   capabilitiesRef.current = capabilities;
+  settingsRef.current = settings;
 
   function isInteractionBlocked() {
     return interactionBlockedRef.current || panelRef.current !== null;
@@ -279,8 +291,19 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   }
 
   function closePanel() {
+    const closingPanel = panelRef.current;
     setPanel(null);
-    window.requestAnimationFrame(() => panelReturnFocusRef.current?.focus());
+    window.requestAnimationFrame(() => {
+      if (panelReturnFocusRef.current?.isConnected) {
+        panelReturnFocusRef.current.focus();
+        return;
+      }
+      if (!closingPanel) return;
+      const matchingTriggers = Array.from(document.querySelectorAll<HTMLElement>(
+        `[data-reader-controller="bottom-console"] [data-reader-panel-trigger="${closingPanel}"]`
+      ));
+      matchingTriggers.find((trigger) => trigger.getClientRects().length > 0)?.focus();
+    });
   }
 
   function dismissPanelWithoutFocusRestore() {
@@ -289,7 +312,9 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   }
 
   function togglePanel(next: ReaderPanel, returnFocus: HTMLElement) {
-    panelReturnFocusRef.current = returnFocus;
+    if (!returnFocus.closest('[data-reader-workspace="true"]')) {
+      panelReturnFocusRef.current = returnFocus;
+    }
     if (panelRef.current === next) closePanel();
     else setPanel(next);
   }
@@ -388,7 +413,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   function handleReaderTap(clientX: number, clientY: number) {
     const bounds = readerViewportRef.current?.getBoundingClientRect();
     if (!bounds) return;
-    handleInputIntent(readerPointerIntentInViewport(clientX, clientY, bounds, readerDirectionRef.current));
+    handleInputIntent(readerPointerIntentInViewport(clientX, clientY, bounds, readerDirectionRef.current, settingsRef.current.tapZones));
   }
 
   useEffect(() => {
@@ -420,7 +445,10 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      const intent = readerKeyIntent(event, readerDirectionRef.current);
+      const intent = readerKeyIntent(event, readerDirectionRef.current, {
+        keyboardPageTurn: settingsRef.current.keyboardPageTurn,
+        volumeKeyPageTurn: settingsRef.current.volumeKeyPageTurn
+      });
       if (!intent) return;
       if (intent === 'escape') {
         event.preventDefault();
@@ -439,47 +467,6 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   useEffect(() => {
     if (!panel) return;
     setControlsVisibility(true);
-  }, [panel]);
-
-  useLayoutEffect(() => {
-    if (!panel) {
-      setPanelPlacement(null);
-      return undefined;
-    }
-
-    const updatePlacement = () => {
-      const dialog = panelElementRef.current;
-      const anchor = panelReturnFocusRef.current;
-      if (!dialog || !anchor || !window.matchMedia('(min-width: 768px)').matches) {
-        setPanelPlacement(null);
-        return;
-      }
-
-      const anchorBounds = anchor.getBoundingClientRect();
-      const dialogBounds = dialog.getBoundingClientRect();
-      const horizontalInset = 20;
-      const idealLeft = anchorBounds.left + (anchorBounds.width / 2) - (dialogBounds.width / 2);
-      const left = Math.max(horizontalInset, Math.min(idealLeft, window.innerWidth - dialogBounds.width - horizontalInset));
-      const bottom = Math.max(0, window.innerHeight - anchorBounds.top + 12);
-      setPanelPlacement((current) => (
-        current && Math.abs(current.left - left) < 0.5 && Math.abs(current.bottom - bottom) < 0.5
-          ? current
-          : { left, bottom }
-      ));
-    };
-
-    updatePlacement();
-    const frame = window.requestAnimationFrame(updatePlacement);
-    const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updatePlacement);
-    if (panelElementRef.current) resizeObserver?.observe(panelElementRef.current);
-    window.addEventListener('resize', updatePlacement);
-    window.visualViewport?.addEventListener('resize', updatePlacement);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      resizeObserver?.disconnect();
-      window.removeEventListener('resize', updatePlacement);
-      window.visualViewport?.removeEventListener('resize', updatePlacement);
-    };
   }, [panel]);
 
   useEffect(() => {
@@ -558,6 +545,48 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
     keepControlsOpen();
   }
 
+  function adjustPrimaryReadingScale(direction: -1 | 1) {
+    if (readerType === 'reflowable') {
+      updateSettings({
+        fontSize: Number(adjacentReaderOptionValue(settings.fontSize, readerFontSizeOptions, direction))
+      });
+      return;
+    }
+    if (readerType === 'comic') {
+      updateSettings({ comicZoom: Math.max(0.6, Math.min(2.4, Number((settings.comicZoom + (direction * 0.1)).toFixed(1)))) });
+      return;
+    }
+    updateSettings({ pdfZoom: Math.max(0.6, Math.min(2.4, Number((settings.pdfZoom + (direction * 0.1)).toFixed(1)))) });
+  }
+
+  function cycleReaderTheme() {
+    const currentIndex = READER_THEME_OPTIONS.findIndex((option) => option.value === settings.theme);
+    const nextOption = READER_THEME_OPTIONS[(currentIndex + 1) % READER_THEME_OPTIONS.length];
+    if (nextOption) updateSettings({ theme: nextOption.value });
+  }
+
+  function toggleMobileReadingMode() {
+    if (readerType === 'reflowable') {
+      updateSettings({ ebookFlow: settings.ebookFlow === 'paginated' ? 'scrolled' : 'paginated' });
+      return;
+    }
+    if (readerType === 'comic') {
+      updateSettings({ comicMode: settings.comicMode === 'single' ? 'double' : 'single' });
+      return;
+    }
+    updateSettings({ pdfFit: settings.pdfFit === 'width' ? 'page' : 'width' });
+  }
+
+  const currentThemeOption = READER_THEME_OPTIONS.find((option) => option.value === settings.theme) ?? READER_THEME_OPTIONS[0];
+  const mobileScaleValue = readerType === 'reflowable'
+    ? String(settings.fontSize)
+    : `${Math.round((readerType === 'comic' ? settings.comicZoom : settings.pdfZoom) * 100)}%`;
+  const mobileModeLabel = readerType === 'reflowable'
+    ? READER_FLOW_OPTIONS.find((option) => option.value === settings.ebookFlow)?.label ?? '分页'
+    : readerType === 'comic'
+      ? READER_SPREAD_MODE_OPTIONS.find((option) => option.value === settings.comicMode)?.label ?? '单页'
+      : READER_PDF_FIT_OPTIONS.find((option) => option.value === settings.pdfFit)?.label ?? '宽度';
+
   return (
     <div
       className={cn('fixed inset-0 z-50 min-h-0 overflow-clip transition-colors', themeSurface.textClass)}
@@ -631,7 +660,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
         const deltaX = touch.clientX - touchRef.current.x;
         const deltaY = touch.clientY - touchRef.current.y;
         const elapsed = Date.now() - touchRef.current.time;
-        const swipeIntent = horizontalPaging === 'shell-discrete' && !zoomedPannable
+        const swipeIntent = settings.swipePageTurn && horizontalPaging === 'shell-discrete' && !zoomedPannable
           ? readerSwipeIntent(deltaX, deltaY, elapsed, readerDirectionRef.current)
           : null;
         if (swipeIntent) {
@@ -686,7 +715,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
         onClick={stopControlEvent}
       >
         <div
-          className={cn('pointer-events-auto mx-auto flex h-12 w-full max-w-5xl items-center justify-between rounded-full border px-1 shadow-sm backdrop-blur-xl', dark ? 'border-white/10 bg-slate-950/75' : 'border-stone-200/80 bg-white/80')}
+          className={cn('pointer-events-auto relative mx-auto flex h-12 w-full max-w-5xl items-center justify-between rounded-full border px-1 shadow-sm backdrop-blur-xl', dark ? 'border-white/10 bg-slate-950/75' : 'border-stone-200/80 bg-white/80')}
           data-reader-top-bar="true"
         >
           <button
@@ -698,6 +727,9 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
           >
             <ChevronLeft size={22} />
           </button>
+          <span className="pointer-events-none absolute inset-x-12 truncate px-2 text-center text-sm font-medium md:hidden">
+            {currentNavigationLabel ?? progressPageLabel(progress)}
+          </span>
           <button
             type="button"
             disabled={!canBookmark || !onToggleBookmark}
@@ -734,48 +766,133 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
 
       <div
         className={cn(
-          'shuku-reader-bottom-bleed absolute inset-x-0 px-3 pt-2 transition duration-200 motion-reduce:transition-none md:px-5',
+          'shuku-reader-bottom-bleed shuku-reader-bottom-console absolute inset-x-0 px-3 pt-2 md:px-5',
           panel ? 'z-40' : 'z-20',
           dark ? 'text-slate-100' : 'text-stone-900'
         )}
         style={{
-          height: readerBottomAreaHeight,
-          paddingBottom: 'calc(0.25rem + var(--shuku-safe-area-bottom))',
+          paddingBottom: 'calc(0.75rem + var(--shuku-safe-area-bottom))',
           transform: controlsVisible ? 'translateY(0)' : 'translateY(100%)',
           opacity: controlsVisible ? 1 : 0
         }}
         data-reader-control="true"
         data-reader-controller="bottom-console"
+        data-reader-panel-state={panel ?? 'home'}
         aria-hidden={!controlsVisible}
         {...inertWhen(!controlsVisible)}
-        onPointerDownCapture={(event) => {
-          if (!panelRef.current) return;
-          const target = event.target instanceof Element ? event.target : null;
-          if (target?.closest('[data-reader-panel-trigger]')) return;
-          if (target?.closest('button, input')) dismissPanelWithoutFocusRestore();
-        }}
         onClick={stopControlEvent}
       >
-        <div className={cn('relative mx-auto flex h-[4.75rem] items-stretch overflow-hidden rounded-[1.35rem] border shadow-[0_-10px_35px_rgba(41,28,17,0.12)] backdrop-blur-2xl md:h-[4.5rem] md:shadow-2xl', readerBottomControlsMaxWidth, dark ? 'border-white/10 bg-slate-950/90' : 'border-stone-200/90 bg-[#fffaf2]/95')}>
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-current/10 md:hidden" aria-hidden="true">
-            <div className="h-full" style={{ width: `${clampPercent(progress.percent)}%`, backgroundColor: accentColor }} />
+        <div
+          ref={panelElementRef}
+          role={panel ? 'dialog' : undefined}
+          aria-modal={panel ? 'true' : undefined}
+          aria-labelledby={panel ? 'reader-panel-title' : undefined}
+          tabIndex={panel ? -1 : undefined}
+          className={cn('relative mx-auto flex h-full items-stretch overflow-hidden rounded-[1.65rem] border shadow-[0_8px_28px_rgba(75,54,31,0.10)] md:rounded-[1.35rem]', readerBottomControlsMaxWidth, dark ? 'border-white/15' : 'border-stone-900/15')}
+          style={{ backgroundColor: themeSurface.background }}
+          data-reader-console-surface="true"
+          data-reader-panel={panel ?? undefined}
+          data-reader-workspace={panel ? 'true' : undefined}
+          id={panel ? 'reader-panel' : undefined}
+        >
+          {!panel ? (
+            <div key="home" className="shuku-reader-console-home flex h-full min-w-0 flex-1">
+          <div className="flex min-w-0 flex-1 flex-col md:hidden">
+            <div className="px-4 pb-1 pt-3">
+              <div className="flex items-center justify-between gap-3 text-xs opacity-70">
+                <span className="truncate">{currentNavigationLabel ?? locationLabel ?? progressPageLabel(progress)}</span>
+                <span className="shrink-0 tabular-nums">{precisePercent(progress.percent, readerType, locale)}%</span>
+              </div>
+              <input
+                aria-label={i18nAttribute("阅读进度")}
+                type="range"
+                min={0}
+                max={100}
+                value={progressScrubPercent ?? clampPercent(progress.percent)}
+                disabled={!controls || capabilities?.canJumpToProgress === false}
+                onChange={(event) => {
+                  void jumpToPercent(Number(event.target.value), true);
+                  keepControlsOpen();
+                }}
+                onBlur={flushPendingProgressJump}
+                className="mt-1 h-7 w-full cursor-pointer disabled:cursor-not-allowed"
+                style={{ accentColor }}
+              />
+            </div>
+
+            <div className="grid grid-cols-4 gap-2 px-3 pb-3">
+              <div className={cn('grid min-h-[4.5rem] grid-cols-[1.75rem_minmax(1.25rem,1fr)_1.75rem] items-center rounded-2xl border px-0.5', dark ? 'border-white/15 bg-white/[0.045]' : 'border-stone-900/15 bg-white/55')}>
+                <button
+                  type="button"
+                  onClick={() => adjustPrimaryReadingScale(-1)}
+                  className={cn('flex h-10 w-7 items-center justify-center rounded-full transition active:scale-[0.96]', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}
+                  aria-label={readerType === 'reflowable' ? i18nAttribute("字号小") : i18nAttribute("缩小")}
+                >
+                  <Minus size={16} />
+                </button>
+                <span className="min-w-0 text-center text-sm font-medium tabular-nums">{mobileScaleValue}</span>
+                <button
+                  type="button"
+                  onClick={() => adjustPrimaryReadingScale(1)}
+                  className={cn('flex h-10 w-7 items-center justify-center rounded-full transition active:scale-[0.96]', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}
+                  aria-label={readerType === 'reflowable' ? i18nAttribute("字号大") : i18nAttribute("放大")}
+                >
+                  <Plus size={16} />
+                </button>
+              </div>
+              <ReaderQuickActionButton
+                label={i18nAttribute(currentThemeOption.label)}
+                onClick={cycleReaderTheme}
+                dark={dark}
+              >
+                <span
+                  className="h-6 w-6 rounded-full border border-black/10 shadow-sm"
+                  style={{ backgroundColor: currentThemeOption.value === 'warm' ? '#f3ddb0' : readerThemeSurfaces[currentThemeOption.value].background }}
+                  aria-hidden="true"
+                />
+              </ReaderQuickActionButton>
+              <ReaderQuickActionButton label={i18nAttribute(mobileModeLabel)} onClick={toggleMobileReadingMode} dark={dark}>
+                <BookOpen size={21} />
+              </ReaderQuickActionButton>
+              <ReaderQuickActionButton
+                label={i18nAttribute("更多")}
+                ariaLabel={i18nAttribute("阅读设置")}
+                selected={panel === 'settings'}
+                expanded={panel === 'settings'}
+                panelTrigger="settings"
+                onClick={(event) => togglePanel('settings', event.currentTarget)}
+                dark={dark}
+              >
+                <SlidersHorizontal size={21} />
+              </ReaderQuickActionButton>
+            </div>
+
+            <div className={cn('grid min-h-[4.75rem] grid-cols-4 border-t px-2 py-1', dark ? 'border-white/10' : 'border-stone-900/10')}>
+              <ReaderControlNavButton icon={ListTree} label={i18nAttribute("目录")} selected={panel === 'toc'} expanded={panel === 'toc'} panelTrigger="toc" onClick={(event) => togglePanel('toc', event.currentTarget)} dark={dark} />
+              <ReaderControlNavButton
+                icon={NotebookPen}
+                label={i18nAttribute("笔记")}
+                active={bookmarkActive}
+                selected={panel === 'notes'}
+                expanded={panel === 'notes'}
+                panelTrigger="notes"
+                onClick={(event) => {
+                  setNotesTab('bookmarks');
+                  togglePanel('notes', event.currentTarget);
+                }}
+                dark={dark}
+              />
+              <ReaderControlNavButton icon={Palette} label={i18nAttribute("外观")} selected={panel === 'appearance'} expanded={panel === 'appearance'} panelTrigger="appearance" onClick={(event) => togglePanel('appearance', event.currentTarget)} dark={dark} />
+              <ReaderControlNavButton icon={Settings} label={i18nAttribute("设置")} selected={panel === 'settings'} expanded={panel === 'settings'} panelTrigger="settings" onClick={(event) => togglePanel('settings', event.currentTarget)} dark={dark} />
+            </div>
           </div>
-          {readerType !== 'reflowable' || navItems.length > 0 || volumeNavigation ? (
-            <ReaderDockButton icon={ListTree} label={i18nAttribute("目录")} selected={panel === 'toc'} expanded={panel === 'toc'} panelTrigger="toc" onClick={(event) => togglePanel('toc', event.currentTarget)} dark={dark} />
-          ) : null}
-          <ReaderDockButton
-            icon={Bookmark}
-            label={i18nAttribute("书签")}
-            ariaLabel={i18nAttribute("书签")}
-            active={bookmarkActive}
-            selected={panel === 'bookmarks'}
-            expanded={panel === 'bookmarks'}
-            panelTrigger="bookmarks"
-            onClick={(event) => togglePanel('bookmarks', event.currentTarget)}
-            dark={dark}
-          />
-          <ReaderDockButton icon={Gauge} label={i18nAttribute("进度")} prominent selected={panel === 'progress'} expanded={panel === 'progress'} panelTrigger="progress" onClick={(event) => togglePanel('progress', event.currentTarget)} dark={dark} className="md:hidden" />
-          <div className="hidden min-w-0 flex-1 items-center gap-2 px-2 md:flex lg:px-4">
+
+          <div className="hidden h-full w-full items-stretch md:flex">
+            {readerType !== 'reflowable' || navItems.length > 0 || volumeNavigation ? (
+              <ReaderControlNavButton layout="dock" icon={ListTree} label={i18nAttribute("目录")} selected={panel === 'toc'} expanded={panel === 'toc'} panelTrigger="toc" onClick={(event) => togglePanel('toc', event.currentTarget)} dark={dark} />
+            ) : null}
+            <ReaderControlNavButton layout="dock" icon={NotebookPen} label={i18nAttribute("笔记")} active={bookmarkActive} selected={panel === 'notes'} expanded={panel === 'notes'} panelTrigger="notes" onClick={(event) => { setNotesTab('bookmarks'); togglePanel('notes', event.currentTarget); }} dark={dark} />
+            <div className="min-w-0 flex-1 items-center gap-2 px-2 md:flex lg:px-4">
             <button type="button" aria-label={i18nAttribute("上一页")} disabled={!controls || capabilities?.canGoPrevious === false} onClick={() => { void controls?.prev(); keepControlsOpen(); }} className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition active:scale-[0.97] disabled:opacity-35', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}>
               <ChevronLeft size={20} />
             </button>
@@ -803,11 +920,12 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
             <button type="button" aria-label={i18nAttribute("下一页")} disabled={!controls || capabilities?.canGoNext === false} onClick={() => { void controls?.next(); keepControlsOpen(); }} className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition active:scale-[0.97] disabled:opacity-35', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}>
               <ChevronRight size={20} />
             </button>
+            </div>
+            <ReaderControlNavButton layout="dock" icon={Palette} label={i18nAttribute("外观")} selected={panel === 'appearance'} expanded={panel === 'appearance'} panelTrigger="appearance" onClick={(event) => togglePanel('appearance', event.currentTarget)} dark={dark} />
+            <ReaderControlNavButton layout="dock" icon={Settings} label={i18nAttribute("设置")} ariaLabel={i18nAttribute("阅读设置")} selected={panel === 'settings'} expanded={panel === 'settings'} panelTrigger="settings" onClick={(event) => togglePanel('settings', event.currentTarget)} dark={dark} />
           </div>
-          {supportsTextAnnotations ? <ReaderDockButton icon={Highlighter} label={i18nAttribute("标注")} ariaLabel={i18nAttribute("标注与批注")} selected={panel === 'annotations'} expanded={panel === 'annotations'} panelTrigger="annotations" onClick={(event) => togglePanel('annotations', event.currentTarget)} dark={dark} /> : null}
-          <ReaderDockButton icon={Settings} label={i18nAttribute("显示")} ariaLabel={i18nAttribute("阅读设置")} selected={panel === 'settings'} expanded={panel === 'settings'} panelTrigger="settings" onClick={(event) => togglePanel('settings', event.currentTarget)} dark={dark} />
-        </div>
-      </div>
+            </div>
+          ) : null}
 
       {bookmarkNotice ? (
         <div role="status" className={cn('pointer-events-none absolute inset-x-0 z-30 mx-auto w-fit rounded-full border px-4 py-2 text-xs font-medium shadow-lg backdrop-blur-xl', dark ? 'border-white/10 bg-slate-950/90' : 'border-stone-200 bg-white/90')} style={{ bottom: 'calc(6rem + var(--shuku-safe-area-bottom))' }}>
@@ -816,32 +934,13 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
       ) : null}
 
       {panel ? (
-        <aside
-          ref={panelElementRef}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="reader-panel-title"
-          tabIndex={-1}
-          className={cn(
-            'shuku-reader-mobile-panel fixed inset-x-0 z-30 flex w-full flex-col overflow-hidden overscroll-contain rounded-t-3xl border-t p-4 shadow-2xl backdrop-blur-2xl md:inset-x-auto md:left-5 md:rounded-3xl md:border md:p-5',
-            (panel === 'toc' || panel === 'bookmarks') && 'shuku-reader-list-panel',
-            panel === 'toc' || panel === 'bookmarks'
-              ? 'md:w-[min(24rem,calc(100vw-2.5rem))]'
-              : panel === 'settings'
-                ? 'md:w-[min(24rem,calc(100vw-2.5rem))]'
-                : 'md:w-[min(26rem,calc(100vw-2.5rem))]',
-            dark ? 'border-white/10 bg-slate-950/95' : 'border-stone-200/90 bg-[#fffaf2]/95'
-          )}
+        <div
+          key={panel}
+          className="shuku-reader-control-workspace flex h-full min-w-0 flex-1 flex-col overflow-hidden overscroll-contain p-4 md:p-5"
           style={{
-            paddingTop: '1rem',
-            paddingBottom: 'var(--shuku-reader-panel-padding-bottom)',
             paddingLeft: 'calc(1rem + var(--shuku-safe-area-left))',
-            paddingRight: 'calc(1rem + var(--shuku-safe-area-right))',
-            ...(panelPlacement ? { left: `${panelPlacement.left}px`, bottom: `${panelPlacement.bottom}px` } : {})
+            paddingRight: 'calc(1rem + var(--shuku-safe-area-right))'
           }}
-          data-reader-control="true"
-          data-reader-panel={panel}
-          id="reader-panel"
           onClick={stopControlEvent}
         >
           <div className="flex items-center justify-between gap-3">
@@ -849,15 +948,19 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
               <div id="reader-panel-title" className="text-sm font-semibold">
                 {panel === 'toc'
                   ? i18nAttribute("目录")
+                  : panel === 'notes'
+                    ? i18nAttribute("笔记")
                   : panel === 'bookmarks'
                     ? i18nAttribute("书签")
-                    : panel === 'settings'
-                      ? readerType === 'reflowable' ? i18nAttribute("小说排版") : i18nAttribute("阅读设置")
-                      : panel === 'annotations' ? i18nAttribute("标注与批注") : i18nAttribute("阅读进度")}
+                    : panel === 'appearance'
+                      ? i18nAttribute("外观")
+                      : panel === 'settings'
+                        ? i18nAttribute("设置")
+                        : i18nAttribute("标注与批注")}
               </div>
-              {panel === 'settings' ? null : (
+              {panel === 'settings' || panel === 'appearance' ? null : (
                 <div className="mt-0.5 text-xs opacity-60">
-                  {panel === 'bookmarks' ? i18nAttribute("{value0} 个书签", { value0: orderedBookmarks.length }) : progressDetail}
+                  {panel === 'bookmarks' || panel === 'notes' ? i18nAttribute("{value0} 个书签", { value0: orderedBookmarks.length }) : progressDetail}
                 </div>
               )}
             </div>
@@ -873,9 +976,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
               activeItemKey={currentNavigationItem ? navigationItemKey(currentNavigationItem) : null}
               dark={dark}
               onJumpItem={(item) => {
-                volumeNavigation.onSelectItem(item);
-                closePanel();
-                keepControlsOpen();
+                void jumpToItem(item);
               }}
             />
           ) : null}
@@ -884,15 +985,15 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
             <div data-pwa-scroll="true" className="mt-5 min-h-0 flex-1 overflow-auto overscroll-contain pr-1">
               {navItems.length === 0 ? <div className="py-6 text-sm opacity-60"><I18nText>暂无可跳转条目</I18nText></div> : null}
               <div className="space-y-1">
-                {navItems.map((item) => (
+                {navItems.map((item, itemIndex) => (
                   <button
                     key={`${item.index}-${item.title}`}
                     type="button"
                     aria-current={currentNavigationItem && navigationItemKey(item) === navigationItemKey(currentNavigationItem) ? 'location' : undefined}
                     onClick={() => { void jumpToItem(item); }}
-                    className={cn('flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition active:scale-[0.99]', currentNavigationItem && navigationItemKey(item) === navigationItemKey(currentNavigationItem) ? 'bg-amber-700 text-white' : 'hover:bg-white/10')}
+                    className={cn('flex min-h-11 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left text-sm transition active:scale-[0.99]', currentNavigationItem && navigationItemKey(item) === navigationItemKey(currentNavigationItem) ? 'border-amber-700 bg-amber-700 text-white' : dark ? 'border-white/10 bg-white/[0.04] hover:bg-white/10' : 'border-stone-900/[0.08] bg-white/55 hover:bg-white/80')}
                   >
-                    <span className="w-9 shrink-0 tabular-nums opacity-60">{item.index}</span>
+                    <span className="w-9 shrink-0 tabular-nums opacity-60">{itemIndex + 1}</span>
                     <span className="line-clamp-2">{item.title}</span>
                   </button>
                 ))}
@@ -900,7 +1001,22 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
             </div>
           ) : null}
 
-          {panel === 'bookmarks' ? (
+          {panel === 'notes' && supportsTextAnnotations ? (
+            <ReaderSegmentedControl
+              ariaLabel={i18nAttribute("笔记")}
+              value={notesTab}
+              options={[
+                { value: 'bookmarks', label: i18nAttribute("书签") },
+                { value: 'annotations', label: i18nAttribute("标注") }
+              ]}
+              onChange={setNotesTab}
+              dark={dark}
+              behavior="tabs"
+              className="mt-4"
+            />
+          ) : null}
+
+          {panel === 'bookmarks' || (panel === 'notes' && notesTab === 'bookmarks') ? (
             <div className="mt-3 flex min-h-0 flex-1 flex-col">
               <button
                 type="button"
@@ -919,7 +1035,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
               </button>
               <div data-pwa-scroll="true" className="mt-3 min-h-0 flex-1 overflow-auto overscroll-contain pr-1">
                 {orderedBookmarks.length === 0 ? (
-                  <div className="flex min-h-32 flex-col items-center justify-center rounded-2xl border border-dashed border-current/15 px-5 text-center">
+                  <div className={cn('flex h-full min-h-40 flex-col items-center justify-center rounded-2xl border px-5 text-center', dark ? 'border-white/10 bg-white/[0.035]' : 'border-stone-900/10 bg-white/45')}>
                     <Bookmark size={22} className="opacity-35" />
                     <div className="mt-2 text-sm font-medium"><I18nText>还没有书签</I18nText></div>
                     <div className="mt-1 text-xs opacity-55"><I18nText>保存当前位置后，可从这里快速返回</I18nText></div>
@@ -963,44 +1079,19 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
             </div>
           ) : null}
 
-          {panel === 'progress' ? (
-            <div className="mt-6 space-y-5">
-              <div className="text-center">
-                <div className="text-3xl font-semibold tabular-nums">{precisePercent(progress.percent, readerType, locale)}%</div>
-                <div className="mt-1 text-xs opacity-60">{currentNavigationLabel ?? progressPageLabel(progress)}</div>
-                {locationLabel ? <div className="mt-2 text-sm tabular-nums opacity-75">{locationLabel}</div> : null}
-                {sectionRemaining || totalRemaining ? (
-                  <div className="mt-2 flex flex-wrap justify-center gap-x-3 gap-y-1 text-xs opacity-60">
-                    {sectionRemaining ? <span>{i18nAttribute('本节剩余：{value0}', { value0: sectionRemaining })}</span> : null}
-                    {totalRemaining ? <span>{i18nAttribute('全书剩余：{value0}', { value0: totalRemaining })}</span> : null}
-                  </div>
-                ) : null}
-              </div>
-              <input
-                aria-label={i18nAttribute("阅读进度")}
-                type="range"
-                min={0}
-                max={100}
-                value={progressScrubPercent ?? clampPercent(progress.percent)}
-                disabled={!controls || capabilities?.canJumpToProgress === false}
-                onChange={(event) => void jumpToPercent(Number(event.target.value), true)}
-                onBlur={flushPendingProgressJump}
-                className="h-12 w-full cursor-pointer disabled:cursor-not-allowed"
-                style={{ accentColor }}
-              />
-              <div className="grid grid-cols-2 gap-3">
-                <Button aria-label={i18nAttribute("上一页")} disabled={!controls || capabilities?.canGoPrevious === false} variant="ghost" icon={ChevronLeft} className={cn('min-h-12 border border-current/10', dark ? 'text-slate-100 hover:bg-white/10' : '')} onClick={() => { void controls?.prev(); keepControlsOpen(); }}><I18nText>上一页</I18nText></Button>
-                <Button aria-label={i18nAttribute("下一页")} disabled={!controls || capabilities?.canGoNext === false} variant="ghost" icon={ChevronRight} className={cn('min-h-12 border border-current/10', dark ? 'text-slate-100 hover:bg-white/10' : '')} onClick={() => { void controls?.next(); keepControlsOpen(); }}><I18nText>下一页</I18nText></Button>
-              </div>
-            </div>
-          ) : null}
-
-          {panel === 'annotations' ? (
+          {panel === 'annotations' || (panel === 'notes' && notesTab === 'annotations') ? (
             <div className="mt-5 min-h-0 flex-1">
-              <div className={cn('grid grid-cols-2 gap-1 rounded-2xl p-1', dark ? 'bg-white/10' : 'bg-stone-900/5')} role="tablist" aria-label={i18nAttribute("标注分类")}>
-                <button type="button" role="tab" aria-selected={annotationTab === 'book'} onClick={() => setAnnotationTab('book')} className={cn('min-h-11 rounded-xl px-3 text-sm font-medium transition', annotationTab === 'book' ? dark ? 'bg-white/15 shadow-sm' : 'bg-white text-amber-800 shadow-sm' : 'opacity-60')}><I18nText>书内注释</I18nText></button>
-                <button type="button" role="tab" aria-selected={annotationTab === 'mine'} onClick={() => setAnnotationTab('mine')} className={cn('min-h-11 rounded-xl px-3 text-sm font-medium transition', annotationTab === 'mine' ? dark ? 'bg-white/15 shadow-sm' : 'bg-white text-amber-800 shadow-sm' : 'opacity-60')}><I18nText>我的标注</I18nText></button>
-              </div>
+              <ReaderSegmentedControl
+                ariaLabel={i18nAttribute("标注分类")}
+                value={annotationTab}
+                options={[
+                  { value: 'book', label: i18nAttribute("书内注释") },
+                  { value: 'mine', label: i18nAttribute("我的标注") }
+                ]}
+                onChange={setAnnotationTab}
+                dark={dark}
+                behavior="tabs"
+              />
               <div role="tabpanel" data-pwa-scroll="true" className="mt-4 min-h-0 overflow-auto rounded-2xl border border-current/10 p-5 text-center">
                 <Highlighter className="mx-auto opacity-45" size={24} />
                 <div className="mt-3 text-sm font-medium">{annotationTab === 'book' ? i18nAttribute("暂无可展示的书内注释") : i18nAttribute("还没有划线或批注")}</div>
@@ -1013,15 +1104,15 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
             </div>
           ) : null}
 
-          {panel === 'settings' ? (
+          {panel === 'appearance' ? (
             <div data-pwa-scroll="true" className="mt-3 min-h-0 flex-1 space-y-3 overflow-auto overscroll-contain pr-1 text-sm">
+              <ThemeSwatches
+                value={settings.theme}
+                onChange={(value) => updateSettings({ theme: value as ReaderTheme })}
+                dark={dark}
+              />
               {readerType === 'reflowable' ? (
-                <>
-                  <ThemeSwatches
-                    value={settings.theme}
-                    onChange={(value) => updateSettings({ theme: value as ReaderTheme })}
-                    dark={dark}
-                  />
+                <ReaderSettingsSection icon={Type} title={i18nAttribute("文字外观")} dark={dark}>
                   <CompactSettingOptions
                     label={i18nAttribute("字号")}
                     value={closestReaderOptionValue(settings.fontSize, readerFontSizeOptions)}
@@ -1052,150 +1143,130 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                     onChange={(value) => updateSettings({ pageWidth: Number(value) })}
                     dark={dark}
                   />
-                  <CompactSettingOptions
-                    label={i18nAttribute("排版")}
-                    value={settings.ebookFlow}
-                    options={READER_FLOW_OPTIONS}
-                    onChange={(value) => updateSettings({ ebookFlow: value as EbookFlow })}
-                    dark={dark}
-                  />
-                </>
+                </ReaderSettingsSection>
               ) : readerType === 'comic' ? (
-                <>
-                  <ThemeSwatches
-                    value={settings.theme}
-                    onChange={(value) => updateSettings({ theme: value as ReaderTheme })}
-                    dark={dark}
-                  />
-                  <CompactSettingOptions
-                    label={i18nAttribute("模式")}
-                    value={settings.comicMode}
-                    options={READER_SPREAD_MODE_OPTIONS}
-                    onChange={(value) => updateSettings({ comicMode: value as ComicMode })}
-                    dark={dark}
-                  />
-                  <CompactSettingOptions
-                    label={i18nAttribute("翻页")}
-                    value={settings.comicPageTurnAnimation}
-                    options={READER_PAGE_TURN_ANIMATION_OPTIONS}
-                    onChange={(value) => updateSettings({ comicPageTurnAnimation: value as ComicPageTurnAnimation })}
-                    dark={dark}
-                  />
-                  <CompactSettingOptions
-                    label={i18nAttribute("适配")}
-                    value={settings.imageFit}
-                    options={READER_COMIC_IMAGE_FIT_OPTIONS}
-                    onChange={(value) => updateSettings({ imageFit: value as ComicImageFit })}
-                    dark={dark}
-                  />
-                  <CompactSettingOptions
-                    label={i18nAttribute("画质")}
-                    value={settings.imageVariant}
-                    options={READER_COMIC_IMAGE_VARIANT_OPTIONS}
-                    onChange={(value) => updateSettings({ imageVariant: value as ComicImageVariant })}
-                    dark={dark}
-                  />
-                  <CompactSettingOptions
-                    label={i18nAttribute("方向")}
-                    value={settings.comicDirection}
-                    options={READER_COMIC_DIRECTION_OPTIONS}
-                    onChange={(value) => updateSettings({ comicDirection: value as ComicDirection })}
-                    dark={dark}
-                  />
+                <ReaderSettingsSection icon={Palette} title={i18nAttribute("画面外观")} dark={dark}>
                   {capabilities?.canZoom !== false ? <CompactStepper label={i18nAttribute("缩放")} value={`${Math.round(settings.comicZoom * 100)}%`} onMinus={() => updateSettings({ comicZoom: Math.max(0.6, Number((settings.comicZoom - 0.1).toFixed(1))) })} onPlus={() => updateSettings({ comicZoom: Math.min(2.4, Number((settings.comicZoom + 0.1).toFixed(1))) })} dark={dark} /> : null}
-                </>
+                </ReaderSettingsSection>
               ) : (
-                <>
-                  <ThemeSwatches
-                    value={settings.theme}
-                    onChange={(value) => updateSettings({ theme: value as ReaderTheme })}
-                    dark={dark}
-                  />
+                <ReaderSettingsSection icon={Palette} title={i18nAttribute("页面外观")} dark={dark}>
                   {capabilities?.canZoom !== false ? <CompactStepper label={i18nAttribute("缩放")} value={`${Math.round(settings.pdfZoom * 100)}%`} onMinus={() => updateSettings({ pdfZoom: Math.max(0.6, Number((settings.pdfZoom - 0.1).toFixed(1))) })} onPlus={() => updateSettings({ pdfZoom: Math.min(2.4, Number((settings.pdfZoom + 0.1).toFixed(1))) })} dark={dark} /> : null}
-                  <CompactSettingOptions
-                    label={i18nAttribute("适配")}
-                    value={settings.pdfFit}
-                    options={READER_PDF_FIT_OPTIONS}
-                    onChange={(value) => updateSettings({ pdfFit: value as PdfFit })}
-                    dark={dark}
-                  />
-                </>
+                </ReaderSettingsSection>
               )}
+            </div>
+          ) : null}
+
+          {panel === 'settings' ? (
+            <div data-pwa-scroll="true" className="mt-3 min-h-0 flex-1 space-y-3 overflow-auto overscroll-contain pr-1 text-sm">
+              <ReaderSettingsSection icon={BookOpen} title={i18nAttribute("翻页设置")} dark={dark}>
+                {readerType === 'reflowable' ? (
+                  <CompactSettingOptions label={i18nAttribute("动画")} value={settings.ebookPageTurnAnimation} options={READER_PAGE_TURN_ANIMATION_OPTIONS} onChange={(value) => updateSettings({ ebookPageTurnAnimation: value as EbookPageTurnAnimation })} dark={dark} />
+                ) : readerType === 'comic' ? (
+                  <CompactSettingOptions label={i18nAttribute("动画")} value={settings.comicPageTurnAnimation} options={READER_PAGE_TURN_ANIMATION_OPTIONS} onChange={(value) => updateSettings({ comicPageTurnAnimation: value as ComicPageTurnAnimation })} dark={dark} />
+                ) : null}
+                <CompactSettingOptions label={i18nAttribute("点击区域")} value={settings.tapZones} options={READER_TAP_ZONE_OPTIONS} onChange={(value) => updateSettings({ tapZones: value as ReaderSettings['tapZones'] })} dark={dark} />
+                <ReaderToggleRow label={i18nAttribute("滑动翻页")} checked={settings.swipePageTurn} onChange={(checked) => updateSettings({ swipePageTurn: checked })} dark={dark} />
+              </ReaderSettingsSection>
+
+              <ReaderSettingsSection icon={LayoutTemplate} title={i18nAttribute("排版")} dark={dark}>
+                {readerType === 'reflowable' ? (
+                  <>
+                    <CompactSettingOptions label={i18nAttribute("阅读方式")} value={settings.ebookFlow} options={READER_FLOW_OPTIONS} onChange={(value) => updateSettings({ ebookFlow: value as EbookFlow })} dark={dark} />
+                    <CompactSettingOptions label={i18nAttribute("页面")} value={settings.ebookSpreadMode} options={READER_SPREAD_MODE_OPTIONS} onChange={(value) => updateSettings({ ebookSpreadMode: value as EbookSpreadMode })} dark={dark} />
+                  </>
+                ) : readerType === 'comic' ? (
+                  <>
+                    <CompactSettingOptions label={i18nAttribute("模式")} value={settings.comicMode} options={READER_SPREAD_MODE_OPTIONS} onChange={(value) => updateSettings({ comicMode: value as ComicMode })} dark={dark} />
+                    <CompactSettingOptions label={i18nAttribute("方向")} value={settings.comicDirection} options={READER_COMIC_DIRECTION_OPTIONS} onChange={(value) => updateSettings({ comicDirection: value as ComicDirection })} dark={dark} />
+                    <CompactSettingOptions label={i18nAttribute("适配")} value={settings.imageFit} options={READER_COMIC_IMAGE_FIT_OPTIONS} onChange={(value) => updateSettings({ imageFit: value as ComicImageFit })} dark={dark} />
+                  </>
+                ) : (
+                  <CompactSettingOptions label={i18nAttribute("适配")} value={settings.pdfFit} options={READER_PDF_FIT_OPTIONS} onChange={(value) => updateSettings({ pdfFit: value as PdfFit })} dark={dark} />
+                )}
+              </ReaderSettingsSection>
+
+              {readerType === 'reflowable' ? (
+                <ReaderSettingsSection icon={Sparkles} title={i18nAttribute("智能优化")} dark={dark}>
+                  <ReaderToggleRow label={i18nAttribute("安全优化")} description={i18nAttribute("避免重复缩进，并为普通正文补齐段首缩进")} checked={settings.smartOptimization} onChange={(checked) => updateSettings({ smartOptimization: checked })} dark={dark} />
+                  <ReaderToggleRow label={i18nAttribute("重复缩进去重")} checked={settings.deduplicateIndent} disabled={!settings.smartOptimization} onChange={(checked) => updateSettings({ deduplicateIndent: checked })} dark={dark} />
+                  <ReaderToggleRow label={i18nAttribute("无缩进正文补齐")} checked={settings.indentUnindented} disabled={!settings.smartOptimization} onChange={(checked) => updateSettings({ indentUnindented: checked })} dark={dark} />
+                </ReaderSettingsSection>
+              ) : null}
+
+              <section className={cn('overflow-hidden rounded-2xl border', dark ? 'border-white/12 bg-white/[0.035]' : 'border-stone-900/10 bg-white/45')}>
+                <button type="button" className="flex min-h-14 w-full items-center gap-3 px-4 text-left" aria-expanded={advancedSettingsOpen} aria-controls="reader-advanced-settings" onClick={() => setAdvancedSettingsOpen((open) => !open)}>
+                  <SlidersHorizontal size={18} className="shrink-0 opacity-70" />
+                  <span className="min-w-0 flex-1 font-semibold"><I18nText>高级设置</I18nText></span>
+                  <ChevronDown size={18} className={cn('shrink-0 transition-transform duration-300 motion-reduce:transition-none', advancedSettingsOpen ? 'rotate-180' : '')} />
+                </button>
+                <div id="reader-advanced-settings" className="shuku-reader-advanced-settings" data-expanded={advancedSettingsOpen ? 'true' : 'false'}>
+                  <div className="min-h-0 space-y-3 border-t border-current/10 p-3">
+                    {readerType === 'reflowable' ? (
+                      <ReaderSettingsSection icon={Type} title={i18nAttribute("段落与内容样式")} dark={dark} nested>
+                        <CompactSettingOptions label={i18nAttribute("段首缩进")} value={String(settings.paragraphIndent)} options={READER_PARAGRAPH_INDENT_OPTIONS} onChange={(value) => updateSettings({ paragraphIndent: Number(value) })} dark={dark} />
+                        <CompactSettingOptions label={i18nAttribute("段间距")} value={String(settings.paragraphSpacing)} options={READER_PARAGRAPH_SPACING_OPTIONS} onChange={(value) => updateSettings({ paragraphSpacing: Number(value) })} dark={dark} />
+                        <CompactSettingOptions label={i18nAttribute("文本对齐")} value={settings.textAlign} options={READER_TEXT_ALIGN_OPTIONS} onChange={(value) => updateSettings({ textAlign: value as ReaderSettings['textAlign'] })} dark={dark} />
+                        <ReaderToggleRow label={i18nAttribute("保留出版方行高")} checked={settings.preservePublisherStyles} onChange={(checked) => updateSettings({ preservePublisherStyles: checked })} dark={dark} />
+                        <ReaderToggleRow label={i18nAttribute("允许出版方颜色")} checked={settings.allowPublisherColors} onChange={(checked) => updateSettings({ allowPublisherColors: checked })} dark={dark} />
+                        <ReaderToggleRow label={i18nAttribute("允许出版方字体")} checked={settings.allowPublisherFonts} onChange={(checked) => updateSettings({ allowPublisherFonts: checked })} dark={dark} />
+                      </ReaderSettingsSection>
+                    ) : readerType === 'comic' ? (
+                      <ReaderSettingsSection icon={Palette} title={i18nAttribute("漫画画面")} dark={dark} nested>
+                        <CompactSettingOptions label={i18nAttribute("画质")} value={settings.imageVariant} options={READER_COMIC_IMAGE_VARIANT_OPTIONS} onChange={(value) => updateSettings({ imageVariant: value as ComicImageVariant })} dark={dark} />
+                      </ReaderSettingsSection>
+                    ) : null}
+                    <ReaderSettingsSection icon={MousePointer2} title={i18nAttribute("操作方式")} dark={dark} nested>
+                      <ReaderToggleRow label={i18nAttribute("键盘翻页")} checked={settings.keyboardPageTurn} onChange={(checked) => updateSettings({ keyboardPageTurn: checked })} dark={dark} />
+                      <ReaderToggleRow label={i18nAttribute("音量键翻页")} description={i18nAttribute("默认关闭，部分浏览器可能不会转发音量键事件")} checked={settings.volumeKeyPageTurn} onChange={(checked) => updateSettings({ volumeKeyPageTurn: checked })} dark={dark} />
+                    </ReaderSettingsSection>
+                  </div>
+                </div>
+              </section>
+
               {onResetSettings ? (
                 <button
                   type="button"
                   onClick={() => { void onResetSettings(); keepControlsOpen(); }}
-                  aria-label={i18nAttribute("恢复本书默认设置")}
+                  aria-label={i18nAttribute("恢复阅读默认设置")}
                   className={cn('flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-current/10 px-3 text-xs font-medium transition active:scale-[0.98]', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}
                 >
                   <RotateCcw size={15} />
-                  <I18nText>恢复默认</I18nText></button>
+                  <I18nText>恢复阅读默认设置</I18nText></button>
               ) : null}
             </div>
           ) : null}
-        </aside>
+
+          <div className={cn('mt-auto grid min-h-[4.5rem] shrink-0 grid-cols-4 border-t px-1 pt-2 md:mx-auto md:w-full md:max-w-lg', dark ? 'border-white/10' : 'border-stone-900/10')}>
+            <ReaderControlNavButton icon={ListTree} label={i18nAttribute("目录")} selected={panel === 'toc'} expanded={panel === 'toc'} panelTrigger="toc" onClick={(event) => togglePanel('toc', event.currentTarget)} dark={dark} />
+            <ReaderControlNavButton
+              icon={NotebookPen}
+              label={i18nAttribute("笔记")}
+              active={bookmarkActive}
+              selected={panel === 'notes'}
+              expanded={panel === 'notes'}
+              panelTrigger="notes"
+              onClick={(event) => {
+                if (panel !== 'notes') setNotesTab('bookmarks');
+                togglePanel('notes', event.currentTarget);
+              }}
+              dark={dark}
+            />
+            <ReaderControlNavButton icon={Palette} label={i18nAttribute("外观")} selected={panel === 'appearance'} expanded={panel === 'appearance'} panelTrigger="appearance" onClick={(event) => togglePanel('appearance', event.currentTarget)} dark={dark} />
+            <ReaderControlNavButton icon={Settings} label={i18nAttribute("设置")} selected={panel === 'settings'} expanded={panel === 'settings'} panelTrigger="settings" onClick={(event) => togglePanel('settings', event.currentTarget)} dark={dark} />
+          </div>
+        </div>
       ) : null}
+        </div>
+      </div>
       </div>
     </div>
-  );
-}
-
-function ReaderDockButton({ icon: Icon, label, ariaLabel, active = false, selected = false, expanded, panelTrigger, prominent = false, disabled = false, onClick, dark, className }: {
-  icon: LucideIcon;
-  label: string;
-  ariaLabel?: string;
-  active?: boolean;
-  selected?: boolean;
-  expanded?: boolean;
-  panelTrigger?: ReaderPanel;
-  prominent?: boolean;
-  disabled?: boolean;
-  onClick: (event: MouseEvent<HTMLButtonElement>) => void;
-  dark: boolean;
-  className?: string;
-}) {
-  const { t: i18nAttribute } = useAttributeI18n();
-  return (
-    <button
-      type="button"
-      aria-label={ariaLabel ?? label}
-      aria-pressed={active || undefined}
-      aria-expanded={expanded}
-      aria-controls={expanded ? 'reader-panel' : undefined}
-      data-reader-panel-trigger={panelTrigger}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        'group flex min-w-0 flex-1 rounded-2xl p-1.5 text-[11px] font-medium transition active:scale-[0.97] disabled:pointer-events-none disabled:opacity-35 md:w-[4.75rem] md:flex-none',
-        selected
-          ? dark ? 'text-amber-400' : 'text-amber-700'
-          : active ? 'text-amber-600' : '',
-        className
-      )}
-    >
-      <span
-        data-reader-dock-surface="true"
-        data-reader-dock-selection-surface={selected ? 'true' : undefined}
-        className={cn(
-          'flex h-full min-w-0 w-full flex-col items-center justify-center gap-1 rounded-[0.95rem] px-1 transition-colors',
-          selected
-            ? dark ? 'bg-white/10' : 'bg-amber-700/10'
-            : dark ? 'group-hover:bg-white/10' : 'group-hover:bg-stone-900/5'
-        )}
-      >
-        <span className={cn('flex items-center justify-center', prominent ? 'h-9 w-9 rounded-full bg-amber-700 text-white shadow-sm' : '')}>
-          <Icon size={prominent ? 18 : 19} strokeWidth={1.8} fill={active ? 'currentColor' : 'none'} />
-        </span>
-        <span className="max-w-full truncate">{i18nAttribute(label)}</span>
-      </span>
-    </button>
   );
 }
 
 function ThemeSwatches({ value, onChange, dark }: { value: ReaderTheme; onChange: (value: ReaderTheme) => void; dark: boolean }) {
   const { t: i18nAttribute } = useAttributeI18n();
   return (
-    <div role="group" aria-label={i18nAttribute("主题")} className={cn('flex items-center justify-center gap-3 rounded-2xl p-1.5', dark ? 'bg-white/[0.06]' : 'bg-stone-900/[0.04]')}>
+    <div role="group" aria-label={i18nAttribute("主题")} className={cn('flex items-center justify-center gap-3 rounded-2xl border p-1.5', dark ? 'border-white/10 bg-white/[0.06]' : 'border-stone-900/[0.07] bg-stone-900/[0.055]')}>
       {READER_THEME_OPTIONS.map((option) => {
         const selected = value === option.value;
         const surface = readerThemeSurfaces[option.value];
@@ -1231,37 +1302,19 @@ function CompactSettingOptions({ label, value, options, onChange, dark, disabled
   return (
     <div className={cn('flex items-center gap-3', disabled && 'opacity-45')}>
       <span className="w-9 shrink-0 text-xs font-medium opacity-55">{i18nAttribute(label)}</span>
-      <div
-        role="group"
-        aria-label={i18nAttribute(label)}
-        className={cn('grid min-w-0 flex-1 gap-1 rounded-xl p-1', dark ? 'bg-white/[0.07]' : 'bg-stone-900/[0.05]')}
-        style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
-        aria-disabled={disabled}
-      >
-        {options.map((option) => {
-          const Icon = option.icon;
-          const selected = value === option.value;
-          return (
-            <button
-              key={option.value}
-              type="button"
-              aria-label={i18nAttribute(disambiguateLabels ? `${label}${option.label}` : option.label)}
-              aria-pressed={selected}
-              disabled={disabled}
-              onClick={() => onChange(option.value)}
-              className={cn(
-                'flex min-h-9 min-w-0 items-center justify-center gap-1 rounded-lg px-1 text-xs font-medium transition active:scale-[0.97]',
-                selected
-                  ? dark ? 'bg-white/15 text-amber-300 shadow-sm' : 'bg-white text-amber-800 shadow-sm'
-                  : dark ? 'opacity-65 hover:bg-white/[0.07] hover:opacity-100' : 'opacity-60 hover:bg-white/55 hover:opacity-100'
-              )}
-            >
-              {Icon ? <Icon size={15} strokeWidth={1.8} /> : null}
-              <span className="truncate">{i18nAttribute(option.label)}</span>
-            </button>
-          );
-        })}
-      </div>
+      <ReaderSegmentedControl
+        ariaLabel={i18nAttribute(label)}
+        value={value}
+        options={options.map((option) => ({
+          ...option,
+          label: i18nAttribute(option.label),
+          ariaLabel: i18nAttribute(disambiguateLabels ? `${label}${option.label}` : option.label)
+        }))}
+        onChange={onChange}
+        dark={dark}
+        disabled={disabled}
+        className="flex-1"
+      />
     </div>
   );
 }
@@ -1271,7 +1324,7 @@ function CompactStepper({ label, value, onMinus, onPlus, dark }: { label: string
   return (
     <div className="flex items-center gap-3">
       <span className="w-9 shrink-0 text-xs font-medium opacity-55">{i18nAttribute(label)}</span>
-      <div className={cn('flex min-w-0 flex-1 items-center rounded-xl p-1', dark ? 'bg-white/[0.07]' : 'bg-stone-900/[0.05]')}>
+      <div className={cn('flex min-w-0 flex-1 items-center rounded-xl border p-1', dark ? 'border-white/10 bg-white/[0.07]' : 'border-stone-900/[0.07] bg-stone-900/[0.055]')}>
         <button type="button" onClick={onMinus} className={cn('flex h-9 w-9 items-center justify-center rounded-lg transition active:scale-[0.97]', dark ? 'hover:bg-white/10' : 'hover:bg-white/60')} aria-label={i18nAttribute("{value0}减少", { value0: label })}>
           <Minus size={14} />
         </button>
@@ -1281,6 +1334,47 @@ function CompactStepper({ label, value, onMinus, onPlus, dark }: { label: string
         </button>
       </div>
     </div>
+  );
+}
+
+function ReaderSettingsSection({ icon: Icon, title, dark, nested = false, children }: {
+  icon: LucideIcon;
+  title: string;
+  dark: boolean;
+  nested?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <section className={cn(
+      'rounded-2xl border p-3',
+      nested ? 'border-current/10 bg-transparent' : dark ? 'border-white/12 bg-white/[0.035]' : 'border-stone-900/10 bg-white/45'
+    )}>
+      <div className="mb-3 flex items-center gap-2 px-1 text-xs font-semibold">
+        <Icon size={16} className="opacity-65" />
+        <span>{title}</span>
+      </div>
+      <div className="space-y-2.5">{children}</div>
+    </section>
+  );
+}
+
+function ReaderToggleRow({ label, description, checked, disabled = false, onChange, dark }: {
+  label: string;
+  description?: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+  dark: boolean;
+}) {
+  return (
+    <label className={cn('flex min-h-11 items-center gap-3 rounded-xl border px-3 py-2', disabled && 'opacity-45', dark ? 'border-white/10 bg-white/[0.045]' : 'border-stone-900/[0.07] bg-white/55')}>
+      <span className="min-w-0 flex-1">
+        <span className="block text-xs font-medium">{label}</span>
+        {description ? <span className="mt-0.5 block text-[11px] leading-4 opacity-55">{description}</span> : null}
+      </span>
+      <input type="checkbox" className="peer sr-only" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
+      <span aria-hidden="true" className={cn('relative h-6 w-11 shrink-0 rounded-full border transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow-sm after:transition-transform peer-checked:after:translate-x-5 peer-focus-visible:ring-2 peer-focus-visible:ring-amber-600/60', checked ? 'border-amber-700 bg-amber-700' : dark ? 'border-white/20 bg-white/10' : 'border-stone-900/15 bg-stone-900/10')} />
+    </label>
   );
 }
 
@@ -1332,7 +1426,7 @@ function VolumeNavigationPanel({ navigation, readerType, activeItemKey, dark, on
       <VolumeNavigationGroup title={isComic ? (showVolumes ? i18nAttribute("当前卷页码") : i18nAttribute("页码")) : (showVolumes ? i18nAttribute("当前卷章节") : i18nAttribute("章节"))}>
         {navigation.pages.length === 0 ? <div className="py-6 text-sm opacity-60">{isComic ? i18nAttribute("暂无可跳转页码") : i18nAttribute("暂无可跳转章节")}</div> : null}
         <div className={isComic ? 'grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-3' : 'space-y-1'}>
-          {navigation.pages.map((item) => (
+          {navigation.pages.map((item, itemIndex) => (
             <button
               key={`${item.index}-${item.title}`}
               type="button"
@@ -1341,12 +1435,12 @@ function VolumeNavigationPanel({ navigation, readerType, activeItemKey, dark, on
               onClick={() => onJumpItem(item)}
               className={cn(
                 isComic ? 'min-h-11 rounded-xl px-2 text-sm tabular-nums transition active:scale-[0.98] disabled:cursor-wait disabled:opacity-60' : 'flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition active:scale-[0.99] disabled:cursor-wait disabled:opacity-60',
-                activeItemKey && navigationItemKey(item) === activeItemKey ? 'bg-amber-700 text-white' : dark ? 'bg-white/10 hover:bg-white/15' : 'bg-stone-100 hover:bg-stone-200'
+                activeItemKey && navigationItemKey(item) === activeItemKey ? 'bg-amber-700 text-white' : dark ? 'border border-white/10 bg-white/[0.05] hover:bg-white/10' : 'border border-stone-900/[0.08] bg-white/55 hover:bg-white/80'
               )}
             >
               {isComic ? item.index : (
                 <>
-                  <span className="w-9 shrink-0 tabular-nums opacity-60">{item.index}</span>
+                  <span className="w-9 shrink-0 tabular-nums opacity-60">{itemIndex + 1}</span>
                   <span className="line-clamp-2">{item.title}</span>
                 </>
               )}

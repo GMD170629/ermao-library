@@ -138,8 +138,16 @@ def parse_event_date_bounds(
     date_from: str | None,
     date_to: str | None,
 ) -> tuple[int | None, int | None]:
-    date_from_ms = to_timestamp_ms(f"{date_from}T00:00:00") if date_from else None
-    date_to_ms = to_timestamp_ms(f"{date_to}T00:00:00") if date_to else None
+    date_from_ms = (
+        to_timestamp_ms(date_from if "T" in date_from else f"{date_from}T00:00:00")
+        if date_from
+        else None
+    )
+    date_to_ms = (
+        to_timestamp_ms(date_to if "T" in date_to else f"{date_to}T00:00:00")
+        if date_to
+        else None
+    )
     return date_from_ms, date_to_ms
 
 

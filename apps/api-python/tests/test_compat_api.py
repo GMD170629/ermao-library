@@ -891,7 +891,7 @@ def test_shelf_list_is_summary_and_detail_is_lightweight_paginated(client, db_se
     assert detailed["totalPages"] == 3
     assert [book["id"] for book in detailed["books"]] == book_ids[10:20]
     assert "bookIds" not in detailed
-    assert len(statements) < 60
+    assert len(statements) <= 22
 
     updated = client.patch(f"/api/shelves/{shelf['id']}", json={"bookIds": []})
     assert updated.status_code == 200
@@ -3397,7 +3397,26 @@ def test_import_tasks_are_server_paginated_with_global_summary(client, db_sessio
     )
     db_session.commit()
 
-    first = client.get("/api/import-tasks")
+    select_count = 0
+
+    def count_selects(
+        _connection,
+        _cursor,
+        statement,
+        _parameters,
+        _context,
+        _executemany,
+    ):
+        nonlocal select_count
+        if statement.lstrip().upper().startswith("SELECT"):
+            select_count += 1
+
+    engine = db_session.get_bind()
+    event.listen(engine, "before_cursor_execute", count_selects)
+    try:
+        first = client.get("/api/import-tasks")
+    finally:
+        event.remove(engine, "before_cursor_execute", count_selects)
     assert first.status_code == 200
     first_data = first.json()["data"]
     assert first_data["page"] == 1
@@ -3409,6 +3428,7 @@ def test_import_tasks_are_server_paginated_with_global_summary(client, db_sessio
     ]
     assert first_data["summary"] == {"completed": 12, "failed": 5}
     assert all("duplicate" not in task for task in first_data["tasks"])
+    assert select_count <= 15
 
     second = client.get("/api/import-tasks?page=2&pageSize=10")
     assert second.status_code == 200

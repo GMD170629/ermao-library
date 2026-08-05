@@ -78,6 +78,12 @@ export type ReaderPreferences = {
   appearance: {
     theme: ReaderTheme;
   };
+  interaction: {
+    tapZones: 'standard' | 'reversed' | 'disabled';
+    swipePageTurn: boolean;
+    keyboardPageTurn: boolean;
+    volumeKeyPageTurn: boolean;
+  };
   epub: {
     fontSize: number;
     lineHeight: number;
@@ -86,6 +92,19 @@ export type ReaderPreferences = {
     spreadMode: 'single' | 'double';
     pageTurnAnimation: 'slide' | 'off';
     flow: 'paginated' | 'scrolled';
+    typography: {
+      paragraphIndent: number;
+      paragraphSpacing: number;
+      textAlign: 'publisher' | 'left' | 'justify';
+      preservePublisherStyles: boolean;
+      allowPublisherColors: boolean;
+      allowPublisherFonts: boolean;
+    };
+    optimization: {
+      enabled: boolean;
+      deduplicateIndent: boolean;
+      indentUnindented: boolean;
+    };
   };
   comic: {
     direction: 'ltr' | 'rtl';

@@ -28,6 +28,7 @@ from app.modules.reader.application.volume_reader import (
     ReaderVolumeFormatUnsupported,
     ReaderVolumeNotFound,
     SaveProgressCommand,
+    SetVolumeReadingStatusCommand,
     VolumeReaderService,
 )
 from app.modules.reader.domain.volume_format import (
@@ -55,6 +56,9 @@ from app.modules.reader.presentation.v3_schemas import (
     ReaderProgressPut,
     ReaderProgressRecord,
     ReaderProgressResponse,
+    ReaderReadingStatusData,
+    ReaderReadingStatusPut,
+    ReaderReadingStatusResponse,
     ReaderUnauthorizedError,
     ReaderUnitSummary,
     ReaderValidationError,
@@ -324,6 +328,48 @@ def reader_bootstrap_v3(
             resumeLocation=_location(bootstrap.resume_location_json),
             resumeFingerprintMismatch=bootstrap.resume_fingerprint_mismatch,
             progressPercent=progress.percent if progress else 0,
+        )
+    )
+
+
+@router.put(
+    "/volumes/{volume_id}/reading-status",
+    response_model=ReaderReadingStatusResponse,
+    response_model_by_alias=True,
+)
+def set_volume_reading_status_v3(
+    volume_id: str,
+    payload: ReaderReadingStatusPut,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> Annotated[
+    ReaderReadingStatusResponse,
+    ErrorResponses(
+        ReaderUnauthorizedError,
+        ReaderNotFoundError,
+        ReaderValidationError,
+    ),
+]:
+    user = _current_user(db, request, settings)
+    if not can_access_volume(db, user, volume_id):
+        raise _not_found()
+    try:
+        progress = _service(db, settings).set_volume_reading_status(
+            SetVolumeReadingStatusCommand(
+                user_id=user.id,
+                volume_id=volume_id,
+                access_scope=_access_scope(db, user),
+                status=payload.status,
+            )
+        )
+    except (ReaderVolumeNotFound, ReaderVolumeFormatUnsupported) as error:
+        _raise_service_error(error)
+    return ReaderReadingStatusResponse(
+        data=ReaderReadingStatusData(
+            volumeId=volume_id,
+            status=payload.status,
+            percent=progress.percent if progress is not None else 0,
         )
     )
 

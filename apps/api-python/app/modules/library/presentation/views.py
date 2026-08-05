@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -227,10 +228,16 @@ def _detail_tab_order(db: Session) -> list[str]:
 
 
 def _detail_tabs(db: Session, available_media_kinds: set[str]) -> list[dict[str, Any]]:
+    return _detail_tabs_from_order(_detail_tab_order(db), available_media_kinds)
+
+
+def _detail_tabs_from_order(
+    tab_order: list[str] | tuple[str, ...], available_media_kinds: set[str]
+) -> list[dict[str, Any]]:
     visible = available_media_kinds | {"STRUCTURE"}
     return [
         {"key": key, "label": DETAIL_TAB_LABELS[key], "sortOrder": index}
-        for index, key in enumerate(_detail_tab_order(db))
+        for index, key in enumerate(tab_order)
         if key in visible
     ]
 
@@ -363,6 +370,31 @@ def _available_media_kinds(db: Session, work_id: str) -> list[str]:
     )
 
 
+def _available_media_kinds_by_work(
+    db: Session, work_ids: list[str]
+) -> dict[str, list[str]]:
+    if not work_ids:
+        return {}
+    rows = db.execute(
+        select(LibraryMediaVersion.work_id, LibraryMediaVersion.media_kind)
+        .where(LibraryMediaVersion.work_id.in_(work_ids))
+        .order_by(
+            LibraryMediaVersion.work_id.asc(),
+            case(
+                (LibraryMediaVersion.media_kind == "EBOOK", 0),
+                (LibraryMediaVersion.media_kind == "COMIC", 1),
+                (LibraryMediaVersion.media_kind == "AUDIOBOOK", 2),
+                else_=3,
+            ),
+            LibraryMediaVersion.id.asc(),
+        )
+    ).all()
+    media_kinds = {work_id: [] for work_id in work_ids}
+    for row in rows:
+        media_kinds.setdefault(str(row.work_id), []).append(str(row.media_kind))
+    return media_kinds
+
+
 def _bookshelf_work_view(
     work: dict[str, Any], media_kinds: list[str]
 ) -> dict[str, Any]:
@@ -378,17 +410,47 @@ def _bookshelf_work_view(
 
 
 def _bookshelf_item_view(db: Session, work: dict[str, Any]) -> dict[str, Any]:
+    return _bookshelf_item_view_with_media_kinds(
+        work,
+        _available_media_kinds(db, str(work["id"])),
+    )
+
+
+def _bookshelf_item_view_with_media_kinds(
+    work: dict[str, Any], media_kinds: list[str]
+) -> dict[str, Any]:
     return {
         "id": work["id"],
         "title": work.get("title") or "未命名作品",
         "author": work.get("author") or "未知作者",
         "coverUrl": _cover_url("works", work["id"], work, size="medium"),
-        "availableMediaKinds": _available_media_kinds(db, str(work["id"])),
+        "availableMediaKinds": media_kinds,
     }
+
+
+def _bookshelf_item_views(
+    db: Session, works: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    media_kinds_by_work = _available_media_kinds_by_work(
+        db, [str(work["id"]) for work in works]
+    )
+    return [
+        _bookshelf_item_view_with_media_kinds(
+            work,
+            media_kinds_by_work.get(str(work["id"]), []),
+        )
+        for work in works
+    ]
 
 
 def _book_search_item_view(db: Session, work: dict[str, Any]) -> dict[str, Any]:
     return _bookshelf_item_view(db, work)
+
+
+def _book_search_item_views(
+    db: Session, works: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    return _bookshelf_item_views(db, works)
 
 
 def _management_work_views(
@@ -674,19 +736,33 @@ def _reading_unit_view(unit: LibraryReadingUnit) -> dict[str, Any]:
     }
 
 
-def _work_view(
+@dataclass(frozen=True, slots=True)
+class _WorkViewBatch:
+    metadata_lookups: dict[str, dict[str, object]]
+    rows_by_work: dict[
+        str, list[tuple[LibraryMediaVersion, LibraryVolume]]
+    ]
+    progresses: dict[str, LibraryReadingProgress]
+    histories: dict[str, UserMediaHistory]
+    files: dict[str, list[LibraryFile]]
+    tab_order: tuple[str, ...]
+    saved_tabs: dict[str, str]
+
+
+def _load_work_view_batch(
     db: Session,
-    work: dict[str, Any],
-    user_id: str | None = None,
+    works: list[dict[str, Any]],
+    user_id: str | None,
     *,
-    volume_limit_per_media: int | None = None,
-    include_files: bool = True,
-) -> dict[str, Any]:
-    work_id = str(work["id"])
-    metadata_lookup = library_projections.latest_metadata_lookup_for_work(db, work_id)
+    include_files: bool,
+) -> _WorkViewBatch:
+    work_ids = [str(work["id"]) for work in works]
     user = db.get(User, user_id) if user_id else None
     context = authorization_context(db, user) if user is not None else None
-    filters = [LibraryMediaVersion.work_id == work_id, LibraryVolume.hidden.is_(False)]
+    filters = [
+        LibraryMediaVersion.work_id.in_(work_ids),
+        LibraryVolume.hidden.is_(False),
+    ]
     if context is not None:
         filters.append(volume_visibility_predicate(context))
     rows = db.execute(
@@ -694,15 +770,24 @@ def _work_view(
         .join(LibraryVolume, LibraryVolume.media_version_id == LibraryMediaVersion.id)
         .where(*filters)
         .order_by(
+            LibraryMediaVersion.work_id.asc(),
             LibraryVolume.sort_order.asc(),
             LibraryVolume.created_at.asc(),
             LibraryVolume.id.asc(),
         )
     ).all()
-    grouped: dict[str, tuple[LibraryMediaVersion, list[LibraryVolume]]] = {}
+    rows_by_work: dict[
+        str, list[tuple[LibraryMediaVersion, LibraryVolume]]
+    ] = {work_id: [] for work_id in work_ids}
+    volume_ids: list[str] = []
+    media_version_ids: list[str] = []
     for media_version, volume in rows:
-        grouped.setdefault(media_version.id, (media_version, []))[1].append(volume)
-    volume_ids = [volume.id for _media, volume in rows]
+        rows_by_work.setdefault(media_version.work_id, []).append(
+            (media_version, volume)
+        )
+        volume_ids.append(volume.id)
+        media_version_ids.append(media_version.id)
+
     progresses = (
         {
             progress.volume_id: progress
@@ -717,6 +802,136 @@ def _work_view(
         else {}
     )
     histories = (
+        {
+            history.media_version_id: history
+            for history in db.scalars(
+                select(UserMediaHistory).where(
+                    UserMediaHistory.user_id == user_id,
+                    UserMediaHistory.media_version_id.in_(media_version_ids),
+                )
+            ).all()
+        }
+        if user_id and media_version_ids
+        else {}
+    )
+    files: dict[str, list[LibraryFile]] = {volume_id: [] for volume_id in volume_ids}
+    if include_files and volume_ids:
+        for file in db.scalars(
+            select(LibraryFile)
+            .where(LibraryFile.volume_id.in_(volume_ids))
+            .order_by(LibraryFile.volume_id, LibraryFile.sort_order, LibraryFile.id)
+        ).all():
+            files[file.volume_id].append(file)
+
+    preferences = (
+        library_projections.get_detail_preferences(
+            db,
+            user_id=user_id,
+            work_ids=work_ids,
+        )
+        if user_id and _has_table(db, "WorkDetailPreference")
+        else {}
+    )
+    return _WorkViewBatch(
+        metadata_lookups=library_projections.latest_metadata_lookups_for_works(
+            db, work_ids
+        ),
+        rows_by_work=rows_by_work,
+        progresses=progresses,
+        histories=histories,
+        files=files,
+        tab_order=tuple(_detail_tab_order(db)),
+        saved_tabs={
+            work_id: str(preference.get("selectedTab") or "").strip().upper()
+            for work_id, preference in preferences.items()
+        },
+    )
+
+
+def _work_views(
+    db: Session,
+    works: list[dict[str, Any]],
+    user_id: str | None = None,
+    *,
+    include_files: bool = True,
+) -> list[dict[str, Any]]:
+    if not works:
+        return []
+    batch = _load_work_view_batch(
+        db,
+        works,
+        user_id,
+        include_files=include_files,
+    )
+    return [
+        _work_view(
+            db,
+            work,
+            user_id,
+            include_files=include_files,
+            batch=batch,
+        )
+        for work in works
+    ]
+
+
+def _work_view(
+    db: Session,
+    work: dict[str, Any],
+    user_id: str | None = None,
+    *,
+    volume_limit_per_media: int | None = None,
+    include_files: bool = True,
+    batch: _WorkViewBatch | None = None,
+) -> dict[str, Any]:
+    work_id = str(work["id"])
+    metadata_lookup = (
+        batch.metadata_lookups.get(work_id)
+        if batch is not None
+        else library_projections.latest_metadata_lookup_for_work(db, work_id)
+    )
+    if batch is not None:
+        rows = batch.rows_by_work.get(work_id, [])
+    else:
+        user = db.get(User, user_id) if user_id else None
+        context = authorization_context(db, user) if user is not None else None
+        filters = [
+            LibraryMediaVersion.work_id == work_id,
+            LibraryVolume.hidden.is_(False),
+        ]
+        if context is not None:
+            filters.append(volume_visibility_predicate(context))
+        rows = db.execute(
+            select(LibraryMediaVersion, LibraryVolume)
+            .join(
+                LibraryVolume,
+                LibraryVolume.media_version_id == LibraryMediaVersion.id,
+            )
+            .where(*filters)
+            .order_by(
+                LibraryVolume.sort_order.asc(),
+                LibraryVolume.created_at.asc(),
+                LibraryVolume.id.asc(),
+            )
+        ).all()
+    grouped: dict[str, tuple[LibraryMediaVersion, list[LibraryVolume]]] = {}
+    for media_version, volume in rows:
+        grouped.setdefault(media_version.id, (media_version, []))[1].append(volume)
+    volume_ids = [volume.id for _media, volume in rows]
+    progresses = batch.progresses if batch is not None else (
+        {
+            progress.volume_id: progress
+            for progress in db.scalars(
+                select(LibraryReadingProgress).where(
+                    LibraryReadingProgress.user_id == user_id,
+                    LibraryReadingProgress.volume_id.in_(volume_ids),
+                )
+            ).all()
+        }
+        if user_id and volume_ids
+        else {}
+    )
+    histories = batch.histories if batch is not None else (
         {
             history.media_version_id: history
             for history in db.scalars(
@@ -788,10 +1003,12 @@ def _work_view(
     response_volume_ids = [
         volume.id for volumes in response_volumes.values() for volume in volumes
     ]
-    files: dict[str, list[LibraryFile]] = {
-        volume_id: [] for volume_id in response_volume_ids
-    }
-    if include_files and response_volume_ids:
+    files: dict[str, list[LibraryFile]] = (
+        batch.files
+        if batch is not None
+        else {volume_id: [] for volume_id in response_volume_ids}
+    )
+    if batch is None and include_files and response_volume_ids:
         for file in db.scalars(
             select(LibraryFile)
             .where(LibraryFile.volume_id.in_(response_volume_ids))
@@ -818,7 +1035,11 @@ def _work_view(
         for media_version, volumes in ordered
     ]
     kinds = [str(item["mediaKind"]) for item in media_views]
-    tabs = _detail_tabs(db, set(kinds))
+    tabs = (
+        _detail_tabs_from_order(batch.tab_order, set(kinds))
+        if batch is not None
+        else _detail_tabs(db, set(kinds))
+    )
     last_progress = max(
         progresses.values(), key=lambda progress: progress.updated_at, default=None
     )
@@ -857,7 +1078,18 @@ def _work_view(
         "mediaVersions": media_views,
         "availableMediaKinds": kinds,
         "detailTabs": tabs,
-        "selectedDetailTab": _resolve_detail_tab(db, user_id, work_id, tabs),
+        "selectedDetailTab": (
+            batch.saved_tabs.get(work_id)
+            if batch is not None and batch.saved_tabs.get(work_id) in {
+                str(tab["key"]) for tab in tabs
+            }
+            else next(
+                (str(tab["key"]) for tab in tabs if tab["key"] != "STRUCTURE"),
+                "STRUCTURE",
+            )
+            if batch is not None
+            else _resolve_detail_tab(db, user_id, work_id, tabs)
+        ),
     }
 
 

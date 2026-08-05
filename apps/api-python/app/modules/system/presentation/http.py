@@ -12,13 +12,13 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.imports import import_http_store
-from app.bootstrap.library import library_dashboard
 from app.bootstrap.media import media_streaming
 from app.bootstrap.system import (
+    clear_info_warning_events,
+    configured_max_event_bytes,
     delete_settings,
     get_setting,
-    list_event_level_facets,
-    list_event_source_facets,
+    list_system_events_page,
     list_settings,
     record_system_event,
     run_system_health_checks,
@@ -322,9 +322,8 @@ def list_system_events(
         return ManagementEventsResponse(
             data=management_events_empty_page(page, page_size)
         )
-    storage = _event_storage_snapshot(db)
     date_from_ms, date_to_ms = parse_event_date_bounds(dateFrom, dateTo)
-    events, total = library_dashboard.list_system_events_page(
+    snapshot = list_system_events_page(
         db,
         page=page,
         page_size=page_size,
@@ -335,17 +334,19 @@ def list_system_events(
         date_from_ms=date_from_ms,
         date_to_ms=date_to_ms,
     )
-    sources = list_event_source_facets(db)
-    levels = list_event_level_facets(db)
     return ManagementEventsResponse(
         data=management_events_payload(
-            events=events,
-            total=total,
-            page=page,
+            events=snapshot.events,
+            total=snapshot.total,
+            page=snapshot.page,
             page_size=page_size,
-            storage=storage,
-            sources=sources,
-            levels=levels,
+            storage={
+                "deleted": 0,
+                "sizeBytes": snapshot.size_bytes,
+                "maxBytes": configured_max_event_bytes(db),
+            },
+            sources=snapshot.sources,
+            levels=snapshot.levels,
         )
     )
 
@@ -361,7 +362,7 @@ def clear_system_events(
         return auth_error
     if not _has_table(db, "SystemEvent"):
         return ClearedEventsResponse(data={"deleted": 0})
-    deleted = library_dashboard.clear_info_warning_events(db)
+    deleted = clear_info_warning_events(db)
     db.commit()
     record_system_event(
         db,

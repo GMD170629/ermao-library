@@ -47,7 +47,9 @@ async function mockSettingsApi(page: Page, locale: 'zh-CN' | 'en-US' = 'zh-CN') 
       return;
     }
     if (pathname.endsWith('/api/library/duplicates')) {
-      await route.fulfill({ json: { ok: true, data: { groups: [] } } });
+      const duplicatePage = Math.max(1, Number(url.searchParams.get('page') ?? 1));
+      counts[`duplicates-page-${duplicatePage}`] = (counts[`duplicates-page-${duplicatePage}`] ?? 0) + 1;
+      await route.fulfill({ json: { ok: true, data: { groups: [], page: duplicatePage, pageSize: 20, total: 21, totalPages: 2 } } });
       return;
     }
     if (pathname.endsWith('/api/library/categories')) {
@@ -209,6 +211,8 @@ test('settings navigation keeps session and shelves stable while tabs load on de
   await expect.poll(() => requestCount(counts, '/api/metadata/providers')).toBeGreaterThan(0);
   await page.locator('a[href="/settings/organize?tab=duplicates"]').click();
   await expect.poll(() => requestCount(counts, '/api/library/duplicates')).toBeGreaterThan(0);
+  await page.getByRole('button', { name: '下一页' }).click();
+  await expect.poll(() => counts['duplicates-page-2'] ?? 0).toBeGreaterThan(0);
   await page.locator('a[href="/settings/organize?tab=categories"]').click();
   await expect.poll(() => requestCount(counts, '/api/library/categories')).toBeGreaterThan(0);
   await page.locator('a[href="/settings/organize?tab=recognition"]').click();

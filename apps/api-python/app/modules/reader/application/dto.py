@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
+
+ReaderReadingStatus = Literal["UNREAD", "FINISHED"]
 
 
 @dataclass(frozen=True, slots=True)

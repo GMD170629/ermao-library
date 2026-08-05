@@ -7,6 +7,16 @@ test('maps keyboard navigation for both reading directions', () => {
   assert.equal(readerKeyIntent({ key: 'ArrowLeft', shiftKey: false }, 'rtl'), 'next');
   assert.equal(readerKeyIntent({ key: ' ', shiftKey: true }, 'ltr'), 'previous');
   assert.equal(readerKeyIntent({ key: 'End', shiftKey: false }, 'ltr'), 'last');
+  assert.equal(readerKeyIntent({ key: 'ArrowRight', shiftKey: false }, 'ltr', { keyboardPageTurn: false }), null);
+  assert.equal(readerKeyIntent({ key: 'Escape', shiftKey: false }, 'ltr', { keyboardPageTurn: false }), 'escape');
+  assert.equal(readerKeyIntent({ key: 'AudioVolumeUp', shiftKey: false }, 'ltr', { keyboardPageTurn: false, volumeKeyPageTurn: true }), 'previous');
+});
+
+test('supports reversed and disabled tap zones', () => {
+  assert.equal(readerPointerIntent(50, 100, 1000, 800, 'ltr', 'reversed'), 'next');
+  assert.equal(readerPointerIntent(950, 100, 1000, 800, 'ltr', 'reversed'), 'previous');
+  assert.equal(readerPointerIntent(50, 100, 1000, 800, 'ltr', 'disabled'), 'toggle-controls');
+  assert.equal(readerPointerIntent(950, 100, 1000, 800, 'rtl', 'disabled'), 'toggle-controls');
 });
 
 test('maps pointer zones without vertical dead strips', () => {

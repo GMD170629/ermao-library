@@ -3,6 +3,12 @@ import { READER_SCHEMA_VERSION, type ReaderFontFamily, type ReaderPreferences, t
 export const DEFAULT_READER_PREFERENCES: Readonly<ReaderPreferences> = Object.freeze({
   schemaVersion: READER_SCHEMA_VERSION,
   appearance: Object.freeze({ theme: 'warm' }),
+  interaction: Object.freeze({
+    tapZones: 'standard',
+    swipePageTurn: true,
+    keyboardPageTurn: true,
+    volumeKeyPageTurn: false
+  }),
   epub: Object.freeze({
     fontSize: 18,
     lineHeight: 1.9,
@@ -10,7 +16,20 @@ export const DEFAULT_READER_PREFERENCES: Readonly<ReaderPreferences> = Object.fr
     fontFamily: 'pingfang',
     spreadMode: 'single',
     pageTurnAnimation: 'slide',
-    flow: 'paginated'
+    flow: 'paginated',
+    typography: Object.freeze({
+      paragraphIndent: 2,
+      paragraphSpacing: 0,
+      textAlign: 'publisher',
+      preservePublisherStyles: false,
+      allowPublisherColors: false,
+      allowPublisherFonts: false
+    }),
+    optimization: Object.freeze({
+      enabled: true,
+      deduplicateIndent: true,
+      indentUnindented: true
+    })
   }),
   comic: Object.freeze({
     direction: 'ltr',
@@ -46,6 +65,10 @@ function choice<T extends string>(value: unknown, choices: readonly T[], fallbac
   return typeof value === 'string' && choices.includes(value as T) ? value as T : fallback;
 }
 
+function boolean(value: unknown, fallback: boolean) {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
 function normalizeEpubPageTurnAnimation(value: unknown, fallback: 'slide' | 'off'): 'slide' | 'off' {
   // 'kindle' is a migration-only alias from the V2 preference schema.
   if (value === 'kindle') return 'slide';
@@ -56,7 +79,12 @@ function clonePreferences(value: Readonly<ReaderPreferences>): ReaderPreferences
   return {
     schemaVersion: READER_SCHEMA_VERSION,
     appearance: { ...value.appearance },
-    epub: { ...value.epub },
+    interaction: { ...value.interaction },
+    epub: {
+      ...value.epub,
+      typography: { ...value.epub.typography },
+      optimization: { ...value.epub.optimization }
+    },
     comic: { ...value.comic },
     pdf: { ...value.pdf }
   };
@@ -70,7 +98,10 @@ function clonePreferences(value: Readonly<ReaderPreferences>): ReaderPreferences
 export function normalizeReaderPreferences(value: unknown, base: Readonly<ReaderPreferences> = DEFAULT_READER_PREFERENCES): ReaderPreferences {
   const source = record(value);
   const appearance = record(source.appearance);
+  const interaction = record(source.interaction);
   const epub = record(source.epub);
+  const epubTypography = record(epub.typography);
+  const epubOptimization = record(epub.optimization);
   const comic = record(source.comic);
   const pdf = record(source.pdf);
   const fallback = clonePreferences(base);
@@ -85,6 +116,12 @@ export function normalizeReaderPreferences(value: unknown, base: Readonly<Reader
     appearance: {
       theme: choice<ReaderTheme>(appearance.theme ?? legacyTheme, ['day', 'warm', 'night', 'black'], fallback.appearance.theme)
     },
+    interaction: {
+      tapZones: choice(interaction.tapZones, ['standard', 'reversed', 'disabled'], fallback.interaction.tapZones),
+      swipePageTurn: boolean(interaction.swipePageTurn, fallback.interaction.swipePageTurn),
+      keyboardPageTurn: boolean(interaction.keyboardPageTurn, fallback.interaction.keyboardPageTurn),
+      volumeKeyPageTurn: boolean(interaction.volumeKeyPageTurn, fallback.interaction.volumeKeyPageTurn)
+    },
     epub: {
       fontSize: clamp(epub.fontSize ?? source.fontSize, 14, 30, fallback.epub.fontSize),
       lineHeight: clamp(epub.lineHeight ?? source.lineHeight, 1.4, 2.4, fallback.epub.lineHeight, 1),
@@ -92,7 +129,20 @@ export function normalizeReaderPreferences(value: unknown, base: Readonly<Reader
       fontFamily: choice<ReaderFontFamily>(epub.fontFamily ?? source.fontFamily, ['pingfang', 'heiti', 'songti', 'yahei', 'kaiti'], fallback.epub.fontFamily),
       spreadMode: choice(epub.spreadMode, ['single', 'double'], fallback.epub.spreadMode),
       pageTurnAnimation: normalizeEpubPageTurnAnimation(epub.pageTurnAnimation ?? legacyPageTurnAnimation, fallback.epub.pageTurnAnimation),
-      flow: choice(epub.flow, ['paginated', 'scrolled'], fallback.epub.flow)
+      flow: choice(epub.flow, ['paginated', 'scrolled'], fallback.epub.flow),
+      typography: {
+        paragraphIndent: clamp(epubTypography.paragraphIndent, 0, 4, fallback.epub.typography.paragraphIndent, 1),
+        paragraphSpacing: clamp(epubTypography.paragraphSpacing, 0, 1.5, fallback.epub.typography.paragraphSpacing, 1),
+        textAlign: choice(epubTypography.textAlign, ['publisher', 'left', 'justify'], fallback.epub.typography.textAlign),
+        preservePublisherStyles: boolean(epubTypography.preservePublisherStyles, fallback.epub.typography.preservePublisherStyles),
+        allowPublisherColors: boolean(epubTypography.allowPublisherColors, fallback.epub.typography.allowPublisherColors),
+        allowPublisherFonts: boolean(epubTypography.allowPublisherFonts, fallback.epub.typography.allowPublisherFonts)
+      },
+      optimization: {
+        enabled: boolean(epubOptimization.enabled, fallback.epub.optimization.enabled),
+        deduplicateIndent: boolean(epubOptimization.deduplicateIndent, fallback.epub.optimization.deduplicateIndent),
+        indentUnindented: boolean(epubOptimization.indentUnindented, fallback.epub.optimization.indentUnindented)
+      }
     },
     comic: {
       direction: choice(comic.direction ?? legacyComicDirection, ['ltr', 'rtl'], fallback.comic.direction),

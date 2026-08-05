@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mapWorkView, searchWorkTransferTargets } from './client';
+import { mapWorkView, searchWorkTransferTargets, volumeFileDownloadUrl } from './client';
+
+test('builds an explicit attachment URL for a single-volume download', () => {
+  assert.equal(
+    volumeFileDownloadUrl('volume/id with spaces'),
+    '/api/volumes/volume%2Fid%20with%20spaces/file?download=true'
+  );
+});
 
 test('full work responses reject summary projections before reaching detail UI', () => {
   assert.throws(

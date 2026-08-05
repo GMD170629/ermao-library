@@ -222,6 +222,39 @@ def list_static_shelf_work_ids(db: Session, shelf_id: str) -> list[str]:
     )
 
 
+def list_static_shelf_work_page(
+    db: Session,
+    shelf_id: str,
+    context: AuthorizationContext,
+    *,
+    page: int,
+    page_size: int,
+) -> tuple[list[str], int]:
+    predicates = [ShelfWork.shelf_id == shelf_id]
+    if not context.is_admin:
+        predicates.append(work_visibility_predicate(context))
+    total = int(
+        db.scalar(
+            select(func.count())
+            .select_from(ShelfWork)
+            .join(LibraryWork, LibraryWork.id == ShelfWork.work_id)
+            .where(*predicates)
+        )
+        or 0
+    )
+    work_ids = list(
+        db.scalars(
+            select(ShelfWork.work_id)
+            .join(LibraryWork, LibraryWork.id == ShelfWork.work_id)
+            .where(*predicates)
+            .order_by(ShelfWork.created_at.asc(), ShelfWork.work_id.asc())
+            .limit(page_size)
+            .offset((page - 1) * page_size)
+        ).all()
+    )
+    return [str(work_id) for work_id in work_ids], total
+
+
 def filter_visible_work_ids(
     db: Session,
     work_ids: list[str],

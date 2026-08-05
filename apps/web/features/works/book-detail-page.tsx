@@ -13,7 +13,7 @@ import { Select } from '../../components/ui/select';
 import type { MediaKind, MediaVersionResource, ReaderType, VolumeResource, WorkDetailTabKey, WorkView } from '../../types/work';
 import { I18nText } from '@/i18n/provider';
 import { useI18n } from '@/i18n/provider';
-import { deleteVolume, deleteWorkRecord, downloadVolumeArchive, fetchAllMediaVersionVolumes, fetchEbookChapterDetail, fetchWork, reclassifyVolume, regenerateWorkCover, runVolumeAction, runVolumeBatchAction, searchWorkTransferTargets, undoLibraryOperation, updateVolume, updateWorkReadingStatus, uploadWorkCover, type WorkTransferTarget } from './api/client';
+import { deleteVolume, deleteWorkRecord, downloadVolumeArchive, fetchAllMediaVersionVolumes, fetchEbookChapterDetail, fetchWork, reclassifyVolume, regenerateWorkCover, runVolumeAction, runVolumeBatchAction, searchWorkTransferTargets, undoLibraryOperation, updateVolume, updateVolumeReadingStatus, uploadWorkCover, volumeFileDownloadUrl, type WorkTransferTarget } from './api/client';
 import { useVolumeWallSelection } from './application/use-volume-wall-selection';
 import { detailTabsForBook, displayVolumeNumber, formatDuration, isWorkDetailTabKey, resolvedDetailTab, selectedVolumeForDetailTab, volumesForDetailTab, workDetailTabHref } from './work-detail-tabs';
 import { smallVolumeCoverUrl } from './volume-cover-url';
@@ -609,7 +609,7 @@ function VolumeCard({
 
       <div className="mt-4 flex flex-wrap gap-2 border-t border-stone-100 pt-4">
           {undoOperationId ? <Button variant="secondary" icon={RotateCcw} loading={busy === 'undo-classification'} onClick={() => void run('undo-classification', async () => { await undoLibraryOperation(undoOperationId); setUndoOperationId(null); }, '已撤销内容分类调整')}>撤销分类调整</Button> : null}
-          {canManage ? <><Button variant="secondary" icon={Download} onClick={() => { window.location.href = `/api/volumes/${encodeURIComponent(volume.id)}/file`; }}>
+          {canManage ? <><Button variant="secondary" icon={Download} onClick={() => { window.location.href = volumeFileDownloadUrl(volume.id); }}>
             下载
           </Button>
           <Button variant="ghost" icon={Edit3} onClick={() => setEditing(true)}>编辑卷册</Button>
@@ -792,11 +792,14 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   }, [chapterPage, singleEbookVolume, t, work]);
 
   const updateReadingStatus = async (status: string) => {
-    if (!work || (status !== 'UNREAD' && status !== 'FINISHED')) return;
+    if (!work || !selectedVolume || (status !== 'UNREAD' && status !== 'FINISHED')) return;
     setReadingStatusBusy(true);
     try {
-      await updateWorkReadingStatus(work.id, status);
-      setWork(await fetchWork(bookId));
+      await updateVolumeReadingStatus(selectedVolume.id, status);
+      const nextWork = await fetchWork(bookId);
+      setWork(nextWork);
+      const nextVolume = selectedVolumeForDetailTab(nextWork, tab, nextWork.continueVolumeId);
+      router.replace(workDetailTabHref(nextWork.id, tab, nextVolume?.id));
       feedback.success(t(status === 'FINISHED' ? '已标记为已读' : '已标记为未读'));
     } catch (reason) {
       feedback.error(reason instanceof Error ? reason.message : t('阅读状态更新失败'));
@@ -870,7 +873,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     } else if (action === 'metadata') setMetadataLookupOpen(true);
     else if (action === 'upload-cover') coverInputRef.current?.click();
     else if (action === 'regenerate-cover') void regenerateCover();
-    else if (action === 'download' && selectedVolume) window.location.href = `/api/volumes/${encodeURIComponent(selectedVolume.id)}/file`;
+    else if (action === 'download' && selectedVolume) window.location.href = volumeFileDownloadUrl(selectedVolume.id);
     else if (action === 'kindle') void openKindleSend();
     else if (action === 'delete') void removeWork();
   };
@@ -911,7 +914,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     if (action === 'download') {
       if (selectedWallVolumes.length === 1) {
         const volume = selectedWallVolumes[0];
-        if (volume?.readable) window.location.href = `/api/volumes/${encodeURIComponent(volume.id)}/file`;
+        if (volume?.readable) window.location.href = volumeFileDownloadUrl(volume.id);
         return;
       }
       setVolumeActionBusy(action);

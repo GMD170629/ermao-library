@@ -56,11 +56,16 @@ echo "  Health check: http://localhost:$WEB_PORT/api/health"
 echo "  Python API:   http://127.0.0.1:$PYTHON_API_PORT"
 echo "  Database:     $DATABASE_PATH"
 echo "  Storage root: $STORAGE_ROOT"
-if command -v ipconfig >/dev/null 2>&1; then
-  LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || true)"
-  if [ -n "$LAN_IP" ]; then
-    echo "  iOS LAN URL:   http://$LAN_IP:$WEB_PORT/?debug=1"
-  fi
+LAN_INTERFACE="$(route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}' || true)"
+LAN_IP=""
+if [ -n "$LAN_INTERFACE" ] && command -v ipconfig >/dev/null 2>&1; then
+  LAN_IP="$(ipconfig getifaddr "$LAN_INTERFACE" 2>/dev/null || true)"
+fi
+if [ -z "$LAN_IP" ] && [ -n "$LAN_INTERFACE" ] && command -v ifconfig >/dev/null 2>&1; then
+  LAN_IP="$(ifconfig "$LAN_INTERFACE" 2>/dev/null | awk '/inet /{print $2; exit}' || true)"
+fi
+if [ -n "$LAN_IP" ]; then
+  echo "  LAN URL:       http://$LAN_IP:$WEB_PORT/?debug=1"
 fi
 
 (

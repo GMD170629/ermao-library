@@ -3,6 +3,7 @@ import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -155,6 +156,66 @@ def test_reader_v3_bootstrap_and_progress_are_volume_scoped(
     assert stored.user_id == user.id
     assert stored.volume_id == volume.id
     assert stored.percent == 50
+
+
+def test_volume_reading_status_advances_work_detail_to_next_unfinished_volume(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    user = _login(client, db_session)
+    first_volume = _ebook_volume(db_session)
+    second_volume = LibraryVolume(
+        id="volume-reader-v3-2",
+        media_version_id=first_volume.media_version_id,
+        title="电子书 2",
+        volume_index=2,
+        sort_order=1,
+        format="EPUB",
+        resource_key="manual:reader-v3-2",
+        import_status="COMPLETED",
+    )
+    second_file = LibraryFile(
+        id="file-reader-v3-2",
+        volume_id=second_volume.id,
+        path="library/reader-v3-2.epub",
+        fingerprint="sha256:reader-v3-2",
+        hash_status="COMPLETED",
+        mtime_ms=1,
+        kind="EPUB",
+        mime_type="application/epub+zip",
+        size_bytes=10,
+        sort_order=0,
+    )
+    db_session.add_all([second_volume, second_file])
+    db_session.commit()
+
+    finished_response = client.put(
+        f"/api/reader/v3/volumes/{first_volume.id}/reading-status",
+        json={"status": "FINISHED"},
+    )
+
+    assert finished_response.status_code == 200
+    assert finished_response.json()["data"] == {
+        "volumeId": first_volume.id,
+        "status": "FINISHED",
+        "percent": 100.0,
+    }
+    detail = client.get("/api/works/work-reader-v3").json()["data"]["book"]
+    assert detail["continueVolumeId"] == second_volume.id
+    progresses = db_session.query(LibraryReadingProgress).all()
+    assert [
+        (progress.user_id, progress.volume_id, progress.percent)
+        for progress in progresses
+    ] == [(user.id, first_volume.id, 100.0)]
+
+    unread_response = client.put(
+        f"/api/reader/v3/volumes/{first_volume.id}/reading-status",
+        json={"status": "UNREAD"},
+    )
+
+    assert unread_response.status_code == 200
+    assert unread_response.json()["data"]["percent"] == 0.0
+    assert db_session.query(LibraryReadingProgress).count() == 0
 
 
 def test_reader_v3_bootstrap_recovers_missing_epub_chapters_once(
@@ -323,6 +384,47 @@ def test_volume_file_route_streams_the_selected_volume_only(
     assert response.status_code == 200
     assert response.content == b"reader-v3"
     assert response.headers["content-type"] == "application/epub+zip"
+
+
+@pytest.mark.parametrize(
+    ("filename", "mime_type"),
+    [
+        ("reader-v3.txt", "text/plain"),
+        ("reader-v3.pdf", "application/pdf"),
+        ("reader-v3.epub", "application/epub+zip"),
+        ("reader-v3.cbz", "application/vnd.comicbook+zip"),
+        ("reader-v3.mp3", "audio/mpeg"),
+    ],
+)
+def test_volume_file_download_mode_uses_attachment_for_every_media_format(
+    client: TestClient,
+    db_session: Session,
+    test_settings: Settings,
+    filename: str,
+    mime_type: str,
+) -> None:
+    _login(client, db_session)
+    volume = _ebook_volume(db_session)
+    library_file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
+    library_file.path = f"library/{filename}"
+    library_file.mime_type = mime_type
+    db_session.commit()
+    stored_file = test_settings.resolved_storage_root / library_file.path
+    stored_file.parent.mkdir(parents=True, exist_ok=True)
+    stored_file.write_bytes(b"downloadable")
+
+    inline_response = client.get(f"/api/volumes/{volume.id}/file")
+    download_response = client.get(
+        f"/api/volumes/{volume.id}/file", params={"download": "true"}
+    )
+
+    assert inline_response.status_code == 200
+    assert inline_response.headers["content-disposition"].startswith("inline;")
+    assert download_response.status_code == 200
+    assert download_response.content == b"downloadable"
+    assert download_response.headers["content-disposition"] == (
+        f"attachment; filename*=UTF-8''{filename}"
+    )
 
 
 def test_work_cover_fallback_uses_media_priority_then_volume_order(

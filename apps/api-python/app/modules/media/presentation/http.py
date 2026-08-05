@@ -141,6 +141,7 @@ def get_volume_file(
     request: Request,
     db: DatabaseSession,
     settings: ApplicationSettings,
+    download: bool = False,
 ) -> Annotated[
     Response,
     ErrorResponses(BasicUnauthorizedError, BasicNotFoundError),
@@ -161,6 +162,7 @@ def get_volume_file(
         name=Path(file.path if file else "file").name,
         route="volume-file",
         file_id=file.id if file else volume_id,
+        as_attachment=download,
     )
 
 

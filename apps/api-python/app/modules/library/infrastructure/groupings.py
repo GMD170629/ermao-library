@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import exists, func, select
+from sqlalchemy.orm import Session, aliased
 
 from app.core.authorization import AuthorizationContext, work_visibility_predicate
 from app.models.library import LibraryFacet, LibraryWork, LibraryWorkFacet
@@ -26,43 +26,74 @@ class SqlAlchemyLibraryGroupingQueries:
         page: int,
         page_size: int,
     ) -> LibraryGroupingPage:
-        filters = [
-            LibraryFacet.kind == kind,
-            LibraryWork.hidden.is_(False),
-            work_visibility_predicate(context),
-        ]
+        filters = [LibraryFacet.kind == kind]
         if kind == "AUTHOR":
             filters.append(func.trim(LibraryFacet.name) != "未知作者")
         if search:
             filters.append(func.lower(LibraryFacet.name).like(f"%{search.casefold()}%"))
+        count_link = aliased(LibraryWorkFacet)
+        count_work = aliased(LibraryWork)
+        count_work_visible = select(count_work.id).where(
+            count_work.id == count_link.work_id,
+            count_work.hidden.is_(False),
+            work_visibility_predicate(context, count_work),
+        )
+        book_count = (
+            select(func.count())
+            .select_from(count_link)
+            .where(
+                count_link.facet_id == LibraryFacet.id,
+                count_work_visible.exists(),
+            )
+            .scalar_subquery()
+        )
+        latest_link = aliased(LibraryWorkFacet)
+        latest_work = aliased(LibraryWork)
+        visible_work_updated_at = (
+            select(latest_work.updated_at)
+            .where(
+                latest_work.id == latest_link.work_id,
+                latest_work.hidden.is_(False),
+                work_visibility_predicate(context, latest_work),
+            )
+            .scalar_subquery()
+        )
+        latest_work_updated_at = (
+            select(func.max(visible_work_updated_at))
+            .select_from(latest_link)
+            .where(
+                latest_link.facet_id == LibraryFacet.id,
+                visible_work_updated_at.is_not(None),
+            )
+            .scalar_subquery()
+        )
+        visible_link = aliased(LibraryWorkFacet)
+        visible_work = aliased(LibraryWork)
+        has_visible_work = exists(
+            select(visible_link.work_id).where(
+                visible_link.facet_id == LibraryFacet.id,
+                select(visible_work.id)
+                .where(
+                    visible_work.id == visible_link.work_id,
+                    visible_work.hidden.is_(False),
+                    work_visibility_predicate(context, visible_work),
+                )
+                .exists(),
+            )
+        )
         grouped = (
             select(
                 LibraryFacet.id.label("facet_id"),
                 LibraryFacet.name,
                 LibraryFacet.normalized_name,
                 LibraryFacet.updated_at.label("facet_updated_at"),
-                func.count(func.distinct(LibraryWork.id)).label("book_count"),
-                func.max(LibraryWork.updated_at).label("latest_work_updated_at"),
+                book_count.label("book_count"),
+                latest_work_updated_at.label("latest_work_updated_at"),
             )
-            .join(
-                LibraryWorkFacet,
-                LibraryWorkFacet.facet_id == LibraryFacet.id,
-            )
-            .join(
-                LibraryWork,
-                LibraryWork.id == LibraryWorkFacet.work_id,
-            )
-            .where(*filters)
-            .group_by(
-                LibraryFacet.id,
-                LibraryFacet.name,
-                LibraryFacet.normalized_name,
-                LibraryFacet.updated_at,
-            )
+            .where(*filters, has_visible_work)
         ).subquery()
-        total = int(self._db.scalar(select(func.count()).select_from(grouped)) or 0)
         rows = self._db.execute(
-            select(grouped)
+            select(grouped, func.count().over().label("total_count"))
             .order_by(
                 grouped.c.normalized_name.asc(),
                 grouped.c.facet_id.asc(),
@@ -70,6 +101,11 @@ class SqlAlchemyLibraryGroupingQueries:
             .offset((page - 1) * page_size)
             .limit(page_size)
         ).all()
+        total = (
+            int(rows[0].total_count)
+            if rows
+            else int(self._db.scalar(select(func.count()).select_from(grouped)) or 0)
+        )
         return LibraryGroupingPage(
             groups=tuple(
                 LibraryGrouping(

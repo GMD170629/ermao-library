@@ -32,6 +32,7 @@ from app.modules.reader.application.dto import (
     ReaderFileDto,
     ReaderMediaVersionDto,
     ReaderProgressDto,
+    ReaderReadingStatus,
     ReaderRecoveredEpubChapterDto,
     ReaderUnitDto,
     ReaderVolumeContextDto,
@@ -437,6 +438,78 @@ class SqlAlchemyReaderVolumeRepository:
             progress.progressed_at = now
             progress.source_protocol = "SHUKU_WEB"
             progress.source_device_name = "Shuku Web Reader"
+            progress.updated_at = now
+
+        history = self._session.scalar(
+            select(UserMediaHistory).where(
+                UserMediaHistory.user_id == user_id,
+                UserMediaHistory.media_version_id == context.media_version.id,
+            )
+        )
+        if history is None:
+            self._session.add(
+                UserMediaHistory(
+                    user_id=user_id,
+                    media_version_id=context.media_version.id,
+                    last_volume_id=context.volume.id,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        else:
+            history.last_volume_id = context.volume.id
+            history.updated_at = now
+        self._session.flush()
+        return _progress_dto(progress)
+
+    def set_reading_status(
+        self,
+        *,
+        user_id: str,
+        context: ReaderVolumeContextDto,
+        reader_type: str,
+        status: ReaderReadingStatus,
+        content_fingerprint: str,
+        now: datetime,
+    ) -> ReaderProgressDto | None:
+        progress = self._session.scalar(
+            select(LibraryReadingProgress).where(
+                LibraryReadingProgress.user_id == user_id,
+                LibraryReadingProgress.volume_id == context.volume.id,
+            )
+        )
+        if status == "UNREAD":
+            if progress is not None:
+                self._session.delete(progress)
+                self._session.flush()
+            return None
+
+        if progress is None:
+            progress = LibraryReadingProgress(
+                user_id=user_id,
+                volume_id=context.volume.id,
+                reader_type=reader_type,
+                position="0",
+                page=None,
+                percent=100,
+                extra="{}",
+                schema_version=3,
+                location_type=reader_type,
+                location_json=None,
+                content_fingerprint=content_fingerprint,
+                mutation_id=f"reading-status-{cuid()}",
+                client_id="shuku-library",
+                client_sequence=int(now.timestamp() * 1000),
+                progressed_at=now,
+                source_protocol="SHUKU_WEB",
+                source_device_name="Shuku Library",
+                created_at=now,
+                updated_at=now,
+            )
+            self._session.add(progress)
+        else:
+            progress.percent = 100
+            progress.progressed_at = now
             progress.updated_at = now
 
         history = self._session.scalar(

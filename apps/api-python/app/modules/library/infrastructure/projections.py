@@ -34,6 +34,23 @@ def get_detail_preference(
     return entity_as_legacy_dict(preference) if preference is not None else None
 
 
+def get_detail_preferences(
+    db: Session, *, user_id: str, work_ids: list[str]
+) -> dict[str, dict[str, object]]:
+    if not work_ids:
+        return {}
+    preferences = db.scalars(
+        select(WorkDetailPreference).where(
+            WorkDetailPreference.user_id == user_id,
+            WorkDetailPreference.work_id.in_(work_ids),
+        )
+    ).all()
+    return {
+        preference.work_id: entity_as_legacy_dict(preference)
+        for preference in preferences
+    }
+
+
 def save_detail_preference(
     db: Session,
     *,
@@ -248,3 +265,29 @@ def latest_metadata_lookup_for_work(
         .limit(1)
     )
     return entity_as_legacy_dict(task) if task is not None else None
+
+
+def latest_metadata_lookups_for_works(
+    db: Session, work_ids: list[str]
+) -> dict[str, dict[str, object]]:
+    if not work_ids:
+        return {}
+    rank = func.row_number().over(
+        partition_by=MetadataLookupTask.work_id,
+        order_by=(
+            MetadataLookupTask.created_at.desc(),
+            MetadataLookupTask.id.desc(),
+        ),
+    ).label("lookup_rank")
+    ranked = (
+        select(MetadataLookupTask.__table__, rank)
+        .where(MetadataLookupTask.work_id.in_(work_ids))
+        .subquery()
+    )
+    rows = db.execute(select(ranked).where(ranked.c.lookup_rank == 1)).mappings()
+    result: dict[str, dict[str, object]] = {}
+    for row in rows:
+        value = dict(row)
+        value.pop("lookup_rank", None)
+        result[str(row["workId"])] = value
+    return result

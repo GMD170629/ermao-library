@@ -16,11 +16,15 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.shelf import shelf_store
-from app.core.authorization import authorization_context, can_access_work
+from app.core.authorization import (
+    AuthorizationContext,
+    authorization_context,
+    can_access_work,
+)
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
-from app.modules.library.public import bookshelf_item_view, get_work
+from app.modules.library.public import bookshelf_item_views, get_work
 from app.modules.shelf.application import (
     ShelfReference,
     validate_collection_replacement,
@@ -100,10 +104,6 @@ def _validated_shelf_payload(value: object) -> dict[str, Any]:
     )
 
 
-def _bookshelf_item_view(db: Session, work: dict[str, Any]) -> dict[str, Any]:
-    return bookshelf_item_view(db, work)
-
-
 def _get_work(db: Session, work_id: str) -> dict[str, Any] | None:
     return get_work(db, work_id)
 
@@ -118,6 +118,7 @@ def list_shelves(
     if auth_error:
         return auth_error
     shelves = shelf_store.list_shelves_for_user(db, user.id)
+    context = authorization_context(db, user)
     collection_ids_by_shelf_id = shelf_store.list_collection_ids_by_shelf_ids(
         db,
         [str(shelf["id"]) for shelf in shelves],
@@ -144,6 +145,7 @@ def list_shelves(
                     collection_member_count=collection_member_count_by_id.get(
                         str(shelf["id"])
                     ),
+                    context=context,
                 )
                 for shelf in shelves
             ]
@@ -155,7 +157,13 @@ def _owned_shelf(db: Session, shelf_id: str, user_id: str) -> dict[str, Any] | N
     return shelf_store.get_owned_shelf(db, shelf_id, user_id)
 
 
-def _shelf_work_ids(db: Session, shelf: dict[str, Any], user: User) -> list[str]:
+def _shelf_work_ids(
+    db: Session,
+    shelf: dict[str, Any],
+    user: User,
+    *,
+    context: AuthorizationContext | None = None,
+) -> list[str]:
     kind = str(shelf.get("kind") or "STATIC").upper()
     if kind == ShelfKind.COLLECTION:
         return []
@@ -169,13 +177,13 @@ def _shelf_work_ids(db: Session, shelf: dict[str, Any], user: User) -> list[str]
     )
     if not work_ids:
         return []
-    context = authorization_context(db, user)
-    return shelf_store.filter_visible_work_ids(db, work_ids, context)
+    visibility = context or authorization_context(db, user)
+    return shelf_store.filter_visible_work_ids(db, work_ids, visibility)
 
 
 def _shelf_book_views(db: Session, work_ids: list[str]) -> list[dict[str, Any]]:
     works = shelf_store.list_work_cards(db, work_ids)
-    return [_bookshelf_item_view(db, work) for work in works]
+    return bookshelf_item_views(db, works)
 
 
 def _shelf_base_view(shelf: dict[str, Any]) -> dict[str, Any]:
@@ -198,8 +206,10 @@ def _shelf_summary_view(
     *,
     collection_ids: list[str] | None = None,
     collection_member_count: int | None = None,
+    context: AuthorizationContext | None = None,
 ) -> dict[str, Any]:
-    if str(shelf.get("kind") or "STATIC").upper() == ShelfKind.COLLECTION:
+    kind = str(shelf.get("kind") or "STATIC").upper()
+    if kind == ShelfKind.COLLECTION:
         return {
             **_shelf_base_view(shelf),
             "shelfCount": collection_member_count
@@ -207,11 +217,21 @@ def _shelf_summary_view(
             else len(shelf_store.list_member_shelf_ids(db, str(shelf["id"]))),
             "shelves": [],
         }
-    work_ids = _shelf_work_ids(db, shelf, user)
+    if kind == "STATIC":
+        work_ids, total = shelf_store.list_static_shelf_work_page(
+            db,
+            str(shelf["id"]),
+            context or authorization_context(db, user),
+            page=1,
+            page_size=3,
+        )
+    else:
+        all_work_ids = _shelf_work_ids(db, shelf, user, context=context)
+        work_ids, total = all_work_ids[:3], len(all_work_ids)
     return {
         **_shelf_base_view(shelf),
-        "bookCount": len(work_ids),
-        "books": _shelf_book_views(db, work_ids[:3]),
+        "bookCount": total,
+        "books": _shelf_book_views(db, work_ids),
         "collectionIds": collection_ids
         if collection_ids is not None
         else shelf_store.list_collection_ids_by_shelf_ids(
@@ -227,12 +247,14 @@ def _shelf_member_view(
     user: User,
     *,
     collection_ids: list[str],
+    context: AuthorizationContext | None = None,
 ) -> dict[str, Any]:
     summary = _shelf_summary_view(
         db,
         shelf,
         user,
         collection_ids=collection_ids,
+        context=context,
     )
     return {
         key: summary[key]
@@ -269,16 +291,28 @@ def _shelf_detail_view(
             page_size=page_size,
             include_member_shelf_ids=include_book_ids,
         )
-    work_ids = _shelf_work_ids(db, shelf, user)
     page = max(1, page)
     page_size = min(100, max(1, page_size))
-    total = len(work_ids)
+    context = authorization_context(db, user)
+    kind = str(shelf.get("kind") or "STATIC").upper()
+    if kind == "STATIC" and not include_book_ids:
+        page_ids, total = shelf_store.list_static_shelf_work_page(
+            db,
+            str(shelf["id"]),
+            context,
+            page=page,
+            page_size=page_size,
+        )
+        work_ids: list[str] = []
+    else:
+        work_ids = _shelf_work_ids(db, shelf, user, context=context)
+        total = len(work_ids)
+        start = (page - 1) * page_size
+        page_ids = work_ids[start : start + page_size]
     total_pages = max(1, (total + page_size - 1) // page_size)
-    start = (page - 1) * page_size
-    page_ids = work_ids[start : start + page_size]
     result = {
         **_shelf_base_view(shelf),
-        "bookCount": len(work_ids),
+        "bookCount": total,
         "books": _shelf_book_views(db, page_ids),
         "collectionIds": shelf_store.list_collection_ids_by_shelf_ids(
             db,
@@ -319,6 +353,7 @@ def _collection_detail_view(
         db,
         [str(member["id"]) for member in page_members],
     )
+    context = authorization_context(db, user)
     result = {
         **_shelf_base_view(shelf),
         "shelfCount": total,
@@ -331,6 +366,7 @@ def _collection_detail_view(
                     str(member["id"]),
                     [],
                 ),
+                context=context,
             )
             for member in page_members
         ],

@@ -9,12 +9,23 @@ const epubFixture = path.join(root, 'test-data/library/epub/reader-v2.epub'); //
 const defaultPreferences = {
   schemaVersion: 3,
   appearance: { theme: 'warm' },
-  epub: { fontSize: 18, lineHeight: 1.9, pageWidth: 1350, fontFamily: 'pingfang', spreadMode: 'single', pageTurnAnimation: 'slide', flow: 'paginated' },
+  interaction: { tapZones: 'standard', swipePageTurn: true, keyboardPageTurn: true, volumeKeyPageTurn: false },
+  epub: {
+    fontSize: 18,
+    lineHeight: 1.9,
+    pageWidth: 1350,
+    fontFamily: 'pingfang',
+    spreadMode: 'single',
+    pageTurnAnimation: 'slide',
+    flow: 'paginated',
+    typography: { paragraphIndent: 2, paragraphSpacing: 0, textAlign: 'publisher', preservePublisherStyles: false, allowPublisherColors: false, allowPublisherFonts: false },
+    optimization: { enabled: true, deduplicateIndent: true, indentUnindented: true }
+  },
   comic: { direction: 'ltr', mode: 'single', pageTurnAnimation: 'slide', imageFit: 'width', imageVariant: 'original', zoom: 1 },
   pdf: { zoom: 1, fit: 'page' }
 };
 
-function bootstrap(kind: 'epub' | 'comic' | 'pdf', epubUnitCount = 2) {
+function bootstrap(kind: 'epub' | 'comic' | 'pdf', epubUnitCount = 2, epubHrefPrefix = '') {
   const readerType = kind === 'epub' ? 'reflowable' : kind;
   const volumeId = `${kind}-volume`;
   const mediaVersionId = `${kind}-media`;
@@ -36,7 +47,7 @@ function bootstrap(kind: 'epub' | 'comic' | 'pdf', epubUnitCount = 2) {
     lastReadAt: null
   };
   const units = kind === 'epub'
-    ? Array.from({ length: epubUnitCount }, (_, index) => ({ id: `unit-${index + 1}`, index, title: `Chapter ${index + 1}`, href: `chapter${index + 1}.xhtml`, fileId: `${kind}-file`, startMs: null, endMs: null, durationMs: null, metadata: {} }))
+    ? Array.from({ length: epubUnitCount }, (_, index) => ({ id: `unit-${index + 1}`, index, title: `第${['一', '二', '三', '四'][index] ?? index + 1}章`, href: `${epubHrefPrefix}chapter${index + 1}.xhtml`, fileId: `${kind}-file`, startMs: null, endMs: null, durationMs: null, metadata: {} }))
     : kind === 'comic'
       ? [1, 2, 3].map((pageIndex) => ({ id: `page-${pageIndex}`, index: pageIndex - 1, title: `Page ${pageIndex}`, href: null, fileId: `${kind}-file`, startMs: null, endMs: null, durationMs: null, metadata: { pageIndex, mimeType: 'image/svg+xml', width: 600, height: 900, size: 100 } }))
       : [];
@@ -80,7 +91,7 @@ async function mockReaderApi(
   page: Page,
   kind: 'epub' | 'comic' | 'pdf',
   progressBodies: unknown[] = [],
-  options: { pdfBody?: Buffer; epubBody?: Buffer; progressStatus?: number; bootstrapDelayMs?: number; epubUnitCount?: number } = {}
+  options: { pdfBody?: Buffer; epubBody?: Buffer; progressStatus?: number; bootstrapDelayMs?: number; epubUnitCount?: number; epubHrefPrefix?: string } = {}
 ) {
   const pdf = kind === 'pdf' ? options.pdfBody ?? await readFile(pdfFixture) : null;
   const epub = kind === 'epub' ? options.epubBody ?? await readFile(epubFixture) : null;
@@ -89,7 +100,7 @@ async function mockReaderApi(
     const url = new URL(request.url());
     if (url.pathname.includes('/api/reader/v3/volumes/') && url.pathname.endsWith('/bootstrap')) {
       if (options.bootstrapDelayMs) await new Promise((resolve) => setTimeout(resolve, options.bootstrapDelayMs));
-      await route.fulfill({ json: bootstrap(kind, options.epubUnitCount) });
+      await route.fulfill({ json: bootstrap(kind, options.epubUnitCount, options.epubHrefPrefix) });
       return;
     }
     if (url.pathname.includes('/api/reader/v3/volumes/') && url.pathname.endsWith('/progress')) {
@@ -182,11 +193,13 @@ async function clickVisibleReflowableZone(body: Locator, horizontalFraction: num
 
 async function showReaderControls(page: Page) {
   await waitForReaderReady(page);
-  const shell = page.locator('[data-reader-shell="v2"]');
+  const shell = page.locator('[data-reader-shell="v3"]');
   const box = await shell.boundingBox();
   if (!box) throw new Error('Reader shell is not visible');
   const settingsButton = page.getByRole('button', { name: '阅读设置' });
-  if (await settingsButton.isVisible()) {
+  const console = page.locator('[data-reader-controller="bottom-console"]');
+  const controlsAreOpen = await console.evaluate((element) => getComputedStyle(element).opacity === '1');
+  if (await settingsButton.isVisible() && controlsAreOpen) {
     await settingsButton.hover();
     return;
   }
@@ -205,6 +218,7 @@ async function showReaderControls(page: Page) {
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   }
   await expect(settingsButton).toBeVisible();
+  await expect.poll(() => console.evaluate((element) => getComputedStyle(element).opacity)).toBe('1');
 }
 
 async function waitForReaderReady(page: Page) {
@@ -234,7 +248,7 @@ test('browser reader uses the dynamic viewport and control overlays keep the can
   await expect(page.locator('[data-reader-engine="comic-v3"]')).toBeVisible();
   await expect(page.locator('html')).not.toHaveClass(/pwa-native/);
 
-  const shell = page.locator('[data-reader-shell="v2"]');
+  const shell = page.locator('[data-reader-shell="v3"]');
   const initialLayout = await shell.evaluate((element) => {
     const shellBounds = element.getBoundingClientRect();
     const viewportElement = element.querySelector<HTMLElement>('[data-reader-viewport="stable"]');
@@ -308,8 +322,9 @@ test('reader loading and iOS bottom safe area stay on the active warm surface', 
   });
   await showReaderControls(page);
   await page.getByRole('button', { name: '阅读设置' }).click();
-  const settingsDialog = page.getByRole('dialog', { name: '小说排版' });
+  const settingsDialog = page.getByRole('dialog', { name: '设置' });
   await expect(settingsDialog).toBeVisible();
+  await expect.poll(() => settingsDialog.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(500);
   if (process.env.SHUKU_READER_EPUB_SETTINGS_CAPTURE) {
     await page.screenshot({ path: process.env.SHUKU_READER_EPUB_SETTINGS_CAPTURE });
   }
@@ -323,40 +338,41 @@ test('reader loading and iOS bottom safe area stay on the active warm surface', 
       cssBottom: style.bottom,
       paddingTop: style.paddingTop,
       paddingBottom: style.paddingBottom,
-      maxHeight: style.maxHeight,
       titleInset: element.querySelector<HTMLElement>('#reader-panel-title')!.getBoundingClientRect().top - bounds.top
     };
   });
-  expect(safeAreaCoverage.bottom).toBeGreaterThan(safeAreaCoverage.viewportBottom);
-  expect(safeAreaCoverage.cssBottom).toBe('-34px');
-  expect(safeAreaCoverage.paddingTop).toBe('16px');
-  expect(safeAreaCoverage.paddingBottom).toBe('142px');
+  expect(safeAreaCoverage.bottom).toBeLessThanOrEqual(safeAreaCoverage.viewportBottom - 10);
+  expect(safeAreaCoverage.cssBottom).toBe('0px');
+  expect(safeAreaCoverage.paddingTop).toBe('0px');
+  expect(safeAreaCoverage.paddingBottom).toBe('0px');
   expect(safeAreaCoverage.titleInset).toBeGreaterThanOrEqual(15);
-  expect(safeAreaCoverage.titleInset).toBeLessThanOrEqual(32);
-  expect(Number.parseFloat(safeAreaCoverage.maxHeight)).toBeGreaterThan(844 * 0.82);
+  expect(safeAreaCoverage.titleInset).toBeLessThanOrEqual(40);
+  expect(settingsDialog.getByRole('button', { name: '外观' })).toBeVisible();
 
   const bottomControls = page.locator('[data-reader-controller="bottom-console"]');
+  await settingsDialog.getByRole('button', { name: '关闭面板' }).click();
   for (const [triggerName, dialogName] of [
     ['目录', '目录'],
-    ['书签', '书签'],
-    ['标注与批注', '标注与批注']
+    ['笔记', '笔记']
   ] as const) {
     await bottomControls.getByRole('button', { name: triggerName, exact: true }).click();
     const dialog = page.getByRole('dialog', { name: dialogName });
     await expect(dialog).toBeVisible();
-    await expect.poll(() => dialog.evaluate((element) => getComputedStyle(element).paddingTop)).toBe('16px');
+    await expect.poll(() => dialog.evaluate((element) => getComputedStyle(element).paddingTop)).toBe('0px');
+    await dialog.getByRole('button', { name: '关闭面板' }).click();
   }
 });
 
 test('mobile EPUB controller exposes the complete thumb dock and persists the current bookmark', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await mockReaderApi(page, 'epub');
+  await mockReaderApi(page, 'epub', [], { epubHrefPrefix: 'OEBPS/' });
   await page.goto('/reader/epub-volume');
   await showReaderControls(page);
 
   const topBar = page.locator('[data-reader-controller="top-minimal"]');
   await expect(topBar.getByRole('button')).toHaveCount(2);
   await expect(topBar).not.toContainText('EPUB 测试读物');
+  await expect(topBar).toContainText(/第一章|第 1 页/);
   const topBarBounds = await topBar.locator('[data-reader-top-bar="true"]').boundingBox();
   expect(topBarBounds).not.toBeNull();
   expect(topBarBounds!.width).toBeGreaterThan(350);
@@ -364,67 +380,188 @@ test('mobile EPUB controller exposes the complete thumb dock and persists the cu
   const console = page.locator('[data-reader-controller="bottom-console"]');
   await expect(console).toBeVisible();
   await expect(page.getByRole('button', { name: '目录' })).toBeVisible();
-  const bookmarksButton = console.getByRole('button', { name: '书签', exact: true });
-  await expect(bookmarksButton).toBeVisible();
-  await expect(page.getByRole('button', { name: '进度' })).toBeVisible();
-  await expect(page.getByRole('button', { name: '标注与批注' })).toBeVisible();
+  const notesButton = console.getByRole('button', { name: '笔记', exact: true });
+  await expect(notesButton).toBeVisible();
+  await expect(page.getByRole('button', { name: '进度' })).toHaveCount(0);
+  await expect(console.getByRole('button', { name: '外观' })).toBeVisible();
+  await expect(console.getByRole('button', { name: '设置', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '字号小' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '字号大' })).toBeVisible();
   await expect(page.getByRole('button', { name: '阅读设置' })).toBeVisible();
+  const consoleSurfaceBounds = await console.locator(':scope > div').boundingBox();
+  expect(consoleSurfaceBounds).not.toBeNull();
+  expect(consoleSurfaceBounds!.height).toBeGreaterThanOrEqual(220);
+  expect(consoleSurfaceBounds!.y + consoleSurfaceBounds!.height).toBeLessThanOrEqual(844 - 10);
 
   await page.getByRole('button', { name: '目录' }).click();
   const mobileDirectory = page.getByRole('dialog', { name: '目录' });
   await expect(mobileDirectory).toBeVisible();
+  await expect.poll(() => mobileDirectory.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(500);
   await expect(page.getByRole('button', { name: '目录' })).toHaveAttribute('aria-expanded', 'true');
   const mobileDirectoryBounds = await mobileDirectory.boundingBox();
   expect(mobileDirectoryBounds).not.toBeNull();
-  expect(mobileDirectoryBounds!.x).toBeLessThanOrEqual(1);
-  expect(mobileDirectoryBounds!.width).toBeGreaterThanOrEqual(389);
-  expect(mobileDirectoryBounds!.height).toBeLessThanOrEqual(466);
+  expect(mobileDirectoryBounds!.x).toBeGreaterThanOrEqual(10);
+  expect(mobileDirectoryBounds!.width).toBeGreaterThanOrEqual(360);
+  expect(mobileDirectoryBounds!.height).toBeGreaterThan(500);
+  const workspace = page.locator('[data-reader-workspace="true"]');
+  await expect(workspace).toHaveAttribute('data-reader-panel', 'toc');
+  await expect(workspace).toHaveCount(1);
   await expect(mobileDirectory.getByRole('button', { name: /1.*第一章/ })).toBeVisible();
   await expect(mobileDirectory.getByRole('button', { name: /2.*第二章/ })).toBeVisible();
   if (process.env.SHUKU_READER_TOC_CAPTURE) await page.screenshot({ path: process.env.SHUKU_READER_TOC_CAPTURE });
 
-  await bookmarksButton.click();
+  await mobileDirectory.getByRole('button', { name: '笔记' }).click();
   await expect(mobileDirectory).not.toBeAttached();
+  await expect(workspace).toHaveAttribute('data-reader-panel', 'notes');
+  await expect(workspace).toHaveCount(1);
   await expect(page.getByRole('button', { name: '目录' })).toHaveAttribute('aria-expanded', 'false');
-  const bookmarksDialog = page.getByRole('dialog', { name: '书签' });
-  await expect(bookmarksDialog).toBeVisible();
-  await expect(bookmarksButton).toHaveAttribute('aria-expanded', 'true');
-  await expect(bookmarksDialog.getByText('还没有书签')).toBeVisible();
-  await bookmarksDialog.getByRole('button', { name: '添加当前位置书签' }).click();
+  const notesDialog = page.getByRole('dialog', { name: '笔记' });
+  await expect(notesDialog).toBeVisible();
+  await expect(notesButton).toHaveAttribute('aria-expanded', 'true');
+  await expect(notesDialog.getByRole('tab', { name: '书签' })).toHaveAttribute('aria-selected', 'true');
+  await expect(notesDialog.getByText('还没有书签')).toBeVisible();
+  await notesDialog.getByRole('button', { name: '添加当前位置书签' }).click();
   await expect(page.getByRole('status')).toHaveText('已添加当前书签');
-  await expect(bookmarksButton).toHaveAttribute('aria-pressed', 'true');
-  await expect(bookmarksDialog.getByRole('button', { name: /跳转到书签：第一章/ })).toBeVisible();
+  await expect(notesButton).toHaveAttribute('aria-pressed', 'true');
+  await expect(notesDialog.getByRole('button', { name: /^跳转到书签：/ })).toHaveCount(1);
   await expect.poll(() => page.evaluate(() => Object.keys(localStorage).some((key) => key.startsWith('shuku:reader-bookmarks:v3:user-e2e:epub-volume:')))).toBe(true);
 
+  await notesDialog.getByRole('button', { name: '关闭面板' }).click();
   await page.getByRole('button', { name: '目录' }).click();
   const reopenedDirectory = page.getByRole('dialog', { name: '目录' });
   await reopenedDirectory.getByRole('button', { name: /2.*第二章/ }).click();
   await expect(reopenedDirectory).not.toBeAttached();
   await expect.poll(() => page.locator('[data-reader-engine="reflowable-v3"]').getAttribute('data-reader-location-href')).toContain('chapter2.xhtml');
 
-  await bookmarksButton.click();
-  await page.getByRole('dialog', { name: '书签' }).getByRole('button', { name: '添加当前位置书签' }).click();
-  await expect(page.getByRole('dialog', { name: '书签' }).getByRole('button', { name: /^跳转到书签：/ })).toHaveCount(2);
+  await notesButton.click();
+  await page.getByRole('dialog', { name: '笔记' }).getByRole('button', { name: '添加当前位置书签' }).click();
+  await expect(page.getByRole('dialog', { name: '笔记' }).getByRole('button', { name: /^跳转到书签：/ })).toHaveCount(2);
   if (process.env.SHUKU_READER_BOOKMARKS_CAPTURE) await page.screenshot({ path: process.env.SHUKU_READER_BOOKMARKS_CAPTURE });
-  await page.getByRole('dialog', { name: '书签' }).getByRole('button', { name: /跳转到书签：第一章/ }).click();
-  await expect(page.getByRole('dialog', { name: '书签' })).not.toBeAttached();
+  await page.getByRole('dialog', { name: '笔记' }).getByRole('button', { name: /^跳转到书签：/ }).first().click();
+  await expect(page.getByRole('dialog', { name: '笔记' })).not.toBeAttached();
   await expect.poll(() => page.locator('[data-reader-engine="reflowable-v3"]').getAttribute('data-reader-location-href')).toContain('chapter1.xhtml');
 
-  await bookmarksButton.click();
-  const reopenedBookmarks = page.getByRole('dialog', { name: '书签' });
-  await reopenedBookmarks.getByRole('button', { name: /删除书签：第一章/ }).click();
-  await expect(reopenedBookmarks.getByRole('button', { name: /^跳转到书签：/ })).toHaveCount(1);
+  await notesButton.click();
+  const reopenedNotes = page.getByRole('dialog', { name: '笔记' });
+  await reopenedNotes.getByRole('button', { name: /^删除书签：/ }).first().click();
+  await expect(reopenedNotes.getByRole('button', { name: /^跳转到书签：/ })).toHaveCount(1);
 
-  await page.getByRole('button', { name: '进度' }).click();
-  const progressDialog = page.getByRole('dialog', { name: '阅读进度' });
-  await expect(progressDialog).toBeVisible();
-  await expect(progressDialog.getByRole('slider', { name: '阅读进度' })).toBeVisible();
-  await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: '标注与批注' }).click();
-  const annotationDialog = page.getByRole('dialog', { name: '标注与批注' });
+  await reopenedNotes.getByRole('button', { name: '关闭面板' }).click();
+  await expect(page.locator('[data-reader-controller="bottom-console"]').getByRole('slider', { name: '阅读进度' })).toBeVisible();
+  await notesButton.click();
+  const annotationDialog = page.getByRole('dialog', { name: '笔记' });
+  await annotationDialog.getByRole('tab', { name: '标注', exact: true }).click();
   await expect(annotationDialog.getByRole('tab', { name: '书内注释' })).toHaveAttribute('aria-selected', 'true');
   await annotationDialog.getByRole('tab', { name: '我的标注' }).click();
   await expect(annotationDialog.getByText('还没有划线或批注')).toBeVisible();
+});
+
+test('mobile EPUB quick console keeps display controls reachable without covering the bottom safe gap', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockReaderApi(page, 'epub');
+  await page.goto('/reader/epub-volume');
+  await showReaderControls(page);
+
+  const console = page.locator('[data-reader-controller="bottom-console"]');
+  const consoleSurface = console.locator(':scope > div');
+  await expect(consoleSurface).toHaveAttribute('data-reader-console-surface', 'true');
+  const compactConsoleBounds = await console.boundingBox();
+  expect(compactConsoleBounds).not.toBeNull();
+  await expect(console).toHaveCSS('transition-property', /height/);
+  await consoleSurface.evaluate((element) => {
+    element.setAttribute('data-reader-surface-identity', 'persistent-reader-surface');
+  });
+  const surfaceBounds = await consoleSurface.boundingBox();
+  expect(surfaceBounds).not.toBeNull();
+  expect(surfaceBounds!.height).toBeGreaterThanOrEqual(220);
+  expect(surfaceBounds!.y + surfaceBounds!.height).toBeLessThanOrEqual(834);
+  await expect(console.getByRole('button', { name: '字号小' })).toBeVisible();
+  await expect(console.getByRole('button', { name: '字号大' })).toBeVisible();
+  await expect(console.getByRole('button', { name: '暖色' })).toBeVisible();
+  await expect(console.getByRole('button', { name: '分页', exact: true })).toBeVisible();
+  await expect(console.getByRole('button', { name: '阅读设置' })).toContainText('更多');
+  await expect(console.getByRole('button', { name: '笔记' })).toBeVisible();
+
+  await console.getByRole('button', { name: '字号大' }).click();
+  await expect(console.getByRole('button', { name: '字号大' }).locator('xpath=..')).toContainText('22');
+
+  await console.getByRole('button', { name: '阅读设置' }).click();
+  const settingsDialog = page.getByRole('dialog', { name: '设置' });
+  await expect(settingsDialog).toBeVisible();
+  await expect.poll(() => console.evaluate((element) => getComputedStyle(element).opacity)).toBe('1');
+  await expect(console).toHaveAttribute('data-reader-panel-state', 'settings');
+  await expect(settingsDialog).toHaveAttribute('data-reader-workspace', 'true');
+  await expect(settingsDialog).toHaveAttribute('data-reader-surface-identity', 'persistent-reader-surface');
+  await expect(console.locator('[data-reader-console-surface="true"]')).toHaveCount(1);
+  await expect(settingsDialog.getByRole('button', { name: '进度' })).toHaveCount(0);
+  for (const label of ['目录', '笔记', '外观', '设置']) {
+    await expect(settingsDialog.getByRole('button', { name: label, exact: true })).toBeVisible();
+  }
+  const advancedButton = settingsDialog.getByRole('button', { name: '高级设置' });
+  await advancedButton.click();
+  await expect(advancedButton).toHaveAttribute('aria-expanded', 'true');
+  await expect(settingsDialog.locator('#reader-advanced-settings')).toHaveAttribute('data-expanded', 'true');
+  await expect(settingsDialog.getByText('段落与内容样式')).toBeVisible();
+  await settingsDialog.getByRole('button', { name: '外观' }).click();
+  await expect(console).toHaveAttribute('data-reader-panel-state', 'appearance');
+  await expect(page.getByRole('dialog', { name: '外观' }).getByRole('group', { name: '主题' })).toBeVisible();
+  await page.getByRole('dialog', { name: '外观' }).getByRole('button', { name: '设置', exact: true }).click();
+  await expect.poll(() => console.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(compactConsoleBounds!.height + 200);
+  const expandedConsoleBounds = await console.boundingBox();
+  expect(expandedConsoleBounds).not.toBeNull();
+  expect(expandedConsoleBounds!.height).toBeGreaterThan(compactConsoleBounds!.height + 200);
+  await expect(settingsDialog.locator('.shuku-reader-control-workspace')).toHaveCSS('animation-name', 'shuku-reader-workspace-enter');
+  await page.getByRole('dialog', { name: '设置' }).getByRole('button', { name: '关闭面板' }).click();
+
+  await console.getByRole('button', { name: '笔记' }).click();
+  const notesDialog = page.getByRole('dialog', { name: '笔记' });
+  await expect(notesDialog.getByRole('tab', { name: '书签' })).toHaveAttribute('aria-selected', 'true');
+  await notesDialog.getByRole('tab', { name: '标注', exact: true }).click();
+  await expect(notesDialog.getByRole('tab', { name: '书内注释' })).toHaveAttribute('aria-selected', 'true');
+});
+
+test('EPUB safe optimization marks only ordinary body paragraphs and remains reversible', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockReaderApi(page, 'epub');
+  await page.goto('/reader/epub-volume');
+  let iframe = await currentEpubIframe(page);
+  await iframe.contentFrame().locator('body').evaluate((body) => {
+    const [plain, duplicate] = Array.from(body.querySelectorAll<HTMLParagraphElement>('p'));
+    if (!plain || !duplicate) throw new Error('EPUB fixture requires two body paragraphs');
+    plain.id = 'smart-plain';
+    duplicate.id = 'smart-duplicate';
+    duplicate.style.textIndent = '2em';
+    duplicate.textContent = `　${duplicate.textContent ?? ''}`;
+  });
+
+  await showReaderControls(page);
+  await page.getByRole('button', { name: '阅读设置' }).click();
+  const settingsDialog = page.getByRole('dialog', { name: '设置' });
+  const safeOptimization = settingsDialog.getByRole('checkbox', { name: '安全优化' });
+  const safeOptimizationLabel = settingsDialog.getByText('安全优化', { exact: true });
+  await safeOptimizationLabel.click();
+  await expect(safeOptimization).not.toBeChecked();
+  await safeOptimizationLabel.click();
+  await expect(safeOptimization).toBeChecked();
+  iframe = await currentEpubIframe(page);
+
+  const optimized = await iframe.contentFrame().locator('body').evaluate((body) => {
+    const state = (id: string) => body.querySelector<HTMLElement>(`#${id}`)?.className ?? '';
+    return {
+      plain: state('smart-plain'),
+      duplicate: state('smart-duplicate'),
+      duplicateText: body.querySelector('#smart-duplicate')?.textContent ?? ''
+    };
+  });
+  expect(optimized.plain).toContain('shuku-smart-auto-indent');
+  expect(optimized.duplicate).toContain('shuku-smart-deduplicate-indent');
+  expect(optimized.duplicateText.startsWith('　')).toBe(true);
+
+  await safeOptimizationLabel.click();
+  await expect(safeOptimization).not.toBeChecked();
+  iframe = await currentEpubIframe(page);
+  await expect.poll(() => iframe.contentFrame().locator('#smart-plain').evaluate((element) => element.className)).not.toContain('shuku-smart-');
+  await expect.poll(() => iframe.contentFrame().locator('#smart-duplicate').evaluate((element) => element.className)).not.toContain('shuku-smart-');
 });
 
 test('tablet comic controller keeps format-appropriate actions and an inline progress scrubber', async ({ page }) => {
@@ -439,10 +576,10 @@ test('tablet comic controller keeps format-appropriate actions and an inline pro
   expect(consoleBounds!.x).toBeGreaterThan(16);
   expect(consoleBounds!.width).toBeLessThan(834 - 32);
   await expect(page.getByRole('slider', { name: '阅读进度' })).toBeVisible();
-  await expect(page.getByRole('button', { name: '进度' })).toBeHidden();
+  await expect(page.getByRole('button', { name: '进度' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '标注与批注' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '目录' })).toBeVisible();
-  await expect(console.getByRole('button', { name: '书签', exact: true })).toBeVisible();
+  await expect(console.getByRole('button', { name: '笔记', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '阅读设置' })).toBeVisible();
 
   const directoryButton = page.getByRole('button', { name: '目录' });
@@ -454,30 +591,27 @@ test('tablet comic controller keeps format-appropriate actions and an inline pro
   const directoryBounds = await directoryDialog.boundingBox();
   expect(directoryButtonBounds).not.toBeNull();
   expect(directoryBounds).not.toBeNull();
-  expect(directoryBounds!.y + directoryBounds!.height).toBeLessThanOrEqual(directoryButtonBounds!.y - 8);
-  expect(directoryButtonBounds!.x + (directoryButtonBounds!.width / 2)).toBeGreaterThanOrEqual(directoryBounds!.x);
-  expect(directoryButtonBounds!.x + (directoryButtonBounds!.width / 2)).toBeLessThanOrEqual(directoryBounds!.x + directoryBounds!.width);
-  expect(directoryBounds!.x + (directoryBounds!.width / 2)).toBeLessThan(834 / 2);
-  const settingsButton = page.getByRole('button', { name: '阅读设置' });
-  const settingsButtonBounds = await settingsButton.boundingBox();
-  await settingsButton.click();
+  expect(directoryBounds!.y + directoryBounds!.height).toBeLessThanOrEqual(1112 - 10);
+  expect(directoryBounds!.x).toBeGreaterThanOrEqual(16);
+  expect(directoryBounds!.width).toBeGreaterThan(780);
+  const workspace = page.locator('[data-reader-workspace="true"]');
+  await expect(workspace).toHaveAttribute('data-reader-panel', 'toc');
+  await directoryDialog.getByRole('button', { name: '外观' }).click();
   await expect(directoryDialog).not.toBeAttached();
   await expect(directoryButton).toHaveAttribute('aria-expanded', 'false');
-  const settingsDialog = page.getByRole('dialog', { name: '阅读设置' });
+  const settingsDialog = page.getByRole('dialog', { name: '外观' });
   await expect(settingsDialog).toBeVisible();
-  await expect(settingsButton).toHaveAttribute('aria-expanded', 'true');
+  await expect(workspace).toHaveAttribute('data-reader-panel', 'appearance');
+  await expect(workspace).toHaveCount(1);
   await expect(settingsDialog.getByRole('group', { name: '主题' }).getByRole('button')).toHaveCount(4);
   await expect(settingsDialog.getByText('主题', { exact: true })).toHaveCount(0);
   if (process.env.SHUKU_READER_SETTINGS_CAPTURE) {
     await page.screenshot({ path: process.env.SHUKU_READER_SETTINGS_CAPTURE });
   }
   const settingsBounds = await settingsDialog.boundingBox();
-  expect(settingsButtonBounds).not.toBeNull();
   expect(settingsBounds).not.toBeNull();
-  expect(settingsBounds!.width).toBeLessThanOrEqual(384);
-  expect(settingsBounds!.y + settingsBounds!.height).toBeLessThanOrEqual(settingsButtonBounds!.y - 8);
-  expect(settingsButtonBounds!.x + (settingsButtonBounds!.width / 2)).toBeGreaterThanOrEqual(settingsBounds!.x);
-  expect(settingsButtonBounds!.x + (settingsButtonBounds!.width / 2)).toBeLessThanOrEqual(settingsBounds!.x + settingsBounds!.width);
+  expect(settingsBounds!.width).toBeGreaterThan(780);
+  expect(settingsBounds!.y + settingsBounds!.height).toBeLessThanOrEqual(1112 - 10);
   if (process.env.SHUKU_READER_SETTINGS_CAPTURE && process.env.SHUKU_READER_SETTINGS_SOURCE && process.env.SHUKU_READER_SETTINGS_COMPARISON) {
     const [sourceVisual, implementation] = await Promise.all([
       readFile(process.env.SHUKU_READER_SETTINGS_SOURCE),
@@ -505,20 +639,46 @@ test('tablet comic controller keeps format-appropriate actions and an inline pro
   }
 });
 
+test('PDF uses the same responsive reader workspace for appearance, settings, directory, and notes', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await mockReaderApi(page, 'pdf');
+  await page.goto('/reader/pdf-volume');
+  await showReaderControls(page);
+
+  const console = page.locator('[data-reader-controller="bottom-console"]');
+  await console.getByRole('button', { name: '阅读设置' }).click();
+  const workspace = page.locator('[data-reader-workspace="true"]');
+  await expect(workspace).toHaveAttribute('data-reader-panel', 'settings');
+  await expect(page.getByRole('dialog', { name: '设置' }).getByRole('group', { name: '适配' })).toBeVisible();
+
+  await workspace.getByRole('button', { name: '外观' }).click();
+  await expect(workspace).toHaveAttribute('data-reader-panel', 'appearance');
+  await expect(page.getByRole('dialog', { name: '外观' }).getByRole('group', { name: '主题' })).toBeVisible();
+
+  await workspace.getByRole('button', { name: '目录' }).click();
+  await expect(workspace).toHaveAttribute('data-reader-panel', 'toc');
+  await expect(page.getByRole('dialog', { name: '目录' }).getByRole('button', { name: /1.*第 1 页/ })).toBeVisible();
+
+  await workspace.getByRole('button', { name: '笔记' }).click();
+  await expect(workspace).toHaveAttribute('data-reader-panel', 'notes');
+  await expect(page.getByRole('dialog', { name: '笔记' }).getByRole('tab', { name: '书签' })).toHaveAttribute('aria-selected', 'true');
+  await expect(workspace).toHaveCount(1);
+});
+
 test('an EPUB without other media or volume choices shows only its chapter hierarchy', async ({ page }, testInfo) => {
   const consoleErrors: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') consoleErrors.push(message.text());
   });
-  const usesAnchoredDesktopPanel = !testInfo.project.name.includes('iphone');
-  if (usesAnchoredDesktopPanel) await page.setViewportSize({ width: 1440, height: 900 });
+  const usesDesktopWorkspace = !testInfo.project.name.includes('iphone');
+  if (usesDesktopWorkspace) await page.setViewportSize({ width: 1440, height: 900 });
   await mockReaderApi(page, 'epub');
   await page.goto('/reader/epub-volume');
   await showReaderControls(page);
   const directoryButton = page.getByRole('button', { name: '目录' });
   const directoryButtonBounds = await directoryButton.boundingBox();
   const dockSurface = directoryButton.locator('[data-reader-dock-surface="true"]');
-  const hoverSurfaceBox = usesAnchoredDesktopPanel ? await (async () => {
+  const hoverSurfaceBox = usesDesktopWorkspace ? await (async () => {
     await directoryButton.hover();
     await expect.poll(() => dockSurface.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
     await expect(directoryButton).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
@@ -534,23 +694,18 @@ test('an EPUB without other media or volume choices shows only its chapter hiera
   const [directoryButtonBox, selectedSurfaceBox] = await Promise.all([directoryButton.boundingBox(), selectedSurface.boundingBox()]);
   expect(directoryButtonBox).not.toBeNull();
   expect(selectedSurfaceBox).not.toBeNull();
-  expect(selectedSurfaceBox!.x - directoryButtonBox!.x).toBeGreaterThanOrEqual(5);
-  expect(selectedSurfaceBox!.y - directoryButtonBox!.y).toBeGreaterThanOrEqual(5);
-  if (hoverSurfaceBox) {
-    expect(selectedSurfaceBox!.width).toBe(hoverSurfaceBox.width);
-    expect(selectedSurfaceBox!.height).toBe(hoverSurfaceBox.height);
-  }
+  expect(selectedSurfaceBox!.x - directoryButtonBox!.x).toBeGreaterThanOrEqual(4);
+  expect(selectedSurfaceBox!.y - directoryButtonBox!.y).toBeGreaterThanOrEqual(4);
+  if (usesDesktopWorkspace) expect(hoverSurfaceBox).not.toBeNull();
   const directoryBounds = await directory.boundingBox();
   expect(directoryButtonBounds).not.toBeNull();
   expect(directoryBounds).not.toBeNull();
-  if (usesAnchoredDesktopPanel) {
-    expect(directoryBounds!.y + directoryBounds!.height).toBeLessThanOrEqual(directoryButtonBounds!.y - 8);
-    expect(directoryButtonBounds!.x + (directoryButtonBounds!.width / 2)).toBeGreaterThanOrEqual(directoryBounds!.x);
-    expect(directoryButtonBounds!.x + (directoryButtonBounds!.width / 2)).toBeLessThanOrEqual(directoryBounds!.x + directoryBounds!.width);
-  } else {
-    expect(directoryBounds!.x).toBeLessThanOrEqual(1);
-    expect(directoryBounds!.width).toBeGreaterThanOrEqual((page.viewportSize()?.width ?? 390) - 1);
+  expect(directoryBounds!.x).toBeGreaterThanOrEqual(10);
+  expect(directoryBounds!.width).toBeGreaterThanOrEqual(usesDesktopWorkspace ? 1000 : (page.viewportSize()?.width ?? 390) - 30);
+  if (usesDesktopWorkspace) {
+    expect(Math.abs((directoryBounds!.x + directoryBounds!.width / 2) - (page.viewportSize()?.width ?? 1440) / 2)).toBeLessThanOrEqual(1);
   }
+  expect(directoryBounds!.y + directoryBounds!.height).toBeLessThanOrEqual((page.viewportSize()?.height ?? 900) - 10);
   await expect(directory.getByText('默认版本', { exact: true })).toHaveCount(0);
   await expect(directory.getByText('版本', { exact: true })).toHaveCount(0);
   await expect(directory.getByText('卷册', { exact: true })).toHaveCount(0);
@@ -559,7 +714,7 @@ test('an EPUB without other media or volume choices shows only its chapter hiera
   await expect(directory.getByRole('button', { name: /2.*第二章/ })).toBeVisible();
   const panelCapturePath = process.env.SHUKU_READER_PANEL_CAPTURE;
   if (panelCapturePath) await page.screenshot({ path: panelCapturePath });
-  await page.mouse.click(usesAnchoredDesktopPanel ? 900 : 195, usesAnchoredDesktopPanel ? 500 : 100);
+  await page.mouse.click(8, 100);
   await expect(directory).not.toBeAttached();
   await expect(directoryButton).toHaveAttribute('aria-expanded', 'false');
   await directoryButton.click();
@@ -595,7 +750,7 @@ test('an EPUB without other media or volume choices shows only its chapter hiera
           </div>
           <div class="column">
             <img class="implementation" src="${dataUri(implementation)}" />
-            <div class="label">实现：目录以底部目录按钮为锚点向上展开</div>
+            <div class="label">实现：目录在统一阅读控制台内展开</div>
           </div>
         </div>
       `);
@@ -612,31 +767,24 @@ test('comic navigation, local theme persistence, reset, and V2 progress transpor
   await expect(page.getByText('第 1 页 / 共 3 页').first()).toBeVisible();
   await showReaderControls(page);
   const previousButton = page.getByRole('button', { name: '上一页' });
-  if (await previousButton.count()) {
-    await expect(previousButton).toBeDisabled();
-  } else {
-    await page.getByRole('button', { name: '进度' }).click();
-    await expect(page.getByRole('dialog', { name: '阅读进度' }).getByRole('button', { name: '上一页' })).toBeDisabled();
-    await page.keyboard.press('Escape');
-  }
+  await expect(previousButton).toBeDisabled();
   await page.keyboard.press('Escape');
 
   await page.keyboard.press('ArrowRight');
   await expect(page.getByText('第 2 页 / 共 3 页').first()).toBeVisible();
   await expect.poll(() => progressBodies.some((body) => (
-    body.userId === 'user-e2e'
-    && body.location?.type === 'comic'
+    body.location?.type === 'comic'
     && body.location.volumeId === 'comic-volume'
     && body.location.pageIndex === 2
   )), { timeout: 8_000 }).toBe(true);
 
   await showReaderControls(page);
   await page.getByRole('button', { name: '阅读设置' }).click();
-  const settingsDialog = page.getByRole('dialog', { name: '阅读设置' });
+  const settingsDialog = page.getByRole('dialog', { name: '设置' });
   await expect(settingsDialog).toBeVisible();
   await expect(page.getByRole('button', { name: '关闭面板' })).toBeFocused();
   await page.keyboard.press('Shift+Tab');
-  await expect(page.getByRole('button', { name: '恢复本书默认设置' })).toBeFocused();
+  await expect(settingsDialog.getByRole('button', { name: '设置', exact: true })).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(page.getByRole('button', { name: '关闭面板' })).toBeFocused();
   await page.keyboard.press('ArrowRight');
@@ -653,9 +801,12 @@ test('comic navigation, local theme persistence, reset, and V2 progress transpor
   await expect(settingsDialog).not.toBeAttached();
   await expect(page.getByText('第 2 页 / 共 3 页').first()).toBeVisible();
   await page.getByRole('button', { name: '阅读设置' }).click();
-  await expect(page.getByRole('dialog', { name: '阅读设置' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: '设置' })).toBeVisible();
+  await page.getByRole('dialog', { name: '设置' }).getByRole('button', { name: '外观' }).click();
   await page.getByRole('button', { name: '纯黑' }).click();
-  await expect(page.locator('[data-reader-shell="v2"]')).toHaveAttribute('data-reader-theme', 'black');
+  await expect(page.locator('[data-reader-shell="v3"]')).toHaveAttribute('data-reader-theme', 'black');
+  await page.getByRole('dialog', { name: '外观' }).getByRole('button', { name: '设置', exact: true }).click();
+  await page.getByRole('button', { name: '高级设置' }).click();
   await page.getByRole('button', { name: '省流', exact: true }).click();
   await page.getByRole('button', { name: '原图', exact: true }).click();
   await expect.poll(async () => {
@@ -667,7 +818,7 @@ test('comic navigation, local theme persistence, reset, and V2 progress transpor
   await expect(settingsDialog).not.toBeAttached();
   await expect(page.getByRole('button', { name: '阅读设置' })).toBeFocused();
   await page.keyboard.press('Escape');
-  await page.locator('[data-reader-shell="v2"] > div').first().focus();
+  await page.locator('[data-reader-shell="v3"] > div').first().focus();
   await page.keyboard.press('ArrowLeft');
   await expect(page.getByText('第 3 页 / 共 3 页').first()).toBeVisible();
   await showReaderControls(page);
@@ -679,11 +830,11 @@ test('comic navigation, local theme persistence, reset, and V2 progress transpor
   await page.keyboard.press('Escape');
   await page.reload();
   await expect(page.locator('[data-reader-engine="comic-v3"]')).toBeVisible();
-  await expect(page.locator('[data-reader-shell="v2"]')).toHaveAttribute('data-reader-theme', 'black');
+  await expect(page.locator('[data-reader-shell="v3"]')).toHaveAttribute('data-reader-theme', 'black');
   await showReaderControls(page);
   await page.getByRole('button', { name: '阅读设置' }).click();
-  await page.getByRole('button', { name: '恢复本书默认设置' }).click();
-  await expect(page.locator('[data-reader-shell="v2"]')).toHaveAttribute('data-reader-theme', 'warm');
+  await page.getByRole('button', { name: '恢复阅读默认设置' }).click();
+  await expect(page.locator('[data-reader-shell="v3"]')).toHaveAttribute('data-reader-theme', 'warm');
 });
 
 test('PDF.js renders a bounded canvas and selectable text layer', async ({ page }) => {
@@ -1000,7 +1151,8 @@ test('EPUB iframe is scriptless and receives the selected theme snapshot', async
     };
   });
   expect(pageLayout.layout).toBeUndefined();
-  expect(pageLayout.paddingTop).toBeGreaterThanOrEqual(32);
+  const startsCompact = (page.viewportSize()?.width ?? Number.POSITIVE_INFINITY) <= 640;
+  expect(pageLayout.paddingTop).toBeGreaterThanOrEqual(startsCompact ? 16 : 32);
   expect(pageLayout.paddingBottom).toBeGreaterThanOrEqual(32);
   const engine = page.locator('[data-reader-engine="reflowable-v3"]');
   const engineLayout = await engine.evaluate((element) => {
@@ -1035,38 +1187,56 @@ test('EPUB iframe is scriptless and receives the selected theme snapshot', async
 
     await page.setViewportSize({ width: 390, height: 844 });
     const mobileIframe = await currentEpubIframe(page);
+    await expect(engine).toHaveAttribute('data-epub-viewport-layout', 'compact');
+    const mobilePaginator = page.locator('foliate-paginator');
+    await expect(mobilePaginator).toHaveAttribute('gap', '0%');
+    await expect.poll(() => mobilePaginator.evaluate((element) => (
+      Number.parseFloat(getComputedStyle(element).paddingBottom)
+    ))).toBeGreaterThanOrEqual(10);
     await expect.poll(() => mobileIframe.contentFrame().locator('body').evaluate((body) => {
       const style = getComputedStyle(body);
+      const rootStyle = getComputedStyle(body.ownerDocument.documentElement);
       const viewportHeight = body.ownerDocument.documentElement.clientHeight;
       const expectedTop = Math.max(16, Math.min(32, viewportHeight * 0.025));
       const expectedBottom = Math.max(32, Math.min(64, viewportHeight * 0.05));
       return {
-        paddingLeft: Number.parseFloat(style.paddingLeft),
-        paddingRight: Number.parseFloat(style.paddingRight),
+        inlinePaddingMatchesFont: Math.abs(Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.fontSize)) < 0.1
+          && Math.abs(Number.parseFloat(style.paddingRight) - Number.parseFloat(style.fontSize)) < 0.1,
+        rootPaddingLeft: Number.parseFloat(rootStyle.paddingLeft),
+        rootPaddingRight: Number.parseFloat(rootStyle.paddingRight),
         topIsHalved: Math.abs(Number.parseFloat(style.paddingTop) - expectedTop) < 0.1,
         bottomIsUnchanged: Math.abs(Number.parseFloat(style.paddingBottom) - expectedBottom) < 0.1
       };
     })).toEqual({
-      paddingLeft: 8,
-      paddingRight: 8,
+      inlinePaddingMatchesFont: true,
+      rootPaddingLeft: 0,
+      rootPaddingRight: 0,
       topIsHalved: true,
       bottomIsUnchanged: true
     });
     await page.setViewportSize(initialViewport);
+    await expect(engine).toHaveAttribute('data-epub-viewport-layout', startsCompact ? 'compact' : 'regular');
+    await expect(page.locator('foliate-paginator')).toHaveAttribute('gap', startsCompact ? '0%' : '7%');
+    const restoredBottomInset = await page.locator('foliate-paginator').evaluate((element) => (
+      Number.parseFloat(getComputedStyle(element).paddingBottom)
+    ));
+    if (startsCompact) expect(restoredBottomInset).toBeGreaterThanOrEqual(10);
+    else expect(restoredBottomInset).toBe(0);
     iframe = await currentEpubIframe(page);
   }
 
   await showReaderControls(page);
   await expect(page.locator('[data-reader-controller="top-minimal"]')).not.toContainText(/EPUB 阅读|第二章|全书 \d+%/);
   await expect(page.locator('[data-reader-controller="top-minimal"]').getByRole('button')).toHaveCount(2);
-  await expect(page.locator('[data-reader-shell="v2"]')).not.toContainText('共 2 页');
-  await expect(page.locator('[data-reader-shell="v2"]')).not.toContainText(/第 \d+ \/ 2 章/);
+  await expect(page.locator('[data-reader-shell="v3"]')).not.toContainText('共 2 页');
+  await expect(page.locator('[data-reader-shell="v3"]')).not.toContainText(/第 \d+ \/ 2 章/);
   await page.getByRole('button', { name: '阅读设置' }).click();
-  const settingsDialog = page.getByRole('dialog', { name: '小说排版' });
+  const settingsDialog = page.getByRole('dialog', { name: '设置' });
   await expect(settingsDialog).toBeVisible();
-  await expect(settingsDialog.getByRole('group', { name: '页面', exact: true })).toHaveCount(0);
+  await settingsDialog.getByRole('button', { name: '外观' }).click();
+  const appearanceDialog = page.getByRole('dialog', { name: '外观' });
   await page.getByRole('button', { name: '暖色' }).click();
-  await expect(page.locator('[data-reader-shell="v2"]')).toHaveAttribute('data-reader-theme', 'warm');
+  await expect(page.locator('[data-reader-shell="v3"]')).toHaveAttribute('data-reader-theme', 'warm');
   await expect.poll(async () => iframe.contentFrame().locator('body').evaluate((body) => getComputedStyle(body).backgroundColor)).toBe('rgb(253, 246, 234)');
   const hostileTheme = await iframe.contentFrame().locator('#hostile-theme').evaluate((element) => {
     const style = getComputedStyle(element);
@@ -1077,7 +1247,7 @@ test('EPUB iframe is scriptless and receives the selected theme snapshot', async
   expect(hostileTheme.font).not.toContain('monospace');
   expect(hostileTheme.inlineStyle ?? '').not.toMatch(/(?:color|background|font-family|line-height)\s*:/i);
 
-  await page.getByRole('button', { name: '行距大' }).click();
+  await appearanceDialog.getByRole('button', { name: '行距大' }).click();
   await expect.poll(async () => {
     const lineHeightIframe = await currentEpubIframe(page);
     return lineHeightIframe.contentFrame().locator('body').evaluate((body) => {
@@ -1105,14 +1275,17 @@ test('EPUB iframe is scriptless and receives the selected theme snapshot', async
   iframe = await currentEpubIframe(page);
   await expect.poll(async () => iframe.contentFrame().locator('#hostile-theme').evaluate((element) => getComputedStyle(element).fontSize)).toBe('22px');
 
+  await page.getByRole('dialog', { name: '外观' }).getByRole('button', { name: '设置', exact: true }).click();
   await page.getByRole('button', { name: '滚动', exact: true }).click();
   await expect(engine).toHaveAttribute('data-reader-flow', 'scrolled');
   iframe = await currentEpubIframe(page);
-  await expect.poll(async () => iframe.contentFrame().locator('body').evaluate((body) => Number.parseFloat(getComputedStyle(body).paddingTop))).toBeGreaterThanOrEqual(28);
+  await expect.poll(async () => iframe.contentFrame().locator('body').evaluate((body) => Number.parseFloat(getComputedStyle(body).paddingTop))).toBeGreaterThanOrEqual(startsCompact ? 14 : 28);
   await page.getByRole('button', { name: '分页', exact: true }).click();
   await expect(engine).toHaveAttribute('data-reader-flow', 'paginated');
   iframe = await currentEpubIframe(page);
   await expect(page.locator('[data-reader-engine="reflowable-v3"]')).toHaveCount(1);
+
+  await page.getByRole('dialog', { name: '设置' }).getByRole('button', { name: '外观' }).click();
 
   for (const [label, expectedFamily] of [
     ['苹方', 'PingFang SC'],
@@ -1135,7 +1308,7 @@ test('EPUB iframe is scriptless and receives the selected theme snapshot', async
     ['白天', 'day', 'rgb(247, 247, 244)']
   ] as const) {
     await page.getByRole('button', { name: label, exact: true }).click();
-    await expect(page.locator('[data-reader-shell="v2"]')).toHaveAttribute('data-reader-theme', theme);
+    await expect(page.locator('[data-reader-shell="v3"]')).toHaveAttribute('data-reader-theme', theme);
     await expect.poll(async () => iframe.contentFrame().locator('body').evaluate((body) => getComputedStyle(body).backgroundColor)).toBe(background);
   }
 
@@ -1146,9 +1319,9 @@ test('EPUB iframe is scriptless and receives the selected theme snapshot', async
 
   await page.reload();
   await expect(page.locator('[data-reader-engine="reflowable-v3"] iframe').first()).toBeVisible();
-  await expect(page.locator('[data-reader-shell="v2"]')).toHaveAttribute('data-reader-theme', 'day');
+  await expect(page.locator('[data-reader-shell="v3"]')).toHaveAttribute('data-reader-theme', 'day');
   await showReaderControls(page);
   await page.getByRole('button', { name: '阅读设置' }).click();
-  await page.getByRole('button', { name: '恢复本书默认设置' }).click();
-  await expect(page.locator('[data-reader-shell="v2"]')).toHaveAttribute('data-reader-theme', 'warm');
+  await page.getByRole('button', { name: '恢复阅读默认设置' }).click();
+  await expect(page.locator('[data-reader-shell="v3"]')).toHaveAttribute('data-reader-theme', 'warm');
 });

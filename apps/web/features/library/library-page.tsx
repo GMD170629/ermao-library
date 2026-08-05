@@ -1,6 +1,6 @@
 'use client';
 
-import { BookmarkPlus, BookOpen, ChevronLeft, ChevronRight, Filter, List, Loader2, Plus, Search, Trash2, UploadCloud, X } from 'lucide-react';
+import { BookOpen, ChevronLeft, ChevronRight, Filter, List, Loader2, Plus, Search, Trash2, UploadCloud, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BookshelfCollection } from '../../components/book/bookshelf';
@@ -119,9 +119,6 @@ export function LibraryPage() {
   const [selectedWorkIds, setSelectedWorkIds] = useState<string[]>([]);
   const [batchDialogAction, setBatchDialogAction] = useState<LibraryBatchAction | null>(null);
   const [batchContextPosition, setBatchContextPosition] = useState<{ x: number; y: number } | null>(null);
-  const [smartShelfOpen, setSmartShelfOpen] = useState(false);
-  const [smartShelfName, setSmartShelfName] = useState('');
-  const [smartShelfSaving, setSmartShelfSaving] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const requestedScopeRef = useRef('');
   const requestedReloadKeyRef = useRef(reloadKey);
@@ -131,7 +128,6 @@ export function LibraryPage() {
     () => applicableSmartFilterRules(smartFilterRules),
     [smartFilterRules]
   );
-  const incompleteSmartFilterCount = smartFilterRules.conditions.length - applicableRules.conditions.length;
   const smartFilterQuery = useMemo(() => applicableRules.conditions.length > 0 ? JSON.stringify(serializableSmartFilterRules(applicableRules)) : '', [applicableRules]);
   const isSeriesFacet = facetKindFilter === 'SERIES' && Boolean(facetIdFilter);
   const isAuthorFacet = facetKindFilter === 'AUTHOR' && Boolean(facetIdFilter);
@@ -463,27 +459,6 @@ export function LibraryPage() {
     setReloadKey((key) => key + 1);
   }
 
-  async function saveSmartShelf() {
-    if (!smartShelfName.trim()) return;
-    setSmartShelfSaving(true);
-    try {
-      const rules: Record<string, unknown> = {};
-      if (search.trim()) rules.search = search.trim();
-      if (statusFilter !== '全部') rules.statuses = [statusFilter];
-      if (formatFilter !== '全部') rules.mediaKinds = [formatFilter === 'ebook' ? 'EBOOK' : formatFilter];
-      if (applicableRules.conditions.length > 0) Object.assign(rules, serializableSmartFilterRules(applicableRules));
-      const response = await fetch('/api/shelves', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: smartShelfName.trim(), description: '由书库筛选条件自动更新', kind: 'SMART', rules, pinned: true }) });
-      const payload = await response.json() as { ok: boolean; error?: { message: string } };
-      if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '保存智能书架失败');
-      toast.success('智能书架已保存', '以后符合这些条件的图书会自动出现。');
-      window.dispatchEvent(new Event('shuku:shelves-changed'));
-      setSmartShelfOpen(false);
-      setSmartShelfName('');
-    } catch (reason) {
-      toast.error('保存失败', reason instanceof Error ? reason.message : '保存智能书架失败');
-    } finally { setSmartShelfSaving(false); }
-  }
-
   return (
     <div>
       <header className="flex items-start justify-between gap-6">
@@ -551,29 +526,27 @@ export function LibraryPage() {
         </div>
       ) : null}
 
-      {smartShelfOpen ? (
-        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-[#241F1C]/35 p-0 backdrop-blur-[2px] md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={i18nAttribute("保存智能书架")}>
-          <div className="w-full max-w-md rounded-t-3xl bg-[#FFFEFC] p-6 shadow-2xl md:rounded-3xl">
-            <div className="flex items-start justify-between gap-4"><div><h2 className="text-lg font-semibold text-[#2D2926]"><I18nText>保存为智能书架</I18nText></h2><p className="mt-1 text-sm leading-6 text-[#817B75]"><I18nText>保存当前搜索、类型、状态和标签条件，结果会随书库自动更新。</I18nText></p></div><button type="button" onClick={() => setSmartShelfOpen(false)}><X size={18} /></button></div>
-            <label className="mt-5 block text-sm text-[#6F6963]"><I18nText>书架名称</I18nText><input autoFocus value={smartShelfName} onChange={(event) => setSmartShelfName(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-black/[0.1] bg-white px-4 outline-none focus:border-[#E8A18D]" placeholder={pageTitle === '全部图书' ? i18nAttribute("例如：近期科幻阅读") : pageTitle} /></label>
-            <div className={cn('mt-4 rounded-xl px-4 py-3 text-xs leading-5', incompleteSmartFilterCount > 0 ? 'bg-amber-50 text-amber-800' : 'bg-black/[0.035] text-[#746E68]')}>{incompleteSmartFilterCount > 0 ? i18nAttribute("还有 {value0} 条条件没有填写完整，请返回补全后再保存。", { value0: incompleteSmartFilterCount }) : [search.trim() && `搜索“${search.trim()}”`, formatFilter !== '全部' && `类型：${formatOptions.find((item) => item.value === formatFilter)?.label}`, statusFilter !== '全部' && `状态：${statusOptions.find((item) => item.value === statusFilter)?.label}`, applicableRules.conditions.length > 0 && `${applicableRules.conditions.length} 条${applicableRules.combinator === 'ALL' ? '全部匹配' : '任一匹配'}规则`].filter(Boolean).join(' · ') || i18nAttribute("当前没有额外条件，将包含全部可见图书")}</div>
-            <div className="mt-6 flex justify-end gap-2"><Button variant="secondary" onClick={() => setSmartShelfOpen(false)}><I18nText>取消</I18nText></Button><Button icon={BookmarkPlus} loading={smartShelfSaving} disabled={!smartShelfName.trim() || incompleteSmartFilterCount > 0} onClick={() => void saveSmartShelf()}><I18nText>保存书架</I18nText></Button></div>
-          </div>
-        </div>
-      ) : null}
+      {view === 'list' ? <div className="mt-8 flex min-w-0 items-center gap-2">
+        <label className="flex h-12 min-w-0 flex-1 items-center gap-3 rounded-xl border border-black/[0.1] bg-white/65 px-4">
+          <Search size={18} className="shrink-0 text-[#8A847E]" strokeWidth={1.8} />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder={i18nAttribute("搜索书名、作者或标签")}
+            className="min-w-0 flex-1 bg-transparent text-sm text-[#2A2724] outline-none placeholder:text-[#98928C]"
+          />
+        </label>
 
-      {view === 'list' ? <div className="mt-8 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
-          <label className="flex h-12 min-w-0 items-center gap-3 rounded-xl border border-black/[0.1] bg-white/65 px-4 sm:w-[300px] lg:w-[340px]">
-            <Search size={18} className="shrink-0 text-[#8A847E]" strokeWidth={1.8} />
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder={i18nAttribute("搜索书名、作者或标签")}
-              className="min-w-0 flex-1 bg-transparent text-sm text-[#2A2724] outline-none placeholder:text-[#98928C]"
-            />
-          </label>
-          <div className="inline-flex h-12 w-full self-start rounded-xl bg-black/[0.035] p-1 sm:w-auto sm:self-auto" role="group" aria-label={i18nAttribute("图书类型")}>
+        <div className="flex min-w-0 items-center gap-2">
+          <Select
+            value={formatFilter}
+            options={formatOptions}
+            onChange={setFormatFilter}
+            ariaLabel={i18nAttribute("图书类型")}
+            className="w-28 !min-w-0 shrink-0 sm:hidden"
+            triggerClassName="!h-12 !rounded-xl !border-black/[0.09] !bg-white/65 !px-4 !text-sm"
+          />
+          <div className="hidden h-12 self-start rounded-xl bg-black/[0.035] p-1 sm:inline-flex sm:w-auto sm:self-auto" role="group" aria-label={i18nAttribute("图书类型")}>
             {formatOptions.map((option) => (
               <button
                 key={option.value}
@@ -589,21 +562,18 @@ export function LibraryPage() {
               </button>
             ))}
           </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setFiltersOpen((open) => !open)}
             aria-expanded={filtersOpen}
             aria-label={i18nAttribute("更多筛选")}
             className={cn(
-              'inline-flex h-11 w-11 items-center justify-center gap-2 rounded-xl border px-0 text-sm font-medium transition sm:w-auto sm:px-4',
+              'relative inline-flex h-12 w-12 items-center justify-center gap-2 overflow-visible rounded-xl border px-0 text-sm font-medium transition sm:w-auto sm:px-4',
               filtersOpen || advancedFilterCount > 0 ? 'border-[#F3B6A4] bg-[#FFF2ED] text-[#D7462B]' : 'border-black/[0.09] bg-white/55 text-[#69635E] hover:bg-black/[0.025]'
             )}
           >
             <span className="hidden sm:inline"><I18nText>更多筛选</I18nText></span>
-            {advancedFilterCount > 0 ? <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#EF4D2F] px-1 text-[10px] text-white">{advancedFilterCount}</span> : null}
+            {advancedFilterCount > 0 ? <span data-testid="library-advanced-filter-count" className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#EF4D2F] px-1 text-[10px] leading-none text-white shadow-[0_0_0_2px_#FFFEFC] sm:static sm:shadow-none">{advancedFilterCount}</span> : null}
             <Filter size={15} strokeWidth={1.8} />
           </button>
         </div>
@@ -628,9 +598,6 @@ export function LibraryPage() {
             fields={smartFilterFields}
             rules={smartFilterRules}
             loading={filterSchemaLoading || !filterSchemaLoaded}
-            actions={(
-              <button type="button" onClick={() => setSmartShelfOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-black/[0.09] bg-white px-3 text-sm font-medium text-[#69635E] transition hover:bg-black/[0.025]"><BookmarkPlus size={15} /><I18nText>保存筛选</I18nText></button>
-            )}
             onChange={setSmartFilterRules}
           />
         </>
@@ -662,10 +629,13 @@ export function LibraryPage() {
               </div>
             </div>
           ) : (
-            <div className="mt-8"><BookTable books={books.filter((book): book is ManagementWorkSummary => book.projection === 'management')} onDelete={canManageSystem ? openDeleteBook : undefined} selectable selectedIds={selectedWorkIds} onSelect={(book) => toggleSelection(book.id)} onSelectAll={togglePageSelection} onSelectionChange={setSelectedWorkIds} onContextMenu={(_book, position) => setBatchContextPosition(position)} sort={sort} sortDirection={sortDirection} onSort={updateSort} /></div>
+            <div data-testid="library-management-viewport" className={cn('mt-8 lg:flex lg:min-h-[26rem] lg:flex-col', !filtersOpen && 'lg:h-[calc(100dvh-15.75rem)] lg:overflow-hidden')}>
+              <div className="lg:min-h-0 lg:flex-1">
+                <BookTable books={books.filter((book): book is ManagementWorkSummary => book.projection === 'management')} onDelete={canManageSystem ? openDeleteBook : undefined} selectable selectedIds={selectedWorkIds} onSelect={(book) => toggleSelection(book.id)} onSelectAll={togglePageSelection} onSelectionChange={setSelectedWorkIds} onContextMenu={(_book, position) => setBatchContextPosition(position)} sort={sort} sortDirection={sortDirection} onSort={updateSort} />
+              </div>
+              <Pagination page={page} total={meta.total} totalPages={meta.totalPages} loading={loading} pageSize={pageSize} onPage={setPage} onPageSize={(nextPageSize) => { setPage(1); setPageSize(nextPageSize); }} />
+            </div>
           )}
-
-          {view === 'list' ? <Pagination page={page} totalPages={meta.totalPages} loading={loading} pageSize={pageSize} onPage={setPage} onPageSize={(nextPageSize) => { setPage(1); setPageSize(nextPageSize); }} /> : null}
         </>
       ) : null}
 
@@ -677,38 +647,58 @@ export function LibraryPage() {
   );
 }
 
-function Pagination({ page, totalPages, loading, pageSize, onPage, onPageSize }: { page: number; totalPages: number; loading: boolean; pageSize: string; onPage: (page: number) => void; onPageSize: (pageSize: string) => void }) {
+function paginationItems(page: number, totalPages: number): Array<number | 'ellipsis'> {
+  if (totalPages <= 7) return Array.from({ length: totalPages }, (_, index) => index + 1);
+  if (page <= 3) return [1, 2, 3, 4, 'ellipsis', totalPages];
+  if (page >= totalPages - 2) return [1, 'ellipsis', totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+  return [1, 'ellipsis', page - 1, page, page + 1, 'ellipsis', totalPages];
+}
+
+function Pagination({ page, total, totalPages, loading, pageSize, onPage, onPageSize }: { page: number; total: number; totalPages: number; loading: boolean; pageSize: string; onPage: (page: number) => void; onPageSize: (pageSize: string) => void }) {
   const { t: i18nAttribute } = useAttributeI18n();
-  const candidates = Array.from(new Set([1, page - 1, page, page + 1, totalPages])).filter((item) => item >= 1 && item <= totalPages).sort((a, b) => a - b);
+  const items = paginationItems(page, Math.max(1, totalPages));
+  const pageButtonClass = 'flex h-10 min-w-10 items-center justify-center rounded-xl border px-2 text-sm tabular-nums outline-none transition duration-200 focus-visible:ring-2 focus-visible:ring-[#EFAE9B] focus-visible:ring-offset-2 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-35';
   return (
-    <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
-    {totalPages > 1 ? <nav className="flex items-center justify-center gap-1.5" aria-label={i18nAttribute("书库分页")}>
-      <button type="button" aria-label={i18nAttribute("上一页")} disabled={page <= 1 || loading} onClick={() => onPage(Math.max(1, page - 1))} className="flex h-9 w-9 items-center justify-center rounded-lg text-[#736D67] hover:bg-black/[0.035] disabled:opacity-30">
-        <ChevronLeft size={18} />
-      </button>
-      {candidates.map((item, index) => {
-        const previous = candidates[index - 1];
-        return (
-          <span key={item} className="contents">
-            {previous && item - previous > 1 ? <span className="px-1 text-sm text-[#9A948E]">…</span> : null}
+    <section data-testid="library-pagination" className="mt-8 rounded-2xl border border-black/[0.07] bg-white/65 px-3 py-3 shadow-[0_8px_24px_rgba(67,50,42,0.035)] sm:px-4 lg:mt-3 lg:shrink-0" aria-label={i18nAttribute("书库分页")}>
+      <div className="flex flex-col gap-3 lg:grid lg:grid-cols-[minmax(150px,1fr)_auto_minmax(150px,1fr)] lg:items-center">
+        <div className="flex items-center justify-between gap-3 lg:block">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold tabular-nums text-[#3B3632]">{i18nAttribute("共 {value0} 本图书", { value0: total })}</div>
+            <div className="mt-0.5 text-xs tabular-nums text-[#8A837D]" aria-live="polite">{i18nAttribute("第 {value0} / {value1} 页", { value0: page, value1: Math.max(1, totalPages) })}</div>
+          </div>
+          <Select value={pageSize} options={pageSizeOptions} onChange={onPageSize} ariaLabel={i18nAttribute("每页数量")} size="sm" className="min-w-[108px] lg:hidden" triggerClassName="!h-10 !rounded-xl" align="right" />
+        </div>
+
+        <nav className="flex min-w-0 items-center justify-center gap-1" aria-label={i18nAttribute("书库分页")}>
+          <button type="button" aria-label={i18nAttribute("上一页")} disabled={page <= 1 || loading} onClick={() => onPage(Math.max(1, page - 1))} className={cn(pageButtonClass, 'w-10 gap-1.5 border-transparent text-[#6F6862] hover:border-black/[0.07] hover:bg-white sm:w-auto sm:px-3')}>
+            <ChevronLeft size={17} strokeWidth={1.9} />
+            <span className="hidden sm:inline"><I18nText>上一页</I18nText></span>
+          </button>
+          {items.map((item, index) => item === 'ellipsis' ? (
+            <span key={`ellipsis-${index}`} className="flex h-10 min-w-5 items-center justify-center text-sm text-[#A29A93]" aria-hidden="true">…</span>
+          ) : (
             <button
+              key={item}
               type="button"
               aria-label={i18nAttribute("第 {value0} 页", { value0: item })}
               aria-current={item === page ? 'page' : undefined}
               disabled={loading}
               onClick={() => onPage(item)}
-              className={cn('flex h-9 min-w-9 items-center justify-center rounded-lg px-2 text-sm transition', item === page ? 'bg-[#F9DED4] font-medium text-[#EF4D2F]' : 'text-[#625D58] hover:bg-black/[0.035]')}
+              className={cn(pageButtonClass, item === page ? 'border-[#F2B7A6] bg-[#FFF0EA] font-semibold text-[#D9472B] shadow-[inset_0_0_0_1px_rgba(239,77,47,0.04)]' : 'border-transparent text-[#625D58] hover:border-black/[0.07] hover:bg-white')}
             >
               {item}
             </button>
-          </span>
-        );
-      })}
-      <button type="button" aria-label={i18nAttribute("下一页")} disabled={page >= totalPages || loading} onClick={() => onPage(Math.min(totalPages, page + 1))} className="flex h-9 w-9 items-center justify-center rounded-lg text-[#736D67] hover:bg-black/[0.035] disabled:opacity-30">
-        <ChevronRight size={18} />
-      </button>
-    </nav> : null}
-    <Select value={pageSize} options={pageSizeOptions} onChange={onPageSize} ariaLabel={i18nAttribute("每页数量")} size="sm" className="min-w-[104px]" align="right" />
-    </div>
+          ))}
+          <button type="button" aria-label={i18nAttribute("下一页")} disabled={page >= totalPages || loading} onClick={() => onPage(Math.min(totalPages, page + 1))} className={cn(pageButtonClass, 'w-10 gap-1.5 border-transparent text-[#6F6862] hover:border-black/[0.07] hover:bg-white sm:w-auto sm:px-3')}>
+            <span className="hidden sm:inline"><I18nText>下一页</I18nText></span>
+            <ChevronRight size={17} strokeWidth={1.9} />
+          </button>
+        </nav>
+
+        <div className="hidden justify-self-end lg:block">
+          <Select value={pageSize} options={pageSizeOptions} onChange={onPageSize} ariaLabel={i18nAttribute("每页数量")} size="sm" className="min-w-[108px]" triggerClassName="!h-10 !rounded-xl" align="right" />
+        </div>
+      </div>
+    </section>
   );
 }

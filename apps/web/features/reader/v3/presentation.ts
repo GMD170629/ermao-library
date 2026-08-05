@@ -4,6 +4,10 @@ import type { ReaderProgress, ReaderSettings } from '../reader-shell';
 export function preferencesToReaderSettings(preferences: ReaderPreferences): ReaderSettings {
   return {
     theme: preferences.appearance.theme,
+    tapZones: preferences.interaction.tapZones,
+    swipePageTurn: preferences.interaction.swipePageTurn,
+    keyboardPageTurn: preferences.interaction.keyboardPageTurn,
+    volumeKeyPageTurn: preferences.interaction.volumeKeyPageTurn,
     fontSize: preferences.epub.fontSize,
     lineHeight: preferences.epub.lineHeight,
     pageWidth: preferences.epub.pageWidth,
@@ -11,6 +15,15 @@ export function preferencesToReaderSettings(preferences: ReaderPreferences): Rea
     ebookPageTurnAnimation: preferences.epub.pageTurnAnimation,
     ebookSpreadMode: preferences.epub.spreadMode,
     ebookFlow: preferences.epub.flow,
+    paragraphIndent: preferences.epub.typography.paragraphIndent,
+    paragraphSpacing: preferences.epub.typography.paragraphSpacing,
+    textAlign: preferences.epub.typography.textAlign,
+    preservePublisherStyles: preferences.epub.typography.preservePublisherStyles,
+    allowPublisherColors: preferences.epub.typography.allowPublisherColors,
+    allowPublisherFonts: preferences.epub.typography.allowPublisherFonts,
+    smartOptimization: preferences.epub.optimization.enabled,
+    deduplicateIndent: preferences.epub.optimization.deduplicateIndent,
+    indentUnindented: preferences.epub.optimization.indentUnindented,
     comicZoom: preferences.comic.zoom,
     pdfZoom: preferences.pdf.zoom,
     comicDirection: preferences.comic.direction,
@@ -26,6 +39,12 @@ export function readerSettingsToPreferences(settings: ReaderSettings): ReaderPre
   return {
     schemaVersion: READER_SCHEMA_VERSION,
     appearance: { theme: settings.theme },
+    interaction: {
+      tapZones: settings.tapZones,
+      swipePageTurn: settings.swipePageTurn,
+      keyboardPageTurn: settings.keyboardPageTurn,
+      volumeKeyPageTurn: settings.volumeKeyPageTurn
+    },
     epub: {
       fontSize: settings.fontSize,
       lineHeight: settings.lineHeight,
@@ -33,7 +52,20 @@ export function readerSettingsToPreferences(settings: ReaderSettings): ReaderPre
       fontFamily: settings.fontFamily,
       pageTurnAnimation: settings.ebookPageTurnAnimation,
       spreadMode: settings.ebookSpreadMode,
-      flow: settings.ebookFlow
+      flow: settings.ebookFlow,
+      typography: {
+        paragraphIndent: settings.paragraphIndent,
+        paragraphSpacing: settings.paragraphSpacing,
+        textAlign: settings.textAlign,
+        preservePublisherStyles: settings.preservePublisherStyles,
+        allowPublisherColors: settings.allowPublisherColors,
+        allowPublisherFonts: settings.allowPublisherFonts
+      },
+      optimization: {
+        enabled: settings.smartOptimization,
+        deduplicateIndent: settings.deduplicateIndent,
+        indentUnindented: settings.indentUnindented
+      }
     },
     comic: {
       direction: settings.comicDirection,

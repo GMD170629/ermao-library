@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -238,6 +238,104 @@ def list_duplicate_identity_groups(db: Session) -> list[dict[str, Any]]:
         }
         for row in rows
     ]
+
+
+def list_duplicate_identity_page(
+    db: Session,
+    *,
+    page: int,
+    page_size: int,
+) -> tuple[list[dict[str, Any]], int, int]:
+    duplicate_count = func.count(LibraryWork.id).label("work_count")
+    statement = (
+        select(
+            LibraryWork.normalized_title,
+            LibraryWork.normalized_author,
+            duplicate_count,
+            func.count().over().label("total_count"),
+        )
+        .where(LibraryWork.hidden.is_(False))
+        .group_by(
+            LibraryWork.normalized_title,
+            LibraryWork.normalized_author,
+        )
+        .having(duplicate_count > 1)
+        .order_by(
+            duplicate_count.desc(),
+            LibraryWork.normalized_title.asc(),
+            LibraryWork.normalized_author.asc(),
+        )
+    )
+
+    def fetch(target_page: int) -> list[Any]:
+        return db.execute(
+            statement.limit(page_size).offset((target_page - 1) * page_size)
+        ).all()
+
+    rows = fetch(page)
+    if rows:
+        total = int(rows[0].total_count)
+        clamped_page = page
+    else:
+        grouped = (
+            select(
+                LibraryWork.normalized_title,
+                LibraryWork.normalized_author,
+            )
+            .where(LibraryWork.hidden.is_(False))
+            .group_by(
+                LibraryWork.normalized_title,
+                LibraryWork.normalized_author,
+            )
+            .having(func.count(LibraryWork.id) > 1)
+            .subquery()
+        )
+        total = int(db.scalar(select(func.count()).select_from(grouped)) or 0)
+        clamped_page = min(page, max(1, (total + page_size - 1) // page_size))
+        if total and clamped_page != page:
+            rows = fetch(clamped_page)
+
+    identity_filters = [
+        and_(
+            LibraryWork.normalized_title == row.normalized_title,
+            LibraryWork.normalized_author.is_(None)
+            if row.normalized_author is None
+            else LibraryWork.normalized_author == row.normalized_author,
+        )
+        for row in rows
+    ]
+    works = (
+        db.scalars(
+            select(LibraryWork)
+            .where(
+                LibraryWork.hidden.is_(False),
+                or_(*identity_filters),
+            )
+            .order_by(
+                LibraryWork.normalized_title.asc(),
+                LibraryWork.normalized_author.asc(),
+                LibraryWork.id.asc(),
+            )
+        ).all()
+        if identity_filters
+        else []
+    )
+    works_by_identity: dict[tuple[str, str | None], list[dict[str, Any]]] = {}
+    for work in works:
+        identity = (work.normalized_title, work.normalized_author)
+        works_by_identity.setdefault(identity, []).append(entity_as_legacy_dict(work))
+    groups = [
+        {
+            "normalizedTitle": row.normalized_title,
+            "normalizedAuthor": row.normalized_author,
+            "count": int(row.work_count),
+            "works": works_by_identity.get(
+                (row.normalized_title, row.normalized_author), []
+            ),
+        }
+        for row in rows
+    ]
+    return groups, total, clamped_page
 
 
 def list_works_for_normalized_identity(

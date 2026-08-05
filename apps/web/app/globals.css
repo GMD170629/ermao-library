@@ -297,25 +297,110 @@ html[data-audio-mini-player='reader'] .shuku-pwa-bottom-overlay {
   bottom: calc(-1 * var(--shuku-safe-area-bottom));
 }
 
-.shuku-reader-mobile-panel {
-  bottom: calc(-1 * var(--shuku-safe-area-bottom));
-  max-height: calc(82dvh + var(--shuku-safe-area-bottom));
-  --shuku-reader-panel-padding-bottom: calc(6.75rem + var(--shuku-safe-area-bottom));
+.shuku-reader-bottom-console {
+  height: calc(15.5rem + var(--shuku-safe-area-bottom));
+  transition:
+    height 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 180ms ease;
 }
 
-.shuku-reader-list-panel {
-  max-height: calc(55dvh + var(--shuku-safe-area-bottom));
+.shuku-reader-bottom-console[data-reader-panel-state='notes'] {
+  height: min(
+    calc(35rem + var(--shuku-safe-area-bottom)),
+    calc(100dvh - 4.5rem - var(--shuku-safe-area-top))
+  );
+}
+
+.shuku-reader-bottom-console[data-reader-panel-state='appearance'] {
+  height: min(
+    calc(36rem + var(--shuku-safe-area-bottom)),
+    calc(100dvh - 4.5rem - var(--shuku-safe-area-top))
+  );
+}
+
+.shuku-reader-bottom-console[data-reader-panel-state='settings'] {
+  height: min(
+    calc(39rem + var(--shuku-safe-area-bottom)),
+    calc(100dvh - 4.5rem - var(--shuku-safe-area-top))
+  );
+}
+
+.shuku-reader-bottom-console[data-reader-panel-state='toc'] {
+  height: min(
+    calc(42rem + var(--shuku-safe-area-bottom)),
+    calc(100dvh - 4.5rem - var(--shuku-safe-area-top))
+  );
+}
+
+.shuku-reader-control-workspace {
+  min-height: 18rem;
+  animation: shuku-reader-workspace-enter 220ms 70ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.shuku-reader-advanced-settings {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 180ms ease;
+}
+
+.shuku-reader-advanced-settings[data-expanded='true'] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.shuku-reader-console-home {
+  animation: shuku-reader-console-home-enter 200ms 80ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes shuku-reader-workspace-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shuku-reader-console-home-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @media (min-width: 768px) {
-  .shuku-reader-mobile-panel {
-    bottom: calc(5.75rem + var(--shuku-safe-area-bottom));
-    max-height: calc(100dvh - 8rem - var(--shuku-safe-area-top) - var(--shuku-safe-area-bottom));
-    --shuku-reader-panel-padding-bottom: calc(1rem + var(--shuku-safe-area-bottom));
+  .shuku-reader-bottom-console {
+    height: calc(5.75rem + var(--shuku-safe-area-bottom));
   }
 
-  .shuku-reader-list-panel {
-    max-height: calc(55dvh - var(--shuku-safe-area-top) - var(--shuku-safe-area-bottom));
+  .shuku-reader-bottom-console[data-reader-panel-state]:not([data-reader-panel-state='home']) {
+    height: min(
+      calc(32rem + var(--shuku-safe-area-bottom)),
+      calc(100dvh - 6rem - var(--shuku-safe-area-top))
+    );
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shuku-reader-bottom-console {
+    transition: none;
+  }
+
+  .shuku-reader-control-workspace,
+  .shuku-reader-console-home,
+  .shuku-reader-advanced-settings {
+    animation: none;
+    transition: none;
   }
 }
 

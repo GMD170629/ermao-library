@@ -12,6 +12,7 @@ import type { VolumeResource, WorkView } from '../../types/work';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import { fetchAllMediaVersionVolumes } from './api/client';
+import { completeMetadataApply } from './application/metadata-apply-completion';
 
 type MetadataSource = string;
 type MetadataField = 'coverUrl' | 'title' | 'author' | 'description' | 'tags' | 'seriesName' | 'publisher' | 'publishedAt' | 'language' | 'isbn';
@@ -291,8 +292,7 @@ export function MetadataLookupModal({ book, currentMediaVersionId, open, onClose
       const operation = payload.data?.metadataWriteback ?? null;
       setWritebackOperation(operation);
       setMessage(operation ? i18nAttribute('已应用所选字段，正在后台写回图书文件') : i18nAttribute('已应用所选字段'));
-      await onApplied();
-      if (!operation) onClose();
+      await completeMetadataApply({ close: onClose, refresh: onApplied });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '元数据应用失败');
     } finally {

@@ -49,6 +49,14 @@ test('selects the requested volume before the continue volume and stable first v
   assert.equal(selectedVolumeForDetailTab(value, 'EBOOK', 'missing')?.id, 'continue');
 });
 
+test('falls back to the first unfinished volume in version order', () => {
+  const value = work(['EBOOK']);
+  const first = value.mediaVersions[0]?.volumes[0];
+  if (!first) throw new Error('missing fixture volume');
+  value.mediaVersions[0]?.volumes.splice(0, 1, { ...first, progress: 100 }, volume('second', 1));
+  assert.equal(selectedVolumeForDetailTab(value, 'EBOOK')?.id, 'second');
+});
+
 test('uses an explicit volume number before its sorted position', () => {
   const explicit = { ...volume('explicit', 5), volumeIndex: 9 };
   assert.equal(displayVolumeNumber(explicit, 0), 9);

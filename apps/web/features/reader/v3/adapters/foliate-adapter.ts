@@ -16,7 +16,13 @@ import type {
 import { ReaderAdapterBase, StaleReaderOperationError, isAbortError, throwIfAborted } from './adapter-base';
 import { openFoliateBook, NovelOpenError, type FoliateBook, type FoliateTocItem } from './foliate-book';
 import { hardenEpubIframe, sanitizeEpubDocument } from './epub-security';
-import { createEpubThemeSnapshot, epubSurfaceColor } from './epub-theme';
+import {
+  applyEpubDocumentSpacing,
+  createEpubThemeSnapshot,
+  epubSurfaceColor,
+  resolveEpubViewportLayout,
+  type EpubViewportLayout
+} from './epub-theme';
 import { fallbackEpubFont } from './epub-font';
 import type { ReaderAdapterInputHandler, ReaderInteractiveAdapter, ReaderInteractionPolicy } from './reader-interaction';
 import { hasActiveTextSelection, isReaderControlTarget, readerFramePointerIntent, readerKeyIntent, readerPointerIntent } from '../input-router';
@@ -306,6 +312,8 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
   private pendingTocSnapshot: NonNullable<FoliateProgressSnapshot['toc']> | null = null;
   private relocateResolutionSequence = 0;
   private navigationFingerprint: string | undefined;
+  private viewportLayout: EpubViewportLayout = resolveEpubViewportLayout(Number.POSITIVE_INFINITY);
+  private viewportObserver: ResizeObserver | null = null;
 
   constructor(options: FoliateAdapterOptions) {
     super();
@@ -349,6 +357,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     this.format = reflowableFormat(context.source);
     this.container.dataset.readerEngine = 'reflowable-v3';
     this.lifecycleController = new AbortController();
+    this.observeViewport();
     const signal = combineSignals(context.signal, this.lifecycleController.signal);
     this.emit({ type: 'phase-changed', phase: 'loading-content' }, context.operation);
     try {
@@ -465,6 +474,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     this.locationOperation = context.operation;
     this.suppressRelocate = true;
     this.applyRendererPreferences(preferences);
+    this.bridgedDocuments.forEach((_controller, document) => applyEpubDocumentSpacing(document, preferences));
     await nextFrame();
     await nextFrame();
     throwIfAborted(context.signal);
@@ -524,6 +534,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     const controller = new AbortController();
     this.bridgedDocuments.set(document, controller);
     sanitizeEpubDocument(document);
+    if (this.preferences) applyEpubDocumentSpacing(document, this.preferences);
     const frame = document.defaultView?.frameElement;
     hardenEpubIframe(frame instanceof HTMLIFrameElement ? frame : undefined);
     document.documentElement.dataset.shukuInputBridge = 'ready';
@@ -532,6 +543,10 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     const signal = controller.signal;
     let touchStart: { x: number; y: number } | null = null;
     let suppressClick = false;
+    document.addEventListener('touchstart', (event) => {
+      if (this.preferences?.interaction.swipePageTurn !== false || event.touches.length !== 1) return;
+      event.stopImmediatePropagation();
+    }, { capture: true, passive: true, signal });
     document.addEventListener('touchstart', (event) => {
       const touch = event.changedTouches[0];
       touchStart = touch ? { x: touch.clientX, y: touch.clientY } : null;
@@ -543,7 +558,10 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     }, { passive: true, signal });
     document.addEventListener('keydown', (event) => {
       if (!this.onInputIntent || isReaderControlTarget(event.target)) return;
-      const intent = commandForInput(readerKeyIntent(event, this.readingDirection));
+      const intent = commandForInput(readerKeyIntent(event, this.readingDirection, {
+        keyboardPageTurn: this.preferences?.interaction.keyboardPageTurn,
+        volumeKeyPageTurn: this.preferences?.interaction.volumeKeyPageTurn
+      }));
       if (!intent) return;
       event.preventDefault();
       void this.onInputIntent(intent);
@@ -562,9 +580,17 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
           frame.clientHeight || viewport.clientHeight,
           frame.getBoundingClientRect(),
           this.container.getBoundingClientRect(),
-          this.readingDirection
+          this.readingDirection,
+          this.preferences?.interaction.tapZones
         )
-        : readerPointerIntent(event.clientX, event.clientY, viewport.clientWidth, viewport.clientHeight, this.readingDirection));
+        : readerPointerIntent(
+          event.clientX,
+          event.clientY,
+          viewport.clientWidth,
+          viewport.clientHeight,
+          this.readingDirection,
+          this.preferences?.interaction.tapZones
+        ));
       if (!intent) return;
       event.preventDefault();
       void this.onInputIntent(intent);
@@ -575,15 +601,35 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     const renderer = this.view?.renderer;
     if (!renderer) return;
     renderer.setAttribute('flow', preferences.epub.flow);
+    renderer.setAttribute('gap', this.viewportLayout.paginatorGap);
+    renderer.style.paddingBottom = this.viewportLayout.bottomInset;
     renderer.setAttribute('max-inline-size', `${Math.round(clamp(preferences.epub.pageWidth, 600, 1350))}px`);
     renderer.setAttribute('max-column-count', preferences.epub.spreadMode === 'double' ? '2' : '1');
     if (preferences.epub.pageTurnAnimation === 'slide') renderer.setAttribute('animated', '');
     else renderer.removeAttribute('animated');
-    renderer.setStyles?.(createEpubThemeSnapshot(preferences, fallbackEpubFont(preferences.epub.fontFamily)));
+    renderer.setStyles?.(createEpubThemeSnapshot(
+      preferences,
+      fallbackEpubFont(preferences.epub.fontFamily),
+      this.viewportLayout
+    ));
     this.container.style.background = epubSurfaceColor(preferences);
     this.container.dataset.readerTheme = 'ready';
     this.container.dataset.readerFlow = preferences.epub.flow;
     this.container.dataset.readerSpread = preferences.epub.spreadMode;
+    this.container.dataset.epubViewportLayout = this.viewportLayout.compact ? 'compact' : 'regular';
+  }
+
+  private observeViewport() {
+    this.viewportObserver?.disconnect();
+    this.viewportLayout = resolveEpubViewportLayout(this.container.getBoundingClientRect().width);
+    this.viewportObserver = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? this.container.getBoundingClientRect().width;
+      const nextLayout = resolveEpubViewportLayout(width);
+      if (nextLayout.compact === this.viewportLayout.compact) return;
+      this.viewportLayout = nextLayout;
+      if (this.preferences) this.applyRendererPreferences(this.preferences);
+    });
+    this.viewportObserver.observe(this.container);
   }
 
   private async restore(location: ReflowableLocation | null) {
@@ -723,6 +769,8 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
   private async cleanupEngine() {
     this.lifecycleController?.abort();
     this.lifecycleController = null;
+    this.viewportObserver?.disconnect();
+    this.viewportObserver = null;
     this.bridgedDocuments.forEach((controller) => controller.abort());
     this.bridgedDocuments.clear();
     this.tocSnapshots = new WeakMap();
@@ -745,6 +793,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     delete this.container.dataset.readerTheme;
     delete this.container.dataset.readerFlow;
     delete this.container.dataset.readerSpread;
+    delete this.container.dataset.epubViewportLayout;
     delete this.container.dataset.readerLocationCfi;
     delete this.container.dataset.readerLocationHref;
     delete this.container.dataset.readerLocationProgression;

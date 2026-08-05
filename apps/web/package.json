@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "predev": "node scripts/prepare-pdfjs-worker.mjs",
-    "dev": "next dev --webpack -p 3000",
+    "dev": "next dev --webpack -H 0.0.0.0 -p 3000",
     "predev:ios": "node scripts/prepare-pdfjs-worker.mjs",
     "dev:ios": "next dev --webpack -H 0.0.0.0 -p 3000",
     "prebuild": "node scripts/prepare-pdfjs-worker.mjs",

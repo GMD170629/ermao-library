@@ -37,7 +37,9 @@ function canProvidePassword(adapter: ReaderAdapter | null): adapter is PasswordC
 }
 
 function bootstrapNavigationItems(bootstrap: ReaderBootstrap, actualTotalPages?: number | null): ReaderNavigationItem[] {
-  if (bootstrap.readerType === 'reflowable') return [];
+  if (bootstrap.readerType === 'reflowable') {
+    return bootstrap.source.kind === 'reflowable' ? adapterNavigationItems(bootstrap.source.navigation) : [];
+  }
   const pageCount = actualTotalPages ?? bootstrap.volume.pageCount ?? bootstrap.pages.length ?? 0;
   if (bootstrap.readerType === 'comic' && bootstrap.pages.length) {
     return bootstrap.pages.map((page) => ({ index: page.pageIndex, title: page.title ?? `第 ${page.pageIndex} 页` }));
@@ -245,9 +247,10 @@ export function ReaderEngineRuntime({
     ? { ...adapterCapabilities, canGoNext: true }
     : adapterCapabilities;
   const settings = preferencesToReaderSettings(preferences);
-  const items = useMemo(() => session.state.navigationReady
-    ? adapterNavigationItems(session.state.navigationItems)
-    : bootstrapNavigationItems(bootstrap, session.state.totalPages), [bootstrap, session.state.navigationItems, session.state.navigationReady, session.state.totalPages]);
+  const items = useMemo(() => {
+    const adapterItems = session.state.navigationReady ? adapterNavigationItems(session.state.navigationItems) : [];
+    return adapterItems.length > 0 ? adapterItems : bootstrapNavigationItems(bootstrap, session.state.totalPages);
+  }, [bootstrap, session.state.navigationItems, session.state.navigationReady, session.state.totalPages]);
   const bookmarkStorageKey = useMemo(() => readerBookmarkStorageKey(
     bootstrap.userId,
     bootstrap.volume.id,

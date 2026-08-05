@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import delete, exists, func, or_, select, update
+from sqlalchemy import case, delete, exists, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.core.authorization import (
@@ -67,8 +67,32 @@ def list_import_tasks_page(
             )
         )
 
-    total = int(
-        db.scalar(select(func.count()).select_from(ImportTask).where(*filters)) or 0
+    scope = monitor_folder_visibility_predicate(context, ImportTask.monitor_folder_id)
+    scope_counts = db.execute(
+        select(
+            func.count().label("total"),
+            func.coalesce(
+                func.sum(case((ImportTask.status == "COMPLETED", 1), else_=0)),
+                0,
+            ).label("completed"),
+            func.coalesce(
+                func.sum(case((ImportTask.status == "FAILED", 1), else_=0)),
+                0,
+            ).label("failed"),
+        )
+        .select_from(ImportTask)
+        .where(scope)
+    ).one()
+    has_filtered_total = bool(
+        (normalized_status and normalized_status != "ALL") or normalized_keyword
+    )
+    total = (
+        int(
+            db.scalar(select(func.count()).select_from(ImportTask).where(*filters))
+            or 0
+        )
+        if has_filtered_total
+        else int(scope_counts.total or 0)
     )
     total_pages = max(1, (total + page_size - 1) // page_size)
     page = min(max(1, page), total_pages)
@@ -85,26 +109,101 @@ def list_import_tasks_page(
     )
     tasks = [dict(row) for row in rows]
 
-    scope = monitor_folder_visibility_predicate(context, ImportTask.monitor_folder_id)
     summary = {
-        "completed": int(
-            db.scalar(
-                select(func.count())
-                .select_from(ImportTask)
-                .where(scope, ImportTask.status == "COMPLETED")
-            )
-            or 0
-        ),
-        "failed": int(
-            db.scalar(
-                select(func.count())
-                .select_from(ImportTask)
-                .where(scope, ImportTask.status == "FAILED")
-            )
-            or 0
-        ),
+        "completed": int(scope_counts.completed or 0),
+        "failed": int(scope_counts.failed or 0),
     }
     return tasks, total, summary
+
+
+def hydrate_import_task_page(
+    db: Session,
+    tasks: list[dict[str, Any]],
+    *,
+    log_limit: int,
+) -> list[dict[str, Any]]:
+    """Attach page-scoped related records without per-task database queries."""
+
+    if not tasks:
+        return []
+    task_ids = [str(task["id"]) for task in tasks]
+    monitor_folder_ids = {
+        str(task["monitorFolderId"])
+        for task in tasks
+        if task.get("monitorFolderId")
+    }
+    work_ids = {str(task["workId"]) for task in tasks if task.get("workId")}
+
+    monitor_folders = {
+        str(row["id"]): dict(row)
+        for row in db.execute(
+            select(MonitorFolder.__table__).where(
+                MonitorFolder.id.in_(monitor_folder_ids)
+            )
+        )
+        .mappings()
+        .all()
+    }
+    works = {
+        str(row.id): {"id": row.id, "title": row.title}
+        for row in db.execute(
+            select(LibraryWork.id, LibraryWork.title).where(
+                LibraryWork.id.in_(work_ids)
+            )
+        ).all()
+    }
+
+    log_rank = func.row_number().over(
+        partition_by=ImportLog.import_task_id,
+        order_by=(ImportLog.created_at.desc(), ImportLog.id.desc()),
+    ).label("page_rank")
+    ranked_logs = (
+        select(ImportLog.__table__, log_rank)
+        .where(ImportLog.import_task_id.in_(task_ids))
+        .subquery()
+    )
+    logs_by_task_id = {task_id: [] for task_id in task_ids}
+    if log_limit > 0:
+        for row in (
+            db.execute(
+                select(ranked_logs)
+                .where(ranked_logs.c.page_rank <= log_limit)
+                .order_by(
+                    ranked_logs.c.importTaskId,
+                    ranked_logs.c.createdAt.desc(),
+                    ranked_logs.c.id.desc(),
+                )
+            )
+            .mappings()
+            .all()
+        ):
+            log = dict(row)
+            log.pop("page_rank", None)
+            logs_by_task_id[str(row["importTaskId"])].append(log)
+
+    conversions = {
+        str(row["importTaskId"]): dict(row)
+        for row in db.execute(
+            select(BookConversionTask.__table__).where(
+                BookConversionTask.import_task_id.in_(task_ids)
+            )
+        )
+        .mappings()
+        .all()
+    }
+
+    return [
+        {
+            **task,
+            "_pageMonitorFolder": monitor_folders.get(
+                str(task.get("monitorFolderId") or "")
+            ),
+            "_pageWork": works.get(str(task.get("workId") or "")),
+            "_pageLogs": logs_by_task_id[str(task["id"])],
+            "_pageConversion": conversions.get(str(task["id"])),
+        }
+        for task in tasks
+    ]
 
 
 def clear_terminal_import_tasks(db: Session, context: AuthorizationContext) -> int:

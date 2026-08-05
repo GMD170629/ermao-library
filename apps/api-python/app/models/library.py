@@ -34,6 +34,14 @@ class LibraryWork(Base):
         Index("LibraryWork_monitorFolderId_idx", "monitorFolderId"),
         Index("LibraryWork_mergeKey_idx", "mergeKey"),
         Index("LibraryWork_createdAt_id_idx", "createdAt", "id"),
+        Index("LibraryWork_hidden_createdAt_id_idx", "hidden", "createdAt", "id"),
+        Index(
+            "LibraryWork_hidden_normalizedTitle_normalizedAuthor_id_idx",
+            "hidden",
+            "normalizedTitle",
+            "normalizedAuthor",
+            "id",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
@@ -177,6 +185,12 @@ class LibraryVolume(Base):
             "LibraryVolume_mediaVersionId_volumeIndex_idx",
             "mediaVersionId",
             "volumeIndex",
+        ),
+        Index(
+            "LibraryVolume_mediaVersionId_hidden_monitorFolderId_idx",
+            "mediaVersionId",
+            "hidden",
+            "monitorFolderId",
         ),
         Index("LibraryVolume_format_idx", "format"),
         Index("LibraryVolume_identifier_idx", "identifier"),
@@ -641,6 +655,12 @@ class LibraryReadingProgress(Base):
             "volumeId",
             unique=True,
         ),
+        Index(
+            "LibraryReadingProgress_userId_updatedAt_volumeId_idx",
+            "userId",
+            "updatedAt",
+            "volumeId",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
@@ -728,6 +748,12 @@ class UserMediaHistory(Base):
             name="UserMediaHistory_user_mediaVersion_key",
         ),
         Index("UserMediaHistory_updatedAt_idx", "updatedAt"),
+        Index(
+            "UserMediaHistory_userId_updatedAt_mediaVersionId_idx",
+            "userId",
+            "updatedAt",
+            "mediaVersionId",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)

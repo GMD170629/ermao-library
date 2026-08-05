@@ -36,13 +36,17 @@ def _visible_volume_exists(
     media_version = aliased(LibraryMediaVersion)
     volume = aliased(LibraryVolume)
     return exists(
-        select(volume.id)
-        .join(media_version, media_version.id == volume.media_version_id)
+        select(media_version.id)
         .where(
             media_version.work_id == LibraryWork.id,
-            volume.hidden.is_(False),
-            volume_visibility_predicate(context, volume),
-            *extra,
+            exists(
+                select(volume.id).where(
+                    volume.media_version_id == media_version.id,
+                    volume.hidden.is_(False),
+                    volume_visibility_predicate(context, volume),
+                    *extra,
+                )
+            ),
         )
     )
 
@@ -55,13 +59,17 @@ def _media_kind_predicate(
     media_version = aliased(LibraryMediaVersion)
     volume = aliased(LibraryVolume)
     return exists(
-        select(volume.id)
-        .join(media_version, media_version.id == volume.media_version_id)
+        select(media_version.id)
         .where(
             media_version.work_id == LibraryWork.id,
             media_version.media_kind.in_(media_kinds),
-            volume.hidden.is_(False),
-            volume_visibility_predicate(context, volume),
+            exists(
+                select(volume.id).where(
+                    volume.media_version_id == media_version.id,
+                    volume.hidden.is_(False),
+                    volume_visibility_predicate(context, volume),
+                )
+            ),
         )
     )
 
@@ -102,13 +110,17 @@ def _type_predicate(
     media_version = aliased(LibraryMediaVersion)
     volume = aliased(LibraryVolume)
     return exists(
-        select(volume.id)
-        .join(media_version, media_version.id == volume.media_version_id)
+        select(media_version.id)
         .where(
             media_version.work_id == LibraryWork.id,
-            volume.format == normalized,
-            volume.hidden.is_(False),
-            volume_visibility_predicate(context, volume),
+            exists(
+                select(volume.id).where(
+                    volume.media_version_id == media_version.id,
+                    volume.format == normalized,
+                    volume.hidden.is_(False),
+                    volume_visibility_predicate(context, volume),
+                )
+            ),
         )
     )
 
@@ -137,20 +149,25 @@ def _status_predicate(
         )
     )
     unfinished = exists(
-        select(volume.id)
-        .join(media_version, media_version.id == volume.media_version_id)
-        .outerjoin(
-            progress,
-            and_(
-                progress.volume_id == volume.id,
-                progress.user_id == user_id,
-            ),
-        )
+        select(media_version.id)
         .where(
             media_version.work_id == LibraryWork.id,
-            volume.hidden.is_(False),
-            volume_visibility_predicate(context, volume),
-            func.coalesce(progress.percent, 0) < 100,
+            exists(
+                select(volume.id)
+                .outerjoin(
+                    progress,
+                    and_(
+                        progress.volume_id == volume.id,
+                        progress.user_id == user_id,
+                    ),
+                )
+                .where(
+                    volume.media_version_id == media_version.id,
+                    volume.hidden.is_(False),
+                    volume_visibility_predicate(context, volume),
+                    func.coalesce(progress.percent, 0) < 100,
+                )
+            ),
         )
     )
     if normalized == "FINISHED":

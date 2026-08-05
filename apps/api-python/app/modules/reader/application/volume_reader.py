@@ -17,6 +17,7 @@ from app.modules.reader.application.dto import (
     ReaderBootstrapDto,
     ReaderExternalProgressDto,
     ReaderProgressDto,
+    ReaderReadingStatus,
     ReaderUnitDto,
     ReaderVolumeContextDto,
 )
@@ -66,6 +67,14 @@ class SaveProgressCommand:
 class SaveProgressResult:
     applied: bool
     progress: ReaderProgressDto
+
+
+@dataclass(frozen=True, slots=True)
+class SetVolumeReadingStatusCommand:
+    user_id: str
+    volume_id: str
+    access_scope: ReaderAccessScope
+    status: ReaderReadingStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -262,6 +271,34 @@ class VolumeReaderService:
             self._unit_of_work.rollback()
             raise
         return SaveProgressResult(applied=True, progress=progress)
+
+    def set_volume_reading_status(
+        self, command: SetVolumeReadingStatusCommand
+    ) -> ReaderProgressDto | None:
+        if command.status not in {"UNREAD", "FINISHED"}:
+            raise ValueError("status must be UNREAD or FINISHED")
+        context = self._require_visible_context(command.volume_id, command.access_scope)
+        reader_type = reader_type_for_volume_format(context.volume.format)
+        if reader_type is None:
+            raise ReaderVolumeFormatUnsupported
+        fingerprint = build_volume_content_fingerprint(
+            asdict(context.volume),
+            [asdict(file) for file in self._repository.list_files(command.volume_id)],
+        )
+        try:
+            progress = self._repository.set_reading_status(
+                user_id=command.user_id,
+                context=context,
+                reader_type=reader_type.value,
+                status=command.status,
+                content_fingerprint=fingerprint,
+                now=datetime.now(UTC),
+            )
+            self._unit_of_work.commit()
+        except Exception:
+            self._unit_of_work.rollback()
+            raise
+        return progress
 
     def get_external_progress(
         self,

@@ -8,9 +8,11 @@ from app.core.config import Settings
 from app.modules.system.application.commands import execute_system_transaction
 from app.modules.system.domain.health import HealthRunSnapshot
 from app.modules.system.infrastructure.events import (
+    clear_info_warning_events,
     configured_max_event_bytes,
     list_event_level_facets,
     list_event_source_facets,
+    list_system_events_page,
     prune_system_events as _prune_system_events,
     record_system_event as _record_system_event,
     set_max_event_bytes as _set_max_event_bytes,
@@ -215,6 +217,7 @@ __all__ = [
     "active_health_run_id",
     "active_restart_operation",
     "configured_max_event_bytes",
+    "clear_info_warning_events",
     "create_or_reuse_health_run",
     "create_queue_operation",
     "create_restart_operation",
@@ -227,6 +230,7 @@ __all__ = [
     "health_run_snapshot",
     "list_event_level_facets",
     "list_event_source_facets",
+    "list_system_events_page",
     "list_settings",
     "mark_queue_stopped",
     "parse_setting_value",

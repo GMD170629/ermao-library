@@ -1,7 +1,7 @@
 'use client';
 
-import { CheckCircle2, GitMerge, Loader2, RotateCcw, Search } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { CheckCircle2, ChevronLeft, ChevronRight, GitMerge, Loader2, RotateCcw, Search } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { useToast } from '../../components/ui/feedback';
@@ -21,6 +21,9 @@ async function payload<T>(response: Response, fallback: string) {
 export function DuplicateManagementPanel() {
   const { t: i18nAttribute } = useAttributeI18n();
   const [groups, setGroups] = useState<DuplicateGroup[]>([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [targets, setTargets] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [merging, setMerging] = useState('');
@@ -28,21 +31,25 @@ export function DuplicateManagementPanel() {
   const [lastOperation, setLastOperation] = useState<{ id: string; summary: string; undoAvailable: boolean } | null>(null);
   const toast = useToast();
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const data = await payload<{ groups: DuplicateGroup[] }>(await fetch('/api/library/duplicates'), '读取重复项失败');
+      const params = new URLSearchParams({ page: String(page), pageSize: '20' });
+      const data = await payload<{ groups: DuplicateGroup[]; page: number; total: number; totalPages: number }>(await fetch(`/api/library/duplicates?${params}`), '读取重复项失败');
       setGroups(data.groups);
+      setPage(data.page);
+      setTotal(data.total);
+      setTotalPages(Math.max(1, data.totalPages));
       setTargets(Object.fromEntries(data.groups.map((group) => [group.id, group.works[0]?.id ?? ''])));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '读取重复项失败');
     } finally {
       setLoading(false);
     }
-  }
+  }, [page]);
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(); }, [load]);
 
   async function merge(group: DuplicateGroup) {
     const targetWorkId = targets[group.id];
@@ -91,7 +98,7 @@ export function DuplicateManagementPanel() {
           <h2 className="text-base font-semibold text-[#2C2926]"><I18nText>重复作品治理</I18nText></h2>
           <p className="mt-1 text-sm leading-6 text-[#817B75]"><I18nText>按规范化后的标题与作者识别候选。合并只移动媒介版本、卷册、进度与书架关系，不删除源文件。</I18nText></p>
         </div>
-        <Badge tone={groups.length ? 'amber' : 'green'}>{groups.length} <I18nText>组待处理</I18nText></Badge>
+        <Badge tone={total ? 'amber' : 'green'}>{total} <I18nText>组待处理</I18nText></Badge>
       </div>
 
       {lastOperation?.undoAvailable ? (
@@ -132,6 +139,14 @@ export function DuplicateManagementPanel() {
           </div>
         </section>
       ))}
+
+      {totalPages > 1 ? (
+        <div className="flex items-center justify-center gap-3" aria-label={i18nAttribute("重复作品治理")}>
+          <button type="button" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white transition hover:bg-[#F7F4F0] disabled:opacity-40" aria-label={i18nAttribute("上一页")}><ChevronLeft size={16} /></button>
+          <span className="text-sm tabular-nums text-[#817B75]">{i18nAttribute("第 {value0} / {value1} 页", { value0: page, value1: totalPages })}</span>
+          <button type="button" disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#DEDAD4] bg-white transition hover:bg-[#F7F4F0] disabled:opacity-40" aria-label={i18nAttribute("下一页")}><ChevronRight size={16} /></button>
+        </div>
+      ) : null}
     </div>
   );
 }

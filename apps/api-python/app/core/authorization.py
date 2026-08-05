@@ -104,18 +104,20 @@ def work_visibility_predicate(
     accessible_volume = aliased(LibraryVolume)
     accessible_media_version = aliased(LibraryMediaVersion)
     has_accessible_volume = exists(
-        select(accessible_volume.id)
-        .join(
-            accessible_media_version,
-            accessible_media_version.id == accessible_volume.media_version_id,
-        )
-        .where(
-            accessible_media_version.work_id == work.id,
+        select(accessible_volume.id).where(
+            accessible_volume.media_version_id == accessible_media_version.id,
             accessible_volume.hidden.is_(False),
             volume_visibility_predicate(context, accessible_volume),
         )
     )
-    return has_accessible_volume
+    has_accessible_media_version = exists(
+        select(accessible_media_version.id)
+        .where(
+            accessible_media_version.work_id == work.id,
+            has_accessible_volume,
+        )
+    )
+    return has_accessible_media_version
 
 
 def can_access_monitor_folder(

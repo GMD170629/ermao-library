@@ -5,7 +5,7 @@ import {
   normalizeReaderPreferences,
   type ReaderPreferences
 } from '@shuku/reader-core';
-import { BookOpen, Check, FileText, Headphones, Images, Minus, MonitorSmartphone, Palette, Plus, RotateCcw } from 'lucide-react';
+import { BookOpen, Check, FileText, Headphones, Images, Minus, MonitorSmartphone, MousePointer2, Palette, Plus, RotateCcw, Sparkles } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Button } from '../../../components/ui/button';
 import { useToast } from '../../../components/ui/feedback';
@@ -22,6 +22,7 @@ import {
   READER_PAGE_WIDTH_OPTIONS,
   READER_PDF_FIT_OPTIONS,
   READER_SPREAD_MODE_OPTIONS,
+  READER_TAP_ZONE_OPTIONS,
   READER_THEME_OPTIONS,
   closestReaderOptionValue
 } from '../../reader/reader-preference-options';
@@ -303,8 +304,8 @@ export function ReaderDeviceSettingsPage() {
 
   return (
     <SettingsCenterShell
-      title="当前设备偏好"
-      description="这些设置仅保存在当前用户的当前设备，不会改变其他设备或其他用户的阅读器。每本书在阅读器内单独调整的设置仍会优先使用。"
+      title={t('当前设备偏好')}
+      description={t('这些设置仅保存在当前用户的当前设备，并统一应用到这台设备上的所有图书，不会改变其他设备或其他用户的阅读器。')}
       actions={(
         <Button variant="secondary" icon={RotateCcw} disabled={loading || !userId} onClick={reset}>{t('恢复默认')}</Button>
       )}
@@ -364,6 +365,12 @@ export function ReaderDeviceSettingsPage() {
               options={READER_FLOW_OPTIONS}
               onChange={(flow) => updatePreferences({ ...preferences, epub: { ...preferences.epub, flow: flow as ReaderPreferences['epub']['flow'] } })}
             />
+            <ChoiceField
+              label={t('安全优化')}
+              value={String(preferences.epub.optimization.enabled)}
+              options={[{ value: 'true', label: '开启' }, { value: 'false', label: '关闭' }]}
+              onChange={(enabled) => updatePreferences({ ...preferences, epub: { ...preferences.epub, optimization: { ...preferences.epub.optimization, enabled: enabled === 'true' } } })}
+            />
           </SettingsSection>
 
           <SettingsSection
@@ -377,6 +384,28 @@ export function ReaderDeviceSettingsPage() {
             <ChoiceField label={t('画质')} value={preferences.comic.imageVariant} options={READER_COMIC_IMAGE_VARIANT_OPTIONS} onChange={(imageVariant) => updatePreferences({ ...preferences, comic: { ...preferences.comic, imageVariant: imageVariant as ReaderPreferences['comic']['imageVariant'] } })} />
             <ChoiceField label={t('方向')} value={preferences.comic.direction} options={READER_COMIC_DIRECTION_OPTIONS} onChange={(direction) => updatePreferences({ ...preferences, comic: { ...preferences.comic, direction: direction as ReaderPreferences['comic']['direction'] } })} />
             <StepperField label={t('缩放')} value={preferences.comic.zoom} minimum={0.6} maximum={2.4} step={0.1} onChange={(zoom) => updatePreferences({ ...preferences, comic: { ...preferences.comic, zoom } })} />
+          </SettingsSection>
+        </div>
+
+        <div className="grid items-start gap-3 xl:grid-cols-2">
+          <SettingsSection
+            icon={<MousePointer2 size={19} />}
+            title={t('阅读操作')}
+            description={t('设置所有阅读格式共用的点击、滑动和按键行为。')}
+          >
+            <ChoiceField label={t('点击区域')} value={preferences.interaction.tapZones} options={READER_TAP_ZONE_OPTIONS} onChange={(tapZones) => updatePreferences({ ...preferences, interaction: { ...preferences.interaction, tapZones: tapZones as ReaderPreferences['interaction']['tapZones'] } })} />
+            <ChoiceField label={t('滑动翻页')} value={String(preferences.interaction.swipePageTurn)} options={[{ value: 'true', label: '开启' }, { value: 'false', label: '关闭' }]} onChange={(enabled) => updatePreferences({ ...preferences, interaction: { ...preferences.interaction, swipePageTurn: enabled === 'true' } })} />
+            <ChoiceField label={t('键盘翻页')} value={String(preferences.interaction.keyboardPageTurn)} options={[{ value: 'true', label: '开启' }, { value: 'false', label: '关闭' }]} onChange={(enabled) => updatePreferences({ ...preferences, interaction: { ...preferences.interaction, keyboardPageTurn: enabled === 'true' } })} />
+            <ChoiceField label={t('音量键翻页')} value={String(preferences.interaction.volumeKeyPageTurn)} options={[{ value: 'true', label: '开启' }, { value: 'false', label: '关闭' }]} onChange={(enabled) => updatePreferences({ ...preferences, interaction: { ...preferences.interaction, volumeKeyPageTurn: enabled === 'true' } })} />
+          </SettingsSection>
+
+          <SettingsSection
+            icon={<Sparkles size={19} />}
+            title={t('智能排版')}
+            description={t('安全处理普通正文缩进，同时保留标题、诗歌、列表和复杂排版。')}
+          >
+            <ChoiceField label={t('重复缩进去重')} value={String(preferences.epub.optimization.deduplicateIndent)} options={[{ value: 'true', label: '开启' }, { value: 'false', label: '关闭' }]} onChange={(enabled) => updatePreferences({ ...preferences, epub: { ...preferences.epub, optimization: { ...preferences.epub.optimization, deduplicateIndent: enabled === 'true' } } })} />
+            <ChoiceField label={t('无缩进正文补齐')} value={String(preferences.epub.optimization.indentUnindented)} options={[{ value: 'true', label: '开启' }, { value: 'false', label: '关闭' }]} onChange={(enabled) => updatePreferences({ ...preferences, epub: { ...preferences.epub, optimization: { ...preferences.epub.optimization, indentUnindented: enabled === 'true' } } })} />
           </SettingsSection>
         </div>
 

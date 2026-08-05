@@ -271,6 +271,57 @@ def test_alembic_baseline_matches_sqlalchemy_metadata(tmp_path) -> None:
         engine.dispose()
 
 
+def test_management_query_indexes_upgrade_and_downgrade(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_sqlite_engine(settings.database_path)
+    index_names = {
+        "LibraryWork": {
+            "LibraryWork_hidden_normalizedTitle_normalizedAuthor_id_idx"
+        },
+        "ImportTask": {
+            "ImportTask_monitorFolderId_createdAt_id_idx",
+            "ImportTask_monitorFolderId_status_createdAt_id_idx",
+        },
+        "SystemEvent": {
+            "SystemEvent_createdAt_id_idx",
+            "SystemEvent_targetType_createdAt_id_idx",
+        },
+    }
+    try:
+        _run_alembic(
+            engine,
+            lambda config: command.upgrade(config, "0014_dashboard_query_indexes"),
+        )
+        inspector = inspect(engine)
+        for table, expected_names in index_names.items():
+            assert expected_names.isdisjoint(
+                {index["name"] for index in inspector.get_indexes(table)}
+            )
+
+        _run_alembic(
+            engine,
+            lambda config: command.upgrade(config, "0015_management_query_indexes"),
+        )
+        inspector = inspect(engine)
+        for table, expected_names in index_names.items():
+            assert expected_names <= {
+                index["name"] for index in inspector.get_indexes(table)
+            }
+
+        _run_alembic(
+            engine,
+            lambda config: command.downgrade(config, "0014_dashboard_query_indexes"),
+        )
+        inspector = inspect(engine)
+        for table, expected_names in index_names.items():
+            assert expected_names.isdisjoint(
+                {index["name"] for index in inspector.get_indexes(table)}
+            )
+    finally:
+        engine.dispose()
+
+
 def test_seed_is_insert_only_and_safe_across_concurrent_sessions(tmp_path) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
@@ -438,7 +489,40 @@ def test_bootstrap_runs_normalization_after_stamping_v14_boundary(tmp_path) -> N
         bootstrap_database(engine, settings)
 
         with engine.connect() as connection:
-            assert _alembic_version(connection) == "0013_local_metadata_resolution"
+            assert _alembic_version(connection) == "0015_management_query_indexes"
+            inspector = inspect(connection)
+            assert "LibraryWork_hidden_createdAt_id_idx" in {
+                index["name"] for index in inspector.get_indexes("LibraryWork")
+            }
+            assert "LibraryVolume_mediaVersionId_hidden_monitorFolderId_idx" in {
+                index["name"] for index in inspector.get_indexes("LibraryVolume")
+            }
+            assert "LibraryReadingProgress_userId_updatedAt_volumeId_idx" in {
+                index["name"]
+                for index in inspector.get_indexes("LibraryReadingProgress")
+            }
+            assert "UserMediaHistory_userId_updatedAt_mediaVersionId_idx" in {
+                index["name"] for index in inspector.get_indexes("UserMediaHistory")
+            }
+            assert (
+                "LibraryWork_hidden_normalizedTitle_normalizedAuthor_id_idx"
+                in {
+                    index["name"]
+                    for index in inspector.get_indexes("LibraryWork")
+                }
+            )
+            assert "ImportTask_monitorFolderId_createdAt_id_idx" in {
+                index["name"] for index in inspector.get_indexes("ImportTask")
+            }
+            assert "ImportTask_monitorFolderId_status_createdAt_id_idx" in {
+                index["name"] for index in inspector.get_indexes("ImportTask")
+            }
+            assert "SystemEvent_createdAt_id_idx" in {
+                index["name"] for index in inspector.get_indexes("SystemEvent")
+            }
+            assert "SystemEvent_targetType_createdAt_id_idx" in {
+                index["name"] for index in inspector.get_indexes("SystemEvent")
+            }
             assert (
                 connection.execute(
                     text(

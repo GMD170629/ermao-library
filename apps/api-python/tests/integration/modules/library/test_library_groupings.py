@@ -106,7 +106,7 @@ def test_groupings_split_authors_filter_visibility_search_and_page(
     finally:
         event.remove(engine, "before_cursor_execute", count_statement)
 
-    assert executed_statements == 2
+    assert executed_statements == 1
     assert [(group.name, group.book_count) for group in authors.groups] == [
         ("周禾", 1),
         ("林川", 2),

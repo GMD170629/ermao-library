@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from time import time_ns
+from time import perf_counter, time_ns
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -51,6 +52,7 @@ from app.schemas.responses import fail, ok
 
 router = APIRouter(tags=["imports"], route_class=TypedContractRoute)
 router.include_router(writes_router)
+logger = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
@@ -344,6 +346,7 @@ def list_import_tasks(
     if normalized_status and normalized_status != "ALL":
         if normalized_status not in {"PENDING", "PARSING", "COMPLETED", "FAILED"}:
             return fail("导入状态无效", status_code=400)
+    started_at = perf_counter()
     tasks, total, summary = import_http_store.list_import_tasks_page(
         db,
         context,
@@ -352,9 +355,27 @@ def list_import_tasks(
         status=normalized_status or None,
         keyword=keyword,
     )
+    queried_at = perf_counter()
+    tasks = import_http_store.hydrate_import_task_page(db, tasks, log_limit=20)
+    hydrated_at = perf_counter()
     total_pages = max(1, (total + page_size - 1) // page_size)
     page = min(page, total_pages)
     views = [import_task_view(db, task, log_limit=20) for task in tasks]
+    mapped_at = perf_counter()
+    logger.info(
+        "import_tasks.page.loaded",
+        extra={
+            "event": "import_tasks.page.loaded",
+            "actorId": user.id,
+            "page": page,
+            "pageSize": page_size,
+            "resultCount": len(views),
+            "queryElapsedMs": round((queried_at - started_at) * 1000, 2),
+            "hydrateElapsedMs": round((hydrated_at - queried_at) * 1000, 2),
+            "mapElapsedMs": round((mapped_at - hydrated_at) * 1000, 2),
+            "elapsedMs": round((mapped_at - started_at) * 1000, 2),
+        },
+    )
     return ok(
         {
             "tasks": views,

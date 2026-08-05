@@ -158,7 +158,14 @@ def test_library_management_endpoints_return_their_documented_contracts(
 
     duplicates_response = client.get("/api/library/duplicates")
     assert duplicates_response.status_code == 200
-    duplicate_group = duplicates_response.json()["data"]["groups"][0]
+    duplicates_data = duplicates_response.json()["data"]
+    assert {
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1,
+    }.items() <= duplicates_data.items()
+    duplicate_group = duplicates_data["groups"][0]
     assert duplicate_group["reasons"] == ["标题与作者规范化后相同"]
     assert {work["id"] for work in duplicate_group["works"]} == {
         target_work.id,

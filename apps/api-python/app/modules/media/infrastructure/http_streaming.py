@@ -142,13 +142,20 @@ def _should_use_range(request: Request, etag: str, last_modified: str) -> bool:
 
 
 def _response_headers(
-    size: int, mtime: float, media_type: str, name: str, extra: str = ""
+    size: int,
+    mtime: float,
+    media_type: str,
+    name: str,
+    extra: str = "",
+    *,
+    as_attachment: bool = False,
 ) -> dict[str, str]:
     modified = datetime.fromtimestamp(mtime, UTC).replace(microsecond=0)
+    disposition = "attachment" if as_attachment else "inline"
     return {
         "Accept-Ranges": "bytes",
         "Content-Type": media_type,
-        "Content-Disposition": f"inline; filename*=UTF-8''{quote(name)}",
+        "Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(name)}",
         "Cache-Control": "private, max-age=86400"
         if media_type.lower().startswith("image/")
         else "private, max-age=60",
@@ -607,6 +614,8 @@ def _file_response(
     missing_message: str = "文件不存在",
     route: str = "file",
     file_id: str | None = None,
+    *,
+    as_attachment: bool = False,
 ) -> Response:
     if path is None or not path.exists() or not path.is_file():
         return fail(missing_message, status_code=404)
@@ -621,6 +630,7 @@ def _file_response(
         resolved_media_type,
         name or path.name,
         extra=f"user:{user_id}",
+        as_attachment=as_attachment,
     )
     if not request.headers.get("range") and _not_modified(
         request, headers["ETag"], headers["Last-Modified"]
@@ -727,6 +737,8 @@ def _send_file(
     name: str | None = None,
     route: str = "file",
     file_id: str | None = None,
+    *,
+    as_attachment: bool = False,
 ) -> Response:
     return _file_response(
         path,
@@ -736,6 +748,7 @@ def _send_file(
         name=name,
         route=route,
         file_id=file_id,
+        as_attachment=as_attachment,
     )
 
 
@@ -1084,6 +1097,8 @@ def send_file(
     name: str | None = None,
     route: str = "file",
     file_id: str | None = None,
+    *,
+    as_attachment: bool = False,
 ) -> Response:
     return _send_file(
         path,
@@ -1093,6 +1108,7 @@ def send_file(
         name=name,
         route=route,
         file_id=file_id,
+        as_attachment=as_attachment,
     )
 
 

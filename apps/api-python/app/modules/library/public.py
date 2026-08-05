@@ -49,6 +49,9 @@ from app.modules.library.presentation.views import (
     _bookshelf_item_view as bookshelf_item_view,
 )
 from app.modules.library.presentation.views import (
+    _bookshelf_item_views as bookshelf_item_views,
+)
+from app.modules.library.presentation.views import (
     _get_work as get_work,
 )
 from app.modules.library.presentation.views import (
@@ -105,6 +108,7 @@ __all__ = [
     "WorkListResult",
     "WorkView",
     "bookshelf_item_view",
+    "bookshelf_item_views",
     "collect_import_linked_library_scope_paths",
     "conversion_output_paths",
     "delete_import_linked_library_scope",

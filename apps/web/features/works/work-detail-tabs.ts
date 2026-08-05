@@ -82,6 +82,7 @@ export function selectedVolumeForDetailTab(
   const volumes = volumesForDetailTab(work, tab);
   return volumes.find((volume) => volume.id === requestedVolumeId)
     ?? volumes.find((volume) => volume.id === work.continueVolumeId)
+    ?? volumes.find((volume) => volume.progress < 100)
     ?? volumes[0]
     ?? null;
 }

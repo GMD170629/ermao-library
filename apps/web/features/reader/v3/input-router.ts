@@ -10,6 +10,12 @@ export type ReaderViewportRect = {
 
 type KeyInput = Pick<KeyboardEvent, 'key' | 'shiftKey'>;
 
+export type ReaderInputPreferences = Readonly<{
+  tapZones?: 'standard' | 'reversed' | 'disabled';
+  keyboardPageTurn?: boolean;
+  volumeKeyPageTurn?: boolean;
+}>;
+
 function physicalSideIntent(side: 'left' | 'right', direction: ReaderDirection): 'previous' | 'next' {
   if (direction === 'rtl') return side === 'left' ? 'next' : 'previous';
   return side === 'left' ? 'previous' : 'next';
@@ -26,8 +32,11 @@ export function hasActiveTextSelection(selection: Selection | null | undefined) 
   return Boolean(selection && !selection.isCollapsed && selection.toString().trim());
 }
 
-export function readerKeyIntent(input: KeyInput, direction: ReaderDirection): ReaderInputIntent | null {
+export function readerKeyIntent(input: KeyInput, direction: ReaderDirection, preferences: ReaderInputPreferences = {}): ReaderInputIntent | null {
   if (input.key === 'Escape') return 'escape';
+  if (preferences.volumeKeyPageTurn && (input.key === 'AudioVolumeUp' || input.key === 'VolumeUp')) return 'previous';
+  if (preferences.volumeKeyPageTurn && (input.key === 'AudioVolumeDown' || input.key === 'VolumeDown')) return 'next';
+  if (preferences.keyboardPageTurn === false) return null;
   if (input.key === 'ArrowLeft') return physicalSideIntent('left', direction);
   if (input.key === 'ArrowRight') return physicalSideIntent('right', direction);
   if (input.key === 'PageUp' || (input.key === ' ' && input.shiftKey)) return 'previous';
@@ -42,12 +51,15 @@ export function readerPointerIntent(
   clientY: number,
   viewportWidth: number,
   viewportHeight: number,
-  direction: ReaderDirection
+  direction: ReaderDirection,
+  tapZones: ReaderInputPreferences['tapZones'] = 'standard'
 ): ReaderInputIntent | null {
   if (viewportWidth <= 0 || viewportHeight <= 0) return null;
   if (clientX < 0 || clientY < 0 || clientX > viewportWidth || clientY > viewportHeight) return null;
-  if (clientX < viewportWidth * 0.33) return physicalSideIntent('left', direction);
-  if (clientX > viewportWidth * 0.67) return physicalSideIntent('right', direction);
+  if (tapZones === 'disabled') return 'toggle-controls';
+  const resolvedDirection = tapZones === 'reversed' ? (direction === 'rtl' ? 'ltr' : 'rtl') : direction;
+  if (clientX < viewportWidth * 0.33) return physicalSideIntent('left', resolvedDirection);
+  if (clientX > viewportWidth * 0.67) return physicalSideIntent('right', resolvedDirection);
   return 'toggle-controls';
 }
 
@@ -55,14 +67,16 @@ export function readerPointerIntentInViewport(
   clientX: number,
   clientY: number,
   viewport: ReaderViewportRect,
-  direction: ReaderDirection
+  direction: ReaderDirection,
+  tapZones: ReaderInputPreferences['tapZones'] = 'standard'
 ) {
   return readerPointerIntent(
     clientX - viewport.left,
     clientY - viewport.top,
     viewport.width,
     viewport.height,
-    direction
+    direction,
+    tapZones
   );
 }
 
@@ -87,7 +101,8 @@ export function readerFramePointerIntent(
   frameViewportHeight: number,
   frame: ReaderViewportRect,
   viewport: ReaderViewportRect,
-  direction: ReaderDirection
+  direction: ReaderDirection,
+  tapZones: ReaderInputPreferences['tapZones'] = 'standard'
 ) {
   const projected = projectReaderFramePointer(
     clientX,
@@ -97,7 +112,7 @@ export function readerFramePointerIntent(
     frame
   );
   if (!projected) return null;
-  return readerPointerIntentInViewport(projected.clientX, projected.clientY, viewport, direction);
+  return readerPointerIntentInViewport(projected.clientX, projected.clientY, viewport, direction, tapZones);
 }
 
 export function readerSwipeIntent(deltaX: number, deltaY: number, elapsedMs: number, direction: ReaderDirection): ReaderInputIntent | null {

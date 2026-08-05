@@ -1,10 +1,10 @@
 'use client';
 
-import { ArrowDown, ArrowUp, ArrowUpDown, Eye, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { useEffect, useRef } from 'react';
-import { mediaKindsLabel, type ManagementWorkSummary } from '../../features/library/public';
+import { mediaKindsLabel, type ManagementWorkSummary, useMobileDeleteSwipe } from '../../features/library/public';
 import { useI18n } from '../../i18n/provider';
 import { Badge } from '../ui/badge';
 import type { BadgeTone } from '../ui/badge';
@@ -53,6 +53,7 @@ export function BookTable({
   const selectedRef = useRef(new Set(selectedIds));
   const anchorIndexRef = useRef<number | null>(null);
   const dragRef = useRef<{ active: boolean; mode: 'select' | 'deselect'; visited: Set<string> }>({ active: false, mode: 'select', visited: new Set() });
+  const mobileDeleteSwipe = useMobileDeleteSwipe(Boolean(onDelete));
 
   useEffect(() => {
     selectedRef.current = new Set(selectedIds);
@@ -116,6 +117,11 @@ export function BookTable({
     onContextMenu(book, { x: event.clientX, y: event.clientY });
   }
 
+  function openMobileBookDetails(event: ReactMouseEvent<HTMLButtonElement>, book: ManagementWorkSummary) {
+    event.stopPropagation();
+    if (mobileDeleteSwipe.consumeClick(book.id)) router.push(`/works/${book.id}`);
+  }
+
   function mediaLabel(book: ManagementWorkSummary) {
     return mediaKindsLabel(book.availableMediaKinds, locale) || '—';
   }
@@ -160,34 +166,61 @@ export function BookTable({
           const authorLabel = book.author.trim() && book.author !== '未知作者' ? book.author.trim() : null;
 
           return (
-            <article key={book.id} data-testid="book-list-mobile-card" onContextMenu={(event) => openContextMenu(event, book)} className={`rounded-2xl border bg-white/70 p-4 ${selectedIds.includes(book.id) ? 'border-[#EF4D2F]' : 'border-black/[0.07]'}`}>
-              <div className="flex w-full min-w-0 items-start gap-3">
-                {selectable ? <input type="checkbox" checked={selectedIds.includes(book.id)} onChange={() => onSelect?.(book)} className="mt-1 h-4 w-4 shrink-0 accent-[#EF4D2F]" aria-label={i18nAttribute(selectedIds.includes(book.id) ? "取消选择《{value0}》" : "选择《{value0}》", { value0: book.title })} /> : null}
-                <button type="button" onClick={() => router.push(`/works/${book.id}`)} className="flex min-w-0 flex-1 items-start gap-3 text-left">
-                  <Cover book={book} className="h-20 w-14 shrink-0 rounded-md" small />
+            <article key={book.id} data-testid="book-list-mobile-card" onContextMenu={(event) => openContextMenu(event, book)} className={`relative overflow-hidden rounded-2xl border bg-red-50 ${selectedIds.includes(book.id) ? 'border-[#EF4D2F]' : 'border-black/[0.07]'}`}>
+              {onDelete ? (
+                <button
+                  type="button"
+                  className={mobileDeleteSwipe.isActionVisible(book.id)
+                    ? 'absolute inset-y-0 right-0 flex flex-col items-center justify-center gap-1.5 bg-red-50 text-sm font-medium text-red-700 outline-none transition-colors hover:bg-red-100 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-300'
+                    : 'sr-only'}
+                  style={mobileDeleteSwipe.isActionVisible(book.id) ? { width: mobileDeleteSwipe.actionWidth } : undefined}
+                  aria-label={i18nAttribute("删除《{value0}》", { value0: book.title })}
+                  onFocus={() => mobileDeleteSwipe.reveal(book.id)}
+                  onClick={() => {
+                    mobileDeleteSwipe.close();
+                    onDelete(book);
+                  }}
+                >
+                  <Trash2 size={18} aria-hidden="true" />
+                  <I18nText>删除</I18nText>
+                </button>
+              ) : null}
+              <div
+                data-testid="book-list-mobile-swipe-surface"
+                className={`relative z-10 touch-pan-y rounded-2xl p-4 transition-colors ${selectedIds.includes(book.id) ? 'bg-[#FFF8F5] shadow-[inset_1px_0_0_#EF4D2F]' : 'bg-white/70'} ${mobileDeleteSwipe.isDragging(book.id) ? '' : 'transition-transform duration-200 motion-reduce:transition-none'}`}
+                style={{ transform: `translate3d(${mobileDeleteSwipe.offsetFor(book.id)}px, 0, 0)` }}
+                onPointerDown={(event) => mobileDeleteSwipe.begin(event, book.id)}
+                onPointerMove={mobileDeleteSwipe.move}
+                onPointerUp={mobileDeleteSwipe.finish}
+                onPointerCancel={mobileDeleteSwipe.cancel}
+                onClick={() => {
+                  if (mobileDeleteSwipe.consumeClick(book.id) && selectable) onSelect?.(book);
+                }}
+              >
+                <div className="flex w-full min-w-0 items-start gap-3">
+                  {selectable ? <input type="checkbox" checked={selectedIds.includes(book.id)} onChange={() => onSelect?.(book)} onClick={(event) => event.stopPropagation()} className="sr-only" aria-label={i18nAttribute(selectedIds.includes(book.id) ? "取消选择《{value0}》" : "选择《{value0}》", { value0: book.title })} /> : null}
+                  <button type="button" onClick={(event) => openMobileBookDetails(event, book)} className="shrink-0 rounded-md outline-none transition hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-[#F6B7A5]" aria-label={i18nAttribute("查看《{value0}》封面", { value0: book.title })}>
+                    <Cover book={book} className="h-20 w-14 shrink-0 rounded-md" small />
+                  </button>
                   <span className="min-w-0 flex-1">
-                    <span data-i18n-skip className="line-clamp-2 font-medium leading-5 text-[#272421]">{book.title}</span>
+                    <button data-i18n-skip type="button" onClick={(event) => openMobileBookDetails(event, book)} className="line-clamp-2 w-full rounded-sm text-left font-medium leading-5 text-[#272421] outline-none transition hover:text-[#D94724] hover:underline focus-visible:ring-2 focus-visible:ring-[#F6B7A5]" aria-label={i18nAttribute("查看《{value0}》详情", { value0: book.title })}>{book.title}</button>
                     {authorLabel ? <span data-i18n-skip className="mt-1 block truncate text-xs text-[#8A847E]">{authorLabel}</span> : null}
-                    <span className="mt-2 flex flex-wrap gap-1.5">
-                      <Badge>{mediaLabel(book)}</Badge>
-                      <Badge tone={statusTone(book)}>{statusLabel(book)}</Badge>
-                      {(book.tags ?? []).slice(0, 1).map((tag) => <Badge key={tag} translate={false}>{tag}</Badge>)}
+                    <span data-testid="book-list-mobile-metadata" className="mt-2 flex min-w-0 flex-nowrap gap-1.5 overflow-hidden">
+                      <Badge className="shrink-0 whitespace-nowrap">{mediaLabel(book)}</Badge>
+                      <Badge className="shrink-0 whitespace-nowrap" tone={statusTone(book)}>{statusLabel(book)}</Badge>
+                      {(book.tags ?? []).slice(0, 1).map((tag) => <Badge key={tag} className="min-w-0 truncate whitespace-nowrap" translate={false}>{tag}</Badge>)}
                     </span>
                   </span>
-                </button>
-              </div>
-              <div className="mt-3 flex justify-end gap-2" data-testid="book-list-mobile-actions">
-                <Button variant="ghost" icon={Eye} className="h-11 w-11 min-h-11 px-0 py-0" aria-label={i18nAttribute("查看《{value0}》", { value0: book.title })} title={i18nAttribute("查看")} onClick={() => router.push(`/works/${book.id}`)}><span className="sr-only"><I18nText>查看</I18nText></span></Button>
-                {onDelete ? <Button variant="danger" icon={Trash2} className="h-11 w-11 min-h-11 px-0 py-0" aria-label={i18nAttribute("删除《{value0}》", { value0: book.title })} title={i18nAttribute("删除")} onClick={() => onDelete(book)}><span className="sr-only"><I18nText>删除</I18nText></span></Button> : null}
+                </div>
               </div>
             </article>
           );
         })}
       </div>
 
-      <div data-testid="book-list-desktop-table" className="hidden max-w-full overflow-x-auto overscroll-x-contain rounded-2xl border border-black/[0.07] bg-white/70 md:block">
+      <div data-testid="book-list-desktop-table" tabIndex={0} aria-label={i18nAttribute("图书列表")} className="hidden max-w-full overflow-x-auto overscroll-contain rounded-2xl border border-black/[0.07] bg-white/70 outline-none focus-visible:border-[#EFAE9B] focus-visible:ring-2 focus-visible:ring-[#F9D8CE] md:block lg:h-full lg:overflow-auto">
         <table className="w-full min-w-[1200px] table-fixed text-left text-sm">
-        <thead className="border-b border-black/[0.06] bg-[#F7F4F0] text-xs font-medium text-[#837D77]">
+        <thead className="sticky top-0 z-20 border-b border-black/[0.06] bg-[#F7F4F0] text-xs font-medium text-[#837D77] shadow-[0_1px_0_rgba(54,43,36,0.06)]">
           <tr>
             {selectable ? <th className="w-12 p-4"><input type="checkbox" checked={allSelected} onChange={(event) => onSelectAll?.(event.target.checked)} className="h-4 w-4 accent-[#EF4D2F]" aria-label={allSelected ? i18nAttribute("取消全选当前页") : i18nAttribute("全选当前页")} /></th> : null}
             <th className="w-[250px] p-2">{sortableHeader('标题', 'title')}</th>
@@ -198,7 +231,7 @@ export function BookTable({
             <th className="w-[70px]"><I18nText>状态</I18nText></th>
             <th className="w-[104px]">{sortableHeader('最近阅读', 'recent_read', 'desc')}</th>
             <th className="w-[104px]">{sortableHeader('加入时间', 'recent_import', 'desc')}</th>
-            <th className="w-[140px] pr-3 text-right"><I18nText>操作</I18nText></th>
+            <th className="w-[84px] pr-3 text-right"><I18nText>操作</I18nText></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-black/[0.05]">
@@ -243,7 +276,6 @@ export function BookTable({
                 <td className="truncate px-2 text-[#817B75]">{localDateLabel(book.importedAt, '', locale)}</td>
                 <td className="pr-3 text-right">
                   <div className="flex justify-end gap-1">
-                    <Button variant="ghost" icon={Eye} className="h-9 min-h-9 px-2 py-1.5" aria-label={i18nAttribute("查看《{value0}》", { value0: book.title })} onClick={() => router.push(`/works/${book.id}`)}><span className="hidden 2xl:inline"><I18nText>查看</I18nText></span></Button>
                     {onDelete ? <Button variant="danger" icon={Trash2} className="h-9 min-h-9 px-2 py-1.5" aria-label={i18nAttribute("删除《{value0}》", { value0: book.title })} onClick={() => onDelete(book)}><span className="hidden 2xl:inline"><I18nText>删除</I18nText></span></Button> : null}
                   </div>
                 </td>

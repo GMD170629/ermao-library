@@ -8,10 +8,10 @@ from collections.abc import Iterable
 from hashlib import sha1
 from typing import Any
 
-from sqlalchemy import case, delete, distinct, func, or_, select
+from sqlalchemy import case, delete, distinct, exists, func, or_, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.core.time import to_timestamp_ms
 from app.models.common import db_timestamp
@@ -238,3 +238,82 @@ def list_categories(
 
     rows = db.execute(statement).all()
     return [_facet_public_dict(facet, int(count or 0)) for facet, count in rows]
+
+
+def list_categories_page(
+    db: Session,
+    kind: str,
+    search: str = "",
+    *,
+    page: int,
+    page_size: int,
+) -> tuple[list[dict[str, Any]], int, int]:
+    """Return an indexed category page, its exact total, and the clamped page."""
+
+    normalized_kind = kind.strip().upper()
+    if normalized_kind not in FACET_KINDS:
+        raise ValueError("分类类型无效")
+    if page <= 0 or page_size <= 0:
+        raise ValueError("分页参数无效")
+
+    count_link = aliased(LibraryWorkFacet)
+    count_work = aliased(LibraryWork)
+    visible_work = exists(
+        select(count_work.id).where(
+            count_work.id == count_link.work_id,
+            func.coalesce(count_work.hidden, 0) == 0,
+        )
+    )
+    book_count = (
+        select(func.count())
+        .select_from(count_link)
+        .where(
+            count_link.facet_id == LibraryFacet.id,
+            visible_work,
+        )
+        .correlate(LibraryFacet)
+        .scalar_subquery()
+    )
+    filters = [LibraryFacet.kind == normalized_kind]
+    search_clause = _facet_search_clause(search)
+    if search_clause is not None:
+        filters.append(search_clause)
+    base_statement = (
+        select(
+            LibraryFacet,
+            book_count.label("book_count"),
+            func.count().over().label("total_count"),
+        )
+        .where(*filters)
+        .order_by(
+            book_count.desc(),
+            LibraryFacet.name.collate("NOCASE").asc(),
+            LibraryFacet.id.asc(),
+        )
+    )
+
+    def fetch(target_page: int) -> list[Any]:
+        return db.execute(
+            base_statement.limit(page_size).offset((target_page - 1) * page_size)
+        ).all()
+
+    rows = fetch(page)
+    if rows:
+        total = int(rows[0].total_count)
+        return (
+            [_facet_public_dict(row[0], int(row.book_count or 0)) for row in rows],
+            total,
+            page,
+        )
+
+    total = int(
+        db.scalar(select(func.count()).select_from(LibraryFacet).where(*filters)) or 0
+    )
+    clamped_page = min(page, max(1, (total + page_size - 1) // page_size))
+    if total and clamped_page != page:
+        rows = fetch(clamped_page)
+    return (
+        [_facet_public_dict(row[0], int(row.book_count or 0)) for row in rows],
+        total,
+        clamped_page,
+    )

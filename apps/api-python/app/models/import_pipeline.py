@@ -296,6 +296,19 @@ class ImportTask(Base):
         Index("ImportTask_status_leaseExpiresAt_idx", "status", "leaseExpiresAt"),
         Index("ImportTask_createdAt_id_idx", "createdAt", "id"),
         Index(
+            "ImportTask_monitorFolderId_createdAt_id_idx",
+            "monitorFolderId",
+            "createdAt",
+            "id",
+        ),
+        Index(
+            "ImportTask_monitorFolderId_status_createdAt_id_idx",
+            "monitorFolderId",
+            "status",
+            "createdAt",
+            "id",
+        ),
+        Index(
             "ImportTask_sourceKey_status_createdAt_idx",
             "sourceKey",
             "status",

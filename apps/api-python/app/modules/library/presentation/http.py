@@ -129,9 +129,10 @@ from app.modules.library.presentation.schemas import (
 from app.modules.library.presentation.views import (
     _active_media_view,
     _apply_remote_cover,
-    _book_search_item_view,
-    _bookshelf_item_view,
+    _book_search_item_views,
+    _bookshelf_item_views,
     _coerce_int,
+    _cover_url,
     _finish_metadata_organize_work,
     _get_work,
     _management_work_views,
@@ -144,6 +145,7 @@ from app.modules.library.presentation.views import (
     _work_detail_summary_view,
     _work_reading_units_view,
     _work_view,
+    _work_views,
     _work_volume_page_view,
 )
 from app.modules.library.presentation.work_ops import (
@@ -173,10 +175,10 @@ from app.services.default_cover import (
 from app.services.health import run_system_health_checks
 from app.services.library_filters import library_filter_schema
 from app.services.library_management import (
-    count_categories,
     delete_category,
-    duplicate_groups,
+    duplicate_groups_page,
     list_categories,
+    list_categories_page,
     merge_categories,
     merge_works,
     operation_view,
@@ -409,9 +411,7 @@ def dashboard_recent_books(
     take = min(24, max(1, limit))
     context = authorization_context(db, user)
     works = library_dashboard.recent_books(db, context, limit=take)
-    return WorkSummariesResponse(
-        data={"books": [_bookshelf_item_view(db, work) for work in works]}
-    )
+    return WorkSummariesResponse(data={"books": _bookshelf_item_views(db, works)})
 
 
 @router.get("/dashboard/recent-reading")
@@ -427,9 +427,7 @@ def dashboard_recent_reading(
     take = min(24, max(1, limit))
     context = authorization_context(db, user)
     works = library_dashboard.recent_reading(db, context, user.id, limit=take)
-    return WorkSummariesResponse(
-        data={"books": [_bookshelf_item_view(db, work) for work in works]}
-    )
+    return WorkSummariesResponse(data={"books": _bookshelf_item_views(db, works)})
 
 
 @router.get("/dashboard/continue-reading")
@@ -446,17 +444,20 @@ def dashboard_continue_reading(
     if not progress:
         return ContinueReadingResponse(data={"item": None})
     work_id = str(progress.get("workId") or "")
-    work = _get_work(db, work_id)
-    if not work or work.get("hidden"):
-        return ContinueReadingResponse(data={"item": None})
-    book = _work_view(db, work, user.id)
+    work_summary = {
+        "id": work_id,
+        "coverPath": progress.get("coverPath"),
+        "updatedAt": progress.get("workUpdatedAt"),
+    }
     return ContinueReadingResponse(
         data={
             "item": {
-                "workId": book.get("id"),
-                "title": book.get("title"),
-                "author": book.get("author"),
-                "coverUrl": book.get("coverUrl"),
+                "workId": work_id,
+                "title": progress.get("title") or "未命名作品",
+                "author": progress.get("author") or "未知作者",
+                "coverUrl": _cover_url(
+                    "works", work_id, work_summary, size="medium"
+                ),
                 "mediaKind": progress.get("mediaKind"),
                 "volumeFormat": progress.get("volumeFormat"),
                 "readerType": progress.get("readerType"),
@@ -883,9 +884,13 @@ def list_works(
         start = (page - 1) * result_page_size
         page_items = work_views[start : start + result_page_size]
         book_views = (
-            [_bookshelf_item_view(db, work) for work, _item_view in page_items]
+            _bookshelf_item_views(
+                db, [work for work, _item_view in page_items]
+            )
             if bookshelf_view
-            else [_book_search_item_view(db, work) for work, _item_view in page_items]
+            else _book_search_item_views(
+                db, [work for work, _item_view in page_items]
+            )
             if search_view
             else _management_work_views(
                 db, [work for work, _item_view in page_items], user.id
@@ -896,9 +901,9 @@ def list_works(
     else:
         works = result.works
         book_views = (
-            [_bookshelf_item_view(db, work) for work in works]
+            _bookshelf_item_views(db, works)
             if bookshelf_view
-            else [_book_search_item_view(db, work) for work in works]
+            else _book_search_item_views(db, works)
             if search_view
             else _management_work_views(db, works, user.id)
             if management_view
@@ -2328,12 +2333,14 @@ def library_categories(
         search = request.query_params.get("search", "")
         page = max(1, int(request.query_params.get("page", "1")))
         page_size = min(100, max(1, int(request.query_params.get("pageSize", "20"))))
-        total = count_categories(db, kind, search)
-        total_pages = max(1, (total + page_size - 1) // page_size)
-        page = min(page, total_pages)
-        items = list_categories(
-            db, kind, search, limit=page_size, offset=(page - 1) * page_size
+        items, total, page = list_categories_page(
+            db,
+            kind,
+            search,
+            page=page,
+            page_size=page_size,
         )
+        total_pages = max(1, (total + page_size - 1) // page_size)
     except ValueError as exc:
         _raise_library_error(str(exc), status_code=400)
     return CategoriesResponse(
@@ -2408,18 +2415,39 @@ async def merge_library_categories(
 @router.get("/library/duplicates")
 def library_duplicates(
     request: Request,
+    page: int = 1,
+    pageSize: int = 20,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> DuplicatesResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    groups = duplicate_groups(db)
+    page = max(1, page)
+    page_size = min(100, max(1, pageSize))
+    groups, total, page = duplicate_groups_page(
+        db,
+        page=page,
+        page_size=page_size,
+    )
+    works = [work for group in groups for work in group.get("works") or []]
+    work_views = {
+        str(work["id"]): view
+        for work, view in zip(works, _work_views(db, works, user.id), strict=True)
+    }
     for group in groups:
         group["works"] = [
-            _work_view(db, work, user.id) for work in group.get("works") or []
+            work_views[str(work["id"])] for work in group.get("works") or []
         ]
-    return DuplicatesResponse(data={"groups": groups, "total": len(groups)})
+    return DuplicatesResponse(
+        data={
+            "groups": groups,
+            "total": total,
+            "page": page,
+            "pageSize": page_size,
+            "totalPages": max(1, (total + page_size - 1) // page_size),
+        }
+    )
 
 
 @router.post("/library/duplicates/merge")

@@ -415,11 +415,15 @@ export async function downloadVolumeArchive(workId: string, volumeIds: string[])
   };
 }
 
-export async function updateWorkReadingStatus(workId: string, status: 'UNREAD' | 'FINISHED'): Promise<void> {
-  await apiJson('/api/works/bulk', {
-    method: 'POST',
+export function volumeFileDownloadUrl(volumeId: string): string {
+  return `/api/volumes/${encodeURIComponent(volumeId)}/file?download=true`;
+}
+
+export async function updateVolumeReadingStatus(volumeId: string, status: 'UNREAD' | 'FINISHED'): Promise<void> {
+  await apiJson(`/api/reader/v3/volumes/${encodeURIComponent(volumeId)}/reading-status`, {
+    method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ids: [workId], action: 'reading_status', status })
+    body: JSON.stringify({ status })
   });
 }
 

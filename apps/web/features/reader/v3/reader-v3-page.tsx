@@ -11,7 +11,12 @@ import {
   getReaderRuntime
 } from '../../../lib/reader';
 import { migrateLegacyBrowserReaderState } from '../../../lib/reader/browser-migration';
-import { readDeviceReaderPreferences } from '../../../lib/reader-device-preferences';
+import {
+  READER_DEVICE_PREFERENCES_KEY,
+  clearDeviceReaderPreferences,
+  readDeviceReaderPreferences,
+  writeDeviceReaderPreferences
+} from '../../../lib/reader-device-preferences';
 import { withBasePath } from '../../../lib/base-path';
 import { BEFORE_PWA_UPDATE_EVENT, type BeforePwaUpdateDetail } from '../../../lib/pwa/update-coordination';
 import { DEFAULT_READER_THEME, readerThemeSurfaces } from '../reader-theme';
@@ -333,14 +338,9 @@ export function ReaderV3Page({ volumeId }: { volumeId: string }) {
           clientSequence: localResume.clientSequence
         });
       }
-      const deviceDefault = readDeviceReaderPreferences(
+      const preferences = readDeviceReaderPreferences(
         bootstrap.userId,
         bootstrap.serverPreferences.settings
-      );
-      const resolved = await runtime.preferences.resolve(
-        bootstrap.userId,
-        bootstrap.mediaVersion.workId,
-        deviceDefault
       );
       if (controller.signal.aborted) return;
       if (bootstrap.resumeFingerprintMismatch) {
@@ -363,48 +363,60 @@ export function ReaderV3Page({ volumeId }: { volumeId: string }) {
       emitReaderDebug('info', 'Reader v3 启动完成', {
         volumeId: bootstrap.volume.id,
         workId: bootstrap.mediaVersion.workId,
-        preferences: resolved.source,
+        preferences: 'device-default',
         fingerprintMismatch: bootstrap.resumeFingerprintMismatch
       });
-      dispatch({ type: 'ready', requestId, bootstrap, preferences: resolved.preferences });
+      dispatch({ type: 'ready', requestId, bootstrap, preferences });
     })().catch((reason) => {
       if (controller.signal.aborted) return;
       dispatch({ type: 'error', requestId, error: reason instanceof Error ? reason.message : '读取阅读器启动信息失败' });
     });
 
     return () => controller.abort();
-  }, [requestedHref, requestedPage, retry, runtime.preferences, runtime.storage, volumeId]);
+  }, [requestedHref, requestedPage, retry, runtime.storage, volumeId]);
 
   const savePreferences = useCallback((preferences: ReaderPreferences) => {
     const bootstrap = state.bootstrap;
     if (!bootstrap) return;
     dispatch({ type: 'preferences', preferences });
     setStorageError('');
-    void runtime.preferences.save(
-      bootstrap.userId,
-      bootstrap.mediaVersion.workId,
-      preferences,
-      readDeviceReaderPreferences(bootstrap.userId, bootstrap.serverPreferences.settings)
-    ).catch((reason) => {
+    try {
+      writeDeviceReaderPreferences(bootstrap.userId, preferences);
+    } catch (reason) {
       setStorageError(reason instanceof Error ? reason.message : '本机阅读设置保存失败');
-    });
-  }, [runtime.preferences, state.bootstrap]);
+    }
+  }, [state.bootstrap]);
 
   const resetPreferences = useCallback(async () => {
     const bootstrap = state.bootstrap;
     if (!bootstrap) return;
     try {
-      const preferences = await runtime.preferences.reset(
-        bootstrap.userId,
-        bootstrap.mediaVersion.workId,
-        readDeviceReaderPreferences(bootstrap.userId, bootstrap.serverPreferences.settings)
-      );
+      clearDeviceReaderPreferences(bootstrap.userId);
+      const preferences = readDeviceReaderPreferences(bootstrap.userId, bootstrap.serverPreferences.settings);
       dispatch({ type: 'preferences', preferences });
       setStorageError('');
     } catch (reason) {
-      setStorageError(reason instanceof Error ? reason.message : '恢复本书默认设置失败');
+      setStorageError(reason instanceof Error ? reason.message : '恢复阅读默认设置失败');
     }
-  }, [runtime.preferences, state.bootstrap]);
+  }, [state.bootstrap]);
+
+  useEffect(() => {
+    const bootstrap = state.bootstrap;
+    if (!bootstrap) return undefined;
+    const refresh = () => dispatch({
+      type: 'preferences',
+      preferences: readDeviceReaderPreferences(bootstrap.userId, bootstrap.serverPreferences.settings)
+    });
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key?.includes(READER_DEVICE_PREFERENCES_KEY)) refresh();
+    };
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('shuku:reader-device-preferences-changed', refresh);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('shuku:reader-device-preferences-changed', refresh);
+    };
+  }, [state.bootstrap]);
 
   const saveLocation = useCallback((location: Parameters<ReaderV3PageLocationHandler>[0], percent: number) => {
     const bootstrap = state.bootstrap;

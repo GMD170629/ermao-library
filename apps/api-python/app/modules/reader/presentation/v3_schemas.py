@@ -221,6 +221,21 @@ class ReaderProgressResponse(ReaderWireModel):
     data: ReaderProgressData
 
 
+class ReaderReadingStatusPut(ReaderWireModel):
+    status: Literal["UNREAD", "FINISHED"]
+
+
+class ReaderReadingStatusData(ReaderWireModel):
+    volume_id: str = Field(alias="volumeId")
+    status: Literal["UNREAD", "FINISHED"]
+    percent: float = Field(ge=0, le=100)
+
+
+class ReaderReadingStatusResponse(ReaderWireModel):
+    ok: Literal[True] = True
+    data: ReaderReadingStatusData
+
+
 class ReaderBookmark(ReaderWireModel):
     id: str = Field(min_length=1, max_length=5000)
     location: ReaderLocation

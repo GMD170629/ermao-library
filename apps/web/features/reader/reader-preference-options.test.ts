@@ -7,6 +7,7 @@ import {
   READER_LINE_HEIGHT_OPTIONS,
   READER_PAGE_TURN_ANIMATION_OPTIONS,
   READER_PAGE_WIDTH_OPTIONS,
+  adjacentReaderOptionValue,
   closestReaderOptionValue
 } from './reader-preference-options';
 
@@ -31,4 +32,11 @@ test('legacy numeric reader preferences resolve to the same nearest semantic opt
   assert.equal(closestReaderOptionValue(20, READER_FONT_SIZE_OPTIONS), '18');
   assert.equal(closestReaderOptionValue(2.05, READER_LINE_HEIGHT_OPTIONS), '1.9');
   assert.equal(closestReaderOptionValue(1200, READER_PAGE_WIDTH_OPTIONS), '1050');
+});
+
+test('reader options move to an adjacent value without leaving the supported range', () => {
+  assert.equal(adjacentReaderOptionValue(18, READER_FONT_SIZE_OPTIONS, -1), '16');
+  assert.equal(adjacentReaderOptionValue(18, READER_FONT_SIZE_OPTIONS, 1), '22');
+  assert.equal(adjacentReaderOptionValue(16, READER_FONT_SIZE_OPTIONS, -1), '16');
+  assert.equal(adjacentReaderOptionValue(22, READER_FONT_SIZE_OPTIONS, 1), '22');
 });

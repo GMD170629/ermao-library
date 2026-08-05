@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import http from 'node:http';
+import os from 'node:os';
 import test from 'node:test';
 import { createUnifiedGateway } from './unified-http-gateway.mjs';
 
@@ -134,4 +135,16 @@ test('Next development server rewrites API and OPDS requests to FastAPI', async 
       destination: 'http://127.0.0.1:8000/opds/:path*'
     }
   ]);
+});
+
+test('Next development server allows access through every local IPv4 address', () => {
+  const localAddresses = Object.values(os.networkInterfaces())
+    .flatMap((addresses) => addresses ?? [])
+    .filter((address) => address.family === 'IPv4' && !address.internal)
+    .map((address) => address.address);
+
+  assert.ok(localAddresses.length > 0);
+  for (const address of localAddresses) {
+    assert.ok(nextConfig.allowedDevOrigins.includes(address), `${address} is not an allowed dev origin`);
+  }
 });

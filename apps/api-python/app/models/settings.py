@@ -99,6 +99,13 @@ class SystemEvent(Base):
         Index("SystemEvent_action_createdAt_idx", "action", "createdAt"),
         Index("SystemEvent_targetType_targetId_idx", "targetType", "targetId"),
         Index("SystemEvent_createdAt_idx", "createdAt"),
+        Index("SystemEvent_createdAt_id_idx", "createdAt", "id"),
+        Index(
+            "SystemEvent_targetType_createdAt_id_idx",
+            "targetType",
+            "createdAt",
+            "id",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)

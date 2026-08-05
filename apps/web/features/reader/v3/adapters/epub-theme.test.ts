@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DEFAULT_READER_PREFERENCES } from '@shuku/reader-core';
-import { createEpubThemeSnapshot } from './epub-theme';
+import { createEpubThemeSnapshot, resolveEpubViewportLayout } from './epub-theme';
 
 test('EPUB theme keeps vertical page spacing enforced after epub.js writes layout shorthands', () => {
   const paginated = createEpubThemeSnapshot(DEFAULT_READER_PREFERENCES);
@@ -22,18 +22,35 @@ test('EPUB theme keeps vertical page spacing enforced after epub.js writes layou
   assert.doesNotMatch(paginated, /scrollbar-width: none/);
 });
 
-test('EPUB theme reduces only mobile inline and top page spacing', () => {
-  const paginated = createEpubThemeSnapshot(DEFAULT_READER_PREFERENCES);
+test('EPUB theme uses the outer reader viewport profile instead of an iframe media query', () => {
+  const compactLayout = resolveEpubViewportLayout(390);
+  const regularLayout = resolveEpubViewportLayout(641);
+  const paginated = createEpubThemeSnapshot(
+    DEFAULT_READER_PREFERENCES,
+    undefined,
+    compactLayout
+  );
   const scrolled = createEpubThemeSnapshot({
     ...DEFAULT_READER_PREFERENCES,
     epub: { ...DEFAULT_READER_PREFERENCES.epub, flow: 'scrolled' }
-  });
+  }, undefined, compactLayout);
 
-  assert.match(paginated, /@media \(max-width: 640px\)/);
-  assert.match(paginated, /--shuku-reader-padding-inline: 8px/);
+  assert.match(paginated, /--shuku-reader-padding-inline: 1em/);
   assert.match(paginated, /--shuku-reader-padding-top: clamp\(16px, 2\.5vh, 32px\)/);
   assert.match(scrolled, /--shuku-reader-padding-top: clamp\(14px, 2vh, 28px\)/);
-  assert.doesNotMatch(paginated, /@media \(max-width: 640px\)[\s\S]*--shuku-reader-padding-bottom:/);
+  assert.doesNotMatch(paginated, /@media \(max-width: 640px\)/);
+  assert.deepEqual(compactLayout, {
+    compact: true,
+    inlinePadding: '1em',
+    paginatorGap: '0%',
+    bottomInset: 'calc(var(--shuku-safe-area-bottom) + 10px)'
+  });
+  assert.deepEqual(regularLayout, {
+    compact: false,
+    inlinePadding: '24px',
+    paginatorGap: '7%',
+    bottomInset: '0px'
+  });
 });
 
 test('EPUB theme repaints the Foliate paginator background on the current page', () => {

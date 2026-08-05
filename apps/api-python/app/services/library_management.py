@@ -24,6 +24,7 @@ from app.modules.library.infrastructure.facets import (
     FACET_KINDS,
     count_categories,
     list_categories,
+    list_categories_page,
     split_authors,
 )
 from app.modules.library.infrastructure.facets import (
@@ -50,7 +51,7 @@ STATUS_RANK = library_works.STATUS_RANK
 P = ParamSpec("P")
 R = TypeVar("R")
 
-__all__ = ["count_categories", "list_categories"]
+__all__ = ["count_categories", "list_categories", "list_categories_page"]
 
 
 def _transactional_write(
@@ -116,6 +117,35 @@ def duplicate_groups(db: Session) -> list[dict[str, Any]]:
             }
         )
     return result
+
+
+def duplicate_groups_page(
+    db: Session,
+    *,
+    page: int,
+    page_size: int,
+) -> tuple[list[dict[str, Any]], int, int]:
+    identity_groups, total, clamped_page = library_works.list_duplicate_identity_page(
+        db,
+        page=page,
+        page_size=page_size,
+    )
+    groups: list[dict[str, Any]] = []
+    start = (clamped_page - 1) * page_size
+    for index, group in enumerate(identity_groups, start=start):
+        group_key = f"{group['normalizedTitle']}:{group['normalizedAuthor']}"
+        groups.append(
+            {
+                "id": (
+                    f"duplicate_{index}_"
+                    f"{sha1(group_key.encode()).hexdigest()[:12]}"
+                ),
+                "confidence": 0.98,
+                "reasons": ["标题与作者规范化后相同"],
+                "works": group["works"],
+            }
+        )
+    return groups, total, clamped_page
 
 
 def _shelf_snapshot(db: Session, work_ids: list[str]) -> list[dict[str, Any]]:

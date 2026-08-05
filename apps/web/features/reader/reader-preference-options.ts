@@ -68,10 +68,47 @@ export const READER_PDF_FIT_OPTIONS = [
   { value: 'page', label: '整页' }
 ] as const;
 
+export const READER_TAP_ZONE_OPTIONS = [
+  { value: 'standard', label: '标准' },
+  { value: 'reversed', label: '反向' },
+  { value: 'disabled', label: '关闭' }
+] as const;
+
+export const READER_TEXT_ALIGN_OPTIONS = [
+  { value: 'publisher', label: '原书' },
+  { value: 'left', label: '左对齐' },
+  { value: 'justify', label: '两端对齐' }
+] as const;
+
+export const READER_PARAGRAPH_INDENT_OPTIONS = [
+  { value: '0', label: '关闭' },
+  { value: '1', label: '一字' },
+  { value: '2', label: '两字' },
+  { value: '3', label: '三字' }
+] as const;
+
+export const READER_PARAGRAPH_SPACING_OPTIONS = [
+  { value: '0', label: '原书' },
+  { value: '0.4', label: '小' },
+  { value: '0.8', label: '中' },
+  { value: '1.2', label: '大' }
+] as const;
+
 export function closestReaderOptionValue(value: number, options: ReadonlyArray<{ value: string }>) {
   return options.reduce((closest, option) => (
     Math.abs(Number(option.value) - value) < Math.abs(Number(closest.value) - value) ? option : closest
   )).value;
+}
+
+export function adjacentReaderOptionValue(
+  value: number,
+  options: ReadonlyArray<{ value: string }>,
+  direction: -1 | 1
+) {
+  const closestValue = closestReaderOptionValue(value, options);
+  const currentIndex = options.findIndex((option) => option.value === closestValue);
+  const nextIndex = Math.max(0, Math.min(options.length - 1, currentIndex + direction));
+  return options[nextIndex]?.value ?? closestValue;
 }
 
 export type ReaderFontFamily = typeof READER_FONT_FAMILY_OPTIONS[number]['value'];

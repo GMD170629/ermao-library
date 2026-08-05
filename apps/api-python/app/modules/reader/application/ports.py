@@ -11,6 +11,7 @@ from app.modules.reader.application.dto import (
     ReaderEpubSourceDto,
     ReaderFileDto,
     ReaderProgressDto,
+    ReaderReadingStatus,
     ReaderRecoveredEpubChapterDto,
     ReaderUnitDto,
     ReaderVolumeContextDto,
@@ -64,6 +65,17 @@ class ReaderVolumeRepository(Protocol):
         client_sequence: int,
         now: datetime,
     ) -> ReaderProgressDto: ...
+
+    def set_reading_status(
+        self,
+        *,
+        user_id: str,
+        context: ReaderVolumeContextDto,
+        reader_type: str,
+        status: ReaderReadingStatus,
+        content_fingerprint: str,
+        now: datetime,
+    ) -> ReaderProgressDto | None: ...
 
     def save_external_progress(
         self,
