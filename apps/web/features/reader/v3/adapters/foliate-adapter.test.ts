@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  continuousScrollBoundaryDirection,
   foliateNavigationEntries,
   foliateResolvedSectionIndex,
   foliateRemainingSeconds,
@@ -12,14 +11,6 @@ import {
   shouldResolveFoliateTocItem,
   validatedServerToc
 } from './foliate-adapter';
-
-test('continuous EPUB scrolling advances only after the user keeps scrolling at a chapter boundary', () => {
-  assert.equal(continuousScrollBoundaryDirection({ delta: 80, start: 400, end: 900, extent: 1_200 }), null);
-  assert.equal(continuousScrollBoundaryDirection({ delta: 80, start: 700, end: 1_199, extent: 1_200 }), 1);
-  assert.equal(continuousScrollBoundaryDirection({ delta: -80, start: 1, end: 501, extent: 1_200 }), -1);
-  assert.equal(continuousScrollBoundaryDirection({ delta: -80, start: 300, end: 800, extent: 1_200 }), null);
-  assert.equal(continuousScrollBoundaryDirection({ delta: 0, start: 700, end: 1_200, extent: 1_200 }), null);
-});
 
 test('parseFoliateRelocateDetail validates CFI and clamps official fraction', () => {
   assert.deepEqual(

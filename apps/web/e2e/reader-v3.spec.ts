@@ -1015,6 +1015,31 @@ test('comic navigation, local theme persistence, reset, and V2 progress transpor
   await expect(page.locator('[data-reader-shell="v3"]')).toHaveAttribute('data-reader-theme', 'warm');
 });
 
+test('comic vertical flow keeps stable slots while scrolling into the next page', async ({ page }) => {
+  await mockReaderApi(page, 'comic');
+  await page.goto('/reader/comic-volume');
+  const engine = page.locator('[data-reader-engine="comic-v3"]');
+  await expect(engine).toBeVisible();
+  await showReaderControls(page);
+  await page.getByRole('button', { name: '阅读设置' }).click();
+  await page.getByRole('dialog', { name: '设置' }).getByRole('button', { name: '竖向连续', exact: true }).click();
+
+  const stream = engine.locator('[data-comic-continuous="true"]');
+  const firstSlot = stream.locator('[data-comic-continuous-page="1"]');
+  await expect(stream.locator('[data-comic-continuous-page]')).toHaveCount(3);
+  await firstSlot.evaluate((element) => { element.dataset.e2eStableSlot = 'first'; });
+  await stream.evaluate((element) => {
+    const second = element.querySelector<HTMLElement>('[data-comic-continuous-page="2"]');
+    if (!second) throw new Error('The second comic page slot is unavailable');
+    element.scrollTop = second.offsetTop;
+    element.dispatchEvent(new Event('scroll'));
+  });
+
+  await expect(stream).toHaveAttribute('data-comic-continuous-current', '2');
+  await expect(firstSlot).toHaveAttribute('data-e2e-stable-slot', 'first');
+  await expect(stream.locator('img')).toHaveCount(3);
+});
+
 test('PDF.js renders a bounded canvas and selectable text layer', async ({ page }) => {
   await mockReaderApi(page, 'pdf');
   await page.goto('/reader/pdf-volume');
@@ -1145,7 +1170,7 @@ test('EPUB cross-spine paging uses one foliate step without a custom track or an
   ).__epubPageTurnAnimations ?? 0)).toBe(0);
 });
 
-test('EPUB scrolled flow continues into adjacent chapters at scroll boundaries', async ({ page }) => {
+test('EPUB scrolled flow keeps adjacent chapters mounted in one stable stream', async ({ page }) => {
   const progressBodies: Array<Record<string, any>> = [];
   await mockReaderApi(page, 'epub', progressBodies);
   await page.goto('/reader/epub-volume');
@@ -1157,29 +1182,35 @@ test('EPUB scrolled flow continues into adjacent chapters at scroll boundaries',
   await page.getByRole('dialog', { name: '设置' }).getByRole('button', { name: '滚动', exact: true }).click();
   const engine = page.locator('[data-reader-engine="reflowable-v3"]');
   await expect(engine).toHaveAttribute('data-reader-flow', 'scrolled');
+  const stream = engine.locator('[data-reflowable-continuous="true"]');
+  const firstSlot = stream.locator('[data-reflowable-continuous-section="0"]');
+  const secondSlot = stream.locator('[data-reflowable-continuous-section="1"]');
+  await expect(firstSlot.locator('iframe')).toHaveCount(1);
+  await expect(secondSlot.locator('iframe')).toHaveCount(1);
+  await firstSlot.evaluate((element) => { element.dataset.e2eStableSlot = 'first'; });
+  await firstSlot.locator('iframe').evaluate((element) => { element.dataset.e2eStableFrame = 'first'; });
 
-  await page.locator('foliate-paginator').evaluate((element) => {
-    const scroller = element.shadowRoot?.querySelector<HTMLElement>('#container');
-    if (!scroller) throw new Error('Foliate scroll container is unavailable');
-    scroller.scrollTop = scroller.scrollHeight;
+  await stream.evaluate((element) => {
+    const second = element.querySelector<HTMLElement>('[data-reflowable-continuous-section="1"]');
+    if (!second) throw new Error('The next stable section slot is unavailable');
+    element.scrollTop = Math.max(0, second.offsetTop - element.clientHeight * 0.2);
   });
   await iframe.contentFrame().locator('body').evaluate((body) => {
     body.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 120 }));
   });
-  await expect.poll(async () => engine.locator('iframe:visible').first().contentFrame().locator('body').innerText()).toContain('第二章 翻页验证');
-  iframe = await currentEpubIframe(page);
+  await expect.poll(() => engine.getAttribute('data-reader-location-href')).toContain('chapter2.xhtml');
+  iframe = secondSlot.locator('iframe');
   await expect(iframe.contentFrame().getByText('第二章 翻页验证')).toBeVisible();
+  await expect(firstSlot).toHaveAttribute('data-e2e-stable-slot', 'first');
+  await expect(firstSlot.locator('iframe')).toHaveAttribute('data-e2e-stable-frame', 'first');
 
-  await page.locator('foliate-paginator').evaluate((element) => {
-    const scroller = element.shadowRoot?.querySelector<HTMLElement>('#container');
-    if (!scroller) throw new Error('Foliate scroll container is unavailable');
-    scroller.scrollTop = 0;
-  });
+  await stream.evaluate((element) => { element.scrollTop = 0; });
   await page.waitForTimeout(220);
   await iframe.contentFrame().locator('body').evaluate((body) => {
     body.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -120 }));
   });
-  await expect.poll(async () => engine.locator('iframe:visible').first().contentFrame().locator('body').innerText()).toContain('第一章 开始阅读');
+  await expect.poll(() => engine.getAttribute('data-reader-location-href')).toContain('chapter1.xhtml');
+  await expect(firstSlot.locator('iframe')).toHaveAttribute('data-e2e-stable-frame', 'first');
 });
 
 test('EPUB swipe submits one navigation command without a visual paging track', async ({ page }) => {

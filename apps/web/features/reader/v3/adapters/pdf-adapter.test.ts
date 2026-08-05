@@ -36,6 +36,25 @@ class FakeElement {
   scrollLeft = 0;
   scrollTop = 0;
 
+  get childElementCount() {
+    return this.children.length;
+  }
+
+  get firstElementChild() {
+    return this.children[0] ?? null;
+  }
+
+  get offsetHeight() {
+    return Number.parseFloat(String(this.style.height ?? this.style.minHeight ?? 0)) || 0;
+  }
+
+  get offsetTop() {
+    if (!this.parentElement) return 0;
+    const index = this.parentElement.children.indexOf(this);
+    return this.parentElement.children.slice(0, Math.max(0, index))
+      .reduce((height, child) => height + child.offsetHeight, 0);
+  }
+
   constructor(ownerDocument: FakeDocument) {
     this.ownerDocument = ownerDocument;
   }
@@ -145,6 +164,86 @@ test('PDF page navigation resets a zoomed document to the top', async () => {
 
     assert.equal(acknowledged.accepted, true);
     assert.equal(container.scrollTop, 0);
+  } finally {
+    await adapter.dispose();
+    Object.assign(globalThis, {
+      ResizeObserver: originalResizeObserver,
+      window: originalWindow
+    });
+  }
+});
+
+test('PDF continuous mode preserves every page slot while incrementally moving its canvas window', async () => {
+  const originalResizeObserver = globalThis.ResizeObserver;
+  const originalWindow = globalThis.window;
+  const ownerDocument = new FakeDocument();
+  const container = new FakeElement(ownerDocument);
+  const page = {
+    getViewport: ({ scale }: { scale: number }) => ({ width: 600 * scale, height: 900 * scale }),
+    render: () => ({ promise: Promise.resolve(), cancel() {} }) as RenderTask,
+    streamTextContent: () => ({}),
+    cleanup() {}
+  } as unknown as PDFPageProxy;
+  const document = {
+    numPages: 7,
+    getPage: async () => page
+  } as unknown as PDFDocumentProxy;
+  const loadingTask = {
+    promise: Promise.resolve(document),
+    destroy: async () => undefined,
+    onPassword: undefined
+  } as unknown as PDFDocumentLoadingTask;
+  class FakeTextLayer {
+    render() { return Promise.resolve(); }
+    cancel() {}
+  }
+  const pdfjs = {
+    GlobalWorkerOptions: {},
+    getDocument: () => loadingTask,
+    TextLayer: FakeTextLayer as unknown as typeof TextLayer,
+    AnnotationMode: { DISABLE: 0 },
+    PasswordResponses: { INCORRECT_PASSWORD: 2 }
+  } as unknown as typeof import('pdfjs-dist/legacy/build/pdf.mjs');
+  Object.assign(globalThis, {
+    ResizeObserver: FakeResizeObserver,
+    window: { devicePixelRatio: 1, innerWidth: 800, innerHeight: 600 }
+  });
+  const adapter = new PdfReaderAdapter({
+    container: container as unknown as HTMLElement,
+    fetch: async () => new Response('%PDF-1.7', { status: 200 }),
+    loadPdfJs: async () => pdfjs
+  });
+
+  try {
+    await adapter.open({
+      sessionId: 'pdf-continuous-session',
+      operation: { sessionId: 'pdf-continuous-session', kind: 'bootstrap', sequence: 1 },
+      signal: new AbortController().signal,
+      source: {
+        volumeId: 'volume-1',
+        workId: 'work-1',
+        kind: 'pdf',
+        contentUrl: '/book.pdf',
+        contentFingerprint: 'pdf-continuous-fingerprint',
+        totalPages: 7
+      },
+      initialLocation: null,
+      preferences: {
+        ...DEFAULT_READER_PREFERENCES,
+        pdf: { ...DEFAULT_READER_PREFERENCES.pdf, flow: 'continuous' }
+      }
+    });
+    const stableSlots = [...container.children];
+    assert.equal(stableSlots.length, 7);
+
+    const acknowledged = await adapter.execute({ type: 'go-to-index', index: 4 }, {
+      operation: { sessionId: 'pdf-continuous-session', kind: 'navigation', sequence: 2 },
+      signal: new AbortController().signal
+    });
+
+    assert.equal(acknowledged.accepted, true);
+    assert.deepEqual(container.children, stableSlots);
+    assert.equal(container.children.filter((slot) => slot.children[0]?.className === 'shuku-pdf-page').length, 5);
   } finally {
     await adapter.dispose();
     Object.assign(globalThis, {

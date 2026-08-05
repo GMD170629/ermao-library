@@ -2920,5 +2920,8 @@
   "智能排版": "Smart typography",
   "智能优化": "Smart optimization",
   "重复缩进去重": "Remove duplicate indentation",
-  "左对齐": "Left aligned"
+  "左对齐": "Left aligned",
+  "本章节加载失败。": "This section could not be loaded.",
+  "重试本页": "Retry page",
+  "重试本章节": "Retry section"
 }

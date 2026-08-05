@@ -2919,5 +2919,8 @@
   "Use your Shuku account email and password. / 使用 Shuku 账号邮箱和密码。": "Use your Shuku account email and password. / 使用 Shuku 账号邮箱和密码。",
   "useAudioPlayback 必须在 AudioPlaybackProvider 内使用": "useAudioPlayback 必须在 AudioPlaybackProvider 内使用",
   "ZIP 漫画压缩包已损坏": "ZIP 漫画压缩包已损坏",
-  "zip|archive|corrupt|invalid|损坏": "zip|archive|corrupt|invalid|损坏"
+  "zip|archive|corrupt|invalid|损坏": "zip|archive|corrupt|invalid|损坏",
+  "本章节加载失败。": "本章节加载失败。",
+  "重试本页": "重试本页",
+  "重试本章节": "重试本章节"
 }

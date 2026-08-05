@@ -243,6 +243,14 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
       this.currentPage = clampPage(page, this.pages.length);
       this.emitLocation();
       void this.refreshVisiblePages(this.currentGeneration(), this.lifecycleController?.signal ?? AbortSignal.abort()).catch(() => undefined);
+    }, (page) => {
+      const signal = this.lifecycleController?.signal;
+      if (!signal || signal.aborted) return;
+      this.retryCounts.set(page, (this.retryCounts.get(page) ?? 0) + 1);
+      this.releasePage(page);
+      void this.loadPage(page, this.currentGeneration(), signal, false)
+        .then(() => this.emitView())
+        .catch(() => this.emitView());
     });
     const viewport = this.track.getViewportElement();
     viewport.addEventListener('pointerdown', this.handlePointerDown);
@@ -257,6 +265,7 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
       this.viewportWidth = viewport.clientWidth || this.container.clientWidth;
       this.resizeObserver = new ResizeObserverConstructor(() => this.handleViewportResize());
       this.resizeObserver.observe(viewport);
+      this.resizeObserver.observe(this.container);
     }
   }
 
@@ -401,6 +410,9 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     }
 
     if (command.type === 'next' || command.type === 'previous') {
+      if (this.preferences.comic.flow === 'vertical') {
+        return this.executeContinuousAdjacentStep(command.type === 'next' ? 1 : -1, context);
+      }
       return this.executeAdjacentStep(command.type === 'next' ? 1 : -1, context);
     }
 
@@ -433,7 +445,8 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     this.emitView();
     try {
       await this.refreshVisiblePages(this.currentGeneration(), context.signal);
-      this.track.recenter(true);
+      if (this.preferences.comic.flow === 'vertical') this.continuous.scrollToPage(this.currentPage);
+      else this.track.recenter(true);
       this.status = 'ready';
       this.emitLocation(context.operation);
       this.emitView();
@@ -470,7 +483,8 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     if (variantChanged) this.releaseAllPages();
     if (this.openContext && this.pages.length) {
       await this.refreshVisiblePages(this.currentGeneration(), context.signal);
-      this.track.recenter();
+      if (preferences.comic.flow === 'vertical') this.continuous.scrollToPage(this.currentPage);
+      else this.track.recenter();
     }
     if (modeChanged || this.currentPage !== pageBeforeModeChange) this.emitLocation(context.operation);
     else this.emit({ type: 'capabilities-changed', capabilities: this.getCapabilities() }, context.operation);
@@ -502,8 +516,11 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     if (!Number.isFinite(width) || width <= 0 || Math.abs(width - this.viewportWidth) < 0.5) return;
     this.viewportWidth = width;
     this.trackController.interrupt({ suspended: this.zoom > 1 });
-    this.track.render();
-    this.track.recenter();
+    if (this.preferences?.comic.flow === 'vertical') this.renderContinuous();
+    else {
+      this.track.render();
+      this.track.recenter();
+    }
   }
 
   private async executeAdjacentStep(step: PageStep, context: ReaderAdapterOperationContext): Promise<ReaderCommandAck> {
@@ -569,24 +586,63 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     }
   }
 
+  private async executeContinuousAdjacentStep(
+    step: PageStep,
+    context: ReaderAdapterOperationContext
+  ): Promise<ReaderCommandAck> {
+    const target = comicAdjacentSpreadPage(this.pages, this.currentPage, 'single', step, this.pairingPolicy());
+    if (target === this.currentPage) {
+      return this.failOperation(context, step === 1 ? 'end-of-volume' : 'start-of-volume');
+    }
+    this.emit({ type: 'activity' }, context.operation);
+    this.status = 'loading';
+    this.currentPage = target;
+    this.emitView();
+    try {
+      await this.refreshVisiblePages(this.currentGeneration(), context.signal);
+      this.continuous.scrollToPage(target);
+      this.status = 'ready';
+      this.emitLocation(context.operation);
+      this.emitView();
+      return this.ack(context.operation, true, { location: this.location() });
+    } catch (reason) {
+      if (isAbortError(reason) || reason instanceof StaleReaderOperationError) {
+        return this.failOperation(context, 'operation-cancelled');
+      }
+      this.status = 'error';
+      this.error = errorMessage(reason, '漫画页面加载失败');
+      this.emitView();
+      return this.failOperation(context, this.error);
+    }
+  }
+
   private async refreshVisiblePages(generation: number, signal: AbortSignal) {
     this.assertActive(generation, signal);
     const preferences = this.preferences;
     if (!preferences) return;
     const vertical = preferences.comic.flow === 'vertical';
     const visible = vertical
-      ? this.pages.filter((page) => Math.abs(page - this.currentPage) <= 2)
+      ? this.pages.filter((page) => Math.abs(page - this.currentPage) <= 1)
       : comicSpreadPages(this.pages, this.currentPage, this.comicMode(preferences), this.pairingPolicy(preferences));
     const retained = new Set(vertical
-      ? this.pages.filter((page) => Math.abs(page - this.currentPage) <= 3)
+      ? this.pages.filter((page) => Math.abs(page - this.currentPage) <= 2)
       : comicCacheWindow(this.pages, this.currentPage, this.comicMode(preferences), this.pairingPolicy(preferences)));
     this.cache.forEach((_entry, page) => {
       if (!retained.has(page)) this.releasePage(page);
     });
-    await Promise.all(visible.map((page) => this.loadPage(page, generation, signal, true)));
+    if (vertical) {
+      await Promise.all(visible.map((page) => this.loadPage(page, generation, signal, true).catch((reason: unknown) => {
+        if (isAbortError(reason) || reason instanceof StaleReaderOperationError) throw reason;
+        // The cache retains the page-scoped error so the stable slot can show
+        // an inline retry without collapsing or replacing the reading stream.
+        return undefined;
+      })));
+    } else {
+      await Promise.all(visible.map((page) => this.loadPage(page, generation, signal, true)));
+    }
     this.emitView();
     const preload = vertical
-      ? this.pages.filter((page) => Math.abs(page - this.currentPage) === 3)
+      ? this.pages.filter((page) => Math.abs(page - this.currentPage) === 2)
       : comicPreloadWindow(this.pages, this.currentPage, this.comicMode(preferences), this.pairingPolicy(preferences));
     for (const page of preload) {
       if (visible.includes(page)) continue;
@@ -785,21 +841,21 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
   private renderContinuous() {
     const preferences = this.preferences;
     if (!preferences) return;
-    const windowPages = this.pages.filter((page) => Math.abs(page - this.currentPage) <= 2);
     this.continuous.render({
       currentPage: this.currentPage,
       pageCount: this.pages.length,
       pageGap: preferences.comic.pageGap,
       imageFit: preferences.comic.imageFit,
       zoom: this.zoom,
-      pages: windowPages.map((page) => {
+      pages: this.pages.map((page) => {
         const cached = this.cache.get(page);
+        const materialized = Math.abs(page - this.currentPage) <= 1;
         return {
           pageIndex: page,
           ...this.pageMeta.get(page),
-          url: cached?.url,
-          loading: Boolean(cached?.controller),
-          error: cached?.error
+          url: materialized ? cached?.url : undefined,
+          loading: materialized && Boolean(cached?.controller),
+          error: materialized ? cached?.error : undefined
         };
       })
     });

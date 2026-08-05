@@ -28,6 +28,11 @@ import type { ReaderAdapterInputHandler, ReaderInteractiveAdapter, ReaderInterac
 import { hasActiveTextSelection, isReaderControlTarget, readerFramePointerIntent, readerKeyIntent, readerPointerIntent } from '../input-router';
 import { isEngineResolvableReflowableHref } from '../reflowable-navigation-href';
 import type { ReaderBookCache } from '../../../../lib/reader/book-cache';
+import {
+  ReflowableContinuousController,
+  type ReflowableContinuousRelocate,
+  type ReflowableContinuousTarget
+} from './reflowable-continuous';
 
 type FoliateRelocateDetail = {
   cfi?: string;
@@ -81,25 +86,6 @@ export type FoliateAdapterOptions = {
 
 function clamp(value: number, minimum = 0, maximum = 1) {
   return Math.max(minimum, Math.min(maximum, value));
-}
-
-export function continuousScrollBoundaryDirection({
-  delta,
-  start,
-  end,
-  extent,
-  threshold = 2
-}: {
-  delta: number;
-  start: number;
-  end: number;
-  extent: number;
-  threshold?: number;
-}): -1 | 1 | null {
-  if (![delta, start, end, extent, threshold].every(Number.isFinite) || delta === 0) return null;
-  if (delta > 0 && extent - end <= Math.max(0, threshold)) return 1;
-  if (delta < 0 && start <= Math.max(0, threshold)) return -1;
-  return null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -317,6 +303,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
   private readonly onCacheWarning?: (code: 'BOOK_CACHE_WRITE_FAILED') => void;
   private lifecycleController: AbortController | null = null;
   private view: FoliateView | null = null;
+  private continuous: ReflowableContinuousController | null = null;
   private book: FoliateBook | null = null;
   private destroyBook: (() => void | Promise<void>) | null = null;
   private preferences: ReaderPreferences | null = null;
@@ -331,14 +318,13 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
   private tocSnapshots = new WeakMap<object, NonNullable<FoliateProgressSnapshot['toc']>>();
   private tocSnapshotsById = new Map<number, NonNullable<FoliateProgressSnapshot['toc']>>();
   private tocSnapshotsByHref = new Map<string, NonNullable<FoliateProgressSnapshot['toc']>>();
+  private tocSnapshotsBySection = new Map<number, NonNullable<FoliateProgressSnapshot['toc']>>();
   private pendingTocSnapshot: NonNullable<FoliateProgressSnapshot['toc']> | null = null;
   private relocateResolutionSequence = 0;
   private navigationFingerprint: string | undefined;
   private viewportLayout: EpubViewportLayout = resolveEpubViewportLayout(Number.POSITIVE_INFINITY);
   private viewportObserver: ResizeObserver | null = null;
-  private continuousSectionTransition: Promise<void> | null = null;
-  private wheelBoundaryLocked = false;
-  private wheelBoundaryReleaseTimer: ReturnType<typeof setTimeout> | null = null;
+  private sessionGeneration = 0;
 
   constructor(options: FoliateAdapterOptions) {
     super();
@@ -353,7 +339,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
   }
 
   getInteractionPolicy(): ReaderInteractionPolicy {
-    return { horizontalPaging: this.preferences?.epub.flow === 'scrolled' ? 'none' : 'adapter-interactive' };
+    return { horizontalPaging: this.continuous ? 'none' : 'adapter-interactive' };
   }
 
   getCapabilities(): ReaderCapabilities {
@@ -376,6 +362,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
   async open(context: ReaderAdapterOpenContext) {
     await this.cleanupEngine();
     const generation = this.beginSession(context.sessionId, context.operation);
+    this.sessionGeneration = generation;
     this.locationOperation = context.operation;
     this.lastPersistentOperation = context.operation;
     this.preferences = context.preferences;
@@ -423,23 +410,21 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
       opened.book.toc = context.source.kind === 'reflowable'
         ? await validatedServerToc(opened.book, context.source.navigation)
         : [];
-      const view = document.createElement('foliate-view') as FoliateView;
-      this.view = view;
-      this.bindView(view, generation);
-      this.container.replaceChildren(view);
-      this.emit({ type: 'phase-changed', phase: 'rendering' }, context.operation);
-      await view.open(opened.book);
-      this.assertActive(generation, signal);
-      this.applyRendererPreferences(context.preferences);
       const navigationItems = foliateNavigationEntries(opened.book.toc);
-      await this.indexToc(opened.book.toc);
       this.emit({ type: 'navigation-changed', items: navigationItems }, context.operation);
+      this.emit({ type: 'phase-changed', phase: 'rendering' }, context.operation);
       this.suppressRelocate = true;
-      await this.restore(normalizeFoliateInitialLocation(context.initialLocation, this.format));
+      const initialLocation = normalizeFoliateInitialLocation(context.initialLocation, this.format);
+      if (this.shouldUseContinuous(context.preferences)) {
+        await this.indexToc(opened.book.toc);
+        await this.openContinuousSurface(initialLocation, generation);
+      } else {
+        await this.openPaginatedSurface(initialLocation, generation, signal);
+      }
       await nextFrame();
       this.assertActive(generation, signal);
       this.suppressRelocate = false;
-      const stable = this.pendingRelocate ?? parseFoliateRelocateDetail(view.lastLocation);
+      const stable = this.pendingRelocate ?? parseFoliateRelocateDetail(this.view?.lastLocation);
       this.pendingRelocate = null;
       if (stable) this.commitRelocate(stable, context.operation, generation);
       this.emit({ type: 'phase-changed', phase: null }, context.operation);
@@ -456,20 +441,166 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     }
   }
 
+  private shouldUseContinuous(preferences: ReaderPreferences) {
+    return preferences.epub.flow === 'scrolled' && this.book?.rendition?.layout !== 'pre-paginated';
+  }
+
+  private async openPaginatedSurface(
+    location: ReflowableLocation | null,
+    generation: number,
+    signal: AbortSignal
+  ) {
+    const book = this.book;
+    if (!book) throw new Error('The novel reader book is unavailable');
+    const view = document.createElement('foliate-view') as FoliateView;
+    this.view = view;
+    this.bindView(view, generation);
+    this.container.replaceChildren(view);
+    await view.open(book);
+    this.assertActive(generation, signal);
+    await this.indexToc(book.toc);
+    if (this.preferences) this.applyRendererPreferences(this.preferences);
+    await this.restore(location);
+  }
+
+  private async openContinuousSurface(location: ReflowableLocation | null, generation: number) {
+    const book = this.book;
+    const preferences = this.preferences;
+    if (!book || !preferences) throw new Error('The continuous novel reader is unavailable');
+    const controller = new ReflowableContinuousController({
+      container: this.container,
+      book,
+      preferences,
+      viewportLayout: this.viewportLayout,
+      onDocument: (document) => this.bindDocument(document),
+      onRelocate: (relocate) => {
+        if (!this.isActive(generation) || this.continuous !== controller) return;
+        const detail = this.continuousRelocateDetail(relocate);
+        if (this.suppressRelocate) this.pendingRelocate = detail;
+        else this.commitRelocate(detail, this.locationOperation ?? this.currentOperation(), generation);
+      },
+      onExternalLink: (href) => this.emit({ type: 'external-link', href })
+    });
+    this.continuous = controller;
+    this.applyContinuousSurfacePreferences(preferences);
+    const target = await this.resolveContinuousLocation(location, controller);
+    await controller.open(target ?? { index: this.firstLinearSectionIndex() });
+    if (!target && typeof location?.progression === 'number') {
+      await controller.goToProgress(clamp(location.progression));
+    }
+  }
+
+  private continuousRelocateDetail(relocate: ReflowableContinuousRelocate): FoliateRelocateDetail {
+    const toc = this.tocSnapshotsBySection.get(relocate.index);
+    const sectionId = this.book?.sections[relocate.index]?.id;
+    const href = toc?.href ?? (typeof sectionId === 'string' ? sectionId : undefined);
+    if (!this.pendingTocSnapshot && toc) this.pendingTocSnapshot = toc;
+    return {
+      ...(relocate.cfi ? { cfi: relocate.cfi } : {}),
+      fraction: relocate.fraction,
+      section: { current: relocate.index, total: this.book?.sections.length ?? 0 },
+      ...(href ? { tocItem: { href, ...(toc ? { label: toc.title } : {}) } } : {})
+    };
+  }
+
+  private async resolveContinuousLocation(
+    location: ReflowableLocation | null,
+    controller = this.continuous
+  ): Promise<ReflowableContinuousTarget | null> {
+    if (!controller || !location) return null;
+    this.pendingTocSnapshot = location.foliate?.toc ?? null;
+    if (location.cfi) {
+      const target = await Promise.resolve(controller.resolveCFI(location.cfi));
+      if (target) return target;
+    }
+    if (location.href && isEngineResolvableReflowableHref(this.format, location.href)) {
+      const target = await controller.resolveHref(location.href);
+      if (target) return target;
+    }
+    const section = location.foliate?.section?.current;
+    return typeof section === 'number' && section >= 0 && section < (this.book?.sections.length ?? 0)
+      ? { index: section }
+      : null;
+  }
+
+  private firstLinearSectionIndex() {
+    const index = this.book?.sections.findIndex((section) => section.linear !== 'no' && section.linear !== false) ?? -1;
+    return Math.max(0, index);
+  }
+
+  private lastLinearSectionIndex() {
+    const sections = this.book?.sections ?? [];
+    for (let index = sections.length - 1; index >= 0; index -= 1) {
+      const section = sections[index];
+      if (section?.linear !== 'no' && section?.linear !== false) return index;
+    }
+    return Math.max(0, sections.length - 1);
+  }
+
+  private applyContinuousSurfacePreferences(preferences: ReaderPreferences) {
+    this.container.style.background = epubSurfaceColor(preferences);
+    this.container.dataset.readerTheme = 'ready';
+    this.container.dataset.readerFlow = 'scrolled';
+    this.container.dataset.readerSpread = preferences.epub.spreadMode;
+    this.container.dataset.epubViewportLayout = this.viewportLayout.compact ? 'compact' : 'regular';
+  }
+
+  private clearReadingSurface() {
+    this.bridgedDocuments.forEach((controller) => controller.abort());
+    this.bridgedDocuments.clear();
+    this.continuous?.destroy();
+    this.continuous = null;
+    try {
+      this.view?.close();
+    } catch (reason) {
+      console.warn('reader.reflowable-surface-close.failed', {
+        reason: reason instanceof Error ? reason.message : String(reason)
+      });
+    }
+    this.view = null;
+    this.container.replaceChildren();
+  }
+
   async execute(command: ReaderCommand, context: ReaderAdapterOperationContext): Promise<ReaderCommandAck> {
     this.beginOperation(context);
     this.locationOperation = context.operation;
     this.lastPersistentOperation = context.operation;
     const view = this.view;
-    if (!view) return this.failOperation(context, 'Reader is not ready');
+    const continuous = this.continuous;
+    if (!view && !continuous) return this.failOperation(context, 'Reader is not ready');
     try {
-      if (command.type === 'next') {
+      if (continuous) {
+        if (command.type === 'next') await continuous.next();
+        else if (command.type === 'previous') await continuous.previous();
+        else if (command.type === 'first') await continuous.goTo({ index: this.firstLinearSectionIndex() });
+        else if (command.type === 'last') await continuous.goTo({ index: this.lastLinearSectionIndex(), fraction: 1 });
+        else if (command.type === 'go-to-progress') await continuous.goToProgress(clamp(command.progression));
+        else if (command.type === 'go-to-href') {
+          if (!isEngineResolvableReflowableHref(this.format, command.href)) {
+            return this.failOperation(context, 'Unsupported navigation href for this format');
+          }
+          this.pendingTocSnapshot = this.tocSnapshotsByHref.get(command.href) ?? null;
+          const target = await continuous.resolveHref(command.href);
+          if (!target) return this.failOperation(context, 'The chapter target could not be resolved');
+          await continuous.goTo(target);
+        } else if (command.type === 'go-to-index') {
+          await continuous.goTo({ index: foliateSectionIndexFromDisplayIndex(command.index) });
+        } else if (command.type === 'go-to-location') {
+          const location = normalizeFoliateInitialLocation(command.location, this.format);
+          if (!location) return this.failOperation(context, 'Location does not belong to the novel reader');
+          const target = await this.resolveContinuousLocation(location, continuous);
+          if (target) await continuous.goTo(target);
+          else if (typeof location.progression === 'number') await continuous.goToProgress(location.progression);
+          else await continuous.goTo({ index: this.firstLinearSectionIndex() });
+        } else if (command.type === 'cancel') return this.ack(context.operation, true);
+        else return this.failOperation(context, `Unsupported command: ${command.type}`);
+      } else if (command.type === 'next') {
         if (!this.getCapabilities().canGoNext && this.onEndOfVolume) this.onEndOfVolume();
-        else await view.next();
-      } else if (command.type === 'previous') await view.prev();
-      else if (command.type === 'first') await view.goToTextStart();
-      else if (command.type === 'last') await view.goToFraction(1);
-      else if (command.type === 'go-to-progress') await view.goToFraction(clamp(command.progression));
+        else await view?.next();
+      } else if (command.type === 'previous') await view?.prev();
+      else if (command.type === 'first') await view?.goToTextStart();
+      else if (command.type === 'last') await view?.goToFraction(1);
+      else if (command.type === 'go-to-progress') await view?.goToFraction(clamp(command.progression));
       else if (command.type === 'go-to-href') {
         if (!isEngineResolvableReflowableHref(this.format, command.href)) {
           return this.failOperation(context, 'Unsupported navigation href for this format');
@@ -477,7 +608,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
         this.pendingTocSnapshot = this.tocSnapshotsByHref.get(command.href) ?? null;
         await this.goToHref(command.href);
       }
-      else if (command.type === 'go-to-index') await view.goTo(foliateSectionIndexFromDisplayIndex(command.index));
+      else if (command.type === 'go-to-index') await view?.goTo(foliateSectionIndexFromDisplayIndex(command.index));
       else if (command.type === 'go-to-location') {
         const location = normalizeFoliateInitialLocation(command.location, this.format);
         if (!location) return this.failOperation(context, 'Location does not belong to the novel reader');
@@ -495,11 +626,29 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
 
   async applyPreferences(preferences: ReaderPreferences, context: ReaderAdapterOperationContext) {
     this.beginOperation(context);
+    const location = this.currentLocation;
+    const wasContinuous = Boolean(this.continuous);
     this.preferences = preferences;
     this.locationOperation = context.operation;
     this.suppressRelocate = true;
-    this.applyRendererPreferences(preferences);
-    this.bridgedDocuments.forEach((_controller, document) => applyEpubDocumentSpacing(document, preferences));
+    const wantsContinuous = this.shouldUseContinuous(preferences);
+    if (wasContinuous !== wantsContinuous) {
+      this.clearReadingSurface();
+      if (wantsContinuous) {
+        await this.openContinuousSurface(location, this.sessionGeneration);
+      } else {
+        const signal = this.lifecycleController
+          ? combineSignals(context.signal, this.lifecycleController.signal)
+          : context.signal;
+        await this.openPaginatedSurface(location, this.sessionGeneration, signal);
+      }
+    } else if (this.continuous) {
+      this.applyContinuousSurfacePreferences(preferences);
+      await this.continuous.applyPreferences(preferences, this.viewportLayout);
+    } else {
+      this.applyRendererPreferences(preferences);
+      this.bridgedDocuments.forEach((_controller, document) => applyEpubDocumentSpacing(document, preferences));
+    }
     await nextFrame();
     await nextFrame();
     throwIfAborted(context.signal);
@@ -581,22 +730,8 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
       const touch = event.changedTouches[0];
       if (touch && touchStart && Math.hypot(touch.clientX - touchStart.x, touch.clientY - touchStart.y) > 12) suppressClick = true;
     }, { passive: true, signal });
-    document.addEventListener('touchend', (event) => {
-      const touch = event.changedTouches[0];
-      const delta = touch && touchStart ? touchStart.y - touch.clientY : 0;
+    document.addEventListener('touchend', () => {
       touchStart = null;
-      if (Math.abs(delta) >= 24) this.requestContinuousSectionNavigation(delta);
-    }, { passive: true, signal });
-    document.addEventListener('wheel', (event) => {
-      const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
-      if (!delta) return;
-      if (this.wheelBoundaryReleaseTimer !== null) clearTimeout(this.wheelBoundaryReleaseTimer);
-      this.wheelBoundaryReleaseTimer = setTimeout(() => {
-        this.wheelBoundaryLocked = false;
-        this.wheelBoundaryReleaseTimer = null;
-      }, 180);
-      if (this.wheelBoundaryLocked) return;
-      if (this.requestContinuousSectionNavigation(delta)) this.wheelBoundaryLocked = true;
     }, { passive: true, signal });
     document.addEventListener('keydown', (event) => {
       if (!this.onInputIntent || isReaderControlTarget(event.target)) return;
@@ -637,38 +772,16 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
       event.preventDefault();
       void this.onInputIntent(intent);
     }, { signal });
-  }
-
-  private requestContinuousSectionNavigation(delta: number) {
-    if (this.preferences?.epub.flow !== 'scrolled' || this.continuousSectionTransition) return false;
-    const renderer = this.view?.renderer;
-    const view = this.view;
-    if (!renderer || !view) return false;
-    const direction = continuousScrollBoundaryDirection({
-      delta,
-      start: renderer.start ?? Number.NaN,
-      end: renderer.end ?? Number.NaN,
-      extent: renderer.viewSize ?? Number.NaN
-    });
-    if (!direction) return false;
-    const transition = (direction > 0 ? view.next() : view.prev())
-      .catch((reason: unknown) => {
-        console.warn('reader.continuous-section-navigation.failed', {
-          direction: direction > 0 ? 'next' : 'previous',
-          reason: reason instanceof Error ? reason.message : String(reason)
-        });
-      })
-      .finally(() => {
-        if (this.continuousSectionTransition === transition) this.continuousSectionTransition = null;
-      });
-    this.continuousSectionTransition = transition;
-    return true;
+    return () => {
+      controller.abort();
+      if (this.bridgedDocuments.get(document) === controller) this.bridgedDocuments.delete(document);
+    };
   }
 
   private applyRendererPreferences(preferences: ReaderPreferences) {
     const renderer = this.view?.renderer;
     if (!renderer) return;
-    renderer.setAttribute('flow', preferences.epub.flow);
+    renderer.setAttribute('flow', 'paginated');
     renderer.setAttribute('gap', this.viewportLayout.paginatorGap);
     renderer.style.paddingBottom = this.viewportLayout.bottomInset;
     renderer.setAttribute('max-inline-size', `${Math.round(clamp(preferences.epub.pageWidth, 600, 1350))}px`);
@@ -685,7 +798,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     ));
     this.container.style.background = epubSurfaceColor(preferences);
     this.container.dataset.readerTheme = 'ready';
-    this.container.dataset.readerFlow = preferences.epub.flow;
+    this.container.dataset.readerFlow = 'paginated';
     this.container.dataset.readerSpread = preferences.epub.spreadMode;
     this.container.dataset.epubViewportLayout = this.viewportLayout.compact ? 'compact' : 'regular';
   }
@@ -701,7 +814,10 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
         && nextLayout.automaticColumnCount === this.viewportLayout.automaticColumnCount
       ) return;
       this.viewportLayout = nextLayout;
-      if (this.preferences) this.applyRendererPreferences(this.preferences);
+      if (this.preferences && this.continuous) {
+        this.applyContinuousSurfacePreferences(this.preferences);
+        void this.continuous.applyPreferences(this.preferences, nextLayout);
+      } else if (this.preferences) this.applyRendererPreferences(this.preferences);
     });
     this.viewportObserver.observe(this.container);
   }
@@ -768,7 +884,10 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
       ?? this.resolveTocSnapshot(detail.tocItem)
       ?? undefined;
     this.pendingTocSnapshot = null;
-    const currentHref = toc?.href ?? href;
+    const sectionId = detail.section
+      ? this.book?.sections[detail.section.current]?.id
+      : undefined;
+    const currentHref = toc?.href ?? href ?? (typeof sectionId === 'string' ? sectionId : undefined);
     const foliate: FoliateProgressSnapshot = {
       toc,
       navigationFingerprint: this.navigationFingerprint,
@@ -799,6 +918,8 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     this.tocSnapshots = new WeakMap();
     this.tocSnapshotsById.clear();
     this.tocSnapshotsByHref.clear();
+    this.tocSnapshotsBySection.clear();
+    const hrefSnapshots: Array<NonNullable<FoliateProgressSnapshot['toc']>> = [];
     let index = 0;
     const visit = (candidates: FoliateTocItem[] | undefined) => {
       if (!Array.isArray(candidates)) return;
@@ -820,6 +941,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
           }
           if (snapshot.href && !this.tocSnapshotsByHref.has(snapshot.href)) {
             this.tocSnapshotsByHref.set(snapshot.href, snapshot);
+            hrefSnapshots.push(snapshot);
           }
           index += 1;
         }
@@ -827,6 +949,22 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
       }
     };
     visit(items);
+    const book = this.book;
+    if (!book) return;
+    await Promise.all(hrefSnapshots.map(async (snapshot) => {
+      if (!snapshot.href) return;
+      const resolvedSection = await foliateResolvedSectionIndex(book, snapshot.href);
+      const normalizedHref = snapshot.href.replace(/^\.\//u, '');
+      const matchingSection = book.sections.findIndex((section) => {
+        if (typeof section.id !== 'string') return false;
+        const sectionId = section.id.replace(/^\.\//u, '');
+        return sectionId === normalizedHref || sectionId.endsWith(`/${normalizedHref}`);
+      });
+      const section = resolvedSection ?? (matchingSection >= 0 ? matchingSection : undefined);
+      if (section !== undefined && !this.tocSnapshotsBySection.has(section)) {
+        this.tocSnapshotsBySection.set(section, snapshot);
+      }
+    }));
   }
 
   private resolveTocSnapshot(item: Record<string, unknown> | undefined) {
@@ -845,27 +983,22 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     this.lifecycleController = null;
     this.viewportObserver?.disconnect();
     this.viewportObserver = null;
-    if (this.wheelBoundaryReleaseTimer !== null) clearTimeout(this.wheelBoundaryReleaseTimer);
-    this.wheelBoundaryReleaseTimer = null;
-    this.wheelBoundaryLocked = false;
-    this.continuousSectionTransition = null;
-    this.bridgedDocuments.forEach((controller) => controller.abort());
-    this.bridgedDocuments.clear();
+    this.clearReadingSurface();
     this.tocSnapshots = new WeakMap();
     this.tocSnapshotsById.clear();
     this.tocSnapshotsByHref.clear();
+    this.tocSnapshotsBySection.clear();
     this.pendingTocSnapshot = null;
     this.relocateResolutionSequence += 1;
     this.navigationFingerprint = undefined;
-    const view = this.view;
     const destroyBook = this.destroyBook;
-    this.view = null;
     this.book = null;
     this.destroyBook = null;
     this.currentLocation = null;
     this.pendingRelocate = null;
     this.locationOperation = null;
     this.lastPersistentOperation = null;
+    this.sessionGeneration = 0;
     delete this.container.dataset.readerContent;
     delete this.container.dataset.readerInputBridge;
     delete this.container.dataset.readerTheme;
@@ -879,11 +1012,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     delete this.container.dataset.readerLocationTocTitle;
     delete this.container.dataset.readerEngine;
     this.container.replaceChildren();
-    try {
-      view?.close();
-    } finally {
-      await destroyBook?.();
-    }
+    await destroyBook?.();
   }
 }
 

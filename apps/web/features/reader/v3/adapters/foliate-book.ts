@@ -10,10 +10,13 @@ import { decodeTxt, makeTxtBook } from './txt-book';
 
 export type FoliateSection = {
   id?: unknown;
+  cfi?: unknown;
+  linear?: unknown;
   size?: number;
   load: () => string | Promise<string>;
   unload?: () => void;
   createDocument?: () => Document | Promise<Document>;
+  resolveHref?: (href: string) => unknown;
 };
 
 export type FoliateTocItem = {
@@ -37,6 +40,7 @@ export type FoliateBook = {
   rendition?: FoliateRendition;
   transformTarget?: EventTarget;
   resolveHref?: (href: string) => unknown | Promise<unknown>;
+  resolveCFI?: (cfi: string) => unknown;
   splitTOCHref?: (href: string) => unknown;
   destroy?: () => void | Promise<void>;
 };

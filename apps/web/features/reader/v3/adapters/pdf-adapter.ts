@@ -16,10 +16,17 @@ import type {
   TextLayer
 } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { withBasePath } from '../../../../lib/base-path';
+import { normalizeLocale } from '../../../../i18n/config';
+import { translateMessage } from '../../../../i18n/messages';
 import { readerThemeSurfaces } from '../../reader-theme';
 import { ReaderAdapterBase, StaleReaderOperationError, errorMessage, isAbortError } from './adapter-base';
 import { computePdfRenderBudget, pdfPageScale } from './pdf-render-budget';
 import { detectPdfCropBox, pdfContinuousWindowPages, type PdfCropBox } from './pdf-layout';
+import {
+  captureContinuousAnchor,
+  continuousItemAtReadingLine,
+  restoreContinuousAnchor
+} from './continuous-layout';
 
 type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
 
@@ -135,6 +142,9 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
   private cropBoxes = new Map<number, PdfCropBox | null>();
   private scrollFrame: number | null = null;
   private continuousRenderController: AbortController | null = null;
+  private continuousSlots = new Map<number, HTMLElement>();
+  private continuousPageHeights = new Map<number, number>();
+  private continuousFailures = new Map<number, string>();
   private passwordCallback: ((password: string) => void) | null = null;
   private passwordReason: PdfViewModel['passwordReason'];
   private status: PdfViewModel['status'] = 'idle';
@@ -143,12 +153,9 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     if (this.preferences?.pdf.flow !== 'continuous' || this.scrollFrame !== null) return;
     this.scrollFrame = requestAnimationFrame(() => {
       this.scrollFrame = null;
-      const candidates = Array.from(this.container.querySelectorAll<HTMLElement>('[data-page-number]'));
-      const nearest = candidates.reduce<HTMLElement | null>((best, element) => {
-        if (!best) return element;
-        return Math.abs(element.offsetTop - this.container.scrollTop) < Math.abs(best.offsetTop - this.container.scrollTop) ? element : best;
-      }, null);
-      const page = Number(nearest?.dataset.pageNumber);
+      const candidates = Array.from(this.continuousSlots.values());
+      const index = continuousItemAtReadingLine(candidates, this.container.scrollTop, this.container.clientHeight);
+      const page = Number(candidates[index]?.dataset.pdfContinuousSlot);
       if (!Number.isFinite(page) || page === this.pageNumber) return;
       this.pageNumber = clampPage(page, this.pageCount);
       this.emitLocation();
@@ -335,6 +342,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
         if (command.location.kind !== 'pdf') return this.failOperation(context, 'location-kind-mismatch');
         target = command.location.pageNumber;
       } else if (command.type === 'retry') {
+        this.continuousFailures.delete(this.pageNumber);
         this.releasePage(this.pageNumber);
       }
       const clamped = clampPage(target, this.pageCount);
@@ -353,6 +361,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     try {
       await this.queueRender(this.currentGeneration(), context.signal, forceRender);
       if (pageChanged && this.preferences.pdf.flow === 'paged') this.container.scrollTop = 0;
+      if (pageChanged && this.preferences.pdf.flow === 'continuous') this.scrollToContinuousPage(this.pageNumber);
       this.status = 'ready';
       this.emitLocation(context.operation);
       this.emitView();
@@ -415,6 +424,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       throw reason;
     }
     this.container.replaceChildren(current.entry.wrapper);
+    this.continuousSlots.clear();
     this.commitPage(this.pageNumber, current);
     if (neighbor) {
       void this.renderPage(neighbor, generation, epoch, signal, force)
@@ -439,40 +449,124 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     this.assertActive(generation, signal);
     const epoch = ++this.renderEpoch;
     this.cancelPendingRenders();
+    const hadSlots = this.continuousSlots.size > 0;
+    this.ensureContinuousSlots();
+    const anchor = this.captureContinuousAnchor();
     const windowPages = pdfContinuousWindowPages(this.pageNumber, this.pageCount);
     const keep = new Set(windowPages);
     Array.from(this.renderedPages.keys()).forEach((page) => {
       if (!keep.has(page)) this.releasePage(page);
     });
-    const anchorElement = this.container.querySelector<HTMLElement>(`[data-page-number="${this.pageNumber}"]`);
-    const anchorOffset = anchorElement ? anchorElement.offsetTop - this.container.scrollTop : 0;
-    const candidates = await Promise.all(windowPages.map((page) => this.renderPage(page, generation, epoch, signal, force)));
-    candidates.forEach((candidate, index) => this.commitPage(windowPages[index] ?? this.pageNumber, candidate));
+    const candidates = await Promise.all(windowPages.map(async (page) => {
+      try {
+        const candidate = await this.renderPage(page, generation, epoch, signal, force);
+        this.continuousFailures.delete(page);
+        return { page, candidate };
+      } catch (reason) {
+        if (this.isRenderingCancelled(reason) || isAbortError(reason) || reason instanceof StaleReaderOperationError) throw reason;
+        this.continuousFailures.set(page, this.pdfErrorMessage(reason));
+        return { page, candidate: null };
+      }
+    }));
+    candidates.forEach(({ page, candidate }) => {
+      if (candidate) this.commitPage(page, candidate);
+    });
     this.assertRenderActive(generation, epoch, signal);
+    this.reconcileContinuousSlots();
+    this.restoreContinuousAnchor(anchor);
+    if (!hadSlots) this.scrollToContinuousPage(this.pageNumber);
+  }
 
+  private ensureContinuousSlots() {
+    if (this.continuousSlots.size) return;
     const document = documentOwner(this.container);
-    const fallbackHeight = candidates.find((candidate) => candidate.entry.wrapper)?.entry.wrapper.offsetHeight
-      || Math.max(320, Math.round(this.container.clientHeight * 0.85));
-    const elements = Array.from({ length: this.pageCount }, (_, index) => {
-      const page = index + 1;
+    const fallbackHeight = Math.max(320, Math.round(this.container.clientHeight * 0.85));
+    this.container.replaceChildren();
+    for (let page = 1; page <= this.pageCount; page += 1) {
+      const slot = document.createElement('section');
+      slot.dataset.pdfContinuousSlot = String(page);
+      Object.assign(slot.style, {
+        alignItems: 'flex-start',
+        display: 'flex',
+        justifyContent: 'center',
+        margin: '0 auto 24px',
+        minHeight: `${this.continuousPageHeights.get(page) ?? fallbackHeight}px`,
+        position: 'relative',
+        width: '100%'
+      });
+      this.continuousSlots.set(page, slot);
+      this.container.append(slot);
+    }
+  }
+
+  private reconcileContinuousSlots() {
+    const fallbackHeight = Math.max(320, Math.round(this.container.clientHeight * 0.85));
+    for (let page = 1; page <= this.pageCount; page += 1) {
+      const slot = this.continuousSlots.get(page);
+      if (!slot) continue;
       const rendered = this.renderedPages.get(page);
       if (rendered) {
-        rendered.wrapper.style.marginBottom = '24px';
-        return rendered.wrapper;
+        delete slot.dataset.pdfFailure;
+        const height = Number.parseFloat(rendered.wrapper.style.height) || rendered.wrapper.offsetHeight || fallbackHeight;
+        this.continuousPageHeights.set(page, height);
+        slot.style.minHeight = `${height}px`;
+        if (slot.firstElementChild !== rendered.wrapper) slot.replaceChildren(rendered.wrapper);
+        continue;
       }
-      const placeholder = document.createElement('div');
-      placeholder.dataset.pageNumber = String(page);
-      placeholder.dataset.pdfPlaceholder = 'true';
-      Object.assign(placeholder.style, {
-        height: `${fallbackHeight}px`,
-        margin: '0 auto 24px',
-        width: 'min(92%, 900px)'
-      });
-      return placeholder;
+      const failure = this.continuousFailures.get(page);
+      if (failure) this.renderContinuousFailure(slot, page, failure);
+      else {
+        delete slot.dataset.pdfFailure;
+        if (slot.childElementCount) slot.replaceChildren();
+      }
+      slot.style.minHeight = `${this.continuousPageHeights.get(page) ?? fallbackHeight}px`;
+    }
+  }
+
+  private renderContinuousFailure(slot: HTMLElement, page: number, messageText: string) {
+    if (slot.dataset.pdfFailure === messageText) return;
+    slot.dataset.pdfFailure = messageText;
+    const document = documentOwner(this.container);
+    const failure = document.createElement('div');
+    failure.setAttribute('role', 'alert');
+    const message = document.createElement('p');
+    message.textContent = messageText;
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.textContent = translateMessage(normalizeLocale(document.documentElement.lang), '重试本页');
+    retry.addEventListener('click', () => {
+      this.continuousFailures.delete(page);
+      delete slot.dataset.pdfFailure;
+      this.releasePage(page);
+      const controller = new AbortController();
+      this.continuousRenderController?.abort();
+      this.continuousRenderController = controller;
+      void this.queueRender(this.currentGeneration(), controller.signal, true).catch(() => undefined);
     });
-    this.container.replaceChildren(...elements);
-    const restoredAnchor = this.container.querySelector<HTMLElement>(`[data-page-number="${this.pageNumber}"]`);
-    if (restoredAnchor) this.container.scrollTop = Math.max(0, restoredAnchor.offsetTop - anchorOffset);
+    failure.append(message, retry);
+    slot.replaceChildren(failure);
+  }
+
+  private captureContinuousAnchor() {
+    return captureContinuousAnchor(
+      this.container,
+      Array.from(this.continuousSlots.values()),
+      (item) => item.dataset.pdfContinuousSlot
+    );
+  }
+
+  private restoreContinuousAnchor(anchor: ReturnType<typeof captureContinuousAnchor>) {
+    restoreContinuousAnchor(
+      this.container,
+      Array.from(this.continuousSlots.values()),
+      anchor,
+      (item) => item.dataset.pdfContinuousSlot
+    );
+  }
+
+  private scrollToContinuousPage(page: number) {
+    const slot = this.continuousSlots.get(page);
+    if (slot) this.container.scrollTop = Math.max(0, slot.offsetTop);
   }
 
   private queueRender(generation: number, signal: AbortSignal, force = false) {
@@ -815,6 +909,9 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     this.pageNumber = 1;
     this.pageCount = 0;
     this.cropBoxes.clear();
+    this.continuousSlots.clear();
+    this.continuousPageHeights.clear();
+    this.continuousFailures.clear();
     this.status = 'idle';
     this.error = undefined;
     try {
