@@ -6,6 +6,7 @@ const COMPACT_EPUB_VIEWPORT_MAX_WIDTH = 640;
 
 export type EpubViewportLayout = Readonly<{
   compact: boolean;
+  automaticColumnCount: 1 | 2;
   inlinePadding: string;
   paginatorGap: string;
   bottomInset: string;
@@ -13,6 +14,7 @@ export type EpubViewportLayout = Readonly<{
 
 const DEFAULT_EPUB_VIEWPORT_LAYOUT: EpubViewportLayout = Object.freeze({
   compact: false,
+  automaticColumnCount: 2,
   inlinePadding: '24px',
   paginatorGap: '7%',
   bottomInset: '0px'
@@ -25,11 +27,15 @@ export function resolveEpubViewportLayout(viewportWidth: number): EpubViewportLa
   return compact
     ? {
         compact: true,
+        automaticColumnCount: 1,
         inlinePadding: '1em',
         paginatorGap: '0%',
         bottomInset: 'calc(var(--shuku-safe-area-bottom) + 10px)'
       }
-    : DEFAULT_EPUB_VIEWPORT_LAYOUT;
+    : {
+        ...DEFAULT_EPUB_VIEWPORT_LAYOUT,
+        automaticColumnCount: viewportWidth >= 1000 ? 2 : 1
+      };
 }
 
 export function epubSurfaceColor(preferences: ReaderPreferences) {
@@ -61,6 +67,11 @@ export function createEpubThemeSnapshot(
   const maxWidth = Math.max(600, Math.min(1350, Math.round(preferences.epub.pageWidth)));
   const fontSize = Math.max(14, Math.min(30, Math.round(preferences.epub.fontSize)));
   const lineHeight = Math.max(1.4, Math.min(2.4, preferences.epub.lineHeight));
+  const fontWeight = preferences.epub.fontWeight;
+  const letterSpacing = preferences.epub.letterSpacing;
+  const pagePadding = viewportLayout.compact
+    ? { narrow: '0.5em', standard: '1em', wide: '1.5em' }[preferences.epub.pageMargin]
+    : { narrow: '16px', standard: '24px', wide: '40px' }[preferences.epub.pageMargin];
   const paragraphIndent = Math.max(0, Math.min(4, preferences.epub.typography.paragraphIndent));
   const paragraphSpacing = Math.max(0, Math.min(1.5, preferences.epub.typography.paragraphSpacing));
   const paragraphAlignment = preferences.epub.typography.textAlign === 'publisher'
@@ -122,7 +133,9 @@ export function createEpubThemeSnapshot(
       --shuku-reader-paragraph-spacing: ${paragraphSpacing}em;
       --shuku-reader-page-width: ${maxWidth}px;
       --shuku-reader-font-family: ${resolvedFont.stack};
-      --shuku-reader-padding-inline: ${viewportLayout.inlinePadding};
+      --shuku-reader-font-weight: ${fontWeight};
+      --shuku-reader-letter-spacing: ${letterSpacing}em;
+      --shuku-reader-padding-inline: ${pagePadding};
       --shuku-reader-padding-top: ${viewportLayout.compact ? epubMobileTopSpacing(preferences) : verticalSpacing};
       --shuku-reader-padding-bottom: ${verticalSpacing};
     }
@@ -132,6 +145,8 @@ export function createEpubThemeSnapshot(
     }
     html {
       font-size: var(--shuku-reader-font-size) !important;
+      font-weight: var(--shuku-reader-font-weight) !important;
+      letter-spacing: var(--shuku-reader-letter-spacing) !important;
     }
     ${protectedBody} {
       box-sizing: border-box !important;

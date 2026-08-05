@@ -298,11 +298,44 @@ html[data-audio-mini-player='reader'] .shuku-pwa-bottom-overlay {
 }
 
 .shuku-reader-bottom-console {
-  height: calc(15.5rem + var(--shuku-safe-area-bottom));
+  height: calc(9.25rem + var(--shuku-safe-area-bottom));
   transition:
     height 320ms cubic-bezier(0.22, 1, 0.36, 1),
     transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
     opacity 180ms ease;
+}
+
+[data-reader-shell='v3'] {
+  --shuku-reader-accent: #b45309;
+}
+
+[data-reader-shell='v3'][data-reader-theme='green'] {
+  --shuku-reader-accent: #3f6f4e;
+}
+
+[data-reader-shell='v3'][data-reader-theme='night'],
+[data-reader-shell='v3'][data-reader-theme='black'] {
+  --shuku-reader-accent: #f59e0b;
+}
+
+.shuku-reader-accent-text {
+  color: var(--shuku-reader-accent);
+}
+
+.shuku-reader-accent-selected {
+  background: color-mix(in srgb, var(--shuku-reader-accent) 12%, transparent);
+  color: var(--shuku-reader-accent);
+}
+
+.shuku-reader-accent-solid {
+  background: var(--shuku-reader-accent);
+  border-color: var(--shuku-reader-accent);
+  color: white;
+}
+
+.shuku-reader-accent-toggle {
+  background: var(--shuku-reader-accent);
+  border-color: var(--shuku-reader-accent);
 }
 
 .shuku-reader-bottom-console[data-reader-panel-state='notes'] {
@@ -334,8 +367,21 @@ html[data-audio-mini-player='reader'] .shuku-pwa-bottom-overlay {
 }
 
 .shuku-reader-control-workspace {
-  min-height: 18rem;
-  animation: shuku-reader-workspace-enter 220ms 70ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  position: absolute;
+  inset: 0 0 14.25rem;
+  min-height: 0;
+  animation: shuku-reader-workspace-enter 180ms ease-out both;
+}
+
+.shuku-reader-control-workspace [data-pwa-scroll='true'] {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.shuku-reader-control-workspace [data-pwa-scroll='true']::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .shuku-reader-advanced-settings {
@@ -353,28 +399,44 @@ html[data-audio-mini-player='reader'] .shuku-pwa-bottom-overlay {
 }
 
 .shuku-reader-console-home {
-  animation: shuku-reader-console-home-enter 200ms 80ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 8rem;
+  opacity: 1;
+  transform: none;
+}
+
+.shuku-reader-console-home [data-reader-console-nav='true'] {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 4.75rem;
+}
+
+@media (max-width: 767px) {
+  .shuku-reader-bottom-console[data-reader-panel-state]:not([data-reader-panel-state='home'])
+    [data-reader-mobile-progress-controls='true'] {
+    display: none;
+  }
+
+  .shuku-reader-bottom-console[data-reader-panel-state]:not([data-reader-panel-state='home'])
+    .shuku-reader-console-home {
+    height: 4.75rem;
+  }
+
+  .shuku-reader-bottom-console[data-reader-panel-state]:not([data-reader-panel-state='home'])
+    .shuku-reader-control-workspace {
+    bottom: 4.75rem;
+  }
 }
 
 @keyframes shuku-reader-workspace-enter {
   from {
     opacity: 0;
-    transform: translateY(10px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes shuku-reader-console-home-enter {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
   }
 }
 
@@ -388,6 +450,43 @@ html[data-audio-mini-player='reader'] .shuku-pwa-bottom-overlay {
       calc(32rem + var(--shuku-safe-area-bottom)),
       calc(100dvh - 6rem - var(--shuku-safe-area-top))
     );
+  }
+
+  .shuku-reader-console-home {
+    height: 4.5rem;
+  }
+
+  .shuku-reader-control-workspace {
+    bottom: 4.5rem;
+  }
+}
+
+@media (min-width: 900px) {
+  .shuku-reader-bottom-console[data-reader-panel-state]:not([data-reader-panel-state='home']) {
+    height: auto;
+    max-height: calc(100dvh - 6rem - var(--shuku-safe-area-top));
+  }
+
+  .shuku-reader-bottom-console[data-reader-panel-state]:not([data-reader-panel-state='home'])
+    > [data-reader-console-surface='true'] {
+    height: auto;
+    max-height: calc(
+      100dvh - 7.25rem - var(--shuku-safe-area-top) - var(--shuku-safe-area-bottom)
+    );
+  }
+
+  .shuku-reader-bottom-console[data-reader-panel-state]:not([data-reader-panel-state='home'])
+    .shuku-reader-control-workspace {
+    position: relative;
+    inset: auto;
+    flex: 1 1 auto;
+  }
+
+  .shuku-reader-bottom-console[data-reader-panel-state]:not([data-reader-panel-state='home'])
+    .shuku-reader-console-home {
+    position: relative;
+    inset: auto;
+    flex: 0 0 4.5rem;
   }
 }
 

@@ -24,7 +24,7 @@ const capabilities: ReaderCapabilities = {
   supportsSpreads: false
 };
 
-test('normalizes a complete V3 preference snapshot from legacy and invalid input', () => {
+test('normalizes a complete V4 preference snapshot from legacy and invalid input', () => {
   const preferences = normalizeReaderPreferences({
     theme: 'warm',
     fontSize: 80,
@@ -40,19 +40,24 @@ test('normalizes a complete V3 preference snapshot from legacy and invalid input
   });
 
   assert.deepEqual(preferences, {
-    schemaVersion: 3,
-    appearance: { theme: 'warm' },
+    schemaVersion: 4,
+    appearance: { theme: 'warm', themeMode: 'manual' },
+    display: { progressStyle: 'auto', showClock: false },
     interaction: {
       tapZones: 'standard',
       swipePageTurn: true,
       keyboardPageTurn: true,
-      volumeKeyPageTurn: false
+      volumeKeyPageTurn: false,
+      keepScreenAwake: false
     },
     epub: {
       fontSize: 30,
       lineHeight: 1.9,
       pageWidth: 1350,
       fontFamily: 'pingfang',
+      fontWeight: 400,
+      letterSpacing: 0,
+      pageMargin: 'standard',
       spreadMode: 'single',
       pageTurnAnimation: 'off',
       flow: 'paginated',
@@ -76,9 +81,12 @@ test('normalizes a complete V3 preference snapshot from legacy and invalid input
       pageTurnAnimation: 'slide',
       imageFit: 'contain',
       imageVariant: 'data-saver',
-      zoom: 1.6
+      zoom: 1.6,
+      flow: 'paged',
+      coverSingle: false,
+      pageGap: 0
     },
-    pdf: { zoom: 1.6, fit: 'page' }
+    pdf: { zoom: 1.6, fit: 'page', flow: 'paged', rotation: 0, cropMargins: 'off' }
   });
   assert.equal(DEFAULT_READER_PREFERENCES.appearance.theme, 'warm');
   assert.equal(DEFAULT_READER_PREFERENCES.pdf.fit, 'page');
@@ -92,7 +100,7 @@ test('preserves an explicitly saved PDF width fit preference', () => {
   assert.equal(preferences.pdf.fit, 'width');
 });
 
-test('migrates V2 kindle animation and missing paging fields to V3 defaults', () => {
+test('migrates V2 kindle animation and missing paging fields to V4 defaults', () => {
   const preferences = normalizeReaderPreferences({
     schemaVersion: 2,
     epub: {
@@ -103,7 +111,7 @@ test('migrates V2 kindle animation and missing paging fields to V3 defaults', ()
     }
   });
 
-  assert.equal(preferences.schemaVersion, 3);
+  assert.equal(preferences.schemaVersion, 4);
   assert.equal(preferences.epub.spreadMode, 'single');
   assert.equal(preferences.epub.pageTurnAnimation, 'slide');
   assert.equal(preferences.comic.mode, 'double');
@@ -125,6 +133,35 @@ test('preserves valid V3 spread and animation preferences', () => {
   assert.equal(preferences.epub.spreadMode, 'double');
   assert.equal(preferences.epub.pageTurnAnimation, 'slide');
   assert.equal(preferences.comic.pageTurnAnimation, 'off');
+});
+
+test('normalizes V4 display, theme, EPUB, comic, and PDF settings', () => {
+  const preferences = normalizeReaderPreferences({
+    schemaVersion: 4,
+    appearance: { theme: 'green', themeMode: 'system' },
+    display: { progressStyle: 'remaining', showClock: true },
+    interaction: { keepScreenAwake: true },
+    epub: { fontWeight: 700, letterSpacing: 0.08, pageMargin: 'wide', spreadMode: 'auto' },
+    comic: { flow: 'vertical', coverSingle: true, pageGap: 16 },
+    pdf: { flow: 'continuous', rotation: 270, cropMargins: 'auto' }
+  });
+
+  assert.equal(preferences.appearance.theme, 'green');
+  assert.equal(preferences.appearance.themeMode, 'system');
+  assert.deepEqual(preferences.display, { progressStyle: 'remaining', showClock: true });
+  assert.equal(preferences.interaction.keepScreenAwake, true);
+  assert.deepEqual(
+    { fontWeight: preferences.epub.fontWeight, letterSpacing: preferences.epub.letterSpacing, pageMargin: preferences.epub.pageMargin, spreadMode: preferences.epub.spreadMode },
+    { fontWeight: 700, letterSpacing: 0.08, pageMargin: 'wide', spreadMode: 'auto' }
+  );
+  assert.deepEqual(
+    { flow: preferences.comic.flow, coverSingle: preferences.comic.coverSingle, pageGap: preferences.comic.pageGap },
+    { flow: 'vertical', coverSingle: true, pageGap: 16 }
+  );
+  assert.deepEqual(
+    { flow: preferences.pdf.flow, rotation: preferences.pdf.rotation, cropMargins: preferences.pdf.cropMargins },
+    { flow: 'continuous', rotation: 270, cropMargins: 'auto' }
+  );
 });
 
 test('normalizes interaction and smart typography preferences without weakening safe defaults', () => {
@@ -156,7 +193,8 @@ test('normalizes interaction and smart typography preferences without weakening 
     tapZones: 'reversed',
     swipePageTurn: false,
     keyboardPageTurn: false,
-    volumeKeyPageTurn: true
+    volumeKeyPageTurn: true,
+    keepScreenAwake: false
   });
   assert.deepEqual(preferences.epub.typography, {
     paragraphIndent: 4,

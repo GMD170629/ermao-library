@@ -4,14 +4,22 @@ import type { ReaderProgress, ReaderSettings } from '../reader-shell';
 export function preferencesToReaderSettings(preferences: ReaderPreferences): ReaderSettings {
   return {
     theme: preferences.appearance.theme,
+    manualTheme: preferences.appearance.theme,
+    themeMode: preferences.appearance.themeMode,
+    progressStyle: preferences.display.progressStyle,
+    showClock: preferences.display.showClock,
     tapZones: preferences.interaction.tapZones,
     swipePageTurn: preferences.interaction.swipePageTurn,
     keyboardPageTurn: preferences.interaction.keyboardPageTurn,
     volumeKeyPageTurn: preferences.interaction.volumeKeyPageTurn,
+    keepScreenAwake: preferences.interaction.keepScreenAwake,
     fontSize: preferences.epub.fontSize,
     lineHeight: preferences.epub.lineHeight,
     pageWidth: preferences.epub.pageWidth,
     fontFamily: preferences.epub.fontFamily,
+    fontWeight: preferences.epub.fontWeight,
+    letterSpacing: preferences.epub.letterSpacing,
+    pageMargin: preferences.epub.pageMargin,
     ebookPageTurnAnimation: preferences.epub.pageTurnAnimation,
     ebookSpreadMode: preferences.epub.spreadMode,
     ebookFlow: preferences.epub.flow,
@@ -31,25 +39,36 @@ export function preferencesToReaderSettings(preferences: ReaderPreferences): Rea
     comicPageTurnAnimation: preferences.comic.pageTurnAnimation,
     imageFit: preferences.comic.imageFit,
     imageVariant: preferences.comic.imageVariant,
-    pdfFit: preferences.pdf.fit
+    comicFlow: preferences.comic.flow,
+    comicCoverSingle: preferences.comic.coverSingle,
+    comicPageGap: preferences.comic.pageGap,
+    pdfFit: preferences.pdf.fit,
+    pdfFlow: preferences.pdf.flow,
+    pdfRotation: preferences.pdf.rotation,
+    pdfCropMargins: preferences.pdf.cropMargins
   };
 }
 
 export function readerSettingsToPreferences(settings: ReaderSettings): ReaderPreferences {
   return {
     schemaVersion: READER_SCHEMA_VERSION,
-    appearance: { theme: settings.theme },
+    appearance: { theme: settings.theme, themeMode: settings.themeMode },
+    display: { progressStyle: settings.progressStyle, showClock: settings.showClock },
     interaction: {
       tapZones: settings.tapZones,
       swipePageTurn: settings.swipePageTurn,
       keyboardPageTurn: settings.keyboardPageTurn,
-      volumeKeyPageTurn: settings.volumeKeyPageTurn
+      volumeKeyPageTurn: settings.volumeKeyPageTurn,
+      keepScreenAwake: settings.keepScreenAwake
     },
     epub: {
       fontSize: settings.fontSize,
       lineHeight: settings.lineHeight,
       pageWidth: settings.pageWidth,
       fontFamily: settings.fontFamily,
+      fontWeight: settings.fontWeight,
+      letterSpacing: settings.letterSpacing,
+      pageMargin: settings.pageMargin,
       pageTurnAnimation: settings.ebookPageTurnAnimation,
       spreadMode: settings.ebookSpreadMode,
       flow: settings.ebookFlow,
@@ -73,11 +92,17 @@ export function readerSettingsToPreferences(settings: ReaderSettings): ReaderPre
       imageFit: settings.imageFit,
       pageTurnAnimation: settings.comicPageTurnAnimation,
       imageVariant: settings.imageVariant,
-      zoom: settings.comicZoom
+      zoom: settings.comicZoom,
+      flow: settings.comicFlow,
+      coverSingle: settings.comicCoverSingle,
+      pageGap: settings.comicPageGap
     },
     pdf: {
       zoom: settings.pdfZoom,
-      fit: settings.pdfFit
+      fit: settings.pdfFit,
+      flow: settings.pdfFlow,
+      rotation: settings.pdfRotation,
+      cropMargins: settings.pdfCropMargins
     }
   };
 }

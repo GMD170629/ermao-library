@@ -46,6 +46,15 @@ test('double-page mode leaves only an unmatched final page single', () => {
   assert.equal(comicLastSpreadPage(pages, 'double'), 5);
 });
 
+test('cover-single pairing keeps the cover alone and pairs later pages', () => {
+  const pages = comicOrderedPages(7);
+  assert.deepEqual(comicSpreadPages(pages, 1, 'double', 'cover-single'), [1]);
+  assert.deepEqual(comicSpreadPages(pages, 2, 'double', 'cover-single'), [2, 3]);
+  assert.equal(comicNormalizePage(pages, 3, 'double', 'cover-single'), 2);
+  assert.equal(comicAdjacentSpreadPage(pages, 1, 'double', 1, 'cover-single'), 2);
+  assert.equal(comicLastSpreadPage(pages, 'double', 'cover-single'), 6);
+});
+
 test('comic page slots and default width fit stay inside the reading area', () => {
   assert.deepEqual(comicPageSlotSizing('single'), { flex: '0 1 100%', maxWidth: '100%', width: '100%' });
   assert.deepEqual(comicPageSlotSizing('double'), { flex: '1 1 50%', maxWidth: '50%', width: '50%' });

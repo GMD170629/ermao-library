@@ -17,6 +17,7 @@ import type { ReaderBookCache } from '../../../lib/reader/book-cache';
 type ReaderEngineRuntimeProps = {
   bootstrap: ReaderBootstrap;
   preferences: ReaderPreferences;
+  effectivePreferences: ReaderPreferences;
   onPreferencesChange: (preferences: ReaderPreferences) => void;
   onResetPreferences: () => void | Promise<void>;
   onLocationChange: Parameters<typeof useReaderSession>[0]['onLocationChange'];
@@ -83,6 +84,7 @@ function phaseLabel(phase: string | null, kind: ReaderBootstrap['readerType']) {
 export function ReaderEngineRuntime({
   bootstrap,
   preferences,
+  effectivePreferences,
   onPreferencesChange,
   onResetPreferences,
   onLocationChange,
@@ -189,7 +191,7 @@ export function ReaderEngineRuntime({
     adapter,
     source: bootstrap.source,
     initialLocation: bootstrap.initialLocation,
-    preferences,
+    preferences: effectivePreferences,
     onLocationChange,
     onExternalLink: (href) => window.open(href, '_blank', 'noopener,noreferrer'),
     onPasswordRequired: (reason) => {
@@ -246,7 +248,10 @@ export function ReaderEngineRuntime({
   const effectiveCapabilities = hasNextVolume && !adapterCapabilities.canGoNext
     ? { ...adapterCapabilities, canGoNext: true }
     : adapterCapabilities;
-  const settings = preferencesToReaderSettings(preferences);
+  const settings = {
+    ...preferencesToReaderSettings(effectivePreferences),
+    manualTheme: preferences.appearance.theme
+  };
   const items = useMemo(() => {
     const adapterItems = session.state.navigationReady ? adapterNavigationItems(session.state.navigationItems) : [];
     return adapterItems.length > 0 ? adapterItems : bootstrapNavigationItems(bootstrap, session.state.totalPages);
@@ -384,10 +389,15 @@ export function ReaderEngineRuntime({
       settings={settings}
       capabilities={effectiveCapabilities}
       readingDirection={bootstrap.readerType === 'comic'
-        ? preferences.comic.direction
+        ? effectivePreferences.comic.direction
         : (session.state.capabilities?.readingDirection ?? bootstrap.capabilities.readingDirection)}
       onBack={onBack}
-      onSettingsChange={(next) => onPreferencesChange(readerSettingsToPreferences(next))}
+      onSettingsChange={(next) => {
+        const mapped = readerSettingsToPreferences(next);
+        onPreferencesChange(preferences.appearance.themeMode === 'system' && next.themeMode === 'system'
+          ? { ...mapped, appearance: { ...mapped.appearance, theme: preferences.appearance.theme } }
+          : mapped);
+      }}
       onResetSettings={onResetPreferences}
       interactionBlocked={interactionBlocked}
       horizontalPaging={horizontalPaging}

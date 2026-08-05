@@ -1,8 +1,8 @@
-export const READER_SCHEMA_VERSION = 3 as const;
+export const READER_SCHEMA_VERSION = 4 as const;
 
 export type ReflowableFormat = 'epub' | 'mobi' | 'azw' | 'azw3' | 'prc' | 'fb2' | 'txt';
 export type ReaderKind = 'reflowable' | 'comic' | 'pdf';
-export type ReaderTheme = 'day' | 'warm' | 'night' | 'black';
+export type ReaderTheme = 'day' | 'warm' | 'green' | 'night' | 'black';
 export type ReaderFontFamily = 'pingfang' | 'heiti' | 'songti' | 'yahei' | 'kaiti';
 export type ReaderLifecycle = 'bootstrapping' | 'loading' | 'ready' | 'error' | 'disposed';
 export type ReaderOperationKind = 'bootstrap' | 'navigation' | 'render' | 'preferences' | 'pagination';
@@ -77,19 +77,28 @@ export type ReaderPreferences = {
   schemaVersion: typeof READER_SCHEMA_VERSION;
   appearance: {
     theme: ReaderTheme;
+    themeMode: 'manual' | 'system';
+  };
+  display: {
+    progressStyle: 'auto' | 'percent' | 'position' | 'remaining' | 'hidden';
+    showClock: boolean;
   };
   interaction: {
     tapZones: 'standard' | 'reversed' | 'disabled';
     swipePageTurn: boolean;
     keyboardPageTurn: boolean;
     volumeKeyPageTurn: boolean;
+    keepScreenAwake: boolean;
   };
   epub: {
     fontSize: number;
     lineHeight: number;
     pageWidth: number;
     fontFamily: ReaderFontFamily;
-    spreadMode: 'single' | 'double';
+    fontWeight: 400 | 500 | 700;
+    letterSpacing: -0.02 | 0 | 0.04 | 0.08;
+    pageMargin: 'narrow' | 'standard' | 'wide';
+    spreadMode: 'auto' | 'single' | 'double';
     pageTurnAnimation: 'slide' | 'off';
     flow: 'paginated' | 'scrolled';
     typography: {
@@ -113,10 +122,16 @@ export type ReaderPreferences = {
     imageFit: 'width' | 'height' | 'contain' | 'original';
     imageVariant: 'original' | 'data-saver';
     zoom: number;
+    flow: 'paged' | 'vertical';
+    coverSingle: boolean;
+    pageGap: 0 | 8 | 16 | 24;
   };
   pdf: {
     zoom: number;
     fit: 'width' | 'page';
+    flow: 'paged' | 'continuous';
+    rotation: 0 | 90 | 180 | 270;
+    cropMargins: 'off' | 'auto';
   };
 };
 

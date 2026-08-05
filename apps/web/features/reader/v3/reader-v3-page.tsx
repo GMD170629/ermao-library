@@ -4,7 +4,7 @@ import type { ReaderPreferences } from '@shuku/reader-core';
 import { AlertTriangle, LoaderCircle, RotateCcw } from 'lucide-react';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   activateReaderUser,
   emitReaderDebug,
@@ -19,7 +19,7 @@ import {
 } from '../../../lib/reader-device-preferences';
 import { withBasePath } from '../../../lib/base-path';
 import { BEFORE_PWA_UPDATE_EVENT, type BeforePwaUpdateDetail } from '../../../lib/pwa/update-coordination';
-import { DEFAULT_READER_THEME, readerThemeSurfaces } from '../reader-theme';
+import { DEFAULT_READER_THEME, readerThemeSurfaces, resolveReaderTheme } from '../reader-theme';
 import { fetchReaderBootstrap, type ReaderBootstrap } from './api';
 import { requestedPdfPage } from './direct-page-target';
 import { resolveRequestedEpubHref } from './epub-direct-target';
@@ -222,15 +222,37 @@ export function ReaderV3Page({ volumeId }: { volumeId: string }) {
   const [indexProgress, setIndexProgress] = useState<{ completed: number; total: number; percent: number } | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<{ loadedBytes: number; totalBytes: number | null; percent: number | null } | null>(null);
   const [storageError, setStorageError] = useState('');
+  const [systemDark, setSystemDark] = useState(false);
   const [openingContext] = useState<OpeningContext | null>(() => readOpeningContext(volumeId));
   const requestSequenceRef = useRef(0);
   const pendingLocationWriteRef = useRef<Promise<unknown>>(Promise.resolve());
   const runtime = getReaderRuntime();
+  const effectivePreferences = useMemo(() => state.preferences
+    ? {
+        ...state.preferences,
+        appearance: {
+          ...state.preferences.appearance,
+          theme: resolveReaderTheme(
+            state.preferences.appearance.theme,
+            state.preferences.appearance.themeMode,
+            systemDark
+          )
+        }
+      }
+    : null, [state.preferences, systemDark]);
   const activeTheme = state.status === 'error'
     ? 'night'
-    : state.preferences?.appearance.theme ?? DEFAULT_READER_THEME;
+    : effectivePreferences?.appearance.theme ?? DEFAULT_READER_THEME;
   const activeSurface = readerThemeSurfaces[activeTheme];
   useReaderPwaSurface(activeTheme);
+
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-color-scheme: dark)');
+    const update = () => setSystemDark(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
 
   const readerHref = useCallback((nextVolumeId: string, pageIndex?: number) => {
     const query = new URLSearchParams();
@@ -466,11 +488,12 @@ export function ReaderV3Page({ volumeId }: { volumeId: string }) {
   const preferences = state.preferences;
   return (
     <>
-      {bootstrap && preferences ? (
+      {bootstrap && preferences && effectivePreferences ? (
         <ReaderEngineRuntime
           key={`${bootstrap.volume.id}:${bootstrap.contentFingerprint}:${retry}`}
           bootstrap={bootstrap}
           preferences={preferences}
+          effectivePreferences={effectivePreferences}
           onPreferencesChange={savePreferences}
           onResetPreferences={resetPreferences}
           onLocationChange={saveLocation}

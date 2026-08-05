@@ -14,13 +14,22 @@ import {
   READER_COMIC_DIRECTION_OPTIONS,
   READER_COMIC_IMAGE_FIT_OPTIONS,
   READER_COMIC_IMAGE_VARIANT_OPTIONS,
+  READER_COMIC_FLOW_OPTIONS,
   READER_FLOW_OPTIONS,
   READER_FONT_FAMILY_OPTIONS,
   READER_FONT_SIZE_OPTIONS,
   READER_LINE_HEIGHT_OPTIONS,
+  READER_FONT_WEIGHT_OPTIONS,
+  READER_LETTER_SPACING_OPTIONS,
+  READER_PAGE_MARGIN_OPTIONS,
+  READER_PROGRESS_STYLE_OPTIONS,
+  READER_PAGE_GAP_OPTIONS,
   READER_PAGE_TURN_ANIMATION_OPTIONS,
   READER_PAGE_WIDTH_OPTIONS,
   READER_PDF_FIT_OPTIONS,
+  READER_PDF_FLOW_OPTIONS,
+  READER_PDF_ROTATION_OPTIONS,
+  READER_PDF_CROP_OPTIONS,
   READER_SPREAD_MODE_OPTIONS,
   READER_TAP_ZONE_OPTIONS,
   READER_THEME_OPTIONS,
@@ -149,7 +158,7 @@ function ThemeField({
   const { t } = useI18n();
   return (
     <SettingRow label={label}>
-      <div className="grid w-full max-w-[24rem] grid-cols-4 gap-1 rounded-xl bg-[#F2EEE8] p-1" role="group" aria-label={label}>
+      <div className="grid w-full max-w-[26rem] grid-cols-5 gap-1 rounded-xl bg-[#F2EEE8] p-1" role="group" aria-label={label}>
         {READER_THEME_OPTIONS.map((option) => {
           const selected = value === option.value;
           const surface = readerThemeSurfaces[option.value];
@@ -325,8 +334,9 @@ export function ReaderDeviceSettingsPage() {
           <ThemeField
             label={t('主题')}
             value={preferences.appearance.theme}
-            onChange={(theme) => updatePreferences({ ...preferences, appearance: { theme } })}
+            onChange={(theme) => updatePreferences({ ...preferences, appearance: { ...preferences.appearance, theme, themeMode: 'manual' } })}
           />
+          <ChoiceField label={t('跟随系统明暗')} value={preferences.appearance.themeMode} options={[{ value: 'manual', label: '关闭' }, { value: 'system', label: '开启' }]} onChange={(themeMode) => updatePreferences({ ...preferences, appearance: { ...preferences.appearance, themeMode: themeMode as ReaderPreferences['appearance']['themeMode'] } })} />
         </SettingsSection>
 
         <div className="grid items-start gap-3 xl:grid-cols-2">
@@ -341,6 +351,7 @@ export function ReaderDeviceSettingsPage() {
               options={READER_FONT_SIZE_OPTIONS}
               onChange={(fontSize) => updatePreferences({ ...preferences, epub: { ...preferences.epub, fontSize: Number(fontSize) } })}
             />
+            <RangeField label={t('精细字号')} value={preferences.epub.fontSize} minimum={14} maximum={30} step={1} suffix="px" onChange={(fontSize) => updatePreferences({ ...preferences, epub: { ...preferences.epub, fontSize } })} />
             <ChoiceField
               label={t('行距')}
               value={closestReaderOptionValue(preferences.epub.lineHeight, READER_LINE_HEIGHT_OPTIONS)}
@@ -353,6 +364,9 @@ export function ReaderDeviceSettingsPage() {
               options={READER_FONT_FAMILY_OPTIONS}
               onChange={(fontFamily) => updatePreferences({ ...preferences, epub: { ...preferences.epub, fontFamily: fontFamily as ReaderPreferences['epub']['fontFamily'] } })}
             />
+            <ChoiceField label={t('字重')} value={String(preferences.epub.fontWeight)} options={READER_FONT_WEIGHT_OPTIONS} onChange={(fontWeight) => updatePreferences({ ...preferences, epub: { ...preferences.epub, fontWeight: Number(fontWeight) as ReaderPreferences['epub']['fontWeight'] } })} />
+            <ChoiceField label={t('字间距')} value={String(preferences.epub.letterSpacing)} options={READER_LETTER_SPACING_OPTIONS} onChange={(letterSpacing) => updatePreferences({ ...preferences, epub: { ...preferences.epub, letterSpacing: Number(letterSpacing) as ReaderPreferences['epub']['letterSpacing'] } })} />
+            <ChoiceField label={t('页边距')} value={preferences.epub.pageMargin} options={READER_PAGE_MARGIN_OPTIONS} onChange={(pageMargin) => updatePreferences({ ...preferences, epub: { ...preferences.epub, pageMargin: pageMargin as ReaderPreferences['epub']['pageMargin'] } })} />
             <ChoiceField
               label={t('页宽')}
               value={closestReaderOptionValue(preferences.epub.pageWidth, READER_PAGE_WIDTH_OPTIONS)}
@@ -365,6 +379,7 @@ export function ReaderDeviceSettingsPage() {
               options={READER_FLOW_OPTIONS}
               onChange={(flow) => updatePreferences({ ...preferences, epub: { ...preferences.epub, flow: flow as ReaderPreferences['epub']['flow'] } })}
             />
+            <ChoiceField label={t('页面')} value={preferences.epub.spreadMode} options={READER_SPREAD_MODE_OPTIONS} onChange={(spreadMode) => updatePreferences({ ...preferences, epub: { ...preferences.epub, spreadMode: spreadMode as ReaderPreferences['epub']['spreadMode'] } })} />
             <ChoiceField
               label={t('安全优化')}
               value={String(preferences.epub.optimization.enabled)}
@@ -378,7 +393,10 @@ export function ReaderDeviceSettingsPage() {
             title={t('漫画阅读器')}
             description={t('设置当前设备的漫画模式、翻页、显示和缩放方式。')}
           >
-            <ChoiceField label={t('模式')} value={preferences.comic.mode} options={READER_SPREAD_MODE_OPTIONS} onChange={(mode) => updatePreferences({ ...preferences, comic: { ...preferences.comic, mode: mode as ReaderPreferences['comic']['mode'] } })} />
+            <ChoiceField label={t('阅读方式')} value={preferences.comic.flow} options={READER_COMIC_FLOW_OPTIONS} onChange={(flow) => updatePreferences({ ...preferences, comic: { ...preferences.comic, flow: flow as ReaderPreferences['comic']['flow'] } })} />
+            <ChoiceField label={t('模式')} value={preferences.comic.mode} options={READER_SPREAD_MODE_OPTIONS.filter((option) => option.value !== 'auto')} onChange={(mode) => updatePreferences({ ...preferences, comic: { ...preferences.comic, mode: mode as ReaderPreferences['comic']['mode'] } })} />
+            <ChoiceField label={t('双页时封面单独显示')} value={String(preferences.comic.coverSingle)} options={[{ value: 'true', label: '开启' }, { value: 'false', label: '关闭' }]} onChange={(coverSingle) => updatePreferences({ ...preferences, comic: { ...preferences.comic, coverSingle: coverSingle === 'true' } })} />
+            <ChoiceField label={t('页间距')} value={String(preferences.comic.pageGap)} options={READER_PAGE_GAP_OPTIONS} onChange={(pageGap) => updatePreferences({ ...preferences, comic: { ...preferences.comic, pageGap: Number(pageGap) as ReaderPreferences['comic']['pageGap'] } })} />
             <ChoiceField label={t('翻页')} value={preferences.comic.pageTurnAnimation} options={READER_PAGE_TURN_ANIMATION_OPTIONS} onChange={(pageTurnAnimation) => updatePreferences({ ...preferences, comic: { ...preferences.comic, pageTurnAnimation: pageTurnAnimation as ReaderPreferences['comic']['pageTurnAnimation'] } })} />
             <ChoiceField label={t('适配')} value={preferences.comic.imageFit} options={READER_COMIC_IMAGE_FIT_OPTIONS} onChange={(imageFit) => updatePreferences({ ...preferences, comic: { ...preferences.comic, imageFit: imageFit as ReaderPreferences['comic']['imageFit'] } })} />
             <ChoiceField label={t('画质')} value={preferences.comic.imageVariant} options={READER_COMIC_IMAGE_VARIANT_OPTIONS} onChange={(imageVariant) => updatePreferences({ ...preferences, comic: { ...preferences.comic, imageVariant: imageVariant as ReaderPreferences['comic']['imageVariant'] } })} />
@@ -397,6 +415,9 @@ export function ReaderDeviceSettingsPage() {
             <ChoiceField label={t('滑动翻页')} value={String(preferences.interaction.swipePageTurn)} options={[{ value: 'true', label: '开启' }, { value: 'false', label: '关闭' }]} onChange={(enabled) => updatePreferences({ ...preferences, interaction: { ...preferences.interaction, swipePageTurn: enabled === 'true' } })} />
             <ChoiceField label={t('键盘翻页')} value={String(preferences.interaction.keyboardPageTurn)} options={[{ value: 'true', label: '开启' }, { value: 'false', label: '关闭' }]} onChange={(enabled) => updatePreferences({ ...preferences, interaction: { ...preferences.interaction, keyboardPageTurn: enabled === 'true' } })} />
             <ChoiceField label={t('音量键翻页')} value={String(preferences.interaction.volumeKeyPageTurn)} options={[{ value: 'true', label: '开启' }, { value: 'false', label: '关闭' }]} onChange={(enabled) => updatePreferences({ ...preferences, interaction: { ...preferences.interaction, volumeKeyPageTurn: enabled === 'true' } })} />
+            <ChoiceField label={t('进度显示')} value={preferences.display.progressStyle} options={READER_PROGRESS_STYLE_OPTIONS} onChange={(progressStyle) => updatePreferences({ ...preferences, display: { ...preferences.display, progressStyle: progressStyle as ReaderPreferences['display']['progressStyle'] } })} />
+            <ChoiceField label={t('常显时钟')} value={String(preferences.display.showClock)} options={[{ value: 'true', label: '开启' }, { value: 'false', label: '关闭' }]} onChange={(showClock) => updatePreferences({ ...preferences, display: { ...preferences.display, showClock: showClock === 'true' } })} />
+            <ChoiceField label={t('保持屏幕唤醒')} value={String(preferences.interaction.keepScreenAwake)} options={[{ value: 'true', label: '开启' }, { value: 'false', label: '关闭' }]} onChange={(keepScreenAwake) => updatePreferences({ ...preferences, interaction: { ...preferences.interaction, keepScreenAwake: keepScreenAwake === 'true' } })} />
           </SettingsSection>
 
           <SettingsSection
@@ -417,6 +438,9 @@ export function ReaderDeviceSettingsPage() {
           >
             <StepperField label={t('缩放')} value={preferences.pdf.zoom} minimum={0.6} maximum={2.4} step={0.1} onChange={(zoom) => updatePreferences({ ...preferences, pdf: { ...preferences.pdf, zoom } })} />
             <ChoiceField label={t('适配')} value={preferences.pdf.fit} options={READER_PDF_FIT_OPTIONS} onChange={(fit) => updatePreferences({ ...preferences, pdf: { ...preferences.pdf, fit: fit as ReaderPreferences['pdf']['fit'] } })} />
+            <ChoiceField label={t('阅读方式')} value={preferences.pdf.flow} options={READER_PDF_FLOW_OPTIONS} onChange={(flow) => updatePreferences({ ...preferences, pdf: { ...preferences.pdf, flow: flow as ReaderPreferences['pdf']['flow'] } })} />
+            <ChoiceField label={t('页面旋转')} value={String(preferences.pdf.rotation)} options={READER_PDF_ROTATION_OPTIONS} onChange={(rotation) => updatePreferences({ ...preferences, pdf: { ...preferences.pdf, rotation: Number(rotation) as ReaderPreferences['pdf']['rotation'] } })} />
+            <ChoiceField label={t('自动裁白边')} value={preferences.pdf.cropMargins} options={READER_PDF_CROP_OPTIONS} onChange={(cropMargins) => updatePreferences({ ...preferences, pdf: { ...preferences.pdf, cropMargins: cropMargins as ReaderPreferences['pdf']['cropMargins'] } })} />
           </SettingsSection>
 
           <SettingsSection

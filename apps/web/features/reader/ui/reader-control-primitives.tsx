@@ -33,7 +33,7 @@ export function ReaderControlNavButton({ icon: Icon, label, ariaLabel, active = 
       className={cn(
         'group flex min-w-0 flex-1 rounded-2xl font-medium transition active:scale-[0.97] disabled:pointer-events-none disabled:opacity-35',
         layout === 'dock' ? 'p-1.5 text-[11px] md:w-[4.75rem] md:flex-none' : 'p-1 text-xs',
-        selected ? dark ? 'text-amber-400' : 'text-amber-700' : active ? 'text-amber-600' : '',
+        selected || active ? 'shuku-reader-accent-text' : '',
         className
       )}
     >
@@ -44,7 +44,7 @@ export function ReaderControlNavButton({ icon: Icon, label, ariaLabel, active = 
           'flex h-full min-w-0 w-full flex-col items-center justify-center gap-1 px-1 transition-colors',
           layout === 'dock' ? 'rounded-[0.95rem]' : 'rounded-2xl',
           selected
-            ? dark ? 'bg-amber-400/10 text-amber-300' : 'bg-amber-700/10 text-amber-700'
+            ? 'shuku-reader-accent-selected'
             : dark ? 'group-hover:bg-white/10' : 'group-hover:bg-stone-900/5'
         )}
       >
@@ -78,7 +78,7 @@ export function ReaderQuickActionButton({ label, ariaLabel, selected = false, ex
       className={cn(
         'flex min-h-[4.5rem] min-w-0 flex-col items-center justify-center gap-1 rounded-2xl border px-1 text-xs font-medium transition active:scale-[0.97]',
         selected
-          ? dark ? 'border-amber-400/25 bg-amber-400/10 text-amber-300' : 'border-amber-700/20 bg-amber-700/10 text-amber-800'
+          ? 'shuku-reader-accent-selected border-current/20'
           : dark ? 'border-white/15 bg-white/[0.045] hover:bg-white/[0.09]' : 'border-stone-900/15 bg-white/55 hover:bg-white/80'
       )}
     >
@@ -124,7 +124,7 @@ export function ReaderSegmentedControl<T extends string>({ ariaLabel, value, opt
             className={cn(
               'flex min-h-9 min-w-0 items-center justify-center gap-1 rounded-lg px-1 text-xs font-medium transition active:scale-[0.97]',
               selected
-                ? dark ? 'bg-white/15 text-amber-300 shadow-sm' : 'bg-white text-amber-800 shadow-sm'
+                ? dark ? 'shuku-reader-accent-selected shadow-sm' : 'shuku-reader-accent-text bg-white shadow-sm'
                 : dark ? 'opacity-65 hover:bg-white/[0.07] hover:opacity-100' : 'opacity-60 hover:bg-white/55 hover:opacity-100'
             )}
           >

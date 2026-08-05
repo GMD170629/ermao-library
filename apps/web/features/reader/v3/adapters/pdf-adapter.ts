@@ -19,6 +19,7 @@ import { withBasePath } from '../../../../lib/base-path';
 import { readerThemeSurfaces } from '../../reader-theme';
 import { ReaderAdapterBase, StaleReaderOperationError, errorMessage, isAbortError } from './adapter-base';
 import { computePdfRenderBudget, pdfPageScale } from './pdf-render-budget';
+import { detectPdfCropBox, pdfContinuousWindowPages, type PdfCropBox } from './pdf-layout';
 
 type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
 
@@ -125,15 +126,38 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
   private renderEpoch = 0;
   private renderedPages = new Map<number, RenderedPdfPage>();
   private pendingPages = new Set<RenderedPdfPage>();
+  private pendingCropTasks = new Set<RenderTask>();
   private resizeObserver: ResizeObserver | null = null;
   private resizeFrame: number | null = null;
   private resizeController: AbortController | null = null;
   private observedViewportSize: { width: number; height: number } | null = null;
   private renderTail: Promise<void> = Promise.resolve();
+  private cropBoxes = new Map<number, PdfCropBox | null>();
+  private scrollFrame: number | null = null;
+  private continuousRenderController: AbortController | null = null;
   private passwordCallback: ((password: string) => void) | null = null;
   private passwordReason: PdfViewModel['passwordReason'];
   private status: PdfViewModel['status'] = 'idle';
   private error: string | undefined;
+  private readonly handleContinuousScroll = () => {
+    if (this.preferences?.pdf.flow !== 'continuous' || this.scrollFrame !== null) return;
+    this.scrollFrame = requestAnimationFrame(() => {
+      this.scrollFrame = null;
+      const candidates = Array.from(this.container.querySelectorAll<HTMLElement>('[data-page-number]'));
+      const nearest = candidates.reduce<HTMLElement | null>((best, element) => {
+        if (!best) return element;
+        return Math.abs(element.offsetTop - this.container.scrollTop) < Math.abs(best.offsetTop - this.container.scrollTop) ? element : best;
+      }, null);
+      const page = Number(nearest?.dataset.pageNumber);
+      if (!Number.isFinite(page) || page === this.pageNumber) return;
+      this.pageNumber = clampPage(page, this.pageCount);
+      this.emitLocation();
+      this.continuousRenderController?.abort();
+      const controller = new AbortController();
+      this.continuousRenderController = controller;
+      void this.queueRender(this.currentGeneration(), controller.signal).catch(() => undefined);
+    });
+  };
 
   constructor(options: PdfAdapterOptions) {
     super();
@@ -141,6 +165,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     this.fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.loadPdfJs = options.loadPdfJs ?? (() => import('pdfjs-dist/legacy/build/pdf.mjs'));
     if (options.onViewModel) this.viewListeners.add(options.onViewModel);
+    this.container.addEventListener('scroll', this.handleContinuousScroll, { passive: true });
   }
 
   subscribeView(listener: (model: PdfViewModel) => void) {
@@ -163,7 +188,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       canZoom: true,
       canSelectText: true,
       supportsPagination: true,
-      supportsScrolling: false,
+      supportsScrolling: this.preferences?.pdf.flow === 'continuous',
       supportsSpreads: false,
       readingDirection: 'ltr'
     };
@@ -327,7 +352,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     this.emitView();
     try {
       await this.queueRender(this.currentGeneration(), context.signal, forceRender);
-      if (pageChanged) this.container.scrollTop = 0;
+      if (pageChanged && this.preferences.pdf.flow === 'paged') this.container.scrollTop = 0;
       this.status = 'ready';
       this.emitLocation(context.operation);
       this.emitView();
@@ -353,7 +378,10 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     } catch {
       return this.failOperation(context, 'stale-session');
     }
+    const renderingGeometryChanged = preferences.pdf.rotation !== this.preferences?.pdf.rotation
+      || preferences.pdf.cropMargins !== this.preferences?.pdf.cropMargins;
     this.preferences = preferences;
+    if (renderingGeometryChanged) this.cropBoxes.clear();
     this.applySurface();
     if (this.document) {
       await this.queueRender(this.currentGeneration(), context.signal, true);
@@ -365,6 +393,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
   async dispose() {
     if (!this.markDisposed()) return;
     await this.cleanupEngine();
+    this.container.removeEventListener('scroll', this.handleContinuousScroll);
     this.viewListeners.clear();
   }
 
@@ -406,13 +435,54 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     }
   }
 
+  private async renderContinuousWindow(generation: number, signal: AbortSignal, force = false) {
+    this.assertActive(generation, signal);
+    const epoch = ++this.renderEpoch;
+    this.cancelPendingRenders();
+    const windowPages = pdfContinuousWindowPages(this.pageNumber, this.pageCount);
+    const keep = new Set(windowPages);
+    Array.from(this.renderedPages.keys()).forEach((page) => {
+      if (!keep.has(page)) this.releasePage(page);
+    });
+    const anchorElement = this.container.querySelector<HTMLElement>(`[data-page-number="${this.pageNumber}"]`);
+    const anchorOffset = anchorElement ? anchorElement.offsetTop - this.container.scrollTop : 0;
+    const candidates = await Promise.all(windowPages.map((page) => this.renderPage(page, generation, epoch, signal, force)));
+    candidates.forEach((candidate, index) => this.commitPage(windowPages[index] ?? this.pageNumber, candidate));
+    this.assertRenderActive(generation, epoch, signal);
+
+    const document = documentOwner(this.container);
+    const fallbackHeight = candidates.find((candidate) => candidate.entry.wrapper)?.entry.wrapper.offsetHeight
+      || Math.max(320, Math.round(this.container.clientHeight * 0.85));
+    const elements = Array.from({ length: this.pageCount }, (_, index) => {
+      const page = index + 1;
+      const rendered = this.renderedPages.get(page);
+      if (rendered) {
+        rendered.wrapper.style.marginBottom = '24px';
+        return rendered.wrapper;
+      }
+      const placeholder = document.createElement('div');
+      placeholder.dataset.pageNumber = String(page);
+      placeholder.dataset.pdfPlaceholder = 'true';
+      Object.assign(placeholder.style, {
+        height: `${fallbackHeight}px`,
+        margin: '0 auto 24px',
+        width: 'min(92%, 900px)'
+      });
+      return placeholder;
+    });
+    this.container.replaceChildren(...elements);
+    const restoredAnchor = this.container.querySelector<HTMLElement>(`[data-page-number="${this.pageNumber}"]`);
+    if (restoredAnchor) this.container.scrollTop = Math.max(0, restoredAnchor.offsetTop - anchorOffset);
+  }
+
   private queueRender(generation: number, signal: AbortSignal, force = false) {
     const run = async () => {
       this.assertActive(generation, signal);
       const abortRender = () => this.cancelRenders();
       signal.addEventListener('abort', abortRender, { once: true });
       try {
-        await this.renderCurrentAndNeighbor(generation, signal, force);
+      if (this.preferences?.pdf.flow === 'continuous') await this.renderContinuousWindow(generation, signal, force);
+      else await this.renderCurrentAndNeighbor(generation, signal, force);
       } finally {
         signal.removeEventListener('abort', abortRender);
       }
@@ -439,7 +509,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     if (!document || !pdfjs || !preferences) throw new Error('PDF is not ready');
     const page = await document.getPage(pageNumber);
     this.assertRenderActive(generation, epoch, signal);
-    const baseViewport = page.getViewport({ scale: 1 });
+    const baseViewport = page.getViewport({ scale: 1, rotation: preferences.pdf.rotation });
     const containerWidth = Math.max(1, this.container.clientWidth || window.innerWidth || baseViewport.width);
     const containerHeight = Math.max(1, this.container.clientHeight || window.innerHeight || baseViewport.height);
     const scale = pdfPageScale({
@@ -450,7 +520,10 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       fit: preferences.pdf.fit,
       zoom: preferences.pdf.zoom
     });
-    const viewport = page.getViewport({ scale });
+    const viewport = page.getViewport({ scale, rotation: preferences.pdf.rotation });
+    const cropBox = preferences.pdf.cropMargins === 'auto'
+      ? await this.resolveCropBox(pageNumber, page, generation, epoch, signal)
+      : null;
     const budget = computePdfRenderBudget({
       cssWidth: viewport.width,
       cssHeight: viewport.height,
@@ -461,10 +534,11 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     wrapper.dataset.pageNumber = String(pageNumber);
     Object.assign(wrapper.style, {
       background: '#ffffff',
-      height: `${viewport.height}px`,
+      height: `${viewport.height * (cropBox ? cropBox.bottom - cropBox.top : 1)}px`,
       margin: '0 auto',
       position: 'relative',
-      width: `${viewport.width}px`
+      overflow: 'hidden',
+      width: `${viewport.width * (cropBox ? cropBox.right - cropBox.left : 1)}px`
     });
     const style = documentOwner(this.container).createElement('style');
     style.textContent = pdfTextLayerStyles;
@@ -474,11 +548,13 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     canvas.style.display = 'block';
     canvas.style.height = `${viewport.height}px`;
     canvas.style.width = `${viewport.width}px`;
+    if (cropBox) canvas.style.transform = `translate(${-cropBox.left * viewport.width}px, ${-cropBox.top * viewport.height}px)`;
     canvas.setAttribute('aria-label', `PDF 第 ${pageNumber} 页`);
     const textLayerElement = documentOwner(this.container).createElement('div');
     textLayerElement.className = 'textLayer';
     textLayerElement.setAttribute('aria-label', `PDF 第 ${pageNumber} 页文本`);
     textLayerElement.style.setProperty('--total-scale-factor', String(scale));
+    if (cropBox) textLayerElement.style.transform = `translate(${-cropBox.left * viewport.width}px, ${-cropBox.top * viewport.height}px)`;
     wrapper.append(style, canvas, textLayerElement);
 
     const renderTask = page.render({
@@ -516,6 +592,44 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       this.pendingPages.delete(entry);
       this.releaseEntry(entry);
       throw reason;
+    }
+  }
+
+  private async resolveCropBox(
+    pageNumber: number,
+    page: PDFPageProxy,
+    generation: number,
+    epoch: number,
+    signal: AbortSignal
+  ): Promise<PdfCropBox | null> {
+    if (this.cropBoxes.has(pageNumber)) return this.cropBoxes.get(pageNumber) ?? null;
+    const pdfjs = this.pdfjs;
+    if (!pdfjs) return null;
+    const viewport = page.getViewport({ scale: 0.2, rotation: this.preferences?.pdf.rotation ?? 0 });
+    const canvas = documentOwner(this.container).createElement('canvas');
+    canvas.width = Math.max(1, Math.round(viewport.width));
+    canvas.height = Math.max(1, Math.round(viewport.height));
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) return null;
+    const task = page.render({ canvas, viewport, annotationMode: pdfjs.AnnotationMode.DISABLE, background: '#ffffff' });
+    this.pendingCropTasks.add(task);
+    const cancel = () => task.cancel();
+    signal.addEventListener('abort', cancel, { once: true });
+    try {
+      await task.promise;
+      this.assertRenderActive(generation, epoch, signal);
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      const crop = detectPdfCropBox(pixels, canvas.width, canvas.height);
+      this.cropBoxes.set(pageNumber, crop);
+      return crop;
+    } catch (reason) {
+      if (this.isRenderingCancelled(reason) || isAbortError(reason) || reason instanceof StaleReaderOperationError) throw reason;
+      this.cropBoxes.set(pageNumber, null);
+      return null;
+    } finally {
+      this.pendingCropTasks.delete(task);
+      signal.removeEventListener('abort', cancel);
+      canvas.remove();
     }
   }
 
@@ -603,6 +717,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       entry.renderTask.cancel();
       entry.textLayer?.cancel();
     });
+    this.pendingCropTasks.forEach((task) => task.cancel());
   }
 
   private releasePage(pageNumber: number) {
@@ -669,13 +784,17 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       height: '100%',
       justifyContent: '',
       overflow: 'auto',
-      touchAction: this.preferences.pdf.zoom > 1 ? 'pan-x pan-y' : 'none',
+      touchAction: this.preferences.pdf.flow === 'continuous' || this.preferences.pdf.zoom > 1 ? 'pan-x pan-y' : 'none',
       width: '100%'
     });
   }
 
   private async cleanupEngine() {
     this.renderEpoch += 1;
+    if (this.scrollFrame !== null) cancelAnimationFrame(this.scrollFrame);
+    this.scrollFrame = null;
+    this.continuousRenderController?.abort();
+    this.continuousRenderController = null;
     if (this.resizeFrame !== null) cancelAnimationFrame(this.resizeFrame);
     this.resizeFrame = null;
     this.resizeController?.abort();
@@ -695,6 +814,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     this.preferences = null;
     this.pageNumber = 1;
     this.pageCount = 0;
+    this.cropBoxes.clear();
     this.status = 'idle';
     this.error = undefined;
     try {

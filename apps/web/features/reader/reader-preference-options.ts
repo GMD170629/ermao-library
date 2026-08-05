@@ -1,6 +1,7 @@
 export const READER_THEME_OPTIONS = [
   { value: 'day', label: '白天' },
   { value: 'warm', label: '暖色' },
+  { value: 'green', label: '护眼绿' },
   { value: 'night', label: '夜间' },
   { value: 'black', label: '纯黑' }
 ] as const;
@@ -37,8 +38,55 @@ export const READER_FLOW_OPTIONS = [
 ] as const;
 
 export const READER_SPREAD_MODE_OPTIONS = [
+  { value: 'auto', label: '自动' },
   { value: 'single', label: '单页' },
   { value: 'double', label: '双页' }
+] as const;
+
+export const READER_FONT_WEIGHT_OPTIONS = [
+  { value: '400', label: '常规' },
+  { value: '500', label: '中等' },
+  { value: '700', label: '粗体' }
+] as const;
+
+export const READER_LETTER_SPACING_OPTIONS = [
+  { value: '-0.02', label: '紧凑' },
+  { value: '0', label: '标准' },
+  { value: '0.04', label: '舒展' },
+  { value: '0.08', label: '宽松' }
+] as const;
+
+export const READER_PAGE_MARGIN_OPTIONS = [
+  { value: 'narrow', label: '窄' },
+  { value: 'standard', label: '标准' },
+  { value: 'wide', label: '宽' }
+] as const;
+
+export const READER_PROGRESS_STYLE_OPTIONS = [
+  { value: 'auto', label: '自动' },
+  { value: 'percent', label: '百分比' },
+  { value: 'position', label: '当前位置' },
+  { value: 'remaining', label: '剩余量' },
+  { value: 'hidden', label: '隐藏' }
+] as const;
+
+export const READER_COMIC_FLOW_OPTIONS = [
+  { value: 'paged', label: '分页' },
+  { value: 'vertical', label: '竖向连续' }
+] as const;
+
+export const READER_PAGE_GAP_OPTIONS = [0, 8, 16, 24].map((value) => ({ value: String(value), label: value === 0 ? '无' : `${value}px` }));
+
+export const READER_PDF_FLOW_OPTIONS = [
+  { value: 'paged', label: '分页' },
+  { value: 'continuous', label: '连续滚动' }
+] as const;
+
+export const READER_PDF_ROTATION_OPTIONS = [0, 90, 180, 270].map((value) => ({ value: String(value), label: `${value}°` }));
+
+export const READER_PDF_CROP_OPTIONS = [
+  { value: 'off', label: '关闭' },
+  { value: 'auto', label: '自动' }
 ] as const;
 
 export const READER_PAGE_TURN_ANIMATION_OPTIONS = [

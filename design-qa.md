@@ -134,3 +134,70 @@ The bottom 250 px comparison was used because the fidelity-critical controls are
 - P3: a future pass could tune individual icon optical sizes by one pixel after testing on a physical iPhone and Android device.
 
 final result: passed
+
+---
+
+# Reader unified control panel design QA
+
+## Comparison target
+
+- Source visual truth:
+  - `C:/Users/gamer/AppData/Local/Temp/codex-clipboard-84010533-73f7-4b97-989d-a4b9a9eb143d.png` (collapsed desktop controller, 2187 × 1980 px).
+  - `C:/Users/gamer/AppData/Local/Temp/codex-clipboard-dbfa84db-5635-4d24-8f62-6eca3e6e8081.png` (previous expanded directory state, 2320 × 2043 px).
+  - The requested interaction brief is authoritative where it intentionally differs from the previous expanded-state screenshot: the collapsed controller must remain the same control instance and expand upward instead of being replaced by a second dock.
+- Implementation evidence:
+  - `/home/liumianti/shuku-starship/design-qa-implementation-desktop.png` (1440 × 900 px; CSS viewport 1440 × 900; device scale factor 1).
+  - `/home/liumianti/shuku-starship/design-qa-implementation-mobile.png` (390 × 844 px; CSS viewport 390 × 844; device scale factor 1).
+- State: EPUB directory open, warm theme, reader controller visible.
+- Density normalization: source screenshots and implementation captures use different viewport sizes and fixture content, so the comparison is interaction- and component-focused rather than pixel-overlay based. Control proportions, anchoring, persistent identity, panel expansion, and responsive structure were compared at their native densities.
+
+## Full-view comparison evidence
+
+- Desktop: the expanded directory remains anchored to the same rounded bottom controller surface. The original desktop dock—including directory, notes, previous/next, progress slider, appearance, and settings—remains visible at the bottom while the directory content grows above it.
+- Mobile: the mobile-specific quick console remains intact (progress, scale controls, theme, reading mode, more, and the four-item navigation dock), with the directory workspace expanding above it inside the same rounded surface.
+- The panel stays inside viewport and safe-area bounds at both tested sizes.
+
+## Focused region comparison evidence
+
+- The bottom control region was inspected separately because persistent control identity is the core requirement. The implementation has one `[data-reader-console-controls="true"]` element before and after expansion, and its DOM identity is preserved while switching among directory, notes, appearance, and settings.
+- The desktop expanded state intentionally differs from the old screenshot by retaining the complete progress/navigation dock rather than rendering the old second, reduced four-button dock.
+
+## Required fidelity surfaces
+
+- Fonts and typography: existing reader typography, hierarchy, weights, and truncation are preserved; no new font or copy treatment was introduced.
+- Spacing and layout rhythm: the workspace expands vertically above a fixed-height device-specific controller. Existing radii, borders, shadows, padding, safe-area spacing, and desktop maximum width are preserved.
+- Colors and visual tokens: existing warm/dark reader theme surfaces and amber selected states are reused without new color literals for the panel structure.
+- Image quality and assets: the control panel contains no raster content; existing Lucide icon assets remain sharp and consistent at both breakpoints.
+- Copy and content: no new user-visible copy was added. Existing `zh-CN` and `en-US` catalog coverage remains complete.
+
+## Findings
+
+- No actionable P0, P1, or P2 visual or interaction mismatch remains for the requested unified-controller behavior.
+
+## Open questions
+
+- None. The mobile implementation is intentionally its own responsive control layout, not a scaled desktop dock.
+
+## Comparison history
+
+- Initial visual review found no blocking layout issue after the structural change. The requested mismatch—the second control definition in the expanded state—was removed before capture.
+- Interaction regression then found two P2 issues adjacent to the unified surface: the focus trap included CSS-hidden controls from the other responsive layout, and the full-width console wrapper intercepted clicks outside the visible panel. The focusable filter now requires visible client geometry, and pointer events are owned by the visible surface so the dismiss layer remains reachable.
+- Post-fix evidence and focused tests show one persistent control region at desktop and mobile sizes, correct keyboard focus wrapping within the visible device layout, working outside-click dismissal, and the content workspace expanding above the same controls.
+- Transition follow-up: the controller is now absolutely anchored to the bottom of the persistent surface while the workspace occupies only the area above it. The controller has no enter animation, and the workspace can shrink to zero while the surface expands or collapses. Thirty animation-frame samples now verify that desktop and mobile controller top, bottom, height, and opacity remain fixed throughout both transitions, eliminating both the blank-controller frame and positional jitter.
+- Mobile expanded-state follow-up source: `C:/Users/gamer/AppData/Local/Temp/codex-clipboard-3d8dea63-9463-40df-b44d-4f7ed61260b6.png` (848 x 1114 px). Implementation: `design-qa-implementation-mobile-toc.png` (390 x 844 px at a 390 x 844 CSS viewport and device scale factor 1). Combined evidence: `design-qa-comparison-mobile-toc.png`; the source was proportionally normalized to 623 x 844 px and the implementation remained at native size.
+- The combined full-view and focused controller comparison confirms that the mobile progress and quick-setting region is removed in the expanded directory state, the directory workspace fills the released area, and the persistent four-item navigation stays fixed at the bottom. Typography, spacing rhythm, warm color tokens, Lucide icon quality, and existing localized copy remain consistent. No new raster assets or user-visible text were introduced.
+
+## Implementation checklist
+
+- [x] Keep one controller surface and one control definition per rendered breakpoint.
+- [x] Expand directory, notes, appearance, and settings inside that surface.
+- [x] Preserve the complete desktop progress/navigation dock while expanded.
+- [x] Preserve the complete mobile quick console while expanded.
+- [x] Verify safe-area bounds, panel switching, focus behavior, and persistent DOM identity.
+- [x] Verify type checking, lint, i18n catalogs, and focused Chromium interaction tests.
+
+## Follow-up polish
+
+- No P3 follow-up is required for this change.
+
+final result: passed

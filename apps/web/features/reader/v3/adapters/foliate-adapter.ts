@@ -44,6 +44,9 @@ type FoliateLoadDetail = {
 };
 
 type FoliateRenderer = HTMLElement & {
+  readonly start?: number;
+  readonly end?: number;
+  readonly viewSize?: number;
   setStyles?: (css: string) => void;
   goTo?: (target: unknown) => Promise<void>;
 };
@@ -78,6 +81,25 @@ export type FoliateAdapterOptions = {
 
 function clamp(value: number, minimum = 0, maximum = 1) {
   return Math.max(minimum, Math.min(maximum, value));
+}
+
+export function continuousScrollBoundaryDirection({
+  delta,
+  start,
+  end,
+  extent,
+  threshold = 2
+}: {
+  delta: number;
+  start: number;
+  end: number;
+  extent: number;
+  threshold?: number;
+}): -1 | 1 | null {
+  if (![delta, start, end, extent, threshold].every(Number.isFinite) || delta === 0) return null;
+  if (delta > 0 && extent - end <= Math.max(0, threshold)) return 1;
+  if (delta < 0 && start <= Math.max(0, threshold)) return -1;
+  return null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -314,6 +336,9 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
   private navigationFingerprint: string | undefined;
   private viewportLayout: EpubViewportLayout = resolveEpubViewportLayout(Number.POSITIVE_INFINITY);
   private viewportObserver: ResizeObserver | null = null;
+  private continuousSectionTransition: Promise<void> | null = null;
+  private wheelBoundaryLocked = false;
+  private wheelBoundaryReleaseTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: FoliateAdapterOptions) {
     super();
@@ -556,6 +581,23 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
       const touch = event.changedTouches[0];
       if (touch && touchStart && Math.hypot(touch.clientX - touchStart.x, touch.clientY - touchStart.y) > 12) suppressClick = true;
     }, { passive: true, signal });
+    document.addEventListener('touchend', (event) => {
+      const touch = event.changedTouches[0];
+      const delta = touch && touchStart ? touchStart.y - touch.clientY : 0;
+      touchStart = null;
+      if (Math.abs(delta) >= 24) this.requestContinuousSectionNavigation(delta);
+    }, { passive: true, signal });
+    document.addEventListener('wheel', (event) => {
+      const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+      if (!delta) return;
+      if (this.wheelBoundaryReleaseTimer !== null) clearTimeout(this.wheelBoundaryReleaseTimer);
+      this.wheelBoundaryReleaseTimer = setTimeout(() => {
+        this.wheelBoundaryLocked = false;
+        this.wheelBoundaryReleaseTimer = null;
+      }, 180);
+      if (this.wheelBoundaryLocked) return;
+      if (this.requestContinuousSectionNavigation(delta)) this.wheelBoundaryLocked = true;
+    }, { passive: true, signal });
     document.addEventListener('keydown', (event) => {
       if (!this.onInputIntent || isReaderControlTarget(event.target)) return;
       const intent = commandForInput(readerKeyIntent(event, this.readingDirection, {
@@ -597,6 +639,32 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     }, { signal });
   }
 
+  private requestContinuousSectionNavigation(delta: number) {
+    if (this.preferences?.epub.flow !== 'scrolled' || this.continuousSectionTransition) return false;
+    const renderer = this.view?.renderer;
+    const view = this.view;
+    if (!renderer || !view) return false;
+    const direction = continuousScrollBoundaryDirection({
+      delta,
+      start: renderer.start ?? Number.NaN,
+      end: renderer.end ?? Number.NaN,
+      extent: renderer.viewSize ?? Number.NaN
+    });
+    if (!direction) return false;
+    const transition = (direction > 0 ? view.next() : view.prev())
+      .catch((reason: unknown) => {
+        console.warn('reader.continuous-section-navigation.failed', {
+          direction: direction > 0 ? 'next' : 'previous',
+          reason: reason instanceof Error ? reason.message : String(reason)
+        });
+      })
+      .finally(() => {
+        if (this.continuousSectionTransition === transition) this.continuousSectionTransition = null;
+      });
+    this.continuousSectionTransition = transition;
+    return true;
+  }
+
   private applyRendererPreferences(preferences: ReaderPreferences) {
     const renderer = this.view?.renderer;
     if (!renderer) return;
@@ -604,7 +672,10 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     renderer.setAttribute('gap', this.viewportLayout.paginatorGap);
     renderer.style.paddingBottom = this.viewportLayout.bottomInset;
     renderer.setAttribute('max-inline-size', `${Math.round(clamp(preferences.epub.pageWidth, 600, 1350))}px`);
-    renderer.setAttribute('max-column-count', preferences.epub.spreadMode === 'double' ? '2' : '1');
+    const columnCount = preferences.epub.spreadMode === 'auto'
+      ? this.viewportLayout.automaticColumnCount
+      : preferences.epub.spreadMode === 'double' ? 2 : 1;
+    renderer.setAttribute('max-column-count', String(columnCount));
     if (preferences.epub.pageTurnAnimation === 'slide') renderer.setAttribute('animated', '');
     else renderer.removeAttribute('animated');
     renderer.setStyles?.(createEpubThemeSnapshot(
@@ -625,7 +696,10 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     this.viewportObserver = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect.width ?? this.container.getBoundingClientRect().width;
       const nextLayout = resolveEpubViewportLayout(width);
-      if (nextLayout.compact === this.viewportLayout.compact) return;
+      if (
+        nextLayout.compact === this.viewportLayout.compact
+        && nextLayout.automaticColumnCount === this.viewportLayout.automaticColumnCount
+      ) return;
       this.viewportLayout = nextLayout;
       if (this.preferences) this.applyRendererPreferences(this.preferences);
     });
@@ -771,6 +845,10 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     this.lifecycleController = null;
     this.viewportObserver?.disconnect();
     this.viewportObserver = null;
+    if (this.wheelBoundaryReleaseTimer !== null) clearTimeout(this.wheelBoundaryReleaseTimer);
+    this.wheelBoundaryReleaseTimer = null;
+    this.wheelBoundaryLocked = false;
+    this.continuousSectionTransition = null;
     this.bridgedDocuments.forEach((controller) => controller.abort());
     this.bridgedDocuments.clear();
     this.tocSnapshots = new WeakMap();

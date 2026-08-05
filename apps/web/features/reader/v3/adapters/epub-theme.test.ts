@@ -41,22 +41,44 @@ test('EPUB theme uses the outer reader viewport profile instead of an iframe med
   assert.doesNotMatch(paginated, /@media \(max-width: 640px\)/);
   assert.deepEqual(compactLayout, {
     compact: true,
+    automaticColumnCount: 1,
     inlinePadding: '1em',
     paginatorGap: '0%',
     bottomInset: 'calc(var(--shuku-safe-area-bottom) + 10px)'
   });
   assert.deepEqual(regularLayout, {
     compact: false,
+    automaticColumnCount: 1,
     inlinePadding: '24px',
     paginatorGap: '7%',
     bottomInset: '0px'
   });
 });
 
+test('EPUB theme applies V4 font weight, letter spacing, and responsive page margins', () => {
+  const preferences = {
+    ...DEFAULT_READER_PREFERENCES,
+    epub: {
+      ...DEFAULT_READER_PREFERENCES.epub,
+      fontWeight: 700 as const,
+      letterSpacing: 0.08 as const,
+      pageMargin: 'wide' as const
+    }
+  };
+  const compact = createEpubThemeSnapshot(preferences, undefined, resolveEpubViewportLayout(390));
+  const desktop = createEpubThemeSnapshot(preferences, undefined, resolveEpubViewportLayout(1200));
+
+  assert.match(compact, /--shuku-reader-font-weight: 700/);
+  assert.match(compact, /--shuku-reader-letter-spacing: 0.08em/);
+  assert.match(compact, /--shuku-reader-padding-inline: 1.5em/);
+  assert.match(desktop, /--shuku-reader-padding-inline: 40px/);
+  assert.equal(resolveEpubViewportLayout(1200).automaticColumnCount, 2);
+});
+
 test('EPUB theme repaints the Foliate paginator background on the current page', () => {
   const snapshot = createEpubThemeSnapshot({
     ...DEFAULT_READER_PREFERENCES,
-    appearance: { theme: 'black' }
+    appearance: { ...DEFAULT_READER_PREFERENCES.appearance, theme: 'black' }
   });
 
   assert.match(snapshot, /--theme-bg-color: #000000/);

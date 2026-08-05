@@ -75,7 +75,7 @@ test('book files are isolated by content fingerprint and cleared with private re
   assert.equal(await storage.getBookFile(nextIdentity), null);
 });
 
-test('IndexedDB preference reads lazily rewrite V2 and malformed snapshots to one complete V3 snapshot', async () => {
+test('IndexedDB preference reads lazily rewrite V2 and malformed snapshots to one complete V4 snapshot', async () => {
   const legacy = {
     key: 'user-1::work-1',
     userId: 'user-1',
@@ -99,9 +99,9 @@ test('IndexedDB preference reads lazily rewrite V2 and malformed snapshots to on
   );
 
   assert.ok(migrated);
-  assert.equal(migrated.schemaVersion, 3);
+  assert.equal(migrated.schemaVersion, 4);
   assert.equal(migrated.updatedAt, 123);
-  assert.equal(migrated.preferences.schemaVersion, 3);
+  assert.equal(migrated.preferences.schemaVersion, 4);
   assert.equal(migrated.preferences.appearance.theme, 'night');
   assert.equal(migrated.preferences.epub.fontSize, 22);
   assert.equal(migrated.preferences.epub.spreadMode, 'single');

@@ -20,6 +20,7 @@ export type ComicTrackView = {
   mode: 'single' | 'double';
   imageFit: ComicImageFit;
   zoom: number;
+  pageGap?: 0 | 8 | 16 | 24;
   reducedMotion: boolean;
   error?: string;
 };
@@ -65,7 +66,8 @@ function spreadKey(spread: ComicTrackSpread | null, view: ComicTrackView, role: 
     fit: view.imageFit,
     mode: view.mode,
     pages: spread.pages.map((page) => [page.pageIndex, page.url, page.loading, page.error]),
-    zoom: view.zoom
+    zoom: view.zoom,
+    pageGap: view.pageGap ?? 0
   });
 }
 
@@ -260,7 +262,7 @@ export class ComicSpreadTrackDriver implements PagedTrackDriver {
   }
 
   private mount() {
-    if (this.viewport.parentElement !== this.container) this.container.replaceChildren(this.viewport);
+    if (this.viewport.parentElement !== this.container) this.container.append(this.viewport);
   }
 
   private createSlot(role: ComicTrackSlot) {
@@ -327,7 +329,7 @@ export class ComicSpreadTrackDriver implements PagedTrackDriver {
       alignItems: 'center',
       boxSizing: 'border-box',
       display: 'flex',
-      gap: '0',
+      gap: `${view.pageGap ?? 0}px`,
       height: `${view.zoom * 100}%`,
       justifyContent: 'center',
       margin: view.zoom > 1 ? 'auto' : '0',
