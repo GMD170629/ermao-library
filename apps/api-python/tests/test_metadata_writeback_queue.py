@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from sqlalchemy import select
@@ -210,3 +211,62 @@ def test_writeback_can_target_one_volume_in_media_version(
     assert process_next_metadata_writeback(db_session, test_settings) is True
     assert first_source.with_suffix(".opf").exists()
     assert not second_source.with_suffix(".opf").exists()
+
+
+def test_writeback_prefers_the_target_volumes_cover_over_the_work_cover(
+    db_session, test_settings, tmp_path: Path
+) -> None:
+    source = tmp_path / "book.txt"
+    source.write_text("正文")
+    _library_source(db_session, source)
+    storage_root = test_settings.resolved_storage_root
+    storage_root.mkdir(parents=True, exist_ok=True)
+    work_cover = storage_root / "work-cover.jpg"
+    volume_cover = storage_root / "volume-cover.jpg"
+    work_cover.write_bytes(b"work cover")
+    volume_cover.write_bytes(b"volume cover")
+    work = db_session.get(LibraryWork, "work-1")
+    volume = db_session.get(LibraryVolume, "volume-1")
+    assert work is not None
+    assert volume is not None
+    work.cover_path = str(work_cover)
+    volume.cover_path = str(volume_cover)
+
+    enqueue_metadata_writeback(
+        db_session,
+        work_id="work-1",
+        media_version_id="media-1",
+        source="MANUAL",
+    )
+    target = db_session.scalar(select(MetadataWritebackTarget))
+
+    assert target is not None
+    payload = json.loads(target.payload_json)
+    assert payload["coverPath"] == str(volume_cover)
+
+
+def test_writeback_falls_back_to_the_work_cover_when_the_volume_has_none(
+    db_session, test_settings, tmp_path: Path
+) -> None:
+    source = tmp_path / "book.txt"
+    source.write_text("正文")
+    _library_source(db_session, source)
+    storage_root = test_settings.resolved_storage_root
+    storage_root.mkdir(parents=True, exist_ok=True)
+    work_cover = storage_root / "work-cover.jpg"
+    work_cover.write_bytes(b"work cover")
+    work = db_session.get(LibraryWork, "work-1")
+    assert work is not None
+    work.cover_path = str(work_cover)
+
+    enqueue_metadata_writeback(
+        db_session,
+        work_id="work-1",
+        media_version_id="media-1",
+        source="MANUAL",
+    )
+    target = db_session.scalar(select(MetadataWritebackTarget))
+
+    assert target is not None
+    payload = json.loads(target.payload_json)
+    assert payload["coverPath"] == str(work_cover)

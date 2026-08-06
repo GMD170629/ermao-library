@@ -174,7 +174,7 @@ def enqueue_writeback(
                 else None,
                 "identifier": volume.identifier,
                 "isbn": volume.isbn,
-                "coverPath": work.cover_path or volume.cover_path,
+                "coverPath": volume.cover_path or work.cover_path,
                 "sourceSize": target_stat.st_size if target_stat else None,
                 "sourceMtimeMs": int(target_stat.st_mtime * 1000)
                 if target_stat
