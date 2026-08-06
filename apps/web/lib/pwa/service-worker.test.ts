@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const source = readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8');
+const packageSource = readFileSync(new URL('../../package.json', import.meta.url), 'utf8');
+const packageVersion = /"version"\s*:\s*"([^"]+)"/u.exec(packageSource)?.[1];
 
 test('service worker waits for explicit production updates but releases stale localhost workers', () => {
   const installHandler = source.slice(source.indexOf("self.addEventListener('install'"), source.indexOf("self.addEventListener('activate'"));
@@ -29,10 +31,11 @@ test('service worker scopes shell and API handling to the configured application
 });
 
 test('service worker caches the shared web shell without a dedicated mobile entry', () => {
+  assert.ok(packageVersion);
   assert.match(source, /'\/login'/);
   assert.match(source, /'\/setup'/);
   assert.doesNotMatch(source, /'\/mobile/);
-  assert.match(source, /const FRONTEND_RESOURCE_VERSION = '0\.5\.0'/);
+  assert.ok(source.includes(`const FRONTEND_RESOURCE_VERSION = '${packageVersion}';`));
   assert.match(source, /const VERSION = `shuku-pwa-v\$\{FRONTEND_RESOURCE_VERSION\}`/);
 });
 
