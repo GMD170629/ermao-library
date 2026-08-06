@@ -30,6 +30,7 @@ from app.bootstrap.library import (
     library_storage,
     library_works,
     volume_structure_commands,
+    work_merge_gateway,
 )
 from app.bootstrap.library import (
     list_works as list_library_works,
@@ -75,6 +76,15 @@ from app.modules.library.application.volume_commands import (
     split_volume_resource,
     update_volume_resource,
 )
+from app.modules.library.application.work_merge import (
+    CreateMergedWork,
+    MergeCommand,
+    MergeMetadata,
+    PreviewWorkMerge,
+    WorkMergeError,
+    WorkMergeInProgressError,
+    WorkMergeNotFoundError,
+)
 from app.modules.library.presentation.schemas import (
     BatchSetMediaKindRequest,
     BatchTransferVolumesRequest,
@@ -85,6 +95,7 @@ from app.modules.library.presentation.schemas import (
     ContinueReadingResponse,
     ConversionResponse,
     CoverMutationResponse,
+    CreateWorkMergeRequest,
     DashboardSummaryResponse,
     DeleteCategoryResponse,
     DeletedWorkResponse,
@@ -119,6 +130,9 @@ from app.modules.library.presentation.schemas import (
     UpdateVolumeRequest,
     WorkDetailResponse,
     WorkDetailSummaryResponse,
+    WorkMergePreviewResponse,
+    WorkMergeResponse,
+    WorkMergeSelectionRequest,
     WorkReadingUnitsResponse,
     WorkResponse,
     WorksResponse,
@@ -455,9 +469,7 @@ def dashboard_continue_reading(
                 "workId": work_id,
                 "title": progress.get("title") or "未命名作品",
                 "author": progress.get("author") or "未知作者",
-                "coverUrl": _cover_url(
-                    "works", work_id, work_summary, size="medium"
-                ),
+                "coverUrl": _cover_url("works", work_id, work_summary, size="medium"),
                 "mediaKind": progress.get("mediaKind"),
                 "volumeFormat": progress.get("volumeFormat"),
                 "readerType": progress.get("readerType"),
@@ -884,13 +896,9 @@ def list_works(
         start = (page - 1) * result_page_size
         page_items = work_views[start : start + result_page_size]
         book_views = (
-            _bookshelf_item_views(
-                db, [work for work, _item_view in page_items]
-            )
+            _bookshelf_item_views(db, [work for work, _item_view in page_items])
             if bookshelf_view
-            else _book_search_item_views(
-                db, [work for work, _item_view in page_items]
-            )
+            else _book_search_item_views(db, [work for work, _item_view in page_items])
             if search_view
             else _management_work_views(
                 db, [work for work, _item_view in page_items], user.id
@@ -1225,6 +1233,112 @@ def _bulk_work_ids(raw_ids: Any, *, maximum: int = 500) -> list[str]:
     return list(
         dict.fromkeys(str(item).strip() for item in raw_ids if str(item).strip())
     )[:maximum]
+
+
+def _require_merge_scope(db: Session, user: User, work_ids: list[str]) -> None:
+    if not can_manage_system(user):
+        _raise_library_error(
+            "需要系统管理权限", status_code=403, code="SYSTEM_MANAGER_REQUIRED"
+        )
+    if any(not can_access_work(db, user, work_id) for work_id in work_ids):
+        _raise_library_error("作品不存在", status_code=404, code="WORK_NOT_FOUND")
+
+
+def _raise_work_merge_error(error: WorkMergeError) -> Never:
+    if isinstance(error, WorkMergeNotFoundError):
+        _raise_library_error(str(error), status_code=404, code=error.code)
+    if isinstance(error, WorkMergeInProgressError):
+        _raise_library_error(str(error), status_code=409, code=error.code)
+    _raise_library_error(str(error), status_code=400, code=error.code)
+
+
+@router.post("/works/merge/preview")
+def preview_work_merge(
+    payload: WorkMergeSelectionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    WorkMergePreviewResponse,
+    ErrorResponses(
+        LibraryBadRequestError,
+        LibraryForbiddenError,
+        LibraryNotFoundError,
+        LibraryConflictError,
+    ),
+]:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    _require_merge_scope(db, user, payload.work_ids)
+    try:
+        preview = PreviewWorkMerge(work_merge_gateway(db)).execute(payload.work_ids)
+    except WorkMergeError as error:
+        _raise_work_merge_error(error)
+    return WorkMergePreviewResponse(
+        data={
+            "works": list(preview.works),
+            "mediaGroups": list(preview.media_groups),
+            "suggestedMetadata": {
+                "title": preview.suggested_metadata.title,
+                "author": preview.suggested_metadata.author,
+                "description": preview.suggested_metadata.description,
+                "seriesName": preview.suggested_metadata.series_name,
+                "seriesIndex": preview.suggested_metadata.series_index,
+                "tags": list(preview.suggested_metadata.tags),
+            },
+            "defaultCoverVolumeId": preview.default_cover_volume_id,
+            "writeMetadataToFiles": preview.write_metadata_to_files,
+        }
+    )
+
+
+@router.post("/works/merge")
+def create_work_merge(
+    payload: CreateWorkMergeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    WorkMergeResponse,
+    ErrorResponses(
+        LibraryBadRequestError,
+        LibraryForbiddenError,
+        LibraryNotFoundError,
+        LibraryConflictError,
+    ),
+]:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    _require_merge_scope(db, user, payload.work_ids)
+    try:
+        result = CreateMergedWork(work_merge_gateway(db)).execute(
+            MergeCommand(
+                work_ids=tuple(payload.work_ids),
+                metadata=MergeMetadata(
+                    title=payload.metadata.title,
+                    author=payload.metadata.author,
+                    description=payload.metadata.description,
+                    series_name=payload.metadata.series_name,
+                    series_index=payload.metadata.series_index,
+                    tags=tuple(payload.metadata.tags),
+                ),
+                cover_volume_id=payload.cover_volume_id,
+                actor_id=user.id,
+            )
+        )
+    except WorkMergeError as error:
+        _raise_work_merge_error(error)
+    return WorkMergeResponse(
+        data={
+            "workId": result.work_id,
+            "sourceWorkIds": list(result.source_work_ids),
+            "mediaVersions": list(result.media_versions),
+            "metadataWritebacks": list(result.metadata_writebacks),
+            "operation": result.operation,
+        }
+    )
 
 
 def _first_volume(db: Session, work_id: str) -> dict[str, Any] | None:
@@ -3218,9 +3332,7 @@ async def apply_work_metadata(
         )
     nested_volume_metadata = candidate.get("volumeMetadata")
     volume_metadata = (
-        dict(nested_volume_metadata)
-        if isinstance(nested_volume_metadata, dict)
-        else {}
+        dict(nested_volume_metadata) if isinstance(nested_volume_metadata, dict) else {}
     )
     for volume_field in volume_fields:
         if volume_metadata.get(volume_field) is None:

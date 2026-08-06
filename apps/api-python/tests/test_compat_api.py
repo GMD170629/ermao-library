@@ -29,7 +29,12 @@ from app.db.base import Base
 from app.db.runner import apply_schema
 from app.models.auth import User
 from app.models.import_pipeline import BookConversionTask, ImportTask, ImportWorkItem
-from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
+from app.models.library import (
+    LibraryFile,
+    LibraryMediaVersion,
+    LibraryVolume,
+    LibraryWork,
+)
 from app.modules.imports.application.dto import ImportOptions
 from app.modules.imports.infrastructure.task_mapper import import_task_dto_from_row
 from app.modules.media.infrastructure import http_streaming as media_streaming
@@ -2707,6 +2712,126 @@ def test_delete_import_task_only_deletes_its_linked_volume(
         ).scalar()
         == 0
     )
+
+
+def test_delete_import_task_matches_volume_by_file_path_without_work_link(
+    client, db_session, test_settings
+):
+    create_worker_tables(db_session)
+    _login(client, db_session)
+    library_path = (
+        test_settings.resolved_storage_root
+        / "library"
+        / "path-linked-delete"
+        / "book.epub"
+    )
+    library_path.parent.mkdir(parents=True)
+    library_path.write_bytes(b"path-linked")
+
+    work = LibraryWork(
+        id="path-linked-work",
+        origin="MANUAL",
+        title="Path linked work",
+        normalized_title="pathlinkedwork",
+        author="Author",
+        normalized_author="author",
+        tags="[]",
+    )
+    media = LibraryMediaVersion(
+        id="path-linked-media",
+        work_id=work.id,
+        media_kind="EBOOK",
+    )
+    volume = LibraryVolume(
+        id="path-linked-volume",
+        media_version_id=media.id,
+        title="Path linked volume",
+        sort_order=0,
+        format="EPUB",
+        resource_key="path-linked:volume",
+        import_status="COMPLETED",
+    )
+    library_file = LibraryFile(
+        id="path-linked-file",
+        volume_id=volume.id,
+        path=str(library_path.resolve()),
+        hash_status="FAILED",
+        mtime_ms=0,
+        kind="EPUB",
+        mime_type="application/epub+zip",
+        size_bytes=11,
+        sort_order=0,
+    )
+    task = ImportTask(
+        id="path-linked-task",
+        origin="MANUAL",
+        status="COMPLETED",
+        original_name=library_path.name,
+        source_path=str(library_path),
+        work_id=None,
+        volume_id=None,
+        progress=100,
+    )
+    db_session.add_all([work, media, volume, library_file, task])
+    db_session.commit()
+
+    response = client.request(
+        "DELETE",
+        "/api/import-tasks/path-linked-task",
+        json={"deleteMode": "record", "deleteLibraryRecord": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "deleted": True,
+        "id": "path-linked-task",
+        "deleteMode": "record",
+        "deleteLibraryRecord": True,
+        "deletedLibraryRecord": True,
+        "deletedWorkRecord": True,
+        "deletedLibraryDatabaseRecords": 1,
+        "libraryRecordId": "path-linked-work",
+        "deletedFiles": 1,
+        "missingFiles": [],
+        "failedFileDeletes": [],
+    }
+    assert db_session.get(ImportTask, task.id) is None
+    assert db_session.get(LibraryVolume, volume.id) is None
+    assert db_session.get(LibraryWork, work.id) is None
+    assert not library_path.exists()
+
+
+def test_delete_import_task_library_cleanup_succeeds_without_path_match(
+    client, db_session, test_settings
+):
+    create_worker_tables(db_session)
+    _login(client, db_session)
+    task = ImportTask(
+        id="unmatched-path-task",
+        origin="MANUAL",
+        status="FAILED",
+        original_name="missing.epub",
+        source_path=str(test_settings.resolved_monitor_root / "missing.epub"),
+        work_id=None,
+        volume_id=None,
+        progress=100,
+    )
+    db_session.add(task)
+    db_session.commit()
+
+    response = client.request(
+        "DELETE",
+        "/api/import-tasks/unmatched-path-task",
+        json={"deleteMode": "record", "deleteLibraryRecord": True},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["deleted"] is True
+    assert data["deletedLibraryRecord"] is False
+    assert data["deletedWorkRecord"] is False
+    assert data["libraryRecordId"] is None
+    assert db_session.get(ImportTask, task.id) is None
 
 
 def test_regenerate_cover_uses_first_sorted_volume(client, db_session, test_settings):

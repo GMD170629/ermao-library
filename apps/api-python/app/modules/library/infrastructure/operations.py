@@ -122,6 +122,7 @@ def create_operation(
     payload: dict[str, Any],
     inverse: dict[str, Any],
     now: datetime,
+    undoable: bool = True,
 ) -> dict[str, Any]:
     operation_id = f"op_{time_ns()}"
     expires_at = now + timedelta(days=7)
@@ -129,13 +130,13 @@ def create_operation(
         id=operation_id,
         user_id=user_id,
         action=action,
-        status="COMPLETED",
+        status="COMPLETED" if undoable else "FINALIZED",
         target_type=target_type,
         target_id=target_id,
         summary=summary,
         payload_json=_json(payload),
         inverse_json=_json(inverse),
-        expires_at=expires_at,
+        expires_at=expires_at if undoable else None,
         created_at=now,
         updated_at=now,
     )

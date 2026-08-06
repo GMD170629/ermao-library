@@ -58,7 +58,7 @@ def test_registered_api_endpoints_are_owned_by_capability_presentations() -> Non
         if isinstance(route, APIRoute) and route.path.startswith("/api")
     ]
 
-    assert len(api_routes) == 203
+    assert len(api_routes) == 206
     legacy = [
         (next(iter(route.methods or ())), route.path, route.endpoint.__module__)
         for route in api_routes
@@ -74,7 +74,7 @@ def test_migrated_endpoint_sources_match_capability_ownership() -> None:
         "app.modules.auth.presentation.users": 8,
         "app.modules.kindle.presentation.http": 10,
         "app.modules.reader.presentation.retired": 7,
-        "app.modules.reader.presentation.v3": 4,
+        "app.modules.reader.presentation.v3": 5,
         "app.modules.system.presentation.health": 10,
     }
     counts = Counter(
@@ -84,7 +84,7 @@ def test_migrated_endpoint_sources_match_capability_ownership() -> None:
     )
 
     assert counts == migrated_modules
-    assert sum(counts.values()) == 53
+    assert sum(counts.values()) == 54
 
     reader_v2_routes = [
         route
@@ -109,5 +109,5 @@ def test_registered_api_method_path_pairs_are_unique() -> None:
         if method in HTTP_METHODS
     ]
 
-    assert len(pairs) == 200
+    assert len(pairs) == 203
     assert len(pairs) == len(set(pairs))

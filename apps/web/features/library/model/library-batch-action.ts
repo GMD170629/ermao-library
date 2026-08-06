@@ -1,4 +1,5 @@
 export type LibraryBatchAction =
+  | 'merge'
   | 'metadata'
   | 'find_replace'
   | 'shelves'

@@ -13,6 +13,7 @@ from app.modules.library.application.queries import (
     SmartShelfCriteria,
 )
 from app.modules.library.application.work_list import WorkListQuery, WorkListResult
+from app.modules.library.application.work_merge import MergeMetadataWritebackPort
 from app.modules.library.infrastructure import dashboard as library_dashboard
 from app.modules.library.infrastructure import deletion as library_deletion
 from app.modules.library.infrastructure import facet_queries as library_facet_queries
@@ -33,6 +34,12 @@ from app.modules.library.infrastructure.structural_operations import (
 )
 from app.modules.library.infrastructure.volume_commands import SqlAlchemyVolumeStructure
 from app.modules.library.infrastructure.work_list import list_works as _list_works
+from app.modules.library.infrastructure.work_merge import SqlAlchemyWorkMergeGateway
+from app.modules.metadata.infrastructure.writeback_queue import (
+    enqueue_writeback,
+    operation_view,
+    write_metadata_to_files_enabled,
+)
 
 __all__ = [
     "library_dashboard",
@@ -49,7 +56,31 @@ __all__ = [
     "reorder_volume",
     "smart_shelf_work_ids",
     "volume_structure_commands",
+    "work_merge_gateway",
 ]
+
+
+class _MetadataWritebackAdapter(MergeMetadataWritebackPort):
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def enabled(self) -> bool:
+        return write_metadata_to_files_enabled(self._db)
+
+    def enqueue(
+        self, *, work_id: str, media_version_id: str
+    ) -> dict[str, object] | None:
+        operation_id = enqueue_writeback(
+            self._db,
+            work_id=work_id,
+            media_version_id=media_version_id,
+            source="MANUAL",
+        )
+        return operation_view(self._db, operation_id)
+
+
+def work_merge_gateway(db: Session) -> SqlAlchemyWorkMergeGateway:
+    return SqlAlchemyWorkMergeGateway(db, _MetadataWritebackAdapter(db))
 
 
 def smart_shelf_work_ids(

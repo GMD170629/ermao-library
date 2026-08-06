@@ -137,8 +137,7 @@ def duplicate_groups_page(
         groups.append(
             {
                 "id": (
-                    f"duplicate_{index}_"
-                    f"{sha1(group_key.encode()).hexdigest()[:12]}"
+                    f"duplicate_{index}_{sha1(group_key.encode()).hexdigest()[:12]}"
                 ),
                 "confidence": 0.98,
                 "reasons": ["标题与作者规范化后相同"],
@@ -601,6 +600,8 @@ def undo_operation(
         raise ValueError("操作记录不存在")
     if operation.get("status") == "UNDONE":
         raise ValueError("该操作已经撤销")
+    if operation.get("status") != "COMPLETED":
+        raise ValueError("该操作不可撤销")
     expires_at = to_timestamp_ms(operation.get("expiresAt"))
     if expires_at is not None and expires_at < now_timestamp_ms():
         raise ValueError("撤销期限已过")

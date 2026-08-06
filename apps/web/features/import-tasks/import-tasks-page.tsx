@@ -392,8 +392,6 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   const dialogTargets = bulkDeleteOpen ? selectedTasks : deleteTarget ? [deleteTarget] : [];
   const canDeleteSources = dialogTargets.length > 0 && dialogTargets.every(sourceFileAvailable);
   const canDeleteConverted = dialogTargets.length > 0 && dialogTargets.every(convertedFileAvailable);
-  const linkedBookIds = dialogTargets.flatMap((task) => task.book ? [task.book.id] : []);
-  const canDeleteLibraryRecords = linkedBookIds.length === dialogTargets.length && new Set(linkedBookIds).size === linkedBookIds.length;
 
   function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -611,17 +609,13 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
                 </button>
               ))}
             </div>
-            {canDeleteLibraryRecords ? (
-              <label className={`mt-4 flex cursor-pointer gap-3 rounded-2xl border p-4 transition ${deleteLibraryRecord ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}>
-                <input type="checkbox" checked={deleteLibraryRecord} disabled={Boolean(deletingTaskId)} onChange={(event) => setDeleteLibraryRecord(event.target.checked)} className="mt-0.5 h-4 w-4 accent-red-600" />
-                <span>
-                  <span className="block text-sm font-semibold text-slate-900"><I18nText>同步删除关联卷册</I18nText></span>
-                  <span className="mt-1 block text-xs leading-5 text-slate-500"><I18nText>仅删除所选记录直接关联的卷册及其阅读进度和系统生成文件；同一本书的其他卷册会保留，最后一个卷册删除后才移除作品。源文件是否删除由上方选项决定。</I18nText></span>
-                </span>
-              </label>
-            ) : (
-              <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-500">{bulkDeleteOpen ? i18nAttribute("所选记录没有一一对应的独立书库图书，本次仅处理导入记录和所选文件。") : i18nAttribute("这条导入记录没有关联的书库图书，无需同步删除书库记录。")}</div>
-            )}
+            <label className={`mt-4 flex cursor-pointer gap-3 rounded-2xl border p-4 transition ${deleteLibraryRecord ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}>
+              <input type="checkbox" checked={deleteLibraryRecord} onChange={(event) => setDeleteLibraryRecord(event.target.checked)} className="mt-0.5 h-4 w-4 accent-red-600" />
+              <span>
+                <span className="block text-sm font-semibold text-slate-900"><I18nText>同步删除关联卷册</I18nText></span>
+                <span className="mt-1 block text-xs leading-5 text-slate-500"><I18nText>仅删除所选记录直接关联的卷册及其阅读进度和系统生成文件；同一本书的其他卷册会保留，最后一个卷册删除后才移除作品。源文件是否删除由上方选项决定。</I18nText></span>
+              </span>
+            </label>
             {deleteMode !== 'record' || deleteLibraryRecord ? <div className="mt-4 flex gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800"><AlertTriangle size={16} className="mt-0.5 shrink-0" /><I18nText>已选择的文件和书库数据删除后无法恢复。</I18nText></div> : null}
             <div className="mt-6 flex justify-end gap-2">
               <Button type="button" variant="secondary" disabled={Boolean(deletingTaskId)} onClick={() => { setDeleteTarget(null); setBulkDeleteOpen(false); }}><I18nText>取消</I18nText></Button>

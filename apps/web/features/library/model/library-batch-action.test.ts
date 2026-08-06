@@ -3,6 +3,7 @@ import test from 'node:test';
 import { canUseLibraryBatchAction, type LibraryBatchAction } from './library-batch-action';
 
 const actions: LibraryBatchAction[] = [
+  'merge',
   'metadata',
   'find_replace',
   'shelves',

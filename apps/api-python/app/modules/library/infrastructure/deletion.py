@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import delete, func, select, update
@@ -30,6 +31,72 @@ from app.models.library import (
 from app.models.organize import MetadataLookupTask, OrganizeJob
 from app.models.shelf import ShelfWork
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
+
+
+@dataclass(frozen=True)
+class VolumeDeletionTarget:
+    volume_id: str
+    work_id: str
+    cover_path: str | None
+
+
+def find_volume_deletion_target_by_file_paths(
+    db: Session, file_paths: list[str]
+) -> VolumeDeletionTarget | None:
+    """Resolve the first exact library-file path to its owning volume."""
+
+    if not file_paths:
+        return None
+    rows = db.execute(
+        select(
+            LibraryFile.path,
+            LibraryVolume.id.label("volume_id"),
+            LibraryVolume.cover_path.label("cover_path"),
+            LibraryMediaVersion.work_id.label("work_id"),
+        )
+        .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
+        .join(
+            LibraryMediaVersion,
+            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+        )
+        .where(LibraryFile.path.in_(file_paths))
+    ).all()
+    targets_by_path = {
+        str(row.path): VolumeDeletionTarget(
+            volume_id=str(row.volume_id),
+            work_id=str(row.work_id),
+            cover_path=str(row.cover_path) if row.cover_path else None,
+        )
+        for row in rows
+    }
+    return next(
+        (targets_by_path[path] for path in file_paths if path in targets_by_path),
+        None,
+    )
+
+
+def find_volume_deletion_target_by_id(
+    db: Session, volume_id: str
+) -> VolumeDeletionTarget | None:
+    row = db.execute(
+        select(
+            LibraryVolume.id.label("volume_id"),
+            LibraryVolume.cover_path.label("cover_path"),
+            LibraryMediaVersion.work_id.label("work_id"),
+        )
+        .join(
+            LibraryMediaVersion,
+            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+        )
+        .where(LibraryVolume.id == volume_id)
+    ).one_or_none()
+    if row is None:
+        return None
+    return VolumeDeletionTarget(
+        volume_id=str(row.volume_id),
+        work_id=str(row.work_id),
+        cover_path=str(row.cover_path) if row.cover_path else None,
+    )
 
 
 def clear_file_references(db: Session, file_ids: list[str]) -> None:

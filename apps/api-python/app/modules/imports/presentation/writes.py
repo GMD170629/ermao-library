@@ -103,9 +103,6 @@ from app.modules.library.public import (
     delete_import_linked_library_scope as _delete_import_linked_library_scope,
 )
 from app.modules.library.public import (
-    get_work as _get_work,
-)
-from app.modules.library.public import (
     source_delete_path as _source_delete_path,
 )
 from app.schemas.responses import ok
@@ -540,9 +537,6 @@ async def delete_import_task(
     if delete_mode not in {"record", "source", "converted"}:
         _raise_import_error("删除范围无效", status_code=400)
     work_id = str(task.get("workId") or "").strip()
-    work = _get_work(db, work_id) if work_id else None
-    if delete_library_record and not work:
-        _raise_import_error("该导入记录没有可删除的关联书库图书", status_code=400)
 
     conversion = import_http_store.get_conversion_for_import(db, task_id)
     selected_paths: list[Path] = []
@@ -559,11 +553,11 @@ async def delete_import_task(
             _raise_import_error("该导入记录没有可删除的转换文件", status_code=400)
 
     library_paths = (
-        _collect_import_linked_library_scope_paths(db, task, settings)
-        if delete_library_record and work
+        _collect_import_linked_library_scope_paths(db, task, settings, conversion)
+        if delete_library_record
         else []
     )
-    deletion_paths = [*selected_paths, *library_paths]
+    deletion_paths = list(dict.fromkeys([*selected_paths, *library_paths]))
     monitor_roots = [
         Path(root).expanduser()
         for root in import_http_store.list_monitor_root_paths(db)
@@ -578,14 +572,15 @@ async def delete_import_task(
             pass
     def delete_database_records() -> tuple[bool, dict[str, Any]]:
         library_cleanup = (
-            _delete_import_linked_library_scope(db, task, settings)
-            if delete_library_record and work
+            _delete_import_linked_library_scope(db, task, settings, conversion)
+            if delete_library_record
             else {
                 "deleted": False,
                 "deletedWorkRecord": False,
                 "deletedDatabaseRecords": 0,
                 "deletedFiles": 0,
                 "failedFileDeletes": [],
+                "workId": None,
             }
         )
         deleted = import_http_store.delete_import_task_row(db, task_id)
@@ -610,7 +605,9 @@ async def delete_import_task(
                     "deletedLibraryDatabaseRecords": int(
                         library_cleanup.get("deletedDatabaseRecords") or 0
                     ),
-                    "libraryRecordId": work_id or None,
+                    "libraryRecordId": library_cleanup.get("workId")
+                    or work_id
+                    or None,
                     "plannedFileDeletes": len(deletion_paths),
                 },
             )
@@ -651,7 +648,7 @@ async def delete_import_task(
             "deletedLibraryDatabaseRecords": int(
                 library_cleanup.get("deletedDatabaseRecords") or 0
             ),
-            "libraryRecordId": work_id or None,
+            "libraryRecordId": library_cleanup.get("workId") or work_id or None,
             "deletedFiles": file_cleanup.deleted_files,
             "missingFiles": list(file_cleanup.missing_paths),
             "failedFileDeletes": failed_file_deletes,
