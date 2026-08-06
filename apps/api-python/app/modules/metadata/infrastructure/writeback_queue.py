@@ -512,7 +512,10 @@ def reconcile_queue_state(db: Session) -> int:
         .values(id=QUEUE_STATE_ID, pending_targets=active_count, updated_at=now)
         .on_conflict_do_update(
             index_elements=[MetadataOpfQueueState.id],
-            set_={"pending_targets": active_count, "updated_at": now},
+            set_={
+                MetadataOpfQueueState.pending_targets: active_count,
+                MetadataOpfQueueState.updated_at: now,
+            },
         )
     )
     return active_count

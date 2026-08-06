@@ -18,7 +18,10 @@ from app.models.organize import (
 )
 from app.models.settings import SystemEvent
 from app.modules.metadata.application.opf import parse_opf_metadata
-from app.modules.metadata.infrastructure.writeback_queue import enqueue_writeback
+from app.modules.metadata.infrastructure.writeback_queue import (
+    enqueue_writeback,
+    reconcile_queue_state,
+)
 from app.services.metadata_file_writeback import (
     enqueue_metadata_writeback,
     metadata_writeback_view,
@@ -190,6 +193,23 @@ def test_queue_capacity_drops_the_whole_new_operation(db_session, tmp_path: Path
     state = db_session.get(MetadataOpfQueueState, "default")
     assert state is not None
     assert state.pending_targets == 1
+
+
+def test_reconcile_queue_state_updates_existing_counter(db_session) -> None:
+    state = db_session.get(MetadataOpfQueueState, "default")
+    if state is None:
+        state = MetadataOpfQueueState(id="default", pending_targets=7)
+        db_session.add(state)
+    else:
+        state.pending_targets = 7
+    db_session.commit()
+
+    assert reconcile_queue_state(db_session) == 0
+    db_session.expire_all()
+
+    reconciled_state = db_session.get(MetadataOpfQueueState, "default")
+    assert reconciled_state is not None
+    assert reconciled_state.pending_targets == 0
 
 
 def test_multi_media_batch_is_fully_discarded_when_later_scope_exceeds_capacity(
