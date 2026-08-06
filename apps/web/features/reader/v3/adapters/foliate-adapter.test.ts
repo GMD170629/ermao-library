@@ -7,7 +7,10 @@ import {
   foliateSectionIndexFromDisplayIndex,
   normalizeFoliateInitialLocation,
   parseFoliateRelocateDetail,
+  refineContinuousRestoreWithSectionFraction,
+  resolveFoliatePaginatedRestoreTargets,
   resolveAsynchronousFoliateHref,
+  shouldRefineContinuousRestoreWithProgression,
   shouldResolveFoliateTocItem,
   validatedServerToc
 } from './foliate-adapter';
@@ -78,6 +81,43 @@ test('falls back to the official href resolver when a MOBI TOC splitter rejects 
   assert.equal(sectionIndex, 6);
 });
 
+test('pagination restores a section CFI without evaluating an empty content anchor', async () => {
+  const unsafeAnchor = () => { throw new TypeError('Invalid empty CFI content path'); };
+  const targets = await resolveFoliatePaginatedRestoreTargets({
+    sections: [{ load: () => '' }, { id: 'chapter-2.xhtml', load: () => '' }],
+    resolveCFI: () => ({ index: 1, anchor: unsafeAnchor }),
+    resolveHref: () => ({ index: 1, anchor: () => 0 })
+  }, {
+    kind: 'reflowable',
+    format: 'epub',
+    cfi: 'epubcfi(/6/4)',
+    href: 'chapter-2.xhtml',
+    progression: 0.5,
+    foliate: { section: { current: 1, total: 2 } }
+  });
+
+  assert.deepEqual(targets[0], { index: 1 });
+  assert.notEqual(targets[0]?.anchor, unsafeAnchor);
+  assert.deepEqual(targets.slice(1).map(({ index }) => index), [1, 1]);
+});
+
+test('pagination preserves a full content CFI anchor and rejects invalid restore targets', async () => {
+  const anchor = () => 0;
+  const targets = await resolveFoliatePaginatedRestoreTargets({
+    sections: [{ load: () => '' }, { load: () => '' }],
+    resolveCFI: () => ({ index: 1, anchor }),
+    resolveHref: () => ({ index: 8 })
+  }, {
+    kind: 'reflowable',
+    format: 'epub',
+    cfi: 'epubcfi(/6/4!/4/2/2)',
+    href: 'missing.xhtml',
+    foliate: { section: { current: 0, total: 2 } }
+  });
+
+  assert.deepEqual(targets, [{ index: 1, anchor }, { index: 0 }]);
+});
+
 test('normalizeFoliateInitialLocation migrates legacy EPUB locations without losing fallbacks', () => {
   assert.deepEqual(normalizeFoliateInitialLocation({
     kind: 'epub',
@@ -93,6 +133,40 @@ test('normalizeFoliateInitialLocation migrates legacy EPUB locations without los
     progression: 0.42
   });
   assert.equal(normalizeFoliateInitialLocation({ kind: 'pdf', pageNumber: 2 }, 'epub'), null);
+});
+
+test('continuous restore refines chapter-only resume locations with saved progression', () => {
+  assert.equal(shouldRefineContinuousRestoreWithProgression({
+    kind: 'reflowable',
+    format: 'epub',
+    cfi: 'epubcfi(/6/4)',
+    href: 'chapter.xhtml',
+    progression: 0.42
+  }, { index: 1, anchor: () => null }), true);
+
+  assert.equal(shouldRefineContinuousRestoreWithProgression({
+    kind: 'reflowable',
+    format: 'epub',
+    cfi: 'epubcfi(/6/4!/4/2/2)',
+    href: 'chapter.xhtml',
+    progression: 0.42
+  }, { index: 1, anchor: () => null }), false);
+
+  assert.equal(shouldRefineContinuousRestoreWithProgression({
+    kind: 'reflowable',
+    format: 'epub',
+    href: 'chapter.xhtml#paragraph-8',
+    progression: 0.42
+  }, { index: 1, anchor: () => null }), false);
+
+  assert.deepEqual(refineContinuousRestoreWithSectionFraction({
+    kind: 'reflowable',
+    format: 'epub',
+    cfi: 'epubcfi(/6/4)',
+    href: 'chapter.xhtml',
+    progression: 0.42,
+    foliate: { continuous: { sectionFraction: 0.68 } }
+  }, { index: 1, anchor: () => null }), { index: 1, fraction: 0.68 });
 });
 
 test('foliateNavigationEntries maps nested official TOC data and rejects malformed items', () => {

@@ -122,6 +122,7 @@ def refresh_existing_reflowable_source(
         settings.resolved_storage_root,
         existing.work_id,
         existing.media_version_id,
+        volume_id,
         metadata,
     )
     volume_values: dict[str, object] = {
@@ -422,6 +423,7 @@ def _import_reflowable_source(
     cover_path = services.publish_reflowable_cover(
         settings.resolved_storage_root,
         str(work["id"]),
+        str(media_version["id"]),
         str(volume["id"]),
         metadata,
     )

@@ -346,14 +346,20 @@ def _import_epub(
                 "updatedAt": _now(),
             },
         )
+        volume_id = _id()
         if metadata.get("coverPath"):
             cover_path = _extract_epub_cover(
-                settings, source_path, work["id"], media_version["id"], metadata
+                settings,
+                source_path,
+                work["id"],
+                media_version["id"],
+                metadata,
+                volume_id,
             )
         stored_cover_path = cover_path or services.ensure_default_cover()
         volume = store.insert_library_volume(
             columns={
-                "id": _id(),
+                "id": volume_id,
                 "mediaVersionId": media_version["id"],
                 "title": resolved_local.metadata.volume_title or identity.title,
                 "sortOrder": 0,
@@ -897,6 +903,11 @@ def _extract_epub_cover(
         / (volume_id or "")
         / f"cover{ext}"
     )
+    temporary = target.with_suffix(f"{target.suffix}.part")
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(cover)
+    try:
+        temporary.write_bytes(cover)
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
     return str(target)

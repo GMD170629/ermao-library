@@ -25,7 +25,20 @@ const defaultPreferences = {
   pdf: { zoom: 1, fit: 'page' }
 };
 
-function bootstrap(kind: 'epub' | 'comic' | 'pdf', epubUnitCount = 2, epubHrefPrefix = '') {
+type MockReaderOptions = {
+  pdfBody?: Buffer;
+  epubBody?: Buffer;
+  progressStatus?: number;
+  bootstrapDelayMs?: number;
+  epubUnitCount?: number;
+  epubHrefPrefix?: string;
+  resumeLocation?: Record<string, unknown>;
+  progressPercent?: number;
+};
+
+function bootstrap(kind: 'epub' | 'comic' | 'pdf', options: MockReaderOptions = {}) {
+  const epubUnitCount = options.epubUnitCount ?? 2;
+  const epubHrefPrefix = options.epubHrefPrefix ?? '';
   const readerType = kind === 'epub' ? 'reflowable' : kind;
   const volumeId = `${kind}-volume`;
   const mediaVersionId = `${kind}-media`;
@@ -80,9 +93,9 @@ function bootstrap(kind: 'epub' | 'comic' | 'pdf', epubUnitCount = 2, epubHrefPr
         readingDirection: 'ltr'
       },
       serverPreferences: { schemaVersion: 3, settings: defaultPreferences, updatedAt: null },
-      resumeLocation: kind === 'epub' ? { type: 'reflowable', format: 'epub', progression: 0 } : kind === 'comic' ? { type: 'comic', volumeId, pageIndex: 1 } : { type: 'pdf', pageNumber: 1 },
+      resumeLocation: options.resumeLocation ?? (kind === 'epub' ? { type: 'reflowable', format: 'epub', progression: 0 } : kind === 'comic' ? { type: 'comic', volumeId, pageIndex: 1 } : { type: 'pdf', pageNumber: 1 }),
       resumeFingerprintMismatch: false,
-      progressPercent: 0
+      progressPercent: options.progressPercent ?? 0
     }
   };
 }
@@ -91,7 +104,7 @@ async function mockReaderApi(
   page: Page,
   kind: 'epub' | 'comic' | 'pdf',
   progressBodies: unknown[] = [],
-  options: { pdfBody?: Buffer; epubBody?: Buffer; progressStatus?: number; bootstrapDelayMs?: number; epubUnitCount?: number; epubHrefPrefix?: string } = {}
+  options: MockReaderOptions = {}
 ) {
   const pdf = kind === 'pdf' ? options.pdfBody ?? await readFile(pdfFixture) : null;
   const epub = kind === 'epub' ? options.epubBody ?? await readFile(epubFixture) : null;
@@ -100,7 +113,7 @@ async function mockReaderApi(
     const url = new URL(request.url());
     if (url.pathname.includes('/api/reader/v3/volumes/') && url.pathname.endsWith('/bootstrap')) {
       if (options.bootstrapDelayMs) await new Promise((resolve) => setTimeout(resolve, options.bootstrapDelayMs));
-      await route.fulfill({ json: bootstrap(kind, options.epubUnitCount, options.epubHrefPrefix) });
+      await route.fulfill({ json: bootstrap(kind, options) });
       return;
     }
     if (url.pathname.includes('/api/reader/v3/volumes/') && url.pathname.endsWith('/progress')) {
@@ -293,6 +306,38 @@ test.beforeEach(async ({ context }) => {
   });
 });
 
+test('dashboard continue reading navigation commits the reader route without starving the main thread', async ({ page }) => {
+  await mockReaderApi(page, 'epub');
+  await page.route('**/api/dashboard/**', async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (!pathname.endsWith('/continue-reading')) {
+      await route.fulfill({ json: { ok: true, data: { books: [], total: 0 } } });
+      return;
+    }
+    await route.fulfill({ json: { ok: true, data: { item: {
+      workId: 'work-epub',
+      title: 'EPUB 测试读物',
+      author: 'Test',
+      coverUrl: '',
+      mediaKind: 'EBOOK',
+      volumeFormat: 'EPUB',
+      readerType: 'reflowable',
+      resumeVolumeId: 'epub-volume',
+      progress: 12,
+      lastReadAt: '2026-08-06T03:06:00.000Z',
+      chapter: '第一章',
+      volumeTitle: '全本',
+      narrator: null
+    } } } });
+  });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: '继续阅读' }).click();
+  await expect(page).toHaveURL(/\/reader\/epub-volume$/);
+  await expect(page.locator('[data-reader-shell="v3"]')).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByRole('heading', { name: '主页' })).toHaveCount(0);
+});
+
 test('browser reader uses the dynamic viewport and control overlays keep the canvas stable', async ({ page }) => {
   await mockReaderApi(page, 'comic');
   await page.goto('/reader/comic-volume');
@@ -347,6 +392,7 @@ test('reader loading and iOS bottom safe area stay on the active warm surface', 
   await page.setViewportSize({ width: 390, height: 844 });
   await mockReaderApi(page, 'epub', [], { bootstrapDelayMs: 600 });
   await page.goto('/reader/epub-volume');
+  await expect(page.locator('meta[name="apple-mobile-web-app-capable"]')).toHaveAttribute('content', 'yes');
 
   const openingCover = page.locator('[data-reader-opening-cover="loading"]');
   await expect(openingCover).toBeVisible();
@@ -371,6 +417,9 @@ test('reader loading and iOS bottom safe area stay on the active warm surface', 
     document.documentElement.style.setProperty('--shuku-safe-area-top', '47px');
     document.documentElement.style.setProperty('--shuku-safe-area-bottom', '34px');
   });
+  const topSafeArea = page.locator('[data-reader-top-safe-area="true"]');
+  await expect(topSafeArea).toHaveCSS('height', '47px');
+  await expect(topSafeArea).toHaveCSS('background-color', 'rgb(253, 246, 234)');
   await showReaderControls(page);
   await page.getByRole('button', { name: '阅读设置' }).click();
   const settingsDialog = page.getByRole('dialog', { name: '设置' });
@@ -399,9 +448,21 @@ test('reader loading and iOS bottom safe area stay on the active warm surface', 
   expect(safeAreaCoverage.titleInset).toBeGreaterThanOrEqual(15);
   expect(safeAreaCoverage.titleInset).toBeLessThanOrEqual(40);
   expect(settingsDialog.getByRole('button', { name: '外观' })).toBeVisible();
+  await settingsDialog.getByRole('button', { name: '外观' }).click();
+  await page.getByRole('dialog', { name: '外观' }).getByRole('button', { name: '护眼绿' }).click();
+  await expect(topSafeArea).toHaveCSS('background-color', 'rgb(232, 240, 227)');
+  await expect.poll(() => page.evaluate(() => ({
+    statusBarStyle: document.querySelector<HTMLMetaElement>('meta[name="apple-mobile-web-app-status-bar-style"]')?.content,
+    themeColors: Array.from(document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')).map((meta) => meta.content)
+  }))).toEqual({
+    statusBarStyle: 'black-translucent',
+    themeColors: ['#E8F0E3', '#E8F0E3']
+  });
+  await page.getByRole('dialog', { name: '外观' }).getByRole('button', { name: '纯黑' }).click();
+  await expect(topSafeArea).toHaveCSS('background-color', 'rgb(0, 0, 0)');
 
   const bottomControls = page.locator('[data-reader-controller="bottom-console"]');
-  await settingsDialog.getByRole('button', { name: '关闭面板' }).click();
+  await page.getByRole('dialog', { name: '外观' }).getByRole('button', { name: '关闭面板' }).click();
   for (const [triggerName, dialogName] of [
     ['目录', '目录'],
     ['笔记', '笔记']
@@ -1211,6 +1272,142 @@ test('EPUB scrolled flow keeps adjacent chapters mounted in one stable stream', 
   });
   await expect.poll(() => engine.getAttribute('data-reader-location-href')).toContain('chapter1.xhtml');
   await expect(firstSlot.locator('iframe')).toHaveAttribute('data-e2e-stable-frame', 'first');
+});
+
+test('EPUB scrolled flow resumes inside a chapter instead of its beginning', async ({ page }) => {
+  await page.addInitScript((preferences) => {
+    window.localStorage.setItem('shuku:reader:device-defaults:v1:user-e2e', JSON.stringify(preferences));
+  }, { ...defaultPreferences, epub: { ...defaultPreferences.epub, flow: 'scrolled' } });
+  const progressBodies: Array<Record<string, any>> = [];
+  await mockReaderApi(page, 'epub', progressBodies, {
+    resumeLocation: {
+      type: 'reflowable',
+      format: 'epub',
+      cfi: 'epubcfi(/6/2)',
+      href: 'chapter1.xhtml',
+      progression: 0.25,
+      foliate: { continuous: { sectionFraction: 0.5 } }
+    },
+    progressPercent: 25
+  });
+  await page.goto('/reader/epub-volume');
+
+  const engine = page.locator('[data-reader-engine="reflowable-v3"]');
+  const stream = engine.locator('[data-reflowable-continuous="true"]');
+  await expect(engine).toHaveAttribute('data-reader-flow', 'scrolled');
+  await expect.poll(() => stream.evaluate((element) => element.scrollTop)).toBeGreaterThan(10);
+  await expect.poll(async () => Number(await engine.getAttribute('data-reader-location-progression'))).toBeGreaterThan(0.05);
+  await expect.poll(() => engine.getAttribute('data-reader-location-href')).toContain('chapter1.xhtml');
+  await expect.poll(() => progressBodies.some((body) => (
+    typeof body.location?.foliate?.continuous?.sectionFraction === 'number'
+    && body.location.foliate.continuous.sectionFraction > 0
+  ))).toBe(true);
+});
+
+test('EPUB scrolled flow leaves touch movement native and defers remeasurement until scroll settles', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockReaderApi(page, 'epub');
+  await page.goto('/reader/epub-volume');
+  await showReaderControls(page);
+  await page.getByRole('button', { name: '阅读设置' }).click();
+  await page.getByRole('dialog', { name: '设置' }).getByRole('button', { name: '滚动', exact: true }).click();
+
+  const stream = page.locator('[data-reflowable-continuous="true"]');
+  const iframe = await currentEpubIframe(page);
+  const body = iframe.contentFrame().locator('body');
+  await expect(stream).toHaveCSS('touch-action', 'pan-y');
+  await expect(stream).toHaveCSS('overflow-y', 'auto');
+
+  const initialFrameHeight = await iframe.evaluate((element) => element.getBoundingClientRect().height);
+  const touchMoveWasNotCancelled = await body.evaluate((element) => {
+    const touch = { clientX: 195, clientY: 500, screenX: 195, screenY: 600 };
+    const dispatch = (type: string, touches: readonly object[]) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, {
+        changedTouches: { value: touches.length ? touches : [touch] },
+        touches: { value: touches }
+      });
+      return element.dispatchEvent(event);
+    };
+    dispatch('touchstart', [touch]);
+    const moveAllowed = dispatch('touchmove', [touch]);
+    const spacer = element.ownerDocument.createElement('div');
+    spacer.dataset.e2eNativeScrollSpacer = 'true';
+    spacer.style.height = '800px';
+    element.append(spacer);
+    return moveAllowed;
+  });
+  expect(touchMoveWasNotCancelled).toBe(true);
+  await expect(stream).toHaveAttribute('data-native-scroll-state', 'active');
+  await page.waitForTimeout(100);
+  await expect.poll(() => iframe.evaluate((element) => element.getBoundingClientRect().height)).toBe(initialFrameHeight);
+
+  await body.evaluate((element) => {
+    const event = new Event('touchend', { bubbles: true, cancelable: true });
+    Object.defineProperties(event, {
+      changedTouches: { value: [{}] },
+      touches: { value: [] }
+    });
+    element.dispatchEvent(event);
+  });
+  await expect(stream).toHaveAttribute('data-native-scroll-state', 'idle');
+  await expect.poll(() => iframe.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(initialFrameHeight + 300);
+});
+
+test('EPUB scrolled flow tap zones move by one viewport without jumping chapters', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockReaderApi(page, 'epub');
+  await page.goto('/reader/epub-volume');
+  await showReaderControls(page);
+  await page.getByRole('button', { name: '阅读设置' }).click();
+  await page.getByRole('dialog', { name: '设置' }).getByRole('button', { name: '滚动', exact: true }).click();
+  await page.getByRole('dialog', { name: '设置' }).getByRole('button', { name: '关闭面板' }).click();
+
+  const engine = page.locator('[data-reader-engine="reflowable-v3"]');
+  const stream = engine.locator('[data-reflowable-continuous="true"]');
+  const firstFrame = stream.locator('[data-reflowable-continuous-section="0"] iframe');
+  const firstBody = firstFrame.contentFrame().locator('body');
+  await firstBody.evaluate((body) => {
+    const spacer = body.ownerDocument.createElement('div');
+    spacer.dataset.e2eViewportPagingSpacer = 'true';
+    spacer.style.height = '300vh';
+    body.append(spacer);
+  });
+  await expect.poll(() => firstFrame.evaluate((frame) => frame.getBoundingClientRect().height)).toBeGreaterThan(2_000);
+  await stream.evaluate((element) => { element.scrollTop = 0; });
+  await expect.poll(() => engine.getAttribute('data-reader-location-href')).toContain('chapter1.xhtml');
+
+  const viewportHeight = await stream.evaluate((element) => element.clientHeight);
+  await clickVisibleReflowableZone(firstBody, 0.9);
+  await expect.poll(() => stream.evaluate((element) => element.scrollTop)).toBeGreaterThan(viewportHeight * 0.9);
+  await expect.poll(() => stream.evaluate((element) => element.scrollTop)).toBeLessThanOrEqual(viewportHeight * 1.05);
+  await expect.poll(() => engine.getAttribute('data-reader-location-href')).toContain('chapter1.xhtml');
+
+  await clickVisibleReflowableZone(firstBody, 0.1);
+  await expect.poll(() => stream.evaluate((element) => element.scrollTop)).toBeLessThan(2);
+  await expect.poll(() => engine.getAttribute('data-reader-location-href')).toContain('chapter1.xhtml');
+});
+
+test('EPUB restores a section location when switching from scrolling back to pagination', async ({ page }) => {
+  const paginationRestoreErrors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error' && /Cannot read properties of undefined.*length/u.test(message.text())) {
+      paginationRestoreErrors.push(message.text());
+    }
+  });
+  await mockReaderApi(page, 'epub');
+  await page.goto('/reader/epub-volume?href=chapter2.xhtml');
+  const engine = page.locator('[data-reader-engine="reflowable-v3"]');
+  await expect((await currentEpubIframe(page)).contentFrame().getByText('第二章 翻页验证')).toBeVisible();
+
+  await showReaderControls(page);
+  await page.getByRole('button', { name: '阅读设置' }).click();
+  await page.getByRole('dialog', { name: '设置' }).getByRole('button', { name: '滚动', exact: true }).click();
+  await expect(engine).toHaveAttribute('data-reader-flow', 'scrolled');
+  await page.getByRole('button', { name: '分页', exact: true }).click();
+  await expect(engine).toHaveAttribute('data-reader-flow', 'paginated');
+  await expect((await currentEpubIframe(page)).contentFrame().getByText('第二章 翻页验证')).toBeVisible();
+  expect(paginationRestoreErrors).toHaveLength(0);
 });
 
 test('EPUB swipe submits one navigation command without a visual paging track', async ({ page }) => {

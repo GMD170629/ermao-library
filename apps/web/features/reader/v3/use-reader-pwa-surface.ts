@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReaderTheme } from '@shuku/reader-core';
-import { useEffect } from 'react';
+import { useLayoutEffect } from 'react';
 import { readerThemeSurfaces } from '../reader-theme';
 
 function ensureMeta(name: string) {
@@ -15,7 +15,7 @@ function ensureMeta(name: string) {
 
 /** Keeps the iOS standalone chrome and safe-area canvas on the active reader theme. */
 export function useReaderPwaSurface(theme: ReaderTheme) {
-  useEffect(() => {
+  useLayoutEffect(() => {
     const themeSurface = readerThemeSurfaces[theme];
     const previousHtmlBackground = document.documentElement.style.backgroundColor;
     const previousBodyBackground = document.body.style.backgroundColor;
@@ -27,13 +27,30 @@ export function useReaderPwaSurface(theme: ReaderTheme) {
     const previousThemeColors = themeColorMetas.map((meta) => meta.content);
     const previousStatusBarStyle = statusBarMeta.content;
 
-    document.documentElement.style.backgroundColor = themeSurface.background;
-    document.body.style.backgroundColor = themeSurface.background;
-    document.documentElement.style.colorScheme = themeSurface.colorScheme;
-    themeColorMetas.forEach((meta) => meta.setAttribute('content', themeSurface.background));
-    statusBarMeta.setAttribute('content', themeSurface.statusBarStyle);
+    function applySurface() {
+      document.documentElement.style.backgroundColor = themeSurface.background;
+      document.body.style.backgroundColor = themeSurface.background;
+      document.documentElement.style.colorScheme = themeSurface.colorScheme;
+      const currentThemeColorMetas = Array.from(document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]'));
+      const targetThemeColorMetas = currentThemeColorMetas.length > 0
+        ? currentThemeColorMetas
+        : [ensureMeta('theme-color').meta];
+      targetThemeColorMetas.forEach((meta) => {
+        if (meta.content !== themeSurface.background) meta.setAttribute('content', themeSurface.background);
+      });
+      const currentStatusBarMeta = ensureMeta('apple-mobile-web-app-status-bar-style').meta;
+      if (currentStatusBarMeta.content !== themeSurface.statusBarStyle) {
+        currentStatusBarMeta.setAttribute('content', themeSurface.statusBarStyle);
+      }
+    }
+
+    applySurface();
+    const frame = window.requestAnimationFrame(applySurface);
+    const settleTimer = window.setTimeout(applySurface, 250);
 
     return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(settleTimer);
       document.documentElement.style.backgroundColor = previousHtmlBackground;
       document.body.style.backgroundColor = previousBodyBackground;
       document.documentElement.style.colorScheme = previousColorScheme;

@@ -18,7 +18,7 @@ export const readerThemeSurfaces: Record<ReaderTheme, {
     accent: '#B45309',
     colorScheme: 'light',
     textClass: 'text-slate-950',
-    statusBarStyle: 'default'
+    statusBarStyle: 'black-translucent'
   },
   warm: {
     background: '#FDF6EA',
@@ -27,7 +27,7 @@ export const readerThemeSurfaces: Record<ReaderTheme, {
     accent: '#B45309',
     colorScheme: 'light',
     textClass: 'text-slate-950',
-    statusBarStyle: 'default'
+    statusBarStyle: 'black-translucent'
   },
   green: {
     background: '#E8F0E3',
@@ -36,7 +36,7 @@ export const readerThemeSurfaces: Record<ReaderTheme, {
     accent: '#3F6F4E',
     colorScheme: 'light',
     textClass: 'text-slate-950',
-    statusBarStyle: 'default'
+    statusBarStyle: 'black-translucent'
   },
   night: {
     background: '#0F172A',

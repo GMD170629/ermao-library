@@ -1430,6 +1430,13 @@ def test_explicit_series_directory_groups_all_volumes_by_folder(
 
     assert first.work_id == second.work_id
     assert first.media_version_id == second.media_version_id
+    first_volume = db_session.get(LibraryVolume, first.volume_id)
+    second_volume = db_session.get(LibraryVolume, second.volume_id)
+    assert first_volume is not None
+    assert second_volume is not None
+    assert first_volume.cover_path != second_volume.cover_path
+    assert Path(str(first_volume.cover_path)).parent.name == first.volume_id
+    assert Path(str(second_volume.cover_path)).parent.name == second.volume_id
     assert db_session.execute(
         text("SELECT volumeIndex FROM LibraryVolume ORDER BY volumeIndex")
     ).scalars().all() == [26, 30]
@@ -1612,6 +1619,14 @@ def test_identical_embedded_metadata_groups_files_despite_different_paths(
     )
 
     assert first.work_id == second.work_id
+    assert first.media_version_id == second.media_version_id
+    first_volume = db_session.get(LibraryVolume, first.volume_id)
+    second_volume = db_session.get(LibraryVolume, second.volume_id)
+    assert first_volume is not None
+    assert second_volume is not None
+    assert first_volume.cover_path != second_volume.cover_path
+    assert Path(str(first_volume.cover_path)).parent.name == first.volume_id
+    assert Path(str(second_volume.cover_path)).parent.name == second.volume_id
     assert db_session.execute(
         text("SELECT title FROM LibraryWork ORDER BY title")
     ).scalars().all() == ["目录测试"]
@@ -1868,6 +1883,15 @@ def test_watched_pdf_volumes_recognize_short_numbers_inside_titles(
         1,
         2,
     ]
+    first_volume = db_session.get(LibraryVolume, first_result.volume_id)
+    second_volume = db_session.get(LibraryVolume, second_result.volume_id)
+    assert first_volume is not None
+    assert second_volume is not None
+    assert first_volume.cover_path != second_volume.cover_path
+    assert Path(str(first_volume.cover_path)).parent.name == first_result.volume_id
+    assert Path(str(second_volume.cover_path)).parent.name == second_result.volume_id
+    assert Path(str(first_volume.cover_path)).is_file()
+    assert Path(str(second_volume.cover_path)).is_file()
 
 
 def test_watched_cjk_marker_before_number_merges_by_directory_and_title(
@@ -2647,6 +2671,51 @@ def test_import_pdf_creates_library_records(db_session, test_settings, tmp_path)
         == "EBOOK"
     )
     assert _count(db_session, "LibraryReadingUnit") == 1
+
+
+def test_existing_pdf_rescan_repairs_legacy_shared_cover_path(
+    db_session, test_settings, tmp_path
+):
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    pdf = tmp_path / "legacy-cover.pdf"
+    write_pdf_fixture(pdf)
+
+    imported = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(source_file_path=pdf, origin="WATCH", original_name=pdf.name),
+    )
+    volume = db_session.get(LibraryVolume, imported.volume_id)
+    work = db_session.get(LibraryWork, imported.work_id)
+    assert volume is not None
+    assert work is not None
+    legacy_cover = (
+        test_settings.resolved_storage_root
+        / "books"
+        / imported.work_id
+        / imported.media_version_id
+        / "cover.jpg"
+    )
+    legacy_cover.parent.mkdir(parents=True, exist_ok=True)
+    legacy_cover.write_bytes(Path(str(volume.cover_path)).read_bytes())
+    volume.cover_path = str(legacy_cover)
+    work.cover_path = str(legacy_cover)
+    db_session.commit()
+
+    rescanned = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(source_file_path=pdf, origin="WATCH", original_name=pdf.name),
+    )
+
+    db_session.refresh(volume)
+    db_session.refresh(work)
+    assert rescanned.duplicate is True
+    assert volume.cover_path != str(legacy_cover)
+    assert Path(str(volume.cover_path)).parent.name == imported.volume_id
+    assert Path(str(volume.cover_path)).is_file()
+    assert work.cover_path == volume.cover_path
 
 
 def test_import_text_pdf_remains_ebook(db_session, test_settings, tmp_path):

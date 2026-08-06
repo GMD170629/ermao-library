@@ -25,6 +25,7 @@ export type ReflowableContinuousTarget = {
 export type ReflowableContinuousRelocate = {
   index: number;
   fraction: number;
+  sectionFraction: number;
   cfi?: string;
 };
 
@@ -81,6 +82,7 @@ const PLACEHOLDER_RANGE_SIZE = 256;
 const MAX_CONCURRENT_SECTION_LOADS = 2;
 const PREFERENCE_BATCH_SIZE = 8;
 const READING_LINE_RATIO = 0.25;
+const NATIVE_SCROLL_IDLE_MS = 160;
 
 function clamp(value: number, minimum = 0, maximum = 1) {
   return Math.max(minimum, Math.min(maximum, value));
@@ -150,6 +152,10 @@ export class ReflowableContinuousController {
   private currentLogicalIndex = 0;
   private destroyed = false;
   private scrollFrame: number | null = null;
+  private nativeScrollIdleTimer: ReturnType<typeof setTimeout> | null = null;
+  private nativeScrollActive = false;
+  private nativeTouchActive = false;
+  private readonly pendingMeasurements = new Set<SectionRecord>();
   private relocateTimer: ReturnType<typeof setTimeout> | null = null;
   private preferenceTimer: ReturnType<typeof setTimeout> | null = null;
   private preferenceQueue: number[] = [];
@@ -177,9 +183,12 @@ export class ReflowableContinuousController {
       overflowX: 'hidden',
       overflowY: 'auto',
       overscrollBehavior: 'contain',
+      overflowAnchor: 'none',
       scrollBehavior: 'auto',
+      touchAction: 'pan-y',
       width: '100%'
     });
+    this.root.dataset.nativeScrollState = 'idle';
 
     const hasLinearSection = this.book.sections.some((section) => section.linear !== 'no' && section.linear !== false);
     const records: SectionRecord[] = [];
@@ -214,6 +223,7 @@ export class ReflowableContinuousController {
       this.root.append(gap.element);
     });
     this.root.addEventListener('scroll', this.handleScroll, { passive: true });
+    this.root.addEventListener('scrollend', this.handleScrollEnd);
     this.container.replaceChildren(this.root);
   }
 
@@ -254,15 +264,11 @@ export class ReflowableContinuousController {
   }
 
   async next() {
-    if (this.currentLogicalIndex >= this.records.length - 1) return false;
-    await this.goTo({ index: this.records[this.currentLogicalIndex + 1]?.index ?? this.records.length - 1 });
-    return true;
+    return this.scrollByViewport(1);
   }
 
   async previous() {
-    if (this.currentLogicalIndex <= 0) return false;
-    await this.goTo({ index: this.records[this.currentLogicalIndex - 1]?.index ?? 0 });
-    return true;
+    return this.scrollByViewport(-1);
   }
 
   async goToProgress(progression: number) {
@@ -320,9 +326,12 @@ export class ReflowableContinuousController {
     this.destroyed = true;
     this.loadGeneration += 1;
     if (this.scrollFrame !== null) cancelAnimationFrame(this.scrollFrame);
+    if (this.nativeScrollIdleTimer !== null) clearTimeout(this.nativeScrollIdleTimer);
     if (this.relocateTimer !== null) clearTimeout(this.relocateTimer);
     if (this.preferenceTimer !== null) clearTimeout(this.preferenceTimer);
     this.root.removeEventListener('scroll', this.handleScroll);
+    this.root.removeEventListener('scrollend', this.handleScrollEnd);
+    this.pendingMeasurements.clear();
     this.records.forEach((record) => {
       record.loadController?.abort();
       record.loadController = null;
@@ -340,6 +349,7 @@ export class ReflowableContinuousController {
 
   private readonly handleScroll = () => {
     if (this.destroyed || this.scrollFrame !== null) return;
+    this.noteNativeScrollActivity();
     this.scrollFrame = requestAnimationFrame(() => {
       this.scrollFrame = null;
       const scrollTop = this.root.scrollTop;
@@ -365,6 +375,10 @@ export class ReflowableContinuousController {
         this.emitRelocate();
       }, 180);
     });
+  };
+
+  private readonly handleScrollEnd = () => {
+    if (!this.nativeTouchActive) this.settleNativeScroll();
   };
 
   private beginLoadCycle(indices: readonly number[]) {
@@ -475,7 +489,8 @@ export class ReflowableContinuousController {
       applyEpubDocumentSpacing(document, this.preferences);
       document.documentElement.style.setProperty('overflow', 'hidden', 'important');
       document.body?.style.setProperty('overflow', 'hidden', 'important');
-      this.bindScrollBridge(document);
+      this.bindWheelBridge(document);
+      this.observeNativeTouch(document);
       this.bindLinks(document, record.index);
       record.documentCleanup = this.onDocument(document) ?? null;
       record.state = 'ready';
@@ -568,7 +583,7 @@ export class ReflowableContinuousController {
       this.root.insertBefore(element, following ?? null);
     }
     record.element = element;
-    this.restoreAnchor(anchor);
+    if (!this.nativeScrollActive) this.restoreAnchor(anchor);
     return element;
   }
 
@@ -600,7 +615,7 @@ export class ReflowableContinuousController {
     const gapIndex = insertionIndex >= 0 ? insertionIndex : this.gaps.length;
     this.gaps.splice(gapIndex, 0, gap);
     this.mergeGapAt(gapIndex);
-    this.restoreAnchor(anchor);
+    if (!this.nativeScrollActive) this.restoreAnchor(anchor);
   }
 
   private createGap(start: number, end: number): PlaceholderGap {
@@ -657,6 +672,10 @@ export class ReflowableContinuousController {
   }
 
   private measure(record: SectionRecord) {
+    if (this.nativeScrollActive) {
+      this.pendingMeasurements.add(record);
+      return;
+    }
     const anchor = this.stableAnchor ?? this.captureAnchor();
     if (!this.updateMeasurement(record)) return;
     this.restoreAnchor(anchor);
@@ -714,29 +733,80 @@ export class ReflowableContinuousController {
     element.replaceChildren(surface);
   }
 
-  private bindScrollBridge(document: Document) {
-    let lastTouchY: number | null = null;
+  private bindWheelBridge(document: Document) {
     document.addEventListener('wheel', (event) => {
       const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
       if (!delta) return;
       event.preventDefault();
       this.root.scrollTop += delta;
     }, { capture: true, passive: false });
+  }
+
+  private scrollByViewport(direction: -1 | 1) {
+    const maximumScrollTop = Math.max(0, this.root.scrollHeight - this.root.clientHeight);
+    const targetScrollTop = Math.max(
+      0,
+      Math.min(maximumScrollTop, this.root.scrollTop + direction * this.root.clientHeight)
+    );
+    if (Math.abs(targetScrollTop - this.root.scrollTop) < 1) return false;
+    this.root.scrollTo({ top: targetScrollTop, behavior: 'smooth' });
+    return true;
+  }
+
+  private observeNativeTouch(document: Document) {
     document.addEventListener('touchstart', (event) => {
-      lastTouchY = event.touches.length === 1 ? event.touches[0]?.clientY ?? null : null;
+      if (event.touches.length !== 1) return;
+      this.nativeTouchActive = true;
+      this.markNativeScrollActive();
     }, { capture: true, passive: true });
-    document.addEventListener('touchmove', (event) => {
-      const touch = event.touches.length === 1 ? event.touches[0] : undefined;
-      if (!touch || lastTouchY === null) return;
-      const delta = lastTouchY - touch.clientY;
-      lastTouchY = touch.clientY;
-      if (!delta) return;
-      event.preventDefault();
-      this.root.scrollTop += delta;
-    }, { capture: true, passive: false });
-    document.addEventListener('touchend', () => {
-      lastTouchY = null;
+    document.addEventListener('touchend', (event) => {
+      if (event.touches.length > 0) return;
+      this.nativeTouchActive = false;
+      this.scheduleNativeScrollSettle();
     }, { capture: true, passive: true });
+    document.addEventListener('touchcancel', () => {
+      this.nativeTouchActive = false;
+      this.scheduleNativeScrollSettle();
+    }, { capture: true, passive: true });
+  }
+
+  private markNativeScrollActive() {
+    this.nativeScrollActive = true;
+    this.root.dataset.nativeScrollState = 'active';
+    if (this.nativeScrollIdleTimer !== null) {
+      clearTimeout(this.nativeScrollIdleTimer);
+      this.nativeScrollIdleTimer = null;
+    }
+  }
+
+  private noteNativeScrollActivity() {
+    this.markNativeScrollActive();
+    if (!this.nativeTouchActive) this.scheduleNativeScrollSettle();
+  }
+
+  private scheduleNativeScrollSettle() {
+    if (this.destroyed || this.nativeTouchActive) return;
+    if (this.nativeScrollIdleTimer !== null) clearTimeout(this.nativeScrollIdleTimer);
+    this.nativeScrollIdleTimer = setTimeout(() => {
+      this.nativeScrollIdleTimer = null;
+      this.settleNativeScroll();
+    }, NATIVE_SCROLL_IDLE_MS);
+  }
+
+  private settleNativeScroll() {
+    if (this.destroyed || this.nativeTouchActive) return;
+    if (this.nativeScrollIdleTimer !== null) {
+      clearTimeout(this.nativeScrollIdleTimer);
+      this.nativeScrollIdleTimer = null;
+    }
+    this.nativeScrollActive = false;
+    this.root.dataset.nativeScrollState = 'idle';
+    if (!this.pendingMeasurements.size) return;
+    const anchor = this.stableAnchor ?? this.captureAnchor();
+    this.pendingMeasurements.forEach((record) => this.updateMeasurement(record));
+    this.pendingMeasurements.clear();
+    this.restoreAnchor(anchor);
+    this.stableAnchor = this.captureAnchor();
   }
 
   private bindLinks(document: Document, index: number) {
@@ -810,6 +880,7 @@ export class ReflowableContinuousController {
     this.onRelocate({
       index: record?.index ?? 0,
       fraction: this.overallProgress(),
+      sectionFraction: this.currentFraction(),
       ...(typeof section?.cfi === 'string' ? { cfi: section.cfi } : {})
     });
   }

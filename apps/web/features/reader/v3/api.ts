@@ -1,4 +1,4 @@
-import { normalizeReaderPreferences, type ReaderLocation, type ReaderNavigationEntry, type ReaderSource, type ReflowableFormat } from '@shuku/reader-core';
+import { normalizeReaderPreferences, type FoliateProgressSnapshot, type ReaderLocation, type ReaderNavigationEntry, type ReaderSource, type ReflowableFormat } from '@shuku/reader-core';
 import { withBasePath } from '../../../lib/base-path';
 import type { ReaderBookmark } from './bookmarks';
 
@@ -95,6 +95,13 @@ function visualReaderType(value: unknown): VisualReaderType | null {
   return value === 'reflowable' || value === 'comic' || value === 'pdf' ? value : null;
 }
 
+function foliateProgress(value: unknown): FoliateProgressSnapshot | undefined {
+  const continuous = record(record(value).continuous);
+  const sectionFraction = nullableNumber(continuous.sectionFraction);
+  if (sectionFraction === null || sectionFraction < 0 || sectionFraction > 1) return undefined;
+  return { continuous: { sectionFraction } };
+}
+
 function mapVolume(value: unknown): ReaderVolume | null {
   const item = record(value);
   const id = stringValue(item.id).trim();
@@ -149,7 +156,15 @@ export function wireLocationToDomain(value: unknown, volumeId: string): ReaderLo
   if (location.type === 'reflowable') {
     const format = sourceFormat(location.format);
     if (!format) return null;
-    return { kind: 'reflowable', format, cfi: nullableString(location.cfi) ?? undefined, href: nullableString(location.href) ?? undefined, progression: nullableNumber(location.progression) ?? undefined };
+    const foliate = foliateProgress(location.foliate);
+    return {
+      kind: 'reflowable',
+      format,
+      cfi: nullableString(location.cfi) ?? undefined,
+      href: nullableString(location.href) ?? undefined,
+      progression: nullableNumber(location.progression) ?? undefined,
+      ...(foliate ? { foliate } : {})
+    };
   }
   if (location.type === 'comic') return { kind: 'comic', volumeId, pageIndex: Math.max(1, numberValue(location.pageIndex, 1)) };
   if (location.type === 'pdf') return { kind: 'pdf', pageNumber: Math.max(1, numberValue(location.pageNumber, 1)) };

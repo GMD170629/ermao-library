@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -160,8 +161,17 @@ def publish_pdf_cover(
     source_path: Path,
     work_id: str,
     media_version_id: str,
+    volume_id: str,
 ) -> PdfCoverPublication:
-    target = storage_root / "books" / work_id / media_version_id / "cover.jpg"
+    target = (
+        storage_root
+        / "books"
+        / work_id
+        / media_version_id
+        / volume_id
+        / "cover.jpg"
+    )
+    temporary = target.with_suffix(f"{target.suffix}.part")
     try:
         import pypdfium2 as pdfium
 
@@ -182,11 +192,13 @@ def publish_pdf_cover(
                 image = image.convert("RGB")
             image.thumbnail((900, 1200))
             target.parent.mkdir(parents=True, exist_ok=True)
-            image.save(target, format="JPEG", quality=88, optimize=True)
+            image.save(temporary, format="JPEG", quality=88, optimize=True)
+            os.replace(temporary, target)
             return PdfCoverPublication(path=str(target), rendered_page=1)
         finally:
             pdf.close()
     except Exception as exc:
+        temporary.unlink(missing_ok=True)
         target.unlink(missing_ok=True)
         return PdfCoverPublication(path=None, warning=str(exc))
 

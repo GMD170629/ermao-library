@@ -305,6 +305,7 @@ class ImportOrchestrationServices(Protocol):
         storage_root: Path,
         work_id: str,
         media_version_id: str,
+        volume_id: str,
         metadata: ReflowableBookMetadata,
     ) -> str | None: ...
 
@@ -316,6 +317,7 @@ class ImportOrchestrationServices(Protocol):
         source_path: Path,
         work_id: str,
         media_version_id: str,
+        volume_id: str,
     ) -> PdfCoverPublication: ...
 
 

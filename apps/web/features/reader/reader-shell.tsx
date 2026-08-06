@@ -661,6 +661,15 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
       }}
     >
       <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 z-[120]"
+        data-reader-top-safe-area="true"
+        style={{
+          backgroundColor: themeSurface.background,
+          height: 'var(--shuku-safe-area-top)'
+        }}
+      />
+      <div
         className="relative flex h-full min-h-0 flex-col overflow-clip"
         style={{
           backgroundColor: themeSurface.background,

@@ -71,7 +71,7 @@ const libraryNavItems = [
 
 const shellSurfaces = {
   app: { background: '#FBFAF8', colorScheme: 'light', statusBarStyle: 'black-translucent' },
-  reader: { background: '#FDF6EA', colorScheme: 'light', statusBarStyle: 'default' },
+  reader: { background: '#FDF6EA', colorScheme: 'light', statusBarStyle: 'black-translucent' },
   login: { background: '#F8FAFC', colorScheme: 'light', statusBarStyle: 'black-translucent' },
   setup: { background: '#E8DCC7', colorScheme: 'light', statusBarStyle: 'black-translucent' },
   offline: { background: '#020617', colorScheme: 'dark', statusBarStyle: 'black-translucent' }

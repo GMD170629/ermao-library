@@ -75,6 +75,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang={locale} suppressHydrationWarning>
       <head>
+        <meta name="apple-mobile-web-app-capable" content="yes" />
         <link rel="manifest" href={withBasePath('/manifest.webmanifest')} />
         <Script id="shuku-base-path-fetch" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: basePathFetchBridge }} />
       </head>

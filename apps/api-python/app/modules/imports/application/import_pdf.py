@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 from app.contracts.publication_metadata import PublicationMetadata
@@ -40,6 +41,81 @@ from app.modules.imports.domain.content_classification import (
     normalize_media_kind_policy,
 )
 from app.modules.imports.domain.pdf_content import PdfContentKind
+
+logger = logging.getLogger(__name__)
+
+
+def refresh_existing_pdf_cover(
+    store: LibraryImportStore,
+    queries: ImportLibraryQueries,
+    services: ImportOrchestrationServices,
+    settings: ImportRuntimeConfig,
+    source_path: Path,
+    existing: ImportResult,
+) -> ImportResult:
+    """Move a legacy shared PDF cover back to its owning volume on rescan."""
+
+    if not existing.volume_id:
+        return existing
+    volume = queries.get_volume_context_by_id(existing.volume_id)
+    if volume is None:
+        return existing
+    current_cover = str(volume.get("coverPath") or "").strip()
+    legacy_cover = (
+        settings.resolved_storage_root
+        / "books"
+        / existing.work_id
+        / existing.media_version_id
+        / "cover.jpg"
+    )
+    current_path = Path(current_cover) if current_cover else None
+    if current_path is not None and not current_path.is_absolute():
+        current_path = settings.resolved_storage_root / current_path
+    needs_repair = (
+        not current_cover
+        or services.is_default_cover_path(current_cover)
+        or current_path == legacy_cover
+    )
+    if not needs_repair:
+        return existing
+    publication = services.publish_pdf_cover(
+        settings.resolved_storage_root,
+        source_path,
+        existing.work_id,
+        existing.media_version_id,
+        existing.volume_id,
+    )
+    if publication.path is None:
+        logger.warning(
+            "pdf.cover-repair.failed volume_id=%s reason=%s",
+            existing.volume_id,
+            publication.warning or "render-failed",
+        )
+        return existing
+    store.update_library_volume(
+        existing.volume_id,
+        columns={
+            "coverPath": publication.path,
+            "coverStatus": services.cover_status(publication.path),
+            "updatedAt": _now(),
+        },
+    )
+    work = queries.get_work_by_id(existing.work_id)
+    if work and str(work.get("coverPath") or "").strip() == current_cover:
+        store.update_library_work(
+            existing.work_id,
+            columns={
+                "coverPath": publication.path,
+                "coverStatus": services.cover_status(publication.path),
+                "updatedAt": _now(),
+            },
+        )
+    logger.info(
+        "pdf.cover-repair.completed volume_id=%s source=%s",
+        existing.volume_id,
+        source_path.name,
+    )
+    return existing
 
 
 def _import_pdf(
@@ -129,11 +205,13 @@ def _import_pdf(
                 "updatedAt": _now(),
             },
         )
+        volume_id = _id()
         cover = services.publish_pdf_cover(
             settings.resolved_storage_root,
             source_path,
             str(work["id"]),
             str(media_version["id"]),
+            volume_id,
         )
         cover_path = cover.path
         raw_metadata = dict(inspection.raw_metadata)
@@ -144,7 +222,7 @@ def _import_pdf(
         stored_cover_path = cover_path or services.ensure_default_cover()
         volume = store.insert_library_volume(
             columns={
-                "id": _id(),
+                "id": volume_id,
                 "mediaVersionId": media_version["id"],
                 "title": resolved_local.metadata.volume_title or identity.title,
                 "volumeIndex": identity.volume_index,

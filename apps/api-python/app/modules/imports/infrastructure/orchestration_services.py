@@ -359,12 +359,14 @@ class SessionImportOrchestrationServices:
         storage_root: Path,
         work_id: str,
         media_version_id: str,
+        volume_id: str,
         metadata: ReflowableBookMetadata,
     ) -> str | None:
         published = publish_reflowable_cover(
             storage_root,
             work_id,
             media_version_id,
+            volume_id,
             metadata.cover,
         )
         if published:
@@ -380,12 +382,14 @@ class SessionImportOrchestrationServices:
         source_path: Path,
         work_id: str,
         media_version_id: str,
+        volume_id: str,
     ) -> PdfCoverPublication:
         publication = publish_pdf_cover(
             storage_root,
             source_path,
             work_id,
             media_version_id,
+            volume_id,
         )
         if publication.path:
             self._new_publications.add(Path(publication.path))

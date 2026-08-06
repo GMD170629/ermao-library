@@ -12,12 +12,18 @@ def publish_reflowable_cover(
     storage_root: Path,
     work_id: str,
     media_version_id: str,
+    volume_id: str,
     cover: EmbeddedBookCover | None,
 ) -> str | None:
     if cover is None:
         return None
     target = (
-        storage_root / "books" / work_id / media_version_id / f"cover{cover.extension}"
+        storage_root
+        / "books"
+        / work_id
+        / media_version_id
+        / volume_id
+        / f"cover{cover.extension}"
     )
     temporary = target.with_suffix(f"{target.suffix}.part")
     target.parent.mkdir(parents=True, exist_ok=True)

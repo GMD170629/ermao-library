@@ -28,6 +28,9 @@ export type ReflowableLocation = {
 };
 
 export type FoliateProgressSnapshot = {
+  continuous?: {
+    sectionFraction: number;
+  };
   toc?: {
     index: number;
     title: string;

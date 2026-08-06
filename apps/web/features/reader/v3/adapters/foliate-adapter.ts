@@ -37,6 +37,7 @@ import {
 type FoliateRelocateDetail = {
   cfi?: string;
   fraction?: number;
+  continuousSectionFraction?: number;
   tocItem?: Record<string, unknown>;
   section?: { current: number; total: number };
   location?: { current: number; next: number; total: number };
@@ -56,6 +57,11 @@ type FoliateRenderer = HTMLElement & {
   goTo?: (target: unknown) => Promise<void>;
 };
 
+type FoliateResolvedNavigationTarget = {
+  index: number;
+  anchor?: unknown;
+};
+
 type FoliateView = HTMLElement & {
   book?: FoliateBook;
   renderer?: FoliateRenderer;
@@ -68,6 +74,7 @@ type FoliateView = HTMLElement & {
   goLeft: () => Promise<void>;
   goRight: () => Promise<void>;
   goTo: (target: string | number | { fraction: number }) => Promise<unknown>;
+  resolveCFI: (cfi: string) => unknown;
   getTOCItemOf?: (target: string) => Promise<unknown>;
   goToFraction: (fraction: number) => Promise<void>;
   goToTextStart: () => Promise<unknown>;
@@ -151,6 +158,97 @@ export async function foliateResolvedSectionIndex(book: FoliateBook, href: strin
   const resolved = await Promise.resolve(book.resolveHref?.(href));
   if (!isRecord(resolved)) return undefined;
   return nonNegativeInteger(resolved.index);
+}
+
+function foliateNavigationTarget(value: unknown, sectionCount: number): FoliateResolvedNavigationTarget | null {
+  if (!isRecord(value)) return null;
+  const index = nonNegativeInteger(value.index);
+  if (index === undefined || index >= sectionCount) return null;
+  return { index, ...('anchor' in value ? { anchor: value.anchor } : {}) };
+}
+
+export async function resolveFoliatePaginatedRestoreTargets(
+  book: FoliateBook,
+  location: ReflowableLocation | null,
+  resolveCFI = book.resolveCFI
+): Promise<FoliateResolvedNavigationTarget[]> {
+  if (!location) return [];
+  const targets: FoliateResolvedNavigationTarget[] = [];
+  const cfi = location.cfi;
+  if (cfi && resolveCFI) {
+    try {
+      const resolved = foliateNavigationTarget(
+        await Promise.resolve(resolveCFI(cfi)),
+        book.sections.length
+      );
+      if (resolved) {
+        // A package-level CFI identifies only a spine section. Foliate's EPUB
+        // resolver still attaches an anchor for its empty content path, which
+        // crashes the paginator when that anchor is evaluated.
+        targets.push(cfi.includes('!') ? resolved : { index: resolved.index });
+      }
+    } catch {
+      // Continue with href, section, and progression recovery.
+    }
+  }
+
+  const href = location.href;
+  const normalizedHref = href?.replace(/^\.\//u, '');
+  const matchingSection = normalizedHref
+    ? book.sections.find((section) => {
+      if (typeof section.id !== 'string') return false;
+      const sectionId = section.id.replace(/^\.\//u, '');
+      return sectionId === normalizedHref || sectionId.endsWith(`/${normalizedHref}`);
+    })?.id
+    : undefined;
+  const hrefTargets = [matchingSection, href]
+    .filter((target, index, values): target is string => Boolean(target) && values.indexOf(target) === index);
+  for (const target of hrefTargets) {
+    if (!book.resolveHref || !isEngineResolvableReflowableHref(location.format, target)) continue;
+    try {
+      const resolved = foliateNavigationTarget(
+        await Promise.resolve(book.resolveHref(target)),
+        book.sections.length
+      );
+      if (resolved) targets.push(resolved);
+    } catch {
+      // Continue with the next stable navigation representation.
+    }
+  }
+
+  const section = location.foliate?.section?.current;
+  if (typeof section === 'number' && Number.isInteger(section) && section >= 0 && section < book.sections.length) {
+    targets.push({ index: section });
+  }
+  return targets;
+}
+
+export function shouldRefineContinuousRestoreWithProgression(
+  location: ReflowableLocation | null,
+  target: ReflowableContinuousTarget | null
+) {
+  if (typeof location?.progression !== 'number' || !Number.isFinite(location.progression)) return false;
+  if (!target) return true;
+  if (typeof target.fraction === 'number') return false;
+
+  const hasContentCfi = Boolean(location.cfi?.includes('!'));
+  const hasFragmentHref = Boolean(location.href?.includes('#'));
+  const hasPreciseAnchor = Boolean(target.anchor) && (hasContentCfi || hasFragmentHref);
+  return !hasPreciseAnchor;
+}
+
+export function refineContinuousRestoreWithSectionFraction(
+  location: ReflowableLocation | null,
+  target: ReflowableContinuousTarget | null
+) {
+  const sectionFraction = location?.foliate?.continuous?.sectionFraction;
+  if (
+    !target
+    || typeof sectionFraction !== 'number'
+    || !Number.isFinite(sectionFraction)
+    || !shouldRefineContinuousRestoreWithProgression(location, target)
+  ) return target;
+  return { index: target.index, fraction: clamp(sectionFraction) };
 }
 
 export function foliateSectionIndexFromDisplayIndex(index: number) {
@@ -484,8 +582,9 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     this.continuous = controller;
     this.applyContinuousSurfacePreferences(preferences);
     const target = await this.resolveContinuousLocation(location, controller);
+    const shouldRefineWithProgression = shouldRefineContinuousRestoreWithProgression(location, target);
     await controller.open(target ?? { index: this.firstLinearSectionIndex() });
-    if (!target && typeof location?.progression === 'number') {
+    if (shouldRefineWithProgression && typeof location?.progression === 'number') {
       await controller.goToProgress(clamp(location.progression));
     }
   }
@@ -498,6 +597,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     return {
       ...(relocate.cfi ? { cfi: relocate.cfi } : {}),
       fraction: relocate.fraction,
+      continuousSectionFraction: relocate.sectionFraction,
       section: { current: relocate.index, total: this.book?.sections.length ?? 0 },
       ...(href ? { tocItem: { href, ...(toc ? { label: toc.title } : {}) } } : {})
     };
@@ -511,16 +611,17 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     this.pendingTocSnapshot = location.foliate?.toc ?? null;
     if (location.cfi) {
       const target = await Promise.resolve(controller.resolveCFI(location.cfi));
-      if (target) return target;
+      if (target) return refineContinuousRestoreWithSectionFraction(location, target);
     }
     if (location.href && isEngineResolvableReflowableHref(this.format, location.href)) {
       const target = await controller.resolveHref(location.href);
-      if (target) return target;
+      if (target) return refineContinuousRestoreWithSectionFraction(location, target);
     }
     const section = location.foliate?.section?.current;
-    return typeof section === 'number' && section >= 0 && section < (this.book?.sections.length ?? 0)
+    const target = typeof section === 'number' && section >= 0 && section < (this.book?.sections.length ?? 0)
       ? { index: section }
       : null;
+    return refineContinuousRestoreWithSectionFraction(location, target);
   }
 
   private firstLinearSectionIndex() {
@@ -824,28 +925,16 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
 
   private async restore(location: ReflowableLocation | null) {
     const view = this.view;
-    if (!view) return;
+    const book = this.book;
+    if (!view || !book) return;
     this.pendingTocSnapshot = location?.foliate?.toc ?? null;
-    const href = location?.href;
-    const normalizedHref = href?.replace(/^\.\//u, '');
-    const matchingSection = normalizedHref
-      ? this.book?.sections.find((section) => {
-        if (typeof section.id !== 'string') return false;
-        const sectionId = section.id.replace(/^\.\//u, '');
-        return sectionId === normalizedHref || sectionId.endsWith(`/${normalizedHref}`);
-      })?.id
-      : undefined;
-    const targets = [location?.cfi, matchingSection, href]
-      .filter((target, index, values): target is string => Boolean(target) && values.indexOf(target) === index)
-      .filter((target) => {
-        // CFI and section ids are engine-native; only filter href-like pseudo targets.
-        if (target === location?.cfi || target === matchingSection) return true;
-        return isEngineResolvableReflowableHref(this.format, target);
-      });
+    const renderer = view.renderer;
+    const targets = await resolveFoliatePaginatedRestoreTargets(book, location, view.resolveCFI.bind(view));
     for (const target of targets) {
+      if (!renderer?.goTo) break;
       try {
-        const resolved = target === href ? await this.goToHref(target) : await view.goTo(target);
-        if (resolved) return;
+        await renderer.goTo(target);
+        return;
       } catch {
         // Continue to the next official navigation representation.
       }
@@ -889,6 +978,9 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
       : undefined;
     const currentHref = toc?.href ?? href ?? (typeof sectionId === 'string' ? sectionId : undefined);
     const foliate: FoliateProgressSnapshot = {
+      continuous: typeof detail.continuousSectionFraction === 'number'
+        ? { sectionFraction: detail.continuousSectionFraction }
+        : undefined,
       toc,
       navigationFingerprint: this.navigationFingerprint,
       section: detail.section,

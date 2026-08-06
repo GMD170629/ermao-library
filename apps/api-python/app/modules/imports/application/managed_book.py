@@ -37,7 +37,10 @@ from app.modules.imports.application.import_audio import (
 )
 from app.modules.imports.application.import_comic import _import_comic
 from app.modules.imports.application.import_epub import _import_epub
-from app.modules.imports.application.import_pdf import _import_pdf
+from app.modules.imports.application.import_pdf import (
+    _import_pdf,
+    refresh_existing_pdf_cover,
+)
 from app.modules.imports.application.import_policy import (
     REFLOWABLE_SOURCE_EXTS,
     extension_is_allowed,
@@ -269,6 +272,15 @@ def import_managed_book(
         if existing_file:
             if source_ext in REFLOWABLE_SOURCE_EXTS:
                 existing_file = refresh_existing_reflowable_source(
+                    store,
+                    queries,
+                    services,
+                    settings,
+                    source,
+                    existing_file,
+                )
+            elif source_ext == ".pdf":
+                existing_file = refresh_existing_pdf_cover(
                     store,
                     queries,
                     services,
