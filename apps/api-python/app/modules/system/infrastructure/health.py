@@ -31,13 +31,13 @@ def _check_monitor_folders(paths: list[Path]) -> dict[str, str]:
     for path in paths:
         if not path.exists() or not path.is_dir():
             return health_check_item(
-                "monitorRootReadable", "error", f"监控文件夹不存在：{path}"
+                "monitorRootReadable", "warning", f"监控文件夹不存在：{path}"
             )
         try:
             next(path.iterdir(), None)
         except OSError as exc:
             return health_check_item(
-                "monitorRootReadable", "error", f"监控文件夹不可读：{exc}"
+                "monitorRootReadable", "warning", f"监控文件夹不可读：{exc}"
             )
     return health_check_item(
         "monitorRootReadable", "ok", f"{len(paths)} 个监控文件夹可读"

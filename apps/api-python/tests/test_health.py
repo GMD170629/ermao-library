@@ -69,6 +69,32 @@ def test_health_aggregates_enabled_monitor_folder_readability(
     assert monitor_check["message"] == "2 个监控文件夹可读"
 
 
+def test_missing_enabled_monitor_folder_does_not_block_service_readiness(
+    client, db_session, tmp_path
+):
+    _setup_admin(client)
+    missing = tmp_path / "detached-library"
+    db_session.add(
+        MonitorFolder(name="Detached", root_path=str(missing), enabled=True)
+    )
+    db_session.commit()
+
+    readiness_response = client.get("/api/health")
+    diagnostics_response = client.get("/api/system/health")
+
+    assert readiness_response.status_code == 200
+    assert readiness_response.json()["data"]["status"] == "ok"
+    assert diagnostics_response.status_code == 200, diagnostics_response.text
+    assert diagnostics_response.json()["data"]["status"] == "ok"
+    monitor_check = next(
+        check
+        for check in diagnostics_response.json()["data"]["checks"]
+        if check["name"] == "monitorRootReadable"
+    )
+    assert monitor_check["status"] == "warning"
+    assert str(missing) in monitor_check["message"]
+
+
 def test_health_reports_an_unreadable_enabled_monitor_folder(
     client, db_session, tmp_path, monkeypatch
 ):
@@ -93,7 +119,7 @@ def test_health_reports_an_unreadable_enabled_monitor_folder(
         for check in response.json()["data"]["checks"]
         if check["name"] == "monitorRootReadable"
     )
-    assert monitor_check["status"] == "error"
+    assert monitor_check["status"] == "warning"
     assert "监控文件夹不可读" in monitor_check["message"]
 
 
