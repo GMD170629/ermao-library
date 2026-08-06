@@ -76,9 +76,11 @@ test('the default Turbopack build is not shadowed by a webpack override', () => 
   );
 });
 
-test('Playwright loopback traffic is allowed by the Next 16 development server', () => {
+test('loopback traffic remains allowed alongside environment-specific development origins', () => {
   const config = loadConfig();
+  const allowedDevOrigins = config.allowedDevOrigins ?? [];
 
-  assert.deepEqual(config.allowedDevOrigins, ['127.0.0.1']);
+  assert.ok(allowedDevOrigins.includes('127.0.0.1'));
+  assert.ok(allowedDevOrigins.includes('localhost'));
   assert.equal(config.devIndicators, false);
 });
