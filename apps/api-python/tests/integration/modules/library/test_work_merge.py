@@ -258,6 +258,56 @@ def test_merge_rejects_an_active_background_job(
     assert db_session.get(LibraryWork, second.id) is not None
 
 
+def test_merge_does_not_reassign_unresolved_organize_jobs(
+    client: TestClient, db_session: Session
+) -> None:
+    _login(client, db_session)
+    first, second, volumes = _seed(db_session)
+    jobs = [
+        OrganizeJob(
+            work_id=first.id,
+            volume_id=volumes[0].id,
+            media_version_id=volumes[0].media_version_id,
+            trigger="MANUAL",
+            status="REVIEWING",
+            issue_codes="[]",
+        ),
+        OrganizeJob(
+            work_id=second.id,
+            volume_id=volumes[2].id,
+            media_version_id=volumes[2].media_version_id,
+            trigger="MANUAL",
+            status="FAILED",
+            issue_codes="[]",
+        ),
+    ]
+    db_session.add_all(jobs)
+    db_session.commit()
+    job_ids = [job.id for job in jobs]
+
+    response = client.post(
+        "/api/works/merge",
+        json={
+            "workIds": [first.id, second.id],
+            "metadata": {"title": "合并整理任务", "author": "林川", "tags": []},
+            "coverVolumeId": volumes[0].id,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    merged_work_id = response.json()["data"]["workId"]
+    db_session.expire_all()
+    remaining_jobs = [
+        job
+        for job_id in job_ids
+        if (job := db_session.get(OrganizeJob, job_id)) is not None
+    ]
+    assert all(job.work_id in {first.id, second.id} for job in remaining_jobs)
+    assert db_session.scalar(
+        select(OrganizeJob.id).where(OrganizeJob.work_id == merged_work_id)
+    ) is None
+
+
 def test_merge_preview_requires_system_management_permission(
     client: TestClient, db_session: Session
 ) -> None:

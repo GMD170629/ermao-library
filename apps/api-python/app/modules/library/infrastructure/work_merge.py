@@ -418,11 +418,6 @@ class SqlAlchemyWorkMergeGateway:
             .where(KindleSendTask.work_id.in_(command.work_ids))
             .values(work_id=new_work.id)
         )
-        organize_rows = list(
-            self._db.scalars(
-                select(OrganizeJob).where(OrganizeJob.work_id.in_(command.work_ids))
-            ).all()
-        )
         lookup_rows = list(
             self._db.scalars(
                 select(MetadataLookupTask).where(
@@ -430,7 +425,7 @@ class SqlAlchemyWorkMergeGateway:
                 )
             ).all()
         )
-        for row in (*organize_rows, *lookup_rows):
+        for row in lookup_rows:
             row.work_id = new_work.id
             if row.media_version_id in media_by_id:
                 row.media_version_id = new_media[
