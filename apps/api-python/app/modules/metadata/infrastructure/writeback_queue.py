@@ -247,7 +247,7 @@ def _public_target_summary(target: MetadataWritebackTarget) -> str | None:
     if target.warning_code == "SIDECAR_FALLBACK":
         return "已生成旁车 OPF"
     if target.warning_code:
-        return "文件元数据写回失败"
+        return "旁车 OPF 保存失败"
     return None
 
 

@@ -233,10 +233,10 @@ export function MetadataLookupModal({ book, currentMediaVersionId, open, onClose
         const operation = payload.ok ? payload.data?.operation : undefined;
         if (!operation) return;
         setWritebackOperation(operation);
-        if (operation.status === 'COMPLETED') setMessage(i18nAttribute('元数据已保存，图书文件写回完成'));
-        if (operation.status === 'COMPLETED_WITH_WARNINGS') setMessage(i18nAttribute('元数据已保存，{value0} 个文件写回失败', { value0: operation.warningTargets }));
+        if (operation.status === 'COMPLETED') setMessage(i18nAttribute('元数据已保存，旁车 OPF 写入完成'));
+        if (operation.status === 'COMPLETED_WITH_WARNINGS') setMessage(i18nAttribute('元数据已保存，{value0} 个旁车 OPF 写入失败', { value0: operation.warningTargets }));
       } catch (reason) {
-        if (!(reason instanceof DOMException && reason.name === 'AbortError')) setError(i18nAttribute('无法读取文件写回进度'));
+        if (!(reason instanceof DOMException && reason.name === 'AbortError')) setError(i18nAttribute('无法读取旁车 OPF 保存进度'));
       }
     };
     void poll();
@@ -291,7 +291,7 @@ export function MetadataLookupModal({ book, currentMediaVersionId, open, onClose
       if (!payload.ok) throw new Error(payload.error?.message ?? '元数据应用失败');
       const operation = payload.data?.metadataWriteback ?? null;
       setWritebackOperation(operation);
-      setMessage(operation ? i18nAttribute('已应用所选字段，正在后台写回图书文件') : i18nAttribute('已应用所选字段'));
+      setMessage(operation ? i18nAttribute('已应用所选字段，正在后台写入旁车 OPF') : i18nAttribute('已应用所选字段'));
       await completeMetadataApply({ close: onClose, refresh: onApplied });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '元数据应用失败');
@@ -445,9 +445,9 @@ export function MetadataLookupModal({ book, currentMediaVersionId, open, onClose
         <div className="border-t border-slate-100 px-5 pt-4">
           <label className="flex items-start gap-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
             <input type="checkbox" checked={writeMetadataToFiles} onChange={(event) => setWriteMetadataToFiles(event.target.checked)} className="mt-0.5 h-4 w-4 accent-blue-600" />
-            <span><span className="block font-medium"><I18nText>同时覆盖图书文件元数据</I18nText></span><span className="mt-1 block text-xs text-slate-500"><I18nText>本次选择不会修改系统识别设置；文件将在后台安全写回。</I18nText></span></span>
+            <span><span className="block font-medium"><I18nText>同时保存到旁车 OPF</I18nText></span><span className="mt-1 block text-xs text-slate-500"><I18nText>在图书旁生成同名 OPF 和独立封面；不会修改源图书文件。</I18nText></span></span>
           </label>
-          {writebackOperation ? <div className="mt-2 text-xs text-slate-500"><I18nText>文件写回进度：</I18nText>{writebackOperation.completedTargets}/{writebackOperation.totalTargets}</div> : null}
+          {writebackOperation ? <div className="mt-2 text-xs text-slate-500"><I18nText>旁车 OPF 保存进度：</I18nText>{writebackOperation.completedTargets}/{writebackOperation.totalTargets}</div> : null}
         </div>
         <div className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:justify-end">
           <Button variant="secondary" onClick={onClose}><I18nText>取消</I18nText></Button>

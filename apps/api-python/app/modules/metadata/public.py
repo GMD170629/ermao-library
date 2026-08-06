@@ -8,6 +8,7 @@ from app.modules.metadata.application.commands import (
 from app.modules.metadata.application.opf import (
     MAX_OPF_BYTES,
     OpfMetadataError,
+    cover_media_type,
     parse_opf_metadata,
     serialize_opf_metadata,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "ProviderManifest",
     "PublicationMetadata",
     "execute_metadata_transaction",
+    "cover_media_type",
     "parse_opf_metadata",
     "serialize_opf_metadata",
 ]

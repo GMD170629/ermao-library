@@ -74,6 +74,8 @@ def test_writeback_uses_immutable_snapshot_and_finishes_after_background_process
 ) -> None:
     source = tmp_path / "book.txt"
     source.write_text("正文")
+    original_source = source.read_bytes()
+    original_stat = source.stat()
     _library_source(db_session, source)
     work = db_session.get(LibraryWork, "work-1")
     assert work is not None
@@ -99,6 +101,12 @@ def test_writeback_uses_immutable_snapshot_and_finishes_after_background_process
     assert metadata.title == "快照标题"
     assert metadata.author == "作者"
     assert metadata.series_index is None
+    assert source.read_bytes() == original_source
+    assert source.stat().st_mtime_ns == original_stat.st_mtime_ns
+    library_file = db_session.get(LibraryFile, "file-1")
+    assert library_file is not None
+    assert library_file.size_bytes == original_stat.st_size
+    assert library_file.mtime_ms == int(original_stat.st_mtime * 1000)
 
 
 def test_external_change_is_contained_as_warning_after_last_attempt(

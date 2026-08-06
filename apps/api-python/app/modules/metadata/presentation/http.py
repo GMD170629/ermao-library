@@ -67,10 +67,10 @@ def get_metadata_writeback(
     user = _auth(db, request, settings)
     work_id = metadata_writeback_work_id(db, operation_id)
     if work_id is None or not can_access_work(db, user, work_id):
-        raise BasicNotFoundError(MessageError(message="元数据文件写回任务不存在"))
+        raise BasicNotFoundError(MessageError(message="元数据旁车 OPF 保存任务不存在"))
     operation = metadata_writeback_view(db, operation_id)
     if operation is None:
-        raise BasicNotFoundError(MessageError(message="元数据文件写回任务不存在"))
+        raise BasicNotFoundError(MessageError(message="元数据旁车 OPF 保存任务不存在"))
     return MetadataWritebackResponse(
         data=MetadataWritebackPayload.model_validate({"operation": operation})
     )

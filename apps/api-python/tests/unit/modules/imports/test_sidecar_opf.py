@@ -97,6 +97,36 @@ def test_file_sidecar_wins_over_directory_candidates(tmp_path: Path) -> None:
     assert result.source_kind == "FILE"
 
 
+@pytest.mark.parametrize(
+    "suffix",
+    (
+        ".epub",
+        ".pdf",
+        ".cbz",
+        ".fb2",
+        ".mp3",
+        ".flac",
+        ".m4b",
+        ".mobi",
+        ".azw3",
+        ".txt",
+    ),
+)
+def test_every_supported_book_family_discovers_the_same_named_opf(
+    tmp_path: Path, suffix: str
+) -> None:
+    book = tmp_path / f"book{suffix}"
+    book.write_bytes(b"source remains opaque to sidecar discovery")
+    book.with_suffix(".opf").write_bytes(_opf(title="旁车卷名"))
+
+    result = discover_sidecar_opf(book, directory_fallback=False)
+
+    assert result is not None
+    assert result.opf_path == book.with_suffix(".opf")
+    assert result.source_kind == "FILE"
+    assert result.metadata.volume_title == "旁车卷名"
+
+
 def test_file_and_directory_sidecars_merge_each_field_independently(
     tmp_path: Path,
 ) -> None:

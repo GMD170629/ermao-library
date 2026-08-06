@@ -95,12 +95,14 @@ function ChoiceField({
   value,
   options,
   columns,
+  disabled = false,
   onChange
 }: {
   label: string;
   value: string;
   options: ReadonlyArray<Choice>;
   columns?: number;
+  disabled?: boolean;
   onChange: (value: string) => void;
 }) {
   const { t } = useI18n();
@@ -118,7 +120,8 @@ function ChoiceField({
       <div
         role="group"
         aria-label={label}
-        className={`grid w-full gap-1 rounded-xl bg-[#F2EEE8] p-1 ${widthClass}`}
+        aria-disabled={disabled}
+        className={`grid w-full gap-1 rounded-xl bg-[#F2EEE8] p-1 ${widthClass} ${disabled ? 'opacity-45' : ''}`}
         style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}
       >
         {options.map((option) => {
@@ -128,6 +131,7 @@ function ChoiceField({
               key={option.value}
               type="button"
               aria-pressed={selected}
+              disabled={disabled}
               onClick={() => onChange(option.value)}
               className={`min-h-10 min-w-0 rounded-[10px] font-semibold transition focus:outline-none focus:ring-2 focus:ring-[#EF8B73]/60 active:scale-[0.98] sm:px-1.5 sm:text-xs ${
                 denseLabels ? 'px-0 text-[10px]' : 'px-0.5 text-[11px]'
@@ -389,14 +393,14 @@ export function ReaderDeviceSettingsPage() {
             description={t('设置当前设备的漫画模式、翻页、显示和缩放方式。')}
           >
             <ChoiceField label={t('阅读方式')} value={preferences.comic.flow} options={READER_COMIC_FLOW_OPTIONS} onChange={(flow) => updatePreferences({ ...preferences, comic: { ...preferences.comic, flow: flow as ReaderPreferences['comic']['flow'] } })} />
-            <ChoiceField label={t('模式')} value={preferences.comic.mode} options={READER_SPREAD_MODE_OPTIONS.filter((option) => option.value !== 'auto')} onChange={(mode) => updatePreferences({ ...preferences, comic: { ...preferences.comic, mode: mode as ReaderPreferences['comic']['mode'] } })} />
-            <ChoiceField label={t('双页时封面单独显示')} value={String(preferences.comic.coverSingle)} options={[{ value: 'true', label: '开启' }, { value: 'false', label: '关闭' }]} onChange={(coverSingle) => updatePreferences({ ...preferences, comic: { ...preferences.comic, coverSingle: coverSingle === 'true' } })} />
-            <ChoiceField label={t('页间距')} value={String(preferences.comic.pageGap)} options={READER_PAGE_GAP_OPTIONS} onChange={(pageGap) => updatePreferences({ ...preferences, comic: { ...preferences.comic, pageGap: Number(pageGap) as ReaderPreferences['comic']['pageGap'] } })} />
+            <ChoiceField label={t('模式')} value={preferences.comic.mode} options={READER_SPREAD_MODE_OPTIONS.filter((option) => option.value !== 'auto')} disabled={preferences.comic.flow === 'vertical'} onChange={(mode) => updatePreferences({ ...preferences, comic: { ...preferences.comic, mode: mode as ReaderPreferences['comic']['mode'] } })} />
+            <ChoiceField label={t('双页时封面单独显示')} value={String(preferences.comic.coverSingle)} options={[{ value: 'true', label: '开启' }, { value: 'false', label: '关闭' }]} disabled={preferences.comic.flow === 'vertical' || preferences.comic.mode !== 'double'} onChange={(coverSingle) => updatePreferences({ ...preferences, comic: { ...preferences.comic, coverSingle: coverSingle === 'true' } })} />
+            <ChoiceField label={t('页间距')} value={String(preferences.comic.pageGap)} options={READER_PAGE_GAP_OPTIONS} disabled={preferences.comic.flow === 'vertical'} onChange={(pageGap) => updatePreferences({ ...preferences, comic: { ...preferences.comic, pageGap: Number(pageGap) as ReaderPreferences['comic']['pageGap'] } })} />
             <RangeField label={t('页宽')} value={preferences.comic.pageWidth} minimum={READER_PAGE_WIDTH_MINIMUM} maximum={READER_PAGE_WIDTH_MAXIMUM} step={10} suffix="px" onChange={(pageWidth) => updatePreferences({ ...preferences, comic: { ...preferences.comic, pageWidth } })} />
             <ChoiceField label={t('翻页')} value={preferences.comic.pageTurnAnimation} options={READER_PAGE_TURN_ANIMATION_OPTIONS} onChange={(pageTurnAnimation) => updatePreferences({ ...preferences, comic: { ...preferences.comic, pageTurnAnimation: pageTurnAnimation as ReaderPreferences['comic']['pageTurnAnimation'] } })} />
             <ChoiceField label={t('适配')} value={preferences.comic.imageFit} options={READER_COMIC_IMAGE_FIT_OPTIONS} onChange={(imageFit) => updatePreferences({ ...preferences, comic: { ...preferences.comic, imageFit: imageFit as ReaderPreferences['comic']['imageFit'] } })} />
             <ChoiceField label={t('画质')} value={preferences.comic.imageVariant} options={READER_COMIC_IMAGE_VARIANT_OPTIONS} onChange={(imageVariant) => updatePreferences({ ...preferences, comic: { ...preferences.comic, imageVariant: imageVariant as ReaderPreferences['comic']['imageVariant'] } })} />
-            <ChoiceField label={t('方向')} value={preferences.comic.direction} options={READER_COMIC_DIRECTION_OPTIONS} onChange={(direction) => updatePreferences({ ...preferences, comic: { ...preferences.comic, direction: direction as ReaderPreferences['comic']['direction'] } })} />
+            <ChoiceField label={t('方向')} value={preferences.comic.direction} options={READER_COMIC_DIRECTION_OPTIONS} disabled={preferences.comic.flow === 'vertical'} onChange={(direction) => updatePreferences({ ...preferences, comic: { ...preferences.comic, direction: direction as ReaderPreferences['comic']['direction'] } })} />
             <StepperField label={t('缩放')} value={preferences.comic.zoom} minimum={0.6} maximum={2.4} step={0.1} onChange={(zoom) => updatePreferences({ ...preferences, comic: { ...preferences.comic, zoom } })} />
           </SettingsSection>
         </div>

@@ -15,10 +15,22 @@ from app.contracts.publication_titles import titles_from_local_source
 MAX_OPF_BYTES = 2 * 1024 * 1024
 DC_NAMESPACE = "http://purl.org/dc/elements/1.1/"
 OPF_NAMESPACE = "http://www.idpf.org/2007/opf"
+COVER_MEDIA_TYPES = {
+    ".gif": "image/gif",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
 
 
 class OpfMetadataError(ValueError):
     pass
+
+
+def cover_media_type(href: str) -> str:
+    suffix = href.rsplit(".", 1)[-1].casefold() if "." in href else ""
+    return COVER_MEDIA_TYPES.get(f".{suffix}", "image/jpeg")
 
 
 def _clean(value: object, *, limit: int = 8_000) -> str | None:
@@ -231,8 +243,10 @@ def serialize_opf_metadata(metadata: PublicationMetadata) -> bytes:
     lines.append("  </metadata>\n")
     lines.append("  <manifest>\n")
     if metadata.cover_href:
+        media_type = cover_media_type(metadata.cover_href)
         lines.append(
-            f'    <item id="cover-image" href={quoteattr(metadata.cover_href)} media-type="image/jpeg" properties="cover-image" />\n'
+            f'    <item id="cover-image" href={quoteattr(metadata.cover_href)} '
+            f'media-type={quoteattr(media_type)} properties="cover-image" />\n'
         )
     lines.extend(("  </manifest>\n", "  <spine />\n", "</package>\n"))
     return "".join(lines).encode("utf-8")

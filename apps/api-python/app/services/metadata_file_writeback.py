@@ -1,4 +1,4 @@
-"""Recoverable worker boundary for metadata file writeback operations."""
+"""Recoverable worker boundary for metadata OPF sidecar save operations."""
 
 from __future__ import annotations
 
@@ -108,7 +108,7 @@ def process_next_metadata_writeback(db: Session, settings: Settings) -> bool:
         if prepared_path:
             Path(prepared_path).unlink(missing_ok=True)
         LOGGER.warning(
-            "metadata file writeback failed target=%s operation=%s: %s",
+            "metadata OPF sidecar save failed target=%s operation=%s: %s",
             target_id,
             target.get("operationId"),
             exc,

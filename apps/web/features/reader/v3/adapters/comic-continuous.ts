@@ -11,7 +11,6 @@ import {
 export type ComicContinuousView = {
   currentPage: number;
   pageCount: number;
-  pageGap: 0 | 8 | 16 | 24;
   imageFit: ComicImageFit;
   zoom: number;
   pageWidth: number;
@@ -74,7 +73,7 @@ export class ComicContinuousController {
     const anchor = preserveAnchor ? this.captureAnchor() : null;
     this.currentPage = view.currentPage;
     this.root.dataset.comicContinuousCurrent = String(view.currentPage);
-    this.root.style.paddingBlock = `${view.pageGap}px`;
+    this.root.style.paddingBlock = '0px';
     const availableWidth = Math.min(view.pageWidth, Math.max(1, this.root.clientWidth || this.container.clientWidth));
     const knownPages = new Set(view.pages.map((page) => page.pageIndex));
     for (const [page, slot] of this.slots) {
@@ -86,7 +85,7 @@ export class ComicContinuousController {
       const slot = this.slotFor(page.pageIndex);
       slot.element.style.maxWidth = `${availableWidth}px`;
       slot.element.style.marginInline = 'auto';
-      slot.element.style.marginBlockEnd = `${view.pageGap}px`;
+      slot.element.style.marginBlockEnd = '0px';
       slot.element.style.minHeight = `${pageHeight(page, availableWidth, this.root.clientHeight, view.zoom)}px`;
       this.renderSlot(slot, page, view);
       if (slot.element.parentElement !== this.root) this.root.append(slot.element);
@@ -134,10 +133,14 @@ export class ComicContinuousController {
       slot.image = null;
       if (page.url) {
         const image = this.document.createElement('img');
-        image.src = page.url;
         image.alt = String(page.pageIndex);
         image.decoding = 'async';
-        image.addEventListener('load', () => this.restoreAnchor(this.captureAnchor()), { once: true });
+        image.addEventListener('load', () => {
+          const anchor = this.captureAnchor();
+          slot.element.style.minHeight = '0px';
+          this.restoreAnchor(anchor);
+        }, { once: true });
+        image.src = page.url;
         slot.image = image;
         slot.element.replaceChildren(image);
       } else if (page.error) {
@@ -159,6 +162,7 @@ export class ComicContinuousController {
       Object.assign(slot.image.style, comicImageSizing(view.imageFit));
       slot.image.style.transform = `scale(${view.zoom})`;
       slot.image.style.transformOrigin = 'top center';
+      if (slot.image.complete) slot.element.style.minHeight = '0px';
     }
   }
 

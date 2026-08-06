@@ -1158,10 +1158,10 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                       <>
                         <CompactSettingOptions label={i18nAttribute("阅读方式")} value={settings.comicFlow} options={READER_COMIC_FLOW_OPTIONS} onChange={(value) => updateSettings({ comicFlow: value as ReaderSettings['comicFlow'] })} dark={dark} />
                         <CompactSettingOptions label={i18nAttribute("模式")} value={settings.comicMode} options={READER_SPREAD_MODE_OPTIONS.filter((option) => option.value !== 'auto')} disabled={settings.comicFlow === 'vertical'} onChange={(value) => updateSettings({ comicMode: value as ComicMode })} dark={dark} />
-                        <CompactSettingOptions label={i18nAttribute("方向")} value={settings.comicDirection} options={READER_COMIC_DIRECTION_OPTIONS} onChange={(value) => updateSettings({ comicDirection: value as ComicDirection })} dark={dark} />
+                        <CompactSettingOptions label={i18nAttribute("方向")} value={settings.comicDirection} options={READER_COMIC_DIRECTION_OPTIONS} disabled={settings.comicFlow === 'vertical'} onChange={(value) => updateSettings({ comicDirection: value as ComicDirection })} dark={dark} />
                         <CompactSettingOptions label={i18nAttribute("适配")} value={settings.imageFit} options={READER_COMIC_IMAGE_FIT_OPTIONS} onChange={(value) => updateSettings({ imageFit: value as ComicImageFit })} dark={dark} />
                         <ReaderToggleRow label={i18nAttribute("双页时封面单独显示")} checked={settings.comicCoverSingle} disabled={settings.comicFlow === 'vertical' || settings.comicMode !== 'double'} onChange={(checked) => updateSettings({ comicCoverSingle: checked })} dark={dark} />
-                        <CompactSettingOptions label={i18nAttribute("页间距")} value={String(settings.comicPageGap)} options={READER_PAGE_GAP_OPTIONS} onChange={(value) => updateSettings({ comicPageGap: Number(value) as ReaderSettings['comicPageGap'] })} dark={dark} />
+                        <CompactSettingOptions label={i18nAttribute("页间距")} value={String(settings.comicPageGap)} options={READER_PAGE_GAP_OPTIONS} disabled={settings.comicFlow === 'vertical'} onChange={(value) => updateSettings({ comicPageGap: Number(value) as ReaderSettings['comicPageGap'] })} dark={dark} />
                       </>
                     ) : (
                       <>

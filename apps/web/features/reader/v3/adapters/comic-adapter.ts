@@ -849,7 +849,6 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     this.continuous.render({
       currentPage: this.currentPage,
       pageCount: this.pages.length,
-      pageGap: preferences.comic.pageGap,
       imageFit: preferences.comic.imageFit,
       zoom: this.zoom,
       pageWidth: effectiveReaderPageWidth(

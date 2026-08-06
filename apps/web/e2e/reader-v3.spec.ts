@@ -1221,7 +1221,12 @@ test('comic vertical flow keeps stable slots while scrolling into the next page'
   await expect(engine).toBeVisible();
   await showReaderControls(page);
   await page.getByRole('button', { name: '阅读设置' }).click();
-  await page.getByRole('dialog', { name: '设置' }).getByRole('button', { name: '竖向连续', exact: true }).click();
+  const settingsDialog = page.getByRole('dialog', { name: '设置' });
+  await settingsDialog.getByRole('button', { name: '24px', exact: true }).click();
+  await settingsDialog.getByRole('button', { name: '竖向连续', exact: true }).click();
+
+  await expect(settingsDialog.getByRole('group', { name: '方向' })).toHaveAttribute('aria-disabled', 'true');
+  await expect(settingsDialog.getByRole('group', { name: '页间距' })).toHaveAttribute('aria-disabled', 'true');
 
   const stream = engine.locator('[data-comic-continuous="true"]');
   const firstSlot = stream.locator('[data-comic-continuous-page="1"]');
@@ -1237,6 +1242,11 @@ test('comic vertical flow keeps stable slots while scrolling into the next page'
   await expect(stream).toHaveAttribute('data-comic-continuous-current', '2');
   await expect(firstSlot).toHaveAttribute('data-e2e-stable-slot', 'first');
   await expect(stream.locator('img')).toHaveCount(3);
+  await expect.poll(() => stream.locator('[data-comic-continuous-page]').evaluateAll((slots) => slots.slice(0, -1).map((slot, index) => {
+    const current = slot.getBoundingClientRect();
+    const next = slots[index + 1].getBoundingClientRect();
+    return Math.round(next.top - current.bottom);
+  }))).toEqual([0, 0]);
 });
 
 test('PDF.js renders a bounded canvas and selectable text layer', async ({ page }) => {
