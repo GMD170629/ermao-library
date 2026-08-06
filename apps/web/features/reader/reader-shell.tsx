@@ -2,7 +2,7 @@
 
 import type { ReaderCapabilities, ReaderKind, ReaderPreferences } from '@shuku/reader-core';
 import { BookOpen, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Clock3, Highlighter, LayoutTemplate, ListTree, Minus, MousePointer2, NotebookPen, Palette, Plus, RotateCcw, Rows2, Rows3, Rows4, Settings, SlidersHorizontal, Sparkles, Trash2, Type, X, type LucideIcon } from 'lucide-react';
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type SyntheticEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { cn } from '../../components/ui/cn';
 import { VolumeSelect } from '../../components/ui/volume-select';
 import { useI18n } from '../../i18n/provider';
@@ -861,8 +861,8 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
           aria-modal={panel ? 'true' : undefined}
           aria-labelledby={panel ? 'reader-panel-title' : undefined}
           tabIndex={panel ? -1 : undefined}
-          className={cn('shuku-reader-control-border pointer-events-auto relative mx-auto flex h-full flex-col overflow-hidden rounded-[1.65rem] border shadow-[0_8px_28px_rgba(75,54,31,0.10)] md:rounded-[1.35rem]', readerBottomControlsMaxWidth)}
-          style={{ backgroundColor: themeSurface.background }}
+          className={cn('shuku-reader-console-surface shuku-reader-control-border pointer-events-auto relative mx-auto flex h-full flex-col overflow-hidden rounded-[1.65rem] border shadow-[0_8px_28px_rgba(75,54,31,0.10)] md:rounded-[1.35rem]', readerBottomControlsMaxWidth)}
+          style={{ '--shuku-reader-surface': themeSurface.background, backgroundColor: themeSurface.background } as CSSProperties}
           data-reader-console-surface="true"
           data-reader-panel={panel ?? undefined}
           data-reader-workspace={panel ? 'true' : undefined}
@@ -871,7 +871,8 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
           {panel ? (
             <div
               key={panel}
-              className="shuku-reader-control-workspace flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden overscroll-contain p-4 md:p-5"
+              className="shuku-reader-control-workspace shuku-reader-panel-surface flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden overscroll-contain p-4 md:p-5"
+              data-reader-panel-surface="true"
               style={{
                 paddingLeft: 'calc(1rem + var(--shuku-safe-area-left))',
                 paddingRight: 'calc(1rem + var(--shuku-safe-area-right))'
@@ -1054,7 +1055,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                     dark={dark}
                   />
                   {readerType === 'reflowable' ? (
-                    <ReaderSettingsSection icon={Type} title={i18nAttribute("文字外观")} dark={dark} desktopColumns>
+                    <ReaderSettingsSection icon={Type} title={i18nAttribute("文字外观")} dark={dark}>
                       <CompactStepper label={i18nAttribute("字号")} value={`${settings.fontSize}px`} onMinus={() => updateSettings({ fontSize: Math.max(14, settings.fontSize - 1) })} onPlus={() => updateSettings({ fontSize: Math.min(30, settings.fontSize + 1) })} dark={dark} />
                       <CompactSettingOptions label={i18nAttribute("快捷字号")} value={closestReaderOptionValue(settings.fontSize, readerFontSizeOptions)} options={readerFontSizeOptions} disambiguateLabels onChange={(value) => updateSettings({ fontSize: Number(value) })} dark={dark} />
                       <CompactSettingOptions
@@ -1097,10 +1098,10 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
 
               {panel === 'settings' ? (
                 <div data-pwa-scroll="true" className="mt-3 min-h-0 flex-1 space-y-3 overflow-auto overscroll-contain pr-1 text-sm">
-                  <div className="grid items-start gap-3 min-[900px]:grid-cols-2">
+                  <div className="grid items-start gap-3">
                     <ReaderSettingsSection icon={Clock3} title={i18nAttribute("阅读界面")} dark={dark}>
                       <CompactSettingOptions label={i18nAttribute("进度显示")} value={settings.progressStyle} options={READER_PROGRESS_STYLE_OPTIONS} onChange={(value) => updateSettings({ progressStyle: value as ReaderSettings['progressStyle'] })} dark={dark} />
-                      <div className="grid gap-2.5 min-[1200px]:grid-cols-2">
+                      <div className="grid gap-2.5">
                         <ReaderToggleRow label={i18nAttribute("常显时钟")} checked={settings.showClock} onChange={(checked) => updateSettings({ showClock: checked })} dark={dark} />
                         <ReaderToggleRow label={i18nAttribute("保持屏幕唤醒")} description={wakeLockSupported ? undefined : i18nAttribute("当前浏览器不支持保持屏幕唤醒")} checked={settings.keepScreenAwake} disabled={!wakeLockSupported} onChange={(checked) => updateSettings({ keepScreenAwake: checked })} dark={dark} />
                       </div>
@@ -1116,7 +1117,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                     </ReaderSettingsSection>
                   </div>
 
-                  <ReaderSettingsSection icon={LayoutTemplate} title={i18nAttribute("排版")} dark={dark} desktopColumns>
+                  <ReaderSettingsSection icon={LayoutTemplate} title={i18nAttribute("排版")} dark={dark}>
                     {readerType === 'reflowable' ? (
                       <>
                         <CompactSettingOptions label={i18nAttribute("阅读方式")} value={settings.ebookFlow} options={READER_FLOW_OPTIONS} onChange={(value) => updateSettings({ ebookFlow: value as EbookFlow })} dark={dark} />
@@ -1142,7 +1143,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                   </ReaderSettingsSection>
 
                   {readerType === 'reflowable' ? (
-                    <ReaderSettingsSection icon={Sparkles} title={i18nAttribute("智能优化")} dark={dark} desktopColumns>
+                    <ReaderSettingsSection icon={Sparkles} title={i18nAttribute("智能优化")} dark={dark}>
                       <ReaderToggleRow label={i18nAttribute("安全优化")} description={i18nAttribute("避免重复缩进，并为普通正文补齐段首缩进")} checked={settings.smartOptimization} onChange={(checked) => updateSettings({ smartOptimization: checked })} dark={dark} />
                       <ReaderToggleRow label={i18nAttribute("重复缩进去重")} checked={settings.deduplicateIndent} disabled={!settings.smartOptimization} onChange={(checked) => updateSettings({ deduplicateIndent: checked })} dark={dark} />
                       <ReaderToggleRow label={i18nAttribute("无缩进正文补齐")} checked={settings.indentUnindented} disabled={!settings.smartOptimization} onChange={(checked) => updateSettings({ indentUnindented: checked })} dark={dark} />
@@ -1158,7 +1159,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                     <div id="reader-advanced-settings" className="shuku-reader-advanced-settings" data-expanded={advancedSettingsOpen ? 'true' : 'false'}>
                       <div className="shuku-reader-control-border min-h-0 space-y-3 border-t p-3">
                         {readerType === 'reflowable' ? (
-                          <ReaderSettingsSection icon={Type} title={i18nAttribute("段落与内容样式")} dark={dark} nested desktopColumns>
+                          <ReaderSettingsSection icon={Type} title={i18nAttribute("段落与内容样式")} dark={dark} nested>
                             <CompactSettingOptions label={i18nAttribute("段首缩进")} value={String(settings.paragraphIndent)} options={READER_PARAGRAPH_INDENT_OPTIONS} onChange={(value) => updateSettings({ paragraphIndent: Number(value) })} dark={dark} />
                             <CompactSettingOptions label={i18nAttribute("段间距")} value={String(settings.paragraphSpacing)} options={READER_PARAGRAPH_SPACING_OPTIONS} onChange={(value) => updateSettings({ paragraphSpacing: Number(value) })} dark={dark} />
                             <CompactSettingOptions label={i18nAttribute("文本对齐")} value={settings.textAlign} options={READER_TEXT_ALIGN_OPTIONS} onChange={(value) => updateSettings({ textAlign: value as ReaderSettings['textAlign'] })} dark={dark} />
@@ -1171,7 +1172,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                             <CompactSettingOptions label={i18nAttribute("画质")} value={settings.imageVariant} options={READER_COMIC_IMAGE_VARIANT_OPTIONS} onChange={(value) => updateSettings({ imageVariant: value as ComicImageVariant })} dark={dark} />
                           </ReaderSettingsSection>
                         ) : null}
-                        <ReaderSettingsSection icon={MousePointer2} title={i18nAttribute("操作方式")} dark={dark} nested desktopColumns>
+                        <ReaderSettingsSection icon={MousePointer2} title={i18nAttribute("操作方式")} dark={dark} nested>
                           <ReaderToggleRow label={i18nAttribute("键盘翻页")} checked={settings.keyboardPageTurn} onChange={(checked) => updateSettings({ keyboardPageTurn: checked })} dark={dark} />
                           <ReaderToggleRow label={i18nAttribute("音量键翻页")} description={i18nAttribute("默认关闭，部分浏览器可能不会转发音量键事件")} checked={settings.volumeKeyPageTurn} onChange={(checked) => updateSettings({ volumeKeyPageTurn: checked })} dark={dark} />
                         </ReaderSettingsSection>
@@ -1194,7 +1195,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
             </div>
           ) : null}
 
-          <div className="shuku-reader-console-home flex min-w-0 shrink-0" data-reader-console-controls="true">
+          <div className="shuku-reader-console-home shuku-reader-console-bar flex min-w-0 shrink-0" data-reader-console-controls="true">
           <div className="flex min-w-0 flex-1 flex-col md:hidden">
             <div data-reader-mobile-progress-controls="true" className="px-2 pb-1 pt-2">
               <div className="flex min-w-0 items-center gap-1">
@@ -1383,12 +1384,11 @@ function CompactStepper({ label, value, onMinus, onPlus, dark }: { label: string
   );
 }
 
-function ReaderSettingsSection({ icon: Icon, title, dark, nested = false, desktopColumns = false, children }: {
+function ReaderSettingsSection({ icon: Icon, title, dark, nested = false, children }: {
   icon: LucideIcon;
   title: string;
   dark: boolean;
   nested?: boolean;
-  desktopColumns?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -1400,10 +1400,7 @@ function ReaderSettingsSection({ icon: Icon, title, dark, nested = false, deskto
         <Icon size={16} className="opacity-65" />
         <span>{title}</span>
       </div>
-      <div className={cn(
-        'space-y-2.5',
-        desktopColumns && 'min-[900px]:grid min-[900px]:grid-cols-2 min-[900px]:items-start min-[900px]:gap-x-6 min-[900px]:gap-y-3 min-[900px]:space-y-0'
-      )}>{children}</div>
+      <div className="space-y-2.5">{children}</div>
     </section>
   );
 }

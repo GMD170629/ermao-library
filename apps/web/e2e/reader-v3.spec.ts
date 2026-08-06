@@ -844,6 +844,21 @@ test('PDF uses the same responsive reader workspace for appearance, settings, di
   await console.getByRole('button', { name: '阅读设置' }).click();
   const workspace = page.locator('[data-reader-workspace="true"]');
   await expect(workspace).toHaveAttribute('data-reader-panel', 'settings');
+  const panelSurface = workspace.locator('[data-reader-panel-surface="true"]');
+  const consoleControls = workspace.locator('[data-reader-console-controls="true"]');
+  const [panelSurfaceBox, consoleControlsBox] = await Promise.all([
+    panelSurface.boundingBox(),
+    consoleControls.boundingBox()
+  ]);
+  expect(panelSurfaceBox).not.toBeNull();
+  expect(consoleControlsBox).not.toBeNull();
+  expect(panelSurfaceBox!.width).toBeGreaterThanOrEqual(399.5);
+  expect(panelSurfaceBox!.width).toBeLessThanOrEqual(400.5);
+  expect(panelSurfaceBox!.height).toBeGreaterThanOrEqual(499.5);
+  expect(panelSurfaceBox!.height).toBeLessThanOrEqual(500.5);
+  expect(panelSurfaceBox!.width).toBeLessThan(consoleControlsBox!.width);
+  expect(panelSurfaceBox!.y + panelSurfaceBox!.height).toBeLessThan(consoleControlsBox!.y);
+  expect(Math.abs(panelSurfaceBox!.x + panelSurfaceBox!.width - (consoleControlsBox!.x + consoleControlsBox!.width))).toBeLessThanOrEqual(1);
   await expect(page.getByRole('dialog', { name: '设置' }).getByRole('group', { name: '适配' })).toBeVisible();
   await expect(page.getByRole('dialog', { name: '设置' }).getByRole('group', { name: '阅读方式' })).toBeVisible();
   await expect(page.getByRole('dialog', { name: '设置' }).getByRole('group', { name: '页面旋转' })).toBeVisible();
@@ -853,37 +868,115 @@ test('PDF uses the same responsive reader workspace for appearance, settings, di
   const [desktopDisplayBox, desktopPagingBox, desktopWorkspaceBox] = await Promise.all([
     desktopDisplaySection.boundingBox(),
     desktopPagingSection.boundingBox(),
-    workspace.boundingBox()
+    panelSurface.boundingBox()
   ]);
   expect(desktopDisplayBox).not.toBeNull();
   expect(desktopPagingBox).not.toBeNull();
   expect(desktopWorkspaceBox).not.toBeNull();
-  expect(Math.abs(desktopDisplayBox!.y - desktopPagingBox!.y)).toBeLessThanOrEqual(1);
-  expect(desktopDisplayBox!.width).toBeLessThan(desktopWorkspaceBox!.width * 0.55);
+  expect(desktopPagingBox!.y).toBeGreaterThan(desktopDisplayBox!.y + desktopDisplayBox!.height - 1);
+  expect(desktopDisplayBox!.width).toBeGreaterThan(desktopWorkspaceBox!.width * 0.8);
   const [desktopFlowBox, desktopFitBox] = await Promise.all([
     workspace.getByRole('group', { name: '阅读方式' }).boundingBox(),
     workspace.getByRole('group', { name: '适配' }).boundingBox()
   ]);
   expect(desktopFlowBox).not.toBeNull();
   expect(desktopFitBox).not.toBeNull();
-  expect(Math.abs(desktopFlowBox!.y - desktopFitBox!.y)).toBeLessThanOrEqual(1);
+  expect(desktopFitBox!.y).toBeGreaterThan(desktopFlowBox!.y + desktopFlowBox!.height - 1);
 
   await workspace.getByRole('button', { name: '外观' }).click();
   await expect(workspace).toHaveAttribute('data-reader-panel', 'appearance');
   await expect(page.getByRole('dialog', { name: '外观' }).getByRole('group', { name: '主题' })).toBeVisible();
   await expect(page.getByRole('dialog', { name: '外观' }).getByRole('button', { name: '护眼绿' })).toBeVisible();
+  const [appearancePanelBox, appearanceConsoleBox] = await Promise.all([
+    panelSurface.boundingBox(),
+    consoleControls.boundingBox()
+  ]);
+  expect(appearancePanelBox).not.toBeNull();
+  expect(appearanceConsoleBox).not.toBeNull();
+  expect(Math.abs(appearancePanelBox!.x + appearancePanelBox!.width - (appearanceConsoleBox!.x + appearanceConsoleBox!.width))).toBeLessThanOrEqual(1);
 
   await workspace.getByRole('button', { name: '目录' }).click();
   await expect(workspace).toHaveAttribute('data-reader-panel', 'toc');
   await expect(page.getByRole('dialog', { name: '目录' }).getByRole('button', { name: /1.*第 1 页/ })).toBeVisible();
+  const [tocPanelBox, tocConsoleBox] = await Promise.all([
+    panelSurface.boundingBox(),
+    consoleControls.boundingBox()
+  ]);
+  expect(tocPanelBox).not.toBeNull();
+  expect(tocConsoleBox).not.toBeNull();
+  expect(Math.abs(tocPanelBox!.x - tocConsoleBox!.x)).toBeLessThanOrEqual(1);
 
   await workspace.getByRole('button', { name: '笔记' }).click();
   await expect(workspace).toHaveAttribute('data-reader-panel', 'notes');
   await expect(page.getByRole('dialog', { name: '笔记' }).getByRole('tab', { name: '书签' })).toHaveAttribute('aria-selected', 'true');
+  const [notesPanelBox, notesConsoleBox] = await Promise.all([
+    panelSurface.boundingBox(),
+    consoleControls.boundingBox()
+  ]);
+  expect(notesPanelBox).not.toBeNull();
+  expect(notesConsoleBox).not.toBeNull();
+  expect(Math.abs(notesPanelBox!.x - notesConsoleBox!.x)).toBeLessThanOrEqual(1);
   await expect(workspace).toHaveCount(1);
 });
 
-test('desktop EPUB settings grows with content up to the viewport and then scrolls without chrome', async ({ page }) => {
+test('desktop EPUB appearance, settings, and advanced controls keep every option in one column', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  await mockReaderApi(page, 'epub');
+  await page.goto('/reader/epub-volume');
+  await showReaderControls(page);
+
+  const console = page.locator('[data-reader-controller="bottom-console"]');
+  await console.getByRole('button', { name: '外观' }).click();
+  const appearanceDialog = page.getByRole('dialog', { name: '外观' });
+  const [fontSizeBox, quickFontSizeBox] = await Promise.all([
+    appearanceDialog.getByRole('button', { name: '字号减少' }).boundingBox(),
+    appearanceDialog.getByRole('group', { name: '快捷字号' }).boundingBox()
+  ]);
+  expect(fontSizeBox).not.toBeNull();
+  expect(quickFontSizeBox).not.toBeNull();
+  expect(quickFontSizeBox!.y).toBeGreaterThan(fontSizeBox!.y + fontSizeBox!.height - 1);
+  if (process.env.SHUKU_READER_DESKTOP_APPEARANCE_CAPTURE) {
+    await page.screenshot({ path: process.env.SHUKU_READER_DESKTOP_APPEARANCE_CAPTURE, fullPage: true });
+  }
+
+  await appearanceDialog.getByRole('button', { name: '阅读设置', exact: true }).click();
+  const settingsDialog = page.getByRole('dialog', { name: '设置' });
+  const [displaySectionBox, pagingSectionBox, flowBox, spreadBox, safeOptimizationBox, deduplicateIndentBox] = await Promise.all([
+    settingsDialog.getByText('阅读界面', { exact: true }).locator('xpath=ancestor::section').boundingBox(),
+    settingsDialog.getByText('翻页设置', { exact: true }).locator('xpath=ancestor::section').boundingBox(),
+    settingsDialog.getByRole('group', { name: '阅读方式' }).boundingBox(),
+    settingsDialog.getByRole('group', { name: '页面' }).boundingBox(),
+    settingsDialog.getByText('安全优化', { exact: true }).locator('..').boundingBox(),
+    settingsDialog.getByText('重复缩进去重', { exact: true }).locator('..').boundingBox()
+  ]);
+  expect(displaySectionBox).not.toBeNull();
+  expect(pagingSectionBox).not.toBeNull();
+  expect(flowBox).not.toBeNull();
+  expect(spreadBox).not.toBeNull();
+  expect(safeOptimizationBox).not.toBeNull();
+  expect(deduplicateIndentBox).not.toBeNull();
+  expect(pagingSectionBox!.y).toBeGreaterThan(displaySectionBox!.y + displaySectionBox!.height - 1);
+  expect(spreadBox!.y).toBeGreaterThan(flowBox!.y + flowBox!.height - 1);
+  expect(deduplicateIndentBox!.y).toBeGreaterThan(safeOptimizationBox!.y + safeOptimizationBox!.height - 1);
+  await settingsDialog.getByRole('button', { name: '高级设置' }).click();
+  const [paragraphIndentBox, paragraphSpacingBox, keyboardPageTurnBox, volumePageTurnBox] = await Promise.all([
+    settingsDialog.getByRole('group', { name: '段首缩进' }).boundingBox(),
+    settingsDialog.getByRole('group', { name: '段间距' }).boundingBox(),
+    settingsDialog.getByText('键盘翻页', { exact: true }).locator('..').boundingBox(),
+    settingsDialog.getByText('音量键翻页', { exact: true }).locator('..').boundingBox()
+  ]);
+  expect(paragraphIndentBox).not.toBeNull();
+  expect(paragraphSpacingBox).not.toBeNull();
+  expect(keyboardPageTurnBox).not.toBeNull();
+  expect(volumePageTurnBox).not.toBeNull();
+  expect(paragraphSpacingBox!.y).toBeGreaterThan(paragraphIndentBox!.y + paragraphIndentBox!.height - 1);
+  expect(volumePageTurnBox!.y).toBeGreaterThan(keyboardPageTurnBox!.y + keyboardPageTurnBox!.height - 1);
+  if (process.env.SHUKU_READER_DESKTOP_ADVANCED_CAPTURE) {
+    await page.screenshot({ path: process.env.SHUKU_READER_DESKTOP_ADVANCED_CAPTURE, fullPage: true });
+  }
+});
+
+test('desktop EPUB settings stays near 400 by 500 and scrolls internally without chrome', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1600 });
   await mockReaderApi(page, 'epub');
   await page.goto('/reader/epub-volume');
@@ -892,12 +985,20 @@ test('desktop EPUB settings grows with content up to the viewport and then scrol
   const console = page.locator('[data-reader-controller="bottom-console"]');
   await console.getByRole('button', { name: '阅读设置' }).click();
   const settingsDialog = page.getByRole('dialog', { name: '设置' });
+  const settingsPanel = settingsDialog.locator('[data-reader-panel-surface="true"]');
   const settingsScrollArea = settingsDialog.locator('[data-pwa-scroll="true"]');
+  const settingsPanelBox = await settingsPanel.boundingBox();
+  expect(settingsPanelBox).not.toBeNull();
+  expect(settingsPanelBox!.width).toBeGreaterThanOrEqual(399.5);
+  expect(settingsPanelBox!.width).toBeLessThanOrEqual(400.5);
+  expect(settingsPanelBox!.height).toBeGreaterThanOrEqual(499.5);
+  expect(settingsPanelBox!.height).toBeLessThanOrEqual(500.5);
   const initialPanelHeight = await console.evaluate((element) => element.getBoundingClientRect().height);
 
   await settingsDialog.getByRole('button', { name: '高级设置' }).click();
   await expect(settingsDialog.locator('#reader-advanced-settings')).toHaveAttribute('data-expanded', 'true');
-  await expect.poll(() => console.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(initialPanelHeight);
+  await expect.poll(() => console.evaluate((element) => element.getBoundingClientRect().height)).toBeLessThanOrEqual(initialPanelHeight + 1);
+  await expect.poll(() => settingsScrollArea.evaluate((element) => element.scrollHeight > element.clientHeight + 1)).toBe(true);
 
   await page.setViewportSize({ width: 1440, height: 640 });
   await expect.poll(() => console.evaluate((element) => element.getBoundingClientRect().height)).toBeLessThanOrEqual(640 - 96);

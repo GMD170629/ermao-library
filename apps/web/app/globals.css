@@ -484,13 +484,45 @@ html[data-audio-mini-player='reader'] .shuku-pwa-bottom-overlay {
     max-height: calc(
       100dvh - 7.25rem - var(--shuku-safe-area-top) - var(--shuku-safe-area-bottom)
     );
+    gap: 0.75rem;
+    overflow: visible;
+    border-color: transparent;
+    background: transparent !important;
+    box-shadow: none;
   }
 
   .shuku-reader-bottom-console[data-reader-panel-state]:not([data-reader-panel-state='home'])
     .shuku-reader-control-workspace {
     position: relative;
     inset: auto;
-    flex: 1 1 auto;
+    width: min(25rem, 100%);
+    height: min(
+      31.25rem,
+      calc(100dvh - 7.25rem - var(--shuku-safe-area-top) - var(--shuku-safe-area-bottom))
+    );
+    flex: 0 1 auto;
+    border: 1px solid var(--shuku-reader-control-border);
+    border-radius: 1.35rem;
+    background: var(--shuku-reader-surface);
+    box-shadow: 0 16px 42px rgb(75 54 31 / 14%);
+  }
+
+  .shuku-reader-bottom-console:is(
+      [data-reader-panel-state='toc'],
+      [data-reader-panel-state='notes'],
+      [data-reader-panel-state='bookmarks'],
+      [data-reader-panel-state='annotations']
+    )
+    .shuku-reader-control-workspace {
+    align-self: flex-start;
+  }
+
+  .shuku-reader-bottom-console:is(
+      [data-reader-panel-state='appearance'],
+      [data-reader-panel-state='settings']
+    )
+    .shuku-reader-control-workspace {
+    align-self: flex-end;
   }
 
   .shuku-reader-bottom-console[data-reader-panel-state]:not([data-reader-panel-state='home'])
@@ -498,6 +530,11 @@ html[data-audio-mini-player='reader'] .shuku-pwa-bottom-overlay {
     position: relative;
     inset: auto;
     flex: 0 0 4.5rem;
+    overflow: hidden;
+    border: 1px solid var(--shuku-reader-control-border);
+    border-radius: 1.35rem;
+    background: var(--shuku-reader-surface);
+    box-shadow: 0 8px 28px rgb(75 54 31 / 10%);
   }
 }
 
