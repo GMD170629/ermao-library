@@ -1,6 +1,6 @@
 'use client';
 
-import { Activity, BookKey, BookOpen, Database, FileText, Info, Mail, Sparkles, UserRound, Users } from 'lucide-react';
+import { Activity, BookKey, Database, FileText, Info, Mail, Sparkles, UserRound, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -17,13 +17,6 @@ export type SettingsItem = { href: string; label: string; icon: LucideIcon; acce
 export type SettingsGroup = { key: string; label: string | null; items: readonly SettingsItem[] };
 
 export const settingsGroups: readonly SettingsGroup[] = [
-  {
-    key: 'reader',
-    label: '阅读器',
-    items: [
-      { href: '/settings/reader', label: '当前设备偏好', icon: BookOpen, access: 'account' }
-    ]
-  },
   {
     key: 'user',
     label: '用户设置',

@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { isSettingsItemActive, settingsGroups, settingsItems } from './settings-secondary-nav';
 
-test('settings navigation is grouped into reader, user, system, then about', () => {
-  assert.deepEqual(settingsGroups.map((group) => group.label), ['阅读器', '用户设置', '系统设置', null]);
+test('settings navigation excludes device preferences and is grouped into user, system, then about', () => {
+  assert.deepEqual(settingsGroups.map((group) => group.label), ['用户设置', '系统设置', null]);
+  assert.ok(!settingsItems.some((item) => item.href === '/settings/reader'));
   assert.deepEqual(
     settingsGroups.find((group) => group.key === 'system')?.items.map((item) => item.label),
     ['用户管理', '书库来源和导入', '智能整理', 'OPDS', '数据和系统', '系统健康检查', '系统日志']

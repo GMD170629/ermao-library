@@ -10,7 +10,7 @@ import {
   closestReaderOptionValue
 } from './reader-preference-options';
 
-test('reader and device settings share semantic display options instead of raw measurements', () => {
+test('reader settings expose semantic display options instead of raw measurements', () => {
   assert.deepEqual(READER_FONT_SIZE_OPTIONS, [
     { value: '16', label: '小' },
     { value: '18', label: '中' },
