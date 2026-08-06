@@ -6,6 +6,7 @@ import { hardenEpubIframe, sanitizeEpubDocument } from './epub-security';
 import {
   applyEpubDocumentSpacing,
   applyEpubThemeSnapshot,
+  epubPageWidth,
   type EpubViewportLayout
 } from './epub-theme';
 import { fallbackEpubFont } from './epub-font';
@@ -101,6 +102,23 @@ function resolvedTarget(value: unknown): ReflowableContinuousTarget | null {
       : {}),
     ...(typeof value.anchor === 'function' ? { anchor: value.anchor as (document: Document) => unknown } : {})
   };
+}
+
+export async function resolveReflowableDocumentLink(
+  book: FoliateBook,
+  sectionIndex: number,
+  rawHref: string
+) {
+  const sectionCandidate = await Promise.resolve(
+    book.sections[sectionIndex]?.resolveHref?.(rawHref)
+  ).catch(() => undefined);
+  const directTarget = resolvedTarget(sectionCandidate);
+  if (directTarget) return directTarget;
+  const normalizedHref = typeof sectionCandidate === 'string' && sectionCandidate
+    ? sectionCandidate
+    : rawHref;
+  const bookCandidate = await Promise.resolve(book.resolveHref?.(normalizedHref)).catch(() => undefined);
+  return resolvedTarget(bookCandidate);
 }
 
 function localizeFailure(document: Document) {
@@ -288,6 +306,7 @@ export class ReflowableContinuousController {
     this.preferences = preferences;
     this.viewportLayout = viewportLayout;
     this.preferenceRevision += 1;
+    this.records.forEach((record) => this.applyRecordInlineSize(record));
     if (this.preferenceTimer !== null) clearTimeout(this.preferenceTimer);
     const priority = new Set([
       this.currentLogicalIndex - 1,
@@ -555,6 +574,8 @@ export class ReflowableContinuousController {
     element.dataset.reflowableContinuousSection = String(record.index);
     element.dataset.continuousState = record.state;
     Object.assign(element.style, {
+      marginInline: 'auto',
+      maxWidth: `${epubPageWidth(this.preferences)}px`,
       minHeight: `${record.measuredHeight}px`,
       position: 'relative',
       width: '100%'
@@ -819,9 +840,7 @@ export class ReflowableContinuousController {
       if (typeof rawHref !== 'string' || !rawHref || !externalHref) return;
       event.preventDefault();
       event.stopPropagation();
-      const sectionResolved = this.book.sections[index]?.resolveHref?.(rawHref);
-      void Promise.resolve(sectionResolved ?? this.book.resolveHref?.(rawHref)).then((candidate) => {
-        const resolved = resolvedTarget(candidate);
+      void resolveReflowableDocumentLink(this.book, index, rawHref).then((resolved) => {
         if (resolved) void this.goTo(resolved);
         else this.onExternalLink(externalHref);
       });
@@ -834,6 +853,11 @@ export class ReflowableContinuousController {
     applyEpubThemeSnapshot(document, this.preferences, fallbackEpubFont(this.preferences.epub.fontFamily), this.viewportLayout);
     applyEpubDocumentSpacing(document, this.preferences);
     record.appliedPreferenceRevision = this.preferenceRevision;
+  }
+
+  private applyRecordInlineSize(record: SectionRecord) {
+    if (!record.element) return;
+    record.element.style.maxWidth = `${epubPageWidth(this.preferences)}px`;
   }
 
   private ensureRecordPreferences(record: SectionRecord) {

@@ -34,6 +34,8 @@ class ProgressNavigation(HttpContractModel):
     current_href: str | None = Field(default=None, alias="currentHref")
     current_section_index: int | None = Field(default=None, alias="currentSectionIndex")
     current_chapter_title: str | None = Field(default=None, alias="currentChapterTitle")
+    current_chapter_index: int | None = Field(default=None, alias="currentChapterIndex")
+    current_page_number: int | None = Field(default=None, alias="currentPageNumber")
     current_chapter_sort_order: int | None = Field(
         default=None,
         alias="currentChapterSortOrder",
@@ -558,6 +560,7 @@ class VolumeSection(HttpContractModel):
     current_href: str | None = Field(default=None, alias="currentHref")
     current_section_index: int | None = Field(default=None, alias="currentSectionIndex")
     current_chapter_title: str | None = Field(default=None, alias="currentChapterTitle")
+    current_chapter_index: int | None = Field(default=None, alias="currentChapterIndex")
     current_chapter_sort_order: int | None = Field(
         default=None,
         alias="currentChapterSortOrder",
@@ -597,6 +600,8 @@ class ActiveMedia(HttpContractModel):
     current_href: str | None = Field(default=None, alias="currentHref")
     current_section_index: int | None = Field(default=None, alias="currentSectionIndex")
     current_chapter_title: str | None = Field(default=None, alias="currentChapterTitle")
+    current_chapter_index: int | None = Field(default=None, alias="currentChapterIndex")
+    current_page_number: int | None = Field(default=None, alias="currentPageNumber")
     current_chapter_sort_order: int | None = Field(
         default=None,
         alias="currentChapterSortOrder",
@@ -636,6 +641,7 @@ class WorkReadingUnitsPayload(HttpContractModel):
     page: ReadingUnitsPage
     progress: float
     current_href: str | None = Field(default=None, alias="currentHref")
+    current_chapter_index: int | None = Field(default=None, alias="currentChapterIndex")
     current_chapter_sort_order: int | None = Field(
         default=None, alias="currentChapterSortOrder"
     )

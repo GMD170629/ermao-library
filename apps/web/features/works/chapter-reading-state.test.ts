@@ -79,6 +79,26 @@ test('uses an exact foliate TOC index across paginated chapter rows', () => {
   );
 });
 
+test('uses the exact Reader v3 chapter index across pages before and after the current chapter', () => {
+  const firstPage = Array.from({ length: 5 }, (_, index) => ({
+    href: `txt-section:${index}`,
+    sortOrder: index
+  }));
+  const laterPage = Array.from({ length: 5 }, (_, index) => ({
+    href: `txt-section:${index + 10}`,
+    sortOrder: index + 10
+  }));
+
+  assert.deepEqual(
+    resolveChapterReadingStates(firstPage, null, null, 0.2, { total: 20, page: 1, pageSize: 5, currentIndex: 9 }),
+    ['read', 'read', 'read', 'read', 'read']
+  );
+  assert.deepEqual(
+    resolveChapterReadingStates(laterPage, null, null, 0.2, { total: 20, page: 3, pageSize: 5, currentIndex: 9 }),
+    ['unread', 'unread', 'unread', 'unread', 'unread']
+  );
+});
+
 test('does not use percent fallback when an unresolved href was provided', () => {
   assert.deepEqual(
     resolveChapterReadingStates(anchoredChapters, 'Text/all.xhtml', null, 50),

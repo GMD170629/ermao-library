@@ -686,7 +686,7 @@ class LibraryReadingProgress(Base):
     )
     extra: Mapped[str] = mapped_column(Text, nullable=False)
     schema_version: Mapped[int] = mapped_column(
-        "schemaVersion", Integer, nullable=False, default=1, server_default="1"
+        "schemaVersion", Integer, nullable=False, default=3, server_default="3"
     )
     location_type: Mapped[str | None] = mapped_column(
         "locationType", String(191), nullable=True

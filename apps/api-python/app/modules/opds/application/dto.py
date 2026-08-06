@@ -23,6 +23,14 @@ class BasicCredentialsDto:
 
 
 @dataclass(frozen=True, slots=True)
+class OpdsAuthenticationRequestDto:
+    credentials: BasicCredentialsDto = field(repr=False)
+    client_address: str
+    method: str
+    path: str
+
+
+@dataclass(frozen=True, slots=True)
 class OpdsLinkDto:
     href: str
     rel: str

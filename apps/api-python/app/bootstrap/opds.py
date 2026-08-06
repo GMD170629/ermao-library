@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote, urlencode
 
 from fastapi import Request
@@ -16,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.bootstrap.auth import build_password_authenticator
 from app.bootstrap.media import media_page_index, media_resource_query, media_streaming
 from app.bootstrap.reader import reader_volume_service
+from app.bootstrap.system import record_system_event
 from app.core.authorization import (
     AuthorizationContext,
     authorization_context,
@@ -56,6 +58,7 @@ from app.modules.opds.application.dto import (
     OPDS_PROGRESSION_REL,
     BasicCredentialsDto,
     OpdsActorDto,
+    OpdsAuthenticationRequestDto,
     OpdsAuthorDto,
     OpdsCatalogQueryDto,
     OpdsEntryDto,
@@ -150,18 +153,33 @@ class PasswordOpdsAuthenticator:
         self._session_factory = session_factory
         self._runtime = runtime
 
-    def authenticate(
-        self, credentials: BasicCredentialsDto, client_address: str
-    ) -> OpdsActorDto | None:
+    def authenticate(self, request: OpdsAuthenticationRequestDto) -> OpdsActorDto | None:
+        credentials = request.credentials
         db = self._session_factory()
         try:
             result = build_password_authenticator(db, self._runtime).execute(
                 PasswordCredentials(
                     email=credentials.username,
                     password=credentials.password,
-                    client_address=client_address,
+                    client_address=request.client_address,
                 )
             )
+            if isinstance(result, PasswordAuthenticationThrottled):
+                self._record_authentication_event(
+                    db,
+                    request,
+                    outcome="throttled",
+                    retry_after_seconds=result.retry_after_seconds,
+                )
+            elif isinstance(result, PasswordAuthenticated):
+                self._record_authentication_event(
+                    db,
+                    request,
+                    outcome="succeeded",
+                    actor_id=result.principal.user_id,
+                )
+            else:
+                self._record_authentication_event(db, request, outcome="failed")
         finally:
             db.close()
         if isinstance(result, PasswordAuthenticationThrottled):
@@ -169,6 +187,46 @@ class PasswordOpdsAuthenticator:
         if not isinstance(result, PasswordAuthenticated):
             return None
         return OpdsActorDto(user_id=result.principal.user_id)
+
+    @staticmethod
+    def _record_authentication_event(
+        db: Session,
+        request: OpdsAuthenticationRequestDto,
+        *,
+        outcome: Literal["succeeded", "failed", "throttled"],
+        actor_id: str | None = None,
+        retry_after_seconds: int | None = None,
+    ) -> None:
+        locale = configured_locale(db)
+        messages = {
+            "succeeded": ("OPDS 登录成功", "OPDS sign-in succeeded."),
+            "failed": ("OPDS 登录失败：凭据无效", "OPDS sign-in failed: invalid credentials."),
+            "throttled": (
+                "OPDS 登录受限：尝试次数过多",
+                "OPDS sign-in throttled: too many attempts.",
+            ),
+        }
+        chinese, english = messages[outcome]
+        metadata: dict[str, str | int] = {
+            "clientAddress": request.client_address[:255],
+            "method": request.method[:16].upper(),
+            "path": request.path[:2048],
+            "username": request.credentials.username.strip()[:320],
+        }
+        if retry_after_seconds is not None:
+            metadata["retryAfterSeconds"] = retry_after_seconds
+        record_system_event(
+            db,
+            source="opds",
+            action=f"authentication.{outcome}",
+            message=english if locale == "en-US" else chinese,
+            level="info" if outcome == "succeeded" else "warning",
+            actor_type="user" if actor_id is not None else "anonymous",
+            actor_id=actor_id,
+            target_type="opdsAuthentication",
+            metadata=metadata,
+            commit=True,
+        )
 
 
 @dataclass(frozen=True, slots=True)

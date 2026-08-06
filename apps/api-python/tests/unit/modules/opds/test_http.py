@@ -7,8 +7,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.modules.opds.application.dto import (
-    BasicCredentialsDto,
     OpdsActorDto,
+    OpdsAuthenticationRequestDto,
     OpdsCatalogQueryDto,
     OpdsFeedDto,
     OpdsProgressionDocumentDto,
@@ -22,10 +22,11 @@ NOW = datetime(2026, 8, 3, 8, 0, tzinfo=UTC)
 
 
 class FakeAuthenticator:
-    def authenticate(
-        self, credentials: BasicCredentialsDto, client_address: str
-    ) -> OpdsActorDto | None:
-        assert client_address
+    def authenticate(self, request: OpdsAuthenticationRequestDto) -> OpdsActorDto | None:
+        credentials = request.credentials
+        assert request.client_address
+        assert request.method in {"GET", "PUT"}
+        assert request.path.startswith("/opds/")
         if (
             credentials.username == "reader@example.com"
             and credentials.password == "secret"

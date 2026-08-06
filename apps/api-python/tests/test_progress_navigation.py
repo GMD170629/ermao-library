@@ -11,7 +11,10 @@ ANCHORED_UNITS = [
 
 
 def test_progress_navigation_preserves_exact_fragment_for_shared_xhtml_resource():
-    progress = {"percent": 12, "extra": '{"currentHref":"text/all.xhtml#chapter-2"}'}
+    progress = {
+        "percent": 12,
+        "locationJson": '{"type":"reflowable","format":"epub","href":"text/all.xhtml#chapter-2"}',
+    }
 
     navigation = progress_navigation(progress, ANCHORED_UNITS)
 
@@ -20,10 +23,35 @@ def test_progress_navigation_preserves_exact_fragment_for_shared_xhtml_resource(
     assert navigation["currentChapterSortOrder"] == 2
 
 
+def test_progress_navigation_projects_reader_v3_location_for_chapter_detail():
+    progress = {
+        "percent": 0.2,
+        "locationJson": '{"type":"reflowable","format":"txt","href":"txt-section:9","foliate":{"toc":{"index":9,"title":"第9章","href":"txt-section:9","navigationKey":"unit-9"},"section":{"current":9,"total":2000}}}',
+    }
+    units = [
+        {
+            "id": f"unit-{index}",
+            "href": f"txt-section:{index}",
+            "title": f"第{index}章",
+            "sortOrder": index,
+        }
+        for index in range(12)
+    ]
+
+    navigation = progress_navigation(progress, units)
+
+    assert navigation["currentHref"] == "txt-section:9"
+    assert navigation["currentChapterTitle"] == "第9章"
+    assert navigation["currentChapterSortOrder"] == 9
+    assert navigation["currentChapterIndex"] == 9
+    assert navigation["currentSectionIndex"] == 9
+    assert navigation["progressExtra"] == {}
+
+
 def test_progress_navigation_does_not_guess_ambiguous_resource_only_href():
     progress = {
         "percent": 0,
-        "extra": '{"currentHref":"Text/all.xhtml","sectionIndex":0}',
+        "locationJson": '{"type":"reflowable","format":"epub","href":"Text/all.xhtml","foliate":{"section":{"current":0}}}',
     }
 
     navigation = progress_navigation(progress, ANCHORED_UNITS)
@@ -46,7 +74,7 @@ def test_progress_navigation_does_not_estimate_mobi_chapter_without_exact_naviga
     ]
     progress = {
         "percent": 11.201454819672687,
-        "extra": '{"cfi":"epubcfi(/6/14!/4/4,/86,/128/1:134)","currentHref":null,"progression":0.11201454819672686,"sourceFormat":"mobi"}',
+        "locationJson": '{"type":"reflowable","format":"mobi","cfi":"epubcfi(/6/14!/4/4,/86,/128/1:134)","progression":0.11201454819672686}',
     }
 
     navigation = progress_navigation(progress, units)
@@ -60,7 +88,7 @@ def test_progress_navigation_does_not_estimate_mobi_chapter_without_exact_naviga
 def test_progress_navigation_uses_foliate_toc_index_without_section_guessing():
     progress = {
         "percent": 42.5,
-        "extra": '{"navigationKey":"epub:chapter-2","chapterIndex":1,"chapterTitle":"Exact chapter","sectionIndex":8,"sectionTotal":12,"locationCurrent":41,"locationNext":43,"locationTotal":100}',
+        "locationJson": '{"type":"reflowable","format":"epub","foliate":{"toc":{"navigationKey":"epub:chapter-2","index":1,"title":"Exact chapter"},"section":{"current":8,"total":12},"location":{"current":41,"next":43,"total":100}}}',
     }
     units = [
         {**unit, "navigationKey": f"epub:chapter-{index + 1}"}
@@ -74,7 +102,7 @@ def test_progress_navigation_uses_foliate_toc_index_without_section_guessing():
     assert navigation["progressEstimated"] is False
 
 
-def test_progress_navigation_rejects_stale_navigation_fingerprint():
+def test_progress_navigation_ignores_removed_legacy_extra_fields():
     units = [
         {**unit, "navigationKey": f"epub:chapter-{index + 1}"}
         for index, unit in enumerate(ANCHORED_UNITS)
@@ -82,16 +110,20 @@ def test_progress_navigation_rejects_stale_navigation_fingerprint():
     progress = {
         "percent": 50,
         "extra": '{"navigationKey":"epub:chapter-2","navigationFingerprint":"old"}',
+        "locationJson": '{"type":"reflowable","format":"epub","progression":0.5}',
     }
 
-    navigation = progress_navigation(progress, units, navigation_fingerprint="new")
+    navigation = progress_navigation(progress, units)
 
     assert navigation["currentChapterTitle"] is None
     assert navigation["currentChapterSortOrder"] is None
 
 
 def test_progress_navigation_does_not_override_unmatched_href_with_percent():
-    progress = {"percent": 50, "extra": '{"currentHref":"Text/all.xhtml"}'}
+    progress = {
+        "percent": 50,
+        "locationJson": '{"type":"reflowable","format":"epub","href":"Text/all.xhtml"}',
+    }
 
     navigation = progress_navigation(progress, ANCHORED_UNITS)
 

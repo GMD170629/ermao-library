@@ -16,6 +16,7 @@ from app.models.library import (
     LibraryVolume,
     LibraryWork,
 )
+from app.models.settings import SystemEvent
 from app.modules.opds.public import (
     OPDS_ENABLED_SETTING_KEY,
     OPDS_PUBLIC_BASE_URL_SETTING_KEY,
@@ -147,6 +148,113 @@ def test_opds_basic_catalog_and_progression_contract(
         )
         assert stale.status_code == 409
         assert stale.json()["type"].endswith("progression-date")
+
+
+def test_opds_basic_login_requests_are_recorded_in_system_events(
+    test_settings: Settings,
+    db_session: Session,
+) -> None:
+    _seed_opds_publication(db_session)
+    _enable_opds(db_session)
+    app = create_app(test_settings, session_factory=lambda: db_session)
+
+    with TestClient(app) as client:
+        assert client.get("/opds/v1.2/catalog").status_code == 401
+        assert (
+            client.get(
+                "/opds/v1.2/catalog?page=2",
+                auth=("reader@example.com", "wrong-password"),
+            ).status_code
+            == 401
+        )
+        assert (
+            client.get(
+                "/opds/v1.2/works",
+                auth=("reader@example.com", "reader-password"),
+            ).status_code
+            == 200
+        )
+
+    events = db_session.scalars(
+        select(SystemEvent)
+        .where(SystemEvent.source == "opds")
+        .order_by(SystemEvent.created_at.asc())
+    ).all()
+    assert [(event.level, event.action) for event in events] == [
+        ("warning", "authentication.failed"),
+        ("info", "authentication.succeeded"),
+    ]
+    assert events[0].actor_type == "anonymous"
+    assert events[0].actor_id is None
+    assert events[0].message == "OPDS 登录失败：凭据无效"
+    assert events[0].metadata_json == {
+        "clientAddress": "testclient",
+        "method": "GET",
+        "path": "/opds/v1.2/catalog",
+        "username": "reader@example.com",
+    }
+    assert events[1].actor_type == "user"
+    assert events[1].actor_id == "opds-user"
+    assert events[1].message == "OPDS 登录成功"
+    assert events[1].metadata_json == {
+        "clientAddress": "testclient",
+        "method": "GET",
+        "path": "/opds/v1.2/works",
+        "username": "reader@example.com",
+    }
+    assert "password" not in str([event.metadata_json for event in events]).lower()
+
+
+def test_opds_throttled_login_request_is_recorded_in_english(
+    test_settings: Settings,
+    db_session: Session,
+) -> None:
+    _seed_opds_publication(db_session)
+    _enable_opds(db_session)
+    upsert_setting(db_session, "language", "en-US")
+    db_session.commit()
+    app = create_app(test_settings, session_factory=lambda: db_session)
+
+    with TestClient(app) as client:
+        for _ in range(5):
+            assert (
+                client.get(
+                    "/opds/v1.2/catalog",
+                    auth=("reader@example.com", "wrong-password"),
+                ).status_code
+                == 401
+            )
+        throttled = client.get(
+            "/opds/v1.2/catalog",
+            auth=("reader@example.com", "wrong-password"),
+        )
+        assert throttled.status_code == 429
+
+    events = db_session.scalars(
+        select(SystemEvent)
+        .where(SystemEvent.source == "opds")
+        .order_by(SystemEvent.created_at.asc())
+    ).all()
+    assert [event.action for event in events] == [
+        "authentication.failed",
+        "authentication.failed",
+        "authentication.failed",
+        "authentication.failed",
+        "authentication.failed",
+        "authentication.throttled",
+    ]
+    assert events[-1].level == "warning"
+    assert events[-1].message == "OPDS sign-in throttled: too many attempts."
+    throttled_metadata = dict(events[-1].metadata_json)
+    retry_after_seconds = throttled_metadata.pop("retryAfterSeconds")
+    assert throttled_metadata == {
+        "clientAddress": "testclient",
+        "method": "GET",
+        "path": "/opds/v1.2/catalog",
+        "username": "reader@example.com",
+    }
+    assert isinstance(retry_after_seconds, int)
+    assert retry_after_seconds >= 1
 
 
 def test_opds_routes_are_absent_when_disabled(

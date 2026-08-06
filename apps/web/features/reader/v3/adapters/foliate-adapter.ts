@@ -19,6 +19,7 @@ import { hardenEpubIframe, sanitizeEpubDocument } from './epub-security';
 import {
   applyEpubDocumentSpacing,
   createEpubThemeSnapshot,
+  epubPageWidth,
   epubSurfaceColor,
   resolveEpubViewportLayout,
   type EpubViewportLayout
@@ -97,6 +98,12 @@ function clamp(value: number, minimum = 0, maximum = 1) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function elementAttribute(value: unknown, name: string) {
+  if (!isRecord(value) || typeof value.getAttribute !== 'function') return null;
+  const attribute = Reflect.apply(value.getAttribute, value, [name]);
+  return typeof attribute === 'string' ? attribute : null;
 }
 
 function nonNegativeNumber(value: unknown): number | undefined {
@@ -778,14 +785,58 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     view.addEventListener('load', (event) => {
       if (!this.isActive(generation)) return;
       const detail = loadDetail(event instanceof CustomEvent ? event.detail : null);
-      if (detail) this.bindDocument(detail.doc);
+      if (detail) this.bindDocument(detail.doc, detail.index);
     });
     view.addEventListener('external-link', (event) => {
       if (!(event instanceof CustomEvent) || !isRecord(event.detail)) return;
-      const href = typeof event.detail.href_ === 'string' ? event.detail.href_ : null;
+      const href = typeof event.detail.href === 'string' ? event.detail.href : null;
       if (!href) return;
       event.preventDefault();
-      this.emit({ type: 'external-link', href });
+      const rawHref = elementAttribute(event.detail.a, 'href');
+      const navigationHref = typeof rawHref === 'string' && rawHref.trim() ? rawHref : href;
+      const book = this.book;
+      void (async () => {
+        const explicitExternalHref = /^[a-z][a-z\d+.-]*:/iu.test(navigationHref.trim())
+          || navigationHref.trim().startsWith('//');
+        if (explicitExternalHref) {
+          this.emit({ type: 'external-link', href });
+          return;
+        }
+        const sectionIndex = this.currentLocation?.foliate?.section?.current;
+        const sectionCandidate = book && typeof sectionIndex === 'number'
+          ? await Promise.resolve(book.sections[sectionIndex]?.resolveHref?.(navigationHref)).catch(() => undefined)
+          : undefined;
+        if (typeof sectionCandidate === 'string' && sectionCandidate) {
+          this.pendingTocSnapshot = this.tocSnapshotsByHref.get(navigationHref) ?? null;
+          await view.goTo(sectionCandidate);
+          return;
+        }
+        const bookCandidate = sectionCandidate ?? (book
+          ? await Promise.resolve(book.resolveHref?.(navigationHref)).catch(() => undefined)
+          : undefined);
+        const internalTarget = book
+          ? foliateNavigationTarget(bookCandidate, book.sections.length)
+          : null;
+        if (internalTarget) {
+          this.pendingTocSnapshot = this.tocSnapshotsByHref.get(navigationHref) ?? null;
+          if (view.renderer?.goTo) await view.renderer.goTo(internalTarget);
+          else await this.goToHref(navigationHref);
+          return;
+        }
+        const rawLooksInternal = typeof rawHref === 'string'
+          && !/^[a-z][a-z\d+.-]*:/iu.test(rawHref.trim())
+          && !rawHref.trim().startsWith('//');
+        if (rawLooksInternal) {
+          await view.goTo(navigationHref);
+          return;
+        }
+        this.emit({ type: 'external-link', href });
+      })().catch((reason) => {
+        console.warn('reader.reflowable-link-navigation.failed', {
+          href: navigationHref,
+          reason: reason instanceof Error ? reason.message : String(reason)
+        });
+      });
     });
   }
 
@@ -804,7 +855,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     }).catch(() => undefined);
   }
 
-  private bindDocument(document: Document) {
+  private bindDocument(document: Document, sectionIndex?: number) {
     this.bridgedDocuments.get(document)?.abort();
     const controller = new AbortController();
     this.bridgedDocuments.set(document, controller);
@@ -818,6 +869,41 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     const signal = controller.signal;
     let touchStart: { x: number; y: number } | null = null;
     let suppressClick = false;
+    if (typeof sectionIndex === 'number') {
+      document.addEventListener('click', (event) => {
+        if (!isRecord(event.target) || typeof event.target.closest !== 'function') return;
+        const anchor = event.target.closest('a[href]');
+        const rawHref = elementAttribute(anchor, 'href');
+        if (typeof rawHref !== 'string' || !rawHref.trim()) return;
+        const normalizedHref = rawHref.trim();
+        const hasExternalScheme = /^[a-z][a-z\d+.-]*:/iu.test(normalizedHref) || normalizedHref.startsWith('//');
+        if (hasExternalScheme) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const book = this.book;
+        if (!book) return;
+        void Promise.resolve(
+          book.sections[sectionIndex]?.resolveHref?.(normalizedHref)
+          ?? book.resolveHref?.(normalizedHref)
+        ).then((candidate) => {
+          if (typeof candidate === 'string' && candidate) {
+            void this.view?.goTo(candidate);
+            return;
+          }
+          const target = foliateNavigationTarget(candidate, book.sections.length);
+          if (target && this.view?.renderer?.goTo) {
+            void this.view.renderer.goTo(target);
+            return;
+          }
+          void this.view?.goTo(normalizedHref);
+        }).catch((reason) => {
+          console.warn('reader.reflowable-internal-link.failed', {
+            href: normalizedHref,
+            reason: reason instanceof Error ? reason.message : String(reason)
+          });
+        });
+      }, { capture: true, signal });
+    }
     document.addEventListener('touchstart', (event) => {
       if (this.preferences?.interaction.swipePageTurn !== false || event.touches.length !== 1) return;
       event.stopImmediatePropagation();
@@ -885,7 +971,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
     renderer.setAttribute('flow', 'paginated');
     renderer.setAttribute('gap', this.viewportLayout.paginatorGap);
     renderer.style.paddingBottom = this.viewportLayout.bottomInset;
-    renderer.setAttribute('max-inline-size', `${Math.round(clamp(preferences.epub.pageWidth, 600, 1350))}px`);
+    renderer.setAttribute('max-inline-size', `${epubPageWidth(preferences)}px`);
     const columnCount = preferences.epub.spreadMode === 'auto'
       ? this.viewportLayout.automaticColumnCount
       : preferences.epub.spreadMode === 'double' ? 2 : 1;

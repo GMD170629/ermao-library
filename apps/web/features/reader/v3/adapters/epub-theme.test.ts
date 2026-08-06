@@ -1,7 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DEFAULT_READER_PREFERENCES } from '@shuku/reader-core';
-import { createEpubThemeSnapshot, resolveEpubViewportLayout } from './epub-theme';
+import { createEpubThemeSnapshot, epubPageWidth, resolveEpubViewportLayout } from './epub-theme';
+
+test('EPUB page width uses one bounded measure in paginated and scrolled layouts', () => {
+  assert.equal(epubPageWidth(DEFAULT_READER_PREFERENCES), 1350);
+  assert.equal(epubPageWidth({
+    ...DEFAULT_READER_PREFERENCES,
+    epub: { ...DEFAULT_READER_PREFERENCES.epub, pageWidth: 420 }
+  }), 600);
+  assert.equal(epubPageWidth({
+    ...DEFAULT_READER_PREFERENCES,
+    epub: { ...DEFAULT_READER_PREFERENCES.epub, pageWidth: 1800 }
+  }), 1350);
+});
 
 test('EPUB theme keeps vertical page spacing enforced after epub.js writes layout shorthands', () => {
   const paginated = createEpubThemeSnapshot(DEFAULT_READER_PREFERENCES);

@@ -46,6 +46,10 @@ export function epubSurfaceTextColor(preferences: ReaderPreferences) {
   return readerThemeSurfaces[preferences.appearance.theme].color;
 }
 
+export function epubPageWidth(preferences: ReaderPreferences) {
+  return Math.max(600, Math.min(1350, Math.round(preferences.epub.pageWidth)));
+}
+
 function epubVerticalSpacing(preferences: ReaderPreferences) {
   return preferences.epub.flow === 'paginated'
     ? 'clamp(32px, 5vh, 64px)'
@@ -64,7 +68,7 @@ export function createEpubThemeSnapshot(
   viewportLayout: EpubViewportLayout = DEFAULT_EPUB_VIEWPORT_LAYOUT
 ) {
   const tokens = readerThemeSurfaces[preferences.appearance.theme];
-  const maxWidth = Math.max(600, Math.min(1350, Math.round(preferences.epub.pageWidth)));
+  const maxWidth = epubPageWidth(preferences);
   const fontSize = Math.max(14, Math.min(30, Math.round(preferences.epub.fontSize)));
   const lineHeight = Math.max(1.4, Math.min(2.4, preferences.epub.lineHeight));
   const fontWeight = preferences.epub.fontWeight;

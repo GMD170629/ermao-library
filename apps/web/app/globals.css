@@ -307,15 +307,26 @@ html[data-audio-mini-player='reader'] .shuku-pwa-bottom-overlay {
 
 [data-reader-shell='v3'] {
   --shuku-reader-accent: #b45309;
+  --shuku-reader-control-border: rgb(28 25 23 / 10%);
 }
 
 [data-reader-shell='v3'][data-reader-theme='green'] {
   --shuku-reader-accent: #3f6f4e;
+  --shuku-reader-control-border: rgb(32 49 38 / 12%);
 }
 
-[data-reader-shell='v3'][data-reader-theme='night'],
+[data-reader-shell='v3'][data-reader-theme='night'] {
+  --shuku-reader-accent: #f59e0b;
+  --shuku-reader-control-border: #334155;
+}
+
 [data-reader-shell='v3'][data-reader-theme='black'] {
   --shuku-reader-accent: #f59e0b;
+  --shuku-reader-control-border: #262626;
+}
+
+.shuku-reader-control-border {
+  border-color: var(--shuku-reader-control-border);
 }
 
 .shuku-reader-accent-text {

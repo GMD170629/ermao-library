@@ -8,7 +8,11 @@ from fastapi import APIRouter, Body, Header, Query, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError
 
-from app.modules.opds.application.dto import OpdsCatalogQueryDto, PsePageRequestDto
+from app.modules.opds.application.dto import (
+    OpdsAuthenticationRequestDto,
+    OpdsCatalogQueryDto,
+    PsePageRequestDto,
+)
 from app.modules.opds.application.ports import (
     OpdsAuthenticator,
     OpdsCatalogPort,
@@ -150,8 +154,14 @@ def create_opds_router(dependencies: OpdsHttpDependencies) -> APIRouter:
             )
         try:
             actor = dependencies.authenticator.authenticate(
-                credentials,
-                request.client.host if request.client is not None else "unknown",
+                OpdsAuthenticationRequestDto(
+                    credentials=credentials,
+                    client_address=(
+                        request.client.host if request.client is not None else "unknown"
+                    ),
+                    method=request.method,
+                    path=request.url.path,
+                )
             )
         except OpdsAuthenticationThrottled as error:
             return authentication_throttled_response(error.retry_after_seconds)

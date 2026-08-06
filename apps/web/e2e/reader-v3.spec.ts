@@ -424,6 +424,17 @@ test('reader loading and iOS bottom safe area stay on the active warm surface', 
   await page.getByRole('button', { name: '阅读设置' }).click();
   const settingsDialog = page.getByRole('dialog', { name: '设置' });
   await expect(settingsDialog).toBeVisible();
+  const toggleCenterOffsets = await Promise.all(['常显时钟', '保持屏幕唤醒', '滑动翻页'].map(async (label) => (
+    settingsDialog.getByText(label, { exact: true }).locator('..').locator('..').evaluate((row) => {
+      const control = row.querySelector('[data-reader-toggle-control="true"]');
+      const knob = row.querySelector('[data-reader-toggle-knob="true"]');
+      if (!(control instanceof HTMLElement) || !(knob instanceof HTMLElement)) throw new Error(`Missing toggle control for ${row.textContent ?? ''}`);
+      const controlBounds = control.getBoundingClientRect();
+      const knobBounds = knob.getBoundingClientRect();
+      return Math.abs((controlBounds.top + controlBounds.height / 2) - (knobBounds.top + knobBounds.height / 2));
+    })
+  )));
+  expect(toggleCenterOffsets.every((offset) => offset <= 0.5)).toBe(true);
   await expect.poll(() => settingsDialog.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(500);
   if (process.env.SHUKU_READER_EPUB_SETTINGS_CAPTURE) {
     await page.screenshot({ path: process.env.SHUKU_READER_EPUB_SETTINGS_CAPTURE });
@@ -458,8 +469,11 @@ test('reader loading and iOS bottom safe area stay on the active warm surface', 
     statusBarStyle: 'black-translucent',
     themeColors: ['#E8F0E3', '#E8F0E3']
   });
+  await page.getByRole('dialog', { name: '外观' }).getByRole('button', { name: '夜间' }).click();
+  await expect(page.getByText('文字外观', { exact: true }).locator('..').locator('..')).toHaveCSS('border-color', 'rgb(51, 65, 85)');
   await page.getByRole('dialog', { name: '外观' }).getByRole('button', { name: '纯黑' }).click();
   await expect(topSafeArea).toHaveCSS('background-color', 'rgb(0, 0, 0)');
+  await expect(page.getByText('文字外观', { exact: true }).locator('..').locator('..')).toHaveCSS('border-color', 'rgb(38, 38, 38)');
 
   const bottomControls = page.locator('[data-reader-controller="bottom-console"]');
   await page.getByRole('dialog', { name: '外观' }).getByRole('button', { name: '关闭面板' }).click();
@@ -1233,10 +1247,13 @@ test('EPUB cross-spine paging uses one foliate step without a custom track or an
 
 test('EPUB scrolled flow keeps adjacent chapters mounted in one stable stream', async ({ page }) => {
   const progressBodies: Array<Record<string, any>> = [];
+  await page.setViewportSize({ width: 1600, height: 900 });
   await mockReaderApi(page, 'epub', progressBodies);
   await page.goto('/reader/epub-volume');
   let iframe = await currentEpubIframe(page);
   await expect(iframe.contentFrame().getByText('第一章 开始阅读')).toBeVisible();
+  const paginatedWidth = await iframe.evaluate((element) => element.getBoundingClientRect().width);
+  expect(paginatedWidth).toBeLessThanOrEqual(defaultPreferences.epub.pageWidth + 1);
 
   await showReaderControls(page);
   await page.getByRole('button', { name: '阅读设置' }).click();
@@ -1248,8 +1265,29 @@ test('EPUB scrolled flow keeps adjacent chapters mounted in one stable stream', 
   const secondSlot = stream.locator('[data-reflowable-continuous-section="1"]');
   await expect(firstSlot.locator('iframe')).toHaveCount(1);
   await expect(secondSlot.locator('iframe')).toHaveCount(1);
+  const scrolledMeasure = await firstSlot.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const viewport = element.parentElement?.getBoundingClientRect();
+    return {
+      width: bounds.width,
+      centered: viewport ? Math.abs((bounds.left + bounds.width / 2) - (viewport.left + viewport.width / 2)) : Number.POSITIVE_INFINITY
+    };
+  });
+  expect(Math.abs(scrolledMeasure.width - paginatedWidth)).toBeLessThanOrEqual(1);
+  expect(scrolledMeasure.centered).toBeLessThanOrEqual(1);
   await firstSlot.evaluate((element) => { element.dataset.e2eStableSlot = 'first'; });
   await firstSlot.locator('iframe').evaluate((element) => { element.dataset.e2eStableFrame = 'first'; });
+
+  await page.getByRole('dialog', { name: '设置' }).getByRole('button', { name: '外观' }).click();
+  await page.getByRole('dialog', { name: '外观' }).getByRole('group', { name: '页宽' }).getByRole('button', { name: '窄', exact: true }).click();
+  await expect.poll(() => firstSlot.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const viewport = element.parentElement?.getBoundingClientRect();
+    return {
+      width: bounds.width,
+      centered: viewport ? Math.abs((bounds.left + bounds.width / 2) - (viewport.left + viewport.width / 2)) : Number.POSITIVE_INFINITY
+    };
+  })).toEqual({ width: 760, centered: 0 });
 
   await stream.evaluate((element) => {
     const second = element.querySelector<HTMLElement>('[data-reflowable-continuous-section="1"]');
@@ -1272,6 +1310,30 @@ test('EPUB scrolled flow keeps adjacent chapters mounted in one stable stream', 
   });
   await expect.poll(() => engine.getAttribute('data-reader-location-href')).toContain('chapter1.xhtml');
   await expect(firstSlot.locator('iframe')).toHaveAttribute('data-e2e-stable-frame', 'first');
+});
+
+test('EPUB scrolled flow resolves section-normalized document links without opening a tab', async ({ page }) => {
+  await mockReaderApi(page, 'epub');
+  await page.goto('/reader/epub-volume');
+  await showReaderControls(page);
+  await page.getByRole('button', { name: '阅读设置' }).click();
+  await page.getByRole('dialog', { name: '设置' }).getByRole('button', { name: '滚动', exact: true }).click();
+
+  const engine = page.locator('[data-reader-engine="reflowable-v3"]');
+  const firstFrame = engine.locator('[data-reflowable-continuous-section="0"] iframe');
+  const pagesBeforeNavigation = page.context().pages().length;
+  await firstFrame.contentFrame().locator('body').evaluate((body) => {
+    const anchor = body.ownerDocument.createElement('a');
+    anchor.href = 'chapter2.xhtml';
+    anchor.target = '_blank';
+    anchor.textContent = '第二章';
+    body.append(anchor);
+    anchor.click();
+  });
+
+  await expect.poll(() => engine.getAttribute('data-reader-location-href')).toContain('chapter2.xhtml');
+  await expect(engine.locator('[data-reflowable-continuous-section="1"] iframe').contentFrame().getByText('第二章 翻页验证')).toBeVisible();
+  expect(page.context().pages()).toHaveLength(pagesBeforeNavigation);
 });
 
 test('EPUB scrolled flow resumes inside a chapter instead of its beginning', async ({ page }) => {
@@ -1545,6 +1607,60 @@ test('EPUB pointer tap navigates only when its click is emitted', async ({ page 
   expect(await page.evaluate(() => (
     window as typeof window & { __epubNavigationStarts?: number }
   ).__epubNavigationStarts ?? 0)).toBe(2);
+});
+
+test('EPUB document links stay inside the reader while external links use the application boundary', async ({ page }) => {
+  await mockReaderApi(page, 'epub');
+  await page.goto('/reader/epub-volume');
+  await expect((await currentEpubIframe(page)).contentFrame().getByText('第一章 开始阅读')).toBeVisible();
+
+  const pagesBeforeInternalNavigation = page.context().pages().length;
+  await (await currentEpubIframe(page)).contentFrame().locator('body').evaluate((body) => {
+    const document = body.ownerDocument;
+    const anchor = document.createElement('a');
+    anchor.setAttribute('href', 'chapter2.xhtml');
+    anchor.setAttribute('target', '_blank');
+    anchor.textContent = '第二章';
+    document.body.append(anchor);
+    anchor.click();
+  });
+  await expect((await currentEpubIframe(page)).contentFrame().getByText('第二章 翻页验证')).toBeVisible();
+  expect(page.context().pages()).toHaveLength(pagesBeforeInternalNavigation);
+
+  await page.evaluate(() => {
+    const state = window as typeof window & { __readerExternalLinks?: string[] };
+    state.__readerExternalLinks = [];
+    window.open = ((href?: string | URL) => {
+      state.__readerExternalLinks?.push(String(href ?? ''));
+      return null;
+    }) as typeof window.open;
+  });
+  const externalEventCancelled = await (await currentEpubIframe(page)).contentFrame().locator('body').evaluate((body) => {
+    let node: Node | null = body.ownerDocument.defaultView?.frameElement ?? null;
+    let view: Element | null = null;
+    while (node) {
+      const root = node.getRootNode();
+      const host = 'host' in root ? root.host as Element : null;
+      if (!host || typeof host.localName !== 'string') break;
+      if (host.localName === 'foliate-view') {
+        view = host;
+        break;
+      }
+      node = host;
+    }
+    if (!view) throw new Error('The EPUB view is unavailable');
+    const ViewCustomEvent = view.ownerDocument.defaultView?.CustomEvent;
+    if (!ViewCustomEvent) throw new Error('The EPUB event constructor is unavailable');
+    return !view.dispatchEvent(new ViewCustomEvent('external-link', {
+      bubbles: true,
+      cancelable: true,
+      detail: { href: 'https://example.com/reference' }
+    }));
+  });
+  expect(externalEventCancelled).toBe(true);
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __readerExternalLinks?: string[] }
+  ).__readerExternalLinks)).toEqual(['https://example.com/reference']);
 });
 
 test('EPUB iframe is scriptless and receives the selected theme snapshot', async ({ page }) => {

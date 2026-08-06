@@ -14,6 +14,7 @@ import {
   shouldResolveFoliateTocItem,
   validatedServerToc
 } from './foliate-adapter';
+import { resolveReflowableDocumentLink } from './reflowable-continuous';
 
 test('parseFoliateRelocateDetail validates CFI and clamps official fraction', () => {
   assert.deepEqual(
@@ -64,6 +65,19 @@ test('awaits asynchronous MOBI href resolution before renderer navigation', asyn
     resolveHref: async (href) => href === 'kindle:pos:fid:1:off:20' ? target : undefined
   }, 'kindle:pos:fid:1:off:20');
   assert.deepEqual(result, { asynchronous: true, target });
+});
+
+test('continuous document links resolve a section-normalized string through the book', async () => {
+  const target = { index: 4, anchor: () => null };
+  const result = await resolveReflowableDocumentLink({
+    sections: [{
+      load: () => '',
+      resolveHref: (href) => `OEBPS/${href}`
+    }],
+    resolveHref: (href) => href === 'OEBPS/index_split_004.html#filepos62933' ? target : undefined
+  }, 0, 'index_split_004.html#filepos62933');
+
+  assert.deepEqual(result, target);
 });
 
 test('converts one-based directory labels to Foliate zero-based section indexes', () => {

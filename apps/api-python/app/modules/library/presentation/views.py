@@ -53,7 +53,7 @@ from app.modules.reader.public import (
     number_or_none as _number_or_none,
 )
 from app.modules.reader.public import (
-    progress_extra as _progress_extra,
+    progress_location as _progress_location,
 )
 from app.modules.reader.public import (
     progress_navigation as _progress_navigation,
@@ -295,16 +295,30 @@ def _media_position_label(
     if not progress:
         return "未开始"
     if reader_type != "audio":
-        page = progress.get("page")
-        if page:
+        location = _progress_location(progress)
+        page = _number_or_none(
+            location.get("pageIndex")
+            if location.get("type") == "comic"
+            else location.get("pageNumber")
+            if location.get("type") == "pdf"
+            else None
+        )
+        if page is not None:
             return f"第 {page} 页"
-        extra = _progress_extra(progress)
-        chapter_title = extra.get("chapterTitle")
+        foliate = location.get("foliate")
+        foliate = foliate if isinstance(foliate, dict) else {}
+        toc = foliate.get("toc")
+        toc = toc if isinstance(toc, dict) else {}
+        chapter_title = toc.get("title")
         if isinstance(chapter_title, str) and chapter_title:
             return chapter_title
-        location_current = _number_or_none(extra.get("locationCurrent"))
-        location_next = _number_or_none(extra.get("locationNext"))
-        location_total = _number_or_none(extra.get("locationTotal"))
+        foliate_location = foliate.get("location")
+        foliate_location = (
+            foliate_location if isinstance(foliate_location, dict) else {}
+        )
+        location_current = _number_or_none(foliate_location.get("current"))
+        location_next = _number_or_none(foliate_location.get("next"))
+        location_total = _number_or_none(foliate_location.get("total"))
         if (
             location_current is not None
             and location_next is not None
@@ -319,23 +333,13 @@ def _media_position_label(
                 else f"Loc {start}–{end} / {location_total}"
             )
         return "继续上次位置"
-    location = _parse_json(progress.get("locationJson"), {})
-    extra = _progress_extra(progress)
+    location = _progress_location(progress)
     position_ms = _number_or_none(
         location.get("positionMs") if isinstance(location, dict) else None
     )
     if position_ms is None:
-        position_ms = _number_or_none(extra.get("positionMs"))
-    if position_ms is None:
-        try:
-            position_ms = int(float(progress.get("position") or 0))
-        except (TypeError, ValueError):
-            position_ms = 0
-    chapter_id = (
-        location.get("chapterId")
-        if isinstance(location, dict)
-        else extra.get("chapterId")
-    )
+        position_ms = 0
+    chapter_id = location.get("chapterId") if isinstance(location, dict) else None
     chapter_title = (
         library_projections.get_reading_unit_title(db, str(chapter_id))
         if chapter_id and _has_table(db, "LibraryReadingUnit")
@@ -1166,10 +1170,7 @@ def _active_media_view(
     progress_view = (
         {
             "volumeId": progress.volume_id,
-            "position": progress.position,
-            "page": progress.page,
             "percent": progress.percent,
-            "extra": progress.extra,
             "locationJson": progress.location_json,
             "updatedAt": progress.updated_at,
         }
@@ -1194,6 +1195,7 @@ def _active_media_view(
             "totalPages": total_pages,
         },
     }
+    progress_navigation = _progress_navigation(progress_view, reading_units)
     return {
         "key": selected_tab,
         "formatLabel": selected_volume.get("format") or "UNKNOWN",
@@ -1207,7 +1209,10 @@ def _active_media_view(
         else "UNREAD",
         "progressStatus": _status_from_progress(progress_view),
         "progress": percent,
-        "positionLabel": _media_position_label(db, reader_type, progress_view),
+        "positionLabel": (
+            progress_navigation.get("currentChapterTitle")
+            or _media_position_label(db, reader_type, progress_view)
+        ),
         "durationMs": selected_volume.get("durationMs"),
         "narrator": selected_volume.get("narrator") if reader_type == "audio" else None,
         "primaryAction": {
@@ -1224,7 +1229,7 @@ def _active_media_view(
                 selected_volume, files
             ),
         },
-        **_progress_navigation(progress_view, reading_units),
+        **progress_navigation,
     }, navigation
 
 
@@ -1360,10 +1365,7 @@ def _work_reading_units_view(
     progress_view = (
         {
             "volumeId": progress.volume_id,
-            "position": progress.position,
-            "page": progress.page,
             "percent": progress.percent,
-            "extra": progress.extra,
             "locationJson": progress.location_json,
             "updatedAt": progress.updated_at,
         }
@@ -1371,7 +1373,6 @@ def _work_reading_units_view(
         else None
     )
     navigation = _progress_navigation(progress_view, unit_views)
-    extra = _progress_extra(progress_view)
     return {
         "units": unit_views,
         "page": {
@@ -1384,8 +1385,9 @@ def _work_reading_units_view(
             100.0, max(0.0, float(progress.percent if progress is not None else 0))
         ),
         "currentHref": navigation.get("currentHref"),
+        "currentChapterIndex": navigation.get("currentChapterIndex"),
         "currentChapterSortOrder": navigation.get("currentChapterSortOrder"),
-        "currentPageNumber": extra.get("pageIndex"),
+        "currentPageNumber": navigation.get("currentPageNumber"),
     }
 
 

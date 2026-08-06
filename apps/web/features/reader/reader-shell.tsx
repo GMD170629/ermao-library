@@ -786,7 +786,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
         onClick={stopControlEvent}
       >
         <div
-          className={cn('pointer-events-auto relative mx-auto flex h-12 w-full max-w-5xl items-center justify-between rounded-full border px-1 shadow-sm backdrop-blur-xl', dark ? 'border-white/10 bg-slate-950/75' : 'border-stone-200/80 bg-white/80')}
+          className={cn('shuku-reader-control-border pointer-events-auto relative mx-auto flex h-12 w-full max-w-5xl items-center justify-between rounded-full border px-1 shadow-sm backdrop-blur-xl', dark ? 'bg-slate-950/75' : 'bg-white/80')}
           data-reader-top-bar="true"
         >
           <button
@@ -861,7 +861,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
           aria-modal={panel ? 'true' : undefined}
           aria-labelledby={panel ? 'reader-panel-title' : undefined}
           tabIndex={panel ? -1 : undefined}
-          className={cn('pointer-events-auto relative mx-auto flex h-full flex-col overflow-hidden rounded-[1.65rem] border shadow-[0_8px_28px_rgba(75,54,31,0.10)] md:rounded-[1.35rem]', readerBottomControlsMaxWidth, dark ? 'border-white/15' : 'border-stone-900/15')}
+          className={cn('shuku-reader-control-border pointer-events-auto relative mx-auto flex h-full flex-col overflow-hidden rounded-[1.65rem] border shadow-[0_8px_28px_rgba(75,54,31,0.10)] md:rounded-[1.35rem]', readerBottomControlsMaxWidth)}
           style={{ backgroundColor: themeSurface.background }}
           data-reader-console-surface="true"
           data-reader-panel={panel ?? undefined}
@@ -926,7 +926,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                         type="button"
                         aria-current={currentNavigationItem && navigationItemKey(item) === navigationItemKey(currentNavigationItem) ? 'location' : undefined}
                         onClick={() => { void jumpToItem(item); }}
-                        className={cn('flex min-h-11 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left text-sm transition active:scale-[0.99]', currentNavigationItem && navigationItemKey(item) === navigationItemKey(currentNavigationItem) ? 'shuku-reader-accent-solid' : dark ? 'border-white/10 bg-white/[0.04] hover:bg-white/10' : 'border-stone-900/[0.08] bg-white/55 hover:bg-white/80')}
+                        className={cn('flex min-h-11 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left text-sm transition active:scale-[0.99]', currentNavigationItem && navigationItemKey(item) === navigationItemKey(currentNavigationItem) ? 'shuku-reader-accent-solid' : dark ? 'shuku-reader-control-border bg-white/[0.04] hover:bg-white/10' : 'shuku-reader-control-border bg-white/55 hover:bg-white/80')}
                       >
                         <span className="w-9 shrink-0 tabular-nums opacity-60">{itemIndex + 1}</span>
                         <span className="line-clamp-2">{item.title}</span>
@@ -961,7 +961,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                       'flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-medium transition active:scale-[0.98] disabled:opacity-40',
                       bookmarkActive
                         ? 'shuku-reader-accent-selected border-current/20'
-                        : dark ? 'border-white/10 hover:bg-white/10' : 'border-stone-900/10 hover:bg-stone-900/5'
+                        : dark ? 'shuku-reader-control-border hover:bg-white/10' : 'shuku-reader-control-border hover:bg-stone-900/5'
                     )}
                     aria-label={bookmarkActive ? i18nAttribute("移除当前位置书签") : i18nAttribute("添加当前位置书签")}
                   >
@@ -970,7 +970,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                   </button>
                   <div data-pwa-scroll="true" className="mt-3 min-h-0 flex-1 overflow-auto overscroll-contain pr-1">
                     {orderedBookmarks.length === 0 ? (
-                      <div className={cn('flex h-full min-h-40 flex-col items-center justify-center rounded-2xl border px-5 text-center', dark ? 'border-white/10 bg-white/[0.035]' : 'border-stone-900/10 bg-white/45')}>
+                      <div className={cn('shuku-reader-control-border flex h-full min-h-40 flex-col items-center justify-center rounded-2xl border px-5 text-center', dark ? 'bg-white/[0.035]' : 'bg-white/45')}>
                         <Bookmark size={22} className="opacity-35" />
                         <div className="mt-2 text-sm font-medium"><I18nText>还没有书签</I18nText></div>
                         <div className="mt-1 text-xs opacity-55"><I18nText>保存当前位置后，可从这里快速返回</I18nText></div>
@@ -1027,7 +1027,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                     dark={dark}
                     behavior="tabs"
                   />
-                  <div role="tabpanel" data-pwa-scroll="true" className="mt-4 min-h-0 overflow-auto rounded-2xl border border-current/10 p-5 text-center">
+                  <div role="tabpanel" data-pwa-scroll="true" className="shuku-reader-control-border mt-4 min-h-0 overflow-auto rounded-2xl border p-5 text-center">
                     <Highlighter className="mx-auto opacity-45" size={24} />
                     <div className="mt-3 text-sm font-medium">{annotationTab === 'book' ? i18nAttribute("暂无可展示的书内注释") : i18nAttribute("还没有划线或批注")}</div>
                     <p className="mx-auto mt-2 max-w-xs text-xs leading-5 opacity-60">
@@ -1149,14 +1149,14 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                     </ReaderSettingsSection>
                   ) : null}
 
-                  <section className={cn('overflow-hidden rounded-2xl border', dark ? 'border-white/12 bg-white/[0.035]' : 'border-stone-900/10 bg-white/45')}>
+                  <section className={cn('shuku-reader-control-border overflow-hidden rounded-2xl border', dark ? 'bg-white/[0.035]' : 'bg-white/45')}>
                     <button type="button" className="flex min-h-14 w-full items-center gap-3 px-4 text-left" aria-expanded={advancedSettingsOpen} aria-controls="reader-advanced-settings" onClick={() => setAdvancedSettingsOpen((open) => !open)}>
                       <SlidersHorizontal size={18} className="shrink-0 opacity-70" />
                       <span className="min-w-0 flex-1 font-semibold"><I18nText>高级设置</I18nText></span>
                       <ChevronDown size={18} className={cn('shrink-0 transition-transform duration-300 motion-reduce:transition-none', advancedSettingsOpen ? 'rotate-180' : '')} />
                     </button>
                     <div id="reader-advanced-settings" className="shuku-reader-advanced-settings" data-expanded={advancedSettingsOpen ? 'true' : 'false'}>
-                      <div className="min-h-0 space-y-3 border-t border-current/10 p-3">
+                      <div className="shuku-reader-control-border min-h-0 space-y-3 border-t p-3">
                         {readerType === 'reflowable' ? (
                           <ReaderSettingsSection icon={Type} title={i18nAttribute("段落与内容样式")} dark={dark} nested desktopColumns>
                             <CompactSettingOptions label={i18nAttribute("段首缩进")} value={String(settings.paragraphIndent)} options={READER_PARAGRAPH_INDENT_OPTIONS} onChange={(value) => updateSettings({ paragraphIndent: Number(value) })} dark={dark} />
@@ -1184,7 +1184,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                       type="button"
                       onClick={() => { void onResetSettings(); keepControlsOpen(); }}
                       aria-label={i18nAttribute("恢复阅读默认设置")}
-                      className={cn('flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-current/10 px-3 text-xs font-medium transition active:scale-[0.98]', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}
+                      className={cn('shuku-reader-control-border flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border px-3 text-xs font-medium transition active:scale-[0.98]', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}
                     >
                       <RotateCcw size={15} />
                       <I18nText>恢复阅读默认设置</I18nText></button>
@@ -1236,7 +1236,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
               </div>
             </div>
 
-            <div data-reader-console-nav="true" className={cn('grid min-h-[4.75rem] grid-cols-4 border-t px-2 py-1', dark ? 'border-white/10' : 'border-stone-900/10')}>
+            <div data-reader-console-nav="true" className="shuku-reader-control-border grid min-h-[4.75rem] grid-cols-4 border-t px-2 py-1">
               <ReaderControlNavButton icon={ListTree} label={i18nAttribute("目录")} selected={panel === 'toc'} expanded={panel === 'toc'} panelTrigger="toc" onClick={(event) => togglePanel('toc', event.currentTarget)} dark={dark} />
               <ReaderControlNavButton
                 icon={NotebookPen}
@@ -1296,7 +1296,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
             </div>
 
       {bookmarkNotice ? (
-        <div role="status" className={cn('pointer-events-none absolute inset-x-0 z-30 mx-auto w-fit rounded-full border px-4 py-2 text-xs font-medium shadow-lg backdrop-blur-xl', dark ? 'border-white/10 bg-slate-950/90' : 'border-stone-200 bg-white/90')} style={{ bottom: 'calc(6rem + var(--shuku-safe-area-bottom))' }}>
+        <div role="status" className={cn('shuku-reader-control-border pointer-events-none absolute inset-x-0 z-30 mx-auto w-fit rounded-full border px-4 py-2 text-xs font-medium shadow-lg backdrop-blur-xl', dark ? 'bg-slate-950/90' : 'bg-white/90')} style={{ bottom: 'calc(6rem + var(--shuku-safe-area-bottom))' }}>
           {bookmarkNotice}
         </div>
       ) : null}
@@ -1311,7 +1311,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
 function ThemeSwatches({ value, onChange, dark }: { value: ReaderTheme; onChange: (value: ReaderTheme) => void; dark: boolean }) {
   const { t: i18nAttribute } = useAttributeI18n();
   return (
-    <div role="group" aria-label={i18nAttribute("主题")} className={cn('flex items-center justify-center gap-3 rounded-2xl border p-1.5', dark ? 'border-white/10 bg-white/[0.06]' : 'border-stone-900/[0.07] bg-stone-900/[0.055]')}>
+    <div role="group" aria-label={i18nAttribute("主题")} className={cn('shuku-reader-control-border flex items-center justify-center gap-3 rounded-2xl border p-1.5', dark ? 'bg-white/[0.06]' : 'bg-stone-900/[0.055]')}>
       {READER_THEME_OPTIONS.map((option) => {
         const selected = value === option.value;
         const surface = readerThemeSurfaces[option.value];
@@ -1322,7 +1322,7 @@ function ThemeSwatches({ value, onChange, dark }: { value: ReaderTheme; onChange
             aria-label={i18nAttribute(option.label)}
             aria-pressed={selected}
             onClick={() => onChange(option.value)}
-            className={cn('flex h-11 w-11 items-center justify-center rounded-full border-2 border-transparent p-1 transition active:scale-[0.96]', selected ? '' : dark ? 'hover:border-white/15' : 'hover:border-stone-900/10')}
+            className={cn('flex h-11 w-11 items-center justify-center rounded-full border-2 border-transparent p-1 transition active:scale-[0.96]', selected ? '' : 'hover:border-[var(--shuku-reader-control-border)]')}
             style={selected ? { borderColor: surface.accent } : undefined}
           >
             <span className="flex h-7 w-7 items-center justify-center rounded-full border border-black/10 shadow-sm" style={{ backgroundColor: surface.background, color: surface.color }}>
@@ -1370,7 +1370,7 @@ function CompactStepper({ label, value, onMinus, onPlus, dark }: { label: string
   return (
     <div className="flex items-center gap-3 min-[900px]:max-w-[32rem]">
       <span className="w-9 shrink-0 text-xs font-medium opacity-55">{i18nAttribute(label)}</span>
-      <div className={cn('flex min-w-0 flex-1 items-center rounded-xl border p-1', dark ? 'border-white/10 bg-white/[0.07]' : 'border-stone-900/[0.07] bg-stone-900/[0.055]')}>
+      <div className={cn('shuku-reader-control-border flex min-w-0 flex-1 items-center rounded-xl border p-1', dark ? 'bg-white/[0.07]' : 'bg-stone-900/[0.055]')}>
         <button type="button" onClick={onMinus} className={cn('flex h-9 w-9 items-center justify-center rounded-lg transition active:scale-[0.97]', dark ? 'hover:bg-white/10' : 'hover:bg-white/60')} aria-label={i18nAttribute("{value0}减少", { value0: label })}>
           <Minus size={14} />
         </button>
@@ -1393,8 +1393,8 @@ function ReaderSettingsSection({ icon: Icon, title, dark, nested = false, deskto
 }) {
   return (
     <section className={cn(
-      'rounded-2xl border p-3',
-      nested ? 'border-current/10 bg-transparent' : dark ? 'border-white/12 bg-white/[0.035]' : 'border-stone-900/10 bg-white/45'
+      'shuku-reader-control-border rounded-2xl border p-3',
+      nested ? 'bg-transparent' : dark ? 'bg-white/[0.035]' : 'bg-white/45'
     )}>
       <div className="mb-3 flex items-center gap-2 px-1 text-xs font-semibold">
         <Icon size={16} className="opacity-65" />
@@ -1417,13 +1417,15 @@ function ReaderToggleRow({ label, description, checked, disabled = false, onChan
   dark: boolean;
 }) {
   return (
-    <label className={cn('flex min-h-11 items-center gap-3 rounded-xl border px-3 py-2', disabled && 'opacity-45', dark ? 'border-white/10 bg-white/[0.045]' : 'border-stone-900/[0.07] bg-white/55')}>
+    <label className={cn('shuku-reader-control-border flex min-h-11 items-center gap-3 rounded-xl border px-3 py-2', disabled && 'opacity-45', dark ? 'bg-white/[0.045]' : 'bg-white/55')}>
       <span className="min-w-0 flex-1">
         <span className="block text-xs font-medium">{label}</span>
         {description ? <span className="mt-0.5 block text-[11px] leading-4 opacity-55">{description}</span> : null}
       </span>
       <input type="checkbox" className="peer sr-only" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
-      <span aria-hidden="true" className={cn('relative h-6 w-11 shrink-0 rounded-full border transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow-sm after:transition-transform peer-checked:after:translate-x-5 peer-focus-visible:ring-2', checked ? 'shuku-reader-accent-toggle' : dark ? 'border-white/20 bg-white/10' : 'border-stone-900/15 bg-stone-900/10')} />
+      <span data-reader-toggle-control="true" aria-hidden="true" className={cn('relative h-6 w-11 shrink-0 rounded-full border transition-colors peer-focus-visible:ring-2', checked ? 'shuku-reader-accent-toggle' : dark ? 'shuku-reader-control-border bg-white/10' : 'shuku-reader-control-border bg-stone-900/10')}>
+        <span data-reader-toggle-knob="true" className={cn('absolute left-0.5 top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-white shadow-sm transition-transform', checked && 'translate-x-5')} />
+      </span>
     </label>
   );
 }
@@ -1485,7 +1487,7 @@ function VolumeNavigationPanel({ navigation, readerType, activeItemKey, dark, on
               onClick={() => onJumpItem(item)}
               className={cn(
                 isComic ? 'min-h-11 rounded-xl px-2 text-sm tabular-nums transition active:scale-[0.98] disabled:cursor-wait disabled:opacity-60' : 'flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition active:scale-[0.99] disabled:cursor-wait disabled:opacity-60',
-                activeItemKey && navigationItemKey(item) === activeItemKey ? 'shuku-reader-accent-solid' : dark ? 'border border-white/10 bg-white/[0.05] hover:bg-white/10' : 'border border-stone-900/[0.08] bg-white/55 hover:bg-white/80'
+                activeItemKey && navigationItemKey(item) === activeItemKey ? 'shuku-reader-accent-solid' : dark ? 'shuku-reader-control-border border bg-white/[0.05] hover:bg-white/10' : 'shuku-reader-control-border border bg-white/55 hover:bg-white/80'
               )}
             >
               {isComic ? item.index : (

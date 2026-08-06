@@ -5,27 +5,28 @@ from app.models.auth import User
 from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
+    LibraryReadingProgress,
     LibraryReadingUnit,
     LibraryVolume,
     LibraryWork,
 )
 
 
-def _login(client, db_session) -> None:
-    db_session.add(
-        User(
-            email="detail@example.com",
-            name="Detail reader",
-            password_hash=hash_password("detail-password"),
-            role="admin",
-        )
+def _login(client, db_session) -> User:
+    user = User(
+        email="detail@example.com",
+        name="Detail reader",
+        password_hash=hash_password("detail-password"),
+        role="admin",
     )
+    db_session.add(user)
     db_session.commit()
     response = client.post(
         "/api/auth/login",
         json={"email": "detail@example.com", "password": "detail-password"},
     )
     assert response.status_code == 200
+    return user
 
 
 def _add_work_with_volumes(db_session, *, volume_count: int = 12) -> None:
@@ -174,6 +175,7 @@ def test_work_reading_units_query_returns_only_requested_navigation(client, db_s
         "page",
         "progress",
         "currentHref",
+        "currentChapterIndex",
         "currentChapterSortOrder",
         "currentPageNumber",
     }
@@ -184,6 +186,38 @@ def test_work_reading_units_query_returns_only_requested_navigation(client, db_s
         "total": 2,
         "totalPages": 2,
     }
+
+
+def test_work_reading_units_query_projects_reader_v3_chapter_location(
+    client, db_session
+):
+    user = _login(client, db_session)
+    _add_work_with_volumes(db_session)
+    db_session.add(
+        LibraryReadingProgress(
+            user_id=user.id,
+            volume_id="detail-volume-01",
+            reader_type="reflowable",
+            position="0",
+            percent=12.5,
+            extra="{}",
+            schema_version=3,
+            location_type="reflowable",
+            location_json='{"type":"reflowable","format":"txt","href":"002.jpg","foliate":{"toc":{"index":1,"title":"第二章","href":"002.jpg"},"section":{"current":1,"total":2}}}',
+        )
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/api/works/detail-work/volumes/detail-volume-01/reading-units",
+        params={"page": 1, "pageSize": 2},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["currentHref"] == "002.jpg"
+    assert data["currentChapterIndex"] == 1
+    assert data["currentChapterSortOrder"] == 1
 
 
 def test_work_detail_queries_preserve_authentication_and_not_found_contracts(

@@ -79,7 +79,7 @@ export function ReaderQuickActionButton({ label, ariaLabel, selected = false, ex
         'flex min-h-[4.5rem] min-w-0 flex-col items-center justify-center gap-1 rounded-2xl border px-1 text-xs font-medium transition active:scale-[0.97]',
         selected
           ? 'shuku-reader-accent-selected border-current/20'
-          : dark ? 'border-white/15 bg-white/[0.045] hover:bg-white/[0.09]' : 'border-stone-900/15 bg-white/55 hover:bg-white/80'
+          : dark ? 'shuku-reader-control-border bg-white/[0.045] hover:bg-white/[0.09]' : 'shuku-reader-control-border bg-white/55 hover:bg-white/80'
       )}
     >
       {children}
@@ -105,7 +105,7 @@ export function ReaderSegmentedControl<T extends string>({ ariaLabel, value, opt
       role={behavior === 'tabs' ? 'tablist' : 'group'}
       aria-label={ariaLabel}
       aria-disabled={disabled}
-      className={cn('grid min-w-0 gap-1 rounded-xl border p-1', dark ? 'border-white/10 bg-white/[0.07]' : 'border-stone-900/[0.07] bg-stone-900/[0.055]', disabled && 'opacity-45', className)}
+      className={cn('shuku-reader-control-border grid min-w-0 gap-1 rounded-xl border p-1', dark ? 'bg-white/[0.07]' : 'bg-stone-900/[0.055]', disabled && 'opacity-45', className)}
       style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
     >
       {options.map((option) => {

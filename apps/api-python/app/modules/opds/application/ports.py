@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Protocol
 
 from app.modules.opds.application.dto import (
-    BasicCredentialsDto,
     OpdsActorDto,
+    OpdsAuthenticationRequestDto,
     OpdsCatalogQueryDto,
     OpdsFeedDto,
     OpdsProgressionDocumentDto,
@@ -13,9 +13,7 @@ from app.modules.opds.application.dto import (
 
 
 class OpdsAuthenticator(Protocol):
-    def authenticate(
-        self, credentials: BasicCredentialsDto, client_address: str
-    ) -> OpdsActorDto | None: ...
+    def authenticate(self, request: OpdsAuthenticationRequestDto) -> OpdsActorDto | None: ...
 
 
 class OpdsCatalogPort(Protocol):

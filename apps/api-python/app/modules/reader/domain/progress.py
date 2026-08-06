@@ -72,42 +72,35 @@ def _unit_navigation_key(unit: dict[str, Any]) -> str | None:
     return candidate if isinstance(candidate, str) and candidate else None
 
 
-def progress_extra(progress: dict[str, Any] | None) -> dict[str, Any]:
+def progress_location(progress: dict[str, Any] | None) -> dict[str, Any]:
     if not progress:
         return {}
-    parsed = _parse_json(progress.get("extra"), {})
+    parsed = _parse_json(progress.get("locationJson"), {})
     return parsed if isinstance(parsed, dict) else {}
 
 
 def progress_navigation(
     progress: dict[str, Any] | None,
     units: list[dict[str, Any]],
-    *,
-    navigation_fingerprint: str | None = None,
 ) -> dict[str, Any]:
-    extra = progress_extra(progress)
-    current_href = extra.get("chapterHref") or extra.get("currentHref")
-    navigation_key = extra.get("navigationKey")
-    stored_navigation_fingerprint = extra.get("navigationFingerprint")
-    fingerprint_mismatch = bool(
-        navigation_fingerprint
-        and isinstance(stored_navigation_fingerprint, str)
-        and stored_navigation_fingerprint != navigation_fingerprint
-    )
-    section_index = number_or_none(
-        extra.get("chapterSectionIndex")
-        if extra.get("chapterSectionIndex") is not None
-        else extra.get("sectionIndex")
-        if extra.get("sectionIndex") is not None
-        else extra.get("chapterIndex")
-    )
+    location = progress_location(progress)
+    foliate = location.get("foliate")
+    foliate = foliate if isinstance(foliate, dict) else {}
+    toc = foliate.get("toc")
+    toc = toc if isinstance(toc, dict) else {}
+    section = foliate.get("section")
+    section = section if isinstance(section, dict) else {}
+    current_href = toc.get("href") or location.get("href")
+    navigation_key = toc.get("navigationKey")
+    section_index = number_or_none(section.get("current"))
+    chapter_index = number_or_none(toc.get("index"))
     unit = None
-    if not fingerprint_mismatch and isinstance(navigation_key, str) and navigation_key:
+    if isinstance(navigation_key, str) and navigation_key:
         unit = next(
             (item for item in units if _unit_navigation_key(item) == navigation_key),
             None,
         )
-    if unit is None and not fingerprint_mismatch:
+    if unit is None:
         unit_index = reader_unit_index(current_href, units)
         if unit_index is not None:
             unit = units[unit_index]
@@ -119,13 +112,22 @@ def progress_navigation(
         else None
     )
     return {
-        "progressExtra": extra,
+        "progressExtra": {},
         "currentHref": resolved_href,
         "currentSectionIndex": section_index,
-        "currentChapterTitle": (unit.get("title") if unit else None) or None,
+        "currentChapterIndex": chapter_index,
+        "currentChapterTitle": (unit.get("title") if unit else None)
+        or (toc.get("title") if isinstance(toc.get("title"), str) else None),
         "currentChapterSortOrder": number_or_none(unit.get("sortOrder"))
         if unit
         else None,
+        "currentPageNumber": number_or_none(
+            location.get("pageIndex")
+            if location.get("type") == "comic"
+            else location.get("pageNumber")
+            if location.get("type") == "pdf"
+            else None
+        ),
         "progressEstimated": False,
     }
 

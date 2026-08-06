@@ -47,7 +47,7 @@ export function SingleVolumeChapterList({ volume, detail, loading, error, reques
       detail?.currentHref,
       detail?.currentChapterSortOrder,
       detail?.progress ?? volume.progress,
-      { page, pageSize, total }
+      { page, pageSize, total, currentIndex: detail?.currentChapterIndex }
     );
 
   const openReader = () => router.push(`/reader/${encodeURIComponent(volume.id)}`);

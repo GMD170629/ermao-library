@@ -17,7 +17,7 @@ from app.modules.reader.application.volume_reader import (
 from app.modules.reader.domain.progress import (
     normalize_reader_href,
     number_or_none,
-    progress_extra,
+    progress_location,
     progress_navigation,
     progress_percent_with_navigation,
     raw_progress_percent,
@@ -45,7 +45,7 @@ __all__ = [
     "completed_for_available_volumes",
     "normalize_reader_href",
     "number_or_none",
-    "progress_extra",
+    "progress_location",
     "progress_navigation",
     "progress_percent_with_navigation",
     "raw_progress_percent",
