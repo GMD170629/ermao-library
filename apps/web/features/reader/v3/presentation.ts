@@ -45,7 +45,7 @@ export function preferencesToReaderSettings(preferences: ReaderPreferences): Rea
     comicCoverSingle: preferences.comic.coverSingle,
     comicPageGap: preferences.comic.pageGap,
     pdfFit: preferences.pdf.fit,
-    pdfFlow: preferences.pdf.flow,
+    pdfFlow: 'paged',
     pdfRotation: preferences.pdf.rotation,
     pdfCropMargins: preferences.pdf.cropMargins
   };
@@ -104,7 +104,7 @@ export function readerSettingsToPreferences(settings: ReaderSettings): ReaderPre
       zoom: settings.pdfZoom,
       pageWidth: settings.pdfPageWidth,
       fit: settings.pdfFit,
-      flow: settings.pdfFlow,
+      flow: 'paged',
       rotation: settings.pdfRotation,
       cropMargins: settings.pdfCropMargins
     }

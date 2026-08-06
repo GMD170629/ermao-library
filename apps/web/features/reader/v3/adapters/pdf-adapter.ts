@@ -62,6 +62,11 @@ export type PdfAdapterOptions = {
   onViewModel?: (model: PdfViewModel) => void;
 };
 
+function pagedPdfPreferences(preferences: ReaderPreferences): ReaderPreferences {
+  if (preferences.pdf.flow === 'paged') return preferences;
+  return { ...preferences, pdf: { ...preferences.pdf, flow: 'paged' } };
+}
+
 async function assertPdfHeader(url: string, fetcher: typeof globalThis.fetch, signal: AbortSignal) {
   const response = await fetcher(url, {
     signal,
@@ -206,7 +211,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     await this.cleanupEngine();
     const generation = this.beginSession(context.sessionId, context.operation);
     this.openContext = context;
-    this.preferences = context.preferences;
+    this.preferences = pagedPdfPreferences(context.preferences);
     this.pageNumber = context.initialLocation?.kind === 'pdf' ? Math.max(1, context.initialLocation.pageNumber) : 1;
     this.status = 'loading';
     this.error = undefined;
@@ -388,10 +393,11 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     } catch {
       return this.failOperation(context, 'stale-session');
     }
-    const renderingGeometryChanged = preferences.pdf.rotation !== this.preferences?.pdf.rotation
-      || preferences.pdf.pageWidth !== this.preferences?.pdf.pageWidth
-      || preferences.pdf.cropMargins !== this.preferences?.pdf.cropMargins;
-    this.preferences = preferences;
+    const pagedPreferences = pagedPdfPreferences(preferences);
+    const renderingGeometryChanged = pagedPreferences.pdf.rotation !== this.preferences?.pdf.rotation
+      || pagedPreferences.pdf.pageWidth !== this.preferences?.pdf.pageWidth
+      || pagedPreferences.pdf.cropMargins !== this.preferences?.pdf.cropMargins;
+    this.preferences = pagedPreferences;
     if (renderingGeometryChanged) this.cropBoxes.clear();
     this.applySurface();
     if (this.document) {

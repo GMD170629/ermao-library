@@ -878,7 +878,8 @@ test('PDF uses the same responsive reader workspace for appearance, settings, di
   expect(panelSurfaceBox!.y + panelSurfaceBox!.height).toBeLessThan(consoleControlsBox!.y);
   expect(Math.abs(panelSurfaceBox!.x + panelSurfaceBox!.width - (consoleControlsBox!.x + consoleControlsBox!.width))).toBeLessThanOrEqual(1);
   await expect(page.getByRole('dialog', { name: '设置' }).getByRole('group', { name: '适配' })).toBeVisible();
-  await expect(page.getByRole('dialog', { name: '设置' }).getByRole('group', { name: '阅读方式' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: '设置' }).getByRole('group', { name: '阅读方式' })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: '设置' }).getByRole('button', { name: '连续滚动' })).toHaveCount(0);
   await expect(page.getByRole('dialog', { name: '设置' }).getByRole('group', { name: '页面旋转' })).toBeVisible();
   await expect(page.getByRole('dialog', { name: '设置' }).getByRole('group', { name: '自动裁白边' })).toBeVisible();
   await page.getByRole('dialog', { name: '设置' }).getByRole('group', { name: '适配' }).getByRole('button', { name: '宽度' }).click();
@@ -894,13 +895,7 @@ test('PDF uses the same responsive reader workspace for appearance, settings, di
   expect(desktopWorkspaceBox).not.toBeNull();
   expect(desktopPagingBox!.y).toBeGreaterThan(desktopDisplayBox!.y + desktopDisplayBox!.height - 1);
   expect(desktopDisplayBox!.width).toBeGreaterThan(desktopWorkspaceBox!.width * 0.8);
-  const [desktopFlowBox, desktopFitBox] = await Promise.all([
-    workspace.getByRole('group', { name: '阅读方式' }).boundingBox(),
-    workspace.getByRole('group', { name: '适配' }).boundingBox()
-  ]);
-  expect(desktopFlowBox).not.toBeNull();
-  expect(desktopFitBox).not.toBeNull();
-  expect(desktopFitBox!.y).toBeGreaterThan(desktopFlowBox!.y + desktopFlowBox!.height - 1);
+  await expect(workspace.getByRole('group', { name: '适配' })).toBeVisible();
 
   await workspace.getByRole('button', { name: '外观' }).click();
   await expect(workspace).toHaveAttribute('data-reader-panel', 'appearance');
@@ -1230,8 +1225,11 @@ test('comic vertical flow keeps stable slots while scrolling into the next page'
 
   const stream = engine.locator('[data-comic-continuous="true"]');
   const firstSlot = stream.locator('[data-comic-continuous-page="1"]');
+  const firstImage = firstSlot.locator('img');
   await expect(stream.locator('[data-comic-continuous-page]')).toHaveCount(3);
+  await expect(stream.locator('img')).toHaveCount(3);
   await firstSlot.evaluate((element) => { element.dataset.e2eStableSlot = 'first'; });
+  await firstImage.evaluate((element) => { element.dataset.e2eStableImage = 'first'; });
   await stream.evaluate((element) => {
     const second = element.querySelector<HTMLElement>('[data-comic-continuous-page="2"]');
     if (!second) throw new Error('The second comic page slot is unavailable');
@@ -1241,12 +1239,23 @@ test('comic vertical flow keeps stable slots while scrolling into the next page'
 
   await expect(stream).toHaveAttribute('data-comic-continuous-current', '2');
   await expect(firstSlot).toHaveAttribute('data-e2e-stable-slot', 'first');
+  await expect(firstImage).toHaveAttribute('data-e2e-stable-image', 'first');
   await expect(stream.locator('img')).toHaveCount(3);
   await expect.poll(() => stream.locator('[data-comic-continuous-page]').evaluateAll((slots) => slots.slice(0, -1).map((slot, index) => {
     const current = slot.getBoundingClientRect();
     const next = slots[index + 1].getBoundingClientRect();
     return Math.round(next.top - current.bottom);
   }))).toEqual([0, 0]);
+
+  await stream.evaluate((element) => {
+    const third = element.querySelector<HTMLElement>('[data-comic-continuous-page="3"]');
+    if (!third) throw new Error('The third comic page slot is unavailable');
+    element.scrollTop = third.offsetTop;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await expect(stream).toHaveAttribute('data-comic-continuous-current', '3');
+  await expect(firstImage).toHaveAttribute('data-e2e-stable-image', 'first');
+  await expect(stream.locator('img')).toHaveCount(3);
 });
 
 test('PDF.js renders a bounded canvas and selectable text layer', async ({ page }) => {

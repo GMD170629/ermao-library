@@ -161,7 +161,7 @@ test('normalizes V4 display, theme, EPUB, comic, and PDF settings', () => {
   );
   assert.deepEqual(
     { flow: preferences.pdf.flow, rotation: preferences.pdf.rotation, cropMargins: preferences.pdf.cropMargins },
-    { flow: 'continuous', rotation: 270, cropMargins: 'auto' }
+    { flow: 'paged', rotation: 270, cropMargins: 'auto' }
   );
 });
 

@@ -19,9 +19,14 @@ class FakeElement {
   scrollWidth = 800;
   scrollLeft = 0;
   scrollTop = 0;
+  offsetHeight = 600;
+  offsetTop = 0;
   textContent = '';
   src = '';
   alt = '';
+  loading = '';
+  complete = false;
+  naturalWidth = 0;
   draggable = true;
 
   constructor(ownerDocument: FakeDocument) {
@@ -88,9 +93,48 @@ class FakeElement {
 }
 
 class FakeDocument {
-  defaultView: { ResizeObserver?: typeof ResizeObserver } | null = null;
+  defaultView: {
+    HTMLImageElement?: typeof HTMLImageElement;
+    IntersectionObserver?: typeof IntersectionObserver;
+    ResizeObserver?: typeof ResizeObserver;
+    requestAnimationFrame?: (callback: FrameRequestCallback) => number;
+  } | null = null;
   createElement() {
     return new FakeElement(this);
+  }
+}
+class FakeIntersectionObserver {
+  static latest: FakeIntersectionObserver | null = null;
+  readonly observed = new Set<FakeElement>();
+  disconnected = false;
+  readonly options: IntersectionObserverInit;
+
+  constructor(
+    private readonly callback: IntersectionObserverCallback,
+    options: IntersectionObserverInit = {}
+  ) {
+    FakeIntersectionObserver.latest = this;
+    this.options = options;
+  }
+
+  observe(target: Element) {
+    this.observed.add(target as unknown as FakeElement);
+  }
+
+  unobserve(target: Element) {
+    this.observed.delete(target as unknown as FakeElement);
+  }
+
+  disconnect() {
+    this.disconnected = true;
+    this.observed.clear();
+  }
+
+  trigger(target: FakeElement) {
+    this.callback([{
+      isIntersecting: true,
+      target: target as unknown as Element
+    } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
   }
 }
 class FakeResizeObserver {
@@ -307,6 +351,93 @@ test('comic navigation waits for the candidate image to decode before promoting 
   assert.equal(acknowledged.accepted, true);
   assert.equal(adapter.getViewModel().currentPage, 2);
   adapter.dispose();
+});
+
+test('comic continuous flow keeps every lazy image mounted and only explicit navigation changes scrollTop', async () => {
+  FakeIntersectionObserver.latest = null;
+  const ownerDocument = new FakeDocument();
+  ownerDocument.defaultView = {
+    HTMLImageElement: FakeElement as unknown as typeof HTMLImageElement,
+    IntersectionObserver: FakeIntersectionObserver as unknown as typeof IntersectionObserver,
+    requestAnimationFrame: (callback) => {
+      callback(0);
+      return 1;
+    }
+  };
+  const container = new FakeElement(ownerDocument);
+  const preferences = {
+    ...DEFAULT_READER_PREFERENCES,
+    comic: { ...DEFAULT_READER_PREFERENCES.comic, flow: 'vertical' as const }
+  };
+  const adapter = new ComicReaderAdapter({
+    container: container as unknown as HTMLElement,
+    initialPages: [1, 2, 3].map((pageIndex) => ({ pageIndex, width: 600, height: 900 }))
+  });
+
+  await adapter.open({
+    sessionId: 'comic-session',
+    operation: operation(1, 'bootstrap'),
+    signal: new AbortController().signal,
+    source: {
+      workId: 'work-1',
+      kind: 'comic',
+      contentUrl: '/comic',
+      contentFingerprint: 'comic-fingerprint',
+      volumeId: 'volume-1',
+      totalPages: 3
+    },
+    initialLocation: null,
+    preferences
+  });
+
+  const stream = container.children[1];
+  assert.equal(stream.dataset.comicContinuous, 'true');
+  assert.equal(stream.children.length, 3);
+  const slots = stream.children;
+  const images = slots.map((slot) => slot.children[0]);
+  assert.deepEqual(images.map((image) => image.loading), ['lazy', 'lazy', 'lazy']);
+  assert.deepEqual(images.map((image) => image.src), [
+    '/api/volumes/volume-1/pages/1?imageVariant=original',
+    '/api/volumes/volume-1/pages/2?imageVariant=original',
+    '/api/volumes/volume-1/pages/3?imageVariant=original'
+  ]);
+  const preloadObserver = FakeIntersectionObserver.latest as FakeIntersectionObserver | null;
+  assert.ok(preloadObserver);
+  assert.equal(preloadObserver.options.root, stream as unknown as Element);
+  assert.equal(preloadObserver.options.rootMargin, '200% 0px');
+  assert.equal(preloadObserver.observed.size, 3);
+  preloadObserver.trigger(images[1]);
+  assert.equal(images[1].loading, 'eager');
+  assert.equal(images[1].dataset.comicContinuousPreloaded, 'true');
+  assert.equal(preloadObserver.observed.has(images[1]), false);
+
+  images[0].complete = true;
+  images[0].naturalWidth = 600;
+  images[0].dispatch('load', {});
+  assert.equal(slots[0].style.minHeight, '0px');
+  assert.equal(slots[0].dataset.comicContinuousLoaded, 'true');
+
+  slots.forEach((slot, index) => {
+    slot.offsetTop = index * 900;
+    slot.offsetHeight = 900;
+  });
+  stream.scrollTop = 900;
+  stream.dispatch('scroll', {});
+
+  assert.equal(adapter.getViewModel().currentPage, 2);
+  assert.equal(stream.scrollTop, 900);
+  assert.equal(slots[0].children[0], images[0]);
+  assert.deepEqual(slots.map((slot) => slot.children[0]), images);
+
+  const jump = await adapter.execute({ type: 'go-to-index', index: 3 }, {
+    operation: operation(2),
+    signal: new AbortController().signal
+  });
+  assert.equal(jump.accepted, true);
+  assert.equal(stream.scrollTop, 1800);
+  assert.deepEqual(slots.map((slot) => slot.children[0]), images);
+  adapter.dispose();
+  assert.equal(preloadObserver.disconnected, true);
 });
 
 test('comic viewport resize interrupts a drag and recenters the committed spread at the new width', async () => {

@@ -21,7 +21,6 @@ import {
   READER_PROGRESS_STYLE_OPTIONS,
   READER_COMIC_FLOW_OPTIONS,
   READER_PAGE_GAP_OPTIONS,
-  READER_PDF_FLOW_OPTIONS,
   READER_PDF_ROTATION_OPTIONS,
   READER_PDF_CROP_OPTIONS,
   READER_PARAGRAPH_INDENT_OPTIONS,
@@ -1165,7 +1164,6 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                       </>
                     ) : (
                       <>
-                        <CompactSettingOptions label={i18nAttribute("阅读方式")} value={settings.pdfFlow} options={READER_PDF_FLOW_OPTIONS} onChange={(value) => updateSettings({ pdfFlow: value as ReaderSettings['pdfFlow'] })} dark={dark} />
                         <CompactSettingOptions label={i18nAttribute("适配")} value={settings.pdfFit} options={READER_PDF_FIT_OPTIONS} onChange={(value) => updateSettings({ pdfFit: value as PdfFit })} dark={dark} />
                         <CompactSettingOptions label={i18nAttribute("页面旋转")} value={String(settings.pdfRotation)} options={READER_PDF_ROTATION_OPTIONS} onChange={(value) => updateSettings({ pdfRotation: Number(value) as ReaderSettings['pdfRotation'] })} dark={dark} />
                         <CompactSettingOptions label={i18nAttribute("自动裁白边")} value={settings.pdfCropMargins} options={READER_PDF_CROP_OPTIONS} onChange={(value) => updateSettings({ pdfCropMargins: value as ReaderSettings['pdfCropMargins'] })} dark={dark} />

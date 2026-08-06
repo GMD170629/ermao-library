@@ -26,7 +26,6 @@ import {
   READER_PAGE_GAP_OPTIONS,
   READER_PAGE_TURN_ANIMATION_OPTIONS,
   READER_PDF_FIT_OPTIONS,
-  READER_PDF_FLOW_OPTIONS,
   READER_PDF_ROTATION_OPTIONS,
   READER_PDF_CROP_OPTIONS,
   READER_SPREAD_MODE_OPTIONS,
@@ -439,7 +438,6 @@ export function ReaderDeviceSettingsPage() {
             <StepperField label={t('缩放')} value={preferences.pdf.zoom} minimum={0.6} maximum={2.4} step={0.1} onChange={(zoom) => updatePreferences({ ...preferences, pdf: { ...preferences.pdf, zoom } })} />
             <RangeField label={t('页宽')} value={preferences.pdf.pageWidth} minimum={READER_PAGE_WIDTH_MINIMUM} maximum={READER_PAGE_WIDTH_MAXIMUM} step={10} suffix="px" onChange={(pageWidth) => updatePreferences({ ...preferences, pdf: { ...preferences.pdf, pageWidth } })} />
             <ChoiceField label={t('适配')} value={preferences.pdf.fit} options={READER_PDF_FIT_OPTIONS} onChange={(fit) => updatePreferences({ ...preferences, pdf: { ...preferences.pdf, fit: fit as ReaderPreferences['pdf']['fit'] } })} />
-            <ChoiceField label={t('阅读方式')} value={preferences.pdf.flow} options={READER_PDF_FLOW_OPTIONS} onChange={(flow) => updatePreferences({ ...preferences, pdf: { ...preferences.pdf, flow: flow as ReaderPreferences['pdf']['flow'] } })} />
             <ChoiceField label={t('页面旋转')} value={String(preferences.pdf.rotation)} options={READER_PDF_ROTATION_OPTIONS} onChange={(rotation) => updatePreferences({ ...preferences, pdf: { ...preferences.pdf, rotation: Number(rotation) as ReaderPreferences['pdf']['rotation'] } })} />
             <ChoiceField label={t('自动裁白边')} value={preferences.pdf.cropMargins} options={READER_PDF_CROP_OPTIONS} onChange={(cropMargins) => updatePreferences({ ...preferences, pdf: { ...preferences.pdf, cropMargins: cropMargins as ReaderPreferences['pdf']['cropMargins'] } })} />
           </SettingsSection>

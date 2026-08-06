@@ -71,11 +71,6 @@ export const READER_COMIC_FLOW_OPTIONS = [
 
 export const READER_PAGE_GAP_OPTIONS = [0, 8, 16, 24].map((value) => ({ value: String(value), label: value === 0 ? '无' : `${value}px` }));
 
-export const READER_PDF_FLOW_OPTIONS = [
-  { value: 'paged', label: '分页' },
-  { value: 'continuous', label: '连续滚动' }
-] as const;
-
 export const READER_PDF_ROTATION_OPTIONS = [0, 90, 180, 270].map((value) => ({ value: String(value), label: `${value}°` }));
 
 export const READER_PDF_CROP_OPTIONS = [

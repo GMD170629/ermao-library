@@ -243,11 +243,15 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
       if (this.preferences?.comic.flow !== 'vertical' || page === this.currentPage) return;
       this.currentPage = clampPage(page, this.pages.length);
       this.emitLocation();
-      void this.refreshVisiblePages(this.currentGeneration(), this.lifecycleController?.signal ?? AbortSignal.abort()).catch(() => undefined);
+      this.emitView();
     }, (page) => {
       const signal = this.lifecycleController?.signal;
       if (!signal || signal.aborted) return;
       this.retryCounts.set(page, (this.retryCounts.get(page) ?? 0) + 1);
+      if (this.preferences?.comic.flow === 'vertical') {
+        this.renderContinuous();
+        return;
+      }
       this.releasePage(page);
       void this.loadPage(page, this.currentGeneration(), signal, false)
         .then(() => this.emitView())
@@ -472,6 +476,7 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
       return this.failOperation(context, 'stale-session');
     }
     this.trackController.interrupt({ suspended: preferences.comic.zoom > 1 });
+    const previousFlow = this.preferences?.comic.flow;
     const variantChanged = preferences.comic.imageVariant !== this.preferences?.comic.imageVariant;
     const modeChanged = preferences.comic.mode !== this.preferences?.comic.mode
       || preferences.comic.flow !== this.preferences?.comic.flow
@@ -484,8 +489,11 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     if (variantChanged) this.releaseAllPages();
     if (this.openContext && this.pages.length) {
       await this.refreshVisiblePages(this.currentGeneration(), context.signal);
-      if (preferences.comic.flow === 'vertical') this.continuous.scrollToPage(this.currentPage);
-      else this.track.recenter();
+      if (preferences.comic.flow === 'vertical') {
+        if (previousFlow !== 'vertical') this.continuous.scrollToPage(this.currentPage);
+      } else {
+        this.track.recenter();
+      }
     }
     if (modeChanged || this.currentPage !== pageBeforeModeChange) this.emitLocation(context.operation);
     else this.emit({ type: 'capabilities-changed', capabilities: this.getCapabilities() }, context.operation);
@@ -622,29 +630,18 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     const preferences = this.preferences;
     if (!preferences) return;
     const vertical = preferences.comic.flow === 'vertical';
-    const visible = vertical
-      ? this.pages.filter((page) => Math.abs(page - this.currentPage) <= 1)
-      : comicSpreadPages(this.pages, this.currentPage, this.comicMode(preferences), this.pairingPolicy(preferences));
-    const retained = new Set(vertical
-      ? this.pages.filter((page) => Math.abs(page - this.currentPage) <= 2)
-      : comicCacheWindow(this.pages, this.currentPage, this.comicMode(preferences), this.pairingPolicy(preferences)));
+    if (vertical) {
+      this.emitView();
+      return;
+    }
+    const visible = comicSpreadPages(this.pages, this.currentPage, this.comicMode(preferences), this.pairingPolicy(preferences));
+    const retained = new Set(comicCacheWindow(this.pages, this.currentPage, this.comicMode(preferences), this.pairingPolicy(preferences)));
     this.cache.forEach((_entry, page) => {
       if (!retained.has(page)) this.releasePage(page);
     });
-    if (vertical) {
-      await Promise.all(visible.map((page) => this.loadPage(page, generation, signal, true).catch((reason: unknown) => {
-        if (isAbortError(reason) || reason instanceof StaleReaderOperationError) throw reason;
-        // The cache retains the page-scoped error so the stable slot can show
-        // an inline retry without collapsing or replacing the reading stream.
-        return undefined;
-      })));
-    } else {
-      await Promise.all(visible.map((page) => this.loadPage(page, generation, signal, true)));
-    }
+    await Promise.all(visible.map((page) => this.loadPage(page, generation, signal, true)));
     this.emitView();
-    const preload = vertical
-      ? this.pages.filter((page) => Math.abs(page - this.currentPage) === 2)
-      : comicPreloadWindow(this.pages, this.currentPage, this.comicMode(preferences), this.pairingPolicy(preferences));
+    const preload = comicPreloadWindow(this.pages, this.currentPage, this.comicMode(preferences), this.pairingPolicy(preferences));
     for (const page of preload) {
       if (visible.includes(page)) continue;
       void this.loadPage(page, generation, signal, false).then(() => {
@@ -845,7 +842,8 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
 
   private renderContinuous() {
     const preferences = this.preferences;
-    if (!preferences) return;
+    const context = this.openContext;
+    if (!preferences || !context) return;
     this.continuous.render({
       currentPage: this.currentPage,
       pageCount: this.pages.length,
@@ -856,14 +854,11 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
         this.viewportWidth || this.container.clientWidth || 1350
       ),
       pages: this.pages.map((page) => {
-        const cached = this.cache.get(page);
-        const materialized = Math.abs(page - this.currentPage) <= 1;
         return {
           pageIndex: page,
           ...this.pageMeta.get(page),
-          url: materialized ? cached?.url : undefined,
-          loading: materialized && Boolean(cached?.controller),
-          error: materialized ? cached?.error : undefined
+          url: this.pageUrl(context, page, preferences, this.retryCounts.get(page) ?? 0),
+          loading: false
         };
       })
     });

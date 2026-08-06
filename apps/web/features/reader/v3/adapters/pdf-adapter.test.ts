@@ -174,7 +174,7 @@ test('PDF page navigation resets a zoomed document to the top', async () => {
   }
 });
 
-test('PDF continuous mode preserves every page slot while incrementally moving its canvas window', async () => {
+test('PDF adapter forces legacy continuous preferences into paged rendering', async () => {
   const originalResizeObserver = globalThis.ResizeObserver;
   const originalWindow = globalThis.window;
   const ownerDocument = new FakeDocument();
@@ -234,8 +234,9 @@ test('PDF continuous mode preserves every page slot while incrementally moving i
         pdf: { ...DEFAULT_READER_PREFERENCES.pdf, flow: 'continuous' }
       }
     });
-    const stableSlots = [...container.children];
-    assert.equal(stableSlots.length, 7);
+    assert.equal(adapter.getCapabilities().supportsScrolling, false);
+    assert.equal(container.children.length, 1);
+    assert.equal(container.children[0]?.className, 'shuku-pdf-page');
 
     const acknowledged = await adapter.execute({ type: 'go-to-index', index: 4 }, {
       operation: { sessionId: 'pdf-continuous-session', kind: 'navigation', sequence: 2 },
@@ -243,8 +244,8 @@ test('PDF continuous mode preserves every page slot while incrementally moving i
     });
 
     assert.equal(acknowledged.accepted, true);
-    assert.deepEqual(container.children, stableSlots);
-    assert.equal(container.children.filter((slot) => slot.children[0]?.className === 'shuku-pdf-page').length, 5);
+    assert.equal(container.children.length, 1);
+    assert.equal(container.children[0]?.dataset.pageNumber, '4');
   } finally {
     await adapter.dispose();
     Object.assign(globalThis, {

@@ -184,7 +184,9 @@ export function normalizeReaderPreferences(value: unknown, base: Readonly<Reader
       zoom: clamp(pdf.zoom ?? source.zoom, 0.6, 2.4, fallback.pdf.zoom, 1),
       pageWidth: clamp(pdf.pageWidth, 600, 1350, fallback.pdf.pageWidth),
       fit: choice(pdf.fit, ['width', 'page'], fallback.pdf.fit),
-      flow: choice(pdf.flow, ['paged', 'continuous'], fallback.pdf.flow),
+      // PDF continuous rendering remains a recognized wire type for backward
+      // compatibility, but is temporarily unavailable in the application.
+      flow: 'paged',
       rotation: choice(pdf.rotation, [0, 90, 180, 270] as const, fallback.pdf.rotation),
       cropMargins: choice(pdf.cropMargins, ['off', 'auto'], fallback.pdf.cropMargins)
     }
