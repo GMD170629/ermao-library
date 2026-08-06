@@ -38,6 +38,7 @@ from app.modules.imports.application.enqueue import (
 from app.modules.imports.application.fail import (
     fail_claimed_import_task as fail_claimed_import_task_command,
 )
+from app.modules.imports.application.ports import ImportMetadataObserver
 from app.modules.imports.application.process import (
     process_import_task as process_import_task_command,
 )
@@ -89,6 +90,23 @@ from app.modules.imports.infrastructure.uploaded_file_publication import (
 from app.modules.imports.infrastructure.work_queue import ensure_import_work_item
 from app.modules.system.infrastructure.events import record_system_event
 from app.services.import_preferences import load_import_preferences
+from app.services.metadata_file_writeback import schedule_work_metadata_writebacks
+
+
+class _ImportMetadataOpfObserver(ImportMetadataObserver):
+    def __init__(self, db: Session, settings: Settings) -> None:
+        self._db = db
+        self._settings = settings
+
+    def schedule(self, result: ImportResult) -> None:
+        schedule_work_metadata_writebacks(
+            self._db,
+            work_id=result.work_id,
+            media_version_id=result.media_version_id,
+            volume_id=result.volume_id,
+            source="IMPORT_METADATA",
+            settings=self._settings,
+        )
 
 
 def import_managed_book(
@@ -343,6 +361,7 @@ def process_import_task(
         pipeline,
         _runtime_config(settings),
         task,
+        _ImportMetadataOpfObserver(db, settings),
         now=now_timestamp_ms(),
     )
 

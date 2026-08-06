@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import timedelta
+from dataclasses import dataclass
 from pathlib import Path
 from time import time_ns
 from typing import Any
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.models.common import db_timestamp
@@ -21,13 +22,21 @@ from app.models.library import (
     LibraryWork,
 )
 from app.models.organize import (
+    MetadataOpfQueueState,
     MetadataWritebackOperation,
     MetadataWritebackTarget,
     OrganizePolicy,
 )
 
-MAX_ATTEMPTS = 3
-RETRY_DELAYS_SECONDS = (30, 120)
+DEFAULT_MAX_PENDING_TARGETS = 50_000
+QUEUE_STATE_ID = "default"
+
+
+@dataclass(frozen=True, slots=True)
+class EnqueueWritebackResult:
+    operation_id: str | None
+    requested_targets: int
+    outcome: str
 
 
 def _id(prefix: str) -> str:
@@ -67,7 +76,8 @@ def enqueue_writeback(
     source: str,
     lookup_task_id: str | None = None,
     volume_id: str | None = None,
-) -> str:
+    max_pending_targets: int = DEFAULT_MAX_PENDING_TARGETS,
+) -> EnqueueWritebackResult:
     work = db.scalar(select(LibraryWork).where(LibraryWork.id == work_id))
     media_version = db.scalar(
         select(LibraryMediaVersion).where(
@@ -78,20 +88,6 @@ def enqueue_writeback(
     if work is None or media_version is None:
         raise ValueError("作品或媒介版本不存在")
     now = db_timestamp()
-    operation = MetadataWritebackOperation(
-        id=_id("metadata_writeback"),
-        work_id=work_id,
-        media_version_id=media_version_id,
-        lookup_task_id=lookup_task_id,
-        source=source,
-        status="PENDING",
-        total_targets=0,
-        completed_targets=0,
-        warning_targets=0,
-        created_at=now,
-        updated_at=now,
-    )
-    db.add(operation)
     file_query = (
         select(LibraryFile, LibraryVolume)
         .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
@@ -112,6 +108,7 @@ def enqueue_writeback(
         entry = files_by_volume.setdefault(volume.id, (volume, []))
         entry[1].append(file)
     seen: set[Path] = set()
+    targets: list[dict[str, object]] = []
     for volume, files in files_by_volume.values():
         import_tasks = db.execute(
             select(ImportTask.id, ImportTask.source_path)
@@ -166,7 +163,10 @@ def enqueue_writeback(
                 "description": work.description or volume.description,
                 "subjects": _tags(work.tags),
                 "seriesName": work.series_name,
+                "seriesIndex": work.series_index,
                 "volumeIndex": volume.volume_index,
+                "narrators": _authors(volume.narrator),
+                "abridged": volume.abridged,
                 "language": volume.language,
                 "publisher": volume.publisher,
                 "publishedAt": volume.published_at.isoformat()
@@ -181,31 +181,71 @@ def enqueue_writeback(
                 else None,
             }
             target_key = hashlib.sha256(str(target_path).encode("utf-8")).hexdigest()
-            db.add(
-                MetadataWritebackTarget(
-                    id=_id("metadata_writeback_target"),
-                    operation_id=operation.id,
-                    library_file_id=matching_file.id if matching_file else None,
-                    target_key=target_key,
-                    source_path=str(target_path),
-                    format=(
+            targets.append(
+                {
+                    "id": _id("metadata_writeback_target"),
+                    "library_file_id": matching_file.id if matching_file else None,
+                    "target_key": target_key,
+                    "source_path": str(target_path),
+                    "format": (
                         target_path.suffix.removeprefix(".") or "DIRECTORY"
                     ).upper(),
-                    payload_json=json.dumps(payload, ensure_ascii=False),
-                    status="PENDING",
-                    attempts=0,
-                    written_fields_json="[]",
-                    created_at=now,
-                    updated_at=now,
-                )
+                    "payload_json": json.dumps(payload, ensure_ascii=False),
+                }
             )
-            operation.total_targets += 1
-    if operation.total_targets == 0:
-        operation.status = "COMPLETED_WITH_WARNINGS"
-        operation.warning_targets = 1
-        operation.finished_at = now
+            if len(targets) > max_pending_targets:
+                return EnqueueWritebackResult(
+                    None, len(targets), "QUEUE_FULL"
+                )
+    if not targets:
+        return EnqueueWritebackResult(None, 0, "NO_TARGETS")
+    db.execute(
+        sqlite_insert(MetadataOpfQueueState)
+        .values(id=QUEUE_STATE_ID, pending_targets=0, updated_at=now)
+        .on_conflict_do_nothing(index_elements=[MetadataOpfQueueState.id])
+    )
+    reserved = db.execute(
+        update(MetadataOpfQueueState)
+        .where(
+            MetadataOpfQueueState.id == QUEUE_STATE_ID,
+            MetadataOpfQueueState.pending_targets
+            <= max_pending_targets - len(targets),
+        )
+        .values(
+            pending_targets=MetadataOpfQueueState.pending_targets + len(targets),
+            updated_at=now,
+        )
+    )
+    if not reserved.rowcount:
+        return EnqueueWritebackResult(None, len(targets), "QUEUE_FULL")
+    operation = MetadataWritebackOperation(
+        id=_id("metadata_writeback"),
+        work_id=work_id,
+        media_version_id=media_version_id,
+        lookup_task_id=lookup_task_id,
+        source=source,
+        status="PENDING",
+        total_targets=len(targets),
+        completed_targets=0,
+        warning_targets=0,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(operation)
+    for target in targets:
+        db.add(
+            MetadataWritebackTarget(
+                operation_id=operation.id,
+                status="PENDING",
+                attempts=0,
+                written_fields_json="[]",
+                created_at=now,
+                updated_at=now,
+                **target,
+            )
+        )
     db.flush()
-    return operation.id
+    return EnqueueWritebackResult(operation.id, len(targets), "QUEUED")
 
 
 def operation_view(db: Session, operation_id: str) -> dict[str, Any] | None:
@@ -271,6 +311,42 @@ def operation_work_id(db: Session, operation_id: str) -> str | None:
             MetadataWritebackOperation.id == operation_id
         )
     )
+
+
+def discard_operations(db: Session, operation_ids: tuple[str, ...]) -> int:
+    """Atomically discard a newly admitted batch when a later scope cannot fit."""
+    if not operation_ids:
+        return 0
+    target_count = int(
+        db.scalar(
+            select(func.count())
+            .select_from(MetadataWritebackTarget)
+            .where(MetadataWritebackTarget.operation_id.in_(operation_ids))
+        )
+        or 0
+    )
+    db.execute(
+        delete(MetadataWritebackTarget).where(
+            MetadataWritebackTarget.operation_id.in_(operation_ids)
+        )
+    )
+    db.execute(
+        delete(MetadataWritebackOperation).where(
+            MetadataWritebackOperation.id.in_(operation_ids)
+        )
+    )
+    if target_count:
+        db.execute(
+            update(MetadataOpfQueueState)
+            .where(MetadataOpfQueueState.id == QUEUE_STATE_ID)
+            .values(
+                pending_targets=func.max(
+                    0, MetadataOpfQueueState.pending_targets - target_count
+                ),
+                updated_at=db_timestamp(),
+            )
+        )
+    return target_count
 
 
 def claim_next_target(db: Session) -> dict[str, Any] | None:
@@ -339,6 +415,7 @@ def recover_interrupted_targets(db: Session) -> int:
         .where(MetadataWritebackOperation.status == "RUNNING")
         .values(status="PENDING", updated_at=db_timestamp())
     )
+    reconcile_queue_state(db)
     return recovered_count
 
 
@@ -363,30 +440,32 @@ def mark_prepared(
     )
 
 
-def _refresh_operation(db: Session, operation_id: str) -> None:
+def _release_target(db: Session, target: MetadataWritebackTarget) -> None:
+    operation_id = target.operation_id
+    db.delete(target)
+    db.execute(
+        update(MetadataOpfQueueState)
+        .where(
+            MetadataOpfQueueState.id == QUEUE_STATE_ID,
+            MetadataOpfQueueState.pending_targets > 0,
+        )
+        .values(
+            pending_targets=MetadataOpfQueueState.pending_targets - 1,
+            updated_at=db_timestamp(),
+        )
+    )
     db.flush()
-    counts: dict[str, int] = {
-        str(status): int(count)
-        for status, count in db.execute(
-            select(MetadataWritebackTarget.status, func.count())
-            .where(MetadataWritebackTarget.operation_id == operation_id)
-            .group_by(MetadataWritebackTarget.status)
-        ).all()
-    }
-    operation = db.get(MetadataWritebackOperation, operation_id)
-    if operation is None:
-        return
-    complete = int(counts.get("COMPLETED", 0))
-    warnings = int(counts.get("WARNING", 0))
-    operation.completed_targets = complete
-    operation.warning_targets = warnings
-    operation.updated_at = db_timestamp()
-    terminal = complete + warnings >= operation.total_targets
-    if terminal:
-        operation.status = "COMPLETED_WITH_WARNINGS" if warnings else "COMPLETED"
-        operation.finished_at = db_timestamp()
-    else:
-        operation.status = "RUNNING"
+    remaining = db.scalar(
+        select(func.count()).where(
+            MetadataWritebackTarget.operation_id == operation_id
+        )
+    )
+    if not remaining:
+        db.execute(
+            delete(MetadataWritebackOperation).where(
+                MetadataWritebackOperation.id == operation_id
+            )
+        )
 
 
 def complete_target(
@@ -401,13 +480,6 @@ def complete_target(
     target = db.get(MetadataWritebackTarget, target_id)
     if target is None:
         return
-    target.status = "WARNING" if warning_code else "COMPLETED"
-    target.written_fields_json = json.dumps(written_fields, ensure_ascii=False)
-    target.prepared_path = None
-    target.warning_code = warning_code
-    target.error_summary = "已生成旁车 OPF" if warning_code else None
-    target.finished_at = db_timestamp()
-    target.updated_at = db_timestamp()
     if target.library_file_id and size_bytes is not None and mtime_ms is not None:
         db.execute(
             update(LibraryFile)
@@ -420,24 +492,81 @@ def complete_target(
                 updated_at=db_timestamp(),
             )
         )
-    _refresh_operation(db, target.operation_id)
+    _release_target(db, target)
 
 
 def fail_target(db: Session, target_id: str, *, code: str, summary: str) -> None:
     target = db.get(MetadataWritebackTarget, target_id)
     if target is None:
         return
-    target.prepared_path = None
-    target.output_hash = None
-    target.error_summary = summary[:800]
-    target.updated_at = db_timestamp()
-    if target.attempts >= MAX_ATTEMPTS:
-        target.status = "WARNING"
-        target.warning_code = code
-        target.finished_at = db_timestamp()
-    else:
-        target.status = "PENDING"
-        target.next_attempt_at = db_timestamp() + timedelta(
-            seconds=RETRY_DELAYS_SECONDS[max(0, target.attempts - 1)]
+    _release_target(db, target)
+
+
+def reconcile_queue_state(db: Session) -> int:
+    active_count = int(
+        db.scalar(select(func.count()).select_from(MetadataWritebackTarget)) or 0
+    )
+    now = db_timestamp()
+    db.execute(
+        sqlite_insert(MetadataOpfQueueState)
+        .values(id=QUEUE_STATE_ID, pending_targets=active_count, updated_at=now)
+        .on_conflict_do_update(
+            index_elements=[MetadataOpfQueueState.id],
+            set_={"pending_targets": active_count, "updated_at": now},
         )
-    _refresh_operation(db, target.operation_id)
+    )
+    return active_count
+
+
+def cleanup_terminal_history(db: Session, *, batch_size: int = 1_000) -> int:
+    terminal_ids = list(
+        db.scalars(
+            select(MetadataWritebackTarget.id)
+            .where(MetadataWritebackTarget.status.in_(("COMPLETED", "WARNING")))
+            .order_by(MetadataWritebackTarget.created_at.asc())
+            .limit(batch_size)
+        ).all()
+    )
+    if terminal_ids:
+        db.execute(
+            delete(MetadataWritebackTarget).where(
+                MetadataWritebackTarget.id.in_(terminal_ids)
+            )
+        )
+    orphan_operation_ids = list(
+        db.scalars(
+            select(MetadataWritebackOperation.id)
+            .outerjoin(
+                MetadataWritebackTarget,
+                MetadataWritebackTarget.operation_id == MetadataWritebackOperation.id,
+            )
+            .where(MetadataWritebackTarget.id.is_(None))
+            .limit(batch_size)
+        ).all()
+    )
+    if orphan_operation_ids:
+        db.execute(
+            delete(MetadataWritebackOperation).where(
+                MetadataWritebackOperation.id.in_(orphan_operation_ids)
+            )
+        )
+    cleaned = len(terminal_ids) + len(orphan_operation_ids)
+    if cleaned:
+        reconcile_queue_state(db)
+    return cleaned
+
+
+def queue_status(db: Session, *, capacity: int) -> dict[str, int | float]:
+    pending = int(
+        db.scalar(
+            select(MetadataOpfQueueState.pending_targets).where(
+                MetadataOpfQueueState.id == QUEUE_STATE_ID
+            )
+        )
+        or 0
+    )
+    return {
+        "pendingTargets": pending,
+        "capacity": capacity,
+        "utilization": pending / capacity if capacity else 0.0,
+    }

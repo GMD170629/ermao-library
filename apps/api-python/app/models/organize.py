@@ -449,6 +449,22 @@ class MetadataWritebackTarget(Base):
     )
 
 
+class MetadataOpfQueueState(Base):
+    __tablename__ = "MetadataOpfQueueState"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    pending_targets: Mapped[int] = mapped_column(
+        "pendingTargets", Integer, nullable=False, default=0, server_default="0"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        onupdate=db_timestamp,
+    )
+
+
 class MetadataProviderExecution(Base):
     __tablename__ = "MetadataProviderExecution"
     __table_args__ = (

@@ -89,7 +89,18 @@ class MetadataWritebackPayload(HttpContractModel):
     operation: MetadataWritebackOperationContract
 
 
+class MetadataOpfQueueStatus(HttpContractModel):
+    pending_targets: int = Field(alias="pendingTargets")
+    capacity: int
+    utilization: float
+
+
+class MetadataOpfQueueStatusPayload(HttpContractModel):
+    queue: MetadataOpfQueueStatus
+
+
 ProvidersResponse = SuccessEnvelope[ProvidersPayload]
 ProviderResponse = SuccessEnvelope[ProviderPayload]
 ProviderTestResponse = SuccessEnvelope[ProviderTestPayload]
 MetadataWritebackResponse = SuccessEnvelope[MetadataWritebackPayload]
+MetadataOpfQueueStatusResponse = SuccessEnvelope[MetadataOpfQueueStatusPayload]

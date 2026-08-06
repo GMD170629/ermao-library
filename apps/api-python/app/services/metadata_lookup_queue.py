@@ -25,9 +25,9 @@ from app.services.book_identity import (
 )
 from app.services.library_management import sync_work_facets
 from app.services.metadata_file_writeback import (
-    enqueue_metadata_writeback,
     process_next_metadata_writeback,
     recover_interrupted_metadata_writebacks,
+    schedule_work_metadata_writebacks,
 )
 from app.services.metadata_provider_registry import (
     metadata_provider_registry,
@@ -354,16 +354,15 @@ def _apply_candidate(
                 {"candidate": candidate, "appliedFields": applied}, ensure_ascii=False
             ),
         )
-    if lookup_persist.write_metadata_to_files_enabled(db) and task.get(
-        "mediaVersionId"
-    ):
-        enqueue_metadata_writeback(
-            db,
-            work_id=str(work["id"]),
-            media_version_id=str(task["mediaVersionId"]),
-            source="AUTOMATIC",
-            lookup_task_id=str(task["id"]),
-        )
+    schedule_work_metadata_writebacks(
+        db,
+        work_id=str(work["id"]),
+        media_version_id=str(task["mediaVersionId"])
+        if task.get("mediaVersionId")
+        else None,
+        source="AUTOMATIC",
+        lookup_task_id=str(task["id"]),
+    )
     return applied
 
 

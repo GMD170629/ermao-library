@@ -36,8 +36,6 @@ from app.modules.library.infrastructure.volume_commands import SqlAlchemyVolumeS
 from app.modules.library.infrastructure.work_list import list_works as _list_works
 from app.modules.library.infrastructure.work_merge import SqlAlchemyWorkMergeGateway
 from app.modules.metadata.infrastructure.writeback_queue import (
-    enqueue_writeback,
-    operation_view,
     write_metadata_to_files_enabled,
 )
 
@@ -70,13 +68,8 @@ class _MetadataWritebackAdapter(MergeMetadataWritebackPort):
     def enqueue(
         self, *, work_id: str, media_version_id: str
     ) -> dict[str, object] | None:
-        operation_id = enqueue_writeback(
-            self._db,
-            work_id=work_id,
-            media_version_id=media_version_id,
-            source="MANUAL",
-        )
-        return operation_view(self._db, operation_id)
+        # Merge persistence commits ORM changes through the global observer.
+        return None
 
 
 def work_merge_gateway(db: Session) -> SqlAlchemyWorkMergeGateway:

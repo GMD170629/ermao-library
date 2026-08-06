@@ -201,8 +201,8 @@ from app.services.library_management import (
     undo_operation,
 )
 from app.services.metadata_file_writeback import (
-    enqueue_metadata_writeback,
     metadata_writeback_view,
+    schedule_work_metadata_writebacks,
 )
 from app.services.metadata_provider_registry import (
     metadata_provider_registry,
@@ -1160,7 +1160,14 @@ async def update_work(
     work = library_works.update_work_fields(db, work_id, values)
     if not work:
         _raise_library_error("作品不存在", status_code=404)
-    sync_work_facets(db, work_id)
+    sync_work_facets(db, work_id, commit=False)
+    if global_fields.intersection(
+        {"title", "author", "description", "tags", "seriesName", "seriesIndex"}
+    ):
+        schedule_work_metadata_writebacks(
+            db, work_id=work_id, source="WORK_METADATA_EDIT", settings=settings
+        )
+    db.commit()
     work = _get_work(db, work_id) or work
     return WorkResponse(data={"book": _work_view(db, work, user.id)})
 
@@ -1813,6 +1820,12 @@ async def bulk_works(
                 changed_work_ids.add(str(replacement["workId"]))
             for work_id in changed_work_ids:
                 sync_work_facets(db, work_id, commit=False)
+                schedule_work_metadata_writebacks(
+                    db,
+                    work_id=work_id,
+                    source="BULK_FIND_REPLACE",
+                    settings=settings,
+                )
             db.commit()
             updated = len(changed_work_ids)
             if updated:
@@ -1949,6 +1962,18 @@ async def bulk_works(
                     db,
                     work_id,
                     {**fields, "updatedAt": _now()},
+                )
+            if action in {
+                "add_tags",
+                "remove_tags",
+                "update_fields",
+                "update_metadata",
+            }:
+                schedule_work_metadata_writebacks(
+                    db,
+                    work_id=work_id,
+                    source="BULK_METADATA_EDIT",
+                    settings=settings,
                 )
             sync_work_facets(db, work_id)
             updated += 1
@@ -2130,6 +2155,9 @@ async def bulk_work_covers(
                 cover_status=status,
                 now=now,
             )
+            schedule_work_metadata_writebacks(
+                db, work_id=work_id, source="BULK_COVER_EDIT", settings=settings
+            )
         db.commit()
     except Exception:
         db.rollback()
@@ -2193,6 +2221,9 @@ async def upload_cover(
         cover_status="READY",
         now=_now(),
     )
+    schedule_work_metadata_writebacks(
+        db, work_id=work_id, source="COVER_UPLOAD", settings=settings
+    )
     db.commit()
     return CoverMutationResponse(
         data={
@@ -2232,6 +2263,9 @@ def regenerate_cover(
         cover_path=cover_path,
         cover_status=cover_status(cover_path, settings),
         now=_now(),
+    )
+    schedule_work_metadata_writebacks(
+        db, work_id=work_id, source="COVER_REGENERATE", settings=settings
     )
     db.commit()
     return CoverMutationResponse(
@@ -3246,7 +3280,7 @@ async def apply_work_metadata(
         _raise_library_error("作品不存在", status_code=404)
     volume_fields = {"publisher", "publishedAt", "language", "isbn"}
     volume_selected = bool(volume_fields.intersection(fields))
-    volume_required = volume_selected or payload.write_metadata_to_files
+    volume_required = volume_selected
     target_media_version: LibraryMediaVersion | None = None
     target_volumes: list[LibraryVolume] = []
     if volume_required:
@@ -3382,15 +3416,18 @@ async def apply_work_metadata(
         target_volume.updated_at = _now()
     sync_work_facets(db, work_id, commit=False)
     finished_job_ids = _finish_metadata_organize_work(db, work_id)
-    writeback_operation_id = None
-    if payload.write_metadata_to_files and target_media_version is not None:
-        writeback_operation_id = enqueue_metadata_writeback(
-            db,
-            work_id=work_id,
-            media_version_id=target_media_version.id,
-            source="MANUAL",
-            volume_id=(target_volumes[0].id if not apply_to_all_volumes else None),
-        )
+    writeback_operation_ids = schedule_work_metadata_writebacks(
+        db,
+        work_id=work_id,
+        media_version_id=target_media_version.id if target_media_version else None,
+        volume_id=(
+            target_volumes[0].id
+            if target_volumes and not apply_to_all_volumes
+            else None
+        ),
+        source="MANUAL_METADATA_APPLY",
+        settings=settings,
+    )
     db.commit()
     return MetadataApplyResponse(
         data={
@@ -3398,8 +3435,8 @@ async def apply_work_metadata(
             "appliedFields": fields,
             "finishedOrganizeJobIds": finished_job_ids,
             "metadataWriteback": (
-                metadata_writeback_view(db, writeback_operation_id)
-                if writeback_operation_id
+                metadata_writeback_view(db, writeback_operation_ids[0])
+                if writeback_operation_ids
                 else None
             ),
         }

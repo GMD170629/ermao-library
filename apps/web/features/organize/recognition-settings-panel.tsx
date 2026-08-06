@@ -29,6 +29,7 @@ type LocalMetadataSource = 'SIDECAR_OPF' | 'EMBEDDED' | 'PATH';
 
 type PolicyResponse = { ok: boolean; data?: { policy: OrganizePolicy }; error?: { message: string } };
 type CandidateResponse = { ok: boolean; data?: { candidates: { total: number } }; error?: { message: string } };
+type OpfQueueResponse = { ok: boolean; data?: { queue: { pendingTargets: number; capacity: number; utilization: number } } };
 
 const defaultPolicy: OrganizePolicy = {
   id: 'default',
@@ -77,6 +78,7 @@ export function RecognitionSettingsPanel({ compact = false, onSaved }: { compact
   const { locale } = useI18n();
   const [policy, setPolicy] = useState<OrganizePolicy>(defaultPolicy);
   const [candidateCount, setCandidateCount] = useState(0);
+  const [opfQueue, setOpfQueue] = useState({ pendingTargets: 0, capacity: 50000, utilization: 0 });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -84,15 +86,18 @@ export function RecognitionSettingsPanel({ compact = false, onSaved }: { compact
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [policyResponse, candidateResponse] = await Promise.all([
+      const [policyResponse, candidateResponse, queueResponse] = await Promise.all([
         fetch('/api/organize/policy', { cache: 'no-store' }),
-        fetch('/api/organize/candidates', { cache: 'no-store' })
+        fetch('/api/organize/candidates', { cache: 'no-store' }),
+        fetch('/api/metadata/opf-sync/status', { cache: 'no-store' })
       ]);
       const policyPayload = (await policyResponse.json()) as PolicyResponse;
       const candidatePayload = (await candidateResponse.json()) as CandidateResponse;
+      const queuePayload = (await queueResponse.json()) as OpfQueueResponse;
       if (!policyPayload.ok || !policyPayload.data?.policy) throw new Error(policyPayload.error?.message ?? '读取识别设置失败');
       setPolicy(policyPayload.data.policy);
       if (candidatePayload.ok) setCandidateCount(candidatePayload.data?.candidates.total ?? 0);
+      if (queuePayload.ok && queuePayload.data?.queue) setOpfQueue(queuePayload.data.queue);
       setError('');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '读取识别设置失败');
@@ -161,7 +166,8 @@ export function RecognitionSettingsPanel({ compact = false, onSaved }: { compact
         {settingRow('定时执行识别', '开启后按固定间隔扫描书库；导入流程本身不会直接创建整理任务。', <Toggle checked={policy.enabled && policy.scheduleMode === 'INTERVAL'} disabled={loading} label={i18nAttribute("定时执行识别")} onChange={(checked) => setPolicy({ ...policy, enabled: checked, scheduleMode: checked ? 'INTERVAL' : 'MANUAL' })} />)}
         {policy.enabled && policy.scheduleMode === 'INTERVAL' ? settingRow('执行间隔', '建议至少 30 分钟，避免对外部数据源产生过密请求。', <Select value={String(policy.intervalMinutes)} options={intervalOptions} ariaLabel="识别任务执行间隔" onChange={(value) => setPolicy({ ...policy, intervalMinutes: Number(value) })} className="min-w-36" triggerClassName="!border-[#DCD7D1] !text-[#393632]" />) : null}
         {settingRow('新增后自动执行', '仅处理开启此设置之后新增的读物，历史书库不会被一次性加入。', <Toggle checked={policy.autoRunOnNew} disabled={loading} label={i18nAttribute("新增后自动执行")} onChange={(autoRunOnNew) => setPolicy({ ...policy, autoRunOnNew })} />)}
-        {settingRow(i18nAttribute('识别结果保存到旁车 OPF'), i18nAttribute('开启后，在图书旁生成同名 OPF 和独立封面；源图书文件始终保持不变。'), <Toggle checked={policy.writeMetadataToFiles} disabled={loading} label={i18nAttribute('识别结果保存到旁车 OPF')} onChange={(writeMetadataToFiles) => setPolicy({ ...policy, writeMetadataToFiles })} />)}
+        {settingRow(i18nAttribute('元数据变化自动保存到旁车 OPF'), i18nAttribute('开启后，仅观察之后发生的作品、卷册和有声书元数据变化；异步生成 OPF 和独立封面，源图书文件始终保持不变。关闭后不再新增任务，已排队任务会继续完成。'), <Toggle checked={policy.writeMetadataToFiles} disabled={loading} label={i18nAttribute('元数据变化自动保存到旁车 OPF')} onChange={(writeMetadataToFiles) => setPolicy({ ...policy, writeMetadataToFiles })} />)}
+        {policy.writeMetadataToFiles ? settingRow(i18nAttribute('OPF 保存队列'), i18nAttribute('当前待处理 {value0} / {value1} 个目标；达到容量时，新变更仍会保存到书库，但该批 OPF 任务会被丢弃并记录系统警告。', { value0: opfQueue.pendingTargets, value1: opfQueue.capacity }), <span className="shrink-0 text-sm font-semibold text-[#625D57]">{Math.round(opfQueue.utilization * 100)}%</span>) : null}
         {settingRow(i18nAttribute('本地元数据优先'), i18nAttribute('开启后远程数据仅作为补充'), <Toggle checked={policy.preferLocalMetadata} disabled={loading} label={i18nAttribute('本地元数据优先')} onChange={(preferLocalMetadata) => setPolicy({ ...policy, preferLocalMetadata })} />)}
       </div>
 

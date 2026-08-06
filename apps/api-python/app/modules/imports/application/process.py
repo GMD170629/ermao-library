@@ -14,6 +14,7 @@ from app.modules.imports.application.errors import (
     MonitorFolderDeletedDuringImportError,
 )
 from app.modules.imports.application.ports import (
+    ImportMetadataObserver,
     ImportPipeline,
     ImportTaskStore,
     ImportUnitOfWork,
@@ -36,6 +37,7 @@ def process_import_task(
     pipeline: ImportPipeline,
     settings: ImportRuntimeConfig,
     task: ImportTaskDTO,
+    metadata_observer: ImportMetadataObserver | None = None,
     *,
     now: int,
 ) -> ImportResult:
@@ -66,6 +68,8 @@ def process_import_task(
             book_id=result.work_id,
             updated_at=now,
         )
+        if metadata_observer is not None:
+            metadata_observer.schedule(result)
         unit_of_work.commit()
         pipeline.finalize_publications()
         return result

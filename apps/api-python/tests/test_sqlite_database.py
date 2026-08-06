@@ -51,6 +51,7 @@ EXPECTED_TABLES = {
     "MetadataLookupTask",
     "MetadataWritebackOperation",
     "MetadataWritebackTarget",
+    "MetadataOpfQueueState",
     "MetadataProviderExecution",
     "MetadataProviderPipeline",
     "MonitorFolder",
@@ -489,7 +490,7 @@ def test_bootstrap_runs_normalization_after_stamping_v14_boundary(tmp_path) -> N
         bootstrap_database(engine, settings)
 
         with engine.connect() as connection:
-            assert _alembic_version(connection) == "0016_reader_progress_v3"
+            assert _alembic_version(connection) == "0017_metadata_opf_queue_state"
             inspector = inspect(connection)
             assert "LibraryWork_hidden_createdAt_id_idx" in {
                 index["name"] for index in inspector.get_indexes("LibraryWork")

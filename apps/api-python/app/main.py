@@ -11,6 +11,7 @@ from app.api.error_handlers import (
 )
 from app.api.router import api_router
 from app.bootstrap.auth import build_password_authentication_runtime
+from app.bootstrap.metadata_opf_observer import install_metadata_opf_observer
 from app.bootstrap.opds import build_opds_router
 from app.contracts.http_errors import HttpContractError
 from app.core.auth import get_current_user
@@ -92,6 +93,9 @@ def create_app(
             expire_on_commit=False,
         )
         heartbeat_runtime_factory = runtime_factory
+    install_metadata_opf_observer(runtime_factory, settings)
+    if factory is not runtime_factory and isinstance(factory, sessionmaker):
+        install_metadata_opf_observer(factory, settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

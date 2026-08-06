@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     kindle_send_queue_enabled: bool = True
     kindle_send_queue_interval_seconds: int = Field(default=5, ge=1)
     import_queue_interval_seconds: int = Field(default=2, ge=1)
+    metadata_opf_queue_max_pending: int = Field(
+        default=50_000, ge=1, le=1_000_000
+    )
     libmobi_bin: str = "mobitool"
     ebook_conversion_enabled: bool = True
     ebook_conversion_timeout_seconds: int = Field(default=600, ge=10, le=3600)

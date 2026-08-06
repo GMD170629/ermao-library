@@ -21,6 +21,8 @@ from app.core.authorization import can_access_work
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.modules.metadata.presentation.schemas import (
+    MetadataOpfQueueStatusPayload,
+    MetadataOpfQueueStatusResponse,
     MetadataProvider,
     MetadataWritebackPayload,
     MetadataWritebackResponse,
@@ -32,6 +34,7 @@ from app.modules.metadata.presentation.schemas import (
     ProviderTestResponse,
 )
 from app.services.metadata_file_writeback import (
+    metadata_opf_queue_status,
     metadata_writeback_view,
     metadata_writeback_work_id,
 )
@@ -52,6 +55,22 @@ def _auth(db: Session, request: Request, settings: Settings):
     if auth_error is not None or user is None:
         raise BasicUnauthorizedError(MessageError(message="UNAUTHORIZED"))
     return user
+
+
+@router.get("/metadata/opf-sync/status")
+def get_metadata_opf_queue_status(
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    MetadataOpfQueueStatusResponse, ErrorResponses(BasicUnauthorizedError)
+]:
+    _auth(db, request, settings)
+    return MetadataOpfQueueStatusResponse(
+        data=MetadataOpfQueueStatusPayload.model_validate(
+            {"queue": metadata_opf_queue_status(db, settings)}
+        )
+    )
 
 
 @router.get("/metadata/writebacks/{operation_id}")

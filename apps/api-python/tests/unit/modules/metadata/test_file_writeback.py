@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from lxml import etree
 import pytest
-
 from app.modules.imports.infrastructure.sidecar_opf import discover_sidecar_opf
 from app.modules.metadata.application.opf import parse_opf_metadata
 from app.modules.metadata.infrastructure.file_writeback import (
@@ -13,6 +11,7 @@ from app.modules.metadata.infrastructure.file_writeback import (
     prepare_writeback,
     publish_prepared,
 )
+from lxml import etree
 
 
 def _payload(path: Path, **values: object) -> dict[str, object]:
@@ -21,6 +20,8 @@ def _payload(path: Path, **values: object) -> dict[str, object]:
         "title": "新标题",
         "volumeTitle": "第一卷",
         "authors": ["新作者"],
+        "narrators": [],
+        "abridged": None,
         "description": None,
         "subjects": [],
         "seriesName": None,
@@ -82,7 +83,7 @@ def test_every_book_format_writes_opf_without_mutating_source(
     assert metadata.author == "新作者"
 
 
-def test_sidecar_preserves_extensions_and_existing_nonempty_fields(
+def test_sidecar_preserves_extensions_and_clears_removed_managed_fields(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "book.epub"
@@ -103,9 +104,40 @@ def test_sidecar_preserves_extensions_and_existing_nonempty_fields(
     content = output.read_bytes()
     metadata = parse_opf_metadata(content)
     assert metadata.title == "新标题"
-    assert metadata.description == "保留简介"
+    assert metadata.description is None
     assert b"vendor:custom" in content
     assert source.read_bytes() == b"immutable epub"
+
+
+def test_audiobook_fields_and_work_series_index_round_trip_independently(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "audio.m4b"
+    source.write_bytes(b"immutable audio")
+
+    prepared = prepare_writeback(
+        str(source),
+        _payload(
+            source,
+            narrators=["甲", "乙"],
+            abridged=True,
+            seriesName="作品系列",
+            seriesIndex=23,
+            volumeIndex=2,
+        ),
+        tmp_path,
+    )
+    output, _size, _mtime = publish_prepared(
+        str(source), str(prepared.prepared_path), prepared.output_hash
+    )
+
+    metadata = parse_opf_metadata(output.read_bytes())
+    assert metadata.narrators == ("甲", "乙")
+    assert metadata.abridged is True
+    assert metadata.series_name == "作品系列"
+    assert metadata.series_index == 23
+    assert metadata.volume_index == 2
+    assert source.read_bytes() == b"immutable audio"
 
 
 def test_cover_is_written_beside_opf_and_referenced_with_real_media_type(

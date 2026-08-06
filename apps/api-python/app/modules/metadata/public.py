@@ -7,6 +7,7 @@ from app.modules.metadata.application.commands import (
 )
 from app.modules.metadata.application.opf import (
     MAX_OPF_BYTES,
+    OPF_NAMESPACE,
     OpfMetadataError,
     cover_media_type,
     parse_opf_metadata,
@@ -27,6 +28,7 @@ __all__ = [
     "AutomaticRateLimit",
     "MetadataUnitOfWork",
     "OpfMetadataError",
+    "OPF_NAMESPACE",
     "ProviderConfigField",
     "ProviderManifest",
     "PublicationMetadata",

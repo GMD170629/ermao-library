@@ -223,6 +223,6 @@ def test_reader_progress_upgrade_rewrites_legacy_extra_to_v3_location(tmp_path) 
                     "positionMs": 45000,
                 },
             }
-            assert head_revision(engine) == "0016_reader_progress_v3"
+            assert head_revision(engine) == "0017_metadata_opf_queue_state"
     finally:
         engine.dispose()

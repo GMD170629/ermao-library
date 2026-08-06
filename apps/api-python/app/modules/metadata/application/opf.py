@@ -116,6 +116,31 @@ def _cover_href(root: etree._Element, metadata: dict[str, str]) -> str | None:
     return metadata.get("shuku:cover") or metadata.get("calibre:cover")
 
 
+def _narrators(root: etree._Element) -> tuple[str, ...]:
+    values: list[str] = []
+    for node in root.iter():
+        if not isinstance(node.tag, str) or _local_name(node) != "contributor":
+            continue
+        role = _clean(
+            node.get(f"{{{OPF_NAMESPACE}}}role") or node.get("role"), limit=32
+        )
+        if str(role or "").casefold() not in {"nrt", "narrator"}:
+            continue
+        value = _clean("".join(node.itertext()))
+        if value and value not in values:
+            values.append(value)
+    return tuple(values)
+
+
+def _boolean(value: str | None) -> bool | None:
+    normalized = str(value or "").strip().casefold()
+    if normalized in {"true", "1", "yes"}:
+        return True
+    if normalized in {"false", "0", "no"}:
+        return False
+    return None
+
+
 def parse_opf_metadata(content: bytes) -> PublicationMetadata:
     if not content or len(content) > MAX_OPF_BYTES:
         raise OpfMetadataError("OPF 文件为空或超过 2 MiB")
@@ -140,7 +165,9 @@ def parse_opf_metadata(content: bytes) -> PublicationMetadata:
     authors = _text_nodes(root, "creator")
     identifiers = _text_nodes(root, "identifier")
     series_name = metadata.get("calibre:series")
-    series_index_raw = metadata.get("calibre:series_index")
+    volume_index_raw = metadata.get("calibre:series_index")
+    volume_index = _float(volume_index_raw)
+    series_index_raw = metadata.get("shuku:series_index")
     series_index = _float(series_index_raw)
     epub3_series_name: str | None = None
     epub3_series_index_raw: str | None = None
@@ -154,9 +181,11 @@ def parse_opf_metadata(content: bytes) -> PublicationMetadata:
             epub3_series_index_raw = _clean("".join(node.itertext()))
     if series_name is None:
         series_name = epub3_series_name
+    if volume_index is None:
+        volume_index_raw = epub3_series_index_raw or volume_index_raw
+        volume_index = _float(volume_index_raw)
     if series_index is None:
-        series_index_raw = epub3_series_index_raw or series_index_raw
-        series_index = _float(series_index_raw)
+        series_index = volume_index
 
     dates = _text_nodes(root, "date")
     date_raw = dates[0] if dates else None
@@ -164,19 +193,23 @@ def parse_opf_metadata(content: bytes) -> PublicationMetadata:
     unparsed: list[tuple[str, str]] = []
     if date_raw and published_at is None:
         unparsed.append(("publishedAt", date_raw))
-    if series_index_raw and series_index is None:
+    if series_index_raw and _float(series_index_raw) is None:
         unparsed.append(("seriesIndex", series_index_raw))
+    if volume_index_raw and volume_index is None:
+        unparsed.append(("volumeIndex", volume_index_raw))
 
     title = titles[0] if titles else None
     publication_titles = titles_from_local_source(
         title,
         series_name=series_name,
-        volume_index=series_index,
+        volume_index=volume_index,
     )
     return PublicationMetadata(
         title=publication_titles.work_title,
         volume_title=publication_titles.volume_title,
         authors=authors,
+        narrators=_narrators(root),
+        abridged=_boolean(metadata.get("shuku:abridged")),
         description=next(iter(_text_nodes(root, "description")), None),
         subjects=_text_nodes(root, "subject"),
         series_name=series_name,
@@ -206,6 +239,10 @@ def serialize_opf_metadata(metadata: PublicationMetadata) -> bytes:
         "  <metadata>\n",
         element("title", metadata.volume_title or metadata.title),
         *(element("creator", author) for author in metadata.authors),
+        *(
+            f'    <dc:contributor opf:role="nrt" xmlns:opf={quoteattr(OPF_NAMESPACE)}>{escape(narrator)}</dc:contributor>\n'
+            for narrator in metadata.narrators
+        ),
         element("description", metadata.description),
         *(element("subject", subject) for subject in metadata.subjects),
         element("language", metadata.language),
@@ -237,6 +274,14 @@ def serialize_opf_metadata(metadata: PublicationMetadata) -> bytes:
     if metadata.volume_index is not None:
         lines.append(
             f'    <meta name="calibre:series_index" content={quoteattr(str(metadata.volume_index))} />\n'
+        )
+    if metadata.series_index is not None:
+        lines.append(
+            f'    <meta name="shuku:series_index" content={quoteattr(str(metadata.series_index))} />\n'
+        )
+    if metadata.abridged is not None:
+        lines.append(
+            f'    <meta name="shuku:abridged" content={quoteattr(str(metadata.abridged).lower())} />\n'
         )
     if metadata.cover_href:
         lines.append('    <meta name="cover" content="cover-image" />\n')

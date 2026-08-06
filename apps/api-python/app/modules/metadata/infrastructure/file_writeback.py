@@ -14,6 +14,7 @@ from lxml import etree  # type: ignore[import-untyped]
 
 from app.contracts.publication_metadata import PublicationMetadata
 from app.modules.metadata.public import (
+    OPF_NAMESPACE,
     OpfMetadataError,
     cover_media_type,
     parse_opf_metadata,
@@ -39,6 +40,9 @@ def _publication(
 ) -> tuple[PublicationMetadata, Path | None]:
     authors = payload.get("authors")
     subjects = payload.get("subjects")
+    narrators = payload.get("narrators")
+    abridged_value = payload.get("abridged")
+    abridged = abridged_value if isinstance(abridged_value, bool) else None
     cover_value = str(payload.get("coverPath") or "").strip()
     cover_path = None
     if cover_value:
@@ -57,6 +61,12 @@ def _publication(
         authors=tuple(str(item).strip() for item in authors if str(item).strip())
         if isinstance(authors, list)
         else (),
+        narrators=tuple(
+            str(item).strip() for item in narrators if str(item).strip()
+        )
+        if isinstance(narrators, list)
+        else (),
+        abridged=abridged,
         description=str(payload.get("description") or "").strip() or None,
         subjects=tuple(str(item).strip() for item in subjects if str(item).strip())
         if isinstance(subjects, list)
@@ -144,31 +154,7 @@ def _metadata_element(metadata: PublicationMetadata) -> etree._Element:
 def _overlay_metadata(
     existing: PublicationMetadata, desired: PublicationMetadata
 ) -> PublicationMetadata:
-    return PublicationMetadata(
-        title=desired.title or existing.title,
-        volume_title=desired.volume_title or existing.volume_title,
-        authors=desired.authors or existing.authors,
-        description=desired.description or existing.description,
-        subjects=desired.subjects or existing.subjects,
-        series_name=desired.series_name or existing.series_name,
-        series_index=(
-            desired.series_index
-            if desired.series_index is not None
-            else existing.series_index
-        ),
-        volume_index=(
-            desired.volume_index
-            if desired.volume_index is not None
-            else existing.volume_index
-        ),
-        language=desired.language or existing.language,
-        publisher=desired.publisher or existing.publisher,
-        published_at=desired.published_at or existing.published_at,
-        identifier=desired.identifier or existing.identifier,
-        isbn=desired.isbn or existing.isbn,
-        cover_href=desired.cover_href or existing.cover_href,
-        unparsed_values=existing.unparsed_values,
-    )
+    return replace(desired, unparsed_values=existing.unparsed_values)
 
 
 def _replace_package_metadata(
@@ -194,6 +180,8 @@ def _replace_package_metadata(
     managed_meta = {
         "calibre:series",
         "calibre:series_index",
+        "shuku:series_index",
+        "shuku:abridged",
         "belongs-to-collection",
         "group-position",
         "cover",
@@ -201,14 +189,22 @@ def _replace_package_metadata(
     for child in list(package_metadata):
         local = etree.QName(child).localname
         name = str(child.get("name") or child.get("property") or "").casefold()
-        if local in managed or (local == "meta" and name in managed_meta):
+        role = str(
+            child.get(f"{{{OPF_NAMESPACE}}}role") or child.get("role") or ""
+        ).casefold()
+        managed_narrator = local == "contributor" and role in {"nrt", "narrator"}
+        if (
+            local in managed
+            or managed_narrator
+            or (local == "meta" and name in managed_meta)
+        ):
             package_metadata.remove(child)
     replacement = _metadata_element(metadata)
     for child in replacement:
         package_metadata.append(child)
 
 
-def _set_cover_manifest(package: etree._Element, href: str) -> None:
+def _set_cover_manifest(package: etree._Element, href: str | None) -> None:
     if etree.QName(package).localname != "package":
         return
     manifest = next(
@@ -228,6 +224,10 @@ def _set_cover_manifest(package: etree._Element, href: str) -> None:
         ),
         None,
     )
+    if href is None:
+        if cover_item is not None:
+            manifest.remove(cover_item)
+        return
     if cover_item is None:
         cover_item = etree.SubElement(manifest, "item")
         cover_item.set("id", "cover-image")
@@ -258,8 +258,7 @@ def _write_sidecar(
             )
             merged = _overlay_metadata(existing, metadata)
             _replace_package_metadata(package, merged)
-            if merged.cover_href:
-                _set_cover_manifest(package, merged.cover_href)
+            _set_cover_manifest(package, merged.cover_href)
             content = etree.tostring(package, xml_declaration=True, encoding="utf-8")
         except (OSError, OpfMetadataError, etree.XMLSyntaxError):
             content = None

@@ -12,6 +12,8 @@ class PublicationMetadata:
     title: str | None = None
     volume_title: str | None = None
     authors: tuple[str, ...] = ()
+    narrators: tuple[str, ...] = ()
+    abridged: bool | None = None
     description: str | None = None
     subjects: tuple[str, ...] = ()
     series_name: str | None = None
@@ -35,6 +37,8 @@ class PublicationMetadata:
             ("title", self.title),
             ("volumeTitle", self.volume_title),
             ("author", self.authors),
+            ("narrator", self.narrators),
+            ("abridged", self.abridged),
             ("description", self.description),
             ("tags", self.subjects),
             ("seriesName", self.series_name),

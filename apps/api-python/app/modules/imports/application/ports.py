@@ -44,6 +44,12 @@ class ImportUnitOfWork(Protocol):
     def rollback(self) -> None: ...
 
 
+class ImportMetadataObserver(Protocol):
+    """Schedules side effects for the final metadata snapshot of an import."""
+
+    def schedule(self, result: ImportResult) -> None: ...
+
+
 class ImportTaskStore(Protocol):
     """Persistence for import-task queue state transitions."""
 

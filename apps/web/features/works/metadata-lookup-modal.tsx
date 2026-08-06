@@ -113,14 +113,6 @@ function initialSource(book: WorkView): MetadataSource {
 
 type MetadataProviderOption = { id: string; name: string; enabled: boolean; mediaKinds: string[]; mode: string };
 type MetadataProviderPipeline = { mediaKind: string; providers: Array<{ providerId: string; enabled: boolean }> };
-type MetadataWritebackOperation = {
-  id: string;
-  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'COMPLETED_WITH_WARNINGS';
-  totalTargets: number;
-  completedTargets: number;
-  warningTargets: number;
-};
-
 function selectedMediaKind(book: WorkView) {
   return book.availableMediaKinds[0] ?? 'EBOOK';
 }
@@ -158,8 +150,6 @@ export function MetadataLookupModal({ book, currentMediaVersionId, open, onClose
   const [error, setError] = useState('');
   const [providers, setProviders] = useState<MetadataProviderOption[]>([]);
   const [enabledProviderIds, setEnabledProviderIds] = useState<string[]>([]);
-  const [writeMetadataToFiles, setWriteMetadataToFiles] = useState(false);
-  const [writebackOperation, setWritebackOperation] = useState<MetadataWritebackOperation | null>(null);
 
   const selected = useMemo(() => candidates.find((candidate) => candidate.id === selectedId) ?? candidates[0] ?? null, [candidates, selectedId]);
   const options = useMemo(() => providers.map((provider) => ({
@@ -180,12 +170,6 @@ export function MetadataLookupModal({ book, currentMediaVersionId, open, onClose
     setSelectedFields([]);
     setMessage('');
     setError('');
-    setWriteMetadataToFiles(false);
-    setWritebackOperation(null);
-    fetch('/api/organize/policy', { cache: 'no-store' })
-      .then((response) => response.json() as Promise<{ ok: boolean; data?: { policy?: { writeMetadataToFiles?: boolean } } }>)
-      .then((payload) => setWriteMetadataToFiles(Boolean(payload.ok && payload.data?.policy?.writeMetadataToFiles)))
-      .catch(() => setWriteMetadataToFiles(false));
     fetch('/api/metadata/providers', { cache: 'no-store' })
       .then((response) => response.json() as Promise<{ ok: boolean; data?: { providers: MetadataProviderOption[]; pipelines?: MetadataProviderPipeline[] }; error?: { message: string } }>)
       .then((payload) => {
@@ -219,33 +203,6 @@ export function MetadataLookupModal({ book, currentMediaVersionId, open, onClose
   useEffect(() => {
     setSelectedFields(defaultFields(book, selected, targetVolumes[0]));
   }, [book, selected, targetVolumes]);
-
-  useEffect(() => {
-    if (!open || !writebackOperation || writebackOperation.status === 'COMPLETED' || writebackOperation.status === 'COMPLETED_WITH_WARNINGS') return;
-    const controller = new AbortController();
-    const poll = async () => {
-      try {
-        const response = await fetch(`/api/metadata/writebacks/${encodeURIComponent(writebackOperation.id)}`, {
-          cache: 'no-store',
-          signal: controller.signal
-        });
-        const payload = (await response.json()) as { ok: boolean; data?: { operation?: MetadataWritebackOperation } };
-        const operation = payload.ok ? payload.data?.operation : undefined;
-        if (!operation) return;
-        setWritebackOperation(operation);
-        if (operation.status === 'COMPLETED') setMessage(i18nAttribute('元数据已保存，旁车 OPF 写入完成'));
-        if (operation.status === 'COMPLETED_WITH_WARNINGS') setMessage(i18nAttribute('元数据已保存，{value0} 个旁车 OPF 写入失败', { value0: operation.warningTargets }));
-      } catch (reason) {
-        if (!(reason instanceof DOMException && reason.name === 'AbortError')) setError(i18nAttribute('无法读取旁车 OPF 保存进度'));
-      }
-    };
-    void poll();
-    const timer = window.setInterval(() => void poll(), 1500);
-    return () => {
-      controller.abort();
-      window.clearInterval(timer);
-    };
-  }, [i18nAttribute, open, writebackOperation]);
 
   async function searchCandidates() {
     setBusy(true);
@@ -283,15 +240,12 @@ export function MetadataLookupModal({ book, currentMediaVersionId, open, onClose
           source,
           candidate: selected,
           fields: selectedFields,
-          volumeId: selectedFields.some((field) => volumeFields.has(field)) || writeMetadataToFiles ? targetVolumeId : null,
-          writeMetadataToFiles
+          volumeId: selectedFields.some((field) => volumeFields.has(field)) ? targetVolumeId : null
         })
       });
-      const payload = (await response.json()) as { ok: boolean; data?: { metadataWriteback?: MetadataWritebackOperation | null }; error?: { message: string } };
+      const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
       if (!payload.ok) throw new Error(payload.error?.message ?? '元数据应用失败');
-      const operation = payload.data?.metadataWriteback ?? null;
-      setWritebackOperation(operation);
-      setMessage(operation ? i18nAttribute('已应用所选字段，正在后台写入旁车 OPF') : i18nAttribute('已应用所选字段'));
+      setMessage(i18nAttribute('已应用所选字段'));
       await completeMetadataApply({ close: onClose, refresh: onApplied });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '元数据应用失败');
@@ -400,7 +354,7 @@ export function MetadataLookupModal({ book, currentMediaVersionId, open, onClose
           </div>
 
           <div className="min-w-0 rounded-2xl border border-slate-200">
-            {selectedFields.some((field) => volumeFields.has(field)) || writeMetadataToFiles ? (
+            {selectedFields.some((field) => volumeFields.has(field)) ? (
               <div className="border-b border-slate-100 bg-slate-50 px-3 py-3">
                 <div className="mb-2 text-xs font-medium text-slate-500"><I18nText>卷册元数据应用范围</I18nText></div>
                 <Select value={volumeTarget} options={volumeTargetOptions} onChange={setVolumeTarget} ariaLabel={i18nAttribute('卷册元数据应用范围')} className="w-full" />
@@ -442,16 +396,9 @@ export function MetadataLookupModal({ book, currentMediaVersionId, open, onClose
           </div>
         </div>
 
-        <div className="border-t border-slate-100 px-5 pt-4">
-          <label className="flex items-start gap-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
-            <input type="checkbox" checked={writeMetadataToFiles} onChange={(event) => setWriteMetadataToFiles(event.target.checked)} className="mt-0.5 h-4 w-4 accent-blue-600" />
-            <span><span className="block font-medium"><I18nText>同时保存到旁车 OPF</I18nText></span><span className="mt-1 block text-xs text-slate-500"><I18nText>在图书旁生成同名 OPF 和独立封面；不会修改源图书文件。</I18nText></span></span>
-          </label>
-          {writebackOperation ? <div className="mt-2 text-xs text-slate-500"><I18nText>旁车 OPF 保存进度：</I18nText>{writebackOperation.completedTargets}/{writebackOperation.totalTargets}</div> : null}
-        </div>
         <div className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:justify-end">
           <Button variant="secondary" onClick={onClose}><I18nText>取消</I18nText></Button>
-          <Button disabled={busy || !selected || selectedFields.length === 0 || ((selectedFields.some((field) => volumeFields.has(field)) || writeMetadataToFiles) && !targetVolumeId)} icon={CheckCircle2} onClick={() => void applySelected()}><I18nText>应用所选字段</I18nText></Button>
+          <Button disabled={busy || !selected || selectedFields.length === 0 || (selectedFields.some((field) => volumeFields.has(field)) && !targetVolumeId)} icon={CheckCircle2} onClick={() => void applySelected()}><I18nText>应用所选字段</I18nText></Button>
         </div>
       </div>
     </div>

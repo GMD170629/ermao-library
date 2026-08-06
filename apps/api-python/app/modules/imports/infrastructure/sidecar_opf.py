@@ -150,6 +150,10 @@ def _merge_metadata(
         title=preferred.title or current.title,
         volume_title=preferred.volume_title or current.volume_title,
         authors=preferred.authors or current.authors,
+        narrators=preferred.narrators or current.narrators,
+        abridged=preferred.abridged
+        if preferred.abridged is not None
+        else current.abridged,
         description=preferred.description or current.description,
         subjects=preferred.subjects or current.subjects,
         series_name=preferred.series_name or current.series_name,
