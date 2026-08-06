@@ -20,6 +20,7 @@ export type ComicTrackView = {
   mode: 'single' | 'double';
   imageFit: ComicImageFit;
   zoom: number;
+  pageWidth: number;
   pageGap?: 0 | 8 | 16 | 24;
   reducedMotion: boolean;
   error?: string;
@@ -67,6 +68,7 @@ function spreadKey(spread: ComicTrackSpread | null, view: ComicTrackView, role: 
     mode: view.mode,
     pages: spread.pages.map((page) => [page.pageIndex, page.url, page.loading, page.error]),
     zoom: view.zoom,
+    pageWidth: view.pageWidth,
     pageGap: view.pageGap ?? 0
   });
 }
@@ -339,6 +341,7 @@ export class ComicSpreadTrackDriver implements PagedTrackDriver {
       padding: '24px 16px',
       width: `${view.zoom * 100}%`
     });
+    frame.style.maxWidth = `${view.pageWidth * view.zoom}px`;
     if (view.error && role === 'current' && !spread?.pages.length) {
       const message = this.document.createElement('div');
       message.setAttribute('role', 'alert');

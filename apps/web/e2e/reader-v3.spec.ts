@@ -795,6 +795,11 @@ test('tablet comic controller keeps format-appropriate actions and an inline pro
   await expect(workspace).toHaveCount(1);
   await expect(settingsDialog.getByRole('group', { name: '主题' }).getByRole('button')).toHaveCount(5);
   await expect(settingsDialog.getByText('主题', { exact: true })).toHaveCount(0);
+  const comicPageWidth = settingsDialog.getByRole('slider', { name: '页宽' });
+  await expect(comicPageWidth).toBeVisible();
+  await expect(comicPageWidth).toHaveAttribute('max', '834');
+  await comicPageWidth.fill('700');
+  await expect(page.locator('[data-comic-spread-slot="current"] > div')).toHaveCSS('max-width', '700px');
   if (process.env.SHUKU_READER_SETTINGS_CAPTURE) {
     await page.screenshot({ path: process.env.SHUKU_READER_SETTINGS_CAPTURE });
   }
@@ -834,6 +839,19 @@ test('tablet comic controller keeps format-appropriate actions and an inline pro
   }
 });
 
+test('mobile reader ignores page width and fills the visible comic viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockReaderApi(page, 'comic');
+  await page.goto('/reader/comic-volume');
+  await showReaderControls(page);
+  await page.getByRole('button', { name: '外观' }).click();
+
+  const appearance = page.getByRole('dialog', { name: '外观' });
+  await expect(appearance.getByRole('slider', { name: '页宽' })).toBeDisabled();
+  await expect(appearance.getByText('手机模式下自动使用可视区域宽度')).toBeVisible();
+  await expect(page.locator('[data-comic-spread-slot="current"] > div')).toHaveCSS('max-width', '390px');
+});
+
 test('PDF uses the same responsive reader workspace for appearance, settings, directory, and notes', async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 900 });
   await mockReaderApi(page, 'pdf');
@@ -863,6 +881,7 @@ test('PDF uses the same responsive reader workspace for appearance, settings, di
   await expect(page.getByRole('dialog', { name: '设置' }).getByRole('group', { name: '阅读方式' })).toBeVisible();
   await expect(page.getByRole('dialog', { name: '设置' }).getByRole('group', { name: '页面旋转' })).toBeVisible();
   await expect(page.getByRole('dialog', { name: '设置' }).getByRole('group', { name: '自动裁白边' })).toBeVisible();
+  await page.getByRole('dialog', { name: '设置' }).getByRole('group', { name: '适配' }).getByRole('button', { name: '宽度' }).click();
   const desktopDisplaySection = workspace.getByText('阅读界面', { exact: true }).locator('xpath=ancestor::section');
   const desktopPagingSection = workspace.getByText('翻页设置', { exact: true }).locator('xpath=ancestor::section');
   const [desktopDisplayBox, desktopPagingBox, desktopWorkspaceBox] = await Promise.all([
@@ -887,6 +906,10 @@ test('PDF uses the same responsive reader workspace for appearance, settings, di
   await expect(workspace).toHaveAttribute('data-reader-panel', 'appearance');
   await expect(page.getByRole('dialog', { name: '外观' }).getByRole('group', { name: '主题' })).toBeVisible();
   await expect(page.getByRole('dialog', { name: '外观' }).getByRole('button', { name: '护眼绿' })).toBeVisible();
+  const pdfPageWidth = page.getByRole('dialog', { name: '外观' }).getByRole('slider', { name: '页宽' });
+  await expect(pdfPageWidth).toHaveAttribute('max', '1024');
+  await pdfPageWidth.fill('720');
+  await expect(page.locator('[data-reader-engine="pdf-v3"] .shuku-pdf-page').first()).toHaveCSS('width', '720px');
   const [appearancePanelBox, appearanceConsoleBox] = await Promise.all([
     panelSurface.boundingBox(),
     consoleControls.boundingBox()
@@ -1380,7 +1403,7 @@ test('EPUB scrolled flow keeps adjacent chapters mounted in one stable stream', 
   await firstSlot.locator('iframe').evaluate((element) => { element.dataset.e2eStableFrame = 'first'; });
 
   await page.getByRole('dialog', { name: '设置' }).getByRole('button', { name: '外观' }).click();
-  await page.getByRole('dialog', { name: '外观' }).getByRole('group', { name: '页宽' }).getByRole('button', { name: '窄', exact: true }).click();
+  await page.getByRole('dialog', { name: '外观' }).getByRole('slider', { name: '页宽' }).fill('760');
   await expect.poll(() => firstSlot.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
     const viewport = element.parentElement?.getBoundingClientRect();

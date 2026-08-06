@@ -27,7 +27,6 @@ import {
   READER_PARAGRAPH_INDENT_OPTIONS,
   READER_PARAGRAPH_SPACING_OPTIONS,
   READER_PAGE_TURN_ANIMATION_OPTIONS,
-  READER_PAGE_WIDTH_OPTIONS,
   READER_PDF_FIT_OPTIONS,
   READER_SPREAD_MODE_OPTIONS,
   READER_THEME_OPTIONS,
@@ -40,6 +39,11 @@ import type { ReaderBookmark } from './v3/bookmarks';
 import { resolveActiveEpubNavigationIndex } from './v3/epub-navigation';
 import type { ReaderInteractionPolicy } from './v3/adapters/reader-interaction';
 import { hasActiveTextSelection, isReaderControlTarget, readerKeyIntent, readerPinchZoom, readerPointerIntentInViewport, readerSwipeIntent, type ReaderInputIntent } from './v3/input-router';
+import {
+  MOBILE_READER_VIEWPORT_MAXIMUM,
+  READER_PAGE_WIDTH_MINIMUM,
+  readerPageWidthSliderMaximum
+} from './v3/page-width';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import { ReaderControlNavButton, ReaderSegmentedControl } from './ui/reader-control-primitives';
@@ -111,7 +115,9 @@ export type ReaderSettings = {
   deduplicateIndent: boolean;
   indentUnindented: boolean;
   comicZoom: number;
+  comicPageWidth: number;
   pdfZoom: number;
+  pdfPageWidth: number;
   comicDirection: ComicDirection;
   comicMode: ComicMode;
   comicPageTurnAnimation: ComicPageTurnAnimation;
@@ -293,6 +299,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
   const [bookmarkNotice, setBookmarkNotice] = useState('');
   const [clockTime, setClockTime] = useState(() => new Date());
+  const [readerViewportWidth, setReaderViewportWidth] = useState(1350);
   const wakeLockPort = typeof navigator === 'undefined' ? null : readerWakeLockPort(navigator);
   const wakeLockSupported = wakeLockPort !== null;
   const navItems = navigationItems ?? [];
@@ -348,10 +355,27 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   const passiveProgressAreaHeight = usesCompactPassiveProgress ? 'calc(2.75rem + var(--shuku-safe-area-bottom))' : readerBottomAreaHeight;
   const supportsTextAnnotations = readerType !== 'comic';
   const accentColor = themeSurface.accent;
+  const pageWidth = readerType === 'reflowable'
+    ? settings.pageWidth
+    : readerType === 'comic'
+      ? settings.comicPageWidth
+      : settings.pdfPageWidth;
+  const pageWidthMaximum = readerPageWidthSliderMaximum(readerViewportWidth);
+  const mobilePageWidth = readerViewportWidth <= MOBILE_READER_VIEWPORT_MAXIMUM;
   panelRef.current = panel;
   interactionBlockedRef.current = interactionBlocked;
   capabilitiesRef.current = capabilities;
   settingsRef.current = settings;
+
+  useEffect(() => {
+    const viewport = readerViewportRef.current;
+    if (!viewport) return;
+    const measure = () => setReaderViewportWidth(Math.max(1, Math.round(viewport.getBoundingClientRect().width)));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!settings.showClock) return;
@@ -1076,20 +1100,27 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                       <CompactSettingOptions label={i18nAttribute("字重")} value={String(settings.fontWeight)} options={READER_FONT_WEIGHT_OPTIONS} onChange={(value) => updateSettings({ fontWeight: Number(value) as ReaderSettings['fontWeight'] })} dark={dark} />
                       <CompactSettingOptions label={i18nAttribute("字间距")} value={String(settings.letterSpacing)} options={READER_LETTER_SPACING_OPTIONS} onChange={(value) => updateSettings({ letterSpacing: Number(value) as ReaderSettings['letterSpacing'] })} dark={dark} />
                       <CompactSettingOptions label={i18nAttribute("页边距")} value={settings.pageMargin} options={READER_PAGE_MARGIN_OPTIONS} onChange={(value) => updateSettings({ pageMargin: value as ReaderSettings['pageMargin'] })} dark={dark} />
-                      <CompactSettingOptions
+                      <CompactRangeSetting
                         label={i18nAttribute("页宽")}
-                        value={closestReaderOptionValue(settings.pageWidth, READER_PAGE_WIDTH_OPTIONS)}
-                        options={READER_PAGE_WIDTH_OPTIONS}
-                        onChange={(value) => updateSettings({ pageWidth: Number(value) })}
+                        value={Math.min(pageWidth, pageWidthMaximum)}
+                        minimum={READER_PAGE_WIDTH_MINIMUM}
+                        maximum={pageWidthMaximum}
+                        step={10}
+                        suffix="px"
+                        disabled={mobilePageWidth}
+                        description={mobilePageWidth ? i18nAttribute("手机模式下自动使用可视区域宽度") : undefined}
+                        onChange={(value) => updateSettings({ pageWidth: value })}
                         dark={dark}
                       />
                     </ReaderSettingsSection>
                   ) : readerType === 'comic' ? (
                     <ReaderSettingsSection icon={Palette} title={i18nAttribute("画面外观")} dark={dark}>
+                      <CompactRangeSetting label={i18nAttribute("页宽")} value={Math.min(pageWidth, pageWidthMaximum)} minimum={READER_PAGE_WIDTH_MINIMUM} maximum={pageWidthMaximum} step={10} suffix="px" disabled={mobilePageWidth} description={mobilePageWidth ? i18nAttribute("手机模式下自动使用可视区域宽度") : undefined} onChange={(value) => updateSettings({ comicPageWidth: value })} dark={dark} />
                       {capabilities?.canZoom !== false ? <CompactStepper label={i18nAttribute("缩放")} value={`${Math.round(settings.comicZoom * 100)}%`} onMinus={() => updateSettings({ comicZoom: Math.max(0.6, Number((settings.comicZoom - 0.1).toFixed(1))) })} onPlus={() => updateSettings({ comicZoom: Math.min(2.4, Number((settings.comicZoom + 0.1).toFixed(1))) })} dark={dark} /> : null}
                     </ReaderSettingsSection>
                   ) : (
                     <ReaderSettingsSection icon={Palette} title={i18nAttribute("页面外观")} dark={dark}>
+                      <CompactRangeSetting label={i18nAttribute("页宽")} value={Math.min(pageWidth, pageWidthMaximum)} minimum={READER_PAGE_WIDTH_MINIMUM} maximum={pageWidthMaximum} step={10} suffix="px" disabled={mobilePageWidth} description={mobilePageWidth ? i18nAttribute("手机模式下自动使用可视区域宽度") : undefined} onChange={(value) => updateSettings({ pdfPageWidth: value })} dark={dark} />
                       {capabilities?.canZoom !== false ? <CompactStepper label={i18nAttribute("缩放")} value={`${Math.round(settings.pdfZoom * 100)}%`} onMinus={() => updateSettings({ pdfZoom: Math.max(0.6, Number((settings.pdfZoom - 0.1).toFixed(1))) })} onPlus={() => updateSettings({ pdfZoom: Math.min(2.4, Number((settings.pdfZoom + 0.1).toFixed(1))) })} dark={dark} /> : null}
                     </ReaderSettingsSection>
                   )}
@@ -1380,6 +1411,42 @@ function CompactStepper({ label, value, onMinus, onPlus, dark }: { label: string
           <Plus size={14} />
         </button>
       </div>
+    </div>
+  );
+}
+
+function CompactRangeSetting({ label, value, minimum, maximum, step, suffix, disabled, description, onChange, dark }: {
+  label: string;
+  value: number;
+  minimum: number;
+  maximum: number;
+  step: number;
+  suffix: string;
+  disabled: boolean;
+  description?: string;
+  onChange: (value: number) => void;
+  dark: boolean;
+}) {
+  return (
+    <div className={cn('min-[900px]:max-w-[32rem]', disabled && 'opacity-55')}>
+      <div className="flex items-center gap-3">
+        <span className="w-9 shrink-0 text-xs font-medium opacity-55">{label}</span>
+        <label className={cn('shuku-reader-control-border flex min-w-0 flex-1 items-center gap-3 rounded-xl border px-3', dark ? 'bg-white/[0.07]' : 'bg-stone-900/[0.055]')}>
+          <input
+            aria-label={label}
+            type="range"
+            min={minimum}
+            max={maximum}
+            step={step}
+            value={value}
+            disabled={disabled}
+            onChange={(event) => onChange(Number(event.target.value))}
+            className="h-11 min-w-0 flex-1 cursor-pointer disabled:cursor-not-allowed"
+          />
+          <span className="w-14 shrink-0 text-right text-xs tabular-nums">{value}{suffix}</span>
+        </label>
+      </div>
+      {description ? <p className="ml-12 mt-1 text-[11px] leading-4 opacity-55">{description}</p> : null}
     </div>
   );
 }

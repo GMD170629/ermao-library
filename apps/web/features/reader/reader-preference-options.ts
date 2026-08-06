@@ -26,12 +26,6 @@ export const READER_FONT_FAMILY_OPTIONS = [
   { value: 'kaiti', label: '楷体' }
 ] as const;
 
-export const READER_PAGE_WIDTH_OPTIONS = [
-  { value: '760', label: '窄' },
-  { value: '1050', label: '中' },
-  { value: '1350', label: '宽' }
-] as const;
-
 export const READER_FLOW_OPTIONS = [
   { value: 'paginated', label: '分页' },
   { value: 'scrolled', label: '滚动' }

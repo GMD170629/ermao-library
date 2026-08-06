@@ -43,12 +43,14 @@ export const DEFAULT_READER_PREFERENCES: Readonly<ReaderPreferences> = Object.fr
     imageFit: 'width',
     imageVariant: 'original',
     zoom: 1,
+    pageWidth: 1350,
     flow: 'paged',
     coverSingle: false,
     pageGap: 0
   }),
   pdf: Object.freeze({
     zoom: 1,
+    pageWidth: 1350,
     fit: 'page',
     flow: 'paged',
     rotation: 0,
@@ -173,12 +175,14 @@ export function normalizeReaderPreferences(value: unknown, base: Readonly<Reader
       imageFit: choice(comic.imageFit ?? source.imageFit, ['width', 'height', 'contain', 'original'], fallback.comic.imageFit),
       imageVariant: choice(comic.imageVariant ?? source.imageVariant, ['original', 'data-saver'], fallback.comic.imageVariant),
       zoom: clamp(comic.zoom ?? source.zoom, 0.6, 2.4, fallback.comic.zoom, 1),
+      pageWidth: clamp(comic.pageWidth, 600, 1350, fallback.comic.pageWidth),
       flow: choice(comic.flow, ['paged', 'vertical'], fallback.comic.flow),
       coverSingle: boolean(comic.coverSingle, fallback.comic.coverSingle),
       pageGap: choice(comic.pageGap, [0, 8, 16, 24] as const, fallback.comic.pageGap)
     },
     pdf: {
       zoom: clamp(pdf.zoom ?? source.zoom, 0.6, 2.4, fallback.pdf.zoom, 1),
+      pageWidth: clamp(pdf.pageWidth, 600, 1350, fallback.pdf.pageWidth),
       fit: choice(pdf.fit, ['width', 'page'], fallback.pdf.fit),
       flow: choice(pdf.flow, ['paged', 'continuous'], fallback.pdf.flow),
       rotation: choice(pdf.rotation, [0, 90, 180, 270] as const, fallback.pdf.rotation),

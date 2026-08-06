@@ -25,7 +25,6 @@ import {
   READER_PROGRESS_STYLE_OPTIONS,
   READER_PAGE_GAP_OPTIONS,
   READER_PAGE_TURN_ANIMATION_OPTIONS,
-  READER_PAGE_WIDTH_OPTIONS,
   READER_PDF_FIT_OPTIONS,
   READER_PDF_FLOW_OPTIONS,
   READER_PDF_ROTATION_OPTIONS,
@@ -35,6 +34,7 @@ import {
   READER_THEME_OPTIONS,
   closestReaderOptionValue
 } from '../../reader/reader-preference-options';
+import { READER_PAGE_WIDTH_MAXIMUM, READER_PAGE_WIDTH_MINIMUM } from '../../reader/v3/page-width';
 import { readerThemeSurfaces } from '../../reader/reader-theme';
 import {
   AUDIO_PLAYBACK_RATE_OPTIONS,
@@ -367,12 +367,7 @@ export function ReaderDeviceSettingsPage() {
             <ChoiceField label={t('字重')} value={String(preferences.epub.fontWeight)} options={READER_FONT_WEIGHT_OPTIONS} onChange={(fontWeight) => updatePreferences({ ...preferences, epub: { ...preferences.epub, fontWeight: Number(fontWeight) as ReaderPreferences['epub']['fontWeight'] } })} />
             <ChoiceField label={t('字间距')} value={String(preferences.epub.letterSpacing)} options={READER_LETTER_SPACING_OPTIONS} onChange={(letterSpacing) => updatePreferences({ ...preferences, epub: { ...preferences.epub, letterSpacing: Number(letterSpacing) as ReaderPreferences['epub']['letterSpacing'] } })} />
             <ChoiceField label={t('页边距')} value={preferences.epub.pageMargin} options={READER_PAGE_MARGIN_OPTIONS} onChange={(pageMargin) => updatePreferences({ ...preferences, epub: { ...preferences.epub, pageMargin: pageMargin as ReaderPreferences['epub']['pageMargin'] } })} />
-            <ChoiceField
-              label={t('页宽')}
-              value={closestReaderOptionValue(preferences.epub.pageWidth, READER_PAGE_WIDTH_OPTIONS)}
-              options={READER_PAGE_WIDTH_OPTIONS}
-              onChange={(pageWidth) => updatePreferences({ ...preferences, epub: { ...preferences.epub, pageWidth: Number(pageWidth) } })}
-            />
+            <RangeField label={t('页宽')} value={preferences.epub.pageWidth} minimum={READER_PAGE_WIDTH_MINIMUM} maximum={READER_PAGE_WIDTH_MAXIMUM} step={10} suffix="px" onChange={(pageWidth) => updatePreferences({ ...preferences, epub: { ...preferences.epub, pageWidth } })} />
             <ChoiceField
               label={t('排版')}
               value={preferences.epub.flow}
@@ -397,6 +392,7 @@ export function ReaderDeviceSettingsPage() {
             <ChoiceField label={t('模式')} value={preferences.comic.mode} options={READER_SPREAD_MODE_OPTIONS.filter((option) => option.value !== 'auto')} onChange={(mode) => updatePreferences({ ...preferences, comic: { ...preferences.comic, mode: mode as ReaderPreferences['comic']['mode'] } })} />
             <ChoiceField label={t('双页时封面单独显示')} value={String(preferences.comic.coverSingle)} options={[{ value: 'true', label: '开启' }, { value: 'false', label: '关闭' }]} onChange={(coverSingle) => updatePreferences({ ...preferences, comic: { ...preferences.comic, coverSingle: coverSingle === 'true' } })} />
             <ChoiceField label={t('页间距')} value={String(preferences.comic.pageGap)} options={READER_PAGE_GAP_OPTIONS} onChange={(pageGap) => updatePreferences({ ...preferences, comic: { ...preferences.comic, pageGap: Number(pageGap) as ReaderPreferences['comic']['pageGap'] } })} />
+            <RangeField label={t('页宽')} value={preferences.comic.pageWidth} minimum={READER_PAGE_WIDTH_MINIMUM} maximum={READER_PAGE_WIDTH_MAXIMUM} step={10} suffix="px" onChange={(pageWidth) => updatePreferences({ ...preferences, comic: { ...preferences.comic, pageWidth } })} />
             <ChoiceField label={t('翻页')} value={preferences.comic.pageTurnAnimation} options={READER_PAGE_TURN_ANIMATION_OPTIONS} onChange={(pageTurnAnimation) => updatePreferences({ ...preferences, comic: { ...preferences.comic, pageTurnAnimation: pageTurnAnimation as ReaderPreferences['comic']['pageTurnAnimation'] } })} />
             <ChoiceField label={t('适配')} value={preferences.comic.imageFit} options={READER_COMIC_IMAGE_FIT_OPTIONS} onChange={(imageFit) => updatePreferences({ ...preferences, comic: { ...preferences.comic, imageFit: imageFit as ReaderPreferences['comic']['imageFit'] } })} />
             <ChoiceField label={t('画质')} value={preferences.comic.imageVariant} options={READER_COMIC_IMAGE_VARIANT_OPTIONS} onChange={(imageVariant) => updatePreferences({ ...preferences, comic: { ...preferences.comic, imageVariant: imageVariant as ReaderPreferences['comic']['imageVariant'] } })} />
@@ -437,6 +433,7 @@ export function ReaderDeviceSettingsPage() {
             description={t('设置当前设备打开 PDF 时的默认缩放和适配方式。')}
           >
             <StepperField label={t('缩放')} value={preferences.pdf.zoom} minimum={0.6} maximum={2.4} step={0.1} onChange={(zoom) => updatePreferences({ ...preferences, pdf: { ...preferences.pdf, zoom } })} />
+            <RangeField label={t('页宽')} value={preferences.pdf.pageWidth} minimum={READER_PAGE_WIDTH_MINIMUM} maximum={READER_PAGE_WIDTH_MAXIMUM} step={10} suffix="px" onChange={(pageWidth) => updatePreferences({ ...preferences, pdf: { ...preferences.pdf, pageWidth } })} />
             <ChoiceField label={t('适配')} value={preferences.pdf.fit} options={READER_PDF_FIT_OPTIONS} onChange={(fit) => updatePreferences({ ...preferences, pdf: { ...preferences.pdf, fit: fit as ReaderPreferences['pdf']['fit'] } })} />
             <ChoiceField label={t('阅读方式')} value={preferences.pdf.flow} options={READER_PDF_FLOW_OPTIONS} onChange={(flow) => updatePreferences({ ...preferences, pdf: { ...preferences.pdf, flow: flow as ReaderPreferences['pdf']['flow'] } })} />
             <ChoiceField label={t('页面旋转')} value={String(preferences.pdf.rotation)} options={READER_PDF_ROTATION_OPTIONS} onChange={(rotation) => updatePreferences({ ...preferences, pdf: { ...preferences.pdf, rotation: Number(rotation) as ReaderPreferences['pdf']['rotation'] } })} />

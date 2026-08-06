@@ -16,6 +16,7 @@ import type { PageStep, PagedTrackCommitRequest, PagedTrackPointerInput } from '
 import { ReaderAdapterBase, StaleReaderOperationError, errorMessage, isAbortError } from './adapter-base';
 import { ComicSpreadTrackDriver, type ComicTrackSpread, type ComicTrackView } from './comic-track';
 import { ComicContinuousController } from './comic-continuous';
+import { effectiveReaderPageWidth } from '../page-width';
 import type { ReaderAdapterInputHandler, ReaderInteractiveAdapter, ReaderInteractionPolicy } from './reader-interaction';
 import {
   comicCacheWindow,
@@ -803,6 +804,10 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
       mode,
       imageFit: preferences?.comic.imageFit ?? 'width',
       zoom: this.zoom,
+      pageWidth: effectiveReaderPageWidth(
+        preferences?.comic.pageWidth ?? 1350,
+        this.viewportWidth || this.container.clientWidth || 1350
+      ),
       pageGap: preferences?.comic.pageGap ?? 0,
       reducedMotion: preferences?.comic.pageTurnAnimation === 'off'
         || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches),
@@ -847,6 +852,10 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
       pageGap: preferences.comic.pageGap,
       imageFit: preferences.comic.imageFit,
       zoom: this.zoom,
+      pageWidth: effectiveReaderPageWidth(
+        preferences.comic.pageWidth,
+        this.viewportWidth || this.container.clientWidth || 1350
+      ),
       pages: this.pages.map((page) => {
         const cached = this.cache.get(page);
         const materialized = Math.abs(page - this.currentPage) <= 1;

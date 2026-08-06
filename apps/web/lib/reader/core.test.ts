@@ -82,11 +82,12 @@ test('normalizes a complete V4 preference snapshot from legacy and invalid input
       imageFit: 'contain',
       imageVariant: 'data-saver',
       zoom: 1.6,
+      pageWidth: 1350,
       flow: 'paged',
       coverSingle: false,
       pageGap: 0
     },
-    pdf: { zoom: 1.6, fit: 'page', flow: 'paged', rotation: 0, cropMargins: 'off' }
+    pdf: { zoom: 1.6, pageWidth: 1350, fit: 'page', flow: 'paged', rotation: 0, cropMargins: 'off' }
   });
   assert.equal(DEFAULT_READER_PREFERENCES.appearance.theme, 'warm');
   assert.equal(DEFAULT_READER_PREFERENCES.pdf.fit, 'page');

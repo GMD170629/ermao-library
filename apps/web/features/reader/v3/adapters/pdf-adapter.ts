@@ -8,6 +8,7 @@ import type {
   ReaderCommandAck,
   ReaderPreferences
 } from '@shuku/reader-core';
+import { effectiveReaderPageWidth } from '../page-width';
 import type {
   PDFDocumentLoadingTask,
   PDFDocumentProxy,
@@ -388,6 +389,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       return this.failOperation(context, 'stale-session');
     }
     const renderingGeometryChanged = preferences.pdf.rotation !== this.preferences?.pdf.rotation
+      || preferences.pdf.pageWidth !== this.preferences?.pdf.pageWidth
       || preferences.pdf.cropMargins !== this.preferences?.pdf.cropMargins;
     this.preferences = preferences;
     if (renderingGeometryChanged) this.cropBoxes.clear();
@@ -604,7 +606,8 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     const page = await document.getPage(pageNumber);
     this.assertRenderActive(generation, epoch, signal);
     const baseViewport = page.getViewport({ scale: 1, rotation: preferences.pdf.rotation });
-    const containerWidth = Math.max(1, this.container.clientWidth || window.innerWidth || baseViewport.width);
+    const visibleContainerWidth = Math.max(1, this.container.clientWidth || window.innerWidth || baseViewport.width);
+    const containerWidth = effectiveReaderPageWidth(preferences.pdf.pageWidth, visibleContainerWidth);
     const containerHeight = Math.max(1, this.container.clientHeight || window.innerHeight || baseViewport.height);
     const scale = pdfPageScale({
       pageWidth: baseViewport.width,

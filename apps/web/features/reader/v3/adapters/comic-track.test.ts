@@ -74,6 +74,7 @@ function view(overrides: Partial<ComicTrackView> = {}): ComicTrackView {
     mode: 'single',
     imageFit: 'contain',
     zoom: 1,
+    pageWidth: 800,
     reducedMotion: true,
     ...overrides
   };
@@ -122,6 +123,17 @@ test('comic track keeps the viewport and rotates persistent slots after promotio
   assert.equal(harness.driver.getSlotElement('next'), previous);
   assert.equal(harness.driver.getSlotElement('current').dataset.comicSpreadAnchor, '2');
   assert.equal(viewport.scrollLeft, 800);
+});
+
+test('comic spread width follows the bounded page-width preference', () => {
+  const harness = createHarness(view({ pageWidth: 720 }));
+  const frame = harness.driver.getSlotElement('current').children[0] as HTMLElement;
+
+  assert.equal(frame.style.maxWidth, '720px');
+
+  harness.setView(view({ pageWidth: 640, zoom: 1.5 }));
+  harness.driver.render();
+  assert.equal((harness.driver.getSlotElement('current').children[0] as HTMLElement).style.maxWidth, '960px');
 });
 
 test('zoomed comic navigation starts the promoted spread at the top', async () => {

@@ -125,12 +125,14 @@ export type ReaderPreferences = {
     imageFit: 'width' | 'height' | 'contain' | 'original';
     imageVariant: 'original' | 'data-saver';
     zoom: number;
+    pageWidth: number;
     flow: 'paged' | 'vertical';
     coverSingle: boolean;
     pageGap: 0 | 8 | 16 | 24;
   };
   pdf: {
     zoom: number;
+    pageWidth: number;
     fit: 'width' | 'page';
     flow: 'paged' | 'continuous';
     rotation: 0 | 90 | 180 | 270;

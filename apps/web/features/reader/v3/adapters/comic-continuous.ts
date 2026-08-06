@@ -14,6 +14,7 @@ export type ComicContinuousView = {
   pageGap: 0 | 8 | 16 | 24;
   imageFit: ComicImageFit;
   zoom: number;
+  pageWidth: number;
   pages: ComicTrackPage[];
 };
 
@@ -74,7 +75,7 @@ export class ComicContinuousController {
     this.currentPage = view.currentPage;
     this.root.dataset.comicContinuousCurrent = String(view.currentPage);
     this.root.style.paddingBlock = `${view.pageGap}px`;
-    const availableWidth = Math.max(1, this.root.clientWidth || this.container.clientWidth);
+    const availableWidth = Math.min(view.pageWidth, Math.max(1, this.root.clientWidth || this.container.clientWidth));
     const knownPages = new Set(view.pages.map((page) => page.pageIndex));
     for (const [page, slot] of this.slots) {
       if (knownPages.has(page)) continue;
@@ -83,6 +84,8 @@ export class ComicContinuousController {
     }
     view.pages.forEach((page) => {
       const slot = this.slotFor(page.pageIndex);
+      slot.element.style.maxWidth = `${availableWidth}px`;
+      slot.element.style.marginInline = 'auto';
       slot.element.style.marginBlockEnd = `${view.pageGap}px`;
       slot.element.style.minHeight = `${pageHeight(page, availableWidth, this.root.clientHeight, view.zoom)}px`;
       this.renderSlot(slot, page, view);

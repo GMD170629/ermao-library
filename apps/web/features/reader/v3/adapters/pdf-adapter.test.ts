@@ -152,9 +152,10 @@ test('PDF page navigation resets a zoomed document to the top', async () => {
       initialLocation: null,
       preferences: {
         ...DEFAULT_READER_PREFERENCES,
-        pdf: { ...DEFAULT_READER_PREFERENCES.pdf, zoom: 2 }
+        pdf: { ...DEFAULT_READER_PREFERENCES.pdf, fit: 'width', zoom: 2, pageWidth: 700 }
       }
     });
+    assert.equal(container.children[0]?.style.width, '1400px');
     container.scrollTop = 420;
 
     const acknowledged = await adapter.execute({ type: 'next' }, {
