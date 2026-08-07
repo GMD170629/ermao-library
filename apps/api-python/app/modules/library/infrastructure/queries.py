@@ -18,7 +18,10 @@ from app.models.library import (
 )
 from app.modules.library.application.filter_ast import FilterCondition, FilterExpression
 from app.modules.library.application.queries import SmartShelfCriteria
-from app.modules.library.infrastructure.filter_query import compile_filter_expression
+from app.modules.library.infrastructure.filter_query import (
+    compile_filter_expression,
+    resolve_monitor_folder_roots,
+)
 
 
 class SqlAlchemyLibraryQueries:
@@ -132,11 +135,17 @@ class SqlAlchemyLibraryQueries:
                     monitor_folder_ids=(),
                     authz_version=1,
                 )
+            monitor_folder_roots = resolve_monitor_folder_roots(
+                self._db,
+                criteria.filters,
+                context,
+            )
             dynamic = compile_filter_expression(
                 criteria.filters,
                 context=context,
                 user_id=user_id,
                 shelf_owner_user_id=user_id,
+                monitor_folder_roots=monitor_folder_roots,
             )
             if dynamic is not None:
                 predicates.append(dynamic)

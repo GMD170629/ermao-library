@@ -236,7 +236,7 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
         LibraryFile(
             id="file-alpha-1",
             volume_id=alpha_volumes[0].id,
-            path="/books/鸡皮疙瘩_100%/第一卷.epub",
+            path="/books/alpha/鸡皮疙瘩_100%/第一卷.epub",
             kind="BOOK",
             mime_type="application/epub+zip",
             size_bytes=2 * 1024 * 1024,
@@ -252,7 +252,7 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
         LibraryFile(
             id="file-beta",
             volume_id=beta_volume.id,
-            path="/books/鸡皮疙瘩X100Y/第一卷.pdf",
+            path="/books/beta/鸡皮疙瘩X100Y/第一卷.pdf",
             kind="PDF",
             mime_type="application/pdf",
             size_bytes=512 * 1024,
@@ -452,8 +452,14 @@ def test_work_list_applies_every_smart_filter_field(
     }
     schema_response = client.get("/api/library/filter-schema")
     assert schema_response.status_code == 200
-    schema_fields = {field["key"] for field in schema_response.json()["data"]["fields"]}
+    returned_fields = schema_response.json()["data"]["fields"]
+    schema_fields = {field["key"] for field in returned_fields}
     assert set(conditions_by_field) == schema_fields
+    field_keys = [field["key"] for field in returned_fields]
+    monitor_folder_index = field_keys.index("monitorFolder")
+    assert returned_fields[monitor_folder_index]["label"] == "监控文件夹"
+    assert field_keys[monitor_folder_index + 1] == "sourcePath"
+    assert returned_fields[monitor_folder_index + 1]["group"] == "来源与归档"
 
     for field, partial_condition in conditions_by_field.items():
         titles = _filtered_titles(
@@ -464,6 +470,79 @@ def test_work_list_applies_every_smart_filter_field(
             },
         )
         assert titles == ["星海列车"], field
+
+
+def test_monitor_folder_filter_matches_real_volume_file_paths(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    user = _login_admin(client, db_session)
+    _add_filter_matrix_fixture(db_session, user)
+    stored_folder_ids = {
+        "volume-alpha-1": "folder-beta",
+        "volume-alpha-2": None,
+        "volume-beta": "folder-alpha",
+    }
+    for volume_id, folder_id in stored_folder_ids.items():
+        volume = db_session.get(LibraryVolume, volume_id)
+        assert volume is not None
+        volume.monitor_folder_id = folder_id
+    real_paths = {
+        "file-alpha-1": "/books/alpha/星海列车/第一卷.epub",
+        "file-alpha-2": "/outside/星海列车/第二卷.epub",
+        "file-beta": "/books/beta/平凡日记/第一卷.pdf",
+        "file-empty": "/books/alpha-archive/sample.epub",
+    }
+    for file_id, path in real_paths.items():
+        library_file = db_session.get(LibraryFile, file_id)
+        assert library_file is not None
+        library_file.path = path
+    db_session.commit()
+
+    assert _filtered_titles(
+        client,
+        {
+            "combinator": "ALL",
+            "conditions": [
+                {
+                    "field": "monitorFolder",
+                    "operator": "equals",
+                    "value": "folder-alpha",
+                }
+            ],
+        },
+    ) == ["星海列车"]
+    assert set(
+        _filtered_titles(
+            client,
+            {
+                "combinator": "ALL",
+                "conditions": [
+                    {
+                        "field": "monitorFolder",
+                        "operator": "not_equals",
+                        "value": "folder-alpha",
+                    }
+                ],
+            },
+        )
+    ) == {"平凡日记", "空白样本"}
+    assert set(
+        _filtered_titles(
+            client,
+            {
+                "combinator": "ALL",
+                "conditions": [{"field": "monitorFolder", "operator": "is_not_empty"}],
+            },
+        )
+    ) == {"星海列车", "平凡日记"}
+    assert _filtered_titles(
+        client,
+        {
+            "combinator": "ALL",
+            "conditions": [{"field": "monitorFolder", "operator": "is_empty"}],
+        },
+    ) == ["空白样本"]
 
 
 def test_work_list_applies_all_operator_families_and_combinators(
@@ -669,7 +748,7 @@ def test_work_list_applies_all_operator_families_and_combinators(
                 "combinator": "ALL",
                 "conditions": [
                     {"field": "title", "operator": "contains", "value": "星海"},
-                        {"field": "format", "operator": "equals", "value": "EPUB"},
+                    {"field": "format", "operator": "equals", "value": "EPUB"},
                 ],
             },
         )

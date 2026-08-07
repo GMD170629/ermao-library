@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy import ColumnElement, func, select
 from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.authorization import AuthorizationContext, authorization_context
@@ -19,7 +20,10 @@ from app.modules.library.application.filter_ast import (
     InvalidFilterExpression,
     parse_filter_expression,
 )
-from app.modules.library.infrastructure.filter_query import compile_filter_expression
+from app.modules.library.infrastructure.filter_query import (
+    compile_filter_expression,
+    resolve_monitor_folder_roots,
+)
 
 TEXT_OPERATORS = [
     "contains",
@@ -185,13 +189,6 @@ FILTER_FIELDS: list[dict[str, Any]] = [
         "operators": NUMBER_OPERATORS,
     },
     {
-        "key": "sourcePath",
-        "label": "原始文件路径",
-        "group": "格式与文件",
-        "type": "text",
-        "operators": TEXT_OPERATORS,
-    },
-    {
         "key": "readingStatus",
         "label": "阅读状态",
         "group": "阅读与整理",
@@ -262,11 +259,18 @@ FILTER_FIELDS: list[dict[str, Any]] = [
     },
     {
         "key": "monitorFolder",
-        "label": "原始文件夹",
+        "label": "监控文件夹",
         "group": "来源与归档",
         "type": "select",
         "operators": SELECT_OPERATORS,
         "optionSource": "monitorFolders",
+    },
+    {
+        "key": "sourcePath",
+        "label": "原始文件路径",
+        "group": "来源与归档",
+        "type": "text",
+        "operators": TEXT_OPERATORS,
     },
     {
         "key": "origin",
@@ -336,7 +340,7 @@ STATIC_OPTIONS: dict[str, list[tuple[str, str]]] = {
 def _table_exists(db: Session, table: str) -> bool:
     try:
         return sa_inspect(db.connection()).has_table(table)
-    except Exception:
+    except SQLAlchemyError:
         return False
 
 
@@ -531,12 +535,14 @@ def compile_filter_predicate(
         return None, str(exc)
     context = _authorization_context_for_user(db, user_id)
     try:
+        monitor_folder_roots = resolve_monitor_folder_roots(db, expression, context)
         return (
             compile_filter_expression(
                 expression,
                 context=context,
                 user_id=user_id,
                 shelf_owner_user_id=shelf_owner_user_id,
+                monitor_folder_roots=monitor_folder_roots,
             ),
             None,
         )

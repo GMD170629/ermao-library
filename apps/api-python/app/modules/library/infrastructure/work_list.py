@@ -25,7 +25,10 @@ from app.modules.library.application.work_list import (
     WorkListResult,
     resolve_page_size,
 )
-from app.modules.library.infrastructure.filter_query import compile_filter_expression
+from app.modules.library.infrastructure.filter_query import (
+    compile_filter_expression,
+    resolve_monitor_folder_roots,
+)
 from app.modules.library.infrastructure.works import entity_as_legacy_dict
 
 
@@ -36,8 +39,7 @@ def _visible_volume_exists(
     media_version = aliased(LibraryMediaVersion)
     volume = aliased(LibraryVolume)
     return exists(
-        select(media_version.id)
-        .where(
+        select(media_version.id).where(
             media_version.work_id == LibraryWork.id,
             exists(
                 select(volume.id).where(
@@ -59,8 +61,7 @@ def _media_kind_predicate(
     media_version = aliased(LibraryMediaVersion)
     volume = aliased(LibraryVolume)
     return exists(
-        select(media_version.id)
-        .where(
+        select(media_version.id).where(
             media_version.work_id == LibraryWork.id,
             media_version.media_kind.in_(media_kinds),
             exists(
@@ -110,8 +111,7 @@ def _type_predicate(
     media_version = aliased(LibraryMediaVersion)
     volume = aliased(LibraryVolume)
     return exists(
-        select(media_version.id)
-        .where(
+        select(media_version.id).where(
             media_version.work_id == LibraryWork.id,
             exists(
                 select(volume.id).where(
@@ -149,8 +149,7 @@ def _status_predicate(
         )
     )
     unfinished = exists(
-        select(media_version.id)
-        .where(
+        select(media_version.id).where(
             media_version.work_id == LibraryWork.id,
             exists(
                 select(volume.id)
@@ -178,7 +177,10 @@ def _status_predicate(
 
 
 def _predicates(
-    context: AuthorizationContext, user: User, query: WorkListQuery
+    db: Session,
+    context: AuthorizationContext,
+    user: User,
+    query: WorkListQuery,
 ) -> list[ColumnElement[bool]]:
     predicates: list[ColumnElement[bool]] = [work_visibility_predicate(context)]
     if query.visibility == "ignored":
@@ -243,11 +245,17 @@ def _predicates(
             )
         )
     if query.filter_expression is not None:
+        monitor_folder_roots = resolve_monitor_folder_roots(
+            db,
+            query.filter_expression,
+            context,
+        )
         dynamic_filter = compile_filter_expression(
             query.filter_expression,
             context=context,
             user_id=user.id,
             shelf_owner_user_id=user.id,
+            monitor_folder_roots=monitor_folder_roots,
         )
         if dynamic_filter is not None:
             predicates.append(dynamic_filter)
@@ -287,7 +295,7 @@ def _order(query: WorkListQuery) -> list[ColumnElement[object]]:
 
 def list_works(db: Session, user: User, query: WorkListQuery) -> WorkListResult:
     context = authorization_context(db, user)
-    predicates = _predicates(context, user, query)
+    predicates = _predicates(db, context, user, query)
     total = int(
         db.scalar(
             select(func.count()).select_from(LibraryWork).where(and_(*predicates))
