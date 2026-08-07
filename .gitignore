@@ -8,6 +8,19 @@ apps/web/test-results/
 apps/web/playwright-report/
 apps/web/playwright.codex.config.ts
 apps/web/scripts/codex-bookshelf-visual-check.cjs
+test-results/
+playwright-report/
+blob-report/
+allure-results/
+coverage/
+htmlcov/
+.coverage
+.coverage.*
+.nyc_output/
+*.lcov
+*.log
+.eslintcache
+.stylelintcache
 dist
 .fnos-build
 .turbo
@@ -31,3 +44,6 @@ data
 /output/
 /artifacts/
 /validation-artifacts/
+/design-qa/
+/design-qa.md
+/design-qa*.png
