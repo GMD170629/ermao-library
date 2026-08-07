@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { COLLAPSED_STRUCTURE_VOLUME_LIMIT, structureVolumeList } from './structure-volume-list';
+import { COLLAPSED_STRUCTURE_VOLUME_LIMIT, structureVolumeList, structureVolumeShowsFileDetails } from './structure-volume-list';
 
 const volumes = Array.from({ length: 12 }, (_, index) => `volume-${index + 1}`);
 
@@ -24,4 +24,10 @@ test('content structure does not offer a toggle for ten or fewer volumes', () =>
 
   assert.deepEqual(result.visibleVolumes, volumes.slice(0, 10));
   assert.equal(result.canToggle, false);
+});
+
+test('content structure hides source file details for audiobook volumes', () => {
+  assert.equal(structureVolumeShowsFileDetails('AUDIOBOOK'), false);
+  assert.equal(structureVolumeShowsFileDetails('EBOOK'), true);
+  assert.equal(structureVolumeShowsFileDetails('COMIC'), true);
 });

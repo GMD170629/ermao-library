@@ -22,7 +22,7 @@ import { MetadataLookupModal } from './metadata-lookup-modal';
 import { bookActionIds, type BookActionId } from './model/book-action-menu';
 import { CHAPTER_DETAIL_PAGE_SIZE, singleVolumeEbook, type EbookChapterDetail } from './model/chapter-detail';
 import { structureFileLabel } from './model/structure-file-label';
-import { structureVolumeList } from './model/structure-volume-list';
+import { structureVolumeList, structureVolumeShowsFileDetails } from './model/structure-volume-list';
 import { volumeActionAvailability, type VolumeActionId } from './model/volume-action-menu';
 import { SingleVolumeChapterList } from './ui/single-volume-chapter-list';
 import { WorkMetadataEditor } from './ui/work-metadata-editor';
@@ -448,10 +448,10 @@ function StructureVersionCard({
               <span className="w-8 text-xs tabular-nums text-stone-400">{String(displayVolumeNumber(volume, index)).padStart(2, '0')}</span>
               <div className="min-w-0 flex-1">
                 <span data-i18n-skip className="block truncate text-sm text-stone-800" title={volume.title}>{volume.title}</span>
-                {volume.files.map((file) => {
+                {structureVolumeShowsFileDetails(mediaVersion.mediaKind) ? volume.files.map((file) => {
                   const label = structureFileLabel(volume.readerType, file.path);
                   return <span key={file.id} data-i18n-skip className="mt-0.5 block truncate text-xs text-stone-400" title={label}>{label}</span>;
-                })}
+                }) : null}
               </div>
               <span className="text-xs text-stone-400">{volumeUnitLabel(volume, t)}</span>
               {managementMode ? <div className="flex items-center gap-1">
