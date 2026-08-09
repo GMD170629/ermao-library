@@ -4,6 +4,23 @@ on:
   pull_request:
     paths:
       - 'apps/mobile/**'
+      - 'apps/api-python/app/api/**'
+      - 'apps/api-python/app/bootstrap/auth.py'
+      - 'apps/api-python/app/bootstrap/library.py'
+      - 'apps/api-python/app/bootstrap/media.py'
+      - 'apps/api-python/app/bootstrap/reader.py'
+      - 'apps/api-python/app/contracts/**'
+      - 'apps/api-python/app/core/auth.py'
+      - 'apps/api-python/app/core/authorization.py'
+      - 'apps/api-python/app/main.py'
+      - 'apps/api-python/app/modules/auth/**'
+      - 'apps/api-python/app/modules/library/**'
+      - 'apps/api-python/app/modules/media/**'
+      - 'apps/api-python/app/modules/reader/**'
+      - 'apps/api-python/app/modules/system/presentation/health*.py'
+      - 'apps/api-python/pyproject.toml'
+      - 'apps/api-python/scripts/export_openapi.py'
+      - 'apps/api-python/uv.lock'
       - 'packages/reader-core/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
@@ -15,6 +32,23 @@ on:
       - develop
     paths:
       - 'apps/mobile/**'
+      - 'apps/api-python/app/api/**'
+      - 'apps/api-python/app/bootstrap/auth.py'
+      - 'apps/api-python/app/bootstrap/library.py'
+      - 'apps/api-python/app/bootstrap/media.py'
+      - 'apps/api-python/app/bootstrap/reader.py'
+      - 'apps/api-python/app/contracts/**'
+      - 'apps/api-python/app/core/auth.py'
+      - 'apps/api-python/app/core/authorization.py'
+      - 'apps/api-python/app/main.py'
+      - 'apps/api-python/app/modules/auth/**'
+      - 'apps/api-python/app/modules/library/**'
+      - 'apps/api-python/app/modules/media/**'
+      - 'apps/api-python/app/modules/reader/**'
+      - 'apps/api-python/app/modules/system/presentation/health*.py'
+      - 'apps/api-python/pyproject.toml'
+      - 'apps/api-python/scripts/export_openapi.py'
+      - 'apps/api-python/uv.lock'
       - 'packages/reader-core/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
@@ -48,14 +82,34 @@ jobs:
           node-version-file: '.nvmrc'
           cache: pnpm
 
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: apps/api-python/.python-version
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Type-check shared reader contracts
         run: pnpm --filter @shuku/reader-core typecheck
 
+      - name: Check Mobile API contract drift
+        run: pnpm --filter @shuku/mobile api:check
+
       - name: Run Mobile quality gates
         run: pnpm --filter @shuku/mobile check
 
+      - name: Run aggregate Mobile UI and Router tests
+        run: pnpm --filter @shuku/mobile test
+
+      - name: Check Mobile translations
+        run: pnpm --filter @shuku/mobile i18n:check
+
+      - name: Check Expo dependencies and project health
+        run: pnpm --filter @shuku/mobile run doctor
+
       - name: Export Android and iOS bundles
-        run: pnpm --filter @shuku/mobile exec expo export --platform all --output-dir "$RUNNER_TEMP/mobile-export"
+        run: pnpm --filter @shuku/mobile export:check

@@ -121,6 +121,12 @@ def _file_resource_key(fmt: str, path: Path) -> str:
     return f"{fmt}:{_hash_text(str(path.resolve()))[:24]}"
 
 
+def _prepared_default_cover(options: ImportOptions) -> str:
+    if not options.default_cover_path:
+        raise RuntimeError("导入文件准备阶段未生成默认封面")
+    return options.default_cover_path
+
+
 def _classification_columns(
     classification: ContentClassification,
 ) -> dict[str, object]:
@@ -472,6 +478,7 @@ def _finalize_work_cover(
     work_id: str,
     media_version_id: str,
     cover_path: str | None,
+    default_cover_path: str,
 ) -> None:
     work = queries.get_work_by_id(work_id)
     if not work:
@@ -479,7 +486,7 @@ def _finalize_work_cover(
     preferred_cover_path = (
         _preferred_work_cover_path(queries, work_id, media_version_id, services)
         or cover_path
-        or services.ensure_default_cover()
+        or default_cover_path
     )
     current_cover_path = work.get("coverPath")
     should_update_cover = not current_cover_path or _is_generated_work_cover_path(

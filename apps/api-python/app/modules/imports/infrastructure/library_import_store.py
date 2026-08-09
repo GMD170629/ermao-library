@@ -7,8 +7,13 @@ transactions.
 
 from __future__ import annotations
 
+from typing import cast
+
 from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.schema import Table
+from sqlalchemy.sql.selectable import FromClause
 
 from app.models.import_pipeline import ImportAsset, ImportLog, ImportTask
 from app.models.library import (
@@ -29,9 +34,28 @@ class SqlAlchemyLibraryImportStore:
     def __init__(self, db: Session) -> None:
         self._db = db
 
+    def _upsert_by_id(
+        self, table: FromClause, columns: dict[str, object]
+    ) -> dict[str, object]:
+        """Idempotently persist one task-owned intermediate record."""
+
+        concrete_table = cast(Table, table)
+        statement = sqlite_insert(concrete_table).values(columns)
+        update_values = {
+            key: statement.excluded[key]
+            for key in columns
+            if key not in {"id", "createdAt"}
+        }
+        self._db.execute(
+            statement.on_conflict_do_update(
+                index_elements=[concrete_table.c.id],
+                set_=update_values,
+            )
+        )
+        return dict(columns)
+
     def insert_import_task(self, *, columns: dict[str, object]) -> dict[str, object]:
         self._db.execute(insert(ImportTask.__table__).values(columns))
-        self._db.flush()
         return dict(columns)
 
     def update_import_task(self, task_id: str, *, columns: dict[str, object]) -> None:
@@ -42,9 +66,7 @@ class SqlAlchemyLibraryImportStore:
         )
 
     def insert_import_asset(self, *, columns: dict[str, object]) -> dict[str, object]:
-        self._db.execute(insert(ImportAsset.__table__).values(columns))
-        self._db.flush()
-        return dict(columns)
+        return self._upsert_by_id(ImportAsset.__table__, columns)
 
     def update_import_asset(self, asset_id: str, *, columns: dict[str, object]) -> None:
         self._db.execute(
@@ -55,15 +77,12 @@ class SqlAlchemyLibraryImportStore:
 
     def insert_import_log(self, *, columns: dict[str, object]) -> dict[str, object]:
         self._db.execute(insert(ImportLog.__table__).values(columns))
-        self._db.flush()
         return dict(columns)
 
     def insert_library_work(self, *, columns: dict[str, object]) -> dict[str, object]:
         allowed = {column.name for column in LibraryWork.__table__.columns}
         values = {key: value for key, value in columns.items() if key in allowed}
-        self._db.execute(insert(LibraryWork.__table__).values(values))
-        self._db.flush()
-        return dict(values)
+        return self._upsert_by_id(LibraryWork.__table__, values)
 
     def update_library_work(self, work_id: str, *, columns: dict[str, object]) -> None:
         allowed = {column.name for column in LibraryWork.__table__.columns}
@@ -91,13 +110,12 @@ class SqlAlchemyLibraryImportStore:
         )
         if existing is not None:
             return dict(existing)
-        values = {
+        values: dict[str, object] = {
             key: columns[key]
             for key in ("id", "workId", "mediaKind", "createdAt", "updatedAt")
             if key in columns
         }
         self._db.execute(insert(LibraryMediaVersion.__table__).values(values))
-        self._db.flush()
         return dict(values)
 
     def update_library_media_version(
@@ -136,9 +154,22 @@ class SqlAlchemyLibraryImportStore:
         normalized = {**columns, "mediaVersionId": media_version_id}
         allowed = {column.name for column in LibraryVolume.__table__.columns}
         normalized = {key: value for key, value in normalized.items() if key in allowed}
-        self._db.execute(insert(LibraryVolume.__table__).values(normalized))
-        self._db.flush()
-        return dict(normalized)
+        existing_status = self._db.scalar(
+            select(LibraryVolume.import_status).where(
+                LibraryVolume.id == str(normalized["id"])
+            )
+        )
+        if existing_status is not None and str(existing_status) not in {
+            "COMPLETED",
+            "IMPORTED",
+            "READY",
+        }:
+            self._db.execute(
+                delete(LibraryMetadata).where(
+                    LibraryMetadata.volume_id == str(normalized["id"])
+                )
+            )
+        return self._upsert_by_id(LibraryVolume.__table__, normalized)
 
     def update_library_volume(
         self, volume_id: str, *, columns: dict[str, object]
@@ -153,9 +184,43 @@ class SqlAlchemyLibraryImportStore:
         path = columns.get("path")
         if isinstance(path, str):
             columns = {**columns, "pathKey": source_key(path)}
-        self._db.execute(insert(LibraryFile.__table__).values(columns))
-        self._db.flush()
-        return dict(columns)
+            existing = (
+                self._db.execute(
+                    select(
+                        LibraryFile.id,
+                        LibraryFile.volume_id,
+                        LibraryVolume.import_status,
+                    )
+                    .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
+                    .where(LibraryFile.path == path)
+                    .limit(1)
+                )
+                .mappings()
+                .first()
+            )
+            if existing is not None and str(existing["import_status"]) not in {
+                "COMPLETED",
+                "IMPORTED",
+                "READY",
+            }:
+                existing_id = str(existing["id"])
+                self._db.execute(
+                    delete(LibraryReadingUnit).where(
+                        LibraryReadingUnit.file_id == existing_id
+                    )
+                )
+                values = {
+                    key: value
+                    for key, value in columns.items()
+                    if key not in {"id", "createdAt"}
+                }
+                self._db.execute(
+                    update(LibraryFile.__table__)
+                    .where(LibraryFile.__table__.c.id == existing_id)
+                    .values(values)
+                )
+                return {**columns, "id": existing_id}
+        return self._upsert_by_id(LibraryFile.__table__, columns)
 
     def update_library_file(self, file_id: str, *, columns: dict[str, object]) -> None:
         path = columns.get("path")
@@ -180,9 +245,7 @@ class SqlAlchemyLibraryImportStore:
     def insert_library_reading_unit(
         self, *, columns: dict[str, object]
     ) -> dict[str, object]:
-        self._db.execute(insert(LibraryReadingUnit.__table__).values(columns))
-        self._db.flush()
-        return dict(columns)
+        return self._upsert_by_id(LibraryReadingUnit.__table__, columns)
 
     def update_library_reading_unit(
         self, unit_id: str, *, columns: dict[str, object]
@@ -215,9 +278,7 @@ class SqlAlchemyLibraryImportStore:
     ) -> dict[str, object]:
         if not columns.get("volumeId"):
             raise ValueError("LibraryMetadata.volumeId is required")
-        self._db.execute(insert(LibraryMetadata.__table__).values(columns))
-        self._db.flush()
-        return dict(columns)
+        return self._upsert_by_id(LibraryMetadata.__table__, columns)
 
     def update_library_reading_progress(
         self,
@@ -245,7 +306,6 @@ class SqlAlchemyLibraryImportStore:
 
     def insert_organize_job(self, *, columns: dict[str, object]) -> dict[str, object]:
         self._db.execute(insert(OrganizeJob.__table__).values(columns))
-        self._db.flush()
         return dict(columns)
 
     def update_organize_job(self, job_id: str, *, columns: dict[str, object]) -> None:
@@ -259,7 +319,6 @@ class SqlAlchemyLibraryImportStore:
         self, *, columns: dict[str, object]
     ) -> dict[str, object]:
         self._db.execute(insert(MetadataLookupTask.__table__).values(columns))
-        self._db.flush()
         return dict(columns)
 
     def update_metadata_lookup_task(

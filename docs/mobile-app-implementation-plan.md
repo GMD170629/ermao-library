@@ -1,1211 +1,490 @@
 # React Native + Expo 客户端实施计划
 
-> 状态：Proposed
-> 基线日期：2026-07-30
+> 状态：Active
+> 基线日期：2026-08-08
 > 目标平台：Android 手机/平板、iPhone、iPad
-> 首版定位：面向阅读与收听的配套客户端，系统管理继续由 Web 承担
+> 当前目标：先完成与 Web、FastAPI 和 `reader-core` 同源的移动端基线，再继续界面与业务功能开发
 
-## 1. 决策摘要
+## 1. 唯一实现基线
 
-在现有 monorepo 中新增独立的 `apps/mobile`，使用 React Native、Expo Development Build、Expo Router 和 TypeScript strict 开发一套 Android/iOS 客户端。
+移动端不保留独立的旧业务模型，也不为历史移动端原型增加兼容分支。所有新增实现必须直接使用仓库当前公开契约：
 
-客户端复用：
+- 业务层级是 `work -> mediaVersion -> volume`；
+- 阅读入口是 volume-first Reader v3；
+- 身份认证复用现有 Cookie Session 和 `/api/auth/*`；
+- 阅读控制、位置和偏好以 `packages/reader-core` 为唯一平台无关来源；
+- FastAPI OpenAPI 是 HTTP wire contract 的唯一来源；
+- `zh-CN`、`en-US`、根版本号和现有授权规则与 Web 保持一致。
 
-- FastAPI 现有公开 API、资源级授权和 Reader v2；
-- `packages/reader-core` 中的平台无关阅读协议、偏好与状态机；
-- FastAPI OpenAPI 作为唯一服务端契约来源；
-- 现有 `zh-CN` / `en-US` 完整性原则和根版本号。
+移动端直接切换到当前存储格式。旧移动快照不读取、不转换、不回写；发现不符合当前 schema 的快照时将其明确拒绝为不兼容本地数据，由后续界面提供清理并按当前契约重新建立 profile、会话状态和阅读进度。不得增加旧字段映射、双写或临时迁移层。
 
-客户端不复用：
+## 2. 当前契约
 
-- Next.js 页面、React DOM 组件和 Web 私有 feature；
-- Web 的 Cookie/sessionStorage/IndexedDB/PWA 实现；
-- EPUB、PDF、漫画和音频的 DOM 表现层；
-- Web 的生成文件和 i18n 私有目录。
+### 2.1 内容数据模型
 
-移动端不是整个 Web 的 WebView 套壳。只有 EPUB 和 PDF 渲染引擎运行在受控的本地 WebView runtime 中；导航、书库、漫画、下载、同步、有声书和系统集成都使用 React Native/Expo 能力。
+所有书库、详情、阅读、下载和进度功能使用以下稳定标识：
 
-### 1.1 初始技术版本
+```text
+workId
+  -> mediaVersionId
+      -> volumeId
+```
 
-仓库当前 Node.js 固定为 22.23.1，已满足 Expo SDK 57 的 Node.js 22.13.x 最低要求，Web Docker 镜像也已完成 Node 22 对齐。因此首期直接采用 Expo SDK 57；React Native New Architecture 和所有原生模块仍须在 M0 完成兼容性与真机验证，不借移动端初始化升级现有 Web 的 React、Next.js 或其他依赖。
+- `work` 表示作品及书名、作者、封面等作品级信息；
+- `mediaVersion` 表示电子书、漫画或有声书媒体版本；
+- `volume` 是阅读、阅读状态、书签、进度和文件访问的直接目标；
+- 文件与阅读单元由 Reader bootstrap 返回，不由客户端从路径或文件名推断；
+- 用户可见性和资源级授权继续由服务端按当前 actor 校验。
 
-Expo SDK、React Native、React 和所有原生模块都必须固定在 lockfile 中，不使用漂移的 latest。
+移动端路由和状态命名必须使用 `workId`、`mediaVersionId`、`volumeId`，不得引入另一套内容主键。
 
-## 2. 不影响 Web 的硬约束
+### 2.2 Reader v3
 
-以下约束是合并条件，不是建议：
+当前阅读接口：
 
-1. `apps/mobile` 不得导入 `apps/web/**`。
-2. `apps/web` 不得依赖 `apps/mobile`、移动端生成物或移动端原生模块。
-3. 不为了移动端升级 Web 的 React、Next.js、Node.js 或现有 EPUB.js。
-4. 不修改现有 `/api/auth/login` 的 path、Cookie、status、response envelope 或错误码。
-5. 后端移动能力只做向后兼容的增量接口；现有书库、Reader v2 和媒体接口继续作为唯一业务实现。
-6. 不增加一套重复的 “Mobile Library API”。
-7. 不把 Bearer/refresh token 暴露给 EPUB/PDF WebView。
-8. 不为移动端开启通配 CORS 或把 token 放入 URL query。
-9. `packages/reader-core` 只接受平台无关、向后兼容且有 Web/Mobile 两个真实消费者的规则。
-10. 提取 Web 纯规则时，必须单独成 PR：先加特征测试，再移动规则，再切换 Web import；不得与移动 UI 开发混在一起。
-11. Mobile CI 成熟前独立运行，不改动现有 fnOS/Web 发布链；触及后端、根依赖或共享包时必须运行 Web 回归门禁。
-12. 现有生产镜像仍只构建 Web/Python；`apps/mobile` 加入 `.dockerignore`，不得扩大当前 Docker 构建上下文。
+```text
+GET /api/reader/v3/volumes/{volumeId}/bootstrap
+PUT /api/reader/v3/volumes/{volumeId}/progress
+PUT /api/reader/v3/volumes/{volumeId}/reading-status
+GET /api/reader/v3/volumes/{volumeId}/bookmarks
+PUT /api/reader/v3/volumes/{volumeId}/bookmarks
+```
+
+Reader bootstrap 提供：
+
+- `book`、`mediaVersion`、当前 `volume` 和 `availableVolumes`；
+- `files`、`units`、`fileUrl`；
+- `readerType`、`sourceFormat` 和能力矩阵；
+- `contentFingerprint`、恢复位置和阅读百分比；
+- 电子书、漫画、PDF 和音频位置的显式联合类型。
+
+Reader v3 HTTP payload 的 `schemaVersion` 当前为 3。客户端必须在 feature API 边界校验 `unknown` 响应，并通过 mapper 转换为移动端 model 或 `reader-core` 类型。生成类型不可直接作为可编辑 UI 状态。
+
+### 2.3 `reader-core`
+
+`packages/reader-core` 当前 `READER_SCHEMA_VERSION` 为 4。移动端直接复用：
+
+- `ReaderKind`、`ReaderLocation`、`ReaderSource`；
+- `ReaderPreferences` 的完整当前结构；
+- `ReaderCommand`、`ReaderCapabilities`；
+- `ReaderAdapter`、事件、operation token 和 session 状态机；
+- 默认偏好、当前输入归一化和 schema 4 校验规则。
+
+必须区分两个独立版本：Reader v3 HTTP contract 使用 schema 3，`reader-core` 偏好模型使用 schema 4。任何映射都应位于 `features/reader/api` 或 reader application 边界，不能靠类型断言混用。
+
+视觉阅读器当前覆盖 `reflowable`、`comic`、`pdf`。有声书由独立 audio capability 管理，不扩充视觉 `ReaderKind`。
+
+### 2.4 Cookie Session
+
+移动端复用现有认证接口：
+
+```text
+GET  /api/auth/setup/status
+POST /api/auth/login
+GET  /api/auth/me
+POST /api/auth/logout
+```
+
+统一 transport 使用 `credentials: include`，由平台网络栈维护会话 Cookie。客户端不定义第二套认证协议，不把 Cookie 注入 Reader WebView、URL、日志、本地 JSON 或崩溃上下文。
+
+身份 application 层负责：
+
+- 检查服务端初始化状态；
+- 登录并把 wire session 映射为显式用户模型；
+- App 启动或回到前台时通过 `/api/auth/me` 恢复会话；
+- 注销、401 失效和服务器切换时清理内存中的用户态数据；
+- 按稳定错误码处理未初始化、凭据错误和账号停用。
+
+### 2.5 服务入口和媒体
+
+App 只保存用户在浏览器中访问二毛图书时使用的 Web 根地址，绝不要求用户填写独立的 API/后台地址或内部端口。移动端保留反向代理 base path，并从该前台地址同源派生 `GET /api/health`、`/api/auth/*` 和后续业务 API。profile 当前按规范化 `baseUrl` 标识，不引入新的服务端身份接口。
+
+Reader 返回的封面、文件和页面地址保持相对 URL，由已验证的 server profile 解析。媒体访问继续复用当前 `/api/files/{fileId}`、`/api/volumes/{volumeId}/file` 及 Reader 返回的资源地址，并遵守 GET、HEAD、Range、ETag、Last-Modified 和资源级授权语义。
 
 ## 3. 产品范围
 
-### 3.1 Beta 范围
+### 3.1 在线阅读 Beta
 
-- 手工添加自托管服务器地址；
-- 服务器初始化状态探测；
-- 设备登录、自动刷新、注销；
-- 书库首页、搜索、筛选、书架、作品详情；
-- 封面展示；
-- 漫画、EPUB、PDF 在线阅读；
-- 阅读偏好、书签、进度恢复与同步；
+- 手工输入或扫描书库前台地址；
+- 服务健康和初始化状态检查；
+- Cookie Session 登录、恢复与注销；
+- 书库首页、搜索、筛选、书架和作品详情；
+- 从 media version 中选择 volume；
+- EPUB/其他可重排格式、漫画和 PDF 在线阅读；
+- 阅读偏好、阅读状态、书签、本地恢复和服务端进度；
 - 手机和平板自适应布局；
 - `zh-CN`、`en-US`；
-- 深色模式、Dynamic Type/字体缩放、VoiceOver/TalkBack 基础支持；
-- Android/iOS 内部分发安装包。
+- 深色模式、字体缩放、VoiceOver/TalkBack 和横竖屏支持。
 
-### 3.2 V1 范围
+### 3.2 后续范围
 
-- EPUB、PDF、漫画和有声书离线下载；
-- 有声书后台播放、锁屏控制、耳机控制、中断恢复、倍速和睡眠定时；
-- 下载暂停、恢复、校验、空间不足和失效处理；
-- 多服务器 profile 与同一服务器多地址切换；
-- iPad/Android 平板双栏或三栏、横屏、键盘、鼠标/触控板；
+- EPUB、PDF、漫画和音频离线下载；
+- 有声书后台播放、系统媒体控制、中断恢复、倍速和睡眠定时；
+- 下载暂停、恢复、校验、容量处理和失效处理；
+- 多服务器 profile；
+- iPad 和 Android 平板双栏或三栏；
 - TestFlight 和 Google Play Internal Testing；
-- 可安装升级、App 数据迁移和分阶段发布。
+- App 数据升级与分阶段发布。
 
-### 3.3 首版不做
+### 3.3 不在移动端实现
 
-- 在手机上运行 Python、Worker 或服务端 SQLite；
-- 服务端系统管理、备份恢复、元数据提供方配置；
-- 完整导入任务管理、监控文件夹和下载器管理；
-- 与 Web 页面像素级一致；
+- Python、Worker 或服务端 SQLite；
+- 服务端系统管理、备份恢复和元数据提供方配置；
+- 完整导入任务、监控目录和下载器管理；
+- Web 页面套壳或 Web 私有 feature 复用；
 - 修改或 patch EPUB.js；
-- 桌面端；
-- 远程推送通知；
-- 默认采集用户阅读内容或行为分析。
+- 默认采集书籍内容或用户阅读内容。
 
-管理能力保留在 Web。App 可提供“在 Web 管理端打开”的安全深链，但不嵌入已登录的管理页面。
-
-## 4. 当前可复用基础
-
-### 4.1 公开服务入口
-
-生产环境只公开 Web 端口，Next 将 `/api/*` 转发给容器内 FastAPI。App 保存的是用户可访问的 Web 根地址，而不是内部 Python 8000 端口。
-
-示例：
+## 4. 架构与依赖方向
 
 ```text
-https://books.example.com
-https://nas.example.com/apps/shuku
-http://192.168.1.20:3000
+index/composition
+  -> app-shell
+      -> feature UI
+          -> feature application
+              -> feature model
+
+feature api/files adapters
+  -> application ports and explicit model types
+
+reader host
+  -> reader-core + format adapter
 ```
 
-Reader v2 返回的文件、音轨和页面地址保持相对 URL，由当前 server profile 解析。不得改成绝对 URL，否则会破坏反向代理和 base path 部署。
+硬约束：
 
-### 4.2 Reader v2
+1. `apps/mobile` 不导入 `apps/web/**`。
+2. `apps/web` 不依赖移动端代码、生成物或原生模块。
+3. feature 外部只能经该 feature 的 `public.ts` 使用能力。
+4. UI、页面和 reducer 不直接调用 `fetch`、文件系统或持久化 API。
+5. 网络、存储和 URL 输入先按 `unknown` 校验，再映射为显式类型。
+6. `generated/**` 只由脚本生成，禁止手改。
+7. `reader-core` 保持无 React 和平台运行时依赖。
+8. 不新增顶层 `utils`、`helpers`、`managers` 或通用 `services`。
+9. 每个异步流程支持取消或陈旧结果拒绝。
+10. 用户可见文案同时完成中英文和无障碍标签。
 
-现有 Reader v2 已提供：
-
-- edition bootstrap；
-- 格式、卷、章节、漫画页和音轨；
-- 阅读能力、偏好和恢复位置；
-- `contentFingerprint`；
-- 书签；
-- EPUB locations 缓存/租约；
-- `mutationId`、`clientId`、`clientSequence` 和 `applied`；
-- 相同客户端序列的幂等/单调写入。
-
-移动端直接复用该协议。首版维持当前跨客户端“按服务器到达顺序覆盖”的语义，不改变 Reader v2。若以后需要 Web/App 强冲突检测，应新增 Reader v3 的 `progressVersion/baseVersion`，不能静默改变 v2。
-
-### 4.3 媒体流
-
-现有媒体层已支持：
-
-- GET、HEAD（`/api/files/{fileId}`）；
-- 单一 byte range；
-- 200、206、304、416；
-- `If-Range`；
-- `Accept-Ranges`、`Content-Length`、`Content-Range`；
-- ETag、Last-Modified；
-- 每用户流并发限制；
-- 文件、edition、volume、work 资源级授权。
-
-移动端下载并发默认限制为 2，最多允许用户调整至 4；429 使用带抖动的指数退避。弱 ETag 导致恢复请求返回 200 时，必须重建临时文件，不能追加到 partial 文件。
-
-### 4.4 `reader-core`
-
-移动端直接依赖：
-
-- `ReaderKind`、`ReaderLocation`；
-- `ReaderPreferences`；
-- `ReaderCommand`、`ReaderCapabilities`；
-- `ReaderAdapterEvent`；
-- `ReaderAdapter` 生命周期和取消；
-- session/operation token 状态机；
-- 偏好默认值、迁移和 `unknown` 输入归一化。
-
-不在移动端重新定义这些协议。
-
-## 5. 目标架构
-
-```mermaid
-flowchart LR
-    subgraph Mobile["apps/mobile"]
-        Route["Expo Router composition"]
-        UI["Feature UI"]
-        Application["Feature application"]
-        Model["Feature model"]
-        ApiAdapter["API adapters"]
-        StorageAdapter["SQLite / FileSystem / SecureStore adapters"]
-        ReaderHost["Reader host"]
-        AudioRuntime["Native audio runtime"]
-    end
-
-    ReaderCore["packages/reader-core"]
-    FastAPI["Existing FastAPI API"]
-    WebViewRuntime["Local EPUB/PDF WebView runtimes"]
-    Web["Existing Next.js Web/PWA"]
-
-    Route --> UI
-    UI --> Application
-    Application --> Model
-    Application --> ApiAdapter
-    Application --> StorageAdapter
-    ReaderHost --> ReaderCore
-    ReaderHost --> WebViewRuntime
-    AudioRuntime --> Application
-    ApiAdapter --> FastAPI
-    Web --> FastAPI
-    Web -. "no dependency on mobile" .-> Mobile
-```
-
-依赖方向：
-
-```text
-app route -> feature UI -> feature application -> feature model
-feature api/storage adapters -> application ports and explicit model types
-reader host -> reader-core + format-specific adapter
-```
-
-禁止：
-
-```text
-feature UI -> raw fetch / SecureStore / SQLite / FileSystem
-feature A -> feature B private files
-mobile -> web private code
-WebView -> long-lived credentials
-generated DTO -> editable UI state
-```
-
-## 6. 建议目录
+目标结构按真实代码逐步创建：
 
 ```text
 apps/mobile/
-├── app/                                  # Expo Router；只做组合和导航
-│   ├── _layout.tsx
-│   ├── (auth)/
-│   ├── (main)/
-│   ├── work/[workId].tsx
-│   └── reader/[editionId].tsx
-├── features/
-│   ├── servers/
-│   │   ├── api/
-│   │   ├── model/
-│   │   ├── application/
-│   │   ├── ui/
-│   │   └── public.ts
-│   ├── identity/
-│   ├── library/
-│   ├── reader/
-│   │   ├── adapters/
-│   │   │   ├── comic/
-│   │   │   ├── epub-webview/
-│   │   │   └── pdf-webview/
-│   │   ├── application/
-│   │   ├── model/
-│   │   ├── ui/
-│   │   └── public.ts
-│   ├── reader-progress/
-│   ├── downloads/
-│   └── audio/
-├── shared/
-│   ├── api/
-│   ├── i18n/
-│   ├── storage/
-│   ├── telemetry/
-│   └── ui/
-├── generated/                            # 生成物；禁止手改
-├── reader-runtimes/
-│   ├── epub/                             # WebView runtime 源码
-│   └── pdf/
-├── scripts/
-│   ├── generate-api.mjs
-│   ├── check-api-drift.mjs
-│   ├── build-reader-runtimes.mjs
-│   └── check-i18n.mjs
-├── tests/
-├── .maestro/
-├── app.config.ts
-├── eas.json
+├── generated/                       # 提交的 OpenAPI 生成物
+├── scripts/                         # 契约、i18n、runtime 门禁
+├── src/
+│   ├── app-shell/                   # 根布局和自适应导航组合
+│   ├── bootstrap/                   # composition root
+│   ├── features/
+│   │   ├── server-connection/
+│   │   ├── identity/
+│   │   ├── library/
+│   │   ├── reader/
+│   │   ├── reader-progress/
+│   │   ├── downloads/
+│   │   └── audio/
+│   └── shared/
+│       ├── api/
+│       ├── files/
+│       ├── i18n/
+│       ├── infrastructure/
+│       ├── ui/
+│       └── validation/
+├── app.json
+├── index.ts
 ├── package.json
 └── tsconfig.json
 ```
 
-目录只在放入真实代码时创建。不得新增顶层 `utils`、`helpers`、`managers` 或通用 `services`。
+## 5. API 和生成契约
 
-## 7. 技术选型
+FastAPI OpenAPI 是生成物的输入。移动端 Reader 生成流程：
 
-| 领域 | 选择 |
-| --- | --- |
-| 运行时 | React Native + Expo SDK 57 Development Build |
-| 导航 | Expo Router |
-| 语言 | TypeScript strict |
-| 服务端状态 | TanStack Query |
-| 工作流状态 | 纯 reducer/显式状态机 |
-| API transport | `shared/api` 中的唯一 fetch 入口 |
-| 外部数据校验 | feature `api/schemas.ts` 运行时校验 |
-| 安全凭据 | Expo SecureStore |
-| 本地结构化数据 | Expo SQLite + capability repository |
-| 本地文件 | Expo FileSystem |
-| 网络变化 | NetInfo |
-| EPUB/PDF | React Native WebView + 本地 runtime |
-| 漫画 | React Native 原生图片 + Gesture Handler/Reanimated |
-| 有声书 | Expo Audio；验证失败时封装自有 Expo Module |
-| 单元/组件测试 | Jest + React Native Testing Library |
-| E2E | Maestro |
-| 构建 | Expo CNG + EAS Build |
+1. 使用 `apps/api-python/scripts/export_openapi.py` 导出当前 OpenAPI；
+2. 由 `apps/mobile/scripts/generate-reader-api.mjs` 选择 Reader v3 所需 schemas；
+3. 生成 `apps/mobile/generated/reader-v3.ts`；
+4. `api:check` 重新导出、生成并检查工作树无 drift；
+5. feature wire decoder 对字段集合、联合类型、边界值和响应大小做运行时校验；
+6. mapper 把 wire DTO 转为 volume-first model 和 `reader-core` 类型。
 
-不默认引入全局 Zustand/Redux。只有出现真实、跨页面、无法由 server cache、URL/router 或 feature runtime 所有的状态时，才用单独 ADR 引入。
+生成器必须确定性输出。后端 reader、auth、library、media、共享 HTTP contract 或 OpenAPI 导出逻辑变化时，Mobile CI 必须运行。
 
-## 8. pnpm、React 和 monorepo 隔离
+后续增加 library client 时沿用相同原则，不创建重复的移动端专用服务端接口。
 
-现有 `pnpm-workspace.yaml` 已覆盖 `apps/*`，新增 `apps/mobile` 不需要修改 workspace 范围。
+## 6. 网络和身份边界
 
-Mobile 使用 Expo SDK 57 对应的 React 19.2 和 React Native 0.86，Web 使用 Next.js 16 对应的 React 19。必须：
+`shared/api` 是唯一 JSON transport，负责：
 
-- 保留 pnpm isolated dependency 安装策略；
-- 不在根目录用 override/resolution 强制 React 单版本；
-- `packages/reader-core` 保持无 React 运行时依赖；
-- Mobile 只显式依赖自己的 React、React Native 和 Expo 版本；
-- 每次依赖更新运行 `expo-doctor`；
-- 检查 Mobile 构建中没有重复原生模块；
-- 不为了去重将 Web 升级到 React 19。
+- base path 安全拼接；
+- `credentials: include`；
+- GET、POST、PUT、PATCH、DELETE；
+- JSON 编码和 Content-Type；
+- AbortSignal、超时和最大响应体限制；
+- 手动重定向策略；
+- 网络、取消、超时、无效 JSON 和超限响应归一化。
 
-门禁：
+feature API adapter 负责 endpoint、运行时 schema、wire mapper 和稳定 outcome。UI 只处理 named outcome，不按原始 status 或本地化 message 决策。
 
-```bash
-pnpm --filter @shuku/mobile why react react-native expo
-pnpm --filter @shuku/web why react react-dom
-pnpm --filter @shuku/mobile doctor
-```
+服务器切换、用户注销和 session 失效时必须取消请求并清理用户态内存缓存。日志不得包含密码、Cookie、响应 body、书籍内容或本地路径。
 
-后续 Expo SDK 升级条件：
+## 7. 本地持久化
 
-1. 保持已通过的 Web Node 22 兼容性门禁；
-2. Python/构建脚本和 fnOS/Docker 构建通过；
-3. Mobile 所有原生模块支持目标 React Native New Architecture；
-4. 作为独立 PR 合并，不夹带产品功能。
+当前基础设施使用 App 私有文档目录和版本化快照：
 
-## 9. 后端兼容扩展
+- 临时文件写入；
+- 写后回读和运行时 schema 校验；
+- 原子移动发布；
+- 当前和上一份有效快照；
+- 损坏回退；
+- 同目录操作串行化。
 
-### 9.1 服务器信息
+当前文档：
 
-新增公开只读接口：
+| 文档 | 当前 schema | 所有权 |
+| --- | ---: | --- |
+| `shuku.server-profiles` | 2 | `server-connection` |
+| `shuku.reader-progress` | 3 | `reader-progress` |
+| `ReaderPreferences` | 4 | `reader-core` 定义，reader feature 持久化 |
+
+旧移动快照没有迁移路径。codec 只接受当前字段集合、当前 schema 和当前不变量；不匹配时作为不兼容数据拒绝，不尝试恢复旧字段。此决策适用于开发阶段已有的服务器 profile、阅读进度和偏好快照。
+
+阅读进度槽位按以下维度隔离：
 
 ```text
-GET /api/mobile/v1/server-info
+profileId + baseUrl + owner + workId + mediaVersionId
++ volumeId + contentFingerprint + readerKind
 ```
 
-响应至少包含：
+本地进度必须支持 schema 4 中的可重排位置，包括 `foliate` 精确恢复快照。漫画位置必须绑定同一个 `volumeId`。容量、字段长度、重复槽位、序列单调性和最坏文件大小继续由测试覆盖。
 
-```ts
-type MobileServerInfo = {
-  product: 'shuku-starship';
-  instanceId: string;
-  displayName: string;
-  version: string;
-  apiVersions: string[];
-  authMethods: Array<'device-bearer'>;
-  initialized: boolean;
-  supportedLocales: Array<'zh-CN' | 'en-US'>;
-};
-```
-
-`instanceId` 是数据库持久化 UUID，不能使用进程/Worker 实例 ID。App 的账号、token、SQLite、文件、下载和 outbox 均以：
+服务端同步阶段在现有本地模型上增加持久 outbox：
 
 ```text
-serverInstanceId + userId
+记录本地位置
+-> 持久化待发送 mutation
+-> 按 clientSequence 发送 Reader v3 progress
+-> compare-delete
+-> 更新本地 head
 ```
 
-隔离。服务器 URL 只是一个可替换连接地址。
+`applied: false`、内容指纹冲突、401、取消和网络错误都必须成为显式状态，不得 fallback-to-success。
 
-### 9.2 设备会话
+## 8. App 壳和界面基础
 
-保留现有 Cookie 登录，新增：
+当前壳层职责：
+
+- Safe Area 和状态栏；
+- 系统明暗主题；
+- 独立 `zh-CN` / `en-US` catalog；
+- compact 底部导航和 expanded 侧栏；
+- 可访问的共享文字、按钮、图标按钮、卡片、通知、加载状态和页面脚手架；
+- Expo Router 的 `(connection)`、`(auth)`、`(main)` 受保护 route group；
+- 由 app-flow state 统一决定连接、身份和已登录主界面的访问边界；
+- 启动与前台会话恢复、前序异步操作取消和陈旧结果拒绝；
+- 服务端确认注销后才退出已登录态，注销失败时保留会话并报告 warning。
+
+壳层不是已完成页面。B1 连接页面已接入 feature application；登录、书库和阅读仍须按阶段替换占位 route，不在占位组件中直接堆叠网络和持久化逻辑。
+
+按可用窗口宽度自适应，而不是按设备名称分支：
 
 ```text
-POST   /api/mobile/v1/auth/login
-POST   /api/mobile/v1/auth/refresh
-POST   /api/mobile/v1/auth/logout
-GET    /api/mobile/v1/auth/devices
-DELETE /api/mobile/v1/auth/devices/{deviceSessionId}
+compact   < 760
+expanded  >= 760
 ```
 
-后端 `DeviceSession` 至少包含：
+实现时覆盖安全区、横竖屏、分屏、系统返回、键盘、pointer、触摸、字体缩放、reduced motion 和屏幕阅读器。
+
+## 9. 阅读器实现
+
+Reader host 持有 session、adapter、operation token、取消、dispose、controls 可见性、当前 source 和进度 application。Reader UI 只发送用户意图。
+
+### 9.1 漫画
+
+首个完整阅读垂直切片：
 
 ```text
-id
-userId
-deviceId
-deviceName
-platform
-accessTokenHash
-refreshTokenHash
-tokenFamilyId
-accessExpiresAt
-refreshExpiresAt
-rotatedAt
-revokedAt
-lastUsedAt
-createdAt
+volume bootstrap
+-> wire validation and mapper
+-> ReaderSource
+-> reader-core session
+-> 原生图片 adapter
+-> 本地进度
+-> Reader v3 progress
 ```
 
-规则：
+覆盖单页/双页、LTR/RTL、横滑、点击区、工具栏、进度跳转、缩放互斥、有限预取、旋转、内存预算和隐藏 controls 恢复。
 
-- 使用随机 opaque token，不使用可长期自验证且难撤销的 JWT；
-- access token 短期有效，refresh token 长期有效并每次轮换；
-- 数据库只存 hash；
-- 重用旧 refresh token 时撤销 token family；
-- 修改密码、停用或删除用户时同时撤销 Cookie 与设备会话；
-- App 只通过 `Authorization: Bearer` 发送 access token；
-- token 不进入 URL、日志、SQLite、WebView 或崩溃上下文；
-- refresh token 仅存 SecureStore；
-- Web 登录响应不返回 token。
+### 9.2 可重排格式
 
-统一认证解析器接受 Cookie 或 Bearer，并继续返回同一种 authenticated actor。资源级授权仍由原有 library/reader/media 用例执行。
+使用本地 WebView runtime 和官方阅读引擎，通过版本化 bridge 传递命令、事件、位置、偏好和小型元数据。WebView 不持有 Cookie，不加载远程脚本，不接受未校验消息。
 
-### 9.3 缓存隔离
+实现 CFI/href/progression/foliate、目录、分页/滚动、主题、字体、排版和重建恢复，并完整映射 schema 4 `ReaderPreferences`。
 
-加入 Bearer 后，用户态响应至少设置：
+### 9.3 PDF
 
-```http
-Vary: Cookie, Authorization
-Cache-Control: private
-```
+使用本地 PDF runtime，支持 page、zoom、fit、rotation、continuous/paged、文本层、Range、本地文件和渲染预算。上层只依赖 `ReaderAdapter`，允许以后替换渲染实现。
 
-认证、会话和敏感响应使用 `no-store`。测试覆盖：
+### 9.4 音频
 
-- Cookie 与 Bearer；
-- 两个用户；
-- JSON、封面、Reader bootstrap；
-- 200/206/304/401/404/416；
-- Range 和 HEAD。
+audio capability 独立管理 track、章节、position、系统媒体控制、后台播放和中断恢复。Reader v3 bootstrap 和 progress 仍提供音频服务端契约，但不把音频塞入视觉 reader state。
 
-### 9.4 OpenAPI
+## 10. 国际化和可访问性
 
-保留 Web 的现有生成脚本和 `apps/web/generated/reader-v2.ts`。
+- 所有 UI 文案使用 Mobile 自有 i18n API；
+- `zh-CN` 和 `en-US` 在同一变更中完成；
+- 校验缺失键、多余键、中文残留和 placeholder 不一致；
+- 日期、时间、数字、百分比使用当前 locale；
+- 用户书名、作者、标签、书架和文件名保持原样；
+- 权限说明、错误、空状态、toast 和 accessibility label 均双语；
+- 交互目标满足 44pt/48dp，支持字体缩放和读屏；
+- 隐藏阅读 controls 后必须始终存在可发现的恢复方式。
 
-新增 Mobile 生成流程：
+## 11. 安全要求
 
-1. 从 FastAPI 导出 OpenAPI；
-2. 只选择 Mobile V1、auth/me、dashboard、works、shelves、Reader v2 和媒体相关 operation；
-3. 生成 `apps/mobile/generated/api.ts`；
-4. 生成文件提交到仓库，使 EAS 不依赖 Python/uv；
-5. CI 重新生成并检查 drift；
-6. HTTP JSON 仍作为 `unknown` 接收，在 feature `api/schemas.ts` 校验并映射为 model。
+- 公网地址要求 HTTPS；LAN HTTP 仅允许明确的私有地址范围；
+- 不关闭 TLS 校验，不接受任意证书；
+- 重定向由 transport 拒绝或显式重新验证；
+- WebView 默认只加载本地 runtime 和受控内容；
+- 文件路径由受控 ID 构造并限制在 App 私有根目录；
+- 不信任 filename、MIME、长度或相对资源 URL；
+- 每个服务端资源操作继续执行 actor 范围授权；
+- 账号和服务器切换不得复用旧用户的请求、缓存或进度队列。
 
-OpenAPI 新增 `cookieAuth`、`bearerAuth` security scheme，并明确每个 operation 的安全要求。
+## 12. 实施路线图
 
-### 9.5 下载清单
-
-完整离线阶段新增：
-
-```text
-GET /api/mobile/v1/editions/{editionId}/download-manifest?volume={volumeId}
-```
-
-清单只编排当前用户可见资源：
-
-```ts
-type DownloadManifest = {
-  editionId: string;
-  volumeId: string | null;
-  contentFingerprint: string;
-  format: 'epub' | 'pdf' | 'comic' | 'audio';
-  totalBytes: number;
-  assets: Array<{
-    assetId: string;
-    fileId: string;
-    url: string;
-    mimeType: string;
-    filename: string;
-    size: number;
-    contentHash: string;
-    sortOrder: number;
-  }>;
-};
-```
-
-不得暴露服务端文件系统路径。每个 asset 继续通过现有受授权媒体端点下载。给 `/api/editions/{editionId}/file` 补 HEAD，与 `/api/files/{fileId}` 对齐。
-
-## 10. Mobile API transport
-
-只有 `shared/api/transport.ts` 和 feature `api/client.ts` 可以发起网络请求。
-
-Transport 负责：
-
-- server base path 解析；
-- Bearer access token；
-- 单飞 refresh 和失败后的统一注销；
-- `AbortSignal`；
-- request correlation ID；
-- JSON/content-type/envelope 解码；
-- 401、429、超时、离线和传输错误归一化；
-- 重定向 host/scheme 变化时移除 Authorization；
-- 不记录 body、token、Cookie 或书籍内容。
-
-Feature API adapter 负责：
-
-- endpoint 参数；
-- `unknown` 响应运行时校验；
-- wire DTO -> feature model；
-- 稳定错误码 -> named outcome。
-
-UI 不处理原始 HTTP status、后端本地化 message 或任意字典。
-
-## 11. 本地数据和同步
-
-### 11.1 存储所有权
-
-| 数据 | 所有者 |
-| --- | --- |
-| access/refresh token | SecureStore |
-| server URL、instanceId、非秘密 profile | servers repository |
-| 书库缓存 | library SQLite repository |
-| 阅读偏好 | reader preferences repository |
-| 待同步进度 | reader-progress SQLite outbox |
-| 下载状态 | downloads SQLite repository |
-| EPUB/PDF/漫画/音频内容 | App 私有文件目录 |
-| 页面临时状态 | 最近的 UI component/reducer |
-| 服务端事实 | TanStack Query + feature application |
-
-SQLite 不成为一个通用数据库访问层。各 capability 拥有自己的 repository、migration 和 DTO；UI/application 不写 SQL。
-
-### 11.2 进度 outbox
-
-沿用 Web 已验证的语义：
-
-```text
-先写持久 outbox
-→ debounce
-→ 按 clientSequence 顺序发送
-→ compare-delete
-→ 成功更新本地 head
-→ 可重试错误指数退避
-→ terminal/fingerprint 冲突隔离
-```
-
-规则：
-
-- `clientId` 每个安装生成一次；
-- `clientSequence` 按 `serverInstanceId + userId + workId + clientId` 持久单调递增；
-- `mutationId` 全局唯一；
-- AppState、NetInfo、登录完成和 reader dispose 唤醒同步；
-- 不创建无所有者的 fire-and-forget task；
-- 收到 `applied:false` 后重新拉 bootstrap；
-- 收到 `CONTENT_FINGERPRINT_MISMATCH` 后隔离旧 outbox、清除该内容位置并重新 bootstrap；
-- 账号切换立即取消旧请求，旧账号队列不得由新账号发送。
-
-恢复顺序：
-
-```text
-明确深链位置
-> 同 server/user/edition/volume/fingerprint 的本地待同步位置
-> 服务端 bootstrap 位置
-```
-
-### 11.3 下载状态机
-
-```text
-queued
-→ downloading
-→ verifying
-→ ready
-
-downloading/verifying
-→ paused | failed | invalidated
-
-ready
-→ deleting
-→ removed
-```
-
-要求：
-
-- 临时路径下载；
-- 校验长度和 hash 后原子发布；
-- partial 与 manifest fingerprint 绑定；
-- 200 覆盖恢复请求时重新开始，禁止把完整响应追加到 partial；
-- “删除下载”和“从书库删除”是不同命令；
-- 用户明确保存的离线内容不被普通 cache LRU 自动清除；
-- transient cache 可按空间预算清理；
-- 退出账号默认撤销会话并锁定该账号数据，提供单独的“同时删除本机内容”操作；
-- 服务器、账号和 fingerprint 变化时不静默复用文件；
-- iOS/Android 杀进程后可从 SQLite 状态恢复。
-
-首版不承诺无限后台下载。阶段 0 验证 Expo/平台后台传输能力；若无法满足大文件可靠下载，则用自有 Expo Module 封装 iOS background `URLSession` 和 Android foreground work，而不是依赖 JavaScript 定时器。
-
-## 12. 阅读器实现
-
-### 12.1 共享控制层
-
-Mobile Reader runtime 持有：
-
-- `ReaderSessionState`；
-- 当前 `ReaderAdapter`；
-- operation token；
-- abort/dispose；
-- controls visibility；
-- progress outbox；
-- local/remote source selection。
-
-Reader UI 只发送用户意图，不直接调用 EPUB.js、PDF.js、SQLite 或 fetch。
-
-### 12.2 WebView bridge
-
-EPUB/PDF 共用版本化消息 envelope：
-
-```ts
-type ReaderBridgeEnvelope = {
-  protocolVersion: 1;
-  messageId: string;
-  sessionId: string;
-  operation: OperationToken | null;
-  type: string;
-  payload: unknown;
-};
-```
-
-每条消息必须运行时校验。Bridge 只传命令、事件、位置、偏好、元数据和小型控制消息，禁止 Base64 传整本书。
-
-WebView runtime：
-
-- 是 Mobile 构建产物，不是 Next 页面；
-- 从官方 npm EPUB.js/PDF.js 构建；
-- 不修改第三方源码；
-- 不内联超大 JS 字符串到 TypeScript bundle；
-- 使用 CSP 和严格外链 allowlist；
-- 默认禁止远程脚本、表单、对象和任意连接；
-- 不持有 access/refresh token；
-- 外链只产生 `external-link` 事件，由原生 UI 确认后打开；
-- dispose 时移除 observer/listener/object URL/worker。
-
-### 12.3 漫画
-
-漫画使用 React Native 原生图片和手势，语义保持：
-
-- 单页/双页；
-- LTR/RTL；
-- 横滑、点击区、工具栏和进度跳转；
-- 缩放时停用翻页；
-- 当前 spread 前后有限预加载；
-- 原图/省流版本切换使旧缓存失效；
-- file URI 与远端 source 统一 adapter；
-- 大图按内存预算解码和释放。
-
-漫画是第一个完整垂直切片，用于验证：
-
-```text
-Reader v2 bootstrap
-→ ReaderAdapter
-→ reader-core session
-→ 原生输入
-→ 本地 outbox
-→ 服务端进度
-```
-
-### 12.4 EPUB
-
-EPUB 使用本地 WebView runtime + 官方 EPUB.js：
-
-- CFI、href、spineIndex、progression；
-- 目录跳转；
-- paginated/scrolled；
-- 单/双页；
-- 字体、字号、行高、主题；
-- 文本选择；
-- iframe 内点击、滑动、键盘和外链事件；
-- locations 按 fingerprint 缓存；
-- WebView 重建后从明确位置恢复；
-- 不向 WebView注入长期凭据。
-
-### 12.5 PDF
-
-第一版使用独立 PDF WebView runtime + PDF.js：
-
-- pageNumber；
-- fit width/page；
-- zoom；
-- password-required；
-- 文本选择；
-- 页面缓存和渲染预算；
-- Worker 本地打包；
-- Range 或已下载本地文件；
-- 旋转、分屏和 WebView 重建恢复。
-
-以后可用 PDFKit/PdfRenderer 替换具体 adapter，上层继续依赖同一个 `ReaderAdapter`。
-
-### 12.6 有声书
-
-有声书不加入视觉 `ReaderKind`，由独立 audio capability 管理：
-
-- 原生后台播放；
-- 锁屏/通知中心元数据与控制；
-- 蓝牙耳机；
-- 系统中断、来电和音频焦点；
-- track/章节切换；
-- 倍速与音高修正；
-- 快进、快退、睡眠定时；
-- 远端 Range 与本地离线文件；
-- App/进程恢复；
-- 使用既有音频进度位置和同步协议。
-
-## 13. 手机和平板设计
-
-按可用窗口宽度而不是硬件类型适配：
-
-```text
-compact   < 600
-medium    600–839
-expanded  >= 840
-```
-
-阈值在真实设备验证后固化为 design token。
-
-| Surface | Compact | Medium/Expanded |
-| --- | --- | --- |
-| 主导航 | 底部标签 + stack | 侧边栏/Navigation Rail |
-| 书库 | 单列进入详情 | 列表 + 详情双栏 |
-| 设置 | 单列 | 分类侧栏 + 内容 |
-| Reader 目录 | 全屏 sheet | 常驻/可收起侧栏 |
-| EPUB | 单页优先 | 宽度允许时双页 |
-| PDF/漫画 | 工具栏 overlay | 缩略图侧栏 + 内容 |
-
-必须覆盖：
-
-- iPad Split View/Stage Manager；
-- Android 多窗口；
-- 横竖屏切换和窗口实时 resize；
-- pointer hover、鼠标滚轮和触控板；
-- 键盘左右箭头、Page Up/Down、Space、Esc；
-- 返回手势/系统返回；
-- center tap 恢复隐藏 controls；
-- toolbar、目录、进度 slider 和 tap/swipe 导航；
-- VoiceOver/TalkBack；
-- Dynamic Type/系统字体缩放；
-- reduced motion；
-- safe area；
-- 44pt/48dp 最小触控目标；
-- 深色模式和足够对比度。
-
-## 14. 国际化
-
-Mobile 首期拥有自己的消息目录与门禁，不从 `apps/web/i18n` 深度导入。
-
-要求：
-
-- `zh-CN` 和 `en-US` 同一 PR 完成；
-- 无 UI 硬编码文案；
-- 校验缺失键、陈旧键、英文目录残留中文和 placeholder 不一致；
-- 日期、时间、数字、百分比和相对时间使用当前 locale；
-- 用户书名、作者、标签、书架、路径和文件名保持原样；
-- 原生权限说明、通知、下载失败、深链错误、无障碍标签和商店文案双语；
-- backend 错误按稳定 code 分支，message 只显示。
-
-当 Web/Mobile 确实共享稳定 locale 类型或格式化规则时，再单独提取 `packages/i18n-core`。
-
-## 15. 安全与网络
-
-- 公网服务器强制 HTTPS；
-- HTTP 只允许用户明确确认的私有 LAN 地址；
-- 不全局关闭 TLS 校验，不接受“信任所有证书”；
-- iOS ATS/Local Network 和 Android cleartext 采用范围最小的生产配置；
-- URL 重定向改变 scheme/host 时移除 Authorization；
-- 不为 React Native 原生请求开启全局 CORS；
-- WebView 默认只打开本地内容；
-- token 只存 SecureStore；
-- 下载路径由受控 ID 生成并解析到 App 私有根目录；
-- 不信任服务端 filename、MIME、长度或路径；
-- 外链只允许 `http`/`https`，其余 scheme 需显式策略；
-- 日志不得包含 token、Cookie、密码、整本书内容、用户路径或响应 body；
-- server/user 切换清空内存 cache 并取消 in-flight request；
-- 每个资源操作继续由服务端执行资源级授权。
-
-真实公开入口 smoke 必须经过端口 3000/反向代理，验证：
-
-```text
-Authorization
-Range / If-Range
-Content-Range / Accept-Ranges
-HEAD
-流式响应取消
-base path
-```
-
-## 16. 可执行 PR 路线图
-
-每个 PR 只完成一个可命名能力，不混入无关升级、全仓格式化或产品改版。
-
-### M0：ADR 与技术尖峰（5–8 人日）
+### B0：基线迁移
 
 交付：
 
-- 记录 Mobile 边界 ADR；
-- 固定 Expo SDK 57/Node 22.23.1 决策；
-- 验证 pnpm 中 Web 与 Mobile 各自的 React 19 依赖可独立解析；
-- Android、iPhone、iPad Development Build；
-- Mobile 导入 `@shuku/reader-core`；
-- 本地 WebView 打开 sample EPUB/PDF；
-- 验证 iOS/Android 本地文件访问和 PDF Worker；
-- 验证 Expo Audio 的 Authorization header、后台和锁屏；
-- 验证大文件下载、暂停、杀进程恢复能力；
-- 冻结首批 API/error code/relative URL 合同。
-
-退出条件：
+- Expo SDK 57 工程与严格 TypeScript；
+- capability-first 基础设施；
+- Cookie Session identity gateway；
+- Reader v3 生成契约、wire validation 和 mapper；
+- volume-first 本地进度；
+- schema 4 位置支持；
+- 双语、自适应、安全区 App 壳；
+- Mobile CI 契约与构建门禁。
 
-- 两个平台真机/模拟器可安装；
-- Web 全门禁保持通过；
-- 没有 Mobile -> Web import；
-- 每项尖峰有通过/失败结论和 fallback。
+退出条件：lint、typecheck、test、`api:check`、`i18n:check`、`doctor` 和双平台 export 全通过，旧移动快照没有读取或迁移代码。
 
-### M1：工程骨架与独立 CI（4–6 人日）
+### B1：连接服务器
 
-交付：
-
-- `apps/mobile`；
-- Expo Router、strict TS、lint、test、i18n；
-- `development`、`preview`、`production` EAS profile；
-- CNG 配置；
-- `mobile-ci.yml`；
-- `.dockerignore`、`.gitignore`；
-- Mobile package scripts 和 Turbo task；
-- 空壳手机/平板导航。
-
-退出条件：
+状态：已完成（2026-08-08）。代码、自动化测试和 Android/iOS 双平台 export 的最终门禁均已通过。
 
-- lint/typecheck/test/i18n/doctor/export 全通过；
-- Web Docker 构建上下文和产物无变化；
-- Android/iOS preview build 成功。
+- 手工地址、二维码扫描、相机权限和重新扫描 UI；
+- 手工与 QR 共用同一地址规范化和安全边界，保留反向代理 base path；
+- 健康、初始化、超时、取消、不兼容响应和错误恢复状态；
+- 原子 `ServerProfileCatalog`，以及 load、select、delete、reset-corrupt application use case；
+- 选择已有 profile 前重新健康检查，并发删除不得被迟到的选择结果复活；
+- 删除 active profile 后将 active 置空，不自动回退到其他服务器；
+- 有效旧快照可恢复并向上报告 warning，全部受管快照损坏时才允许显式原子重置；
+- 手机/平板、自适应布局、双语、无障碍及 Router/UI 聚合测试。
 
-### M2：服务器 profile 与 API transport（5–8 人日）
+完成记录：`reader-core` typecheck、`api:check`、Mobile lint、production/unit/UI typecheck、Node 测试 104/104、UI/Router 测试 7 个 suite 共 12/12、i18n 4/4、Doctor 20/20，以及 Android/iOS `export:check` 均通过。
 
-交付：
+当前环境未执行真机扫码、相机权限设置跳转、冷启动杀进程恢复、Cookie 前后台恢复、真实注销、LAN HTTP、HTTPS 和反向代理 base path 部署验证。上述场景仍保留在后续真机与部署验收矩阵中，不将自动化测试结果表述为已完成真机验证。
 
-- `server-info` 后端接口；
-- 持久 `instanceId`；
-- server URL/base path 规范化；
-- HTTPS/LAN HTTP 策略；
-- profile repository；
-- API transport、取消、错误归一化、runtime validation；
-- OpenAPI Mobile 生成与 drift check；
-- 连接/初始化引导 UI。
+### B2：登录与会话
 
-退出条件：
+状态：部分完成。会话恢复和确认注销框架已接入，登录表单仍是下一阶段。
 
-- 可连接根路径和 base path 两种部署；
-- 两个不同实例完全隔离；
-- URL 变化但 instanceId 相同不会复制账号数据；
-- 不启用通配 CORS。
+- 已完成启动和前台恢复、无会话跳转、会话刷新失败保留 stale session warning；
+- 已完成服务端确认注销后退出，注销失败保留已登录态；
+- 已完成受保护身份/主界面 route、操作取消和陈旧结果拒绝；
+- 待完成登录表单、登录错误与账号停用 UI、401 全链路跳转；
+- 待完成服务器切换的会话/缓存清理验收，以及 iOS/Android Cookie 生命周期真机验证。
 
-### M3：设备认证（6–10 人日）
+### B3：只读书库
 
-交付：
+- dashboard、作品列表、搜索、筛选和书架；
+- work 详情和 media version/volume 选择；
+- 分页、取消、陈旧结果拒绝、封面和空状态；
+- 手机单栏、平板列表加详情布局。
 
-- DeviceSession domain/application/repository/HTTP；
-- access/refresh token hash 与轮换；
-- Bearer + Cookie 统一 actor 解析；
-- SecureStore；
-- 登录、刷新、注销、设备撤销；
-- `Vary: Cookie, Authorization`；
-- Cookie/Bearer 双矩阵合同测试。
+### B4：Reader host 与漫画
 
-退出条件：
+- Reader v3 bootstrap client；
+- reader-core session 和 adapter host；
+- 漫画输入、工具栏、目录/跳页和进度；
+- 生命周期、旋转、杀进程恢复和内存测试。
 
-- 现有 Web Cookie 登录合同逐字段不变；
-- Bearer 可访问既有书库、Reader 和媒体；
-- refresh replay、停用用户、改密和注销可撤销；
-- 两用户 cache/ETag/Range 不串数据。
+### B5：可重排格式与 PDF
 
-### M4：只读书库垂直切片（8–12 人日）
+- 本地 WebView runtimes；
+- 版本化 bridge 和运行时校验；
+- schema 4 偏好完整映射；
+- EPUB、MOBI 系列、FB2、TXT 和 PDF 的格式专项测试。
 
-交付：
+### B6：进度、书签和同步硬化
 
-- dashboard、works、search/filter、shelf、detail；
-- 封面；
-- 分页和 stale-result rejection；
-- library cache；
-- 手机列表、平板列表+详情；
-- 双语 loading/error/empty/offline。
+- 持久 outbox；
+- AppState 和网络恢复唤醒；
+- Reader v3 reading-status、progress 和 bookmarks；
+- 指纹冲突、幂等、序列、重试和隔离测试。
 
-退出条件：
+完成 B6 后进入在线阅读 Beta。
 
-- 普通用户、受限用户、管理员授权行为与 Web 一致；
-- 不新增重复 library API；
-- 无 component raw fetch；
-- 低端 Android 长列表无明显卡顿。
+### B7：离线与音频
 
-### M5：Reader 基础与漫画（10–15 人日）
+- 下载清单由现有 volume/file 资源组合产生；
+- 临时文件、Range resume、校验和原子发布；
+- 下载状态恢复、空间和账号隔离；
+- 音频后台、锁屏、耳机和系统中断。
 
-交付：
+### B8：发布硬化
 
-- ReaderSession/Adapter host；
-- controls、tap zone、swipe、keyboard、toolbar、目录/跳页；
-- 原生漫画 adapter；
-- 单/双页、LTR/RTL、缩放和内存预算；
-- 在线进度 outbox；
-- 生命周期 dispose/cancel。
+- iPhone、iPad、Android 手机/平板矩阵；
+- 性能、内存、无障碍和大字体；
+- E2E 主旅程；
+- TestFlight、Play Internal、升级和回滚；
+- 根/Web/Python/Mobile 版本一致性。
 
-退出条件：
+## 13. CI 与质量门禁
 
-- Reader v2 bootstrap -> render -> progress -> resume 全链路；
-- 旧 operation/已取消事件不能覆盖新 session；
-- 大图、500 页、旋转和杀进程恢复测试通过；
-- 手机和平板交互变体完成审计。
-
-### M6：EPUB（10–15 人日）
-
-交付：
-
-- 本地 EPUB WebView runtime；
-- 版本化 bridge；
-- 官方 EPUB.js；
-- CSP/内容清洗；
-- CFI/href/spine/progression；
-- 目录、文本选择、主题、字体、单双页、scroll/paginated；
-- locations fingerprint cache。
-
-退出条件：
-
-- WebView 无长期 token；
-- bridge 所有 payload runtime validation；
-- iframe 点击/滑动/键盘/外链可用；
-- WebView 重建、分屏 resize 和内容变化恢复正确；
-- 未修改 node_modules/epubjs。
-
-### M7：PDF（8–12 人日）
-
-交付：
-
-- 本地 PDF WebView runtime；
-- PDF.js Worker；
-- page/zoom/fit/password/text layer；
-- Range、本地文件和渲染预算；
-- 缩略图/目录侧栏。
-
-退出条件：
-
-- 大 PDF 不 OOM；
-- 206/200 fallback 正确；
-- 密码、旋转、横屏和 WebView 重建通过；
-- adapter 可被将来的原生 PDF 实现替换。
-
-### M8：进度、偏好和恢复硬化（6–10 人日）
-
-交付：
-
-- SQLite outbox、隔离区和 client sequence；
-- AppState/NetInfo 唤醒；
-- preferences repository；
-- bookmark；
-- `applied:false` 和 fingerprint mismatch；
-- Web/App 同时使用的跨客户端行为测试。
-
-退出条件：
-
-- 断网阅读、重启、联网重试不丢进度；
-- 相同 mutation 幂等；
-- 同客户端不回退；
-- 当前 Reader v2 跨客户端 last-arrival 语义被明确测试。
-
-完成 M8 后进入在线阅读 Beta。
-
-### M9：完整离线下载（12–18 人日）
-
-交付：
-
-- download manifest；
-- EPUB/PDF/漫画/音轨 download state machine；
-- 临时文件、Range resume、hash、原子发布；
-- 空间配额、暂停/重试、删除和失效；
-- server/user/fingerprint 隔离；
-- readers 从 file URI 打开。
-
-退出条件：
-
-- 飞行模式可打开已下载内容；
-- 下载中杀进程后可恢复；
-- 账号退出/切换不泄漏内容；
-- 空间不足和 429 不会错误显示成功。
-
-### M10：有声书（8–12 人日）
-
-交付：
-
-- 原生播放 runtime；
-- track/章节/倍速/seek/睡眠定时；
-- 后台、锁屏、耳机和中断；
-- 在线 Range 和离线文件；
-- 音频进度 outbox。
-
-退出条件：
-
-- iOS/Android 锁屏 30 分钟稳定播放；
-- 来电/音频焦点/蓝牙断开处理明确；
-- App 被系统回收后恢复合理；
-- 播放器无未释放资源。
-
-### M11：平板、无障碍与性能（8–12 人日）
-
-交付：
-
-- iPad/Android 平板双栏/三栏；
-- Split View、多窗口、横屏；
-- 键盘、鼠标、触控板；
-- Dynamic Type、VoiceOver/TalkBack、reduced motion；
-- 性能和内存预算；
-- 四类 reader 导航能力对齐。
-
-退出条件：
-
-- 设备矩阵全部通过；
-- 大字体无关键操作截断；
-- 所有 controls 可由键盘和屏幕阅读器操作；
-- 隐藏 controls 始终可恢复。
-
-### M12：发布硬化（5–8 人日）
-
-交付：
-
-- App icon、splash、隐私说明、双语商店文案；
-- version/build number；
-- Maestro 主旅程；
-- TestFlight/Play Internal；
-- 升级、数据迁移、回滚和 staged rollout；
-- 无敏感数据的崩溃/结构化日志。
-
-退出条件：
-
-- 内部渠道可安装、升级和回退；
-- 根/Web/Python/Mobile 语义版本一致；
-- Android/iOS build number 独立递增；
-- 人工验收后才推广生产。
-
-### 16.1 粗略工作量
-
-以一名熟悉 React/TypeScript、可处理少量 Swift/Kotlin 的工程师计：
-
-- 在线阅读 Beta（M0–M8）：约 12–18 人周；
-- 完整 V1（M0–M12）：约 20–30 人周。
-
-两人可并行“后端契约/认证”和“Mobile UI/reader runtime”，但 reader、同步和离线存在顺序依赖，工期不能线性减半。
-
-## 17. CI 与质量门禁
-
-`apps/mobile/package.json` 至少提供：
-
-```text
-dev
-android
-ios
-lint
-typecheck
-test
-i18n:check
-api:generate
-api:check
-reader-runtimes:build
-reader-runtimes:check
-doctor
-export
-eas:preview
-eas:production
-```
-
-Mobile PR：
+Mobile PR 至少执行：
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm --filter @shuku/reader-core typecheck
 pnpm --filter @shuku/mobile api:check
-pnpm --filter @shuku/mobile reader-runtimes:check
-pnpm --filter @shuku/mobile lint
-pnpm --filter @shuku/mobile typecheck
+pnpm --filter @shuku/mobile check
 pnpm --filter @shuku/mobile test
 pnpm --filter @shuku/mobile i18n:check
-pnpm --filter @shuku/mobile doctor
-pnpm --filter @shuku/mobile export
+pnpm --filter @shuku/mobile run doctor
+pnpm --filter @shuku/mobile export:check
 ```
 
-触及后端/契约：
+`check` 覆盖契约漂移、lint、严格类型检查、测试、双语和 Expo 健康；CI 另行执行聚合 `test`（单元测试加 Jest 原生 UI/Expo Router 测试），并显式执行契约、双语、doctor 和双平台 export，使各类失败能单独定位。
 
-```bash
-cd apps/api-python
-uv run --extra dev --locked pytest -q \
-  tests/test_auth.py \
-  tests/test_reader_v2.py \
-  tests/test_openapi_quality.py \
-  tests/contract/api
-```
+CI path filter 必须覆盖：
 
-触及根依赖、`packages/reader-core`、公共契约或现有 API：
+- `apps/mobile/**`；
+- `packages/reader-core/**`；
+- backend reader/auth/library/media modules；
+- backend auth、authorization、bootstrap、HTTP contracts 和 OpenAPI exporter；
+- 根依赖、workspace 和 Mobile workflow。
 
-```bash
-pnpm --filter @shuku/web lint
-pnpm --filter @shuku/web typecheck
-pnpm --filter @shuku/web test
-pnpm --filter @shuku/web i18n:check
-pnpm --filter @shuku/web build
-```
+涉及后端公开契约的变更还应运行对应 Python contract tests。涉及共享包或根依赖时继续运行适用的 Web 回归门禁，不以 Mobile CI 代替现有 Web/Python CI。
 
-构建策略：
+## 14. Definition of Done
 
-- PR：JS/TS/contract/unit/export；
-- 合并主干：Android development/preview build；
-- 每晚或 release candidate：iOS preview build；
-- release：Android production AAB + iOS production IPA；
-- 不在普通 Mobile PR 自动提交商店。
+当前基线只有在以下条件全部满足时完成：
 
-## 18. 测试矩阵
+- 移动端只使用 `work -> mediaVersion -> volume`；
+- 所有阅读网络调用只面向 Reader v3 volume routes；
+- 身份只使用现有 Cookie Session `/api/auth/*`；
+- FastAPI OpenAPI、生成类型、wire decoder 和 mapper 无 drift；
+- Reader v3 schema 3 与 `reader-core` schema 4 显式分层；
+- `ReaderPreferences` 当前字段在移动端没有缩减版重复类型；
+- 本地进度包含 `workId`、`mediaVersionId`、`volumeId` 和 `contentFingerprint`；
+- 旧移动快照不迁移、不双写；
+- App 壳具备双语、主题、安全区和自适应导航；
+- 页面和 reader 尚未实现的能力在进度文档中明确标记；
+- 所有适用门禁通过，且没有测试跳过、警告掩盖或未说明兼容层。
 
-### 18.1 层级
-
-- `reader-core`：纯单元测试；
-- feature model：纯规则、reducer、状态机；
-- feature application：fake ports，验证取消、授权结果、side-effect 顺序；
-- API contract：FastAPI 真实测试库，Cookie/Bearer 双协议；
-- repository：真实 Expo SQLite/文件目录；
-- component：交互、可访问性、双语；
-- E2E：Maestro；
-- smoke：公开端口 3000/反向代理；
-- 真机：内存、音频、后台、下载、网络切换。
-
-### 18.2 最小设备
-
-| 平台 | 设备/窗口 |
-| --- | --- |
-| iOS | 小屏 iPhone |
-| iOS | 当前主流 iPhone |
-| iPadOS | 11 英寸 iPad，横竖屏和 1/2 Split View |
-| Android | API 最低版本小屏设备 |
-| Android | 当前 API 中端手机 |
-| Android | 10 英寸平板 |
-| Android | 可变宽度/折叠屏模拟器 |
-
-### 18.3 关键旅程
-
-1. 添加服务器 -> 初始化检测 -> 登录 -> 书库。
-2. 搜索/筛选 -> 详情 -> 阅读 -> 退出 -> 恢复。
-3. Web 与 App 同一账号交替更新进度。
-4. 下载中断 -> 杀进程 -> 恢复 -> 飞行模式阅读。
-5. server URL 更换但 instanceId 相同。
-6. 切换账号/服务器后无旧数据泄漏。
-7. EPUB/PDF/漫画四种输入方式：键盘、pointer、tap、swipe。
-8. 有声书锁屏、耳机、来电、网络切换。
-9. iPad/Android 平板分屏 resize。
-10. `zh-CN` / `en-US`、大字体、深色和屏幕阅读器。
-
-## 19. 版本与发布
-
-根 `package.json` 继续是语义版本唯一来源。
-
-新增要求：
-
-- `apps/mobile/package.json.version` 与根版本一致；
-- `app.config.ts` 读取根版本，不手写第二份；
-- 扩展现有版本一致性校验和发布文件清单；
-- App 内用 `expo-application` 显示 application/build version；
-- EAS 远程管理 iOS `buildNumber` 和 Android `versionCode`；
-- 若启用 EAS Update，`runtimeVersion.policy = "appVersion"`；
-- TestFlight/Play 测试重建只增加 build number/versionCode；
-- 一个 `v<version>` 对应 Web、后端、Docker、fnOS、Android 和 iOS；
-- Mobile release 不阻塞已有 Web hotfix；未发布 Mobile 的版本仍允许 Mobile build 缺席，但一旦宣告含 Mobile，版本必须一致。
-
-发布 profiles：
-
-| Profile | 用途 | 分发 |
-| --- | --- | --- |
-| development | 开发客户端 | internal |
-| preview | QA/验收 | internal |
-| production | TestFlight/Play | store |
-
-商店发布只上传到 TestFlight/Google Play Internal Testing，不自动推广生产。人工验收、双语 release notes 和版本一致性通过后再推广。
-
-## 20. 风险登记
-
-| 风险 | 阻断门禁/缓解 |
-| --- | --- |
-| Expo SDK 57 原生模块或 New Architecture 兼容性不足 | M0 先完成依赖矩阵和真机尖峰；不降级 Web/Node，不用关闭严格门禁掩盖问题 |
-| Web/Mobile React 19 依赖解析冲突 | pnpm isolated；不做根 React override；doctor/why 检查 |
-| WebView token 泄漏 | 只开本地内容；不注入长期 token；CSP 和 bridge schema |
-| EPUB iframe/CFI 与 Web 行为不同 | M0 sample spike；fingerprint 缓存；格式专项合同测试 |
-| iOS 本地文件/Worker 限制 | M0 真机 spike；独立 runtime 构建 |
-| PDF/漫画内存过高 | 渲染预算、有限预取、低端 Android 真机门禁 |
-| 后台下载不可靠 | 持久状态机；验证后决定自有 Expo Module |
-| 后台音频平台差异 | M0 验证；M10 中断/锁屏/回收测试 |
-| Bearer cache 串用户 | `Vary: Cookie, Authorization` + 两用户合同矩阵 |
-| 反代丢 Range/Authorization | 公开 3000 入口 smoke |
-| Web/Mobile 纯规则漂移 | 两消费者后再提取；合同测试；禁止深导入 |
-| API 生成物漂移 | Mobile 独立 generation + CI diff |
-| 离线文件串账号 | `instanceId + userId + fingerprint` 命名空间 |
-| App 扩大现有 Docker 构建 | `.dockerignore` + Web image smoke |
-
-## 21. 开工前需要确认的产品输入
-
-这些输入不阻塞计划评审，但必须在对应阶段前确定：
-
-- App 展示名称；
-- iOS bundle identifier；
-- Android application ID；
-- Apple Developer / Google Play 账号；
-- 是否允许 LAN HTTP，默认“仅显式确认后允许”；
-- 是否要求支持自签名 HTTPS，默认“不绕过系统信任链”；
-- 首版最低 iOS 目标，SDK 57 默认 iOS 16.4+；
-- 是否允许 EAS 云构建，默认允许；若不允许则准备自管 macOS 构建机；
-- 退出账号时是否默认删除下载，默认不自动删除但不可跨账号访问；
-- 是否需要崩溃上报，默认只做本地隐私安全结构化日志。
-
-## 22. Definition of Done
-
-完整 V1 只有在以下条件全部满足时完成：
-
-- Mobile 位于独立 capability-first 结构；
-- Web 没有 Mobile 依赖、原生条件分支或被迫升级；
-- Cookie Web 合同保持兼容；
-- Device Bearer 可撤销、可轮换且缓存隔离正确；
-- 所有外部 JSON 运行时校验；
-- `reader-core` 是阅读协议唯一来源；
-- EPUB.js 保持官方依赖、未 patch；
-- EPUB/PDF WebView 无长期 token；
-- 进度 outbox 幂等、可恢复且按账号隔离；
-- 所有下载临时写入、校验和原子发布；
-- 四类内容在线/离线行为通过；
-- 后台音频、锁屏和中断恢复通过；
-- iPhone、iPad、Android 手机/平板布局和输入通过；
-- `zh-CN`、`en-US` 完整；
-- 无障碍和大字体通过；
-- Mobile、Backend、Web 适用门禁全部通过；
-- TestFlight/Play Internal 可安装升级；
-- 根/Web/Backend/Mobile 版本一致；
-- 没有未说明的兼容层、重复实现、测试跳过或新增 warning。
-
-## 23. 官方工程基线
+## 15. 官方工程参考
 
 - Expo monorepo 与 pnpm：<https://docs.expo.dev/guides/monorepos/>
-- EAS monorepo 构建：<https://docs.expo.dev/build-reference/build-with-monorepos/>
-- Expo SDK/Node/OS 兼容矩阵：<https://docs.expo.dev/versions/latest/>
 - Expo Development Build：<https://docs.expo.dev/workflow/overview/>
-- EAS Build：<https://docs.expo.dev/build/introduction/>
-- Expo Router：<https://docs.expo.dev/router/introduction/>
+- Expo SDK 版本：<https://docs.expo.dev/versions/latest/>
+- EAS monorepo 构建：<https://docs.expo.dev/build-reference/build-with-monorepos/>
 - Expo FileSystem：<https://docs.expo.dev/versions/latest/sdk/filesystem/>
 - Expo Audio：<https://docs.expo.dev/versions/latest/sdk/audio/>

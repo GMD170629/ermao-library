@@ -7,6 +7,9 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 import pytest
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session, sessionmaker
+
 from app.bootstrap.imports import (
     claim_next_import_task,
     enqueue_import_task,
@@ -23,18 +26,22 @@ from app.models.library import (
     LibraryVolume,
     LibraryWork,
 )
+from app.modules.imports.application.conversion_identity import (
+    conversion_idempotency_key,
+)
 from app.modules.imports.application.dto import ImportOptions
+from app.modules.imports.infrastructure.conversion_progress import (
+    SqlAlchemyTextConversionProgress,
+)
 from app.services.download_executor import assert_allowed_extension
 from app.services.epub_normalizer import EPUB_NORMALIZER_VERSION
 from app.services.text_conversion import (
     ConversionFailure,
-    conversion_idempotency_key,
     convert_to_epub,
     detect_txt_encoding,
     source_format,
     validate_epub,
 )
-from sqlalchemy import select, text
 from tests.test_worker_importer import create_worker_tables
 
 
@@ -127,6 +134,16 @@ def insert_import_task(
         },
     )
     db.commit()
+
+
+def conversion_progress(db: Session) -> SqlAlchemyTextConversionProgress:
+    return SqlAlchemyTextConversionProgress(
+        sessionmaker(
+            bind=db.get_bind(),
+            autoflush=False,
+            expire_on_commit=False,
+        )
+    )
 
 
 class SuccessfulRunner:
@@ -226,13 +243,25 @@ def test_conversion_validates_output_and_reuses_versioned_cache(
     insert_import_task(db_session, "task-1", source)
     runner = SuccessfulRunner()
 
-    first = convert_to_epub(db_session, test_settings, "task-1", source, runner=runner)
+    first = convert_to_epub(
+        conversion_progress(db_session),
+        test_settings,
+        "task-1",
+        source,
+        runner=runner,
+    )
     assert first.cached is False
     assert first.source_format == "AZW3"
     assert validate_epub(first.output_path)["spineCount"] == 1
 
     insert_import_task(db_session, "task-2", source)
-    second = convert_to_epub(db_session, test_settings, "task-2", source, runner=runner)
+    second = convert_to_epub(
+        conversion_progress(db_session),
+        test_settings,
+        "task-2",
+        source,
+        runner=runner,
+    )
     assert second.cached is True
     assert second.output_path == first.output_path
     assert runner.conversion_calls == 1
@@ -262,12 +291,20 @@ def test_conversion_source_change_creates_a_new_idempotency_scope(
     runner = SuccessfulRunner()
 
     first = convert_to_epub(
-        db_session, test_settings, "task-revision-1", source, runner=runner
+        conversion_progress(db_session),
+        test_settings,
+        "task-revision-1",
+        source,
+        runner=runner,
     )
     source.write_bytes(b"source revision two")
     insert_import_task(db_session, "task-revision-2", source)
     second = convert_to_epub(
-        db_session, test_settings, "task-revision-2", source, runner=runner
+        conversion_progress(db_session),
+        test_settings,
+        "task-revision-2",
+        source,
+        runner=runner,
     )
 
     assert first.source_hash != second.source_hash
@@ -292,7 +329,7 @@ def test_txt_is_converted_internally_with_detected_chapters(
         raise AssertionError("TXT conversion must not invoke libmobi")
 
     artifact = convert_to_epub(
-        db_session,
+        conversion_progress(db_session),
         test_settings,
         "task-txt",
         source,
@@ -374,7 +411,9 @@ def test_fb2_is_converted_internally_with_metadata_and_image(
     )
     insert_import_task(db_session, "task-fb2", source)
 
-    artifact = convert_to_epub(db_session, test_settings, "task-fb2", source)
+    artifact = convert_to_epub(
+        conversion_progress(db_session), test_settings, "task-fb2", source
+    )
 
     assert artifact.converter == "shuku-internal"
     assert validate_epub(artifact.output_path)["spineCount"] >= 1
@@ -478,7 +517,11 @@ def test_conversion_records_actionable_failures(
 
     with pytest.raises(ConversionFailure) as raised:
         convert_to_epub(
-            db_session, test_settings, "task-failed", source, runner=failed_runner
+            conversion_progress(db_session),
+            test_settings,
+            "task-failed",
+            source,
+            runner=failed_runner,
         )
 
     assert raised.value.code == expected_code
@@ -517,7 +560,7 @@ def test_missing_converter_is_retryable_and_keeps_source(
 
     with pytest.raises(ConversionFailure) as raised:
         convert_to_epub(
-            db_session,
+            conversion_progress(db_session),
             test_settings,
             "task-missing-converter",
             source,
@@ -546,7 +589,11 @@ def test_libmobi_success_without_output_still_classifies_drm(
 
     with pytest.raises(ConversionFailure) as raised:
         convert_to_epub(
-            db_session, test_settings, "task-drm-no-output", source, runner=drm_runner
+            conversion_progress(db_session),
+            test_settings,
+            "task-drm-no-output",
+            source,
+            runner=drm_runner,
         )
 
     assert raised.value.code == "DRM_PROTECTED"
@@ -572,7 +619,7 @@ def test_invalid_epub_output_is_rejected_without_publishing_partial_file(
 
     with pytest.raises(ConversionFailure) as raised:
         convert_to_epub(
-            db_session,
+            conversion_progress(db_session),
             test_settings,
             "task-invalid-output",
             source,
@@ -616,7 +663,7 @@ def test_libmobi_private_markup_is_normalized_before_strict_epub_validation(
         return subprocess.CompletedProcess(args, 0, "converted", "")
 
     artifact = convert_to_epub(
-        db_session,
+        conversion_progress(db_session),
         test_settings,
         "task-private-markup",
         source,
@@ -674,7 +721,7 @@ def test_libmobi_normalization_failure_is_retryable_and_never_publishes_raw_epub
 
     with pytest.raises(ConversionFailure) as raised:
         convert_to_epub(
-            db_session,
+            conversion_progress(db_session),
             test_settings,
             "task-normalization-failed",
             source,
@@ -807,7 +854,11 @@ def test_watched_azw3_task_can_be_retried_after_upload_only_saves_the_source(
     upload_dir.mkdir()
     monitored = client.post(
         "/api/monitor-folders",
-        json={"name": "Conversion uploads", "rootPath": str(upload_dir), "enabled": True},
+        json={
+            "name": "Conversion uploads",
+            "rootPath": str(upload_dir),
+            "enabled": True,
+        },
     )
     assert monitored.status_code == 201
     response = client.post(

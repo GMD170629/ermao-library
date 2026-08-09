@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 
 from app.contracts.publication_metadata import PublicationMetadata
 from app.contracts.publication_titles import titles_from_local_source
 from app.modules.imports.application.comic_types import ComicArchiveInspection
+from app.modules.imports.application.commands import release_import_transaction
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
     ImportOptions,
@@ -32,6 +34,7 @@ from app.modules.imports.application.import_support import (
     _insert_identity_metadata,
     _log_import,
     _now,
+    _prepared_default_cover,
     _select_volume_media_version,
     _source_group_key,
     _work_merge_key,
@@ -39,6 +42,7 @@ from app.modules.imports.application.import_support import (
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
     ImportOrchestrationServices,
+    ImportUnitOfWork,
     LibraryImportStore,
 )
 from app.modules.imports.domain.content_classification import (
@@ -46,6 +50,8 @@ from app.modules.imports.domain.content_classification import (
     classify_content,
     normalize_media_kind_policy,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _import_comic(
@@ -58,10 +64,13 @@ def _import_comic(
     file_size: int,
     ext: str,
     identity: BookIdentityDTO,
+    unit_of_work: ImportUnitOfWork,
 ) -> ImportResult:
     parsed = services.inspect_comic_archive(
         options.source_file_path, options.original_name
     )
+    source_path = options.source_file_path.resolve()
+    source_stat = source_path.stat()
     comic_info = (
         parsed.get("comicInfo") if isinstance(parsed.get("comicInfo"), dict) else None
     )
@@ -197,7 +206,6 @@ def _import_comic(
                 "updatedAt": _now(),
             }
         )
-        source_path = options.source_file_path.resolve()
         store.update_import_task(task_id, columns={"message": "正在建立漫画记录"})
         store.insert_library_file(
             columns={
@@ -209,13 +217,14 @@ def _import_comic(
                 "kind": "COMIC",
                 "mimeType": _comic_archive_media_type(parsed["format"]),
                 "sizeBytes": file_size,
-                "mtimeMs": int(source_path.stat().st_mtime * 1000),
+                "mtimeMs": int(source_stat.st_mtime * 1000),
                 "sortOrder": sort_order,
                 "createdAt": _now(),
                 "updatedAt": _now(),
             }
         )
         try:
+            release_import_transaction(unit_of_work)
             cover_path = services.publish_comic_cover(
                 settings.resolved_storage_root,
                 source_path,
@@ -252,7 +261,7 @@ def _import_comic(
             }
         )
         _insert_identity_metadata(store, volume["id"], identity)
-        stored_cover_path = cover_path or services.ensure_default_cover()
+        stored_cover_path = cover_path or _prepared_default_cover(options)
         media_version_cover_path = (
             cover_path or media_version.get("coverPath") or stored_cover_path
         )
@@ -282,6 +291,7 @@ def _import_comic(
             work["id"],
             media_version["id"],
             media_version_cover_path,
+            _prepared_default_cover(options),
         )
         return ImportResult(
             work["id"],
@@ -305,8 +315,7 @@ def _import_comic(
             metadata_source_order=resolved_local.source_order,
         )
     except Exception:
-        if cover_path:
-            Path(cover_path).unlink(missing_ok=True)
+        logger.debug("comic import persistence failed", exc_info=True)
         raise
 
 

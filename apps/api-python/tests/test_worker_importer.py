@@ -1,3 +1,4 @@
+import hashlib
 import json
 import zipfile
 from contextlib import nullcontext
@@ -6,7 +7,7 @@ from pathlib import Path
 from threading import Thread
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 
 from app import models as _models  # noqa: F401
 from app.bootstrap.imports import (
@@ -36,6 +37,10 @@ from app.modules.imports.application.import_epub import parse_epub_metadata
 from app.modules.imports.application.import_support import (
     _work_merge_key,
     parse_series_volume_info,
+)
+from app.modules.imports.application.transactions import (
+    normalized_import_source_key,
+    stable_import_resource_id,
 )
 from app.modules.imports.infrastructure.orchestration_services import (
     SessionImportOrchestrationServices,
@@ -511,6 +516,116 @@ def test_import_epub_creates_library_records(db_session, test_settings, tmp_path
     assert identity_metadata["recognitionMethod"] == "regex"
     assert identity_metadata["title"] == "book"
     assert identity_metadata["author"] == "未知作者"
+
+
+def test_import_retry_reuses_hidden_partial_volume_and_file(
+    db_session, test_settings, tmp_path
+):
+    create_worker_tables(db_session)
+    test_settings.resolved_storage_root.mkdir(parents=True)
+    epub = tmp_path / "partial-retry.epub"
+    write_epub_fixture(epub)
+    stat = epub.stat()
+    task_id = "partial-task"
+    source_path = str(epub.resolve())
+    normalized_source = normalized_import_source_key(source_path)
+    resource_key = (
+        f"epub:{hashlib.sha256(source_path.encode('utf-8')).hexdigest()[:24]}"
+    )
+    volume_id = stable_import_resource_id(
+        task_id,
+        "volume",
+        f"{normalized_source}|{resource_key}",
+    )
+    work_id = stable_import_resource_id(
+        task_id,
+        "work",
+        f"{normalized_source}|primary",
+    )
+    media_version_id = stable_import_resource_id(
+        task_id,
+        "media-version",
+        f"{normalized_source}|{work_id}|EBOOK",
+    )
+    file_id = stable_import_resource_id(
+        task_id,
+        "file",
+        f"{normalized_source}|{source_path}",
+    )
+    db_session.add_all(
+        [
+            ImportTask(
+                id=task_id,
+                origin="MANUAL",
+                status="FAILED",
+                source_path=source_path,
+                retryable=True,
+            ),
+            LibraryWork(
+                id=work_id,
+                title="Sample",
+                normalized_title="sample",
+                author="Author",
+                normalized_author="author",
+                tags="[]",
+                merge_key=_work_merge_key("Sample"),
+            ),
+            LibraryMediaVersion(
+                id=media_version_id,
+                work_id=work_id,
+                media_kind="EBOOK",
+            ),
+            LibraryVolume(
+                id=volume_id,
+                media_version_id=media_version_id,
+                title="Sample",
+                format="EPUB",
+                resource_key=resource_key,
+                import_status="PARSING",
+            ),
+            LibraryFile(
+                id=file_id,
+                volume_id=volume_id,
+                path=source_path,
+                file_path_hash=hashlib.sha256(source_path.encode()).hexdigest(),
+                hash_status="PARTIAL_PENDING",
+                mtime_ms=int(stat.st_mtime * 1000),
+                kind="EPUB",
+                mime_type="application/epub+zip",
+                size_bytes=stat.st_size,
+                sort_order=0,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    result = import_managed_book(
+        db_session,
+        test_settings,
+        ImportOptions(
+            source_file_path=epub,
+            origin="MANUAL",
+            original_name=epub.name,
+            import_task_id=task_id,
+        ),
+    )
+    db_session.commit()
+
+    stored_file = db_session.get(LibraryFile, file_id)
+    completed_volume = db_session.get(LibraryVolume, result.volume_id)
+    files_for_path = db_session.scalars(
+        select(LibraryFile).where(LibraryFile.path == str(epub.resolve()))
+    ).all()
+
+    assert result.duplicate is False
+    assert result.volume_id == volume_id
+    assert stored_file is not None and stored_file.volume_id == result.volume_id
+    assert completed_volume is not None
+    assert completed_volume.import_status == "COMPLETED"
+    assert len(files_for_path) == 1
+    assert db_session.scalar(select(func.count()).select_from(LibraryVolume)) == 1
+    assert db_session.scalar(select(func.count()).select_from(LibraryWork)) == 1
+    assert db_session.scalar(select(func.count()).select_from(LibraryMediaVersion)) == 1
 
 
 def test_import_records_ai_identity_and_result(
@@ -1388,9 +1503,7 @@ def test_pdf_and_comic_imports_keep_duplicate_volume_numbers(
         volumes = list(
             db_session.scalars(
                 select(LibraryVolume)
-                .where(
-                    LibraryVolume.media_version_id == first_result.media_version_id
-                )
+                .where(LibraryVolume.media_version_id == first_result.media_version_id)
                 .order_by(LibraryVolume.sort_order)
             )
         )

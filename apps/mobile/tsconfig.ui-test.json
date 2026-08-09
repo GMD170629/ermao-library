@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": [
+      "jest",
+      "node"
+    ]
+  },
+  "include": [
+    "expo-env.d.ts",
+    ".expo/types/**/*.ts",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "tests/ui/**/*.ts",
+    "tests/ui/**/*.tsx"
+  ],
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/shared/testing/**/*.ts"
+  ]
+}

@@ -1,0 +1,25 @@
+---
+description: Mobile App 的 Apple HIG、项目品牌、视觉 token、交互模式和无障碍固定规范。
+globs: apps/mobile/**/*.{ts,tsx,json}, docs/mobile-app-*.md
+alwaysApply: false
+---
+
+# Mobile App 视觉与交互
+
+权威规范：`docs/mobile-app-design-guidelines.md`。设计或修改 `apps/mobile` 页面、导航、交互、共享 UI、主题、图标、动效、状态反馈和原生可见配置前，必须先按该文件验收。
+
+## 固定风格
+
+- 风格是 Apple HIG × 温暖编辑感：清晰、安静、内容优先、原生感、自适应。
+- Apple HIG 决定层级、布局、交互和无障碍；项目现有品牌决定珊瑚橙、暖白、猫咪 Logo、产品名与语气。
+- 不引入 Material 视觉语言、大面积渐变/玻璃、厚重阴影、卡片套卡片、重复 Logo 或无语义动效。
+
+## 实现约束
+
+- 页面只能使用 `apps/mobile/src/shared/ui` 提供的语义 token/基础组件，业务 UI 留在 feature `ui`；禁止页面新增硬编码品牌色和任意字号。
+- 背景可全屏延伸，内容和控件必须尊重安全区；触控目标至少 44×44 pt，常规目标 48×48 pt。
+- 手机使用底部标签、平板/宽窗口使用语义相同的侧栏或多栏；保留 iOS 边缘返回与 Android predictive back。
+- 手势必须有可见替代；状态必须覆盖加载、空、错误、离线、无权限、成功、禁用和取消/过期结果。
+- 所有界面同时完成浅/深色、Dynamic Type/系统大字体、`zh-CN`/`en-US`、VoiceOver/TalkBack、减少动态效果与降低透明度。
+- Logo 仅用于 App 图标、首次欢迎/连接、关于或确有品牌上下文的空状态，不在常规标题栏重复。
+- 新页面交付必须完成权威规范第 14 节设计模板和第 15 节验收矩阵。

@@ -7,7 +7,15 @@ export type ServerAddressErrorCode =
   | 'QUERY_OR_FRAGMENT_NOT_ALLOWED'
   | 'UNSUPPORTED_SCHEME';
 
+/**
+ * Canonical address of the user-facing Ermao Books web application.
+ *
+ * This is deliberately not a separately exposed API/backend origin. Mobile
+ * API URLs are always derived from this origin and its reverse-proxy base path
+ * so users enter the same address they open in a browser.
+ */
 export type ServerBaseUrl = Readonly<{
+  basePath: string;
   value: string;
   hostname: string;
   protocol: 'http:' | 'https:';
@@ -176,6 +184,7 @@ export function parseServerAddress(
   return {
     ok: true,
     baseUrl: {
+      basePath: basePath.length === 0 ? '/' : basePath,
       value: `${url.origin}${basePath}`,
       hostname,
       protocol: url.protocol,
@@ -184,6 +193,20 @@ export function parseServerAddress(
   };
 }
 
+export function serverApiUrl(
+  baseUrl: ServerBaseUrl,
+  apiPath: `/api/${string}`,
+): string {
+  if (apiPath.includes('#') || apiPath.startsWith('/api//')) {
+    throw new TypeError('API path must be an application-relative API path');
+  }
+  return new URL(apiPath.slice(1), `${baseUrl.value}/`).toString();
+}
+
 export function serverHealthUrl(baseUrl: ServerBaseUrl): string {
-  return `${baseUrl.value}/api/health`;
+  return serverApiUrl(baseUrl, '/api/health');
+}
+
+export function serverSetupStatusUrl(baseUrl: ServerBaseUrl): string {
+  return serverApiUrl(baseUrl, '/api/auth/setup/status');
 }

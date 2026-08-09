@@ -78,6 +78,7 @@ class SqlAlchemyImportTaskStore:
             message=message,
             retryable=retryable,
             now=now,
+            expected_lease_owner=task.lease_owner,
         )
 
     def stage_failure_event(

@@ -16,6 +16,7 @@ from app.modules.imports.application.audio_types import (
 )
 from app.modules.imports.application.commands import (
     commit_import_checkpoint,
+    release_import_transaction,
     reset_failed_import_checkpoint,
 )
 from app.modules.imports.application.dto import (
@@ -165,7 +166,7 @@ def import_managed_book(
             "message": "正在校验文件",
         },
     )
-    commit_import_checkpoint(unit_of_work)
+    release_import_transaction(unit_of_work)
     try:
         if not original_source.exists():
             raise FileNotFoundError(f"导入源已不存在：{original_source}")
@@ -216,6 +217,11 @@ def import_managed_book(
             effective_options,
             local_metadata_priority=services.load_local_metadata_priority(),
         )
+        release_import_transaction(unit_of_work)
+        effective_options = replace(
+            effective_options,
+            default_cover_path=services.ensure_default_cover(),
+        )
         preference_sources = audio_sources if audio_sources else [original_source]
         disallowed_sources = [
             item
@@ -263,6 +269,7 @@ def import_managed_book(
                 source_file_path=source,
                 original_source_file_path=original_source,
             )
+        release_import_transaction(unit_of_work)
         stat = source.stat()
         existing_file = (
             _existing_file_result(queries, source)
@@ -270,6 +277,7 @@ def import_managed_book(
             else _existing_audio_bundle_result(queries, audio_sources)
         )
         if existing_file:
+            release_import_transaction(unit_of_work)
             if source_ext in REFLOWABLE_SOURCE_EXTS:
                 existing_file = refresh_existing_reflowable_source(
                     store,
@@ -278,6 +286,7 @@ def import_managed_book(
                     settings,
                     source,
                     existing_file,
+                    unit_of_work,
                 )
             elif source_ext == ".pdf":
                 existing_file = refresh_existing_pdf_cover(
@@ -287,6 +296,7 @@ def import_managed_book(
                     settings,
                     source,
                     existing_file,
+                    unit_of_work,
                 )
             if converted is not None:
                 services.bind_conversion_result(
@@ -351,6 +361,7 @@ def import_managed_book(
             )
             return existing_file
 
+        release_import_transaction(unit_of_work)
         audio_metadata: list[AudioFileMetadata] = []
         sidecar = services.read_sidecar_metadata(
             original_source,
@@ -376,6 +387,7 @@ def import_managed_book(
                     "message": f"正在读取 {len(audio_sources)} 个音频文件",
                 },
             )
+            release_import_transaction(unit_of_work)
             audio_metadata = [
                 services.parse_audio_metadata(path) for path in audio_sources
             ]
@@ -478,6 +490,7 @@ def import_managed_book(
             != options.expected_lease_owner
         ):
             raise RuntimeError("导入任务租约已失效")
+        release_import_transaction(unit_of_work)
         content_hash = (
             converted.source_hash
             if converted
@@ -500,6 +513,7 @@ def import_managed_book(
         if content_hash:
             task_update["contentHash"] = content_hash
         store.update_import_task(task_id, columns=task_update)
+        release_import_transaction(unit_of_work)
         if ext == ".epub":
             result = _import_epub(
                 store,
@@ -511,6 +525,7 @@ def import_managed_book(
                 stat.st_size,
                 ext,
                 identity,
+                unit_of_work,
             )
         elif ext in REFLOWABLE_SOURCE_EXTS:
             result = _import_reflowable_source(
@@ -523,6 +538,7 @@ def import_managed_book(
                 stat.st_size,
                 ext,
                 identity,
+                unit_of_work,
             )
         elif ext == ".pdf":
             result = _import_pdf(
@@ -535,6 +551,7 @@ def import_managed_book(
                 stat.st_size,
                 ext,
                 identity,
+                unit_of_work,
             )
         elif audio_metadata:
             result = _import_audio(
@@ -548,6 +565,7 @@ def import_managed_book(
                 audio_metadata,
                 audio_structure,
                 audio_resolved_local,
+                unit_of_work,
             )
         else:
             result = _import_comic(
@@ -560,6 +578,7 @@ def import_managed_book(
                 stat.st_size,
                 ext,
                 identity,
+                unit_of_work,
             )
         if result.resolved_metadata is not None:
             publication = result.resolved_metadata
@@ -606,6 +625,7 @@ def import_managed_book(
                 and field_sources.get("cover") == "SIDECAR_OPF"
                 and result.volume_id
             ):
+                release_import_transaction(unit_of_work)
                 cover_path = services.publish_sidecar_cover(
                     settings.resolved_storage_root,
                     sidecar.cover_path,

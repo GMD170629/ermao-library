@@ -97,7 +97,7 @@ def inspect_pdf(
             )
         finally:
             pdf.close()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - PDF backend failures become inspection warnings
         raw_metadata["parseWarning"] = str(exc)
         page_count = max(1, _fallback_pdf_page_count(path))
         evidence = PdfTextEvidence(
@@ -164,12 +164,7 @@ def publish_pdf_cover(
     volume_id: str,
 ) -> PdfCoverPublication:
     target = (
-        storage_root
-        / "books"
-        / work_id
-        / media_version_id
-        / volume_id
-        / "cover.jpg"
+        storage_root / "books" / work_id / media_version_id / volume_id / "cover.jpg"
     )
     temporary = target.with_suffix(f"{target.suffix}.part")
     try:
@@ -197,9 +192,8 @@ def publish_pdf_cover(
             return PdfCoverPublication(path=str(target), rendered_page=1)
         finally:
             pdf.close()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - cover adapter contains backend failures
         temporary.unlink(missing_ok=True)
-        target.unlink(missing_ok=True)
         return PdfCoverPublication(path=None, warning=str(exc))
 
 

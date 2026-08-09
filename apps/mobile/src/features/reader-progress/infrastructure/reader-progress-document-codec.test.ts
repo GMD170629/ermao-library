@@ -10,72 +10,84 @@ const connection = {
   baseUrl: 'http://192.168.1.20:3000',
 } as const;
 
-test('round-trips a validated EPUB progress document', () => {
-  const recorded = recordReaderProgress(null, {
+function reflowableDocument() {
+  return recordReaderProgress(null, {
     connection,
     owner: { kind: 'local' },
     workId: 'work-1',
+    mediaVersionId: 'media-version-1',
     volumeId: 'volume-1',
     contentFingerprint: 'fingerprint-1',
     location: {
-      kind: 'epub',
+      kind: 'reflowable',
+      format: 'epub',
       cfi: 'epubcfi(/6/2)',
+      href: 'chapter-2.xhtml',
       progression: 0.42,
+      foliate: {
+        continuous: { sectionFraction: 0.375 },
+        toc: {
+          index: 2,
+          title: 'Chapter 2',
+          href: 'chapter-2.xhtml',
+          navigationKey: 'chapter-2',
+        },
+        navigationFingerprint: 'navigation-fingerprint-1',
+        section: { current: 2, total: 12 },
+        location: { current: 42, next: 43, total: 100 },
+        remainingSeconds: { section: 125.5, total: 1_250.75 },
+      },
     },
     percent: 42,
     nowMs: 1_000,
     proposedClientId: 'client-000001',
     mutationId: 'mutation-000001',
   });
+}
 
+test('round-trips the complete Reader v3 reflowable progress document', () => {
+  const recorded = reflowableDocument();
   const decoded = readerProgressDocumentCodec.decode(
     readerProgressDocumentCodec.encode(recorded.document),
   );
+
   assert.equal(decoded.ok, true);
   if (decoded.ok) {
     assert.deepEqual(decoded.value, recorded.document);
+    assert.deepEqual(
+      decoded.value.entries[0]?.location,
+      recorded.entry.location,
+    );
   }
 });
 
-test('migrates a legacy edition-scoped entry only when it has an explicit volume', () => {
-  const legacy = {
-    format: 'shuku.reader-progress',
-    schemaVersion: 1,
-    generation: 1,
-    connection,
-    client: { id: 'client-000001', lastSequence: 1 },
-    updatedAtMs: 1_000,
-    entries: [{
-      mutationId: 'mutation-000001',
-      clientSequence: 1,
-      owner: { kind: 'local' },
-      workId: 'work-1',
-      editionId: 'edition-1',
-      volumeId: 'volume-1',
-      contentFingerprint: 'fingerprint-1',
-      location: { kind: 'epub', progression: 0.42 },
-      percent: 42,
-      createdAtMs: 1_000,
-      updatedAtMs: 1_000,
-    }],
-  };
+test('rejects prior schemas and edition-scoped entries', () => {
+  const recorded = reflowableDocument();
 
-  const migrated = readerProgressDocumentCodec.decode(legacy);
-  assert.equal(migrated.ok, true);
-  if (migrated.ok) {
-    assert.equal(migrated.value.schemaVersion, 2);
-    assert.equal(migrated.value.entries[0]?.volumeId, 'volume-1');
-    assert.equal('editionId' in (migrated.value.entries[0] ?? {}), false);
+  for (const schemaVersion of [1, 2]) {
+    assert.equal(
+      readerProgressDocumentCodec.decode({
+        ...recorded.document,
+        schemaVersion,
+      }).ok,
+      false,
+    );
   }
-
-  const ambiguous = {
-    ...legacy,
-    entries: [{ ...legacy.entries[0], volumeId: null }],
-  };
-  assert.equal(readerProgressDocumentCodec.decode(ambiguous).ok, false);
+  assert.equal(
+    readerProgressDocumentCodec.decode({
+      ...recorded.document,
+      entries: [
+        {
+          ...recorded.entry,
+          editionId: 'edition-1',
+        },
+      ],
+    }).ok,
+    false,
+  );
 });
 
-test('validates reflowable, legacy EPUB, comic and PDF locations at the file boundary', () => {
+test('accepts only current reflowable, comic and PDF locations', () => {
   assert.equal(
     decodeReaderLocation({
       kind: 'reflowable',
@@ -83,10 +95,6 @@ test('validates reflowable, legacy EPUB, comic and PDF locations at the file bou
       cfi: 'epubcfi(/6/4)',
       progression: 0.5,
     }).ok,
-    true,
-  );
-  assert.equal(
-    decodeReaderLocation({ kind: 'epub', progression: 0.5 }).ok,
     true,
   );
   assert.equal(
@@ -102,7 +110,10 @@ test('validates reflowable, legacy EPUB, comic and PDF locations at the file bou
     true,
   );
 
-  assert.equal(decodeReaderLocation({ kind: 'epub' }).ok, false);
+  assert.equal(
+    decodeReaderLocation({ kind: 'epub', progression: 0.5 }).ok,
+    false,
+  );
   assert.equal(
     decodeReaderLocation({
       kind: 'reflowable',
@@ -112,7 +123,11 @@ test('validates reflowable, legacy EPUB, comic and PDF locations at the file bou
     false,
   );
   assert.equal(
-    decodeReaderLocation({ kind: 'epub', progression: 42 }).ok,
+    decodeReaderLocation({
+      kind: 'reflowable',
+      format: 'epub',
+      progression: 42,
+    }).ok,
     false,
   );
   assert.equal(
@@ -129,11 +144,58 @@ test('validates reflowable, legacy EPUB, comic and PDF locations at the file bou
   );
 });
 
+test('strictly validates every Foliate snapshot field', () => {
+  const valid = reflowableDocument().entry.location;
+  assert.equal(decodeReaderLocation(valid).ok, true);
+  if (valid.kind !== 'reflowable' || valid.foliate === undefined) {
+    assert.fail('Expected a reflowable Foliate location');
+  }
+
+  assert.equal(
+    decodeReaderLocation({
+      ...valid,
+      foliate: {
+        ...valid.foliate,
+        continuous: { sectionFraction: 1.01 },
+      },
+    }).ok,
+    false,
+  );
+  assert.equal(
+    decodeReaderLocation({
+      ...valid,
+      foliate: {
+        ...valid.foliate,
+        section: { current: 12, total: 12 },
+      },
+    }).ok,
+    false,
+  );
+  assert.equal(
+    decodeReaderLocation({
+      ...valid,
+      foliate: {
+        ...valid.foliate,
+        location: { current: 42, next: 101, total: 100 },
+      },
+    }).ok,
+    false,
+  );
+  assert.equal(
+    decodeReaderLocation({
+      ...valid,
+      foliate: { ...valid.foliate, unsupportedMetric: 1 },
+    }).ok,
+    false,
+  );
+});
+
 test('rejects a comic entry whose top-level volume does not match', () => {
   const recorded = recordReaderProgress(null, {
     connection,
     owner: { kind: 'local' },
     workId: 'work-1',
+    mediaVersionId: 'media-version-1',
     volumeId: 'volume-1',
     contentFingerprint: 'fingerprint-1',
     location: {

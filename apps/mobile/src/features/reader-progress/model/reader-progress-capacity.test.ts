@@ -4,9 +4,9 @@ import test from 'node:test';
 import {
   MAXIMUM_READER_PROGRESS_ENTRIES,
   recordReaderProgress,
-  type LocalProgressEntryV2,
+  type LocalProgressEntry,
   type ProgressConnection,
-  type ReaderProgressDocumentV2,
+  type ReaderProgressDocument,
   type RecordReaderProgressCommand,
 } from './reader-progress';
 
@@ -15,25 +15,30 @@ const connection: ProgressConnection = {
   baseUrl: 'https://library.example',
 };
 
-function progressEntry(index: number): LocalProgressEntryV2 {
+function progressEntry(index: number): LocalProgressEntry {
   return {
     mutationId: `mutation-${index}`,
     clientSequence: index + 1,
     owner: { kind: 'local' },
     workId: `work-${index}`,
+    mediaVersionId: `media-version-${index}`,
     volumeId: `volume-${index}`,
     contentFingerprint: `fingerprint-${index}`,
-    location: { kind: 'epub', progression: index / 10_000 },
+    location: {
+      kind: 'reflowable',
+      format: 'epub',
+      progression: index / 10_000,
+    },
     percent: index / 100,
     createdAtMs: index,
     updatedAtMs: index,
   };
 }
 
-function fullDocument(): ReaderProgressDocumentV2 {
+function fullDocument(): ReaderProgressDocument {
   return {
     format: 'shuku.reader-progress',
-    schemaVersion: 2,
+    schemaVersion: 3,
     generation: 1,
     connection,
     client: {
@@ -55,9 +60,14 @@ function recordCommand(
     connection,
     owner: { kind: 'local' },
     workId: `work-${workIndex}`,
+    mediaVersionId: `media-version-${workIndex}`,
     volumeId: `volume-${workIndex}`,
     contentFingerprint: `fingerprint-${workIndex}`,
-    location: { kind: 'epub', progression: 0.5 },
+    location: {
+      kind: 'reflowable',
+      format: 'epub',
+      progression: 0.5,
+    },
     percent: 50,
     nowMs: 20_000,
     proposedClientId: 'unused-client',

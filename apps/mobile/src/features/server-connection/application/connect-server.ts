@@ -1,6 +1,7 @@
 import type { Clock, IdGenerator } from '../../../shared/lib/runtime';
 import type {
   CancellationToken,
+  ServerProfilePersistenceWarning,
   ServerHealthGateway,
   ServerProfileRepository,
   ServerProfileWriteFailureReason,
@@ -10,7 +11,10 @@ import {
   parseServerAddress,
   type ServerAddressErrorCode,
 } from '../model/server-address';
-import type { ServerProfile } from '../model/server-profile';
+import type {
+  ServerProfile,
+  ServerProfileCatalog,
+} from '../model/server-profile';
 
 export type ConnectServerCommand = Readonly<{
   candidate: string;
@@ -35,13 +39,14 @@ export type ConnectServerResult =
     }>
   | Readonly<{
       outcome: 'profile-save-failed';
-      reason: ServerProfileWriteFailureReason;
+      reason: Exclude<ServerProfileWriteFailureReason, 'cancelled'>;
     }>
+  | Readonly<{ outcome: 'cancelled' }>
   | Readonly<{
       outcome: 'connected';
       profile: ServerProfile;
-      recoveredFromCorruption: boolean;
-      maintenanceWarningCount: number;
+      catalog: ServerProfileCatalog;
+      warnings: readonly ServerProfilePersistenceWarning[];
     }>;
 
 export class ConnectServer {
@@ -55,6 +60,9 @@ export class ConnectServer {
   async execute(
     command: ConnectServerCommand,
   ): Promise<ConnectServerResult> {
+    if (command.cancellation?.isCancellationRequested() === true) {
+      return { outcome: 'cancelled' };
+    }
     const parsed = parseServerAddress(command.candidate);
     if (!parsed.ok) {
       return {
@@ -71,15 +79,34 @@ export class ConnectServer {
             command.cancellation,
           );
     if (health.outcome !== 'healthy') {
+      if (
+        health.outcome === 'unreachable' &&
+        health.reason === 'cancelled'
+      ) {
+        return { outcome: 'cancelled' };
+      }
       return health;
     }
 
-    const persisted = await this.profiles.activateHealthyServer({
-      baseUrl: parsed.baseUrl,
-      proposedProfileId: this.idGenerator.nextId(),
-      verifiedAtMs: this.clock.nowMs(),
-    });
+    if (command.cancellation?.isCancellationRequested() === true) {
+      return { outcome: 'cancelled' };
+    }
+
+    const persisted = await this.profiles.activateHealthyServer(
+      {
+        baseUrl: parsed.baseUrl,
+        initialized: health.initialized,
+        proposedProfileId: this.idGenerator.nextId(),
+        verifiedAtMs: this.clock.nowMs(),
+      },
+      command.cancellation === undefined
+        ? undefined
+        : { cancellation: command.cancellation },
+    );
     if (!persisted.ok) {
+      if (persisted.error.reason === 'cancelled') {
+        return { outcome: 'cancelled' };
+      }
       return {
         outcome: 'profile-save-failed',
         reason: persisted.error.reason,
@@ -88,8 +115,8 @@ export class ConnectServer {
     return {
       outcome: 'connected',
       profile: persisted.profile,
-      recoveredFromCorruption: persisted.recoveredFromCorruption,
-      maintenanceWarningCount: persisted.maintenanceWarningCount,
+      catalog: persisted.catalog,
+      warnings: persisted.warnings,
     };
   }
 }

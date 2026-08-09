@@ -1,5 +1,3 @@
-import type { ReaderLocation } from '@shuku/reader-core';
-
 import type { JsonDocumentCodec } from '../../../shared/files/snapshot-document-store';
 import {
   type ValidationResult,
@@ -14,10 +12,10 @@ import {
   isSafeRuntimeId,
   MAXIMUM_READER_PROGRESS_ENTRIES,
   readerProgressSlotKey,
-  type LocalProgressEntryV2,
+  type LocalProgressEntry,
   type ProgressConnection,
   type ProgressOwner,
-  type ReaderProgressDocumentV2,
+  type ReaderProgressDocument,
 } from '../model/reader-progress';
 import {
   decodeReaderLocation,
@@ -40,6 +38,7 @@ const ENTRY_KEYS = new Set([
   'clientSequence',
   'owner',
   'workId',
+  'mediaVersionId',
   'volumeId',
   'contentFingerprint',
   'location',
@@ -84,13 +83,8 @@ function decodeOwner(value: unknown): ProgressOwner | null {
   return null;
 }
 
-const LEGACY_ENTRY_KEYS = new Set([...ENTRY_KEYS, 'editionId']);
-
-function decodeEntry(
-  value: unknown,
-  legacy: boolean,
-): LocalProgressEntryV2 | null {
-  if (!isRecord(value) || !hasOnlyKeys(value, legacy ? LEGACY_ENTRY_KEYS : ENTRY_KEYS)) {
+function decodeEntry(value: unknown): LocalProgressEntry | null {
+  if (!isRecord(value) || !hasOnlyKeys(value, ENTRY_KEYS)) {
     return null;
   }
 
@@ -98,6 +92,7 @@ function decodeEntry(
   const clientSequence = nonNegativeSafeInteger(value.clientSequence);
   const owner = decodeOwner(value.owner);
   const workId = nonEmptyString(value.workId, 191);
+  const mediaVersionId = nonEmptyString(value.mediaVersionId, 191);
   const volumeId = nonEmptyString(value.volumeId, 191);
   const contentFingerprint = nonEmptyString(
     value.contentFingerprint,
@@ -114,6 +109,7 @@ function decodeEntry(
     clientSequence < 1 ||
     owner === null ||
     workId === null ||
+    mediaVersionId === null ||
     volumeId === null ||
     contentFingerprint === null ||
     !location.ok ||
@@ -132,6 +128,7 @@ function decodeEntry(
     clientSequence,
     owner,
     workId,
+    mediaVersionId,
     volumeId,
     contentFingerprint,
     location: location.value,
@@ -147,12 +144,13 @@ function encodeOwner(owner: ProgressOwner): unknown {
     : { kind: owner.kind, userId: owner.userId };
 }
 
-function encodeEntry(entry: LocalProgressEntryV2): unknown {
+function encodeEntry(entry: LocalProgressEntry): unknown {
   return {
     mutationId: entry.mutationId,
     clientSequence: entry.clientSequence,
     owner: encodeOwner(entry.owner),
     workId: entry.workId,
+    mediaVersionId: entry.mediaVersionId,
     volumeId: entry.volumeId,
     contentFingerprint: entry.contentFingerprint,
     location: encodeReaderLocation(entry.location),
@@ -162,14 +160,14 @@ function encodeEntry(entry: LocalProgressEntryV2): unknown {
   };
 }
 
-export const readerProgressDocumentCodec: JsonDocumentCodec<ReaderProgressDocumentV2> =
+export const readerProgressDocumentCodec: JsonDocumentCodec<ReaderProgressDocument> =
   {
-    decode(value: unknown): ValidationResult<ReaderProgressDocumentV2> {
+    decode(value: unknown): ValidationResult<ReaderProgressDocument> {
       if (
         !isRecord(value) ||
         !hasOnlyKeys(value, DOCUMENT_KEYS) ||
         value.format !== 'shuku.reader-progress' ||
-        (value.schemaVersion !== 1 && value.schemaVersion !== 2) ||
+        value.schemaVersion !== 3 ||
         !Array.isArray(value.entries) ||
         value.entries.length > MAXIMUM_READER_PROGRESS_ENTRIES ||
         !isRecord(value.client) ||
@@ -185,8 +183,7 @@ export const readerProgressDocumentCodec: JsonDocumentCodec<ReaderProgressDocume
         value.client.lastSequence,
       );
       const updatedAtMs = nonNegativeSafeInteger(value.updatedAtMs);
-      const legacy = value.schemaVersion === 1;
-      const entries = value.entries.map((entry) => decodeEntry(entry, legacy));
+      const entries = value.entries.map(decodeEntry);
       if (
         generation === null ||
         generation < 1 ||
@@ -201,7 +198,7 @@ export const readerProgressDocumentCodec: JsonDocumentCodec<ReaderProgressDocume
       }
 
       const validEntries = entries.filter(
-        (entry): entry is LocalProgressEntryV2 => entry !== null,
+        (entry): entry is LocalProgressEntry => entry !== null,
       );
       const sequences = new Set(
         validEntries.map((entry) => entry.clientSequence),
@@ -234,7 +231,7 @@ export const readerProgressDocumentCodec: JsonDocumentCodec<ReaderProgressDocume
         ok: true,
         value: {
           format: 'shuku.reader-progress',
-          schemaVersion: 2,
+          schemaVersion: 3,
           generation,
           connection,
           client: { id: clientId, lastSequence },
@@ -244,7 +241,7 @@ export const readerProgressDocumentCodec: JsonDocumentCodec<ReaderProgressDocume
       };
     },
 
-    encode(document: ReaderProgressDocumentV2): unknown {
+    encode(document: ReaderProgressDocument): unknown {
       return {
         format: document.format,
         schemaVersion: document.schemaVersion,
@@ -256,5 +253,3 @@ export const readerProgressDocumentCodec: JsonDocumentCodec<ReaderProgressDocume
       };
     },
   };
-
-export type { ReaderLocation };

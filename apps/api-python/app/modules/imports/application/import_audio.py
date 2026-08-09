@@ -22,6 +22,7 @@ from app.modules.imports.application.audio_types import (
     is_supported_audio_file,
     strict_flat_audio_title,
 )
+from app.modules.imports.application.commands import release_import_transaction
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
     ImportOptions,
@@ -37,6 +38,7 @@ from app.modules.imports.application.import_support import (
     _id,
     _normalize_key,
     _now,
+    _prepared_default_cover,
     _title_from_file,
     _work_merge_key,
 )
@@ -44,6 +46,7 @@ from app.modules.imports.application.local_metadata import ResolvedLocalMetadata
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
     ImportOrchestrationServices,
+    ImportUnitOfWork,
     LibraryImportStore,
 )
 from app.modules.imports.domain.content_classification import (
@@ -70,6 +73,7 @@ def _import_audio(
     metadata_items: list[AudioFileMetadata],
     structure: AudioBundleStructure | None = None,
     resolved_local: ResolvedLocalMetadata | None = None,
+    unit_of_work: ImportUnitOfWork | None = None,
 ) -> ImportResult:
     if not metadata_items:
         raise ValueError("有声书目录中没有可导入的音频文件")
@@ -107,6 +111,7 @@ def _import_audio(
         _flat_audio_bundle_key(source_root, flat_title) if flat_title else None
     )
     display_titles = _audio_track_titles(metadata_items)
+    source_stats = {item.path.resolve(): item.path.stat() for item in metadata_items}
     existing_by_path = _audio_files_by_path(
         queries, [item.path for item in metadata_items]
     )
@@ -224,7 +229,7 @@ def _import_audio(
                             "origin": options.origin,
                             "sourceGroupKey": f"{options.origin.lower()}:{bundle_key}",
                             "sizeBytes": sum(
-                                item.path.stat().st_size
+                                source_stats[item.path.resolve()].st_size
                                 for item in metadata_items
                                 if group is None
                                 or item.path.resolve() in set(group.files)
@@ -249,6 +254,9 @@ def _import_audio(
         if index < len(volumes)
         for path in group.files
     }
+    if unit_of_work is None:
+        raise RuntimeError("有声书导入缺少事务协调器")
+    release_import_transaction(unit_of_work)
     cover_path = media_version.get("coverPath") or services.publish_audio_cover(
         settings.resolved_storage_root,
         str(work["id"]),
@@ -256,7 +264,7 @@ def _import_audio(
         tuple(metadata_items),
         bundle_root=source_root if directory_bundle else None,
     )
-    cover_path = cover_path or services.ensure_default_cover()
+    cover_path = cover_path or _prepared_default_cover(options)
     manifest_tracks: list[dict[str, Any]] = []
     manifest_chapters: list[dict[str, Any]] = []
     chapter_sort_order = 0
@@ -272,7 +280,7 @@ def _import_audio(
         )
     for index, item in enumerate(metadata_items):
         item_volume = volume_by_source_path.get(item.path.resolve(), volume)
-        stat = item.path.stat()
+        stat = source_stats[item.path.resolve()]
         sort_order = index
         existing_file = existing_by_path.get(str(item.path))
         existing_full_hash = existing_file.get("fullHash") if existing_file else None
@@ -512,6 +520,7 @@ def _import_audio(
         work["id"],
         media_version["id"],
         cover_path,
+        _prepared_default_cover(options),
     )
     return ImportResult(
         work["id"],
@@ -591,6 +600,12 @@ def _audio_files_by_path(
     found = queries.list_library_files_by_paths(list(dict.fromkeys(candidates)))
     by_path: dict[str, dict[str, Any]] = {}
     for row in found:
+        if str(row.get("volumeImportStatus") or "") not in {
+            "COMPLETED",
+            "IMPORTED",
+            "READY",
+        }:
+            continue
         stored = str(row["path"])
         by_path[stored] = row
         try:

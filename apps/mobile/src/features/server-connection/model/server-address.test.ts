@@ -3,10 +3,11 @@ import test from 'node:test';
 
 import {
   parseServerAddress,
+  serverApiUrl,
   serverHealthUrl,
 } from './server-address';
 
-test('normalizes a manually entered LAN address and defaults to HTTP', () => {
+test('uses the library web address as the only public origin for API requests', () => {
   const parsed = parseServerAddress(' 192.168.1.20:3000/ ');
   assert.equal(parsed.ok, true);
   if (parsed.ok) {
@@ -15,6 +16,10 @@ test('normalizes a manually entered LAN address and defaults to HTTP', () => {
     assert.equal(
       serverHealthUrl(parsed.baseUrl),
       'http://192.168.1.20:3000/api/health',
+    );
+    assert.equal(
+      serverApiUrl(parsed.baseUrl, '/api/auth/me'),
+      'http://192.168.1.20:3000/api/auth/me',
     );
   }
 });
@@ -42,9 +47,14 @@ test('preserves a reverse-proxy base path for the health endpoint', () => {
   );
   assert.equal(parsed.ok, true);
   if (parsed.ok) {
+    assert.equal(parsed.baseUrl.basePath, '/shuku');
     assert.equal(
       serverHealthUrl(parsed.baseUrl),
       'https://books.example.com/shuku/api/health',
+    );
+    assert.equal(
+      serverApiUrl(parsed.baseUrl, '/api/auth/logout'),
+      'https://books.example.com/shuku/api/auth/logout',
     );
   }
 });

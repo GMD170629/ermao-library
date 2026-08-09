@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime
 from typing import cast
 
@@ -12,35 +11,18 @@ from sqlalchemy.orm import Session
 
 from app.models.import_pipeline import BookConversionTask, ImportTask
 from app.models.library import LibraryFile
+from app.modules.imports.application.dto import ConversionProgressTaskDTO
 
 
 class ConversionTaskConflict(RuntimeError):
     """Raised when a conversion idempotency scope cannot be safely reconciled."""
 
 
-@dataclass(frozen=True)
-class ConversionTaskRecord:
-    id: str
-    import_task_id: str
-    source_volume_id: str
-    derived_volume_id: str | None
-    idempotency_key: str
-    source_hash: str | None
-    output_path: str | None
-    status: str
-    attempts: int
-    started_at: object | None
-
-
-def _record(task: BookConversionTask) -> ConversionTaskRecord:
-    return ConversionTaskRecord(
+def _record(task: BookConversionTask) -> ConversionProgressTaskDTO:
+    return ConversionProgressTaskDTO(
         id=task.id,
         import_task_id=task.import_task_id,
-        source_volume_id=task.source_volume_id,
-        derived_volume_id=task.derived_volume_id,
         idempotency_key=task.idempotency_key,
-        source_hash=task.source_hash,
-        output_path=task.output_path,
         status=task.status,
         attempts=task.attempts,
         started_at=task.started_at,
@@ -92,7 +74,7 @@ def ensure_conversion_task(
     converter: str,
     options_json: str,
     now: object,
-) -> ConversionTaskRecord:
+) -> ConversionProgressTaskDTO:
     """Return the single task for a source-volume/hash/target conversion scope.
 
     A retried import may have a different ``ImportTask`` id. The unique conversion

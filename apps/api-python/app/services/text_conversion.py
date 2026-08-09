@@ -8,7 +8,6 @@ import posixpath
 import re
 import shutil
 import subprocess
-import time
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -17,18 +16,12 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 from xml.etree import ElementTree
 
-from sqlalchemy.orm import Session
-
 from app.core.config import Settings
 from app.core.time import now_timestamp_ms
-from app.modules.imports.infrastructure.conversion import (
-    ConversionTaskConflict,
-    ConversionTaskRecord,
-    ensure_conversion_task,
-    record_conversion_failure,
-    resolve_source_volume_id,
-    update_conversion_stage,
-)
+from app.modules.imports.application.dto import ConversionProgressTaskDTO
+from app.modules.imports.application.errors import ConversionProgressConflict
+from app.modules.imports.application.ports import TextConversionProgressStore
+from app.modules.imports.application.transactions import stable_import_resource_id
 from app.services.epub_normalizer import (
     EPUB_NORMALIZER_VERSION,
     EpubInspection,
@@ -112,27 +105,12 @@ def _now() -> int:
     return now_timestamp_ms()
 
 
-def _id() -> str:
-    return f"py_{time.time_ns()}"
-
-
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def conversion_idempotency_key(
-    source_volume_id: str, source_hash: str, target_format: str = "EPUB"
-) -> str:
-    """Build the stable identity for one derived-format conversion scope."""
-
-    normalized_target = target_format.strip().upper()
-    return hashlib.sha256(
-        f"{source_volume_id}|{source_hash.lower()}|{normalized_target}".encode()
-    ).hexdigest()
 
 
 def _decode_txt_sample(sample: bytes, continuation: bytes, *, encoding: str) -> str:
@@ -452,7 +430,7 @@ def converter_capability(
 
 
 def _update_stage(
-    db: Session,
+    progress_store: TextConversionProgressStore,
     import_task_id: str,
     conversion_task_id: str,
     *,
@@ -461,8 +439,7 @@ def _update_stage(
     message: str,
     conversion_values: dict[str, Any] | None = None,
 ) -> None:
-    update_conversion_stage(
-        db,
+    progress_store.update_stage(
         import_task_id,
         conversion_task_id,
         status=status,
@@ -471,40 +448,31 @@ def _update_stage(
         conversion_values=conversion_values,
         now=_now(),
     )
-    db.commit()
 
 
 def _ensure_conversion_task(
-    db: Session,
+    progress_store: TextConversionProgressStore,
     import_task_id: str,
     source: Path,
     fmt: str,
     converter: str,
     source_hash: str,
     options: dict[str, Any],
-) -> ConversionTaskRecord:
-    source_volume_id = resolve_source_volume_id(
-        db, import_task_id, str(source.resolve())
-    )
-    if not source_volume_id:
-        raise ValueError("转换任务缺少源卷册")
-    idempotency_key = conversion_idempotency_key(source_volume_id, source_hash)
-    task = ensure_conversion_task(
-        db,
+) -> ConversionProgressTaskDTO:
+    return progress_store.ensure_task(
         import_task_id,
-        task_id=_id(),
-        source_volume_id=source_volume_id,
-        source_hash=source_hash,
-        idempotency_key=idempotency_key,
-        source_path=str(source),
-        fmt=fmt,
-        target_format="EPUB",
+        task_id=stable_import_resource_id(
+            import_task_id,
+            "text-conversion",
+            str(source),
+        ),
+        source_path=source,
+        source_format=fmt,
         converter=converter,
+        source_hash=source_hash,
         options_json=json.dumps(options, ensure_ascii=False, sort_keys=True),
         now=_now(),
     )
-    db.commit()
-    return task
 
 
 def _failure_from_process(stderr: str, stdout: str) -> ConversionFailure:
@@ -643,7 +611,7 @@ def _write_normalization_options(
 
 
 def convert_to_epub(
-    db: Session,
+    progress_store: TextConversionProgressStore,
     settings: Settings,
     import_task_id: str,
     source_path: str | Path,
@@ -657,9 +625,15 @@ def convert_to_epub(
     source_hash = _sha256(source)
     try:
         task = _ensure_conversion_task(
-            db, import_task_id, source, fmt, converter, source_hash, {}
+            progress_store,
+            import_task_id,
+            source,
+            fmt,
+            converter,
+            source_hash,
+            {},
         )
-    except ConversionTaskConflict as exc:
+    except ConversionProgressConflict as exc:
         raise ConversionFailure(
             "CONVERSION_CONFLICT",
             "相同源卷册的 EPUB 转换发生冲突，请稍后重试",
@@ -675,12 +649,12 @@ def convert_to_epub(
     try:
         probe = probe_text_source(source)
     except ConversionFailure as exc:
-        _record_failure(db, import_task_id, task.id, exc)
+        _record_failure(progress_store, import_task_id, task.id, exc)
         raise
     fmt = str(probe["sourceFormat"])
     options = dict(probe["options"])
     _update_stage(
-        db,
+        progress_store,
         import_task_id,
         task.id,
         status="PROBING",
@@ -695,7 +669,7 @@ def convert_to_epub(
     try:
         engine_version = converter_version(settings, fmt, command_runner)
     except ConversionFailure as exc:
-        _record_failure(db, import_task_id, task.id, exc)
+        _record_failure(progress_store, import_task_id, task.id, exc)
         raise
     version = (
         _libmobi_pipeline_version(engine_version)
@@ -734,7 +708,7 @@ def convert_to_epub(
                     _cached_normalization_options(final_path, normalized_inspection)
                 )
             _update_stage(
-                db,
+                progress_store,
                 import_task_id,
                 task.id,
                 status="COMPLETED",
@@ -770,7 +744,7 @@ def convert_to_epub(
     temp_dir.mkdir(parents=True, exist_ok=True)
     output_path = temp_dir / "book.part.epub"
     _update_stage(
-        db,
+        progress_store,
         import_task_id,
         task.id,
         status="CONVERTING",
@@ -802,7 +776,7 @@ def convert_to_epub(
                 inspection = inspect_libmobi_epub(raw_output_path)
                 if inspection.requires_normalization:
                     _update_stage(
-                        db,
+                        progress_store,
                         import_task_id,
                         task.id,
                         status="NORMALIZING",
@@ -839,7 +813,7 @@ def convert_to_epub(
         else:
             options = _run_internal_conversion(fmt, source, output_path, options)
             _update_stage(
-                db,
+                progress_store,
                 import_task_id,
                 task.id,
                 status="CONVERTING",
@@ -852,7 +826,7 @@ def convert_to_epub(
                 },
             )
         _update_stage(
-            db,
+            progress_store,
             import_task_id,
             task.id,
             status="VALIDATING",
@@ -878,7 +852,7 @@ def convert_to_epub(
                 # must not turn a readable EPUB into a failed import.
                 pass
         _update_stage(
-            db,
+            progress_store,
             import_task_id,
             task.id,
             status="COMPLETED",
@@ -906,16 +880,16 @@ def convert_to_epub(
         failure = ConversionFailure(
             "CONVERSION_TIMEOUT", "电子书转换超时，原文件已保留"
         )
-        _record_failure(db, import_task_id, task.id, failure)
+        _record_failure(progress_store, import_task_id, task.id, failure)
         raise failure from exc
     except ConversionFailure as exc:
-        _record_failure(db, import_task_id, task.id, exc)
+        _record_failure(progress_store, import_task_id, task.id, exc)
         raise
     except (OSError, ValueError) as exc:
         failure = ConversionFailure(
             "CONVERSION_FAILED", f"电子书转换失败：{str(exc)[:800]}"
         )
-        _record_failure(db, import_task_id, task.id, failure)
+        _record_failure(progress_store, import_task_id, task.id, failure)
         raise failure from exc
     finally:
         if output_path.exists():
@@ -925,13 +899,12 @@ def convert_to_epub(
 
 
 def _record_failure(
-    db: Session,
+    progress_store: TextConversionProgressStore,
     import_task_id: str,
     conversion_task_id: str,
     failure: ConversionFailure,
 ) -> None:
-    record_conversion_failure(
-        db,
+    progress_store.record_failure(
         import_task_id,
         conversion_task_id,
         retryable=failure.retryable,
@@ -939,4 +912,3 @@ def _record_failure(
         summary=str(failure)[:MAX_LOG_CHARS],
         now=_now(),
     )
-    db.commit()

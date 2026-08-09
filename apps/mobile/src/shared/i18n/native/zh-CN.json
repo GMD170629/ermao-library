@@ -1,0 +1,10 @@
+{
+  "ios": {
+    "CFBundleDisplayName": "二毛图书",
+    "NSCameraUsageDescription": "用于扫描包含书库前台地址的连接二维码。",
+    "NSLocalNetworkUsageDescription": "用于连接您的书库服务器。"
+  },
+  "android": {
+    "app_name": "二毛图书"
+  }
+}

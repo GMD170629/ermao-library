@@ -29,6 +29,12 @@ def commit_import_checkpoint(unit_of_work: ImportUnitOfWork) -> None:
     execute_import_checkpoint(unit_of_work, lambda: None)
 
 
+def release_import_transaction(unit_of_work: ImportUnitOfWork) -> None:
+    """Commit and release the database connection before external I/O."""
+
+    unit_of_work.release()
+
+
 def reset_failed_import_checkpoint(unit_of_work: ImportUnitOfWork) -> None:
     """Discard a failed checkpoint before recording a terminal worker result."""
 

@@ -1,6 +1,6 @@
 import { fetch as expoFetch } from 'expo/fetch';
 
-import type { FetchFunction } from '../api/json-transport';
+import type { ApiFetchFunction } from '../api/public';
 
-export const expoFetchFunction: FetchFunction = (url, request) =>
+export const expoFetchFunction: ApiFetchFunction = (url, request) =>
   expoFetch(url, request);

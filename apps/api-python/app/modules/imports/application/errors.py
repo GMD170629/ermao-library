@@ -12,6 +12,10 @@ class ImportExecutionError(RuntimeError):
         self.retryable = retryable
 
 
+class ConversionProgressConflict(RuntimeError):
+    """A conversion checkpoint cannot be reconciled with its idempotency scope."""
+
+
 class AudioInspectionError(ValueError):
     """A source cannot satisfy the audiobook media-inspection contract."""
 

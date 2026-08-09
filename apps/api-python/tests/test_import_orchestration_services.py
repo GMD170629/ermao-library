@@ -1,18 +1,27 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import pytest
+from sqlalchemy.orm import Session
 
 import app.modules.imports.infrastructure.orchestration_services as services_module
+from app.core.config import Settings
 from app.modules.imports.application.errors import (
     AudioTrackLimitExceededError,
     ImportExecutionError,
 )
+from app.modules.imports.application.ports import TextConversionProgressStore
 from app.modules.imports.infrastructure.orchestration_services import (
     SessionImportOrchestrationServices,
 )
 from app.services.text_conversion import ConversionFailure
+
+
+class _ReleasedSession:
+    def in_transaction(self) -> bool:
+        return False
 
 
 def test_conversion_failure_is_translated_at_infrastructure_boundary(
@@ -26,7 +35,11 @@ def test_conversion_failure_is_translated_at_infrastructure_boundary(
         )
 
     monkeypatch.setattr(services_module, "convert_to_epub", fail_conversion)
-    services = SessionImportOrchestrationServices(object(), object())
+    services = SessionImportOrchestrationServices(
+        cast(Session, _ReleasedSession()),
+        cast(Settings, object()),
+        conversion_progress=cast(TextConversionProgressStore, object()),
+    )
 
     with pytest.raises(ImportExecutionError) as raised:
         services.convert_text("task-1", Path("/tmp/book.mobi"))
@@ -47,7 +60,9 @@ def test_audio_track_limit_is_translated_at_infrastructure_boundary(
         )
 
     monkeypatch.setattr(services_module, "inspect_audio_bundle", reject_bundle)
-    services = SessionImportOrchestrationServices(object(), object())
+    services = SessionImportOrchestrationServices(
+        cast(Session, _ReleasedSession()), cast(Settings, object())
+    )
 
     with pytest.raises(ImportExecutionError) as raised:
         services.inspect_audio_bundle(Path("/books/overflow"))

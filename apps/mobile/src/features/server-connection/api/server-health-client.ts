@@ -1,4 +1,4 @@
-import type { JsonTransport } from '../../../shared/api/json-transport';
+import type { ApiTransport } from '../../../shared/api/public';
 import type {
   CancellationToken,
   ServerHealthGateway,
@@ -7,15 +7,16 @@ import type {
 } from '../application/ports';
 import {
   serverHealthUrl,
+  serverSetupStatusUrl,
   type ServerBaseUrl,
 } from '../model/server-address';
-import { decodeServiceHealth } from './health-schema';
+import { decodeServiceHealth, decodeSetupStatus } from './health-schema';
 
 const HEALTH_TIMEOUT_MS = 8_000;
 const HEALTH_MAXIMUM_RESPONSE_BYTES = 16 * 1024;
 
 export class ServerHealthClient implements ServerHealthGateway {
-  constructor(private readonly transport: JsonTransport) {}
+  constructor(private readonly transport: ApiTransport) {}
 
   async probe(
     baseUrl: ServerBaseUrl,
@@ -30,8 +31,10 @@ export class ServerHealthClient implements ServerHealthGateway {
     }
 
     try {
-      const response = await this.transport.get({
+      const response = await this.transport.request({
         maximumResponseBytes: HEALTH_MAXIMUM_RESPONSE_BYTES,
+        method: 'GET',
+        responseType: 'json',
         signal: controller.signal,
         timeoutMs: HEALTH_TIMEOUT_MS,
         url: serverHealthUrl(baseUrl),
@@ -73,7 +76,47 @@ export class ServerHealthClient implements ServerHealthGateway {
           status: response.status,
         };
       }
-      return { outcome: 'healthy' };
+      const setupResponse = await this.transport.request({
+        maximumResponseBytes: HEALTH_MAXIMUM_RESPONSE_BYTES,
+        method: 'GET',
+        responseType: 'json',
+        signal: controller.signal,
+        timeoutMs: HEALTH_TIMEOUT_MS,
+        url: serverSetupStatusUrl(baseUrl),
+      });
+      if (!setupResponse.ok) {
+        if (
+          setupResponse.reason === 'invalid-json' ||
+          setupResponse.reason === 'response-too-large'
+        ) {
+          return {
+            outcome: 'incompatible',
+            reason: 'invalid-response',
+            status: setupResponse.status,
+          };
+        }
+        const reason: ServerUnreachableReason =
+          setupResponse.reason === 'aborted'
+            ? 'cancelled'
+            : setupResponse.reason;
+        return { outcome: 'unreachable', reason };
+      }
+      const setup = decodeSetupStatus(setupResponse.body);
+      if (!setup.ok) {
+        return {
+          outcome: 'incompatible',
+          reason: 'invalid-response',
+          status: setupResponse.status,
+        };
+      }
+      if (setupResponse.status !== 200) {
+        return {
+          outcome: 'incompatible',
+          reason: 'unexpected-http-status',
+          status: setupResponse.status,
+        };
+      }
+      return { outcome: 'healthy', initialized: setup.value.initialized };
     } finally {
       unsubscribe?.();
     }

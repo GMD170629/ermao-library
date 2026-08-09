@@ -144,3 +144,82 @@ test('a failed publish leaves the last committed snapshot readable', async () =>
     assert.equal(restored.value.value, 'committed');
   }
 });
+
+test('resets only a completely corrupt managed snapshot set', async () => {
+  const fileSystem = new MemoryPrivateFileSystem();
+  const store = new SnapshotDocumentStore(
+    fileSystem,
+    'test/reset-corrupt',
+    testCodec,
+    new SequenceIdGenerator(),
+    new InProcessSnapshotOperationCoordinator(),
+  );
+  fileSystem.setFile(
+    'test/reset-corrupt/snapshot-000000000001-broken.json',
+    '{broken',
+  );
+  fileSystem.setFile(
+    'test/reset-corrupt/.snapshot-000000000002-staged.tmp',
+    '{also-broken',
+  );
+  fileSystem.setFile('test/reset-corrupt/keep.txt', 'unrelated');
+
+  const reset = await store.resetCorrupt();
+
+  assert.deepEqual(reset, { status: 'reset', deletedFileCount: 2 });
+  assert.deepEqual(fileSystem.fileNames('test/reset-corrupt'), ['keep.txt']);
+  assert.deepEqual(await store.read(), { status: 'empty' });
+});
+
+test('does not reset when an older valid snapshot can be recovered', async () => {
+  const fileSystem = new MemoryPrivateFileSystem();
+  const store = new SnapshotDocumentStore(
+    fileSystem,
+    'test/reset-recoverable',
+    testCodec,
+    new SequenceIdGenerator(),
+    new InProcessSnapshotOperationCoordinator(),
+  );
+  await store.update(() => ({
+    document: { generation: 1, value: 'recoverable' },
+    result: null,
+  }));
+  fileSystem.setFile(
+    'test/reset-recoverable/snapshot-000000000002-broken.json',
+    '{broken',
+  );
+
+  assert.deepEqual(await store.resetCorrupt(), {
+    status: 'not-corrupt',
+    deletedFileCount: 0,
+  });
+  assert.deepEqual(fileSystem.fileNames('test/reset-recoverable'), [
+    'snapshot-000000000001-id-000001.json',
+    'snapshot-000000000002-broken.json',
+  ]);
+});
+
+test('checks reset authorization inside the serialized operation', async () => {
+  const fileSystem = new MemoryPrivateFileSystem();
+  const store = new SnapshotDocumentStore(
+    fileSystem,
+    'test/reset-cancelled',
+    testCodec,
+    new SequenceIdGenerator(),
+    new InProcessSnapshotOperationCoordinator(),
+  );
+  fileSystem.setFile(
+    'test/reset-cancelled/snapshot-000000000001-broken.json',
+    '{broken',
+  );
+
+  await assert.rejects(
+    store.resetCorrupt(() => {
+      throw new Error('cancelled');
+    }),
+    /cancelled/,
+  );
+  assert.deepEqual(fileSystem.fileNames('test/reset-cancelled'), [
+    'snapshot-000000000001-broken.json',
+  ]);
+});

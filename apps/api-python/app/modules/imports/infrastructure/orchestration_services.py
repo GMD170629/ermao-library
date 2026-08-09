@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.contracts.local_metadata import LocalMetadataSource
 from app.core.config import Settings
@@ -38,9 +38,16 @@ from app.modules.imports.application.pdf_types import (
     PdfCoverPublication,
     PdfInspection,
 )
+from app.modules.imports.application.ports import (
+    ImportUnitOfWork,
+    TextConversionProgressStore,
+)
 from app.modules.imports.application.reflowable_types import ReflowableBookMetadata
 from app.modules.imports.infrastructure.audio_cover import publish_audio_cover
 from app.modules.imports.infrastructure.conversion import bind_derived_volume
+from app.modules.imports.infrastructure.conversion_progress import (
+    SqlAlchemyTextConversionProgress,
+)
 from app.modules.imports.infrastructure.pdf_inspection import (
     inspect_pdf,
     publish_pdf_cover,
@@ -54,6 +61,7 @@ from app.modules.imports.infrastructure.reflowable_metadata import (
 )
 from app.modules.imports.infrastructure.sidecar_cover import publish_sidecar_cover
 from app.modules.imports.infrastructure.sidecar_opf import discover_sidecar_opf
+from app.modules.imports.infrastructure.uow import SqlAlchemyImportUnitOfWork
 from app.modules.library.infrastructure.facets import sync_work_facets
 from app.modules.system.infrastructure.events import record_system_event
 from app.services.audio_metadata import inspect_audio_bundle, parse_audio_metadata
@@ -71,10 +79,34 @@ from app.services.text_conversion import ConversionFailure, convert_to_epub
 
 
 class SessionImportOrchestrationServices:
-    def __init__(self, db: Session, settings: Settings) -> None:
+    def __init__(
+        self,
+        db: Session,
+        settings: Settings,
+        unit_of_work: ImportUnitOfWork | None = None,
+        conversion_progress: TextConversionProgressStore | None = None,
+    ) -> None:
         self._db = db
         self._settings = settings
-        self._new_publications: set[Path] = set()
+        self._unit_of_work = unit_of_work or SqlAlchemyImportUnitOfWork(db)
+        self._conversion_progress = conversion_progress
+
+    def _text_conversion_progress(self) -> TextConversionProgressStore:
+        if self._conversion_progress is None:
+            self._conversion_progress = SqlAlchemyTextConversionProgress(
+                sessionmaker(
+                    bind=self._db.get_bind(),
+                    autoflush=False,
+                    expire_on_commit=False,
+                )
+            )
+        return self._conversion_progress
+
+    def _require_released_transaction(self, operation: str) -> None:
+        if self._db.in_transaction():
+            raise RuntimeError(
+                f"import external operation started inside a database transaction: {operation}"
+            )
 
     def load_preferences(self) -> ImportPreferencesDTO:
         preferences = load_import_preferences(self._db)
@@ -90,9 +122,10 @@ class SessionImportOrchestrationServices:
     def convert_text(
         self, import_task_id: str, source_path: Path
     ) -> ConversionArtifactDTO:
+        self._require_released_transaction("convert_text")
         try:
             artifact = convert_to_epub(
-                self._db,
+                self._text_conversion_progress(),
                 self._settings,
                 import_task_id,
                 source_path,
@@ -127,9 +160,11 @@ class SessionImportOrchestrationServices:
     def recognize_identity(
         self, path: Path, original_name: str | None
     ) -> BookIdentityDTO:
+        self._require_released_transaction("recognize_identity")
         identity = recognize_book_identity(
             self._db, self._settings, path, original_name
         )
+        self._unit_of_work.release()
         return BookIdentityDTO(
             title=identity.title,
             author=identity.author,
@@ -143,6 +178,7 @@ class SessionImportOrchestrationServices:
         )
 
     def recognize_filename_identity(self, filename: str) -> BookIdentityDTO:
+        self._require_released_transaction("recognize_filename_identity")
         safe_filename = Path(filename).name
         identity = recognize_book_identity(
             self._db,
@@ -150,6 +186,7 @@ class SessionImportOrchestrationServices:
             Path(safe_filename),
             safe_filename,
         )
+        self._unit_of_work.release()
         return BookIdentityDTO(
             title=identity.title,
             author=identity.author,
@@ -183,11 +220,13 @@ class SessionImportOrchestrationServices:
         root_path = self._db.scalar(
             select(MonitorFolder.root_path).where(MonitorFolder.id == monitor_folder_id)
         )
+        self._unit_of_work.release()
         if root_path is None:
             return None
         return Path(root_path).expanduser().resolve()
 
     def list_sibling_files(self, path: Path) -> DirectorySiblingSnapshotDTO:
+        self._require_released_transaction("list_sibling_files")
         resolved = path.resolve()
         try:
             siblings = tuple(
@@ -204,6 +243,7 @@ class SessionImportOrchestrationServices:
     def read_sidecar_metadata(
         self, path: Path, *, directory_fallback: bool
     ) -> SidecarMetadataDTO | None:
+        self._require_released_transaction("read_sidecar_metadata")
         result = discover_sidecar_opf(path, directory_fallback=directory_fallback)
         if result is None:
             return None
@@ -232,6 +272,7 @@ class SessionImportOrchestrationServices:
         )
 
     def ensure_default_cover(self) -> str:
+        self._require_released_transaction("ensure_default_cover")
         return ensure_default_cover(self._settings)
 
     def cover_status(self, value: object) -> str:
@@ -243,6 +284,7 @@ class SessionImportOrchestrationServices:
     def inspect_comic_archive(
         self, path: Path, original_name: str | None
     ) -> ComicArchiveInspection:
+        self._require_released_transaction("inspect_comic_archive")
         return inspect_comic_archive(path, original_name)
 
     def publish_comic_cover(
@@ -254,6 +296,7 @@ class SessionImportOrchestrationServices:
         volume_id: str,
         entry_name: str,
     ) -> str:
+        self._require_released_transaction("publish_comic_cover")
         published = extract_comic_cover(
             storage_root,
             source_path,
@@ -262,7 +305,6 @@ class SessionImportOrchestrationServices:
             volume_id,
             entry_name,
         )
-        self._new_publications.add(Path(published))
         return published
 
     def publish_sidecar_cover(
@@ -273,6 +315,7 @@ class SessionImportOrchestrationServices:
         media_version_id: str,
         volume_id: str,
     ) -> str:
+        self._require_released_transaction("publish_sidecar_cover")
         published = publish_sidecar_cover(
             storage_root,
             source_path,
@@ -280,10 +323,10 @@ class SessionImportOrchestrationServices:
             media_version_id,
             volume_id,
         )
-        self._new_publications.add(storage_root.resolve() / published)
         return published
 
     def inspect_audio_bundle(self, path: Path) -> AudioBundleStructure | None:
+        self._require_released_transaction("inspect_audio_bundle")
         try:
             return inspect_audio_bundle(path)
         except AudioTrackLimitExceededError as exc:
@@ -294,6 +337,7 @@ class SessionImportOrchestrationServices:
             ) from exc
 
     def parse_audio_metadata(self, path: Path) -> AudioFileMetadata:
+        self._require_released_transaction("parse_audio_metadata")
         try:
             return parse_audio_metadata(path)
         except AudioInspectionError as exc:
@@ -312,11 +356,7 @@ class SessionImportOrchestrationServices:
         *,
         bundle_root: Path | None = None,
     ) -> str | None:
-        possible_targets = {
-            storage_root / "books" / work_id / media_version_id / f"cover{extension}"
-            for extension in (".jpg", ".png", ".webp", ".gif")
-        }
-        existing_targets = {path for path in possible_targets if path.exists()}
+        self._require_released_transaction("publish_audio_cover")
         published = publish_audio_cover(
             storage_root,
             work_id,
@@ -324,15 +364,12 @@ class SessionImportOrchestrationServices:
             metadata_items,
             bundle_root=bundle_root,
         )
-        if published:
-            published_path = Path(published)
-            if published_path not in existing_targets:
-                self._new_publications.add(published_path)
         return published
 
     def inspect_reflowable_book(
         self, path: Path, source_format: str
     ) -> ReflowableBookMetadata:
+        self._require_released_transaction("inspect_reflowable_book")
         try:
             return inspect_reflowable_book(path, source_format)
         except ReflowableMetadataError as exc:
@@ -362,6 +399,7 @@ class SessionImportOrchestrationServices:
         volume_id: str,
         metadata: ReflowableBookMetadata,
     ) -> str | None:
+        self._require_released_transaction("publish_reflowable_cover")
         published = publish_reflowable_cover(
             storage_root,
             work_id,
@@ -369,11 +407,10 @@ class SessionImportOrchestrationServices:
             volume_id,
             metadata.cover,
         )
-        if published:
-            self._new_publications.add(Path(published))
         return published
 
     def inspect_pdf(self, path: Path, original_name: str | None) -> PdfInspection:
+        self._require_released_transaction("inspect_pdf")
         return inspect_pdf(path, original_name)
 
     def publish_pdf_cover(
@@ -384,6 +421,7 @@ class SessionImportOrchestrationServices:
         media_version_id: str,
         volume_id: str,
     ) -> PdfCoverPublication:
+        self._require_released_transaction("publish_pdf_cover")
         publication = publish_pdf_cover(
             storage_root,
             source_path,
@@ -391,14 +429,4 @@ class SessionImportOrchestrationServices:
             media_version_id,
             volume_id,
         )
-        if publication.path:
-            self._new_publications.add(Path(publication.path))
         return publication
-
-    def finalize_publications(self) -> None:
-        self._new_publications.clear()
-
-    def rollback_publications(self) -> None:
-        for path in tuple(self._new_publications):
-            path.unlink(missing_ok=True)
-        self._new_publications.clear()

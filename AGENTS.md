@@ -411,6 +411,18 @@ For every implementation:
 6. Update or add tests for both locales when behavior, metadata, interpolation, or generated content changes.
 7. Run `pnpm i18n:check` from `apps/web` before considering the work complete. Do not ship with missing catalog entries, Chinese text remaining in the English catalog, stale keys, or mismatched placeholders.
 
+## Mobile App Visual and Interaction Standard
+
+`docs/mobile-app-design-guidelines.md` is the authoritative design and interaction policy for `apps/mobile`. Read and apply it whenever designing or changing a Mobile page, navigation model, interaction, shared UI component, theme, icon, motion, state feedback, or user-visible native configuration.
+
+- The fixed style is Apple HIG × Warm Editorial Native: clear, quiet, content-first, familiar, and adaptive.
+- Apple HIG governs hierarchy, layout, behavior, platform expectations, and accessibility. The existing project brand governs the coral accent, warm surfaces, cat logo, product name, and writing voice.
+- Do not introduce Material visual grammar, decorative glass/gradients, heavy shadows, nested-card layouts, repeated logos, or gesture-only core actions.
+- Use semantic Mobile design tokens and shared UI components. Do not hard-code brand colors or page-specific type scales in feature screens.
+- Preserve iOS edge-back expectations and Android system/predictive back while keeping one product information architecture.
+- Every visible change must cover compact/expanded layouts, light/dark appearances, system text scaling, `zh-CN`/`en-US`, VoiceOver/TalkBack, reduced motion, reduced transparency, and all relevant loading/empty/error/offline/permission/success states.
+- New page work is not design-complete until the delivery template and acceptance matrix in the authoritative design policy are satisfied.
+
 ## EPUB.js Dependency Boundary
 
 Treat EPUB.js as an immutable third-party dependency:

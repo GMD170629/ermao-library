@@ -187,6 +187,7 @@ def fail_claimed_import_task_row(
     message: str,
     retryable: bool,
     now: Any,
+    expected_lease_owner: str | None = None,
 ) -> bool:
     table = ImportTask.__table__
     values = {
@@ -201,14 +202,13 @@ def fail_claimed_import_task_row(
         "finishedAt": now,
         "updatedAt": now,
     }
-    result = db.execute(
-        update(table)
-        .where(
-            table.c.id == task_id,
-            table.c.status.in_(("PENDING", "PARSING")),
-        )
-        .values(values)
-    )
+    conditions = [
+        table.c.id == task_id,
+        table.c.status.in_(("PENDING", "PARSING")),
+    ]
+    if expected_lease_owner is not None:
+        conditions.append(table.c.leaseOwner == expected_lease_owner)
+    result = db.execute(update(table).where(*conditions).values(values))
     if result.rowcount:
         fail_import_assets_for_task(
             db,

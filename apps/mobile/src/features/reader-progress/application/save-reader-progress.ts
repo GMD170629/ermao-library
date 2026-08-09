@@ -1,10 +1,9 @@
-import type { ReaderLocation } from '@shuku/reader-core';
-
 import type { Clock, IdGenerator } from '../../../shared/lib/runtime';
 import type { ReaderProgressDocumentStore } from './ports';
+import type { ReaderProgressLocation } from '../model/reader-location';
 import {
   recordReaderProgress,
-  type LocalProgressEntryV2,
+  type LocalProgressEntry,
   type ProgressConnection,
   type ProgressOwner,
 } from '../model/reader-progress';
@@ -13,14 +12,15 @@ export type SaveReaderProgressCommand = Readonly<{
   connection: ProgressConnection;
   owner: ProgressOwner;
   workId: string;
+  mediaVersionId: string;
   volumeId: string;
   contentFingerprint: string;
-  location: ReaderLocation;
+  location: ReaderProgressLocation;
   percent: number;
 }>;
 
 export type SaveReaderProgressResult = Readonly<{
-  entry: LocalProgressEntryV2;
+  entry: LocalProgressEntry;
   recoveredFromCorruption: boolean;
   maintenanceWarningCount: number;
 }>;

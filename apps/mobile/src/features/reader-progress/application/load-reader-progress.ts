@@ -3,7 +3,7 @@ import type { ReaderKind } from '@shuku/reader-core';
 import type { ReaderProgressDocumentStore } from './ports';
 import {
   findReaderProgress,
-  type LocalProgressEntryV2,
+  type LocalProgressEntry,
   type ProgressConnection,
   type ProgressOwner,
 } from '../model/reader-progress';
@@ -11,6 +11,8 @@ import {
 export type LoadReaderProgressQuery = Readonly<{
   connection: ProgressConnection;
   owner: ProgressOwner;
+  workId: string;
+  mediaVersionId: string;
   volumeId: string;
   contentFingerprint: string;
   readerKind: ReaderKind;
@@ -23,7 +25,7 @@ export type LoadReaderProgressResult =
     }>
   | Readonly<{
       outcome: 'found';
-      entry: LocalProgressEntryV2;
+      entry: LocalProgressEntry;
       recoveredFromCorruption: boolean;
     }>;
 

@@ -11,7 +11,7 @@ import type {
 import {
   isSafeRuntimeId,
   type ProgressConnection,
-  type ReaderProgressDocumentV2,
+  type ReaderProgressDocument,
 } from '../model/reader-progress';
 import { readerProgressDocumentCodec } from './reader-progress-document-codec';
 
@@ -20,7 +20,7 @@ export class SnapshotReaderProgressDocumentStore
 {
   private readonly stores = new Map<
     string,
-    SnapshotDocumentStore<ReaderProgressDocumentV2>
+    SnapshotDocumentStore<ReaderProgressDocument>
   >();
 
   constructor(
@@ -45,7 +45,7 @@ export class SnapshotReaderProgressDocumentStore
   async update<Result>(
     connection: ProgressConnection,
     mutate: (
-      current: ReaderProgressDocumentV2 | null,
+      current: ReaderProgressDocument | null,
     ) => ProgressDocumentMutation<Result>,
   ): Promise<ProgressDocumentWriteResult<Result>> {
     const write = await this.storeFor(connection.profileId).update(
@@ -61,7 +61,7 @@ export class SnapshotReaderProgressDocumentStore
 
   private storeFor(
     profileId: string,
-  ): SnapshotDocumentStore<ReaderProgressDocumentV2> {
+  ): SnapshotDocumentStore<ReaderProgressDocument> {
     if (!isSafeRuntimeId(profileId)) {
       throw new TypeError('Progress profile identifier is not path-safe');
     }

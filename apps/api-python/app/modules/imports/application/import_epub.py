@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import zipfile
@@ -14,6 +15,7 @@ from app.contracts.epub_navigation import (
     EPUB_HREF_BASE_METADATA_KEY,
     EPUB_PUBLICATION_ROOT_HREF_BASE,
 )
+from app.modules.imports.application.commands import release_import_transaction
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
     EpubNavigationChapterDTO,
@@ -40,6 +42,7 @@ from app.modules.imports.application.import_support import (
     _insert_identity_metadata,
     _now,
     _preferred_identifier,
+    _prepared_default_cover,
     _sanitize_description,
     _select_volume_media_version,
     _source_filename_title,
@@ -51,6 +54,7 @@ from app.modules.imports.application.import_support import (
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
     ImportOrchestrationServices,
+    ImportUnitOfWork,
     LibraryImportStore,
 )
 from app.modules.imports.domain.content_classification import (
@@ -59,6 +63,8 @@ from app.modules.imports.domain.content_classification import (
     normalize_media_kind_policy,
 )
 from app.modules.metadata.application.opf import parse_opf_metadata
+
+logger = logging.getLogger(__name__)
 
 
 def _import_epub(
@@ -71,8 +77,11 @@ def _import_epub(
     file_size: int,
     ext: str,
     identity: BookIdentityDTO,
+    unit_of_work: ImportUnitOfWork,
 ) -> ImportResult:
     metadata = parse_epub_metadata(options.source_file_path)
+    source_path = options.source_file_path.resolve()
+    source_stat = source_path.stat()
     raw_metadata = metadata.get("rawMetadata")
     embedded_metadata = metadata["publicationMetadata"]
     identity, resolved_local = resolve_import_metadata(
@@ -156,7 +165,6 @@ def _import_epub(
         work = queries.get_work_by_id(str(work["id"])) or {**work, **work_updates}
     if volume_info:
         source_key = _source_group_key(options, metadata["title"])
-        source_path = options.source_file_path.resolve()
         media_version = _select_volume_media_version(
             queries,
             work["id"],
@@ -215,6 +223,7 @@ def _import_epub(
                 task_id, columns={"message": "正在建立 EPUB 卷册记录"}
             )
             if metadata.get("coverPath"):
+                release_import_transaction(unit_of_work)
                 cover_path = _extract_epub_cover(
                     settings,
                     source_path,
@@ -223,7 +232,6 @@ def _import_epub(
                     metadata,
                     volume["id"],
                 )
-            source_stat = source_path.stat()
             file = store.insert_library_file(
                 columns={
                     "id": _id(),
@@ -274,7 +282,7 @@ def _import_epub(
                 }
             )
             _insert_identity_metadata(store, volume["id"], identity)
-            stored_cover_path = cover_path or services.ensure_default_cover()
+            stored_cover_path = cover_path or _prepared_default_cover(options)
             media_version_cover_path = (
                 cover_path or media_version.get("coverPath") or stored_cover_path
             )
@@ -304,6 +312,7 @@ def _import_epub(
                 work["id"],
                 media_version["id"],
                 media_version_cover_path,
+                _prepared_default_cover(options),
             )
             return ImportResult(
                 work["id"],
@@ -327,12 +336,10 @@ def _import_epub(
                 metadata_source_order=resolved_local.source_order,
             )
         except Exception:
-            if cover_path:
-                Path(cover_path).unlink(missing_ok=True)
+            logger.debug("EPUB series import persistence failed", exc_info=True)
             raise
     cover_path = None
     try:
-        source_path = options.source_file_path.resolve()
         store.update_import_task(task_id, columns={"message": "正在建立 EPUB 记录"})
         media_version = store.ensure_library_media_version(
             columns={
@@ -348,6 +355,7 @@ def _import_epub(
         )
         volume_id = _id()
         if metadata.get("coverPath"):
+            release_import_transaction(unit_of_work)
             cover_path = _extract_epub_cover(
                 settings,
                 source_path,
@@ -356,7 +364,7 @@ def _import_epub(
                 metadata,
                 volume_id,
             )
-        stored_cover_path = cover_path or services.ensure_default_cover()
+        stored_cover_path = cover_path or _prepared_default_cover(options)
         volume = store.insert_library_volume(
             columns={
                 "id": volume_id,
@@ -383,7 +391,6 @@ def _import_epub(
                 "updatedAt": _now(),
             }
         )
-        source_stat = source_path.stat()
         file = store.insert_library_file(
             columns={
                 "id": _id(),
@@ -449,6 +456,7 @@ def _import_epub(
             work["id"],
             media_version["id"],
             stored_cover_path,
+            _prepared_default_cover(options),
         )
         return ImportResult(
             work["id"],
@@ -468,8 +476,7 @@ def _import_epub(
             metadata_source_order=resolved_local.source_order,
         )
     except Exception:
-        if cover_path:
-            Path(cover_path).unlink(missing_ok=True)
+        logger.debug("EPUB import persistence failed", exc_info=True)
         raise
 
 

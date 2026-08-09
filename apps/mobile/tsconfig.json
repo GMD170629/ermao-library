@@ -9,12 +9,17 @@
     "useUnknownInCatchVariables": true
   },
   "include": [
-    "index.ts",
+    "expo-env.d.ts",
+    ".expo/types/**/*.ts",
     "src/**/*.ts",
     "src/**/*.tsx"
   ],
   "exclude": [
     "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/**/*.native.test.tsx",
+    "tests/**/*.ts",
+    "tests/**/*.tsx",
     "src/shared/testing/**/*.ts"
   ]
 }

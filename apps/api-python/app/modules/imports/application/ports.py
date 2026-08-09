@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Protocol
 
@@ -14,6 +15,7 @@ from app.modules.imports.application.comic_types import ComicArchiveInspection
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
     ConversionArtifactDTO,
+    ConversionProgressTaskDTO,
     DirectorySiblingSnapshotDTO,
     ImportOptions,
     ImportPreferencesDTO,
@@ -43,11 +45,55 @@ class ImportUnitOfWork(Protocol):
 
     def rollback(self) -> None: ...
 
+    def release(self) -> None:
+        """Commit and release the checked-out connection before external I/O."""
+        ...
+
 
 class ImportMetadataObserver(Protocol):
     """Schedules side effects for the final metadata snapshot of an import."""
 
     def schedule(self, result: ImportResult) -> None: ...
+
+
+class TextConversionProgressStore(Protocol):
+    """Short-transaction checkpoints used by transaction-free file conversion."""
+
+    def ensure_task(
+        self,
+        import_task_id: str,
+        *,
+        task_id: str,
+        source_path: Path,
+        source_format: str,
+        converter: str,
+        source_hash: str,
+        options_json: str,
+        now: int,
+    ) -> ConversionProgressTaskDTO: ...
+
+    def update_stage(
+        self,
+        import_task_id: str,
+        conversion_task_id: str,
+        *,
+        status: str,
+        progress: int,
+        message: str,
+        conversion_values: Mapping[str, object] | None,
+        now: int,
+    ) -> None: ...
+
+    def record_failure(
+        self,
+        import_task_id: str,
+        conversion_task_id: str,
+        *,
+        retryable: bool,
+        error_code: str,
+        summary: str,
+        now: int,
+    ) -> None: ...
 
 
 class ImportTaskStore(Protocol):
@@ -221,9 +267,7 @@ class ImportPipeline(Protocol):
         options: ImportOptions,
     ) -> ImportResult: ...
 
-    def finalize_publications(self) -> None: ...
-
-    def rollback_publications(self) -> None: ...
+    def complete_import(self) -> None: ...
 
 
 class ImportOrchestrationServices(Protocol):

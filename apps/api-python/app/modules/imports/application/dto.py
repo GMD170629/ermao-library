@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -128,6 +129,18 @@ class ConversionArtifactDTO:
     idempotency_key: str
 
 
+@dataclass(frozen=True, slots=True)
+class ConversionProgressTaskDTO:
+    """Conversion checkpoint state returned without exposing an ORM entity."""
+
+    id: str
+    import_task_id: str
+    idempotency_key: str
+    status: str
+    attempts: int
+    started_at: datetime | None
+
+
 @dataclass(frozen=True)
 class ImportSystemEvent:
     source: str
@@ -195,6 +208,7 @@ class ImportOptions:
     import_task_id: str | None = None
     original_source_file_path: Path | None = None
     expected_lease_owner: str | None = None
+    default_cover_path: str | None = None
     sidecar_metadata: PublicationMetadata | None = None
     sidecar_cover_path: Path | None = None
     sidecar_source_kind: str | None = None

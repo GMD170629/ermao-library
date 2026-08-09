@@ -10,7 +10,7 @@ import {
   isSafeProfileId,
   MAXIMUM_SERVER_PROFILES,
   type ServerProfile,
-  type ServerProfilesDocumentV1,
+  type ServerProfilesDocument,
 } from '../model/server-profile';
 import { parseServerAddress } from '../model/server-address';
 
@@ -26,6 +26,7 @@ const PROFILE_KEYS = new Set([
   'id',
   'baseUrl',
   'service',
+  'initialized',
   'createdAtMs',
   'lastVerifiedAtMs',
 ]);
@@ -43,6 +44,7 @@ function decodeProfile(value: unknown): ServerProfile | null {
     !isSafeProfileId(id) ||
     baseUrlText === null ||
     value.service !== 'ermao-books' ||
+    typeof value.initialized !== 'boolean' ||
     createdAtMs === null ||
     lastVerifiedAtMs === null ||
     lastVerifiedAtMs < createdAtMs
@@ -62,19 +64,20 @@ function decodeProfile(value: unknown): ServerProfile | null {
     id,
     baseUrl: parsedAddress.baseUrl,
     service: 'ermao-books',
+    initialized: value.initialized,
     createdAtMs,
     lastVerifiedAtMs,
   };
 }
 
-export const serverProfilesDocumentCodec: JsonDocumentCodec<ServerProfilesDocumentV1> =
+export const serverProfilesDocumentCodec: JsonDocumentCodec<ServerProfilesDocument> =
   {
-    decode(value: unknown): ValidationResult<ServerProfilesDocumentV1> {
+    decode(value: unknown): ValidationResult<ServerProfilesDocument> {
       if (
         !isRecord(value) ||
         !hasOnlyKeys(value, DOCUMENT_KEYS) ||
         value.format !== 'shuku.server-profiles' ||
-        value.schemaVersion !== 1 ||
+        value.schemaVersion !== 2 ||
         !Array.isArray(value.profiles) ||
         value.profiles.length > MAXIMUM_SERVER_PROFILES
       ) {
@@ -122,7 +125,7 @@ export const serverProfilesDocumentCodec: JsonDocumentCodec<ServerProfilesDocume
         ok: true,
         value: {
           format: 'shuku.server-profiles',
-          schemaVersion: 1,
+          schemaVersion: 2,
           generation,
           activeProfileId,
           profiles: validProfiles,
@@ -131,7 +134,7 @@ export const serverProfilesDocumentCodec: JsonDocumentCodec<ServerProfilesDocume
       };
     },
 
-    encode(document: ServerProfilesDocumentV1): unknown {
+    encode(document: ServerProfilesDocument): unknown {
       return {
         format: document.format,
         schemaVersion: document.schemaVersion,
@@ -141,6 +144,7 @@ export const serverProfilesDocumentCodec: JsonDocumentCodec<ServerProfilesDocume
           id: profile.id,
           baseUrl: profile.baseUrl.value,
           service: profile.service,
+          initialized: profile.initialized,
           createdAtMs: profile.createdAtMs,
           lastVerifiedAtMs: profile.lastVerifiedAtMs,
         })),

@@ -14,7 +14,7 @@ import {
 
 const healthyGateway: ServerHealthGateway = {
   async probe() {
-    return { outcome: 'healthy' };
+    return { outcome: 'healthy', initialized: true };
   },
 };
 
@@ -29,11 +29,26 @@ test('returns a capability-level result when profile persistence fails', async (
         ),
       };
     },
-    async active() {
-      return null;
+    async activateExistingHealthyServer() {
+      return { ok: true, activated: false, reason: 'not-found' };
     },
-    async list() {
-      return [];
+    async deleteProfile() {
+      return { ok: true, deleted: false };
+    },
+    async load() {
+      return {
+        ok: true,
+        catalog: {
+          generation: 0,
+          activeProfileId: null,
+          profiles: [],
+          updatedAtMs: 0,
+        },
+        warnings: [],
+      };
+    },
+    async resetCorrupt() {
+      return { ok: true, reset: false, deletedFileCount: 0 };
     },
   };
   const connect = new ConnectServer(

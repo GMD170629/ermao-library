@@ -43,6 +43,7 @@ def process_import_task(
 ) -> ImportResult:
     try:
         _ensure_monitor_folder_exists(store, task.monitor_folder_id)
+        unit_of_work.release()
         result = pipeline.import_managed_book(
             settings,
             ImportOptions(
@@ -70,10 +71,9 @@ def process_import_task(
         )
         if metadata_observer is not None:
             metadata_observer.schedule(result)
+        pipeline.complete_import()
         unit_of_work.commit()
-        pipeline.finalize_publications()
         return result
     except Exception:
         unit_of_work.rollback()
-        pipeline.rollback_publications()
         raise

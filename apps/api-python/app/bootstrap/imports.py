@@ -114,9 +114,17 @@ def import_managed_book(
 ) -> ImportResult:
     """Session-bound composition wrapper for media import."""
 
-    return SessionImportPipeline(db, settings).import_managed_book(
-        _runtime_config(settings), options
-    )
+    unit_of_work = SqlAlchemyImportUnitOfWork(db)
+    try:
+        unit_of_work.release()
+        pipeline = SessionImportPipeline(db, settings, unit_of_work)
+        result = pipeline.import_managed_book(_runtime_config(settings), options)
+        pipeline.complete_import()
+        unit_of_work.commit()
+        return result
+    except Exception:
+        unit_of_work.rollback()
+        raise
 
 
 def save_uploaded_files(
@@ -353,7 +361,7 @@ def process_import_task(
     db: Session, settings: Settings, task: ImportTaskDTO
 ) -> ImportResult:
     store = SqlAlchemyImportTaskStore(db)
-    unit_of_work = SqlAlchemyImportUnitOfWork(db)
+    unit_of_work = SqlAlchemyImportUnitOfWork(db, close_on_release=True)
     pipeline = SessionImportPipeline(db, settings, unit_of_work)
     return process_import_task_command(
         store,

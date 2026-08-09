@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app.contracts.publication_metadata import PublicationMetadata
 from app.contracts.publication_titles import titles_from_local_source
+from app.modules.imports.application.commands import release_import_transaction
 from app.modules.imports.application.dto import (
     BookIdentityDTO,
     ImportOptions,
@@ -24,12 +25,14 @@ from app.modules.imports.application.import_support import (
     _hash_text,
     _id,
     _now,
+    _prepared_default_cover,
     _source_group_key,
     _work_merge_key,
 )
 from app.modules.imports.application.ports import (
     ImportLibraryQueries,
     ImportOrchestrationServices,
+    ImportUnitOfWork,
     LibraryImportStore,
 )
 from app.modules.imports.application.reflowable_types import ReflowableBookMetadata
@@ -57,6 +60,7 @@ def refresh_existing_reflowable_source(
     settings: ImportRuntimeConfig,
     source_path: Path,
     existing: ImportResult,
+    unit_of_work: ImportUnitOfWork,
 ) -> ImportResult:
     """Reinspect a source and deterministically replace its exact navigation."""
 
@@ -118,6 +122,7 @@ def refresh_existing_reflowable_source(
             "updatedAt": _now(),
         }
     )
+    release_import_transaction(unit_of_work)
     cover_path = services.publish_reflowable_cover(
         settings.resolved_storage_root,
         existing.work_id,
@@ -270,10 +275,12 @@ def _import_reflowable_source(
     file_size: int,
     ext: str,
     identity: BookIdentityDTO,
+    unit_of_work: ImportUnitOfWork,
 ) -> ImportResult:
     """Inspect and register an original source for the native reader."""
 
     source_path = options.source_file_path.resolve()
+    source_stat = source_path.stat()
     source_format = ext.removeprefix(".").upper()
     metadata = services.inspect_reflowable_book(source_path, source_format)
     embedded_title = (
@@ -387,7 +394,7 @@ def _import_reflowable_source(
             "kind": source_format,
             "mimeType": mime_type,
             "sizeBytes": file_size,
-            "mtimeMs": int(source_path.stat().st_mtime * 1000),
+            "mtimeMs": int(source_stat.st_mtime * 1000),
             "sortOrder": 0,
             "createdAt": _now(),
             "updatedAt": _now(),
@@ -420,6 +427,7 @@ def _import_reflowable_source(
             "updatedAt": _now(),
         }
     )
+    release_import_transaction(unit_of_work)
     cover_path = services.publish_reflowable_cover(
         settings.resolved_storage_root,
         str(work["id"]),
@@ -427,7 +435,7 @@ def _import_reflowable_source(
         str(volume["id"]),
         metadata,
     )
-    stored_cover_path = cover_path or services.ensure_default_cover()
+    stored_cover_path = cover_path or _prepared_default_cover(options)
     store.update_library_volume(
         str(volume["id"]),
         columns={"coverPath": stored_cover_path, "updatedAt": _now()},
@@ -439,6 +447,7 @@ def _import_reflowable_source(
         str(work["id"]),
         str(media_version["id"]),
         stored_cover_path,
+        _prepared_default_cover(options),
     )
     return ImportResult(
         str(work["id"]),
@@ -482,11 +491,18 @@ def _complete_deferred_source_conversion(
             "updatedAt": _now(),
         }
     )
+    existing_orders = [
+        int(row["sortOrder"])
+        for row in queries.list_volume_ordering_for_media_version(
+            str(media_version["id"])
+        )
+    ]
     store.update_library_volume(
         result.volume_id,
         columns={
             "derivedFromVolumeId": source_volume["id"],
             "mediaVersionId": media_version["id"],
+            "sortOrder": max(existing_orders, default=-1000) + 1000,
             **_classification_columns(inherited),
             "updatedAt": _now(),
         },

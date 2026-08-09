@@ -10,9 +10,9 @@ import {
 import { SaveReaderProgress } from '../application/save-reader-progress';
 import {
   MAXIMUM_READER_PROGRESS_ENTRIES,
-  type LocalProgressEntryV2,
+  type LocalProgressEntry,
   type ProgressConnection,
-  type ReaderProgressDocumentV2,
+  type ReaderProgressDocument,
 } from '../model/reader-progress';
 import { SnapshotReaderProgressDocumentStore } from './snapshot-reader-progress-document-store';
 
@@ -37,7 +37,7 @@ function maximumSafeRuntimeId(prefix: string, index: number): string {
   return `${uniquePrefix}${'x'.repeat(128 - uniquePrefix.length)}`;
 }
 
-function maximumEntry(index: number): LocalProgressEntryV2 {
+function maximumEntry(index: number): LocalProgressEntry {
   return {
     mutationId: maximumSafeRuntimeId('mutation', index),
     clientSequence: index + 1,
@@ -46,10 +46,12 @@ function maximumEntry(index: number): LocalProgressEntryV2 {
       userId: maximumIdentifier('user', index),
     },
     workId: maximumIdentifier('work', index),
+    mediaVersionId: maximumIdentifier('media-version', index),
     volumeId: maximumIdentifier('volume', index),
     contentFingerprint: maximumIdentifier('fingerprint', index),
     location: {
-      kind: 'epub',
+      kind: 'reflowable',
+      format: 'epub',
       cfi: ESCAPED_CHARACTER.repeat(MAXIMUM_CFI_LENGTH),
       href: ESCAPED_CHARACTER.repeat(MAXIMUM_HREF_LENGTH),
     },
@@ -59,10 +61,10 @@ function maximumEntry(index: number): LocalProgressEntryV2 {
   };
 }
 
-function maximumDocument(): ReaderProgressDocumentV2 {
+function maximumDocument(): ReaderProgressDocument {
   return {
     format: 'shuku.reader-progress',
-    schemaVersion: 2,
+    schemaVersion: 3,
     generation: 1,
     connection,
     client: {
@@ -102,13 +104,15 @@ test('persists and rotates a worst-case full progress snapshot below its file bu
       userId: maximumIdentifier('user', nextIndex),
     },
     workId: maximumIdentifier('work', nextIndex),
+    mediaVersionId: maximumIdentifier('media-version', nextIndex),
     volumeId: maximumIdentifier('volume', nextIndex),
     contentFingerprint: maximumIdentifier(
       'fingerprint',
       nextIndex,
     ),
     location: {
-      kind: 'epub',
+      kind: 'reflowable',
+      format: 'epub',
       cfi: ESCAPED_CHARACTER.repeat(MAXIMUM_CFI_LENGTH),
       href: ESCAPED_CHARACTER.repeat(MAXIMUM_HREF_LENGTH),
     },

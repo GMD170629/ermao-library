@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "书库星舰",
+    "name": "二毛图书",
     "slug": "shuku-starship",
     "scheme": "shuku-starship",
     "version": "0.5.2",
@@ -10,17 +10,34 @@
     ],
     "orientation": "default",
     "userInterfaceStyle": "automatic",
+    "icon": "./assets/brand/ios-app-icon.png",
+    "experiments": {
+      "typedRoutes": true
+    },
+    "locales": {
+      "zh-CN": "./src/shared/i18n/native/zh-CN.json",
+      "en-US": "./src/shared/i18n/native/en-US.json"
+    },
     "ios": {
+      "icon": "./assets/brand/ios-app-icon.png",
       "supportsTablet": true,
       "bundleIdentifier": "com.shuku.starship",
       "infoPlist": {
-        "NSLocalNetworkUsageDescription": "用于连接您的书库服务器 / Used to connect to your library server.",
+        "CFBundleAllowMixedLocalizations": true,
+        "NSLocalNetworkUsageDescription": "用于连接您的书库服务器。",
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         }
       }
     },
     "android": {
+      "icon": "./assets/brand/android-legacy-icon.png",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/brand/android-adaptive-foreground.png",
+        "backgroundImage": "./assets/brand/android-adaptive-background.png",
+        "backgroundColor": "#FAF8F5",
+        "monochromeImage": "./assets/brand/android-adaptive-monochrome.png"
+      },
       "package": "com.shuku.starship",
       "predictiveBackGestureEnabled": true
     },
@@ -28,7 +45,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "用于扫描书库服务器二维码 / Used to scan your library server QR code.",
+          "cameraPermission": "用于扫描包含书库前台地址的连接二维码。",
           "recordAudioAndroid": false,
           "barcodeScannerEnabled": true
         }
@@ -43,7 +60,39 @@
             "deploymentTarget": "16.4"
           }
         }
-      ]
+      ],
+      [
+        "expo-localization",
+        {
+          "supportedLocales": {
+            "ios": [
+              "zh-CN",
+              "en-US"
+            ],
+            "android": [
+              "zh-CN",
+              "en-US"
+            ]
+          }
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "android": {
+            "drawable": {
+              "icon": "./assets/brand/splash-transparent.xml"
+            }
+          },
+          "backgroundColor": "#FAF8F5",
+          "dark": {
+            "backgroundColor": "#171310"
+          }
+        }
+      ],
+      "expo-status-bar",
+      "expo-router",
+      "expo-font"
     ]
   }
 }

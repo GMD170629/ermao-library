@@ -16,10 +16,12 @@ test('stores the validated normalized reader location', () => {
     connection,
     owner: { kind: 'local' },
     workId: 'work-1',
+    mediaVersionId: 'media-version-1',
     volumeId: 'volume-1',
     contentFingerprint: 'fingerprint-1',
     location: {
-      kind: 'epub',
+      kind: 'reflowable',
+      format: 'epub',
       cfi: '  epubcfi(/6/2!/4/1:0)  ',
       href: '  chapter-1.xhtml  ',
     },

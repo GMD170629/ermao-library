@@ -52,8 +52,13 @@ export type SnapshotUpdateResult<Value, Result> = Readonly<{
   value: Value;
   result: Result;
   recoveredFromCorruption: boolean;
+  rejectedNewerSnapshots: number;
   maintenanceIssues: readonly SnapshotMaintenanceIssue[];
 }>;
+
+export type SnapshotCorruptResetResult =
+  | Readonly<{ status: 'not-corrupt'; deletedFileCount: 0 }>
+  | Readonly<{ status: 'reset'; deletedFileCount: number }>;
 
 export type SnapshotDocumentErrorCode =
   | 'CORRUPT_DOCUMENT'
@@ -165,7 +170,45 @@ export class SnapshotDocumentStore<Value extends GenerationDocument> {
         recoveredFromCorruption:
           current.status === 'loaded' &&
           current.recoveredFromCorruption,
+        rejectedNewerSnapshots:
+          current.status === 'loaded'
+            ? current.rejectedNewerSnapshots
+            : 0,
         maintenanceIssues,
+      };
+    });
+  }
+
+  async resetCorrupt(
+    assertCanReset: () => void = () => undefined,
+  ): Promise<SnapshotCorruptResetResult> {
+    return this.operationCoordinator.run(this.directory, async () => {
+      try {
+        await this.readUnlocked();
+        return { status: 'not-corrupt', deletedFileCount: 0 };
+      } catch (cause: unknown) {
+        if (
+          !(cause instanceof SnapshotDocumentError) ||
+          cause.code !== 'CORRUPT_DOCUMENT'
+        ) {
+          throw cause;
+        }
+      }
+
+      assertCanReset();
+      const entries = await this.fileSystem.list(this.directory);
+      const managedFiles = entries.filter(
+        (entry) =>
+          entry.kind === 'file' &&
+          (this.snapshotCandidate(entry.name) !== null ||
+            TEMPORARY_FILE_PATTERN.test(entry.name)),
+      );
+      for (const entry of managedFiles) {
+        await this.fileSystem.deleteFile(this.childPath(entry.name));
+      }
+      return {
+        status: 'reset',
+        deletedFileCount: managedFiles.length,
       };
     });
   }

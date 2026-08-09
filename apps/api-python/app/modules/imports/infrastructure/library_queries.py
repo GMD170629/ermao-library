@@ -605,7 +605,15 @@ def list_library_files_by_paths(db: Session, paths: list[str]) -> list[dict[str,
     found: list[dict[str, Any]] = []
     for offset in range(0, len(unique_paths), 400):
         chunk = unique_paths[offset : offset + 400]
-        rows = _list_library_files(db, LibraryFile.path.in_(chunk))
+        rows = _records(
+            db,
+            select(
+                *LibraryFile.__table__.c,
+                LibraryVolume.import_status.label("volumeImportStatus"),
+            )
+            .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
+            .where(LibraryFile.path.in_(chunk)),
+        )
         found.extend(rows)
     deduped: dict[str, dict[str, Any]] = {}
     for row in found:
@@ -1053,7 +1061,10 @@ def existing_file_import_snapshot(db: Session, path: Path) -> dict[str, Any] | N
                 LibraryMediaVersion.id == LibraryVolume.media_version_id,
             )
             .join(LibraryWork, LibraryWork.id == LibraryMediaVersion.work_id)
-            .where(LibraryFile.path == str(path.resolve()))
+            .where(
+                LibraryFile.path == str(path.resolve()),
+                LibraryVolume.import_status.in_(("COMPLETED", "IMPORTED", "READY")),
+            )
             .limit(1)
         )
         .mappings()
@@ -1075,7 +1086,14 @@ def list_file_volumes_by_paths(db: Session, paths: list[str]) -> list[dict[str, 
     rows = (
         db.execute(
             select(LibraryFile.path, LibraryFile.volume_id).where(
-                LibraryFile.path.in_(list(dict.fromkeys(expanded)))
+                LibraryFile.path.in_(list(dict.fromkeys(expanded))),
+                LibraryFile.volume_id.in_(
+                    select(LibraryVolume.id).where(
+                        LibraryVolume.import_status.in_(
+                            ("COMPLETED", "IMPORTED", "READY")
+                        )
+                    )
+                ),
             )
         )
         .mappings()

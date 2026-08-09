@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+
 from app.modules.imports.application.dto import (
     ImportOptions,
     ImportResult,
@@ -23,6 +24,7 @@ from app.modules.imports.application.process import process_import_task
 class RecordingUnitOfWork:
     commits: int = 0
     rollbacks: int = 0
+    releases: int = 0
     fail_commit: bool = False
 
     def commit(self) -> None:
@@ -32,6 +34,9 @@ class RecordingUnitOfWork:
 
     def rollback(self) -> None:
         self.rollbacks += 1
+
+    def release(self) -> None:
+        self.releases += 1
 
 
 class RecordingStore:
@@ -78,8 +83,7 @@ class RecordingPipeline:
         self.after_import = after_import
         self.imports = 0
         self.options: ImportOptions | None = None
-        self.finalized = 0
-        self.rolled_back = 0
+        self.completed = 0
 
     def import_managed_book(
         self,
@@ -107,11 +111,8 @@ class RecordingPipeline:
             merge_reason="new",
         )
 
-    def finalize_publications(self) -> None:
-        self.finalized += 1
-
-    def rollback_publications(self) -> None:
-        self.rolled_back += 1
+    def complete_import(self) -> None:
+        self.completed += 1
 
 
 def _task() -> ImportTaskDTO:
@@ -145,8 +146,7 @@ def test_process_import_commits_final_writes_once_after_post_success_hooks() -> 
     assert store.calls == ["monitor", "monitor", "shelf", "download"]
     assert unit_of_work.commits == 1
     assert unit_of_work.rollbacks == 0
-    assert pipeline.finalized == 1
-    assert pipeline.rolled_back == 0
+    assert pipeline.completed == 1
 
 
 def test_previous_task_result_work_id_is_not_an_import_identity_input() -> None:
@@ -197,7 +197,7 @@ def test_process_import_rolls_back_all_final_writes_when_post_hook_fails(
 
     assert unit_of_work.commits == 0
     assert unit_of_work.rollbacks == 1
-    assert pipeline.rolled_back == 1
+    assert pipeline.completed == 0
 
 
 def test_process_import_stops_before_pipeline_when_monitor_folder_was_deleted() -> None:
@@ -221,7 +221,7 @@ def test_process_import_stops_before_pipeline_when_monitor_folder_was_deleted() 
 
     assert pipeline.imports == 0
     assert unit_of_work.rollbacks == 1
-    assert pipeline.rolled_back == 1
+    assert pipeline.completed == 0
 
 
 def test_process_import_rolls_back_when_monitor_folder_is_deleted_during_pipeline() -> (
@@ -249,7 +249,7 @@ def test_process_import_rolls_back_when_monitor_folder_is_deleted_during_pipelin
     assert store.calls == ["monitor", "monitor"]
     assert unit_of_work.commits == 0
     assert unit_of_work.rollbacks == 1
-    assert pipeline.rolled_back == 1
+    assert pipeline.completed == 0
 
 
 class FailureRecordingStore:
@@ -347,7 +347,9 @@ def test_fail_claimed_import_preserves_named_execution_failure() -> None:
     assert unit_of_work.commits == 1
 
 
-def test_process_import_rolls_back_publications_when_final_commit_fails() -> None:
+def test_process_import_does_not_roll_back_published_files_when_final_commit_fails() -> (
+    None
+):
     unit_of_work = RecordingUnitOfWork(fail_commit=True)
     pipeline = RecordingPipeline()
 
@@ -366,5 +368,4 @@ def test_process_import_rolls_back_publications_when_final_commit_fails() -> Non
 
     assert unit_of_work.commits == 1
     assert unit_of_work.rollbacks == 1
-    assert pipeline.finalized == 0
-    assert pipeline.rolled_back == 1
+    assert pipeline.completed == 1

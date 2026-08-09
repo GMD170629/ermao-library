@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import os
 import re
 from pathlib import Path
 
@@ -95,6 +96,14 @@ def _write_cover(
     extension: str,
 ) -> str:
     target = storage_root / "books" / work_id / media_version_id / f"cover{extension}"
+    temporary = target.with_suffix(f"{target.suffix}.part")
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(data)
+    try:
+        with temporary.open("wb") as output:
+            output.write(data)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
     return str(target)
