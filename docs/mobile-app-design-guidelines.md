@@ -2,13 +2,26 @@
 
 > 状态：Authoritative（固定基线）
 >
-> 版本：1.1
+> 版本：1.4
 >
-> 生效日期：2026-08-09
+> 生效日期：2026-08-10
 >
 > 适用范围：`apps/mobile` 的 iPhone、iPad、Android 手机与 Android 平板界面
 
-本规范是移动 App 页面设计、交互设计、组件设计和视觉验收的权威基线。Apple Human Interface Guidelines（HIG）是上游设计原则，本文件把它转换为 React Native + Expo 可执行、可测试的项目规则。页面级设计稿不得自行发明另一套视觉语言。
+本规范是移动 App 页面设计、交互设计、组件设计和视觉验收的权威基线。Apple Human Interface Guidelines（HIG）是上游设计原则，本文件把它转换为 React Native + Expo 可执行、可测试的项目规则。页面实现不得自行发明另一套视觉语言。
+
+### 原生优先组件决策树
+
+每个交互控件必须按以下顺序选择第一个可行方案：
+
+1. Expo Router 提供的原生标签、堆栈、导航栏、返回行为与路由 Sheet；
+2. `@expo/ui` 在 iOS 上由 SwiftUI、Android 上由 Jetpack Compose 提供的控件；
+3. React Native 平台控件，例如在通用 Expo UI 控件不满足既有行为时使用 `TextInput`；
+4. 只有内容没有系统等价物时，才使用小型共享自定义组件，例如图书封面、书架层板、阅读进度、扫描遮罩和编辑式内容卡片。
+
+功能页面只向共享原生适配器传入标签、图标名、状态与动作 ID，不直接依赖原生 Host 实现。Android 原生控件可以自然呈现 Material 3，iOS 原生控件可以自然呈现 SwiftUI；本规范禁止的是页面自行仿制 Material 卡片、FAB、导航栏、按钮和动效。
+
+业务页面禁止直接使用 React Native `Modal`、自绘 tab role、自绘返回型标题栏和按钮型 `Pressable`。内容型点击统一通过 `ContentPressable` 提供最小触摸反馈与无障碍契约。核心动作必须有可见入口，不得只依赖手势或长按。
 
 上游依据：
 
@@ -19,6 +32,14 @@
 - [Branding](https://developer.apple.com/design/human-interface-guidelines/branding)
 
 HIG 更新不会自动改变已发布界面。采用新的 HIG 行为或视觉材料前，必须先评估最低系统版本、Android 等价行为、无障碍和现有页面一致性，再显式更新本规范版本。
+
+### 设计来源与工具边界
+
+- Mobile 设计与实现以本规范、`apps/mobile/src/shared/ui` 的运行时 token 和共享组件、现有产品界面及模拟器/真机验收结果为唯一执行依据。
+- Mobile 页面、流程、组件、主题、图标、动效和状态设计不得调用 Figma，也不要求创建、读取、更新或维护任何 Figma 文件、节点、组件库或设计稿。
+- 当本规范没有覆盖某项视觉或交互决策时，按 HIG、现有共享组件、Web 品牌契约、双平台原生预期和可访问性要求做出最小一致决策，并在同一变更中补充本规范或记录页面级例外。
+- 用户提供的截图、图片或其他静态参考可以作为输入，但必须映射到仓库内语义 token 和共享组件；外部设计工具不得成为实现、测试或验收的前置条件。
+- 视觉验收以可运行代码为准，至少检查相关 Compact/Expanded、浅色/深色、`zh-CN`/`en-US`、系统字体缩放和辅助技术状态。
 
 ## 1. 已确定的设计风格
 
@@ -77,13 +98,13 @@ HIG 更新不会自动改变已发布界面。采用新的 HIG 行为或视觉�
 
 ## 3. 品牌契约
 
-### 3.1 当前唯一品牌来源
+### 3.1 仓库内品牌来源
 
 - 产品名：`二毛图书`
 - 品牌语：`和二毛一起，安静读书`
 - Web 品牌文案来源：`apps/web/lib/brand.ts`
 - App 运行时主题来源：`apps/mobile/src/shared/ui/theme.ts`
-- Web 对照主题来源：`apps/web/styles/theme.css`
+- Web 浅色主题基准来源：`apps/web/styles/theme.css`
 - 品牌母版图：`apps/web/public/brand/ermao-library-app-icon-v1.png`
 - 当前派生 App/PWA 图标：`apps/web/public/icons/icon-192.png`、`icon-512.png` 和 `maskable-512.png`
 
@@ -95,35 +116,40 @@ HIG 更新不会自动改变已发布界面。采用新的 HIG 行为或视觉�
 
 | 语义 | 浅色 | 深色 | 用途与来源 |
 | --- | --- | --- | --- |
-| `brand` | `#F15A3B` | `#FF7A59` | Figma 品牌识别色；用于 Logo 邻近品牌元素，不直接等同于操作色 |
-| `tint` | `#A23A22` | `#FF9B7F` | Figma 文字图标 tint；用于链接、选中态、导航和输入选择色 |
-| `tintMuted` | `#FCE6DF` | `#4B271F` | 已有组件证据；用于轻选中背景和低强调信息表面 |
-| `actionFill` | `#A23A22` | `#B9432E` | Figma 主操作实心填充 |
-| `actionPressed` | `#842F1C` | `#963625` | 浅色来自 Figma；深色由 `actionFill` 等比例压暗约 19%，保持按下反馈和白字对比度 |
-| `onAction` | `#FFF9F5` | `#FFF9F5` | Figma 主操作上的文字与图标 |
-| `background` | `#FAF8F5` | `#171310` | Figma 页面与启动屏底色 |
-| `card` | `#FFFCF9` | `#211B18` | Figma 内容表面 |
-| `cardStrong` | `#FFFFFF` | `#26211E` | 浅色来自 Figma；深色保留输入与较高表面的既有组件证据 |
-| `text` | `#2C211D` | `#FFF6F3` | Figma 主要内容 |
-| `textMuted` | `#70635C` | `#C8B8AF` | Figma 次要内容 |
-| `border` | `#E4D9D2` | `#3D332E` | Figma 分隔和弱边界 |
-| `borderStrong` | `#D8D1C9` | `#554B44` | 已有输入与 secondary button 组件证据；用于需要更清楚轮廓的控件 |
-| `focus` | `#F6B7A5` | `#D96A50` | 已有输入组件证据；3 pt 焦点 ring，不参与控件外尺寸计算 |
-| `danger` | `#A53A32` | `#FF9289` | Figma 危险、错误状态 |
-| `success` | `#337A49` | `#7DCB92` | Figma 成功状态 |
-| `warning` | `#8D5A12` | `#F0B963` | Figma 警告状态 |
+| `brand` | `#FF4F2A` | `#FF7A59` | Web `accent`；用于 Logo 邻近品牌元素 |
+| `tint` | `#FF4F2A` | `#FF9B7F` | Web `accent`；用于图标、进度、选中轮廓、导航和输入选择色 |
+| `tintText` | `#A23A22` | `#FF9B7F` | 强调色的高对比文字适配；用于链接、标签和小号强调文字 |
+| `tintMuted` | `#FCE6DF` | `#4B271F` | Web `accent-soft`；用于轻选中背景和低强调信息表面 |
+| `actionFill` | `#FF4F2A` | `#B9432E` | Web `accent`；用于主操作实心填充 |
+| `actionPressed` | `#E94320` | `#963625` | Web `accent-hover`；深色模式使用相应按下态 |
+| `onAction` | `#15171B` | `#FFF9F5` | 主操作上的文字与图标；浅色使用深色前景以维持按下态 4.5:1 对比度 |
+| `background` | `#FBFAF8` | `#171310` | Web `bg`；用于页面与启动屏底色 |
+| `card` | `#FFFDFA` | `#211B18` | Web `panel`；用于内容表面 |
+| `cardStrong` | `#FFFFFF` | `#26211E` | Web `panel-strong`；深色保留输入与较高表面的既有组件证据 |
+| `text` | `#17191D` | `#FFF6F3` | Web `text`；用于主要内容 |
+| `textMuted` | `#77736F` | `#C8B8AF` | Web `muted`；用于次要内容 |
+| `border` | `#E6E1DB` | `#3D332E` | Web `line`；用于分隔和弱边界 |
+| `borderStrong` | `#D8D1C9` | `#554B44` | Web `line-strong`；用于需要更清楚轮廓的控件 |
+| `focus` | `rgba(255, 155, 126, 0.42)` | `#D96A50` | Web `focus`；3 pt 焦点 ring，不参与控件外尺寸计算 |
+| `danger` | `#A53A32` | `#FF9289` | Mobile 危险、错误状态，由主题测试锁定 |
+| `success` | `#3F9C59` | `#7DCB92` | Web `success`；用于成功状态 |
+| `warning` | `#C67B12` | `#F0B963` | Web `warning`；用于警告状态 |
 
-`dangerMuted`、`successMuted`、`warningMuted` 和 `overlay` 继续采用已有共享组件中已经验收的语义值，直到对应 Figma component 明确给出替代值；它们不得被页面私自重定义。所有上述值都由 `apps/mobile/src/shared/ui/theme.ts` 提供并由主题测试锁定。
+`dangerMuted`、`successMuted`、`warningMuted` 和 `overlay` 继续采用已有共享组件中已经验收的语义值；它们不得被页面私自重定义。所有上述值都由 `apps/mobile/src/shared/ui/theme.ts` 提供并由主题测试锁定，变更时必须同时更新本表、消费者和对比度测试。
 
-1.1 变更理由：Live Figma Foundations 已把“品牌识别”“文字/图标 tint”和“实心主操作”拆成不同语义。旧 `accent`、`accentMuted`、`accentPressed`、`onAccent` 同时承担品牌、导航、选择和按钮职责，导致浅色主按钮前景及深色交互状态难以独立验证，因此本版移除这些无主 alias，并迁移全部现有 Mobile 消费者。
+1.1 变更理由：品牌基础层把“品牌识别”“文字/图标 tint”和“实心主操作”拆成不同语义。旧 `accent`、`accentMuted`、`accentPressed`、`onAccent` 同时承担品牌、导航、选择和按钮职责，导致浅色主按钮前景及深色交互状态难以独立验证，因此本版移除这些无主 alias，并迁移全部现有 Mobile 消费者。
 
-影响评估：iOS 与 Android 共用同一套新 token；Compact/Expanded 布局和中英文信息结构不变。页面、卡片、启动屏和 Android adaptive icon 背景同步到新底色；主按钮改用 `action*`，导航、链接、选择和进度反馈改用 `tint*`。共享输入焦点 ring 固定为 3 pt 且不改变控件外尺寸；共享图标按钮合并 `selected`、`busy`、`disabled` 无障碍状态。迁移不引入新动效、平台分叉或手势依赖。
+1.2 变更理由：Web 与 Mobile 的浅色基础 palette 出现偏差，尤其是 Mobile 强调色偏暗，导致同一品牌在两个客户端呈现不一致。本版以 `apps/web/styles/theme.css` 为浅色数值基准，同步背景、表面、正文、弱文字、边界、强调、按下、焦点、成功和警告色。Mobile 继续保留语义 token 与独立深色适配，不在运行时导入 Web 私有 CSS；小号强调文字使用 `tintText`，主操作使用高对比 `onAction`，确保视觉同步不牺牲可访问性。
+
+1.3 变更理由：Mobile 已具备完整的仓库内设计规范、语义 token、共享组件、双语测试和设备验收流程，外部设计文件不再提供不可替代的信息。本版明确取消 Figma 依赖和调用要求，将可运行代码与本规范确立为设计、实现和验收依据，避免仓库实现与外部设计状态产生双重事实来源。
+
+影响评估：iOS 与 Android 共用同一套语义 token；Compact/Expanded 布局和中英文信息结构不变。页面、卡片、启动屏和 Android adaptive icon 背景同步到 Web 浅色底色；图标、进度、选择和主操作显示更鲜明的 Web 珊瑚橙，小号文字继续达到 4.5:1 对比度。深色主题保留原有自适应值；迁移不引入新动效、平台分叉、手势依赖或文案变化。
 
 固定用色规则：
 
 - 珊瑚橙只表达品牌交互和当前选中，不表示警告、错误或普通装饰文本。
 - 成功、警告、危险使用独立语义色，同时提供图标或文字，不得只靠颜色传达。
-- 品牌色、tint 和主操作填充不得互换。任何实心填充与文字/图标组合都必须单独通过对比度验证；主按钮统一使用 `actionFill`、`actionPressed` 与 `onAction`。
+- 即使 `brand`、`tint` 和 `actionFill` 当前共享 Web 强调色数值，它们也不得按名字互换；每个 token 的语义和未来演进独立。小号强调文字使用 `tintText`，主按钮统一使用 `actionFill`、`actionPressed` 与 `onAction`。
 - 所有自定义颜色都必须有浅色、深色和高对比度策略。新增 token 时同步检查 Web 品牌一致性，但不因此复用 Web 私有代码。
 
 ### 3.3 Logo 与 App 图标
@@ -323,4 +349,4 @@ Apple HIG 是设计依据，不要求采用 SwiftUI 或 UIKit。React Native + E
 4. 迁移所有受影响页面，不能长期保留两套模式；
 5. 通过 Mobile lint、typecheck、test、i18n 和适用的设备视觉验收。
 
-页面级例外必须记录原因、影响范围、替代无障碍行为和删除条件。仅以“更好看”“设计稿如此”或“实现方便”为理由，不构成例外。
+页面级例外必须记录原因、影响范围、替代无障碍行为和删除条件。仅以“更好看”“参考图如此”或“实现方便”为理由，不构成例外。

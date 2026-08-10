@@ -1,4 +1,4 @@
-import { Slot } from 'expo-router';
+import { NativeTabs } from 'expo-router/unstable-native-tabs';
 import { useMemo, type ReactNode } from 'react';
 
 import { MainApplicationShell } from '../../app-shell/public';
@@ -12,9 +12,13 @@ import {
   LibraryController,
   LibraryProvider,
 } from '../../features/library/public';
+import { useI18n } from '../../shared/i18n/public';
+import { useAppTheme } from '../../shared/ui/public';
 
 export default function MainLayout(): ReactNode {
   const flow = useAppFlow();
+  const { t } = useI18n();
+  const theme = useAppTheme();
   const authenticatedState =
     flow.state.phase === 'authenticated' ||
     flow.state.phase === 'logging-out'
@@ -47,18 +51,80 @@ export default function MainLayout(): ReactNode {
         : 'session-stale'
       : undefined;
 
-  const shell = (
+  const navigation = (
     <MainApplicationShell
       {...(sessionWarning === undefined ? {} : { sessionWarning })}
     >
-      <Slot />
+      <NativeTabs
+        backBehavior="history"
+        backgroundColor={theme.colors.card}
+        iconColor={{
+          default: theme.colors.textMuted,
+          selected: theme.colors.tint,
+        }}
+        indicatorColor={theme.colors.tintMuted}
+        labelStyle={{
+          default: { color: theme.colors.textMuted },
+          selected: { color: theme.colors.tintText },
+        }}
+        labelVisibilityMode="labeled"
+        minimizeBehavior="automatic"
+        sidebarAdaptable
+        tintColor={theme.colors.tint}
+      >
+        <NativeTabs.Trigger
+          accessibilityLabel={t('route.home.label')}
+          name="home"
+          testID="native-tab-home"
+        >
+          <NativeTabs.Trigger.Icon
+            md={{ default: 'home', selected: 'home' }}
+            sf={{ default: 'house', selected: 'house.fill' }}
+          />
+          <NativeTabs.Trigger.Label>
+            {t('route.home.label')}
+          </NativeTabs.Trigger.Label>
+        </NativeTabs.Trigger>
+        <NativeTabs.Trigger
+          accessibilityLabel={t('route.library.label')}
+          name="library"
+          testID="native-tab-library"
+        >
+          <NativeTabs.Trigger.Icon
+            md={{ default: 'local_library', selected: 'local_library' }}
+            sf={{
+              default: 'books.vertical',
+              selected: 'books.vertical.fill',
+            }}
+          />
+          <NativeTabs.Trigger.Label>
+            {t('route.library.label')}
+          </NativeTabs.Trigger.Label>
+        </NativeTabs.Trigger>
+        <NativeTabs.Trigger
+          accessibilityLabel={t('route.me.label')}
+          name="me"
+          testID="native-tab-me"
+        >
+          <NativeTabs.Trigger.Icon
+            md={{ default: 'account_circle', selected: 'account_circle' }}
+            sf={{
+              default: 'person.crop.circle',
+              selected: 'person.crop.circle.fill',
+            }}
+          />
+          <NativeTabs.Trigger.Label>
+            {t('route.me.label')}
+          </NativeTabs.Trigger.Label>
+        </NativeTabs.Trigger>
+      </NativeTabs>
     </MainApplicationShell>
   );
   return libraryController === null ? (
-    shell
+    navigation
   ) : (
     <LibraryProvider controller={libraryController}>
-      {shell}
+      {navigation}
     </LibraryProvider>
   );
 }

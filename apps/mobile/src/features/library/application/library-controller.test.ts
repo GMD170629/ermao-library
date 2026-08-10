@@ -94,6 +94,7 @@ class FakeGateway implements LibraryGateway {
       value: {
         summary: null,
         continueReading: null,
+        recentReading: [],
         recentBooks: [],
         unavailableSections: ['summary', 'unread'],
       },

@@ -6,6 +6,7 @@ import type {
   BooksQuery,
   CollectionDetail,
   ContinueReadingBook,
+  HomeSection,
   HomeSummary,
   ImportSuccess,
   ImportTargets,
@@ -30,13 +31,9 @@ export type HomeLoadResult = LibraryResult<
   Readonly<{
     summary: HomeSummary | null;
     continueReading: ContinueReadingBook | null;
+    recentReading: readonly LibraryBook[];
     recentBooks: readonly LibraryBook[];
-    unavailableSections: readonly (
-      | 'continue-reading'
-      | 'recent-books'
-      | 'summary'
-      | 'unread'
-    )[];
+    unavailableSections: readonly HomeSection[];
   }>
 >;
 

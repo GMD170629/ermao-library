@@ -46,6 +46,7 @@ export type LibraryBook = Readonly<{
   author: string;
   coverUrl: string;
   mediaKinds: readonly LibraryMediaKind[];
+  progressPercent?: number;
 }>;
 
 export type ContinueReadingBook = LibraryBook &
@@ -69,12 +70,14 @@ export type HomeSummary = Readonly<{
 export type HomeSection =
   | 'continue-reading'
   | 'recent-books'
+  | 'recent-reading'
   | 'summary'
   | 'unread';
 
 export type HomeData = Readonly<{
   summary: HomeSummary | null;
   continueReading: ContinueReadingBook | null;
+  recentReading: readonly LibraryBook[];
   recentBooks: readonly LibraryBook[];
   unavailableSections: readonly HomeSection[];
 }>;

@@ -1,18 +1,23 @@
 import { useRouter } from 'expo-router';
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
+import { Alert } from 'react-native';
 
 import {
   BookshelfScreen,
   encodeBooksRouteQuery,
-  LibraryImportModal,
   useLibrary,
   type ShelfSummary,
 } from '../../../features/library/public';
+import { useI18n } from '../../../shared/i18n/public';
+import {
+  notifyOperationSucceeded,
+  notifyOperationWarning,
+} from '../../../shared/ui/public';
 
 export default function BookshelfRoute(): ReactNode {
   const router = useRouter();
   const library = useLibrary();
-  const [importVisible, setImportVisible] = useState(false);
+  const { t } = useI18n();
 
   const openShelf = (shelf: ShelfSummary): void => {
     router.push({
@@ -34,40 +39,67 @@ export default function BookshelfRoute(): ReactNode {
     });
   };
 
+  const confirmDelete = (shelf: ShelfSummary): void => {
+    Alert.alert(
+      t('library.shelves.deleteTitle'),
+      t('library.shelves.deleteBody', { name: shelf.name }),
+      [
+        { style: 'cancel', text: t('common.cancel') },
+        {
+          onPress: () => {
+            void library.deleteShelf(shelf.id).then((outcome) => {
+              if (outcome.outcome === 'succeeded') {
+                void notifyOperationSucceeded();
+              } else {
+                void notifyOperationWarning();
+                Alert.alert(
+                  t('library.issue.title'),
+                  t('library.issue.shelfMutation'),
+                );
+              }
+            });
+          },
+          style: 'destructive',
+          text: t('library.shelves.deleteAction'),
+        },
+      ],
+    );
+  };
+
   return (
-    <>
-      <BookshelfScreen
-        collection={library.state.collection}
-        coverSource={library.coverSource}
-        onCloseCollection={library.closeCollection}
-        onCreateShelf={library.createShelf}
-        onDeleteShelf={library.deleteShelf}
-        onImport={() => setImportVisible(true)}
-        onOpenAllBooks={openAllBooks}
-        onOpenCollection={(collectionId) => {
-          void library.loadCollection(collectionId);
-        }}
-        onOpenShelf={openShelf}
-        onRefresh={() => {
-          void library.loadShelves();
-        }}
-        onRenameShelf={library.renameShelf}
-        onRetry={() => {
-          void library.loadShelves();
-        }}
-        onViewChange={(view) => {
-          void library.setBooksQuery({
-            ...library.state.books.query,
-            view,
-          });
-        }}
-        state={library.state.shelves}
-        view={library.state.books.query.view}
-      />
-      <LibraryImportModal
-        onClose={() => setImportVisible(false)}
-        visible={importVisible}
-      />
-    </>
+    <BookshelfScreen
+      coverSource={library.coverSource}
+      onCreateShelf={() => router.push('/library/shelf-editor')}
+      onDeleteShelf={confirmDelete}
+      onEditShelf={(shelf) =>
+        router.push({
+          pathname: '/library/shelf-editor',
+          params: { shelfId: shelf.id },
+        })
+      }
+      onImport={() => router.push('/library/import')}
+      onOpenAllBooks={openAllBooks}
+      onOpenCollection={(collectionId) =>
+        router.push({
+          pathname: '/library/collection/[collectionId]',
+          params: { collectionId },
+        })
+      }
+      onOpenShelf={openShelf}
+      onRefresh={() => {
+        void library.loadShelves();
+      }}
+      onRetry={() => {
+        void library.loadShelves();
+      }}
+      onViewChange={(view) => {
+        void library.setBooksQuery({
+          ...library.state.books.query,
+          view,
+        });
+      }}
+      state={library.state.shelves}
+      view={library.state.books.query.view}
+    />
   );
 }

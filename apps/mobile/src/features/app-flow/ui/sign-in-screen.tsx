@@ -2,7 +2,6 @@ import { useRef, useState, type ReactNode } from 'react';
 import {
   Image,
   Platform,
-  Pressable,
   StyleSheet,
   View,
   type ImageSourcePropType,
@@ -290,30 +289,15 @@ export function SignInScreen({
             keyboardType="url"
             label={t('identity.signIn.serverLabel')}
             labelAction={
-              <Pressable
+              <AppButton
                 accessibilityHint={t(
                   'identity.signIn.manageConnectionsHint',
                 )}
-                accessibilityLabel={t(
-                  'identity.signIn.manageConnections',
-                )}
-                accessibilityRole="button"
-                accessibilityState={{ disabled: busy }}
                 disabled={busy}
-                hitSlop={13}
+                label={t('identity.signIn.manageConnections')}
                 onPress={onManageConnections}
-                style={({ pressed }) => [
-                  pressed && styles.pressed,
-                  busy && styles.disabled,
-                ]}
-              >
-                <AppText
-                  style={{ color: theme.colors.tint }}
-                  variant="caption"
-                >
-                  {t('identity.signIn.manageConnections')}
-                </AppText>
-              </Pressable>
+                variant="ghost"
+              />
             }
             maxLength={MAXIMUM_SERVER_ADDRESS_LENGTH}
             onChangeText={(value) => {
@@ -404,38 +388,19 @@ export function SignInScreen({
             testID="sign-in-password"
             textContentType="password"
             trailingAction={
-              <Pressable
-                accessibilityLabel={
+              <AppButton
+                disabled={busy}
+                label={
                   passwordVisible
                     ? t('identity.signIn.hidePassword')
                     : t('identity.signIn.showPassword')
                 }
-                accessibilityRole="button"
-                accessibilityState={{
-                  disabled: busy,
-                  selected: passwordVisible,
-                }}
-                disabled={busy}
-                hitSlop={4}
                 onPress={() =>
                   setPasswordVisible((currentVisible) => !currentVisible)
                 }
-                style={({ pressed }) => [
-                  styles.passwordVisibility,
-                  pressed && styles.pressed,
-                  busy && styles.disabled,
-                ]}
                 testID="sign-in-password-visibility"
-              >
-                <AppText
-                  style={{ color: theme.colors.tint }}
-                  variant="label"
-                >
-                  {passwordVisible
-                    ? t('identity.signIn.hidePassword')
-                    : t('identity.signIn.showPassword')}
-                </AppText>
-              </Pressable>
+                variant="ghost"
+              />
             }
             value={password}
           />
@@ -472,7 +437,7 @@ export function SignInScreen({
           fullWidth
           label={t('common.cancel')}
           onPress={onCancel}
-          style={[
+          containerStyle={[
             styles.footer,
             {
               marginTop: theme.spacing.xxl,
@@ -511,9 +476,6 @@ const styles = StyleSheet.create({
   brand: {
     alignItems: 'center',
   },
-  disabled: {
-    opacity: 0.45,
-  },
   form: {
     width: '100%',
   },
@@ -524,15 +486,6 @@ const styles = StyleSheet.create({
   main: {
     alignSelf: 'center',
     width: '100%',
-  },
-  passwordVisibility: {
-    alignItems: 'center',
-    height: 44,
-    justifyContent: 'center',
-    minWidth: 44,
-  },
-  pressed: {
-    opacity: 0.65,
   },
   scanStatus: {
     alignItems: 'baseline',

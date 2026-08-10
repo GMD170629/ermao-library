@@ -125,9 +125,6 @@ export function ServerProfilesFlowScreen({
       mode="editable"
       onAddAddress={() => router.push('/address')}
       onAddQr={() => router.push('/scan')}
-      onBack={() =>
-        router.replace(flow.state.phase === 'signed-out' ? '/login' : '/connect')
-      }
       onDelete={(profileId) => {
         void controller.delete(profileId);
       }}

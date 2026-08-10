@@ -35,7 +35,7 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/brand/android-adaptive-foreground.png",
         "backgroundImage": "./assets/brand/android-adaptive-background.png",
-        "backgroundColor": "#FAF8F5",
+        "backgroundColor": "#FBFAF8",
         "monochromeImage": "./assets/brand/android-adaptive-monochrome.png"
       },
       "package": "com.shuku.starship",
@@ -84,7 +84,7 @@
               "icon": "./assets/brand/splash-transparent.xml"
             }
           },
-          "backgroundColor": "#FAF8F5",
+          "backgroundColor": "#FBFAF8",
           "dark": {
             "backgroundColor": "#171310"
           }

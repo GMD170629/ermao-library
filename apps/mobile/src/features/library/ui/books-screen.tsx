@@ -1,15 +1,15 @@
 import { useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { useI18n } from '../../../shared/i18n/public';
 import {
   AppButton,
-  AppIcon,
   AppText,
   InlineNotice,
   LoadingState,
-  PageHeader,
+  PageIntro,
   ScreenScaffold,
+  SystemActionMenu,
   useAppTheme,
 } from '../../../shared/ui/public';
 import type {
@@ -27,7 +27,6 @@ import {
 
 export type BooksScreenProps = Readonly<{
   coverSource?(book: LibraryBook): LibraryCoverSource;
-  onBack(): void;
   onLoadNextPage(): void;
   onQueryChange(query: BooksQuery): void;
   onRefresh(): void;
@@ -38,7 +37,6 @@ export type BooksScreenProps = Readonly<{
 
 export function BooksScreen({
   coverSource,
-  onBack,
   onLoadNextPage,
   onQueryChange,
   onRefresh,
@@ -60,16 +58,12 @@ export function BooksScreen({
       refreshing={state.phase === 'ready' && state.refreshing}
       testID="library-books-screen"
     >
-      <PageHeader
-        backAccessibilityHint={t('library.books.backHint')}
-        backLabel={t('common.back')}
+      <PageIntro
         description={
           shelfName === undefined
             ? t('library.books.subtitle')
             : t('library.books.shelfSubtitle', { name: shelfName })
         }
-        onBack={onBack}
-        title={shelfName ?? t('library.books.title')}
       />
       <BooksSearchField
         key={state.query.search}
@@ -92,36 +86,38 @@ export function BooksScreen({
         />
       </View>
 
-      <FilterRail
-        allLabel={t('library.filter.allStatuses')}
-        onSelect={(status) => updateQuery({ status })}
-        options={[
-          ['READING', t('library.filter.reading')],
-          ['UNREAD', t('library.filter.unread')],
-          ['FINISHED', t('library.filter.finished')],
-        ]}
-        selected={state.query.status}
-      />
-      <FilterRail
-        allLabel={t('library.filter.allMedia')}
-        onSelect={(mediaKind) => updateQuery({ mediaKind })}
-        options={[
-          ['EBOOK', t('library.filter.ebook')],
-          ['COMIC', t('library.filter.comic')],
-          ['AUDIOBOOK', t('library.filter.audiobook')],
-        ]}
-        selected={state.query.mediaKind}
-      />
-      <SortRail
-        direction={state.query.direction}
-        onDirectionToggle={() =>
-          updateQuery({
-            direction: state.query.direction === 'asc' ? 'desc' : 'asc',
-          })
-        }
-        onSelect={(sort) => updateQuery({ sort })}
-        selected={state.query.sort}
-      />
+      <View style={[styles.nativeMenus, { gap: theme.spacing.sm }]}>
+        <FilterRail
+          allLabel={t('library.filter.allStatuses')}
+          onSelect={(status) => updateQuery({ status })}
+          options={[
+            ['READING', t('library.filter.reading')],
+            ['UNREAD', t('library.filter.unread')],
+            ['FINISHED', t('library.filter.finished')],
+          ]}
+          selected={state.query.status}
+        />
+        <FilterRail
+          allLabel={t('library.filter.allMedia')}
+          onSelect={(mediaKind) => updateQuery({ mediaKind })}
+          options={[
+            ['EBOOK', t('library.filter.ebook')],
+            ['COMIC', t('library.filter.comic')],
+            ['AUDIOBOOK', t('library.filter.audiobook')],
+          ]}
+          selected={state.query.mediaKind}
+        />
+        <SortRail
+          direction={state.query.direction}
+          onDirectionToggle={() =>
+            updateQuery({
+              direction: state.query.direction === 'asc' ? 'desc' : 'asc',
+            })
+          }
+          onSelect={(sort) => updateQuery({ sort })}
+          selected={state.query.sort}
+        />
+      </View>
 
       {state.phase === 'idle' || state.phase === 'loading' ? (
         <LoadingState label={t('library.books.loading')} />
@@ -210,70 +206,29 @@ function FilterRail<Value extends string>({
   options,
   selected,
 }: FilterRailProps<Value>): ReactNode {
-  const theme = useAppTheme();
   return (
-    <ScrollView
-      accessibilityRole="tablist"
-      contentContainerStyle={{ gap: theme.spacing.xs }}
-      horizontal
-      showsHorizontalScrollIndicator={false}
-    >
-      <FilterChip
-        label={allLabel}
-        onPress={() => onSelect(null)}
-        selected={selected === null}
-      />
-      {options.map(([value, label]) => (
-        <FilterChip
-          key={value}
-          label={label}
-          onPress={() => onSelect(value)}
-          selected={selected === value}
-        />
-      ))}
-    </ScrollView>
-  );
-}
-
-function FilterChip({
-  label,
-  onPress,
-  selected,
-}: Readonly<{
-  label: string;
-  onPress(): void;
-  selected: boolean;
-}>): ReactNode {
-  const theme = useAppTheme();
-  return (
-    <Pressable
-      accessibilityLabel={label}
-      accessibilityRole="tab"
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.filterChip,
-        {
-          backgroundColor: selected
-            ? theme.colors.tintMuted
-            : theme.colors.card,
-          borderColor: selected
-            ? theme.colors.tint
-            : theme.colors.border,
-          borderRadius: theme.radius.control,
-          minHeight: theme.control.minimumTouchTarget,
-          paddingHorizontal: theme.spacing.md,
-        },
-        pressed && { opacity: 0.68 },
+    <SystemActionMenu
+      accessibilityLabel={allLabel}
+      actions={[
+        { id: 'all', selected: selected === null, title: allLabel },
+        ...options.map(([value, title]) => ({
+          id: `value:${value}`,
+          selected: selected === value,
+          title,
+        })),
       ]}
-    >
-      <AppText
-        style={selected ? { color: theme.colors.tint } : undefined}
-        variant="caption"
-      >
-        {label}
-      </AppText>
-    </Pressable>
+      iconName="filter"
+      onAction={(actionId) => {
+        if (actionId === 'all') {
+          onSelect(null);
+          return;
+        }
+        const option = options.find(
+          ([value]) => `value:${value}` === actionId,
+        );
+        if (option !== undefined) onSelect(option[0]);
+      }}
+    />
   );
 }
 
@@ -288,7 +243,6 @@ function SortRail({
   onSelect(value: LibrarySort): void;
   selected: LibrarySort;
 }>): ReactNode {
-  const theme = useAppTheme();
   const { t } = useI18n();
   const options: readonly (readonly [LibrarySort, string])[] = [
     ['recent_read', t('library.sort.recentRead')],
@@ -297,71 +251,46 @@ function SortRail({
     ['author', t('library.sort.author')],
   ];
   return (
-    <View style={[styles.sortRow, { gap: theme.spacing.xs }]}>
-      <ScrollView
-        accessibilityRole="tablist"
-        contentContainerStyle={{ gap: theme.spacing.xs }}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.flex}
-      >
-        {options.map(([value, label]) => (
-          <FilterChip
-            key={value}
-            label={label}
-            onPress={() => onSelect(value)}
-            selected={selected === value}
-          />
-        ))}
-      </ScrollView>
-      <Pressable
-        accessibilityLabel={
-          direction === 'asc'
-            ? t('library.sort.ascending')
-            : t('library.sort.descending')
+    <SystemActionMenu
+      accessibilityLabel={t('library.sort.menuLabel')}
+      actions={[
+        ...options.map(([value, title]) => ({
+          id: `sort:${value}`,
+          selected: selected === value,
+          title,
+        })),
+        {
+          id: 'direction',
+          title:
+            direction === 'asc'
+              ? t('library.sort.ascending')
+              : t('library.sort.descending'),
+        },
+      ]}
+      iconName="sort"
+      onAction={(actionId) => {
+        if (actionId === 'direction') {
+          onDirectionToggle();
+          return;
         }
-        accessibilityRole="button"
-        onPress={onDirectionToggle}
-        style={({ pressed }) => [
-          styles.directionButton,
-          {
-            backgroundColor: theme.colors.card,
-            borderColor: theme.colors.border,
-            borderRadius: theme.radius.control,
-            height: theme.control.minimumTouchTarget,
-            width: theme.control.minimumTouchTarget,
-          },
-          pressed && { backgroundColor: theme.colors.tintMuted },
-        ]}
-      >
-        <AppIcon
-          color={theme.colors.tint}
-          decorative
-          name="sort"
-          size={theme.control.iconMedium}
-        />
-      </Pressable>
-    </View>
+        const option = options.find(
+          ([value]) => `sort:${value}` === actionId,
+        );
+        if (option !== undefined) onSelect(option[0]);
+      }}
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  directionButton: {
-    alignItems: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    justifyContent: 'center',
-  },
-  filterChip: {
-    alignItems: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    justifyContent: 'center',
-  },
   flex: {
     flex: 1,
   },
-  sortRow: {
+  nativeMenus: {
     alignItems: 'center',
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
   },
   viewToolbar: {
     alignItems: 'center',

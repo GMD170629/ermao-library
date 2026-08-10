@@ -20,11 +20,14 @@
     "generate:api": "pnpm generate:reader-api && pnpm generate:library-api",
     "api:check": "cd ../api-python && uv run --extra dev python scripts/export_openapi.py ../mobile/.reader-openapi.json && uv run --extra dev python scripts/export_openapi.py ../mobile/.library-openapi.json && cd ../mobile && node scripts/generate-reader-api.mjs .reader-openapi.json generated/reader-v3.ts --check --delete-input && node scripts/generate-library-api.mjs .library-openapi.json generated/library.ts --check --delete-input",
     "i18n:check": "tsx --test src/shared/i18n/catalog-validation.test.ts",
+    "native-ui:check": "node scripts/check-native-ui-policy.mjs",
     "doctor": "expo install --check && expo-doctor",
     "export:check": "expo export --platform all --output-dir .expo/export-check",
-    "check": "pnpm api:check && pnpm lint && pnpm typecheck && pnpm test && pnpm i18n:check && pnpm run doctor"
+    "check": "pnpm api:check && pnpm lint && pnpm typecheck && pnpm test && pnpm i18n:check && pnpm native-ui:check && pnpm run doctor"
   },
   "dependencies": {
+    "@expo/material-symbols": "^0.1.1",
+    "@expo/ui": "~57.0.9",
     "@shuku/reader-core": "workspace:*",
     "expo": "~57.0.11",
     "expo-build-properties": "~57.0.9",
@@ -34,6 +37,7 @@
     "expo-dev-client": "~57.0.10",
     "expo-file-system": "~57.0.2",
     "expo-font": "~57.0.1",
+    "expo-haptics": "~57.0.1",
     "expo-linking": "~57.0.5",
     "expo-localization": "~57.0.1",
     "expo-router": "~57.0.11",

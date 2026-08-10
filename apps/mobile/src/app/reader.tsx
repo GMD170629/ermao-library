@@ -1,7 +1,7 @@
 import { useRouter } from 'expo-router';
 import type { ReactNode } from 'react';
 
-import { PlaceholderScreen } from '../../app-shell/public';
+import { PlaceholderScreen } from '../app-shell/public';
 
 export default function ReaderRoute(): ReactNode {
   const router = useRouter();

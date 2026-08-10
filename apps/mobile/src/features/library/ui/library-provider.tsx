@@ -128,6 +128,7 @@ function visibleBooks(state: LibrarySnapshot): readonly LibraryBook[] {
         state.home.data.continueReading,
       );
     }
+    for (const book of state.home.data.recentReading) books.set(book.id, book);
     for (const book of state.home.data.recentBooks) books.set(book.id, book);
   }
   if (state.shelves.phase === 'ready') {

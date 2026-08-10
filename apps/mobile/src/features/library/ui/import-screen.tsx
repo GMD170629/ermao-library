@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { useI18n } from '../../../shared/i18n/public';
 import {
@@ -8,15 +8,16 @@ import {
   AppText,
   InlineNotice,
   LoadingState,
-  PageHeader,
+  PageIntro,
   ScreenScaffold,
+  notifySelectionChanged,
   SurfaceCard,
+  SystemListItem,
   useAppTheme,
 } from '../../../shared/ui/public';
-import type { ImportState, ImportTarget } from '../model/library';
+import type { ImportState } from '../model/library';
 
 export type ImportScreenProps = Readonly<{
-  onBack(): void;
   onCancel(): void;
   onChooseFiles(targetPath: string): void;
   onLoadTargets(): void;
@@ -24,7 +25,6 @@ export type ImportScreenProps = Readonly<{
 }>;
 
 export function ImportScreen({
-  onBack,
   onCancel,
   onChooseFiles,
   onLoadTargets,
@@ -39,13 +39,7 @@ export function ImportScreen({
       edges={[]}
       testID="library-import-screen"
     >
-      <PageHeader
-        backAccessibilityHint={t('library.import.backHint')}
-        backLabel={t('common.back')}
-        description={t('library.import.subtitle')}
-        onBack={onBack}
-        title={t('library.import.title')}
-      />
+      <PageIntro description={t('library.import.subtitle')} />
 
       {state.phase === 'idle' || state.phase === 'loading-targets' ? (
         <LoadingState label={t('library.import.loadingTargets')} />
@@ -109,15 +103,20 @@ function ImportReadyContent({
             ) : (
               <View style={{ gap: theme.spacing.xs }}>
                 {state.targets.targets.map((target) => (
-                  <ImportTargetRow
+                  <SystemListItem
+                    disabled={!target.enabled}
                     key={target.folderId}
-                    onPress={() => setSelectedTargetPath(target.rootPath)}
+                    label={target.name}
+                    onPress={() => {
+                      void notifySelectionChanged();
+                      setSelectedTargetPath(target.rootPath);
+                    }}
                     selected={
                       selectedTargetPath === target.rootPath ||
                       selectedTargetPath?.startsWith(`${target.rootPath}/`) ===
                         true
                     }
-                    target={target}
+                    supportingText={target.rootPath}
                   />
                 ))}
               </View>
@@ -215,18 +214,11 @@ function ImportReadyContent({
             <AppButton
               disabled={selectedTargetPath === null}
               fullWidth
+              iconName="upload"
               label={
                 state.upload.phase === 'failed'
                   ? t('library.import.retryAction')
                   : t('library.import.chooseAction')
-              }
-              leadingIcon={
-                <AppIcon
-                  color={theme.colors.onAction}
-                  decorative
-                  name="upload"
-                  size={theme.control.iconMedium}
-                />
               }
               onPress={() => {
                 if (selectedTargetPath !== null) {
@@ -257,104 +249,15 @@ function getInitialTargetPath(
   return selected === undefined ? fallback?.rootPath ?? null : preferredPath;
 }
 
-function ImportTargetRow({
-  onPress,
-  selected,
-  target,
-}: Readonly<{
-  onPress(): void;
-  selected: boolean;
-  target: ImportTarget;
-}>): ReactNode {
-  const theme = useAppTheme();
-  const { t } = useI18n();
-  return (
-    <Pressable
-      accessibilityHint={
-        target.enabled ? t('library.import.targetHint') : undefined
-      }
-      accessibilityLabel={target.name}
-      accessibilityRole="radio"
-      accessibilityState={{ checked: selected, disabled: !target.enabled }}
-      disabled={!target.enabled}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.targetRow,
-        {
-          backgroundColor: selected
-            ? theme.colors.tintMuted
-            : theme.colors.card,
-          borderColor: selected
-            ? theme.colors.tint
-            : theme.colors.border,
-          borderRadius: theme.radius.control,
-          gap: theme.spacing.md,
-          minHeight: theme.control.regularHeight,
-          opacity: target.enabled ? 1 : 0.48,
-          padding: theme.spacing.md,
-        },
-        pressed && { opacity: 0.68 },
-      ]}
-    >
-      <View
-        style={[
-          styles.radio,
-          {
-            borderColor: selected
-              ? theme.colors.tint
-              : theme.colors.borderStrong,
-          },
-        ]}
-      >
-        {selected ? (
-          <View
-            style={[
-              styles.radioSelected,
-              { backgroundColor: theme.colors.tint },
-            ]}
-          />
-        ) : null}
-      </View>
-      <View style={[styles.flex, { gap: theme.spacing.xxs }]}>
-        <AppText variant="label">{target.name}</AppText>
-        <AppText muted numberOfLines={2} variant="caption">
-          {target.rootPath}
-        </AppText>
-      </View>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
-  flex: {
-    flex: 1,
-  },
   progressFill: {
     height: '100%',
   },
   progressTrack: {
     overflow: 'hidden',
   },
-  radio: {
-    alignItems: 'center',
-    borderRadius: 10,
-    borderWidth: 2,
-    height: 20,
-    justifyContent: 'center',
-    width: 20,
-  },
-  radioSelected: {
-    borderRadius: 5,
-    height: 10,
-    width: 10,
-  },
   successHeader: {
     alignItems: 'center',
-    flexDirection: 'row',
-  },
-  targetRow: {
-    alignItems: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
   },
 });

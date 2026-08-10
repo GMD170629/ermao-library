@@ -84,23 +84,20 @@ export function ServerAddressFlowScreen(): ReactNode {
   const flow = useAppFlow();
   return (
     <ServerAddressScreen
-      onBack={() => router.replace('/connect')}
       onCancel={flow.cancelPendingConnection}
       onConnect={(address) => {
         void flow.connect(address, 'manual');
       }}
-      onScanQr={() => router.replace('/scan')}
+      onScanQr={() => router.push('/scan')}
       state={submissionState(flow.state)}
     />
   );
 }
 
 export function QrScannerFlowScreen(): ReactNode {
-  const router = useRouter();
   const flow = useAppFlow();
   return (
     <QrScannerScreen
-      onBack={() => router.replace('/connect')}
       onCodeAccepted={(payload) => {
         void flow.connect(payload, 'qr');
       }}

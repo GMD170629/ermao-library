@@ -28,7 +28,6 @@ function ProfilesFixture({
         mode="editable"
         onAddAddress={noOperation}
         onAddQr={noOperation}
-        onBack={noOperation}
         onDelete={noOperation}
         onResetCorrupt={onResetCorrupt}
         onRetry={noOperation}
@@ -38,7 +37,6 @@ function ProfilesFixture({
     ) : (
       <ServerProfilesScreen
         mode="read-only"
-        onBack={noOperation}
         onRetry={noOperation}
         state={state}
       />
@@ -152,8 +150,7 @@ describe('ServerProfilesScreen', () => {
     );
 
     expect(view.getByText('https://books.example.com')).toBeOnTheScreen();
-    expect(view.getByText('Base path')).toBeOnTheScreen();
-    expect(view.getByText('/reader-service')).toBeOnTheScreen();
+    expect(view.getByText(/\/reader-service/u)).toBeOnTheScreen();
     expect(
       view.getByRole('button', { name: 'Refresh recovery state' }),
     ).toBeOnTheScreen();

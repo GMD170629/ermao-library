@@ -159,6 +159,7 @@ test('accepts progress from current bookshelf summaries across library surfaces'
     data: { books: [bookshelfBook] },
   });
   assert.equal(recent.ok, true);
+  if (recent.ok) assert.equal(recent.value[0]?.progressPercent, 66);
 
   const page = decodeBooksPage({
     ok: true,

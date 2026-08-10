@@ -1,6 +1,8 @@
 import { Stack } from 'expo-router';
 import type { ReactNode } from 'react';
 
+import { useI18n } from '../../../shared/i18n/public';
+import { useAppTheme } from '../../../shared/ui/public';
 import type { AppFlowState } from '../model/app-flow-state';
 import {
   canAccessConnectionFlow,
@@ -45,6 +47,7 @@ export function ProtectedApplicationRoutes({
       </Stack.Protected>
       <Stack.Protected guard={isAuthenticatedFlow(state)}>
         <Stack.Screen name="(main)" />
+        <Stack.Screen name="reader" />
       </Stack.Protected>
     </Stack>
   );
@@ -53,12 +56,34 @@ export function ProtectedApplicationRoutes({
 export function ProtectedConnectionRoutes({
   state: _state,
 }: Readonly<{ state: AppFlowState }>): ReactNode {
+  const { t } = useI18n();
+  const theme = useAppTheme();
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="connect" />
-      <Stack.Screen name="address" />
-      <Stack.Screen name="scan" />
-      <Stack.Screen name="connections" />
+    <Stack
+      screenOptions={{
+        contentStyle: { backgroundColor: theme.colors.background },
+        headerBackButtonDisplayMode: 'minimal',
+        headerStyle: { backgroundColor: theme.colors.background },
+        headerTintColor: theme.colors.tint,
+        headerTitleStyle: { color: theme.colors.text },
+      }}
+    >
+      <Stack.Screen
+        name="connect"
+        options={{ headerShown: false, title: t('connection.home.title') }}
+      />
+      <Stack.Screen
+        name="address"
+        options={{ title: t('connection.address.title') }}
+      />
+      <Stack.Screen
+        name="scan"
+        options={{ title: t('connection.qr.title') }}
+      />
+      <Stack.Screen
+        name="connections"
+        options={{ title: t('connection.profiles.title') }}
+      />
     </Stack>
   );
 }

@@ -50,10 +50,10 @@ describe('ConnectionHomeScreen', () => {
 
     expect(view.getByText('Ermao Books')).toBeOnTheScreen();
     await fireEvent.press(
-      view.getByRole('button', { name: 'Enter address manually' }),
+      view.getByRole('button', { name: 'Enter library web address' }),
     );
     await fireEvent.press(
-      view.getByRole('button', { name: 'Scan QR code' }),
+      view.getByRole('button', { name: 'Scan a connection QR code' }),
     );
 
     expect(onEnterAddress).toHaveBeenCalledTimes(1);

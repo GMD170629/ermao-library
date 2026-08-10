@@ -27,7 +27,6 @@ function AddressFixture({
       <I18nProvider>
         <ServerAddressScreen
           initialAddress={initialAddress}
-          onBack={noOperation}
           onCancel={onCancel}
           onConnect={onConnect}
           onScanQr={noOperation}
@@ -48,7 +47,7 @@ describe('ServerAddressScreen public address contract', () => {
       />,
     );
 
-    expect(view.getByText('Enter library web address')).toBeOnTheScreen();
+    expect(view.getByText('Library connection')).toBeOnTheScreen();
     expect(
       view.getByText(
         'Enter the root address where Ermao Books opens in your browser. The app automatically uses the API on the same domain and base path; do not enter a backend address or /api path.',

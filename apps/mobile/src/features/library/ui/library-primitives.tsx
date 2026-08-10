@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import {
   Image,
-  Pressable,
   StyleSheet,
   TextInput,
   View,
@@ -10,8 +9,12 @@ import {
 } from 'react-native';
 
 import {
+  AppButton,
   AppIcon,
   AppText,
+  ContentPressable,
+  SystemListItem,
+  SystemSegmentedControl,
   useAppTheme,
 } from '../../../shared/ui/public';
 import type {
@@ -89,13 +92,12 @@ export function LibrarySearchButton({
 }: LibrarySearchButtonProps): ReactNode {
   const theme = useAppTheme();
   return (
-    <Pressable
+    <ContentPressable
       accessibilityHint={accessibilityHint}
       accessibilityLabel={label}
       accessibilityRole="search"
-      hitSlop={4}
       onPress={onPress}
-      style={({ pressed }) => [
+      style={[
         styles.search,
         {
           backgroundColor: theme.colors.cardStrong,
@@ -105,7 +107,6 @@ export function LibrarySearchButton({
           minHeight: theme.control.regularHeight,
           paddingHorizontal: theme.spacing.md,
         },
-        pressed && { backgroundColor: theme.colors.tintMuted },
       ]}
     >
       <AppIcon
@@ -117,7 +118,7 @@ export function LibrarySearchButton({
       <AppText muted numberOfLines={1} style={styles.flex}>
         {label}
       </AppText>
-    </Pressable>
+    </ContentPressable>
   );
 }
 
@@ -179,20 +180,12 @@ export function LibrarySearchField({
         value={value}
       />
       {value.length === 0 ? null : (
-        <Pressable
-          accessibilityLabel={clearAccessibilityLabel}
-          accessibilityRole="button"
-          hitSlop={8}
+        <AppButton
+          containerStyle={styles.clearSearch}
+          label={clearAccessibilityLabel}
           onPress={() => onChangeText('')}
-          style={styles.clearSearch}
-        >
-          <AppIcon
-            color={theme.colors.textMuted}
-            decorative
-            name="close"
-            size={theme.control.iconSmall}
-          />
-        </Pressable>
+          variant="ghost"
+        />
       )}
     </View>
   );
@@ -211,58 +204,16 @@ export function ViewSwitcher({
   onChange,
   value,
 }: ViewSwitcherProps): ReactNode {
-  const theme = useAppTheme();
   return (
-    <View
-      accessibilityRole="tablist"
-      style={[
-        styles.switcher,
-        {
-          backgroundColor: theme.colors.card,
-          borderColor: theme.colors.border,
-          borderRadius: theme.radius.control,
-          padding: theme.spacing.xxs,
-        },
+    <SystemSegmentedControl
+      onChange={onChange}
+      options={[
+        { label: gridLabel, value: 'grid' },
+        { label: listLabel, value: 'list' },
       ]}
-    >
-      {([
-        ['grid', gridLabel],
-        ['list', listLabel],
-      ] as const).map(([candidate, label]) => {
-        const selected = candidate === value;
-        return (
-          <Pressable
-            accessibilityLabel={label}
-            accessibilityRole="tab"
-            accessibilityState={{ selected }}
-            hitSlop={4}
-            key={candidate}
-            onPress={() => onChange(candidate)}
-            style={({ pressed }) => [
-              styles.switcherItem,
-              {
-                backgroundColor: selected
-                  ? theme.colors.tintMuted
-                  : 'transparent',
-                borderRadius: theme.radius.compact,
-                height: theme.control.minimumTouchTarget,
-                width: theme.control.minimumTouchTarget,
-              },
-              pressed && { opacity: 0.68 },
-            ]}
-          >
-            <AppIcon
-              color={
-                selected ? theme.colors.tint : theme.colors.textMuted
-              }
-              decorative
-              name={candidate}
-              size={theme.control.iconMedium}
-            />
-          </Pressable>
-        );
-      })}
-    </View>
+      testID="library-view-switcher"
+      value={value}
+    />
   );
 }
 
@@ -354,37 +305,20 @@ function BookListItem({
   book,
   coverAccessibilityLabel,
   coverSource,
-  titleLineLimit,
 }: BookItemProps): ReactNode {
-  const theme = useAppTheme();
   return (
-    <View
-      accessibilityLabel={`${book.title}, ${book.author}`}
-      accessible
-      style={[
-        styles.bookListItem,
-        {
-          borderBottomColor: theme.colors.border,
-          gap: theme.spacing.md,
-          minHeight: theme.control.minimumTouchTarget,
-          paddingVertical: theme.spacing.sm,
-        },
-      ]}
-    >
-      <BookCover
-        accessibilityLabel={coverAccessibilityLabel}
-        size="small"
-        {...(coverSource === undefined ? {} : { source: coverSource })}
-      />
-      <View style={[styles.flex, { gap: theme.spacing.xxs }]}>
-        <AppText numberOfLines={titleLineLimit} variant="label">
-          {book.title}
-        </AppText>
-        <AppText muted numberOfLines={1} variant="caption">
-          {book.author}
-        </AppText>
-      </View>
-    </View>
+    <SystemListItem
+      label={book.title}
+      leading={
+        <BookCover
+          accessibilityLabel={coverAccessibilityLabel}
+          size="small"
+          {...(coverSource === undefined ? {} : { source: coverSource })}
+        />
+      }
+      supportingText={book.author}
+      testID={`library-book-${book.id}`}
+    />
   );
 }
 
@@ -447,11 +381,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
-  bookListItem: {
-    alignItems: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-  },
   clearSearch: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -491,14 +420,5 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 44,
     paddingVertical: 0,
-  },
-  switcher: {
-    alignItems: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-  },
-  switcherItem: {
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 });

@@ -13,9 +13,11 @@ import {
   AppText,
   InlineNotice,
   LoadingState,
-  PageHeader,
+  PageIntro,
   ScreenScaffold,
   SurfaceCard,
+  SystemActionMenu,
+  SystemListItem,
   useAppTheme,
 } from '../../../shared/ui/public';
 import {
@@ -34,7 +36,7 @@ export function ServerProfilesScreen(
   const { t } = useI18n();
   const theme = useAppTheme();
   const { fontScale, width } = useWindowDimensions();
-  const { mode, onBack, onRetry, state } = props;
+  const { mode, onRetry, state } = props;
   const editable = mode === 'editable';
   const expandedActions =
     width >= theme.breakpoint.expandedMinWidth && fontScale <= 1.3;
@@ -61,9 +63,7 @@ export function ServerProfilesScreen(
 
   return (
     <ScreenScaffold contentStyle={styles.screen} testID="server-profiles-screen">
-      <PageHeader
-        backAccessibilityHint={t('common.back')}
-        backLabel={t('common.back')}
+      <PageIntro
         description={t(
           editable
             ? 'connection.profiles.description'
@@ -74,8 +74,6 @@ export function ServerProfilesScreen(
             ? 'connection.profiles.eyebrow'
             : 'connection.profiles.readOnlyEyebrow',
         )}
-        onBack={onBack}
-        title={t('connection.profiles.title')}
       />
 
       {state.status === 'loading' ? (
@@ -96,18 +94,12 @@ export function ServerProfilesScreen(
             ]}
           >
             <AppButton
+              containerStyle={expandedActions && styles.actionExpanded}
               disabled={resetting}
               fullWidth={!expandedActions}
+              iconName="refresh"
               label={t('common.retry')}
-              leadingIcon={
-                <AppIcon
-                  color={theme.colors.text}
-                  decorative
-                  name="refresh"
-                />
-              }
               onPress={onRetry}
-              style={expandedActions && styles.actionExpanded}
               testID="retry-server-profiles"
               variant="secondary"
             />
@@ -116,22 +108,16 @@ export function ServerProfilesScreen(
                 accessibilityHint={t(
                   'connection.profiles.resetCorruptHint',
                 )}
+                containerStyle={expandedActions && styles.actionExpanded}
                 fullWidth={!expandedActions}
+                iconName="trash"
                 label={
                   resetting
                     ? t('connection.profiles.resettingCorrupt')
                     : t('connection.profiles.resetCorruptAction')
                 }
-                leadingIcon={
-                  <AppIcon
-                    color={theme.colors.danger}
-                    decorative
-                    name="trash"
-                  />
-                }
                 loading={resetting}
                 onPress={confirmCorruptReset}
-                style={expandedActions && styles.actionExpanded}
                 testID="reset-corrupt-server-profiles"
                 variant="destructive"
               />
@@ -150,14 +136,8 @@ export function ServerProfilesScreen(
           <AppButton
             accessibilityHint={t('connection.profiles.readOnlyRetryHint')}
             fullWidth
+            iconName="refresh"
             label={t('connection.profiles.readOnlyRetry')}
-            leadingIcon={
-              <AppIcon
-                color={theme.colors.text}
-                decorative
-                name="refresh"
-              />
-            }
             onPress={onRetry}
             testID="refresh-server-profile-recovery"
             variant="secondary"
@@ -205,10 +185,8 @@ export function ServerProfilesScreen(
 
       {state.status === 'ready' && state.profiles.length > 0 ? (
         <SurfaceCard padding="none" style={styles.profileGroup}>
-          {state.profiles.map((profile, index) => (
+          {state.profiles.map((profile) => (
             <ServerProfileRow
-              divided={index > 0}
-              expandedActions={expandedActions}
               key={profile.id}
               {...(props.mode === 'editable'
                 ? {
@@ -235,32 +213,20 @@ export function ServerProfilesScreen(
         >
           <AppButton
             accessibilityHint={t('connection.profiles.addManualHint')}
+            containerStyle={expandedActions && styles.actionExpanded}
             fullWidth={!expandedActions}
+            iconName="plus"
             label={t('connection.profiles.addManual')}
-            leadingIcon={
-              <AppIcon
-                color={theme.colors.onAction}
-                decorative
-                name="plus"
-              />
-            }
             onPress={props.onAddAddress}
-            style={expandedActions && styles.actionExpanded}
             testID="add-server-address"
           />
           <AppButton
             accessibilityHint={t('connection.profiles.addQrHint')}
+            containerStyle={expandedActions && styles.actionExpanded}
             fullWidth={!expandedActions}
+            iconName="scan"
             label={t('connection.profiles.addQr')}
-            leadingIcon={
-              <AppIcon
-                color={theme.colors.text}
-                decorative
-                name="scan"
-              />
-            }
             onPress={props.onAddQr}
-            style={expandedActions && styles.actionExpanded}
             testID="add-server-qr"
             variant="secondary"
           />
@@ -271,8 +237,6 @@ export function ServerProfilesScreen(
 }
 
 type ServerProfileRowBaseProps = Readonly<{
-  divided: boolean;
-  expandedActions: boolean;
   pendingAction?: ServerProfilePendingAction;
   profile: ServerProfileSummary;
 }>;
@@ -288,9 +252,8 @@ type ServerProfileRowProps =
     >;
 
 function ServerProfileRow(props: ServerProfileRowProps): ReactNode {
-  const { divided, expandedActions, pendingAction, profile } = props;
+  const { pendingAction, profile } = props;
   const { formatDateTime, t } = useI18n();
-  const theme = useAppTheme();
   const selecting =
     pendingAction?.type === 'select' &&
     pendingAction.profileId === profile.id;
@@ -324,122 +287,50 @@ function ServerProfileRow(props: ServerProfileRowProps): ReactNode {
 
   return (
     <View
-      style={[
-        styles.profileRow,
-        divided && {
-          borderTopColor: theme.colors.border,
-          borderTopWidth: StyleSheet.hairlineWidth,
-        },
-        profile.active && { backgroundColor: theme.colors.tintMuted },
-      ]}
+      style={styles.profileRow}
       testID={`server-profile-${profile.id}`}
     >
-      <View style={styles.profileHeading}>
-        <View
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          style={styles.profileIcon}
-        >
-          <AppIcon
-            color={profile.active ? theme.colors.tint : theme.colors.textMuted}
-            decorative
-            name="server"
-          />
-        </View>
-        <View style={styles.profileTitleCopy}>
-          <AppText selectable variant="headline">
-            {profile.baseUrl}
-          </AppText>
-          <AppText muted variant="caption">
-            {setupLabel}
-          </AppText>
-        </View>
-        {profile.active ? (
-          <View style={styles.activeBadge}>
-            <AppIcon
-              color={theme.colors.tint}
-              decorative
-              name="check"
-              size={16}
-            />
-            <AppText style={{ color: theme.colors.tint }} variant="caption">
-              {t('common.active')}
-            </AppText>
-          </View>
-        ) : null}
-      </View>
-
-      <View style={styles.metadata}>
-        <View style={styles.metadataLine}>
-          <AppText muted variant="caption">
-            {t('connection.profiles.basePath')}
-          </AppText>
-          <AppText selectable style={styles.metadataValue} variant="caption">
-            {profile.basePath}
-          </AppText>
-        </View>
-        <View style={styles.metadataLine}>
-          <AppText muted variant="caption">
-            {t('connection.profiles.lastVerified')}
-          </AppText>
-          <AppText style={styles.metadataValue} variant="caption">
-            {formatDateTime(profile.lastVerifiedAtMs)}
-          </AppText>
-        </View>
-      </View>
+      <SystemListItem
+        disabled={hasPendingAction}
+        iconName="server"
+        label={profile.baseUrl}
+        selected={profile.active}
+        supportingText={`${setupLabel} · ${profile.basePath} · ${formatDateTime(profile.lastVerifiedAtMs)}`}
+        testID={`select-server-${profile.id}`}
+        {...(props.mode === 'editable' && !profile.active
+          ? { onPress: () => props.onSelect(profile.id) }
+          : {})}
+      />
 
       {props.mode === 'editable' ? (
-        <View
-          style={[
-            styles.profileActions,
-            expandedActions && styles.actionsExpanded,
-          ]}
-        >
-          <AppButton
-            accessibilityHint={t('connection.profiles.selectHint')}
-            disabled={profile.active || hasPendingAction}
-            fullWidth={!expandedActions}
-            label={
-              selecting
-                ? t('connection.profiles.selecting')
-                : profile.active
-                  ? t('common.active')
-                  : t('common.select')
-            }
-            leadingIcon={
-              <AppIcon
-                color={theme.colors.text}
-                decorative
-                name="check"
-              />
-            }
-            loading={selecting}
-            onPress={() => props.onSelect(profile.id)}
-            style={expandedActions && styles.actionExpanded}
-            testID={`select-server-${profile.id}`}
-            variant="secondary"
-          />
-          <AppButton
-            accessibilityHint={t('connection.profiles.deleteHint')}
-            disabled={hasPendingAction}
-            fullWidth={!expandedActions}
-            label={
-              deleting
-                ? t('connection.profiles.deleting')
-                : t('common.delete')
-            }
-            leadingIcon={
-              <AppIcon
-                color={theme.colors.danger}
-                decorative
-                name="trash"
-              />
-            }
-            loading={deleting}
-            onPress={confirmDelete}
-            style={expandedActions && styles.actionExpanded}
-            testID={`delete-server-${profile.id}`}
-            variant="destructive"
+        <View style={styles.profileMenu}>
+          <SystemActionMenu
+            accessibilityLabel={t('connection.profiles.title')}
+            actions={[
+              {
+                disabled: profile.active || hasPendingAction,
+                id: 'select',
+                selected: profile.active,
+                title: selecting
+                  ? t('connection.profiles.selecting')
+                  : profile.active
+                    ? t('common.active')
+                    : t('common.select'),
+              },
+              {
+                destructive: true,
+                disabled: hasPendingAction,
+                id: 'delete',
+                title: deleting
+                  ? t('connection.profiles.deleting')
+                  : t('common.delete'),
+              },
+            ]}
+            onAction={(actionId) => {
+              if (actionId === 'select') props.onSelect(profile.id);
+              if (actionId === 'delete') confirmDelete();
+            }}
+            testID={`server-actions-${profile.id}`}
           />
         </View>
       ) : null}
@@ -458,12 +349,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
   },
-  activeBadge: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 4,
-    minHeight: 28,
-  },
   emptyCopy: {
     flex: 1,
     gap: 4,
@@ -481,45 +366,18 @@ const styles = StyleSheet.create({
     gap: 16,
     paddingVertical: 16,
   },
-  metadata: {
-    gap: 4,
-    paddingLeft: 40,
-  },
-  metadataLine: {
-    alignItems: 'baseline',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  metadataValue: {
-    flexShrink: 1,
-  },
-  profileActions: {
-    gap: 8,
-    paddingLeft: 40,
-  },
   profileGroup: {
     gap: 0,
     overflow: 'hidden',
   },
-  profileHeading: {
-    alignItems: 'flex-start',
-    flexDirection: 'row',
-    gap: 12,
-  },
-  profileIcon: {
-    alignItems: 'center',
-    height: 28,
-    justifyContent: 'center',
-    width: 28,
+  profileMenu: {
+    position: 'absolute',
+    right: 4,
+    top: 4,
   },
   profileRow: {
-    gap: 12,
-    padding: 20,
-  },
-  profileTitleCopy: {
-    flex: 1,
-    gap: 2,
+    paddingRight: 48,
+    position: 'relative',
   },
   screen: {
     gap: 20,

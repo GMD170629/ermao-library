@@ -174,25 +174,17 @@ describe('SignInScreen', () => {
     });
   });
 
-  test('toggles password visibility with an explicit selected state', async () => {
+  test('toggles password visibility with an explicit native button', async () => {
     const view = await render(<Fixture onSignIn={jest.fn()} />);
     const password = view.getByLabelText('Password');
     const show = view.getByRole('button', { name: 'Show' });
 
     expect(password).toHaveProp('secureTextEntry', true);
-    expect(show).toHaveProp('accessibilityState', {
-      disabled: false,
-      selected: false,
-    });
+    expect(show).toBeEnabled();
     await fireEvent.press(show);
 
     expect(password).toHaveProp('secureTextEntry', false);
-    expect(
-      view.getByRole('button', { name: 'Hide' }),
-    ).toHaveProp('accessibilityState', {
-      disabled: false,
-      selected: true,
-    });
+    expect(view.getByRole('button', { name: 'Hide' })).toBeEnabled();
   });
 
   test.each([

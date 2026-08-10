@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { Text } from 'react-native';
 
 import type { AuthenticatedSession } from '../../src/features/identity/public';
+import { I18nProvider } from '../../src/shared/i18n/public';
+import { AppThemeProvider } from '../../src/shared/ui/public';
 import {
   appFlowAnchorHref,
   ProtectedApplicationRoutes,
@@ -58,7 +60,13 @@ export function routes(state: AppFlowState) {
     return <ProtectedApplicationRoutes state={state} />;
   }
   function ConnectionLayout(): ReactNode {
-    return <ProtectedConnectionRoutes state={state} />;
+    return (
+      <AppThemeProvider colorScheme="light">
+        <I18nProvider>
+          <ProtectedConnectionRoutes state={state} />
+        </I18nProvider>
+      </AppThemeProvider>
+    );
   }
   function Anchor(): ReactNode {
     const href = appFlowAnchorHref(state);
@@ -75,6 +83,7 @@ export function routes(state: AppFlowState) {
   const Home = () => <Text>home</Text>;
   const Library = () => <Text>library</Text>;
   const Me = () => <Text>me</Text>;
+  const Reader = () => <Text>reader</Text>;
 
   return {
     _layout: RootLayout,
@@ -90,5 +99,6 @@ export function routes(state: AppFlowState) {
     '(main)/home': Home,
     '(main)/library': Library,
     '(main)/me': Me,
+    reader: Reader,
   };
 }

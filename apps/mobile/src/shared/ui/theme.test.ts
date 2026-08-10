@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { appTheme } from './theme';
 
-test('theme keeps the live Figma foundations in both appearances', () => {
+test('theme synchronizes the Web light palette and mobile dark adaptations', () => {
   const light = appTheme('light');
   const dark = appTheme('dark');
 
@@ -22,23 +22,25 @@ test('theme keeps the live Figma foundations in both appearances', () => {
       text: light.colors.text,
       textMuted: light.colors.textMuted,
       tint: light.colors.tint,
+      tintText: light.colors.tintText,
       warning: light.colors.warning,
     },
     {
-      actionFill: '#A23A22',
-      actionPressed: '#842F1C',
-      background: '#FAF8F5',
-      border: '#E4D9D2',
-      brand: '#F15A3B',
-      card: '#FFFCF9',
+      actionFill: '#FF4F2A',
+      actionPressed: '#E94320',
+      background: '#FBFAF8',
+      border: '#E6E1DB',
+      brand: '#FF4F2A',
+      card: '#FFFDFA',
       cardStrong: '#FFFFFF',
       danger: '#A53A32',
-      onAction: '#FFF9F5',
-      success: '#337A49',
-      text: '#2C211D',
-      textMuted: '#70635C',
-      tint: '#A23A22',
-      warning: '#8D5A12',
+      onAction: '#15171B',
+      success: '#3F9C59',
+      text: '#17191D',
+      textMuted: '#77736F',
+      tint: '#FF4F2A',
+      tintText: '#A23A22',
+      warning: '#C67B12',
     },
   );
   assert.deepEqual(
@@ -54,6 +56,7 @@ test('theme keeps the live Figma foundations in both appearances', () => {
       text: dark.colors.text,
       textMuted: dark.colors.textMuted,
       tint: dark.colors.tint,
+      tintText: dark.colors.tintText,
       warning: dark.colors.warning,
     },
     {
@@ -68,17 +71,26 @@ test('theme keeps the live Figma foundations in both appearances', () => {
       text: '#FFF6F3',
       textMuted: '#C8B8AF',
       tint: '#FF9B7F',
+      tintText: '#FF9B7F',
       warning: '#F0B963',
     },
   );
 });
 
-test('primary button foregrounds meet normal-text contrast requirements', () => {
+test('emphasis and action foregrounds meet their contrast requirements', () => {
   for (const colorScheme of ['light', 'dark'] as const) {
     const theme = appTheme(colorScheme);
     assert.ok(
-      contrastRatio(theme.colors.tint, theme.colors.background) >= 4.5,
-      `${colorScheme} tint must meet WCAG AA normal-text contrast`,
+      contrastRatio(theme.colors.tint, theme.colors.background) >= 3,
+      `${colorScheme} tint must meet WCAG AA non-text contrast`,
+    );
+    assert.ok(
+      contrastRatio(theme.colors.tintText, theme.colors.background) >= 4.5,
+      `${colorScheme} tintText must meet WCAG AA normal-text contrast`,
+    );
+    assert.ok(
+      contrastRatio(theme.colors.tintText, theme.colors.tintMuted) >= 4.5,
+      `${colorScheme} tintText must remain legible on selected surfaces`,
     );
     assert.ok(
       contrastRatio(theme.colors.actionFill, theme.colors.onAction) >= 4.5,
@@ -110,8 +122,8 @@ test('unspecified component-support tokens retain recorded semantics', () => {
       borderStrong: '#D8D1C9',
       cardStrong: '#FFFFFF',
       dangerMuted: '#FEECEB',
-      focus: '#F6B7A5',
-      overlay: 'rgba(44, 33, 29, 0.58)',
+      focus: 'rgba(255, 155, 126, 0.42)',
+      overlay: 'rgba(23, 25, 29, 0.58)',
       successMuted: '#E8F5EB',
       tintMuted: '#FCE6DF',
       warningMuted: '#FFF3D9',

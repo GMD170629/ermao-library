@@ -416,6 +416,7 @@ For every implementation:
 `docs/mobile-app-design-guidelines.md` is the authoritative design and interaction policy for `apps/mobile`. Read and apply it whenever designing or changing a Mobile page, navigation model, interaction, shared UI component, theme, icon, motion, state feedback, or user-visible native configuration.
 
 - The fixed style is Apple HIG × Warm Editorial Native: clear, quiet, content-first, familiar, and adaptive.
+- Mobile design and implementation use `docs/mobile-app-design-guidelines.md`, repository tokens/components, and running-device evidence as the source of truth. Do not call Figma or require Figma artifacts for Mobile work.
 - Apple HIG governs hierarchy, layout, behavior, platform expectations, and accessibility. The existing project brand governs the coral accent, warm surfaces, cat logo, product name, and writing voice.
 - Do not introduce Material visual grammar, decorative glass/gradients, heavy shadows, nested-card layouts, repeated logos, or gesture-only core actions.
 - Use semantic Mobile design tokens and shared UI components. Do not hard-code brand colors or page-specific type scales in feature screens.

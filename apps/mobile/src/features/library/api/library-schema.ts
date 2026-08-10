@@ -175,7 +175,14 @@ function decodeBook(value: unknown): LibraryBook | null {
   ) {
     return null;
   }
-  return { id, title, author, coverUrl, mediaKinds: kinds };
+  return {
+    id,
+    title,
+    author,
+    coverUrl,
+    mediaKinds: kinds,
+    ...(progress === undefined ? {} : { progressPercent: progress }),
+  };
 }
 
 function decodeBooks(value: unknown, maximumItems: number): LibraryBook[] | null {

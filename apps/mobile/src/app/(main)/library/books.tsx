@@ -65,10 +65,6 @@ export default function BooksRoute(): ReactNode {
   return (
     <BooksScreen
       coverSource={coverSource}
-      onBack={() => {
-        if (router.canGoBack()) router.back();
-        else router.replace('/library');
-      }}
       onLoadNextPage={() => {
         void loadNextPage();
       }}

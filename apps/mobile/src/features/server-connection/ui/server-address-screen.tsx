@@ -4,10 +4,9 @@ import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useI18n } from '../../../shared/i18n/public';
 import {
   AppButton,
-  AppIcon,
   AppTextField,
   InlineNotice,
-  PageHeader,
+  PageIntro,
   ScreenScaffold,
   useAppTheme,
 } from '../../../shared/ui/public';
@@ -23,7 +22,6 @@ const MAXIMUM_ADDRESS_LENGTH = 2_048;
 export function ServerAddressScreen({
   initialAddress = '',
   onAddressChange,
-  onBack,
   onCancel,
   onConnect,
   onScanQr,
@@ -58,13 +56,9 @@ export function ServerAddressScreen({
 
   return (
     <ScreenScaffold contentStyle={styles.screen} testID="server-address-screen">
-      <PageHeader
-        backAccessibilityHint={t('common.back')}
-        backLabel={t('common.back')}
+      <PageIntro
         description={t('connection.address.description')}
         eyebrow={t('connection.address.eyebrow')}
-        onBack={onBack}
-        title={t('connection.address.title')}
       />
 
       <View style={styles.form}>
@@ -105,48 +99,36 @@ export function ServerAddressScreen({
           ]}
         >
           <AppButton
+            containerStyle={!compactActions && styles.actionExpanded}
             fullWidth={compactActions}
+            iconName="link"
             label={
               connecting
                 ? t('connection.address.connecting')
                 : t('connection.address.connect')
             }
-            leadingIcon={
-              <AppIcon
-                color={theme.colors.onAction}
-                decorative
-                name="link"
-              />
-            }
             loading={connecting}
             onPress={submit}
-            style={!compactActions && styles.actionExpanded}
             testID="connect-server"
           />
           {connecting ? (
             <AppButton
               accessibilityHint={t('connection.address.cancelHint')}
+              containerStyle={!compactActions && styles.actionExpanded}
               fullWidth={compactActions}
               label={t('common.cancel')}
               onPress={onCancel}
-              style={!compactActions && styles.actionExpanded}
               testID="cancel-server-connection"
               variant="secondary"
             />
           ) : (
             <AppButton
               accessibilityHint={t('connection.address.scanHint')}
+              containerStyle={!compactActions && styles.actionExpanded}
               fullWidth={compactActions}
+              iconName="scan"
               label={t('connection.address.scanInstead')}
-              leadingIcon={
-                <AppIcon
-                  color={theme.colors.tint}
-                  decorative
-                  name="scan"
-                />
-              }
               onPress={onScanQr}
-              style={!compactActions && styles.actionExpanded}
               testID="scan-server-qr"
               variant="ghost"
             />

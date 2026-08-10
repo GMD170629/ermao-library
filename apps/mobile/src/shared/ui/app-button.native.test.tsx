@@ -42,27 +42,35 @@ describe('AppButton', () => {
     expect(onPress).not.toHaveBeenCalled();
   });
 
-  test('uses the action palette for the primary button in both appearances', async () => {
-    const light = await render(
+  test('maps business variants to native button variants', async () => {
+    const rendered = await render(
       <AppThemeProvider colorScheme="light">
         <AppButton label="Continue" onPress={jest.fn()} />
-      </AppThemeProvider>,
-    );
-    const dark = await render(
-      <AppThemeProvider colorScheme="dark">
-        <AppButton label="Continue" onPress={jest.fn()} />
+        <AppButton label="More" onPress={jest.fn()} variant="secondary" />
+        <AppButton label="Skip" onPress={jest.fn()} variant="ghost" />
+        <AppButton label="Delete" onPress={jest.fn()} variant="destructive" />
       </AppThemeProvider>,
     );
 
-    expect(light.getByRole('button', { name: 'Continue' })).toHaveStyle({
-      backgroundColor: '#A23A22',
-      borderColor: '#A23A22',
-    });
-    expect(dark.getByRole('button', { name: 'Continue' })).toHaveStyle({
-      backgroundColor: '#B9432E',
-      borderColor: '#B9432E',
-    });
-    expect(light.getByText('Continue')).toHaveStyle({ color: '#FFF9F5' });
-    expect(dark.getByText('Continue')).toHaveStyle({ color: '#FFF9F5' });
+    expect(rendered.getAllByTestId('native-button-filled')).toHaveLength(2);
+    expect(rendered.getByTestId('native-button-outlined')).toBeOnTheScreen();
+    expect(rendered.getByTestId('native-button-text')).toBeOnTheScreen();
+  });
+
+  test('passes only numeric dimensions to a full-width native button', async () => {
+    const rendered = await render(
+      <AppThemeProvider colorScheme="light">
+        <AppButton
+          fullWidth
+          label="Continue"
+          onPress={jest.fn()}
+          testID="full-width-button"
+        />
+      </AppThemeProvider>,
+    );
+
+    const button = rendered.getByTestId('full-width-button');
+    expect(button.props.style).toEqual({ height: expect.any(Number) });
+    expect(JSON.stringify(button.props.style)).not.toContain('100%');
   });
 });

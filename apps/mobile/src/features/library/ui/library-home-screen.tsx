@@ -1,6 +1,7 @@
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import {
-  Pressable,
+  Image,
+  ScrollView,
   StyleSheet,
   View,
   useWindowDimensions,
@@ -11,10 +12,10 @@ import {
   AppButton,
   AppIcon,
   AppText,
-  IconButton,
+  ContentPressable,
   InlineNotice,
   LoadingState,
-  PageHeader,
+  PageIntro,
   ScreenScaffold,
   SurfaceCard,
   useAppTheme,
@@ -26,42 +27,50 @@ import type {
   LibraryBook,
 } from '../model/library';
 import {
-  BookCollection,
   BookCover,
   LibrarySearchButton,
   type LibraryCoverSource,
 } from './library-primitives';
 
+const BOOKSHELF_LEDGE_LEFT = require('../../../../assets/ui/bookshelf-ledge-left-v2.png');
+const BOOKSHELF_LEDGE_CENTER = require('../../../../assets/ui/bookshelf-ledge-center-v2.png');
+const BOOKSHELF_LEDGE_RIGHT = require('../../../../assets/ui/bookshelf-ledge-right-v2.png');
+const SHELF_LEDGE_HEIGHT = 17;
+const SHELF_LEDGE_TOP_CAP_HEIGHT = 6;
+const SHELF_COVER_INSET = Math.round(SHELF_LEDGE_TOP_CAP_HEIGHT / 2);
+
 export type LibraryHomeScreenProps = Readonly<{
   coverSource?(book: LibraryBook): LibraryCoverSource;
   importState: ImportState;
+  onContinueReading(book: ContinueReadingBook): void;
   onImport(): void;
   onOpenBooks(): void;
+  onOpenRecentBooks(): void;
+  onOpenRecentReading(): void;
   onRefresh(): void;
   onRetry(): void;
-  onToggleTheme(): void;
   state: HomeState;
-  themeMode: 'dark' | 'light';
 }>;
 
 export function LibraryHomeScreen({
   coverSource,
   importState,
+  onContinueReading,
   onImport,
   onOpenBooks,
+  onOpenRecentBooks,
+  onOpenRecentReading,
   onRefresh,
   onRetry,
-  onToggleTheme,
   state,
-  themeMode,
 }: LibraryHomeScreenProps): ReactNode {
   const theme = useAppTheme();
   const { formatNumber, t } = useI18n();
-  const [readingUnavailable, setReadingUnavailable] = useState(false);
   const readyData = state.phase === 'ready' ? state.data : null;
   const empty =
     readyData !== null &&
     readyData.continueReading === null &&
+    readyData.recentReading.length === 0 &&
     readyData.recentBooks.length === 0 &&
     (readyData.summary?.totalBooks ?? 0) === 0;
   const description =
@@ -84,32 +93,7 @@ export function LibraryHomeScreen({
       refreshing={state.phase === 'ready' && state.refreshing}
       testID="library-home-screen"
     >
-      <PageHeader
-        description={description}
-        title={t('library.home.title')}
-        trailing={
-          <IconButton
-            accessibilityHint={t('library.home.themeHint')}
-            accessibilityLabel={
-              themeMode === 'dark'
-                ? t('library.home.useLightTheme')
-                : t('library.home.useDarkTheme')
-            }
-            accessibilityState={{ selected: themeMode === 'dark' }}
-            icon={
-              <AppIcon
-                color={theme.colors.text}
-                decorative
-                name="sun"
-                size={theme.control.iconLarge}
-              />
-            }
-            onPress={onToggleTheme}
-            shape="circle"
-            testID="home-theme-toggle"
-          />
-        }
-      />
+      <PageIntro description={description} />
       <LibrarySearchButton
         accessibilityHint={t('library.search.hint')}
         label={t('library.search.placeholder')}
@@ -137,10 +121,10 @@ export function LibraryHomeScreen({
             <View style={{ gap: theme.spacing.md }}>
               <SectionHeader
                 actionLabel={t('library.home.seeAll')}
-                onAction={onOpenBooks}
+                onAction={onOpenRecentReading}
                 title={t('library.home.continue')}
               />
-              <ContinueReadingCard
+              <ContinueReadingPanel
                 book={state.data.continueReading}
                 {...(coverSource === undefined
                   ? {}
@@ -149,31 +133,34 @@ export function LibraryHomeScreen({
                         state.data.continueReading,
                       ),
                     })}
-                onContinue={() => setReadingUnavailable(true)}
+                onContinue={onContinueReading}
               />
             </View>
           )}
-          {readingUnavailable ? (
-            <InlineNotice
-              body={t('library.reader.unavailableBody')}
-              title={t('library.reader.unavailableTitle')}
-            />
-          ) : null}
+          {state.data.recentReading.length === 0 ? null : (
+            <View style={{ gap: theme.spacing.md }}>
+              <SectionHeader
+                actionLabel={t('library.home.seeAll')}
+                onAction={onOpenRecentReading}
+                title={t('library.home.recentReading')}
+              />
+              <BookshelfRail
+                books={state.data.recentReading}
+                title={t('library.home.recentReading')}
+                {...(coverSource === undefined ? {} : { coverSource })}
+              />
+            </View>
+          )}
           {state.data.recentBooks.length === 0 ? null : (
             <View style={{ gap: theme.spacing.md }}>
               <SectionHeader
                 actionLabel={t('library.home.seeAll')}
-                onAction={onOpenBooks}
+                onAction={onOpenRecentBooks}
                 title={t('library.home.recent')}
               />
-              <BookCollection
-                books={state.data.recentBooks.slice(0, 3)}
-                coverAccessibilityLabel={(book) =>
-                  t('library.book.coverLabel', { title: book.title })
-                }
-                emptyLabel={t('library.books.empty')}
-                titleLineLimit={1}
-                view="grid"
+              <BookshelfRail
+                books={state.data.recentBooks}
+                title={t('library.home.recent')}
                 {...(coverSource === undefined ? {} : { coverSource })}
               />
             </View>
@@ -271,44 +258,53 @@ function EmptyHome({ onImport }: Readonly<{ onImport(): void }>): ReactNode {
       </View>
       <AppButton
         fullWidth
+        iconName="upload"
         label={t('library.import.action')}
-        leadingIcon={
-          <AppIcon
-            color={theme.colors.onAction}
-            decorative
-            name="upload"
-            size={theme.control.iconMedium}
-          />
-        }
         onPress={onImport}
       />
     </SurfaceCard>
   );
 }
 
-type ContinueReadingCardProps = Readonly<{
+type ContinueReadingPanelProps = Readonly<{
   book: ContinueReadingBook;
   coverSource?: LibraryCoverSource;
-  onContinue(): void;
+  onContinue(book: ContinueReadingBook): void;
 }>;
 
-function ContinueReadingCard({
+function ContinueReadingPanel({
   book,
   coverSource,
   onContinue,
-}: ContinueReadingCardProps): ReactNode {
+}: ContinueReadingPanelProps): ReactNode {
   const theme = useAppTheme();
   const { formatNumber, t } = useI18n();
   const { fontScale } = useWindowDimensions();
   const progress = Math.max(0, Math.min(100, book.progressPercent));
   const stacked = fontScale >= 1.6;
+  const actionLabel = t('library.home.continueBookAction', {
+    title: book.title,
+  });
   return (
-    <SurfaceCard padding="compact">
-      <View
+    <View
+      style={[
+        styles.continuePanel,
+        {
+          borderBottomColor: theme.colors.border,
+          gap: theme.spacing.lg,
+          paddingBottom: theme.spacing.xl,
+        },
+        stacked && styles.continueColumn,
+      ]}
+    >
+      <ContentPressable
+        accessibilityHint={t('library.home.continueBookHint')}
+        accessibilityLabel={actionLabel}
+        accessibilityRole="button"
+        onPress={() => onContinue(book)}
         style={[
-          styles.continueRow,
-          { gap: theme.spacing.md },
-          stacked && styles.continueColumn,
+          styles.continueCoverAction,
+          { borderRadius: theme.radius.compact },
         ]}
       >
         <BookCover
@@ -320,93 +316,259 @@ function ContinueReadingCard({
             ? {}
             : { source: coverSource })}
         />
-        <View
+      </ContentPressable>
+      <View
+        style={[
+          styles.continueDetails,
+          { gap: theme.spacing.md },
+          stacked && styles.continueDetailsStacked,
+        ]}
+      >
+        <ContentPressable
+          accessibilityHint={t('library.home.continueBookHint')}
+          accessibilityLabel={actionLabel}
+          accessibilityRole="button"
+          onPress={() => onContinue(book)}
           style={[
-            styles.continueDetails,
-            { gap: theme.spacing.sm },
-            stacked && styles.continueDetailsStacked,
+            styles.continueTitleAction,
+            {
+              borderRadius: theme.radius.compact,
+              minHeight: theme.control.minimumTouchTarget,
+            },
           ]}
         >
-          <View style={{ gap: theme.spacing.xxs }}>
-            <AppText numberOfLines={2} variant="headline">
+          <View style={styles.flex}>
+            <AppText numberOfLines={2} variant="title">
               {book.title}
             </AppText>
             <AppText muted numberOfLines={1} variant="caption">
               {book.author}
             </AppText>
           </View>
-          <View style={{ gap: theme.spacing.xxs }}>
-            <AppText muted variant="caption">
-              {t('library.home.progressValue', {
-                progress: formatNumber(Math.round(progress)),
-              })}
-            </AppText>
-            <View
-              accessibilityLabel={t('library.home.progressLabel', {
-                progress: formatNumber(Math.round(progress)),
-              })}
-              accessibilityRole="progressbar"
-              accessibilityValue={{ max: 100, min: 0, now: progress }}
-              style={[
-                styles.progressTrack,
-                {
-                  backgroundColor: theme.colors.border,
-                  borderRadius: theme.radius.compact,
-                  height: theme.spacing.xxs,
-                },
-              ]}
-            >
-              <View
-                style={[
-                  styles.progressFill,
-                  {
-                    backgroundColor: theme.colors.tint,
-                    borderRadius: theme.radius.compact,
-                    width: `${progress}%`,
-                  },
-                ]}
-              />
-            </View>
-          </View>
-          <Pressable
-            accessibilityLabel={t('library.home.continueAction')}
-            accessibilityRole="button"
-            hitSlop={4}
-            onPress={onContinue}
-            style={({ pressed }) => [
-              styles.continueAction,
-              {
-                borderRadius: theme.radius.control,
-                gap: theme.spacing.xs,
-                minHeight: theme.control.minimumTouchTarget,
-                paddingRight: theme.spacing.xs,
-              },
-              pressed && { backgroundColor: theme.colors.tintMuted },
-            ]}
-          >
-            <View
-              style={[
-                styles.continueActionIcon,
-                {
-                  backgroundColor: theme.colors.actionFill,
-                  borderRadius: theme.radius.control,
-                },
-              ]}
-            >
-              <AppIcon
-                color={theme.colors.onAction}
-                decorative
-                name="play"
-                size={theme.control.iconSmall}
-              />
-            </View>
-            <AppText variant="label">
-              {t('library.home.continueAction')}
-            </AppText>
-          </Pressable>
+          <AppIcon
+            color={theme.colors.textMuted}
+            decorative
+            name="chevron-right"
+            size={theme.control.iconMedium}
+          />
+        </ContentPressable>
+        <View style={{ gap: theme.spacing.xxs }}>
+          <AppText muted variant="caption">
+            {t('library.home.progressValue', {
+              progress: formatNumber(Math.round(progress)),
+            })}
+          </AppText>
+          <ReadingProgress progress={progress} />
         </View>
       </View>
-    </SurfaceCard>
+    </View>
+  );
+}
+
+function ReadingProgress({
+  progress,
+}: Readonly<{ progress: number }>): ReactNode {
+  const theme = useAppTheme();
+  const { formatNumber, t } = useI18n();
+  const boundedProgress = Math.max(0, Math.min(100, progress));
+  return (
+    <View
+      accessibilityLabel={t('library.home.progressLabel', {
+        progress: formatNumber(Math.round(boundedProgress)),
+      })}
+      accessibilityRole="progressbar"
+      accessibilityValue={{ max: 100, min: 0, now: boundedProgress }}
+      style={[
+        styles.progressTrack,
+        {
+          backgroundColor: theme.colors.border,
+          borderRadius: theme.radius.compact,
+          height: theme.spacing.xxs,
+        },
+      ]}
+    >
+      <View
+        style={[
+          styles.progressFill,
+          {
+            backgroundColor: theme.colors.tint,
+            borderRadius: theme.radius.compact,
+            width: `${boundedProgress}%`,
+          },
+        ]}
+      />
+    </View>
+  );
+}
+
+type BookshelfRailProps = Readonly<{
+  books: readonly LibraryBook[];
+  coverSource?(book: LibraryBook): LibraryCoverSource;
+  title: string;
+}>;
+
+function BookshelfRail({
+  books,
+  coverSource,
+  title,
+}: BookshelfRailProps): ReactNode {
+  const theme = useAppTheme();
+  return (
+    <ScrollView
+      accessibilityLabel={title}
+      contentContainerStyle={[
+        styles.shelfScrollContent,
+        { paddingRight: theme.spacing.lg },
+      ]}
+      horizontal
+      nestedScrollEnabled
+      showsHorizontalScrollIndicator={false}
+    >
+      <View>
+        <View
+          testID="home-shelf-covers"
+          style={[
+            styles.shelfCovers,
+            { gap: theme.spacing.md, paddingTop: theme.spacing.sm },
+          ]}
+        >
+          {books.map((book) => (
+            <ShelfBookCover
+              book={book}
+              key={book.id}
+              {...(coverSource === undefined
+                ? {}
+                : { coverSource: coverSource(book) })}
+            />
+          ))}
+        </View>
+        <ShelfLedge />
+        <View
+          testID="home-shelf-metadata-band"
+          style={[
+            styles.shelfMetadataBand,
+            {
+              borderBottomColor: theme.colors.borderStrong,
+            },
+          ]}
+        >
+          <View
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            pointerEvents="none"
+            testID="home-shelf-metadata-surface"
+            style={[
+              styles.shelfMetadataSurface,
+              { backgroundColor: theme.colors.border },
+            ]}
+          />
+          <View
+            style={styles.shelfMetadataItems}
+            testID="home-shelf-metadata-items"
+          >
+            {books.map((book, index) => (
+              <View
+                key={book.id}
+                style={[
+                  styles.shelfMetadata,
+                  {
+                    borderLeftColor: theme.colors.borderStrong,
+                    marginLeft: index === 0 ? 0 : theme.spacing.md,
+                    paddingLeft: index === 0 ? 0 : theme.spacing.sm,
+                  },
+                ]}
+              >
+                <AppText numberOfLines={1} variant="caption">
+                  {book.title}
+                </AppText>
+                <AppText muted numberOfLines={1} variant="caption">
+                  {book.author}
+                </AppText>
+              </View>
+            ))}
+          </View>
+        </View>
+      </View>
+    </ScrollView>
+  );
+}
+
+function ShelfBookCover({
+  book,
+  coverSource,
+}: Readonly<{
+  book: LibraryBook;
+  coverSource?: LibraryCoverSource;
+}>): ReactNode {
+  const theme = useAppTheme();
+  const { t } = useI18n();
+  const progress = book.progressPercent;
+  return (
+    <View
+      style={[
+        styles.shelfBookCover,
+        theme.elevation.floating,
+        {
+          backgroundColor: theme.colors.cardStrong,
+          borderRadius: theme.radius.compact,
+        },
+      ]}
+    >
+      <BookCover
+        accessibilityLabel={t('library.book.coverLabel', {
+          title: book.title,
+        })}
+        size="medium"
+        {...(coverSource === undefined ? {} : { source: coverSource })}
+      />
+      {progress === undefined || progress <= 0 ? null : (
+        <View style={styles.shelfProgressOverlay}>
+          <ReadingProgress progress={progress} />
+        </View>
+      )}
+    </View>
+  );
+}
+
+function ShelfLedge(): ReactNode {
+  const theme = useAppTheme();
+  return (
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      testID="home-shelf-ledge"
+      style={[
+        styles.shelfLedge,
+        theme.elevation.card,
+        {
+          backgroundColor: theme.colors.cardStrong,
+          borderRadius: theme.radius.compact,
+        },
+      ]}
+    >
+      <Image
+        source={BOOKSHELF_LEDGE_LEFT}
+        style={[
+          styles.shelfLedgeEnd,
+          theme.isDark && styles.shelfLedgeImageDark,
+        ]}
+      />
+      <Image
+        resizeMode="stretch"
+        source={BOOKSHELF_LEDGE_CENTER}
+        style={[
+          styles.shelfLedgeCenter,
+          theme.isDark && styles.shelfLedgeImageDark,
+        ]}
+      />
+      <Image
+        source={BOOKSHELF_LEDGE_RIGHT}
+        style={[
+          styles.shelfLedgeEnd,
+          theme.isDark && styles.shelfLedgeImageDark,
+        ]}
+      />
+    </View>
   );
 }
 
@@ -419,46 +581,28 @@ function SectionHeader({
   onAction(): void;
   title: string;
 }>): ReactNode {
-  const theme = useAppTheme();
   return (
     <View style={styles.sectionHeader}>
       <AppText accessibilityRole="header" variant="headline">
         {title}
       </AppText>
-      <Pressable
-        accessibilityLabel={actionLabel}
-        accessibilityRole="button"
-        hitSlop={8}
+      <AppButton
+        label={actionLabel}
         onPress={onAction}
-        style={({ pressed }) => [
-          styles.sectionAction,
-          { minHeight: theme.control.minimumTouchTarget },
-          pressed && { opacity: 0.68 },
-        ]}
-      >
-        <AppText style={{ color: theme.colors.tint }} variant="label">
-          {actionLabel}
-        </AppText>
-      </Pressable>
+        variant="ghost"
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  continueAction: {
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    justifyContent: 'center',
-  },
-  continueActionIcon: {
-    alignItems: 'center',
-    height: 28,
-    justifyContent: 'center',
-    width: 28,
-  },
   continueColumn: {
     flexDirection: 'column',
+  },
+  continueCoverAction: {
+    alignSelf: 'flex-start',
+    minHeight: 44,
+    minWidth: 44,
   },
   continueDetails: {
     flex: 1,
@@ -468,9 +612,18 @@ const styles = StyleSheet.create({
   continueDetailsStacked: {
     alignSelf: 'stretch',
   },
-  continueRow: {
+  continuePanel: {
     alignItems: 'flex-start',
+    borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
+  },
+  continueTitleAction: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'space-between',
+    marginHorizontal: -8,
+    paddingHorizontal: 8,
   },
   emptyCard: {
     alignItems: 'center',
@@ -479,19 +632,78 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  flex: {
+    flex: 1,
+    minWidth: 0,
+  },
   progressFill: {
     height: '100%',
   },
   progressTrack: {
     overflow: 'hidden',
   },
-  sectionAction: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   sectionHeader: {
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
+  },
+  shelfBookCover: {
+    width: 80,
+    zIndex: 3,
+  },
+  shelfCovers: {
+    alignItems: 'flex-end',
+    flexDirection: 'row',
+    paddingHorizontal: 8,
+    zIndex: 3,
+  },
+  shelfLedge: {
+    flexDirection: 'row',
+    height: SHELF_LEDGE_HEIGHT,
+    marginTop: -SHELF_COVER_INSET,
+    zIndex: 1,
+  },
+  shelfLedgeCenter: {
+    flex: 1,
+    height: SHELF_LEDGE_HEIGHT,
+  },
+  shelfLedgeEnd: {
+    height: SHELF_LEDGE_HEIGHT,
+    width: 20,
+  },
+  shelfLedgeImageDark: {
+    opacity: 0.56,
+  },
+  shelfMetadata: {
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    gap: 2,
+    justifyContent: 'center',
+    minHeight: 54,
+    width: 80,
+  },
+  shelfMetadataBand: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  shelfMetadataItems: {
+    flexDirection: 'row',
+    paddingBottom: 6,
+    paddingHorizontal: 8,
+  },
+  shelfMetadataSurface: {
+    bottom: 0,
+    left: 0,
+    opacity: 0.38,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
+  shelfProgressOverlay: {
+    bottom: SHELF_COVER_INSET + 2,
+    left: 4,
+    position: 'absolute',
+    right: 4,
+  },
+  shelfScrollContent: {
+    flexGrow: 1,
   },
 });

@@ -181,6 +181,7 @@ test('loads home sections independently and returns partial data', async () => {
     }),
     json(503, { ok: false, error: { message: 'busy', code: 'BUSY' } }),
     json(200, { ok: true, data: { books: [] } }),
+    json(200, { ok: true, data: { books: [] } }),
   ]);
   const result = await new LibraryClient(transport).loadHome(
     server(),
@@ -191,6 +192,10 @@ test('loads home sections independently and returns partial data', async () => {
   if (result.outcome !== 'loaded') return;
   assert.equal(result.value.summary?.unreadBooks, 3);
   assert.deepEqual(result.value.unavailableSections, ['continue-reading']);
+  assert.equal(
+    new URL(transport.requests[3]?.url ?? '').pathname,
+    '/subpath/api/dashboard/recent-reading',
+  );
   assert.equal(
     new URL(transport.requests[1]?.url ?? '').searchParams.get('view'),
     'management',

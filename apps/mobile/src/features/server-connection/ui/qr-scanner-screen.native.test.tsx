@@ -62,7 +62,6 @@ function ScannerFixture({
     <AppThemeProvider colorScheme="light">
       <I18nProvider>
         <QrScannerScreen
-          onBack={noOperation}
           onCodeAccepted={noOperation}
           {...(onOpenSettings === undefined ? {} : { onOpenSettings })}
           onScanAgain={onScanAgain}

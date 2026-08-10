@@ -1,15 +1,17 @@
-import type { ReactNode } from 'react';
+import { Button, Host, Icon, Row, Text } from '@expo/ui';
+import { useState, type ReactNode } from 'react';
 import {
-  ActivityIndicator,
-  Pressable,
   StyleSheet,
   View,
+  type LayoutChangeEvent,
   type StyleProp,
-  type TextStyle,
   type ViewStyle,
 } from 'react-native';
 
-import { AppText } from './app-text';
+import {
+  appNativeIconName,
+  type AppIconName,
+} from './app-icon';
 import { useAppTheme } from './theme-provider';
 
 export type AppButtonVariant =
@@ -20,146 +22,108 @@ export type AppButtonVariant =
 
 export type AppButtonProps = Readonly<{
   accessibilityHint?: string;
+  containerStyle?: StyleProp<ViewStyle>;
   disabled?: boolean;
   fullWidth?: boolean;
+  iconName?: AppIconName;
   label: string;
-  leadingIcon?: ReactNode;
   loading?: boolean;
   onPress: () => void;
-  style?: StyleProp<ViewStyle>;
   testID?: string;
   variant?: AppButtonVariant;
 }>;
 
 export function AppButton({
   accessibilityHint,
+  containerStyle,
   disabled = false,
   fullWidth = false,
+  iconName,
   label,
-  leadingIcon,
   loading = false,
   onPress,
-  style,
   testID,
   variant = 'primary',
 }: AppButtonProps): ReactNode {
   const theme = useAppTheme();
+  const [measuredWidth, setMeasuredWidth] = useState<number>();
   const inactive = disabled || loading;
-  const appearance = buttonAppearance(theme, variant);
+  const nativeVariant =
+    variant === 'primary' || variant === 'destructive'
+      ? 'filled'
+      : variant === 'secondary'
+        ? 'outlined'
+        : 'text';
+  const seedColor =
+    variant === 'destructive'
+      ? theme.colors.danger
+      : variant === 'primary'
+        ? theme.colors.actionFill
+        : theme.colors.tint;
 
   return (
-    <Pressable
+    <View
       accessibilityHint={accessibilityHint}
-      accessibilityLabel={label}
-      accessibilityRole="button"
       accessibilityState={{ busy: loading, disabled: inactive }}
-      disabled={inactive}
-      hitSlop={4}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.button,
+      onLayout={
+        fullWidth
+          ? (event: LayoutChangeEvent) => {
+              setMeasuredWidth(Math.round(event.nativeEvent.layout.width));
+            }
+          : undefined
+      }
+      style={[
+        styles.container,
         fullWidth && styles.fullWidth,
-        {
-          backgroundColor: appearance.background,
-          borderColor: appearance.border,
-          borderRadius: theme.radius.control,
-          minHeight: theme.control.regularHeight,
-          paddingHorizontal: theme.spacing.lg,
-          paddingVertical: theme.spacing.sm,
-        },
-        pressed && !inactive && {
-          backgroundColor: appearance.pressed,
-        },
-        inactive && styles.inactive,
-        style,
+        containerStyle,
       ]}
-      testID={testID}
     >
-      <View style={[styles.content, { gap: theme.spacing.xs }]}>
-        {loading ? (
-          <ActivityIndicator
-            accessibilityElementsHidden
-            color={appearance.text}
-            importantForAccessibility="no-hide-descendants"
-            size="small"
-          />
-        ) : (
-          leadingIcon
-        )}
-        <AppText
-          style={[
-            styles.label,
-            { color: appearance.text } satisfies TextStyle,
-          ]}
-          variant="label"
+      <Host
+        colorScheme={theme.isDark ? 'dark' : 'light'}
+        matchContents={!fullWidth}
+        seedColor={seedColor}
+        style={[styles.host, fullWidth && styles.fullWidth]}
+      >
+        <Button
+          disabled={inactive}
+          onPress={onPress}
+          style={{
+            height: theme.control.regularHeight,
+            // Expo UI forwards these dimensions to native records, which only
+            // accept numeric dp values. Percentage layout stays on the RN host.
+            ...(fullWidth && measuredWidth !== undefined
+              ? { width: measuredWidth }
+              : {}),
+          }}
+          {...(testID === undefined ? {} : { testID })}
+          variant={nativeVariant}
         >
-          {label}
-        </AppText>
-      </View>
-    </Pressable>
+          {iconName === undefined ? (
+            <Text>{label}</Text>
+          ) : (
+            <Row alignment="center" spacing={theme.spacing.xs}>
+              <Icon
+                name={appNativeIconName(iconName)}
+                size={theme.control.iconMedium}
+              />
+              <Text>{label}</Text>
+            </Row>
+          )}
+        </Button>
+      </Host>
+    </View>
   );
 }
 
-function buttonAppearance(
-  theme: ReturnType<typeof useAppTheme>,
-  variant: AppButtonVariant,
-): Readonly<{
-  background: string;
-  border: string;
-  pressed: string;
-  text: string;
-}> {
-  if (variant === 'destructive') {
-    return {
-      background: theme.colors.dangerMuted,
-      border: theme.colors.dangerMuted,
-      pressed: theme.colors.borderStrong,
-      text: theme.colors.danger,
-    };
-  }
-  if (variant === 'secondary') {
-    return {
-      background: theme.colors.cardStrong,
-      border: theme.colors.borderStrong,
-      pressed: theme.colors.tintMuted,
-      text: theme.colors.text,
-    };
-  }
-  if (variant === 'ghost') {
-    return {
-      background: 'transparent',
-      border: 'transparent',
-      pressed: theme.colors.tintMuted,
-      text: theme.colors.tint,
-    };
-  }
-  return {
-    background: theme.colors.actionFill,
-    border: theme.colors.actionFill,
-    pressed: theme.colors.actionPressed,
-    text: theme.colors.onAction,
-  };
-}
-
 const styles = StyleSheet.create({
-  button: {
-    alignItems: 'center',
-    borderWidth: 1,
-    justifyContent: 'center',
-  },
-  content: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
+  container: {
+    minHeight: 48,
   },
   fullWidth: {
     alignSelf: 'stretch',
+    width: '100%',
   },
-  inactive: {
-    opacity: 0.48,
-  },
-  label: {
-    textAlign: 'center',
+  host: {
+    minHeight: 48,
   },
 });

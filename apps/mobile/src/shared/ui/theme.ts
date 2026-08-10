@@ -45,6 +45,7 @@ export type AppTheme = Readonly<{
     textMuted: string;
     tint: string;
     tintMuted: string;
+    tintText: string;
     warning: string;
     warningMuted: string;
   }>;
@@ -238,31 +239,55 @@ const sharedTheme = {
   type,
 } as const;
 
+// Keep the native light appearance aligned with the Web palette without
+// importing a Web-private stylesheet at runtime.
+const webLightPalette = {
+  accent: '#FF4F2A',
+  accentHover: '#E94320',
+  accentSoft: '#FCE6DF',
+  background: '#FBFAF8',
+  border: '#E6E1DB',
+  borderStrong: '#D8D1C9',
+  focus: 'rgba(255, 155, 126, 0.42)',
+  panel: '#FFFDFA',
+  panelStrong: '#FFFFFF',
+  success: '#3F9C59',
+  text: '#17191D',
+  textMuted: '#77736F',
+  warning: '#C67B12',
+} as const;
+
+const lightAccessibilityColors = {
+  onAction: '#15171B',
+  tintText: '#A23A22',
+} as const;
+
 const lightTheme: AppTheme = {
   ...sharedTheme,
   elevation: lightElevation,
   isDark: false,
   colors: {
-    actionFill: '#A23A22',
-    actionPressed: '#842F1C',
-    background: '#FAF8F5',
-    border: '#E4D9D2',
-    borderStrong: '#D8D1C9',
-    brand: '#F15A3B',
-    card: '#FFFCF9',
-    cardStrong: '#FFFFFF',
+    actionFill: webLightPalette.accent,
+    actionPressed: webLightPalette.accentHover,
+    background: webLightPalette.background,
+    border: webLightPalette.border,
+    borderStrong: webLightPalette.borderStrong,
+    brand: webLightPalette.accent,
+    card: webLightPalette.panel,
+    cardStrong: webLightPalette.panelStrong,
     danger: '#A53A32',
     dangerMuted: '#FEECEB',
-    focus: '#F6B7A5',
-    onAction: '#FFF9F5',
-    overlay: 'rgba(44, 33, 29, 0.58)',
-    success: '#337A49',
+    focus: webLightPalette.focus,
+    onAction: lightAccessibilityColors.onAction,
+    overlay: 'rgba(23, 25, 29, 0.58)',
+    success: webLightPalette.success,
     successMuted: '#E8F5EB',
-    text: '#2C211D',
-    textMuted: '#70635C',
-    tint: '#A23A22',
-    tintMuted: '#FCE6DF',
-    warning: '#8D5A12',
+    text: webLightPalette.text,
+    textMuted: webLightPalette.textMuted,
+    tint: webLightPalette.accent,
+    tintMuted: webLightPalette.accentSoft,
+    tintText: lightAccessibilityColors.tintText,
+    warning: webLightPalette.warning,
     warningMuted: '#FFF3D9',
   },
 };
@@ -291,6 +316,7 @@ const darkTheme: AppTheme = {
     textMuted: '#C8B8AF',
     tint: '#FF9B7F',
     tintMuted: '#4B271F',
+    tintText: '#FF9B7F',
     warning: '#F0B963',
     warningMuted: '#44351C',
   },

@@ -36,7 +36,6 @@ export type ConnectionHomeScreenProps = Readonly<{
 export type ServerAddressScreenProps = Readonly<{
   initialAddress?: string;
   onAddressChange?: (address: string) => void;
-  onBack: () => void;
   onCancel: () => void;
   onConnect: (address: string) => void;
   onScanQr: () => void;
@@ -80,7 +79,6 @@ export type ServerProfilesViewState =
     }>;
 
 type ServerProfilesScreenBaseProps = Readonly<{
-  onBack: () => void;
   onRetry: () => void;
   state: ServerProfilesViewState;
 }>;
@@ -99,7 +97,6 @@ export type ServerProfilesScreenProps = ServerProfilesScreenBaseProps &
   );
 
 export type QrScannerScreenProps = Readonly<{
-  onBack: () => void;
   onCodeAccepted: (text: string) => void;
   onOpenSettings?: () => Promise<void>;
   onScanAgain: () => void;

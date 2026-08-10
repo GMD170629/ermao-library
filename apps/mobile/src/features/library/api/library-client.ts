@@ -188,6 +188,12 @@ export class LibraryClient implements LibraryGateway {
       ),
       this.get(
         baseUrl,
+        '/api/dashboard/recent-reading?limit=5',
+        'load-home',
+        cancellation,
+      ),
+      this.get(
+        baseUrl,
         '/api/dashboard/recent-books?limit=5',
         'load-home',
         cancellation,
@@ -209,15 +215,19 @@ export class LibraryClient implements LibraryGateway {
     const continuing = requests[2]?.outcome === 'loaded'
       ? decodeContinueReading(requests[2].value.body)
       : invalidDecodedValue('CONTINUE_REQUEST_FAILED');
-    const recent = requests[3]?.outcome === 'loaded'
+    const recentReading = requests[3]?.outcome === 'loaded'
       ? decodeRecentBooks(requests[3].value.body)
+      : invalidDecodedValue('RECENT_READING_REQUEST_FAILED');
+    const recent = requests[4]?.outcome === 'loaded'
+      ? decodeRecentBooks(requests[4].value.body)
       : invalidDecodedValue('RECENT_REQUEST_FAILED');
     const unavailableSections: HomeSection[] = [];
     if (!summary.ok) unavailableSections.push('summary');
     if (!unread.ok) unavailableSections.push('unread');
     if (!continuing.ok) unavailableSections.push('continue-reading');
+    if (!recentReading.ok) unavailableSections.push('recent-reading');
     if (!recent.ok) unavailableSections.push('recent-books');
-    if (unavailableSections.length === 4) {
+    if (unavailableSections.length === 5) {
       const firstFailure = requests.find((result) => result.outcome === 'failed');
       return firstFailure?.outcome === 'failed'
         ? firstFailure
@@ -230,6 +240,7 @@ export class LibraryClient implements LibraryGateway {
           ? { ...summary.value, unreadBooks: unread.value }
           : null,
         continueReading: continuing.ok ? continuing.value : null,
+        recentReading: recentReading.ok ? recentReading.value : [],
         recentBooks: recent.ok ? recent.value : [],
         unavailableSections,
       },

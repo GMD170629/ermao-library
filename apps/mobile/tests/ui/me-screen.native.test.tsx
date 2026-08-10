@@ -59,7 +59,7 @@ describe('MeRoute', () => {
     expect(view.getByText('https://books.example.com')).toBeTruthy();
 
     await fireEvent.press(
-      view.getByRole('button', { name: 'Manage server connections' }),
+      view.getByRole('button', { name: 'Current server' }),
     );
     expect(mockLogoutForConnectionManagement).not.toHaveBeenCalled();
     confirmButton(alert.mock.calls[0]?.[2]).onPress?.();

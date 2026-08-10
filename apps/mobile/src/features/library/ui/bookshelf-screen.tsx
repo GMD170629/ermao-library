@@ -1,23 +1,18 @@
-import { useState, type ReactNode } from 'react';
-import {
-  Modal,
-  Pressable,
-  StyleSheet,
-  View,
-} from 'react-native';
+import type { ReactNode } from 'react';
+import { StyleSheet, View } from 'react-native';
 
 import { useI18n } from '../../../shared/i18n/public';
 import {
   AppButton,
   AppIcon,
   AppText,
-  AppTextField,
-  IconButton,
+  ContentPressable,
   InlineNotice,
   LoadingState,
-  PageHeader,
+  PageIntro,
   ScreenScaffold,
   SurfaceCard,
+  SystemActionMenu,
   useAppTheme,
 } from '../../../shared/ui/public';
 import type {
@@ -27,7 +22,6 @@ import type {
   ShelfOverviewState,
   ShelfSummary,
 } from '../model/library';
-import type { ShelfMutationOutcome } from '../application/ports';
 import {
   BookCover,
   ViewSwitcher,
@@ -35,20 +29,15 @@ import {
 } from './library-primitives';
 
 export type BookshelfScreenProps = Readonly<{
-  collection: CollectionDetailState;
   coverSource?(book: LibraryBook): LibraryCoverSource;
-  onCloseCollection(): void;
-  onCreateShelf(name: string): Promise<ShelfMutationOutcome>;
-  onDeleteShelf(shelfId: string): Promise<ShelfMutationOutcome>;
+  onCreateShelf(): void;
+  onDeleteShelf(shelf: ShelfSummary): void;
+  onEditShelf(shelf: ShelfSummary): void;
   onImport(): void;
   onOpenAllBooks(): void;
   onOpenCollection(collectionId: string): void;
   onOpenShelf(shelf: ShelfSummary): void;
   onRefresh(): void;
-  onRenameShelf(
-    shelfId: string,
-    name: string,
-  ): Promise<ShelfMutationOutcome>;
   onRetry(): void;
   onViewChange(view: LibraryView): void;
   state: ShelfOverviewState;
@@ -56,17 +45,15 @@ export type BookshelfScreenProps = Readonly<{
 }>;
 
 export function BookshelfScreen({
-  collection,
   coverSource,
-  onCloseCollection,
   onCreateShelf,
   onDeleteShelf,
+  onEditShelf,
   onImport,
   onOpenAllBooks,
   onOpenCollection,
   onOpenShelf,
   onRefresh,
-  onRenameShelf,
   onRetry,
   onViewChange,
   state,
@@ -74,74 +61,38 @@ export function BookshelfScreen({
 }: BookshelfScreenProps): ReactNode {
   const theme = useAppTheme();
   const { t } = useI18n();
-  const [modalShelf, setModalShelf] = useState<ShelfSummary | 'create' | null>(
-    null,
-  );
-
-  if (collection.phase !== 'idle') {
-    return (
-      <CollectionScreen
-        collection={collection}
-        onBack={onCloseCollection}
-        onOpenCollection={onOpenCollection}
-        onOpenShelf={onOpenShelf}
-        view={view}
-        {...(coverSource === undefined ? {} : { coverSource })}
-      />
-    );
-  }
 
   return (
-    <>
-      <ScreenScaffold
+    <ScreenScaffold
         contentStyle={{ gap: theme.spacing.xl }}
         edges={[]}
         onRefresh={onRefresh}
         refreshing={state.phase === 'ready' && state.refreshing}
         testID="bookshelf-screen"
       >
-        <PageHeader
-          description={t('library.shelves.subtitle')}
-          title={t('library.shelves.title')}
-          trailing={
-            <IconButton
-              accessibilityHint={t('library.shelves.addHint')}
-              accessibilityLabel={t('library.shelves.add')}
-              icon={
-                <AppIcon
-                  color={theme.colors.tint}
-                  decorative
-                  name="plus"
-                  size={theme.control.iconLarge}
-                />
-              }
-              onPress={() => setModalShelf('create')}
-              tone="tint"
-            />
-          }
-        />
+        <PageIntro description={t('library.shelves.subtitle')} />
         <View style={styles.toolbar}>
-          <Pressable
-            accessibilityLabel={t('library.shelves.allBooks')}
-            accessibilityRole="button"
-            hitSlop={4}
+          <AppButton
+            iconName="library"
+            label={t('library.shelves.allBooks')}
             onPress={onOpenAllBooks}
-            style={({ pressed }) => [
-              styles.allBooks,
-              { minHeight: theme.control.minimumTouchTarget },
-              pressed && { opacity: 0.68 },
+            variant="ghost"
+          />
+          <SystemActionMenu
+            accessibilityLabel={t('library.shelves.add')}
+            actions={[
+              {
+                id: 'create',
+                title: t('library.shelves.createAction'),
+              },
+              { id: 'import', title: t('library.import.action') },
             ]}
-          >
-            <AppText style={{ color: theme.colors.tint }} variant="label">
-              {t('library.shelves.allBooks')}
-            </AppText>
-            <AppIcon
-              color={theme.colors.tint}
-              decorative
-              name="chevron-right"
-              size={theme.control.iconSmall}
-            />
-          </Pressable>
+            iconName="plus"
+            onAction={(actionId) => {
+              if (actionId === 'create') onCreateShelf();
+              if (actionId === 'import') onImport();
+            }}
+          />
           <ViewSwitcher
             gridLabel={t('library.view.grid')}
             listLabel={t('library.view.list')}
@@ -186,7 +137,8 @@ export function BookshelfScreen({
             <ShelfSection
               emptyBody={t('library.shelves.empty')}
               mutatingShelfId={state.mutatingShelfId}
-              onEditShelf={setModalShelf}
+              onDeleteShelf={onDeleteShelf}
+              onEditShelf={onEditShelf}
               onOpenShelf={onOpenShelf}
               shelves={state.data.shelves}
               title={t('library.shelves.section')}
@@ -196,61 +148,32 @@ export function BookshelfScreen({
             />
           </View>
         )}
-      </ScreenScaffold>
-
-      {modalShelf === null ? null : (
-        <ShelfActionModal
-          busy={
-            state.phase === 'ready' && state.mutatingShelfId !== null
-          }
-          onClose={() => setModalShelf(null)}
-          onCreate={onCreateShelf}
-          onDelete={onDeleteShelf}
-          onImport={() => {
-            setModalShelf(null);
-            onImport();
-          }}
-          onRename={onRenameShelf}
-          shelf={modalShelf}
-        />
-      )}
-    </>
+    </ScreenScaffold>
   );
 }
 
-function CollectionScreen({
+export function LibraryCollectionScreen({
   collection,
   coverSource,
-  onBack,
   onOpenCollection,
   onOpenShelf,
   view,
 }: Readonly<{
   collection: Exclude<CollectionDetailState, Readonly<{ phase: 'idle' }>>;
   coverSource?: (book: LibraryBook) => LibraryCoverSource;
-  onBack(): void;
   onOpenCollection(collectionId: string): void;
   onOpenShelf(shelf: ShelfSummary): void;
   view: LibraryView;
 }>): ReactNode {
   const theme = useAppTheme();
   const { t } = useI18n();
-  const title =
-    collection.phase === 'ready'
-      ? collection.data.name
-      : t('library.shelves.collectionTitle');
   return (
     <ScreenScaffold
       contentStyle={{ gap: theme.spacing.xl }}
       edges={[]}
       testID="library-collection-screen"
     >
-      <PageHeader
-        backAccessibilityHint={t('library.shelves.collectionBackHint')}
-        backLabel={t('common.back')}
-        onBack={onBack}
-        title={title}
-      />
+      <PageIntro description={t('library.shelves.collectionMembers')} />
       {collection.phase === 'loading' ? (
         <LoadingState label={t('library.shelves.collectionLoading')} />
       ) : collection.phase === 'failure' ? (
@@ -285,6 +208,7 @@ type ShelfSectionProps = Readonly<{
   coverSource?: (book: LibraryBook) => LibraryCoverSource;
   emptyBody: string;
   mutatingShelfId?: string | null;
+  onDeleteShelf?: (shelf: ShelfSummary) => void;
   onEditShelf?: (shelf: ShelfSummary) => void;
   onOpenShelf(shelf: ShelfSummary): void;
   shelves: readonly ShelfSummary[];
@@ -297,6 +221,7 @@ function ShelfSection({
   coverSource,
   emptyBody,
   mutatingShelfId,
+  onDeleteShelf,
   onEditShelf,
   onOpenShelf,
   shelves,
@@ -330,6 +255,9 @@ function ShelfSection({
               {...(onEditShelf === undefined
                 ? {}
                 : { onEdit: () => onEditShelf(shelf) })}
+              {...(onDeleteShelf === undefined
+                ? {}
+                : { onDelete: () => onDeleteShelf(shelf) })}
             />
           ))}
         </View>
@@ -341,6 +269,7 @@ function ShelfSection({
 type ShelfVisualProps = Readonly<{
   busy: boolean;
   coverSource?: (book: LibraryBook) => LibraryCoverSource;
+  onDelete?: () => void;
   onEdit?: () => void;
   onPress(): void;
   shelf: ShelfSummary;
@@ -350,6 +279,7 @@ type ShelfVisualProps = Readonly<{
 function ShelfVisual({
   busy,
   coverSource,
+  onDelete,
   onEdit,
   onPress,
   shelf,
@@ -373,16 +303,15 @@ function ShelfVisual({
       padding="compact"
       style={variant === 'grid' ? styles.shelfTile : undefined}
     >
-      <Pressable
+      <ContentPressable
         accessibilityLabel={label}
         accessibilityRole="button"
         accessibilityState={{ busy }}
         disabled={busy}
         onPress={onPress}
-        style={({ pressed }) => [
+        style={[
           variant === 'grid' ? styles.tileBody : styles.railBody,
           { gap: theme.spacing.sm },
-          pressed && { opacity: 0.68 },
         ]}
       >
         <View style={[styles.coverRail, { gap: theme.spacing.xs }]}>
@@ -434,25 +363,26 @@ function ShelfVisual({
                 })}
           </AppText>
         </View>
-      </Pressable>
+      </ContentPressable>
       {onEdit === undefined ? null : (
         <View style={styles.editButton}>
-          <IconButton
-            accessibilityHint={t('library.shelves.editHint')}
+          <SystemActionMenu
             accessibilityLabel={t('library.shelves.edit', {
               name: shelf.name,
             })}
-            accessibilityState={{ busy }}
-            disabled={busy}
-            icon={
-              <AppIcon
-                color={theme.colors.textMuted}
-                decorative
-                name="more"
-                size={theme.control.iconMedium}
-              />
-            }
-            onPress={onEdit}
+            actions={[
+              { id: 'edit', title: t('library.shelves.renameAction') },
+              {
+                destructive: true,
+                id: 'delete',
+                title: t('library.shelves.deleteAction'),
+              },
+            ]}
+            iconName="more"
+            onAction={(actionId) => {
+              if (actionId === 'edit') onEdit();
+              if (actionId === 'delete') onDelete?.();
+            }}
           />
         </View>
       )}
@@ -460,218 +390,7 @@ function ShelfVisual({
   );
 }
 
-type ShelfActionModalProps = Readonly<{
-  busy: boolean;
-  onClose(): void;
-  onCreate(name: string): Promise<ShelfMutationOutcome>;
-  onDelete(shelfId: string): Promise<ShelfMutationOutcome>;
-  onImport(): void;
-  onRename(
-    shelfId: string,
-    name: string,
-  ): Promise<ShelfMutationOutcome>;
-  shelf: ShelfSummary | 'create';
-}>;
-
-function ShelfActionModal({
-  busy,
-  onClose,
-  onCreate,
-  onDelete,
-  onImport,
-  onRename,
-  shelf,
-}: ShelfActionModalProps): ReactNode {
-  const theme = useAppTheme();
-  const { t } = useI18n();
-  const [name, setName] = useState(
-    typeof shelf === 'object' ? shelf.name : '',
-  );
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [mutationFailed, setMutationFailed] = useState(false);
-  const editingShelf = typeof shelf === 'object' ? shelf : null;
-  const normalizedName = name.trim();
-  const invalidName = normalizedName.length === 0;
-
-  return (
-    <Modal
-      animationType="fade"
-      onRequestClose={onClose}
-      presentationStyle="overFullScreen"
-      statusBarTranslucent
-      transparent
-      visible
-    >
-      <View
-        accessibilityViewIsModal
-        style={[
-          styles.modalBackdrop,
-          {
-            backgroundColor: theme.colors.overlay,
-            padding: theme.spacing.lg,
-          },
-        ]}
-      >
-        <SurfaceCard
-          accessibilityLabel={
-            editingShelf === null
-              ? t('library.shelves.modalTitle')
-              : t('library.shelves.editTitle')
-          }
-          style={[
-            styles.modalCard,
-            { maxWidth: theme.breakpoint.contentMaxWidth },
-          ]}
-        >
-          <View style={styles.modalHeader}>
-            <AppText accessibilityRole="header" variant="title">
-              {confirmDelete
-                ? t('library.shelves.deleteTitle')
-                : editingShelf === null
-                  ? t('library.shelves.modalTitle')
-                  : t('library.shelves.editTitle')}
-            </AppText>
-            <IconButton
-              accessibilityLabel={t('common.cancel')}
-              disabled={busy}
-              icon={
-                <AppIcon
-                  color={theme.colors.textMuted}
-                  decorative
-                  name="close"
-                  size={theme.control.iconMedium}
-                />
-              }
-              onPress={onClose}
-            />
-          </View>
-
-          {confirmDelete && editingShelf !== null ? (
-            <View style={{ gap: theme.spacing.lg }}>
-              {mutationFailed ? <ShelfMutationNotice /> : null}
-              <AppText>
-                {t('library.shelves.deleteBody', {
-                  name: editingShelf.name,
-                })}
-              </AppText>
-              <View style={[styles.modalActions, { gap: theme.spacing.sm }]}>
-                <AppButton
-                  disabled={busy}
-                  label={t('common.cancel')}
-                  onPress={() => setConfirmDelete(false)}
-                  variant="secondary"
-                />
-                <AppButton
-                  disabled={busy}
-                  label={t('library.shelves.deleteAction')}
-                  onPress={() => {
-                    setMutationFailed(false);
-                    void onDelete(editingShelf.id).then((outcome) => {
-                      if (outcome.outcome === 'succeeded') onClose();
-                      else setMutationFailed(true);
-                    });
-                  }}
-                  variant="destructive"
-                />
-              </View>
-            </View>
-          ) : (
-            <View style={{ gap: theme.spacing.lg }}>
-              {mutationFailed ? <ShelfMutationNotice /> : null}
-              <AppTextField
-                autoCapitalize="sentences"
-                autoCorrect
-                disabled={busy}
-                error={
-                  invalidName && name.length > 0
-                    ? t('library.shelves.nameRequired')
-                    : undefined
-                }
-                label={t('library.shelves.nameLabel')}
-                maxLength={100}
-                onChangeText={setName}
-                onSubmitEditing={() => {
-                  if (invalidName) return;
-                  setMutationFailed(false);
-                  const operation =
-                    editingShelf === null
-                      ? onCreate(normalizedName)
-                      : onRename(editingShelf.id, normalizedName);
-                  void operation.then((outcome) => {
-                    if (outcome.outcome === 'succeeded') onClose();
-                    else setMutationFailed(true);
-                  });
-                }}
-                placeholder={t('library.shelves.namePlaceholder')}
-                returnKeyType="done"
-                value={name}
-              />
-              <AppButton
-                disabled={invalidName || busy}
-                label={
-                  editingShelf === null
-                    ? t('library.shelves.createAction')
-                    : t('library.shelves.renameAction')
-                }
-                loading={busy}
-                onPress={() => {
-                  setMutationFailed(false);
-                  const operation =
-                    editingShelf === null
-                      ? onCreate(normalizedName)
-                      : onRename(editingShelf.id, normalizedName);
-                  void operation.then((outcome) => {
-                    if (outcome.outcome === 'succeeded') onClose();
-                    else setMutationFailed(true);
-                  });
-                }}
-              />
-              {editingShelf === null ? (
-                <AppButton
-                  label={t('library.import.action')}
-                  leadingIcon={
-                    <AppIcon
-                      color={theme.colors.tint}
-                      decorative
-                      name="upload"
-                      size={theme.control.iconMedium}
-                    />
-                  }
-                  onPress={onImport}
-                  variant="ghost"
-                />
-              ) : (
-                <AppButton
-                  disabled={busy}
-                  label={t('library.shelves.deleteAction')}
-                  onPress={() => setConfirmDelete(true)}
-                  variant="destructive"
-                />
-              )}
-            </View>
-          )}
-        </SurfaceCard>
-      </View>
-    </Modal>
-  );
-}
-
-function ShelfMutationNotice(): ReactNode {
-  const { t } = useI18n();
-  return (
-    <InlineNotice
-      body={t('library.issue.shelfMutation')}
-      title={t('library.issue.title')}
-      tone="danger"
-    />
-  );
-}
-
 const styles = StyleSheet.create({
-  allBooks: {
-    alignItems: 'center',
-    flexDirection: 'row',
-  },
   coverRail: {
     flexDirection: 'row',
     minHeight: 72,
@@ -683,24 +402,6 @@ const styles = StyleSheet.create({
   },
   flex: {
     flex: 1,
-  },
-  modalActions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'flex-end',
-  },
-  modalBackdrop: {
-    alignItems: 'center',
-    flex: 1,
-    justifyContent: 'center',
-  },
-  modalCard: {
-    width: '100%',
-  },
-  modalHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
   },
   railBody: {
     alignItems: 'center',

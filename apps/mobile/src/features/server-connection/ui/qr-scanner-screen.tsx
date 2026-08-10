@@ -13,7 +13,7 @@ import {
   AppText,
   InlineNotice,
   LoadingState,
-  PageHeader,
+  PageIntro,
   ScreenScaffold,
   useAppTheme,
 } from '../../../shared/ui/public';
@@ -42,7 +42,6 @@ const rejectionMessageKeys: Readonly<
 };
 
 export function QrScannerScreen({
-  onBack,
   onCodeAccepted,
   onOpenSettings = Linking.openSettings,
   onScanAgain,
@@ -173,17 +172,11 @@ export function QrScannerScreen({
               : t('connection.qr.openSettingsHint')
           }
           fullWidth
+          iconName={permission.canAskAgain ? 'camera' : 'settings'}
           label={
             permission.canAskAgain
               ? t('connection.qr.requestPermission')
               : t('common.openSettings')
-          }
-          leadingIcon={
-            <AppIcon
-              color={theme.colors.onAction}
-              decorative
-              name={permission.canAskAgain ? 'camera' : 'settings'}
-            />
           }
           onPress={() => {
             if (permission.canAskAgain) {
@@ -290,14 +283,8 @@ export function QrScannerScreen({
             <AppButton
               accessibilityHint={t('connection.qr.scanAgainHint')}
               fullWidth
+              iconName="scan"
               label={t('connection.qr.scanAgain')}
-              leadingIcon={
-                <AppIcon
-                  color={theme.colors.onAction}
-                  decorative
-                  name="scan"
-                />
-              }
               onPress={scanAgain}
               testID="scan-qr-again"
             />
@@ -312,14 +299,8 @@ export function QrScannerScreen({
             <AppButton
               accessibilityHint={t('connection.qr.scanAgainHint')}
               fullWidth
+              iconName="scan"
               label={t('connection.qr.scanAgain')}
-              leadingIcon={
-                <AppIcon
-                  color={theme.colors.text}
-                  decorative
-                  name="scan"
-                />
-              }
               onPress={scanAgain}
               testID="scan-qr-again"
               variant="secondary"
@@ -336,14 +317,8 @@ export function QrScannerScreen({
             <AppButton
               accessibilityHint={t('connection.qr.scanAgainHint')}
               fullWidth
+              iconName="scan"
               label={t('connection.qr.scanAgain')}
-              leadingIcon={
-                <AppIcon
-                  color={theme.colors.onAction}
-                  decorative
-                  name="scan"
-                />
-              }
               onPress={scanAgain}
               testID="scan-qr-again"
             />
@@ -358,14 +333,8 @@ export function QrScannerScreen({
             />
             <AppButton
               fullWidth
+              iconName="refresh"
               label={t('common.retry')}
-              leadingIcon={
-                <AppIcon
-                  color={theme.colors.onAction}
-                  decorative
-                  name="refresh"
-                />
-              }
               onPress={scanAgain}
               testID="retry-camera"
             />
@@ -377,13 +346,9 @@ export function QrScannerScreen({
 
   return (
     <ScreenScaffold contentStyle={styles.screen} testID="qr-scanner-screen">
-      <PageHeader
-        backAccessibilityHint={t('common.back')}
-        backLabel={t('common.back')}
+      <PageIntro
         description={t('connection.qr.description')}
         eyebrow={t('connection.qr.eyebrow')}
-        onBack={onBack}
-        title={t('connection.qr.title')}
       />
       {scannerContent}
     </ScreenScaffold>

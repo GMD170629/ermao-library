@@ -1,3 +1,4 @@
+import { Icon, type IconName } from '@expo/ui';
 import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
 import type { ReactNode } from 'react';
 import { type ColorValue } from 'react-native';
@@ -43,7 +44,7 @@ export type AppIconName =
   | 'upload'
   | 'warning';
 
-type PlatformSymbol = Readonly<{
+export type AppPlatformSymbol = Readonly<{
   android: AndroidSymbol;
   ios: SFSymbol;
   web: AndroidSymbol;
@@ -87,7 +88,7 @@ const symbols = {
   trash: symbol('trash', 'delete'),
   upload: symbol('square.and.arrow.up', 'upload_file'),
   warning: symbol('exclamationmark.triangle', 'warning'),
-} satisfies Readonly<Record<AppIconName, PlatformSymbol>>;
+} satisfies Readonly<Record<AppIconName, AppPlatformSymbol>>;
 
 export type AppIconProps = Readonly<{
   accessibilityLabel?: string;
@@ -131,6 +132,90 @@ export function AppIcon({
   );
 }
 
-function symbol(ios: SFSymbol, android: AndroidSymbol): PlatformSymbol {
+export function appIconSymbol(name: AppIconName): AppPlatformSymbol {
+  return symbols[name];
+}
+
+export function appNativeIconName(name: AppIconName): IconName {
+  const platformSymbol = symbols[name];
+  switch (name) {
+    case 'back':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/arrow_back.xml') });
+    case 'book-closed':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/book_2.xml') });
+    case 'camera':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/photo_camera.xml') });
+    case 'check':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/check.xml') });
+    case 'chevron-right':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/chevron_right.xml') });
+    case 'close':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/close.xml') });
+    case 'edit':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/edit.xml') });
+    case 'eye':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/visibility.xml') });
+    case 'eye-off':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/visibility_off.xml') });
+    case 'filter':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/filter_list.xml') });
+    case 'globe':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/public.xml') });
+    case 'grid':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/grid_view.xml') });
+    case 'home':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/home.xml') });
+    case 'info':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/info.xml') });
+    case 'keyboard':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/keyboard.xml') });
+    case 'library':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/local_library.xml') });
+    case 'link':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/link.xml') });
+    case 'list':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/view_list.xml') });
+    case 'lock':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/lock.xml') });
+    case 'logout':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/logout.xml') });
+    case 'mail':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/mail.xml') });
+    case 'more':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/more_horiz.xml') });
+    case 'person':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/account_circle.xml') });
+    case 'play':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/play_circle.xml') });
+    case 'plus':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/add.xml') });
+    case 'qr':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/qr_code_scanner.xml') });
+    case 'reader':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/menu_book.xml') });
+    case 'refresh':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/refresh.xml') });
+    case 'scan':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/document_scanner.xml') });
+    case 'search':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/search.xml') });
+    case 'server':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/dns.xml') });
+    case 'settings':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/settings.xml') });
+    case 'sort':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/sort.xml') });
+    case 'sun':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/light_mode.xml') });
+    case 'trash':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/delete.xml') });
+    case 'upload':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/upload_file.xml') });
+    case 'warning':
+      return Icon.select({ ios: platformSymbol.ios, android: import('@expo/material-symbols/warning.xml') });
+  }
+}
+
+function symbol(ios: SFSymbol, android: AndroidSymbol): AppPlatformSymbol {
   return { android, ios, web: android };
 }
