@@ -304,6 +304,26 @@ test('desktop and mobile library navigation expose all, reading, series, and aut
   await expect(accountLink.getByText('账户与设置', { exact: true })).toBeVisible();
 });
 
+test('desktop sidebar search results match the search field width', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+
+  const searchInput = page.getByTestId('top-search-input');
+  await searchInput.fill('流面体');
+
+  const searchField = searchInput.locator('..');
+  const searchDropdown = page.getByTestId('top-search-dropdown');
+  await expect(searchDropdown).toBeVisible();
+
+  const [searchFieldBox, searchDropdownBox] = await Promise.all([
+    searchField.boundingBox(),
+    searchDropdown.boundingBox()
+  ]);
+  expect(searchFieldBox).not.toBeNull();
+  expect(searchDropdownBox).not.toBeNull();
+  expect(searchDropdownBox?.width).toBe(searchFieldBox?.width);
+});
+
 test('shelf collections and unassigned shelves are the only top-level sidebar entries', async ({ page }) => {
   await page.route('**/api/shelves', async (route) => {
     await route.fulfill({

@@ -739,7 +739,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <kbd className="shrink-0 text-[11px] text-[#9A9691]">⌘K</kbd>
           </div>
           {searchFocused && librarySearch.trim() ? (
-            <div data-testid="top-search-dropdown" className="absolute left-0 top-[calc(100%+8px)] z-40 w-[420px] overflow-hidden rounded-2xl border border-black/[0.07] bg-white shadow-[0_18px_55px_rgba(53,43,35,0.16)]">
+            <div data-testid="top-search-dropdown" className="absolute left-0 top-[calc(100%+8px)] z-40 w-full overflow-hidden rounded-2xl border border-black/[0.07] bg-white shadow-[0_18px_55px_rgba(53,43,35,0.16)]">
               <div className="max-h-[360px] overflow-y-auto py-2">
                 {searchLoading ? <div className="px-4 py-5 text-sm text-[#77736F]"><I18nText>正在搜索书库...</I18nText></div> : null}
                 {!searchLoading && searchBooks.map((book, index) => (
