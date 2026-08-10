@@ -1,6 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { projectReaderFramePointer, readerFramePointerIntent, readerKeyIntent, readerPinchZoom, readerPointerIntent, readerPointerIntentInViewport, readerSwipeIntent } from './input-router';
+import { projectReaderFramePointer, ReaderKeyboardNavigationController, readerFramePointerIntent, readerKeyIntent, readerPinchZoom, readerPointerIntent, readerPointerIntentInViewport, readerSwipeIntent } from './input-router';
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
+async function flush() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
 
 test('maps keyboard navigation for both reading directions', () => {
   assert.equal(readerKeyIntent({ key: 'ArrowLeft', shiftKey: false }, 'ltr'), 'previous');
@@ -10,6 +23,38 @@ test('maps keyboard navigation for both reading directions', () => {
   assert.equal(readerKeyIntent({ key: 'ArrowRight', shiftKey: false }, 'ltr', { keyboardPageTurn: false }), null);
   assert.equal(readerKeyIntent({ key: 'Escape', shiftKey: false }, 'ltr', { keyboardPageTurn: false }), 'escape');
   assert.equal(readerKeyIntent({ key: 'AudioVolumeUp', shiftKey: false }, 'ltr', { keyboardPageTurn: false, volumeKeyPageTurn: true }), 'previous');
+});
+
+test('bounds key auto-repeat to one rendered turn and stops it on keyup', async () => {
+  const controller = new ReaderKeyboardNavigationController();
+  const firstTurn = deferred();
+  const turns: string[] = [];
+
+  assert.equal(controller.keyDown({ key: 'ArrowRight', repeat: false }, () => {
+    turns.push('initial');
+    return firstTurn.promise;
+  }), true);
+  assert.equal(controller.keyDown({ key: 'ArrowRight', repeat: true }, () => turns.push('queued-repeat')), false);
+  controller.keyUp({ key: 'ArrowRight' });
+  firstTurn.resolve();
+  await flush();
+
+  assert.equal(controller.keyDown({ key: 'ArrowRight', repeat: true }, () => turns.push('after-release')), false);
+  assert.deepEqual(turns, ['initial']);
+});
+
+test('allows a held key to repeat after the previous turn settles', async () => {
+  const controller = new ReaderKeyboardNavigationController();
+  const turns: string[] = [];
+
+  assert.equal(controller.keyDown({ key: 'ArrowRight', repeat: false }, () => turns.push('initial')), true);
+  await flush();
+  assert.equal(controller.keyDown({ key: 'ArrowRight', repeat: true }, () => turns.push('repeat')), true);
+  controller.keyUp({ key: 'ArrowRight' });
+  await flush();
+
+  assert.equal(controller.keyDown({ key: 'ArrowRight', repeat: true }, () => turns.push('after-release')), false);
+  assert.deepEqual(turns, ['initial', 'repeat']);
 });
 
 test('supports reversed and disabled tap zones', () => {

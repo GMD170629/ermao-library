@@ -26,7 +26,7 @@ import {
 } from './epub-theme';
 import { fallbackEpubFont } from './epub-font';
 import type { ReaderAdapterInputHandler, ReaderInteractiveAdapter, ReaderInteractionPolicy } from './reader-interaction';
-import { hasActiveTextSelection, isReaderControlTarget, readerFramePointerIntent, readerKeyIntent, readerPointerIntent } from '../input-router';
+import { hasActiveTextSelection, isReaderControlTarget, ReaderKeyboardNavigationController, readerFramePointerIntent, readerKeyIntent, readerPointerIntent } from '../input-router';
 import { isEngineResolvableReflowableHref } from '../reflowable-navigation-href';
 import type { ReaderBookCache } from '../../../../lib/reader/book-cache';
 import {
@@ -430,6 +430,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
   private viewportLayout: EpubViewportLayout = resolveEpubViewportLayout(Number.POSITIVE_INFINITY);
   private viewportObserver: ResizeObserver | null = null;
   private sessionGeneration = 0;
+  private readonly keyboardNavigation = new ReaderKeyboardNavigationController();
 
   constructor(options: FoliateAdapterOptions) {
     super();
@@ -654,6 +655,7 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
   }
 
   private clearReadingSurface() {
+    this.keyboardNavigation.reset();
     this.bridgedDocuments.forEach((controller) => controller.abort());
     this.bridgedDocuments.clear();
     this.continuous?.destroy();
@@ -928,7 +930,10 @@ export class FoliateReaderAdapter extends ReaderAdapterBase implements ReaderAda
       }));
       if (!intent) return;
       event.preventDefault();
-      void this.onInputIntent(intent);
+      this.keyboardNavigation.keyDown(event, () => this.onInputIntent?.(intent));
+    }, { signal });
+    document.addEventListener('keyup', (event) => {
+      this.keyboardNavigation.keyUp(event);
     }, { signal });
     document.addEventListener('click', (event) => {
       if (!this.onInputIntent || suppressClick || isReaderControlTarget(event.target) || hasActiveTextSelection(document.getSelection())) {

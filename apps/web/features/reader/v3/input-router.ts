@@ -9,6 +9,12 @@ export type ReaderViewportRect = {
 };
 
 type KeyInput = Pick<KeyboardEvent, 'key' | 'shiftKey'>;
+type RepeatableKeyInput = Pick<KeyboardEvent, 'key'> & Partial<Pick<KeyboardEvent, 'repeat'>>;
+
+type ActiveKeyboardNavigation = {
+  held: boolean;
+  inFlight: boolean;
+};
 
 export type ReaderInputPreferences = Readonly<{
   tapZones?: 'standard' | 'reversed' | 'disabled';
@@ -44,6 +50,48 @@ export function readerKeyIntent(input: KeyInput, direction: ReaderDirection, pre
   if (input.key === 'Home') return 'first';
   if (input.key === 'End') return 'last';
   return null;
+}
+
+/**
+ * Keeps keyboard auto-repeat aligned with rendered navigation throughput.
+ * Physical presses remain discrete intents; a held key may repeat only after
+ * its prior turn settles, and keyup prevents any later repeat from starting.
+ */
+export class ReaderKeyboardNavigationController {
+  private readonly activeKeys = new Map<string, ActiveKeyboardNavigation>();
+
+  keyDown(input: RepeatableKeyInput, navigate: () => unknown) {
+    const current = this.activeKeys.get(input.key);
+    if (input.repeat && (!current?.held || current.inFlight)) return false;
+    const active = input.repeat ? current : { held: true, inFlight: false };
+    if (!active) return false;
+    active.held = true;
+    active.inFlight = true;
+    this.activeKeys.set(input.key, active);
+    const settle = () => {
+      if (this.activeKeys.get(input.key) !== active) return;
+      active.inFlight = false;
+      if (!active.held) this.activeKeys.delete(input.key);
+    };
+    try {
+      void Promise.resolve(navigate()).then(settle, settle);
+    } catch (reason) {
+      settle();
+      throw reason;
+    }
+    return true;
+  }
+
+  keyUp(input: Pick<KeyboardEvent, 'key'>) {
+    const active = this.activeKeys.get(input.key);
+    if (!active) return;
+    active.held = false;
+    if (!active.inFlight) this.activeKeys.delete(input.key);
+  }
+
+  reset() {
+    this.activeKeys.clear();
+  }
 }
 
 export function readerPointerIntent(

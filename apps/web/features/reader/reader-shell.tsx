@@ -37,7 +37,7 @@ import {
 import type { ReaderBookmark } from './v3/bookmarks';
 import { resolveActiveEpubNavigationIndex } from './v3/epub-navigation';
 import type { ReaderInteractionPolicy } from './v3/adapters/reader-interaction';
-import { hasActiveTextSelection, isReaderControlTarget, readerKeyIntent, readerPinchZoom, readerPointerIntentInViewport, readerSwipeIntent, type ReaderInputIntent } from './v3/input-router';
+import { hasActiveTextSelection, isReaderControlTarget, ReaderKeyboardNavigationController, readerKeyIntent, readerPinchZoom, readerPointerIntentInViewport, readerSwipeIntent, type ReaderInputIntent } from './v3/input-router';
 import {
   MOBILE_READER_VIEWPORT_MAXIMUM,
   READER_PAGE_WIDTH_MINIMUM,
@@ -288,7 +288,8 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   const interactionBlockedRef = useRef(interactionBlocked);
   const capabilitiesRef = useRef<ReaderCapabilities | null>(capabilities);
   const settingsRef = useRef(settings);
-  const handleInputIntentRef = useRef<(intent: ReaderInputIntent | null) => void>(() => undefined);
+  const handleInputIntentRef = useRef<(intent: ReaderInputIntent | null) => void | Promise<void>>(() => undefined);
+  const keyboardNavigationRef = useRef(new ReaderKeyboardNavigationController());
   const panelElementRef = useRef<HTMLDivElement | null>(null);
   const panelReturnFocusRef = useRef<HTMLElement | null>(null);
   const [controlsVisible, setControlsVisible] = useState(false);
@@ -494,8 +495,8 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   }
 
   function goByIntent(intent: 'previous' | 'next') {
-    if (intent === 'next') void goNext();
-    else void goPrev();
+    if (intent === 'next') return goNext();
+    return goPrev();
   }
 
   async function jumpToStart() {
@@ -531,16 +532,16 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
     }
     else if (isInteractionBlocked()) return;
     else if (intent === 'toggle-controls') toggleControls();
-    else if (intent === 'first') void jumpToStart();
-    else if (intent === 'last') void jumpToEnd();
-    else goByIntent(intent);
+    else if (intent === 'first') return jumpToStart();
+    else if (intent === 'last') return jumpToEnd();
+    else return goByIntent(intent);
   }
   handleInputIntentRef.current = handleInputIntent;
 
   function handleReaderTap(clientX: number, clientY: number) {
     const bounds = readerViewportRef.current?.getBoundingClientRect();
     if (!bounds) return;
-    handleInputIntent(readerPointerIntentInViewport(clientX, clientY, bounds, readerDirectionRef.current, settingsRef.current.tapZones));
+    void handleInputIntent(readerPointerIntentInViewport(clientX, clientY, bounds, readerDirectionRef.current, settingsRef.current.tapZones));
   }
 
   useEffect(() => {
@@ -571,6 +572,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   }, [progress.percent, progressScrubPercent]);
 
   useEffect(() => {
+    const keyboardNavigation = keyboardNavigationRef.current;
     function onKeyDown(event: KeyboardEvent) {
       const intent = readerKeyIntent(event, readerDirectionRef.current, {
         keyboardPageTurn: settingsRef.current.keyboardPageTurn,
@@ -584,11 +586,20 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
       }
       if (isInteractionBlocked() || shouldIgnoreReaderInteraction(event.target)) return;
       event.preventDefault();
-      handleInputIntentRef.current(intent);
+      keyboardNavigation.keyDown(event, () => handleInputIntentRef.current(intent));
+    }
+
+    function onKeyUp(event: KeyboardEvent) {
+      keyboardNavigation.keyUp(event);
     }
 
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      keyboardNavigation.reset();
+    };
   }, []);
 
   useEffect(() => {

@@ -1350,6 +1350,42 @@ test('EPUB reload restores the pending local CFI while an explicit href still wi
   await expect(iframe.contentFrame().getByText('第一章 开始阅读')).toBeVisible();
 });
 
+test('EPUB keyboard navigation bounds operating-system key auto-repeat and stops on keyup', async ({ page }) => {
+  await page.addInitScript(() => {
+    const state = window as typeof window & { __epubNavigationStarts?: number };
+    state.__epubNavigationStarts = 0;
+    window.addEventListener('shuku:reader-debug', (event) => {
+      const detail = (event as CustomEvent<{ message?: string; data?: { kind?: string } }>).detail;
+      if (detail.message === '阅读器操作开始' && detail.data?.kind === 'navigation') {
+        state.__epubNavigationStarts = (state.__epubNavigationStarts ?? 0) + 1;
+      }
+    });
+  });
+  await mockReaderApi(page, 'epub');
+  await page.goto('/reader/epub-volume');
+  const body = (await currentEpubIframe(page)).contentFrame().locator('body');
+  await expect(body.getByText('第一章 开始阅读')).toBeVisible();
+  await waitForReaderReady(page);
+
+  await body.evaluate((element) => {
+    const view = element.ownerDocument.defaultView;
+    if (!view) throw new Error('EPUB frame window is unavailable');
+    element.dispatchEvent(new view.KeyboardEvent('keydown', { bubbles: true, key: 'ArrowRight' }));
+    for (let index = 0; index < 24; index += 1) {
+      element.dispatchEvent(new view.KeyboardEvent('keydown', { bubbles: true, key: 'ArrowRight', repeat: true }));
+    }
+    element.dispatchEvent(new view.KeyboardEvent('keyup', { bubbles: true, key: 'ArrowRight' }));
+  });
+
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __epubNavigationStarts?: number }
+  ).__epubNavigationStarts ?? 0)).toBe(1);
+  await page.waitForTimeout(1_000);
+  expect(await page.evaluate(() => (
+    window as typeof window & { __epubNavigationStarts?: number }
+  ).__epubNavigationStarts ?? 0)).toBe(1);
+});
+
 test('EPUB cross-spine paging uses one foliate step without a custom track or animation', async ({ page }) => {
   await page.addInitScript(() => {
     const state = window as typeof window & { __epubPageTurnAnimations?: number };
