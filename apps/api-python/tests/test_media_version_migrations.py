@@ -215,7 +215,7 @@ def test_0003_upgrade_merges_same_media_editions_without_losing_volumes(
 
         apply_schema(engine, settings)
 
-        assert head_revision(engine) == "0017_metadata_opf_queue_state"
+        assert head_revision(engine) == "0018_library_facet_index_version"
         upgraded_volume = _table(engine, "LibraryVolume")
         upgraded_task = _table(engine, "ImportTask")
         upgraded_folder = _table(engine, "MonitorFolder")
@@ -399,10 +399,10 @@ def test_contract_discards_conversion_without_source_volume_and_completes_upgrad
             assert connection.scalar(select(_table(engine, "ImportTask").c.id)) == (
                 "orphaned-import"
             )
-            assert head_revision(engine) == "0017_metadata_opf_queue_state"
+            assert head_revision(engine) == "0018_library_facet_index_version"
             assert "LibraryEdition" not in inspect(connection).get_table_names()
 
         apply_schema(engine, settings)
-        assert head_revision(engine) == "0017_metadata_opf_queue_state"
+        assert head_revision(engine) == "0018_library_facet_index_version"
     finally:
         engine.dispose()

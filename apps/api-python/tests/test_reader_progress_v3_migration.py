@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
+import sqlalchemy as sa
 from alembic import command
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -15,7 +17,6 @@ from app.models.library import (
     LibraryMediaVersion,
     LibraryReadingProgress,
     LibraryVolume,
-    LibraryWork,
 )
 
 
@@ -28,6 +29,7 @@ def test_reader_progress_upgrade_rewrites_legacy_extra_to_v3_location(tmp_path) 
             engine,
             lambda config: command.upgrade(config, "0015_management_query_indexes"),
         )
+        legacy_work = sa.Table("LibraryWork", sa.MetaData(), autoload_with=engine)
         with Session(engine) as session, session.begin():
             user = User(
                 id="migration-user",
@@ -36,17 +38,22 @@ def test_reader_progress_upgrade_rewrites_legacy_extra_to_v3_location(tmp_path) 
                 password_hash="not-used",
                 role="admin",
             )
-            work = LibraryWork(
-                id="migration-work",
-                title="Migration work",
-                normalized_title="migration work",
-                author="Author",
-                normalized_author="author",
-                tags="[]",
+            now = datetime.now(UTC)
+            session.execute(
+                sa.insert(legacy_work).values(
+                    id="migration-work",
+                    title="Migration work",
+                    normalizedTitle="migration work",
+                    author="Author",
+                    normalizedAuthor="author",
+                    tags="[]",
+                    createdAt=now,
+                    updatedAt=now,
+                )
             )
             media = LibraryMediaVersion(
                 id="migration-media",
-                work_id=work.id,
+                work_id="migration-work",
                 media_kind="EBOOK",
             )
             volume = LibraryVolume(
@@ -59,7 +66,6 @@ def test_reader_progress_upgrade_rewrites_legacy_extra_to_v3_location(tmp_path) 
                 import_status="COMPLETED",
             )
             session.add(user)
-            session.add(work)
             session.flush()
             session.add(media)
             session.flush()
@@ -223,6 +229,6 @@ def test_reader_progress_upgrade_rewrites_legacy_extra_to_v3_location(tmp_path) 
                     "positionMs": 45000,
                 },
             }
-            assert head_revision(engine) == "0017_metadata_opf_queue_state"
+            assert head_revision(engine) == "0018_library_facet_index_version"
     finally:
         engine.dispose()

@@ -7,6 +7,16 @@ export {
   type SmartFilterRules
 } from './smart-filter-builder';
 export {
+  fetchLibraryFilterOptions,
+  fetchLibraryFilterSchema
+} from './api/filtering';
+export type {
+  LibraryFilterOptionPage,
+  LibraryFilterOptionSource,
+  LibraryFilterSchema,
+  SmartFilterOption
+} from './model/filter-schema';
+export {
   applicableSmartFilterRules,
   parseSmartFilterRules,
   serializableSmartFilterRules,

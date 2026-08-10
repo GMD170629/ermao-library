@@ -108,8 +108,11 @@ def test_library_filter_schema_is_read_only_and_bounded(client, db_session):
 
     assert response.status_code == 200
     fields = {field["key"]: field for field in response.json()["data"]["fields"]}
-    assert {option["value"] for option in fields["author"]["options"]} == {"测试作者"}
+    assert fields["author"]["options"] == []
+    assert fields["tag"]["options"] == []
+    assert fields["series"]["options"] == []
     assert len(statements) <= 25
+    assert not any('FROM "LIBRARYFACET"' in statement for statement in statements)
     assert not any(
         statement.startswith(("INSERT ", "UPDATE ", "DELETE ", "REPLACE "))
         for statement in statements

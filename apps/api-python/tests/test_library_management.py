@@ -7,7 +7,7 @@ from app.db.sqlite import create_sqlite_engine
 from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
 from app.modules.library.infrastructure.deletion import delete_work_records
 from app.services import library_management
-from app.services.library_filters import compile_filter_rules, library_filter_schema
+from app.services.library_filters import compile_filter_rules
 from app.services.library_management import (
     count_categories,
     delete_category,
@@ -520,23 +520,6 @@ def test_dynamic_filters_cover_metadata_files_shelves_folders_and_free_combinati
             }
             assert smart_shelf_work_ids(db, any_rules) == ["work-b"]
 
-            schema = library_filter_schema(db)
-            fields = {item["key"]: item for item in schema["fields"]}
-            assert {
-                "title",
-                "format",
-                "progress",
-                "shelf",
-                "monitorFolder",
-                "createdAt",
-            }.issubset(fields)
-            assert {"publishedYear", "publisher", "language", "isbn", "identifier"}.isdisjoint(fields)
-            assert {option["value"] for option in fields["shelf"]["options"]} == {
-                "shelf-a"
-            }
-            assert {
-                option["value"] for option in fields["monitorFolder"]["options"]
-            } == {"folder-a"}
     finally:
         engine.dispose()
 

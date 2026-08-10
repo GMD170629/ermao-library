@@ -8,9 +8,8 @@ from collections.abc import Iterable
 from hashlib import sha1
 from typing import Any
 
-from sqlalchemy import case, delete, distinct, exists, func, or_, select
+from sqlalchemy import case, delete, distinct, exists, func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, aliased
 
 from app.core.time import to_timestamp_ms
@@ -20,7 +19,7 @@ from app.models.library import (
     LibraryWork,
     LibraryWorkFacet,
 )
-from app.modules.library.domain.facets import FACET_KINDS
+from app.modules.library.domain.facets import CURRENT_FACET_INDEX_VERSION, FACET_KINDS
 from app.services.book_identity import UNKNOWN_AUTHOR, normalize_identity_part
 
 
@@ -101,16 +100,6 @@ def ensure_facet(db: Session, kind: str, name: str) -> str:
     return str(existing)
 
 
-def _optional_scalar(db: Session, statement: Any) -> Any:
-    """Read an optional fixture column without aborting the surrounding transaction."""
-
-    try:
-        with db.begin_nested():
-            return db.execute(statement).scalar_one_or_none()
-    except OperationalError:
-        return None
-
-
 def _facet_search_clause(search: str) -> Any | None:
     term = search.strip()
     if not term:
@@ -138,30 +127,23 @@ def _facet_public_dict(facet: LibraryFacet, book_count: int) -> dict[str, Any]:
 def sync_work_facets(db: Session, work_id: str) -> None:
     """Synchronize persisted facets for one work after a runtime library change."""
 
-    try:
-        with db.begin_nested():
-            work = db.execute(
-                select(
-                    LibraryWork.id,
-                    LibraryWork.author,
-                    LibraryWork.tags,
-                ).where(LibraryWork.id == work_id)
-            ).one_or_none()
-    except OperationalError:
-        return
+    work = db.execute(
+        select(
+            LibraryWork.id,
+            LibraryWork.author,
+            LibraryWork.tags,
+            LibraryWork.series_name,
+        ).where(LibraryWork.id == work_id)
+    ).one_or_none()
     if work is None:
         return
 
-    series_name = _optional_scalar(
-        db,
-        select(LibraryWork.series_name).where(LibraryWork.id == work_id),
-    )
     now = db_timestamp()
     db.execute(delete(LibraryWorkFacet).where(LibraryWorkFacet.work_id == work_id))
     work_values = {
         "AUTHOR": split_authors(work.author),
         "TAG": work_tags(work.tags),
-        "SERIES": unique_names([series_name]),
+        "SERIES": unique_names([work.series_name]),
     }
     for kind, names in work_values.items():
         for sort_order, name in enumerate(names):
@@ -179,6 +161,11 @@ def sync_work_facets(db: Session, work_id: str) -> None:
                 )
             )
 
+    db.execute(
+        update(LibraryWork)
+        .where(LibraryWork.id == work_id)
+        .values(facet_index_version=CURRENT_FACET_INDEX_VERSION)
+    )
     db.flush()
 
 

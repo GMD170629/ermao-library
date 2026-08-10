@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password
@@ -470,6 +471,167 @@ def test_work_list_applies_every_smart_filter_field(
             },
         )
         assert titles == ["星海列车"], field
+
+
+def test_filter_schema_keeps_high_cardinality_options_out_of_payload(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    user = _login_admin(client, db_session)
+    _add_filter_matrix_fixture(db_session, user)
+
+    response = client.get("/api/library/filter-schema")
+
+    assert response.status_code == 200
+    fields = {field["key"]: field for field in response.json()["data"]["fields"]}
+    assert fields["author"]["options"] == []
+    assert fields["tag"]["options"] == []
+    assert fields["series"]["options"] == []
+    assert {option["value"] for option in fields["format"]["options"]} == {
+        "AUDIO",
+        "EPUB",
+        "PDF",
+    }
+    assert {option["value"] for option in fields["shelf"]["options"]} == {"shelf-alpha"}
+
+
+def test_filter_options_are_bounded_and_author_uses_complete_raw_value(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    user = _login_admin(client, db_session)
+    _add_filter_matrix_fixture(db_session, user)
+    alpha = db_session.get(LibraryWork, "alpha")
+    assert alpha is not None
+    alpha.author = "林川、周秋"
+    db_session.commit()
+
+    response = client.get(
+        "/api/library/filter-options",
+        params={"source": "authors", "query": " 林 ", "limit": 1},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "source": "authors",
+        "query": "林",
+        "options": [{"value": "林川、周秋", "label": "林川、周秋", "count": 1}],
+        "hasMore": False,
+        "indexReady": True,
+    }
+
+
+def test_tag_filter_options_wait_for_index_and_then_use_facet_links(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    user = _login_admin(client, db_session)
+    _add_filter_matrix_fixture(db_session, user)
+
+    pending = client.get(
+        "/api/library/filter-options",
+        params={"source": "tags", "query": "科"},
+    )
+    assert pending.status_code == 200
+    assert pending.json()["data"]["options"] == []
+    assert pending.json()["data"]["indexReady"] is False
+
+    for work in db_session.query(LibraryWork).all():
+        work.facet_index_version = 1
+    db_session.commit()
+
+    ready = client.get(
+        "/api/library/filter-options",
+        params={"source": "tags", "query": "科"},
+    )
+    assert ready.status_code == 200
+    assert ready.json()["data"] == {
+        "source": "tags",
+        "query": "科",
+        "options": [{"value": "科幻", "label": "科幻", "count": 1}],
+        "hasMore": False,
+        "indexReady": True,
+    }
+
+
+def test_filter_options_validate_source_limit_and_authentication(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    anonymous = client.get(
+        "/api/library/filter-options",
+        params={"source": "authors", "query": "林"},
+    )
+    assert anonymous.status_code == 401
+
+    _login_admin(client, db_session)
+    invalid_source = client.get(
+        "/api/library/filter-options",
+        params={"source": "publishers", "query": "林"},
+    )
+    invalid_limit = client.get(
+        "/api/library/filter-options",
+        params={"source": "authors", "query": "林", "limit": 51},
+    )
+    assert invalid_source.status_code == 422
+    assert invalid_source.json()["ok"] is False
+    assert invalid_limit.status_code == 422
+    assert invalid_limit.json()["ok"] is False
+
+
+def test_filter_schema_size_and_option_query_stay_bounded_at_high_cardinality(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login_admin(client, db_session)
+
+    def add_works(start: int, stop: int) -> None:
+        db_session.add_all(
+            [
+                LibraryWork(
+                    id=f"large-filter-{index}",
+                    title=f"Large filter {index}",
+                    normalized_title=f"large filter {index}",
+                    author=f"Unique Author {index}",
+                    normalized_author=f"unique author {index}",
+                    tags='["must-not-be-read"]',
+                    facet_index_version=1,
+                )
+                for index in range(start, stop)
+            ]
+        )
+        db_session.commit()
+
+    add_works(0, 100)
+    smaller_schema = client.get("/api/library/filter-schema")
+    add_works(100, 1000)
+    larger_schema = client.get("/api/library/filter-schema")
+    assert smaller_schema.status_code == 200
+    assert larger_schema.status_code == 200
+    assert abs(len(larger_schema.content) - len(smaller_schema.content)) < 10
+
+    statements: list[str] = []
+    engine = db_session.get_bind()
+
+    def capture_statement(
+        _connection, _cursor, statement, _parameters, _context, _executemany
+    ) -> None:
+        statements.append(" ".join(statement.split()).upper())
+
+    event.listen(engine, "before_cursor_execute", capture_statement)
+    try:
+        response = client.get(
+            "/api/library/filter-options",
+            params={"source": "authors", "query": "Unique", "limit": 20},
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_statement)
+
+    assert response.status_code == 200
+    assert len(response.json()["data"]["options"]) == 20
+    assert response.json()["data"]["hasMore"] is True
+    assert len(statements) <= 5
+    assert not any("LIBRARYWORK.TAGS" in statement for statement in statements)
 
 
 def test_monitor_folder_filter_matches_real_volume_file_paths(

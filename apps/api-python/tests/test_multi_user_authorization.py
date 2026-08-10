@@ -498,3 +498,39 @@ def test_preferences_progress_bookmarks_and_shelves_are_isolated(
     second_work = client.get("/api/works/work-a").json()["data"]["book"]
     assert second_work["completed"] is False
     assert second_work["mediaVersions"][0]["volumes"][0]["progress"] == 0
+
+
+def test_member_filter_options_are_scoped_in_sql_and_bypass_manager_middleware(
+    client,
+    db_session,
+) -> None:
+    admin = _prepare_schema(db_session)
+    _seed_library(db_session)
+    work_a = db_session.get(LibraryWork, "work-a")
+    work_b = db_session.get(LibraryWork, "work-b")
+    merged = db_session.get(LibraryWork, "work-merged")
+    assert work_a is not None and work_b is not None and merged is not None
+    work_a.author = "A 范围作者"
+    work_b.author = "B 范围作者"
+    merged.author = "共享作者"
+    db_session.commit()
+
+    _login(client, admin.email)
+    member = _create_user(
+        client,
+        email="filter-member@example.com",
+        folder_ids=["folder-a"],
+    )
+    _logout(client)
+    _login(client, member["email"])
+
+    response = client.get(
+        "/api/library/filter-options",
+        params={"source": "authors", "query": "作者"},
+    )
+
+    assert response.status_code == 200
+    assert [option["value"] for option in response.json()["data"]["options"]] == [
+        "A 范围作者",
+        "共享作者",
+    ]

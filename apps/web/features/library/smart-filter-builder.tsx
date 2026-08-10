@@ -6,24 +6,13 @@ import { Combobox } from '../../components/ui/combobox';
 import { Select } from '../../components/ui/select';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
+import { AsyncFilterValueEditor } from './async-filter-value-editor';
+import {
+  isLibraryFilterOptionSource,
+  type SmartFilterField
+} from './model/filter-schema';
 
-export type SmartFilterOption = {
-  value: string;
-  label: string;
-  count?: number;
-  rootPath?: string;
-};
-
-export type SmartFilterField = {
-  key: string;
-  label: string;
-  group: string;
-  type: 'text' | 'select' | 'number' | 'date' | 'boolean';
-  operators: string[];
-  options?: SmartFilterOption[];
-  allowCustom?: boolean;
-  unit?: string;
-};
+export type { SmartFilterField, SmartFilterOption } from './model/filter-schema';
 
 export type SmartFilterCondition = {
   id: string;
@@ -141,6 +130,17 @@ export function SmartFilterBuilder({ fields, rules, loading = false, onChange }:
       );
     }
     const value = Array.isArray(condition.value) ? condition.value[0] ?? '' : condition.value ?? '';
+    if (field.type === 'select' && isLibraryFilterOptionSource(field.optionSource)) {
+      return (
+        <AsyncFilterValueEditor
+          key={`${condition.id}:${field.key}`}
+          source={field.optionSource}
+          value={value}
+          fieldLabel={translatedFieldLabel(field)}
+          onChange={(nextValue) => updateCondition(condition.id, { value: nextValue })}
+        />
+      );
+    }
     if (field.type === 'select' && !field.allowCustom) {
       return (
         <Select

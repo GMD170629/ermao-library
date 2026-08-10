@@ -33,6 +33,12 @@ from app.bootstrap.library import (
     work_merge_gateway,
 )
 from app.bootstrap.library import (
+    library_filter_options as search_library_filter_options,
+)
+from app.bootstrap.library import (
+    library_filter_schema as get_library_filter_schema,
+)
+from app.bootstrap.library import (
     list_works as list_library_works,
 )
 from app.bootstrap.media import media_streaming
@@ -56,6 +62,7 @@ from app.models.library import (
     LibraryReadingProgress,
     LibraryVolume,
 )
+from app.modules.library.application.filter_options import LibraryFilterOptionSource
 from app.modules.library.application.volume_commands import (
     BatchVolumeCommand,
     InvalidVolumeChangeError,
@@ -85,6 +92,10 @@ from app.modules.library.application.work_merge import (
     WorkMergeInProgressError,
     WorkMergeNotFoundError,
 )
+from app.modules.library.presentation.filter_mappers import (
+    filter_options_payload,
+    filter_schema_payload,
+)
 from app.modules.library.presentation.schemas import (
     BatchSetMediaKindRequest,
     BatchTransferVolumesRequest,
@@ -102,6 +113,7 @@ from app.modules.library.presentation.schemas import (
     DetailPreferenceResponse,
     DuplicatesResponse,
     FacetsResponse,
+    FilterOptionsResponse,
     FilterSchemaResponse,
     FindReplacePreviewResponse,
     LibraryBadRequestError,
@@ -187,7 +199,6 @@ from app.services.default_cover import (
     ensure_default_cover,
 )
 from app.services.health import run_system_health_checks
-from app.services.library_filters import library_filter_schema
 from app.services.library_management import (
     delete_category,
     duplicate_groups_page,
@@ -2324,139 +2335,8 @@ def _visible_categories(db: Session, user: User, kind: str) -> list[dict[str, An
     ]
 
 
-def _scoped_filter_schema(db: Session, user: User) -> dict[str, Any]:
-    schema = library_filter_schema(db)
-    context = authorization_context(db, user)
-    options_by_source: dict[str, list[dict[str, Any]]] = {}
-    if context.is_admin:
-        options_by_source = {}
-    else:
-        work_rows = library_facet_queries.visible_work_option_rows(db, context)
-        volume_rows = library_facet_queries.visible_volume_option_rows(db, context)
-
-        def counted(values: list[str]) -> list[dict[str, Any]]:
-            counts: dict[str, int] = {}
-            for value in values:
-                normalized = value.strip()
-                if normalized:
-                    counts[normalized] = counts.get(normalized, 0) + 1
-            return [
-                {"value": value, "label": value, "count": count}
-                for value, count in sorted(
-                    counts.items(), key=lambda item: (-item[1], item[0].casefold())
-                )
-            ]
-
-        authors = [
-            part.strip()
-            for row in work_rows
-            for part in re.split(r"[、,，;/；|]+", str(row.get("author") or ""))
-            if part.strip()
-        ]
-        tags = [
-            str(tag).strip()
-            for row in work_rows
-            for tag in _parse_json(row.get("tags"), [])
-            if str(tag).strip()
-        ]
-        options_by_source.update(
-            {
-                "authors": counted(authors),
-                "tags": counted(tags),
-                "series": counted(
-                    [str(row.get("seriesName") or "") for row in work_rows]
-                ),
-                "formats": counted(
-                    [str(row.get("format") or "") for row in volume_rows]
-                ),
-                "importStatuses": counted(
-                    [str(row.get("importStatus") or "") for row in volume_rows]
-                ),
-                "origins": counted(
-                    [
-                        *[str(row.get("origin") or "") for row in work_rows],
-                        *[str(row.get("origin") or "") for row in volume_rows],
-                    ]
-                ),
-            }
-        )
-        visible_media_kinds = {str(row.get("mediaKind") or "") for row in volume_rows}
-        existing_media = next(
-            (
-                field.get("options", [])
-                for field in schema["fields"]
-                if field.get("optionSource") == "mediaKinds"
-            ),
-            [],
-        )
-        options_by_source["mediaKinds"] = [
-            option
-            for option in existing_media
-            if option.get("value") in visible_media_kinds
-        ]
-
-    if context.is_admin:
-        monitor_rows = sorted(
-            (
-                {
-                    "id": row.get("id"),
-                    "name": row.get("name"),
-                    "rootPath": row.get("rootPath"),
-                }
-                for row in import_http_store.list_monitor_folders(db)
-            ),
-            key=lambda row: str(row.get("name") or "").casefold(),
-        )
-    elif context.monitor_folder_ids:
-        allowed = set(context.monitor_folder_ids)
-        monitor_rows = sorted(
-            (
-                {
-                    "id": row.get("id"),
-                    "name": row.get("name"),
-                    "rootPath": row.get("rootPath"),
-                }
-                for row in import_http_store.list_monitor_folders(db)
-                if str(row.get("id")) in allowed
-            ),
-            key=lambda row: str(row.get("name") or "").casefold(),
-        )
-    else:
-        monitor_rows = []
-    options_by_source["monitorFolders"] = [
-        {
-            "value": str(row["id"]),
-            "label": str(row["name"]),
-            "rootPath": row.get("rootPath"),
-        }
-        for row in monitor_rows
-    ]
-    shelf_rows = shelf_store.list_shelves_for_user(db, user.id)
-    options_by_source["shelves"] = [
-        {"value": str(row["id"]), "label": str(row["name"])}
-        for row in sorted(
-            (
-                row
-                for row in shelf_rows
-                if str(row.get("kind") or "STATIC").upper() == "STATIC"
-            ),
-            key=lambda row: str(row.get("name") or "").casefold(),
-        )
-    ]
-    schema["fields"] = [
-        {
-            **field,
-            "options": options_by_source.get(
-                str(field.get("optionSource")), field.get("options", [])
-            ),
-        }
-        for field in schema["fields"]
-    ]
-    return schema
-
-
 @router.get("/library/filter-schema")
-def library_filter_options(
+def get_library_filter_schema_route(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -2464,7 +2344,31 @@ def library_filter_options(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    return FilterSchemaResponse(data=_scoped_filter_schema(db, user))
+    context = authorization_context(db, user)
+    result = get_library_filter_schema(db).execute(context)
+    return FilterSchemaResponse(data=filter_schema_payload(result))
+
+
+@router.get("/library/filter-options")
+def search_library_filter_option_values(
+    request: Request,
+    source: Annotated[LibraryFilterOptionSource, Query()],
+    query: Annotated[str, Query(max_length=100)] = "",
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> FilterOptionsResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    context = authorization_context(db, user)
+    result = search_library_filter_options(db).execute(
+        context,
+        source=source,
+        query=query,
+        limit=limit,
+    )
+    return FilterOptionsResponse(data=filter_options_payload(result))
 
 
 @router.get("/library/categories")

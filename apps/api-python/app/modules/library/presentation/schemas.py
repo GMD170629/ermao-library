@@ -741,6 +741,12 @@ class FilterOption(HttpContractModel):
     root_path: str | None = Field(default=None, alias="rootPath")
 
 
+class FilterSuggestionOption(HttpContractModel):
+    value: str
+    label: str
+    count: int
+
+
 class FilterFieldDefinition(HttpContractModel):
     key: str
     label: str
@@ -757,6 +763,14 @@ class FilterFieldDefinition(HttpContractModel):
 class FilterSchemaPayload(HttpContractModel):
     fields: list[FilterFieldDefinition]
     max_conditions: int = Field(alias="maxConditions")
+
+
+class FilterOptionsPayload(HttpContractModel):
+    source: Literal["authors", "tags", "series"]
+    query: str
+    options: list[FilterSuggestionOption]
+    has_more: bool = Field(alias="hasMore")
+    index_ready: bool = Field(alias="indexReady")
 
 
 class LibraryCategory(HttpContractModel):
@@ -1138,6 +1152,7 @@ FindReplacePreviewResponse = SuccessEnvelope[FindReplacePreviewPayload]
 CoverMutationResponse = SuccessEnvelope[CoverMutationPayload]
 FacetsResponse = SuccessEnvelope[FacetsPayload]
 FilterSchemaResponse = SuccessEnvelope[FilterSchemaPayload]
+FilterOptionsResponse = SuccessEnvelope[FilterOptionsPayload]
 CategoriesResponse = SuccessEnvelope[CategoriesPayload]
 RenameCategoryResponse = SuccessEnvelope[RenameCategoryPayload]
 MergeCategoriesResponse = SuccessEnvelope[MergeCategoriesPayload]

@@ -1,7 +1,7 @@
 'use client';
 
 import { Check, ChevronDown } from 'lucide-react';
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from './cn';
@@ -13,11 +13,14 @@ type ComboboxProps = {
   value: string;
   options: SelectOption[];
   onChange: (value: string) => void;
+  onInputChange?: (value: string) => void;
   placeholder?: string;
   ariaLabel?: string;
   className?: string;
   inputClassName?: string;
   disabled?: boolean;
+  loading?: boolean;
+  status?: ReactNode;
 };
 
 type MenuPosition = {
@@ -31,11 +34,14 @@ export function Combobox({
   value,
   options,
   onChange,
+  onInputChange,
   placeholder = '选择或输入',
   ariaLabel,
   className,
   inputClassName,
-  disabled = false
+  disabled = false,
+  loading = false,
+  status
 }: ComboboxProps) {
   const { t: i18nExpression } = useExpressionI18n();
   const [open, setOpen] = useState(false);
@@ -141,6 +147,7 @@ export function Combobox({
         aria-expanded={open}
         aria-controls={listboxId}
         aria-activedescendant={activeIndex >= 0 ? `${listboxId}-${activeIndex}` : undefined}
+        aria-busy={loading}
         disabled={disabled}
         value={value}
         placeholder={i18nExpression(placeholder)}
@@ -148,6 +155,7 @@ export function Combobox({
         onClick={() => setOpen(true)}
         onChange={(event) => {
           onChange(event.target.value);
+          onInputChange?.(event.target.value);
           setOpen(true);
         }}
         onKeyDown={onKeyDown}
@@ -183,6 +191,11 @@ export function Combobox({
           }}
           className="fixed z-[120] overflow-auto overscroll-contain rounded-2xl border border-[#DED8D1] bg-white p-1.5 text-[#4F4B47] shadow-xl shadow-stone-200/60"
         >
+          {status ? (
+            <div role="status" className="px-3 py-2 text-xs leading-5 text-[#8A837D]">
+              {status}
+            </div>
+          ) : null}
           {filteredOptions.length ? filteredOptions.map((option, index) => {
             const selected = option.value === value;
             const active = index === activeIndex;
@@ -208,7 +221,7 @@ export function Combobox({
                 {selected ? <Check size={15} className="shrink-0" /> : <span className="h-[15px] w-[15px] shrink-0" />}
               </button>
             );
-          }) : (
+          }) : status ? null : (
             <div className="px-3 py-3 text-xs leading-5 text-[#8A837D]"><I18nText>没有匹配选项，可继续使用当前输入值</I18nText></div>
           )}
         </div>,

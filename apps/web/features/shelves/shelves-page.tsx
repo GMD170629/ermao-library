@@ -12,6 +12,7 @@ import { useConfirm, useToast } from '../../components/ui/feedback';
 import { PageTitle } from '../../components/ui/page-title';
 import {
   applicableSmartFilterRules,
+  fetchLibraryFilterSchema,
   mediaKindsLabel,
   serializableSmartFilterRules,
   SmartFilterBuilder,
@@ -42,12 +43,6 @@ type BooksPayload = {
     pageSize?: number;
     totalPages?: number;
   };
-  error?: { message: string };
-};
-
-type FilterSchemaPayload = {
-  ok: boolean;
-  data?: { fields: SmartFilterField[]; maxConditions: number };
   error?: { message: string };
 };
 
@@ -185,14 +180,9 @@ export function ShelvesPage() {
     const controller = new AbortController();
     setFilterSchemaLoading(true);
     setFilterSchemaError('');
-    fetch('/api/library/filter-schema', {
-      cache: 'no-store',
-      credentials: 'same-origin',
-      signal: controller.signal
-    })
-      .then((response) => readPayload<FilterSchemaPayload>(response, i18nAttribute("读取筛选条件失败")))
-      .then((payload) => {
-        setSmartFilterFields(payload.data?.fields ?? []);
+    fetchLibraryFilterSchema(controller.signal)
+      .then((schema) => {
+        setSmartFilterFields(schema.fields);
         setFilterSchemaLoaded(true);
       })
       .catch((reason) => {

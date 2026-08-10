@@ -44,6 +44,76 @@ test.beforeEach(async ({ context, page }) => {
   await mockWebAppApi(page);
 });
 
+test('smart filter searches high-cardinality author options only after edited input', async ({ page }) => {
+  let optionRequests = 0;
+  const filteredWorkRequests: URL[] = [];
+  await page.route('**/api/library/filter-schema', async (route) => {
+    await route.fulfill({
+      json: {
+        ok: true,
+        data: {
+          fields: [{
+            key: 'author',
+            label: '作者',
+            group: '作品元数据',
+            type: 'select',
+            operators: ['equals'],
+            optionSource: 'authors',
+            allowCustom: true,
+            options: []
+          }],
+          maxConditions: 30
+        }
+      }
+    });
+  });
+  await page.route('**/api/library/filter-options?**', async (route) => {
+    optionRequests += 1;
+    const requestUrl = new URL(route.request().url());
+    expect(requestUrl.searchParams.get('source')).toBe('authors');
+    expect(requestUrl.searchParams.get('query')).toBe('哆啦A梦');
+    expect(requestUrl.searchParams.get('limit')).toBe('20');
+    await route.fulfill({
+      json: {
+        ok: true,
+        data: {
+          source: 'authors',
+          query: '哆啦A梦',
+          options: [{ value: '哆啦A梦', label: '哆啦A梦', count: 3 }],
+          hasMore: false,
+          indexReady: true
+        }
+      }
+    });
+  });
+  await page.route('**/api/works?**', async (route) => {
+    const requestUrl = new URL(route.request().url());
+    if (requestUrl.searchParams.has('filters')) filteredWorkRequests.push(requestUrl);
+    await route.fulfill({ json: { ok: true, data: { books: [], total: 0 } } });
+  });
+
+  await page.goto('/library');
+  await page.getByRole('button', { name: '管理图书', exact: true }).click();
+  await page.getByRole('button', { name: '更多筛选' }).click();
+  await page.getByRole('button', { name: '添加第一个筛选条件' }).click();
+  const authorInput = page.getByRole('combobox', { name: '作者筛选值' });
+  await authorInput.focus();
+  await page.waitForTimeout(300);
+  expect(optionRequests).toBe(0);
+
+  await authorInput.pressSequentially('哆啦A梦', { delay: 20 });
+  expect(optionRequests).toBe(0);
+  expect(filteredWorkRequests).toHaveLength(0);
+  await expect.poll(() => optionRequests).toBe(1);
+  await expect.poll(() => filteredWorkRequests.length).toBe(1);
+  expect(filteredWorkRequests[0]?.searchParams.get('filters')).toContain('"value":"哆啦A梦"');
+  await page.getByRole('option', { name: '哆啦A梦 · 3' }).click();
+  await expect(authorInput).toHaveValue('哆啦A梦');
+  await page.waitForTimeout(300);
+  expect(optionRequests).toBe(1);
+  expect(filteredWorkRequests).toHaveLength(1);
+});
+
 test('PWA launch parameters keep the responsive web shell on mobile widths', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/?source=pwa');

@@ -86,6 +86,7 @@ EXPECTED_BASELINE_DEFAULTS = {
     ("LibraryOperation", "payloadJson"): "{}",
     ("LibraryOperation", "status"): "COMPLETED",
     ("LibraryWorkFacet", "sortOrder"): "0",
+    ("LibraryWork", "facetIndexVersion"): "0",
     ("ReaderBookmark", "percent"): "0",
     ("ReaderProgressCursor", "highWater"): "-1",
     ("SystemEvent", "actorType"): "system",
@@ -490,7 +491,7 @@ def test_bootstrap_runs_normalization_after_stamping_v14_boundary(tmp_path) -> N
         bootstrap_database(engine, settings)
 
         with engine.connect() as connection:
-            assert _alembic_version(connection) == "0017_metadata_opf_queue_state"
+            assert _alembic_version(connection) == "0018_library_facet_index_version"
             inspector = inspect(connection)
             assert "LibraryWork_hidden_createdAt_id_idx" in {
                 index["name"] for index in inspector.get_indexes("LibraryWork")

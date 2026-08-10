@@ -7,6 +7,10 @@ from sqlalchemy.orm import Session
 
 from app.models.auth import User
 from app.modules.library.application.dto import MoveVolumeResult
+from app.modules.library.application.filter_options import (
+    GetLibraryFilterSchema,
+    SearchLibraryFilterOptions,
+)
 from app.modules.library.application.groupings import ListLibraryGroupings
 from app.modules.library.application.queries import (
     GetSmartShelfWorkIds,
@@ -22,6 +26,9 @@ from app.modules.library.infrastructure import operations as library_operation_s
 from app.modules.library.infrastructure import projections as library_projections
 from app.modules.library.infrastructure import storage as library_storage
 from app.modules.library.infrastructure import works as library_works
+from app.modules.library.infrastructure.filter_options import (
+    SqlAlchemyLibraryFilterQueries,
+)
 from app.modules.library.infrastructure.groupings import (
     SqlAlchemyLibraryGroupingQueries,
 )
@@ -43,6 +50,8 @@ __all__ = [
     "library_dashboard",
     "library_deletion",
     "library_facet_queries",
+    "library_filter_options",
+    "library_filter_schema",
     "library_groupings",
     "library_join_queries",
     "library_operation_store",
@@ -91,6 +100,14 @@ def smart_shelf_work_ids(
 
 def library_groupings(db: Session) -> ListLibraryGroupings:
     return ListLibraryGroupings(SqlAlchemyLibraryGroupingQueries(db))
+
+
+def library_filter_schema(db: Session) -> GetLibraryFilterSchema:
+    return GetLibraryFilterSchema(SqlAlchemyLibraryFilterQueries(db))
+
+
+def library_filter_options(db: Session) -> SearchLibraryFilterOptions:
+    return SearchLibraryFilterOptions(SqlAlchemyLibraryFilterQueries(db))
 
 
 def list_works(

@@ -84,61 +84,6 @@ def visible_categories(
     return result
 
 
-def visible_work_option_rows(
-    db: Session, context: AuthorizationContext
-) -> list[dict[str, Any]]:
-    rows = db.execute(
-        select(
-            LibraryWork.author,
-            LibraryWork.tags,
-            LibraryWork.series_name,
-            LibraryWork.origin,
-        ).where(
-            func.coalesce(LibraryWork.hidden, False).is_(False),
-            work_visibility_predicate(context),
-        )
-    ).all()
-    return [
-        {
-            "author": row.author,
-            "tags": row.tags,
-            "seriesName": row.series_name,
-            "origin": row.origin,
-        }
-        for row in rows
-    ]
-
-
-def visible_volume_option_rows(
-    db: Session, context: AuthorizationContext
-) -> list[dict[str, Any]]:
-    rows = db.execute(
-        select(
-            LibraryVolume.format,
-            LibraryVolume.import_status,
-            LibraryVolume.origin,
-            LibraryMediaVersion.media_kind,
-        )
-        .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
-        )
-        .where(
-            LibraryVolume.hidden.is_(False),
-            volume_visibility_predicate(context),
-        )
-    ).all()
-    return [
-        {
-            "format": row.format,
-            "importStatus": row.import_status,
-            "origin": row.origin,
-            "mediaKind": row.media_kind,
-        }
-        for row in rows
-    ]
-
-
 def list_series_groups(
     db: Session,
     context: AuthorizationContext,

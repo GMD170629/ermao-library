@@ -2910,5 +2910,10 @@
   "Use your Shuku account email and password. / 使用 Shuku 账号邮箱和密码。": "Use your Shuku account email and password.",
   "useAudioPlayback 必须在 AudioPlaybackProvider 内使用": "Use AudioPlayback to use in AudioPlaybackProvider",
   "ZIP 漫画压缩包已损坏": "The ZIP comic archive is corrupt",
-  "zip|archive|corrupt|invalid|损坏": "Zip|archive|currupt|invalid|"
+  "zip|archive|corrupt|invalid|损坏": "Zip|archive|currupt|invalid|",
+  "标签索引正在构建，可继续使用当前输入值": "The tag index is being built. You can keep using the current value.",
+  "读取筛选建议失败": "Failed to load filter suggestions",
+  "还有更多结果，请继续输入以缩小范围": "More results are available. Keep typing to narrow them down.",
+  "筛选建议加载失败，可继续使用当前输入值": "Suggestions could not be loaded. You can keep using the current value.",
+  "正在搜索筛选建议...": "Searching filter suggestions..."
 }

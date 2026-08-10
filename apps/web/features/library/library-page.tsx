@@ -15,8 +15,14 @@ import {
   type LibraryWorkSummary,
   type ManagementWorkSummary
 } from './api/works';
+import { fetchLibraryFilterSchema } from './api/filtering';
 import { LibraryBatchContextMenu, LibraryBatchDialog, type LibraryBatchAction } from './library-batch-actions';
 import { canUseLibraryBatchAction } from './model/library-batch-action';
+import {
+  LibraryQueryDebouncer,
+  libraryQueryDraftIsSettled,
+  type LibraryQueryDraft
+} from './model/library-query-debounce';
 import {
   applicableSmartFilterRules,
   parseSmartFilterRules,
@@ -37,12 +43,6 @@ import {
   type LibrarySort,
   type LibrarySortDirection
 } from './model/library-sort-preference';
-
-type FilterSchemaResponse = {
-  ok: boolean;
-  data?: { fields: SmartFilterField[]; maxConditions: number };
-  error?: { message: string };
-};
 
 const formatOptions = [
   { value: '全部', label: '全部' },
@@ -129,11 +129,17 @@ export function LibraryPage() {
     [smartFilterRules]
   );
   const smartFilterQuery = useMemo(() => applicableRules.conditions.length > 0 ? JSON.stringify(serializableSmartFilterRules(applicableRules)) : '', [applicableRules]);
+  const queryDraft = useMemo<LibraryQueryDraft>(() => ({
+    search: search.trim(),
+    smartFilterQuery
+  }), [search, smartFilterQuery]);
+  const [settledQuery, setSettledQuery] = useState<LibraryQueryDraft>(queryDraft);
+  const queryDraftSettled = libraryQueryDraftIsSettled(queryDraft, settledQuery);
   const isSeriesFacet = facetKindFilter === 'SERIES' && Boolean(facetIdFilter);
   const isAuthorFacet = facetKindFilter === 'AUTHOR' && Boolean(facetIdFilter);
   const queryBase = useMemo(() => {
     const params = new URLSearchParams();
-    if (search.trim()) params.set('search', search.trim());
+    if (settledQuery.search) params.set('search', settledQuery.search);
     if (formatFilter !== '全部') params.set('type', formatFilter);
     if (statusFilter !== '全部') params.set('status', statusFilter);
     if (seriesNameFilter) params.set('seriesName', seriesNameFilter);
@@ -141,18 +147,24 @@ export function LibraryPage() {
       params.set('facetKind', facetKindFilter);
       params.set('facetId', facetIdFilter);
     }
-    if (smartFilterQuery) params.set('filters', smartFilterQuery);
+    if (settledQuery.smartFilterQuery) params.set('filters', settledQuery.smartFilterQuery);
     params.set('visibility', 'active');
     params.set('sort', isSeriesFacet ? 'series_index' : isAuthorFacet ? 'updated' : sort);
     params.set('sortDirection', isSeriesFacet ? 'asc' : isAuthorFacet ? 'desc' : sortDirection);
     return params.toString();
-  }, [facetIdFilter, facetKindFilter, formatFilter, isAuthorFacet, isSeriesFacet, search, seriesNameFilter, smartFilterQuery, sort, sortDirection, statusFilter]);
+  }, [facetIdFilter, facetKindFilter, formatFilter, isAuthorFacet, isSeriesFacet, seriesNameFilter, settledQuery.search, settledQuery.smartFilterQuery, sort, sortDirection, statusFilter]);
   const requestPageSize = view === 'grid'
     ? String(BROWSE_LIBRARY_PAGE_SIZE)
     : pageSize === 'all'
     ? '0'
     : pageSize;
   const requestScope = `${queryBase}&pageSize=${requestPageSize}&view=${view}`;
+
+  useEffect(() => {
+    const debouncer = new LibraryQueryDebouncer(setSettledQuery);
+    debouncer.update(queryDraft);
+    return () => debouncer.dispose();
+  }, [queryDraft]);
 
   useEffect(() => {
     setPage(1);
@@ -223,26 +235,26 @@ export function LibraryPage() {
 
   useEffect(() => {
     if (!filtersOpen || filterSchemaLoaded) return;
-    let active = true;
+    const controller = new AbortController();
     setFilterSchemaLoading(true);
-    fetch('/api/library/filter-schema')
-      .then((response) => response.json() as Promise<FilterSchemaResponse>)
-      .then((payload) => {
-        if (!active) return;
-        if (!payload.ok) throw new Error(payload.error?.message ?? '读取筛选维度失败');
-        setSmartFilterFields(payload.data?.fields ?? []);
+    fetchLibraryFilterSchema(controller.signal)
+      .then((schema) => {
+        if (controller.signal.aborted) return;
+        setSmartFilterFields(schema.fields);
         setFilterSchemaLoaded(true);
       })
       .catch((reason) => {
-        if (!active) return;
+        if (controller.signal.aborted) return;
         toast.error('读取筛选维度失败', reason instanceof Error ? reason.message : '请稍后重试');
       })
-      .finally(() => active && setFilterSchemaLoading(false));
-    return () => { active = false; };
+      .finally(() => {
+        if (!controller.signal.aborted) setFilterSchemaLoading(false);
+      });
+    return () => controller.abort();
   }, [filterSchemaLoaded, filtersOpen, toast]);
 
   useEffect(() => {
-    if (!sortPreferenceLoaded) return;
+    if (!sortPreferenceLoaded || !queryDraftSettled) return;
     let active = true;
     const scopeChanged = requestedScopeRef.current !== requestScope;
     const reloadChanged = requestedReloadKeyRef.current !== reloadKey;
@@ -289,7 +301,7 @@ export function LibraryPage() {
       active = false;
       controller.abort();
     };
-  }, [page, queryBase, reloadKey, requestPageSize, requestScope, sortPreferenceLoaded, view]);
+  }, [page, queryBase, queryDraftSettled, reloadKey, requestPageSize, requestScope, sortPreferenceLoaded, view]);
 
   useEffect(() => {
     const sentinel = loadMoreRef.current;

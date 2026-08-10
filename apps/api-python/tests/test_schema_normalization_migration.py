@@ -185,7 +185,7 @@ def test_0004_produces_identical_schema_from_distinct_0003_shapes(
 
         for engine in (canonical, legacy):
             _upgrade(engine, "head")
-            assert head_revision(engine) == "0017_metadata_opf_queue_state"
+            assert head_revision(engine) == "0018_library_facet_index_version"
 
         assert _schema_fingerprint(canonical) == _schema_fingerprint(legacy)
     finally:

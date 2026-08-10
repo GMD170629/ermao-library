@@ -11,6 +11,7 @@ from app.api.error_handlers import (
 )
 from app.api.router import api_router
 from app.bootstrap.auth import build_password_authentication_runtime
+from app.bootstrap.library_facet_index import start_facet_index_maintenance_worker
 from app.bootstrap.metadata_opf_observer import install_metadata_opf_observer
 from app.bootstrap.opds import build_opds_router
 from app.contracts.http_errors import HttpContractError
@@ -55,6 +56,7 @@ def _requires_system_manager(path: str, method: str) -> bool:
     if path.startswith("/api/library/") and path not in {
         "/api/library/facets",
         "/api/library/filter-schema",
+        "/api/library/filter-options",
     }:
         return True
     if path in {
@@ -118,8 +120,14 @@ def create_app(
             startup_db.close()
         log_maintenance_worker = SystemEventMaintenanceWorker(runtime_factory)
         log_maintenance_worker.start()
+        facet_index_worker = (
+            start_facet_index_maintenance_worker(runtime_factory)
+            if session_factory is None
+            else None
+        )
         app.state.download_queue_worker = download_queue_worker
         app.state.kindle_send_queue_worker = kindle_send_queue_worker
+        app.state.facet_index_worker = facet_index_worker
         try:
             yield
         finally:
@@ -127,6 +135,8 @@ def create_app(
                 download_queue_worker.stop()
             if kindle_send_queue_worker is not None:
                 kindle_send_queue_worker.stop()
+            if facet_index_worker is not None:
+                facet_index_worker.stop()
             log_maintenance_worker.stop()
 
     app = FastAPI(
