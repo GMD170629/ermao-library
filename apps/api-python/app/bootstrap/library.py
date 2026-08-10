@@ -6,6 +6,7 @@ from typing import Literal
 from sqlalchemy.orm import Session
 
 from app.models.auth import User
+from app.modules.library.application.bookshelf import ListBookshelfItems
 from app.modules.library.application.dto import MoveVolumeResult
 from app.modules.library.application.filter_options import (
     GetLibraryFilterSchema,
@@ -26,6 +27,7 @@ from app.modules.library.infrastructure import operations as library_operation_s
 from app.modules.library.infrastructure import projections as library_projections
 from app.modules.library.infrastructure import storage as library_storage
 from app.modules.library.infrastructure import works as library_works
+from app.modules.library.infrastructure.bookshelf import SqlAlchemyBookshelfItemQueries
 from app.modules.library.infrastructure.filter_options import (
     SqlAlchemyLibraryFilterQueries,
 )
@@ -47,6 +49,7 @@ from app.modules.metadata.infrastructure.writeback_queue import (
 )
 
 __all__ = [
+    "bookshelf_items",
     "library_dashboard",
     "library_deletion",
     "library_facet_queries",
@@ -65,6 +68,10 @@ __all__ = [
     "volume_structure_commands",
     "work_merge_gateway",
 ]
+
+
+def bookshelf_items(db: Session) -> ListBookshelfItems:
+    return ListBookshelfItems(SqlAlchemyBookshelfItemQueries(db))
 
 
 class _MetadataWritebackAdapter(MergeMetadataWritebackPort):

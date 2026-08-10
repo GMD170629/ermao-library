@@ -12,6 +12,7 @@ import { useToast } from '../../components/ui/feedback';
 import { Select } from '../../components/ui/select';
 import {
   fetchLibraryWorksPage,
+  type BookshelfWorkSummary,
   type LibraryWorkSummary,
   type ManagementWorkSummary
 } from './api/works';
@@ -43,6 +44,7 @@ import {
   type LibrarySort,
   type LibrarySortDirection
 } from './model/library-sort-preference';
+import { workDetailHrefFromLibrary } from './model/library-navigation';
 
 const formatOptions = [
   { value: '全部', label: '全部' },
@@ -159,6 +161,7 @@ export function LibraryPage() {
     ? '0'
     : pageSize;
   const requestScope = `${queryBase}&pageSize=${requestPageSize}&view=${view}`;
+  const workDetailHref = (workId: string) => workDetailHrefFromLibrary(workId, searchParamString);
 
   useEffect(() => {
     const debouncer = new LibraryQueryDebouncer(setSettledQuery);
@@ -633,9 +636,9 @@ export function LibraryPage() {
           {view === 'grid' ? (
             <div className="mt-8">
               <BookshelfCollection
-                books={books}
+                books={books.filter((book): book is BookshelfWorkSummary => book.projection === 'bookshelf')}
                 testId="library-book-bookshelves"
-                onOpen={(book) => router.push(`/works/${book.id}`)}
+                onOpen={(book) => router.push(workDetailHref(book.id))}
               />
               <div ref={loadMoreRef} className="flex min-h-20 items-center justify-center py-5 text-xs tabular-nums text-[#8A847E]" role="status" aria-live="polite">
                 {loading && page > 1 ? <><Loader2 size={15} className="mr-2 animate-spin" /><I18nText>正在加载更多图书...</I18nText></> : i18nAttribute("已加载 {value0} / {value1} 本", { value0: books.length, value1: meta.total })}
@@ -644,7 +647,7 @@ export function LibraryPage() {
           ) : (
             <div data-testid="library-management-viewport" className={cn('mt-8 lg:flex lg:min-h-[26rem] lg:flex-col', !filtersOpen && 'lg:h-[calc(100dvh-15.75rem)] lg:overflow-hidden')}>
               <div className="lg:min-h-0 lg:flex-1">
-                <BookTable books={books.filter((book): book is ManagementWorkSummary => book.projection === 'management')} onDelete={canManageSystem ? openDeleteBook : undefined} selectable selectedIds={selectedWorkIds} onSelect={(book) => toggleSelection(book.id)} onSelectAll={togglePageSelection} onSelectionChange={setSelectedWorkIds} onContextMenu={(_book, position) => setBatchContextPosition(position)} sort={sort} sortDirection={sortDirection} onSort={updateSort} />
+                <BookTable books={books.filter((book): book is ManagementWorkSummary => book.projection === 'management')} onOpen={(book) => router.push(workDetailHref(book.id))} onDelete={canManageSystem ? openDeleteBook : undefined} selectable selectedIds={selectedWorkIds} onSelect={(book) => toggleSelection(book.id)} onSelectAll={togglePageSelection} onSelectionChange={setSelectedWorkIds} onContextMenu={(_book, position) => setBatchContextPosition(position)} sort={sort} sortDirection={sortDirection} onSort={updateSort} />
               </div>
               <Pagination page={page} total={meta.total} totalPages={meta.totalPages} loading={loading} pageSize={pageSize} onPage={setPage} onPageSize={(nextPageSize) => { setPage(1); setPageSize(nextPageSize); }} />
             </div>

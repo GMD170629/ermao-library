@@ -148,7 +148,7 @@ test('work detail volume covers support selection, keyboard-accessible context m
     chapterCount: null,
     durationMs: null,
     trackCount: null,
-    progress: 0,
+    progress: sortOrder === 0 ? 80 : 100,
     lastReadAt: null,
     hidden: false,
     readable: true,
@@ -188,9 +188,22 @@ test('work detail volume covers support selection, keyboard-accessible context m
     await route.fulfill({ json: { ok: true, data: work } });
   });
 
-  await page.goto('/works/context-work?detailTab=COMIC');
+  await page.goto('/works/context-work?detailTab=COMIC&returnTo=%2Flibrary%3Fstatus%3DREADING%26sort%3Dtitle');
   const first = page.getByRole('button', { name: '第 1 卷' });
   const second = page.getByRole('button', { name: '第 2 卷' });
+  const volumeProgress = page.locator('[data-volume-progress]');
+  await expect(volumeProgress).toHaveCount(2);
+  await expect(volumeProgress.nth(0)).toHaveAttribute('data-volume-progress-state', 'reading');
+  await expect(volumeProgress.nth(1)).toHaveAttribute('data-volume-progress-state', 'finished');
+  await expect(page.locator('[data-volume-progress-complete]')).toHaveCount(1);
+  const progressRatio = await volumeProgress.first().evaluate((element) => {
+    const fill = element.firstElementChild?.getBoundingClientRect();
+    const track = element.getBoundingClientRect();
+    return fill && track.width > 0 ? fill.width / track.width : 0;
+  });
+  expect(progressRatio).toBeCloseTo(0.8, 2);
+  await expect(first).toHaveAccessibleName('第 1 卷，阅读进度 80%');
+  await expect(second).toHaveAccessibleName('第 2 卷，阅读进度 100%');
   await first.click();
   await expect(first).toHaveAttribute('aria-pressed', 'true');
   await expect(second).toHaveAttribute('aria-pressed', 'false');
@@ -219,6 +232,10 @@ test('work detail volume covers support selection, keyboard-accessible context m
 
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
+  await page.getByRole('button', { name: '返回全部图书', exact: true }).click();
+  await expect(page).toHaveURL((url) => url.pathname === '/library' && url.searchParams.get('status') === 'READING' && url.searchParams.get('sort') === 'title');
+  await page.goBack();
+  await expect(page.getByRole('button', { name: '返回全部图书', exact: true })).toBeVisible();
   await second.dblclick();
   await expect(page).toHaveURL(/\/reader\/context-volume-2$/);
 });
@@ -507,13 +524,14 @@ test('collection creation can select standard and smart shelf members', async ({
   await expect(page.getByRole('button', { name: /近期科幻/ })).toBeVisible();
 });
 
-test('dashboard recent shelves share a ten-book horizontal rail without visible scrollbars or progress bars', async ({ page }) => {
+test('dashboard recent shelves share a ten-book horizontal rail with cover-bottom reading progress', async ({ page }) => {
   const requestedQueries: string[] = [];
   const recentReading = Array.from({ length: 12 }, (_, index) => ({
     id: `recent-reading-${index + 1}`,
     title: `最近阅读 ${index + 1}`,
     author: '测试作者',
-    coverUrl: ''
+    coverUrl: '',
+    progress: index === 0 ? 80 : index === 1 ? 100 : index === 2 ? 0.4 : 0
   }));
   const recentAdded = recentReading.map((book, index) => ({
     ...book,
@@ -558,7 +576,26 @@ test('dashboard recent shelves share a ten-book horizontal rail without visible 
     expect(Math.abs(geometry.firstTop - geometry.lastTop)).toBeLessThan(1);
   }
 
-  await expect(readingShelf.locator('[data-bookshelf-progress]')).toHaveCount(0);
+  for (const shelf of [readingShelf, addedShelf]) {
+    const progressLines = shelf.locator('[data-bookshelf-progress]');
+    await expect(progressLines).toHaveCount(2);
+    await expect(shelf.locator('[data-bookshelf-progress-complete]')).toHaveCount(1);
+    await expect(progressLines.nth(0)).toHaveAttribute('data-bookshelf-progress-state', 'reading');
+    await expect(progressLines.nth(1)).toHaveAttribute('data-bookshelf-progress-state', 'finished');
+    const progressRatio = await progressLines.first().evaluate((element) => {
+      const fill = element.firstElementChild?.getBoundingClientRect();
+      const track = element.getBoundingClientRect();
+      return fill && track.width > 0 ? fill.width / track.width : 0;
+    });
+    expect(progressRatio).toBeCloseTo(0.8, 2);
+
+    const metadata = shelf.getByTestId(`${await shelf.getAttribute('data-testid')}-metadata`);
+    await expect(metadata).not.toContainText('未读');
+    await expect(metadata).not.toContainText('阅读中');
+    await expect(metadata).not.toContainText('已读完');
+  }
+  await expect(readingShelf.getByRole('button').first()).toHaveAccessibleName('查看《最近阅读 1》，阅读进度 80%');
+  await expect(readingShelf.getByRole('button').nth(2)).toHaveAccessibleName('查看《最近阅读 3》');
   expect(requestedQueries.length).toBeGreaterThanOrEqual(2);
   expect(new Set(requestedQueries.map((url) => new URL(url).pathname))).toEqual(new Set([
     '/api/dashboard/recent-reading',
@@ -602,11 +639,14 @@ test('wide shelf details use responsive bookshelf rows and load more on scroll',
     status: '未读',
     statusValue: 'UNREAD',
     progress: 0,
+    availableMediaKinds: ['EBOOK'],
     tags: [],
     coverUrl: index === 0
       ? '/test-landscape-cover.svg'
       : index === 1
         ? '/test-square-cover.svg'
+        : index === 2
+          ? '/test-extra-tall-cover.svg'
         : '',
     gradient: 'from-orange-100 to-stone-200'
   }));
@@ -621,6 +661,12 @@ test('wide shelf details use responsive bookshelf rows and load more on scroll',
     await route.fulfill({
       contentType: 'image/svg+xml',
       body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320"><rect width="320" height="320" fill="#222222"/></svg>'
+    });
+  });
+  await page.route('**/test-extra-tall-cover.svg', async (route) => {
+    await route.fulfill({
+      contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="600"><rect width="120" height="600" fill="#5a4238"/></svg>'
     });
   });
 
@@ -664,11 +710,11 @@ test('wide shelf details use responsive bookshelf rows and load more on scroll',
   const grid = page.getByTestId('shelf-book-bookshelves');
   await expect(grid).toBeVisible();
   await expect(grid.locator('[data-book-cover="true"]')).toHaveCount(25);
-  await expect.poll(() => coverRequestUrls.some((url) => url.includes('/shelf-work-3/cover?size=small'))).toBe(true);
+  await expect.poll(() => coverRequestUrls.some((url) => url.includes('/shelf-work-4/cover?size=small'))).toBe(true);
   const firstCover = grid.locator('[data-book-cover="true"]').first();
   const firstBook = grid.getByRole('button', { name: '查看《书架读物 1》' });
   const firstBookVisual = firstBook.locator('[data-bookshelf-book-visual]');
-  await expect(firstCover.locator('img')).toHaveCSS('object-fit', 'contain');
+  await expect(firstCover).toHaveCSS('object-fit', 'fill');
   await expect(grid.getByTestId('bookshelf-ledge')).toHaveCount(3);
   await expect(grid.getByTestId('bookshelf-ledge').first()).toHaveCSS('height', '30px');
   await expect(grid.getByTestId('bookshelf-ledge-asset').first()).toHaveCSS('height', '14px');
@@ -711,18 +757,29 @@ test('wide shelf details use responsive bookshelf rows and load more on scroll',
   const layout = await grid.evaluate((element) => {
     const bounds = element.parentElement?.parentElement?.getBoundingClientRect();
     const covers = Array.from(element.querySelectorAll<HTMLElement>('[data-book-cover="true"]'));
+    const coverVisuals = covers.map((cover) => cover.closest<HTMLElement>('[data-bookshelf-book-visual]'));
+    const coverSizes = covers.map((cover) => {
+      const styles = getComputedStyle(cover);
+      return {
+        width: Number.parseFloat(styles.width),
+        height: Number.parseFloat(styles.height)
+      };
+    });
     const rows = Array.from(element.querySelectorAll<HTMLElement>('[data-testid="bookshelf-row"]'));
     const firstRowGrid = rows[0]?.querySelector<HTMLElement>('.grid');
     const firstCoverShadow = getComputedStyle(covers[0]).boxShadow;
     return {
       contentWidth: bounds?.width ?? 0,
-      coverWidths: covers.map((cover) => cover.getBoundingClientRect().width),
-      coverRatios: covers.map((cover) => cover.getBoundingClientRect().height / cover.getBoundingClientRect().width),
+      coverWidths: coverSizes.map(({ width }) => width),
+      coverHeights: coverSizes.map(({ height }) => height),
+      coverRatios: coverSizes.map(({ height, width }) => height / width),
+      coverVisualWidths: coverVisuals.map((visual) => visual ? Number.parseFloat(getComputedStyle(visual).width) : 0),
       firstCoverBackground: getComputedStyle(covers[0]).backgroundColor,
       firstCoverHasVisibleShadow: firstCoverShadow !== 'none'
         && firstCoverShadow
           .split(/,\s*(?=rgba)/)
           .some((shadow) => !shadow.startsWith('rgba(0, 0, 0, 0)')),
+      firstCoverHasInsetShadow: firstCoverShadow.includes('inset'),
       rowCount: rows.length,
       columnCount: firstRowGrid ? getComputedStyle(firstRowGrid).gridTemplateColumns.split(' ').filter(Boolean).length : 0,
       firstRowTop: covers[0]?.getBoundingClientRect().top,
@@ -733,13 +790,22 @@ test('wide shelf details use responsive bookshelf rows and load more on scroll',
   expect(layout.contentWidth).toBeLessThanOrEqual(1280);
   expect(layout.columnCount).toBe(10);
   expect(layout.rowCount).toBe(3);
-  expect(Math.min(...layout.coverWidths)).toBeGreaterThan(90);
+  expect(Math.min(...layout.coverWidths.slice(0, 2))).toBeGreaterThan(90);
+  expect(Math.min(...layout.coverWidths.slice(3))).toBeGreaterThan(90);
   expect(Math.max(...layout.coverWidths)).toBeLessThanOrEqual(130);
+  expect(layout.coverWidths[2]).toBeLessThan(90);
+  expect(
+    layout.coverHeights.every((height, index) => height <= (layout.coverVisualWidths[index] ?? 0) * 1.5 + 0.5),
+    JSON.stringify({ coverHeights: layout.coverHeights, coverVisualWidths: layout.coverVisualWidths })
+  ).toBe(true);
+  expect(Math.abs((layout.coverHeights[2] ?? 0) - (layout.coverVisualWidths[2] ?? 0) * 1.5)).toBeLessThan(0.5);
   expect(Math.abs((layout.coverRatios[0] ?? 0) - 180 / 320)).toBeLessThan(0.01);
   expect(Math.abs((layout.coverRatios[1] ?? 0) - 1)).toBeLessThan(0.01);
-  expect(layout.coverRatios.slice(2).every((ratio) => Math.abs(ratio - 1.5) < 0.01)).toBe(true);
+  expect(Math.abs((layout.coverRatios[2] ?? 0) - 5)).toBeLessThan(0.01);
+  expect(layout.coverRatios.slice(3).every((ratio) => Math.abs(ratio - 1.5) < 0.01)).toBe(true);
   expect(layout.firstCoverBackground).toBe('rgba(0, 0, 0, 0)');
   expect(layout.firstCoverHasVisibleShadow).toBe(true);
+  expect(layout.firstCoverHasInsetShadow).toBe(false);
   expect(layout.eleventhTop).toBeGreaterThan(layout.firstRowTop ?? 0);
   await expect(grid.getByRole('button', { name: '查看《书架读物 25》' })).toBeVisible();
   await expect(page.getByText('已加载 25 / 25 本')).toBeVisible();
@@ -753,6 +819,20 @@ test('wide shelf details use responsive bookshelf rows and load more on scroll',
       ? getComputedStyle(firstRowGrid).gridTemplateColumns.split(' ').filter(Boolean).length
       : 0;
   })).toBe(3);
+  const compactTallCover = grid.locator('[data-book-cover="true"]').nth(2);
+  const compactTallGeometry = await compactTallCover.evaluate((cover) => {
+    const visual = cover.closest<HTMLElement>('[data-bookshelf-book-visual]');
+    const coverStyles = getComputedStyle(cover);
+    return {
+      coverHeight: Number.parseFloat(coverStyles.height),
+      visualWidth: visual ? Number.parseFloat(getComputedStyle(visual).width) : 0
+    };
+  });
+  expect(
+    Math.abs(compactTallGeometry.coverHeight - compactTallGeometry.visualWidth * 1.5),
+    JSON.stringify(compactTallGeometry)
+  ).toBeLessThan(0.5);
+  expect(compactTallGeometry.visualWidth).not.toBeCloseTo(layout.coverVisualWidths[2] ?? 0, 1);
   await expect(grid.getByTestId('bookshelf-ledge')).toHaveCount(9);
 });
 
@@ -993,8 +1073,9 @@ test('all-books shelves load the next batch while scrolling down', async ({ page
     status: '未读',
     statusValue: 'UNREAD',
     progress: 0,
+    availableMediaKinds: ['EBOOK'],
     tags: [],
-    coverUrl: '',
+    coverUrl: `/api/works/continuous-work-${index + 1}/cover?size=medium`,
     gradient: 'from-orange-100 to-stone-200'
   }));
 
@@ -1078,7 +1159,8 @@ test('desktop book list opens details from both the cover and title', async ({ p
           gradient: book.gradient,
           coverStatus: 'PENDING',
           coverUrl: book.coverUrl,
-          availableMediaKinds: book.availableMediaKinds
+          availableMediaKinds: book.availableMediaKinds,
+          progress: 64
       }
       : book;
     const responseBooks = requestUrl.searchParams.get('view') === 'bookshelf' ? [responseBook] : managementBooks;
@@ -1192,9 +1274,9 @@ test('desktop book list opens details from both the cover and title', async ({ p
   await page.getByRole('button', { name: '清空', exact: true }).click();
 
   await page.getByRole('button', { name: '查看《桌面列表入口测试》封面' }).click();
-  await expect(page).toHaveURL(/\/works\/desktop-list-work$/);
+  await expect(page).toHaveURL((url) => url.pathname === '/works/desktop-list-work' && url.searchParams.get('returnTo') === '/library?sortDirection=asc');
 
   await page.goto('/library');
   await page.getByRole('button', { name: '查看《桌面列表入口测试》详情' }).click();
-  await expect(page).toHaveURL(/\/works\/desktop-list-work$/);
+  await expect(page).toHaveURL((url) => url.pathname === '/works/desktop-list-work' && url.searchParams.get('returnTo') === '/library');
 });

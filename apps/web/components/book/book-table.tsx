@@ -23,6 +23,7 @@ function localDateLabel(value: string | null | undefined, fallback: string, loca
 
 export function BookTable({
   books,
+  onOpen,
   onDelete,
   selectable = false,
   selectedIds = [],
@@ -35,6 +36,7 @@ export function BookTable({
   onSort
 }: {
   books: ManagementWorkSummary[];
+  onOpen?: (book: ManagementWorkSummary) => void;
   onDelete?: (book: ManagementWorkSummary) => void;
   selectable?: boolean;
   selectedIds?: string[];
@@ -54,6 +56,11 @@ export function BookTable({
   const anchorIndexRef = useRef<number | null>(null);
   const dragRef = useRef<{ active: boolean; mode: 'select' | 'deselect'; visited: Set<string> }>({ active: false, mode: 'select', visited: new Set() });
   const mobileDeleteSwipe = useMobileDeleteSwipe(Boolean(onDelete));
+
+  function openBook(book: ManagementWorkSummary) {
+    if (onOpen) onOpen(book);
+    else router.push(`/works/${encodeURIComponent(book.id)}`);
+  }
 
   useEffect(() => {
     selectedRef.current = new Set(selectedIds);
@@ -119,7 +126,7 @@ export function BookTable({
 
   function openMobileBookDetails(event: ReactMouseEvent<HTMLButtonElement>, book: ManagementWorkSummary) {
     event.stopPropagation();
-    if (mobileDeleteSwipe.consumeClick(book.id)) router.push(`/works/${book.id}`);
+    if (mobileDeleteSwipe.consumeClick(book.id)) openBook(book);
   }
 
   function mediaLabel(book: ManagementWorkSummary) {
@@ -251,11 +258,11 @@ export function BookTable({
                 {selectable ? <td className="p-4"><input type="checkbox" checked={selectedIds.includes(book.id)} onChange={() => onSelect?.(book)} className="h-4 w-4 accent-[#EF4D2F]" aria-label={i18nAttribute(selectedIds.includes(book.id) ? "取消选择《{value0}》" : "选择《{value0}》", { value0: book.title })} /></td> : null}
                 <td className="overflow-hidden p-3">
                   <div className="flex min-w-0 items-center gap-3">
-                    <button type="button" onClick={() => router.push(`/works/${book.id}`)} className="shrink-0 rounded-md outline-none transition hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-[#F6B7A5]" aria-label={i18nAttribute("查看《{value0}》封面", { value0: book.title })}>
+                    <button type="button" onClick={() => openBook(book)} className="shrink-0 rounded-md outline-none transition hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-[#F6B7A5]" aria-label={i18nAttribute("查看《{value0}》封面", { value0: book.title })}>
                       <Cover book={book} className="h-16 w-11 rounded-md" small />
                     </button>
                     <div className="min-w-0">
-                      <button data-i18n-skip type="button" onClick={() => router.push(`/works/${book.id}`)} className="block w-full truncate text-left font-medium text-[#272421] outline-none transition hover:text-[#D94724] hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-[#F6B7A5]" aria-label={i18nAttribute("查看《{value0}》详情", { value0: book.title })}>{book.title}</button>
+                      <button data-i18n-skip type="button" onClick={() => openBook(book)} className="block w-full truncate text-left font-medium text-[#272421] outline-none transition hover:text-[#D94724] hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-[#F6B7A5]" aria-label={i18nAttribute("查看《{value0}》详情", { value0: book.title })}>{book.title}</button>
                     </div>
                   </div>
                 </td>

@@ -1,5 +1,10 @@
 import { useState, type ReactNode } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import {
+  Pressable,
+  StyleSheet,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 
 import { useI18n } from '../../../shared/i18n/public';
 import {
@@ -93,14 +98,15 @@ export function LibraryHomeScreen({
             accessibilityState={{ selected: themeMode === 'dark' }}
             icon={
               <AppIcon
-                color={theme.colors.tint}
+                color={theme.colors.text}
                 decorative
                 name="sun"
                 size={theme.control.iconLarge}
               />
             }
             onPress={onToggleTheme}
-            tone="tint"
+            shape="circle"
+            testID="home-theme-toggle"
           />
         }
       />
@@ -128,17 +134,24 @@ export function LibraryHomeScreen({
             />
           )}
           {state.data.continueReading === null ? null : (
-            <ContinueReadingCard
-              book={state.data.continueReading}
-              {...(coverSource === undefined
-                ? {}
-                : {
-                    coverSource: coverSource(
-                      state.data.continueReading,
-                    ),
-                  })}
-              onContinue={() => setReadingUnavailable(true)}
-            />
+            <View style={{ gap: theme.spacing.md }}>
+              <SectionHeader
+                actionLabel={t('library.home.seeAll')}
+                onAction={onOpenBooks}
+                title={t('library.home.continue')}
+              />
+              <ContinueReadingCard
+                book={state.data.continueReading}
+                {...(coverSource === undefined
+                  ? {}
+                  : {
+                      coverSource: coverSource(
+                        state.data.continueReading,
+                      ),
+                    })}
+                onContinue={() => setReadingUnavailable(true)}
+              />
+            </View>
           )}
           {readingUnavailable ? (
             <InlineNotice
@@ -159,6 +172,7 @@ export function LibraryHomeScreen({
                   t('library.book.coverLabel', { title: book.title })
                 }
                 emptyLabel={t('library.books.empty')}
+                titleLineLimit={1}
                 view="grid"
                 {...(coverSource === undefined ? {} : { coverSource })}
               />
@@ -285,86 +299,114 @@ function ContinueReadingCard({
 }: ContinueReadingCardProps): ReactNode {
   const theme = useAppTheme();
   const { formatNumber, t } = useI18n();
+  const { fontScale } = useWindowDimensions();
   const progress = Math.max(0, Math.min(100, book.progressPercent));
+  const stacked = fontScale >= 1.6;
   return (
-    <View style={{ gap: theme.spacing.md }}>
-      <AppText accessibilityRole="header" variant="headline">
-        {t('library.home.continue')}
-      </AppText>
-      <SurfaceCard padding="compact">
-        <View style={[styles.continueRow, { gap: theme.spacing.md }]}>
-          <BookCover
-            accessibilityLabel={t('library.book.coverLabel', {
-              title: book.title,
-            })}
-            size="large"
-            {...(coverSource === undefined
-              ? {}
-              : { source: coverSource })}
-          />
-          <View style={[styles.flex, { gap: theme.spacing.sm }]}>
-            <View style={{ gap: theme.spacing.xxs }}>
-              <AppText numberOfLines={2} variant="headline">
-                {book.title}
-              </AppText>
-              <AppText muted numberOfLines={1} variant="caption">
-                {book.author}
-              </AppText>
-            </View>
-            <AppText muted numberOfLines={2} variant="caption">
-              {book.chapter ??
-                book.volumeTitle ??
-                t('library.home.continueFallback')}
+    <SurfaceCard padding="compact">
+      <View
+        style={[
+          styles.continueRow,
+          { gap: theme.spacing.md },
+          stacked && styles.continueColumn,
+        ]}
+      >
+        <BookCover
+          accessibilityLabel={t('library.book.coverLabel', {
+            title: book.title,
+          })}
+          size="large"
+          {...(coverSource === undefined
+            ? {}
+            : { source: coverSource })}
+        />
+        <View
+          style={[
+            styles.continueDetails,
+            { gap: theme.spacing.sm },
+            stacked && styles.continueDetailsStacked,
+          ]}
+        >
+          <View style={{ gap: theme.spacing.xxs }}>
+            <AppText numberOfLines={2} variant="headline">
+              {book.title}
             </AppText>
-            <View style={{ gap: theme.spacing.xs }}>
+            <AppText muted numberOfLines={1} variant="caption">
+              {book.author}
+            </AppText>
+          </View>
+          <View style={{ gap: theme.spacing.xxs }}>
+            <AppText muted variant="caption">
+              {t('library.home.progressValue', {
+                progress: formatNumber(Math.round(progress)),
+              })}
+            </AppText>
+            <View
+              accessibilityLabel={t('library.home.progressLabel', {
+                progress: formatNumber(Math.round(progress)),
+              })}
+              accessibilityRole="progressbar"
+              accessibilityValue={{ max: 100, min: 0, now: progress }}
+              style={[
+                styles.progressTrack,
+                {
+                  backgroundColor: theme.colors.border,
+                  borderRadius: theme.radius.compact,
+                  height: theme.spacing.xxs,
+                },
+              ]}
+            >
               <View
-                accessibilityLabel={t('library.home.progressLabel', {
-                  progress: formatNumber(Math.round(progress)),
-                })}
-                accessibilityRole="progressbar"
-                accessibilityValue={{ max: 100, min: 0, now: progress }}
                 style={[
-                  styles.progressTrack,
+                  styles.progressFill,
                   {
-                    backgroundColor: theme.colors.border,
+                    backgroundColor: theme.colors.tint,
                     borderRadius: theme.radius.compact,
-                    height: theme.spacing.xxs,
+                    width: `${progress}%`,
                   },
                 ]}
-              >
-                <View
-                  style={[
-                    styles.progressFill,
-                    {
-                      backgroundColor: theme.colors.tint,
-                      borderRadius: theme.radius.compact,
-                      width: `${progress}%`,
-                    },
-                  ]}
-                />
-              </View>
-              <AppText muted variant="caption">
-                {t('library.home.progressValue', {
-                  progress: formatNumber(Math.round(progress)),
-                })}
-              </AppText>
+              />
             </View>
-            <AppButton
-              label={t('library.home.continueAction')}
-              leadingIcon={
-                <AppIcon
-                  color={theme.colors.onAction}
-                  decorative
-                  name="play"
-                  size={theme.control.iconMedium}
-                />
-              }
-              onPress={onContinue}
-            />
           </View>
+          <Pressable
+            accessibilityLabel={t('library.home.continueAction')}
+            accessibilityRole="button"
+            hitSlop={4}
+            onPress={onContinue}
+            style={({ pressed }) => [
+              styles.continueAction,
+              {
+                borderRadius: theme.radius.control,
+                gap: theme.spacing.xs,
+                minHeight: theme.control.minimumTouchTarget,
+                paddingRight: theme.spacing.xs,
+              },
+              pressed && { backgroundColor: theme.colors.tintMuted },
+            ]}
+          >
+            <View
+              style={[
+                styles.continueActionIcon,
+                {
+                  backgroundColor: theme.colors.actionFill,
+                  borderRadius: theme.radius.control,
+                },
+              ]}
+            >
+              <AppIcon
+                color={theme.colors.onAction}
+                decorative
+                name="play"
+                size={theme.control.iconSmall}
+              />
+            </View>
+            <AppText variant="label">
+              {t('library.home.continueAction')}
+            </AppText>
+          </Pressable>
         </View>
-      </SurfaceCard>
-    </View>
+      </View>
+    </SurfaceCard>
   );
 }
 
@@ -403,6 +445,29 @@ function SectionHeader({
 }
 
 const styles = StyleSheet.create({
+  continueAction: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  continueActionIcon: {
+    alignItems: 'center',
+    height: 28,
+    justifyContent: 'center',
+    width: 28,
+  },
+  continueColumn: {
+    flexDirection: 'column',
+  },
+  continueDetails: {
+    flex: 1,
+    justifyContent: 'space-between',
+    minWidth: 0,
+  },
+  continueDetailsStacked: {
+    alignSelf: 'stretch',
+  },
   continueRow: {
     alignItems: 'flex-start',
     flexDirection: 'row',
@@ -413,9 +478,6 @@ const styles = StyleSheet.create({
   emptyIllustration: {
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  flex: {
-    flex: 1,
   },
   progressFill: {
     height: '100%',

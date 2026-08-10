@@ -49,6 +49,14 @@ test('messages translate static text, interpolated text, and surrounding JSX whi
     translateMessage('en-US', '创建下载任务：{value0}', { value0: 'Example' }),
     'Created download task: Example'
   );
+  assert.equal(
+    translateMessage('zh-CN', '查看《{value0}》，阅读进度 {value1}%', { value0: '示例', value1: 42 }),
+    '查看《示例》，阅读进度 42%'
+  );
+  assert.equal(
+    translateMessage('en-US', '查看《{value0}》，阅读进度 {value1}%', { value0: 'Example', value1: 42 }),
+    'View Example, 42% read'
+  );
   assert.equal(translateMessage('en-US', '创建下载任务：Example'), 'Created download task: Example');
 });
 

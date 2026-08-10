@@ -18,6 +18,21 @@ test('library list selects the lightweight projection required by the active vie
   assert.equal(managementUrl.searchParams.get('page'), '3');
 });
 
+test('bookshelf projection validates and preserves cover progress', () => {
+  const work = mapLibraryWorkSummary({
+    id: 'work-1',
+    title: 'Example',
+    author: 'Author',
+    coverUrl: '/api/works/work-1/cover',
+    availableMediaKinds: ['EBOOK'],
+    progress: 42.5
+  }, 'bookshelf');
+
+  assert.equal(work.projection, 'bookshelf');
+  if (work.projection !== 'bookshelf') assert.fail('expected bookshelf projection');
+  assert.equal(work.progress, 42.5);
+});
+
 test('management projection maps media and progress summaries without mediaVersions', () => {
   const work = mapLibraryWorkSummary({
     id: 'work-1',

@@ -4,6 +4,7 @@ import { ArrowLeft, BookOpen, Check, CheckCircle2, ChevronDown, ChevronLeft, Che
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { Cover } from '../../components/book/cover';
+import { CoverReadingProgress, coverReadingProgressState } from '../../components/book/cover-reading-progress';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { ContextActionMenu, type ContextMenuPosition } from '../../components/ui/context-action-menu';
@@ -15,7 +16,7 @@ import { I18nText } from '@/i18n/provider';
 import { useI18n } from '@/i18n/provider';
 import { deleteVolume, deleteWorkRecord, downloadVolumeArchive, fetchAllMediaVersionVolumes, fetchEbookChapterDetail, fetchWork, reclassifyVolume, regenerateWorkCover, runVolumeAction, runVolumeBatchAction, searchWorkTransferTargets, undoLibraryOperation, updateVolume, updateVolumeReadingStatus, uploadWorkCover, volumeFileDownloadUrl, type WorkTransferTarget } from './api/client';
 import { useVolumeWallSelection } from './application/use-volume-wall-selection';
-import { detailTabsForBook, displayVolumeNumber, formatDuration, isWorkDetailTabKey, resolvedDetailTab, selectedVolumeForDetailTab, volumesForDetailTab, workDetailTabHref } from './work-detail-tabs';
+import { detailTabsForBook, displayVolumeNumber, formatDuration, isWorkDetailTabKey, resolvedDetailTab, selectedVolumeForDetailTab, volumesForDetailTab, workDetailReturnHref, workDetailTabHref } from './work-detail-tabs';
 import { smallVolumeCoverUrl } from './volume-cover-url';
 import { KindleSendModal } from './kindle-send-modal';
 import { MetadataLookupModal } from './metadata-lookup-modal';
@@ -119,6 +120,7 @@ function VolumeWallCard({
   const router = useRouter();
   const { t } = useI18n();
   const number = displayVolumeNumber(volume, position);
+  const progress = coverReadingProgressState(volume.progress);
   const openVolume = () => {
     if (volume.readable) router.push(readerHref(volume));
   };
@@ -143,7 +145,12 @@ function VolumeWallCard({
         const bounds = event.currentTarget.getBoundingClientRect();
         onOpenContextMenu({ x: bounds.left + Math.min(bounds.width, 28), y: bounds.top + Math.min(bounds.height, 28) }, event.currentTarget);
       }}
-      aria-label={t('第 {value0} 卷', { value0: number })}
+      aria-label={progress.visible
+        ? t(volume.readerType === 'audio' ? '第 {value0} 卷，收听进度 {value1}%' : '第 {value0} 卷，阅读进度 {value1}%', {
+            value0: number,
+            value1: progress.roundedValue
+          })
+        : t('第 {value0} 卷', { value0: number })}
       aria-pressed={canManage ? selected : undefined}
       className={cn('group min-w-0 text-left', !volume.readable && !canManage && 'cursor-not-allowed opacity-50')}
     >
@@ -151,6 +158,7 @@ function VolumeWallCard({
         <Cover book={{ id: volume.id, title: volume.title, author: work.author, coverUrl: smallVolumeCoverUrl(volume.id, volume.coverUrl), gradient: work.gradient, coverStatus: '' }} className="aspect-[2/3] w-full rounded-none" size="small" />
         <span className="absolute left-2 top-2 rounded-full bg-white/90 px-2 py-0.5 text-[11px] tabular-nums text-stone-600 shadow-sm">{String(number).padStart(2, '0')}</span>
         {selected ? <span className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-[#ff4f2a] text-white shadow-sm" aria-hidden="true"><Check size={14} strokeWidth={3} /></span> : null}
+        <CoverReadingProgress progress={volume.progress} surface="volume" />
       </div>
       <span data-i18n-skip className="mt-2 block line-clamp-2 text-sm font-medium leading-5 text-stone-900">{volume.title}</span>
     </button>
@@ -314,6 +322,7 @@ function StructureVersionCard({
   mediaVersion,
   managementMode,
   canManage,
+  returnHref,
   onLoadAll,
   onRefresh
 }: {
@@ -321,6 +330,7 @@ function StructureVersionCard({
   mediaVersion: MediaVersionResource;
   managementMode: boolean;
   canManage: boolean;
+  returnHref: string;
   onLoadAll: () => Promise<void>;
   onRefresh: () => Promise<void>;
 }) {
@@ -416,7 +426,7 @@ function StructureVersionCard({
       setMovingVolumeId(null);
       feedback.success(t('卷册已转移'));
       const totalVolumes = work.mediaVersions.reduce((total, version) => total + version.volumeCount, 0);
-      if (totalVolumes <= 1) router.push('/library');
+      if (totalVolumes <= 1) router.push(returnHref);
       else await onRefresh();
     } catch (reason) {
       feedback.error(reason instanceof Error ? reason.message : t('卷册转移失败'));
@@ -704,6 +714,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
 
   const requestedTab = isWorkDetailTabKey(searchParams.get('detailTab')) ? searchParams.get('detailTab') as WorkDetailTabKey : null;
   const requestedVolumeId = searchParams.get('volumeId')?.trim() || null;
+  const returnHref = workDetailReturnHref(searchParams.get('returnTo'));
   const tab = work ? resolvedDetailTab(work, requestedTab) : 'STRUCTURE';
   const selectedVolume = work ? selectedVolumeForDetailTab(work, tab, requestedVolumeId) : null;
   const tabs = useMemo(() => work ? detailTabsForBook(work) : [], [work]);
@@ -799,7 +810,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       const nextWork = await fetchWork(bookId);
       setWork(nextWork);
       const nextVolume = selectedVolumeForDetailTab(nextWork, tab, nextWork.continueVolumeId);
-      router.replace(workDetailTabHref(nextWork.id, tab, nextVolume?.id));
+      router.replace(workDetailTabHref(nextWork.id, tab, nextVolume?.id, returnHref));
       feedback.success(t(status === 'FINISHED' ? '已标记为已读' : '已标记为未读'));
     } catch (reason) {
       feedback.error(reason instanceof Error ? reason.message : t('阅读状态更新失败'));
@@ -858,7 +869,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     try {
       await deleteWorkRecord(work.id);
       feedback.success(t('已删除图书记录'));
-      router.push('/library');
+      router.push(returnHref);
     } catch (reason) {
       feedback.error(reason instanceof Error ? reason.message : t('删除失败'));
       setWorkActionBusy(null);
@@ -900,7 +911,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const selectTab = (next: WorkDetailTabKey) => {
     if (!work) return;
     const nextVolume = selectedVolumeForDetailTab(work, next, work.continueVolumeId);
-    router.replace(workDetailTabHref(work.id, next, nextVolume?.id));
+    router.replace(workDetailTabHref(work.id, next, nextVolume?.id, returnHref));
   };
 
   const refreshWallVolumes = async () => {
@@ -960,7 +971,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
           ? await runVolumeBatchAction(work.id, { action: 'SPLIT', volumeIds })
           : await runVolumeBatchAction(work.id, { action: 'DELETE', volumeIds });
       wallSelection.clear();
-      if (result.deletedWork) router.push('/library');
+      if (result.deletedWork) router.push(returnHref);
       else await refreshWallVolumes();
       feedback.success(t(
         targetMediaKind ? '已更新 {value0} 个卷册的媒体类型' : action === 'split' ? '已拆分 {value0} 个卷册为独立作品' : '已删除 {value0} 个卷册',
@@ -974,11 +985,11 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   };
 
   if (loading && !work) return <div className="flex min-h-[60vh] items-center justify-center"><LoaderCircle className="animate-spin text-[#ff4f2a]" /></div>;
-  if (!work) return <div className="mx-auto max-w-lg p-8 text-center"><p className="text-stone-600">{error || t('作品不存在')}</p><Button className="mt-4" onClick={() => router.push('/library')}>返回书库</Button></div>;
+  if (!work) return <div className="mx-auto max-w-lg p-8 text-center"><p className="text-stone-600">{error || t('作品不存在')}</p><Button className="mt-4" onClick={() => router.push(returnHref)}>返回书库</Button></div>;
 
   return (
     <div className="w-full">
-      <button type="button" onClick={() => router.push('/library')} className="mb-6 inline-flex items-center gap-2 text-sm text-stone-600 hover:text-stone-950"><ArrowLeft size={17} /><I18nText>返回全部图书</I18nText></button>
+      <button type="button" onClick={() => router.push(returnHref)} className="mb-6 inline-flex items-center gap-2 text-sm text-stone-600 hover:text-stone-950"><ArrowLeft size={17} /><I18nText>返回全部图书</I18nText></button>
       <section className="rounded-[22px] border border-[#f1ddd3] bg-[#fffaf7] p-5 sm:p-6">
         <div className="grid gap-6 lg:grid-cols-[190px_minmax(0,1fr)] xl:grid-cols-[190px_minmax(0,1fr)_230px]">
           <Cover book={{ id: work.id, title: work.title, author: work.author, coverUrl: coverRevision > 0 && work.coverUrl ? `${work.coverUrl}${work.coverUrl.includes('?') ? '&' : '?'}v=${coverRevision}` : work.coverUrl, gradient: work.gradient, coverStatus: work.coverStatus }} className="mx-auto aspect-[2/3] w-36 rounded-xl shadow-md sm:w-[190px] lg:mx-0" size="large" priority />
@@ -1077,6 +1088,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
                 mediaVersion={mediaVersion}
                 managementMode={managementMode}
                 canManage={canManage}
+                returnHref={returnHref}
                 onLoadAll={async () => { await loadAllVolumes(mediaVersion.id); }}
                 onRefresh={async () => {
                   try {
@@ -1179,7 +1191,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         onClose={() => setTransferringWallVolumes(false)}
         onTransferred={async (deletedWork) => {
           wallSelection.clear();
-          if (deletedWork) router.push('/library');
+          if (deletedWork) router.push(returnHref);
           else await refreshWallVolumes();
         }}
       />

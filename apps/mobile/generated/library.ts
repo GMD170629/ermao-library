@@ -230,6 +230,7 @@ export type ShelfBook = {
   author: string;
   coverUrl: string;
   availableMediaKinds: MediaKind[];
+  progress: number;
 };
 
 export type ShelfCondition = {
@@ -397,6 +398,7 @@ export type WorkSearchSummary = {
   author: string;
   coverUrl: string;
   availableMediaKinds: ("EBOOK" | "COMIC" | "AUDIOBOOK")[];
+  progress: number;
 };
 
 export type WorkSummariesPayload = {
@@ -409,6 +411,7 @@ export type WorkSummary = {
   author: string;
   coverUrl: string;
   availableMediaKinds: ("EBOOK" | "COMIC" | "AUDIOBOOK")[];
+  progress: number;
 };
 
 export type WorkView = {

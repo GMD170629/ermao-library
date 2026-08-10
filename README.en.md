@@ -1,58 +1,68 @@
-# Ermao Books (ermao-books)
+# Ermao Books
 
 English | [简体中文](README.md)
 
-Ermao Books is a self-hosted digital library for individuals and families. It helps organize ebooks, PDFs, comics, and audiobooks stored on a NAS, home server, or local drive. It provides file importing and automatic conversion, library search, metadata management, online reading and audio playback, reading progress synchronization, Send to Kindle, and data backup.
+Ermao Books is a self-hosted digital library for individuals and families. It organizes ebooks, PDFs, comics, and audiobooks stored on a NAS, home server, or local drive. The system provides folder monitoring and uploads, format conversion, metadata organization, online reading and listening, progress synchronization, OPDS, Send to Kindle, and data backup.
 
-The library database, accounts, reading progress, and system settings remain on your own device. Original books stay in the directories you specify, with no dependency on third-party cloud hosting.
+The database, accounts, reading progress, and system settings remain on your own device. Original books stay in the directories you specify, with no dependency on third-party cloud hosting.
 
-## Community and Feedback
+- Current version: `0.5.2`
+- Languages: Simplified Chinese and English
+- License: [MIT](LICENSE)
+- Community and feedback: QQ group `154560969`
 
-- QQ group: `154560969`
+## Core Features
 
-## Features
+### Library and Organization
 
-### Library Management
-
-- Upload books or monitor selected folders to discover and import new files automatically.
+- Upload books or monitor multiple folders to discover and import new files automatically.
 - Search and filter by title, author, media type, format, tag, series, and reading status.
-- Organize your collection with custom shelves, reading statuses, and series.
-- Automatically identify titles, authors, covers, chapters, and volumes, with support for manual editing and intelligent metadata completion.
+- Organize books with custom shelves, smart shelves, reading statuses, and series.
+- Identify titles, authors, covers, chapters, and volumes automatically, with manual editing and intelligent metadata completion.
+- Detect duplicate files, alternate media editions, and consecutive volumes, with merge, split, transfer, and bulk organization actions.
+- Review import progress and failure reasons, then retry, rescan, or clean up tasks in bulk.
 
 ### Reading and Listening
 
-- Read EPUBs, PDFs, and comics online, with table-of-contents navigation, display settings, and multiple page-turning modes.
-- Play single-file or multi-track audiobooks, with chapter navigation, playback speed, seeking, volume, and a sleep timer.
-- Save reading and listening progress automatically and synchronize it across devices.
+- Read EPUBs, PDFs, and comics online with table-of-contents navigation, display settings, page-turning, and scrolling modes.
+- Play single-file or multi-track audiobooks with chapter navigation, playback speed, seeking, volume, and a sleep timer.
+- Save reading and listening progress automatically and synchronize it across devices signed in to the same server.
+- Download original volume files, or send EPUB and PDF files to Kindle and review delivery status.
 
-### Importing and Organization
+### Accounts, Access, and Operations
 
-- Support ebooks, PDFs, comics, and audiobooks, with automatic conversion of common text-based ebook formats during import.
-- View import progress and failure reasons, and search, filter, retry, rescan, or clean up tasks in bulk.
-- Automatically identify duplicate files, alternate editions, and consecutive volumes, with items requiring attention and metadata suggestions.
-
-### Kindle
-
-- Send EPUB or PDF files to Kindle and view delivery status.
-
-### Accounts and Data
-
-- Manage account profiles and passwords, and back up or restore the database.
-- Review import activity, Kindle delivery history, and system logs.
-- Use the responsive interface on desktop and mobile devices, or install it as a PWA.
+- First-run setup, multiple user accounts, profiles, and password management.
+- SQLite database backup, restore, and download.
+- Import activity, Kindle delivery history, system events, health checks, and log export.
+- Responsive Web access and PWA installation.
+- Optional OPDS 1.2 catalog access for browsing, search, downloads, and reading-progress synchronization in compatible readers.
+- A native iOS and Android client is under active development. Server connection, sign-in, library browsing, shelves, and imports are available; the native reader is still in progress.
 
 ## Supported Formats
 
 - Ebooks: EPUB, MOBI, AZW, AZW3, PRC, FB2, TXT
 - Documents: PDF
-- Comics: CBZ, ZIP image archives
-- Audiobooks: M4B, M4A, MP3
+- Comics: CBZ, CBR, ZIP, and RAR image archives
+- Audiobooks (common): M4B, M4A, M4R, MP3, MP2, AAC, FLAC, WAV, RF64, W64, OGG, OGA, OPUS, WEBA
+- Audiobooks (compatible import): AC3, E-AC-3, AIFF, AMR, APE, CAF, DTS, DSD, MKA, WMA, WavPack, and other audio formats recognized by `ffprobe`
+
+Audiobooks are streamed with their original encoding and are not transcoded by the server. Import support does not guarantee that every device browser can decode a format. The player checks the current browser and reports unsupported containers and codecs. General-purpose video containers and DRM audio containers are not imported as audiobooks.
 
 DRM-protected Kindle files are not supported.
 
 ## Docker Compose Installation (Recommended)
 
-The production image supports both `linux/amd64` and `linux/arm64`. Docker automatically pulls the image for your device architecture. When the latest release tag matching the root `package.json` is published, the versioned image, `gamersgu/shuku-starship-web:prod`, and `gamersgu/shuku-starship-web:latest` are updated together. Copy the complete configuration below into your NAS Docker Compose manager, or save it as `compose.yaml` and deploy it:
+The production image supports `linux/amd64` and `linux/arm64`; Docker selects the correct architecture automatically. Prepare the library and application-data directories first:
+
+```bash
+mkdir -p ermao-library/library ermao-library/data/storage
+cd ermao-library
+```
+
+- `library` stores original ebooks, PDFs, comics, and audiobooks.
+- `data/storage` stores SQLite, cover caches, logs, session secrets, and other application data.
+
+Then save the following as `compose.yaml`:
 
 ```yaml
 name: ermao-books
@@ -72,9 +82,8 @@ services:
       - "${WEB_PORT:-3000}:3000"
     volumes:
       - ${STORAGE_PATH:-./data/storage}:/app/storage
-      - ${MONITOR_HOST_PATH:-./monitor}:/monitor
-      # Add more host directories as needed:
-      # - /srv/books:/libraries/books
+      - ./library:/libraries/books
+      # Add other host libraries as needed:
       # - /srv/comics:/libraries/comics
     command: ["./scripts/start-unified-app.sh"]
     healthcheck:
@@ -85,45 +94,60 @@ services:
       start_period: 30s
 ```
 
-For command-line deployment, run this in the directory containing `compose.yaml`:
+Start the service from the directory containing `compose.yaml`:
 
 ```bash
 docker compose up -d
 ```
 
-When the installation is complete, open `http://your-server-address:3000`.
+When startup finishes, open `http://your-server-address:3000`.
 
-Watched folders are selected from the in-app directory tree and are not limited to a fixed root. To expose additional host directories, add volume mappings such as `/srv/books:/libraries/books`; the container user must be able to read them.
+### Data Directories and Permissions
 
-By default:
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `WEB_PORT` | `3000` | Host port for Web access |
+| `PUID` / `PGID` | `1000` / `1000` | Host user and group used by the container process |
+| `STORAGE_PATH` | `./data/storage` | SQLite, derived files, covers, logs, and session secrets |
 
-- The host directory `./monitor` is mounted at `/monitor` in the container for storing and monitoring original books.
-- The host directory `./data/storage` is mounted at `/app/storage` in the container for the SQLite database, derived EPUB files, cover cache, logs, and session keys.
-- The web port is `3000`, and the container runs as host user `1000:1000`.
+Library directories are not configured through environment variables. Map each host library directly to its own container path, such as `/srv/books:/libraries/books` or `/srv/comics:/libraries/comics`, then select that path as a watched folder in the application path tree. Browser-upload destinations must also be writable and must be inside an enabled watched folder.
 
-You can change these defaults with `MONITOR_HOST_PATH`, `STORAGE_PATH`, `WEB_PORT`, `PUID`, and `PGID`. The host user represented by `PUID` and `PGID` must have read and write access to both the library and data directories.
+The user represented by `PUID` and `PGID` must be able to read and write application data and upload destinations. Read-only access is sufficient for an existing library used only for scanning and reading. Do not enter a host-only path that has not been mounted into the container.
 
-To update the production image:
+When `SESSION_SECRET` is not set explicitly, the unified image generates one securely at `secrets/session-secret` inside persistent storage. Always persist `/app/storage`; do not leave the database or secrets only in the container's writable layer.
+
+Update the production image with:
 
 ```bash
 docker compose pull
 docker compose up -d
 ```
 
-Updating or rebuilding the container does not clear the mounted library and data directories.
+Updating or recreating the container does not clear mounted data. For public Internet access, place the service behind an HTTPS reverse proxy and expose only the Web entry point.
 
 ## First-Time Setup
 
-1. Open the application and follow the setup wizard to create the initial administrator account.
-2. Select `/monitor` or any other mounted, readable directory from the wizard's path tree, or configure it later under **Settings → Library Sources and Import**.
-3. Place books in the corresponding host directory, or upload ebook, comic, or audiobook files from the **All Books** page.
-4. Track parsing or conversion progress in the import tasks. When processing is complete, open the library to read or listen.
-5. Configure Douban, Bangumi, or AI metadata sources under **Smart Organization** as needed.
-6. To send books to Kindle, configure SMTP and your Kindle email address under **Email and Kindle**.
+1. Open the application and follow the wizard to create the initial administrator account.
+2. Select the mounted and readable `/libraries/books` directory from the path tree, or configure it later under **Settings → Library Sources and Import**.
+3. Place books in the corresponding host directory, or upload files from **All Books**.
+4. Track parsing and conversion in the import tasks, then open the library to read or listen.
+5. Configure Douban, Bangumi, or AI metadata providers under **Smart Organization** as needed.
+6. For Send to Kindle, configure SMTP and the Kindle email address under **Email and Kindle**.
+7. For third-party readers, enter the public URL and enable the catalog under **Settings → OPDS**.
+
+A new database has no default username or password.
 
 ## Local Development
 
-The required runtimes are Node.js 22.23.1, pnpm 9.12.2, and Python 3.11.15. The Node.js version is recorded in `.nvmrc`, and the backend Python version is recorded in `apps/api-python/.python-version`; `uv` installs or selects the appropriate interpreter automatically. Do not run the project tests with another Node.js version or with Python 3.12.
+Required runtimes:
+
+- Node.js `22.23.1` (see `.nvmrc`)
+- pnpm `9.12.2` (see the root `package.json`)
+- Python `3.11.15` (see `apps/api-python/.python-version`; managed by `uv`)
+
+Do not run project tests with another Node.js version or with Python 3.12.
+
+### Start Web, API, and Worker
 
 ```bash
 pnpm install
@@ -131,38 +155,92 @@ cp .env.example .env
 pnpm dev:test
 ```
 
-The default URL is `http://localhost:3000`. When the development database is empty, create an account through the first-time setup wizard. Default credentials are no longer provided.
+The default URL is `http://localhost:3000`. `pnpm dev:test` starts the unified gateway, Next.js, FastAPI, and the Python worker together.
 
-Common checks:
+### Start the Native Client
+
+Make sure the local service is reachable from the simulator or device, then run:
 
 ```bash
+pnpm --filter @shuku/mobile start
+# Or create and launch a native development build
+pnpm --filter @shuku/mobile ios
+pnpm --filter @shuku/mobile android
+```
+
+Native builds also require the appropriate Xcode or Android Studio toolchain.
+
+### Common Quality Checks
+
+```bash
+# Web
+pnpm --filter @shuku/web lint
 pnpm --filter @shuku/web typecheck
+pnpm --filter @shuku/web test
+pnpm --filter @shuku/web i18n:check
 pnpm --filter @shuku/web build
-cd apps/api-python && uv run --extra dev pytest -q
+
+# Python API and worker
+cd apps/api-python
+uv run --extra dev pytest -q
+
+# Mobile (after returning to the repository root)
+pnpm --filter @shuku/mobile check
+
+# Deployment and release
 pnpm fnos:validate
+pnpm release:validate
 ```
 
 ## Runtime Architecture
 
-Production uses a single unified image that runs:
+Production uses one unified image and one public port:
 
-- Next.js Web (public port `3000`)
-- FastAPI API (container-internal address `127.0.0.1:8000`)
-- Python import and monitoring worker
+```mermaid
+flowchart LR
+  C["Web / PWA / OPDS clients"] --> G["Unified HTTP gateway :3000"]
+  G -->|"Pages and static assets"| W["Next.js :3001"]
+  G -->|"/api/* and /opds/*"| A["FastAPI :8000"]
+  A --> D["SQLite and persistent storage"]
+  K["Import and monitoring worker"] --> D
+  K --> L["Watched library directories"]
+```
 
-Next.js proxies `/api/*` to FastAPI inside the container. SQLite is currently the only supported database, and the API initializes and upgrades the schema at startup.
+- Next.js and FastAPI listen only inside the container and are routed through the gateway.
+- SQLite is currently the only database; the API initializes and upgrades the schema at startup.
+- The Python worker handles folder monitoring, imports, conversions, and persistent queue tasks.
+- Original library directories and system storage are mounted separately for easier backup and migration.
 
 ## Technology Stack
 
-- Web: Next.js 14, React 18, TypeScript, Tailwind CSS
-- API: Python, FastAPI, SQLAlchemy
+- Web: Next.js 16, React 19, TypeScript, Tailwind CSS
+- Mobile: Expo 57, React Native 0.86, Expo Router
+- API: Python 3.11, FastAPI, SQLAlchemy 2, Alembic
 - Database: SQLite
-- Import and conversion: persistent Python worker, Watchdog, libmobi, EbookLib, lxml, Mutagen
-- Readers and players: EPUB.js, PDF.js, custom comic reader adapter, HTML5 Audio
+- Import and conversion: persistent Python worker, Watchdog, libmobi, EbookLib, lxml, Mutagen, FFmpeg/ffprobe
+- Readers and players: Foliate.js, PDF.js, custom comic reader adapter, HTML5 Audio
 - Tooling: pnpm Workspace, Turborepo, Playwright, Pytest
-- Deployment: Docker Compose, multi-architecture `linux/amd64` and `linux/arm64` images, PWA
+- Deployment: Docker Compose, multi-architecture `linux/amd64` and `linux/arm64` images, fnOS, PWA
+
+## Repository Layout
+
+```text
+apps/
+├── api-python/       FastAPI, domain modules, database migrations, and worker
+├── mobile/           Expo iOS and Android client
+└── web/              Next.js Web application and PWA
+packages/
+└── reader-core/      Cross-client reader state and contracts
+deploy/
+└── fnos/             fnOS application template and build documentation
+release-notes/        Release notes and update feed
+scripts/              Local development, validation, publishing, and unified runtime scripts
+```
 
 ## More Documentation
 
 - [Python API, converters, and worker](apps/api-python/README.md)
+- [Mobile visual and interaction guidelines (Chinese)](docs/mobile-app-design-guidelines.md)
+- [Business-code layering and refactoring policy](docs/business-code-layering-and-refactoring.md)
 - [fnOS template and local build](deploy/fnos/README.md)
+- [Release notes](release-notes/README.md)

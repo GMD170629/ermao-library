@@ -2,10 +2,32 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  compactNavigationVerticalPadding,
   shellRouteDefinitions,
   shellRouteForPath,
   shouldUseExpandedNavigation,
 } from './navigation';
+
+test('compact navigation redistributes safe-area space without changing its total height', () => {
+  assert.deepEqual(
+    compactNavigationVerticalPadding({
+      bottomInset: 34,
+      edgePadding: 4,
+      maximumSafeAreaOverlap: 16,
+      minimumSafeBottomClearance: 8,
+    }),
+    { paddingBottom: 22, paddingTop: 20 },
+  );
+  assert.deepEqual(
+    compactNavigationVerticalPadding({
+      bottomInset: 0,
+      edgePadding: 4,
+      maximumSafeAreaOverlap: 16,
+      minimumSafeBottomClearance: 8,
+    }),
+    { paddingBottom: 4, paddingTop: 4 },
+  );
+});
 
 test('shell routes keep stable destinations and semantic icons', () => {
   assert.deepEqual(shellRouteDefinitions.home, {

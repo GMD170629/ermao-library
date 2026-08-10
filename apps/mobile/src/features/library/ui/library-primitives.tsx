@@ -35,7 +35,7 @@ export function BookCover({
   const theme = useAppTheme();
   const width =
     size === 'large'
-      ? theme.spacing.xxxl * 2 + theme.spacing.lg
+      ? theme.spacing.xxxl * 2 + theme.spacing.xs
       : size === 'medium'
         ? theme.spacing.xxxl * 2
         : theme.control.regularHeight;
@@ -271,6 +271,7 @@ export type BookCollectionProps = Readonly<{
   coverAccessibilityLabel(book: LibraryBook): string;
   coverSource?(book: LibraryBook): LibraryCoverSource;
   emptyLabel: string;
+  titleLineLimit?: 1 | 2;
   view: LibraryView;
 }>;
 
@@ -279,6 +280,7 @@ export function BookCollection({
   coverAccessibilityLabel,
   coverSource,
   emptyLabel,
+  titleLineLimit = 2,
   view,
 }: BookCollectionProps): ReactNode {
   const theme = useAppTheme();
@@ -298,6 +300,7 @@ export function BookCollection({
             book={book}
             coverAccessibilityLabel={coverAccessibilityLabel(book)}
             key={book.id}
+            titleLineLimit={titleLineLimit}
             {...(coverSource === undefined
               ? {}
               : { coverSource: coverSource(book) })}
@@ -330,6 +333,7 @@ export function BookCollection({
           coverAccessibilityLabel={coverAccessibilityLabel(book)}
           itemWidth={itemWidth}
           key={book.id}
+          titleLineLimit={titleLineLimit}
           {...(coverSource === undefined
             ? {}
             : { coverSource: coverSource(book) })}
@@ -343,12 +347,14 @@ type BookItemProps = Readonly<{
   book: LibraryBook;
   coverAccessibilityLabel: string;
   coverSource?: LibraryCoverSource;
+  titleLineLimit: 1 | 2;
 }>;
 
 function BookListItem({
   book,
   coverAccessibilityLabel,
   coverSource,
+  titleLineLimit,
 }: BookItemProps): ReactNode {
   const theme = useAppTheme();
   return (
@@ -371,7 +377,7 @@ function BookListItem({
         {...(coverSource === undefined ? {} : { source: coverSource })}
       />
       <View style={[styles.flex, { gap: theme.spacing.xxs }]}>
-        <AppText numberOfLines={2} variant="label">
+        <AppText numberOfLines={titleLineLimit} variant="label">
           {book.title}
         </AppText>
         <AppText muted numberOfLines={1} variant="caption">
@@ -386,6 +392,7 @@ function BookGridItem({
   book,
   coverSource,
   itemWidth,
+  titleLineLimit,
 }: BookItemProps & Readonly<{ itemWidth: number }>): ReactNode {
   const theme = useAppTheme();
   return (
@@ -425,7 +432,7 @@ function BookGridItem({
           )}
         </View>
       </View>
-      <AppText numberOfLines={2} variant="label">
+      <AppText numberOfLines={titleLineLimit} variant="label">
         {book.title}
       </AppText>
       <AppText muted numberOfLines={1} variant="caption">

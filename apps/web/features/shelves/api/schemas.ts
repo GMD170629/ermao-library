@@ -22,6 +22,13 @@ function optionalNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function progressPercent(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error('Invalid shelf book progress');
+  }
+  return Math.max(0, Math.min(100, value));
+}
+
 function stringList(value: unknown): string[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
@@ -52,6 +59,7 @@ function parseBook(value: unknown): BookshelfItem {
     author: typeof value.author === 'string' ? value.author : '',
     coverUrl: optionalString(value.coverUrl),
     availableMediaKinds: mediaKinds(value.availableMediaKinds),
+    progress: progressPercent(value.progress),
     gradient: optionalString(value.gradient),
     coverStatus: optionalString(value.coverStatus)
   };

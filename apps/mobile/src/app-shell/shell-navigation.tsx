@@ -1,10 +1,12 @@
 import { usePathname, useRouter } from 'expo-router';
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useI18n } from '../shared/i18n/public';
 import { AppIcon, AppText, useAppTheme } from '../shared/ui/public';
 import {
+  compactNavigationVerticalPadding,
   shellRouteDefinitions,
   shellRouteForPath,
   shellRoutes,
@@ -21,7 +23,14 @@ export function ShellNavigation({
   const { t } = useI18n();
   const pathname = usePathname();
   const router = useRouter();
+  const safeAreaInsets = useSafeAreaInsets();
   const selectedRoute = shellRouteForPath(pathname);
+  const compactPadding = compactNavigationVerticalPadding({
+    bottomInset: safeAreaInsets.bottom,
+    edgePadding: theme.spacing.xxs,
+    maximumSafeAreaOverlap: theme.spacing.md,
+    minimumSafeBottomClearance: theme.spacing.xs,
+  });
 
   return (
     <View
@@ -29,6 +38,7 @@ export function ShellNavigation({
       accessibilityRole="tablist"
       style={[
         expanded ? styles.expanded : styles.compact,
+        !expanded && compactPadding,
         {
           backgroundColor: theme.colors.card,
           borderColor: theme.colors.border,
@@ -56,7 +66,7 @@ export function ShellNavigation({
             style={({ pressed }) => [
               styles.item,
               expanded ? styles.expandedItem : styles.compactItem,
-              expanded && selected && {
+              selected && {
                 backgroundColor: theme.colors.tintMuted,
               },
               pressed && {
@@ -92,16 +102,6 @@ export function ShellNavigation({
             >
               {label}
             </AppText>
-            {!expanded && selected ? (
-              <View
-                accessibilityElementsHidden
-                importantForAccessibility="no"
-                style={[
-                  styles.compactSelectionIndicator,
-                  { backgroundColor: theme.colors.tint },
-                ]}
-              />
-            ) : null}
           </Pressable>
         );
       })}
@@ -114,20 +114,12 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     paddingHorizontal: 6,
-    paddingVertical: 4,
   },
   compactItem: {
     flex: 1,
     gap: 2,
     minHeight: 60,
     paddingHorizontal: 4,
-  },
-  compactSelectionIndicator: {
-    borderRadius: 1,
-    bottom: 1,
-    height: 2,
-    position: 'absolute',
-    width: 24,
   },
   compactLabel: {
     textAlign: 'center',

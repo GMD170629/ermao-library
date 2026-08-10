@@ -14,6 +14,7 @@ export type IconButtonProps = Readonly<{
   disabled?: boolean;
   icon: ReactNode;
   onPress: () => void;
+  shape?: 'circle' | 'rounded';
   testID?: string;
   tone?: 'danger' | 'neutral' | 'tint';
 }>;
@@ -25,6 +26,7 @@ export function IconButton({
   disabled = false,
   icon,
   onPress,
+  shape = 'rounded',
   testID,
   tone = 'neutral',
 }: IconButtonProps): ReactNode {
@@ -51,7 +53,10 @@ export function IconButton({
         {
           backgroundColor: background,
           borderColor: theme.colors.border,
-          borderRadius: theme.radius.control,
+          borderRadius:
+            shape === 'circle'
+              ? theme.control.regularHeight / 2
+              : theme.radius.control,
           height: theme.control.regularHeight,
           width: theme.control.regularHeight,
         },

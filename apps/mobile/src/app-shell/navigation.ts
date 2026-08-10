@@ -60,3 +60,26 @@ export function shouldUseExpandedNavigation({
   const effectiveFontScale = Math.max(1, fontScale);
   return availableWidth / effectiveFontScale >= expandedMinimumWidth;
 }
+
+export function compactNavigationVerticalPadding({
+  bottomInset,
+  edgePadding,
+  maximumSafeAreaOverlap,
+  minimumSafeBottomClearance,
+}: Readonly<{
+  bottomInset: number;
+  edgePadding: number;
+  maximumSafeAreaOverlap: number;
+  minimumSafeBottomClearance: number;
+}>): Readonly<{ paddingBottom: number; paddingTop: number }> {
+  const safeBottomInset = Math.max(0, bottomInset);
+  const availableOverlap = Math.max(
+    0,
+    safeBottomInset - minimumSafeBottomClearance,
+  );
+  const overlap = Math.min(maximumSafeAreaOverlap, availableOverlap);
+  return {
+    paddingBottom: edgePadding + safeBottomInset - overlap,
+    paddingTop: edgePadding + overlap,
+  };
+}

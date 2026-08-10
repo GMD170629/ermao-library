@@ -44,23 +44,38 @@ export function Cover({
   }, [book.coverUrl, book.id, requestedSize]);
   const fallbackCoverUrl = withBasePath('/images/fallback-book-cover-v1.png');
   const [imageFailed, setImageFailed] = useState(false);
-  const [imageAspectRatio, setImageAspectRatio] = useState<number | null>(null);
 
   useEffect(() => {
     setImageFailed(false);
-    setImageAspectRatio(null);
   }, [coverUrl]);
 
   if (coverUrl && !imageFailed) {
+    if (variant === 'bookshelf') {
+      return (
+        <Image
+          data-book-cover="true"
+          data-i18n-skip
+          src={coverUrl}
+          alt={book.title}
+          width={600}
+          height={900}
+          sizes={responsiveSize}
+          unoptimized
+          className={cn('block h-auto max-h-[150cqw] w-auto max-w-full rounded-2xl', className)}
+          style={style}
+          loading={priority ? 'eager' : 'lazy'}
+          priority={priority}
+          onError={() => setImageFailed(true)}
+        />
+      );
+    }
+
     return (
       <div
         data-book-cover="true"
         data-i18n-skip
         className={cn('relative overflow-hidden rounded-2xl bg-transparent', className)}
-        style={{
-          ...style,
-          ...(variant === 'bookshelf' && imageAspectRatio ? { aspectRatio: imageAspectRatio } : {})
-        }}
+        style={style}
       >
         <Image
           src={coverUrl}
@@ -71,15 +86,28 @@ export function Cover({
           className="rounded-[inherit] object-contain object-center"
           loading={priority ? 'eager' : 'lazy'}
           priority={priority}
-          onLoad={(event) => {
-            const { naturalWidth, naturalHeight } = event.currentTarget;
-            if (variant === 'bookshelf' && naturalWidth > 0 && naturalHeight > 0) {
-              setImageAspectRatio(naturalWidth / naturalHeight);
-            }
-          }}
           onError={() => setImageFailed(true)}
         />
       </div>
+    );
+  }
+
+  if (variant === 'bookshelf') {
+    return (
+      <Image
+        data-book-cover="true"
+        data-i18n-skip
+        src={fallbackCoverUrl}
+        alt={i18nAttribute("{value0}的缺省封面", { value0: book.title })}
+        width={600}
+        height={900}
+        sizes={responsiveSize}
+        unoptimized
+        className={cn('block h-auto max-h-[150cqw] w-auto max-w-full rounded-2xl bg-[#252421] shadow-sm', className)}
+        style={style}
+        loading={priority ? 'eager' : 'lazy'}
+        priority={priority}
+      />
     );
   }
 

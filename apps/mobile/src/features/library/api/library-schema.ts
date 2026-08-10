@@ -37,7 +37,7 @@ const CONTINUE_KEYS = new Set([
 const WORKS_KEYS = new Set(['books', 'page', 'pageSize', 'total', 'totalPages']);
 const WORK_SUMMARIES_KEYS = new Set(['books']);
 const BOOK_KEYS = new Set([
-  'id', 'title', 'author', 'coverUrl', 'availableMediaKinds',
+  'id', 'title', 'author', 'coverUrl', 'availableMediaKinds', 'progress',
 ]);
 const MANAGEMENT_BOOK_KEYS = new Set([
   'id', 'title', 'author', 'gradient', 'coverStatus', 'coverUrl', 'seriesName',
@@ -166,9 +166,12 @@ function decodeBook(value: unknown): LibraryBook | null {
   const author = stringValue(value.author, 1_024);
   const coverUrl = stringValue(value.coverUrl, 2_048);
   const kinds = mediaKinds(value.availableMediaKinds);
+  const progress = value.progress === undefined
+    ? undefined
+    : finiteNumberInRange(value.progress, 0, 100);
   if (
     id === null || title === null || author === null || coverUrl === null ||
-    kinds === null
+    kinds === null || progress === null
   ) {
     return null;
   }

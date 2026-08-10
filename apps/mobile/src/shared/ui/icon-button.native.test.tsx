@@ -5,6 +5,29 @@ import { IconButton } from './icon-button';
 import { AppThemeProvider } from './theme-provider';
 
 describe('IconButton', () => {
+  test('supports the circular neutral appearance used by page headers', async () => {
+    const rendered = await render(
+      <AppThemeProvider colorScheme="light">
+        <IconButton
+          accessibilityLabel="Change appearance"
+          icon={<Text>icon</Text>}
+          onPress={jest.fn()}
+          shape="circle"
+        />
+      </AppThemeProvider>,
+    );
+
+    expect(
+      rendered.getByRole('button', { name: 'Change appearance' }),
+    ).toHaveStyle({
+      backgroundColor: '#FFFFFF',
+      borderColor: '#E4D9D2',
+      borderRadius: 24,
+      height: 48,
+      width: 48,
+    });
+  });
+
   test('merges selected and busy accessibility state with its disabled state', async () => {
     const onPress = jest.fn();
     const rendered = await render(

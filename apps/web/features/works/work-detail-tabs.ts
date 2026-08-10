@@ -18,10 +18,24 @@ export function isWorkDetailTabKey(value: unknown): value is WorkDetailTabKey {
   return typeof value === 'string' && DEFAULT_WORK_DETAIL_TAB_ORDER.includes(value as WorkDetailTabKey);
 }
 
-export function workDetailTabHref(workId: string, tab: WorkDetailTabKey, volumeId?: string | null): string {
+export function workDetailTabHref(workId: string, tab: WorkDetailTabKey, volumeId?: string | null, returnTo?: string | null): string {
   const query = new URLSearchParams({ detailTab: tab });
   if (volumeId) query.set('volumeId', volumeId);
+  if (returnTo) query.set('returnTo', workDetailReturnHref(returnTo));
   return `/works/${encodeURIComponent(workId)}?${query}`;
+}
+
+export function workDetailReturnHref(value: unknown): string {
+  if (typeof value !== 'string' || (!value.startsWith('/library?') && value !== '/library')) {
+    return '/library';
+  }
+  try {
+    const url = new URL(value, 'https://local.invalid');
+    if (url.origin !== 'https://local.invalid' || url.pathname !== '/library') return '/library';
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return '/library';
+  }
 }
 
 export function normalizeWorkDetailTabOrder(value: unknown): WorkDetailTabKey[] {

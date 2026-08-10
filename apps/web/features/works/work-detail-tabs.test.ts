@@ -8,6 +8,7 @@ import {
   normalizeWorkDetailTabOrder,
   resolvedDetailTab,
   selectedVolumeForDetailTab,
+  workDetailReturnHref,
   workDetailTabHref
 } from './work-detail-tabs';
 
@@ -25,6 +26,16 @@ test('normalizes saved order and restores missing media tabs', () => {
 
 test('deep links use detailTab and volumeId only', () => {
   assert.equal(workDetailTabHref('work/下一部', 'EBOOK', 'volume/1'), '/works/work%2F%E4%B8%8B%E4%B8%80%E9%83%A8?detailTab=EBOOK&volumeId=volume%2F1');
+});
+
+test('detail tab links preserve a validated library return target', () => {
+  assert.equal(
+    workDetailTabHref('work-1', 'COMIC', null, '/library?status=READING&sort=title'),
+    '/works/work-1?detailTab=COMIC&returnTo=%2Flibrary%3Fstatus%3DREADING%26sort%3Dtitle'
+  );
+  assert.equal(workDetailReturnHref('https://example.test/library'), '/library');
+  assert.equal(workDetailReturnHref('//example.test/library'), '/library');
+  assert.equal(workDetailReturnHref('/settings'), '/library');
 });
 
 test('shows actual media tabs and the structure tab only', () => {

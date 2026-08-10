@@ -1,5 +1,10 @@
 """Public application and domain contracts for the library capability."""
 
+from app.modules.library.application.bookshelf import (
+    BookshelfItemQueryPort,
+    BookshelfItemSummary,
+    ListBookshelfItems,
+)
 from app.modules.library.application.catalog import (
     CATALOG_FACET_KINDS,
     CatalogFacet,
@@ -57,12 +62,6 @@ from app.modules.library.application.work_list import (
 from app.modules.library.domain.facets import FACET_KINDS
 from app.modules.library.presentation.schemas import WorkView
 from app.modules.library.presentation.views import (
-    _bookshelf_item_view as bookshelf_item_view,
-)
-from app.modules.library.presentation.views import (
-    _bookshelf_item_views as bookshelf_item_views,
-)
-from app.modules.library.presentation.views import (
     _get_work as get_work,
 )
 from app.modules.library.presentation.views import (
@@ -70,6 +69,10 @@ from app.modules.library.presentation.views import (
 )
 from app.modules.library.presentation.views import (
     _work_view as work_view,
+)
+from app.modules.library.presentation.views import (
+    bookshelf_item_view,
+    bookshelf_item_views,
 )
 from app.modules.library.presentation.work_ops import (
     _collect_import_linked_library_scope_paths as collect_import_linked_library_scope_paths,
@@ -91,6 +94,8 @@ __all__ = [
     "CATALOG_FACET_KINDS",
     "FACET_KINDS",
     "LIBRARY_GROUPING_KINDS",
+    "BookshelfItemQueryPort",
+    "BookshelfItemSummary",
     "CatalogFacet",
     "CatalogFacetPage",
     "CatalogFile",
@@ -117,6 +122,7 @@ __all__ = [
     "LibraryGroupingPage",
     "LibraryGroupingQueryPort",
     "LibraryUnitOfWork",
+    "ListBookshelfItems",
     "ListCatalogFacets",
     "ListCatalogWorks",
     "ListLibraryGroupings",

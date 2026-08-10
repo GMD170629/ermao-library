@@ -35,6 +35,12 @@ const book: LibraryBook = {
   mediaKinds: ['EBOOK'],
 };
 
+const recentBook: LibraryBook = {
+  ...book,
+  id: 'book-2',
+  title: 'A recently added title that must stay on one line',
+};
+
 const shelf: ShelfSummary = {
   id: 'shelf-1',
   name: 'Weekend reading',
@@ -73,6 +79,7 @@ describe('mobile library screens', () => {
   });
 
   test('renders dynamic Home data and keeps book content noninteractive', async () => {
+    const onOpenBooks = jest.fn();
     const onToggleTheme = jest.fn();
     const home: HomeState = {
       phase: 'ready',
@@ -94,7 +101,7 @@ describe('mobile library screens', () => {
           volumeTitle: null,
           lastReadAt: '2026-08-09T00:00:00Z',
         },
-        recentBooks: [book],
+        recentBooks: [recentBook],
         unavailableSections: ['unread'],
       },
     };
@@ -114,7 +121,7 @@ describe('mobile library screens', () => {
             },
           }}
           onImport={noOperation}
-          onOpenBooks={noOperation}
+          onOpenBooks={onOpenBooks}
           onRefresh={noOperation}
           onRetry={noOperation}
           onToggleTheme={onToggleTheme}
@@ -137,16 +144,36 @@ describe('mobile library screens', () => {
       ),
     ).toBeOnTheScreen();
     expect(
-      view.getByLabelText('Pride and Prejudice, Jane Austen'),
+      view.getByLabelText(`${recentBook.title}, ${recentBook.author}`),
     ).not.toHaveProp('accessibilityRole', 'button');
     expect(
       view.queryByRole('button', { name: /Pride and Prejudice/u }),
     ).toBeNull();
+    expect(view.queryByText('Chapter 3')).toBeNull();
+    expect(view.getByText(recentBook.title)).toHaveProp(
+      'numberOfLines',
+      1,
+    );
+
+    const homeTitle = view.getByRole('header', { name: 'Home' });
+    const themeToggle = view.getByTestId('home-theme-toggle');
+    expect(homeTitle.parent).toBe(themeToggle.parent);
 
     await fireEvent.press(
       view.getByRole('button', { name: 'Use dark appearance' }),
     );
     expect(onToggleTheme).toHaveBeenCalledTimes(1);
+
+    const seeAllActions = view.getAllByRole('button', {
+      name: 'See all',
+    });
+    expect(seeAllActions).toHaveLength(2);
+    const continueSeeAll = seeAllActions[0];
+    if (continueSeeAll === undefined) {
+      throw new Error('Expected the continue-reading See all action');
+    }
+    await fireEvent.press(continueSeeAll);
+    expect(onOpenBooks).toHaveBeenCalledTimes(1);
 
     await fireEvent.press(
       view.getByRole('button', { name: 'Continue reading' }),

@@ -18,3 +18,23 @@ test('parses a collection shelf at the API boundary', () => {
   assert.equal(shelf.shelfCount, 2);
   assert.deepEqual(shelf.memberShelfIds, ['shelf-a', 'shelf-b']);
 });
+
+test('parses a shelf book with bounded reading progress', () => {
+  const shelf = parseShelfView({
+    id: 'shelf-reading',
+    name: '在读',
+    kind: 'STATIC',
+    books: [{
+      id: 'work-1',
+      title: 'Example',
+      author: 'Author',
+      coverUrl: '/api/works/work-1/cover',
+      availableMediaKinds: ['EBOOK'],
+      progress: 37.5
+    }],
+    createdAt: '1970-01-01T00:00:00Z',
+    updatedAt: '1970-01-01T00:00:00Z'
+  });
+
+  assert.equal(shelf.books?.[0]?.progress, 37.5);
+});

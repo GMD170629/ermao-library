@@ -869,6 +869,7 @@ def test_shelf_list_is_summary_and_detail_is_lightweight_paginated(client, db_se
         "author",
         "coverUrl",
         "availableMediaKinds",
+        "progress",
     }
 
     statements: list[str] = []
@@ -1512,6 +1513,10 @@ def test_works_recent_read_sort_uses_latest_volume_progress_across_pages(
     assert [book["id"] for book in recent_reading["data"]["books"]] == [
         "work-new",
         "work-old",
+    ]
+    assert [book["progress"] for book in recent_reading["data"]["books"]] == [
+        50,
+        80,
     ]
 
     continue_item = client.get("/api/dashboard/continue-reading").json()["data"]["item"]

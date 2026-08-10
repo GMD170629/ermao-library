@@ -46,6 +46,7 @@ from app.models.library import (
     LibraryVolume,
     UserMediaHistory,
 )
+from app.modules.library.application.bookshelf import BookshelfItemSummary
 from app.modules.reader.public import (
     build_volume_content_fingerprint,
 )
@@ -413,48 +414,26 @@ def _bookshelf_work_view(
     }
 
 
-def _bookshelf_item_view(db: Session, work: dict[str, Any]) -> dict[str, Any]:
-    return _bookshelf_item_view_with_media_kinds(
-        work,
-        _available_media_kinds(db, str(work["id"])),
-    )
-
-
-def _bookshelf_item_view_with_media_kinds(
-    work: dict[str, Any], media_kinds: list[str]
-) -> dict[str, Any]:
+def bookshelf_item_view(item: BookshelfItemSummary) -> dict[str, Any]:
     return {
-        "id": work["id"],
-        "title": work.get("title") or "未命名作品",
-        "author": work.get("author") or "未知作者",
-        "coverUrl": _cover_url("works", work["id"], work, size="medium"),
-        "availableMediaKinds": media_kinds,
+        "id": item.id,
+        "title": item.title,
+        "author": item.author,
+        "coverUrl": _cover_url(
+            "works",
+            item.id,
+            {"coverPath": item.cover_path, "updatedAt": item.updated_at},
+            size="medium",
+        ),
+        "availableMediaKinds": list(item.available_media_kinds),
+        "progress": item.progress,
     }
 
 
-def _bookshelf_item_views(
-    db: Session, works: list[dict[str, Any]]
+def bookshelf_item_views(
+    items: tuple[BookshelfItemSummary, ...],
 ) -> list[dict[str, Any]]:
-    media_kinds_by_work = _available_media_kinds_by_work(
-        db, [str(work["id"]) for work in works]
-    )
-    return [
-        _bookshelf_item_view_with_media_kinds(
-            work,
-            media_kinds_by_work.get(str(work["id"]), []),
-        )
-        for work in works
-    ]
-
-
-def _book_search_item_view(db: Session, work: dict[str, Any]) -> dict[str, Any]:
-    return _bookshelf_item_view(db, work)
-
-
-def _book_search_item_views(
-    db: Session, works: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    return _bookshelf_item_views(db, works)
+    return [bookshelf_item_view(item) for item in items]
 
 
 def _management_work_views(

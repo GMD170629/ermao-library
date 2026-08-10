@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
+from app.bootstrap.library import bookshelf_items as get_bookshelf_items
 from app.bootstrap.shelf import shelf_store
 from app.core.authorization import (
     AuthorizationContext,
@@ -181,9 +182,16 @@ def _shelf_work_ids(
     return shelf_store.filter_visible_work_ids(db, work_ids, visibility)
 
 
-def _shelf_book_views(db: Session, work_ids: list[str]) -> list[dict[str, Any]]:
-    works = shelf_store.list_work_cards(db, work_ids)
-    return bookshelf_item_views(db, works)
+def _shelf_book_views(
+    db: Session,
+    work_ids: list[str],
+    context: AuthorizationContext,
+) -> list[dict[str, Any]]:
+    summaries = get_bookshelf_items(db).execute(
+        context=context,
+        work_ids=tuple(work_ids),
+    )
+    return bookshelf_item_views(summaries)
 
 
 def _shelf_base_view(shelf: dict[str, Any]) -> dict[str, Any]:
@@ -231,7 +239,11 @@ def _shelf_summary_view(
     return {
         **_shelf_base_view(shelf),
         "bookCount": total,
-        "books": _shelf_book_views(db, work_ids),
+        "books": _shelf_book_views(
+            db,
+            work_ids,
+            context or authorization_context(db, user),
+        ),
         "collectionIds": collection_ids
         if collection_ids is not None
         else shelf_store.list_collection_ids_by_shelf_ids(
@@ -313,7 +325,7 @@ def _shelf_detail_view(
     result = {
         **_shelf_base_view(shelf),
         "bookCount": total,
-        "books": _shelf_book_views(db, page_ids),
+        "books": _shelf_book_views(db, page_ids, context),
         "collectionIds": shelf_store.list_collection_ids_by_shelf_ids(
             db,
             [str(shelf["id"])],

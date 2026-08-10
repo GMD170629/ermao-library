@@ -17,7 +17,9 @@ from app.models.library import (
     LibraryWorkFacet,
     UserMediaHistory,
 )
+from app.modules.library.application.bookshelf import ListBookshelfItems
 from app.modules.library.application.work_list import WorkListQuery
+from app.modules.library.infrastructure.bookshelf import SqlAlchemyBookshelfItemQueries
 from app.modules.library.infrastructure.dashboard import (
     continue_reading_progress,
     recent_books,
@@ -26,8 +28,6 @@ from app.modules.library.infrastructure.groupings import (
     SqlAlchemyLibraryGroupingQueries,
 )
 from app.modules.library.infrastructure.work_list import list_works
-from app.modules.library.presentation.views import _bookshelf_item_views
-
 
 _ResultT = TypeVar("_ResultT")
 
@@ -90,7 +90,9 @@ def _seed_manual_library(db: Session, *, work_count: int) -> None:
     db.commit()
 
 
-def _sqlite_vm_steps(db: Session, operation: Callable[[], _ResultT]) -> tuple[_ResultT, int]:
+def _sqlite_vm_steps(
+    db: Session, operation: Callable[[], _ResultT]
+) -> tuple[_ResultT, int]:
     driver_connection = db.connection().connection.driver_connection
     callback_count = 0
 
@@ -174,12 +176,15 @@ def test_member_recent_import_listing_has_bounded_query_work(
     engine = db_session.get_bind()
     event.listen(engine, "before_cursor_execute", count_selects)
     try:
-        views = _bookshelf_item_views(db_session, recent)
+        views = ListBookshelfItems(SqlAlchemyBookshelfItemQueries(db_session)).execute(
+            context=context,
+            work_ids=tuple(str(work["id"]) for work in recent),
+        )
     finally:
         event.remove(engine, "before_cursor_execute", count_selects)
 
     assert len(views) == 10
-    assert select_count == 1
+    assert select_count == 2
 
     filtered_result, filtered_vm_steps = _sqlite_vm_steps(
         db_session,

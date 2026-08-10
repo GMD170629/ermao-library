@@ -13,8 +13,9 @@ import {
 } from 'react';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import { Cover, type CoverBook } from './cover';
+import { CoverReadingProgress, coverReadingProgressState } from './cover-reading-progress';
 
-export type BookshelfItem = CoverBook & { id: string };
+export type BookshelfItem = CoverBook & { id: string; progress: number };
 
 function shelfRows<T extends BookshelfItem>(books: T[], columns: number) {
   const rows: T[][] = [];
@@ -189,37 +190,41 @@ function ShelfBook<T extends BookshelfItem>({
   priority?: boolean;
 }) {
   const { t } = useAttributeI18n();
+  const progress = coverReadingProgressState(book.progress);
 
   return (
     <button
       type="button"
       onClick={() => onOpen(book)}
       onDragStart={(event) => event.preventDefault()}
-      aria-label={t("查看《{value0}》", { value0: book.title })}
+      aria-label={progress.visible
+        ? t("查看《{value0}》，阅读进度 {value1}%", {
+            value0: book.title,
+            value1: String(progress.roundedValue)
+          })
+        : t("查看《{value0}》", { value0: book.title })}
       className="group relative z-20 flex w-full min-w-0 origin-bottom items-end justify-center rounded-md outline-none hover:z-30 focus-visible:z-30 focus-visible:ring-2 focus-visible:ring-[#F6B7A5] focus-visible:ring-offset-4 focus-visible:ring-offset-[#FBFAF8]"
     >
       <span
         data-bookshelf-book-visual
-        className="relative block w-full origin-bottom transition-transform duration-200 ease-out group-hover:scale-[1.03] group-focus-visible:scale-[1.03] motion-reduce:transform-none motion-reduce:transition-none"
+        className="relative mx-auto flex w-full max-w-full origin-bottom items-end justify-center [container-type:inline-size] transition-transform duration-200 ease-out group-hover:scale-[1.03] group-focus-visible:scale-[1.03] motion-reduce:transform-none motion-reduce:transition-none"
       >
         <Cover
           book={book}
           size="small"
           variant="bookshelf"
           priority={priority}
-          className="aspect-[2/3] w-full"
           style={{
             borderRadius: '2px',
             transform: 'perspective(900px) rotateY(-0.6deg)',
             transformOrigin: 'bottom center',
             boxShadow: [
-              'inset 1px 0 0 rgba(255, 255, 255, 0.28)',
-              'inset -1px 0 0 rgba(30, 24, 20, 0.12)',
               '2px 3px 3px -2px rgba(45, 36, 30, 0.25)',
               '7px 10px 14px -10px rgba(45, 36, 30, 0.38)'
             ].join(', ')
           }}
         />
+        <CoverReadingProgress progress={book.progress} surface="bookshelf" />
       </span>
     </button>
   );

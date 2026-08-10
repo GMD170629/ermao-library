@@ -10,6 +10,7 @@ export type BookshelfWorkSummary = Readonly<{
   author: string;
   coverUrl: string;
   availableMediaKinds: MediaKind[];
+  progress: number;
 }>;
 
 export type ManagementWorkSummary = Readonly<{
@@ -59,6 +60,13 @@ function finiteNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+function progressPercent(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error('LIBRARY_WORK_SUMMARY_INVALID_progress');
+  }
+  return Math.max(0, Math.min(100, value));
+}
+
 function parseMediaKinds(value: unknown): MediaKind[] {
   if (!Array.isArray(value)) throw new Error('LIBRARY_WORK_SUMMARY_INVALID_availableMediaKinds');
   return value.map((kind) => {
@@ -75,7 +83,8 @@ function mapBookshelfWork(value: unknown): BookshelfWorkSummary {
     title: requiredString(item.title, 'title'),
     author: requiredString(item.author, 'author'),
     coverUrl: requiredString(item.coverUrl, 'coverUrl'),
-    availableMediaKinds: parseMediaKinds(item.availableMediaKinds)
+    availableMediaKinds: parseMediaKinds(item.availableMediaKinds),
+    progress: progressPercent(item.progress)
   };
 }
 

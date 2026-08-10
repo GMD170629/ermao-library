@@ -293,6 +293,7 @@ class WorkSummary(HttpContractModel):
     author: str
     cover_url: str = Field(alias="coverUrl")
     available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
+    progress: float = Field(ge=0, le=100)
 
 
 class WorkSearchSummary(WorkSummary):

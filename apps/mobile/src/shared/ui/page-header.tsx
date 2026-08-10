@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { AppIcon } from './app-icon';
 import { AppText } from './app-text';
@@ -26,12 +26,12 @@ export function PageHeader({
   trailing,
 }: PageHeaderProps): ReactNode {
   const theme = useAppTheme();
-  const hasNavigation =
-    (onBack !== undefined && backLabel !== undefined) || trailing !== undefined;
+  const hasBack = onBack !== undefined && backLabel !== undefined;
+  const titleTrailing = hasBack ? undefined : trailing;
 
   return (
     <View style={{ gap: theme.spacing.lg }}>
-      {hasNavigation ? (
+      {hasBack ? (
         <View
           style={{
             alignItems: 'center',
@@ -39,23 +39,21 @@ export function PageHeader({
             minHeight: theme.control.regularHeight,
           }}
         >
-          {onBack === undefined || backLabel === undefined ? null : (
-            <IconButton
-              {...(backAccessibilityHint === undefined
-                ? {}
-                : { accessibilityHint: backAccessibilityHint })}
-              accessibilityLabel={backLabel}
-              icon={
-                <AppIcon
-                  color={theme.colors.tint}
-                  name="back"
-                  size={theme.control.iconLarge}
-                />
-              }
-              onPress={onBack}
-              tone="tint"
-            />
-          )}
+          <IconButton
+            {...(backAccessibilityHint === undefined
+              ? {}
+              : { accessibilityHint: backAccessibilityHint })}
+            accessibilityLabel={backLabel}
+            icon={
+              <AppIcon
+                color={theme.colors.tint}
+                name="back"
+                size={theme.control.iconLarge}
+              />
+            }
+            onPress={onBack}
+            tone="tint"
+          />
           <View style={{ flex: 1 }} />
           {trailing}
         </View>
@@ -66,9 +64,16 @@ export function PageHeader({
             {eyebrow}
           </AppText>
         )}
-        <AppText accessibilityRole="header" variant="largeTitle">
-          {title}
-        </AppText>
+        <View style={[styles.titleRow, { gap: theme.spacing.md }]}>
+          <AppText
+            accessibilityRole="header"
+            style={styles.title}
+            variant="largeTitle"
+          >
+            {title}
+          </AppText>
+          {titleTrailing}
+        </View>
         {description === undefined ? null : (
           <AppText muted>{description}</AppText>
         )}
@@ -76,3 +81,14 @@ export function PageHeader({
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  title: {
+    flex: 1,
+    minWidth: 0,
+  },
+  titleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+  },
+});

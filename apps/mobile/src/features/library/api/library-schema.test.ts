@@ -9,9 +9,19 @@ import {
   decodeImportSuccess,
   decodeImportTargets,
   decodePreferences,
+  decodeRecentBooks,
   decodeShelves,
   decodeUnreadTotal,
 } from './library-schema';
+
+const bookshelfBook = {
+  id: 'work-1',
+  title: '局外人',
+  author: '阿尔贝·加缪',
+  coverUrl: '/api/works/work-1/cover',
+  availableMediaKinds: ['EBOOK'],
+  progress: 66,
+};
 
 test('decodes dashboard, continue reading, books, and unread totals', () => {
   assert.deepEqual(
@@ -135,6 +145,58 @@ test('strictly rejects unknown keys and invalid nested book data', () => {
     },
   });
   assert.equal(page.ok, false);
+
+  const invalidProgress = decodeRecentBooks({
+    ok: true,
+    data: { books: [{ ...bookshelfBook, progress: 101 }] },
+  });
+  assert.equal(invalidProgress.ok, false);
+});
+
+test('accepts progress from current bookshelf summaries across library surfaces', () => {
+  const recent = decodeRecentBooks({
+    ok: true,
+    data: { books: [bookshelfBook] },
+  });
+  assert.equal(recent.ok, true);
+
+  const page = decodeBooksPage({
+    ok: true,
+    data: {
+      books: [bookshelfBook],
+      page: 1,
+      pageSize: 24,
+      total: 1,
+      totalPages: 1,
+    },
+  });
+  assert.equal(page.ok, true);
+
+  const shelves = decodeShelves({
+    ok: true,
+    data: {
+      shelves: [
+        {
+          id: 'shelf-1',
+          ownerUserId: 'user-1',
+          name: '待读清单',
+          description: null,
+          kind: 'STATIC',
+          rulesJson: '{}',
+          pinned: false,
+          createdAt: '2026-08-09T10:00:00Z',
+          updatedAt: '2026-08-09T10:00:00Z',
+          rules: {},
+          rulesStatus: 'VALID',
+          unsupportedRuleFields: [],
+          bookCount: 1,
+          books: [bookshelfBook],
+          collectionIds: [],
+        },
+      ],
+    },
+  });
+  assert.equal(shelves.ok, true);
 });
 
 test('decodes collections and static shelves into separate sections', () => {

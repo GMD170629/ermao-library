@@ -22,6 +22,9 @@ from app.api.deps import require_system_manager, require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.imports import import_http_store
 from app.bootstrap.library import (
+    bookshelf_items as get_bookshelf_items,
+)
+from app.bootstrap.library import (
     library_dashboard,
     library_facet_queries,
     library_groupings,
@@ -155,8 +158,6 @@ from app.modules.library.presentation.schemas import (
 from app.modules.library.presentation.views import (
     _active_media_view,
     _apply_remote_cover,
-    _book_search_item_views,
-    _bookshelf_item_views,
     _coerce_int,
     _cover_url,
     _finish_metadata_organize_work,
@@ -173,6 +174,7 @@ from app.modules.library.presentation.views import (
     _work_view,
     _work_views,
     _work_volume_page_view,
+    bookshelf_item_views,
 )
 from app.modules.library.presentation.work_ops import (
     _delete_work_and_storage,
@@ -398,6 +400,18 @@ def _dt(value: Any) -> str | None:
     return timestamp_ms_to_iso(value) or str(value)
 
 
+def _bookshelf_views(
+    db: Session,
+    user: User,
+    works: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    summaries = get_bookshelf_items(db).execute(
+        context=authorization_context(db, user),
+        work_ids=tuple(str(work["id"]) for work in works),
+    )
+    return bookshelf_item_views(summaries)
+
+
 @router.get("/dashboard/summary")
 def dashboard_summary(
     request: Request,
@@ -436,7 +450,7 @@ def dashboard_recent_books(
     take = min(24, max(1, limit))
     context = authorization_context(db, user)
     works = library_dashboard.recent_books(db, context, limit=take)
-    return WorkSummariesResponse(data={"books": _bookshelf_item_views(db, works)})
+    return WorkSummariesResponse(data={"books": _bookshelf_views(db, user, works)})
 
 
 @router.get("/dashboard/recent-reading")
@@ -452,7 +466,7 @@ def dashboard_recent_reading(
     take = min(24, max(1, limit))
     context = authorization_context(db, user)
     works = library_dashboard.recent_reading(db, context, user.id, limit=take)
-    return WorkSummariesResponse(data={"books": _bookshelf_item_views(db, works)})
+    return WorkSummariesResponse(data={"books": _bookshelf_views(db, user, works)})
 
 
 @router.get("/dashboard/continue-reading")
@@ -907,10 +921,8 @@ def list_works(
         start = (page - 1) * result_page_size
         page_items = work_views[start : start + result_page_size]
         book_views = (
-            _bookshelf_item_views(db, [work for work, _item_view in page_items])
-            if bookshelf_view
-            else _book_search_item_views(db, [work for work, _item_view in page_items])
-            if search_view
+            _bookshelf_views(db, user, [work for work, _item_view in page_items])
+            if bookshelf_view or search_view
             else _management_work_views(
                 db, [work for work, _item_view in page_items], user.id
             )
@@ -920,10 +932,8 @@ def list_works(
     else:
         works = result.works
         book_views = (
-            _bookshelf_item_views(db, works)
-            if bookshelf_view
-            else _book_search_item_views(db, works)
-            if search_view
+            _bookshelf_views(db, user, works)
+            if bookshelf_view or search_view
             else _management_work_views(db, works, user.id)
             if management_view
             else [_work_view(db, work, user.id) for work in works]

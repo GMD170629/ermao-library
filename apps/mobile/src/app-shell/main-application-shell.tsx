@@ -30,7 +30,11 @@ export function MainApplicationShell({
   });
   return (
     <SafeAreaView
-      edges={['top', 'right', 'bottom', 'left']}
+      edges={
+        expanded
+          ? ['top', 'right', 'bottom', 'left']
+          : ['top', 'right', 'left']
+      }
       style={[
         styles.safeArea,
         { backgroundColor: theme.colors.background },
