@@ -1,4 +1,4 @@
-const FRONTEND_RESOURCE_VERSION = '0.5.3';
+const FRONTEND_RESOURCE_VERSION = '0.5.4';
 const VERSION = `shuku-pwa-v${FRONTEND_RESOURCE_VERSION}`;
 const SHELL_CACHE = `${VERSION}-app-shell`;
 const STATIC_CACHE = `${VERSION}-static`;

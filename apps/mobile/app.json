@@ -3,7 +3,7 @@
     "name": "二毛图书",
     "slug": "shuku-starship",
     "scheme": "shuku-starship",
-    "version": "0.5.3",
+    "version": "0.5.4",
     "platforms": [
       "ios",
       "android"
