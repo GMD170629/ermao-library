@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Ermao Library</string>
+
+    <string name="server_screen_title">Connect your library</string>
+    <string name="server_screen_description">Add a self-hosted server to start reading.</string>
+    <string name="server_add_title">Add Server</string>
+    <string name="server_multiple_profiles">Save multiple servers</string>
+    <string name="server_single_active">Use one server at a time</string>
+    <string name="server_privacy_footer">Server addresses and account data stay on this device.</string>
+    <string name="server_display_name_label">Name</string>
+    <string name="server_display_name_placeholder">Home library</string>
+    <string name="server_url_label">Server address</string>
+    <string name="server_url_placeholder">https://books.example.com/library</string>
+    <string name="server_url_supporting_text">Enter the full address, including any deployment path.</string>
+    <string name="server_system_trust_title">System certificate validation</string>
+    <string name="server_system_trust_description">Default and recommended</string>
+    <string name="server_connect_action">Check and continue</string>
+    <string name="server_connecting_action">Checking server…</string>
+    <string name="server_retry_action">Check again</string>
+    <string name="server_choose_other_action">Choose another server</string>
+    <string name="server_invalid_name">Enter a server name.</string>
+    <string name="server_invalid_url">Enter a complete http or https address.</string>
+    <string name="server_connection_failed_title">Couldn’t connect to this server</string>
+    <string name="server_connection_failed_message">Check the address and network, then try again. Your entries have been kept.</string>
+    <string name="server_incompatible_title">Server update required</string>
+    <string name="server_incompatible_message">This server version is not compatible with this app. Update the server or choose another one.</string>
+
+    <string name="tls_risk_title">Certificate validation failed</string>
+    <string name="tls_risk_message">The server’s identity cannot be verified. Permanently ignoring certificate validation can expose your login credentials, session, metadata, and reading data to interception.</string>
+    <string name="tls_server_identity">%1$s\n%2$s</string>
+    <string name="tls_back_to_edit">Back to editing</string>
+    <string name="tls_ignore_action">Permanently ignore and connect</string>
+    <string name="tls_confirmation_title">Permanently ignore certificate validation?</string>
+    <string name="tls_confirmation_message">This setting applies only to %1$s. Future certificate changes for this server will not be checked.</string>
+    <string name="cancel">Cancel</string>
+
+
+    <string name="login_title">Welcome back</string>
+    <string name="login_email_label">Email</string>
+    <string name="login_password_label">Password</string>
+    <string name="login_show_password">Show password</string>
+    <string name="login_hide_password">Hide password</string>
+    <string name="login_action">Log in</string>
+    <string name="login_in_progress">Logging in…</string>
+    <string name="login_switch_server">Switch server</string>
+    <string name="login_invalid_credentials">The email or password is incorrect.</string>
+    <string name="login_temporarily_unavailable">Sign-in is temporarily unavailable. Check the connection and try again.</string>
+    <string name="login_required_email">Enter your email.</string>
+    <string name="login_required_password">Enter your password.</string>
+    <string name="session_unavailable_title">Session temporarily unavailable</string>
+    <string name="session_unavailable_message">The server cannot be reached right now. Retry without deleting local session data.</string>
+    <string name="session_expired_message">Your session has expired. Sign in to continue.</string>
+    <string name="account_disabled_title">Account disabled</string>
+    <string name="account_disabled_message">%1$s on %2$s (%3$s) is disabled. Ask the server administrator to restore this account.</string>
+    <string name="unexpected_failure">Something went wrong. Try again.</string>
+
+    <string name="tab_home">Home</string>
+    <string name="tab_library">Library</string>
+    <string name="tab_shelves">Shelves</string>
+    <string name="tab_me">Me</string>
+    <string name="navigate_back">Back</string>
+
+    <string name="server_center_title">Servers</string>
+    <string name="server_center_description">Save multiple self-hosted servers. Only the active server can access private content.</string>
+    <string name="server_center_empty">No saved servers.</string>
+    <string name="server_active_badge">Active</string>
+    <string name="server_insecure_badge">Certificate checks off</string>
+    <string name="server_status_active">Active server</string>
+    <string name="server_status_inactive">Inactive server</string>
+    <string name="server_tls_system_status">System certificate validation</string>
+    <string name="server_tls_insecure_status">Certificate validation is permanently ignored for this server.</string>
+    <string name="server_edit_title">Edit Server</string>
+    <string name="server_edit_action">Edit server</string>
+    <string name="server_save_action">Save changes</string>
+    <string name="server_switch_action">Switch to this server</string>
+    <string name="server_remove_action">Remove server</string>
+    <string name="server_restore_trust_action">Restore system validation</string>
+    <string name="server_operation_failed">The server operation could not be completed. Your current server remains unchanged.</string>
+    <string name="server_switch_confirm_title">Switch servers?</string>
+    <string name="server_switch_confirm_message">Switch to %1$s? Private navigation for the current server will close.</string>
+    <string name="server_remove_confirm_title">Remove this server?</string>
+    <string name="server_remove_confirm_message">Removing %1$s deletes its session, offline entitlement, downloads, and readable cache from this device.</string>
+    <string name="server_remove_confirm_action">Remove server and local data</string>
+    <string name="server_restore_trust_confirm_title">Restore certificate validation?</string>
+    <string name="server_restore_trust_confirm_message">%1$s will use system certificate validation again. Its current session will be cleared and the connection checked again.</string>
+
+    <string name="setup_title">Set Up Server</string>
+    <string name="setup_heading">Create the first administrator</string>
+    <string name="setup_description">This account will administer this server. Library folders and imports remain in the web administration interface.</string>
+    <string name="setup_name_label">Name</string>
+    <string name="setup_password_label">Password</string>
+    <string name="setup_password_confirmation_label">Confirm password</string>
+    <string name="setup_action">Create administrator</string>
+    <string name="setup_in_progress">Creating administrator…</string>
+    <string name="setup_failed_message">Setup could not be completed. Review the fields or try again.</string>
+    <string name="setup_error_required">This field is required.</string>
+    <string name="setup_error_email">Enter a valid email address.</string>
+    <string name="setup_error_password_length">Use at least 10 characters.</string>
+    <string name="setup_error_password_mismatch">Passwords do not match.</string>
+    <string name="setup_error_rejected">Check this value and try again.</string>
+
+    <string name="reauthenticate_title">Sign In Again</string>
+    <string name="reauthenticate_heading">Your private library is locked</string>
+    <string name="reauthenticate_expired_message">Your session has expired. Sign in as the account shown below to continue.</string>
+    <string name="reauthenticate_unavailable_message">The server is unavailable. You can sign in when it returns or use eligible downloaded content during the offline grace period.</string>
+    <string name="reauthenticate_action">Sign in again</string>
+    <plurals name="offline_enter_action">
+        <item quantity="one">Enter offline mode · %1$d day left</item>
+        <item quantity="other">Enter offline mode · %1$d days left</item>
+    </plurals>
+    <string name="offline_scope_message">Offline mode includes only complete downloads, local bookmarks, and pending sync status.</string>
+    <string name="offline_empty_title">No downloaded books on this device</string>
+    <string name="offline_empty_message">Online library, search, shelf refresh, and account changes are unavailable in offline mode.</string>
+    <string name="offline_retry_authentication">Check server and sign in</string>
+
+    <string name="me_servers_action">Manage servers</string>
+    <string name="logout_action">Log out</string>
+    <string name="logout_confirm_title">Log out of this server?</string>
+    <string name="logout_confirm_message">Logging out of %1$s immediately ends offline access and removes readable private cache from this device.</string>
+    <string name="logout_confirm_action">Log out and clear private data</string>
+</resources>

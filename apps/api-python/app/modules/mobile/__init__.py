@@ -1,0 +1,1 @@
+"""Mobile client compatibility capability."""

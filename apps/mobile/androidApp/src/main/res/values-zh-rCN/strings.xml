@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">二毛图书</string>
+
+    <string name="server_screen_title">连接你的书库</string>
+    <string name="server_screen_description">添加自托管服务器，开始阅读。</string>
+    <string name="server_add_title">添加服务器</string>
+    <string name="server_multiple_profiles">可保存多个服务器</string>
+    <string name="server_single_active">同时只使用一个</string>
+    <string name="server_privacy_footer">服务器地址和账户数据仅保存在此设备。</string>
+    <string name="server_display_name_label">名称</string>
+    <string name="server_display_name_placeholder">家庭书库</string>
+    <string name="server_url_label">服务器地址</string>
+    <string name="server_url_placeholder">https://books.example.com/library</string>
+    <string name="server_url_supporting_text">请输入完整地址，包括部署路径。</string>
+    <string name="server_system_trust_title">系统证书验证</string>
+    <string name="server_system_trust_description">默认且推荐</string>
+    <string name="server_connect_action">检查并继续</string>
+    <string name="server_connecting_action">正在检查服务器…</string>
+    <string name="server_retry_action">重新检查</string>
+    <string name="server_choose_other_action">选择其他服务器</string>
+    <string name="server_invalid_name">请输入服务器名称。</string>
+    <string name="server_invalid_url">请输入完整的 http 或 https 地址。</string>
+    <string name="server_connection_failed_title">无法连接到此服务器</string>
+    <string name="server_connection_failed_message">请检查地址和网络后重试。已保留你输入的内容。</string>
+    <string name="server_incompatible_title">需要更新服务器</string>
+    <string name="server_incompatible_message">此服务器版本与当前 App 不兼容。请更新服务器或选择其他服务器。</string>
+
+    <string name="tls_risk_title">证书验证失败</string>
+    <string name="tls_risk_message">无法验证服务器身份。永久忽略证书验证可能使登录凭证、会话、元数据和阅读数据遭到截获。</string>
+    <string name="tls_server_identity">%1$s\n%2$s</string>
+    <string name="tls_back_to_edit">返回编辑</string>
+    <string name="tls_ignore_action">永久忽略并连接</string>
+    <string name="tls_confirmation_title">永久忽略证书验证？</string>
+    <string name="tls_confirmation_message">此设置仅作用于“%1$s”。以后将不再检查此服务器的证书变化。</string>
+    <string name="cancel">取消</string>
+
+
+    <string name="login_title">欢迎回来</string>
+    <string name="login_email_label">邮箱</string>
+    <string name="login_password_label">密码</string>
+    <string name="login_show_password">显示密码</string>
+    <string name="login_hide_password">隐藏密码</string>
+    <string name="login_action">登录</string>
+    <string name="login_in_progress">正在登录…</string>
+    <string name="login_switch_server">切换服务器</string>
+    <string name="login_invalid_credentials">邮箱或密码不正确。</string>
+    <string name="login_temporarily_unavailable">暂时无法登录。请检查网络连接后重试。</string>
+    <string name="login_required_email">请输入邮箱。</string>
+    <string name="login_required_password">请输入密码。</string>
+    <string name="session_unavailable_title">会话暂时不可用</string>
+    <string name="session_unavailable_message">当前无法连接服务器。你可以重试，且不会删除本地会话数据。</string>
+    <string name="session_expired_message">会话已过期，请登录后继续。</string>
+    <string name="account_disabled_title">账户已停用</string>
+    <string name="account_disabled_message">%2$s（%3$s）上的账户 %1$s 已停用。请联系服务器管理员恢复此账户。</string>
+    <string name="unexpected_failure">发生错误，请重试。</string>
+
+    <string name="tab_home">首页</string>
+    <string name="tab_library">书库</string>
+    <string name="tab_shelves">书架</string>
+    <string name="tab_me">我的</string>
+    <string name="navigate_back">返回</string>
+
+    <string name="server_center_title">服务器</string>
+    <string name="server_center_description">可保存多个自托管服务器；只有当前服务器可以访问私有内容。</string>
+    <string name="server_center_empty">尚未保存服务器。</string>
+    <string name="server_active_badge">当前</string>
+    <string name="server_insecure_badge">已关闭证书验证</string>
+    <string name="server_status_active">当前服务器</string>
+    <string name="server_status_inactive">非当前服务器</string>
+    <string name="server_tls_system_status">使用系统证书验证</string>
+    <string name="server_tls_insecure_status">此服务器已永久忽略证书验证。</string>
+    <string name="server_edit_title">编辑服务器</string>
+    <string name="server_edit_action">编辑服务器</string>
+    <string name="server_save_action">保存更改</string>
+    <string name="server_switch_action">切换到此服务器</string>
+    <string name="server_remove_action">移除服务器</string>
+    <string name="server_restore_trust_action">恢复系统验证</string>
+    <string name="server_operation_failed">无法完成服务器操作。当前服务器保持不变。</string>
+    <string name="server_switch_confirm_title">切换服务器？</string>
+    <string name="server_switch_confirm_message">切换到“%1$s”？当前服务器的私有导航将关闭。</string>
+    <string name="server_remove_confirm_title">移除此服务器？</string>
+    <string name="server_remove_confirm_message">移除“%1$s”会删除此设备上的会话、离线授权、下载和可读缓存。</string>
+    <string name="server_remove_confirm_action">移除服务器和本地数据</string>
+    <string name="server_restore_trust_confirm_title">恢复证书验证？</string>
+    <string name="server_restore_trust_confirm_message">“%1$s”将重新使用系统证书验证；当前会话会被清除并重新检查连接。</string>
+
+    <string name="setup_title">初始化服务器</string>
+    <string name="setup_heading">创建首位管理员</string>
+    <string name="setup_description">此账户将管理本服务器。书库目录和导入仍在 Web 管理界面中配置。</string>
+    <string name="setup_name_label">用户名</string>
+    <string name="setup_password_label">登录密码</string>
+    <string name="setup_password_confirmation_label">确认密码</string>
+    <string name="setup_action">创建管理员</string>
+    <string name="setup_in_progress">正在创建管理员…</string>
+    <string name="setup_failed_message">无法完成初始化，请检查字段或重试。</string>
+    <string name="setup_error_required">此项不能为空。</string>
+    <string name="setup_error_email">请输入有效的邮箱地址。</string>
+    <string name="setup_error_password_length">密码至少需要 10 个字符。</string>
+    <string name="setup_error_password_mismatch">两次输入的密码不一致。</string>
+    <string name="setup_error_rejected">请检查此项后重试。</string>
+
+    <string name="reauthenticate_title">重新登录</string>
+    <string name="reauthenticate_heading">私有书库已锁定</string>
+    <string name="reauthenticate_expired_message">会话已过期，请使用下方显示的账户重新登录。</string>
+    <string name="reauthenticate_unavailable_message">服务器暂不可用。服务器恢复后可重新登录，离线宽限期内也可使用符合条件的已下载内容。</string>
+    <string name="reauthenticate_action">重新登录</string>
+    <plurals name="offline_enter_action">
+        <item quantity="other">进入离线模式 · 剩余 %1$d 天</item>
+    </plurals>
+    <string name="offline_scope_message">离线模式仅包含完整下载、本地书签和待同步状态。</string>
+    <string name="offline_empty_title">此设备上没有已下载图书</string>
+    <string name="offline_empty_message">离线模式下无法使用在线书库、搜索、书架刷新和账户修改。</string>
+    <string name="offline_retry_authentication">检查服务器并登录</string>
+
+    <string name="me_servers_action">管理服务器</string>
+    <string name="logout_action">退出登录</string>
+    <string name="logout_confirm_title">退出此服务器？</string>
+    <string name="logout_confirm_message">退出“%1$s”会立即终止离线访问，并移除此设备上的可读私有缓存。</string>
+    <string name="logout_confirm_action">退出并清除私有数据</string>
+</resources>

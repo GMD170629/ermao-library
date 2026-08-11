@@ -1,4 +1,5 @@
 import json
+import re
 import sqlite3
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -26,6 +27,7 @@ from app.modules.backup.application.restore import PreparedRestorePlan
 from app.modules.backup.infrastructure.persistence import (
     SqlAlchemyBackupRestoreWriter,
 )
+from app.modules.mobile.public import SERVER_IDENTITY_SETTING_KEY
 from app.services.backup_service import backup_path, create_backup, restore_backup
 
 EXPECTED_TABLES = {
@@ -223,6 +225,8 @@ def test_empty_storage_bootstraps_complete_sqlite_database(tmp_path) -> None:
                     text("SELECT `key`, `value` FROM `SystemSetting` ORDER BY `key`")
                 ).all()
             )
+            server_identity = settings_rows.pop("mobile.serverIdentity")
+            assert re.fullmatch(r"server_[0-9a-f]{32}", server_identity)
             assert settings_rows == {
                 "language": "zh-CN",
                 "systemName": "二毛图书",
@@ -380,6 +384,17 @@ def test_seed_is_insert_only_and_safe_across_concurrent_sessions(tmp_path) -> No
         with ThreadPoolExecutor(max_workers=4) as executor:
             list(executor.map(lambda _index: seed_once(), range(8)))
 
+        with Session(engine) as db:
+            server_identities = tuple(
+                db.scalars(
+                    select(SystemSetting.value).where(
+                        SystemSetting.key == SERVER_IDENTITY_SETTING_KEY
+                    )
+                )
+            )
+        assert len(server_identities) == 1
+        assert re.fullmatch(r"server_[0-9a-f]{32}", server_identities[0])
+
         with engine.connect() as connection:
             assert (
                 connection.execute(
@@ -398,7 +413,7 @@ def test_seed_is_insert_only_and_safe_across_concurrent_sessions(tmp_path) -> No
                 connection.execute(
                     text("SELECT COUNT(*) FROM `SystemSetting`")
                 ).scalar_one()
-                == 3
+                == 4
             )
             assert (
                 connection.execute(

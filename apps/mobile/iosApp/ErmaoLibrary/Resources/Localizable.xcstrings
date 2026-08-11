@@ -1,0 +1,1452 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "auth.accountDisabled.message" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ask the server administrator to restore this account before signing in again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请联系服务器管理员恢复账户后再登录。"
+          }
+        }
+      }
+    },
+    "auth.accountDisabled.navigationTitle" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Account Unavailable"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "账户不可用"
+          }
+        }
+      }
+    },
+    "auth.accountDisabled.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This Account Is Disabled"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "账户已停用"
+          }
+        }
+      }
+    },
+    "auth.email.label" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Email"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "邮箱"
+          }
+        }
+      }
+    },
+    "auth.email.placeholder" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "name@example.com"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "name@example.com"
+          }
+        }
+      }
+    },
+    "auth.invalidCredentials" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The email or password is incorrect."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "邮箱或密码不正确。"
+          }
+        }
+      }
+    },
+    "auth.login.action" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sign In"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录"
+          }
+        }
+      }
+    },
+    "auth.login.navigationTitle" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sign In"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录"
+          }
+        }
+      }
+    },
+    "auth.login.welcome" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Welcome Back"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "欢迎回来"
+          }
+        }
+      }
+    },
+    "auth.password.label" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Password"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "密码"
+          }
+        }
+      }
+    },
+    "auth.password.placeholder" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Password"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "密码"
+          }
+        }
+      }
+    },
+    "auth.privateDeployment" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Private deployment · Data stays on your server"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "私有部署 · 数据保留在你的服务器"
+          }
+        }
+      }
+    },
+    "common.cancel" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancel"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消"
+          }
+        }
+      }
+    },
+    "common.loading" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在加载"
+          }
+        }
+      }
+    },
+    "common.ok" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OK"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "好"
+          }
+        }
+      }
+    },
+    "common.operationFailed" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The operation couldn’t be completed. Check device storage and try again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "操作未能完成，请检查设备存储后重试。"
+          }
+        }
+      }
+    },
+    "common.operationFailed.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Operation Failed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "操作未完成"
+          }
+        }
+      }
+    },
+    "common.requestFailed" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The request couldn’t be completed. Check the connection and try again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请求未能完成，请检查连接后重试。"
+          }
+        }
+      }
+    },
+    "offline.deferred.message" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The offline entitlement state is frozen in Stage 0, but the offline content UI will be delivered in a later phase."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "阶段 0 已冻结离线授权状态，但离线内容界面将在后续阶段交付。"
+          }
+        }
+      }
+    },
+    "offline.deferred.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline Access Isn’t Available Yet"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "离线访问尚未开放"
+          }
+        }
+      }
+    },
+    "server.add.action" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add Server"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加服务器"
+          }
+        }
+      }
+    },
+    "server.add.form.header" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter your self-hosted server information."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入自托管服务器的信息。"
+          }
+        }
+      }
+    },
+    "server.add.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add Server"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加服务器"
+          }
+        }
+      }
+    },
+    "server.check.action" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check and Continue"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "检查并继续"
+          }
+        }
+      }
+    },
+    "server.check.footer" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "We’ll check server health, compatibility, setup, and sign-in status in order."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将依次检查服务器、兼容性、初始化状态和登录状态。"
+          }
+        }
+      }
+    },
+    "server.connection.active" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Active"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前"
+          }
+        }
+      }
+    },
+    "server.connection.status" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connection"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接状态"
+          }
+        }
+      }
+    },
+    "server.current.section" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Current Server"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前服务器"
+          }
+        }
+      }
+    },
+    "server.empty.message" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add a self-hosted server to start reading."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加自托管服务器，开始阅读。"
+          }
+        }
+      }
+    },
+    "server.empty.multiple" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save multiple servers"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可保存多个服务器"
+          }
+        }
+      }
+    },
+    "server.empty.privacy" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Server addresses and account data stay on this device."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器地址和账户数据仅保存在此设备。"
+          }
+        }
+      }
+    },
+    "server.empty.singleActive" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use one server at a time"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同时只使用一个"
+          }
+        }
+      }
+    },
+    "server.empty.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect Your Library"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接你的书库"
+          }
+        }
+      }
+    },
+    "server.identity.accessibility.format" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Server %@, %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器 %@，%@"
+          }
+        }
+      }
+    },
+    "server.inactive.policy" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inactive servers do not play, download, or sync in the background."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "非当前服务器不会播放、下载或后台同步。"
+          }
+        }
+      }
+    },
+    "server.incompatible.footer" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compatibility checks can’t be bypassed."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不会尝试绕过兼容性检查。"
+          }
+        }
+      }
+    },
+    "server.incompatible.message" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This app can’t connect because the server version or capabilities are incompatible. Update the server first."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器版本或能力与当前 App 不兼容，请先更新服务器。"
+          }
+        }
+      }
+    },
+    "server.incompatible.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Server Incompatible"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器不兼容"
+          }
+        }
+      }
+    },
+    "server.name.label" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "名称"
+          }
+        }
+      }
+    },
+    "server.name.placeholder" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Home Library"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "家庭书库"
+          }
+        }
+      }
+    },
+    "server.other.action" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose Another Server"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择其他服务器"
+          }
+        }
+      }
+    },
+    "server.problem.navigationTitle" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connection Problem"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接问题"
+          }
+        }
+      }
+    },
+    "server.profiles.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Servers"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器"
+          }
+        }
+      }
+    },
+    "server.retry.action" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check Again"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新检查"
+          }
+        }
+      }
+    },
+    "server.switch.action" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switch Server"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换服务器"
+          }
+        }
+      }
+    },
+    "server.tls.confirm.message.format" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This setting applies only to “%@”. Certificate changes will no longer be reported."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此设置仅作用于“%@”。之后的证书变化将不再告警。"
+          }
+        }
+      }
+    },
+    "server.tls.confirm.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Permanently ignore certificate validation?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "永久忽略证书验证？"
+          }
+        }
+      }
+    },
+    "server.tls.edit.action" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Return to Edit"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "返回编辑"
+          }
+        }
+      }
+    },
+    "server.tls.ignore.action" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Permanently Ignore and Connect"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "永久忽略并连接"
+          }
+        }
+      }
+    },
+    "server.tls.insecure" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Certificate validation permanently ignored"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "永久忽略证书验证"
+          }
+        }
+      }
+    },
+    "server.tls.mode" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Certificate Validation"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "证书验证"
+          }
+        }
+      }
+    },
+    "server.tls.navigationTitle" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Certificate Can’t Be Verified"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "证书无法验证"
+          }
+        }
+      }
+    },
+    "server.tls.recommended" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Default and recommended"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "默认且推荐"
+          }
+        }
+      }
+    },
+    "server.tls.risk.guidance" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check the server address and certificate configuration first."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先检查服务器地址和证书配置。"
+          }
+        }
+      }
+    },
+    "server.tls.risk.message" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Continuing may allow someone else to intercept your login credentials, session, and reading data."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "继续可能使登录凭证、会话和阅读数据被他人截获。"
+          }
+        }
+      }
+    },
+    "server.tls.risk.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Server Identity Can’t Be Confirmed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法确认服务器身份"
+          }
+        }
+      }
+    },
+    "server.tls.system" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System Certificate Validation"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "系统证书验证"
+          }
+        }
+      }
+    },
+    "server.unavailable.message" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check the address, network, and server status, then try again. Your entries have been kept."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请检查地址、网络和服务器状态后重试。已保留当前填写内容。"
+          }
+        }
+      }
+    },
+    "server.unavailable.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can’t Connect to Server"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法连接服务器"
+          }
+        }
+      }
+    },
+    "server.url.footer" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The address may include a deployment base path. Do not add /api."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "地址可以包含部署路径，请勿添加 /api。"
+          }
+        }
+      }
+    },
+    "server.url.invalid" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter a valid HTTP or HTTPS server address."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请输入有效的 HTTP 或 HTTPS 服务器地址。"
+          }
+        }
+      }
+    },
+    "server.url.label" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Server Address"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器地址"
+          }
+        }
+      }
+    },
+    "server.url.placeholder" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "https://books.example.com"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "https://books.example.com"
+          }
+        }
+      }
+    },
+    "session.unavailable.message" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your session and local data are still preserved. Try again when the server or network is available."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会话和本地数据仍然保留。请在服务器或网络恢复后重试。"
+          }
+        }
+      }
+    },
+    "session.unavailable.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Server Temporarily Unavailable"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器暂时不可用"
+          }
+        }
+      }
+    },
+    "setup.required.message" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stage 0 freezes this state but does not include the setup form. Complete server setup on the Web, then check again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "阶段 0 仅冻结此状态，不包含初始化表单。请先在 Web 完成服务器初始化，然后重新检查。"
+          }
+        }
+      }
+    },
+    "setup.required.navigationTitle" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Setup Required"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要初始化"
+          }
+        }
+      }
+    },
+    "setup.required.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Server Setup Required"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器尚未初始化"
+          }
+        }
+      }
+    },
+    "tab.home" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Home"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "首页"
+          }
+        }
+      }
+    },
+    "tab.library" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Library"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "书库"
+          }
+        }
+      }
+    },
+    "tab.me" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Me"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我的"
+          }
+        }
+      }
+    },
+    "tab.shelves" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shelves"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "书架"
+          }
+        }
+      }
+    },
+    "auth.chooseServer" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose another server" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择其他服务器" } }
+      }
+    },
+    "auth.offline.action.format" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enter Offline Mode · %d days left" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "进入离线模式 · 剩余 %d 天" } }
+      }
+    },
+    "auth.offline.expired" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Offline access has expired. Connect to the server to continue." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "离线访问已过期，请连接服务器后继续。" } }
+      }
+    },
+    "auth.offline.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Offline mode only opens downloaded content and its synchronized state." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "离线模式仅开放已下载内容及其同步状态。" } }
+      }
+    },
+    "auth.reauthenticate.action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sign in again" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重新登录" } }
+      }
+    },
+    "auth.reauthenticate.message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your session for this server has expired. Sign in to return to the app." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "此服务器的会话已失效。重新登录后可返回 App。" } }
+      }
+    },
+    "auth.reauthenticate.navigationTitle" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reauthenticate" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重新认证" } }
+      }
+    },
+    "auth.reauthenticate.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sign in required" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "需要重新登录" } }
+      }
+    },
+    "auth.reauthenticate.unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The server is temporarily unavailable. You can retry or use a valid offline entitlement." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器暂时不可用。你可以重试，或使用有效的离线权限。" } }
+      }
+    },
+    "me.account.section" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Account" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "账户" } }
+      }
+    },
+    "me.email" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Email" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "邮箱" } }
+      }
+    },
+    "me.logout.action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sign out" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "退出登录" } }
+      }
+    },
+    "me.logout.confirm.action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sign out" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "退出登录" } }
+      }
+    },
+    "me.logout.confirm.message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Signing out immediately ends offline access on this device." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "退出后，此设备的离线访问权限会立即失效。" } }
+      }
+    },
+    "me.logout.confirm.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sign out of this server?" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "要退出当前服务器吗？" } }
+      }
+    },
+    "me.name" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Name" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "名称" } }
+      }
+    },
+    "me.server.manage" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Manage servers" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器管理" } }
+      }
+    },
+    "me.server.section" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Server" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器" } }
+      }
+    },
+    "offline.empty.message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Downloaded books will appear here when offline content is available." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "有可用的已下载内容时，它们会显示在这里。" } }
+      }
+    },
+    "offline.empty.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No downloaded content" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂无已下载内容" } }
+      }
+    },
+    "offline.reauthenticate.action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reconnect and sign in" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重新连接并登录" } }
+      }
+    },
+    "offline.shell.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Offline" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "离线模式" } }
+      }
+    },
+    "server.activate.action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Activate this server" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "激活此服务器" } }
+      }
+    },
+    "server.activate.confirm.action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Activate" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "激活" } }
+      }
+    },
+    "server.activate.confirm.message.format" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Switch to %@? Private data and navigation from the current server will be closed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "切换到“%@”？当前服务器的私有数据和导航将关闭。" } }
+      }
+    },
+    "server.activate.confirm.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Switch active server?" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "切换当前服务器？" } }
+      }
+    },
+    "server.connection.inactive" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Inactive" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未激活" } }
+      }
+    },
+    "server.delete.action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove server" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移除服务器" } }
+      }
+    },
+    "server.delete.confirm.action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移除" } }
+      }
+    },
+    "server.delete.confirm.message.format" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove %@ from this device? Its local session and offline entitlement will no longer be available." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从此设备移除“%@”？其本地会话和离线权限将不再可用。" } }
+      }
+    },
+    "server.delete.confirm.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove this server?" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移除此服务器？" } }
+      }
+    },
+    "server.delete.footer" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Removing a profile does not delete data on the server." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移除配置不会删除服务器上的数据。" } }
+      }
+    },
+    "server.edit.action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Edit connection" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "编辑连接" } }
+      }
+    },
+    "server.edit.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Edit Server" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "编辑服务器" } }
+      }
+    },
+    "server.removed.message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This server profile is no longer available." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "此服务器配置已不存在。" } }
+      }
+    },
+    "server.removed.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Server removed" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器已移除" } }
+      }
+    },
+    "server.save.action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Save and verify" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保存并验证" } }
+      }
+    },
+    "server.saved.section" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Server Profiles" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器配置" } }
+      }
+    },
+    "server.tls.restore.action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Restore system trust" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "恢复系统信任" } }
+      }
+    },
+    "setup.account.section" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Administrator Account" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "管理员账户" } }
+      }
+    },
+    "setup.confirmPassword.mismatch" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Passwords do not match." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "两次输入的密码不一致。" } }
+      }
+    },
+    "setup.confirmPassword.placeholder" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Confirm password" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "确认密码" } }
+      }
+    },
+    "setup.field.invalid" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Check this field and try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请检查此字段后重试。" } }
+      }
+    },
+    "setup.form.message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Create the first administrator for this private library." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "为此私人书库创建首位管理员。" } }
+      }
+    },
+    "setup.name.placeholder" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Display name" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用户名" } }
+      }
+    },
+    "setup.password.minimum" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Use at least 10 characters." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "密码至少 10 位。" } }
+      }
+    },
+    "setup.password.placeholder" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Password" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "登录密码" } }
+      }
+    },
+    "setup.scope.footer" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "After creation, server initialization closes and you will enter Home." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "创建后，服务器初始化入口将关闭并进入首页。" } }
+      }
+    },
+    "setup.submit.action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Create and enter Home" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "创建并进入首页" } }
+      }
+    }
+  },
+  "version" : "1.0"
+}

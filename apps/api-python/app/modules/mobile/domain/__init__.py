@@ -1,0 +1,1 @@
+"""Pure mobile compatibility contracts."""

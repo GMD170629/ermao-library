@@ -2,8 +2,9 @@ import re
 from collections import Counter
 from pathlib import Path
 
-from app.main import create_app
 from fastapi.routing import APIRoute
+
+from app.main import create_app
 
 HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
 
@@ -57,7 +58,7 @@ def test_registered_api_endpoints_are_owned_by_capability_presentations() -> Non
         if isinstance(route, APIRoute) and route.path.startswith("/api")
     ]
 
-    assert len(api_routes) == 209
+    assert len(api_routes) == 210
     legacy = [
         (next(iter(route.methods or ())), route.path, route.endpoint.__module__)
         for route in api_routes
@@ -72,6 +73,7 @@ def test_migrated_endpoint_sources_match_capability_ownership() -> None:
         "app.modules.auth.presentation.http": 15,
         "app.modules.auth.presentation.users": 8,
         "app.modules.kindle.presentation.http": 10,
+        "app.modules.mobile.presentation.http": 1,
         "app.modules.reader.presentation.retired": 7,
         "app.modules.reader.presentation.v3": 5,
         "app.modules.system.presentation.health": 10,
@@ -83,7 +85,7 @@ def test_migrated_endpoint_sources_match_capability_ownership() -> None:
     )
 
     assert counts == migrated_modules
-    assert sum(counts.values()) == 55
+    assert sum(counts.values()) == 56
 
     reader_v2_routes = [
         route
@@ -108,5 +110,5 @@ def test_registered_api_method_path_pairs_are_unique() -> None:
         if method in HTTP_METHODS
     ]
 
-    assert len(pairs) == 206
+    assert len(pairs) == 207
     assert len(pairs) == len(set(pairs))

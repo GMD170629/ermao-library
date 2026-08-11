@@ -1,0 +1,410 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 60;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		B00100000000000000000001 /* ErmaoLibraryApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00100000000000000000001 /* ErmaoLibraryApp.swift */; };
+		B00200000000000000000002 /* MobileRuntimeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00200000000000000000002 /* MobileRuntimeClient.swift */; };
+		B00300000000000000000003 /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00300000000000000000003 /* SessionStore.swift */; };
+		B00400000000000000000004 /* PreviewMobileRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00400000000000000000004 /* PreviewMobileRuntime.swift */; };
+		B00500000000000000000005 /* AppRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00500000000000000000005 /* AppRootView.swift */; };
+		B00600000000000000000006 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00600000000000000000006 /* AppTheme.swift */; };
+		B00700000000000000000007 /* BrandedControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00700000000000000000007 /* BrandedControls.swift */; };
+		B00800000000000000000008 /* ServerFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00800000000000000000008 /* ServerFlowView.swift */; };
+		B00900000000000000000009 /* AddServerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00900000000000000000009 /* AddServerView.swift */; };
+		B01000000000000000000010 /* TLSRiskView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01000000000000000000010 /* TLSRiskView.swift */; };
+		B01100000000000000000011 /* IncompatibleServerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01100000000000000000011 /* IncompatibleServerView.swift */; };
+		B01200000000000000000012 /* SetupRequiredView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01200000000000000000012 /* SetupRequiredView.swift */; };
+		B01300000000000000000013 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01300000000000000000013 /* LoginView.swift */; };
+		B01400000000000000000014 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01400000000000000000014 /* MainTabView.swift */; };
+		B01500000000000000000015 /* KeychainCookiePayloadStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01500000000000000000015 /* KeychainCookiePayloadStore.swift */; };
+		B01600000000000000000016 /* UserDefaultsServerProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01600000000000000000016 /* UserDefaultsServerProfileStore.swift */; };
+		B01700000000000000000017 /* SharedRuntimeAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01700000000000000000017 /* SharedRuntimeAdapter.swift */; };
+		B01800000000000000000018 /* GeneratedDesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01800000000000000000018 /* GeneratedDesignTokens.swift */; };
+		B02000000000000000000020 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F02000000000000000000020 /* Assets.xcassets */; };
+		B02100000000000000000021 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = F02100000000000000000021 /* Localizable.xcstrings */; };
+		B02200000000000000000022 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = F02200000000000000000022 /* PrivacyInfo.xcprivacy */; };
+		B03000000000000000000030 /* SessionStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03000000000000000000030 /* SessionStoreTests.swift */; };
+		B03100000000000000000031 /* PersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03100000000000000000031 /* PersistenceTests.swift */; };
+		B03200000000000000000032 /* LocalizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03200000000000000000032 /* LocalizationTests.swift */; };
+		B03300000000000000000033 /* NavigationThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03300000000000000000033 /* NavigationThemeTests.swift */; };
+		B90000000000000000000900 /* ErmaoShared.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F90000000000000000000900 /* ErmaoShared.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		X00100000000000000000001 = {
+			isa = PBXContainerItemProxy;
+			containerPortal = P00100000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = T00100000000000000000001;
+			remoteInfo = ErmaoLibrary;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		F00100000000000000000001 /* ErmaoLibraryApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErmaoLibraryApp.swift; sourceTree = "<group>"; };
+		F00200000000000000000002 /* MobileRuntimeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileRuntimeClient.swift; sourceTree = "<group>"; };
+		F00300000000000000000003 /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
+		F00400000000000000000004 /* PreviewMobileRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewMobileRuntime.swift; sourceTree = "<group>"; };
+		F00500000000000000000005 /* AppRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRootView.swift; sourceTree = "<group>"; };
+		F00600000000000000000006 /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
+		F00700000000000000000007 /* BrandedControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandedControls.swift; sourceTree = "<group>"; };
+		F00800000000000000000008 /* ServerFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerFlowView.swift; sourceTree = "<group>"; };
+		F00900000000000000000009 /* AddServerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddServerView.swift; sourceTree = "<group>"; };
+		F01000000000000000000010 /* TLSRiskView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TLSRiskView.swift; sourceTree = "<group>"; };
+		F01100000000000000000011 /* IncompatibleServerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncompatibleServerView.swift; sourceTree = "<group>"; };
+		F01200000000000000000012 /* SetupRequiredView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupRequiredView.swift; sourceTree = "<group>"; };
+		F01300000000000000000013 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
+		F01400000000000000000014 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
+		F01500000000000000000015 /* KeychainCookiePayloadStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainCookiePayloadStore.swift; sourceTree = "<group>"; };
+		F01600000000000000000016 /* UserDefaultsServerProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserDefaultsServerProfileStore.swift; sourceTree = "<group>"; };
+		F01700000000000000000017 /* SharedRuntimeAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedRuntimeAdapter.swift; sourceTree = "<group>"; };
+		F01800000000000000000018 /* GeneratedDesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GeneratedDesignTokens.swift; path = ../build/generated/design-tokens/swift/GeneratedDesignTokens.swift; sourceTree = SOURCE_ROOT; };
+		F02000000000000000000020 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		F02100000000000000000021 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		F02200000000000000000022 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		F02300000000000000000023 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		F03000000000000000000030 /* SessionStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStoreTests.swift; sourceTree = "<group>"; };
+		F03100000000000000000031 /* PersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceTests.swift; sourceTree = "<group>"; };
+		F03200000000000000000032 /* LocalizationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationTests.swift; sourceTree = "<group>"; };
+		F03300000000000000000033 /* NavigationThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationThemeTests.swift; sourceTree = "<group>"; };
+		F80000000000000000000800 /* ErmaoLibrary.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ErmaoLibrary.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F80100000000000000000801 /* ErmaoLibraryTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ErmaoLibraryTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F90000000000000000000900 /* ErmaoShared.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; path = ErmaoShared.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		S00300000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B90000000000000000000900 /* ErmaoShared.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		S00600000000000000000006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		G00000000000000000000000 = {
+			isa = PBXGroup;
+			children = (
+				G10000000000000000000100 /* ErmaoLibrary */,
+				G10100000000000000000101 /* ErmaoLibraryTests */,
+				G20000000000000000000200 /* Frameworks */,
+				G20100000000000000000201 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		G10000000000000000000100 /* ErmaoLibrary */ = {
+			isa = PBXGroup;
+			children = (
+				F00100000000000000000001 /* ErmaoLibraryApp.swift */,
+				G11000000000000000000110 /* Application */,
+				G11100000000000000000111 /* Design */,
+				G11200000000000000000112 /* Features */,
+				G11500000000000000000115 /* Persistence */,
+				G11600000000000000000116 /* Resources */,
+			);
+			path = ErmaoLibrary;
+			sourceTree = "<group>";
+		};
+		G10100000000000000000101 /* ErmaoLibraryTests */ = {
+			isa = PBXGroup;
+			children = (
+				F03000000000000000000030 /* SessionStoreTests.swift */,
+				F03100000000000000000031 /* PersistenceTests.swift */,
+				F03200000000000000000032 /* LocalizationTests.swift */,
+				F03300000000000000000033 /* NavigationThemeTests.swift */,
+			);
+			path = ErmaoLibraryTests;
+			sourceTree = "<group>";
+		};
+		G11000000000000000000110 /* Application */ = {
+			isa = PBXGroup;
+			children = (
+				F00200000000000000000002 /* MobileRuntimeClient.swift */,
+				F00300000000000000000003 /* SessionStore.swift */,
+				F00400000000000000000004 /* PreviewMobileRuntime.swift */,
+				F00500000000000000000005 /* AppRootView.swift */,
+				F01700000000000000000017 /* SharedRuntimeAdapter.swift */,
+			);
+			path = Application;
+			sourceTree = "<group>";
+		};
+		G11100000000000000000111 /* Design */ = {
+			isa = PBXGroup;
+			children = (
+				F00600000000000000000006 /* AppTheme.swift */,
+				F00700000000000000000007 /* BrandedControls.swift */,
+				F01800000000000000000018 /* GeneratedDesignTokens.swift */,
+			);
+			path = Design;
+			sourceTree = "<group>";
+		};
+		G11200000000000000000112 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				G11300000000000000000113 /* Server */,
+				G11400000000000000000114 /* Auth */,
+				G11700000000000000000117 /* Shell */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		G11300000000000000000113 /* Server */ = {
+			isa = PBXGroup;
+			children = (
+				F00800000000000000000008 /* ServerFlowView.swift */,
+				F00900000000000000000009 /* AddServerView.swift */,
+				F01000000000000000000010 /* TLSRiskView.swift */,
+				F01100000000000000000011 /* IncompatibleServerView.swift */,
+				F01200000000000000000012 /* SetupRequiredView.swift */,
+			);
+			path = Server;
+			sourceTree = "<group>";
+		};
+		G11400000000000000000114 /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				F01300000000000000000013 /* LoginView.swift */,
+			);
+			path = Auth;
+			sourceTree = "<group>";
+		};
+		G11700000000000000000117 /* Shell */ = {
+			isa = PBXGroup;
+			children = (
+				F01400000000000000000014 /* MainTabView.swift */,
+			);
+			path = Shell;
+			sourceTree = "<group>";
+		};
+		G11500000000000000000115 /* Persistence */ = {
+			isa = PBXGroup;
+			children = (
+				F01500000000000000000015 /* KeychainCookiePayloadStore.swift */,
+				F01600000000000000000016 /* UserDefaultsServerProfileStore.swift */,
+			);
+			path = Persistence;
+			sourceTree = "<group>";
+		};
+		G11600000000000000000116 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				F02000000000000000000020 /* Assets.xcassets */,
+				F02100000000000000000021 /* Localizable.xcstrings */,
+				F02200000000000000000022 /* PrivacyInfo.xcprivacy */,
+				F02300000000000000000023 /* Info.plist */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		G20000000000000000000200 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				F90000000000000000000900 /* ErmaoShared.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		G20100000000000000000201 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				F80000000000000000000800 /* ErmaoLibrary.app */,
+				F80100000000000000000801 /* ErmaoLibraryTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		T00100000000000000000001 /* ErmaoLibrary */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = L10100000000000000000101 /* Build configuration list for PBXNativeTarget "ErmaoLibrary" */;
+			buildPhases = (
+				S00100000000000000000001 /* Build KMP Framework and Design Tokens */,
+				S00200000000000000000002 /* Sources */,
+				S00300000000000000000003 /* Frameworks */,
+				S00400000000000000000004 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ErmaoLibrary;
+			productName = ErmaoLibrary;
+			productReference = F80000000000000000000800 /* ErmaoLibrary.app */;
+			productType = "com.apple.product-type.application";
+		};
+		T00200000000000000000002 /* ErmaoLibraryTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = L10200000000000000000102 /* Build configuration list for PBXNativeTarget "ErmaoLibraryTests" */;
+			buildPhases = (
+				S00500000000000000000005 /* Sources */,
+				S00600000000000000000006 /* Frameworks */,
+				S00700000000000000000007 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D00100000000000000000001 /* PBXTargetDependency */,
+			);
+			name = ErmaoLibraryTests;
+			productName = ErmaoLibraryTests;
+			productReference = F80100000000000000000801 /* ErmaoLibraryTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		P00100000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2640;
+				LastUpgradeCheck = 2640;
+				TargetAttributes = {
+					T00100000000000000000001 = { CreatedOnToolsVersion = 26.4; };
+					T00200000000000000000002 = { CreatedOnToolsVersion = 26.4; TestTargetID = T00100000000000000000001; };
+				};
+			};
+			buildConfigurationList = L10000000000000000000100 /* Build configuration list for PBXProject "ErmaoLibrary" */;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+				"zh-Hans",
+			);
+			mainGroup = G00000000000000000000000;
+			productRefGroup = G20100000000000000000201 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				T00100000000000000000001 /* ErmaoLibrary */,
+				T00200000000000000000002 /* ErmaoLibraryTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		S00400000000000000000004 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B02000000000000000000020 /* Assets.xcassets in Resources */,
+				B02100000000000000000021 /* Localizable.xcstrings in Resources */,
+				B02200000000000000000022 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		S00700000000000000000007 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		S00100000000000000000001 /* Build KMP Framework and Design Tokens */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/../design/tokens.json",
+			);
+			name = "Build KMP Framework and Design Tokens";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/../build/generated/design-tokens/swift/GeneratedDesignTokens.swift",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\ncd \"$SRCROOT/..\"\n./gradlew generateDesignTokens :shared:embedAndSignAppleFrameworkForXcode\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		S00200000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B00100000000000000000001 /* ErmaoLibraryApp.swift in Sources */,
+				B00200000000000000000002 /* MobileRuntimeClient.swift in Sources */,
+				B00300000000000000000003 /* SessionStore.swift in Sources */,
+				B00400000000000000000004 /* PreviewMobileRuntime.swift in Sources */,
+				B00500000000000000000005 /* AppRootView.swift in Sources */,
+				B00600000000000000000006 /* AppTheme.swift in Sources */,
+				B00700000000000000000007 /* BrandedControls.swift in Sources */,
+				B00800000000000000000008 /* ServerFlowView.swift in Sources */,
+				B00900000000000000000009 /* AddServerView.swift in Sources */,
+				B01000000000000000000010 /* TLSRiskView.swift in Sources */,
+				B01100000000000000000011 /* IncompatibleServerView.swift in Sources */,
+				B01200000000000000000012 /* SetupRequiredView.swift in Sources */,
+				B01300000000000000000013 /* LoginView.swift in Sources */,
+				B01400000000000000000014 /* MainTabView.swift in Sources */,
+				B01500000000000000000015 /* KeychainCookiePayloadStore.swift in Sources */,
+				B01600000000000000000016 /* UserDefaultsServerProfileStore.swift in Sources */,
+				B01700000000000000000017 /* SharedRuntimeAdapter.swift in Sources */,
+				B01800000000000000000018 /* GeneratedDesignTokens.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		S00500000000000000000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B03000000000000000000030 /* SessionStoreTests.swift in Sources */,
+				B03100000000000000000031 /* PersistenceTests.swift in Sources */,
+				B03200000000000000000032 /* LocalizationTests.swift in Sources */,
+				B03300000000000000000033 /* NavigationThemeTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D00100000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = T00100000000000000000001 /* ErmaoLibrary */;
+			targetProxy = X00100000000000000000001;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		C10000000000000000000100 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_ANALYZER_NONNULL = YES; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; DEBUG_INFORMATION_FORMAT = dwarf; ENABLE_TESTABILITY = YES; GCC_C_LANGUAGE_STANDARD = gnu17; GCC_NO_COMMON_BLOCKS = YES; GCC_WARN_64_TO_32_BIT_CONVERSION = YES; GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR; GCC_WARN_UNDECLARED_SELECTOR = YES; GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE; GCC_WARN_UNUSED_FUNCTION = YES; GCC_WARN_UNUSED_VARIABLE = YES; MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE; ONLY_ACTIVE_ARCH = YES; SDKROOT = iphoneos; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)"; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; }; name = Debug; };
+		C10100000000000000000101 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_ANALYZER_NONNULL = YES; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; ENABLE_NS_ASSERTIONS = NO; GCC_C_LANGUAGE_STANDARD = gnu17; GCC_NO_COMMON_BLOCKS = YES; GCC_WARN_64_TO_32_BIT_CONVERSION = YES; GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR; GCC_WARN_UNDECLARED_SELECTOR = YES; GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE; GCC_WARN_UNUSED_FUNCTION = YES; GCC_WARN_UNUSED_VARIABLE = YES; MTL_ENABLE_DEBUG_INFO = NO; SDKROOT = iphoneos; SWIFT_COMPILATION_MODE = wholemodule; VALIDATE_PRODUCT = YES; }; name = Release; };
+		C11000000000000000000110 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; ENABLE_PREVIEWS = YES; ENABLE_USER_SCRIPT_SANDBOXING = NO; FRAMEWORK_SEARCH_PATHS = "$(inherited) $(BUILT_PRODUCTS_DIR)"; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = ErmaoLibrary/Resources/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 16.0; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks"; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.ermao.library; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
+		C11100000000000000000111 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; ENABLE_PREVIEWS = YES; ENABLE_USER_SCRIPT_SANDBOXING = NO; FRAMEWORK_SEARCH_PATHS = "$(inherited) $(BUILT_PRODUCTS_DIR)"; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = ErmaoLibrary/Resources/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 16.0; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks"; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.ermao.library; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
+		C12000000000000000000120 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 16.0; PRODUCT_BUNDLE_IDENTIFIER = com.ermao.library.tests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ErmaoLibrary.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ErmaoLibrary"; }; name = Debug; };
+		C12100000000000000000121 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 16.0; PRODUCT_BUNDLE_IDENTIFIER = com.ermao.library.tests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ErmaoLibrary.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ErmaoLibrary"; }; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		L10000000000000000000100 /* Build configuration list for PBXProject "ErmaoLibrary" */ = {isa = XCConfigurationList; buildConfigurations = (C10000000000000000000100 /* Debug */, C10100000000000000000101 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		L10100000000000000000101 /* Build configuration list for PBXNativeTarget "ErmaoLibrary" */ = {isa = XCConfigurationList; buildConfigurations = (C11000000000000000000110 /* Debug */, C11100000000000000000111 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		L10200000000000000000102 /* Build configuration list for PBXNativeTarget "ErmaoLibraryTests" */ = {isa = XCConfigurationList; buildConfigurations = (C12000000000000000000120 /* Debug */, C12100000000000000000121 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+	};
+	rootObject = P00100000000000000000001 /* Project object */;
+}

@@ -1,0 +1,21 @@
+.gradle/
+.kotlin/
+**/build/
+local.properties
+.idea/
+*.iml
+
+# Apple build and per-user state
+DerivedData/
+**/xcuserdata/
+*.xcuserstate
+*.xccheckout
+
+# Generated design-token sources
+generated/design-tokens/
+
+# Local secrets and signing material
+*.jks
+*.keystore
+*.p12
+*.mobileprovision

@@ -1,0 +1,1 @@
+"""Mobile compatibility HTTP presentation."""

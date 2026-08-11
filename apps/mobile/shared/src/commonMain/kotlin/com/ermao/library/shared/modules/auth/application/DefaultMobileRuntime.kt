@@ -1,0 +1,740 @@
+package com.ermao.library.shared.modules.auth.application
+
+import com.ermao.library.shared.core.network.ApiResult
+import com.ermao.library.shared.core.network.AppError
+import com.ermao.library.shared.core.network.AppErrorKind
+import com.ermao.library.shared.core.network.CookieVault
+import com.ermao.library.shared.modules.auth.MobileRuntime
+import com.ermao.library.shared.modules.auth.NavigationDirective
+import com.ermao.library.shared.modules.auth.Observation
+import com.ermao.library.shared.modules.auth.RuntimeOperationResult
+import com.ermao.library.shared.modules.auth.SessionObserver
+import com.ermao.library.shared.modules.auth.domain.AppSession
+import com.ermao.library.shared.modules.auth.domain.EpochMillisClock
+import com.ermao.library.shared.modules.auth.domain.OfflineEntitlementEvaluation
+import com.ermao.library.shared.modules.auth.domain.OfflineEntitlementStatus
+import com.ermao.library.shared.modules.auth.domain.OfflineEntitlementPolicy
+import com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace
+import com.ermao.library.shared.modules.auth.domain.SessionIdentity
+import com.ermao.library.shared.modules.auth.domain.SystemEpochMillisClock
+import com.ermao.library.shared.modules.auth.domain.ValidatedSessionRecord
+import com.ermao.library.shared.modules.servers.ProfileIdGenerator
+import com.ermao.library.shared.modules.servers.RandomProfileIdGenerator
+import com.ermao.library.shared.modules.servers.application.DuplicateServerIdentityException
+import com.ermao.library.shared.modules.servers.application.ServerProbe
+import com.ermao.library.shared.modules.servers.application.ServerProbeResult
+import com.ermao.library.shared.modules.servers.application.ServerProfileRepository
+import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
+import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
+import com.ermao.library.shared.modules.servers.domain.ServerConnectionDraft
+import com.ermao.library.shared.modules.servers.domain.ServerProfile
+import com.ermao.library.shared.modules.servers.domain.ServerProfileSnapshot
+import com.ermao.library.shared.modules.servers.domain.TlsMode
+import com.ermao.library.shared.modules.servers.domain.toSnapshot
+import kotlinx.coroutines.CancellationException
+
+/**
+ * Platform facade for the bootstrap gate. Business work is delegated to the server probe,
+ * authentication gateway, repositories, and entitlement policy; no transport wire crosses here.
+ */
+class DefaultMobileRuntime(
+    private val profileRepository: ServerProfileRepository,
+    private val cookieVault: CookieVault,
+    private val entitlementRepository: OfflineEntitlementRepository,
+    private val serverProbe: ServerProbe,
+    private val authGateway: AuthGateway,
+    private val clock: EpochMillisClock = SystemEpochMillisClock,
+    private val entitlementPolicy: OfflineEntitlementPolicy = OfflineEntitlementPolicy(),
+    private val profileIdGenerator: ProfileIdGenerator = RandomProfileIdGenerator(),
+) : MobileRuntime {
+    private val observers = mutableSetOf<SessionObserver>()
+    private var lastConnectionDraft: ServerConnectionDraft? = null
+    private var cachedProfiles = emptyList<ServerProfile>()
+
+    override var currentSession: AppSession = AppSession.NoServer
+        private set
+
+    override val serverProfiles: List<ServerProfileSnapshot>
+        get() = cachedProfiles.map(ServerProfile::toSnapshot)
+
+    override fun observeSession(observer: SessionObserver): Observation {
+        observers += observer
+        observer.onSessionChanged(currentSession)
+        return Observation { observers -= observer }
+    }
+
+    override suspend fun start(): RuntimeOperationResult = storageGuard {
+        reloadProfiles()
+        val profile = cachedProfiles.singleOrNull(ServerProfile::isActive)
+        if (profile == null) {
+            transition(AppSession.NoServer)
+            success("NO_ACTIVE_SERVER", NavigationDirective.ShowServerProfiles)
+        } else {
+            restore(profile, allowAutomaticOffline = true)
+        }
+    }
+
+    override suspend fun connectServer(command: ServerConnectionDraft): RuntimeOperationResult {
+        lastConnectionDraft = command
+        val sessionBeforeConnect = currentSession
+        val parsed = ServerBaseUrl.parse(command.rawBaseUrl) as? ServerBaseUrlParseResult.Valid
+            ?: return failConnection(command, invalidServerAddress())
+        val provisional = ServerProfile(
+            id = profileIdGenerator.generate(),
+            displayName = command.displayName.trim().ifEmpty { parsed.baseUrl.origin },
+            baseUrl = parsed.baseUrl,
+            serverIdentity = "pending",
+            isActive = false,
+            tlsMode = command.tlsMode,
+        )
+        transition(AppSession.CheckingServer(command))
+        return when (val probe = serverProbe.probe(provisional)) {
+            is ServerProbeResult.Failure -> handleProbeFailure(command, probe.error)
+            is ServerProbeResult.Compatible -> storageGuard {
+                if (cachedProfiles.any { it.serverIdentity == probe.serverIdentity }) {
+                    transition(AppSession.ServerConnectionFailed(command, com.ermao.library.shared.modules.auth.domain.ServerConnectionFailureCode.ProtocolViolation))
+                    return@storageGuard failure(AppError(AppErrorKind.Conflict, "SERVER_ALREADY_SAVED"))
+                }
+                val profile = provisional.copy(serverIdentity = probe.serverIdentity, isActive = true)
+                val previousActiveId = cachedProfiles.singleOrNull(ServerProfile::isActive)?.id
+                when (val resolution = preflightGate(profile)) {
+                    is GateResolution.Failed -> {
+                        transition(AppSession.ServerConnectionFailed(command, com.ermao.library.shared.modules.auth.domain.ServerConnectionFailureCode.Unavailable))
+                        failure(resolution.error)
+                    }
+                    else -> commitNewProfile(profile, resolution, previousActiveId, sessionBeforeConnect)
+                }
+            }
+        }
+    }
+
+    override suspend fun editServer(
+        profileId: String,
+        command: ServerConnectionDraft,
+    ): RuntimeOperationResult {
+        val existing = findProfile(profileId) ?: return unknownProfile(profileId)
+        val parsed = ServerBaseUrl.parse(command.rawBaseUrl) as? ServerBaseUrlParseResult.Valid
+            ?: return failure(invalidServerAddress())
+        val candidate = existing.copy(
+            displayName = command.displayName.trim().ifEmpty { parsed.baseUrl.origin },
+            baseUrl = parsed.baseUrl,
+            tlsMode = command.tlsMode,
+        )
+        return when (val probe = serverProbe.probe(candidate)) {
+            is ServerProbeResult.Failure -> failure(probe.error)
+            is ServerProbeResult.Compatible -> {
+                if (probe.serverIdentity != existing.serverIdentity) {
+                    return failure(AppError(AppErrorKind.Conflict, "SERVER_IDENTITY_CHANGED"))
+                }
+                storageGuard {
+                    try {
+                        profileRepository.upsert(candidate)
+                        if (candidate.baseUrl != existing.baseUrl) cookieVault.clear(profileId)
+                        reloadProfiles()
+                        if (candidate.isActive) restore(candidate, allowAutomaticOffline = false)
+                        else success("SERVER_UPDATED")
+                    } catch (cancelled: CancellationException) {
+                        profileRepository.upsert(existing)
+                        reloadProfiles()
+                        throw cancelled
+                    } catch (error: Exception) {
+                        profileRepository.upsert(existing)
+                        reloadProfiles()
+                        throw error
+                    }
+                }
+            }
+        }
+    }
+
+    override suspend fun switchServer(profileId: String): RuntimeOperationResult {
+        val target = findProfile(profileId) ?: return unknownProfile(profileId)
+        if (target.isActive) return success("SERVER_ALREADY_ACTIVE")
+        val previousSession = currentSession
+        val candidate = target.copy(isActive = false)
+        return when (val probe = serverProbe.probe(candidate)) {
+            is ServerProbeResult.Failure -> {
+                transition(previousSession)
+                failure(probe.error)
+            }
+            is ServerProbeResult.Compatible -> {
+                if (probe.serverIdentity != target.serverIdentity) {
+                    transition(previousSession)
+                    return failure(AppError(AppErrorKind.ProtocolViolation, "SERVER_IDENTITY_CHANGED"))
+                }
+                when (val resolution = preflightGate(target)) {
+                    is GateResolution.Failed -> {
+                        transition(previousSession)
+                        failure(resolution.error)
+                    }
+                    else -> commitServerSwitch(
+                        target = target,
+                        resolution = resolution,
+                        previousSession = previousSession,
+                    )
+                }
+            }
+        }
+    }
+
+    override suspend fun removeServer(profileId: String): RuntimeOperationResult {
+        val profile = findProfile(profileId) ?: return unknownProfile(profileId)
+        return storageGuard {
+            cookieVault.clear(profileId)
+            entitlementRepository.removeEntitlement(profileId)
+            profileRepository.remove(profileId)
+            reloadProfiles()
+            if (profile.isActive) transition(AppSession.NoServer)
+            success("SERVER_REMOVED", NavigationDirective.ShowServerProfiles)
+        }
+    }
+
+    override suspend fun restoreSystemTrust(profileId: String): RuntimeOperationResult {
+        val profile = findProfile(profileId) ?: return unknownProfile(profileId)
+        val updated = profile.copy(tlsMode = TlsMode.SystemTrust)
+        return storageGuard {
+            profileRepository.upsert(updated)
+            cookieVault.clear(profileId)
+            reloadProfiles()
+            if (updated.isActive) restore(updated, allowAutomaticOffline = false)
+            else success("SYSTEM_TRUST_RESTORED")
+        }
+    }
+
+    override suspend fun acceptInsecureTls(): RuntimeOperationResult {
+        val draft = (currentSession as? AppSession.TlsRisk)?.draft
+            ?: return failure(AppError(AppErrorKind.InvalidRequest, "TLS_CONFIRMATION_NOT_PENDING"))
+        val existing = cachedProfiles.singleOrNull(ServerProfile::isActive)?.takeIf {
+            it.baseUrl.value == draft.rawBaseUrl
+        }
+        val insecureDraft = draft.copy(tlsMode = TlsMode.InsecureSkipAllValidation)
+        return if (existing == null) connectServer(insecureDraft) else editServer(existing.id, insecureDraft)
+    }
+
+    override suspend fun retry(): RuntimeOperationResult {
+        val draft = when (val session = currentSession) {
+            is AppSession.ServerConnectionFailed -> session.draft
+            is AppSession.IncompatibleServer -> session.draft
+            is AppSession.TlsRisk -> session.draft
+            else -> lastConnectionDraft
+        }
+        if (draft != null && currentProfile() == null) return connectServer(draft)
+        return refreshCurrentSession()
+    }
+
+    override suspend fun login(email: String, password: String): RuntimeOperationResult {
+        val profile = currentProfile() ?: return noActiveServer()
+        val previousIdentity = lastKnownIdentity()
+        transition(AppSession.Authenticating(profile))
+        return when (val result = authGateway.login(profile, email.trim(), password)) {
+            is ApiResult.Success -> verifyAfterAuthentication(profile, previousIdentity)
+            is ApiResult.Failure -> handleLoginFailure(profile, email.trim(), result.error)
+        }
+    }
+
+    override suspend fun setupInitialAdmin(
+        name: String,
+        email: String,
+        password: String,
+        locale: String,
+    ): RuntimeOperationResult {
+        val profile = currentProfile() ?: return noActiveServer()
+        val normalizedName = name.trim()
+        val validation = validateSetup(normalizedName, email, password, locale)
+        if (validation != null) return failure(validation)
+        transition(AppSession.SettingUp(profile))
+        return when (
+            val result = authGateway.setupInitialAdmin(
+                profile,
+                normalizedName,
+                email.trim(),
+                password,
+                locale,
+            )
+        ) {
+            is ApiResult.Success -> verifyAfterAuthentication(profile, previousIdentity = null)
+            is ApiResult.Failure -> if (result.error.kind == AppErrorKind.Conflict) {
+                when (val status = authGateway.setupStatus(profile)) {
+                    is ApiResult.Success -> if (status.value) {
+                        transition(AppSession.SignedOut(profile))
+                        success("SETUP_ALREADY_COMPLETED")
+                    } else {
+                        transition(AppSession.SetupFailed(profile, result.error.code))
+                        failure(result.error)
+                    }
+                    is ApiResult.Failure -> {
+                        transition(AppSession.SetupFailed(profile, status.error.code))
+                        failure(status.error)
+                    }
+                }
+            } else {
+                transition(AppSession.SetupFailed(profile, result.error.code))
+                failure(result.error)
+            }
+        }
+    }
+
+    override suspend fun refreshCurrentSession(): RuntimeOperationResult {
+        val profile = currentProfile() ?: return noActiveServer()
+        return when (val result = authGateway.verifyCurrentSession(profile)) {
+            is ApiResult.Success -> authenticate(profile, result.value, lastKnownIdentity())
+            is ApiResult.Failure -> handleSessionFailure(profile, result.error, allowAutomaticOffline = false)
+        }
+    }
+
+    override suspend fun enterOfflineMode(): RuntimeOperationResult {
+        val profile = currentProfile() ?: return noActiveServer()
+        val record = validEntitlement(profile)
+            ?: return failure(AppError(AppErrorKind.Unauthorized, "OFFLINE_ENTITLEMENT_EXPIRED"))
+        val identity = record.toIdentity()
+        transition(AppSession.OfflineGrace(profile, identity, record.expiresAtEpochMillis))
+        return success("OFFLINE_MODE_ENTERED", NavigationDirective.EnterOfflineShell)
+    }
+
+    override suspend fun logout(): RuntimeOperationResult {
+        val profile = currentProfile() ?: return noActiveServer()
+        try {
+            entitlementRepository.revoke(profile.id)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            return storageFailure(error.message ?: "Unable to revoke local offline access")
+        }
+        transition(AppSession.SignedOut(profile))
+        var remote: ApiResult<Unit>? = null
+        var cookieFailure: Exception? = null
+        try {
+            remote = authGateway.logout(profile)
+        } finally {
+            try {
+                cookieVault.clear(profile.id)
+            } catch (error: Exception) {
+                cookieFailure = error
+            }
+        }
+        return when {
+            cookieFailure != null -> storageFailure(
+                cookieFailure.message ?: "Unable to clear local session cookie",
+            )
+            remote is ApiResult.Failure -> success(
+                "LOGGED_OUT_REMOTE_UNCONFIRMED",
+                NavigationDirective.HidePrivateShell,
+            )
+            else -> success("LOGGED_OUT", NavigationDirective.HidePrivateShell)
+        }
+    }
+
+    override fun close() {
+        observers.clear()
+    }
+
+    private suspend fun restore(
+        profile: ServerProfile,
+        allowAutomaticOffline: Boolean,
+    ): RuntimeOperationResult {
+        val draft = profile.toDraft()
+        transition(AppSession.CheckingServer(draft))
+        return when (val probe = serverProbe.probe(profile)) {
+            is ServerProbeResult.Failure -> handleSavedProbeFailure(
+                profile,
+                draft,
+                probe.error,
+                allowAutomaticOffline,
+            )
+            is ServerProbeResult.Compatible -> if (probe.serverIdentity != profile.serverIdentity) {
+                transition(AppSession.IncompatibleServer(draft, "SERVER_IDENTITY_CHANGED"))
+                failure(AppError(AppErrorKind.ProtocolViolation, "SERVER_IDENTITY_CHANGED"))
+            } else if (isLocallyRevoked(profile)) {
+                cookieVault.clear(profile.id)
+                transition(AppSession.SignedOut(profile))
+                success("SIGNED_OUT", NavigationDirective.HidePrivateShell)
+            } else {
+                resolveGate(profile, activateBeforeTransition = false)
+            }
+        }
+    }
+
+    private suspend fun resolveGate(
+        profile: ServerProfile,
+        activateBeforeTransition: Boolean,
+    ): RuntimeOperationResult = when (val resolution = preflightGate(profile)) {
+        is GateResolution.Failed -> handleSessionFailure(
+            profile,
+            resolution.error,
+            allowAutomaticOffline = false,
+        )
+        else -> {
+            if (activateBeforeTransition) profileRepository.activate(profile.id)
+            applyGateResolution(profile, resolution)
+            when (resolution) {
+                is GateResolution.Authenticated -> success("AUTHENTICATED", resolution.navigationDirective)
+                GateResolution.SetupRequired -> success("SETUP_REQUIRED")
+                is GateResolution.SignedOut -> failure(resolution.error)
+                is GateResolution.AccountDisabled -> success("ACCOUNT_DISABLED", NavigationDirective.HidePrivateShell)
+                is GateResolution.Failed -> error("Handled above")
+            }
+        }
+    }
+
+    private suspend fun commitNewProfile(
+        profile: ServerProfile,
+        resolution: GateResolution,
+        previousActiveId: String?,
+        previousSession: AppSession,
+    ): RuntimeOperationResult = storageGuard {
+        try {
+            profileRepository.upsert(profile)
+            reloadProfiles()
+            applyGateResolution(activeProfile(profile.id), resolution)
+            when (resolution) {
+                is GateResolution.Authenticated -> success("AUTHENTICATED", resolution.navigationDirective)
+                GateResolution.SetupRequired -> success("SETUP_REQUIRED")
+                is GateResolution.SignedOut -> failure(resolution.error)
+                is GateResolution.AccountDisabled -> success("ACCOUNT_DISABLED", NavigationDirective.HidePrivateShell)
+                is GateResolution.Failed -> error("A failed gate cannot be committed")
+            }
+        } catch (cancelled: CancellationException) {
+            compensateNewProfile(profile.id, previousActiveId, previousSession)
+            throw cancelled
+        } catch (error: Exception) {
+            compensateNewProfile(profile.id, previousActiveId, previousSession)
+            throw error
+        }
+    }
+
+    private suspend fun commitServerSwitch(
+        target: ServerProfile,
+        resolution: GateResolution,
+        previousSession: AppSession,
+    ): RuntimeOperationResult {
+        val previousActiveId = cachedProfiles.singleOrNull(ServerProfile::isActive)?.id
+        return storageGuard {
+            try {
+                profileRepository.activate(target.id)
+                reloadProfiles()
+                applyGateResolution(activeProfile(target.id), resolution)
+                success("SERVER_SWITCHED", NavigationDirective.ResetAllStacksHome)
+            } catch (cancelled: CancellationException) {
+                compensateActivation(previousActiveId, previousSession)
+                throw cancelled
+            } catch (error: Exception) {
+                compensateActivation(previousActiveId, previousSession)
+                throw error
+            }
+        }
+    }
+
+    private suspend fun compensateNewProfile(
+        newProfileId: String,
+        previousActiveId: String?,
+        previousSession: AppSession,
+    ) {
+        runCatching { cookieVault.clear(newProfileId) }
+        runCatching { entitlementRepository.removeEntitlement(newProfileId) }
+        runCatching { profileRepository.remove(newProfileId) }
+        if (previousActiveId != null) runCatching { profileRepository.activate(previousActiveId) }
+        reloadProfiles()
+        transition(previousSession)
+    }
+
+    private suspend fun compensateActivation(
+        previousActiveId: String?,
+        previousSession: AppSession,
+    ) {
+        if (previousActiveId != null) profileRepository.activate(previousActiveId)
+        reloadProfiles()
+        transition(previousSession)
+    }
+
+    private suspend fun preflightGate(profile: ServerProfile): GateResolution =
+        when (val setup = authGateway.setupStatus(profile)) {
+            is ApiResult.Failure -> GateResolution.Failed(setup.error)
+            is ApiResult.Success -> if (!setup.value) {
+                GateResolution.SetupRequired
+            } else {
+                when (val me = authGateway.verifyCurrentSession(profile)) {
+                    is ApiResult.Success -> GateResolution.Authenticated(me.value, NavigationDirective.ResetAllStacksHome)
+                    is ApiResult.Failure -> when {
+                        me.error.kind == AppErrorKind.Unauthorized -> GateResolution.SignedOut(me.error)
+                        me.error.code == "ACCOUNT_DISABLED" -> GateResolution.AccountDisabled(lastKnownIdentity()?.email)
+                        else -> GateResolution.Failed(me.error)
+                    }
+                }
+            }
+        }
+
+    private suspend fun applyGateResolution(profile: ServerProfile, resolution: GateResolution) {
+        when (resolution) {
+            GateResolution.SetupRequired -> transition(AppSession.SetupRequired(profile))
+            is GateResolution.SignedOut -> {
+                val entitlement = validEntitlement(profile)
+                transition(
+                    AppSession.SessionExpired(
+                        profile,
+                        entitlement?.toIdentity(),
+                        entitlement?.expiresAtEpochMillis,
+                    ),
+                )
+            }
+            is GateResolution.Authenticated -> authenticate(profile, resolution.session, lastKnownIdentity())
+            is GateResolution.AccountDisabled -> {
+                entitlementRepository.revoke(profile.id)
+                transition(AppSession.AccountDisabled(profile, resolution.email.orEmpty()))
+            }
+            is GateResolution.Failed -> Unit
+        }
+    }
+
+    private suspend fun verifyAfterAuthentication(
+        profile: ServerProfile,
+        previousIdentity: SessionIdentity?,
+    ): RuntimeOperationResult = when (val verified = authGateway.verifyCurrentSession(profile)) {
+        is ApiResult.Success -> authenticate(profile, verified.value, previousIdentity)
+        is ApiResult.Failure -> handleSessionFailure(profile, verified.error, allowAutomaticOffline = false)
+    }
+
+    private suspend fun authenticate(
+        profile: ServerProfile,
+        verified: VerifiedSession,
+        previousIdentity: SessionIdentity?,
+    ): RuntimeOperationResult {
+        val now = clock.now()
+        val previousEntitlement = entitlementRepository.load(profile.id)
+        entitlementRepository.save(
+            entitlementPolicy.validated(profile.id, verified.identity, now, previousEntitlement),
+        )
+        transition(AppSession.Authenticated(profile, verified.identity, verified.authorization))
+        val directive = when {
+            previousIdentity == null -> NavigationDirective.ResetAllStacksHome
+            previousIdentity.namespace == verified.identity.namespace -> NavigationDirective.RestoreSelectedTab
+            else -> NavigationDirective.ResetAllStacksHome
+        }
+        return success("AUTHENTICATED", directive)
+    }
+
+    private suspend fun handleLoginFailure(
+        profile: ServerProfile,
+        email: String,
+        error: AppError,
+    ): RuntimeOperationResult {
+        when {
+            error.code == "SETUP_REQUIRED" -> transition(AppSession.SetupRequired(profile))
+            error.kind == AppErrorKind.Unauthorized -> transition(
+                AppSession.LoginFailed(profile, email, "INVALID_CREDENTIALS"),
+            )
+            error.code == "ACCOUNT_DISABLED" -> {
+                entitlementRepository.revoke(profile.id)
+                transition(AppSession.AccountDisabled(profile, email))
+            }
+            else -> transition(AppSession.LoginFailed(profile, email, error.code))
+        }
+        return failure(error)
+    }
+
+    private suspend fun handleSessionFailure(
+        profile: ServerProfile,
+        error: AppError,
+        allowAutomaticOffline: Boolean,
+    ): RuntimeOperationResult {
+        val entitlement = validEntitlement(profile)
+        when {
+            error.code == "ACCOUNT_DISABLED" -> {
+                entitlementRepository.revoke(profile.id)
+                transition(AppSession.AccountDisabled(profile, lastKnownIdentity()?.email.orEmpty()))
+            }
+            error.kind == AppErrorKind.Unauthorized -> transition(
+                AppSession.SessionExpired(
+                    profile,
+                    entitlement?.toIdentity() ?: lastKnownIdentity(),
+                    entitlement?.expiresAtEpochMillis,
+                ),
+            )
+            error.kind in TEMPORARY_FAILURES && allowAutomaticOffline && entitlement != null -> transition(
+                AppSession.OfflineGrace(profile, entitlement.toIdentity(), entitlement.expiresAtEpochMillis),
+            )
+            error.kind in TEMPORARY_FAILURES -> transition(
+                AppSession.SessionUnavailable(
+                    profile,
+                    entitlement?.toIdentity() ?: lastKnownIdentity(),
+                    entitlement?.expiresAtEpochMillis,
+                ),
+            )
+            else -> transition(AppSession.SignedOut(profile))
+        }
+        return failure(error)
+    }
+
+    private suspend fun handleSavedProbeFailure(
+        profile: ServerProfile,
+        draft: ServerConnectionDraft,
+        error: AppError,
+        allowAutomaticOffline: Boolean,
+    ): RuntimeOperationResult = when {
+        error.kind == AppErrorKind.TlsFailure && profile.tlsMode == TlsMode.SystemTrust -> {
+            transition(AppSession.TlsRisk(draft, "TLS_SYSTEM_TRUST_FAILED"))
+            failure(error)
+        }
+        error.kind == AppErrorKind.ProtocolViolation -> {
+            transition(AppSession.IncompatibleServer(draft, error.code))
+            failure(error)
+        }
+        else -> handleSessionFailure(profile, error, allowAutomaticOffline)
+    }
+
+    private fun handleProbeFailure(
+        draft: ServerConnectionDraft,
+        error: AppError,
+    ): RuntimeOperationResult {
+        if (error.kind == AppErrorKind.TlsFailure && draft.tlsMode == TlsMode.SystemTrust) {
+            transition(AppSession.TlsRisk(draft, "TLS_SYSTEM_TRUST_FAILED"))
+        } else if (error.kind == AppErrorKind.ProtocolViolation) {
+            transition(AppSession.IncompatibleServer(draft, error.code))
+        } else {
+            transition(AppSession.ServerConnectionFailed(draft, com.ermao.library.shared.modules.auth.domain.ServerConnectionFailureCode.Unavailable))
+        }
+        return failure(error)
+    }
+
+    private suspend fun validEntitlement(profile: ServerProfile): ValidatedSessionRecord? {
+        val record = entitlementRepository.load(profile.id) ?: return null
+        if (record.serverIdentity != profile.serverIdentity) return null
+        return when (val evaluation = entitlementPolicy.evaluate(record, clock.now())) {
+            is OfflineEntitlementEvaluation.Valid -> {
+                entitlementRepository.save(evaluation.updatedRecord)
+                evaluation.updatedRecord
+            }
+            OfflineEntitlementEvaluation.Expired,
+            OfflineEntitlementEvaluation.Revoked,
+            -> null
+        }
+    }
+
+    private suspend fun isLocallyRevoked(profile: ServerProfile): Boolean =
+        entitlementRepository.load(profile.id)?.let { record ->
+            record.serverIdentity == profile.serverIdentity &&
+                record.status == OfflineEntitlementStatus.RevokedLocally
+        } == true
+
+    private fun validateSetup(
+        name: String,
+        email: String,
+        password: String,
+        locale: String,
+    ): AppError? {
+        val violations = buildMap {
+            if (name.isBlank()) put("name", listOf("REQUIRED"))
+            else if (name.length > 40) put("name", listOf("TOO_LONG"))
+            if (email.isBlank()) put("email", listOf("REQUIRED"))
+            if (password.length < 10) put("password", listOf("TOO_SHORT"))
+            else if (password.length > 128) put("password", listOf("TOO_LONG"))
+            if (locale !in setOf("zh-CN", "en-US")) put("locale", listOf("UNSUPPORTED"))
+        }
+        return violations.takeIf { it.isNotEmpty() }?.let {
+            AppError(AppErrorKind.Validation, "VALIDATION", fieldErrors = it)
+        }
+    }
+
+    private suspend fun reloadProfiles() {
+        cachedProfiles = profileRepository.profiles().sortedWith(
+            compareByDescending<ServerProfile> { it.isActive }.thenBy { it.displayName.lowercase() },
+        )
+    }
+
+    private suspend fun findProfile(profileId: String): ServerProfile? {
+        if (cachedProfiles.isEmpty()) reloadProfiles()
+        return cachedProfiles.firstOrNull { it.id == profileId }
+    }
+
+    private fun activeProfile(profileId: String): ServerProfile =
+        cachedProfiles.first { it.id == profileId }.copy(isActive = true)
+
+    private fun currentProfile(): ServerProfile? = when (val session = currentSession) {
+        is AppSession.SetupRequired -> session.profile
+        is AppSession.SettingUp -> session.profile
+        is AppSession.SetupFailed -> session.profile
+        is AppSession.SignedOut -> session.profile
+        is AppSession.Authenticating -> session.profile
+        is AppSession.LoginFailed -> session.profile
+        is AppSession.AccountDisabled -> session.profile
+        is AppSession.Authenticated -> session.profile
+        is AppSession.SessionUnavailable -> session.profile
+        is AppSession.SessionExpired -> session.profile
+        is AppSession.OfflineGrace -> session.profile
+        else -> cachedProfiles.singleOrNull(ServerProfile::isActive)
+    }
+
+    private fun lastKnownIdentity(): SessionIdentity? = when (val session = currentSession) {
+        is AppSession.Authenticated -> session.identity
+        is AppSession.OfflineGrace -> session.identity
+        is AppSession.SessionUnavailable -> session.lastKnownIdentity
+        is AppSession.SessionExpired -> session.lastKnownIdentity
+        else -> null
+    }
+
+    private fun transition(session: AppSession) {
+        currentSession = session
+        observers.toList().forEach { it.onSessionChanged(session) }
+    }
+
+    private suspend fun storageGuard(block: suspend () -> RuntimeOperationResult): RuntimeOperationResult = try {
+        block()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (duplicate: DuplicateServerIdentityException) {
+        failure(AppError(AppErrorKind.Conflict, "SERVER_ALREADY_SAVED"))
+    } catch (error: Exception) {
+        storageFailure(error.message ?: "Mobile storage failure")
+    }
+
+    private fun failConnection(draft: ServerConnectionDraft, error: AppError): RuntimeOperationResult {
+        transition(AppSession.ServerConnectionFailed(draft, com.ermao.library.shared.modules.auth.domain.ServerConnectionFailureCode.InvalidAddress))
+        return failure(error)
+    }
+
+    private fun noActiveServer() = failure(AppError(AppErrorKind.InvalidRequest, "NO_ACTIVE_SERVER"))
+
+    private fun unknownProfile(profileId: String) = failure(
+        AppError(AppErrorKind.NotFoundOrUnavailable, "SERVER_PROFILE_NOT_FOUND", parameters = mapOf("profileId" to profileId)),
+    )
+
+    private fun invalidServerAddress() = AppError(AppErrorKind.InvalidRequest, "INVALID_SERVER_ADDRESS")
+
+    private fun storageFailure(message: String) = failure(
+        AppError(AppErrorKind.StorageFailure, "STORAGE_FAILURE", message),
+    )
+
+    private fun success(
+        code: String,
+        directive: NavigationDirective = NavigationDirective.KeepCurrentStacks,
+    ) = RuntimeOperationResult.Success(code, directive)
+
+    private fun failure(error: AppError) = RuntimeOperationResult.Failure(error)
+
+    private fun ServerProfile.toDraft() = ServerConnectionDraft(displayName, baseUrl.value, tlsMode)
+
+    private fun ValidatedSessionRecord.toIdentity() = SessionIdentity(
+        userId = userId,
+        email = email,
+        displayName = displayName,
+        namespace = PrivateDataNamespace(serverIdentity, userId, authorizationVersion),
+    )
+
+    private sealed interface GateResolution {
+        data object SetupRequired : GateResolution
+        data class SignedOut(val error: AppError) : GateResolution
+        data class Authenticated(
+            val session: VerifiedSession,
+            val navigationDirective: NavigationDirective,
+        ) : GateResolution
+        data class AccountDisabled(val email: String?) : GateResolution
+        data class Failed(val error: AppError) : GateResolution
+    }
+
+    private companion object {
+        val TEMPORARY_FAILURES = setOf(
+            AppErrorKind.NetworkUnavailable,
+            AppErrorKind.Timeout,
+            AppErrorKind.ServiceUnavailable,
+        )
+    }
+}

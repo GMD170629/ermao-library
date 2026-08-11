@@ -17,6 +17,10 @@ from app.core.i18n import DEFAULT_LOCALE
 from app.models.common import db_timestamp
 from app.models.settings import SystemSetting
 from app.modules.metadata.public import BUILTIN_MANIFESTS
+from app.modules.mobile.public import (
+    SERVER_IDENTITY_SETTING_KEY,
+    new_server_identity,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -34,6 +38,10 @@ def seed_baseline_data(db: Session) -> None:
     """Insert missing defaults without changing existing v14 data."""
 
     now = db_timestamp()
+    setting_seeds = (
+        *SYSTEM_SETTING_SEEDS,
+        (SERVER_IDENTITY_SETTING_KEY, new_server_identity()),
+    )
     setting_rows = tuple(
         {
             "key": key,
@@ -41,7 +49,7 @@ def seed_baseline_data(db: Session) -> None:
             "created_at": now,
             "updated_at": now,
         }
-        for key, value in SYSTEM_SETTING_SEEDS
+        for key, value in setting_seeds
     )
     setting_statement = (
         sqlite_insert(SystemSetting)
