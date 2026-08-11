@@ -98,7 +98,17 @@ def run_library_facet_index_data_migration(
     )
 
 
+def library_facet_index_data_migration_is_complete(
+    session_factory: sessionmaker[Session],
+) -> bool:
+    """Check the version checkpoint without changing library data."""
+
+    with SqlAlchemyFacetIndexUnitOfWork(session_factory) as unit_of_work:
+        return not unit_of_work.facets.pending_works(limit=1)
+
+
 __all__ = [
     "LibraryFacetIndexDataMigrationError",
+    "library_facet_index_data_migration_is_complete",
     "run_library_facet_index_data_migration",
 ]

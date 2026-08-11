@@ -135,7 +135,22 @@ def run_comic_page_index_data_migration(
     )
 
 
+def comic_page_index_data_migration_is_complete(
+    session_factory: sessionmaker[Session],
+) -> bool:
+    """Check the page-index version checkpoint without opening comic files."""
+
+    with SqlAlchemyComicPageIndexMigrationUnitOfWork(
+        session_factory
+    ) as unit_of_work:
+        return not unit_of_work.page_indexes.pending(
+            limit=1,
+            after_file_id=None,
+        )
+
+
 __all__ = [
     "ComicPageIndexDataMigrationError",
+    "comic_page_index_data_migration_is_complete",
     "run_comic_page_index_data_migration",
 ]

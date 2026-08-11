@@ -11,15 +11,11 @@ from pathlib import Path
 from sqlalchemy.exc import OperationalError
 
 from app.bootstrap.imports import persist_import_queue_operation_checkpoint
-from app.bootstrap.library_facet_index import (
-    run_library_facet_index_data_migration,
-)
-from app.bootstrap.comic_page_index_migration import (
-    run_comic_page_index_data_migration,
+from app.bootstrap.startup_data_migrations import (
+    verify_startup_data_migrations_complete,
 )
 from app.bootstrap.metadata import build_automatic_metadata_request_gate
 from app.core.config import get_settings
-from app.db.bootstrap import bootstrap_database
 from app.db.session import (
     BackgroundSessionLocal,
     HeartbeatSessionLocal,
@@ -83,9 +79,7 @@ def _persist_queue_operation_status(
 
 def main() -> None:
     settings = get_settings()
-    bootstrap_database(engine, settings)
-    run_library_facet_index_data_migration(SessionLocal)
-    run_comic_page_index_data_migration(SessionLocal, settings)
+    verify_startup_data_migrations_complete(engine, SessionLocal)
     manager = WorkerManager(BackgroundSessionLocal, settings)
     persistent_import_worker = start_persistent_import_worker(
         BackgroundSessionLocal,

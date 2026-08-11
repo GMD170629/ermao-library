@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 import app.modules.media.infrastructure.comic_page_index_migration as persistence
 from app.bootstrap.comic_page_index_migration import (
     ComicPageIndexDataMigrationError,
+    comic_page_index_data_migration_is_complete,
     run_comic_page_index_data_migration,
 )
 from app.core.config import Settings
@@ -132,11 +133,13 @@ def test_startup_data_migration_batches_25_comics_with_bounded_dml(
             volume_count=25,
             page_count=5,
         )
+        assert comic_page_index_data_migration_is_complete(factory) is False
         with caplog.at_level(logging.INFO), StatementRecorder(engine) as recorder:
             recorder.reset_after_warmup()
             run_comic_page_index_data_migration(factory, settings)
 
         assert recorder.dml_count <= 6
+        assert comic_page_index_data_migration_is_complete(factory) is True
         messages = [record.getMessage() for record in caplog.records]
         assert any("outcome=started" in message for message in messages)
         assert any("outcome=progress" in message for message in messages)

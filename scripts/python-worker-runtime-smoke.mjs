@@ -12,6 +12,32 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function runStartupDataMigrations(env) {
+  return new Promise((resolve, reject) => {
+    const migration = spawn(
+      'uv',
+      ['run', '--extra', 'dev', 'python', '-m', 'app.bootstrap.startup_data_migrations'],
+      {
+        cwd: apiRoot,
+        env,
+        stdio: ['ignore', 'pipe', 'pipe']
+      }
+    );
+    let output = '';
+    migration.stdout.on('data', (chunk) => {
+      output += chunk.toString();
+    });
+    migration.stderr.on('data', (chunk) => {
+      output += chunk.toString();
+    });
+    migration.once('error', reject);
+    migration.once('exit', (code, signal) => {
+      if (code === 0) resolve(output);
+      else reject(new Error(`startup migrations failed code=${code} signal=${signal}. Output: ${output}`));
+    });
+  });
+}
+
 function waitForExit(child, timeoutMs = 5000) {
   if (child.exitCode !== null || child.signalCode !== null) {
     return Promise.resolve({ code: child.exitCode, signal: child.signalCode });
@@ -60,7 +86,7 @@ async function main() {
   };
 
   let child;
-  let output = '';
+  let runtimeOutput = '';
   try {
     const { mkdir } = await import('node:fs/promises');
     await Promise.all([
@@ -69,41 +95,51 @@ async function main() {
       mkdir(inbox, { recursive: true })
     ]);
 
+    const migrationOutput = await runStartupDataMigrations(env);
     child = spawn('uv', ['run', '--extra', 'dev', 'python', '-m', 'app.worker.main'], {
       cwd: apiRoot,
       env,
       stdio: ['ignore', 'pipe', 'pipe']
     });
     child.stdout.on('data', (chunk) => {
-      output += chunk.toString();
+      runtimeOutput += chunk.toString();
     });
     child.stderr.on('data', (chunk) => {
-      output += chunk.toString();
+      runtimeOutput += chunk.toString();
     });
 
     const pidText = await waitForReady(readyFile, child);
     if (!/^\d+$/.test(pidText)) {
       throw new Error(`ready file did not contain a process id: ${pidText}`);
     }
-    if (!output.includes('[import-worker] ready')) {
-      throw new Error(`worker did not print ready marker. Output: ${output}`);
+    if (!runtimeOutput.includes('[import-worker] ready')) {
+      throw new Error(`worker did not print ready marker. Output: ${runtimeOutput}`);
     }
     const startupMigrations = [
       'library_facet_index_data_migration',
       'comic_page_index_data_migration'
     ];
     for (const migration of startupMigrations) {
-      const startedVisible = output.includes(`${migration} outcome=started`);
-      const successVisible = output.includes(`${migration} outcome=success`);
+      const startedVisible = migrationOutput.includes(`${migration} outcome=started`);
+      const successVisible = migrationOutput.includes(`${migration} outcome=success`);
       if (!startedVisible || !successVisible) {
-        throw new Error(`${migration} lifecycle was not visible in worker output. Output: ${output}`);
+        throw new Error(`${migration} lifecycle was not visible before worker launch. Output: ${migrationOutput}`);
       }
+    }
+    if (!migrationOutput.includes('startup_data_migrations outcome=success')) {
+      throw new Error(`startup migration barrier did not report success. Output: ${migrationOutput}`);
+    }
+    if (!runtimeOutput.includes('startup_data_migration_barrier outcome=ready')) {
+      throw new Error(`worker did not verify the completed migration barrier. Output: ${runtimeOutput}`);
+    }
+    if (runtimeOutput.includes('data_migration outcome=started')) {
+      throw new Error(`worker reran data migrations after process launch. Output: ${runtimeOutput}`);
     }
 
     child.kill('SIGTERM');
     const exit = await waitForExit(child);
     if (exit.code !== 0 && exit.signal !== 'SIGTERM') {
-      throw new Error(`worker stopped unexpectedly with code=${exit.code} signal=${exit.signal}. Output: ${output}`);
+      throw new Error(`worker stopped unexpectedly with code=${exit.code} signal=${exit.signal}. Output: ${runtimeOutput}`);
     }
     try {
       await access(readyFile, constants.F_OK);
@@ -113,6 +149,7 @@ async function main() {
     }
 
     console.log('Python worker runtime smoke ok');
+    const output = `${migrationOutput}${runtimeOutput}`;
     const interesting = output
       .split(/\r?\n/)
       .filter((line) =>

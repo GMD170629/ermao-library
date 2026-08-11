@@ -8,12 +8,14 @@ SQLite 3.50.4、SQLAlchemy 2.0.50。以下时间是本机实测或注明的线�
 
 容器先同步执行 `python -m app.bootstrap.startup_data_migrations`，成功后才创建
 Uvicorn 进程。Schema、分类映射和漫画页索引任一失败都会让命令非零退出，API
-不会启动。直接启动 Uvicorn 或独立 Worker 时，lifespan/worker 入口仍会再次执行
-同一幂等检查，防止绕过容器入口。
+不会启动。独立 Python API 镜像使用相同的 pre-start 命令；API lifespan 与 Worker
+入口只执行只读完整性校验，发现任一阶段未完成就拒绝就绪，不会在运行期补跑或
+重复执行数据迁移。
 
 标准输出包含以下稳定记录：
 
 - `startup_data_migrations outcome=started|success|failed`
+- `startup_data_migration_barrier outcome=ready`
 - `library_facet_index_data_migration outcome=started|progress|success|failed`
 - `comic_page_index_data_migration outcome=started|progress|success|failed`
 

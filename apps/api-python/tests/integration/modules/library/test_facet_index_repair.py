@@ -6,6 +6,9 @@ from threading import Event, Thread
 from time import monotonic
 
 import pytest
+from app.bootstrap.library_facet_index import (
+    library_facet_index_data_migration_is_complete,
+)
 from app.core.config import Settings
 from app.db.base import Base
 from app.db.bootstrap import bootstrap_database
@@ -62,6 +65,13 @@ def test_facet_index_repair_commits_bounded_restartable_batches(
 ) -> None:
     _add_pending_works(db_session, 3)
     rebuild = _rebuilder(db_session)
+    factory = sessionmaker(
+        bind=db_session.get_bind(),
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+    assert library_facet_index_data_migration_is_complete(factory) is False
 
     first = rebuild.execute(limit=2)
     db_session.expire_all()
@@ -82,6 +92,7 @@ def test_facet_index_repair_commits_bounded_restartable_batches(
     assert second.processed == 1
     assert second.may_have_more is False
     assert repeated.processed == 0
+    assert library_facet_index_data_migration_is_complete(factory) is True
     assert db_session.scalar(select(func.count()).select_from(LibraryWorkFacet)) == 9
     assert db_session.scalar(select(func.count()).select_from(LibraryFacet)) == 7
 

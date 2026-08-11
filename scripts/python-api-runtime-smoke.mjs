@@ -26,6 +26,32 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function runStartupDataMigrations(env) {
+  return new Promise((resolve, reject) => {
+    const migration = spawn(
+      'uv',
+      ['run', '--extra', 'dev', 'python', '-m', 'app.bootstrap.startup_data_migrations'],
+      {
+        cwd: apiRoot,
+        env,
+        stdio: ['ignore', 'pipe', 'pipe']
+      }
+    );
+    let output = '';
+    migration.stdout.on('data', (chunk) => {
+      output += chunk.toString();
+    });
+    migration.stderr.on('data', (chunk) => {
+      output += chunk.toString();
+    });
+    migration.once('error', reject);
+    migration.once('exit', (code, signal) => {
+      if (code === 0) resolve(output);
+      else reject(new Error(`startup migrations failed code=${code} signal=${signal}. Output: ${output}`));
+    });
+  });
+}
+
 async function waitForHealth(url, processRef) {
   const deadline = Date.now() + 15000;
   let lastError = null;
@@ -69,17 +95,18 @@ async function main() {
       import('node:fs/promises').then(({ mkdir }) => mkdir(inbox, { recursive: true }))
     ]);
 
+    const migrationOutput = await runStartupDataMigrations(env);
+    let runtimeOutput = '';
     child = spawn('uv', ['run', '--extra', 'dev', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(port), '--log-level', 'warning'], {
       cwd: apiRoot,
       env,
       stdio: ['ignore', 'pipe', 'pipe']
     });
-    let output = '';
     child.stdout.on('data', (chunk) => {
-      output += chunk.toString();
+      runtimeOutput += chunk.toString();
     });
     child.stderr.on('data', (chunk) => {
-      output += chunk.toString();
+      runtimeOutput += chunk.toString();
     });
 
     const health = await waitForHealth(`http://127.0.0.1:${port}/api/health`, child);
@@ -94,13 +121,23 @@ async function main() {
       'comic_page_index_data_migration'
     ];
     for (const migration of startupMigrations) {
-      const startedVisible = output.includes(`${migration} outcome=started`);
-      const successVisible = output.includes(`${migration} outcome=success`);
+      const startedVisible = migrationOutput.includes(`${migration} outcome=started`);
+      const successVisible = migrationOutput.includes(`${migration} outcome=success`);
       if (!startedVisible || !successVisible) {
-        throw new Error(`${migration} lifecycle was not visible in process output. Output: ${output}`);
+        throw new Error(`${migration} lifecycle was not visible before API launch. Output: ${migrationOutput}`);
       }
     }
+    if (!migrationOutput.includes('startup_data_migrations outcome=success')) {
+      throw new Error(`startup migration barrier did not report success. Output: ${migrationOutput}`);
+    }
+    if (!runtimeOutput.includes('startup_data_migration_barrier outcome=ready')) {
+      throw new Error(`API did not verify the completed migration barrier. Output: ${runtimeOutput}`);
+    }
+    if (runtimeOutput.includes('data_migration outcome=started')) {
+      throw new Error(`API reran data migrations after process launch. Output: ${runtimeOutput}`);
+    }
     console.log(`Python API runtime smoke ok on port ${port}`);
+    const output = `${migrationOutput}${runtimeOutput}`;
     if (output.trim()) console.log(output.trim());
   } finally {
     if (child && child.exitCode === null) {

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -20,11 +21,13 @@ sys.path.insert(0, str(API_ROOT))
 
 from app.bootstrap.imports import (
     claim_next_import_task,
-    enqueue_import_task,
+    load_import_enqueue_command_projection,
+    persist_import_enqueue_write,
+    prepare_import_enqueue_command,
+    prepare_import_enqueue_write,
     process_import_task,
 )
 from app.core.config import Settings
-from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
 from tests.test_worker_importer import (
     write_comic_fixture,
@@ -80,13 +83,24 @@ def expect_ok(response: httpx.Response) -> dict:
 def import_sample(path: Path, settings: Settings) -> dict:
     engine = create_sqlite_engine(settings.database_path)
     try:
-        with Session(engine) as db:
-            enqueue_import_task(
-                db,
-                path,
-                origin="MANUAL",
-                original_name=path.name,
+        command = prepare_import_enqueue_command(
+            path,
+            origin="MANUAL",
+            original_name=path.name,
+        )
+        with Session(engine) as projection_db:
+            projection = load_import_enqueue_command_projection(
+                projection_db,
+                command,
             )
+        prepared = prepare_import_enqueue_write(
+            command,
+            projection,
+            available_at=datetime.now(UTC),
+        )
+        with Session(engine) as enqueue_db:
+            persist_import_enqueue_write(enqueue_db, prepared)
+        with Session(engine) as db:
             task = claim_next_import_task(db, "sample-smoke", 900)
             assert task is not None
             result = process_import_task(db, settings, task)
@@ -230,9 +244,6 @@ def main() -> None:
             path.mkdir(parents=True, exist_ok=True)
 
         settings = Settings(storage_root=str(storage_root))
-        engine = create_sqlite_engine(settings.database_path)
-        bootstrap_database(engine, settings)
-        engine.dispose()
         port = free_port()
         env = {
             **os.environ,
@@ -240,6 +251,16 @@ def main() -> None:
             "STORAGE_ROOT": str(storage_root),
             "DOWNLOAD_INBOX_PATH": str(inbox),
         }
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "app.bootstrap.startup_data_migrations",
+            ],
+            cwd=API_ROOT,
+            env=env,
+            check=True,
+        )
         process = subprocess.Popen(
             [
                 "uv",

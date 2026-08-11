@@ -13,11 +13,8 @@ from app.api.error_handlers import (
 )
 from app.api.router import api_router
 from app.bootstrap.auth import build_password_authentication_runtime
-from app.bootstrap.comic_page_index_migration import (
-    run_comic_page_index_data_migration,
-)
-from app.bootstrap.library_facet_index import (
-    run_library_facet_index_data_migration,
+from app.bootstrap.startup_data_migrations import (
+    verify_startup_data_migrations_complete,
 )
 from app.bootstrap.opds import build_opds_router
 from app.bootstrap.reader_navigation import (
@@ -31,7 +28,6 @@ from app.core.database_errors import (
     is_database_busy_error,
     is_database_operation_timeout,
 )
-from app.db.bootstrap import bootstrap_database
 from app.db.maintenance import database_maintenance_is_active
 from app.db.session import (
     BackgroundSessionLocal,
@@ -127,9 +123,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if session_factory is None:
-            bootstrap_database(engine, settings)
-            run_library_facet_index_data_migration(SessionLocal)
-            run_comic_page_index_data_migration(SessionLocal, settings)
+            verify_startup_data_migrations_complete(engine, SessionLocal)
         download_queue_worker = start_download_queue_worker(
             background_runtime_factory,
             settings,
