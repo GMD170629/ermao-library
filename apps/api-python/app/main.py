@@ -19,7 +19,12 @@ from app.core.auth import get_current_user
 from app.core.authorization import can_manage_system
 from app.core.config import Settings, get_settings
 from app.db.bootstrap import bootstrap_database
-from app.db.session import HeartbeatSessionLocal, SessionLocal, engine
+from app.db.session import (
+    FacetMaintenanceSessionLocal,
+    HeartbeatSessionLocal,
+    SessionLocal,
+    engine,
+)
 from app.schemas.responses import fail
 from app.services.download_queue import start_download_queue_worker
 from app.services.health_runs import fail_abandoned_health_runs
@@ -121,7 +126,7 @@ def create_app(
         log_maintenance_worker = SystemEventMaintenanceWorker(runtime_factory)
         log_maintenance_worker.start()
         facet_index_worker = (
-            start_facet_index_maintenance_worker(runtime_factory)
+            start_facet_index_maintenance_worker(FacetMaintenanceSessionLocal)
             if session_factory is None
             else None
         )
