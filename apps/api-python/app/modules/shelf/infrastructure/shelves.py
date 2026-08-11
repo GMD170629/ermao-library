@@ -7,12 +7,14 @@ from typing import Any
 
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.core.authorization import (
     AuthorizationContext,
     work_visibility_predicate,
 )
+from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.library import LibraryWork
 from app.models.settings import MonitorFolder
 from app.models.shelf import Shelf, ShelfWork
@@ -147,22 +149,21 @@ def replace_collection_members(
     shelf_ids: list[str],
     now: datetime,
 ) -> None:
+    rows = [
+        {
+            "collection_id": collection_id,
+            "shelf_id": shelf_id,
+            "created_at": now,
+        }
+        for shelf_id in shelf_ids
+    ]
     db.execute(
         delete(ShelfCollectionMembership).where(
             ShelfCollectionMembership.collection_id == collection_id
         )
     )
-    db.add_all(
-        [
-            ShelfCollectionMembership(
-                collection_id=collection_id,
-                shelf_id=shelf_id,
-                created_at=now,
-            )
-            for shelf_id in shelf_ids
-        ]
-    )
-    db.flush()
+    for chunk in sqlite_parameter_chunks(rows, parameters_per_row=3):
+        db.execute(sqlite_insert(ShelfCollectionMembership).values(list(chunk)))
 
 
 def replace_shelf_collections(
@@ -172,22 +173,21 @@ def replace_shelf_collections(
     collection_ids: list[str],
     now: datetime,
 ) -> None:
+    rows = [
+        {
+            "collection_id": collection_id,
+            "shelf_id": shelf_id,
+            "created_at": now,
+        }
+        for collection_id in collection_ids
+    ]
     db.execute(
         delete(ShelfCollectionMembership).where(
             ShelfCollectionMembership.shelf_id == shelf_id
         )
     )
-    db.add_all(
-        [
-            ShelfCollectionMembership(
-                collection_id=collection_id,
-                shelf_id=shelf_id,
-                created_at=now,
-            )
-            for collection_id in collection_ids
-        ]
-    )
-    db.flush()
+    for chunk in sqlite_parameter_chunks(rows, parameters_per_row=3):
+        db.execute(sqlite_insert(ShelfCollectionMembership).values(list(chunk)))
 
 
 def touch_shelves_updated_at(
@@ -301,19 +301,21 @@ def list_work_cards(
 
 
 def create_shelf(db: Session, values: dict[str, Any]) -> dict[str, Any]:
-    shelf = Shelf(
-        id=str(values["id"]),
-        owner_user_id=str(values["ownerUserId"]),
-        name=str(values["name"]),
-        description=values.get("description"),
-        kind=str(values["kind"]),
-        rules_json=str(values["rulesJson"]),
-        pinned=bool(values["pinned"]),
-        created_at=values["createdAt"],
-        updated_at=values["updatedAt"],
-    )
-    db.add(shelf)
-    db.flush()
+    shelf = db.execute(
+        sqlite_insert(Shelf)
+        .values(
+            id=str(values["id"]),
+            owner_user_id=str(values["ownerUserId"]),
+            name=str(values["name"]),
+            description=values.get("description"),
+            kind=str(values["kind"]),
+            rules_json=str(values["rulesJson"]),
+            pinned=bool(values["pinned"]),
+            created_at=values["createdAt"],
+            updated_at=values["updatedAt"],
+        )
+        .returning(Shelf)
+    ).scalar_one()
     return _entity_record(shelf)
 
 
@@ -322,9 +324,6 @@ def update_shelf(
     shelf_id: str,
     values: dict[str, Any],
 ) -> dict[str, Any] | None:
-    shelf = db.get(Shelf, shelf_id)
-    if shelf is None:
-        return None
     field_map = {
         "name": "name",
         "description": "description",
@@ -333,10 +332,16 @@ def update_shelf(
         "rulesJson": "rules_json",
         "updatedAt": "updated_at",
     }
-    for external_name, attribute_name in field_map.items():
-        if external_name in values:
-            setattr(shelf, attribute_name, values[external_name])
-    db.flush()
+    patch = {
+        attribute_name: values[external_name]
+        for external_name, attribute_name in field_map.items()
+        if external_name in values
+    }
+    shelf = db.execute(
+        update(Shelf).where(Shelf.id == shelf_id).values(**patch).returning(Shelf)
+    ).scalar_one_or_none()
+    if shelf is None:
+        return None
     return _entity_record(shelf)
 
 
@@ -347,20 +352,13 @@ def replace_shelf_works(
     *,
     now: datetime,
 ) -> None:
-    if work_ids and not shelf_accepts_works(db, shelf_id):
-        raise ValueError("COLLECTION_CANNOT_CONTAIN_WORKS")
+    rows = [
+        {"shelf_id": shelf_id, "work_id": work_id, "created_at": now}
+        for work_id in work_ids
+    ]
     db.execute(delete(ShelfWork).where(ShelfWork.shelf_id == shelf_id))
-    db.add_all(
-        [
-            ShelfWork(
-                shelf_id=shelf_id,
-                work_id=work_id,
-                created_at=now,
-            )
-            for work_id in work_ids
-        ]
-    )
-    db.flush()
+    for chunk in sqlite_parameter_chunks(rows, parameters_per_row=3):
+        db.execute(sqlite_insert(ShelfWork).values(list(chunk)))
 
 
 def add_shelf_work(
@@ -372,16 +370,32 @@ def add_shelf_work(
 ) -> None:
     if not shelf_accepts_works(db, shelf_id):
         raise ValueError("COLLECTION_CANNOT_CONTAIN_WORKS")
-    if db.get(ShelfWork, (shelf_id, work_id)) is not None:
-        return
-    db.add(
-        ShelfWork(
-            shelf_id=shelf_id,
-            work_id=work_id,
-            created_at=now,
-        )
+    db.execute(
+        sqlite_insert(ShelfWork)
+        .values(shelf_id=shelf_id, work_id=work_id, created_at=now)
+        .on_conflict_do_nothing(index_elements=[ShelfWork.shelf_id, ShelfWork.work_id])
     )
-    db.flush()
+
+
+def add_shelf_works(
+    db: Session,
+    *,
+    shelf_id: str,
+    work_ids: tuple[str, ...],
+    now: datetime,
+) -> None:
+    rows = tuple(
+        {"shelf_id": shelf_id, "work_id": work_id, "created_at": now}
+        for work_id in work_ids
+    )
+    for chunk in sqlite_parameter_chunks(rows, parameters_per_row=3):
+        db.execute(
+            sqlite_insert(ShelfWork)
+            .values(list(chunk))
+            .on_conflict_do_nothing(
+                index_elements=[ShelfWork.shelf_id, ShelfWork.work_id]
+            )
+        )
 
 
 def remove_shelf_work(
@@ -398,6 +412,21 @@ def remove_shelf_work(
     )
 
 
+def remove_shelf_works(
+    db: Session,
+    *,
+    shelf_id: str,
+    work_ids: tuple[str, ...],
+) -> None:
+    for chunk in sqlite_parameter_chunks(work_ids, parameters_per_row=1):
+        db.execute(
+            delete(ShelfWork).where(
+                ShelfWork.shelf_id == shelf_id,
+                ShelfWork.work_id.in_(chunk),
+            )
+        )
+
+
 def delete_shelf(db: Session, shelf_id: str) -> bool:
     db.execute(
         delete(ShelfCollectionMembership).where(
@@ -409,7 +438,6 @@ def delete_shelf(db: Session, shelf_id: str) -> bool:
     )
     db.execute(delete(ShelfWork).where(ShelfWork.shelf_id == shelf_id))
     result = db.execute(delete(Shelf).where(Shelf.id == shelf_id))
-    db.flush()
     return bool(result.rowcount)
 
 

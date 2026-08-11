@@ -1,19 +1,21 @@
 import time
 from collections.abc import Generator
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-
 from app import models as _models  # noqa: F401
 from app.core.config import Settings, get_settings
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import create_app
 from app.models.import_pipeline import ImportTask
+from app.modules.system.application.commands import SystemWriteTransaction
+from app.modules.system.infrastructure import health_runs
 from app.services.queue_runtime import queue_runtime_view, record_queue_heartbeat
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
 
 
 def _setup_admin(client):
@@ -138,6 +140,46 @@ def test_manual_health_run_exposes_initial_items_and_reaches_terminal_state(
         body = "".join(stream.iter_text())
     assert "event: run.completed" in body
     assert f'"runId": "{run["runId"]}"' in body
+
+
+def test_health_external_checks_run_without_a_checked_out_read_session(
+    tmp_path: Path,
+    test_settings: Settings,
+    monkeypatch,
+) -> None:
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'health-isolation.sqlite'}")
+    Base.metadata.create_all(bind=engine)
+    factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+    with factory() as db:
+        prepared = health_runs.prepare_health_run_creation(
+            db,
+            test_settings,
+            "health-session-actor",
+        )
+        with SystemWriteTransaction(db):
+            health_runs.write_prepared_health_run_creation(db, prepared)
+
+    checked_out_counts: list[int] = []
+
+    def isolated_check(*_args, **_kwargs):
+        checked_out_counts.append(engine.pool.checkedout())
+        return "ok", "health.test.ok", {}
+
+    monkeypatch.setattr(health_runs, "_execute_item", isolated_check)
+    health_runs.run_health_checks(
+        factory,
+        True,
+        test_settings,
+        str(prepared.snapshot["runId"]),
+    )
+
+    assert checked_out_counts
+    assert set(checked_out_counts) == {0}
+    engine.dispose()
 
 
 def test_log_capacity_can_be_updated_from_system_settings(client):

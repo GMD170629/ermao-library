@@ -5,10 +5,12 @@ import logging
 import threading
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from time import time_ns
+from time import monotonic
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import inspect
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.bootstrap.organize import (
@@ -21,11 +23,28 @@ from app.bootstrap.organize import (
     get_organize_policy,
     get_organize_run,
     list_organize_runs,
-    mark_policy_scheduled,
+    mark_organize_policy_scheduled_command,
     sync_organize_runs,
-    update_organize_policy,
+    sync_organize_runs_command,
 )
-from app.infrastructure.sqlite_retry import execute_with_sqlite_busy_retry
+from app.bootstrap.organize import (
+    cancel_organize_job_command as persist_cancel_organize_job,
+)
+from app.bootstrap.organize import (
+    create_organize_run_command as persist_organize_run,
+)
+from app.bootstrap.organize import (
+    delete_organize_job_command as persist_delete_organize_job,
+)
+from app.bootstrap.organize import (
+    recognize_organize_job_command as persist_recognize_organize_job,
+)
+from app.bootstrap.organize import (
+    update_organize_policy_command as persist_organize_policy,
+)
+from app.core.database_errors import is_database_busy_error
+from app.modules.organize.application.commands import prepare_organize_policy_update
+from app.modules.organize.application.dto import PreparedOrganizeJobEnqueue
 from app.modules.organize.infrastructure import eligibility as organize_eligibility
 from app.modules.organize.infrastructure import jobs as organize_jobs
 from app.modules.organize.infrastructure import runs as organize_runs
@@ -33,6 +52,7 @@ from app.services.metadata_provider_registry import enabled_metadata_provider_id
 
 LOGGER = logging.getLogger(__name__)
 DATABASE_BUSY_RETRY_DELAYS_SECONDS = (0.25, 1.0)
+DATABASE_BUSY_LOG_INTERVAL_SECONDS = 30.0
 ACTIVE_JOB_STATUSES = (
     "LOOKUP_PENDING",
     "PENDING",
@@ -68,6 +88,7 @@ __all__ = [
     "retry_organize_job",
     "sync_organize_runs",
     "update_organize_policy",
+    "update_organize_policy_command",
 ]
 
 
@@ -76,11 +97,27 @@ def _now() -> datetime:
 
 
 def _id(prefix: str) -> str:
-    return f"py_{prefix}_{time_ns()}"
+    return f"py_{prefix}_{uuid4().hex}"
 
 
 def _has_table(db: Session, table: str) -> bool:
     return inspect(db.connection()).has_table(table)
+
+
+def update_organize_policy_command(
+    db: Session, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Own the policy mutation transaction outside the HTTP adapter."""
+
+    current = get_organize_policy(db)
+    prepared = prepare_organize_policy_update(current, payload, timestamp=_now())
+    return persist_organize_policy(db, prepared)
+
+
+def update_organize_policy(db: Session, payload: dict[str, Any]) -> dict[str, Any]:
+    """Backward-compatible named policy command."""
+
+    return update_organize_policy_command(db, payload)
 
 
 def eligible_organize_works(
@@ -138,7 +175,7 @@ def _run_dedupe_key(
     digest = hashlib.sha256("\n".join(sorted(work_ids)).encode("utf-8")).hexdigest()[
         :20
     ]
-    return f"{trigger.lower()}:{digest}:{time_ns()}"
+    return f"{trigger.lower()}:{digest}:{uuid4().hex}"
 
 
 def create_organize_run(
@@ -180,9 +217,13 @@ def create_organize_run(
         )
         for work in works
     }
+    # All policy, eligibility, media and provider projections are detached
+    # before dedupe/ID construction or the write unit of work begins.
+    db.close()
     ids = [str(work["id"]) for work in works]
     key = _run_dedupe_key(normalized_trigger, ids, dedupe_key)
     existing = organize_runs.get_run_by_dedupe_key(db, key)
+    db.close()
     if existing:
         return organize_runs.run_view(existing)
 
@@ -190,60 +231,35 @@ def create_organize_run(
     run_id = _id("organize_run")
     run_status = "RUNNING" if works else "COMPLETED"
     scope = {"workIds": selected, "rules": policy["rules"]}
+    job_plans = tuple(
+        PreparedOrganizeJobEnqueue(
+            job_id=_id("organize_job"),
+            task_id=_id("metadata_lookup"),
+            work_id=str(work["id"]),
+            volume_id=selections[str(work["id"])][2],
+            media_version_id=selections[str(work["id"])][0],
+            provider_order=tuple(provider_plans[str(work["id"])]),
+            reasons=tuple(str(reason) for reason in work.get("reasonCodes") or []),
+        )
+        for work in works
+    )
     # The eligibility read and inserts are intentionally separated. A
     # concurrent organizer may claim a work in between; the database
     # unique index is the final arbiter, so the actual count is filled
     # after the inserts below.
-    organize_jobs.insert_organize_run(
+    queued_count = persist_organize_run(
         db,
         run_id=run_id,
         trigger=normalized_trigger,
         scope=scope,
         dedupe_key=key,
-        status=run_status,
-        started_at=now,
-        finished_at=now if not works else None,
-        now=now,
+        run_status=run_status,
+        timestamp=now,
+        job_plans=job_plans,
     )
-    for work in works:
-        work_id = str(work["id"])
-        selection = selections[work_id]
-        assert selection is not None
-        media_version_id, _media_kind, volume_id = selection
-        provider_order = provider_plans[work_id]
-        job_id = _id("organize_job")
-        task_id = _id("metadata_lookup")
-        reasons = list(work.get("reasonCodes") or [])
-        inserted = organize_jobs.try_insert_unresolved_job(
-            db,
-            job_id=job_id,
-            run_id=run_id,
-            work_id=work_id,
-            volume_id=volume_id,
-            media_version_id=media_version_id,
-            trigger=normalized_trigger,
-            reasons=reasons,
-            summary="等待元数据插件识别",
-            now=now,
-        )
-        if not inserted:
-            continue
-        organize_jobs.insert_lookup_task(
-            db,
-            task_id=task_id,
-            work_id=work_id,
-            volume_id=volume_id,
-            media_version_id=media_version_id,
-            job_id=job_id,
-            provider_order=provider_order,
-            now=now,
-        )
-        organize_jobs.mark_work_organize_status(
-            db, work_id=work_id, status="LOOKUP_PENDING", now=now
-        )
-    queued_count = organize_jobs.finalize_run_enqueue(db, run_id=run_id, now=now)
-    db.commit()
-    return get_organize_run(db, run_id) or {
+    persisted_run = get_organize_run(db, run_id)
+    db.close()
+    return persisted_run or {
         "id": run_id,
         "status": "RUNNING" if queued_count else "COMPLETED",
         "queuedCount": queued_count,
@@ -259,13 +275,9 @@ def cancel_organize_job(db: Session, job_id: str) -> dict[str, Any]:
     if str(job.get("status")) in TERMINAL_JOB_STATUSES:
         raise ValueError("当前状态无法取消")
     now = _now()
-    organize_jobs.cancel_lookup_tasks_for_job(db, job_id=job_id, now=now)
-    organize_jobs.cancel_job(db, job_id=job_id, now=now)
-    organize_jobs.mark_work_organize_status(
-        db, work_id=str(job["workId"]), status="UNASSESSED", now=now
+    persist_cancel_organize_job(
+        db, job_id=job_id, work_id=str(job["workId"]), timestamp=now
     )
-    sync_organize_runs(db)
-    db.commit()
     return organize_runs.get_job_row(db, job_id) or {}
 
 
@@ -299,31 +311,24 @@ def recognize_organize_job(db: Session, job_id: str) -> dict[str, Any]:
     media_version_id, media_kind, volume_id = selection
     providers = enabled_metadata_provider_ids(db, media_kind)
     task_ids = organize_jobs.list_lookup_task_ids_for_job(db, job_id)
+    new_task_id = _id("metadata_lookup")
+    run_id = str(job.get("runId") or "") or None
 
     # A new recognition pass owns a clean set of provider executions. Keep the
     # legacy review tables readable for old backups, but never carry their rows
     # into a new automatic run.
-    organize_jobs.clear_job_recognition_artifacts(db, job_id=job_id, task_ids=task_ids)
-    organize_jobs.insert_lookup_task(
+    persist_recognize_organize_job(
         db,
-        task_id=_id("metadata_lookup"),
+        job_id=job_id,
+        task_ids=tuple(task_ids),
+        task_id=new_task_id,
         work_id=str(job["workId"]),
         volume_id=volume_id,
         media_version_id=media_version_id,
-        job_id=job_id,
-        provider_order=providers,
-        now=now,
+        provider_order=tuple(providers),
+        run_id=run_id,
+        timestamp=now,
     )
-    organize_jobs.reset_job_for_recognition(db, job_id=job_id, now=now)
-    organize_jobs.mark_work_organize_status(
-        db,
-        work_id=str(job["workId"]),
-        status="LOOKUP_PENDING",
-        now=now,
-    )
-    if job.get("runId"):
-        organize_jobs.reopen_run(db, run_id=str(job["runId"]), now=now)
-    db.commit()
     return organize_runs.get_job_row(db, job_id) or {}
 
 
@@ -343,30 +348,43 @@ def delete_organize_job(db: Session, job_id: str) -> dict[str, Any]:
     work_id = str(job.get("workId") or "")
     run_id = str(job.get("runId") or "") or None
     task_ids = organize_jobs.list_lookup_task_ids_for_job(db, job_id)
-    organize_jobs.delete_job_graph(db, job_id=job_id, task_ids=task_ids)
-
     now = _now()
-    if work_id and _has_table(db, "LibraryWork"):
-        remaining_status = organize_jobs.latest_job_status_for_work(db, work_id)
-        organized = organize_jobs.work_is_organized(db, work_id)
-        organize_status = remaining_status or ("APPLIED" if organized else "UNASSESSED")
-        organize_jobs.mark_work_organize_status(
-            db, work_id=work_id, status=organize_status, now=now
-        )
-    if run_id and _has_table(db, "OrganizeRun"):
-        organize_jobs.refresh_run_queue_count(db, run_id=run_id, now=now)
-    sync_organize_runs(db)
-    db.commit()
+    has_work_table = bool(work_id) and _has_table(db, "LibraryWork")
+    remaining_status = (
+        organize_jobs.latest_job_status_for_work_excluding(db, work_id, job_id)
+        if has_work_table
+        else None
+    )
+    organized = (
+        organize_jobs.work_is_organized(db, work_id) if has_work_table else False
+    )
+    organize_status = (
+        remaining_status or ("APPLIED" if organized else "UNASSESSED")
+        if has_work_table
+        else None
+    )
+    has_run = bool(run_id) and _has_table(db, "OrganizeRun")
+    persist_delete_organize_job(
+        db,
+        job_id=job_id,
+        task_ids=tuple(task_ids),
+        work_id=work_id,
+        organize_status=organize_status,
+        run_id=run_id if has_run else None,
+        timestamp=now,
+    )
     return {"id": job_id, "workId": work_id, "deleted": True}
 
 
 def process_organize_schedule_tick(db: Session) -> int:
     policy = get_organize_policy(db)
-    runs_updated = sync_organize_runs(db)
+    db.close()
+    runs_updated = sync_organize_runs_command(db)
     queued = 0
     now = _now()
     if policy["autoRunOnNew"]:
         new_works = eligible_organize_works(db, policy, trigger="NEW", limit=500)
+        db.close()
         if new_works:
             ids = [str(item["id"]) for item in new_works]
             result = create_organize_run(
@@ -387,14 +405,14 @@ def process_organize_schedule_tick(db: Session) -> int:
         due_key = f"schedule:{next_run!s}"
         result = create_organize_run(db, trigger="SCHEDULE", dedupe_key=due_key)
         queued += int(result.get("queuedCount") or 0)
-        mark_policy_scheduled(
+        next_run_at = now + timedelta(minutes=policy["intervalMinutes"])
+        mark_organize_policy_scheduled_command(
             db,
-            now=now,
-            next_run_at=now + timedelta(minutes=policy["intervalMinutes"]),
+            timestamp=now,
+            next_run_at=next_run_at,
         )
-        db.commit()
     elif runs_updated:
-        db.commit()
+        pass
     return queued
 
 
@@ -405,6 +423,7 @@ class OrganizerScheduler:
         self._db_factory = db_factory
         self._poll_seconds = poll_seconds
         self._stop = threading.Event()
+        self._last_busy_log_at: float | None = None
         self._thread = threading.Thread(
             target=self._run, name="organizer-scheduler", daemon=True
         )
@@ -418,19 +437,42 @@ class OrganizerScheduler:
             self._thread.join(timeout=max(2.0, self._poll_seconds + 1.0))
 
     def _process_iteration(self) -> bool:
-        result = execute_with_sqlite_busy_retry(
-            self._db_factory,
-            process_organize_schedule_tick,
-            retry_delays_seconds=DATABASE_BUSY_RETRY_DELAYS_SECONDS,
-            stop_wait=self._stop.wait,
+        for attempt in range(len(DATABASE_BUSY_RETRY_DELAYS_SECONDS) + 1):
+            if attempt and self._stop.wait(
+                DATABASE_BUSY_RETRY_DELAYS_SECONDS[attempt - 1]
+            ):
+                return False
+            try:
+                with self._db_factory() as db:
+                    process_organize_schedule_tick(db)
+                return True
+            except OperationalError as error:
+                if not is_database_busy_error(error) or attempt == len(
+                    DATABASE_BUSY_RETRY_DELAYS_SECONDS
+                ):
+                    raise
+        raise AssertionError("organize retry loop exhausted")
+
+    def _record_iteration_error(self, error: BaseException) -> None:
+        if not is_database_busy_error(error):
+            LOGGER.exception("organizer scheduler iteration failed")
+            return
+        now = monotonic()
+        if (
+            self._last_busy_log_at is not None
+            and now - self._last_busy_log_at < DATABASE_BUSY_LOG_INTERVAL_SECONDS
+        ):
+            return
+        LOGGER.warning(
+            "organizer_schedule_iteration outcome=deferred reason=database_busy"
         )
-        return result.completed
+        self._last_busy_log_at = now
 
     def _run(self) -> None:
         while not self._stop.is_set():
             try:
                 if not self._process_iteration():
                     break
-            except Exception:
-                LOGGER.exception("organizer scheduler iteration failed")
+            except Exception as error:  # noqa: BLE001 - worker containment boundary.
+                self._record_iteration_error(error)
             self._stop.wait(self._poll_seconds)

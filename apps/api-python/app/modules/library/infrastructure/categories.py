@@ -33,6 +33,20 @@ def get_facet_of_kind(db: Session, facet_id: str, kind: str) -> dict[str, Any] |
     return entity_as_legacy_dict(facet) if facet is not None else None
 
 
+def list_facets_of_kind(
+    db: Session, facet_ids: list[str], kind: str
+) -> list[dict[str, Any]]:
+    if not facet_ids:
+        return []
+    rows = db.scalars(
+        select(LibraryFacet).where(
+            LibraryFacet.id.in_(facet_ids), LibraryFacet.kind == kind
+        )
+    ).all()
+    by_id = {row.id: entity_as_legacy_dict(row) for row in rows}
+    return [by_id[facet_id] for facet_id in facet_ids if facet_id in by_id]
+
+
 def find_normalized_name_conflict(
     db: Session,
     *,
@@ -95,6 +109,30 @@ def get_volume(db: Session, volume_id: str) -> dict[str, Any] | None:
     result = entity_as_legacy_dict(volume)
     result["workId"] = media_version.work_id
     return result
+
+
+def list_volumes_by_ids(db: Session, volume_ids: list[str]) -> list[dict[str, Any]]:
+    if not volume_ids:
+        return []
+    rows = db.execute(
+        select(LibraryVolume, LibraryMediaVersion)
+        .join(
+            LibraryMediaVersion,
+            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+        )
+        .where(LibraryVolume.id.in_(volume_ids))
+    ).all()
+    by_id: dict[str, dict[str, Any]] = {}
+    for volume, media_version in rows:
+        result = entity_as_legacy_dict(volume)
+        result["workId"] = media_version.work_id
+        by_id[volume.id] = result
+    return [by_id[volume_id] for volume_id in volume_ids if volume_id in by_id]
+
+
+def update_volume_fields_bulk(db: Session, updates: list[dict[str, Any]]) -> None:
+    if updates:
+        db.execute(update(LibraryVolume), updates)
 
 
 def list_work_ids_for_facet(db: Session, facet_id: str) -> list[str]:

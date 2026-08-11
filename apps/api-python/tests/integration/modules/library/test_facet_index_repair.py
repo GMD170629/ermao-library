@@ -2,22 +2,20 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Event, Thread
 from time import monotonic
 
 import pytest
-from sqlalchemy import event, func, select, update
-from sqlalchemy.engine import Engine
-from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import Session, sessionmaker
-
+from app.core.config import Settings
 from app.db.base import Base
+from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
 from app.models.library import LibraryFacet, LibraryWork, LibraryWorkFacet
 from app.modules.library.application.facet_index import (
     PreparedWorkFacets,
     RebuildFacetIndexBatch,
 )
-from app.modules.library.domain.facets import build_work_facet_values
+from app.modules.library.domain.facets import build_work_facet_values, parse_tag_names
 from app.modules.library.infrastructure import facet_index as facet_index_module
 from app.modules.library.infrastructure.facet_index import (
     SqlAlchemyFacetIndexRepository,
@@ -25,6 +23,10 @@ from app.modules.library.infrastructure.facet_index import (
 from app.modules.library.infrastructure.uow import (
     SqlAlchemyFacetIndexUnitOfWork,
 )
+from sqlalchemy import event, func, select, update
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session, sessionmaker
 
 
 def _add_pending_works(db: Session, count: int) -> None:
@@ -150,10 +152,17 @@ def test_facet_index_repair_uses_bounded_set_based_statements(
     engine = db_session.get_bind()
     assert isinstance(engine, Engine)
     statements = 0
+    statement_kinds: list[str] = []
 
-    def count_statement(*_args: object) -> None:
+    def count_statement(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        *_args: object,
+    ) -> None:
         nonlocal statements
         statements += 1
+        statement_kinds.append(statement.lstrip().split(None, 1)[0].upper())
 
     event.listen(engine, "before_cursor_execute", count_statement)
     try:
@@ -163,6 +172,14 @@ def test_facet_index_repair_uses_bounded_set_based_statements(
 
     assert result.processed == 25
     assert statements <= 15
+    first_write = next(
+        index
+        for index, kind in enumerate(statement_kinds)
+        if kind in {"DELETE", "INSERT", "UPDATE"}
+    )
+    assert statement_kinds[first_write] == "UPDATE"
+    assert "WITH" in statement_kinds[first_write + 1 :]
+    assert "SELECT" in statement_kinds[first_write + 1 :]
 
 
 def test_facet_index_repair_preserves_work_updated_at(db_session: Session) -> None:
@@ -323,7 +340,7 @@ def test_facet_index_repair_skips_source_changed_after_preparation(
         source=source,
         facets=build_work_facet_values(
             author=source.author,
-            tags=source.tags,
+            tags=parse_tag_names(source.tags_source),
             series_name=source.series_name,
         ),
     )
@@ -368,6 +385,74 @@ def test_facet_index_repair_skips_source_changed_after_preparation(
     assert tag_names == {"New tag"}
 
 
+def test_facet_index_repair_processes_stable_subset_when_one_source_changed(
+    db_session: Session,
+) -> None:
+    stable = LibraryWork(
+        id="stable-subset-work",
+        title="Stable subset",
+        normalized_title="stable subset",
+        author="Stable author",
+        normalized_author="stable author",
+        tags='["Stable tag"]',
+        series_name=None,
+    )
+    changed = LibraryWork(
+        id="changed-subset-work",
+        title="Changed subset",
+        normalized_title="changed subset",
+        author="Original author",
+        normalized_author="original author",
+        tags='["Original tag"]',
+        series_name=None,
+    )
+    db_session.add_all([stable, changed])
+    db_session.commit()
+    repository = SqlAlchemyFacetIndexRepository(db_session)
+    sources = repository.pending_works(limit=2)
+    prepared = tuple(
+        PreparedWorkFacets(
+            source=source,
+            facets=build_work_facet_values(
+                author=source.author,
+                tags=parse_tag_names(source.tags_source),
+                series_name=source.series_name,
+            ),
+        )
+        for source in sources
+    )
+    db_session.execute(
+        update(LibraryWork)
+        .where(LibraryWork.id == changed.id)
+        .values(tags='["New tag"]', updated_at=LibraryWork.updated_at)
+    )
+
+    processed = repository.replace_batch(prepared, index_version=1)
+    db_session.commit()
+
+    db_session.expire_all()
+    assert processed == 1
+    assert db_session.get(LibraryWork, stable.id).facet_index_version == 1
+    assert db_session.get(LibraryWork, changed.id).facet_index_version == 0
+    stable_facets = set(
+        db_session.scalars(
+            select(LibraryFacet.name)
+            .join(
+                LibraryWorkFacet,
+                LibraryWorkFacet.facet_id == LibraryFacet.id,
+            )
+            .where(LibraryWorkFacet.work_id == stable.id)
+        )
+    )
+    changed_links = db_session.scalar(
+        select(func.count())
+        .select_from(LibraryWorkFacet)
+        .where(LibraryWorkFacet.work_id == changed.id)
+    )
+    assert stable_facets == {"Stable author", "Stable tag"}
+    assert changed_links == 0
+
+
 def test_facet_index_repair_compares_the_exact_tag_source(
     db_session: Session,
 ) -> None:
@@ -388,7 +473,7 @@ def test_facet_index_repair_compares_the_exact_tag_source(
         source=source,
         facets=build_work_facet_values(
             author=source.author,
-            tags=source.tags,
+            tags=parse_tag_names(source.tags_source),
             series_name=source.series_name,
         ),
     )
@@ -464,5 +549,164 @@ def test_facet_index_repair_short_timeout_defers_to_existing_writer(
         assert retried.processed == 1
     finally:
         blocker.close()
+        maintenance_engine.dispose()
+        regular_engine.dispose()
+
+
+def test_facet_index_repair_does_not_lock_writers_during_python_preparation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    regular_engine = create_sqlite_engine(settings.database_path)
+    competing_engine = create_sqlite_engine(
+        settings.database_path,
+        timeout_seconds=0.1,
+    )
+    maintenance_engine = create_sqlite_engine(
+        settings.database_path,
+        timeout_seconds=0.25,
+    )
+    bootstrap_database(regular_engine, settings)
+    maintenance_factory = sessionmaker(
+        bind=maintenance_engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+    with Session(regular_engine) as seed:
+        seed.add_all(
+            [
+                LibraryWork(
+                    id="prepared-work",
+                    title="Prepared work",
+                    normalized_title="prepared work",
+                    author="Prepared author",
+                    normalized_author="prepared author",
+                    tags='["Prepared tag"]',
+                ),
+                LibraryWork(
+                    id="normal-write",
+                    title="Normal write",
+                    normalized_title="normal write",
+                    author=None,
+                    normalized_author=None,
+                    tags="[]",
+                    facet_index_version=1,
+                ),
+            ]
+        )
+        seed.commit()
+
+    preparing = Event()
+    release_preparation = Event()
+    original_unique_values = facet_index_module._unique_facet_values
+
+    def pause_during_preparation(
+        batch: tuple[PreparedWorkFacets, ...],
+    ) -> dict[tuple[str, str], tuple[str, str]]:
+        preparing.set()
+        assert release_preparation.wait(timeout=2)
+        return original_unique_values(batch)
+
+    monkeypatch.setattr(
+        facet_index_module,
+        "_unique_facet_values",
+        pause_during_preparation,
+    )
+    results: list[int] = []
+    errors: list[BaseException] = []
+
+    def rebuild_in_background() -> None:
+        try:
+            rebuild = RebuildFacetIndexBatch(
+                lambda: SqlAlchemyFacetIndexUnitOfWork(maintenance_factory)
+            )
+            results.append(rebuild.execute(limit=1).processed)
+        except BaseException as error:
+            errors.append(error)
+
+    thread = Thread(target=rebuild_in_background)
+    try:
+        thread.start()
+        assert preparing.wait(timeout=2)
+        with Session(competing_engine) as writer:
+            writer.execute(
+                update(LibraryWork)
+                .where(LibraryWork.id == "normal-write")
+                .values(title="normal request succeeded")
+            )
+            writer.commit()
+        release_preparation.set()
+        thread.join(timeout=2)
+
+        assert not thread.is_alive()
+        assert errors == []
+        assert results == [1]
+    finally:
+        release_preparation.set()
+        thread.join(timeout=2)
+        maintenance_engine.dispose()
+        competing_engine.dispose()
+        regular_engine.dispose()
+
+
+def test_budgeted_maintenance_transaction_is_interrupted_and_releases_writer(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "facet-budget.sqlite3"
+    regular_engine = create_sqlite_engine(database_path)
+    maintenance_engine = create_sqlite_engine(
+        database_path,
+        timeout_seconds=0.25,
+        transaction_time_budget_seconds=0.001,
+    )
+    Base.metadata.create_all(regular_engine)
+    with Session(regular_engine) as seed:
+        seed.add_all(
+            [
+                LibraryWork(
+                    id=f"budget-work-{index}",
+                    title=f"Budget work {index}",
+                    normalized_title=f"budget work {index}",
+                    author="Budget author",
+                    normalized_author="budget author",
+                    tags="[]",
+                )
+                for index in range(200)
+            ]
+        )
+        seed.commit()
+
+    first_work = LibraryWork.__table__.alias("first_work")
+    second_work = LibraryWork.__table__.alias("second_work")
+    third_work = LibraryWork.__table__.alias("third_work")
+    try:
+        with Session(maintenance_engine) as maintenance:
+            maintenance.execute(
+                update(LibraryWork)
+                .where(LibraryWork.id == "budget-work-0")
+                .values(
+                    title=LibraryWork.title,
+                    updated_at=LibraryWork.updated_at,
+                )
+            )
+            with pytest.raises(OperationalError, match="interrupted"):
+                maintenance.scalar(
+                    select(func.count()).select_from(
+                        first_work.join(
+                            second_work, first_work.c.id != second_work.c.id
+                        ).join(third_work, second_work.c.id != third_work.c.id)
+                    )
+                )
+
+        with Session(regular_engine) as writer:
+            writer.execute(
+                update(LibraryWork)
+                .where(LibraryWork.id == "budget-work-0")
+                .values(title="writer recovered", updated_at=LibraryWork.updated_at)
+            )
+            writer.commit()
+    finally:
         maintenance_engine.dispose()
         regular_engine.dispose()

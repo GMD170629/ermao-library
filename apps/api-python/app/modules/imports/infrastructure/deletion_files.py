@@ -4,16 +4,15 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import uuid
-from pathlib import Path
 from collections.abc import Callable, Iterable
+from pathlib import Path
 
 from app.modules.imports.application.deletion import (
     FileCleanupFailure,
     FileCleanupResult,
-    ImportFileQuarantineError,
     ImportDeletionToken,
+    ImportFileQuarantineError,
     QuarantinedFile,
 )
 

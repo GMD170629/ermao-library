@@ -1,104 +1,104 @@
-"""Lifecycle boundary for restartable background facet index maintenance."""
+"""Blocking startup boundary for the historical work-facet data migration."""
 
 from __future__ import annotations
 
 import logging
-from threading import Event, Thread
+import sys
 from time import monotonic
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.database_errors import is_database_busy_error
 from app.modules.library.application.facet_index import RebuildFacetIndexBatch
-from app.modules.library.infrastructure.uow import (
-    SqlAlchemyFacetIndexUnitOfWork,
-)
+from app.modules.library.domain.facets import CURRENT_FACET_INDEX_VERSION
+from app.modules.library.infrastructure.uow import SqlAlchemyFacetIndexUnitOfWork
 
 LOGGER = logging.getLogger(__name__)
-FACET_INDEX_BATCH_SIZE = 25
-FACET_INDEX_BATCH_YIELD_SECONDS = 0.1
-FACET_INDEX_BUSY_RETRY_SECONDS = 1.0
-FACET_INDEX_IDLE_POLL_SECONDS = 15.0
-FACET_INDEX_BUSY_LOG_INTERVAL_SECONDS = 30.0
+FACET_INDEX_MIGRATION_BATCH_SIZE = 50
+MIGRATION_PROGRESS_LOG_INTERVAL_SECONDS = 5.0
 
 
-class FacetIndexMaintenanceWorker:
-    def __init__(
-        self,
-        session_factory: sessionmaker[Session],
-        *,
-        batch_size: int = FACET_INDEX_BATCH_SIZE,
-        batch_yield_seconds: float = FACET_INDEX_BATCH_YIELD_SECONDS,
-        busy_retry_seconds: float = FACET_INDEX_BUSY_RETRY_SECONDS,
-        poll_seconds: float = FACET_INDEX_IDLE_POLL_SECONDS,
-    ) -> None:
-        self._batch_size = batch_size
-        self._batch_yield_seconds = batch_yield_seconds
-        self._busy_retry_seconds = busy_retry_seconds
-        self._poll_seconds = poll_seconds
-        self._stop_event = Event()
-        self._thread: Thread | None = None
-        self._last_busy_log_at: float | None = None
-        self._rebuild = RebuildFacetIndexBatch(
-            lambda: SqlAlchemyFacetIndexUnitOfWork(session_factory)
-        )
-
-    def start(self) -> None:
-        if self._thread is not None:
-            return
-        self._thread = Thread(
-            target=self._run,
-            name="library-facet-index-maintenance",
-            daemon=True,
-        )
-        self._thread.start()
-
-    def stop(self) -> None:
-        self._stop_event.set()
-        if self._thread is not None:
-            self._thread.join(timeout=5.0)
-            self._thread = None
-
-    def _process_once(self) -> float:
-        started_at = monotonic()
-        try:
-            result = self._rebuild.execute(limit=self._batch_size)
-        except Exception as error:  # noqa: BLE001 — worker containment boundary
-            if is_database_busy_error(error):
-                now = monotonic()
-                if (
-                    self._last_busy_log_at is None
-                    or now - self._last_busy_log_at
-                    >= FACET_INDEX_BUSY_LOG_INTERVAL_SECONDS
-                ):
-                    LOGGER.warning(
-                        "library_facet_index_batch outcome=deferred reason=database_busy retry_seconds=%s",
-                        self._busy_retry_seconds,
-                    )
-                    self._last_busy_log_at = now
-                return self._busy_retry_seconds
-            LOGGER.exception("library_facet_index_batch outcome=failed")
-            return self._poll_seconds
-        if result.processed:
-            duration_ms = round((monotonic() - started_at) * 1000)
-            LOGGER.info(
-                "library_facet_index_batch outcome=success processed=%s may_have_more=%s duration_ms=%s",
-                result.processed,
-                result.may_have_more,
-                duration_ms,
-            )
-        if result.processed or result.may_have_more:
-            return self._batch_yield_seconds
-        return self._poll_seconds
-
-    def _run(self) -> None:
-        while not self._stop_event.is_set():
-            self._stop_event.wait(self._process_once())
+class LibraryFacetIndexDataMigrationError(RuntimeError):
+    """The required work-facet migration could not make forward progress."""
 
 
-def start_facet_index_maintenance_worker(
+def _log_migration_info(message: str, *arguments: object) -> None:
+    """Keep lifecycle records visible in API and standalone worker containers."""
+
+    if LOGGER.isEnabledFor(logging.INFO) and LOGGER.hasHandlers():
+        LOGGER.info(message, *arguments)
+        return
+    print(message % arguments, file=sys.stdout, flush=True)
+
+
+def run_library_facet_index_data_migration(
     session_factory: sessionmaker[Session],
-) -> FacetIndexMaintenanceWorker:
-    worker = FacetIndexMaintenanceWorker(session_factory)
-    worker.start()
-    return worker
+    *,
+    batch_size: int = FACET_INDEX_MIGRATION_BATCH_SIZE,
+) -> None:
+    """Complete all pending facet rows before API/worker readiness."""
+
+    migration = RebuildFacetIndexBatch(
+        lambda: SqlAlchemyFacetIndexUnitOfWork(session_factory)
+    )
+    started_at = monotonic()
+    last_progress_at = started_at
+    batches = 0
+    processed_total = 0
+    _log_migration_info(
+        "library_facet_index_data_migration outcome=started version=%s "
+        "batch_size=%s",
+        CURRENT_FACET_INDEX_VERSION,
+        batch_size,
+    )
+    try:
+        while True:
+            result = migration.execute(limit=batch_size)
+            if not result.processed:
+                if result.may_have_more:
+                    raise LibraryFacetIndexDataMigrationError(
+                        "work-facet migration could not make forward progress"
+                    )
+                break
+            batches += 1
+            processed_total += result.processed
+            progress_at = monotonic()
+            if (
+                batches == 1
+                or progress_at - last_progress_at
+                >= MIGRATION_PROGRESS_LOG_INTERVAL_SECONDS
+            ):
+                _log_migration_info(
+                    "library_facet_index_data_migration outcome=progress "
+                    "batch=%s processed=%s total_processed=%s duration_ms=%s",
+                    batches,
+                    result.processed,
+                    processed_total,
+                    round((progress_at - started_at) * 1000),
+                )
+                last_progress_at = progress_at
+            if not result.may_have_more:
+                break
+    except Exception:
+        LOGGER.exception(
+            "library_facet_index_data_migration outcome=failed version=%s "
+            "batches=%s processed=%s duration_ms=%s",
+            CURRENT_FACET_INDEX_VERSION,
+            batches,
+            processed_total,
+            round((monotonic() - started_at) * 1000),
+        )
+        raise
+    _log_migration_info(
+        "library_facet_index_data_migration outcome=success version=%s "
+        "batches=%s processed=%s duration_ms=%s",
+        CURRENT_FACET_INDEX_VERSION,
+        batches,
+        processed_total,
+        round((monotonic() - started_at) * 1000),
+    )
+
+
+__all__ = [
+    "LibraryFacetIndexDataMigrationError",
+    "run_library_facet_index_data_migration",
+]

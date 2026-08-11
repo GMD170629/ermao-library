@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -17,7 +18,6 @@ from sqlalchemy.orm import Session
 from app.bootstrap.auth import build_password_authenticator
 from app.bootstrap.media import media_page_index, media_resource_query, media_streaming
 from app.bootstrap.reader import reader_volume_service
-from app.bootstrap.system import record_system_event
 from app.core.authorization import (
     AuthorizationContext,
     authorization_context,
@@ -56,7 +56,6 @@ from app.modules.opds.application.dto import (
     OPDS_ACQUISITION_REL,
     OPDS_PROGRESSION_MEDIA_TYPE,
     OPDS_PROGRESSION_REL,
-    BasicCredentialsDto,
     OpdsActorDto,
     OpdsAuthenticationRequestDto,
     OpdsAuthorDto,
@@ -108,6 +107,7 @@ SessionFactory = Callable[[], Session]
 EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 NAVIGATION_TYPE = "application/atom+xml;profile=opds-catalog;kind=navigation"
 ACQUISITION_TYPE = "application/atom+xml;profile=opds-catalog;kind=acquisition"
+LOGGER = logging.getLogger(__name__)
 
 
 def get_opds_settings(db: Session) -> OpdsSettingsSnapshot:
@@ -153,7 +153,9 @@ class PasswordOpdsAuthenticator:
         self._session_factory = session_factory
         self._runtime = runtime
 
-    def authenticate(self, request: OpdsAuthenticationRequestDto) -> OpdsActorDto | None:
+    def authenticate(
+        self, request: OpdsAuthenticationRequestDto
+    ) -> OpdsActorDto | None:
         credentials = request.credentials
         db = self._session_factory()
         try:
@@ -164,24 +166,22 @@ class PasswordOpdsAuthenticator:
                     client_address=request.client_address,
                 )
             )
-            if isinstance(result, PasswordAuthenticationThrottled):
-                self._record_authentication_event(
-                    db,
-                    request,
-                    outcome="throttled",
-                    retry_after_seconds=result.retry_after_seconds,
-                )
-            elif isinstance(result, PasswordAuthenticated):
-                self._record_authentication_event(
-                    db,
-                    request,
-                    outcome="succeeded",
-                    actor_id=result.principal.user_id,
-                )
-            else:
-                self._record_authentication_event(db, request, outcome="failed")
         finally:
             db.close()
+        if isinstance(result, PasswordAuthenticationThrottled):
+            self._record_authentication_event(
+                request,
+                outcome="throttled",
+                retry_after_seconds=result.retry_after_seconds,
+            )
+        elif isinstance(result, PasswordAuthenticated):
+            self._record_authentication_event(
+                request,
+                outcome="succeeded",
+                actor_id=result.principal.user_id,
+            )
+        else:
+            self._record_authentication_event(request, outcome="failed")
         if isinstance(result, PasswordAuthenticationThrottled):
             raise OpdsAuthenticationThrottled(result.retry_after_seconds)
         if not isinstance(result, PasswordAuthenticated):
@@ -190,42 +190,23 @@ class PasswordOpdsAuthenticator:
 
     @staticmethod
     def _record_authentication_event(
-        db: Session,
         request: OpdsAuthenticationRequestDto,
         *,
         outcome: Literal["succeeded", "failed", "throttled"],
         actor_id: str | None = None,
         retry_after_seconds: int | None = None,
     ) -> None:
-        locale = configured_locale(db)
-        messages = {
-            "succeeded": ("OPDS 登录成功", "OPDS sign-in succeeded."),
-            "failed": ("OPDS 登录失败：凭据无效", "OPDS sign-in failed: invalid credentials."),
-            "throttled": (
-                "OPDS 登录受限：尝试次数过多",
-                "OPDS sign-in throttled: too many attempts.",
-            ),
-        }
-        chinese, english = messages[outcome]
-        metadata: dict[str, str | int] = {
-            "clientAddress": request.client_address[:255],
-            "method": request.method[:16].upper(),
-            "path": request.path[:2048],
-            "username": request.credentials.username.strip()[:320],
-        }
-        if retry_after_seconds is not None:
-            metadata["retryAfterSeconds"] = retry_after_seconds
-        record_system_event(
-            db,
-            source="opds",
-            action=f"authentication.{outcome}",
-            message=english if locale == "en-US" else chinese,
-            level="info" if outcome == "succeeded" else "warning",
-            actor_type="user" if actor_id is not None else "anonymous",
-            actor_id=actor_id,
-            target_type="opdsAuthentication",
-            metadata=metadata,
-            commit=True,
+        log = LOGGER.info if outcome == "succeeded" else LOGGER.warning
+        log(
+            "opds.authentication outcome=%s actor_id=%s client_address=%s "
+            "method=%s path=%s username=%s retry_after_seconds=%s",
+            outcome,
+            actor_id or "anonymous",
+            request.client_address[:255],
+            request.method[:16].upper(),
+            request.path[:2048],
+            request.credentials.username.strip()[:320],
+            retry_after_seconds,
         )
 
 
@@ -472,7 +453,7 @@ class SqlAlchemyOpdsCatalog:
                     progress.volume_id: progress for progress in progresses
                 }
                 pse_media_types = {
-                    volume.id: self._pse_media_type(db, volume.id)
+                    volume.id: self._pse_media_type(volume.id)
                     for volume in work.volumes
                     if volume.media_kind == "COMIC"
                 }
@@ -578,13 +559,15 @@ class SqlAlchemyOpdsCatalog:
         finally:
             db.close()
 
-    def _pse_media_type(self, db: Session, volume_id: str) -> str:
-        units = media_page_index.list_page_units_for_volume(db, volume_id)
-        if not units:
-            media_page_index.ensure_volume_page_index(db, self._settings, volume_id)
-            units = media_page_index.list_page_units_for_volume(db, volume_id)
+    def _pse_media_type(self, volume_id: str) -> str:
+        projection_db = self._session_factory()
+        try:
+            projection = media_page_index.load_read_only(projection_db, volume_id)
+        finally:
+            projection_db.close()
+        resolved = media_page_index.resolve_read_only(projection)
         return select_pse_stream_media_type(
-            tuple(str(unit.get("mediaType") or "") for unit in units)
+            tuple(str(unit.media_type or "") for unit in resolved.pages)
         )
 
     def _facet_entry(
@@ -804,58 +787,47 @@ class OpdsMediaResources:
             user = _active_user(db, actor_id)
             if not can_access_volume(db, user, page.volume_id):
                 return Response(status_code=404)
-            unit = media_page_index.get_page_unit(
-                db, page.volume_id, page.internal_page_index
-            )
-            if unit is None:
-                media_page_index.ensure_volume_page_index(
-                    db, self._settings, page.volume_id
-                )
-                unit = media_page_index.get_page_unit(
-                    db, page.volume_id, page.internal_page_index
-                )
-            if unit is None:
-                return Response(status_code=404)
-            source = (
-                media_page_index.get_library_file(db, unit.get("fileId"))
-                if unit.get("fileId")
-                else None
-            )
-            width = normalize_pse_max_width(page.max_width)
-            units = media_page_index.list_page_units_for_volume(db, page.volume_id)
-            output_media_type = select_pse_stream_media_type(
-                tuple(str(candidate.get("mediaType") or "") for candidate in units)
-            )
-            if output_media_type == "image/gif":
-                width = None
-            if source and source.get("kind") == "COMIC":
-                metadata = _json_object(unit.get("metadataJson"))
-                entry_name = metadata.get("zipEntryName") or unit.get("href")
-                return media_streaming.send_pse_page_zip_entry(
-                    media_streaming.stored_path(
-                        source.get("path"), self._settings, database_backed=True
-                    ),
-                    str(entry_name) if entry_name else None,
-                    request,
-                    user.id,
-                    self._settings,
-                    max_width=width,
-                    file_id=str(unit.get("id") or page.volume_id),
-                    output_media_type=output_media_type,
-                )
-            return media_streaming.send_pse_page_file(
-                media_streaming.stored_path(
-                    unit.get("href"), self._settings, database_backed=True
-                ),
-                request,
-                user.id,
-                self._settings,
-                max_width=width,
-                file_id=str(unit.get("id") or page.volume_id),
-                output_media_type=output_media_type,
-            )
+            user_id = user.id
+            projection = media_page_index.load_read_only(db, page.volume_id)
         finally:
             db.close()
+        resolved = media_page_index.resolve_read_only(projection)
+        unit = resolved.page(page.internal_page_index)
+        if unit is None:
+            return Response(status_code=404)
+        source = resolved.source_for(unit.file_id)
+        width = normalize_pse_max_width(page.max_width)
+        output_media_type = select_pse_stream_media_type(
+            tuple(str(candidate.media_type or "") for candidate in resolved.pages)
+        )
+        if output_media_type == "image/gif":
+            width = None
+        if source is not None and source.kind == "COMIC":
+            metadata = _json_object(unit.metadata_json)
+            entry_name = metadata.get("zipEntryName") or unit.href
+            return media_streaming.send_pse_page_zip_entry(
+                media_streaming.stored_path(
+                    source.path, self._settings, database_backed=True
+                ),
+                str(entry_name) if entry_name else None,
+                request,
+                user_id,
+                self._settings,
+                max_width=width,
+                file_id=unit.id,
+                output_media_type=output_media_type,
+            )
+        return media_streaming.send_pse_page_file(
+            media_streaming.stored_path(
+                unit.href, self._settings, database_backed=True
+            ),
+            request,
+            user_id,
+            self._settings,
+            max_width=width,
+            file_id=unit.id,
+            output_media_type=output_media_type,
+        )
 
 
 def _json_object(value: object) -> dict[str, object]:

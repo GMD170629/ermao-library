@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from collections.abc import Iterable
@@ -53,6 +54,18 @@ def split_author_names(value: str | None) -> tuple[str, ...]:
             flags=re.IGNORECASE,
         )
     )
+
+
+def parse_tag_names(value: str) -> tuple[str, ...]:
+    """Parse the persisted tag source during the pure preparation phase."""
+
+    try:
+        parsed = json.loads(value or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return ()
+    if isinstance(parsed, list):
+        return unique_facet_names(str(item) for item in parsed)
+    return ()
 
 
 def build_work_facet_values(

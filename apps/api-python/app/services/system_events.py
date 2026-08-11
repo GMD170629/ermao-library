@@ -1,5 +1,15 @@
 """Compatibility re-export for system event storage (owned by modules.system)."""
 
+from app.bootstrap.system import (
+    configured_max_event_bytes,
+    prepare_system_event,
+    prune_system_events,
+    record_system_event,
+    set_max_event_bytes,
+    system_event_size_bytes,
+    system_event_storage_view,
+    write_prepared_system_events,
+)
 from app.modules.system.domain.events import (
     DEFAULT_MAX_EVENT_BYTES,
     LOG_MAX_BYTES_SETTING,
@@ -8,14 +18,6 @@ from app.modules.system.domain.events import (
     MAX_MAX_EVENT_BYTES,
     MIN_MAX_EVENT_BYTES,
     PROTECTED_ERROR_ACTIONS,
-)
-from app.bootstrap.system import (
-    configured_max_event_bytes,
-    prune_system_events,
-    record_system_event,
-    set_max_event_bytes,
-    system_event_size_bytes,
-    system_event_storage_view,
 )
 
 __all__ = [
@@ -28,8 +30,10 @@ __all__ = [
     "PROTECTED_ERROR_ACTIONS",
     "configured_max_event_bytes",
     "prune_system_events",
+    "prepare_system_event",
     "record_system_event",
     "set_max_event_bytes",
     "system_event_size_bytes",
     "system_event_storage_view",
+    "write_prepared_system_events",
 ]

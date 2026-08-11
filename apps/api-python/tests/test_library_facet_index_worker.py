@@ -1,92 +1,101 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
-import threading
 from collections.abc import Sequence
-from typing import cast
 
 import pytest
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.bootstrap.library_facet_index import FacetIndexMaintenanceWorker
-from app.modules.library.application.facet_index import (
-    FacetIndexBatchResult,
-    RebuildFacetIndexBatch,
+import app.bootstrap.library_facet_index as migration_module
+from app.bootstrap.library_facet_index import (
+    LibraryFacetIndexDataMigrationError,
+    run_library_facet_index_data_migration,
 )
+from app.modules.library.application.facet_index import FacetIndexBatchResult
 
 
-class StubRebuild:
+class StubMigration:
     def __init__(
         self,
         outcomes: Sequence[FacetIndexBatchResult | BaseException],
     ) -> None:
         self._outcomes = iter(outcomes)
         self.limits: list[int] = []
-        self.called = threading.Event()
 
     def execute(self, *, limit: int = 200) -> FacetIndexBatchResult:
         self.limits.append(limit)
-        self.called.set()
         outcome = next(self._outcomes)
         if isinstance(outcome, BaseException):
             raise outcome
         return outcome
 
 
-def _worker(stub: StubRebuild) -> FacetIndexMaintenanceWorker:
-    worker = FacetIndexMaintenanceWorker(sessionmaker[Session]())
-    worker._rebuild = cast(RebuildFacetIndexBatch, stub)
-    return worker
-
-
-def test_facet_index_worker_yields_between_batches_and_polls_when_idle() -> None:
-    stub = StubRebuild(
-        (
-            FacetIndexBatchResult(processed=25, may_have_more=True),
-            FacetIndexBatchResult(processed=3, may_have_more=False),
-            FacetIndexBatchResult(processed=0, may_have_more=False),
-        )
+def _install_stub(
+    monkeypatch: pytest.MonkeyPatch,
+    stub: StubMigration,
+) -> None:
+    monkeypatch.setattr(
+        migration_module,
+        "RebuildFacetIndexBatch",
+        lambda unused_factory: stub,
     )
-    worker = _worker(stub)
-
-    assert worker._process_once() == 0.1
-    assert worker._process_once() == 0.1
-    assert worker._process_once() == 15.0
-    assert stub.limits == [25, 25, 25]
 
 
-def test_facet_index_worker_defers_and_throttles_database_busy_logs(
+def test_facet_index_data_migration_runs_to_success_before_returning(
+    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    busy = OperationalError(
-        "UPDATE LibraryWork",
-        {},
-        sqlite3.OperationalError("database is locked"),
+    stub = StubMigration(
+        (
+            FacetIndexBatchResult(processed=50, may_have_more=True),
+            FacetIndexBatchResult(processed=3, may_have_more=False),
+        )
     )
-    stub = StubRebuild((busy, busy))
-    worker = _worker(stub)
+    _install_stub(monkeypatch, stub)
 
-    with caplog.at_level(logging.WARNING):
-        assert worker._process_once() == 1.0
-        assert worker._process_once() == 1.0
+    with caplog.at_level(logging.INFO):
+        run_library_facet_index_data_migration(sessionmaker[Session]())
 
-    messages = [
-        record.getMessage()
-        for record in caplog.records
-        if "outcome=deferred reason=database_busy" in record.getMessage()
-    ]
-    assert len(messages) == 1
-    assert all(record.exc_info is None for record in caplog.records)
+    assert stub.limits == [50, 50]
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("outcome=started" in message for message in messages)
+    assert len([message for message in messages if "outcome=progress" in message]) == 1
+    assert any("outcome=success" in message for message in messages)
 
 
-def test_facet_index_worker_stop_interrupts_idle_wait() -> None:
-    stub = StubRebuild((FacetIndexBatchResult(processed=0, may_have_more=False),))
-    worker = _worker(stub)
+def test_facet_index_data_migration_fails_when_no_progress_is_possible(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    stub = StubMigration(
+        (FacetIndexBatchResult(processed=0, may_have_more=True),)
+    )
+    _install_stub(monkeypatch, stub)
 
-    worker.start()
-    assert stub.called.wait(timeout=1)
-    worker.stop()
+    with caplog.at_level(logging.INFO), pytest.raises(
+        LibraryFacetIndexDataMigrationError
+    ):
+        run_library_facet_index_data_migration(sessionmaker[Session]())
 
-    assert worker._thread is None
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("outcome=started" in message for message in messages)
+    assert any("outcome=failed" in message for message in messages)
+    assert not any("outcome=success" in message for message in messages)
+
+
+def test_facet_index_data_migration_logs_unexpected_failure_and_blocks(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    stub = StubMigration((RuntimeError("facet write failed"),))
+    _install_stub(monkeypatch, stub)
+
+    with caplog.at_level(logging.INFO), pytest.raises(
+        RuntimeError,
+        match="facet write failed",
+    ):
+        run_library_facet_index_data_migration(sessionmaker[Session]())
+
+    assert any(
+        "outcome=failed" in record.getMessage() for record in caplog.records
+    )

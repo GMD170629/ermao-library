@@ -29,7 +29,11 @@ import {
   type ReactNode
 } from 'react';
 import { buildLoginRedirectPath, isPublicAppPath, safePostLoginPath } from '../../lib/auth-routes';
-import { installUnauthorizedFetchInterceptor, UNAUTHORIZED_EVENT } from '../../lib/auth-session';
+import {
+  installUnauthorizedFetchInterceptor,
+  requestSessionRefreshIfRequired,
+  UNAUTHORIZED_EVENT
+} from '../../lib/auth-session';
 import { withBasePath } from '../../lib/base-path';
 import { DEFAULT_ACCOUNT_AVATAR_PATH, PRODUCT_NAME } from '../../lib/brand';
 import { clearCurrentUserNamespace, setCurrentUserNamespace, userDevicePreferenceKey } from '../../lib/user-preferences';
@@ -270,7 +274,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       if (cachedSession.user.locale === 'zh-CN' || cachedSession.user.locale === 'en-US') {
         setLocale(cachedSession.user.locale);
       }
-      return undefined;
     }
 
     let active = true;
@@ -282,6 +285,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       signal: controller.signal
     })
       .then(async (response) => {
+        void requestSessionRefreshIfRequired(
+          response.headers,
+          fetch,
+          controller.signal
+        );
         const payload = await response.json().catch(() => null) as MePayload | null;
         if (!active) return;
         if (response.status === 401) {
@@ -317,12 +325,12 @@ export function AppShell({ children }: { children: ReactNode }) {
         } else {
           // A network/proxy/server failure is not proof that the user signed out.
           // Let the page's normal error and offline handling remain available.
-          setSessionStatus('unavailable');
+          setSessionStatus((current) => current === 'authenticated' ? current : 'unavailable');
         }
       })
       .catch((reason) => {
         if (active && !(reason instanceof DOMException && reason.name === 'AbortError')) {
-          setSessionStatus('unavailable');
+          setSessionStatus((current) => current === 'authenticated' ? current : 'unavailable');
         }
       });
 

@@ -325,6 +325,12 @@ class LibraryFile(Base):
         Index("LibraryFile_fullHash_idx", "fullHash"),
         Index("LibraryFile_sizeBytes_mtimeMs_idx", "sizeBytes", "mtimeMs"),
         Index("LibraryFile_pathKey_idx", "pathKey"),
+        Index(
+            "LibraryFile_kind_pageIndexVersion_id_idx",
+            "kind",
+            "pageIndexVersion",
+            "id",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
@@ -357,6 +363,9 @@ class LibraryFile(Base):
     mime_type: Mapped[str] = mapped_column("mimeType", String(191), nullable=False)
     size_bytes: Mapped[int] = mapped_column(
         "sizeBytes", Integer, nullable=False, default=0, server_default="0"
+    )
+    page_index_version: Mapped[int] = mapped_column(
+        "pageIndexVersion", Integer, nullable=False, default=0, server_default="0"
     )
     duration_ms: Mapped[int | None] = mapped_column(
         "durationMs", Integer, nullable=True

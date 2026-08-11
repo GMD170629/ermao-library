@@ -62,6 +62,12 @@ class WorkMergeGateway(Protocol):
     def merge(self, command: MergeCommand) -> MergeResult: ...
 
 
+class WorkMergeUnitOfWork(Protocol):
+    def commit(self) -> None: ...
+
+    def rollback(self) -> None: ...
+
+
 class MergeMetadataWritebackPort(Protocol):
     def enabled(self) -> bool: ...
 
@@ -90,8 +96,13 @@ class PreviewWorkMerge:
 
 
 class CreateMergedWork:
-    def __init__(self, gateway: WorkMergeGateway) -> None:
+    def __init__(
+        self,
+        gateway: WorkMergeGateway,
+        unit_of_work: WorkMergeUnitOfWork,
+    ) -> None:
         self._gateway = gateway
+        self._unit_of_work = unit_of_work
 
     def execute(self, command: MergeCommand) -> MergeResult:
         normalized_ids = normalize_work_ids(command.work_ids)
@@ -121,4 +132,10 @@ class CreateMergedWork:
             cover_volume_id=command.cover_volume_id.strip(),
             actor_id=command.actor_id,
         )
-        return self._gateway.merge(normalized)
+        try:
+            result = self._gateway.merge(normalized)
+            self._unit_of_work.commit()
+        except Exception:
+            self._unit_of_work.rollback()
+            raise
+        return result

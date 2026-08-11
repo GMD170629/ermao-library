@@ -1,11 +1,18 @@
 """Public domain contracts for the system capability."""
 
 from app.core.database_errors import is_database_busy_error
+from app.modules.system.application.commands import SystemUnitOfWork
 from app.modules.system.domain.events import (
     DEFAULT_MAX_EVENT_BYTES,
     LOG_MAX_BYTES_SETTING,
     MAX_MAX_EVENT_BYTES,
     MIN_MAX_EVENT_BYTES,
+    PreparedSystemEvent,
+)
+from app.modules.system.domain.health import (
+    HealthRunItem,
+    HealthRunSnapshot,
+    normalize_health_run_snapshot,
 )
 from app.modules.system.domain.queue import (
     ACTIVE_OPERATION_STATUSES,
@@ -13,15 +20,6 @@ from app.modules.system.domain.queue import (
     HEARTBEAT_BUSY_TIMEOUT_MS,
     TERMINAL_OPERATION_STATUSES,
     safe_runtime_error,
-)
-from app.modules.system.domain.health import (
-    HealthRunItem,
-    HealthRunSnapshot,
-    normalize_health_run_snapshot,
-)
-from app.modules.system.application.commands import (
-    SystemUnitOfWork,
-    execute_system_transaction,
 )
 from app.modules.system.domain.settings_policy import (
     DETAIL_TAB_KEYS,
@@ -45,8 +43,8 @@ __all__ = [
     "TERMINAL_OPERATION_STATUSES",
     "HealthRunItem",
     "HealthRunSnapshot",
+    "PreparedSystemEvent",
     "SystemUnitOfWork",
-    "execute_system_transaction",
     "is_database_busy_error",
     "normalize_detail_tab_order",
     "normalize_health_run_snapshot",

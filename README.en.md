@@ -157,19 +157,6 @@ pnpm dev:test
 
 The default URL is `http://localhost:3000`. `pnpm dev:test` starts the unified gateway, Next.js, FastAPI, and the Python worker together.
 
-### Start the Native Client
-
-Make sure the local service is reachable from the simulator or device, then run:
-
-```bash
-pnpm --filter @shuku/mobile start
-# Or create and launch a native development build
-pnpm --filter @shuku/mobile ios
-pnpm --filter @shuku/mobile android
-```
-
-Native builds also require the appropriate Xcode or Android Studio toolchain.
-
 ### Common Quality Checks
 
 ```bash
@@ -183,9 +170,6 @@ pnpm --filter @shuku/web build
 # Python API and worker
 cd apps/api-python
 uv run --extra dev pytest -q
-
-# Mobile (after returning to the repository root)
-pnpm --filter @shuku/mobile check
 
 # Deployment and release
 pnpm fnos:validate
@@ -214,7 +198,6 @@ flowchart LR
 ## Technology Stack
 
 - Web: Next.js 16, React 19, TypeScript, Tailwind CSS
-- Mobile: Expo 57, React Native 0.86, Expo Router
 - API: Python 3.11, FastAPI, SQLAlchemy 2, Alembic
 - Database: SQLite
 - Import and conversion: persistent Python worker, Watchdog, libmobi, EbookLib, lxml, Mutagen, FFmpeg/ffprobe
@@ -227,7 +210,6 @@ flowchart LR
 ```text
 apps/
 ├── api-python/       FastAPI, domain modules, database migrations, and worker
-├── mobile/           Expo iOS and Android client
 └── web/              Next.js Web application and PWA
 packages/
 └── reader-core/      Cross-client reader state and contracts
@@ -240,7 +222,12 @@ scripts/              Local development, validation, publishing, and unified run
 ## More Documentation
 
 - [Python API, converters, and worker](apps/api-python/README.md)
-- [Mobile visual and interaction guidelines (Chinese)](docs/mobile-app-design-guidelines.md)
 - [Business-code layering and refactoring policy](docs/business-code-layering-and-refactoring.md)
+- [Mobile App Phase 1: Web → App functional baseline](docs/mobile-app-phase-1-web-to-app-functional-baseline.md)
+- [Mobile App Phase 2: 4-Tab information architecture and navigation](docs/mobile-app-phase-2-information-architecture.md)
+- [Mobile App Phase 3: critical user flows and wireframe anchors](docs/mobile-app-phase-3-user-flows-and-wireframes.md)
+- [Mobile App Phase 4: Direction A “Warm Page” visual specification v1](docs/mobile-app-phase-4-visual-master.md)
+- [Mobile App Phase 5: 1:1 high-fidelity visual anchors](docs/mobile-app-phase-5-high-fidelity-anchors.md)
+- [Mobile App global development guidelines: native experience and design fidelity](docs/mobile-app-development-global-guidelines.md)
 - [fnOS template and local build](deploy/fnos/README.md)
 - [Release notes](release-notes/README.md)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from importlib import metadata as importlib_metadata
 from typing import Any, Protocol
@@ -11,27 +11,54 @@ from urllib.request import urlopen
 
 from sqlalchemy.orm import Session
 
-from app.bootstrap.metadata import ensure_metadata_sources
+from app.bootstrap.system import write_prepared_system_events
+from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.domain.providers import BUILTIN_MANIFESTS, ProviderManifest
 from app.modules.metadata.infrastructure.providers import (
-    clear_media_kind_pipelines,
-    ensure_pipeline_row,
+    PreparedMetadataProviderWrite,
+    execute_prepared_provider_write,
     get_provider_source,
     list_enabled_provider_ids,
     list_included_pipelines,
     list_metadata_sources,
     list_pipelines_for_provider,
-    set_provider_pipelines_enabled,
-    update_pipeline_row,
-    update_source_config,
-    update_source_enabled_priority,
+    prepare_pipeline_update_write,
+    prepare_provider_update_write,
     update_source_test_result,
 )
+from app.modules.system.public import PreparedSystemEvent
 
 LOGGER = logging.getLogger(__name__)
 ENTRY_POINT_GROUP = "shuku_starship.metadata_providers"
 METADATA_MEDIA_KINDS = ("EBOOK", "COMIC", "AUDIOBOOK")
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedMetadataProviderPipelineUpdate:
+    media_kind: str
+    provider_ids: tuple[str, ...]
+    write: PreparedMetadataProviderWrite
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedMetadataProviderUpdate:
+    provider_id: str
+    provider_name: str
+    enabled: bool
+    priority: int
+    write: PreparedMetadataProviderWrite
+
+
+def _persist_provider_write(
+    db: Session,
+    prepared: PreparedMetadataProviderWrite,
+    event: PreparedSystemEvent | None,
+) -> None:
+    with MetadataWriteTransaction(db):
+        execute_prepared_provider_write(db, prepared)
+        if event is not None:
+            write_prepared_system_events(db, (event,))
 
 
 def _now() -> datetime:
@@ -143,7 +170,7 @@ class BuiltinMetadataProvider:
             status = int(getattr(response, "status", 200) or 200)
         return {
             "ok": 200 <= status < 400,
-            "message": "连接正常" if status < 400 else f"服务返回 HTTP {status}",
+            "message": ("连接正常" if status < 400 else f"服务返回 HTTP {status}"),
         }
 
 
@@ -218,41 +245,7 @@ def _default_config(manifest: ProviderManifest) -> dict[str, Any]:
     }
 
 
-def ensure_metadata_provider_sources(db: Session) -> list[dict[str, Any]]:
-    registry = metadata_provider_registry()
-    ensure_metadata_sources(db, (plugin.manifest for plugin in registry.all()))
-    sources = list_metadata_sources(db)
-    if sources:
-        db.commit()
-    return sources
-
-
-def ensure_metadata_provider_pipelines(db: Session) -> None:
-    from sqlalchemy import inspect
-
-    if not inspect(db.connection()).has_table("MetadataProviderPipeline"):
-        return
-    sources = ensure_metadata_provider_sources(db)
-    source_by_provider = {str(item.get("providerType")): item for item in sources}
-    now = _now()
-    for plugin in metadata_provider_registry().all():
-        source = source_by_provider.get(plugin.manifest.id) or {}
-        for media_kind in plugin.manifest.media_kinds:
-            ensure_pipeline_row(
-                db,
-                media_kind=media_kind,
-                provider_id=plugin.manifest.id,
-                enabled=bool(source.get("enabled")),
-                position=int(
-                    source.get("priority") or plugin.manifest.default_priority
-                ),
-                now=now,
-            )
-    db.commit()
-
-
 def list_metadata_provider_pipelines(db: Session) -> list[dict[str, Any]]:
-    ensure_metadata_provider_pipelines(db)
     providers = {str(item["id"]): item for item in list_metadata_providers(db)}
     rows = list_included_pipelines(db)
     by_kind: dict[str, list[dict[str, Any]]] = {
@@ -280,10 +273,7 @@ def list_metadata_provider_pipelines(db: Session) -> list[dict[str, Any]]:
     ]
 
 
-def _sync_provider_source_from_pipelines(
-    db: Session, provider_id: str, now: datetime
-) -> tuple[bool, int]:
-    rows = list_pipelines_for_provider(db, provider_id)
+def _provider_pipeline_state(rows: list[dict[str, Any]]) -> tuple[bool, int]:
     enabled = any(bool(item.get("enabled")) for item in rows)
     enabled_positions = [
         int(item.get("position") or 9999) for item in rows if item.get("enabled")
@@ -293,21 +283,18 @@ def _sync_provider_source_from_pipelines(
         if enabled_positions
         else min([int(item.get("position") or 9999) for item in rows] or [9999])
     )
-    update_source_enabled_priority(
-        db, provider_id, enabled=enabled, priority=priority, now=now
-    )
     return enabled, priority
 
 
-def update_metadata_provider_pipeline(
+def prepare_metadata_provider_pipeline_update(
     db: Session, media_kind: str, items: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
+) -> PreparedMetadataProviderPipelineUpdate:
     normalized = str(media_kind or "").strip().upper()
     if normalized not in METADATA_MEDIA_KINDS:
         raise ValueError("不支持的读物类型")
     if not isinstance(items, list):
-        raise ValueError("数据源顺序格式不正确")
-    ensure_metadata_provider_pipelines(db)
+        # Preserve the established provider-validation error contract.
+        raise ValueError("数据源顺序格式不正确")  # noqa: TRY004
     registry = metadata_provider_registry()
     provider_ids = [
         str(item.get("providerId") or "").strip()
@@ -331,26 +318,65 @@ def update_metadata_provider_pipeline(
             )
             if errors:
                 raise ValueError(f"{plugin.manifest.name}：{'；'.join(errors)}")
-    now = _now()
-    clear_media_kind_pipelines(db, normalized, now)
-    for index, (item, provider_id) in enumerate(zip(items, provider_ids), start=1):
-        update_pipeline_row(
-            db,
-            media_kind=normalized,
-            provider_id=provider_id,
-            included=True,
-            enabled=bool(item.get("enabled")),
-            position=index * 100,
-            now=now,
+    provider_states: dict[str, tuple[bool, int]] = {}
+    for current_provider_id in {str(plugin.manifest.id) for plugin in registry.all()}:
+        rows = [
+            row
+            for row in list_pipelines_for_provider(db, current_provider_id)
+            if str(row.get("mediaKind")) != normalized
+        ]
+        rows.extend(
+            {
+                "enabled": bool(item.get("enabled")),
+                "position": index * 100,
+            }
+            for index, (item, provider_id) in enumerate(
+                zip(items, provider_ids), start=1
+            )
+            if provider_id == current_provider_id
         )
-    for provider_id in {str(plugin.manifest.id) for plugin in registry.all()}:
-        _sync_provider_source_from_pipelines(db, provider_id, now)
-    db.commit()
+        provider_states[current_provider_id] = _provider_pipeline_state(rows)
+    db.close()
+    now = _now()
+    pipeline_rows = tuple(
+        {
+            "provider_id": provider_id,
+            "enabled": bool(item.get("enabled")),
+            "position": index * 100,
+        }
+        for index, (item, provider_id) in enumerate(zip(items, provider_ids), start=1)
+    )
+    write = prepare_pipeline_update_write(
+        media_kind=normalized,
+        rows=pipeline_rows,
+        provider_states=provider_states,
+        now=now,
+    )
+    return PreparedMetadataProviderPipelineUpdate(
+        media_kind=normalized,
+        provider_ids=tuple(provider_ids),
+        write=write,
+    )
+
+
+def persist_metadata_provider_pipeline_update(
+    db: Session,
+    prepared: PreparedMetadataProviderPipelineUpdate,
+    *,
+    event: PreparedSystemEvent | None = None,
+) -> list[dict[str, Any]]:
+    _persist_provider_write(db, prepared.write, event)
     return list_metadata_provider_pipelines(db)
 
 
+def update_metadata_provider_pipeline(
+    db: Session, media_kind: str, items: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    prepared = prepare_metadata_provider_pipeline_update(db, media_kind, items)
+    return persist_metadata_provider_pipeline_update(db, prepared)
+
+
 def _provider_source(db: Session, provider_id: str) -> dict[str, Any] | None:
-    ensure_metadata_provider_sources(db)
     return get_provider_source(db, provider_id)
 
 
@@ -402,7 +428,7 @@ def _provider_public_view(
 
 
 def list_metadata_providers(db: Session) -> list[dict[str, Any]]:
-    sources = ensure_metadata_provider_sources(db)
+    sources = list_metadata_sources(db)
     registry = metadata_provider_registry()
     result = []
     for source in sources:
@@ -433,9 +459,9 @@ def _validate_config(
     return errors
 
 
-def update_metadata_provider(
+def prepare_metadata_provider_update(
     db: Session, provider_id: str, payload: dict[str, Any]
-) -> dict[str, Any]:
+) -> PreparedMetadataProviderUpdate:
     plugin = metadata_provider_registry().require(provider_id)
     source = _provider_source(db, provider_id)
     if not source:
@@ -455,7 +481,8 @@ def update_metadata_provider(
             next_config[field.key] = value
     clear_secrets = payload.get("clearSecrets") or []
     if not isinstance(clear_secrets, list):
-        raise ValueError("清除凭据格式不正确")
+        # Preserve the established provider-validation error contract.
+        raise ValueError("清除凭据格式不正确")  # noqa: TRY004
     for key in clear_secrets:
         if str(key) in _secret_fields(plugin.manifest):
             next_config.pop(str(key), None)
@@ -472,24 +499,59 @@ def update_metadata_provider(
     except (TypeError, ValueError):
         raise ValueError("插件优先级格式不正确") from None
     priority = min(max(priority, 1), 9999)
+    update_pipelines = "enabled" in payload
+    pipeline_state = (
+        _provider_pipeline_state(
+            [
+                {**row, "enabled": enabled}
+                for row in list_pipelines_for_provider(db, provider_id)
+            ]
+        )
+        if update_pipelines
+        else None
+    )
+    db.close()
     now = _now()
-    update_source_config(
-        db,
-        str(source["id"]),
+    if pipeline_state is not None:
+        enabled, priority = pipeline_state
+    write = prepare_provider_update_write(
+        source_id=str(source["id"]),
+        provider_id=provider_id,
         enabled=enabled,
         priority=priority,
-        config=_json_text(next_config),
+        config_json=_json_text(next_config),
+        update_pipelines=update_pipelines,
         now=now,
     )
-    if "enabled" in payload:
-        ensure_metadata_provider_pipelines(db)
-        set_provider_pipelines_enabled(db, provider_id, enabled, now)
-        enabled, priority = _sync_provider_source_from_pipelines(db, provider_id, now)
-    db.commit()
+    return PreparedMetadataProviderUpdate(
+        provider_id=provider_id,
+        provider_name=plugin.manifest.name,
+        enabled=enabled,
+        priority=priority,
+        write=write,
+    )
+
+
+def persist_metadata_provider_update(
+    db: Session,
+    prepared: PreparedMetadataProviderUpdate,
+    *,
+    event: PreparedSystemEvent | None = None,
+) -> dict[str, Any]:
+    _persist_provider_write(db, prepared.write, event)
+    provider_id = prepared.provider_id
+    plugin = metadata_provider_registry().require(provider_id)
     updated = _provider_source(db, provider_id)
     if not updated:
         raise ValueError("元数据插件配置不存在")
     return _provider_public_view(updated, plugin)
+
+
+def update_metadata_provider(
+    db: Session, provider_id: str, payload: dict[str, Any]
+) -> dict[str, Any]:
+    prepared = prepare_metadata_provider_update(db, provider_id, payload)
+    return persist_metadata_provider_update(db, prepared)
 
 
 def test_metadata_provider(
@@ -501,24 +563,35 @@ def test_metadata_provider(
         raise ValueError("元数据插件配置不存在")
     config = _source_config(source, plugin.manifest)
     validation = _validate_config(plugin.manifest, config, True)
+    source_id = str(source["id"])
+    source_updated_at = source.get("updatedAt")
+    if not isinstance(source_updated_at, datetime):
+        # Treat malformed persisted configuration as a domain validation error.
+        raise TypeError("METADATA_PROVIDER_UPDATED_AT_MISSING")
+
+    # The provider test may block on DNS, TLS, or the remote service. End the
+    # read transaction before performing that external work so no database
+    # transaction spans the network call.
+    db.close()
     if validation:
         result = {"ok": False, "message": "；".join(validation)}
     else:
         try:
             result = plugin.test(config)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - contains provider failures.
             result = {"ok": False, "message": str(exc)}
     now = _now()
-    update_source_test_result(
-        db,
-        str(source["id"]),
-        status="ok" if result.get("ok") else "failed",
-        error=None
-        if result.get("ok")
-        else str(result.get("message") or "连接测试失败"),
-        now=now,
-    )
-    db.commit()
+    status = "ok" if result.get("ok") else "failed"
+    error = None if result.get("ok") else str(result.get("message") or "连接测试失败")
+    with MetadataWriteTransaction(db):
+        update_source_test_result(
+            db,
+            source_id,
+            expected_updated_at=source_updated_at,
+            status=status,
+            error=error,
+            now=now,
+        )
     provider = get_metadata_provider(db, provider_id)
     return result, provider or {}
 
@@ -549,7 +622,6 @@ def enabled_metadata_provider_ids(
                 )
             )
         ]
-    ensure_metadata_provider_pipelines(db)
     if media_kind is None:
         return list_enabled_provider_ids(db)
     return list_enabled_provider_ids(db, str(media_kind).strip().upper())
@@ -597,6 +669,7 @@ def search_with_metadata_provider(
                 use_cache=use_cache,
                 automatic_request_gate=automatic_request_gate,
             )
+        db.close()
         return plugin.search(
             db, context, query, config=config, force=force, use_cache=use_cache
         )
@@ -629,6 +702,7 @@ def search_with_metadata_provider(
             use_cache=use_cache,
             automatic_request_gate=automatic_request_gate,
         )
+    db.close()
     return plugin.search(
         db, context, query, config=config, force=force, use_cache=use_cache
     )

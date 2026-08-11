@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Table, delete, func, or_, select, update
+from sqlalchemy import delete, func, insert, or_, select, update
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.dml import Insert, Update
 
+from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import timestamp_ms_to_datetime
-from app.db.base import Base
 from app.models.import_pipeline import KindleSendTask
 from app.models.library import (
     LibraryFile,
@@ -30,12 +31,6 @@ def entity_as_legacy_dict(entity: object) -> dict[str, Any]:
 def _legacy_column_to_attr(model: type) -> dict[str, str]:
     mapper = sa_inspect(model)
     return {prop.columns[0].name: prop.key for prop in mapper.column_attrs}
-
-
-def _legacy_table(db: Session, table_name: str) -> Table | None:
-    if not has_table(db, table_name):
-        return None
-    return Base.metadata.tables.get(table_name)
 
 
 def has_table(db: Session, table: str) -> bool:
@@ -107,15 +102,23 @@ def find_active_kindle_task(
     return entity_as_legacy_dict(task) if task is not None else None
 
 
-def create_kindle_send_task(db: Session, values: dict[str, Any]) -> KindleSendTask:
+def prepare_kindle_send_task_insert(values: dict[str, Any]) -> Insert:
     name_to_attr = _legacy_column_to_attr(KindleSendTask)
     payload = {
         name_to_attr[key]: value for key, value in values.items() if key in name_to_attr
     }
-    task = KindleSendTask(**payload)
-    db.add(task)
-    db.flush()
-    return task
+    return insert(KindleSendTask).values(**payload).returning(KindleSendTask)
+
+
+def create_kindle_send_task(db: Session, values: dict[str, Any]) -> KindleSendTask:
+    return db.execute(prepare_kindle_send_task_insert(values)).scalar_one()
+
+
+def execute_kindle_send_task_insert(
+    db: Session,
+    statement: Insert,
+) -> KindleSendTask:
+    return db.execute(statement).scalar_one()
 
 
 def cancel_queued_kindle_task(db: Session, task_id: str, now: datetime) -> int:
@@ -151,7 +154,7 @@ def delete_kindle_send_task(db: Session, task_id: str) -> None:
 def next_queued_kindle_task(db: Session, now_ms: int) -> dict[str, Any] | None:
     if not has_table(db, "KindleSendTask"):
         return None
-    cutoff = timestamp_ms_to_datetime(now_ms) or datetime.now(timezone.utc)
+    cutoff = timestamp_ms_to_datetime(now_ms) or datetime.now(UTC)
     task = db.execute(
         select(KindleSendTask)
         .where(
@@ -170,26 +173,35 @@ def next_queued_kindle_task(db: Session, now_ms: int) -> dict[str, Any] | None:
 def claim_kindle_send_task(
     db: Session, task_id: str, now: datetime
 ) -> dict[str, Any] | None:
-    table = _legacy_table(db, "KindleSendTask")
-    if table is None:
+    if not has_table(db, "KindleSendTask"):
         return None
-    values: dict[str, Any] = {
-        "status": "sending",
-        "startedAt": now,
-        "nextAttemptAt": None,
-        "updatedAt": now,
-    }
-    if "attemptCount" in table.c:
-        values["attemptCount"] = table.c.attemptCount + 1
-    result = db.execute(
-        update(table)
-        .where(table.c.id == task_id, table.c.status == "queued")
-        .values(**values)
+    task = execute_kindle_send_task_update(
+        db,
+        prepare_claim_kindle_send_task(task_id, now=now),
     )
-    if int(result.rowcount or 0) != 1:
-        return None
-    db.flush()
-    return get_kindle_send_task(db, task_id)
+    return entity_as_legacy_dict(task) if task is not None else None
+
+
+def prepare_claim_kindle_send_task(task_id: str, *, now: datetime) -> Update:
+    return (
+        update(KindleSendTask)
+        .where(KindleSendTask.id == task_id, KindleSendTask.status == "queued")
+        .values(
+            status="sending",
+            started_at=now,
+            next_attempt_at=None,
+            updated_at=now,
+            attempt_count=KindleSendTask.attempt_count + 1,
+        )
+        .returning(KindleSendTask)
+    )
+
+
+def execute_kindle_send_task_update(
+    db: Session,
+    statement: Update,
+) -> KindleSendTask | None:
+    return db.execute(statement).scalar_one_or_none()
 
 
 def update_kindle_send_snapshot(
@@ -204,7 +216,34 @@ def update_kindle_send_snapshot(
     message_id: str,
     now: datetime,
 ) -> dict[str, Any] | None:
-    db.execute(
+    task = execute_kindle_send_task_update(
+        db,
+        prepare_kindle_send_snapshot_update(
+            task_id,
+            sender_email=sender_email,
+            smtp_host=smtp_host,
+            smtp_port=smtp_port,
+            smtp_security=smtp_security,
+            smtp_username=smtp_username,
+            message_id=message_id,
+            now=now,
+        ),
+    )
+    return entity_as_legacy_dict(task) if task is not None else None
+
+
+def prepare_kindle_send_snapshot_update(
+    task_id: str,
+    *,
+    sender_email: str,
+    smtp_host: str,
+    smtp_port: int,
+    smtp_security: str,
+    smtp_username: str | None,
+    message_id: str,
+    now: datetime,
+) -> Update:
+    return (
         update(KindleSendTask)
         .where(KindleSendTask.id == task_id)
         .values(
@@ -216,9 +255,8 @@ def update_kindle_send_snapshot(
             message_id=message_id,
             updated_at=now,
         )
+        .returning(KindleSendTask)
     )
-    db.flush()
-    return get_kindle_send_task(db, task_id)
 
 
 def schedule_kindle_retry(
@@ -286,6 +324,27 @@ def mark_kindle_task_unknown(
         .where(KindleSendTask.id == task_id)
         .values(status="unknown", error_message=error_message, updated_at=now)
     )
+
+
+def mark_kindle_tasks_unknown(
+    db: Session,
+    task_ids: tuple[str, ...],
+    *,
+    error_message: str,
+    now: datetime,
+) -> None:
+    """Mark interrupted sends with bounded set-based updates."""
+
+    for task_id_chunk in sqlite_parameter_chunks(
+        task_ids,
+        parameters_per_row=1,
+        fixed_parameters=3,
+    ):
+        db.execute(
+            update(KindleSendTask)
+            .where(KindleSendTask.id.in_(task_id_chunk))
+            .values(status="unknown", error_message=error_message, updated_at=now)
+        )
 
 
 def get_library_file_for_kindle(db: Session, file_id: str) -> dict[str, Any] | None:

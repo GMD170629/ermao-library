@@ -4,17 +4,17 @@ from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
 
-import pytest
-from sqlalchemy.exc import OperationalError
-from watchdog.events import FileMovedEvent
-
 import app.worker.watcher as watcher_module
+import pytest
 from app.worker.watcher import (
     MonitorFolderConfig,
     WatchState,
     WorkerFileHandler,
     WorkerManager,
+    WorkerRefreshProjection,
 )
+from sqlalchemy.exc import OperationalError
+from watchdog.events import FileMovedEvent
 
 
 def test_atomic_publish_rename_is_scheduled_for_monitoring(tmp_path: Path) -> None:
@@ -58,7 +58,7 @@ def test_unstable_file_marks_a_retry_after_it_reaches_the_minimum_size(
         watcher_module, "wait_for_stable_import_source", lambda *_args: False
     )
     monkeypatch.setattr(
-        watcher_module, "record_system_event", lambda *_args, **_kwargs: None
+        watcher_module, "_record_worker_event", lambda *_args, **_kwargs: None
     )
 
     imported = watcher_module.import_watched_file(
@@ -71,6 +71,145 @@ def test_unstable_file_marks_a_retry_after_it_reaches_the_minimum_size(
 
     assert imported is False
     assert deferred.is_set()
+
+
+def test_refresh_worker_state_closes_projection_session_before_path_io(
+    tmp_path: Path,
+    test_settings,
+    monkeypatch,
+) -> None:
+    session_active = False
+
+    class SessionContext:
+        def __enter__(self):
+            nonlocal session_active
+            session_active = True
+            return object()
+
+        def __exit__(self, *_args) -> None:
+            nonlocal session_active
+            session_active = False
+
+    class ObserverProbe:
+        def schedule(self, *_args, **_kwargs) -> None:
+            assert session_active is False
+
+        def start(self) -> None:
+            assert session_active is False
+
+        def stop(self) -> None: ...
+
+        def join(self, *, timeout: int) -> None: ...
+
+    folder = MonitorFolderConfig(id="folder-1", root_path=str(tmp_path))
+    monkeypatch.setattr(
+        watcher_module,
+        "list_enabled_monitor_folders",
+        lambda _db: (
+            [{"id": folder.id, "rootPath": folder.root_path}]
+            if session_active
+            else pytest.fail("read session closed")
+        ),
+    )
+    monkeypatch.setattr(
+        watcher_module,
+        "get_system_settings",
+        lambda _db, _keys: {} if session_active else pytest.fail("read session closed"),
+    )
+    monkeypatch.setattr(
+        watcher_module,
+        "enabled_monitor_folders",
+        lambda _rows, _settings: (
+            (folder,)
+            if not session_active
+            else pytest.fail("projection mapping ran inside read transaction")
+        ),
+    )
+    monkeypatch.setattr(watcher_module, "Observer", ObserverProbe)
+    manager = WorkerManager(lambda: SessionContext(), test_settings)
+    monkeypatch.setattr(
+        manager,
+        "_schedule_scan_request",
+        lambda **_kwargs: (
+            None
+            if not session_active
+            else pytest.fail("scan preparation ran inside read transaction")
+        ),
+    )
+    monkeypatch.setattr(
+        manager.security,
+        "validate_monitor_folder",
+        lambda path: (
+            SimpleNamespace(real_path=Path(path))
+            if not session_active
+            else pytest.fail("path IO ran inside read transaction")
+        ),
+    )
+
+    manager.refresh_worker_state()
+
+    assert "folder-1" in manager.watchers
+
+
+def test_manual_rescan_prepares_all_folders_before_one_database_checkpoint(
+    tmp_path: Path,
+    test_settings,
+    monkeypatch,
+) -> None:
+    session_active = False
+    session_count = 0
+
+    class SessionContext:
+        def __enter__(self):
+            nonlocal session_active, session_count
+            session_active = True
+            session_count += 1
+            return object()
+
+        def __exit__(self, *_args) -> None:
+            nonlocal session_active
+            session_active = False
+
+    folders = (
+        MonitorFolderConfig(id="folder-1", root_path=str(tmp_path / "one")),
+        MonitorFolderConfig(id="folder-2", root_path=str(tmp_path / "two")),
+    )
+    persisted_scan_jobs = []
+
+    def persist_checkpoint(_db, **kwargs) -> int:
+        assert session_active is True
+        persisted_scan_jobs.extend(kwargs["scan_jobs"])
+        return len(kwargs["scan_jobs"])
+
+    manager = WorkerManager(SessionContext, test_settings)
+    monkeypatch.setattr(
+        manager.security,
+        "validate_monitor_folder",
+        lambda path: (
+            SimpleNamespace(real_path=Path(path))
+            if not session_active
+            else pytest.fail("path validation ran inside write transaction")
+        ),
+    )
+    monkeypatch.setattr(
+        watcher_module,
+        "persist_import_rescan_completion",
+        persist_checkpoint,
+    )
+
+    manager.process_rescan_requests(
+        WorkerRefreshProjection(
+            folders=folders,
+            rescan_requested_at='{"requestedAt":"2026-08-11T10:00:00Z"}',
+            rescan_handled_at=None,
+        )
+    )
+
+    assert session_count == 1
+    assert {request.monitor_folder_id for request in persisted_scan_jobs} == {
+        "folder-1",
+        "folder-2",
+    }
 
 
 def test_watcher_retries_a_transient_database_lock_without_losing_event(
@@ -109,9 +248,22 @@ def test_watcher_retries_a_transient_database_lock_without_losing_event(
         watcher_module, "import_queue_at_high_watermark", high_watermark
     )
     monkeypatch.setattr(
+        watcher_module, "prepare_import_enqueue_command", lambda path, **_kwargs: path
+    )
+    monkeypatch.setattr(
         watcher_module,
-        "enqueue_import_task",
-        lambda _db, path, **_kwargs: enqueued.append(path),
+        "load_import_enqueue_command_projection",
+        lambda _db, _command: object(),
+    )
+    monkeypatch.setattr(
+        watcher_module,
+        "prepare_import_enqueue_write",
+        lambda command, _projection, **_kwargs: command,
+    )
+    monkeypatch.setattr(
+        watcher_module,
+        "persist_import_enqueue_write",
+        lambda _db, prepared: enqueued.append(prepared),
     )
     monkeypatch.setattr(watcher_module.time, "sleep", lambda _seconds: None)
 
@@ -121,7 +273,7 @@ def test_watcher_retries_a_transient_database_lock_without_losing_event(
     )
     manager.schedule_import(source, folder, state)
 
-    assert factory_calls == 2
+    assert factory_calls == 4
     assert enqueued == [source]
 
 
@@ -163,9 +315,9 @@ def test_watcher_recovers_exhausted_database_lock_with_folder_scan(
     manager.schedule_import(source, folder, state)
 
     monkeypatch.setattr(
-        watcher_module,
-        "schedule_import_scan_job",
-        lambda _db, **kwargs: recovery_scans.append(
+        manager,
+        "_schedule_scan_request",
+        lambda **kwargs: recovery_scans.append(
             (
                 kwargs["monitor_folder_id"],
                 kwargs["root_path"],
@@ -206,12 +358,7 @@ def test_watcher_audio_events_debounce_into_delayed_directory_scan(
     )
     monkeypatch.setattr(
         watcher_module,
-        "schedule_import_scan_job",
-        lambda _db, **kwargs: scheduled.append(kwargs),
-    )
-    monkeypatch.setattr(
-        watcher_module,
-        "enqueue_import_task",
+        "prepare_import_enqueue_command",
         lambda *_args, **_kwargs: pytest.fail(
             "audio watcher events must not create file-level import tasks"
         ),
@@ -219,6 +366,11 @@ def test_watcher_audio_events_debounce_into_delayed_directory_scan(
     manager = WorkerManager(
         SessionContext,
         SimpleNamespace(monitor_root=str(tmp_path)),
+    )
+    monkeypatch.setattr(
+        manager,
+        "_schedule_scan_request",
+        lambda **kwargs: scheduled.append(kwargs),
     )
 
     manager.schedule_import(source, folder, state)

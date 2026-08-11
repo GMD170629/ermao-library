@@ -7,16 +7,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.models.settings import SystemSetting
 from app.modules.imports.application.audio_types import SUPPORTED_AUDIO_EXTS
-from app.modules.system.infrastructure.settings import (
-    existing_setting_keys,
-    get_settings_raw,
-)
-
 
 IMPORT_STABILITY_ENABLED_KEY = "import.stabilityCheck.enabled"
 IMPORT_STABILITY_SECONDS_KEY = "import.stabilityCheck.seconds"
@@ -60,6 +56,14 @@ class ImportPreferences:
     ignore_patterns: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class RawImportPreferencesProjection:
+    """Unparsed values copied directly from the settings query."""
+
+    available: bool
+    rows: tuple[tuple[str, str | None], ...] = ()
+
+
 def _json_value(value: Any) -> Any:
     if not isinstance(value, str):
         return value
@@ -90,8 +94,9 @@ def normalize_stability_seconds(value: Any) -> float:
     return min(MAX_STABILITY_SECONDS, max(0.5, parsed))
 
 
-def default_stability_seconds() -> float:
-    legacy_delay_ms = os.environ.get("MONITOR_FILE_STABLE_DELAY_MS")
+def default_stability_seconds(legacy_delay_ms: str | None = None) -> float:
+    if legacy_delay_ms is None:
+        legacy_delay_ms = os.environ.get("MONITOR_FILE_STABLE_DELAY_MS")
     if not legacy_delay_ms:
         return DEFAULT_STABILITY_SECONDS
     try:
@@ -136,23 +141,37 @@ def normalize_import_setting_value(key: str, value: Any) -> Any:
     return value
 
 
-def load_import_preferences(db: Session) -> ImportPreferences:
+def load_raw_import_preferences_projection(
+    db: Session,
+) -> RawImportPreferencesProjection:
+    """Read only raw preference columns; parsing belongs after Session release."""
+
     try:
         if "SystemSetting" not in inspect(db.connection()).get_table_names():
-            return ImportPreferences()
-        keys = (
-            IMPORT_STABILITY_ENABLED_KEY,
-            IMPORT_STABILITY_SECONDS_KEY,
-            IMPORT_AUTO_CONVERT_KEY,
-            IMPORT_ALLOWED_EXTENSIONS_KEY,
-            IMPORT_IGNORE_PATTERNS_KEY,
+            return RawImportPreferencesProjection(available=False)
+        rows = db.execute(
+            select(SystemSetting.key, SystemSetting.value).where(
+                SystemSetting.key.in_(IMPORT_PREFERENCE_KEYS)
+            )
+        ).all()
+        copied_rows = tuple(
+            (str(key), None if value is None else str(value)) for key, value in rows
         )
-        key_list = list(keys)
-        existing = existing_setting_keys(db, key_list)
-        raw = get_settings_raw(db, key_list)
-        values = {key: raw[key] for key in existing}
     except SQLAlchemyError:
+        return RawImportPreferencesProjection(available=False)
+    return RawImportPreferencesProjection(available=True, rows=copied_rows)
+
+
+def prepare_import_preferences(
+    projection: RawImportPreferencesProjection,
+    *,
+    legacy_stable_delay_ms: str | None,
+) -> ImportPreferences:
+    """Parse and normalize a raw projection without a database dependency."""
+
+    if not projection.available:
         return ImportPreferences()
+    values = dict(projection.rows)
     return ImportPreferences(
         stability_check_enabled=_boolean(
             values.get(IMPORT_STABILITY_ENABLED_KEY),
@@ -161,7 +180,7 @@ def load_import_preferences(db: Session) -> ImportPreferences:
         stability_check_seconds=(
             normalize_stability_seconds(values[IMPORT_STABILITY_SECONDS_KEY])
             if IMPORT_STABILITY_SECONDS_KEY in values
-            else default_stability_seconds()
+            else default_stability_seconds(legacy_stable_delay_ms)
         ),
         auto_convert_to_epub=_boolean(values.get(IMPORT_AUTO_CONVERT_KEY), True),
         allowed_extensions=normalize_allowed_extensions(values.get(IMPORT_ALLOWED_EXTENSIONS_KEY)),

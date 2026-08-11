@@ -45,7 +45,14 @@ def health_check_item(
 
 
 def summarize_health_items(items: list[dict[str, Any]]) -> dict[str, int]:
-    summary = {"total": len(items), "completed": 0, "ok": 0, "warning": 0, "error": 0, "skipped": 0}
+    summary = {
+        "total": len(items),
+        "completed": 0,
+        "ok": 0,
+        "warning": 0,
+        "error": 0,
+        "skipped": 0,
+    }
     for item in items:
         status = str(item.get("status"))
         if status in TERMINAL_CHECK_STATUSES:

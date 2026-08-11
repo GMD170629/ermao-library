@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import ColumnElement, exists, false, or_, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, aliased
+from sqlalchemy.sql.dml import Insert
 
 from app.models.auth import User, UserMonitorFolderAccess, UserPreference
 from app.models.library import (
@@ -216,18 +217,33 @@ def read_user_preferences(db: Session, user_id: str) -> dict[str, Any]:
     return preferences
 
 
-def write_user_preference(db: Session, user_id: str, key: str, value: object) -> None:
-    db.execute(
-        sqlite_insert(UserPreference)
+def prepare_user_preference_write(
+    user_id: str,
+    key: str,
+    value: object,
+) -> Insert:
+    encoded_value = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    statement = sqlite_insert(UserPreference)
+    return (
+        statement
         .values(
             user_id=user_id,
             key=key,
-            value=json.dumps(value, ensure_ascii=False, separators=(",", ":")),
+            value=encoded_value,
         )
         .on_conflict_do_update(
             index_elements=[UserPreference.user_id, UserPreference.key],
-            set_={
-                "value": json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-            },
+            set_={"value": encoded_value},
         )
+    )
+
+
+def write_prepared_user_preference(db: Session, statement: Insert) -> None:
+    db.execute(statement)
+
+
+def write_user_preference(db: Session, user_id: str, key: str, value: object) -> None:
+    write_prepared_user_preference(
+        db,
+        prepare_user_preference_write(user_id, key, value),
     )

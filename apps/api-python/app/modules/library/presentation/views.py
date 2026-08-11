@@ -6,11 +6,8 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode
-from urllib.request import Request as UrlRequest
-from urllib.request import urlopen
 
 from fastapi.responses import Response
 from sqlalchemy import case, func, inspect, select
@@ -35,7 +32,6 @@ from app.core.authorization import (
     can_manage_system,
     volume_visibility_predicate,
 )
-from app.core.config import Settings
 from app.core.time import timestamp_ms_to_iso
 from app.models.auth import User
 from app.models.library import (
@@ -722,9 +718,7 @@ def _reading_unit_view(unit: LibraryReadingUnit) -> dict[str, Any]:
 @dataclass(frozen=True, slots=True)
 class _WorkViewBatch:
     metadata_lookups: dict[str, dict[str, object]]
-    rows_by_work: dict[
-        str, list[tuple[LibraryMediaVersion, LibraryVolume]]
-    ]
+    rows_by_work: dict[str, list[tuple[LibraryMediaVersion, LibraryVolume]]]
     progresses: dict[str, LibraryReadingProgress]
     histories: dict[str, UserMediaHistory]
     files: dict[str, list[LibraryFile]]
@@ -759,9 +753,9 @@ def _load_work_view_batch(
             LibraryVolume.id.asc(),
         )
     ).all()
-    rows_by_work: dict[
-        str, list[tuple[LibraryMediaVersion, LibraryVolume]]
-    ] = {work_id: [] for work_id in work_ids}
+    rows_by_work: dict[str, list[tuple[LibraryMediaVersion, LibraryVolume]]] = {
+        work_id: [] for work_id in work_ids
+    }
     volume_ids: list[str] = []
     media_version_ids: list[str] = []
     for media_version, volume in rows:
@@ -901,31 +895,39 @@ def _work_view(
     for media_version, volume in rows:
         grouped.setdefault(media_version.id, (media_version, []))[1].append(volume)
     volume_ids = [volume.id for _media, volume in rows]
-    progresses = batch.progresses if batch is not None else (
-        {
-            progress.volume_id: progress
-            for progress in db.scalars(
-                select(LibraryReadingProgress).where(
-                    LibraryReadingProgress.user_id == user_id,
-                    LibraryReadingProgress.volume_id.in_(volume_ids),
-                )
-            ).all()
-        }
-        if user_id and volume_ids
-        else {}
+    progresses = (
+        batch.progresses
+        if batch is not None
+        else (
+            {
+                progress.volume_id: progress
+                for progress in db.scalars(
+                    select(LibraryReadingProgress).where(
+                        LibraryReadingProgress.user_id == user_id,
+                        LibraryReadingProgress.volume_id.in_(volume_ids),
+                    )
+                ).all()
+            }
+            if user_id and volume_ids
+            else {}
+        )
     )
-    histories = batch.histories if batch is not None else (
-        {
-            history.media_version_id: history
-            for history in db.scalars(
-                select(UserMediaHistory).where(
-                    UserMediaHistory.user_id == user_id,
-                    UserMediaHistory.media_version_id.in_(grouped),
-                )
-            ).all()
-        }
-        if user_id and grouped
-        else {}
+    histories = (
+        batch.histories
+        if batch is not None
+        else (
+            {
+                history.media_version_id: history
+                for history in db.scalars(
+                    select(UserMediaHistory).where(
+                        UserMediaHistory.user_id == user_id,
+                        UserMediaHistory.media_version_id.in_(grouped),
+                    )
+                ).all()
+            }
+            if user_id and grouped
+            else {}
+        )
     )
     media_order = {"EBOOK": 0, "COMIC": 1, "AUDIOBOOK": 2}
     ordered = sorted(
@@ -1063,9 +1065,8 @@ def _work_view(
         "detailTabs": tabs,
         "selectedDetailTab": (
             batch.saved_tabs.get(work_id)
-            if batch is not None and batch.saved_tabs.get(work_id) in {
-                str(tab["key"]) for tab in tabs
-            }
+            if batch is not None
+            and batch.saved_tabs.get(work_id) in {str(tab["key"]) for tab in tabs}
             else next(
                 (str(tab["key"]) for tab in tabs if tab["key"] != "STRUCTURE"),
                 "STRUCTURE",
@@ -1435,39 +1436,3 @@ def _finish_metadata_organize_work(db: Session, work_id: str) -> list[str]:
         work_id=work_id,
         now=_now(),
     )
-
-
-def _apply_remote_cover(
-    work_id: str, cover_url: str, settings: Settings
-) -> dict[str, Any]:
-    if not cover_url.startswith(("http://", "https://")):
-        return {}
-    request = UrlRequest(
-        cover_url,
-        headers={
-            "Accept": "image/*,*/*",
-            "User-Agent": "Shuku Starship Python",
-            "Referer": "https://book.douban.com/",
-        },
-    )
-    with urlopen(request, timeout=30) as response:
-        content_type = response.headers.get("content-type") or ""
-        data = response.read(8 * 1024 * 1024)
-    suffix = ".jpg"
-    if "png" in content_type:
-        suffix = ".png"
-    elif "webp" in content_type:
-        suffix = ".webp"
-    elif "." in cover_url.rsplit("/", 1)[-1].split("?", 1)[0]:
-        suffix = (
-            Path(cover_url.rsplit("/", 1)[-1].split("?", 1)[0]).suffix[:12] or suffix
-        )
-    target_dir = settings.resolved_storage_root / "covers"
-    target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / f"{work_id}{suffix}"
-    target.write_bytes(data)
-    return {
-        "coverPath": str(target.relative_to(settings.resolved_storage_root)),
-        "coverStatus": "READY",
-        "updatedAt": _now(),
-    }

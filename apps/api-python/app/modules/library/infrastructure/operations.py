@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from time import time_ns
 from typing import Any
 
-from sqlalchemy import delete, or_, select, update
+from sqlalchemy import delete, insert, or_, select, update
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -97,6 +98,65 @@ def _json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedOperationWrite:
+    row: dict[str, Any]
+    record: dict[str, Any]
+
+
+def prepare_operation_write(
+    *,
+    user_id: str | None,
+    action: str,
+    target_type: str,
+    target_id: str | None,
+    summary: str,
+    payload: dict[str, Any],
+    inverse: dict[str, Any],
+    now: datetime,
+    undoable: bool = True,
+) -> PreparedOperationWrite:
+    operation_id = f"op_{time_ns()}"
+    expires_at = now + timedelta(days=7)
+    status = "COMPLETED" if undoable else "FINALIZED"
+    payload_json = _json(payload)
+    inverse_json = _json(inverse)
+    return PreparedOperationWrite(
+        row={
+            "id": operation_id,
+            "user_id": user_id,
+            "action": action,
+            "status": status,
+            "target_type": target_type,
+            "target_id": target_id,
+            "summary": summary,
+            "payload_json": payload_json,
+            "inverse_json": inverse_json,
+            "expires_at": expires_at if undoable else None,
+            "created_at": now,
+            "updated_at": now,
+        },
+        record={
+            "id": operation_id,
+            "userId": user_id,
+            "action": action,
+            "status": status,
+            "targetType": target_type,
+            "targetId": target_id,
+            "summary": summary,
+            "payloadJson": payload_json,
+            "inverseJson": inverse_json,
+            "expiresAt": expires_at if undoable else None,
+            "createdAt": now,
+            "updatedAt": now,
+        },
+    )
+
+
+def write_prepared_operation(db: Session, prepared: PreparedOperationWrite) -> None:
+    db.execute(insert(LibraryOperation), [prepared.row])
+
+
 def _column_name_to_attr(model: type) -> dict[str, str]:
     mapper = sa_inspect(model)
     return {prop.columns[0].name: prop.key for prop in mapper.column_attrs}
@@ -124,25 +184,19 @@ def create_operation(
     now: datetime,
     undoable: bool = True,
 ) -> dict[str, Any]:
-    operation_id = f"op_{time_ns()}"
-    expires_at = now + timedelta(days=7)
-    operation = LibraryOperation(
-        id=operation_id,
+    prepared = prepare_operation_write(
         user_id=user_id,
         action=action,
-        status="COMPLETED" if undoable else "FINALIZED",
         target_type=target_type,
         target_id=target_id,
         summary=summary,
-        payload_json=_json(payload),
-        inverse_json=_json(inverse),
-        expires_at=expires_at if undoable else None,
-        created_at=now,
-        updated_at=now,
+        payload=payload,
+        inverse=inverse,
+        now=now,
+        undoable=undoable,
     )
-    db.add(operation)
-    db.flush()
-    return entity_as_legacy_dict(operation)
+    write_prepared_operation(db, prepared)
+    return prepared.record
 
 
 def operation_summary(operation: dict[str, Any]) -> OperationSummary:

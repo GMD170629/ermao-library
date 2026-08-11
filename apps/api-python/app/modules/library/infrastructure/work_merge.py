@@ -6,14 +6,19 @@ import json
 from collections import defaultdict
 from datetime import UTC, datetime
 from math import isfinite
+from time import time_ns
 from typing import TypeVar
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, insert, select, update
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.base import Executable
 
+from app.core.sql_batches import sqlite_parameter_chunks
+from app.models.common import cuid
 from app.models.import_pipeline import BookConversionTask, ImportTask, KindleSendTask
 from app.models.library import (
     LibraryMediaVersion,
+    LibraryOperation,
     LibraryVolume,
     LibraryWork,
     UserMediaHistory,
@@ -26,7 +31,10 @@ from app.models.organize import (
 )
 from app.models.settings import ReaderBookPreference, ReaderProgressCursor
 from app.models.shelf import ShelfWork
-from app.modules.library.application.commands import execute_library_write
+from app.modules.library.application.facet_sync import (
+    WorkFacetProjection,
+    prepare_work_facet,
+)
 from app.modules.library.application.work_merge import (
     MEDIA_KIND_ORDER,
     MergeCommand,
@@ -38,9 +46,10 @@ from app.modules.library.application.work_merge import (
     WorkMergeInProgressError,
     WorkMergeNotFoundError,
 )
-from app.modules.library.infrastructure import operations
-from app.modules.library.infrastructure.facets import sync_work_facets
-from app.modules.library.infrastructure.works import entity_as_legacy_dict
+from app.modules.library.infrastructure.facet_sync import (
+    execute_work_facet_write,
+    prepare_work_facet_write,
+)
 from app.services.book_identity import (
     UNKNOWN_AUTHOR,
     identity_merge_key,
@@ -231,29 +240,36 @@ class SqlAlchemyWorkMergeGateway:
         if any(self._db.scalar(statement.limit(1)) is not None for statement in checks):
             raise WorkMergeInProgressError("所选作品仍有后台任务正在处理，请稍后重试")
 
-    def _merge_preferences(
+    def _prepare_merge_preferences(
         self,
         model: type[PreferenceT],
         work_ids: tuple[str, ...],
         new_work_id: str,
-    ) -> None:
+    ) -> tuple[Executable, ...]:
         rows = list(
             self._db.scalars(select(model).where(model.work_id.in_(work_ids))).all()
         )
         by_user: dict[str, list[PreferenceT]] = defaultdict(list)
         for row in rows:
             by_user[row.user_id].append(row)
+        loser_ids: list[str] = []
+        winner_ids: list[str] = []
         for candidates in by_user.values():
             winner = max(candidates, key=lambda row: (row.updated_at, row.id))
-            for row in candidates:
-                if row is not winner:
-                    self._db.delete(row)
-            self._db.flush()
-            winner.work_id = new_work_id
+            loser_ids.extend(row.id for row in candidates if row is not winner)
+            winner_ids.append(winner.id)
+        statements: list[Executable] = []
+        for chunk in sqlite_parameter_chunks(tuple(loser_ids), parameters_per_row=1):
+            statements.append(delete(model).where(model.id.in_(chunk)))
+        for chunk in sqlite_parameter_chunks(tuple(winner_ids), parameters_per_row=1):
+            statements.append(
+                update(model).where(model.id.in_(chunk)).values(work_id=new_work_id)
+            )
+        return tuple(statements)
 
-    def _merge_progress_cursors(
+    def _prepare_merge_progress_cursors(
         self, work_ids: tuple[str, ...], new_work_id: str
-    ) -> None:
+    ) -> tuple[Executable, ...]:
         rows = list(
             self._db.scalars(
                 select(ReaderProgressCursor).where(
@@ -264,15 +280,26 @@ class SqlAlchemyWorkMergeGateway:
         grouped: dict[tuple[str, str], list[ReaderProgressCursor]] = defaultdict(list)
         for row in rows:
             grouped[(row.user_id, row.client_id)].append(row)
+        loser_ids: list[str] = []
+        winner_ids: list[str] = []
         for candidates in grouped.values():
             winner = max(
                 candidates, key=lambda row: (row.high_water, row.updated_at, row.id)
             )
-            for row in candidates:
-                if row is not winner:
-                    self._db.delete(row)
-            self._db.flush()
-            winner.work_id = new_work_id
+            loser_ids.extend(row.id for row in candidates if row is not winner)
+            winner_ids.append(winner.id)
+        statements: list[Executable] = []
+        for chunk in sqlite_parameter_chunks(tuple(loser_ids), parameters_per_row=1):
+            statements.append(
+                delete(ReaderProgressCursor).where(ReaderProgressCursor.id.in_(chunk))
+            )
+        for chunk in sqlite_parameter_chunks(tuple(winner_ids), parameters_per_row=1):
+            statements.append(
+                update(ReaderProgressCursor)
+                .where(ReaderProgressCursor.id.in_(chunk))
+                .values(work_id=new_work_id)
+            )
+        return tuple(statements)
 
     def _operation_view(self, operation: dict[str, object]) -> dict[str, object]:
         return {
@@ -290,7 +317,7 @@ class SqlAlchemyWorkMergeGateway:
         }
 
     def merge(self, command: MergeCommand) -> MergeResult:
-        return execute_library_write(self._db, lambda: self._merge(command))
+        return self._merge(command)
 
     def _merge(self, command: MergeCommand) -> MergeResult:
         works, media_versions, volumes = self._load(command.work_ids)
@@ -316,64 +343,77 @@ class SqlAlchemyWorkMergeGateway:
             else "PENDING"
         )
         first = works[0]
-        new_work = LibraryWork(
-            monitor_folder_id=None,
-            origin="MANUAL",
-            title=command.metadata.title,
-            normalized_title=normalize_identity_part(command.metadata.title),
-            author=command.metadata.author or UNKNOWN_AUTHOR,
-            normalized_author=normalize_identity_part(
-                command.metadata.author or UNKNOWN_AUTHOR
-            ),
-            description=command.metadata.description,
-            publication_status=first.publication_status,
-            tracking_status=first.tracking_status,
-            tags=json.dumps(command.metadata.tags, ensure_ascii=False),
-            series_name=command.metadata.series_name,
-            series_index=command.metadata.series_index,
-            metadata_quality=100,
-            organize_status="APPLIED",
-            cover_path=cover_path,
-            cover_status=cover_status,
-            hidden=False,
-            organized=True,
-            merge_key=identity_merge_key(
-                command.metadata.title, command.metadata.author or UNKNOWN_AUTHOR
-            ),
-            created_at=now,
-            updated_at=now,
-        )
-        self._db.add(new_work)
-        self._db.flush()
-
-        new_media: dict[str, LibraryMediaVersion] = {}
-        for kind in sorted(
-            {media.media_kind for media in media_versions},
-            key=lambda value: MEDIA_KIND_ORDER.get(value, 99),
-        ):
-            media = LibraryMediaVersion(
-                work_id=new_work.id, media_kind=kind, created_at=now, updated_at=now
+        new_work_id = cuid()
+        author = command.metadata.author or UNKNOWN_AUTHOR
+        tags_source = json.dumps(command.metadata.tags, ensure_ascii=False)
+        work_row = {
+            "id": new_work_id,
+            "monitor_folder_id": None,
+            "origin": "MANUAL",
+            "title": command.metadata.title,
+            "normalized_title": normalize_identity_part(command.metadata.title),
+            "author": author,
+            "normalized_author": normalize_identity_part(author),
+            "description": command.metadata.description,
+            "publication_status": first.publication_status,
+            "tracking_status": first.tracking_status,
+            "tags": tags_source,
+            "series_name": command.metadata.series_name,
+            "series_index": command.metadata.series_index,
+            "metadata_quality": 100,
+            "organize_status": "APPLIED",
+            "cover_path": cover_path,
+            "cover_status": cover_status,
+            "hidden": False,
+            "organized": True,
+            "merge_key": identity_merge_key(command.metadata.title, author),
+            "created_at": now,
+            "updated_at": now,
+        }
+        media_kinds = tuple(
+            sorted(
+                {media.media_kind for media in media_versions},
+                key=lambda value: MEDIA_KIND_ORDER.get(value, 99),
             )
-            self._db.add(media)
-            self._db.flush()
-            new_media[kind] = media
+        )
+        new_media_ids = {kind: cuid() for kind in media_kinds}
+        media_rows = tuple(
+            {
+                "id": new_media_ids[kind],
+                "work_id": new_work_id,
+                "media_kind": kind,
+                "created_at": now,
+                "updated_at": now,
+            }
+            for kind in media_kinds
+        )
 
         ordered = self._ordered_volumes(command.work_ids, media_versions, volumes)
         kind_positions: dict[str, int] = defaultdict(int)
+        volume_update_rows: list[dict[str, object]] = []
         for kind, volume in ordered:
-            volume.media_version_id = new_media[kind].id
-            volume.sort_order = kind_positions[kind]
-            volume.updated_at = now
+            volume_update_rows.append(
+                {
+                    "id": volume.id,
+                    "media_version_id": new_media_ids[kind],
+                    "sort_order": kind_positions[kind],
+                    "updated_at": now,
+                }
+            )
             kind_positions[kind] += 1
 
         source_media_ids = [media.id for media in media_versions]
-        histories = list(
-            self._db.scalars(
-                select(UserMediaHistory).where(
-                    UserMediaHistory.media_version_id.in_(source_media_ids)
-                )
-            ).all()
-        )
+        histories: list[UserMediaHistory] = []
+        for chunk in sqlite_parameter_chunks(
+            tuple(source_media_ids), parameters_per_row=1
+        ):
+            histories.extend(
+                self._db.scalars(
+                    select(UserMediaHistory).where(
+                        UserMediaHistory.media_version_id.in_(chunk)
+                    )
+                ).all()
+            )
         history_groups: dict[tuple[str, str], list[UserMediaHistory]] = defaultdict(
             list
         )
@@ -381,121 +421,190 @@ class SqlAlchemyWorkMergeGateway:
             history_groups[
                 (history.user_id, media_by_id[history.media_version_id].media_kind)
             ].append(history)
+        history_loser_ids: list[str] = []
+        history_winner_rows: list[dict[str, object]] = []
         for (_user_id, kind), candidates in history_groups.items():
             winner = max(candidates, key=lambda row: (row.updated_at, row.id))
-            for history in candidates:
-                if history is not winner:
-                    self._db.delete(history)
-            self._db.flush()
-            winner.media_version_id = new_media[kind].id
+            history_loser_ids.extend(
+                history.id for history in candidates if history is not winner
+            )
+            history_winner_rows.append(
+                {"id": winner.id, "media_version_id": new_media_ids[kind]}
+            )
 
-        shelf_ids = set(
-            self._db.scalars(
-                select(ShelfWork.shelf_id).where(
-                    ShelfWork.work_id.in_(command.work_ids)
+        shelf_ids = tuple(
+            set(
+                self._db.scalars(
+                    select(ShelfWork.shelf_id).where(
+                        ShelfWork.work_id.in_(command.work_ids)
+                    )
                 )
             )
         )
-        self._db.execute(
-            delete(ShelfWork).where(ShelfWork.work_id.in_(command.work_ids))
+        preference_statements = (
+            *self._prepare_merge_preferences(
+                WorkDetailPreference, command.work_ids, new_work_id
+            ),
+            *self._prepare_merge_preferences(
+                ReaderBookPreference, command.work_ids, new_work_id
+            ),
+            *self._prepare_merge_progress_cursors(command.work_ids, new_work_id),
         )
-        for shelf_id in shelf_ids:
-            self._db.add(
-                ShelfWork(shelf_id=shelf_id, work_id=new_work.id, created_at=now)
-            )
 
-        self._merge_preferences(WorkDetailPreference, command.work_ids, new_work.id)
-        self._merge_preferences(ReaderBookPreference, command.work_ids, new_work.id)
-        self._merge_progress_cursors(command.work_ids, new_work.id)
-
-        self._db.execute(
-            update(ImportTask)
-            .where(ImportTask.work_id.in_(command.work_ids))
-            .values(work_id=new_work.id)
-        )
-        self._db.execute(
-            update(KindleSendTask)
-            .where(KindleSendTask.work_id.in_(command.work_ids))
-            .values(work_id=new_work.id)
-        )
-        lookup_rows = list(
-            self._db.scalars(
+        lookup_rows = tuple(
+            {
+                "id": row.id,
+                "work_id": new_work_id,
+                "media_version_id": (
+                    new_media_ids[media_by_id[row.media_version_id].media_kind]
+                    if row.media_version_id in media_by_id
+                    else row.media_version_id
+                ),
+            }
+            for row in self._db.scalars(
                 select(MetadataLookupTask).where(
                     MetadataLookupTask.work_id.in_(command.work_ids)
                 )
             ).all()
         )
-        for row in lookup_rows:
-            row.work_id = new_work.id
-            if row.media_version_id in media_by_id:
-                row.media_version_id = new_media[
-                    media_by_id[row.media_version_id].media_kind
-                ].id
-        writeback_rows = list(
-            self._db.scalars(
+        writeback_rows = tuple(
+            {
+                "id": row.id,
+                "work_id": new_work_id,
+                "media_version_id": (
+                    new_media_ids[media_by_id[row.media_version_id].media_kind]
+                    if row.media_version_id in media_by_id
+                    else row.media_version_id
+                ),
+            }
+            for row in self._db.scalars(
                 select(MetadataWritebackOperation).where(
                     MetadataWritebackOperation.work_id.in_(command.work_ids)
                 )
             ).all()
         )
-        for row in writeback_rows:
-            row.work_id = new_work.id
-            if row.media_version_id in media_by_id:
-                row.media_version_id = new_media[
-                    media_by_id[row.media_version_id].media_kind
-                ].id
+        facet_write = prepare_work_facet_write(
+            (
+                prepare_work_facet(
+                    WorkFacetProjection(
+                        work_id=new_work_id,
+                        author=author,
+                        tags_source=tags_source,
+                        series_name=command.metadata.series_name,
+                    )
+                ),
+            ),
+            now=now,
+        )
+        operation_id = f"op_{time_ns()}"
+        operation_view = {
+            "id": operation_id,
+            "action": "CREATE_MERGED_WORK",
+            "status": "FINALIZED",
+            "summary": f"已将 {len(works)} 本图书合并为《{command.metadata.title}》",
+            "targetType": "work",
+            "targetId": new_work_id,
+            "expiresAt": None,
+            "undoneAt": None,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        operation_row = {
+            "id": operation_id,
+            "user_id": command.actor_id,
+            "action": operation_view["action"],
+            "status": operation_view["status"],
+            "target_type": "work",
+            "target_id": new_work_id,
+            "summary": operation_view["summary"],
+            "payload_json": json.dumps(
+                {
+                    "workId": new_work_id,
+                    "sourceWorkIds": list(command.work_ids),
+                },
+                ensure_ascii=False,
+            ),
+            "inverse_json": "{}",
+            "expires_at": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+        # Provider settings are read before the first DML. The current metadata
+        # queue uses explicit post-commit preparations, so this merge returns no
+        # synchronous writeback operation rows.
+        self._writeback.enabled()
 
-        self._db.flush()
-        self._db.execute(
-            delete(LibraryMediaVersion).where(
-                LibraryMediaVersion.id.in_(source_media_ids)
+        history_delete_statements = tuple(
+            delete(UserMediaHistory).where(UserMediaHistory.id.in_(chunk))
+            for chunk in sqlite_parameter_chunks(
+                tuple(history_loser_ids), parameters_per_row=1
             )
         )
-        self._db.execute(
-            delete(LibraryWork).where(LibraryWork.id.in_(command.work_ids))
+        shelf_rows = tuple(
+            {"shelf_id": shelf_id, "work_id": new_work_id, "created_at": now}
+            for shelf_id in shelf_ids
         )
-        sync_work_facets(self._db, new_work.id)
-
-        writeback_enabled = self._writeback.enabled()
-        writebacks: list[dict[str, object]] = []
-        if writeback_enabled:
-            for kind in ("EBOOK", "COMIC", "AUDIOBOOK"):
-                target_media = new_media.get(kind)
-                if target_media is None:
-                    continue
-                view = self._writeback.enqueue(
-                    work_id=new_work.id,
-                    media_version_id=target_media.id,
-                )
-                if view is not None:
-                    writebacks.append(view)
-
-        operation = operations.create_operation(
-            self._db,
-            user_id=command.actor_id,
-            action="CREATE_MERGED_WORK",
-            target_type="work",
-            target_id=new_work.id,
-            summary=f"已将 {len(works)} 本图书合并为《{new_work.title}》",
-            payload={"workId": new_work.id, "sourceWorkIds": list(command.work_ids)},
-            inverse={},
-            now=now,
-            undoable=False,
+        shelf_insert_statements = tuple(
+            insert(ShelfWork).values(list(chunk))
+            for chunk in sqlite_parameter_chunks(shelf_rows, parameters_per_row=3)
         )
-        return MergeResult(
-            work_id=new_work.id,
+        source_media_delete_statements = tuple(
+            delete(LibraryMediaVersion).where(LibraryMediaVersion.id.in_(chunk))
+            for chunk in sqlite_parameter_chunks(
+                tuple(source_media_ids), parameters_per_row=1
+            )
+        )
+        result = MergeResult(
+            work_id=new_work_id,
             source_work_ids=command.work_ids,
             media_versions=tuple(
                 {
-                    "id": media.id,
+                    "id": new_media_ids[kind],
                     "mediaKind": kind,
                     "volumeCount": kind_positions[kind],
                 }
-                for kind, media in sorted(
-                    new_media.items(),
-                    key=lambda item: MEDIA_KIND_ORDER.get(item[0], 99),
-                )
+                for kind in media_kinds
             ),
-            metadata_writebacks=tuple(writebacks),
-            operation=self._operation_view(operation),
+            metadata_writebacks=(),
+            operation=self._operation_view(operation_view),
         )
+
+        self._db.execute(insert(LibraryWork), [work_row])
+        self._db.execute(insert(LibraryMediaVersion), list(media_rows))
+        self._db.execute(update(LibraryVolume), volume_update_rows)
+        for statement in history_delete_statements:
+            self._db.execute(statement)
+        if history_winner_rows:
+            self._db.execute(update(UserMediaHistory), history_winner_rows)
+
+        self._db.execute(
+            delete(ShelfWork).where(ShelfWork.work_id.in_(command.work_ids))
+        )
+        for statement in shelf_insert_statements:
+            self._db.execute(statement)
+
+        for statement in preference_statements:
+            self._db.execute(statement)
+
+        self._db.execute(
+            update(ImportTask)
+            .where(ImportTask.work_id.in_(command.work_ids))
+            .values(work_id=new_work_id)
+        )
+        self._db.execute(
+            update(KindleSendTask)
+            .where(KindleSendTask.work_id.in_(command.work_ids))
+            .values(work_id=new_work_id)
+        )
+        if lookup_rows:
+            self._db.execute(update(MetadataLookupTask), list(lookup_rows))
+        if writeback_rows:
+            self._db.execute(update(MetadataWritebackOperation), list(writeback_rows))
+        for statement in source_media_delete_statements:
+            self._db.execute(statement)
+        self._db.execute(
+            delete(LibraryWork).where(LibraryWork.id.in_(command.work_ids))
+        )
+        execute_work_facet_write(self._db, facet_write)
+        self._db.execute(insert(LibraryOperation), [operation_row])
+        return result

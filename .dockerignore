@@ -23,6 +23,5 @@ books
 .turbo
 **/.turbo
 .fnos-build
-apps/mobile
 npm-debug.log*
 pnpm-debug.log*

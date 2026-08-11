@@ -6,6 +6,7 @@ import hashlib
 import os
 import shutil
 import tempfile
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from pathlib import Path
 from lxml import etree  # type: ignore[import-untyped]
 
 from app.contracts.publication_metadata import PublicationMetadata
-from app.modules.metadata.public import (
+from app.modules.metadata.application.opf import (
     OPF_NAMESPACE,
     OpfMetadataError,
     cover_media_type,
@@ -33,6 +34,64 @@ class PreparedWriteback:
     output_hash: str
     written_fields: tuple[str, ...]
     warning_code: str | None = None
+
+
+ORPHAN_PREPARED_MAX_AGE_SECONDS = 24 * 60 * 60
+ORPHAN_PREPARED_SCAN_LIMIT = 256
+
+
+def cleanup_orphan_prepared_files(
+    source_directories: tuple[Path, ...],
+    *,
+    protected_paths: frozenset[Path] = frozenset(),
+    now_seconds: float | None = None,
+    max_age_seconds: int = ORPHAN_PREPARED_MAX_AGE_SECONDS,
+    scan_limit: int = ORPHAN_PREPARED_SCAN_LIMIT,
+) -> int:
+    """Remove bounded, stale OPF preparation files from known source directories."""
+
+    cutoff = (time.time() if now_seconds is None else now_seconds) - max_age_seconds
+    protected = frozenset(path.resolve() for path in protected_paths)
+    scanned = 0
+    removed = 0
+    for directory in dict.fromkeys(source_directories):
+        if scanned >= scan_limit:
+            break
+        if directory.is_symlink():
+            continue
+        try:
+            resolved_directory = directory.resolve()
+        except OSError:
+            continue
+        if not resolved_directory.is_dir():
+            continue
+        try:
+            candidates = resolved_directory.glob(".*.shuku-*.part")
+            for candidate in candidates:
+                if scanned >= scan_limit:
+                    break
+                scanned += 1
+                try:
+                    resolved_candidate = candidate.resolve()
+                    resolved_candidate.relative_to(resolved_directory)
+                    stat = candidate.lstat()
+                except (OSError, ValueError):
+                    continue
+                if (
+                    resolved_candidate in protected
+                    or candidate.is_symlink()
+                    or not candidate.is_file()
+                    or stat.st_mtime > cutoff
+                ):
+                    continue
+                try:
+                    candidate.unlink()
+                except OSError:
+                    continue
+                removed += 1
+        except OSError:
+            continue
+    return removed
 
 
 def _publication(
@@ -61,9 +120,7 @@ def _publication(
         authors=tuple(str(item).strip() for item in authors if str(item).strip())
         if isinstance(authors, list)
         else (),
-        narrators=tuple(
-            str(item).strip() for item in narrators if str(item).strip()
-        )
+        narrators=tuple(str(item).strip() for item in narrators if str(item).strip())
         if isinstance(narrators, list)
         else (),
         abridged=abridged,

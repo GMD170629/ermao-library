@@ -8,6 +8,38 @@ from pydantic import Field
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 
 
+class SmtpSettingsRequest(HttpContractModel):
+    host: str | None = None
+    port: int | str | None = None
+    security: str | None = None
+    username: str | None = None
+    password: str | None = None
+    from_email: str | None = Field(default=None, alias="fromEmail")
+    from_name: str | None = Field(default=None, alias="fromName")
+    max_attachment_mb: float | int | str | None = Field(
+        default=None, alias="maxAttachmentMb"
+    )
+
+
+class KindleAddressRequest(HttpContractModel):
+    email: str | None = None
+
+
+class UpdateEmailSettingsRequest(HttpContractModel):
+    smtp: SmtpSettingsRequest | None = None
+    kindle: KindleAddressRequest | None = None
+    clear_smtp_password: bool = Field(default=False, alias="clearSmtpPassword")
+
+
+class UpdateKindleSettingsRequest(HttpContractModel):
+    email: str | None = None
+
+
+class CreateKindleTaskRequest(HttpContractModel):
+    file_id: str | None = Field(default=None, alias="fileId")
+    work_id: str | None = Field(default=None, alias="workId")
+
+
 class SmtpSettings(HttpContractModel):
     host: str
     port: int

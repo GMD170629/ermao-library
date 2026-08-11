@@ -106,6 +106,14 @@ class VolumeStructurePort(Protocol):
         self, *, actor: LibraryActor, work_id: str, volume_id: str
     ) -> VolumeContext | None: ...
 
+    def get_volume_contexts(
+        self,
+        *,
+        actor: LibraryActor,
+        work_id: str,
+        volume_ids: tuple[str, ...],
+    ) -> tuple[VolumeContext, ...]: ...
+
     def update_volume(
         self, *, volume_id: str, changes: dict[str, object], now: datetime
     ) -> None: ...
@@ -163,6 +171,16 @@ class VolumeStructurePort(Protocol):
         now: datetime,
     ) -> VolumeReclassifyOutcome: ...
 
+    def apply_batch(
+        self,
+        *,
+        actor_id: str,
+        source_work_id: str,
+        contexts: tuple[VolumeContext, ...],
+        command: BatchVolumeCommand,
+        now: datetime,
+    ) -> BatchVolumeOutcome: ...
+
 
 class UnitOfWork(Protocol):
     def commit(self) -> None: ...
@@ -203,10 +221,15 @@ def batch_volume_resources(
     if len(set(command.volume_ids)) != len(command.volume_ids):
         raise InvalidVolumeChangeError("DUPLICATE_VOLUME_IDS")
 
-    contexts = [
-        _require_volume(port, actor=actor, work_id=work_id, volume_id=volume_id)
-        for volume_id in command.volume_ids
-    ]
+    contexts = list(
+        port.get_volume_contexts(
+            actor=actor,
+            work_id=work_id,
+            volume_ids=command.volume_ids,
+        )
+    )
+    if {context.id for context in contexts} != set(command.volume_ids):
+        raise VolumeNotFoundError
     contexts.sort(
         key=lambda value: (value.media_version_id, value.sort_order, value.id)
     )
@@ -224,54 +247,13 @@ def batch_volume_resources(
             raise InvalidVolumeChangeError("INVALID_TARGET_WORK")
         _require_work_access(port, actor=actor, work_id=target_work_id)
 
-    target_work_ids: list[str] = []
-    operation_ids: list[str] = []
-    deleted_work = False
     try:
-        for context in contexts:
-            if command.action == "SET_MEDIA_KIND":
-                outcome = port.reclassify_volume(
-                    actor_id=actor.user_id,
-                    work_id=work_id,
-                    volume_id=context.id,
-                    target_media_kind=target_media_kind,
-                    apply_to="VOLUME",
-                    now=now,
-                )
-                operation_ids.append(outcome.operation.id)
-            elif command.action == "SPLIT":
-                outcome = port.split_volume(
-                    actor_id=actor.user_id,
-                    source_work_id=work_id,
-                    volume_id=context.id,
-                    new_work=NewWorkInput(
-                        title=f"{context.work_title}（{context.title}）",
-                        author=context.author,
-                    ),
-                    now=now,
-                )
-                target_work_ids.append(outcome.target_work_id)
-                operation_ids.append(outcome.operation.id)
-            elif command.action == "TRANSFER":
-                outcome = port.move_volume(
-                    actor_id=actor.user_id,
-                    source_work_id=work_id,
-                    volume_id=context.id,
-                    target_work_id=target_work_id,
-                    now=now,
-                )
-                operation_ids.append(outcome.operation.id)
-            else:
-                outcome = port.delete_volume(
-                    actor_id=actor.user_id,
-                    work_id=work_id,
-                    volume_id=context.id,
-                    now=now,
-                )
-                deleted_work = deleted_work or outcome.deleted_work
-                operation_ids.append(outcome.operation.id)
-        deleted_work = deleted_work or not port.can_access_work(
-            actor=actor, work_id=work_id
+        outcome = port.apply_batch(
+            actor_id=actor.user_id,
+            source_work_id=work_id,
+            contexts=tuple(contexts),
+            command=command,
+            now=now,
         )
         unit_of_work.commit()
     except ValueError as exc:
@@ -281,15 +263,7 @@ def batch_volume_resources(
         unit_of_work.rollback()
         raise
 
-    if command.action == "TRANSFER":
-        target_work_ids.append(target_work_id)
-    return BatchVolumeOutcome(
-        work_id=work_id,
-        affected_volume_ids=tuple(context.id for context in contexts),
-        target_work_ids=tuple(target_work_ids),
-        operation_ids=tuple(operation_ids),
-        deleted_work=deleted_work,
-    )
+    return outcome
 
 
 def reclassify_volume_resource(

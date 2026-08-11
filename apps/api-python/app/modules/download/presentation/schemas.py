@@ -34,6 +34,32 @@ class DownloadReference(DownloadReferenceDetails):
     )
 
 
+class CreateDownloadTaskRequest(HttpContractModel):
+    source_id: str | None = Field(default=None, alias="sourceId")
+    search_record_id: str | None = Field(default=None, alias="searchRecordId")
+    book_id: str | None = Field(default=None, alias="bookId")
+    type: str = "manual"
+    status: str = "queued"
+    display_name: str | None = Field(default=None, alias="displayName")
+    name: str | None = None
+    remote_ref: DownloadReference | str | None = Field(default=None, alias="remoteRef")
+    target_path: str | None = Field(default=None, alias="targetPath")
+    file_path: str | None = Field(default=None, alias="filePath")
+    error_message: str | None = Field(default=None, alias="errorMessage")
+    progress: float | int | None = None
+
+
+class UpdateDownloadTaskRequest(HttpContractModel):
+    type: str | None = None
+    status: str | None = None
+    display_name: str | None = Field(default=None, alias="displayName")
+    save_path: str | None = Field(default=None, alias="savePath")
+    file_path: str | None = Field(default=None, alias="filePath")
+    error_message: str | None = Field(default=None, alias="errorMessage")
+    progress: float | int | None = None
+    remote_ref: DownloadReference | str | None = Field(default=None, alias="remoteRef")
+
+
 class DownloadTask(HttpContractModel):
     id: str
     source_id: str | None = Field(default=None, alias="sourceId")

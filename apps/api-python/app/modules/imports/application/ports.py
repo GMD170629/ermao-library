@@ -165,6 +165,14 @@ class LibraryImportStore(Protocol):
         self, task_id: str, *, columns: dict[str, object]
     ) -> None: ...
 
+    def apply_import_completion(
+        self,
+        *,
+        task_updates: tuple[tuple[str, Mapping[str, object]], ...],
+        volume_updates: tuple[tuple[str, Mapping[str, object]], ...],
+        media_versions_to_prune: tuple[str, ...],
+    ) -> None: ...
+
     def insert_import_asset(
         self, *, columns: dict[str, object]
     ) -> dict[str, object]: ...

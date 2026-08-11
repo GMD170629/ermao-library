@@ -7,6 +7,7 @@ import logging
 import re
 from pathlib import Path
 
+from app.contracts.comic_page_index import CURRENT_COMIC_PAGE_INDEX_VERSION
 from app.contracts.publication_metadata import PublicationMetadata
 from app.contracts.publication_titles import titles_from_local_source
 from app.modules.imports.application.comic_types import ComicArchiveInspection
@@ -52,6 +53,47 @@ from app.modules.imports.domain.content_classification import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _store_comic_page_index(
+    store: LibraryImportStore,
+    parsed: ComicArchiveInspection,
+    *,
+    volume_id: str,
+    file_id: str,
+    volume_index: float | None,
+    source_file_name: str,
+) -> None:
+    """Stage all page rows before the import checkpoint opens its write UoW."""
+
+    indexed_at = _now()
+    for page in parsed["pages"]:
+        store.insert_library_reading_unit(
+            columns={
+                "id": _id(),
+                "volumeId": volume_id,
+                "fileId": file_id,
+                "unitType": "page",
+                "title": page["title"],
+                "href": page["entryPath"],
+                "mediaType": page["mediaType"],
+                "sortOrder": page["index"],
+                "size": page["size"],
+                "metadataJson": json.dumps(
+                    {
+                        "zipEntryName": page["entryPath"],
+                        "originalName": Path(page["entryPath"]).name,
+                        "pageInVolume": page["index"],
+                        "pageInSection": page["index"],
+                        "volumeIndex": volume_index,
+                        "sourceFileName": source_file_name,
+                    },
+                    ensure_ascii=False,
+                ),
+                "createdAt": indexed_at,
+                "updatedAt": indexed_at,
+            }
+        )
 
 
 def _import_comic(
@@ -207,7 +249,7 @@ def _import_comic(
             }
         )
         store.update_import_task(task_id, columns={"message": "正在建立漫画记录"})
-        store.insert_library_file(
+        comic_file = store.insert_library_file(
             columns={
                 "id": _id(),
                 "volumeId": volume["id"],
@@ -218,10 +260,19 @@ def _import_comic(
                 "mimeType": _comic_archive_media_type(parsed["format"]),
                 "sizeBytes": file_size,
                 "mtimeMs": int(source_stat.st_mtime * 1000),
+                "pageIndexVersion": CURRENT_COMIC_PAGE_INDEX_VERSION,
                 "sortOrder": sort_order,
                 "createdAt": _now(),
                 "updatedAt": _now(),
             }
+        )
+        _store_comic_page_index(
+            store,
+            parsed,
+            volume_id=str(volume["id"]),
+            file_id=str(comic_file["id"]),
+            volume_index=volume_index,
+            source_file_name=options.original_name or source_path.name,
         )
         try:
             release_import_transaction(unit_of_work)
@@ -284,6 +335,7 @@ def _import_comic(
                 "updatedAt": _now(),
             },
         )
+        release_import_transaction(unit_of_work)
         _finalize_work_cover(
             store,
             queries,
@@ -293,6 +345,7 @@ def _import_comic(
             media_version_cover_path,
             _prepared_default_cover(options),
         )
+        release_import_transaction(unit_of_work)
         return ImportResult(
             work["id"],
             work["id"],

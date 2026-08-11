@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 DEFAULT_MAX_EVENT_BYTES = 5 * 1024 * 1024
@@ -12,8 +14,25 @@ MAX_EVENT_MESSAGE_CHARS = 4000
 MAX_EVENT_METADATA_CHARS = 64 * 1024
 LOG_MAX_BYTES_SETTING = "system.logs.maxBytes"
 LAST_PRUNED_AT_SETTING = "events.lastPrunedAt"
-PROTECTED_ERROR_ACTIONS = frozenset({"deleted", "restored", "settings.updated", "backup.restored"})
+PROTECTED_ERROR_ACTIONS = frozenset(
+    {"deleted", "restored", "settings.updated", "backup.restored"}
+)
 PRUNE_LEVEL_ORDER = ("info", "warning", "warn", "error")
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedSystemEvent:
+    id: str
+    level: str
+    source: str
+    actor_type: str
+    actor_id: str | None
+    action: str
+    target_type: str | None
+    target_id: str | None
+    message: str
+    metadata: dict[str, Any]
+    created_at: datetime
 
 
 def clamp_max_event_bytes(value: object) -> int:

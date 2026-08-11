@@ -124,8 +124,6 @@ function packageVersionFromUvLock(contents) {
 export async function readApplicationVersions(repositoryRoot) {
   const rootPackage = JSON.parse(await readFile(path.join(repositoryRoot, 'package.json'), 'utf8'));
   const webPackage = JSON.parse(await readFile(path.join(repositoryRoot, 'apps/web/package.json'), 'utf8'));
-  const mobilePackage = JSON.parse(await readFile(path.join(repositoryRoot, 'apps/mobile/package.json'), 'utf8'));
-  const mobileApp = JSON.parse(await readFile(path.join(repositoryRoot, 'apps/mobile/app.json'), 'utf8'));
   const pyproject = await readFile(path.join(repositoryRoot, 'apps/api-python/pyproject.toml'), 'utf8');
   const runtimeConfig = await readFile(path.join(repositoryRoot, 'apps/api-python/app/core/config.py'), 'utf8');
   const serviceWorker = await readFile(path.join(repositoryRoot, 'apps/web/public/sw.js'), 'utf8');
@@ -133,8 +131,6 @@ export async function readApplicationVersions(repositoryRoot) {
   return {
     root: rootPackage.version,
     web: webPackage.version,
-    mobile: mobilePackage.version,
-    mobileRuntime: mobileApp.expo?.version ?? null,
     python: /^version = "([^"]+)"$/mu.exec(pyproject)?.[1] ?? null,
     runtime: /^\s*app_version: str = "([^"]+)"$/mu.exec(runtimeConfig)?.[1] ?? null,
     serviceWorker: /^const FRONTEND_RESOURCE_VERSION = '([^']+)';\r?$/mu.exec(serviceWorker)?.[1] ?? null,
@@ -194,8 +190,6 @@ export async function validateReleaseNotesRepository({
         `release-notes/v${versions.root}.md`,
         'apps/web/package.json',
         'apps/web/public/sw.js',
-        'apps/mobile/package.json',
-        'apps/mobile/app.json',
         'apps/api-python/pyproject.toml',
         'apps/api-python/app/core/config.py',
         'apps/api-python/uv.lock'

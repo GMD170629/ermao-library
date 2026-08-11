@@ -4,7 +4,7 @@ import mimetypes
 import smtplib
 import threading
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
 from pathlib import Path
@@ -14,21 +14,24 @@ from uuid import uuid4
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.bootstrap.kindle import (
+    claim_kindle_send_task_command,
+    complete_kindle_send_task_command,
+    fail_kindle_send_task_command,
+    recover_interrupted_kindle_tasks_command,
+    schedule_kindle_retry_command,
+    update_kindle_send_snapshot_command,
+)
+from app.bootstrap.system import prepare_system_event
 from app.core.config import Settings
 from app.core.i18n import configured_locale
 from app.core.safe_errors import mask_email, safe_error_message
 from app.core.time import now_timestamp_ms
 from app.modules.kindle.infrastructure.tasks import (
-    claim_kindle_send_task,
     get_kindle_send_task,
     get_library_file_for_kindle,
     list_sending_kindle_tasks,
-    mark_kindle_task_failed,
-    mark_kindle_task_sent,
-    mark_kindle_task_unknown,
     next_queued_kindle_task,
-    schedule_kindle_retry,
-    update_kindle_send_snapshot,
 )
 from app.services.email_settings import (
     EmailSettingsError,
@@ -37,7 +40,6 @@ from app.services.email_settings import (
     smtp_connection_settings,
 )
 from app.services.queue_runtime import QueueHeartbeatPump
-from app.services.system_events import record_system_event
 
 MAX_SEND_ATTEMPTS = 3
 RETRY_DELAYS_SECONDS = (30, 120)
@@ -84,10 +86,10 @@ def next_queued_task(db: Session) -> dict[str, Any] | None:
 
 
 def _claim_task(db: Session, task_id: str) -> dict[str, Any] | None:
-    now = datetime.now(timezone.utc)
-    claimed = claim_kindle_send_task(db, task_id, now)
-    db.commit()
-    return claimed
+    claimed_at = datetime.now(UTC)
+    return claim_kindle_send_task_command(
+        db, task_id, timestamp=claimed_at
+    )
 
 
 def _file_for_task(db: Session, task: dict[str, Any]) -> dict[str, Any]:
@@ -129,17 +131,15 @@ def _smtp_error(exc: BaseException, config_password: str) -> KindleSendError:
     return KindleSendError(safe, transient=False)
 
 
-def _event(
-    db: Session,
+def _prepared_event(
     task: dict[str, Any],
     *,
     action: str,
     message: str,
     level: str = "info",
     metadata: dict[str, Any] | None = None,
-) -> None:
-    record_system_event(
-        db,
+) -> Any:
+    return prepare_system_event(
         source="kindle",
         action=action,
         message=message,
@@ -156,15 +156,14 @@ def _event(
             "recipientEmail": mask_email(task.get("recipientEmail")),
             **(metadata or {}),
         },
-        commit=True,
     )
 
 
 def _update_send_snapshot(
     db: Session, task_id: str, config: Any, message_id: str
 ) -> dict[str, Any]:
-    now = datetime.now(timezone.utc)
-    task = update_kindle_send_snapshot(
+    now = datetime.now(UTC)
+    task = update_kindle_send_snapshot_command(
         db,
         task_id,
         sender_email=config.from_email,
@@ -173,16 +172,22 @@ def _update_send_snapshot(
         smtp_security=config.security,
         smtp_username=config.username or None,
         message_id=message_id,
-        now=now,
+        timestamp=now,
     )
-    db.commit()
     return task or {"id": task_id}
 
 
 def _send_task(db: Session, settings: Settings, task: dict[str, Any]) -> None:
+    file_id = task.get("fileId")
+    if not file_id:
+        raise KindleSendError("附件记录已不存在")
     values = get_email_settings(db, include_password=True)
+    file_row = get_library_file_for_kindle(db, str(file_id))
+    locale = configured_locale(db)
+    db.close()
+    if not file_row:
+        raise KindleSendError("附件记录已不存在")
     config = smtp_connection_settings(values)
-    file_row = _file_for_task(db, task)
     path = _stored_path(file_row.get("path"), settings)
     if path is None or not path.is_file():
         raise KindleSendError("附件文件已不存在或不在受管理目录中")
@@ -201,7 +206,6 @@ def _send_task(db: Session, settings: Settings, task: dict[str, Any]) -> None:
     message = EmailMessage()
     message_id = make_msgid()
     message["Message-ID"] = message_id
-    locale = configured_locale(db)
     fallback_subject = "Send to Kindle" if locale == "en-US" else "发送到 Kindle"
     message["Subject"] = str(
         task.get("subject") or task.get("bookTitle") or fallback_subject
@@ -250,6 +254,7 @@ def _send_task(db: Session, settings: Settings, task: dict[str, Any]) -> None:
 
 def process_next_kindle_send_task(db: Session, settings: Settings) -> bool:
     queued = next_queued_task(db)
+    db.close()
     if not queued:
         return False
     task = _claim_task(db, str(queued["id"]))
@@ -264,23 +269,13 @@ def process_next_kindle_send_task(db: Session, settings: Settings) -> bool:
             else KindleSendError(safe_error_message(exc))
         )
         attempt_count = int(task.get("attemptCount") or 0)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if error.transient and attempt_count < MAX_SEND_ATTEMPTS:
             delay = RETRY_DELAYS_SECONDS[
                 min(attempt_count - 1, len(RETRY_DELAYS_SECONDS) - 1)
             ]
             retry_at = now + timedelta(seconds=delay)
-            schedule_kindle_retry(
-                db,
-                str(task["id"]),
-                retry_at=retry_at,
-                error_message=str(error),
-                now=now,
-            )
-            db.commit()
-            task = _task(db, str(task["id"])) or task
-            _event(
-                db,
+            prepared_event = _prepared_event(
                 task,
                 action="send.retry_scheduled",
                 level="warning",
@@ -291,28 +286,33 @@ def process_next_kindle_send_task(db: Session, settings: Settings) -> bool:
                     "errorMessage": str(error),
                 },
             )
-        else:
-            mark_kindle_task_failed(
-                db, str(task["id"]), error_message=str(error), now=now
-            )
-            db.commit()
-            task = _task(db, str(task["id"])) or task
-            _event(
+            schedule_kindle_retry_command(
                 db,
+                str(task["id"]),
+                retry_at=retry_at,
+                error_message=str(error),
+                timestamp=now,
+                event=prepared_event,
+            )
+        else:
+            prepared_event = _prepared_event(
                 task,
                 action="send.failed",
                 level="error",
                 message=f"Kindle 发送失败：{task.get('bookTitle')}",
                 metadata={"attemptCount": attempt_count, "errorMessage": str(error)},
             )
+            fail_kindle_send_task_command(
+                db,
+                str(task["id"]),
+                error_message=str(error),
+                timestamp=now,
+                event=prepared_event,
+            )
         return True
 
-    sent_at = datetime.now(timezone.utc)
-    mark_kindle_task_sent(db, str(task["id"]), sent_at)
-    db.commit()
-    task = _task(db, str(task["id"])) or task
-    _event(
-        db,
+    sent_at = datetime.now(UTC)
+    prepared_event = _prepared_event(
         task,
         action="send.succeeded",
         message=f"Kindle 邮件已提交：{task.get('bookTitle')}",
@@ -321,29 +321,34 @@ def process_next_kindle_send_task(db: Session, settings: Settings) -> bool:
             "messageId": task.get("messageId"),
         },
     )
+    complete_kindle_send_task_command(
+        db, str(task["id"]), sent_at=sent_at, event=prepared_event
+    )
     return True
 
 
 def recover_interrupted_tasks(db: Session) -> int:
     rows = list_sending_kindle_tasks(db)
-    now = datetime.now(timezone.utc)
-    for task in rows:
-        mark_kindle_task_unknown(
-            db,
-            str(task["id"]),
-            error_message="服务在发送过程中中断，发送结果未知，请确认后手动重试",
-            now=now,
-        )
-    db.commit()
-    for task in rows:
-        task["status"] = "unknown"
-        _event(
-            db,
-            task,
+    db.close()
+    now = datetime.now(UTC)
+    prepared_events = [
+        _prepared_event(
+            {**task, "status": "unknown"},
             action="send.unknown",
             level="warning",
             message=f"Kindle 发送结果未知：{task.get('bookTitle')}",
         )
+        for task in rows
+    ]
+    task_ids = tuple(str(task["id"]) for task in rows)
+    error_message = "服务在发送过程中中断，发送结果未知，请确认后手动重试"
+    recover_interrupted_kindle_tasks_command(
+        db,
+        task_ids=task_ids,
+        error_message=error_message,
+        timestamp=now,
+        events=tuple(prepared_events),
+    )
     return len(rows)
 
 

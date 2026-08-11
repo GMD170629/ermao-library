@@ -5,15 +5,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import Field
-
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.http_errors import HttpContractError
 from app.modules.auth.presentation.schemas import (
-    AuthUser,
     AuthorizationView,
+    AuthUser,
     UserPreferences,
 )
+from pydantic import Field
 
 
 class AdminUser(AuthUser):
@@ -93,9 +92,7 @@ class UserConflictError(HttpContractError[CodedMessageBody]):
     body_model = CodedMessageBody
 
 
-class UnsupportedPreferenceError(
-    HttpContractError[UnsupportedPreferenceBody]
-):
+class UnsupportedPreferenceError(HttpContractError[UnsupportedPreferenceBody]):
     status_code = 400
     body_model = UnsupportedPreferenceBody
 

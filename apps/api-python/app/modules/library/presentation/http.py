@@ -7,33 +7,37 @@ import json
 import logging
 import re
 import shutil
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from time import time_ns
 from typing import Annotated, Any, Never
 
-from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import Response
 from PIL import Image, ImageOps, UnidentifiedImageError
-from sqlalchemy import delete, inspect, select
+from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_system_manager, require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.imports import import_http_store
 from app.bootstrap.library import (
-    bookshelf_items as get_bookshelf_items,
-)
-from app.bootstrap.library import (
+    PreparedWorkFacetWrite,
+    library_cover_publication,
     library_dashboard,
     library_facet_queries,
     library_groupings,
     library_operation_store,
-    library_projections,
-    library_storage,
     library_works,
+    load_metadata_apply_job_ids,
+    load_work_facet_projections,
+    prepare_work_facet_write,
     volume_structure_commands,
     work_merge_gateway,
+)
+from app.bootstrap.library import (
+    bookshelf_items as get_bookshelf_items,
 )
 from app.bootstrap.library import (
     library_filter_options as search_library_filter_options,
@@ -42,11 +46,20 @@ from app.bootstrap.library import (
     library_filter_schema as get_library_filter_schema,
 )
 from app.bootstrap.library import (
+    library_request_mutations as get_library_request_mutations,
+)
+from app.bootstrap.library import (
     list_works as list_library_works,
 )
 from app.bootstrap.media import media_streaming
+from app.bootstrap.metadata import (
+    load_metadata_writeback_projection,
+)
 from app.bootstrap.shelf import shelf_store
-from app.bootstrap.system import record_system_event, system_event_storage_view
+from app.bootstrap.system import (
+    prepare_system_event,
+    system_event_storage_view,
+)
 from app.contracts.http_errors import AdditionalStatusCodes, ErrorResponses
 from app.contracts.imports import ImportTaskContract
 from app.contracts.retired_resources import RetiredResourceError, retired_resource_error
@@ -59,13 +72,31 @@ from app.core.authorization import (
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
-from app.models.common import cuid
 from app.models.library import (
     LibraryMediaVersion,
-    LibraryReadingProgress,
     LibraryVolume,
 )
 from app.modules.library.application.filter_options import LibraryFilterOptionSource
+from app.modules.library.application.request_mutations import (
+    ApplyWorkMetadata,
+    BulkReadingStatusMutation,
+    BulkShelfMembershipMutation,
+    BulkWorkMutation,
+    CompensateCoverPublication,
+    CoverMutation,
+    CoverPublicationFailure,
+    CoverRecordMutation,
+    DetailPreferenceMutation,
+    LibraryRequestMutationGateway,
+    MetadataApplyMutation,
+    SaveDetailPreference,
+    UpdateBulkReadingStatus,
+    UpdateBulkShelfMembership,
+    UpdateBulkWorks,
+    UpdateCoverRecords,
+    UpdateWorkRecord,
+    WorkRecordMutation,
+)
 from app.modules.library.application.volume_commands import (
     BatchVolumeCommand,
     InvalidVolumeChangeError,
@@ -104,7 +135,10 @@ from app.modules.library.presentation.schemas import (
     BatchTransferVolumesRequest,
     BatchVolumeMutationResponse,
     BatchVolumeRequest,
+    BulkCoverRequest,
+    BulkFindReplaceRequest,
     BulkMutationResponse,
+    BulkWorkRequest,
     CategoriesResponse,
     ContinueReadingResponse,
     ConversionResponse,
@@ -129,20 +163,26 @@ from app.modules.library.presentation.schemas import (
     LibraryUnprocessableError,
     ManagementFoldersResponse,
     ManagementOverviewResponse,
+    MergeCategoriesRequest,
     MergeCategoriesResponse,
+    MergeDuplicatesRequest,
     MergeDuplicatesResponse,
     MetadataApplyRequest,
     MetadataApplyResponse,
+    MetadataSearchRequest,
     MetadataSearchResponse,
     MoveVolumeRequest,
     OperationsResponse,
     ReclassifyVolumeRequest,
+    RenameCategoryRequest,
     RenameCategoryResponse,
     ReorderVolumeRequest,
+    SaveDetailPreferenceRequest,
     SeriesResponse,
     SplitVolumeRequest,
     UndoOperationResponse,
     UpdateVolumeRequest,
+    UpdateWorkRequest,
     WorkDetailResponse,
     WorkDetailSummaryResponse,
     WorkMergePreviewResponse,
@@ -157,10 +197,8 @@ from app.modules.library.presentation.schemas import (
 )
 from app.modules.library.presentation.views import (
     _active_media_view,
-    _apply_remote_cover,
     _coerce_int,
     _cover_url,
-    _finish_metadata_organize_work,
     _get_work,
     _management_work_views,
     _metadata_context_for_work,
@@ -178,14 +216,22 @@ from app.modules.library.presentation.views import (
 )
 from app.modules.library.presentation.work_ops import (
     _delete_work_and_storage,
+    _delete_works_and_storage,
     _path_tree,
     _source_folder_preview,
 )
 from app.modules.library.public import (
     InvalidFilterExpression,
+    WorkFacetProjection,
     WorkListQuery,
     parse_filter_expression,
     parse_media_kinds,
+    prepare_work_facet,
+)
+from app.modules.metadata.public import (
+    MetadataWritebackProjection,
+    PreparedWritebackIntent,
+    prepare_metadata_writeback_intents,
 )
 from app.modules.system.presentation.mappers import (
     serialize_system_event as _serialize_system_event,
@@ -210,12 +256,10 @@ from app.services.library_management import (
     merge_works,
     operation_view,
     rename_category,
-    sync_work_facets,
     undo_operation,
 )
 from app.services.metadata_file_writeback import (
     metadata_writeback_view,
-    schedule_work_metadata_writebacks,
 )
 from app.services.metadata_provider_registry import (
     metadata_provider_registry,
@@ -223,6 +267,10 @@ from app.services.metadata_provider_registry import (
 )
 
 router = APIRouter(tags=["library"], route_class=TypedContractRoute)
+
+
+def _request_mutations(db: Session) -> LibraryRequestMutationGateway:
+    return get_library_request_mutations(db)
 
 
 def _library_actor(db: Session, user: User) -> LibraryActor:
@@ -287,32 +335,104 @@ def _system_auth(db: Session, request: Request, settings: Settings):
     return require_system_manager(db, request, settings)
 
 
-def _record_system_event(
+def _updated_metadata_projection(
+    projection: MetadataWritebackProjection,
+    values: dict[str, Any],
+) -> MetadataWritebackProjection:
+    changes: dict[str, Any] = {}
+    for source_name, projection_name in (
+        ("title", "title"),
+        ("author", "author"),
+        ("description", "description"),
+        ("tags", "tags_json"),
+        ("seriesName", "series_name"),
+        ("seriesIndex", "series_index"),
+        ("coverPath", "cover_path"),
+        ("updatedAt", "source_revision"),
+    ):
+        if source_name in values:
+            changes[projection_name] = values[source_name]
+    return replace(projection, **changes) if changes else projection
+
+
+def _prepare_work_writebacks(
     db: Session,
     *,
-    level: str = "info",
+    work_id: str,
     source: str,
-    action: str,
-    message: str,
-    actor_type: str = "system",
-    actor_id: str | None = None,
-    target_type: str | None = None,
-    target_id: str | None = None,
-    metadata: dict[str, Any] | None = None,
-) -> None:
-    record_system_event(
+    values: dict[str, Any] | None = None,
+    media_version_id: str | None = None,
+    volume_id: str | None = None,
+    volume_values_by_id: dict[str, dict[str, Any]] | None = None,
+) -> tuple[PreparedWritebackIntent, ...]:
+    projection = load_metadata_writeback_projection(
         db,
-        level=level,
-        source=source,
-        actor_type=actor_type,
-        actor_id=actor_id,
-        action=action,
-        target_type=target_type,
-        target_id=target_id,
-        message=message,
-        metadata=metadata,
-        commit=True,
+        work_id=work_id,
+        media_version_id=media_version_id,
+        volume_id=volume_id,
     )
+    projection = _updated_metadata_projection(projection, values or {})
+    if volume_values_by_id:
+        projection = replace(
+            projection,
+            volumes=tuple(
+                replace(volume, **volume_values_by_id.get(volume.id, {}))
+                for volume in projection.volumes
+            ),
+        )
+    return prepare_metadata_writeback_intents(
+        projection,
+        source=source,
+        volume_id=volume_id,
+    )
+
+
+def _prepare_facet_write_for_updates(
+    db: Session,
+    updates: tuple[tuple[str, dict[str, Any]], ...],
+    *,
+    now: datetime,
+) -> PreparedWorkFacetWrite:
+    """Load once, then finish all facet parsing before the first write."""
+
+    projections = {
+        projection.work_id: projection
+        for projection in load_work_facet_projections(
+            db, tuple(work_id for work_id, _values in updates)
+        )
+    }
+    prepared = []
+    for work_id, values in updates:
+        projection = projections.get(work_id)
+        if projection is None:
+            continue
+        prepared.append(
+            prepare_work_facet(
+                WorkFacetProjection(
+                    work_id=work_id,
+                    author=(
+                        str(values["author"])
+                        if values.get("author") is not None
+                        else None
+                    )
+                    if "author" in values
+                    else projection.author,
+                    tags_source=(
+                        str(values.get("tags") or "[]")
+                        if "tags" in values
+                        else projection.tags_source
+                    ),
+                    series_name=(
+                        str(values["seriesName"])
+                        if values.get("seriesName") is not None
+                        else None
+                    )
+                    if "seriesName" in values
+                    else projection.series_name,
+                )
+            )
+        )
+    return prepare_work_facet_write(tuple(prepared), now=now)
 
 
 def _has_table(db: Session, table: str) -> bool:
@@ -1059,6 +1179,7 @@ def get_work_volume_reading_units(
 @router.put("/works/{work_id}/detail-preference")
 async def save_work_detail_preference(
     work_id: str,
+    payload: SaveDetailPreferenceRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -1077,8 +1198,7 @@ async def save_work_detail_preference(
     work = _visible_work_or_none(db, user, work_id)
     if not work:
         _raise_library_error("作品不存在", status_code=404)
-    payload = await request.json()
-    requested = str(payload.get("selectedTab") or "").strip().upper()
+    requested = payload.selected_tab.strip().upper()
     book = _work_view(db, work, user.id)
     tabs = book.get("detailTabs", [])
     visible = {str(item.get("key")) for item in tabs}
@@ -1089,14 +1209,14 @@ async def save_work_detail_preference(
     now = _now()
     if not _has_table(db, "WorkDetailPreference"):
         _raise_library_error("详情偏好表尚未初始化", status_code=503)
-    library_projections.save_detail_preference(
-        db,
-        user_id=user.id,
-        work_id=work_id,
-        selected_tab=requested,
-        now=now,
+    SaveDetailPreference(_request_mutations(db), db).execute(
+        DetailPreferenceMutation(
+            user_id=user.id,
+            work_id=work_id,
+            selected_tab=requested,
+            now=now,
+        )
     )
-    db.commit()
     return DetailPreferenceResponse(
         data={"selectedDetailTab": requested, "detailTabs": tabs}
     )
@@ -1105,6 +1225,7 @@ async def save_work_detail_preference(
 @router.patch("/works/{work_id}")
 async def update_work(
     work_id: str,
+    request_payload: UpdateWorkRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -1121,7 +1242,7 @@ async def update_work(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    payload = await request.json()
+    payload = request_payload.model_dump(by_alias=True, exclude_unset=True)
     existing_work = _visible_work_or_none(db, user, work_id)
     if not existing_work:
         _raise_library_error("作品不存在", status_code=404)
@@ -1176,19 +1297,30 @@ async def update_work(
             }
         )
     if not values:
-        db.commit()
         return WorkResponse(data={"book": _work_view(db, existing_work, user.id)})
-    work = library_works.update_work_fields(db, work_id, values)
+    writeback_intents = (
+        _prepare_work_writebacks(
+            db,
+            work_id=work_id,
+            source="WORK_METADATA_EDIT",
+            values=values,
+        )
+        if global_fields.intersection(
+            {"title", "author", "description", "tags", "seriesName", "seriesIndex"}
+        )
+        else ()
+    )
+    facet_write = _prepare_facet_write_for_updates(db, ((work_id, values),), now=_now())
+    work = UpdateWorkRecord(_request_mutations(db), db).execute(
+        WorkRecordMutation(
+            work_id=work_id,
+            values=values,
+            facet_write=facet_write,
+            writeback_intents=writeback_intents,
+        )
+    )
     if not work:
         _raise_library_error("作品不存在", status_code=404)
-    sync_work_facets(db, work_id, commit=False)
-    if global_fields.intersection(
-        {"title", "author", "description", "tags", "seriesName", "seriesIndex"}
-    ):
-        schedule_work_metadata_writebacks(
-            db, work_id=work_id, source="WORK_METADATA_EDIT", settings=settings
-        )
-    db.commit()
     work = _get_work(db, work_id) or work
     return WorkResponse(data={"book": _work_view(db, work, user.id)})
 
@@ -1209,28 +1341,27 @@ async def delete_work(
     payload = await _request_json_or_empty(request)
     delete_source = payload.get("deleteSource") is True
     work = _get_work(db, work_id)
-    result = _delete_work_and_storage(
-        db, work_id, settings, delete_source=delete_source
+    deletion_event = prepare_system_event(
+        level="error",
+        source="library",
+        actor_type="admin",
+        actor_id=user.id,
+        action="deleted",
+        target_type="work",
+        target_id=work_id,
+        message=f"删除书库记录：{(work or {}).get('title') or work_id}",
+        metadata={
+            "workTitle": (work or {}).get("title"),
+            "deleteSource": delete_source,
+        },
     )
-    if result.get("deleted"):
-        _record_system_event(
-            db,
-            level="error",
-            source="library",
-            actor_type="admin",
-            actor_id=user.id,
-            action="deleted",
-            target_type="work",
-            target_id=work_id,
-            message=f"删除书库记录：{(work or {}).get('title') or work_id}",
-            metadata={
-                "workTitle": (work or {}).get("title"),
-                "deleteSource": delete_source,
-                "deletedFiles": result.get("deletedFiles"),
-                "deletedSourceFiles": result.get("deletedSourceFiles"),
-                "failedFileDeletes": result.get("failedFileDeletes"),
-            },
-        )
+    result = _delete_work_and_storage(
+        db,
+        work_id,
+        settings,
+        delete_source=delete_source,
+        events=(deletion_event,),
+    )
     return DeletedWorkResponse(data=result)
 
 
@@ -1341,7 +1472,7 @@ def create_work_merge(
         return auth_error
     _require_merge_scope(db, user, payload.work_ids)
     try:
-        result = CreateMergedWork(work_merge_gateway(db)).execute(
+        result = CreateMergedWork(work_merge_gateway(db), db).execute(
             MergeCommand(
                 work_ids=tuple(payload.work_ids),
                 metadata=MergeMetadata(
@@ -1484,8 +1615,12 @@ def _bulk_find_replace_rows(
         return [], str(exc)
     table, column = _BULK_TEXT_FIELDS[field]
     results: list[dict[str, Any]] = []
+    works_by_id = {
+        str(work["id"]): work
+        for work in library_works.list_works_by_ids(db, tuple(work_ids))
+    }
     for index, work_id in enumerate(work_ids):
-        work = _get_work(db, work_id)
+        work = works_by_id.get(work_id)
         if not work:
             continue
         target = work
@@ -1544,79 +1679,9 @@ def _bulk_find_replace_rows(
     return results, None
 
 
-def _apply_bulk_reading_status(
-    db: Session, user: User, work_ids: list[str], status: str
-) -> int:
-    updated = 0
-    for work_id in work_ids:
-        volumes = db.scalars(
-            select(LibraryVolume)
-            .join(
-                LibraryMediaVersion,
-                LibraryMediaVersion.id == LibraryVolume.media_version_id,
-            )
-            .where(
-                LibraryMediaVersion.work_id == work_id,
-                LibraryVolume.hidden.is_(False),
-            )
-            .order_by(LibraryVolume.sort_order.asc(), LibraryVolume.id.asc())
-        ).all()
-        volumes = [
-            volume for volume in volumes if can_access_volume(db, user, volume.id)
-        ]
-        if not volumes:
-            continue
-        if status == "UNREAD":
-            db.execute(
-                delete(LibraryReadingProgress).where(
-                    LibraryReadingProgress.user_id == user.id,
-                    LibraryReadingProgress.volume_id.in_(
-                        [volume.id for volume in volumes]
-                    ),
-                )
-            )
-        else:
-            target_percent = 100.0 if status == "FINISHED" else 0.01
-            now = _now()
-            for volume in volumes:
-                progress = db.scalar(
-                    select(LibraryReadingProgress).where(
-                        LibraryReadingProgress.user_id == user.id,
-                        LibraryReadingProgress.volume_id == volume.id,
-                    )
-                )
-                if progress is None:
-                    db.add(
-                        LibraryReadingProgress(
-                            id=cuid(),
-                            user_id=user.id,
-                            volume_id=volume.id,
-                            reader_type=(
-                                "audio"
-                                if volume.format.upper() in {"M4B", "M4A", "MP3"}
-                                else "comic"
-                                if volume.format.upper() in {"CBR", "CBZ", "RAR", "ZIP"}
-                                else "pdf"
-                                if volume.format.upper() == "PDF"
-                                else "epub"
-                            ),
-                            position="0",
-                            percent=target_percent,
-                            extra="{}",
-                            created_at=now,
-                            updated_at=now,
-                        )
-                    )
-                else:
-                    progress.percent = target_percent
-                    progress.updated_at = now
-        updated += 1
-    db.commit()
-    return updated
-
-
 @router.post("/works/bulk")
 async def bulk_works(
+    request_payload: BulkWorkRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -1627,7 +1692,7 @@ async def bulk_works(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    payload = await request.json()
+    payload = request_payload.model_dump(by_alias=True, exclude_unset=True)
     ids = payload.get("ids") or payload.get("bookIds") or []
     action = payload.get("action")
     updated = 0
@@ -1657,42 +1722,31 @@ async def bulk_works(
         )
     if _has_table(db, "LibraryWork") and ids and action in {"delete", "delete_records"}:
         delete_source = payload.get("deleteSource") is True
-        deleted_files = 0
-        deleted_source_files = 0
-        missing_source_files: list[str] = []
-        failed_file_deletes: list[dict[str, str]] = []
-        for work_id in normalized_scope_ids:
-            result = _delete_work_and_storage(
-                db,
-                work_id,
-                settings,
-                delete_source=delete_source,
-            )
-            if result["deleted"]:
-                updated += 1
-                deleted_files += int(result.get("deletedFiles") or 0)
-                deleted_source_files += int(result.get("deletedSourceFiles") or 0)
-                missing_source_files.extend(result.get("missingSourceFiles") or [])
-                failed_file_deletes.extend(result.get("failedFileDeletes") or [])
-        if updated:
-            _record_system_event(
-                db,
-                level="error",
-                source="library",
-                actor_type="admin",
-                actor_id=user.id,
-                action="bulk.deleted",
-                target_type="work",
-                message=f"批量删除书库记录 {updated} 个",
-                metadata={
-                    "ids": normalized_scope_ids,
-                    "deleteSource": delete_source,
-                    "deletedFiles": deleted_files,
-                    "deletedSourceFiles": deleted_source_files,
-                    "missingSourceFiles": missing_source_files,
-                    "failedFileDeletes": failed_file_deletes,
-                },
-            )
+        deletion_event = prepare_system_event(
+            level="error",
+            source="library",
+            actor_type="admin",
+            actor_id=user.id,
+            action="bulk.deleted",
+            target_type="work",
+            message=f"批量删除书库记录 {len(normalized_scope_ids)} 个",
+            metadata={
+                "ids": normalized_scope_ids,
+                "deleteSource": delete_source,
+            },
+        )
+        deletion_result = _delete_works_and_storage(
+            db,
+            tuple(normalized_scope_ids),
+            settings,
+            delete_source=delete_source,
+            events=(deletion_event,),
+        )
+        updated = int(deletion_result["deletedDatabaseRecords"])
+        deleted_files = int(deletion_result["deletedFiles"])
+        deleted_source_files = int(deletion_result["deletedSourceFiles"])
+        missing_source_files = list(deletion_result["missingSourceFiles"])
+        failed_file_deletes = list(deletion_result["failedFileDeletes"])
         return BulkMutationResponse(
             data={
                 "updated": updated,
@@ -1712,26 +1766,31 @@ async def bulk_works(
     ):
         hidden = action in {"hide", "ignore"}
         organized = action == "mark_organized"
-        for work_id in ids:
-            values = (
+        updates = tuple(
+            (
+                work_id,
                 {"hidden": hidden}
                 if action != "mark_organized"
-                else {"organized": organized}
+                else {"organized": organized},
             )
-            if library_works.update_work_fields(db, str(work_id), values):
-                updated += 1
-        if updated:
-            _record_system_event(
-                db,
-                level="info",
-                source="library",
-                actor_type="admin",
-                actor_id=user.id,
-                action=f"bulk.{action}",
-                target_type="work",
-                message=f"批量更新作品 {updated} 个",
-                metadata={"ids": ids, "action": action},
+            for work_id in normalized_scope_ids
+        )
+        mutation_event = prepare_system_event(
+            level="info",
+            source="library",
+            actor_type="admin",
+            actor_id=user.id,
+            action=f"bulk.{action}",
+            target_type="work",
+            message=f"批量更新作品 {len(updates)} 个",
+            metadata={"ids": ids, "action": action},
+        )
+        updated = UpdateBulkWorks(_request_mutations(db), db).execute(
+            BulkWorkMutation(
+                updates=updates,
+                events=(mutation_event,),
             )
+        )
     elif (
         _has_table(db, "LibraryWork")
         and ids
@@ -1791,6 +1850,48 @@ async def bulk_works(
                 _raise_library_error(replace_error, status_code=400)
             changed_work_ids: set[str] = set()
             now = _now()
+            writeback_values_by_work: dict[str, dict[str, Any]] = {}
+            for replacement in replacements:
+                changed_work_id = str(replacement["workId"])
+                column = str(replacement["column"])
+                if column in {
+                    "title",
+                    "author",
+                    "description",
+                    "tags",
+                    "seriesName",
+                    "seriesIndex",
+                }:
+                    value = (
+                        _json_text(replacement["after"])
+                        if column == "tags"
+                        else replacement["after"] or None
+                    )
+                    writeback_values_by_work.setdefault(changed_work_id, {}).update(
+                        {column: value, "updatedAt": now}
+                    )
+            writeback_intents = tuple(
+                intent
+                for changed_work_id, final_values in writeback_values_by_work.items()
+                for intent in _prepare_work_writebacks(
+                    db,
+                    work_id=changed_work_id,
+                    source="BULK_FIND_REPLACE",
+                    values=final_values,
+                )
+            )
+            facet_write = _prepare_facet_write_for_updates(
+                db,
+                tuple(writeback_values_by_work.items()),
+                now=now,
+            )
+            works_by_id = {
+                str(work["id"]): work
+                for work in library_works.list_works_by_ids(
+                    db, tuple(writeback_values_by_work)
+                )
+            }
+            work_update_rows: list[tuple[str, dict[str, Any]]] = []
             for replacement in replacements:
                 value = (
                     _json_text(replacement["after"])
@@ -1798,7 +1899,7 @@ async def bulk_works(
                     else replacement["after"] or None
                 )
                 if replacement["column"] in {"title", "author"}:
-                    work = _get_work(db, replacement["workId"]) or {}
+                    work = works_by_id.get(str(replacement["workId"]), {})
                     title_value = str(
                         value
                         if replacement["column"] == "title"
@@ -1816,55 +1917,55 @@ async def bulk_works(
                         _raise_library_error(
                             "查找替换后的标题不能为空", status_code=400
                         )
-                    library_works.update_work_fields(
-                        db,
-                        str(replacement["workId"]),
-                        {
-                            "title": title_value,
-                            "author": author_value,
-                            "normalizedTitle": normalize_identity_part(title_value),
-                            "normalizedAuthor": normalize_identity_part(author_value),
-                            "mergeKey": identity_merge_key(title_value, author_value),
-                            "updatedAt": now,
-                        },
+                    work_update_rows.append(
+                        (
+                            str(replacement["workId"]),
+                            {
+                                "title": title_value,
+                                "author": author_value,
+                                "normalizedTitle": normalize_identity_part(title_value),
+                                "normalizedAuthor": normalize_identity_part(
+                                    author_value
+                                ),
+                                "mergeKey": identity_merge_key(
+                                    title_value, author_value
+                                ),
+                                "updatedAt": now,
+                            },
+                        )
                     )
                 else:
                     update_values = {
                         replacement["column"]: value,
                         "updatedAt": now,
                     }
-                    library_works.update_work_fields(
-                        db,
-                        str(replacement["targetId"]),
-                        update_values,
+                    work_update_rows.append(
+                        (str(replacement["targetId"]), update_values)
                     )
                 changed_work_ids.add(str(replacement["workId"]))
-            for work_id in changed_work_ids:
-                sync_work_facets(db, work_id, commit=False)
-                schedule_work_metadata_writebacks(
-                    db,
-                    work_id=work_id,
-                    source="BULK_FIND_REPLACE",
-                    settings=settings,
-                )
-            db.commit()
+            mutation_event = prepare_system_event(
+                level="info",
+                source="library",
+                actor_type="admin",
+                actor_id=user.id,
+                action="bulk.find_replace",
+                target_type="work",
+                message=f"批量查找替换 {len(changed_work_ids)} 本图书",
+                metadata={
+                    "ids": normalized_ids,
+                    "field": payload.get("field"),
+                    "changedValues": len(replacements),
+                },
+            )
             updated = len(changed_work_ids)
-            if updated:
-                _record_system_event(
-                    db,
-                    level="info",
-                    source="library",
-                    actor_type="admin",
-                    actor_id=user.id,
-                    action="bulk.find_replace",
-                    target_type="work",
-                    message=f"批量查找替换 {updated} 本图书",
-                    metadata={
-                        "ids": normalized_ids,
-                        "field": payload.get("field"),
-                        "changedValues": len(replacements),
-                    },
+            UpdateBulkWorks(_request_mutations(db), db).execute(
+                BulkWorkMutation(
+                    updates=tuple(work_update_rows),
+                    facet_write=facet_write,
+                    writeback_intents=writeback_intents,
+                    events=(mutation_event,) if updated else (),
                 )
+            )
             return BulkMutationResponse(
                 data={
                     "updated": updated,
@@ -1873,19 +1974,26 @@ async def bulk_works(
                 }
             )
         if action in {"set_status", "reading_status"}:
-            updated = _apply_bulk_reading_status(db, user, normalized_ids, status)
-            if updated:
-                _record_system_event(
-                    db,
-                    level="info",
-                    source="library",
-                    actor_type="user",
-                    actor_id=user.id,
-                    action=f"bulk.reading_status.{status.lower()}",
-                    target_type="work",
-                    message=f"批量设置阅读状态 {updated} 本图书",
-                    metadata={"ids": normalized_ids, "status": status},
+            selected_count = len(normalized_ids)
+            mutation_event = prepare_system_event(
+                level="info",
+                source="library",
+                actor_type="user",
+                actor_id=user.id,
+                action=f"bulk.reading_status.{status.lower()}",
+                target_type="work",
+                message=f"批量设置阅读状态 {selected_count} 本图书",
+                metadata={"ids": normalized_ids, "status": status},
+            )
+            updated = UpdateBulkReadingStatus(_request_mutations(db), db).execute(
+                BulkReadingStatusMutation(
+                    context=authorization_context(db, user),
+                    work_ids=tuple(normalized_ids),
+                    status=status,
+                    now=_now(),
+                    events=(mutation_event,),
                 )
+            )
             return BulkMutationResponse(
                 data={"updated": updated, "ids": normalized_ids, "status": status}
             )
@@ -1914,10 +2022,18 @@ async def bulk_works(
             for item in payload.get("removeTags") or []
             if str(item).strip()
         ]
+        bulk_now = _now()
+        prepared_updates: list[tuple[str, dict[str, Any]]] = []
+        prepared_writebacks: list[PreparedWritebackIntent] = []
+        works_by_id = {
+            str(work["id"]): work
+            for work in library_works.list_works_by_ids(db, tuple(normalized_ids))
+        }
         for work_id in normalized_ids:
-            work = _get_work(db, work_id)
+            work = works_by_id.get(work_id)
             if not work:
                 continue
+            work_values: dict[str, Any] = {}
             if action in {"add_tags", "remove_tags"}:
                 current_tags = [str(item) for item in _parse_json(work.get("tags"), [])]
                 if action == "add_tags":
@@ -1927,23 +2043,15 @@ async def bulk_works(
                     next_tags = [
                         item for item in current_tags if item.casefold() not in removed
                     ]
-                library_works.update_work_fields(
-                    db,
-                    work_id,
-                    {"tags": _json_text(next_tags), "updatedAt": _now()},
-                )
+                work_values = {
+                    "tags": _json_text(next_tags),
+                    "updatedAt": bulk_now,
+                }
             elif action in {"add_to_shelf", "remove_from_shelf", "shelf_membership"}:
-                if membership == "ADD":
-                    shelf_store.add_shelf_work(
-                        db, shelf_id=shelf_id, work_id=work_id, now=_now()
-                    )
-                else:
-                    shelf_store.remove_shelf_work(
-                        db, shelf_id=shelf_id, work_id=work_id
-                    )
-                db.commit()
+                prepared_updates.append((work_id, {}))
+                continue
             elif action == "update_metadata":
-                work_values: dict[str, Any] = {"updatedAt": _now()}
+                work_values = {"updatedAt": bulk_now}
                 if "author" in metadata_fields:
                     author = (
                         str(metadata_fields.get("author") or "").strip()
@@ -1976,45 +2084,75 @@ async def bulk_works(
                     ]
                 if add_tags or remove_tags:
                     work_values["tags"] = _json_text(current_tags)
-                if len(work_values) > 1:
-                    library_works.update_work_fields(db, work_id, work_values)
             elif fields:
-                library_works.update_work_fields(
-                    db,
-                    work_id,
-                    {**fields, "updatedAt": _now()},
-                )
+                work_values = {**fields, "updatedAt": bulk_now}
+            prepared_updates.append((work_id, work_values))
             if action in {
                 "add_tags",
                 "remove_tags",
                 "update_fields",
                 "update_metadata",
             }:
-                schedule_work_metadata_writebacks(
-                    db,
-                    work_id=work_id,
-                    source="BULK_METADATA_EDIT",
-                    settings=settings,
+                prepared_writebacks.extend(
+                    _prepare_work_writebacks(
+                        db,
+                        work_id=work_id,
+                        source="BULK_METADATA_EDIT",
+                        values=work_values if len(work_values) > 1 else {},
+                    )
                 )
-            sync_work_facets(db, work_id)
-            updated += 1
-        if updated:
-            _record_system_event(
-                db,
-                level="info",
-                source="library",
-                actor_type="admin",
-                actor_id=user.id,
-                action=f"bulk.{action}",
-                target_type="work",
-                message=f"批量更新作品 {updated} 个",
-                metadata={"ids": normalized_ids, "action": action},
+
+        facet_write = _prepare_facet_write_for_updates(
+            db,
+            tuple(prepared_updates),
+            now=bulk_now,
+        )
+        mutation_event = prepare_system_event(
+            level="info",
+            source="library",
+            actor_type="admin",
+            actor_id=user.id,
+            action=f"bulk.{action}",
+            target_type="work",
+            message=f"批量更新作品 {len(prepared_updates)} 个",
+            metadata={"ids": normalized_ids, "action": action},
+        )
+
+        if action in {"add_to_shelf", "remove_from_shelf", "shelf_membership"}:
+            membership_work_ids = tuple(
+                work_id for work_id, _values in prepared_updates
+            )
+            updated = UpdateBulkShelfMembership(_request_mutations(db), db).execute(
+                BulkShelfMembershipMutation(
+                    shelf_id=shelf_id,
+                    work_ids=membership_work_ids,
+                    now=bulk_now,
+                    membership=membership,
+                    events=(mutation_event,),
+                )
+            )
+        else:
+            effective_updates = tuple(
+                (work_id, work_values)
+                for work_id, work_values in prepared_updates
+                if work_values
+                and not (action == "update_metadata" and len(work_values) == 1)
+            )
+            updated = UpdateBulkWorks(_request_mutations(db), db).execute(
+                BulkWorkMutation(
+                    updates=effective_updates,
+                    facet_write=facet_write,
+                    writeback_intents=tuple(prepared_writebacks),
+                    events=(mutation_event,),
+                    reported_count=len(prepared_updates),
+                )
             )
     return BulkMutationResponse(data={"updated": updated, "ids": ids})
 
 
 @router.post("/works/bulk/find-replace/preview")
 async def preview_bulk_find_replace(
+    request_payload: BulkFindReplaceRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -2025,7 +2163,7 @@ async def preview_bulk_find_replace(
     user, auth_error = _system_auth(db, request, settings)
     if auth_error:
         return auth_error
-    payload = await request.json()
+    payload = request_payload.model_dump(by_alias=True, exclude_unset=True)
     for work_id in _bulk_work_ids(payload.get("ids") or payload.get("bookIds") or []):
         if not can_access_work(db, user, work_id):
             _raise_library_error("作品不存在", status_code=404, code="WORK_NOT_FOUND")
@@ -2065,6 +2203,7 @@ def _prepare_cover_image(
 
 @router.post("/works/bulk/cover")
 async def bulk_work_covers(
+    payload: Annotated[BulkCoverRequest, Form()],
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -2074,25 +2213,24 @@ async def bulk_work_covers(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    form = await request.form()
     try:
-        raw_ids = json.loads(str(form.get("ids") or "[]"))
+        raw_ids = json.loads(payload.ids)
     except json.JSONDecodeError:
         _raise_library_error("图书选择无效", status_code=400)
     work_ids = _bulk_work_ids(raw_ids)
-    action = str(form.get("action") or "").strip().lower()
+    action = payload.action.strip().lower()
     if not work_ids:
         _raise_library_error("请选择至少一本图书", status_code=400)
     if any(not can_access_work(db, user, work_id) for work_id in work_ids):
         _raise_library_error("作品不存在", status_code=404, code="WORK_NOT_FOUND")
     if action not in {"crop", "regenerate", "compress", "replace"}:
         _raise_library_error("封面操作无效", status_code=400)
-    ratio = str(form.get("ratio") or "2:3")
+    ratio = payload.ratio
     if action == "crop" and ratio not in {"2:3", "3:4", "1:1"}:
         _raise_library_error("封面裁剪比例无效", status_code=400)
-    quality = max(40, min(95, _coerce_int(form.get("quality"), 82)))
-    max_dimension = max(600, min(3200, _coerce_int(form.get("maxDimension"), 1600)))
-    upload = form.get("cover")
+    quality = max(40, min(95, payload.quality))
+    max_dimension = max(600, min(3200, payload.max_dimension))
+    upload = payload.cover
     uploaded_image: Image.Image | None = None
     if action == "replace":
         if not upload or not hasattr(upload, "read"):
@@ -2168,34 +2306,24 @@ async def bulk_work_covers(
             relative = str(target.relative_to(settings.resolved_storage_root))
             pending_updates.append((work_id, relative, "READY"))
         now = _now()
-        for work_id, relative, status in pending_updates:
-            library_storage.update_work_cover(
+        writeback_intents = tuple(
+            intent
+            for work_id, relative, _status in pending_updates
+            for intent in _prepare_work_writebacks(
                 db,
                 work_id=work_id,
-                cover_path=relative,
-                cover_status=status,
-                now=now,
+                source="BULK_COVER_EDIT",
+                values={"coverPath": relative, "updatedAt": now},
             )
-            schedule_work_metadata_writebacks(
-                db, work_id=work_id, source="BULK_COVER_EDIT", settings=settings
-            )
-        db.commit()
-    except Exception:
-        db.rollback()
-        for path in created_paths:
-            path.unlink(missing_ok=True)
-        raise
-    updated = len(pending_updates)
-    if updated:
-        _record_system_event(
-            db,
+        )
+        cover_event = prepare_system_event(
             level="info",
             source="library",
             actor_type="admin",
             actor_id=user.id,
             action=f"bulk.cover.{action}",
             target_type="work",
-            message=f"批量处理封面 {updated} 本图书",
+            message=f"批量处理封面 {len(pending_updates)} 本图书",
             metadata={
                 "ids": work_ids,
                 "action": action,
@@ -2205,6 +2333,25 @@ async def bulk_work_covers(
                 "skipped": skipped,
             },
         )
+        updated = UpdateCoverRecords(_request_mutations(db), db).execute(
+            CoverMutation(
+                records=tuple(
+                    CoverRecordMutation(
+                        work_id=work_id,
+                        cover_path=relative,
+                        cover_status=status,
+                    )
+                    for work_id, relative, status in pending_updates
+                ),
+                now=now,
+                writeback_intents=writeback_intents,
+                events=(cover_event,) if pending_updates else (),
+            )
+        )
+    except Exception:
+        for path in created_paths:
+            path.unlink(missing_ok=True)
+        raise
     return BulkMutationResponse(
         data={
             "updated": updated,
@@ -2235,21 +2382,32 @@ async def upload_cover(
     with target.open("wb") as handle:
         shutil.copyfileobj(cover.file, handle)
     relative = str(target.relative_to(settings.resolved_storage_root))
-    library_storage.update_work_cover(
+    now = _now()
+    writeback_intents = _prepare_work_writebacks(
         db,
         work_id=work_id,
-        cover_path=relative,
-        cover_status="READY",
-        now=_now(),
+        source="COVER_UPLOAD",
+        values={"coverPath": relative, "updatedAt": now},
     )
-    schedule_work_metadata_writebacks(
-        db, work_id=work_id, source="COVER_UPLOAD", settings=settings
+    UpdateCoverRecords(_request_mutations(db), db).execute(
+        CoverMutation(
+            records=(
+                CoverRecordMutation(
+                    work_id=work_id,
+                    cover_path=relative,
+                    cover_status="READY",
+                ),
+            ),
+            now=now,
+            writeback_intents=writeback_intents,
+        )
     )
-    db.commit()
     return CoverMutationResponse(
         data={
             "bookId": work_id,
-            "coverUrl": f"/api/works/{work_id}/cover?size=medium&v={int(_now().timestamp())}",
+            "coverUrl": (
+                f"/api/works/{work_id}/cover?size=medium&v={int(_now().timestamp())}"
+            ),
         }
     )
 
@@ -2278,21 +2436,32 @@ def regenerate_cover(
         or not _stored_path(cover_path, settings).is_file()
     ):
         cover_path = ensure_default_cover(settings)
-    library_storage.update_work_cover(
+    now = _now()
+    writeback_intents = _prepare_work_writebacks(
         db,
         work_id=work_id,
-        cover_path=cover_path,
-        cover_status=cover_status(cover_path, settings),
-        now=_now(),
+        source="COVER_REGENERATE",
+        values={"coverPath": cover_path, "updatedAt": now},
     )
-    schedule_work_metadata_writebacks(
-        db, work_id=work_id, source="COVER_REGENERATE", settings=settings
+    UpdateCoverRecords(_request_mutations(db), db).execute(
+        CoverMutation(
+            records=(
+                CoverRecordMutation(
+                    work_id=work_id,
+                    cover_path=cover_path,
+                    cover_status=cover_status(cover_path, settings),
+                ),
+            ),
+            now=now,
+            writeback_intents=writeback_intents,
+        )
     )
-    db.commit()
     return CoverMutationResponse(
         data={
             "bookId": work_id,
-            "coverUrl": f"/api/works/{work_id}/cover?size=medium&v={int(_now().timestamp())}",
+            "coverUrl": (
+                f"/api/works/{work_id}/cover?size=medium&v={int(_now().timestamp())}"
+            ),
         }
     )
 
@@ -2419,6 +2588,7 @@ def library_categories(
 @router.patch("/library/categories/{facet_id}")
 async def update_library_category(
     facet_id: str,
+    payload: RenameCategoryRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -2426,9 +2596,8 @@ async def update_library_category(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    payload = await request.json()
     try:
-        result = rename_category(db, facet_id, str(payload.get("name") or ""), user.id)
+        result = rename_category(db, facet_id, payload.name, user.id)
     except ValueError as exc:
         _raise_library_error(str(exc), status_code=400)
     return RenameCategoryResponse(data=result)
@@ -2453,6 +2622,7 @@ def delete_library_category(
 
 @router.post("/library/categories/merge")
 async def merge_library_categories(
+    payload: MergeCategoriesRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -2460,13 +2630,12 @@ async def merge_library_categories(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    payload = await request.json()
     try:
         result = merge_categories(
             db,
-            str(payload.get("kind") or "TAG"),
-            [str(item) for item in payload.get("sourceIds") or []],
-            str(payload.get("targetId") or ""),
+            payload.kind,
+            payload.source_ids,
+            payload.target_id,
             user.id,
         )
     except ValueError as exc:
@@ -2514,6 +2683,7 @@ def library_duplicates(
 
 @router.post("/library/duplicates/merge")
 async def merge_library_duplicates(
+    payload: MergeDuplicatesRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -2521,12 +2691,11 @@ async def merge_library_duplicates(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    payload = await request.json()
     try:
         result = merge_works(
             db,
-            str(payload.get("targetWorkId") or ""),
-            [str(item) for item in payload.get("sourceWorkIds") or []],
+            payload.target_work_id,
+            payload.source_work_ids,
             user.id,
         )
     except ValueError as exc:
@@ -2569,6 +2738,7 @@ def undo_library_operation(
 @router.post("/works/{work_id}/metadata/search")
 async def metadata_search(
     work_id: str,
+    payload: MetadataSearchRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -2581,14 +2751,13 @@ async def metadata_search(
     permission_error = _require_work_manager(db, user, work_id)
     if permission_error is not None:
         return permission_error
-    payload = await request.json()
-    source = str(payload.get("providerId") or payload.get("source") or "bangumi")
+    source = payload.provider_id or payload.source or "bangumi"
     if source not in metadata_provider_registry().ids():
         _raise_library_error("不支持的元数据来源", status_code=400)
     job, context = _metadata_context_for_work(db, work_id)
     if not job or not context:
         _raise_library_error("读物不存在或无权访问", status_code=404)
-    query = str(payload.get("query") or "").strip() or None
+    query = str(payload.query or "").strip() or None
     try:
         result = search_with_metadata_provider(db, context, source, query)
     except Exception as exc:
@@ -3184,6 +3353,7 @@ async def apply_work_metadata(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    user_id = user.id
     permission_error = _require_work_manager(db, user, work_id)
     if permission_error is not None:
         return permission_error
@@ -3285,69 +3455,146 @@ async def apply_work_metadata(
     for volume_field in volume_fields:
         if volume_metadata.get(volume_field) is None:
             volume_metadata[volume_field] = candidate.get(volume_field)
-    if (
-        "coverUrl" in fields
-        and isinstance(candidate.get("coverUrl"), str)
-        and candidate.get("coverUrl").strip()
-    ):
+    target_media_version_id = (
+        target_media_version.id if target_media_version is not None else None
+    )
+    target_volume_ids = tuple(volume.id for volume in target_volumes)
+    target_volume_id = (
+        target_volume_ids[0] if target_volume_ids and not apply_to_all_volumes else None
+    )
+    previous_cover_path_value = existing_work.get("coverPath")
+    previous_cover_path = (
+        str(previous_cover_path_value) if previous_cover_path_value else None
+    )
+    db.close()
+
+    cover_gateway = library_cover_publication(settings)
+    prepared_cover = None
+    cover_url = candidate.get("coverUrl")
+    if "coverUrl" in fields and isinstance(cover_url, str) and cover_url.strip():
         try:
-            patch.update(
-                _apply_remote_cover(work_id, candidate["coverUrl"].strip(), settings)
+            prepared_cover = cover_gateway.prepare(
+                work_id=work_id,
+                cover_url=cover_url.strip(),
             )
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             logger.warning(
-                "failed to apply remote cover work=%s url=%s error=%s",
+                "failed to prepare remote cover work=%s url=%s error=%s",
                 work_id,
-                candidate.get("coverUrl"),
+                cover_url,
                 exc,
+            )
+        else:
+            patch.update(
+                {
+                    "coverPath": prepared_cover.stored_path,
+                    "coverStatus": "READY",
+                }
             )
     if not patch and not volume_selected:
         _raise_library_error("候选中没有可应用的字段", status_code=400)
+    volume_updated_at = _now()
     patch.update(
         {
             "organized": True,
             "organizeStatus": "APPLIED",
             "metadataQuality": 85,
-            "updatedAt": _now(),
+            "updatedAt": volume_updated_at,
         }
     )
-    work = library_works.update_work_fields(db, work_id, patch)
-    if not work:
-        _raise_library_error("作品不存在", status_code=404)
-    for target_volume in target_volumes:
+    volume_values_by_id: dict[str, dict[str, Any]] = {}
+    volume_update_rows: list[dict[str, Any]] = []
+    for target_volume_id_value in target_volume_ids:
+        volume_values: dict[str, Any] = {}
         if "publisher" in fields:
-            target_volume.publisher = (
+            volume_values["publisher"] = (
                 str(volume_metadata.get("publisher") or "").strip() or None
             )
         if "publishedAt" in fields:
-            target_volume.published_at = volume_metadata.get("publishedAt")
+            volume_values["published_at"] = volume_metadata.get("publishedAt")
         if "language" in fields:
-            target_volume.language = (
+            volume_values["language"] = (
                 str(volume_metadata.get("language") or "").strip() or None
             )
         if "isbn" in fields:
-            target_volume.isbn = str(volume_metadata.get("isbn") or "").strip() or None
-        target_volume.updated_at = _now()
-    sync_work_facets(db, work_id, commit=False)
-    finished_job_ids = _finish_metadata_organize_work(db, work_id)
-    writeback_operation_ids = schedule_work_metadata_writebacks(
-        db,
-        work_id=work_id,
-        media_version_id=target_media_version.id if target_media_version else None,
-        volume_id=(
-            target_volumes[0].id
-            if target_volumes and not apply_to_all_volumes
-            else None
-        ),
-        source="MANUAL_METADATA_APPLY",
-        settings=settings,
-    )
-    db.commit()
+            volume_values["isbn"] = (
+                str(volume_metadata.get("isbn") or "").strip() or None
+            )
+        volume_values_by_id[target_volume_id_value] = volume_values
+        if volume_values:
+            volume_update_rows.append(
+                {
+                    "id": target_volume_id_value,
+                    **volume_values,
+                    "updated_at": volume_updated_at,
+                }
+            )
+    try:
+        writeback_intents = _prepare_work_writebacks(
+            db,
+            work_id=work_id,
+            source="MANUAL_METADATA_APPLY",
+            values=patch,
+            media_version_id=target_media_version_id,
+            volume_id=target_volume_id,
+            volume_values_by_id=volume_values_by_id,
+        )
+        facet_write = _prepare_facet_write_for_updates(
+            db, ((work_id, patch),), now=volume_updated_at
+        )
+        finished_job_ids = load_metadata_apply_job_ids(db, work_id)
+    except Exception:
+        if prepared_cover is not None:
+            cover_gateway.discard(prepared_cover)
+        raise
+    db.close()
+    try:
+        mutation_result = ApplyWorkMetadata(_request_mutations(db), db).execute(
+            MetadataApplyMutation(
+                work_id=work_id,
+                work_values=patch,
+                volume_rows=tuple(volume_update_rows),
+                facet_write=facet_write,
+                writeback_intents=writeback_intents,
+                finished_job_ids=finished_job_ids,
+                now=volume_updated_at,
+            )
+        )
+    except Exception:
+        if prepared_cover is not None:
+            cover_gateway.discard(prepared_cover)
+        raise
+    if prepared_cover is not None:
+        try:
+            cover_gateway.publish(prepared_cover)
+        except OSError as exc:
+            logger.warning(
+                "failed to publish remote cover work=%s target=%s error=%s",
+                work_id,
+                prepared_cover.final_path,
+                exc,
+            )
+            CompensateCoverPublication(_request_mutations(db), db).execute(
+                CoverPublicationFailure(
+                    work_id=work_id,
+                    expected_cover_path=prepared_cover.stored_path,
+                    expected_updated_at=volume_updated_at,
+                    fallback_cover_path=previous_cover_path,
+                    now=_now(),
+                )
+            )
+            mutation_result = replace(
+                mutation_result,
+                work=_get_work(db, work_id),
+            )
+    if not mutation_result.work:
+        _raise_library_error("作品不存在", status_code=404)
+    writeback_operation_ids = mutation_result.writeback_operation_ids
     return MetadataApplyResponse(
         data={
-            "book": _work_view(db, work, user.id),
+            "book": _work_view(db, mutation_result.work, user_id),
             "appliedFields": fields,
-            "finishedOrganizeJobIds": finished_job_ids,
+            "finishedOrganizeJobIds": list(mutation_result.finished_job_ids),
             "metadataWriteback": (
                 metadata_writeback_view(db, writeback_operation_ids[0])
                 if writeback_operation_ids

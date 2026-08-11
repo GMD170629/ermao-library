@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Integer, case, cast, delete, func, or_, select, update
+from sqlalchemy import Integer, case, cast, delete, func, literal, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
@@ -999,16 +999,21 @@ def copy_shelf_links_to_work(
 ) -> None:
     if not source_work_ids:
         return
-    source_links = db.scalars(
-        select(ShelfWork.shelf_id).where(ShelfWork.work_id.in_(source_work_ids))
-    ).all()
     now = db_timestamp()
-    for shelf_id in source_links:
-        db.execute(
-            sqlite_insert(ShelfWork)
-            .values(shelf_id=shelf_id, work_id=target_work_id, created_at=now)
-            .prefix_with("OR IGNORE")
+    shelf_work = ShelfWork.__table__
+    source_links = select(
+        ShelfWork.shelf_id,
+        literal(target_work_id),
+        literal(now),
+    ).where(ShelfWork.work_id.in_(source_work_ids))
+    db.execute(
+        sqlite_insert(shelf_work)
+        .from_select(
+            [shelf_work.c.shelfId, shelf_work.c.workId, shelf_work.c.createdAt],
+            source_links,
         )
+        .prefix_with("OR IGNORE")
+    )
 
 
 def find_deferred_source_volume(

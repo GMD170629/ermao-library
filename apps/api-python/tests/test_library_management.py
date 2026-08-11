@@ -322,12 +322,14 @@ def test_library_writes_rollback_when_facet_sync_fails(tmp_path, monkeypatch) ->
         with Session(engine) as db:
             _insert_work(db, "work-a", "星海列车", "林川", ["科幻"])
             _insert_work(db, "work-b", "远航日志", "周禾", ["旅行"])
-            original_sync = library_management.sync_work_facets
+            original_sync = library_management.execute_work_facet_write
 
             def fail_sync(*_args, **_kwargs) -> None:
                 raise RuntimeError("facet sync failed")
 
-            monkeypatch.setattr(library_management, "sync_work_facets", fail_sync)
+            monkeypatch.setattr(
+                library_management, "execute_work_facet_write", fail_sync
+            )
             with pytest.raises(RuntimeError, match="facet sync failed"):
                 merge_works(db, "work-a", ["work-b"], None)
             assert (
@@ -349,10 +351,16 @@ def test_library_writes_rollback_when_facet_sync_fails(tmp_path, monkeypatch) ->
                 == 0
             )
 
-            monkeypatch.setattr(library_management, "sync_work_facets", original_sync)
+            monkeypatch.setattr(
+                library_management,
+                "execute_work_facet_write",
+                original_sync,
+            )
             merged = merge_works(db, "work-a", ["work-b"], None)
             operation_id = str(merged["operation"]["id"])
-            monkeypatch.setattr(library_management, "sync_work_facets", fail_sync)
+            monkeypatch.setattr(
+                library_management, "execute_work_facet_write", fail_sync
+            )
             with pytest.raises(RuntimeError, match="facet sync failed"):
                 undo_operation(db, operation_id, None)
             assert db.get(LibraryWork, "work-b") is None
@@ -401,7 +409,9 @@ def test_category_write_rolls_back_and_success_commits_once(
             def fail_sync(*_args, **_kwargs) -> None:
                 raise RuntimeError("facet sync failed")
 
-            monkeypatch.setattr(library_management, "sync_work_facets", fail_sync)
+            monkeypatch.setattr(
+                library_management, "execute_work_facet_write", fail_sync
+            )
             renamed_tag = next(
                 item
                 for item in list_categories(db, "TAG")

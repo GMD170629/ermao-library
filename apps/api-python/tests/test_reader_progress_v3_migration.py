@@ -13,7 +13,6 @@ from app.db.runner import _run_alembic, head_revision
 from app.db.sqlite import create_sqlite_engine
 from app.models.auth import User
 from app.models.library import (
-    LibraryFile,
     LibraryMediaVersion,
     LibraryReadingProgress,
     LibraryVolume,
@@ -30,6 +29,7 @@ def test_reader_progress_upgrade_rewrites_legacy_extra_to_v3_location(tmp_path) 
             lambda config: command.upgrade(config, "0015_management_query_indexes"),
         )
         legacy_work = sa.Table("LibraryWork", sa.MetaData(), autoload_with=engine)
+        legacy_file = sa.Table("LibraryFile", sa.MetaData(), autoload_with=engine)
         with Session(engine) as session, session.begin():
             user = User(
                 id="migration-user",
@@ -100,14 +100,16 @@ def test_reader_progress_upgrade_rewrites_legacy_extra_to_v3_location(tmp_path) 
             )
             session.add_all([comic_volume, pdf_volume, audio_volume])
             session.flush()
-            session.add(
-                LibraryFile(
+            session.execute(
+                sa.insert(legacy_file).values(
                     id="migration-audio-file",
-                    volume_id=audio_volume.id,
+                    volumeId=audio_volume.id,
                     path="/library/migration.mp3",
                     kind="AUDIO",
-                    mime_type="audio/mpeg",
-                    sort_order=0,
+                    mimeType="audio/mpeg",
+                    sortOrder=0,
+                    createdAt=now,
+                    updatedAt=now,
                 )
             )
             progress = LibraryReadingProgress(
@@ -229,6 +231,6 @@ def test_reader_progress_upgrade_rewrites_legacy_extra_to_v3_location(tmp_path) 
                     "positionMs": 45000,
                 },
             }
-            assert head_revision(engine) == "0018_library_facet_index_version"
+            assert head_revision(engine) == "0020_comic_page_index"
     finally:
         engine.dispose()

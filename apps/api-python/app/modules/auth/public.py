@@ -1,6 +1,6 @@
 """Stable application contracts for authentication and user administration."""
 
-from app.modules.auth.application.commands import AuthUnitOfWork, execute_auth_write
+from app.modules.auth.application.commands import AuthUnitOfWork
 from app.modules.auth.application.password_authentication import (
     AuthenticatedPrincipal,
     AuthenticatePassword,
@@ -20,5 +20,4 @@ __all__ = [
     "PasswordAuthenticationResult",
     "PasswordAuthenticationThrottled",
     "PasswordCredentials",
-    "execute_auth_write",
 ]

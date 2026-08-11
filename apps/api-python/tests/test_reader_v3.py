@@ -4,9 +4,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
-
 from app.core.auth import hash_password
 from app.core.config import Settings
 from app.models.auth import ReaderBookmark, User
@@ -18,6 +15,22 @@ from app.models.library import (
     LibraryVolume,
     LibraryWork,
 )
+from app.modules.reader.application.navigation_maintenance import (
+    RebuildEpubNavigationBatch,
+)
+from app.modules.reader.infrastructure.epub_navigation_recovery import (
+    FileReaderEpubNavigationParser,
+)
+from app.modules.reader.infrastructure.navigation_maintenance import (
+    prepare_epub_navigation_write,
+)
+from app.modules.reader.infrastructure.uow import (
+    SqlAlchemyEpubNavigationMaintenanceUnitOfWork,
+)
+from fastapi.testclient import TestClient
+from sqlalchemy import event, update
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
 
 
 def _login(client: TestClient, db_session: Session) -> User:
@@ -157,6 +170,23 @@ def test_reader_v3_bootstrap_and_progress_are_volume_scoped(
     assert stored.volume_id == volume.id
     assert stored.percent == 50
 
+    stale_response = client.put(
+        f"/api/reader/v3/volumes/{volume.id}/progress",
+        json={
+            "schemaVersion": 3,
+            "mutationId": "mutation-stale",
+            "clientId": "web",
+            "clientSequence": 1,
+            "contentFingerprint": bootstrap["contentFingerprint"],
+            "location": {"type": "epub", "progression": 0.1},
+            "percent": 10,
+        },
+    )
+    assert stale_response.status_code == 200
+    assert stale_response.json()["data"]["applied"] is False
+    db_session.expire_all()
+    assert db_session.query(LibraryReadingProgress).one().percent == 50
+
 
 def test_volume_reading_status_advances_work_detail_to_next_unfinished_volume(
     client: TestClient,
@@ -218,7 +248,7 @@ def test_volume_reading_status_advances_work_detail_to_next_unfinished_volume(
     assert db_session.query(LibraryReadingProgress).count() == 0
 
 
-def test_reader_v3_bootstrap_recovers_missing_epub_chapters_once(
+def test_reader_v3_bootstrap_does_not_parse_or_write_missing_epub_navigation(
     client: TestClient,
     db_session: Session,
     tmp_path: Path,
@@ -233,21 +263,144 @@ def test_reader_v3_bootstrap_recovers_missing_epub_chapters_once(
     volume.chapter_count = None
     db_session.commit()
 
-    first_response = client.get(f"/api/reader/v3/volumes/{volume.id}/bootstrap")
-    second_response = client.get(f"/api/reader/v3/volumes/{volume.id}/bootstrap")
+    engine = db_session.get_bind()
+    assert isinstance(engine, Engine)
+    writes: list[str] = []
+
+    def capture_writes(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        context: object,
+        _executemany: object,
+    ) -> None:
+        if (
+            getattr(context, "isinsert", False)
+            or getattr(context, "isupdate", False)
+            or getattr(context, "isdelete", False)
+        ):
+            writes.append(statement)
+
+    event.listen(engine, "before_cursor_execute", capture_writes)
+    try:
+        first_response = client.get(f"/api/reader/v3/volumes/{volume.id}/bootstrap")
+        second_response = client.get(f"/api/reader/v3/volumes/{volume.id}/bootstrap")
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_writes)
 
     assert first_response.status_code == 200
     assert second_response.status_code == 200
-    assert [unit["href"] for unit in first_response.json()["data"]["units"]] == [
+    assert first_response.json()["data"]["units"] == []
+    assert second_response.json()["data"]["units"] == []
+    assert writes == []
+    assert db_session.query(LibraryReadingUnit).count() == 0
+    db_session.refresh(volume)
+    assert volume.chapter_count is None
+
+
+def test_reader_navigation_maintenance_repairs_missing_units_outside_get(
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    volume = _ebook_volume(db_session)
+    epub = tmp_path / "historical-missing-navigation.epub"
+    _write_reader_epub(epub)
+    source_file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
+    source_file.path = str(epub)
+    source_file.size_bytes = epub.stat().st_size
+    volume.chapter_count = None
+    db_session.commit()
+
+    engine = db_session.get_bind()
+    assert isinstance(engine, Engine)
+    factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+    maintenance = RebuildEpubNavigationBatch(
+        lambda: SqlAlchemyEpubNavigationMaintenanceUnitOfWork(factory),
+        FileReaderEpubNavigationParser(tmp_path),
+        lambda: datetime(2026, 8, 11, tzinfo=UTC),
+        prepare_epub_navigation_write,
+    )
+
+    result = maintenance.execute(limit=25)
+
+    assert result.scanned == 1
+    assert result.processed == 1
+    db_session.expire_all()
+    units = (
+        db_session.query(LibraryReadingUnit)
+        .order_by(LibraryReadingUnit.sort_order)
+        .all()
+    )
+    assert [unit.href for unit in units] == [
         "OEBPS/Text/one.xhtml#start",
         "OEBPS/Text/two.xhtml",
     ]
-    assert db_session.query(LibraryReadingUnit).count() == 2
+    assert all(
+        json.loads(unit.metadata_json)["hrefBase"] == "publication-root"
+        for unit in units
+    )
     db_session.refresh(volume)
     assert volume.chapter_count == 2
+    assert maintenance.execute(limit=25).scanned == 0
 
 
-def test_reader_v3_bootstrap_repairs_legacy_epub_hrefs_and_preserves_unit_ids(
+def test_reader_navigation_maintenance_cas_skips_changed_source(
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    volume = _ebook_volume(db_session)
+    epub = tmp_path / "source-changes-during-parse.epub"
+    _write_reader_epub(epub)
+    source_file = db_session.query(LibraryFile).filter_by(volume_id=volume.id).one()
+    source_file.path = str(epub)
+    source_file.size_bytes = epub.stat().st_size
+    db_session.commit()
+
+    engine = db_session.get_bind()
+    assert isinstance(engine, Engine)
+    factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+    delegate = FileReaderEpubNavigationParser(tmp_path)
+
+    class MutatingParser:
+        def parse(self, source_path: str):
+            chapters = delegate.parse(source_path)
+            with factory() as mutation:
+                mutation.execute(
+                    update(LibraryFile)
+                    .where(LibraryFile.id == source_file.id)
+                    .values(updated_at=datetime(2026, 8, 12, tzinfo=UTC))
+                )
+                mutation.commit()
+            return chapters
+
+    maintenance = RebuildEpubNavigationBatch(
+        lambda: SqlAlchemyEpubNavigationMaintenanceUnitOfWork(factory),
+        MutatingParser(),
+        lambda: datetime(2026, 8, 11, tzinfo=UTC),
+        prepare_epub_navigation_write,
+    )
+
+    result = maintenance.execute(limit=25)
+
+    assert result.scanned == 1
+    assert result.processed == 0
+    db_session.expire_all()
+    assert db_session.query(LibraryReadingUnit).count() == 0
+    assert db_session.get(LibraryVolume, volume.id).chapter_count is None
+
+
+def test_reader_v3_bootstrap_returns_legacy_navigation_projection_without_repair(
     client: TestClient,
     db_session: Session,
     tmp_path: Path,
@@ -292,25 +445,24 @@ def test_reader_v3_bootstrap_repairs_legacy_epub_hrefs_and_preserves_unit_ids(
 
     assert response.status_code == 200
     assert [unit["href"] for unit in response.json()["data"]["units"]] == [
-        "OEBPS/Text/one.xhtml#start",
-        "OEBPS/Text/two.xhtml",
+        "Text/one.xhtml#start",
+        "Text/two.xhtml",
     ]
-    repaired_units = (
+    stored_units = (
         db_session.query(LibraryReadingUnit)
         .order_by(LibraryReadingUnit.sort_order)
         .all()
     )
-    assert [unit.id for unit in repaired_units] == [
+    assert [unit.id for unit in stored_units] == [
         "legacy-unit-one",
         "legacy-unit-two",
     ]
-    assert [unit.href for unit in repaired_units] == [
-        "OEBPS/Text/one.xhtml#start",
-        "OEBPS/Text/two.xhtml",
+    assert [unit.href for unit in stored_units] == [
+        "Text/one.xhtml#start",
+        "Text/two.xhtml",
     ]
     assert all(
-        json.loads(unit.metadata_json)["hrefBase"] == "publication-root"
-        for unit in repaired_units
+        "hrefBase" not in json.loads(unit.metadata_json) for unit in stored_units
     )
     detail_units_response = client.get(
         f"/api/works/work-reader-v3/volumes/{volume.id}/reading-units",

@@ -7,19 +7,35 @@ from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
-from sqlalchemy import and_, delete, exists, func, or_, select, update
+from sqlalchemy import (
+    and_,
+    bindparam,
+    case,
+    delete,
+    exists,
+    func,
+    insert,
+    or_,
+    select,
+    update,
+)
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
+from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.common import db_timestamp
 from app.models.import_pipeline import ImportScanJob, ImportTask, ImportWorkItem
 from app.models.library import LibraryFile
 from app.modules.imports.application.dto import ImportTaskDTO
+from app.modules.imports.application.scan_jobs import PreparedImportScanJob
 from app.modules.imports.application.work_queue_dto import (
+    ImportQueueMaintenanceProjection,
     ImportScanJobDTO,
     ImportScanStatus,
     ImportWorkItemDTO,
     ImportWorkKind,
     ImportWorkStatus,
+    PreparedImportQueueMaintenance,
     ScanErrorDTO,
 )
 from app.modules.imports.infrastructure.source_keys import source_key
@@ -27,6 +43,73 @@ from app.modules.imports.infrastructure.task_mapper import import_task_dto_from_
 
 ACTIVE_SCAN_STATUSES = ("PENDING", "RUNNING")
 IMPORT_WORK_HIGH_WATERMARK = 2_000
+
+
+def insert_prepared_scan_jobs(
+    db: Session,
+    scan_jobs: tuple[PreparedImportScanJob, ...],
+) -> int:
+    """Insert all missing scan/work row pairs with bounded set-based SQL."""
+
+    if not scan_jobs:
+        return 0
+    unique_requests = {request.dedupe_key: request for request in scan_jobs}
+    existing_keys: set[str] = set()
+    dedupe_keys = tuple(unique_requests)
+    for chunk in sqlite_parameter_chunks(dedupe_keys, parameters_per_row=1):
+        existing_keys.update(
+            db.scalars(
+                select(ImportWorkItem.dedupe_key).where(
+                    ImportWorkItem.dedupe_key.in_(tuple(chunk))
+                )
+            ).all()
+        )
+    missing = tuple(
+        request for key, request in unique_requests.items() if key not in existing_keys
+    )
+    job_rows = [
+        {
+            "id": request.job_id,
+            "monitorFolderId": request.monitor_folder_id,
+            "actorUserId": request.actor_user_id,
+            "rootPath": request.root_path,
+            "trigger": request.trigger,
+            "status": "PENDING",
+            "directoriesScanned": 0,
+            "filesScanned": 0,
+            "candidatesFound": 0,
+            "queuedCount": 0,
+            "skippedCount": 0,
+            "errorCount": 0,
+            "ignoredReasonCounts": {},
+            "errorSamples": [],
+            "restartCount": 0,
+            "createdAt": request.created_at,
+            "updatedAt": request.created_at,
+        }
+        for request in missing
+    ]
+    work_rows = [
+        {
+            "id": request.work_item_id,
+            "kind": "SCAN_DIRECTORY",
+            "scanJobId": request.job_id,
+            "importTaskId": None,
+            "dedupeKey": request.dedupe_key,
+            "status": "PENDING",
+            "priority": 100,
+            "availableAt": request.available_at,
+            "attempts": 0,
+            "createdAt": request.created_at,
+            "updatedAt": request.created_at,
+        }
+        for request in missing
+    ]
+    for chunk in sqlite_parameter_chunks(job_rows, parameters_per_row=17):
+        db.execute(insert(ImportScanJob.__table__), list(chunk))
+    for chunk in sqlite_parameter_chunks(work_rows, parameters_per_row=11):
+        db.execute(insert(ImportWorkItem.__table__), list(chunk))
+    return len(missing)
 
 
 def _work_dto(row: ImportWorkItem) -> ImportWorkItemDTO:
@@ -80,6 +163,24 @@ def scan_job_dto(row: ImportScanJob) -> ImportScanJobDTO:
     )
 
 
+def list_scan_jobs_for_prepared_requests(
+    db: Session,
+    requests: tuple[PreparedImportScanJob, ...],
+) -> list[ImportScanJobDTO]:
+    """Resolve prepared request dedupe keys to persisted jobs in one projection."""
+
+    if not requests:
+        return []
+    dedupe_order = {request.dedupe_key: index for index, request in enumerate(requests)}
+    rows = db.execute(
+        select(ImportWorkItem.dedupe_key, ImportScanJob)
+        .join(ImportScanJob, ImportScanJob.id == ImportWorkItem.scan_job_id)
+        .where(ImportWorkItem.dedupe_key.in_(tuple(dedupe_order)))
+    ).all()
+    rows.sort(key=lambda row: dedupe_order[str(row[0])])
+    return [scan_job_dto(row[1]) for row in rows]
+
+
 def ensure_import_work_item(
     db: Session,
     task: ImportTask,
@@ -92,28 +193,58 @@ def ensure_import_work_item(
     )
     now = db_timestamp()
     key = task.source_key or source_key(task.source_path)
-    task.source_key = key
     if existing is not None:
         if existing.status == "PENDING":
-            existing.available_at = available_at or now
+            refreshed_available_at = available_at or now
+            db.execute(
+                update(ImportWorkItem)
+                .where(ImportWorkItem.id == existing.id)
+                .values(
+                    available_at=refreshed_available_at,
+                    updated_at=now,
+                )
+            )
+            existing.available_at = refreshed_available_at
             existing.updated_at = now
         return existing
+    if task.source_key != key:
+        db.execute(
+            update(ImportTask).where(ImportTask.id == task.id).values(source_key=key)
+        )
+        task.source_key = key
+    work_id = f"work_{uuid4().hex}"
+    work_available_at = available_at or now
     work = ImportWorkItem(
-        id=f"work_{uuid4().hex}",
+        id=work_id,
         kind="IMPORT_SOURCE",
         import_task_id=task.id,
         scan_job_id=None,
         dedupe_key=f"import:{key}:{task.id}",
         status="PENDING",
         priority=priority,
-        available_at=available_at or now,
+        available_at=work_available_at,
         attempts=0,
         created_at=now,
         updated_at=now,
     )
-    db.add(work)
-    db.flush()
-    return work
+    inserted = db.scalar(
+        sqlite_insert(ImportWorkItem)
+        .values(
+            id=work_id,
+            kind="IMPORT_SOURCE",
+            import_task_id=task.id,
+            scan_job_id=None,
+            dedupe_key=f"import:{key}:{task.id}",
+            status="PENDING",
+            priority=priority,
+            available_at=work_available_at,
+            attempts=0,
+            created_at=now,
+            updated_at=now,
+        )
+        .returning(ImportWorkItem)
+    )
+    return inserted or work
 
 
 def create_or_reuse_scan_job(
@@ -138,34 +269,63 @@ def create_or_reuse_scan_job(
                 existing_work.updated_at = db_timestamp()
             return scan_job_dto(existing_job), False
     now = db_timestamp()
+    job_id = f"scan_{uuid4().hex}"
+    work_id = f"work_{uuid4().hex}"
     job = ImportScanJob(
-        id=f"scan_{uuid4().hex}",
+        id=job_id,
         monitor_folder_id=monitor_folder_id,
         actor_user_id=actor_user_id,
         root_path=str(canonical),
         trigger=trigger,
         status="PENDING",
+        directories_scanned=0,
+        files_scanned=0,
+        candidates_found=0,
+        queued_count=0,
+        skipped_count=0,
+        error_count=0,
+        ignored_reason_counts={},
+        error_samples=[],
+        restart_count=0,
         created_at=now,
         updated_at=now,
     )
-    db.add(job)
-    db.flush()
-    db.add(
-        ImportWorkItem(
-            id=f"work_{uuid4().hex}",
-            kind="SCAN_DIRECTORY",
-            scan_job_id=job.id,
-            import_task_id=None,
-            dedupe_key=dedupe_key,
+    db.execute(
+        insert(ImportScanJob.__table__).values(
+            id=job_id,
+            monitorFolderId=monitor_folder_id,
+            actorUserId=actor_user_id,
+            rootPath=str(canonical),
+            trigger=trigger,
             status="PENDING",
-            priority=100,
-            available_at=available_at or now,
-            attempts=0,
-            created_at=now,
-            updated_at=now,
+            directoriesScanned=0,
+            filesScanned=0,
+            candidatesFound=0,
+            queuedCount=0,
+            skippedCount=0,
+            errorCount=0,
+            ignoredReasonCounts={},
+            errorSamples=[],
+            restartCount=0,
+            createdAt=now,
+            updatedAt=now,
         )
     )
-    db.flush()
+    db.execute(
+        insert(ImportWorkItem.__table__).values(
+            id=work_id,
+            kind="SCAN_DIRECTORY",
+            scanJobId=job_id,
+            importTaskId=None,
+            dedupeKey=dedupe_key,
+            status="PENDING",
+            priority=100,
+            availableAt=available_at or now,
+            attempts=0,
+            createdAt=now,
+            updatedAt=now,
+        )
+    )
     return scan_job_dto(job), True
 
 
@@ -207,7 +367,6 @@ def cancel_scan_job(db: Session, job_id: str) -> bool:
     job.finished_at = now
     job.updated_at = now
     db.execute(delete(ImportWorkItem).where(ImportWorkItem.scan_job_id == job_id))
-    db.flush()
     return True
 
 
@@ -279,21 +438,46 @@ def claim_next_work_item(
     if row is None:
         return None
     lease_seconds = import_lease_seconds if row.kind == "IMPORT_SOURCE" else 60
-    row.status = "LEASED"
-    row.lease_owner = worker_id
-    row.lease_expires_at = now + timedelta(seconds=lease_seconds)
-    row.attempts += 1
-    row.updated_at = now
+    lease_expires_at = now + timedelta(seconds=lease_seconds)
+    attempts = row.attempts + 1
+    claimed = db.execute(
+        update(ImportWorkItem)
+        .where(ImportWorkItem.id == row.id, claimable)
+        .values(
+            status="LEASED",
+            lease_owner=worker_id,
+            lease_expires_at=lease_expires_at,
+            attempts=ImportWorkItem.attempts + 1,
+            updated_at=now,
+        )
+    )
+    if not claimed.rowcount:
+        return None
     if row.scan_job_id is not None:
-        job = db.get(ImportScanJob, row.scan_job_id)
-        if job is not None:
-            if job.status == "PENDING":
-                job.status = "RUNNING"
-                job.started_at = now
-            job.heartbeat_at = now
-            job.updated_at = now
-    db.flush()
-    return _work_dto(row)
+        db.execute(
+            update(ImportScanJob)
+            .where(ImportScanJob.id == row.scan_job_id)
+            .values(
+                status=case(
+                    (ImportScanJob.status == "PENDING", "RUNNING"),
+                    else_=ImportScanJob.status,
+                ),
+                started_at=case(
+                    (ImportScanJob.status == "PENDING", now),
+                    else_=ImportScanJob.started_at,
+                ),
+                heartbeat_at=now,
+                updated_at=now,
+            )
+        )
+    return ImportWorkItemDTO(
+        id=row.id,
+        kind=cast(ImportWorkKind, row.kind),
+        scan_job_id=row.scan_job_id,
+        import_task_id=row.import_task_id,
+        status="LEASED",
+        attempts=attempts,
+    )
 
 
 def claim_import_task_for_work_item(
@@ -314,19 +498,36 @@ def claim_import_task_for_work_item(
         if task.status in {"COMPLETED", "FAILED"}:
             complete_work_item(db, work_item.id)
         return None
-    task.status = "PARSING"
-    task.lease_owner = worker_id
-    task.lease_expires_at = now + timedelta(seconds=lease_seconds)
-    task.attempts += 1
-    task.message = "正在准备导入"
-    task.updated_at = now
-    db.flush()
-    return import_task_dto_from_row(
+    lease_expires_at = now + timedelta(seconds=lease_seconds)
+    task_values = {
+        property_.columns[0].name: getattr(task, property_.key)
+        for property_ in ImportTask.__mapper__.column_attrs
+    }
+    task_values.update(
         {
-            property_.columns[0].name: getattr(task, property_.key)
-            for property_ in ImportTask.__mapper__.column_attrs
+            "status": "PARSING",
+            "leaseOwner": worker_id,
+            "leaseExpiresAt": lease_expires_at,
+            "attempts": task.attempts + 1,
+            "message": "正在准备导入",
+            "updatedAt": now,
         }
     )
+    claimed = db.execute(
+        update(ImportTask)
+        .where(ImportTask.id == task.id, ImportTask.status == "PENDING")
+        .values(
+            status="PARSING",
+            lease_owner=worker_id,
+            lease_expires_at=lease_expires_at,
+            attempts=ImportTask.attempts + 1,
+            message="正在准备导入",
+            updated_at=now,
+        )
+    )
+    if not claimed.rowcount:
+        return None
+    return import_task_dto_from_row(task_values)
 
 
 def release_scan_work_item(
@@ -345,83 +546,171 @@ def release_scan_work_item(
     db.execute(
         update(ImportWorkItem).where(ImportWorkItem.id == work_item_id).values(**values)
     )
-    db.flush()
 
 
 def complete_work_item(db: Session, work_item_id: str) -> None:
     db.execute(delete(ImportWorkItem).where(ImportWorkItem.id == work_item_id))
-    db.flush()
 
 
-def reconcile_existing_import_tasks(db: Session, *, limit: int = 2_000) -> int:
-    tasks = db.scalars(
-        select(ImportTask)
-        .where(
-            ImportTask.status.in_(("PENDING", "PARSING")),
-            ~exists().where(ImportWorkItem.import_task_id == ImportTask.id),
-        )
-        .order_by(ImportTask.created_at.asc(), ImportTask.id.asc())
-        .limit(limit)
-    ).all()
-    created = 0
-    for task in tasks:
-        if task.status == "PARSING":
-            task.status = "PENDING"
-            task.lease_owner = None
-            task.lease_expires_at = None
-        ensure_import_work_item(db, task)
-        created += 1
-    db.flush()
-    return created
-
-
-def backfill_source_keys(db: Session, *, limit: int = 500) -> int:
-    """Backfill a restart-safe bounded page without delaying process startup."""
-
-    task_rows = db.scalars(
-        select(ImportTask)
-        .where(ImportTask.source_key.is_(None))
-        .order_by(ImportTask.created_at.asc(), ImportTask.id.asc())
-        .limit(limit)
-    ).all()
-    remaining = max(0, limit - len(task_rows))
-    file_rows = (
-        db.scalars(
-            select(LibraryFile)
-            .where(LibraryFile.path_key.is_(None))
-            .order_by(LibraryFile.id.asc())
-            .limit(remaining)
+def load_import_queue_maintenance_projection(
+    db: Session,
+    *,
+    reconcile_limit: int = 2_000,
+    source_key_limit: int = 500,
+) -> ImportQueueMaintenanceProjection:
+    task_rows = tuple(
+        db.execute(
+            select(
+                ImportTask.id,
+                ImportTask.source_key,
+                ImportTask.source_path,
+                ImportTask.status,
+            )
+            .where(
+                ImportTask.status.in_(("PENDING", "PARSING")),
+                ~exists().where(ImportWorkItem.import_task_id == ImportTask.id),
+            )
+            .order_by(ImportTask.created_at.asc(), ImportTask.id.asc())
+            .limit(reconcile_limit)
         ).all()
-        if remaining
-        else []
     )
-    for task in task_rows:
-        task.source_key = source_key(task.source_path)
-    for library_file in file_rows:
-        library_file.path_key = source_key(library_file.path)
-    db.flush()
-    return len(task_rows) + len(file_rows)
+    missing_task_keys = tuple(
+        db.execute(
+            select(
+                ImportTask.id,
+                ImportTask.source_key,
+                ImportTask.source_path,
+                ImportTask.status,
+            )
+            .where(ImportTask.source_key.is_(None))
+            .order_by(ImportTask.created_at.asc(), ImportTask.id.asc())
+            .limit(source_key_limit)
+        ).all()
+    )
+    task_rows_by_id = {str(row[0]): row for row in (*task_rows, *missing_task_keys)}
+    remaining = max(0, source_key_limit - len(missing_task_keys))
+    file_rows = (
+        tuple(
+            db.execute(
+                select(LibraryFile.id, LibraryFile.path)
+                .where(LibraryFile.path_key.is_(None))
+                .order_by(LibraryFile.id.asc())
+                .limit(remaining)
+            ).all()
+        )
+        if remaining
+        else ()
+    )
+    return ImportQueueMaintenanceProjection(
+        task_rows=tuple(task_rows_by_id.values()),
+        file_rows=file_rows,
+    )
+
+
+def prepare_import_queue_maintenance(
+    projection: ImportQueueMaintenanceProjection,
+    *,
+    now: datetime,
+) -> PreparedImportQueueMaintenance:
+    task_updates: list[dict[str, object]] = []
+    work_values: list[dict[str, object]] = []
+    for task_id, stored_key, source_path, status in projection.task_rows:
+        key = stored_key or source_key(source_path)
+        task_updates.append(
+            {
+                "_target_id": task_id,
+                "_source_key": key,
+                "_status": "PENDING" if status == "PARSING" else status,
+            }
+        )
+        if status in {"PENDING", "PARSING"}:
+            work_values.append(
+                {
+                    "id": f"work_{uuid4().hex}",
+                    "kind": "IMPORT_SOURCE",
+                    "scanJobId": None,
+                    "importTaskId": task_id,
+                    "dedupeKey": f"import:{key}:{task_id}",
+                    "status": "PENDING",
+                    "priority": 10,
+                    "availableAt": now,
+                    "attempts": 0,
+                    "createdAt": now,
+                    "updatedAt": now,
+                }
+            )
+    file_updates = tuple(
+        {"_target_id": file_id, "_path_key": source_key(path)}
+        for file_id, path in projection.file_rows
+    )
+    return PreparedImportQueueMaintenance(
+        task_updates=tuple(task_updates),
+        work_rows=tuple(work_values),
+        file_updates=file_updates,
+    )
+
+
+def write_prepared_import_queue_maintenance(
+    db: Session,
+    prepared: PreparedImportQueueMaintenance,
+) -> int:
+    task_table = ImportTask.__table__
+    if prepared.task_updates:
+        db.execute(
+            task_table.update()
+            .where(task_table.c.id == bindparam("_target_id"))
+            .values(
+                {
+                    task_table.c["sourceKey"]: bindparam("_source_key"),
+                    task_table.c.status: bindparam("_status"),
+                    task_table.c["leaseOwner"]: None,
+                    task_table.c["leaseExpiresAt"]: None,
+                }
+            ),
+            list(prepared.task_updates),
+        )
+    for chunk in sqlite_parameter_chunks(prepared.work_rows, parameters_per_row=11):
+        db.execute(
+            sqlite_insert(ImportWorkItem.__table__)
+            .values(list(chunk))
+            .on_conflict_do_nothing(index_elements=[ImportWorkItem.dedupe_key])
+        )
+    file_table = LibraryFile.__table__
+    if prepared.file_updates:
+        db.execute(
+            file_table.update()
+            .where(file_table.c.id == bindparam("_target_id"))
+            .values({file_table.c["pathKey"]: bindparam("_path_key")}),
+            list(prepared.file_updates),
+        )
+    return prepared.changed_count
 
 
 def recover_scan_work_items(db: Session) -> int:
     now = db_timestamp()
-    jobs = db.scalars(
-        select(ImportScanJob).where(ImportScanJob.status == "RUNNING")
-    ).all()
-    for job in jobs:
-        job.status = "PENDING"
-        job.directories_scanned = 0
-        job.files_scanned = 0
-        job.candidates_found = 0
-        job.queued_count = 0
-        job.skipped_count = 0
-        job.error_count = 0
-        job.ignored_reason_counts = {}
-        job.error_samples = []
-        job.restart_count += 1
-        job.started_at = None
-        job.heartbeat_at = None
-        job.updated_at = now
+    running_filter = ImportScanJob.status == "RUNNING"
+    running_count = db.scalar(
+        select(func.count()).select_from(ImportScanJob).where(running_filter)
+    )
+    db.execute(
+        update(ImportScanJob)
+        .where(running_filter)
+        .values(
+            status="PENDING",
+            directories_scanned=0,
+            files_scanned=0,
+            candidates_found=0,
+            queued_count=0,
+            skipped_count=0,
+            error_count=0,
+            ignored_reason_counts={},
+            error_samples=[],
+            restart_count=ImportScanJob.restart_count + 1,
+            started_at=None,
+            heartbeat_at=None,
+            updated_at=now,
+        )
+    )
     db.execute(
         update(ImportWorkItem)
         .where(ImportWorkItem.kind == "SCAN_DIRECTORY")
@@ -434,19 +723,15 @@ def recover_scan_work_items(db: Session) -> int:
             attempts=0,
         )
     )
-    db.flush()
-    return len(jobs)
+    return int(running_count or 0)
 
 
 def clear_work_queue(db: Session) -> int:
-    scan_jobs = db.scalars(
-        select(ImportScanJob).where(ImportScanJob.status.in_(ACTIVE_SCAN_STATUSES))
-    ).all()
     now = db_timestamp()
-    for job in scan_jobs:
-        job.status = "CANCELLED"
-        job.finished_at = now
-        job.updated_at = now
+    db.execute(
+        update(ImportScanJob)
+        .where(ImportScanJob.status.in_(ACTIVE_SCAN_STATUSES))
+        .values(status="CANCELLED", finished_at=now, updated_at=now)
+    )
     result = db.execute(delete(ImportWorkItem))
-    db.flush()
     return int(result.rowcount or 0)

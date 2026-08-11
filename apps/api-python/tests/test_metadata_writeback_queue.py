@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from app.models.common import db_timestamp
 from app.models.import_pipeline import ImportTask
 from app.models.library import (
     LibraryFile,
@@ -16,7 +17,6 @@ from app.models.organize import (
     MetadataWritebackTarget,
     OrganizePolicy,
 )
-from app.models.settings import SystemEvent
 from app.modules.metadata.application.opf import parse_opf_metadata
 from app.modules.metadata.infrastructure.writeback_queue import (
     enqueue_writeback,
@@ -102,6 +102,10 @@ def test_writeback_uses_immutable_snapshot_and_finishes_after_background_process
     db_session.commit()
 
     assert process_next_metadata_writeback(db_session, test_settings) is True
+    expanded = metadata_writeback_view(db_session, operation_id)
+    assert expanded is not None
+    assert expanded["totalTargets"] == 1
+    assert process_next_metadata_writeback(db_session, test_settings) is True
     assert metadata_writeback_view(db_session, operation_id) is None
     metadata = parse_opf_metadata(source.with_suffix(".opf").read_bytes())
     assert metadata.title == "快照标题"
@@ -127,6 +131,7 @@ def test_external_change_is_logged_and_removed_without_retry(
         media_version_id="media-1",
         source="AUTOMATIC",
     )
+    assert process_next_metadata_writeback(db_session, test_settings) is True
     target = db_session.scalar(select(MetadataWritebackTarget))
     assert target is not None
     target.attempts = 2
@@ -159,6 +164,7 @@ def test_writeback_adds_explicit_volume_number_to_publication_title(
     db_session.commit()
 
     assert process_next_metadata_writeback(db_session, test_settings) is True
+    assert process_next_metadata_writeback(db_session, test_settings) is True
     metadata = parse_opf_metadata(source.with_suffix(".opf").read_bytes())
     assert metadata.title == "快照标题"
     assert metadata.volume_title == "第一卷"
@@ -166,7 +172,9 @@ def test_writeback_adds_explicit_volume_number_to_publication_title(
     assert metadata.volume_index == 2
 
 
-def test_queue_capacity_drops_the_whole_new_operation(db_session, tmp_path: Path) -> None:
+def test_queue_capacity_defers_new_preparation_without_dropping_it(
+    db_session, test_settings, tmp_path: Path
+) -> None:
     source = tmp_path / "capacity.txt"
     source.write_text("正文")
     _library_source(db_session, source)
@@ -175,24 +183,30 @@ def test_queue_capacity_drops_the_whole_new_operation(db_session, tmp_path: Path
         db_session,
         work_id="work-1",
         media_version_id="media-1",
-        source="TEST",
+        source="TEST_FIRST",
         max_pending_targets=1,
     )
     second = enqueue_writeback(
         db_session,
         work_id="work-1",
         media_version_id="media-1",
-        source="TEST",
+        source="TEST_SECOND",
         max_pending_targets=1,
     )
 
     assert first.outcome == "QUEUED"
-    assert second.outcome == "QUEUE_FULL"
-    assert second.requested_targets == 1
-    assert len(db_session.scalars(select(MetadataWritebackOperation)).all()) == 1
+    assert second.outcome == "QUEUED"
+    db_session.commit()
+    constrained = test_settings.model_copy(
+        update={"metadata_opf_queue_max_pending": 1}
+    )
+    assert process_next_metadata_writeback(db_session, constrained) is True
+    assert process_next_metadata_writeback(db_session, constrained) is True
+    assert len(db_session.scalars(select(MetadataWritebackOperation)).all()) == 2
     state = db_session.get(MetadataOpfQueueState, "default")
     assert state is not None
     assert state.pending_targets == 1
+    assert state.pending_preparations == 1
 
 
 def test_reconcile_queue_state_updates_existing_counter(db_session) -> None:
@@ -204,7 +218,7 @@ def test_reconcile_queue_state_updates_existing_counter(db_session) -> None:
         state.pending_targets = 7
     db_session.commit()
 
-    assert reconcile_queue_state(db_session) == 0
+    assert reconcile_queue_state(db_session, now=db_timestamp()) == 0
     db_session.expire_all()
 
     reconciled_state = db_session.get(MetadataOpfQueueState, "default")
@@ -212,7 +226,7 @@ def test_reconcile_queue_state_updates_existing_counter(db_session) -> None:
     assert reconciled_state.pending_targets == 0
 
 
-def test_multi_media_batch_is_fully_discarded_when_later_scope_exceeds_capacity(
+def test_multi_media_batch_defers_later_scope_when_capacity_is_full(
     db_session, test_settings, tmp_path: Path
 ) -> None:
     first_source = tmp_path / "first.epub"
@@ -267,15 +281,15 @@ def test_multi_media_batch_is_fully_discarded_when_later_scope_exceeds_capacity(
         settings=constrained_settings,
     )
 
-    assert operations == ()
-    assert db_session.scalar(select(MetadataWritebackTarget)) is None
+    assert len(operations) == 2
+    db_session.commit()
+    assert process_next_metadata_writeback(db_session, constrained_settings) is True
+    assert process_next_metadata_writeback(db_session, constrained_settings) is True
+    assert db_session.scalar(select(MetadataWritebackTarget)) is not None
     state = db_session.get(MetadataOpfQueueState, "default")
     assert state is not None
-    assert state.pending_targets == 0
-    warning = db_session.scalar(
-        select(SystemEvent).where(SystemEvent.action == "metadata.opf_queue_full")
-    )
-    assert warning is not None
+    assert state.pending_targets == 1
+    assert state.pending_preparations == 1
 
 
 def test_writeback_can_target_one_volume_in_media_version(
@@ -332,7 +346,11 @@ def test_writeback_can_target_one_volume_in_media_version(
 
     view = metadata_writeback_view(db_session, operation_id)
     assert view is not None
-    assert view["totalTargets"] == 1
+    assert view["totalTargets"] == 0
+    assert process_next_metadata_writeback(db_session, test_settings) is True
+    expanded = metadata_writeback_view(db_session, operation_id)
+    assert expanded is not None
+    assert expanded["totalTargets"] == 1
     assert process_next_metadata_writeback(db_session, test_settings) is True
     assert first_source.with_suffix(".opf").exists()
     assert not second_source.with_suffix(".opf").exists()
@@ -363,6 +381,7 @@ def test_writeback_prefers_the_target_volumes_cover_over_the_work_cover(
         media_version_id="media-1",
         source="MANUAL",
     )
+    assert process_next_metadata_writeback(db_session, test_settings) is True
     target = db_session.scalar(select(MetadataWritebackTarget))
 
     assert target is not None
@@ -390,6 +409,7 @@ def test_writeback_falls_back_to_the_work_cover_when_the_volume_has_none(
         media_version_id="media-1",
         source="MANUAL",
     )
+    assert process_next_metadata_writeback(db_session, test_settings) is True
     target = db_session.scalar(select(MetadataWritebackTarget))
 
     assert target is not None

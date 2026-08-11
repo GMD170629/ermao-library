@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol, TypeVar
+from typing import Protocol
 
+from app.contracts.import_deletion import PreparedLibraryVolumeDeletion
 from app.modules.imports.application.ports import ImportUnitOfWork
-
-ResultT = TypeVar("ResultT")
+from app.modules.system.public import PreparedSystemEvent
 
 
 @dataclass(frozen=True)
@@ -55,19 +55,48 @@ class ImportDeletionFiles(Protocol):
     def finalize(self, token: ImportDeletionToken) -> FileCleanupResult: ...
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedImportDeletion:
+    task_id: str
+    quarantine_paths: tuple[str, ...]
+    library_deletion: PreparedLibraryVolumeDeletion | None
+    events: tuple[PreparedSystemEvent, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ImportDeletionDatabaseResult:
+    deleted: bool
+    deleted_library_record: bool
+    deleted_work_record: bool
+    deleted_library_database_records: int
+    library_work_id: str | None
+
+
+class PreparedImportDeletionStore(Protocol):
+    """SQL-only store for an already detached import deletion decision."""
+
+    def write(self, prepared: PreparedImportDeletion) -> ImportDeletionDatabaseResult: ...
+
+
 def execute_import_deletion(
     unit_of_work: ImportUnitOfWork,
     files: ImportDeletionFiles,
-    owner_id: str,
-    paths: Sequence[str],
-    database_operation: Callable[[], ResultT],
-) -> tuple[ResultT, FileCleanupResult]:
+    store: PreparedImportDeletionStore,
+    prepared: PreparedImportDeletion,
+) -> tuple[ImportDeletionDatabaseResult, FileCleanupResult]:
     """Commit database deletion only while the corresponding files are recoverable."""
 
-    token = files.quarantine(owner_id, paths)
+    # Route/query projections may have opened a read transaction. Release it
+    # before path validation, manifest publication, and file quarantine.
+    unit_of_work.release()
+    token = files.quarantine(prepared.task_id, prepared.quarantine_paths)
     try:
-        result = database_operation()
-        unit_of_work.commit()
+        result = store.write(prepared)
+        if result.deleted:
+            unit_of_work.commit()
+        else:
+            unit_of_work.rollback()
+            files.restore(token)
     except Exception:
         unit_of_work.rollback()
         files.restore(token)

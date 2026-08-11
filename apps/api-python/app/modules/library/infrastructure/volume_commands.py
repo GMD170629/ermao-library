@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.orm import Session
 
 from app.core.authorization import (
@@ -15,6 +15,7 @@ from app.core.authorization import (
     volume_visibility_predicate,
     work_visibility_predicate,
 )
+from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.common import cuid
 from app.models.import_pipeline import ImportTask
 from app.models.library import (
@@ -26,6 +27,8 @@ from app.models.library import (
 )
 from app.modules.imports.application.dto import ImportTaskDTO
 from app.modules.library.application.volume_commands import (
+    BatchVolumeCommand,
+    BatchVolumeOutcome,
     LibraryActor,
     NewWorkInput,
     VolumeContext,
@@ -35,9 +38,17 @@ from app.modules.library.application.volume_commands import (
     VolumeSplitOutcome,
 )
 from app.modules.library.infrastructure import operations as operation_store
-from app.modules.library.infrastructure.deletion import delete_volume_scope
+from app.modules.library.infrastructure.batch_volume_commands import (
+    execute_batch_volume_mutation,
+    prepare_batch_volume_mutation,
+)
+from app.modules.library.infrastructure.deletion import (
+    execute_prepared_volume_scope_deletion,
+    prepare_delete_volume_scope,
+)
 from app.modules.library.infrastructure.structural_operations import (
-    move_volume_to_work,
+    execute_prepared_volume_move,
+    prepare_volume_move,
 )
 from app.modules.library.infrastructure.structural_operations import (
     reorder_volume as reorder_volume_within_media_version,
@@ -80,60 +91,96 @@ class SqlAlchemyVolumeStructure:
             is not None
         )
 
+    def apply_batch(
+        self,
+        *,
+        actor_id: str,
+        source_work_id: str,
+        contexts: tuple[VolumeContext, ...],
+        command: BatchVolumeCommand,
+        now: datetime,
+    ) -> BatchVolumeOutcome:
+        prepared = prepare_batch_volume_mutation(
+            self._db,
+            actor_id=actor_id,
+            source_work_id=source_work_id,
+            contexts=contexts,
+            command=command,
+            now=now,
+        )
+        return execute_batch_volume_mutation(self._db, prepared)
+
     def get_volume_context(
         self, *, actor: LibraryActor, work_id: str, volume_id: str
     ) -> VolumeContext | None:
+        contexts = self.get_volume_contexts(
+            actor=actor,
+            work_id=work_id,
+            volume_ids=(volume_id,),
+        )
+        return contexts[0] if contexts else None
+
+    def get_volume_contexts(
+        self,
+        *,
+        actor: LibraryActor,
+        work_id: str,
+        volume_ids: tuple[str, ...],
+    ) -> tuple[VolumeContext, ...]:
+        if not volume_ids:
+            return ()
         authorization = self._authorization_context(actor)
-        row = self._db.execute(
-            select(LibraryVolume, LibraryWork)
+        source_path = (
+            select(LibraryFile.path)
+            .where(LibraryFile.volume_id == LibraryVolume.id)
+            .order_by(LibraryFile.sort_order.asc(), LibraryFile.id.asc())
+            .limit(1)
+            .scalar_subquery()
+        )
+        rows = self._db.execute(
+            select(LibraryVolume, LibraryWork, LibraryMediaVersion, source_path)
             .join(
                 LibraryMediaVersion,
                 LibraryMediaVersion.id == LibraryVolume.media_version_id,
             )
             .join(LibraryWork, LibraryWork.id == LibraryMediaVersion.work_id)
             .where(
-                LibraryVolume.id == volume_id,
+                LibraryVolume.id.in_(volume_ids),
                 LibraryWork.id == work_id,
                 LibraryVolume.hidden.is_(False),
                 volume_visibility_predicate(authorization),
             )
-        ).one_or_none()
-        if row is None:
-            return None
-        volume, work = row
-        source_path = self._db.scalar(
-            select(LibraryFile.path)
-            .where(LibraryFile.volume_id == volume_id)
-            .order_by(LibraryFile.sort_order.asc(), LibraryFile.id.asc())
-            .limit(1)
-        )
-        media_version = self._db.get(LibraryMediaVersion, volume.media_version_id)
-        if media_version is None:
-            return None
-        return VolumeContext(
-            id=volume.id,
-            work_id=work.id,
-            media_version_id=volume.media_version_id,
-            media_kind=media_version.media_kind,
-            title=volume.title,
-            sort_order=volume.sort_order,
-            format=volume.format,
-            monitor_folder_id=volume.monitor_folder_id,
-            author=work.author,
-            work_title=work.title,
-            source_path=Path(source_path).expanduser() if source_path else None,
+        ).all()
+        contexts = {
+            volume.id: VolumeContext(
+                id=volume.id,
+                work_id=work.id,
+                media_version_id=volume.media_version_id,
+                media_kind=media_version.media_kind,
+                title=volume.title,
+                sort_order=volume.sort_order,
+                format=volume.format,
+                monitor_folder_id=volume.monitor_folder_id,
+                author=work.author,
+                work_title=work.title,
+                source_path=(Path(path_value).expanduser() if path_value else None),
+            )
+            for volume, work, media_version, path_value in rows
+        }
+        return tuple(
+            contexts[volume_id] for volume_id in volume_ids if volume_id in contexts
         )
 
     def update_volume(
         self, *, volume_id: str, changes: dict[str, object], now: datetime
     ) -> None:
-        volume = self._db.get(LibraryVolume, volume_id)
-        if volume is None:
+        result = self._db.execute(
+            update(LibraryVolume)
+            .where(LibraryVolume.id == volume_id)
+            .values(**changes, updated_at=now)
+        )
+        if result.rowcount != 1:
             raise ValueError("卷册不存在")
-        for attribute, value in changes.items():
-            setattr(volume, attribute, value)
-        volume.updated_at = now
-        self._db.flush()
 
     def _move_inverse(
         self,
@@ -210,7 +257,7 @@ class SqlAlchemyVolumeStructure:
             if isinstance(volume_row, dict)
             else volume_id
         )
-        result = move_volume_to_work(
+        prepared_move = prepare_volume_move(
             self._db,
             source_work_id=source_work_id,
             volume_id=volume_id,
@@ -220,14 +267,13 @@ class SqlAlchemyVolumeStructure:
         inverse.update(
             {
                 "targetWorkId": target_work_id,
-                "targetMediaVersionId": result.target_media_version_id,
+                "targetMediaVersionId": prepared_move.result.target_media_version_id,
                 "targetMediaVersionCreated": (
-                    result.transfer_mode == "CREATED_MEDIA_VERSION"
+                    prepared_move.result.transfer_mode == "CREATED_MEDIA_VERSION"
                 ),
             }
         )
-        operation = operation_store.create_operation(
-            self._db,
+        operation = operation_store.prepare_operation_write(
             user_id=actor_id,
             action="MOVE_VOLUME",
             target_type="volume",
@@ -241,10 +287,13 @@ class SqlAlchemyVolumeStructure:
             inverse=inverse,
             now=now,
         )
-        return VolumeMoveOutcome(
-            move=result,
-            operation=operation_store.operation_summary(operation),
+        outcome = VolumeMoveOutcome(
+            move=prepared_move.result,
+            operation=operation_store.operation_summary(operation.record),
         )
+        execute_prepared_volume_move(self._db, prepared_move)
+        operation_store.write_prepared_operation(self._db, operation)
+        return outcome
 
     def reorder_volume(
         self,
@@ -300,18 +349,8 @@ class SqlAlchemyVolumeStructure:
             )
         )
         target_created = target_media is None
-        if target_media is None:
-            target_media = LibraryMediaVersion(
-                id=cuid(),
-                work_id=work_id,
-                media_kind=target_media_kind,
-                created_at=now,
-                updated_at=now,
-            )
-            self._db.add(target_media)
-            self._db.flush()
-
-        history_media_ids = list(dict.fromkeys([source_media.id, target_media.id]))
+        target_id = cuid() if target_media is None else target_media.id
+        history_media_ids = list(dict.fromkeys([source_media.id, target_id]))
         histories = list(
             self._db.scalars(
                 select(UserMediaHistory).where(
@@ -324,7 +363,7 @@ class SqlAlchemyVolumeStructure:
             "targetMediaVersion": (
                 None if target_created else entity_as_legacy_dict(target_media)
             ),
-            "targetMediaVersionId": target_media.id,
+            "targetMediaVersionId": target_id,
             "targetMediaVersionCreated": target_created,
             "volumes": [entity_as_legacy_dict(row) for row in selected],
             "mediaHistories": [entity_as_legacy_dict(row) for row in histories],
@@ -332,7 +371,12 @@ class SqlAlchemyVolumeStructure:
         }
         moved_ids = {row.id for row in selected}
         source_id = source_media.id
-        target_id = target_media.id
+        selected_update_rows: list[dict[str, object]] = []
+        remaining_update_rows: list[dict[str, object]] = []
+        history_update_rows: list[dict[str, object]] = []
+        new_history_rows: list[dict[str, object]] = []
+        history_delete_ids: list[str] = []
+        remaining: list[LibraryVolume] = []
         if source_id != target_id:
             target_count = int(
                 self._db.scalar(
@@ -343,22 +387,31 @@ class SqlAlchemyVolumeStructure:
                 or 0
             )
             for offset, selected_volume in enumerate(selected):
-                selected_volume.media_version_id = target_id
-                selected_volume.sort_order = (target_count + offset) * 1000
-                selected_volume.classification_source = "USER"
-                selected_volume.classification_reason = "USER_OVERRIDE"
-                selected_volume.suggested_media_kind = None
-                selected_volume.updated_at = now
-            self._db.flush()
+                selected_update_rows.append(
+                    {
+                        "id": selected_volume.id,
+                        "media_version_id": target_id,
+                        "sort_order": (target_count + offset) * 1000,
+                        "classification_source": "USER",
+                        "classification_reason": "USER_OVERRIDE",
+                        "suggested_media_kind": None,
+                        "updated_at": now,
+                    }
+                )
             remaining = list(
                 self._db.scalars(
                     select(LibraryVolume)
-                    .where(LibraryVolume.media_version_id == source_id)
+                    .where(
+                        LibraryVolume.media_version_id == source_id,
+                        LibraryVolume.id.not_in(moved_ids),
+                    )
                     .order_by(LibraryVolume.sort_order, LibraryVolume.id)
                 ).all()
             )
             for index, remaining_volume in enumerate(remaining):
-                remaining_volume.sort_order = index * 1000
+                remaining_update_rows.append(
+                    {"id": remaining_volume.id, "sort_order": index * 1000}
+                )
             source_histories = [
                 row for row in histories if row.media_version_id == source_id
             ]
@@ -371,41 +424,57 @@ class SqlAlchemyVolumeStructure:
             for source_history in source_histories:
                 target_history = target_by_user.get(source_history.user_id)
                 if target_history is None and not remaining:
-                    source_history.media_version_id = target_id
-                    source_history.last_volume_id = preferred_target_volume_id
-                    source_history.updated_at = now
+                    history_update_rows.append(
+                        {
+                            "id": source_history.id,
+                            "media_version_id": target_id,
+                            "last_volume_id": preferred_target_volume_id,
+                            "updated_at": now,
+                        }
+                    )
                 else:
                     if target_history is None:
-                        target_history = UserMediaHistory(
-                            id=cuid(),
-                            user_id=source_history.user_id,
-                            media_version_id=target_id,
-                            last_volume_id=preferred_target_volume_id,
-                            created_at=now,
-                            updated_at=now,
+                        new_history_rows.append(
+                            {
+                                "id": cuid(),
+                                "user_id": source_history.user_id,
+                                "media_version_id": target_id,
+                                "last_volume_id": preferred_target_volume_id,
+                                "created_at": now,
+                                "updated_at": now,
+                            }
                         )
-                        self._db.add(target_history)
                     elif source_history.updated_at > target_history.updated_at:
-                        target_history.last_volume_id = preferred_target_volume_id
-                        target_history.updated_at = source_history.updated_at
+                        history_update_rows.append(
+                            {
+                                "id": target_history.id,
+                                "last_volume_id": preferred_target_volume_id,
+                                "updated_at": source_history.updated_at,
+                            }
+                        )
                     if remaining:
                         if source_history.last_volume_id in moved_ids:
-                            source_history.last_volume_id = remaining[0].id
-                            source_history.updated_at = now
+                            history_update_rows.append(
+                                {
+                                    "id": source_history.id,
+                                    "last_volume_id": remaining[0].id,
+                                    "updated_at": now,
+                                }
+                            )
                     else:
-                        self._db.delete(source_history)
-            if not remaining:
-                self._db.delete(source_media)
+                        history_delete_ids.append(source_history.id)
         else:
             for selected_volume in selected:
-                selected_volume.classification_source = "USER"
-                selected_volume.classification_reason = "USER_OVERRIDE"
-                selected_volume.suggested_media_kind = None
-                selected_volume.updated_at = now
-        target_media.updated_at = now
-        self._db.flush()
-        operation = operation_store.create_operation(
-            self._db,
+                selected_update_rows.append(
+                    {
+                        "id": selected_volume.id,
+                        "classification_source": "USER",
+                        "classification_reason": "USER_OVERRIDE",
+                        "suggested_media_kind": None,
+                        "updated_at": now,
+                    }
+                )
+        operation = operation_store.prepare_operation_write(
             user_id=actor_id,
             action="RECLASSIFY_VOLUME",
             target_type="volume",
@@ -420,44 +489,80 @@ class SqlAlchemyVolumeStructure:
             inverse=inverse,
             now=now,
         )
-        return VolumeReclassifyOutcome(
+        history_delete_statements = tuple(
+            delete(UserMediaHistory).where(UserMediaHistory.id.in_(chunk))
+            for chunk in sqlite_parameter_chunks(
+                tuple(history_delete_ids), parameters_per_row=1
+            )
+        )
+        outcome = VolumeReclassifyOutcome(
             target_media_version_id=target_id,
             moved_volume_ids=tuple(row.id for row in selected),
-            operation=operation_store.operation_summary(operation),
+            operation=operation_store.operation_summary(operation.record),
         )
+        if target_created:
+            self._db.execute(
+                insert(LibraryMediaVersion),
+                [
+                    {
+                        "id": target_id,
+                        "work_id": work_id,
+                        "media_kind": target_media_kind,
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                ],
+            )
+        if selected_update_rows:
+            self._db.execute(update(LibraryVolume), selected_update_rows)
+        if remaining_update_rows:
+            self._db.execute(update(LibraryVolume), remaining_update_rows)
+        if history_update_rows:
+            self._db.execute(update(UserMediaHistory), history_update_rows)
+        if new_history_rows:
+            self._db.execute(insert(UserMediaHistory), new_history_rows)
+        for statement in history_delete_statements:
+            self._db.execute(statement)
+        if source_id != target_id and not remaining:
+            self._db.execute(
+                delete(LibraryMediaVersion).where(LibraryMediaVersion.id == source_id)
+            )
+        self._db.execute(
+            update(LibraryMediaVersion)
+            .where(LibraryMediaVersion.id == target_id)
+            .values(updated_at=now)
+        )
+        operation_store.write_prepared_operation(self._db, operation)
+        return outcome
 
-    def create_work_from_volume(
+    def _prepare_work_from_volume(
         self,
         *,
         source_work_id: str,
         new_work: NewWorkInput,
         now: datetime,
-    ) -> str:
+    ) -> tuple[str, dict[str, object]]:
         source = self._db.get(LibraryWork, source_work_id)
         if source is None:
             raise ValueError("作品不存在")
         author = str(new_work.author or source.author or UNKNOWN_AUTHOR).strip()
         author = author or UNKNOWN_AUTHOR
         work_id = cuid()
-        self._db.add(
-            LibraryWork(
-                id=work_id,
-                monitor_folder_id=source.monitor_folder_id,
-                origin=source.origin,
-                title=new_work.title,
-                normalized_title=normalize_identity_part(new_work.title),
-                author=author,
-                normalized_author=normalize_identity_part(author),
-                description=source.description,
-                tags=source.tags,
-                cover_status="PENDING",
-                merge_key=identity_merge_key(new_work.title, author),
-                created_at=now,
-                updated_at=now,
-            )
-        )
-        self._db.flush()
-        return work_id
+        return work_id, {
+            "id": work_id,
+            "monitor_folder_id": source.monitor_folder_id,
+            "origin": source.origin,
+            "title": new_work.title,
+            "normalized_title": normalize_identity_part(new_work.title),
+            "author": author,
+            "normalized_author": normalize_identity_part(author),
+            "description": source.description,
+            "tags": source.tags,
+            "cover_status": "PENDING",
+            "merge_key": identity_merge_key(new_work.title, author),
+            "created_at": now,
+            "updated_at": now,
+        }
 
     def split_volume(
         self,
@@ -472,28 +577,28 @@ class SqlAlchemyVolumeStructure:
             source_work_id=source_work_id,
             volume_id=volume_id,
         )
-        target_work_id = self.create_work_from_volume(
+        target_work_id, work_row = self._prepare_work_from_volume(
             source_work_id=source_work_id,
             new_work=new_work,
             now=now,
         )
-        move = move_volume_to_work(
+        prepared_move = prepare_volume_move(
             self._db,
             source_work_id=source_work_id,
             volume_id=volume_id,
             target_work_id=target_work_id,
             now=now,
+            target_work_prepared=True,
         )
         inverse.update(
             {
                 "targetWorkId": target_work_id,
-                "targetMediaVersionId": move.target_media_version_id,
+                "targetMediaVersionId": prepared_move.result.target_media_version_id,
                 "targetMediaVersionCreated": True,
                 "newWorkId": target_work_id,
             }
         )
-        operation = operation_store.create_operation(
-            self._db,
+        operation = operation_store.prepare_operation_write(
             user_id=actor_id,
             action="SPLIT_VOLUME",
             target_type="volume",
@@ -507,11 +612,15 @@ class SqlAlchemyVolumeStructure:
             inverse=inverse,
             now=now,
         )
-        return VolumeSplitOutcome(
+        outcome = VolumeSplitOutcome(
             target_work_id=target_work_id,
-            move=move,
-            operation=operation_store.operation_summary(operation),
+            move=prepared_move.result,
+            operation=operation_store.operation_summary(operation.record),
         )
+        self._db.execute(insert(LibraryWork), [work_row])
+        execute_prepared_volume_move(self._db, prepared_move)
+        operation_store.write_prepared_operation(self._db, operation)
+        return outcome
 
     def delete_volume(
         self,
@@ -530,10 +639,10 @@ class SqlAlchemyVolumeStructure:
         title = str(volume.get("title") or volume_id)
         deleted_media_version = bool(snapshot.get("LibraryMediaVersion"))
         deleted_work = bool(snapshot.get("LibraryWork"))
-        if delete_volume_scope(self._db, volume_id) != 1:
+        prepared_deletion = prepare_delete_volume_scope(self._db, volume_id)
+        if prepared_deletion is None:
             raise ValueError("Volume does not exist")
-        operation = operation_store.create_operation(
-            self._db,
+        operation = operation_store.prepare_operation_write(
             user_id=actor_id,
             action="DELETE_VOLUME",
             target_type="volume",
@@ -543,13 +652,17 @@ class SqlAlchemyVolumeStructure:
             inverse={"snapshot": snapshot},
             now=now,
         )
-        return VolumeDeleteOutcome(
+        outcome = VolumeDeleteOutcome(
             work_id=work_id,
             volume_id=volume_id,
             deleted_media_version=deleted_media_version,
             deleted_work=deleted_work,
-            operation=operation_store.operation_summary(operation),
+            operation=operation_store.operation_summary(operation.record),
         )
+        if execute_prepared_volume_scope_deletion(self._db, prepared_deletion) != 1:
+            raise ValueError("Volume does not exist")
+        operation_store.write_prepared_operation(self._db, operation)
+        return outcome
 
     def queue_epub_conversion(
         self, *, context: VolumeContext, now: datetime
@@ -567,8 +680,9 @@ class SqlAlchemyVolumeStructure:
             message="已加入 EPUB 转换队列",
             allow_terminal_requeue=True,
         )
-        row = self._db.get(ImportTask, task.id)
-        if row is not None:
-            row.volume_id = context.id
-        self._db.flush()
+        self._db.execute(
+            update(ImportTask)
+            .where(ImportTask.id == task.id)
+            .values(volume_id=context.id)
+        )
         return task, created

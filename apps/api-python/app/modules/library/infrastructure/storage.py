@@ -115,8 +115,17 @@ def update_work_cover(
             updated_at=now,
         )
     )
-    db.flush()
     return bool(result.rowcount)
+
+
+def update_work_covers(
+    db: Session,
+    rows: tuple[dict[str, object], ...],
+) -> int:
+    if not rows:
+        return 0
+    db.execute(update(LibraryWork), list(rows))
+    return len(rows)
 
 
 def collect_storage_values(

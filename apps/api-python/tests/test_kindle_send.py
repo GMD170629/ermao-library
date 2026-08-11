@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import smtplib
+from datetime import UTC, datetime
 from pathlib import Path
 
+from app.bootstrap.kindle import recover_interrupted_kindle_tasks_command
+from app.bootstrap.system import prepare_system_event
 from app.core.auth import hash_password
 from app.db.base import Base
 from app.db.bootstrap import apply_schema
 from app.models.auth import User
+from app.models.import_pipeline import KindleSendTask
 from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
@@ -18,7 +22,8 @@ from app.services.kindle_queue import (
     process_next_kindle_send_task,
     recover_interrupted_tasks,
 )
-from sqlalchemy import text
+from sqlalchemy import select, text
+from tests.support.sqlalchemy import StatementRecorder
 
 
 def _apply_full_schema(db_session) -> None:
@@ -121,6 +126,56 @@ def _enqueue(client):
     )
     assert response.status_code == 201
     return response.json()["data"]["task"]
+
+
+def test_recover_interrupted_kindle_tasks_uses_set_based_dml(db_session) -> None:
+    _apply_full_schema(db_session)
+    task_ids = tuple(f"bulk-kindle-{index}" for index in range(25))
+    db_session.add_all(
+        [
+            KindleSendTask(
+                id=task_id,
+                book_title=f"Book {index}",
+                file_name=f"book-{index}.epub",
+                format="EPUB",
+                mime_type="application/epub+zip",
+                size_bytes=1,
+                recipient_email="reader@example.test",
+                subject=f"Book {index}",
+                status="sending",
+            )
+            for index, task_id in enumerate(task_ids)
+        ]
+    )
+    db_session.commit()
+    timestamp = datetime.now(UTC)
+    events = tuple(
+        prepare_system_event(
+            source="kindle",
+            action="send.unknown",
+            target_type="kindleSendTask",
+            target_id=task_id,
+            message="Kindle send outcome unknown",
+        )
+        for task_id in task_ids
+    )
+
+    with StatementRecorder(db_session.get_bind()) as recorder:
+        recorder.reset_after_warmup()
+        recover_interrupted_kindle_tasks_command(
+            db_session,
+            task_ids=task_ids,
+            error_message="interrupted",
+            timestamp=timestamp,
+            events=events,
+        )
+
+    assert recorder.dml_count == 2
+    assert set(
+        db_session.scalars(
+            select(KindleSendTask.id).where(KindleSendTask.status == "unknown")
+        )
+    ) == set(task_ids)
 
 
 class FakeSmtp:

@@ -4,62 +4,151 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
+from dataclasses import dataclass
+from datetime import datetime
 
-from sqlalchemy import inspect, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.dialects.sqlite.dml import Insert
 from sqlalchemy.orm import Session
 
+from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.common import db_timestamp
 from app.models.import_pipeline import Source
+from app.models.organize import MetadataProviderPipeline
 from app.modules.metadata.domain.providers import ProviderManifest
 
 METADATA_SOURCE_KIND = "metadata"
 
 
-def _json_text(value: object) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+@dataclass(frozen=True, slots=True)
+class BuiltinProviderSeedRow:
+    provider_id: str
+    name: str
+    enabled: bool
+    priority: int
+    config_json: str
+    capabilities_json: str
+    media_kinds: tuple[str, ...]
 
 
-def _source_table_ready(db: Session) -> bool:
-    return inspect(db.connection()).has_table("Source")
+@dataclass(frozen=True, slots=True)
+class PreparedMetadataSourceSeedWrite:
+    source_statements: tuple[Insert, ...]
+    pipeline_statements: tuple[Insert, ...]
 
 
-def ensure_metadata_sources(db: Session, manifests: Iterable[ProviderManifest]) -> None:
-    """Insert missing provider sources without changing existing configuration."""
+def prepare_builtin_provider_seed_rows(
+    manifests: Iterable[ProviderManifest],
+) -> tuple[BuiltinProviderSeedRow, ...]:
+    """Purely serialize built-in manifests before bootstrap enters a transaction."""
 
-    if not _source_table_ready(db):
-        return
-
-    existing_provider_ids = set(
-        db.execute(
-            select(Source.provider_type).where(Source.kind == METADATA_SOURCE_KIND)
-        ).scalars()
+    return tuple(
+        BuiltinProviderSeedRow(
+            provider_id=manifest.id,
+            name=manifest.name,
+            enabled=manifest.enabled_by_default,
+            priority=manifest.default_priority,
+            config_json=_json_text(
+                {
+                    field.key: field.default
+                    for field in manifest.config_fields
+                    if field.default is not None
+                }
+            ),
+            capabilities_json=_json_text(list(manifest.capabilities)),
+            media_kinds=tuple(manifest.media_kinds),
+        )
+        for manifest in manifests
     )
-    now = db_timestamp()
-    for manifest in manifests:
-        if manifest.id in existing_provider_ids:
-            continue
-        config = {
-            field.key: field.default
-            for field in manifest.config_fields
-            if field.default is not None
+
+
+def write_builtin_provider_seed_rows(
+    db: Session,
+    rows: tuple[BuiltinProviderSeedRow, ...],
+    *,
+    now: datetime | None = None,
+) -> None:
+    prepared = prepare_metadata_source_seed_write(rows, now=now or db_timestamp())
+    execute_metadata_source_seed_write(db, prepared)
+
+
+def prepare_metadata_source_seed_write(
+    rows: tuple[BuiltinProviderSeedRow, ...],
+    *,
+    now: datetime,
+) -> PreparedMetadataSourceSeedWrite:
+    """Build every SQL expression and bind chunk before the writer transaction."""
+
+    source_rows = tuple(
+        {
+            "id": f"metadata-provider-{row.provider_id}",
+            "name": row.name,
+            "kind": METADATA_SOURCE_KIND,
+            "provider_type": row.provider_id,
+            "enabled": row.enabled,
+            "priority": row.priority,
+            "config": row.config_json,
+            "capabilities": row.capabilities_json,
+            "rate_limit": "{}",
+            "created_at": now,
+            "updated_at": now,
         }
-        statement = (
+        for row in rows
+    )
+    pipeline_rows = tuple(
+        {
+            "media_kind": media_kind,
+            "provider_id": row.provider_id,
+            "included": True,
+            "enabled": row.enabled,
+            "position": row.priority,
+            "created_at": now,
+            "updated_at": now,
+        }
+        for row in rows
+        for media_kind in row.media_kinds
+    )
+    source_statements = tuple(
+        (
             sqlite_insert(Source)
-            .values(
-                id=f"metadata-provider-{manifest.id}",
-                name=manifest.name,
-                kind=METADATA_SOURCE_KIND,
-                provider_type=manifest.id,
-                enabled=manifest.enabled_by_default,
-                priority=manifest.default_priority,
-                config=_json_text(config),
-                capabilities=_json_text(list(manifest.capabilities)),
-                rate_limit=_json_text({}),
-                created_at=now,
-                updated_at=now,
-            )
+            .values(list(chunk))
             .on_conflict_do_nothing(index_elements=[Source.id])
         )
+        for chunk in sqlite_parameter_chunks(source_rows, parameters_per_row=11)
+    )
+    pipeline_statements = tuple(
+        (
+            sqlite_insert(MetadataProviderPipeline)
+            .values(list(chunk))
+            .on_conflict_do_nothing(
+                index_elements=[
+                    MetadataProviderPipeline.media_kind,
+                    MetadataProviderPipeline.provider_id,
+                ]
+            )
+        )
+        for chunk in sqlite_parameter_chunks(pipeline_rows, parameters_per_row=7)
+    )
+    return PreparedMetadataSourceSeedWrite(
+        source_statements=source_statements,
+        pipeline_statements=pipeline_statements,
+    )
+
+
+def execute_metadata_source_seed_write(
+    db: Session, prepared: PreparedMetadataSourceSeedWrite
+) -> None:
+    """Execute only prebuilt expressions inside the bootstrap transaction."""
+
+    for statement in prepared.source_statements:
         db.execute(statement)
-        existing_provider_ids.add(manifest.id)
+    for statement in prepared.pipeline_statements:
+        db.execute(statement)
+
+
+prepare_metadata_source_seed_rows = prepare_builtin_provider_seed_rows
+write_metadata_source_seed_rows = write_builtin_provider_seed_rows
+
+
+def _json_text(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))

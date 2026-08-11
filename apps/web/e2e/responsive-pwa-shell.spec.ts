@@ -836,13 +836,6 @@ test('wide shelf details use responsive bookshelf rows and load more on scroll',
   await expect(grid.getByTestId('bookshelf-ledge')).toHaveCount(9);
 });
 
-test('legacy mobile URLs redirect authenticated users to the shared web home', async ({ page }) => {
-  await page.goto('/mobile');
-
-  await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole('heading', { name: '主页' })).toBeVisible();
-});
-
 test('mobile page actions keep labels horizontal and move below long headings', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/import-tasks');

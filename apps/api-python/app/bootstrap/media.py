@@ -6,36 +6,41 @@ from app.core.config import Settings
 from app.modules.media.application.resource_query import MediaResourceQuery
 from app.modules.media.infrastructure import http_streaming as media_streaming
 from app.modules.media.infrastructure.page_index import (
-    ensure_volume_page_index as build_volume_page_index,
-)
-from app.modules.media.infrastructure.page_index import (
     get_library_file,
     get_page_unit,
     list_page_units_for_volume,
+    load_read_only_page_index_projection,
 )
 from app.modules.media.infrastructure.resource_repository import (
     SqlAlchemyMediaResourceRepository,
 )
 from app.modules.media.infrastructure.volume_archive import ZipVolumeArchiveWriter
-from app.modules.media.public import execute_media_write
+from app.modules.media.public import (
+    ReadOnlyVolumePageIndex,
+    ResolvedVolumePageIndex,
+    VolumePageIndexProjection,
+)
 
 
-def ensure_volume_page_index(
+def load_read_only_volume_page_index(
     db: Session,
-    settings: Settings,
     volume_id: str,
-) -> int:
-    return execute_media_write(
-        db,
-        lambda: build_volume_page_index(db, settings, volume_id),
-    )
+) -> VolumePageIndexProjection:
+    return load_read_only_page_index_projection(db, volume_id)
+
+
+def resolve_read_only_volume_page_index(
+    projection: VolumePageIndexProjection,
+) -> ResolvedVolumePageIndex:
+    return ReadOnlyVolumePageIndex().execute(projection)
 
 
 class MediaPageIndex:
-    ensure_volume_page_index = staticmethod(ensure_volume_page_index)
     get_library_file = staticmethod(get_library_file)
     get_page_unit = staticmethod(get_page_unit)
     list_page_units_for_volume = staticmethod(list_page_units_for_volume)
+    load_read_only = staticmethod(load_read_only_volume_page_index)
+    resolve_read_only = staticmethod(resolve_read_only_volume_page_index)
 
 
 media_page_index = MediaPageIndex()
@@ -52,9 +57,10 @@ def volume_archive_dependencies(
 
 
 __all__ = [
-    "ensure_volume_page_index",
+    "load_read_only_volume_page_index",
     "media_page_index",
     "media_resource_query",
     "media_streaming",
+    "resolve_read_only_volume_page_index",
     "volume_archive_dependencies",
 ]

@@ -16,6 +16,28 @@ class OrganizeRules(HttpContractModel):
     missing_metadata: bool = Field(alias="missingMetadata")
 
 
+class OrganizeRulesUpdateRequest(HttpContractModel):
+    unrecognized: bool | None = None
+    missing_metadata: bool | None = Field(default=None, alias="missingMetadata")
+
+
+class UpdateOrganizePolicyRequest(HttpContractModel):
+    enabled: bool | None = None
+    schedule_mode: str | None = Field(default=None, alias="scheduleMode")
+    interval_minutes: int | str | None = Field(default=None, alias="intervalMinutes")
+    auto_run_on_new: bool | None = Field(default=None, alias="autoRunOnNew")
+    rules: OrganizeRulesUpdateRequest | None = None
+    write_metadata_to_files: bool | None = Field(
+        default=None, alias="writeMetadataToFiles"
+    )
+    prefer_local_metadata: bool | None = Field(
+        default=None, alias="preferLocalMetadata"
+    )
+    local_metadata_priority: list[str] | None = Field(
+        default=None, alias="localMetadataPriority"
+    )
+
+
 class OrganizePolicy(HttpContractModel):
     id: str
     enabled: bool

@@ -5,22 +5,23 @@ import json
 import sys
 from contextlib import nullcontext
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-
-import pytest
-from PIL import Image
-from sqlalchemy import text
 
 import app.modules.imports.application.import_audio as importer_module
 import app.modules.imports.application.managed_book as managed_book_module
 import app.modules.imports.infrastructure.audio_cover as audio_cover_module
 import app.services.audio_metadata as audio_metadata_module
 import app.worker.watcher as watcher_module
+import pytest
 from app.bootstrap.imports import (
-    enqueue_import_task,
     import_managed_book,
+    load_import_enqueue_command_projection,
     load_known_import_paths,
+    persist_import_enqueue_write,
+    prepare_import_enqueue_command,
+    prepare_import_enqueue_write,
     scan_directory_for_imports,
 )
 from app.core.auth import hash_password
@@ -65,7 +66,33 @@ from app.worker.watcher import (
     WatchState,
     WorkerManager,
 )
+from PIL import Image
+from sqlalchemy import text
 from tests.test_worker_importer import write_epub_metadata_fixture
+
+
+def _persist_import_enqueue(
+    db_session,
+    source_path: Path,
+    *,
+    origin: str,
+    original_name: str | None = None,
+    allow_terminal_requeue: bool = False,
+):
+    command = prepare_import_enqueue_command(
+        source_path,
+        origin=origin,
+        original_name=original_name,
+        allow_terminal_requeue=allow_terminal_requeue,
+    )
+    projection = load_import_enqueue_command_projection(db_session, command)
+    db_session.close()
+    prepared = prepare_import_enqueue_write(
+        command,
+        projection,
+        available_at=datetime.now(UTC),
+    )
+    return persist_import_enqueue_write(db_session, prepared)
 
 
 class _FakeAudioDirectoryEntry:
@@ -1518,7 +1545,7 @@ def test_failed_audio_bundle_can_be_retried_and_resets_all_assets(
     bundle.mkdir(parents=True)
     (bundle / "01.mp3").write_bytes(b"first")
     (bundle / "02.mp3").write_bytes(b"second")
-    task, _created = enqueue_import_task(
+    task, _created = _persist_import_enqueue(
         db_session,
         bundle,
         origin="MANUAL",
@@ -1591,7 +1618,7 @@ def test_completed_directory_bundle_can_enqueue_again_after_a_new_episode(
     bundle = test_settings.resolved_monitor_root / "连载有声书"
     bundle.mkdir(parents=True)
     (bundle / "《连载有声书》第1集.m4a").write_bytes(b"episode-one")
-    first, first_created = enqueue_import_task(
+    first, first_created = _persist_import_enqueue(
         db_session, bundle, origin="WATCH", original_name=bundle.name
     )
     assert first_created is True
@@ -1602,7 +1629,7 @@ def test_completed_directory_bundle_can_enqueue_again_after_a_new_episode(
     db_session.commit()
 
     (bundle / "《连载有声书》第2集.m4a").write_bytes(b"episode-two")
-    second, second_created = enqueue_import_task(
+    second, second_created = _persist_import_enqueue(
         db_session,
         bundle,
         origin="WATCH",
@@ -2108,13 +2135,13 @@ def test_watcher_live_and_rescan_only_bundle_proven_book_directories(
         watcher_module, "import_queue_at_high_watermark", lambda _db: False
     )
     monkeypatch.setattr(
-        watcher_module,
-        "schedule_import_scan_job",
-        lambda _db, **kwargs: scheduled.append(kwargs["root_path"].resolve()),
+        manager,
+        "_schedule_scan_request",
+        lambda **kwargs: scheduled.append(kwargs["root_path"].resolve()),
     )
     monkeypatch.setattr(
         watcher_module,
-        "enqueue_import_task",
+        "prepare_import_enqueue_command",
         lambda *_args, **_kwargs: pytest.fail(
             "audio events must schedule a directory scan"
         ),
@@ -2165,13 +2192,13 @@ def test_audio_bundle_detection_applies_ignore_rules_before_mixed_content_check(
         watcher_module, "import_queue_at_high_watermark", lambda _db: False
     )
     monkeypatch.setattr(
-        watcher_module,
-        "schedule_import_scan_job",
-        lambda _db, **kwargs: scheduled.append(kwargs["root_path"].resolve()),
+        manager,
+        "_schedule_scan_request",
+        lambda **kwargs: scheduled.append(kwargs["root_path"].resolve()),
     )
     monkeypatch.setattr(
         watcher_module,
-        "enqueue_import_task",
+        "prepare_import_enqueue_command",
         lambda *_args, **_kwargs: pytest.fail(
             "audio events must schedule a directory scan"
         ),
@@ -2234,13 +2261,13 @@ def test_monitor_root_audio_tracks_are_enqueued_as_one_directory(
         watcher_module, "import_queue_at_high_watermark", lambda _db: False
     )
     monkeypatch.setattr(
-        watcher_module,
-        "schedule_import_scan_job",
-        lambda _db, **kwargs: scheduled.append(kwargs["root_path"].resolve()),
+        manager,
+        "_schedule_scan_request",
+        lambda **kwargs: scheduled.append(kwargs["root_path"].resolve()),
     )
     monkeypatch.setattr(
         watcher_module,
-        "enqueue_import_task",
+        "prepare_import_enqueue_command",
         lambda *_args, **_kwargs: pytest.fail(
             "audio events must schedule a directory scan"
         ),
@@ -2449,7 +2476,7 @@ def test_rescan_reconciles_tracks_split_across_volumes_and_preserves_progress(
             },
         )
     db_session.commit()
-    failed_bundle_task, failed_bundle_created = enqueue_import_task(
+    failed_bundle_task, failed_bundle_created = _persist_import_enqueue(
         db_session,
         book_dir,
         origin="WATCH",

@@ -8,10 +8,11 @@ from collections.abc import Iterable
 from hashlib import sha1
 from typing import Any
 
-from sqlalchemy import case, delete, distinct, exists, func, or_, select, update
+from sqlalchemy import case, delete, distinct, exists, func, or_, select, tuple_, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, aliased
 
+from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import to_timestamp_ms
 from app.models.common import db_timestamp
 from app.models.library import (
@@ -127,46 +128,122 @@ def _facet_public_dict(facet: LibraryFacet, book_count: int) -> dict[str, Any]:
 def sync_work_facets(db: Session, work_id: str) -> None:
     """Synchronize persisted facets for one work after a runtime library change."""
 
-    work = db.execute(
+    sync_works_facets(db, (work_id,))
+
+
+def sync_works_facets(db: Session, work_ids: Iterable[str]) -> None:
+    """Synchronize facets for a prepared work set with bounded collection SQL."""
+
+    unique_work_ids = tuple(dict.fromkeys(work_id for work_id in work_ids if work_id))
+    if not unique_work_ids:
+        return
+
+    works = db.execute(
         select(
             LibraryWork.id,
             LibraryWork.author,
             LibraryWork.tags,
             LibraryWork.series_name,
-        ).where(LibraryWork.id == work_id)
-    ).one_or_none()
-    if work is None:
+        ).where(LibraryWork.id.in_(unique_work_ids))
+    ).all()
+    if not works:
         return
 
     now = db_timestamp()
-    db.execute(delete(LibraryWorkFacet).where(LibraryWorkFacet.work_id == work_id))
-    work_values = {
-        "AUTHOR": split_authors(work.author),
-        "TAG": work_tags(work.tags),
-        "SERIES": unique_names([work.series_name]),
-    }
-    for kind, names in work_values.items():
-        for sort_order, name in enumerate(names):
-            facet_id = ensure_facet(db, kind, name)
-            db.execute(
-                sqlite_insert(LibraryWorkFacet)
-                .values(
-                    facet_id=facet_id,
-                    work_id=work_id,
-                    sort_order=sort_order,
-                    created_at=now,
+    prepared = tuple(
+        (
+            str(work.id),
+            tuple(
+                (kind, name, normalized_name(name), sort_order)
+                for kind, names in (
+                    ("AUTHOR", split_authors(work.author)),
+                    ("TAG", work_tags(work.tags)),
+                    ("SERIES", unique_names([work.series_name])),
                 )
-                .on_conflict_do_nothing(
-                    index_elements=[LibraryWorkFacet.facet_id, LibraryWorkFacet.work_id]
+                for sort_order, name in enumerate(names)
+            ),
+        )
+        for work in works
+    )
+    facets: dict[tuple[str, str], tuple[str, str]] = {}
+    for _work_id, values in prepared:
+        for kind, name, normalized, _sort_order in values:
+            facets.setdefault((kind, normalized), (name, _facet_id(kind, normalized)))
+    facet_rows = [
+        {
+            "id": facet_id,
+            "kind": kind,
+            "name": name,
+            "normalized_name": normalized,
+            "aliases": "[]",
+            "created_at": now,
+            "updated_at": now,
+        }
+        for (kind, normalized), (name, facet_id) in facets.items()
+    ]
+    for chunk in sqlite_parameter_chunks(facet_rows, parameters_per_row=7):
+        db.execute(
+            sqlite_insert(LibraryFacet)
+            .values(list(chunk))
+            .on_conflict_do_nothing(
+                index_elements=[LibraryFacet.kind, LibraryFacet.normalized_name]
+            )
+        )
+
+    facet_ids: dict[tuple[str, str], str] = {}
+    facet_keys = tuple(facets)
+    for chunk in sqlite_parameter_chunks(facet_keys, parameters_per_row=2):
+        rows = db.execute(
+            select(
+                LibraryFacet.kind,
+                LibraryFacet.normalized_name,
+                LibraryFacet.id,
+            ).where(
+                tuple_(LibraryFacet.kind, LibraryFacet.normalized_name).in_(
+                    chunk
                 )
             )
+        )
+        facet_ids.update(
+            {(str(row.kind), str(row.normalized_name)): str(row.id) for row in rows}
+        )
+    missing = set(facet_keys) - set(facet_ids)
+    if missing:
+        raise RuntimeError(f"facet mapping incomplete; missing_count={len(missing)}")
+
+    links = [
+        {
+            "facet_id": facet_ids[(kind, normalized)],
+            "work_id": work_id,
+            "sort_order": sort_order,
+            "created_at": now,
+        }
+        for work_id, values in prepared
+        for kind, _name, normalized, sort_order in values
+    ]
+    persisted_work_ids = tuple(work_id for work_id, _values in prepared)
+    db.execute(
+        delete(LibraryWorkFacet).where(
+            LibraryWorkFacet.work_id.in_(persisted_work_ids)
+        )
+    )
+    for chunk in sqlite_parameter_chunks(links, parameters_per_row=4):
+        db.execute(
+            sqlite_insert(LibraryWorkFacet)
+            .values(list(chunk))
+            .on_conflict_do_nothing(
+                index_elements=[LibraryWorkFacet.facet_id, LibraryWorkFacet.work_id]
+            )
+        )
 
     db.execute(
         update(LibraryWork)
-        .where(LibraryWork.id == work_id)
-        .values(facet_index_version=CURRENT_FACET_INDEX_VERSION)
+        .where(LibraryWork.id.in_(persisted_work_ids))
+        .values(
+            facet_index_version=CURRENT_FACET_INDEX_VERSION,
+            updated_at=LibraryWork.updated_at,
+        )
     )
-    db.flush()
 
 
 def count_categories(db: Session, kind: str, search: str = "") -> int:

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Protocol, TypeVar
-
-ResultT = TypeVar("ResultT")
+from types import TracebackType
+from typing import Protocol
 
 
 class KindleUnitOfWork(Protocol):
@@ -12,16 +10,22 @@ class KindleUnitOfWork(Protocol):
     def rollback(self) -> None: ...
 
 
-def execute_kindle_write(
-    unit_of_work: KindleUnitOfWork,
-    operation: Callable[[], ResultT],
-) -> ResultT:
-    """Commit one Kindle settings or send-task state transition."""
+class KindleWriteTransaction:
+    def __init__(self, unit_of_work: KindleUnitOfWork) -> None:
+        self._unit_of_work = unit_of_work
 
-    try:
-        result = operation()
-        unit_of_work.commit()
-    except Exception:
-        unit_of_work.rollback()
-        raise
-    return result
+    def __enter__(self) -> KindleWriteTransaction:
+        return self
+
+    def __exit__(
+        self,
+        exception_type: type[BaseException] | None,
+        exception: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool:
+        del exception, traceback
+        if exception_type is None:
+            self._unit_of_work.commit()
+        else:
+            self._unit_of_work.rollback()
+        return False

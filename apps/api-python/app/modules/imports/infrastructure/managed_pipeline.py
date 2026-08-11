@@ -16,7 +16,11 @@ from app.modules.imports.application.transactions import (
     ImportCompletion,
     ImportTransactionController,
     PreparedImport,
+    PreparedImportWriteBuffer,
     persist_import_completion,
+)
+from app.modules.imports.infrastructure.checkpointing_queries import (
+    CheckpointingImportLibraryQueries,
 )
 from app.modules.imports.infrastructure.library_import_store import (
     SqlAlchemyLibraryImportStore,
@@ -48,14 +52,18 @@ class SessionImportPipeline:
         self._base_store = SqlAlchemyLibraryImportStore(db)
         self._transactions = ImportTransactionController(self._unit_of_work)
         self._completion = ImportCompletion()
+        self._write_buffer = PreparedImportWriteBuffer()
         self._store = BoundedLibraryImportStore(
             self._base_store,
             self._transactions,
             self._completion,
+            self._write_buffer,
         )
-        self._queries = SqlAlchemyImportLibraryQueries(db)
+        self._queries = CheckpointingImportLibraryQueries(
+            SqlAlchemyImportLibraryQueries(db), self._transactions
+        )
         self._services = SessionImportOrchestrationServices(
-            db, settings, self._unit_of_work
+            db, settings, self._unit_of_work, write_buffer=self._write_buffer
         )
         self._prepared_import: PreparedImport | None = None
 
@@ -82,4 +90,5 @@ class SessionImportPipeline:
     def complete_import(self) -> None:
         if self._prepared_import is None:
             raise RuntimeError("import completion requested before preparation")
+        self._transactions.flush_into_current_transaction()
         persist_import_completion(self._base_store, self._prepared_import)

@@ -3,10 +3,12 @@
 from app.modules.imports.application.audio_types import SUPPORTED_AUDIO_EXTS
 from app.modules.imports.application.commands import (
     commit_import_checkpoint,
-    execute_import_checkpoint,
     reset_failed_import_checkpoint,
 )
-from app.modules.imports.application.deletion import ImportFileQuarantineError
+from app.modules.imports.application.deletion import (
+    ImportFileQuarantineError,
+    PreparedImportDeletion,
+)
 from app.modules.imports.application.dto import (
     EpubNavigationChapterDTO,
     ImportOptions,
@@ -14,6 +16,10 @@ from app.modules.imports.application.dto import (
     ImportTaskDTO,
     SeriesVolumeInfo,
     StageImportCommand,
+)
+from app.modules.imports.application.enqueue import (
+    ImportEnqueueProjection,
+    PreparedImportEnqueue,
 )
 from app.modules.imports.application.file_types import is_supported_import_filename
 from app.modules.imports.application.import_epub import inspect_epub_navigation
@@ -45,7 +51,10 @@ __all__ = [
     "EpubNavigationChapterDTO",
     "ImportFileQuarantineError",
     "ImportOptions",
+    "ImportEnqueueProjection",
     "ImportResult",
+    "PreparedImportEnqueue",
+    "PreparedImportDeletion",
     "ImportTaskDTO",
     "ImportUnitOfWork",
     "MonitorPathError",
@@ -59,7 +68,6 @@ __all__ = [
     "UploadPublicationError",
     "UploadSource",
     "commit_import_checkpoint",
-    "execute_import_checkpoint",
     "inspect_epub_navigation",
     "is_inside_path",
     "is_supported_import_filename",

@@ -8,7 +8,14 @@ from app.modules.shelf.application.catalog import (
     ListCatalogShelfWorkIds,
     ListCatalogShelves,
 )
-from app.modules.shelf.application.commands import execute_shelf_write
+from app.modules.shelf.application.commands import (
+    CreateShelf,
+    CreateShelfCommand,
+    DeleteShelf,
+    DeleteShelfCommand,
+    UpdateShelf,
+    UpdateShelfCommand,
+)
 from app.modules.shelf.domain.policies import ShelfKind
 
 __all__ = [
@@ -16,8 +23,13 @@ __all__ = [
     "CatalogShelfPage",
     "CatalogShelfQueryPort",
     "CatalogShelfWorkPage",
+    "CreateShelf",
+    "CreateShelfCommand",
+    "DeleteShelf",
+    "DeleteShelfCommand",
     "ListCatalogShelfWorkIds",
     "ListCatalogShelves",
     "ShelfKind",
-    "execute_shelf_write",
+    "UpdateShelf",
+    "UpdateShelfCommand",
 ]

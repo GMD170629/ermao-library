@@ -89,6 +89,17 @@ async function main() {
     const ping = await fetch(`http://127.0.0.1:${port}/api/__db-ping`);
     if (!ping.ok) throw new Error(`/api/__db-ping returned ${ping.status}`);
     await import('node:fs/promises').then(({ access }) => access(join(storageRoot, 'database/shuku.sqlite3')));
+    const startupMigrations = [
+      'library_facet_index_data_migration',
+      'comic_page_index_data_migration'
+    ];
+    for (const migration of startupMigrations) {
+      const startedVisible = output.includes(`${migration} outcome=started`);
+      const successVisible = output.includes(`${migration} outcome=success`);
+      if (!startedVisible || !successVisible) {
+        throw new Error(`${migration} lifecycle was not visible in process output. Output: ${output}`);
+      }
+    }
     console.log(`Python API runtime smoke ok on port ${port}`);
     if (output.trim()) console.log(output.trim());
   } finally {

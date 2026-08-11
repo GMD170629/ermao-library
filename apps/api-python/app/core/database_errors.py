@@ -7,6 +7,7 @@ DATABASE_BUSY_MESSAGES = (
     "database table is locked",
     "database is busy",
 )
+DATABASE_OPERATION_TIMEOUT_MESSAGES = ("interrupted",)
 
 
 def is_database_busy_error(error: BaseException) -> bool:
@@ -15,3 +16,11 @@ def is_database_busy_error(error: BaseException) -> bool:
     original = getattr(error, "orig", None)
     message = str(original or error).lower()
     return any(fragment in message for fragment in DATABASE_BUSY_MESSAGES)
+
+
+def is_database_operation_timeout(error: BaseException) -> bool:
+    """Return whether SQLite interrupted an explicitly budgeted operation."""
+
+    original = getattr(error, "orig", None)
+    message = str(original or error).lower()
+    return any(fragment in message for fragment in DATABASE_OPERATION_TIMEOUT_MESSAGES)

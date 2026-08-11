@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import Field, field_validator
 from fastapi.responses import StreamingResponse
+from pydantic import Field, field_validator
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.http_errors import HttpContractError
@@ -224,6 +224,10 @@ class LogSettingsPayload(HttpContractModel):
     storage: EventStorage
     min_bytes: int | None = Field(default=None, alias="minBytes")
     max_bytes: int | None = Field(default=None, alias="maxBytes")
+
+
+class UpdateLogSettingsRequest(HttpContractModel):
+    max_bytes: int = Field(alias="maxBytes")
 
 
 class HealthEventStreamResponse(StreamingResponse):

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
-from app.bootstrap.system import record_system_event
+from app.bootstrap.system import prepare_system_event
 from app.contracts.http import MessageError
 from app.contracts.http_errors import (
     BasicBadRequestError,
@@ -32,6 +32,8 @@ from app.modules.metadata.presentation.schemas import (
     ProvidersResponse,
     ProviderTestPayload,
     ProviderTestResponse,
+    UpdateMetadataProviderPipelineRequest,
+    UpdateMetadataProviderRequest,
 )
 from app.services.metadata_file_writeback import (
     metadata_opf_queue_status,
@@ -42,9 +44,11 @@ from app.services.metadata_provider_registry import (
     get_metadata_provider,
     list_metadata_provider_pipelines,
     list_metadata_providers,
+    persist_metadata_provider_pipeline_update,
+    persist_metadata_provider_update,
+    prepare_metadata_provider_pipeline_update,
+    prepare_metadata_provider_update,
     test_metadata_provider,
-    update_metadata_provider,
-    update_metadata_provider_pipeline,
 )
 
 router = APIRouter(tags=["metadata"], route_class=TypedContractRoute)
@@ -62,9 +66,7 @@ def get_metadata_opf_queue_status(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Annotated[
-    MetadataOpfQueueStatusResponse, ErrorResponses(BasicUnauthorizedError)
-]:
+) -> Annotated[MetadataOpfQueueStatusResponse, ErrorResponses(BasicUnauthorizedError)]:
     _auth(db, request, settings)
     return MetadataOpfQueueStatusResponse(
         data=MetadataOpfQueueStatusPayload.model_validate(
@@ -118,6 +120,7 @@ def list_registered_metadata_providers(
 @router.put("/metadata/provider-pipelines/{media_kind}")
 async def update_registered_metadata_provider_pipeline(
     media_kind: str,
+    payload: UpdateMetadataProviderPipelineRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -126,24 +129,26 @@ async def update_registered_metadata_provider_pipeline(
     ErrorResponses(BasicUnauthorizedError, BasicBadRequestError),
 ]:
     user = _auth(db, request, settings)
-    payload = await request.json()
-    items = payload.get("items") if isinstance(payload, dict) else None
+    items = [item.model_dump(by_alias=True) for item in payload.items]
     try:
-        pipelines = update_metadata_provider_pipeline(db, media_kind, items)
+        prepared = prepare_metadata_provider_pipeline_update(db, media_kind, items)
     except ValueError as exc:
         raise BasicBadRequestError(MessageError(message=str(exc))) from exc
-    record_system_event(
-        db,
+    event = prepare_system_event(
         level="warning",
         source="system",
         actor_type="admin",
         actor_id=user.id,
         action="metadata_provider_pipeline.updated",
         target_type="metadataProviderPipeline",
-        target_id=media_kind,
-        message=f"更新{media_kind}数据源组合",
-        metadata={"providerIds": [item.get("providerId") for item in items or []]},
-        commit=True,
+        target_id=prepared.media_kind,
+        message=f"更新{prepared.media_kind}数据源组合",
+        metadata={"providerIds": list(prepared.provider_ids)},
+    )
+    pipelines = persist_metadata_provider_pipeline_update(
+        db,
+        prepared,
+        event=event,
     )
     return ProvidersResponse(
         data=ProvidersPayload.model_validate(
@@ -178,6 +183,7 @@ def get_registered_metadata_provider(
 @router.put("/metadata/providers/{provider_id}")
 async def update_registered_metadata_provider(
     provider_id: str,
+    payload: UpdateMetadataProviderRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -190,18 +196,15 @@ async def update_registered_metadata_provider(
     ),
 ]:
     user = _auth(db, request, settings)
-    payload = await request.json()
-    if not isinstance(payload, dict):
-        raise BasicBadRequestError(MessageError(message="插件配置格式不正确"))
+    values = payload.model_dump(by_alias=True, exclude_unset=True)
     try:
-        provider = update_metadata_provider(db, provider_id, payload)
+        prepared = prepare_metadata_provider_update(db, provider_id, values)
     except ValueError as exc:
         error_type = (
             BasicNotFoundError if "不存在" in str(exc) else BasicBadRequestError
         )
         raise error_type(MessageError(message=str(exc))) from exc
-    record_system_event(
-        db,
+    event = prepare_system_event(
         level="warning",
         source="system",
         actor_type="admin",
@@ -209,13 +212,13 @@ async def update_registered_metadata_provider(
         action="metadata_provider.updated",
         target_type="metadataProvider",
         target_id=provider_id,
-        message=f"更新元数据插件：{provider.get('name') or provider_id}",
+        message=f"更新元数据插件：{prepared.provider_name}",
         metadata={
-            "enabled": provider.get("enabled"),
-            "priority": provider.get("priority"),
+            "enabled": prepared.enabled,
+            "priority": prepared.priority,
         },
-        commit=True,
     )
+    provider = persist_metadata_provider_update(db, prepared, event=event)
     return ProviderResponse(
         data=ProviderPayload(provider=MetadataProvider.model_validate(provider))
     )

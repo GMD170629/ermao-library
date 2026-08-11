@@ -1,4 +1,10 @@
-from app.bootstrap.imports import clear_import_queue_records
+from datetime import UTC, datetime
+
+from app.bootstrap.imports import (
+    clear_import_queue_records,
+    persist_import_queue_operation_checkpoint,
+)
+from app.models.auth import User
 from app.models.import_pipeline import (
     BookConversionTask,
     ImportAsset,
@@ -6,6 +12,11 @@ from app.models.import_pipeline import (
     ImportTask,
 )
 from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
+from app.models.settings import QueueControlOperation, SystemEvent
+from app.modules.imports.application.queue_control import (
+    PreparedImportQueueOperationCheckpoint,
+)
+from app.services.system_events import prepare_system_event
 from sqlalchemy import func, select
 
 
@@ -123,3 +134,51 @@ def test_clear_import_queue_rolls_back_when_deletion_fails():
 
     assert unit_of_work.commits == 0
     assert unit_of_work.rollbacks == 1
+
+
+def test_queue_completion_status_and_event_share_one_checkpoint(db_session) -> None:
+    checkpoint_at = datetime.now(UTC)
+    user = User(
+        id="queue-checkpoint-user",
+        email="queue-checkpoint@example.com",
+        name="Queue Checkpoint",
+        password_hash="test",
+        role="admin",
+    )
+    operation = QueueControlOperation(
+        id="queue-checkpoint",
+        queue_name="import",
+        action="clear",
+        status="running",
+        actor_user_id=user.id,
+        message_code="queue.clear.running",
+        requested_at=checkpoint_at,
+        started_at=checkpoint_at,
+        finished_at=None,
+        updated_at=checkpoint_at,
+    )
+    db_session.add_all([user, operation])
+    db_session.commit()
+    event = prepare_system_event(
+        event_id="queue-checkpoint-event",
+        created_at=checkpoint_at,
+        source="system",
+        action="queue.cleared",
+        message="queue cleared",
+    )
+
+    persist_import_queue_operation_checkpoint(
+        db_session,
+        PreparedImportQueueOperationCheckpoint(
+            operation_id=operation.id,
+            status="completed",
+            message_code="queue.clear.completed",
+            checkpoint_at=checkpoint_at,
+            events=(event,),
+        ),
+    )
+
+    db_session.refresh(operation)
+    assert operation.status == "completed"
+    assert operation.message_code == "queue.clear.completed"
+    assert db_session.get(SystemEvent, event.id) is not None

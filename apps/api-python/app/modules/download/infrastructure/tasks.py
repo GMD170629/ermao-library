@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import inspect as sa_inspect, select, update
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.dml import Update
 
 from app.models.common import db_timestamp
 from app.models.import_pipeline import DownloadTask
@@ -43,11 +45,79 @@ def next_queued_download_task(db: Session) -> dict[str, Any] | None:
     return entity_as_legacy_dict(task) if task is not None else None
 
 
-def mark_download_task_importing(db: Session, task_id: str) -> None:
-    db.execute(
+def prepare_mark_download_task_importing(
+    task_id: str,
+    *,
+    updated_at: object,
+) -> Update:
+    return (
         update(DownloadTask)
         .where(DownloadTask.id == task_id)
-        .values(status="importing", updated_at=db_timestamp())
+        .values(status="importing", updated_at=updated_at)
+    )
+
+
+def mark_download_task_importing(
+    db: Session,
+    task_id: str,
+    *,
+    updated_at: object | None = None,
+) -> None:
+    db.execute(
+        prepare_mark_download_task_importing(
+            task_id,
+            updated_at=updated_at or db_timestamp(),
+        )
+    )
+
+
+def prepare_claim_download_task(task_id: str, *, now: object) -> Update:
+    return (
+        update(DownloadTask)
+        .where(
+            DownloadTask.id == task_id,
+            DownloadTask.status.in_(("queued", "failed", "PENDING", "FAILED")),
+        )
+        .values(
+            status="downloading",
+            progress=1,
+            error_message=None,
+            updated_at=now,
+        )
+        .returning(DownloadTask)
+    )
+
+
+def execute_download_task_row_update(
+    db: Session,
+    statement: Update,
+) -> DownloadTask | None:
+    return db.execute(statement).scalar_one_or_none()
+
+
+def claim_download_task(
+    db: Session, task_id: str, *, now: Any
+) -> dict[str, Any] | None:
+    statement = prepare_claim_download_task(task_id, now=now)
+    task = execute_download_task_row_update(db, statement)
+    return entity_as_legacy_dict(task) if task is not None else None
+
+
+def prepare_download_task_state_update(
+    task_id: str,
+    values: dict[str, object],
+) -> Update:
+    name_to_attr = _legacy_column_to_attr(DownloadTask)
+    patch = {
+        attr: value
+        for key, value in values.items()
+        if (attr := name_to_attr.get(key)) is not None
+    }
+    return (
+        update(DownloadTask)
+        .where(DownloadTask.id == task_id)
+        .values(**patch)
+        .returning(DownloadTask)
     )
 
 
@@ -58,16 +128,9 @@ def update_download_task(
 ) -> dict[str, Any] | None:
     if not has_table(db, "DownloadTask"):
         return None
-    task = db.get(DownloadTask, task_id)
-    if task is None:
-        return None
-    name_to_attr = _legacy_column_to_attr(DownloadTask)
-    for key, value in values.items():
-        attr = name_to_attr.get(key)
-        if attr is not None:
-            setattr(task, attr, value)
-    db.flush()
-    return entity_as_legacy_dict(task)
+    statement = prepare_download_task_state_update(task_id, values)
+    task = execute_download_task_row_update(db, statement)
+    return entity_as_legacy_dict(task) if task is not None else None
 
 
 def find_active_download_task(db: Session, record_id: str) -> dict[str, Any] | None:

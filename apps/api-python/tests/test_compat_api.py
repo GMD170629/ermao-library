@@ -22,6 +22,10 @@ from app.bootstrap.imports import (
     import_managed_book,
     process_import_task,
 )
+from app.bootstrap.metadata import (
+    prepare_metadata_source_seed_rows,
+    write_metadata_source_seed_rows,
+)
 from app.contracts.imports import ImportTaskContract
 from app.core.auth import hash_password
 from app.core.config import get_settings
@@ -38,6 +42,7 @@ from app.models.library import (
 from app.modules.imports.application.dto import ImportOptions
 from app.modules.imports.infrastructure.task_mapper import import_task_dto_from_row
 from app.modules.media.infrastructure import http_streaming as media_streaming
+from app.modules.metadata.domain.providers import BUILTIN_MANIFESTS
 from app.services.download_queue import process_next_download_task
 from app.services.metadata_provider_registry import update_metadata_provider
 from app.services.organize_service import (
@@ -757,8 +762,8 @@ def test_metadata_candidate_parsers_accept_common_provider_shapes():
                     "summary": "简介",
                     "publisher": "测试出版社",
                     "pubdate": "2019-12-30",
-                        "isbn13": "9781234567897",
-                        "cover_url": "https://example.test/cover.jpg",
+                    "isbn13": "9781234567897",
+                    "cover_url": "https://example.test/cover.jpg",
                 }
             ]
         },
@@ -3813,8 +3818,8 @@ def test_monitor_folder_delete_rolls_back_when_audit_event_fails(
 ):
     from sqlalchemy import select
 
-    from app.bootstrap import system as system_bootstrap
     from app.models.settings import MonitorFolder
+    from app.modules.imports.infrastructure import monitor_folder_write
 
     test_settings.resolved_monitor_root.mkdir(parents=True)
     _login(client, db_session)
@@ -3831,7 +3836,11 @@ def test_monitor_folder_delete_rolls_back_when_audit_event_fails(
     def fail_event(*_args, **_kwargs):
         raise RuntimeError("injected audit failure")
 
-    monkeypatch.setattr(system_bootstrap, "_record_system_event", fail_event)
+    monkeypatch.setattr(
+        monitor_folder_write,
+        "write_prepared_system_events",
+        fail_event,
+    )
     with pytest.raises(RuntimeError, match="injected audit failure"):
         client.delete(f"/api/monitor-folders/{folder_id}")
 
@@ -3873,15 +3882,19 @@ def test_system_settings_roll_back_when_audit_event_fails(
     db_session,
     monkeypatch,
 ):
+    import app.bootstrap.system as system_bootstrap
     from app.modules.system.infrastructure.settings import get_setting
-    from app.modules.system.presentation import http as system_http
 
     _login(client, db_session)
 
     def fail_event(*_args, **_kwargs):
         raise RuntimeError("injected audit failure")
 
-    monkeypatch.setattr(system_http, "record_system_event", fail_event)
+    monkeypatch.setattr(
+        system_bootstrap,
+        "write_prepared_system_events",
+        fail_event,
+    )
     with pytest.raises(RuntimeError, match="injected audit failure"):
         client.put("/api/system-settings", json={"settings": {"readerTheme": "dark"}})
 
@@ -5374,6 +5387,11 @@ def test_ebook_metadata_search_returns_all_douban_crawler_candidates_and_proxy_c
 ):
     create_worker_tables(db_session)
     create_organize_detail_tables(db_session)
+    write_metadata_source_seed_rows(
+        db_session,
+        prepare_metadata_source_seed_rows(BUILTIN_MANIFESTS),
+    )
+    db_session.commit()
     douban = serve_douban_crawler_gateway()
     try:
         update_metadata_provider(
@@ -5459,6 +5477,11 @@ def test_ebook_metadata_search_and_apply_can_use_bangumi_without_suggestion_refr
 ):
     create_worker_tables(db_session)
     create_organize_detail_tables(db_session)
+    write_metadata_source_seed_rows(
+        db_session,
+        prepare_metadata_source_seed_rows(BUILTIN_MANIFESTS),
+    )
+    db_session.commit()
     bangumi = serve_bangumi_api_gateway()
     try:
         update_metadata_provider(
@@ -5606,6 +5629,11 @@ def test_backup_create_download_and_restore_database_export(
     apply_schema(db_session.get_bind())
     test_settings.resolved_storage_root.mkdir(parents=True)
     _login(client, db_session)
+    write_metadata_source_seed_rows(
+        db_session,
+        prepare_metadata_source_seed_rows(BUILTIN_MANIFESTS),
+    )
+    db_session.commit()
     update_metadata_provider(
         db_session,
         "bangumi",
@@ -6957,7 +6985,7 @@ def test_imported_comic_serves_archive_page(
             text("SELECT COUNT(*) FROM LibraryReadingUnit WHERE volumeId = :volume_id"),
             {"volume_id": volume_id},
         ).scalar()
-        == 0
+        == 2
     )
     page = client.get(f"/api/volumes/{volume_id}/pages/1")
 
@@ -7143,7 +7171,7 @@ def test_comic_page_data_saver_uses_one_fixed_avif_encode(monkeypatch):
     assert calls == [{"format": "AVIF", "quality": 12, "speed": 9}]
 
 
-def test_volume_pages_rebuilds_missing_comic_page_index(
+def test_volume_pages_require_persisted_comic_page_index(
     client, db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
@@ -7159,34 +7187,54 @@ def test_volume_pages_rebuilds_missing_comic_page_index(
         ),
     )
     volume_id = imported.volume_id
+    preserved_updated_at = "2026-08-11T08:00:00.000Z"
     db_session.execute(
-        text("UPDATE LibraryVolume SET pageCount = NULL WHERE id = :volume_id"),
+        text("DELETE FROM LibraryReadingUnit WHERE volumeId = :volume_id"),
         {"volume_id": volume_id},
+    )
+    db_session.execute(
+        text(
+            "UPDATE LibraryFile SET pageIndexVersion = 0 WHERE volumeId = :volume_id"
+        ),
+        {"volume_id": volume_id},
+    )
+    db_session.execute(
+        text(
+            "UPDATE LibraryVolume SET pageCount = NULL, updatedAt = :updated_at "
+            "WHERE id = :volume_id"
+        ),
+        {"volume_id": volume_id, "updated_at": preserved_updated_at},
     )
     db_session.commit()
 
     listed = client.get(f"/api/volumes/{volume_id}/pages")
     assert listed.status_code == 200
     pages = listed.json()["data"]["pages"]
-    assert [page["href"] for page in pages] == ["001.jpg", "002.jpg"]
+    assert pages == []
     assert (
         db_session.execute(
             text("SELECT COUNT(*) FROM LibraryReadingUnit WHERE volumeId = :volume_id"),
             {"volume_id": volume_id},
         ).scalar()
-        == 2
+        == 0
     )
-    assert (
+    volume_state = (
         db_session.execute(
-            text("SELECT pageCount FROM LibraryVolume WHERE id = :volume_id"),
+            text(
+                "SELECT pageCount, updatedAt FROM LibraryVolume WHERE id = :volume_id"
+            ),
             {"volume_id": volume_id},
-        ).scalar()
-        == 2
+        )
+        .mappings()
+        .one()
     )
+    assert dict(volume_state) == {
+        "pageCount": None,
+        "updatedAt": preserved_updated_at,
+    }
 
     page = client.get(f"/api/volumes/{volume_id}/pages/2")
-    assert page.status_code == 200
-    assert page.content == b"two"
+    assert page.status_code == 404
 
 
 def test_file_stream_limit_zero_disables_slot_rejection(monkeypatch):

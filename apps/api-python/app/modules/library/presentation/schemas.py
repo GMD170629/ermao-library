@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal
 
+from fastapi import UploadFile
 from pydantic import Field
 from typing_extensions import TypeAliasType
 
@@ -27,6 +28,81 @@ MetadataCandidateRawValue = TypeAliasType(
     | list["MetadataCandidateRawValue"]
     | dict[str, "MetadataCandidateRawValue"],
 )
+RequestScalar = str | int | float | bool | None
+
+
+class SaveDetailPreferenceRequest(HttpContractModel):
+    selected_tab: str = Field(alias="selectedTab", min_length=1)
+
+
+class UpdateWorkRequest(HttpContractModel):
+    title: RequestScalar = None
+    author: RequestScalar = None
+    description: RequestScalar = None
+    publication_status: RequestScalar = Field(default=None, alias="publicationStatus")
+    tracking_status: RequestScalar = Field(default=None, alias="trackingStatus")
+    tags: list[RequestScalar] | str | None = None
+    series_name: RequestScalar = Field(default=None, alias="seriesName")
+    series_index: RequestScalar = Field(default=None, alias="seriesIndex")
+    hidden: bool | None = None
+    organized: bool | None = None
+    metadata_quality: RequestScalar = Field(default=None, alias="metadataQuality")
+    ignored: bool | None = None
+
+
+class BulkFindReplaceRequest(HttpContractModel):
+    ids: list[RequestScalar] | None = None
+    book_ids: list[RequestScalar] | None = Field(default=None, alias="bookIds")
+    field: str | None = None
+    find: str | None = None
+    replacement: str | None = None
+    regex: bool | None = None
+    case_sensitive: bool | None = Field(default=None, alias="caseSensitive")
+    start_number: int | None = Field(default=None, alias="startNumber")
+
+
+class BulkWorkRequest(BulkFindReplaceRequest):
+    action: str | None = None
+    ignored: bool | None = None
+    delete_records: bool | None = Field(default=None, alias="deleteRecords")
+    delete_source: bool | None = Field(default=None, alias="deleteSource")
+    tags: list[RequestScalar] | None = None
+    status: str | None = None
+    shelf_id: str | None = Field(default=None, alias="shelfId")
+    membership: str | None = None
+    fields: dict[str, RequestScalar] | None = None
+    add_tags: list[RequestScalar] | None = Field(default=None, alias="addTags")
+    remove_tags: list[RequestScalar] | None = Field(default=None, alias="removeTags")
+
+
+class BulkCoverRequest(HttpContractModel):
+    ids: str
+    action: str
+    ratio: str = "2:3"
+    max_dimension: int = Field(default=1600, alias="maxDimension")
+    quality: int = 82
+    cover: UploadFile | None = None
+
+
+class RenameCategoryRequest(HttpContractModel):
+    name: str
+
+
+class MergeCategoriesRequest(HttpContractModel):
+    kind: str = "TAG"
+    source_ids: list[str] = Field(alias="sourceIds")
+    target_id: str = Field(alias="targetId")
+
+
+class MergeDuplicatesRequest(HttpContractModel):
+    target_work_id: str = Field(alias="targetWorkId")
+    source_work_ids: list[str] = Field(alias="sourceWorkIds")
+
+
+class MetadataSearchRequest(HttpContractModel):
+    provider_id: str | None = Field(default=None, alias="providerId")
+    source: str | None = None
+    query: str | None = None
 
 
 class ProgressNavigation(HttpContractModel):

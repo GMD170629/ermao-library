@@ -54,6 +54,7 @@ from app.modules.media.presentation.schemas import (
     MediaFileResponse,
     MediaImageResponse,
     VolumeArchiveRequest,
+    VolumePage,
     VolumePagesPayload,
     VolumePagesResponse,
 )
@@ -65,6 +66,7 @@ router = APIRouter(tags=["media"], route_class=TypedContractRoute)
 logger = logging.getLogger(__name__)
 DatabaseSession = Annotated[Session, Depends(get_db)]
 ApplicationSettings = Annotated[Settings, Depends(get_settings)]
+PARTIAL_CONTENT_RESPONSE = {206: {"description": "Partial content"}}
 
 
 class _SafeCoverRedirectHandler(HTTPRedirectHandler):
@@ -104,8 +106,16 @@ def _parse_json(value: Any, fallback: Any) -> Any:
         return fallback
 
 
-@router.get("/files/{file_id}", response_class=MediaFileResponse)
-@router.head("/files/{file_id}", response_class=MediaFileResponse)
+@router.get(
+    "/files/{file_id}",
+    response_class=MediaFileResponse,
+    responses=PARTIAL_CONTENT_RESPONSE,
+)
+@router.head(
+    "/files/{file_id}",
+    response_class=MediaFileResponse,
+    responses=PARTIAL_CONTENT_RESPONSE,
+)
 def get_file(
     file_id: str,
     request: Request,
@@ -134,8 +144,16 @@ def get_file(
     )
 
 
-@router.get("/volumes/{volume_id}/file", response_class=MediaFileResponse)
-@router.head("/volumes/{volume_id}/file", response_class=MediaFileResponse)
+@router.get(
+    "/volumes/{volume_id}/file",
+    response_class=MediaFileResponse,
+    responses=PARTIAL_CONTENT_RESPONSE,
+)
+@router.head(
+    "/volumes/{volume_id}/file",
+    response_class=MediaFileResponse,
+    responses=PARTIAL_CONTENT_RESPONSE,
+)
 def get_volume_file(
     volume_id: str,
     request: Request,
@@ -338,18 +356,35 @@ def list_volume_pages(
         return auth_error
     if not can_access_volume(db, user, volume_id):
         return fail("页面不存在", status_code=404, code="VOLUME_NOT_FOUND")
-    units = media_page_index.list_page_units_for_volume(db, volume_id)
-    if not units:
-        media_page_index.ensure_volume_page_index(db, settings, volume_id)
-        units = media_page_index.list_page_units_for_volume(db, volume_id)
-    return VolumePagesResponse(
-        data=VolumePagesPayload.model_validate({"pages": units, "total": len(units)})
-    )
+    projection = media_page_index.load_read_only(db, volume_id)
+    db.close()
+    index = media_page_index.resolve_read_only(projection)
+    pages = [
+        VolumePage(
+            id=unit.id,
+            volumeId=unit.volume_id,
+            fileId=unit.file_id,
+            unitType=unit.unit_type,
+            title=unit.title,
+            href=unit.href,
+            mediaType=unit.media_type,
+            sortOrder=unit.sort_order,
+            width=unit.width,
+            height=unit.height,
+            size=unit.size,
+            metadataJson=unit.metadata_json,
+            createdAt=unit.created_at,
+            updatedAt=unit.updated_at,
+        )
+        for unit in index.pages
+    ]
+    return VolumePagesResponse(data=VolumePagesPayload(pages=pages, total=len(pages)))
 
 
 @router.get(
     "/volumes/{volume_id}/pages/{page_index}",
     response_class=MediaImageResponse,
+    responses=PARTIAL_CONTENT_RESPONSE,
 )
 def get_volume_page(
     volume_id: str,
@@ -366,38 +401,33 @@ def get_volume_page(
         return auth_error
     if not can_access_volume(db, user, volume_id):
         return fail("页面不存在", status_code=404, code="VOLUME_NOT_FOUND")
-    unit = media_page_index.get_page_unit(db, volume_id, page_index)
-    if not unit:
-        media_page_index.ensure_volume_page_index(db, settings, volume_id)
-        unit = media_page_index.get_page_unit(db, volume_id, page_index)
-        if not unit:
-            return fail("页面不存在", status_code=404)
-    file = (
-        media_page_index.get_library_file(db, unit.get("fileId"))
-        if unit.get("fileId")
-        else None
-    )
-    if file and file.get("kind") == "COMIC":
-        metadata = _parse_json(unit.get("metadataJson"), {})
-        entry_name = metadata.get("zipEntryName") or unit.get("href")
+    actor_id = user.id
+    projection = media_page_index.load_read_only(db, volume_id)
+    db.close()
+    index = media_page_index.resolve_read_only(projection)
+    unit = index.page(page_index)
+    if unit is None:
+        return fail("页面不存在", status_code=404)
+    source = index.source_for(unit.file_id)
+    if source and source.kind == "COMIC":
+        metadata = _parse_json(unit.metadata_json, {})
+        entry_name = metadata.get("zipEntryName") or unit.href
         return media_streaming.send_comic_page_zip_entry(
-            media_streaming.stored_path(
-                file.get("path"), settings, database_backed=True
-            ),
+            media_streaming.stored_path(source.path, settings, database_backed=True),
             entry_name,
             request,
-            user.id,
+            actor_id,
             settings,
-            unit.get("mediaType"),
+            unit.media_type,
             route="volume-page-zip",
-            file_id=unit.get("id") or f"{volume_id}:{page_index}",
+            file_id=unit.id or f"{volume_id}:{page_index}",
         )
     return media_streaming.send_comic_page_file(
-        media_streaming.stored_path(unit.get("href"), settings, database_backed=True),
+        media_streaming.stored_path(unit.href, settings, database_backed=True),
         request,
-        user.id,
+        actor_id,
         settings,
-        media_type=unit.get("mediaType"),
+        media_type=unit.media_type,
         route="volume-page",
-        file_id=unit.get("id") or f"{volume_id}:{page_index}",
+        file_id=unit.id or f"{volume_id}:{page_index}",
     )

@@ -4,21 +4,36 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi.responses import FileResponse
-from pydantic import EmailStr, Field
-
 from app.contracts.http import HttpContractModel, MessageError, SuccessEnvelope
 from app.contracts.http_errors import (
     BasicBadRequestError as BasicBadRequestError,
+)
+from app.contracts.http_errors import (
     BasicConflictError as BasicConflictError,
+)
+from app.contracts.http_errors import (
     BasicForbiddenError as BasicForbiddenError,
+)
+from app.contracts.http_errors import (
     BasicInternalError as BasicInternalError,
+)
+from app.contracts.http_errors import (
     BasicNotFoundError as BasicNotFoundError,
+)
+from app.contracts.http_errors import (
     BasicUnauthorizedError as BasicUnauthorizedError,
+)
+from app.contracts.http_errors import (
     HttpContractError,
+)
+from app.contracts.http_errors import (
     PayloadTooLargeError as PayloadTooLargeError,
+)
+from app.contracts.http_errors import (
     SessionUnauthorizedError as SessionUnauthorizedError,
 )
+from fastapi.responses import FileResponse
+from pydantic import EmailStr, Field
 
 
 class AuthUser(HttpContractModel):
@@ -151,6 +166,14 @@ class AccountDisabledBody(MessageError):
     code: Literal["ACCOUNT_DISABLED"] = "ACCOUNT_DISABLED"
 
 
+class SessionRefreshDeferredBody(MessageError):
+    code: Literal["SESSION_REFRESH_DEFERRED"] = "SESSION_REFRESH_DEFERRED"
+
+
+class AvatarUpdateDeferredBody(MessageError):
+    code: Literal["AVATAR_UPDATE_DEFERRED"] = "AVATAR_UPDATE_DEFERRED"
+
+
 class SetupRequiredError(HttpContractError[SetupRequiredBody]):
     status_code = 409
     body_model = SetupRequiredBody
@@ -159,6 +182,16 @@ class SetupRequiredError(HttpContractError[SetupRequiredBody]):
 class AccountDisabledError(HttpContractError[AccountDisabledBody]):
     status_code = 403
     body_model = AccountDisabledBody
+
+
+class SessionRefreshDeferredError(HttpContractError[SessionRefreshDeferredBody]):
+    status_code = 503
+    body_model = SessionRefreshDeferredBody
+
+
+class AvatarUpdateDeferredError(HttpContractError[AvatarUpdateDeferredBody]):
+    status_code = 503
+    body_model = AvatarUpdateDeferredBody
 
 
 CapabilitiesResponse = SuccessEnvelope[CapabilitiesPayload]

@@ -138,6 +138,10 @@ def recognize_book_identity(
         return regex_identity
 
     ai_config, config_fallback_reason = _ai_config(db)
+    # The provider call can take seconds. Release the read transaction before
+    # any network access so identity recognition never occupies a SQLite
+    # connection or attempts a stale reader-to-writer upgrade afterwards.
+    db.close()
     if ai_config is not None:
         try:
             ai_identity = _recognize_with_ai(logical_path, ai_config)
@@ -231,6 +235,7 @@ def _save_identity_cache(db: Session, identity: BookIdentity) -> None:
     try:
         with db.begin_nested():
             from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
             from app.models.settings import BookIdentityCache
 
             statement = (

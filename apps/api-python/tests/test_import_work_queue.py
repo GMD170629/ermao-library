@@ -6,16 +6,27 @@ from itertools import chain
 from pathlib import Path
 
 import pytest
-from sqlalchemy import delete, func, select
-
-from app.bootstrap.imports import ImportWorkerRuntime
+from app.bootstrap.imports import (
+    ImportWorkerRuntime,
+    execute_import_enqueue_write,
+    load_import_enqueue_command_projection,
+    persist_import_task_retry,
+    prepare_import_enqueue_command,
+    prepare_import_enqueue_write,
+)
+from app.core.time import now_timestamp_ms
 from app.models.common import db_timestamp
 from app.models.import_pipeline import ImportScanJob, ImportTask, ImportWorkItem
 from app.models.settings import MonitorFolder
+from app.modules.imports.application.maintenance_commands import prepare_import_retry
+from app.modules.imports.application.scan_jobs import prepare_import_scan_job
 from app.modules.imports.infrastructure import streaming_scan
 from app.modules.imports.infrastructure.directory_scan import MonitorFolderConfig
 from app.modules.imports.infrastructure.scan_batch_store import (
-    stage_scan_candidate_batch,
+    load_scan_candidate_projection,
+    prepare_scan_candidate_batch,
+    prepare_scan_sources,
+    write_prepared_scan_candidate_batch,
 )
 from app.modules.imports.infrastructure.streaming_scan import StreamingDirectoryScanner
 from app.modules.imports.infrastructure.work_queue import (
@@ -23,9 +34,113 @@ from app.modules.imports.infrastructure.work_queue import (
     create_or_reuse_scan_job,
     ensure_import_work_item,
     get_scan_job,
+    insert_prepared_scan_jobs,
     recover_scan_work_items,
 )
 from app.modules.imports.presentation.schemas import ScanError
+from app.services.system_events import prepare_system_event
+from sqlalchemy import delete, func, select
+
+
+def _stage_scan_candidate_batch(db_session, candidates, *, monitor_folder_id: str):
+    sources = prepare_scan_sources(candidates)
+    projection = load_scan_candidate_projection(
+        db_session,
+        sources,
+        monitor_folder_id=monitor_folder_id,
+    )
+    prepared = prepare_scan_candidate_batch(
+        sources,
+        projection,
+        monitor_folder_id=monitor_folder_id,
+        now_ms=now_timestamp_ms(),
+        now=db_timestamp(),
+    )
+    return write_prepared_scan_candidate_batch(db_session, prepared)
+
+
+def test_import_enqueue_is_prepared_after_its_projection_session_closes(
+    db_session,
+    tmp_path: Path,
+) -> None:
+    folder = MonitorFolder(
+        id="folder-two-phase-enqueue",
+        name="Two phase enqueue",
+        root_path=str(tmp_path),
+        enabled=True,
+    )
+    source = tmp_path / "prepared.epub"
+    source.write_bytes(b"book")
+    db_session.add(folder)
+    db_session.commit()
+
+    command = prepare_import_enqueue_command(
+        source,
+        origin="WATCH",
+        monitor_folder_id=folder.id,
+    )
+    projection = load_import_enqueue_command_projection(db_session, command)
+    db_session.close()
+    prepared = prepare_import_enqueue_write(
+        command,
+        projection,
+        available_at=db_timestamp(),
+    )
+    execute_import_enqueue_write(db_session, prepared)
+    db_session.commit()
+
+    assert prepared.created is True
+    assert db_session.scalar(select(func.count()).select_from(ImportTask)) == 1
+    assert db_session.scalar(select(func.count()).select_from(ImportWorkItem)) == 1
+
+
+def test_import_retry_rolls_back_state_when_event_write_fails(
+    db_session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.modules.imports.infrastructure import maintenance_write
+
+    source = tmp_path / "failed.epub"
+    source.write_bytes(b"book")
+    task = ImportTask(
+        id="task-retry-rollback",
+        origin="WATCH",
+        status="FAILED",
+        source_path=str(source),
+        retryable=True,
+    )
+    db_session.add(task)
+    db_session.commit()
+    event = prepare_system_event(
+        source="import",
+        action="retry",
+        message="retry",
+        target_type="importTask",
+        target_id=task.id,
+    )
+    prepared = prepare_import_retry(
+        task_id=task.id,
+        source_path=source.resolve(),
+        updated_at=db_timestamp(),
+        event=event,
+    )
+
+    def fail_event(*_args, **_kwargs) -> None:
+        raise RuntimeError("injected audit failure")
+
+    monkeypatch.setattr(
+        maintenance_write,
+        "write_prepared_system_events",
+        fail_event,
+    )
+
+    with pytest.raises(RuntimeError, match="audit failure"):
+        persist_import_task_retry(db_session, prepared)
+
+    db_session.expire_all()
+    assert db_session.get(ImportTask, task.id).status == "FAILED"
+    assert db_session.scalar(select(func.count()).select_from(ImportWorkItem)) == 0
 
 
 class _FakeFileEntry:
@@ -399,6 +514,47 @@ def test_pending_audio_scan_job_refreshes_stability_debounce(
     assert abs((work.available_at - later_available_at).total_seconds()) < 0.001
 
 
+def test_prepared_monitor_rescan_jobs_insert_as_one_set_and_reuse_existing(
+    db_session,
+    tmp_path: Path,
+) -> None:
+    folders = tuple(
+        MonitorFolder(
+            id=f"folder-rescan-{index}",
+            name=f"Rescan {index}",
+            root_path=str(tmp_path / str(index)),
+            enabled=True,
+        )
+        for index in range(3)
+    )
+    db_session.add_all(folders)
+    db_session.commit()
+    prepared_at = db_timestamp()
+    requests = tuple(
+        prepare_import_scan_job(
+            job_id=f"scan-rescan-{index}",
+            work_item_id=f"work-rescan-{index}",
+            monitor_folder_id=folder.id,
+            actor_user_id=None,
+            canonical_root_path=folder.root_path,
+            trigger="manual_rescan",
+            available_at=None,
+            created_at=prepared_at,
+        )
+        for index, folder in enumerate(folders)
+    )
+
+    created = insert_prepared_scan_jobs(db_session, requests)
+    db_session.commit()
+    reused = insert_prepared_scan_jobs(db_session, requests)
+    db_session.commit()
+
+    assert created == 3
+    assert reused == 0
+    assert db_session.scalar(select(func.count()).select_from(ImportScanJob)) == 3
+    assert db_session.scalar(select(func.count()).select_from(ImportWorkItem)) == 3
+
+
 def test_scan_candidate_batch_bulk_inserts_and_is_idempotent(
     db_session,
     tmp_path: Path,
@@ -415,10 +571,10 @@ def test_scan_candidate_batch_bulk_inserts_and_is_idempotent(
         candidate.write_bytes(b"book")
     db_session.flush()
 
-    first = stage_scan_candidate_batch(
+    first = _stage_scan_candidate_batch(
         db_session, candidates, monitor_folder_id=folder.id
     )
-    second = stage_scan_candidate_batch(
+    second = _stage_scan_candidate_batch(
         db_session, candidates, monitor_folder_id=folder.id
     )
     db_session.commit()
@@ -448,7 +604,7 @@ def test_completed_audio_bundle_is_not_requeued_by_repeated_scan(
     db_session.add(folder)
     db_session.flush()
 
-    first = stage_scan_candidate_batch(
+    first = _stage_scan_candidate_batch(
         db_session, (bundle,), monitor_folder_id=folder.id
     )
     task = db_session.scalar(select(ImportTask))
@@ -457,7 +613,7 @@ def test_completed_audio_bundle_is_not_requeued_by_repeated_scan(
     db_session.execute(delete(ImportWorkItem))
     db_session.flush()
 
-    second = stage_scan_candidate_batch(
+    second = _stage_scan_candidate_batch(
         db_session, (bundle,), monitor_folder_id=folder.id
     )
     db_session.commit()

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, inspect, select, update
+from sqlalchemy import case, delete, func, insert, inspect, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.base import Executable
 
 from app.models.library import LibraryWork
 from app.models.organize import (
@@ -18,128 +21,193 @@ from app.models.organize import (
     OrganizeJob,
     OrganizeRun,
 )
+from app.modules.organize.application.dto import PreparedOrganizeJobEnqueue
 from app.modules.organize.infrastructure.eligibility import UNRESOLVED_JOB_STATUSES
-from app.modules.organize.infrastructure.runs import (
-    count_jobs_for_run,
-    job_entity_as_legacy_dict,
-    update_run_after_enqueue,
-)
+from app.modules.organize.infrastructure.runs import job_entity_as_legacy_dict
 
 ACTIVE_LOOKUP_STATUSES = ("PENDING", "RUNNING")
 
 
-def _has_table(db: Session, table: str) -> bool:
-    # Use the session connection. inspect(engine) on StaticPool :memory:
-    # can checkout the shared connection and roll back in-flight writes.
-    return inspect(db.connection()).has_table(table)
+@dataclass(frozen=True, slots=True)
+class PreparedOrganizeRunWrite:
+    run_statement: Executable
+    job_statement: Executable | None
+    task_rows_by_job_id: dict[str, dict[str, object]]
+    task_insert_statement: Executable
+    work_statement: Executable | None
+    finalize_statement: Executable
 
 
-def insert_organize_run(
-    db: Session,
+def prepare_organize_run_write(
     *,
     run_id: str,
     trigger: str,
-    scope: dict[str, Any],
+    scope_json: str,
     dedupe_key: str,
-    status: str,
-    started_at: Any,
-    finished_at: Any,
-    now: Any,
-) -> None:
-    db.add(
-        OrganizeRun(
-            id=run_id,
-            trigger=trigger,
-            scope_json=json.dumps(scope, ensure_ascii=False),
-            dedupe_key=dedupe_key,
-            status=status,
-            queued_count=0,
-            completed_count=0,
-            review_count=0,
-            failed_count=0,
-            started_at=started_at,
-            finished_at=finished_at,
-            created_at=now,
-            updated_at=now,
-        )
+    run_status: str,
+    timestamp: datetime,
+    job_plans: tuple[PreparedOrganizeJobEnqueue, ...],
+) -> PreparedOrganizeRunWrite:
+    """Build every row and typed statement before SQLite's first DML."""
+
+    run_statement = insert(OrganizeRun).values(
+        id=run_id,
+        trigger=trigger,
+        scope_json=scope_json,
+        dedupe_key=dedupe_key,
+        status=run_status,
+        queued_count=0,
+        completed_count=0,
+        review_count=0,
+        failed_count=0,
+        started_at=timestamp,
+        finished_at=timestamp if not job_plans else None,
+        created_at=timestamp,
+        updated_at=timestamp,
     )
-    db.flush()
-
-
-def try_insert_unresolved_job(
-    db: Session,
-    *,
-    job_id: str,
-    run_id: str,
-    work_id: str,
-    volume_id: str | None,
-    media_version_id: str | None,
-    trigger: str,
-    reasons: list[str],
-    summary: str,
-    now: Any,
-) -> bool:
-    """Insert a job unless an unresolved job already exists for the work.
-
-    Uses the partial unique index OrganizeJob_unresolved_workId_key.
-    """
-
-    statement = (
+    job_rows = tuple(
+        {
+            "id": plan.job_id,
+            "run_id": run_id,
+            "work_id": plan.work_id,
+            "volume_id": plan.volume_id,
+            "media_version_id": plan.media_version_id,
+            "import_task_id": None,
+            "trigger": trigger,
+            "status": "LOOKUP_PENDING",
+            "issue_codes": "[]",
+            "reason_codes": json.dumps(plan.reasons, ensure_ascii=False),
+            "summary": "等待元数据插件识别",
+            "error_summary": None,
+            "started_at": None,
+            "finished_at": None,
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        }
+        for plan in job_plans
+    )
+    job_statement = (
         sqlite_insert(OrganizeJob)
-        .values(
-            id=job_id,
-            run_id=run_id,
-            work_id=work_id,
-            volume_id=volume_id,
-            media_version_id=media_version_id,
-            import_task_id=None,
-            trigger=trigger,
-            status="LOOKUP_PENDING",
-            issue_codes="[]",
-            reason_codes=json.dumps(reasons, ensure_ascii=False),
-            summary=summary,
-            error_summary=None,
-            started_at=None,
-            finished_at=None,
-            created_at=now,
-            updated_at=now,
-        )
+        .values(list(job_rows))
         .on_conflict_do_nothing(
             index_elements=[OrganizeJob.work_id],
             index_where=OrganizeJob.status.in_(UNRESOLVED_JOB_STATUSES),
         )
+        .returning(OrganizeJob.id)
+        if job_rows
+        else None
     )
-    result = db.execute(statement)
-    return bool(result.rowcount)
+    task_rows_by_job_id = {
+        plan.job_id: {
+            "id": plan.task_id,
+            "work_id": plan.work_id,
+            "volume_id": plan.volume_id,
+            "media_version_id": plan.media_version_id,
+            "import_task_id": None,
+            "organize_job_id": plan.job_id,
+            "status": "PENDING",
+            "provider_order": json.dumps(plan.provider_order, ensure_ascii=False),
+            "attempts": 0,
+            "next_attempt_at": timestamp,
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        }
+        for plan in job_plans
+    }
+    work_ids_for_run = select(OrganizeJob.work_id).where(
+        OrganizeJob.run_id == run_id
+    )
+    work_statement = (
+        update(LibraryWork)
+        .where(LibraryWork.id.in_(work_ids_for_run))
+        .values(organize_status="LOOKUP_PENDING", updated_at=timestamp)
+        if job_plans
+        else None
+    )
+    queued_count = (
+        select(func.count())
+        .select_from(OrganizeJob)
+        .where(OrganizeJob.run_id == run_id)
+        .scalar_subquery()
+    )
+    finalize_statement = (
+        update(OrganizeRun)
+        .where(OrganizeRun.id == run_id)
+        .values(
+            queued_count=queued_count,
+            status=case((queued_count > 0, "RUNNING"), else_="COMPLETED"),
+            finished_at=case((queued_count > 0, None), else_=timestamp),
+            updated_at=timestamp,
+        )
+    )
+    return PreparedOrganizeRunWrite(
+        run_statement=run_statement,
+        job_statement=job_statement,
+        task_rows_by_job_id=task_rows_by_job_id,
+        task_insert_statement=insert(MetadataLookupTask),
+        work_statement=work_statement,
+        finalize_statement=finalize_statement,
+    )
 
 
-def insert_lookup_task(
+def execute_organize_run_write(
     db: Session,
+    prepared: PreparedOrganizeRunWrite,
+) -> int:
+    db.execute(prepared.run_statement)
+    inserted_job_ids = (
+        set(db.scalars(prepared.job_statement))
+        if prepared.job_statement is not None
+        else set()
+    )
+    task_rows = tuple(
+        prepared.task_rows_by_job_id[job_id] for job_id in inserted_job_ids
+    )
+    if task_rows:
+        db.execute(prepared.task_insert_statement, list(task_rows))
+    if prepared.work_statement is not None:
+        db.execute(prepared.work_statement)
+    db.execute(prepared.finalize_statement)
+    return len(inserted_job_ids)
+
+
+def prepare_lookup_task_row(
     *,
     task_id: str,
     work_id: str,
     volume_id: str | None,
     media_version_id: str | None,
     job_id: str,
-    provider_order: list[str],
-    now: Any,
+    provider_order: tuple[str, ...],
+    timestamp: datetime,
+) -> dict[str, object]:
+    return {
+        "id": task_id,
+        "work_id": work_id,
+        "volume_id": volume_id,
+        "media_version_id": media_version_id,
+        "import_task_id": None,
+        "organize_job_id": job_id,
+        "status": "PENDING",
+        "provider_order": json.dumps(provider_order, ensure_ascii=False),
+        "attempts": 0,
+        "next_attempt_at": timestamp,
+        "created_at": timestamp,
+        "updated_at": timestamp,
+    }
+
+
+def insert_prepared_lookup_task(
+    db: Session,
+    prepared_row: dict[str, object],
 ) -> None:
-    db.add(
-        MetadataLookupTask(
-            id=task_id,
-            work_id=work_id,
-            volume_id=volume_id,
-            media_version_id=media_version_id,
-            import_task_id=None,
-            organize_job_id=job_id,
-            status="PENDING",
-            provider_order=json.dumps(provider_order, ensure_ascii=False),
-            attempts=0,
-            next_attempt_at=now,
-            created_at=now,
-            updated_at=now,
-        )
-    )
+    db.execute(insert(MetadataLookupTask), [prepared_row])
+
+
+def _has_table(db: Session, table: str) -> bool:
+    # Use the session connection. inspect(engine) on StaticPool :memory:
+    # can checkout the shared connection and roll back in-flight writes.
+    return inspect(db.connection()).has_table(table)
 
 
 def mark_work_organize_status(
@@ -268,7 +336,7 @@ def reset_job_for_recognition(
             summary="等待重新识别",
             error_summary=None,
             trigger="MANUAL",
-            reason_codes=json.dumps(["MANUAL_RECOGNIZE"], ensure_ascii=False),
+            reason_codes='["MANUAL_RECOGNIZE"]',
             started_at=None,
             finished_at=None,
             updated_at=now,
@@ -295,6 +363,20 @@ def latest_job_status_for_work(db: Session, work_id: str) -> str | None:
     return db.scalar(
         select(OrganizeJob.status)
         .where(OrganizeJob.work_id == work_id)
+        .order_by(OrganizeJob.created_at.desc())
+        .limit(1)
+    )
+
+
+def latest_job_status_for_work_excluding(
+    db: Session, work_id: str, excluded_job_id: str
+) -> str | None:
+    return db.scalar(
+        select(OrganizeJob.status)
+        .where(
+            OrganizeJob.work_id == work_id,
+            OrganizeJob.id != excluded_job_id,
+        )
         .order_by(OrganizeJob.created_at.desc())
         .limit(1)
     )
@@ -333,32 +415,29 @@ def finish_unresolved_jobs_for_work(
                 updated_at=now,
             )
         )
-        db.flush()
     return job_ids
 
 
-def refresh_run_queue_count(db: Session, *, run_id: str, now: Any) -> None:
-    remaining_count = count_jobs_for_run(db, run_id)
-    db.execute(
+def prepare_refresh_run_queue_count(
+    *, run_id: str, now: datetime
+) -> Executable:
+    queued_count = (
+        select(func.count())
+        .select_from(OrganizeJob)
+        .where(OrganizeJob.run_id == run_id)
+        .scalar_subquery()
+    )
+    return (
         update(OrganizeRun)
         .where(OrganizeRun.id == run_id)
         .values(
             status="RUNNING",
-            queued_count=remaining_count,
+            queued_count=queued_count,
             finished_at=None,
             updated_at=now,
         )
     )
 
 
-def finalize_run_enqueue(db: Session, *, run_id: str, now: Any) -> int:
-    queued_count = count_jobs_for_run(db, run_id)
-    update_run_after_enqueue(
-        db,
-        run_id=run_id,
-        queued_count=queued_count,
-        status="RUNNING" if queued_count else "COMPLETED",
-        finished_at=None if queued_count else now,
-        now=now,
-    )
-    return queued_count
+def execute_refresh_run_queue_count(db: Session, statement: Executable) -> None:
+    db.execute(statement)

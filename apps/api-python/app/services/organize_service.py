@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -14,9 +15,29 @@ from urllib.request import urlopen
 
 from sqlalchemy.orm import Session
 
+from app.bootstrap.organize import (
+    apply_duplicate_actions_command,
+    apply_organize_job_command,
+    bulk_apply_organize_jobs_command,
+    create_legacy_organize_job_command,
+    dismiss_organize_job_command,
+    fail_organize_job_command,
+    insert_organize_suggestions_command,
+    merge_organize_works_command,
+    refresh_duplicate_candidates_command,
+    refresh_organize_job_command,
+    set_organize_work_hidden_command,
+)
+from app.core.database_errors import is_database_busy_error
+from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import now_timestamp_ms
+from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.infrastructure import external_cache as metadata_cache
+from app.modules.metadata.infrastructure.short_writes import (
+    metadata_short_write_session,
+)
+from app.modules.organize.application.dto import PreparedDuplicateAction
 from app.modules.organize.infrastructure import duplicates as organize_duplicates
 from app.modules.organize.infrastructure import review as organize_review
 from app.modules.organize.infrastructure import suggestions as organize_suggestions
@@ -25,6 +46,8 @@ from app.services.book_identity import (
     identity_merge_key,
     normalize_identity_part,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -286,16 +309,29 @@ def apply_organize_job(
     if not job:
         raise ValueError("整理任务不存在")
     if payload.get("dismiss"):
-        organize_review.update_job(
-            db, job_id, {"status": "DISMISSED", "updatedAt": now()}
+        stamp = now()
+        work_id = str(job.get("workId") or "")
+        has_work_table = has_table(db, "LibraryWork")
+        dismiss_organize_job_command(
+            db,
+            job_row={"id": job_id, "status": "DISMISSED", "updatedAt": stamp},
+            work_row=(
+                {
+                    "id": work_id,
+                    "organizeStatus": "DISMISSED",
+                    "updatedAt": stamp,
+                }
+                if work_id and has_work_table
+                else None
+            ),
         )
-        if job.get("workId") and has_table(db, "LibraryWork"):
-            organize_review.update_work(
-                db, job["workId"], {"organizeStatus": "DISMISSED", "updatedAt": now()}
-            )
-        db.commit()
         return ApplyResult(
-            organize_review.get_job(db, job_id) or job, 0, 0, False, True, 0
+            {**job, "status": "DISMISSED", "updatedAt": stamp},
+            0,
+            0,
+            False,
+            True,
+            0,
         )
 
     suggestion_ids = [str(item) for item in payload.get("suggestionIds") or []] or None
@@ -331,96 +367,98 @@ def apply_organize_job(
     if mark_organized:
         patch["organized"] = True
         patch["organizeStatus"] = "APPLIED"
-    if patch and job.get("workId") and has_table(db, "LibraryWork"):
-        patch["updatedAt"] = now()
-        organize_review.update_work(db, job["workId"], patch)
-        db.commit()
-    if suggestions:
-        organize_suggestions.mark_suggestions_applied(
-            db, [str(item["id"]) for item in suggestions]
-        )
-        db.commit()
-
     duplicate_ids = [
         str(item) for item in payload.get("duplicateIds") or [] if str(item)
     ]
-    duplicate_actions_applied = (
-        apply_duplicate_actions(db, job, duplicate_ids) if duplicate_ids else 0
+    duplicate_actions = (
+        prepare_duplicate_actions(db, job, duplicate_ids) if duplicate_ids else ()
     )
-
-    if mark_organized:
-        organize_suggestions.dismiss_pending_suggestions(db, job_id)
-        organize_duplicates.dismiss_pending_duplicates(db, job_id)
-        db.commit()
-    updated_job = (
-        organize_review.update_job(
-            db,
-            job_id,
-            {
-                "status": "APPLIED" if mark_organized else job.get("status"),
-                "updatedAt": now(),
-            },
-        )
-        or job
+    stamp = now()
+    if patch:
+        patch["updatedAt"] = stamp
+    job_patch = {
+        "status": "APPLIED" if mark_organized else job.get("status"),
+        "updatedAt": stamp,
+    }
+    has_work_table = has_table(db, "LibraryWork")
+    apply_organize_job_command(
+        db,
+        work_row=(
+            {"id": str(job["workId"]), **patch}
+            if patch and job.get("workId") and has_work_table
+            else None
+        ),
+        suggestion_ids=tuple(str(item["id"]) for item in suggestions),
+        duplicate_actions=duplicate_actions,
+        dismiss_job_id=job_id if mark_organized else None,
+        job_row={"id": job_id, **job_patch},
     )
-    db.commit()
+    updated_job = {**job, **job_patch}
     return ApplyResult(
         updated_job,
         len(suggestions),
         sum(1 for item in suggestions if item.get("source") == "external"),
         False,
         False,
-        duplicate_actions_applied,
+        len(duplicate_actions),
     )
 
 
 def set_work_hidden(
     db: Session, work_id: str, hidden: bool, organize_status: str = "APPLIED"
 ) -> None:
-    organize_duplicates.set_work_hidden(
-        db, work_id=work_id, hidden=hidden, organize_status=organize_status, now=now()
+    stamp = now()
+    set_organize_work_hidden_command(
+        db,
+        work_id=work_id,
+        hidden=hidden,
+        organize_status=organize_status,
+        timestamp=stamp,
     )
-    db.commit()
 
 
 def merge_works(db: Session, source_work_id: str, target_work_id: str) -> None:
     if source_work_id == target_work_id:
         return
     stamp = now()
-    organize_duplicates.merge_media_versions_and_volumes(
-        db, source_work_id=source_work_id, target_work_id=target_work_id, now=stamp
+    merge_organize_works_command(
+        db,
+        source_work_id=source_work_id,
+        target_work_id=target_work_id,
+        timestamp=stamp,
     )
-    organize_duplicates.set_work_hidden(
-        db, work_id=source_work_id, hidden=True, organize_status="APPLIED", now=stamp
+
+
+def prepare_duplicate_actions(
+    db: Session, job: dict[str, Any], duplicate_ids: list[str]
+) -> tuple[PreparedDuplicateAction, ...]:
+    duplicates = organize_duplicates.list_duplicates_by_ids(
+        db, job_id=str(job["id"]), duplicate_ids=duplicate_ids
     )
-    db.commit()
+    target_work_id = str(job.get("workId") or "")
+    if not target_work_id:
+        return ()
+    stamp = now()
+    return tuple(
+        PreparedDuplicateAction(
+            duplicate_id=str(duplicate["id"]),
+            source_work_id=str(duplicate["targetWorkId"]),
+            target_work_id=target_work_id,
+            action=string_value(duplicate.get("suggestedAction")) or "KEEP_SEPARATE",
+            timestamp=stamp,
+        )
+        for duplicate in duplicates
+        if duplicate.get("targetWorkId")
+        and str(duplicate["targetWorkId"]) != target_work_id
+    )
 
 
 def apply_duplicate_actions(
     db: Session, job: dict[str, Any], duplicate_ids: list[str]
 ) -> int:
-    duplicates = organize_duplicates.list_duplicates_by_ids(
-        db, job_id=str(job["id"]), duplicate_ids=duplicate_ids
-    )
-    target_work_id = job.get("workId")
-    if not target_work_id:
-        return 0
-    applied = 0
-    for duplicate in duplicates:
-        source_work_id = duplicate.get("targetWorkId")
-        if not source_work_id or source_work_id == target_work_id:
-            continue
-        action = string_value(duplicate.get("suggestedAction")) or "KEEP_SEPARATE"
-        if action == "HIDE_DUPLICATE":
-            set_work_hidden(db, source_work_id, True)
-        elif action == "MERGE_WORKS":
-            merge_works(db, source_work_id, target_work_id)
-        organize_duplicates.mark_duplicate_applied(
-            db, duplicate_id=str(duplicate["id"]), now=now()
-        )
-        db.commit()
-        applied += 1
-    return applied
+    actions = prepare_duplicate_actions(db, job, duplicate_ids)
+    apply_duplicate_actions_command(db, actions)
+    return len(actions)
 
 
 def issue_codes_for_work(
@@ -454,18 +492,29 @@ def refresh_organize_job(db: Session, job_id: str) -> dict[str, Any]:
         organize_review.get_work(db, str(job["workId"])) if job.get("workId") else None
     )
     if not work:
-        updated = (
-            organize_review.update_job(
-                db,
-                job_id,
-                {"status": "FAILED", "errorSummary": "作品不存在", "updatedAt": now()},
-            )
-            or job
+        stamp = now()
+        updated = {
+            **job,
+            "status": "FAILED",
+            "errorSummary": "作品不存在",
+            "updatedAt": stamp,
+        }
+        fail_organize_job_command(
+            db,
+            {
+                "id": job_id,
+                "status": "FAILED",
+                "errorSummary": "作品不存在",
+                "updatedAt": stamp,
+            },
         )
-        db.commit()
         return updated
     volumes = organize_review.list_volumes_for_work(db, str(work["id"]))
-    duplicate_count = refresh_duplicate_candidates(db, job, work)
+    duplicate_rows = prepare_duplicate_candidate_rows(db, job, work)
+    duplicate_chunks = tuple(
+        sqlite_parameter_chunks(duplicate_rows, parameters_per_row=9)
+    )
+    duplicate_count = len(duplicate_rows)
     issues = issue_codes_for_work(work, volumes, duplicate_count > 0)
     status = "REVIEWING" if issues else "APPLIED"
     summary = (
@@ -473,31 +522,28 @@ def refresh_organize_job(db: Session, job_id: str) -> dict[str, Any]:
         if issues or duplicate_count
         else "未发现需要整理的问题"
     )
-    updated_job = (
-        organize_review.update_job(
-            db,
-            job_id,
-            {
-                "status": status,
-                "issueCodes": json_text(issues),
-                "summary": summary,
-                "errorSummary": None,
-                "updatedAt": now(),
-            },
-        )
-        or job
-    )
-    organize_review.update_work(
+    stamp = now()
+    job_patch = {
+        "status": status,
+        "issueCodes": json_text(issues),
+        "summary": summary,
+        "errorSummary": None,
+        "updatedAt": stamp,
+    }
+    work_patch = {
+        "organizeStatus": status,
+        "metadataQuality": max(0, 100 - len(issues) * 15),
+        "organized": status == "APPLIED" or bool(work.get("organized")),
+        "updatedAt": stamp,
+    }
+    refresh_organize_job_command(
         db,
-        str(work["id"]),
-        {
-            "organizeStatus": status,
-            "metadataQuality": max(0, 100 - len(issues) * 15),
-            "organized": status == "APPLIED" or bool(work.get("organized")),
-            "updatedAt": now(),
-        },
+        job_id=str(job["id"]),
+        duplicate_chunks=duplicate_chunks,
+        job_row={"id": job_id, **job_patch},
+        work_row={"id": str(work["id"]), **work_patch},
     )
-    db.commit()
+    updated_job = {**job, **job_patch}
     return {
         **updated_job,
         "refreshed": True,
@@ -519,17 +565,21 @@ def ensure_organize_job_for_work(db: Session, work_id: str) -> dict[str, Any] | 
     already_organized = (
         bool(work.get("organized")) or work.get("organizeStatus") == "APPLIED"
     )
-    created = organize_review.insert_organize_job(
+    job_id = f"py_{time_ns()}"
+    status = "APPLIED" if already_organized else "REVIEWING"
+    issue_codes_json = json_text([] if already_organized else ["NEW_IMPORT"])
+    summary = "已整理，等待元数据刷新" if already_organized else "等待元数据刷新"
+    stamp = now()
+    created = create_legacy_organize_job_command(
         db,
-        job_id=f"py_{time_ns()}",
+        job_id=job_id,
         work_id=work_id,
         volume_id=str(volume_id) if volume_id else None,
-        status="APPLIED" if already_organized else "REVIEWING",
-        issue_codes_json=json_text([] if already_organized else ["NEW_IMPORT"]),
-        summary="已整理，等待元数据刷新" if already_organized else "等待元数据刷新",
-        now=now(),
+        status=status,
+        issue_codes_json=issue_codes_json,
+        summary=summary,
+        timestamp=stamp,
     )
-    db.commit()
     return created
 
 
@@ -1541,13 +1591,21 @@ def external_metadata_result_cacheable(result: dict[str, Any]) -> bool:
 
 
 def external_metadata_cache_put(
-    db: Session, provider: str, query_key: str, result: dict[str, Any]
+    db: Session,
+    provider: str,
+    query_key: str,
+    result: dict[str, Any],
+    *,
+    cache_ready: bool | None = None,
 ) -> None:
     if (
         not query_key
-        or not has_table(db, "ExternalMetadataCache")
         or not external_metadata_result_cacheable(result)
     ):
+        return
+    if cache_ready is None:
+        cache_ready = metadata_cache.external_metadata_cache_ready(db)
+    if not cache_ready:
         return
     candidates = result["candidates"]
     timestamp = now_timestamp_ms()
@@ -1560,16 +1618,27 @@ def external_metadata_cache_put(
             "message": result.get("message"),
         }
     )
-    metadata_cache.upsert_cache_entry(
-        db,
-        entry_id=f"py_{time_ns()}",
+    entry_id = f"py_{time_ns()}"
+    expires_at_ms = timestamp + 24 * 60 * 60 * 1000
+    prepared = metadata_cache.prepare_cache_entry_write(
+        entry_id=entry_id,
         provider=provider,
         query_key=query_key,
         raw_json=payload,
-        expires_at_ms=timestamp + 24 * 60 * 60 * 1000,
+        expires_at_ms=expires_at_ms,
         now_ms=timestamp,
     )
-    db.commit()
+    try:
+        with metadata_short_write_session(db) as writer:
+            with MetadataWriteTransaction(writer):
+                metadata_cache.write_prepared_cache_entry(writer, prepared)
+    except Exception as exc:
+        if not is_database_busy_error(exc):
+            raise
+        LOGGER.info(
+            "metadata_cache_write outcome=deferred reason=database_busy provider=%s",
+            provider,
+        )
 
 
 def metadata_search_candidates(
@@ -1585,9 +1654,13 @@ def metadata_search_candidates(
 ) -> dict[str, Any]:
     search_text = query or first_string(context["work"].get("title")) or ""
     query_key = metadata_title_key(search_text)
+    cache_eligible = source in {"bangumi", "douban", "ai"}
+    cache_ready = (
+        metadata_cache.external_metadata_cache_ready(db) if cache_eligible else False
+    )
     cached = (
         external_metadata_cache_get(db, source, query_key)
-        if source in {"bangumi", "douban", "ai"} and use_cache
+        if cache_eligible and cache_ready and use_cache
         else None
     )
     if cached is not None:
@@ -1598,6 +1671,7 @@ def metadata_search_candidates(
             "cacheHit": True,
             **cached,
         }
+    db.close()
     if source == "bangumi":
         if automatic_request_gate is None:
             result = run_bangumi_metadata_provider(
@@ -1660,8 +1734,14 @@ def metadata_search_candidates(
                 query or first_string(context["work"].get("title")),
             ),
         }
-    if source in {"bangumi", "douban", "ai"} and result.get("enabled"):
-        external_metadata_cache_put(db, source, query_key, result)
+    if cache_eligible and result.get("enabled"):
+        external_metadata_cache_put(
+            db,
+            source,
+            query_key,
+            result,
+            cache_ready=cache_ready,
+        )
     return result
 
 
@@ -1671,29 +1751,68 @@ def add_suggestions_to_job(
     if not suggestions or not has_table(db, "MetadataSuggestion"):
         return 0
     existing = organize_suggestions.list_suggestion_dedupe_keys(db, job_id)
-    added = 0
+    rows: list[dict[str, Any]] = []
+    stamp = now()
+    base_id = time_ns()
     for suggestion in suggestions:
         key = f"{suggestion.get('field')}:{suggestion.get('source')}:{suggestion.get('suggestedValue')}"
         if key in existing:
             continue
-        organize_suggestions.insert_suggestion(
-            db,
-            suggestion_id=f"py_{time_ns()}_{added}",
-            job_id=job_id,
-            field=str(suggestion.get("field") or ""),
-            current_value=suggestion.get("currentValue"),
-            suggested_value=suggestion.get("suggestedValue"),
-            source=str(suggestion.get("source") or ""),
-            confidence=float(suggestion.get("confidence") or 0),
-            reason=str(suggestion.get("reason") or ""),
-            status=str(suggestion.get("status") or "PENDING"),
-            now=now(),
+        rows.append(
+            {
+                "id": f"py_{base_id}_{len(rows)}",
+                "job_id": job_id,
+                "field": str(suggestion.get("field") or ""),
+                "current_value": (
+                    None
+                    if suggestion.get("currentValue") is None
+                    else str(suggestion.get("currentValue"))
+                ),
+                "suggested_value": str(suggestion.get("suggestedValue")),
+                "source": str(suggestion.get("source") or ""),
+                "confidence": float(suggestion.get("confidence") or 0),
+                "reason": str(suggestion.get("reason") or ""),
+                "status": str(suggestion.get("status") or "PENDING"),
+                "created_at": stamp,
+                "updated_at": stamp,
+            }
         )
         existing.add(key)
-        added += 1
-    if added:
-        db.commit()
-    return added
+    prepared_rows = tuple(rows)
+    chunks = tuple(sqlite_parameter_chunks(prepared_rows, parameters_per_row=11))
+    if chunks:
+        insert_organize_suggestions_command(db, chunks)
+    return len(prepared_rows)
+
+
+def prepare_duplicate_candidate_rows(
+    db: Session, job: dict[str, Any], work: dict[str, Any]
+) -> tuple[dict[str, Any], ...]:
+    title_key = normalize_key(work.get("title"))
+    if len(title_key) < 4:
+        return ()
+    candidates = organize_duplicates.list_visible_works_except(db, str(work["id"]))
+    stamp = now()
+    base_id = time_ns()
+    matching = [
+        candidate
+        for candidate in candidates
+        if normalize_key(candidate.get("title")) == title_key
+    ]
+    return tuple(
+        {
+            "id": f"py_{base_id}_{index}",
+            "job_id": str(job["id"]),
+            "target_work_id": str(candidate["id"]),
+            "reasons": json_text(["title"]),
+            "confidence": 0.75,
+            "suggested_action": "MERGE_WORKS",
+            "status": "PENDING",
+            "created_at": stamp,
+            "updated_at": stamp,
+        }
+        for index, candidate in enumerate(matching)
+    )
 
 
 def refresh_duplicate_candidates(
@@ -1701,33 +1820,12 @@ def refresh_duplicate_candidates(
 ) -> int:
     if not has_table(db, "DuplicateCandidate") or not has_table(db, "LibraryWork"):
         return 0
-    organize_duplicates.delete_pending_duplicates(db, str(job["id"]))
-    db.commit()
-    title_key = normalize_key(work.get("title"))
-    if len(title_key) < 4:
-        return 0
-    candidates = organize_duplicates.list_visible_works_except(db, str(work["id"]))
-    count = 0
-    for candidate in candidates:
-        reasons = []
-        if normalize_key(candidate.get("title")) == title_key:
-            reasons.append("title")
-        if not reasons:
-            continue
-        organize_duplicates.insert_duplicate_candidate(
-            db,
-            candidate_id=f"py_{time_ns()}",
-            job_id=str(job["id"]),
-            target_work_id=str(candidate["id"]),
-            reasons_json=json_text(reasons),
-            confidence=0.75,
-            suggested_action="MERGE_WORKS",
-            now=now(),
-        )
-        count += 1
-    if count:
-        db.commit()
-    return count
+    rows = prepare_duplicate_candidate_rows(db, job, work)
+    chunks = tuple(sqlite_parameter_chunks(rows, parameters_per_row=9))
+    refresh_duplicate_candidates_command(
+        db, job_id=str(job["id"]), chunks=chunks
+    )
+    return len(rows)
 
 
 def bulk_apply_organize_jobs(
@@ -1737,58 +1835,85 @@ def bulk_apply_organize_jobs(
         raise ValueError("请选择要批量处理的整理任务")
     if len(job_ids) > 200:
         raise ValueError("单次最多批量处理 200 个整理任务")
-    applied = 0
-    jobs = 0
-    for job_id in job_ids:
-        if not organize_review.get_job(db, job_id):
-            continue
-        result = apply_organize_job(
-            db,
-            job_id,
-            {
-                "highConfidenceOnly": payload.get("highConfidenceOnly", True),
-                "markOrganized": payload.get("markOrganized"),
-            },
-        )
-        applied += result.applied
-        jobs += 1
     tags = [
         str(tag).strip() for tag in payload.get("addTags") or [] if str(tag).strip()
     ]
-    if tags and has_table(db, "LibraryWork"):
-        for job_id in job_ids:
-            job = organize_review.get_job(db, job_id)
-            if not job:
-                continue
-            work = (
-                organize_review.get_work(db, str(job.get("workId")))
-                if job.get("workId")
-                else None
+    stamp = now()
+    high_confidence_only = bool(payload.get("highConfidenceOnly", True))
+    mark_organized = bool(payload.get("markOrganized"))
+    work_rows: list[dict[str, Any]] = []
+    job_rows: list[dict[str, Any]] = []
+    applied_suggestion_ids: list[str] = []
+    dismiss_job_ids: list[str] = []
+    applied = 0
+    jobs = 0
+    for job_id in dict.fromkeys(job_ids):
+        job = organize_review.get_job(db, job_id)
+        if not job:
+            continue
+        suggestions = selected_suggestions(db, job_id, None, high_confidence_only)
+        patch = work_patch_from_suggestions(db, suggestions)
+        work = (
+            organize_review.get_work(db, str(job.get("workId")))
+            if job.get("workId")
+            else None
+        )
+        if work and ("title" in patch or "author" in patch):
+            title = string_value(patch.get("title")) or string_value(work.get("title"))
+            author = (
+                string_value(patch.get("author"))
+                or string_value(work.get("author"))
+                or UNKNOWN_AUTHOR
             )
-            if not work:
-                continue
+            patch.update(
+                {
+                    "title": title,
+                    "author": author,
+                    "normalizedTitle": normalize_identity_part(title),
+                    "normalizedAuthor": normalize_identity_part(author),
+                    "mergeKey": identity_merge_key(title, author),
+                }
+            )
+        if work and tags:
             current = parse_json_value(work.get("tags"))
             current_tags = current if isinstance(current, list) else []
-            organize_review.update_work(
-                db,
-                str(work["id"]),
-                {
-                    "tags": json_text(
-                        sorted(
-                            {
-                                *[
-                                    str(item).strip()
-                                    for item in current_tags
-                                    if str(item).strip()
-                                ],
-                                *tags,
-                            }
-                        )
-                    ),
-                    "updatedAt": now(),
-                },
+            patch["tags"] = json_text(
+                sorted(
+                    {
+                        *(str(item).strip() for item in current_tags if str(item).strip()),
+                        *tags,
+                    }
+                )
             )
-            db.commit()
+        if mark_organized:
+            patch["organized"] = True
+            patch["organizeStatus"] = "APPLIED"
+            dismiss_job_ids.append(job_id)
+        if work and patch:
+            work_rows.append({"id": str(work["id"]), **patch, "updatedAt": stamp})
+        job_rows.append(
+            {
+                "id": job_id,
+                "status": "APPLIED" if mark_organized else job.get("status"),
+                "updatedAt": stamp,
+            }
+        )
+        applied_suggestion_ids.extend(str(item["id"]) for item in suggestions)
+        applied += len(suggestions)
+        jobs += 1
+    suggestion_id_chunks = tuple(
+        sqlite_parameter_chunks(tuple(applied_suggestion_ids), parameters_per_row=1)
+    )
+    dismiss_job_chunks = tuple(
+        sqlite_parameter_chunks(tuple(dismiss_job_ids), parameters_per_row=1)
+    )
+    bulk_apply_organize_jobs_command(
+        db,
+        work_rows=tuple(work_rows),
+        job_rows=tuple(job_rows),
+        suggestion_id_chunks=suggestion_id_chunks,
+        dismiss_job_chunks=dismiss_job_chunks,
+    )
     return {
         "matched": len(job_ids),
         "jobs": jobs,

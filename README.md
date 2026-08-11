@@ -157,19 +157,6 @@ pnpm dev:test
 
 默认访问地址为 `http://localhost:3000`。`pnpm dev:test` 会同时启动统一网关、Next.js、FastAPI 和 Python Worker。
 
-### 启动原生客户端
-
-先保证本地服务可从模拟器或设备访问，再运行：
-
-```bash
-pnpm --filter @shuku/mobile start
-# 或生成并启动原生开发构建
-pnpm --filter @shuku/mobile ios
-pnpm --filter @shuku/mobile android
-```
-
-原生构建还需要对应平台的 Xcode 或 Android Studio 工具链。
-
 ### 常用质量检查
 
 ```bash
@@ -183,9 +170,6 @@ pnpm --filter @shuku/web build
 # Python API 与 Worker
 cd apps/api-python
 uv run --extra dev pytest -q
-
-# Mobile（回到仓库根目录后执行）
-pnpm --filter @shuku/mobile check
 
 # 部署与发布
 pnpm fnos:validate
@@ -214,7 +198,6 @@ flowchart LR
 ## 技术栈
 
 - Web：Next.js 16、React 19、TypeScript、Tailwind CSS
-- Mobile：Expo 57、React Native 0.86、Expo Router
 - API：Python 3.11、FastAPI、SQLAlchemy 2、Alembic
 - 数据库：SQLite
 - 导入与转换：持久化 Python Worker、Watchdog、libmobi、EbookLib、lxml、Mutagen、FFmpeg/ffprobe
@@ -227,7 +210,6 @@ flowchart LR
 ```text
 apps/
 ├── api-python/       FastAPI、领域模块、数据库迁移与 Worker
-├── mobile/           Expo iOS/Android 客户端
 └── web/              Next.js Web 与 PWA
 packages/
 └── reader-core/      跨客户端的阅读器状态与契约
@@ -240,7 +222,14 @@ scripts/              本地开发、验证、发布和统一运行脚本
 ## 更多文档
 
 - [Python API、转换器与 Worker](apps/api-python/README.md)
-- [移动 App 视觉与交互规范](docs/mobile-app-design-guidelines.md)
 - [业务代码分层与重构策略](docs/business-code-layering-and-refactoring.md)
+- [移动 App 第一阶段：Web → App 功能基线](docs/mobile-app-phase-1-web-to-app-functional-baseline.md)
+- [移动 App 第二阶段：4 Tab 信息架构与导航规范](docs/mobile-app-phase-2-information-architecture.md)
+- [移动 App 第三阶段：关键 User Flow 与 Wireframe 视觉锚点](docs/mobile-app-phase-3-user-flows-and-wireframes.md)
+- [移动 App 第四阶段：方向 A“暖白书页”视觉规范 v1](docs/mobile-app-phase-4-visual-master.md)
+- [移动 App 第五阶段：1:1 高保真视觉锚点](docs/mobile-app-phase-5-high-fidelity-anchors.md)
+- [移动 App 第六阶段：服务器与认证高保真闭环](docs/mobile-app-phase-6-server-auth-high-fidelity.md)
+- [移动 App 第七阶段：书库发现流高保真闭环](docs/mobile-app-phase-7-library-discovery-high-fidelity.md)
+- [移动 App 全局开发规范：原生体验与设计还原](docs/mobile-app-development-global-guidelines.md)
 - [fnOS 模板与本地构建](deploy/fnos/README.md)
 - [版本说明](release-notes/README.md)

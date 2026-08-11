@@ -1,32 +1,37 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import TypeVar
+from types import TracebackType
 
 from app.modules.imports.application.ports import ImportUnitOfWork
 
-ResultT = TypeVar("ResultT")
 
+class ImportWriteTransaction:
+    """Named short unit-of-work boundary for already prepared import writes."""
 
-def execute_import_checkpoint(
-    unit_of_work: ImportUnitOfWork,
-    operation: Callable[[], ResultT],
-) -> ResultT:
-    """Persist one recoverable import state transition."""
+    def __init__(self, unit_of_work: ImportUnitOfWork) -> None:
+        self._unit_of_work = unit_of_work
 
-    try:
-        result = operation()
-        unit_of_work.commit()
-    except Exception:
-        unit_of_work.rollback()
-        raise
-    return result
+    def __enter__(self) -> ImportWriteTransaction:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool:
+        del exc_value, traceback
+        if exc_type is None:
+            self._unit_of_work.commit()
+        else:
+            self._unit_of_work.rollback()
+        return False
 
 
 def commit_import_checkpoint(unit_of_work: ImportUnitOfWork) -> None:
     """Commit writes already staged by the file-processing adapter."""
 
-    execute_import_checkpoint(unit_of_work, lambda: None)
+    unit_of_work.commit()
 
 
 def release_import_transaction(unit_of_work: ImportUnitOfWork) -> None:

@@ -54,6 +54,21 @@ class UpdateMonitorFolderRequest(HttpContractModel):
     import_mode: str | None = Field(default=None, alias="importMode")
 
 
+class ParseReleaseTitleRequest(HttpContractModel):
+    title: str = ""
+
+
+class ScanImportDirectoryRequest(HttpContractModel):
+    path: str = ""
+
+
+class DeleteImportTaskRequest(HttpContractModel):
+    delete_mode: Literal["record", "source", "converted"] = Field(
+        default="record", alias="deleteMode"
+    )
+    delete_library_record: bool = Field(default=False, alias="deleteLibraryRecord")
+
+
 class MonitorFoldersPayload(HttpContractModel):
     folders: list[MonitorFolder]
     monitor_root: str | None = Field(alias="monitorRoot")

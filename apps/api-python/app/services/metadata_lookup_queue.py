@@ -2,32 +2,46 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
+from pathlib import Path
+from time import monotonic, time
 from typing import Any
 from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
 from uuid import uuid4
 
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from app.bootstrap.library import (
+    PreparedWorkFacetWrite,
+    execute_work_facet_write,
+    load_work_facet_projections,
+    prepare_work_facet_write,
+)
 from app.core.config import Settings
-from app.infrastructure.sqlite_retry import execute_with_sqlite_busy_retry
+from app.core.database_errors import is_database_busy_error
 from app.models.common import db_timestamp
-from app.modules.metadata.application.commands import execute_metadata_transaction
+from app.modules.library.public import prepare_work_facet
+from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
+from app.modules.metadata.application.writeback import (
+    prepare_metadata_writeback_intents,
+)
 from app.modules.metadata.infrastructure import lookup_queue as lookup_persist
+from app.modules.metadata.infrastructure import writeback_queue
 from app.services.book_identity import (
     UNKNOWN_AUTHOR,
     identity_merge_key,
     normalize_identity_part,
 )
-from app.services.library_management import sync_work_facets
 from app.services.metadata_file_writeback import (
     process_next_metadata_writeback,
     recover_interrupted_metadata_writebacks,
-    schedule_work_metadata_writebacks,
 )
 from app.services.metadata_provider_registry import (
     metadata_provider_registry,
@@ -42,7 +56,9 @@ from app.services.queue_runtime import QueueHeartbeatPump
 LOGGER = logging.getLogger(__name__)
 RETRY_DELAYS_SECONDS = (60, 300, 1800)
 DATABASE_BUSY_RETRY_DELAYS_SECONDS = (0.25, 1.0)
+DATABASE_BUSY_LOG_INTERVAL_SECONDS = 30.0
 STALE_RUNNING_MINUTES = lookup_persist.STALE_RUNNING_MINUTES
+ORPHAN_COVER_PART_MAX_AGE_SECONDS = 24 * 60 * 60
 
 
 def _now() -> datetime:
@@ -50,17 +66,28 @@ def _now() -> datetime:
 
 
 def recover_stale_metadata_lookup_tasks(db: Session) -> int:
-    return execute_metadata_transaction(
-        db,
-        lambda: lookup_persist.recover_stale_lookup_tasks(db),
-    )
+    now = _now()
+    with MetadataWriteTransaction(db):
+        recovered = lookup_persist.recover_stale_lookup_tasks(db, now=now)
+    return recovered
 
 
-def claim_next_metadata_lookup_task(db: Session) -> dict[str, Any] | None:
-    return execute_metadata_transaction(
-        db,
-        lambda: lookup_persist.claim_next_lookup_task(db),
-    )
+def claim_next_metadata_lookup_task(
+    db: Session, *, owner_id: str = "metadata-lookup-compat"
+) -> dict[str, Any] | None:
+    organize_job_ready = lookup_persist.organize_job_table_ready(db)
+    db.close()
+    now = _now()
+    lease_expires_at = now + timedelta(seconds=lookup_persist.LOOKUP_LEASE_SECONDS)
+    with MetadataWriteTransaction(db):
+        task = lookup_persist.claim_next_lookup_task(
+            db,
+            owner_id=owner_id,
+            now=now,
+            lease_expires_at=lease_expires_at,
+            organize_job_ready=organize_job_ready,
+        )
+    return task
 
 
 def _provider_order(task: dict[str, Any]) -> list[str]:
@@ -93,10 +120,22 @@ def _search_provider(
 def _start_provider_execution(
     db: Session, task: dict[str, Any], provider: str
 ) -> str | None:
-    return execute_metadata_transaction(
-        db,
-        lambda: lookup_persist.start_provider_execution(db, task, provider),
+    execution_id = f"py_{uuid4().hex}"
+    attempts = int(task.get("attempts") or 0) + 1
+    now = _now()
+    table_ready = lookup_persist.provider_execution_table_ready(db)
+    db.close()
+    prepared = lookup_persist.prepare_provider_execution_start(
+        task,
+        provider,
+        execution_id=execution_id,
+        attempts=attempts,
+        now=now,
+        table_ready=table_ready,
     )
+    with MetadataWriteTransaction(db):
+        persisted_id = lookup_persist.write_prepared_provider_execution(db, prepared)
+    return persisted_id
 
 
 def _finish_provider_execution(
@@ -107,16 +146,22 @@ def _finish_provider_execution(
     result: Any = None,
     error: str | None = None,
 ) -> None:
-    execute_metadata_transaction(
-        db,
-        lambda: lookup_persist.finish_provider_execution(
-            db,
-            execution_id,
-            status=status,
-            result=result,
-            error=error,
-        ),
+    raw_result_json = (
+        json.dumps(result, ensure_ascii=False) if result is not None else None
     )
+    now = _now()
+    table_ready = lookup_persist.provider_execution_table_ready(db)
+    db.close()
+    prepared = lookup_persist.prepare_provider_execution_finish(
+        execution_id,
+        status=status,
+        raw_result_json=raw_result_json,
+        error=error,
+        now=now,
+        table_ready=table_ready,
+    )
+    with MetadataWriteTransaction(db):
+        lookup_persist.write_prepared_provider_execution(db, prepared)
 
 
 def _choose_exact_candidate(
@@ -168,9 +213,47 @@ def _local_cover_exists(
     return lookup_persist.volume_has_cover(db, volume_id)
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparedRemoteCover:
+    temporary_path: Path
+    final_path: Path
+    relative_final_path: str
+
+
+def _cleanup_orphan_remote_cover_parts(
+    target_dir: Path,
+    *,
+    work_id: str,
+    current_time: float | None = None,
+) -> int:
+    cutoff = (time() if current_time is None else current_time) - (
+        ORPHAN_COVER_PART_MAX_AGE_SECONDS
+    )
+    removed = 0
+    for part_path in target_dir.glob(f".{work_id}-remote-*.part"):
+        try:
+            if part_path.stat().st_mtime > cutoff:
+                continue
+            part_path.unlink(missing_ok=True)
+            removed += 1
+        except OSError:
+            LOGGER.debug("orphan remote cover cleanup skipped path=%s", part_path)
+    return removed
+
+
+def _validated_remote_cover_suffix(data: bytes) -> str:
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return ".webp"
+    raise ValueError("REMOTE_COVER_INVALID")
+
+
 def _download_remote_cover(
     work_id: str, cover_url: str, settings: Settings
-) -> str | None:
+) -> _PreparedRemoteCover | None:
     if not cover_url.startswith(("http://", "https://")):
         return None
     request = UrlRequest(
@@ -181,40 +264,81 @@ def _download_remote_cover(
         },
     )
     with urlopen(request, timeout=20) as response:
-        content_type = str(response.headers.get("content-type") or "").lower()
         data = response.read(8 * 1024 * 1024 + 1)
     if len(data) > 8 * 1024 * 1024 or not data:
-        raise ValueError("远程封面为空或超过 8 MiB")
-    suffix = (
-        ".png"
-        if "png" in content_type
-        else ".webp"
-        if "webp" in content_type
-        else ".jpg"
-    )
+        raise ValueError("REMOTE_COVER_INVALID")
+    suffix = _validated_remote_cover_suffix(data)
     target_dir = settings.resolved_storage_root / "covers"
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / f"{work_id}-remote{suffix}"
-    target.write_bytes(data)
-    return str(target.relative_to(settings.resolved_storage_root))
+    _cleanup_orphan_remote_cover_parts(target_dir, work_id=work_id)
+    final_path = target_dir / f"{work_id}-remote-{uuid4().hex}{suffix}"
+    temporary_path = final_path.with_name(f".{final_path.name}.part")
+    temporary_path.write_bytes(data)
+    if temporary_path.stat().st_size != len(data):
+        temporary_path.unlink(missing_ok=True)
+        raise OSError("REMOTE_COVER_INVALID")
+    return _PreparedRemoteCover(
+        temporary_path=temporary_path,
+        final_path=final_path,
+        relative_final_path=str(final_path.relative_to(settings.resolved_storage_root)),
+    )
 
 
-def _apply_candidate(
+def _publish_remote_cover(prepared: _PreparedRemoteCover) -> None:
+    try:
+        os.replace(prepared.temporary_path, prepared.final_path)
+    except OSError:
+        prepared.temporary_path.unlink(missing_ok=True)
+        raise
+
+
+def _discard_remote_cover(prepared: _PreparedRemoteCover | None) -> None:
+    if prepared is not None:
+        prepared.temporary_path.unlink(missing_ok=True)
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedCandidateApplication:
+    work_id: str
+    volume_id: str | None
+    work_patch: dict[str, Any]
+    volume_patch: dict[str, Any]
+    organize_job_id: str | None
+    organize_job_status: str
+    organize_job_summary: str
+    library_metadata_json: str | None
+    library_metadata_id: str | None
+    now: datetime
+    facet_write: PreparedWorkFacetWrite
+    remote_cover: _PreparedRemoteCover | None
+    applied: tuple[str, ...]
+
+
+def _prepare_candidate_application(
     db: Session,
     settings: Settings,
     task: dict[str, Any],
     provider: str,
     candidate: dict[str, Any],
-) -> list[str]:
+) -> _PreparedCandidateApplication:
     work = lookup_persist.get_work(db, str(task["workId"]))
     if not work:
         raise ValueError("作品已不存在")
+    facet_projections = load_work_facet_projections(db, (str(work["id"]),))
+    if len(facet_projections) != 1:
+        raise ValueError("WORK_FACET_PROJECTION_NOT_FOUND")
     volume_id = str(task.get("volumeId") or "") or None
     volume = lookup_persist.get_volume(db, volume_id) if volume_id else None
+    prefer_local = lookup_persist.prefer_local_metadata_enabled(db)
+    local_cover_exists = _local_cover_exists(db, work, volume_id)
+
+    # End every projection read before parsing provider data, downloading a
+    # cover or constructing the prepared SQL statements for the write phase.
+    db.close()
     work_patch: dict[str, Any] = {}
     volume_patch: dict[str, Any] = {}
     applied: list[str] = []
-    prefer_local = lookup_persist.prefer_local_metadata_enabled(db)
+    remote_cover: _PreparedRemoteCover | None = None
 
     candidate_title = str(candidate.get("title") or "").strip()
     candidate_author = str(candidate.get("author") or "").strip()
@@ -287,18 +411,23 @@ def _apply_candidate(
             if value and (not prefer_local or not str(volume.get(field) or "").strip()):
                 volume_patch[field] = value
                 applied.append(field)
-    if (not prefer_local or not _local_cover_exists(db, work, volume_id)) and str(
+    if (not prefer_local or not local_cover_exists) and str(
         candidate.get("coverUrl") or ""
     ).strip():
         try:
-            cover_path = _download_remote_cover(
+            remote_cover = _download_remote_cover(
                 str(work["id"]), str(candidate["coverUrl"]).strip(), settings
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - optional cover failure is isolated.
             LOGGER.warning("remote metadata cover skipped work=%s: %s", work["id"], exc)
         else:
-            if cover_path:
-                work_patch.update({"coverPath": cover_path, "coverStatus": "READY"})
+            if remote_cover:
+                work_patch.update(
+                    {
+                        "coverPath": remote_cover.relative_final_path,
+                        "coverStatus": "READY",
+                    }
+                )
                 applied.append("cover")
 
     if "title" in work_patch or "author" in work_patch:
@@ -315,6 +444,7 @@ def _apply_candidate(
             }
         )
 
+    now = _now()
     work_patch.update(
         {
             "metadataQuality": max(
@@ -322,76 +452,182 @@ def _apply_candidate(
             ),
             "organized": True,
             "organizeStatus": "APPLIED",
-            "updatedAt": _now(),
+            "updatedAt": now,
         }
     )
-    lookup_persist.update_work(db, str(work["id"]), work_patch)
     if volume and volume_patch:
-        volume_patch["updatedAt"] = _now()
-        lookup_persist.update_volume(db, str(volume["id"]), volume_patch)
-    sync_work_facets(db, str(work["id"]), commit=False)
+        volume_patch["updatedAt"] = now
 
-    job_id = task.get("organizeJobId")
-    if job_id:
+    job_id = str(task.get("organizeJobId") or "") or None
+    organize_job_summary = (
+        f"已从 {provider} 自动应用 {len(applied)} 项元数据"
+        if applied
+        else f"已从 {provider} 完成识别，现有元数据无需更新"
+    )
+    library_metadata_json = (
+        json.dumps(
+            {"candidate": candidate, "appliedFields": applied},
+            ensure_ascii=False,
+        )
+        if volume_id
+        else None
+    )
+    final_facet_projection = replace(
+        facet_projections[0],
+        author=(
+            str(work_patch.get("author"))
+            if work_patch.get("author") is not None
+            else facet_projections[0].author
+        ),
+        tags_source=str(work_patch.get("tags", facet_projections[0].tags_source)),
+        series_name=(
+            str(work_patch.get("seriesName"))
+            if work_patch.get("seriesName") is not None
+            else facet_projections[0].series_name
+        ),
+    )
+    facet_write = prepare_work_facet_write(
+        (prepare_work_facet(final_facet_projection),),
+        now=now,
+    )
+    return _PreparedCandidateApplication(
+        work_id=str(work["id"]),
+        volume_id=volume_id,
+        work_patch=work_patch,
+        volume_patch=volume_patch,
+        organize_job_id=job_id,
+        organize_job_status="APPLIED" if applied else "COMPLETED",
+        organize_job_summary=organize_job_summary,
+        library_metadata_json=library_metadata_json,
+        library_metadata_id=f"py_{uuid4().hex}" if library_metadata_json else None,
+        now=now,
+        facet_write=facet_write,
+        remote_cover=remote_cover,
+        applied=tuple(applied),
+    )
+
+
+def _persist_candidate_application(
+    db: Session,
+    prepared: _PreparedCandidateApplication,
+    provider: str,
+) -> None:
+    lookup_persist.update_work(db, prepared.work_id, prepared.work_patch)
+    if prepared.volume_id and prepared.volume_patch:
+        lookup_persist.update_volume(
+            db,
+            prepared.volume_id,
+            prepared.volume_patch,
+        )
+    execute_work_facet_write(db, prepared.facet_write)
+    if prepared.organize_job_id:
         lookup_persist.finish_organize_job(
             db,
-            str(job_id),
-            status="APPLIED" if applied else "COMPLETED",
-            summary=(
-                f"已从 {provider} 自动应用 {len(applied)} 项元数据"
-                if applied
-                else f"已从 {provider} 完成识别，现有元数据无需更新"
-            ),
+            prepared.organize_job_id,
+            status=prepared.organize_job_status,
+            summary=prepared.organize_job_summary,
             error_summary=None,
             set_finished_at=True,
+            now=prepared.now,
         )
-    if volume_id:
+    if (
+        prepared.library_metadata_json is not None
+        and prepared.library_metadata_id is not None
+        and prepared.volume_id is not None
+    ):
         lookup_persist.insert_library_metadata(
             db,
-            volume_id=volume_id,
+            volume_id=prepared.volume_id,
             source=provider,
-            raw_json=json.dumps(
-                {"candidate": candidate, "appliedFields": applied}, ensure_ascii=False
-            ),
+            raw_json=prepared.library_metadata_json,
+            metadata_id=prepared.library_metadata_id,
+            now=prepared.now,
         )
-    schedule_work_metadata_writebacks(
-        db,
-        work_id=str(work["id"]),
-        media_version_id=str(task["mediaVersionId"])
-        if task.get("mediaVersionId")
-        else None,
-        source="AUTOMATIC",
-        lookup_task_id=str(task["id"]),
-    )
-    return applied
 
 
-def _mark_organize_lookup_unresolved(
-    db: Session, task: dict[str, Any], message: str, *, failed: bool = False
+def _compensate_remote_cover_publish_failure(
+    db: Session,
+    prepared: _PreparedCandidateApplication,
 ) -> None:
-    """Expose a lookup in the organize queue only after it has no usable match."""
+    remote_cover = prepared.remote_cover
+    if remote_cover is None:
+        return
+    now = _now()
+    with MetadataWriteTransaction(db):
+        lookup_persist.clear_remote_cover_if_current(
+            db,
+            prepared.work_id,
+            cover_path=remote_cover.relative_final_path,
+            now=now,
+        )
 
+
+@dataclass(frozen=True, slots=True)
+class _PreparedUnresolvedOrganizeUpdate:
+    work_id: str | None
+    organize_job_id: str | None
+    message: str
+    failed: bool
+    now: datetime
+
+
+def _prepare_unresolved_organize_update(
+    db: Session, task: dict[str, Any], message: str, *, failed: bool, now: datetime
+) -> _PreparedUnresolvedOrganizeUpdate:
     work = lookup_persist.get_work_organize_state(db, task.get("workId"))
+    db.close()
     already_organized = (
         bool((work or {}).get("organized"))
         or (work or {}).get("organizeStatus") == "APPLIED"
     )
-    if work and not already_organized and task.get("workId"):
-        lookup_persist.mark_work_reviewing(db, str(task["workId"]))
-    if task.get("organizeJobId"):
+    return _PreparedUnresolvedOrganizeUpdate(
+        work_id=(
+            str(task["workId"])
+            if work and not already_organized and task.get("workId")
+            else None
+        ),
+        organize_job_id=(
+            str(task["organizeJobId"]) if task.get("organizeJobId") else None
+        ),
+        message=message,
+        failed=failed,
+        now=now,
+    )
+
+
+def _persist_unresolved_organize_update(
+    db: Session, prepared: _PreparedUnresolvedOrganizeUpdate
+) -> None:
+    if prepared.work_id:
+        lookup_persist.mark_work_reviewing(db, prepared.work_id, now=prepared.now)
+    if prepared.organize_job_id:
         lookup_persist.finish_organize_job(
             db,
-            str(task["organizeJobId"]),
+            prepared.organize_job_id,
             status="FAILED",
-            summary=message,
-            error_summary=message if failed else None,
+            summary=prepared.message,
+            error_summary=prepared.message if prepared.failed else None,
             set_finished_at=True,
             only_if_not_cancelled=True,
+            now=prepared.now,
         )
 
 
-def _update_task(db: Session, task_id: str, **values: Any) -> None:
-    lookup_persist.update_lookup_task(db, task_id, **values)
+def _update_task(
+    db: Session,
+    task_id: str,
+    *,
+    updated_at: datetime,
+    owner_id: str | None = None,
+    **values: Any,
+) -> None:
+    lookup_persist.update_lookup_task(
+        db,
+        task_id,
+        owner_id=owner_id,
+        updated_at=updated_at,
+        **values,
+    )
 
 
 def _finish_without_match(
@@ -401,55 +637,94 @@ def _finish_without_match(
     candidates: list[dict[str, Any]],
     message: str,
 ) -> None:
-    _update_task(
+    candidate_json = json.dumps(candidates, ensure_ascii=False)
+    finished_at = _now()
+    unresolved = _prepare_unresolved_organize_update(
         db,
-        str(task["id"]),
-        status=status,
-        candidateRawJson=json.dumps(candidates, ensure_ascii=False),
-        errorSummary=message if status in {"FAILED", "NO_PROVIDER"} else None,
-        nextAttemptAt=None,
-        finishedAt=_now(),
+        task,
+        message,
+        failed=status == "FAILED",
+        now=finished_at,
     )
-    _mark_organize_lookup_unresolved(db, task, message, failed=status == "FAILED")
-    db.commit()
+    task_id = str(task["id"])
+    owner_id = str(task.get("leaseOwnerId") or "") or None
+    error_summary = message if status in {"FAILED", "NO_PROVIDER"} else None
+    with MetadataWriteTransaction(db):
+        _update_task(
+            db,
+            task_id,
+            updated_at=finished_at,
+            owner_id=owner_id,
+            status=status,
+            candidateRawJson=candidate_json,
+            errorSummary=error_summary,
+            nextAttemptAt=None,
+            finishedAt=finished_at,
+        )
+        _persist_unresolved_organize_update(db, unresolved)
 
 
 def _schedule_retry(
     db: Session, task: dict[str, Any], message: str, candidates: list[dict[str, Any]]
 ) -> None:
     attempts = int(task.get("attempts") or 0) + 1
-    if attempts > len(RETRY_DELAYS_SECONDS):
-        _update_task(
+    candidate_json = json.dumps(candidates, ensure_ascii=False)
+    now = _now()
+    retry_exhausted = attempts > len(RETRY_DELAYS_SECONDS)
+    unresolved = (
+        _prepare_unresolved_organize_update(
             db,
-            str(task["id"]),
-            status="FAILED",
-            attempts=attempts,
-            nextAttemptAt=None,
-            candidateRawJson=json.dumps(candidates, ensure_ascii=False),
-            errorSummary=message,
-            finishedAt=_now(),
+            task,
+            message,
+            failed=True,
+            now=now,
         )
-        _mark_organize_lookup_unresolved(db, task, message, failed=True)
-    else:
-        _update_task(
-            db,
-            str(task["id"]),
-            status="PENDING",
-            attempts=attempts,
-            nextAttemptAt=_now()
+        if retry_exhausted
+        else None
+    )
+    task_values: dict[str, Any] = (
+        {
+            "status": "FAILED",
+            "attempts": attempts,
+            "nextAttemptAt": None,
+            "candidateRawJson": candidate_json,
+            "errorSummary": message,
+            "finishedAt": now,
+        }
+        if retry_exhausted
+        else {
+            "status": "PENDING",
+            "attempts": attempts,
+            "nextAttemptAt": now
             + timedelta(seconds=RETRY_DELAYS_SECONDS[attempts - 1]),
-            candidateRawJson=json.dumps(candidates, ensure_ascii=False),
-            errorSummary=message,
-            startedAt=None,
+            "candidateRawJson": candidate_json,
+            "errorSummary": message,
+            "startedAt": None,
+        }
+    )
+    task_id = str(task["id"])
+    owner_id = str(task.get("leaseOwnerId") or "") or None
+    organize_job_id = str(task.get("organizeJobId") or "") or None
+    retry_summary = f"识别暂时失败，将进行第 {attempts + 1} 次尝试"
+    db.close()
+    with MetadataWriteTransaction(db):
+        _update_task(
+            db,
+            task_id,
+            updated_at=now,
+            owner_id=owner_id,
+            **task_values,
         )
-        if task.get("organizeJobId"):
+        if unresolved is not None:
+            _persist_unresolved_organize_update(db, unresolved)
+        elif organize_job_id is not None:
             lookup_persist.mark_organize_job_retry_wait(
                 db,
-                str(task["organizeJobId"]),
-                summary=f"识别暂时失败，将进行第 {attempts + 1} 次尝试",
+                organize_job_id,
+                summary=retry_summary,
                 error=message,
+                now=now,
             )
-    db.commit()
 
 
 def process_metadata_lookup_task(
@@ -468,7 +743,13 @@ def process_metadata_lookup_task(
         return "FAILED"
     context = context_for_job(db, {"workId": work["id"]})
     if not context:
-        _finish_without_match(db, task, "FAILED", [], "无法建立元数据查询上下文")
+        _finish_without_match(
+            db,
+            task,
+            "FAILED",
+            [],
+            "无法建立元数据查询上下文",
+        )
         return "FAILED"
     effective_request_gate = (
         automatic_request_gate
@@ -489,7 +770,7 @@ def process_metadata_lookup_task(
                 str(work.get("title") or ""),
                 effective_request_gate,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - contains one provider attempt.
             _finish_provider_execution(
                 db, execution_id, status="FAILED", error=str(exc)
             )
@@ -525,32 +806,98 @@ def process_metadata_lookup_task(
             continue
         if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
             return "CANCELLED"
+        prepared_application: _PreparedCandidateApplication | None = None
         try:
-            applied = _apply_candidate(db, settings, task, provider, candidate)
-            _update_task(
+            prepared_application = _prepare_candidate_application(
                 db,
-                str(task["id"]),
-                status="COMPLETED",
-                attempts=int(task.get("attempts") or 0) + 1,
-                nextAttemptAt=None,
-                resultSource=provider,
-                candidateRawJson=json.dumps(
-                    {"selected": candidate, "attempted": inspected}, ensure_ascii=False
+                settings,
+                task,
+                provider,
+                candidate,
+            )
+            applied = list(prepared_application.applied)
+            selected_result_json = json.dumps(
+                {"selected": candidate, "attempted": inspected},
+                ensure_ascii=False,
+            )
+            applied_fields_json = json.dumps(applied, ensure_ascii=False)
+            finished_at = _now()
+            execution_result = {
+                "selected": candidate,
+                "appliedFields": applied,
+            }
+            execution_result_json = json.dumps(
+                execution_result,
+                ensure_ascii=False,
+            )
+            completed_attempts = int(task.get("attempts") or 0) + 1
+            prepared_execution_finish = (
+                lookup_persist.prepare_provider_execution_finish(
+                    execution_id,
+                    status="COMPLETED",
+                    raw_result_json=execution_result_json,
+                    now=finished_at,
+                    table_ready=execution_id is not None,
+                )
+            )
+            task_id = str(task["id"])
+            owner_id = str(task.get("leaseOwnerId") or "") or None
+            with MetadataWriteTransaction(db):
+                _persist_candidate_application(db, prepared_application, provider)
+            if prepared_application.remote_cover is not None:
+                try:
+                    _publish_remote_cover(prepared_application.remote_cover)
+                except OSError as publish_error:
+                    try:
+                        _compensate_remote_cover_publish_failure(
+                            db,
+                            prepared_application,
+                        )
+                    except Exception as compensation_error:
+                        raise RuntimeError(
+                            "REMOTE_COVER_PUBLISH_COMPENSATION_FAILED"
+                        ) from compensation_error
+                    raise RuntimeError("REMOTE_COVER_PUBLISH_FAILED") from publish_error
+            with MetadataWriteTransaction(db):
+                _update_task(
+                    db,
+                    task_id,
+                    updated_at=finished_at,
+                    owner_id=owner_id,
+                    status="COMPLETED",
+                    attempts=completed_attempts,
+                    nextAttemptAt=None,
+                    resultSource=provider,
+                    candidateRawJson=selected_result_json,
+                    appliedFields=applied_fields_json,
+                    errorSummary=None,
+                    finishedAt=finished_at,
+                )
+                lookup_persist.write_prepared_provider_execution(
+                    db, prepared_execution_finish
+                )
+            projection = writeback_queue.load_metadata_writeback_projection(
+                db,
+                work_id=str(work["id"]),
+                media_version_id=(
+                    str(task["mediaVersionId"]) if task.get("mediaVersionId") else None
                 ),
-                appliedFields=json.dumps(applied, ensure_ascii=False),
-                errorSummary=None,
-                finishedAt=_now(),
             )
-            _finish_provider_execution(
-                db,
-                execution_id,
-                status="COMPLETED",
-                result={"selected": candidate, "appliedFields": applied},
+            db.close()
+            intents = prepare_metadata_writeback_intents(
+                projection,
+                source="AUTOMATIC",
+                lookup_task_id=str(task["id"]),
             )
-            db.commit()
+            with MetadataWriteTransaction(db):
+                writeback_queue.enqueue_prepared_writeback_intents(db, intents)
             return "COMPLETED"
-        except Exception as exc:
-            db.rollback()
+        except Exception as exc:  # noqa: BLE001 - contains candidate application.
+            _discard_remote_cover(
+                prepared_application.remote_cover
+                if prepared_application is not None
+                else None
+            )
             _finish_provider_execution(
                 db, execution_id, status="FAILED", error=f"apply: {exc}"
             )
@@ -560,7 +907,11 @@ def process_metadata_lookup_task(
         if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
             return "CANCELLED"
         _finish_without_match(
-            db, task, "NO_PROVIDER", inspected, "所有适用的元数据插件均未启用"
+            db,
+            task,
+            "NO_PROVIDER",
+            inspected,
+            "所有适用的元数据插件均未启用",
         )
         return "NO_PROVIDER"
     if errors:
@@ -581,14 +932,28 @@ def process_next_metadata_lookup_task(
     db: Session,
     settings: Settings,
     automatic_request_gate: AutomaticMetadataRequestGate | None = None,
+    *,
+    owner_id: str = "metadata-lookup-compat",
+    prefer_writeback: bool = False,
+    prefer_preparation: bool = True,
 ) -> bool:
-    if process_next_metadata_writeback(db, settings):
+    if prefer_writeback and process_next_metadata_writeback(
+        db,
+        settings,
+        owner_id=owner_id,
+        prefer_preparation=prefer_preparation,
+    ):
         return True
-    task = claim_next_metadata_lookup_task(db)
-    if not task:
-        return False
-    process_metadata_lookup_task(db, settings, task, automatic_request_gate)
-    return True
+    task = claim_next_metadata_lookup_task(db, owner_id=owner_id)
+    if task:
+        process_metadata_lookup_task(db, settings, task, automatic_request_gate)
+        return True
+    return process_next_metadata_writeback(
+        db,
+        settings,
+        owner_id=owner_id,
+        prefer_preparation=prefer_preparation,
+    )
 
 
 class MetadataLookupWorker:
@@ -605,10 +970,13 @@ class MetadataLookupWorker:
         self._poll_seconds = poll_seconds
         self._automatic_request_gate = automatic_request_gate
         self._stop = threading.Event()
+        self._last_busy_log_at: float | None = None
         self._thread = threading.Thread(
             target=self._run, name="metadata-lookup-worker", daemon=True
         )
         self._instance_id = f"metadata-{uuid4().hex}"
+        self._prefer_writeback = False
+        self._prefer_preparation = True
         self._heartbeat = QueueHeartbeatPump(
             heartbeat_db_factory or db_factory,
             queue_name="metadata",
@@ -621,7 +989,9 @@ class MetadataLookupWorker:
             recovered = recover_stale_metadata_lookup_tasks(db)
             if recovered:
                 LOGGER.warning("recovered %s stale metadata lookup tasks", recovered)
-            recovered_writebacks = recover_interrupted_metadata_writebacks(db)
+            recovered_writebacks = recover_interrupted_metadata_writebacks(
+                db, self._settings
+            )
             if recovered_writebacks:
                 LOGGER.warning(
                     "recovered %s interrupted metadata writeback targets",
@@ -635,15 +1005,48 @@ class MetadataLookupWorker:
             self._thread.join(timeout=max(2.0, self._poll_seconds + 1.0))
 
     def _process_iteration(self) -> bool | None:
-        result = execute_with_sqlite_busy_retry(
-            self._db_factory,
-            lambda db: process_next_metadata_lookup_task(
-                db, self._settings, self._automatic_request_gate
-            ),
-            retry_delays_seconds=DATABASE_BUSY_RETRY_DELAYS_SECONDS,
-            stop_wait=self._stop.wait,
+        prefer_writeback = self._prefer_writeback
+        prefer_preparation = self._prefer_preparation
+        self._prefer_writeback = not self._prefer_writeback
+        self._prefer_preparation = not self._prefer_preparation
+        for attempt in range(len(DATABASE_BUSY_RETRY_DELAYS_SECONDS) + 1):
+            if attempt and self._stop.wait(
+                DATABASE_BUSY_RETRY_DELAYS_SECONDS[attempt - 1]
+            ):
+                return None
+            try:
+                with self._db_factory() as db:
+                    return bool(
+                        process_next_metadata_lookup_task(
+                            db,
+                            self._settings,
+                            self._automatic_request_gate,
+                            owner_id=self._instance_id,
+                            prefer_writeback=prefer_writeback,
+                            prefer_preparation=prefer_preparation,
+                        )
+                    )
+            except OperationalError as error:
+                if not is_database_busy_error(error) or attempt == len(
+                    DATABASE_BUSY_RETRY_DELAYS_SECONDS
+                ):
+                    raise
+        raise AssertionError("metadata retry loop exhausted")
+
+    def _record_iteration_error(self, error: BaseException) -> None:
+        if not is_database_busy_error(error):
+            LOGGER.exception("metadata lookup worker iteration failed")
+            return
+        now = monotonic()
+        if (
+            self._last_busy_log_at is not None
+            and now - self._last_busy_log_at < DATABASE_BUSY_LOG_INTERVAL_SECONDS
+        ):
+            return
+        LOGGER.warning(
+            "metadata_lookup_iteration outcome=deferred reason=database_busy"
         )
-        return bool(result.value) if result.completed else None
+        self._last_busy_log_at = now
 
     def _run(self) -> None:
         self._heartbeat.start()
@@ -656,9 +1059,9 @@ class MetadataLookupWorker:
                     if iteration_result is None:
                         break
                     worked = iteration_result
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - worker containment boundary.
                     error = exc
-                    LOGGER.exception("metadata lookup worker iteration failed")
+                    self._record_iteration_error(exc)
                 self._heartbeat.pulse(processed=worked, error=error)
                 if not worked:
                     self._stop.wait(self._poll_seconds)

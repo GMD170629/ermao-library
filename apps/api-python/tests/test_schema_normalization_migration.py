@@ -7,6 +7,8 @@ import pytest
 from alembic import command
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from app.db.runner import _run_alembic, head_revision
+from app.db.sqlite import create_sqlite_engine
 from sqlalchemy import (
     Column,
     Engine,
@@ -19,9 +21,6 @@ from sqlalchemy import (
     select,
     update,
 )
-
-from app.db.runner import _run_alembic, head_revision
-from app.db.sqlite import create_sqlite_engine
 
 
 def _upgrade(engine: Engine, revision: str) -> None:
@@ -185,7 +184,7 @@ def test_0004_produces_identical_schema_from_distinct_0003_shapes(
 
         for engine in (canonical, legacy):
             _upgrade(engine, "head")
-            assert head_revision(engine) == "0018_library_facet_index_version"
+            assert head_revision(engine) == "0020_comic_page_index"
 
         assert _schema_fingerprint(canonical) == _schema_fingerprint(legacy)
     finally:

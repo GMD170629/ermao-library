@@ -4,9 +4,12 @@ import json
 from urllib.error import HTTPError
 
 import pytest
-from sqlalchemy import select, text
-
+from app.bootstrap.metadata import (
+    prepare_metadata_source_seed_rows,
+    write_metadata_source_seed_rows,
+)
 from app.models.import_pipeline import Source
+from app.modules.metadata.domain.providers import BUILTIN_MANIFESTS
 from app.services import book_identity
 from app.services.book_identity import (
     UNKNOWN_AUTHOR,
@@ -14,11 +17,12 @@ from app.services.book_identity import (
     recognize_book_identity,
     recognize_book_identity_with_regex,
 )
-from app.services.metadata_provider_registry import list_metadata_providers
+from sqlalchemy import select, text
 
 
 def _configure_ai_provider(db, *, enabled: bool = True, complete: bool = True) -> None:
-    list_metadata_providers(db)
+    rows = prepare_metadata_source_seed_rows(BUILTIN_MANIFESTS)
+    write_metadata_source_seed_rows(db, rows)
     source = db.scalar(
         select(Source).where(Source.kind == "metadata", Source.provider_type == "ai")
     )

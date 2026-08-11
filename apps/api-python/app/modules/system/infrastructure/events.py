@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import BigInteger, String, case, cast, delete, func, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
+from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.common import db_timestamp
 from app.models.settings import SystemEvent
 from app.modules.system.domain.events import (
@@ -17,6 +19,7 @@ from app.modules.system.domain.events import (
     LOG_MAX_BYTES_SETTING,
     PROTECTED_ERROR_ACTIONS,
     PRUNE_LEVEL_ORDER,
+    PreparedSystemEvent,
     normalize_event_level,
     parse_max_event_bytes,
     prepare_event_metadata,
@@ -36,6 +39,14 @@ class SystemEventPageSnapshot:
     sources: list[dict[str, Any]]
     levels: list[dict[str, Any]]
     size_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedSystemEventPrune:
+    event_ids: tuple[str, ...]
+    max_bytes: int
+    current_size_bytes: int
+    last_pruned_setting: setting_store.PreparedSettingsWrite | None
 
 
 def _column_length(column: Any) -> Any:
@@ -100,14 +111,23 @@ def prune_system_events(
     db: Session,
     max_bytes: int | None = None,
 ) -> dict[str, int]:
+    prepared = prepare_system_event_prune(db, max_bytes)
+    return write_prepared_system_event_prune(db, prepared)
+
+
+def prepare_system_event_prune(
+    db: Session,
+    max_bytes: int | None = None,
+) -> PreparedSystemEventPrune:
     max_bytes = configured_max_event_bytes(db) if max_bytes is None else int(max_bytes)
     current_size_bytes = system_event_size_bytes(db)
     if current_size_bytes <= max_bytes:
-        return {
-            "deleted": 0,
-            "sizeBytes": current_size_bytes,
-            "maxBytes": max_bytes,
-        }
+        return PreparedSystemEventPrune(
+            event_ids=(),
+            max_bytes=max_bytes,
+            current_size_bytes=current_size_bytes,
+            last_pruned_setting=None,
+        )
 
     target_size_bytes = max_bytes // 2
     bytes_to_reclaim = current_size_bytes - target_size_bytes
@@ -141,18 +161,102 @@ def prune_system_events(
         if reclaimed_bytes >= bytes_to_reclaim:
             break
 
+    last_pruned_setting = setting_store.prepare_settings_write(
+        {LAST_PRUNED_AT_SETTING: datetime.now(UTC).isoformat()}
+    )
+    return PreparedSystemEventPrune(
+        event_ids=tuple(ids_to_delete),
+        max_bytes=max_bytes,
+        current_size_bytes=current_size_bytes,
+        last_pruned_setting=last_pruned_setting,
+    )
+
+
+def write_prepared_system_event_prune(
+    db: Session,
+    prepared: PreparedSystemEventPrune,
+) -> dict[str, int]:
+    if not prepared.event_ids:
+        return {
+            "deleted": 0,
+            "sizeBytes": prepared.current_size_bytes,
+            "maxBytes": prepared.max_bytes,
+        }
+
     deleted = 0
-    for start in range(0, len(ids_to_delete), EVENT_PRUNE_DELETE_BATCH_SIZE):
-        batch_ids = ids_to_delete[start : start + EVENT_PRUNE_DELETE_BATCH_SIZE]
+    for start in range(
+        0,
+        len(prepared.event_ids),
+        EVENT_PRUNE_DELETE_BATCH_SIZE,
+    ):
+        batch_ids = prepared.event_ids[start : start + EVENT_PRUNE_DELETE_BATCH_SIZE]
         result = db.execute(delete(SystemEvent).where(SystemEvent.id.in_(batch_ids)))
         deleted += int(result.rowcount or 0)
 
     size_bytes = system_event_size_bytes(db)
-    if deleted:
-        setting_store.upsert_setting(
-            db, LAST_PRUNED_AT_SETTING, datetime.now(UTC).isoformat()
-        )
-    return {"deleted": deleted, "sizeBytes": size_bytes, "maxBytes": max_bytes}
+    if deleted and prepared.last_pruned_setting is not None:
+        setting_store.write_prepared_settings(db, prepared.last_pruned_setting)
+    return {
+        "deleted": deleted,
+        "sizeBytes": size_bytes,
+        "maxBytes": prepared.max_bytes,
+    }
+
+
+def prepare_system_event(
+    *,
+    event_id: str | None = None,
+    created_at: datetime | None = None,
+    source: str,
+    action: str,
+    message: str,
+    level: str = "info",
+    actor_type: str = "system",
+    actor_id: str | None = None,
+    target_type: str | None = None,
+    target_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> PreparedSystemEvent:
+    return PreparedSystemEvent(
+        id=event_id or f"py_{uuid4().hex}",
+        level=normalize_event_level(level),
+        source=source,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        action=action,
+        target_type=target_type,
+        target_id=target_id,
+        message=truncate_event_message(message),
+        metadata=prepare_event_metadata(metadata),
+        created_at=created_at or db_timestamp(),
+    )
+
+
+def write_prepared_system_events(
+    db: Session,
+    events: list[PreparedSystemEvent] | tuple[PreparedSystemEvent, ...],
+) -> list[str]:
+    if not events:
+        return []
+    rows = [
+        {
+            "id": event.id,
+            "level": event.level,
+            "source": event.source,
+            "actor_type": event.actor_type,
+            "actor_id": event.actor_id,
+            "action": event.action,
+            "target_type": event.target_type,
+            "target_id": event.target_id,
+            "message": event.message,
+            "metadata_json": event.metadata,
+            "created_at": event.created_at,
+        }
+        for event in events
+    ]
+    for chunk in sqlite_parameter_chunks(rows, parameters_per_row=11):
+        db.execute(sqlite_insert(SystemEvent), list(chunk))
+    return [event.id for event in events]
 
 
 def record_system_event(
@@ -167,31 +271,20 @@ def record_system_event(
     target_type: str | None = None,
     target_id: str | None = None,
     metadata: dict[str, Any] | None = None,
-) -> str | None:
-    event_id = f"py_{uuid4().hex}"
-    created_at = db_timestamp()
-    latest_created_at = db.scalar(
-        select(SystemEvent.created_at).order_by(SystemEvent.created_at.desc()).limit(1)
+) -> str:
+    prepared = prepare_system_event(
+        source=source,
+        action=action,
+        message=message,
+        level=level,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        target_type=target_type,
+        target_id=target_id,
+        metadata=metadata,
     )
-    if latest_created_at is not None and created_at <= latest_created_at:
-        created_at = latest_created_at + timedelta(milliseconds=1)
-    db.add(
-        SystemEvent(
-            id=event_id,
-            level=normalize_event_level(level),
-            source=source,
-            actor_type=actor_type,
-            actor_id=actor_id,
-            action=action,
-            target_type=target_type,
-            target_id=target_id,
-            message=truncate_event_message(message),
-            metadata_json=prepare_event_metadata(metadata),
-            created_at=created_at,
-        )
-    )
-    db.flush()
-    return event_id
+    write_prepared_system_events(db, [prepared])
+    return prepared.id
 
 
 def list_event_source_facets(db: Session) -> list[dict[str, Any]]:
@@ -233,9 +326,7 @@ def list_system_events_page(
             SystemEvent.source,
             SystemEvent.level,
             func.count().label("event_count"),
-            func.coalesce(func.sum(_event_size_expression()), 0).label(
-                "size_bytes"
-            ),
+            func.coalesce(func.sum(_event_size_expression()), 0).label("size_bytes"),
         )
         .group_by(SystemEvent.source, SystemEvent.level)
         .order_by(SystemEvent.source.asc(), SystemEvent.level.asc())
@@ -271,9 +362,7 @@ def list_system_events_page(
 
     total = (
         int(
-            db.scalar(
-                select(func.count()).select_from(SystemEvent).where(*filters)
-            )
+            db.scalar(select(func.count()).select_from(SystemEvent).where(*filters))
             or 0
         )
         if filters

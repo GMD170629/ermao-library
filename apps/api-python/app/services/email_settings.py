@@ -10,13 +10,14 @@ from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.modules.system.infrastructure.settings import (
+    PreparedSettingsWrite,
     delete_setting,
     existing_setting_keys,
     get_settings_raw,
     parse_setting_value,
-    upsert_setting,
+    prepare_settings_write,
+    write_prepared_settings,
 )
-
 
 SMTP_PASSWORD_KEY = "email.smtp.password"
 SETTING_KEYS = {
@@ -47,6 +48,14 @@ class SmtpConnectionSettings:
     from_email: str
     from_name: str
     max_attachment_mb: float | None
+
+
+@dataclass(frozen=True)
+class PreparedEmailSettingsUpdate:
+    supplied: dict[str, Any]
+    settings_write: PreparedSettingsWrite
+    clear_password: bool
+    changed_keys: tuple[str, ...]
 
 
 def _has_settings_table(db: Session) -> bool:
@@ -133,7 +142,9 @@ def _normalized(values: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def get_email_settings(db: Session, *, include_password: bool = False) -> dict[str, Any]:
+def get_email_settings(
+    db: Session, *, include_password: bool = False
+) -> dict[str, Any]:
     stored = _load_values(db)
     values = {name: stored.get(key) for name, key in SETTING_KEYS.items()}
     normalized = _normalized(values)
@@ -146,7 +157,19 @@ def get_email_settings(db: Session, *, include_password: bool = False) -> dict[s
 def public_email_settings(db: Session) -> dict[str, Any]:
     values = get_email_settings(db)
     return {
-        "smtp": {key: values[key] for key in ("host", "port", "security", "username", "fromEmail", "fromName", "maxAttachmentMb", "passwordConfigured")},
+        "smtp": {
+            key: values[key]
+            for key in (
+                "host",
+                "port",
+                "security",
+                "username",
+                "fromEmail",
+                "fromName",
+                "maxAttachmentMb",
+                "passwordConfigured",
+            )
+        },
         "kindle": {"email": values["kindleEmail"]},
     }
 
@@ -171,14 +194,24 @@ def candidate_email_settings(db: Session, payload: dict[str, Any]) -> dict[str, 
     return _normalized(mapping)
 
 
-def save_email_settings(db: Session, payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+def prepare_email_settings_update(
+    db: Session, payload: dict[str, Any]
+) -> PreparedEmailSettingsUpdate:
     if not _has_settings_table(db):
         raise EmailSettingsError("系统设置表尚未初始化")
     normalized = candidate_email_settings(db, payload)
     smtp = payload.get("smtp") if isinstance(payload.get("smtp"), dict) else {}
     kindle = payload.get("kindle") if isinstance(payload.get("kindle"), dict) else {}
     supplied: dict[str, Any] = {}
-    for key in ("host", "port", "security", "username", "fromEmail", "fromName", "maxAttachmentMb"):
+    for key in (
+        "host",
+        "port",
+        "security",
+        "username",
+        "fromEmail",
+        "fromName",
+        "maxAttachmentMb",
+    ):
         if key in smtp:
             supplied[SETTING_KEYS[key]] = normalized[key]
     if "password" in smtp and str(smtp.get("password") or "").strip():
@@ -186,18 +219,31 @@ def save_email_settings(db: Session, payload: dict[str, Any]) -> tuple[dict[str,
     if "email" in kindle:
         supplied[SETTING_KEYS["kindleEmail"]] = normalized["kindleEmail"]
 
-    for key, value in supplied.items():
-        upsert_setting(db, key, value)
     changed_keys = list(supplied.keys())
-    if payload.get("clearSmtpPassword") is True:
-        delete_setting(db, SMTP_PASSWORD_KEY)
+    clear_password = payload.get("clearSmtpPassword") is True
+    if clear_password:
         if SMTP_PASSWORD_KEY not in changed_keys:
             changed_keys.append(SMTP_PASSWORD_KEY)
-    db.commit()
-    return public_email_settings(db), changed_keys
+
+    return PreparedEmailSettingsUpdate(
+        supplied=supplied,
+        settings_write=prepare_settings_write(supplied),
+        clear_password=clear_password,
+        changed_keys=tuple(changed_keys),
+    )
 
 
-def smtp_connection_settings(values: dict[str, Any], *, require_sender: bool = True) -> SmtpConnectionSettings:
+def write_prepared_email_settings(
+    db: Session, prepared: PreparedEmailSettingsUpdate
+) -> None:
+    write_prepared_settings(db, prepared.settings_write)
+    if prepared.clear_password:
+        delete_setting(db, SMTP_PASSWORD_KEY)
+
+
+def smtp_connection_settings(
+    values: dict[str, Any], *, require_sender: bool = True
+) -> SmtpConnectionSettings:
     host = _string(values.get("host"))
     if not host:
         raise EmailSettingsError("请填写 SMTP 主机")
@@ -220,10 +266,14 @@ def smtp_connection_settings(values: dict[str, Any], *, require_sender: bool = T
     )
 
 
-def open_smtp_connection(config: SmtpConnectionSettings, *, timeout: int = 30) -> smtplib.SMTP:
+def open_smtp_connection(
+    config: SmtpConnectionSettings, *, timeout: int = 30
+) -> smtplib.SMTP:
     context = ssl.create_default_context()
     if config.security == "ssl":
-        client: smtplib.SMTP = smtplib.SMTP_SSL(config.host, config.port, timeout=timeout, context=context)
+        client: smtplib.SMTP = smtplib.SMTP_SSL(
+            config.host, config.port, timeout=timeout, context=context
+        )
     else:
         client = smtplib.SMTP(config.host, config.port, timeout=timeout)
         client.ehlo()

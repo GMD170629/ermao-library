@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
+from uuid import uuid4
 
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -17,28 +18,52 @@ from app.bootstrap.imports import (
     MonitorFolderConfig,
     ScanSummary,
     StreamingDirectoryScanner,
-    enqueue_import_task,
     import_file_ignore_reason,
     import_queue_at_high_watermark,
     import_source_already_known,
     import_source_meets_minimum_size,
     library_repository,
+    load_import_enqueue_command_projection,
     monitor_folder_config,
     monitor_repository,
-    schedule_import_scan_job,
+    persist_import_enqueue_write,
+    persist_import_events,
+    persist_import_rescan_completion,
+    persist_import_scan_requests,
+    persist_watched_import_shelf_link,
+    prepare_import_enqueue_command,
+    prepare_import_enqueue_write,
     should_ignore_file,
 )
 from app.core.config import Settings
+from app.models.common import db_timestamp
 from app.modules.imports.application.errors import AudioTrackLimitExceededError
-from app.modules.imports.public import commit_import_checkpoint
-from app.modules.system.public import is_database_busy_error
+from app.modules.imports.application.scan_jobs import prepare_import_scan_job
+from app.modules.imports.application.shelf_link import PreparedImportShelfLink
+from app.modules.system.public import PreparedSystemEvent, is_database_busy_error
 from app.services.audio_metadata import (
     audio_bundle_root,
     collect_audio_bundle_files,
     is_supported_audio_file,
 )
-from app.services.import_preferences import load_import_preferences
-from app.services.system_events import record_system_event
+from app.services.import_preferences import (
+    DEFAULT_STABILITY_CHECK_ENABLED,
+    IMPORT_ALLOWED_EXTENSIONS_KEY,
+    IMPORT_AUTO_CONVERT_KEY,
+    IMPORT_IGNORE_PATTERNS_KEY,
+    IMPORT_PREFERENCE_KEYS,
+    IMPORT_STABILITY_ENABLED_KEY,
+    IMPORT_STABILITY_SECONDS_KEY,
+    ImportPreferences,
+    default_stability_seconds,
+    normalize_allowed_extensions,
+    normalize_ignore_patterns,
+    normalize_import_setting_value,
+    normalize_stability_seconds,
+)
+from app.services.system_events import (
+    prepare_system_event,
+)
 from app.worker.path_security import PathSecurityError, PathSecurityService
 
 
@@ -49,15 +74,49 @@ class ImportQueueProtocol(Protocol):
 
 
 audio_bundle_fully_imported = library_repository.audio_bundle_fully_imported
-add_work_to_target_shelf = monitor_repository.add_work_to_target_shelf
 get_completed_import_task_work_id = monitor_repository.get_completed_import_task_work_id
 get_system_settings = monitor_repository.get_system_settings
 list_enabled_monitor_folders = monitor_repository.list_enabled_monitor_folders
-upsert_system_setting = monitor_repository.upsert_system_setting
 
 RESCAN_REQUESTED_AT_KEY = "monitor.rescanRequestedAt"
 RESCAN_HANDLED_AT_KEY = "monitor.rescanHandledAt"
 WATCHER_DATABASE_RETRY_DELAYS_SECONDS = (0.05, 0.2)
+WORKER_REFRESH_SETTING_KEYS = tuple(
+    sorted(
+        {
+            RESCAN_REQUESTED_AT_KEY,
+            RESCAN_HANDLED_AT_KEY,
+            *IMPORT_PREFERENCE_KEYS,
+        }
+    )
+)
+
+
+def _record_worker_event(
+    db: Session,
+    *,
+    source: str,
+    action: str,
+    message: str,
+    level: str = "info",
+    actor_type: str = "system",
+    actor_id: str | None = None,
+    target_type: str | None = None,
+    target_id: str | None = None,
+    metadata: dict[str, object] | None = None,
+) -> None:
+    prepared_event = prepare_system_event(
+        source=source,
+        action=action,
+        message=message,
+        level=level,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        target_type=target_type,
+        target_id=target_id,
+        metadata=metadata,
+    )
+    persist_import_events(db, (prepared_event,))
 
 
 @dataclass
@@ -65,6 +124,13 @@ class WatchState:
     observer: Observer
     root_path: Path
     config_signature: str
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerRefreshProjection:
+    folders: tuple[MonitorFolderConfig, ...]
+    rescan_requested_at: str | None
+    rescan_handled_at: str | None
 
 
 class WorkerFileHandler(FileSystemEventHandler):
@@ -111,13 +177,61 @@ class WorkerManager:
         self.last_handled_rescan_request: str | None = None
 
     def refresh_worker_state(self) -> None:
-        with self.db_factory() as db:
-            self.refresh_watchers(db)
-            self.process_rescan_requests(db)
+        try:
+            with self.db_factory() as db:
+                folder_rows = tuple(list_enabled_monitor_folders(db))
+                setting_values = get_system_settings(db, WORKER_REFRESH_SETTING_KEYS)
+            folders = enabled_monitor_folders(folder_rows, setting_values)
+            projection = WorkerRefreshProjection(
+                folders=folders,
+                rescan_requested_at=setting_values.get(RESCAN_REQUESTED_AT_KEY),
+                rescan_handled_at=setting_values.get(RESCAN_HANDLED_AT_KEY),
+            )
+        except SQLAlchemyError as exc:
+            print(
+                f"[import-worker] watcher projection unavailable, retrying later: {exc}",
+                flush=True,
+            )
+            return
+        self.refresh_watchers(projection.folders)
+        self.process_rescan_requests(projection)
         self._schedule_pending_recovery_scans()
 
-    def refresh_watchers(self, db: Session) -> None:
-        folders = enabled_monitor_folders(db)
+    def _persist_prepared_event(self, event: PreparedSystemEvent) -> None:
+        try:
+            with self.db_factory() as db:
+                persist_import_events(db, (event,))
+        except OperationalError as exc:
+            if not is_database_busy_error(exc):
+                raise
+            print(
+                "[import-worker] event persistence deferred reason=database_busy",
+                flush=True,
+            )
+
+    def _schedule_scan_request(
+        self,
+        *,
+        monitor_folder_id: str,
+        root_path: Path,
+        trigger: str,
+        available_at: datetime | None = None,
+    ) -> None:
+        checkpoint_at = datetime.now(UTC)
+        prepared_job = prepare_import_scan_job(
+            job_id=f"scan_{uuid4().hex}",
+            work_item_id=f"work_{uuid4().hex}",
+            monitor_folder_id=monitor_folder_id,
+            actor_user_id=None,
+            canonical_root_path=str(root_path.expanduser().resolve()),
+            trigger=trigger,
+            available_at=available_at,
+            created_at=checkpoint_at,
+        )
+        with self.db_factory() as db:
+            persist_import_scan_requests(db, (prepared_job,), ())
+
+    def refresh_watchers(self, folders: tuple[MonitorFolderConfig, ...]) -> None:
         active_ids = {folder.id for folder in folders}
         for folder_id, state in list(self.watchers.items()):
             folder = next((item for item in folders if item.id == folder_id), None)
@@ -138,8 +252,7 @@ class WorkerManager:
                     f"[import-worker] monitor folder unavailable {folder.root_path}: {exc}",
                     flush=True,
                 )
-                record_system_event(
-                    db,
+                prepared_event = prepare_system_event(
                     source="import",
                     action="scan.failed",
                     level="error",
@@ -151,8 +264,8 @@ class WorkerManager:
                         "trigger": "watcher_started",
                         "error": str(exc),
                     },
-                    commit=True,
                 )
+                self._persist_prepared_event(prepared_event)
                 continue
             observer = Observer()
             state = WatchState(
@@ -166,27 +279,25 @@ class WorkerManager:
             observer.start()
             self.watchers[folder.id] = state
             print(f"[import-worker] monitoring {real_path}", flush=True)
-            schedule_import_scan_job(
-                db,
-                monitor_folder_id=folder.id,
-                actor_user_id=None,
-                root_path=real_path,
-                trigger="watcher_started",
-            )
+            try:
+                self._schedule_scan_request(
+                    monitor_folder_id=folder.id,
+                    root_path=real_path,
+                    trigger="watcher_started",
+                )
+            except OperationalError as exc:
+                if not is_database_busy_error(exc):
+                    raise
+                self._pending_recovery_folders().add(folder.id)
+                print(
+                    "[import-worker] initial watcher scan deferred "
+                    f"{folder.id} reason=database_busy",
+                    flush=True,
+                )
 
-    def process_rescan_requests(self, db: Session) -> None:
-        try:
-            settings = get_system_settings(
-                db, (RESCAN_REQUESTED_AT_KEY, RESCAN_HANDLED_AT_KEY)
-            )
-        except SQLAlchemyError as exc:
-            print(
-                f"[import-worker] system settings unavailable, retrying later: {exc}",
-                flush=True,
-            )
-            return
-        requested_at = settings.get(RESCAN_REQUESTED_AT_KEY)
-        handled_at = settings.get(RESCAN_HANDLED_AT_KEY)
+    def process_rescan_requests(self, projection: WorkerRefreshProjection) -> None:
+        requested_at = projection.rescan_requested_at
+        handled_at = projection.rescan_handled_at
         if (
             not requested_at
             or requested_at == handled_at
@@ -209,21 +320,14 @@ class WorkerManager:
                     if str(folder_id).strip()
                 }
         print(f"[import-worker] rescan requested at {request_timestamp}", flush=True)
-        folders = enabled_monitor_folders(db)
+        folders = list(projection.folders)
         if requested_folder_ids is not None:
             folders = [
                 folder for folder in folders if folder.id in requested_folder_ids
             ]
-        record_system_event(
-            db,
-            source="import",
-            action="rescan.started",
-            target_type="monitorFolder",
-            message=f"开始重新扫描 {len(folders)} 个监控文件夹",
-            metadata={"requestedAt": request_timestamp, "folderCount": len(folders)},
-            commit=True,
-        )
-        scheduled_folders = 0
+        checkpoint_at = datetime.now(UTC)
+        prepared_scan_jobs = []
+        prepared_events: list[PreparedSystemEvent] = []
         for folder in folders:
             try:
                 real_path = self.security.validate_monitor_folder(
@@ -234,8 +338,7 @@ class WorkerManager:
                     f"[import-worker] rescan monitor folder unavailable {folder.root_path}: {exc}",
                     flush=True,
                 )
-                record_system_event(
-                    db,
+                failure_event = prepare_system_event(
                     source="import",
                     action="scan.failed",
                     level="error",
@@ -248,21 +351,22 @@ class WorkerManager:
                         "requestedAt": request_timestamp,
                         "error": str(exc),
                     },
-                    commit=True,
                 )
+                prepared_events.append(failure_event)
                 continue
-            _job, created = schedule_import_scan_job(
-                db,
-                monitor_folder_id=folder.id,
-                actor_user_id=None,
-                root_path=real_path,
-                trigger="manual_rescan",
+            prepared_scan_jobs.append(
+                prepare_import_scan_job(
+                    job_id=f"scan_{uuid4().hex}",
+                    work_item_id=f"work_{uuid4().hex}",
+                    monitor_folder_id=folder.id,
+                    actor_user_id=None,
+                    canonical_root_path=str(real_path),
+                    trigger="manual_rescan",
+                    available_at=None,
+                    created_at=checkpoint_at,
+                )
             )
-            scheduled_folders += int(created)
-        self.last_handled_rescan_request = requested_at
-        upsert_system_setting(db, RESCAN_HANDLED_AT_KEY, requested_at)
-        record_system_event(
-            db,
+        completed_event = prepare_system_event(
             source="import",
             action="rescan.completed",
             level="info",
@@ -271,9 +375,33 @@ class WorkerManager:
             metadata={
                 "requestedAt": request_timestamp,
                 "folderCount": len(folders),
-                "createdJobCount": scheduled_folders,
+                "scheduledFolderCount": len(prepared_scan_jobs),
             },
-            commit=True,
+        )
+        prepared_events.append(completed_event)
+        try:
+            with self.db_factory() as db:
+                created_count = persist_import_rescan_completion(
+                    db,
+                    setting_key=RESCAN_HANDLED_AT_KEY,
+                    setting_value=requested_at,
+                    checkpoint_at=checkpoint_at,
+                    scan_jobs=tuple(prepared_scan_jobs),
+                    events=tuple(prepared_events),
+                )
+        except OperationalError as exc:
+            if not is_database_busy_error(exc):
+                raise
+            print(
+                "[import-worker] rescan completion deferred reason=database_busy",
+                flush=True,
+            )
+            return
+        self.last_handled_rescan_request = requested_at
+        print(
+            "[import-worker] rescan checkpoint persisted "
+            f"folders={len(prepared_scan_jobs)} created={created_count}",
+            flush=True,
         )
 
     def schedule_import(
@@ -320,42 +448,48 @@ class WorkerManager:
         *,
         audio_scan_root: Path | None,
     ) -> None:
+        available_at = (
+            datetime.now(UTC)
+            + timedelta(seconds=max(0, folder.stability_check_seconds))
+            if folder.stability_check_enabled
+            else None
+        )
+        candidate_is_directory = candidate.is_dir()
+        candidate_name = candidate.name
         with self.db_factory() as db:
-            if import_queue_at_high_watermark(db):
-                schedule_import_scan_job(
-                    db,
-                    monitor_folder_id=folder.id,
-                    actor_user_id=None,
-                    root_path=state.root_path,
-                    trigger="WATCHER_BACKPRESSURE",
-                )
-                return
-            available_at = (
-                datetime.now(UTC)
-                + timedelta(seconds=max(0, folder.stability_check_seconds))
-                if folder.stability_check_enabled
-                else None
-            )
-            if audio_scan_root is not None:
-                schedule_import_scan_job(
-                    db,
-                    monitor_folder_id=folder.id,
-                    actor_user_id=None,
-                    root_path=audio_scan_root,
-                    trigger="WATCHER_AUDIO_EVENT",
-                    available_at=available_at,
-                )
-                return
-            enqueue_import_task(
-                db,
-                candidate,
-                origin="WATCH",
-                original_name=candidate.name,
+            at_high_watermark = import_queue_at_high_watermark(db)
+        if at_high_watermark:
+            self._schedule_scan_request(
                 monitor_folder_id=folder.id,
-                message="监控文件已进入导入队列",
-                allow_terminal_requeue=candidate.is_dir(),
+                root_path=state.root_path,
+                trigger="WATCHER_BACKPRESSURE",
+            )
+            return
+        if audio_scan_root is not None:
+            self._schedule_scan_request(
+                monitor_folder_id=folder.id,
+                root_path=audio_scan_root,
+                trigger="WATCHER_AUDIO_EVENT",
                 available_at=available_at,
             )
+            return
+        command = prepare_import_enqueue_command(
+            candidate,
+            origin="WATCH",
+            original_name=candidate_name,
+            monitor_folder_id=folder.id,
+            message="监控文件已进入导入队列",
+            allow_terminal_requeue=candidate_is_directory,
+        )
+        with self.db_factory() as db:
+            projection = load_import_enqueue_command_projection(db, command)
+        prepared = prepare_import_enqueue_write(
+            command,
+            projection,
+            available_at=available_at or datetime.now(UTC),
+        )
+        with self.db_factory() as db:
+            persist_import_enqueue_write(db, prepared)
 
     def _pending_recovery_folders(self) -> set[str]:
         pending = getattr(self, "_pending_scan_recovery_folder_ids", None)
@@ -372,14 +506,11 @@ class WorkerManager:
                 pending.discard(folder_id)
                 continue
             try:
-                with self.db_factory() as db:
-                    schedule_import_scan_job(
-                        db,
-                        monitor_folder_id=folder_id,
-                        actor_user_id=None,
-                        root_path=state.root_path,
-                        trigger="WATCHER_RECOVERY",
-                    )
+                self._schedule_scan_request(
+                    monitor_folder_id=folder_id,
+                    root_path=state.root_path,
+                    trigger="WATCHER_RECOVERY",
+                )
             except SQLAlchemyError as exc:
                 print(
                     "[import-worker] watcher recovery scan scheduling deferred "
@@ -408,17 +539,40 @@ class WorkerManager:
         print(f"[import-worker] stopped monitor {state.root_path}", flush=True)
 
 
-def enabled_monitor_folders(db: Session) -> list[MonitorFolderConfig]:
-    try:
-        rows = list_enabled_monitor_folders(db)
-    except SQLAlchemyError as exc:
-        print(
-            f"[import-worker] monitor folders unavailable, retrying later: {exc}",
-            flush=True,
-        )
-        return []
-    preferences = load_import_preferences(db)
-    return [monitor_folder_config(row, preferences=preferences) for row in rows]
+def enabled_monitor_folders(
+    rows: tuple[Mapping[str, object], ...],
+    setting_values: Mapping[str, str],
+) -> tuple[MonitorFolderConfig, ...]:
+    """Map detached SQL projections into watcher configuration."""
+
+    stability_enabled = normalize_import_setting_value(
+        IMPORT_STABILITY_ENABLED_KEY,
+        setting_values.get(IMPORT_STABILITY_ENABLED_KEY),
+    )
+    auto_convert = normalize_import_setting_value(
+        IMPORT_AUTO_CONVERT_KEY,
+        setting_values.get(IMPORT_AUTO_CONVERT_KEY),
+    )
+    preferences = ImportPreferences(
+        stability_check_enabled=(
+            stability_enabled
+            if isinstance(stability_enabled, bool)
+            else DEFAULT_STABILITY_CHECK_ENABLED
+        ),
+        stability_check_seconds=(
+            normalize_stability_seconds(setting_values[IMPORT_STABILITY_SECONDS_KEY])
+            if IMPORT_STABILITY_SECONDS_KEY in setting_values
+            else default_stability_seconds()
+        ),
+        auto_convert_to_epub=(auto_convert if isinstance(auto_convert, bool) else True),
+        allowed_extensions=normalize_allowed_extensions(
+            setting_values.get(IMPORT_ALLOWED_EXTENSIONS_KEY)
+        ),
+        ignore_patterns=normalize_ignore_patterns(
+            setting_values.get(IMPORT_IGNORE_PATTERNS_KEY)
+        ),
+    )
+    return tuple(monitor_folder_config(row, preferences=preferences) for row in rows)
 
 
 def config_signature(folder: MonitorFolderConfig) -> str:
@@ -506,8 +660,10 @@ def _add_work_to_target_shelf(
 ) -> None:
     if not folder.shelf_id or not work_id:
         return
-    add_work_to_target_shelf(db, shelf_id=folder.shelf_id, work_id=work_id)
-    commit_import_checkpoint(db)
+    persist_watched_import_shelf_link(
+        db,
+        PreparedImportShelfLink(folder.shelf_id, work_id, db_timestamp()),
+    )
 
 
 def import_watched_file(
@@ -534,7 +690,7 @@ def import_watched_file(
     if retry_after_stability_check and mark_deferred is not None:
         mark_deferred()
     if not stable or changed_during_check:
-        record_system_event(
+        _record_worker_event(
             db,
             source="import",
             action="scan.file.deferred",
@@ -551,14 +707,14 @@ def import_watched_file(
                 "changedDuringStabilityCheck": changed_during_check,
                 "retryScheduled": retry_after_stability_check or changed_during_check,
             },
-            commit=True,
         )
         return False
     existing = get_completed_import_task_work_id(db, str(path))
+    db.close()
     if existing and (path.is_file() or _audio_bundle_is_fully_imported(db, path)):
         _add_work_to_target_shelf(db, folder, existing.get("workId"))
         print(f"[import-worker] skipped already imported file {path}", flush=True)
-        record_system_event(
+        _record_worker_event(
             db,
             source="import",
             action="import.skipped",
@@ -570,11 +726,9 @@ def import_watched_file(
                 "monitorFolderId": folder.id,
                 "reason": "completed_import_task_exists",
             },
-            commit=True,
         )
         return True
-    enqueue_import_task(
-        db,
+    command = prepare_import_enqueue_command(
         path,
         origin="WATCH",
         original_name=path.name,
@@ -582,6 +736,14 @@ def import_watched_file(
         message="监控文件已进入导入队列",
         allow_terminal_requeue=path.is_dir(),
     )
+    projection = load_import_enqueue_command_projection(db, command)
+    db.close()
+    prepared = prepare_import_enqueue_write(
+        command,
+        projection,
+        available_at=datetime.now(UTC),
+    )
+    persist_import_enqueue_write(db, prepared)
     return True
 
 
@@ -600,7 +762,7 @@ def scan_directory_with_logging(
         "trigger": trigger,
         "requestedAt": requested_at,
     }
-    record_system_event(
+    _record_worker_event(
         db,
         source="import",
         action="scan.started",
@@ -608,7 +770,6 @@ def scan_directory_with_logging(
         target_id=folder.id,
         message=f"开始扫描监控文件夹：{root_path.name or root_path}",
         metadata=base_metadata,
-        commit=True,
     )
 
     summary = ScanSummary()
@@ -627,7 +788,9 @@ def scan_directory_with_logging(
                     ignored_reason_counts.get(reason, 0) + count
                 )
             for path in scan_slice.candidates:
-                if path.is_file() and import_source_already_known(db, path):
+                is_known = path.is_file() and import_source_already_known(db, path)
+                db.close()
+                if is_known:
                     summary.cached_files += 1
                     continue
                 import_queue.enqueue(path, folder)
@@ -637,7 +800,7 @@ def scan_directory_with_logging(
         scanner.close()
     error_count = len(summary.errors)
     action = "scan.completed_with_errors" if error_count else "scan.completed"
-    record_system_event(
+    _record_worker_event(
         db,
         source="import",
         action=action,
@@ -665,5 +828,4 @@ def scan_directory_with_logging(
             "errorCount": error_count,
         },
     )
-    commit_import_checkpoint(db)
     return summary

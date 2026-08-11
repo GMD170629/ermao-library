@@ -6,7 +6,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 
-from sqlalchemy import case, delete, false, func, or_, select
+from sqlalchemy import and_, case, delete, false, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
@@ -14,6 +14,7 @@ from app.contracts.epub_navigation import (
     EPUB_HREF_BASE_METADATA_KEY,
     EPUB_PUBLICATION_ROOT_HREF_BASE,
 )
+from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.auth import ReaderBookmark
 from app.models.common import cuid
 from app.models.library import (
@@ -298,67 +299,61 @@ class SqlAlchemyReaderVolumeRepository:
                 )
             ).all()
         }
-        recovered_sort_orders: set[int] = set()
+        recovered_sort_orders = {chapter.sort_order for chapter in chapters}
+        rows: list[dict[str, object]] = []
         for chapter in chapters:
-            recovered_sort_orders.add(chapter.sort_order)
             existing = existing_units.get(chapter.sort_order)
             metadata = _epub_navigation_metadata(
                 existing.metadata_json if existing is not None else None,
                 chapter.idref,
             )
-            if existing is not None:
-                existing.file_id = file_id
-                existing.title = chapter.title
-                existing.href = chapter.href
-                existing.media_type = chapter.media_type
-                existing.metadata_json = metadata
-                existing.updated_at = now
-                continue
             digest = hashlib.sha256(
                 f"{volume_id}\0{chapter.sort_order}\0{chapter.href}".encode()
             ).hexdigest()[:32]
-            statement = (
-                sqlite_insert(LibraryReadingUnit)
-                .values(
-                    id=f"recovered_{digest}",
-                    volumeId=volume_id,
-                    fileId=file_id,
-                    unitType="chapter",
-                    title=chapter.title,
-                    href=chapter.href,
-                    mediaType=chapter.media_type,
-                    sortOrder=chapter.sort_order,
-                    metadataJson=metadata,
-                    createdAt=now,
-                    updatedAt=now,
-                )
-                .on_conflict_do_nothing(
-                    index_elements=["volumeId", "unitType", "sortOrder"]
-                )
+            rows.append(
+                {
+                    "id": existing.id if existing is not None else f"recovered_{digest}",
+                    "volumeId": volume_id,
+                    "fileId": file_id,
+                    "unitType": "chapter",
+                    "title": chapter.title,
+                    "href": chapter.href,
+                    "mediaType": chapter.media_type,
+                    "sortOrder": chapter.sort_order,
+                    "metadataJson": metadata,
+                    "createdAt": now,
+                    "updatedAt": now,
+                }
             )
-            self._session.execute(statement)
-        stale_unit_ids = [
-            unit.id
-            for sort_order, unit in existing_units.items()
-            if sort_order not in recovered_sort_orders
-        ]
-        if stale_unit_ids:
+        for chunk in sqlite_parameter_chunks(rows, parameters_per_row=11):
+            insert_statement = sqlite_insert(LibraryReadingUnit).values(list(chunk))
             self._session.execute(
-                delete(LibraryReadingUnit).where(
-                    LibraryReadingUnit.id.in_(stale_unit_ids)
+                insert_statement.on_conflict_do_update(
+                    index_elements=["volumeId", "unitType", "sortOrder"],
+                    set_={
+                        "fileId": insert_statement.excluded["fileId"],
+                        "title": insert_statement.excluded.title,
+                        "href": insert_statement.excluded.href,
+                        "mediaType": insert_statement.excluded["mediaType"],
+                        "metadataJson": insert_statement.excluded["metadataJson"],
+                        "updatedAt": insert_statement.excluded["updatedAt"],
+                    },
                 )
             )
-        chapter_count = self._session.scalar(
-            select(func.count(LibraryReadingUnit.id)).where(
-                LibraryReadingUnit.volume_id == volume_id,
-                LibraryReadingUnit.unit_type == "chapter",
-            )
+        stale_units = delete(LibraryReadingUnit).where(
+            LibraryReadingUnit.volume_id == volume_id,
+            LibraryReadingUnit.unit_type == "chapter",
         )
-        volume = self._session.get(LibraryVolume, volume_id)
-        if volume is not None:
-            volume.chapter_count = int(chapter_count or 0)
-            volume.updated_at = now
-        self._session.flush()
+        if recovered_sort_orders:
+            stale_units = stale_units.where(
+                LibraryReadingUnit.sort_order.not_in(recovered_sort_orders)
+            )
+        self._session.execute(stale_units)
+        self._session.execute(
+            update(LibraryVolume)
+            .where(LibraryVolume.id == volume_id)
+            .values(chapter_count=len(chapters), updated_at=now)
+        )
 
     def get_progress(self, user_id: str, volume_id: str) -> ReaderProgressDto | None:
         progress = self._session.scalar(
@@ -395,72 +390,101 @@ class SqlAlchemyReaderVolumeRepository:
         client_id: str,
         client_sequence: int,
         now: datetime,
-    ) -> ReaderProgressDto:
+    ) -> tuple[ReaderProgressDto, bool]:
+        progress_insert = sqlite_insert(LibraryReadingProgress).values(
+            id=cuid(),
+            userId=user_id,
+            volumeId=context.volume.id,
+            readerType=reader_type,
+            position="0",
+            page=None,
+            percent=percent,
+            extra="{}",
+            schemaVersion=3,
+            locationType=reader_type,
+            locationJson=location_json,
+            contentFingerprint=content_fingerprint,
+            mutationId=mutation_id,
+            clientId=client_id,
+            clientSequence=client_sequence,
+            progressedAt=now,
+            sourceProtocol="SHUKU_WEB",
+            sourceDeviceName="Shuku Web Reader",
+            createdAt=now,
+            updatedAt=now,
+        )
+        should_apply = and_(
+            or_(
+                LibraryReadingProgress.mutation_id.is_(None),
+                LibraryReadingProgress.mutation_id != mutation_id,
+            ),
+            or_(
+                LibraryReadingProgress.client_id.is_(None),
+                LibraryReadingProgress.client_id != client_id,
+                LibraryReadingProgress.client_sequence.is_(None),
+                LibraryReadingProgress.client_sequence < client_sequence,
+            ),
+        )
         progress = self._session.scalar(
-            select(LibraryReadingProgress).where(
-                LibraryReadingProgress.user_id == user_id,
-                LibraryReadingProgress.volume_id == context.volume.id,
-            )
+            progress_insert.on_conflict_do_update(
+                index_elements=[
+                    LibraryReadingProgress.user_id,
+                    LibraryReadingProgress.volume_id,
+                ],
+                set_={
+                    "readerType": progress_insert.excluded["readerType"],
+                    "percent": progress_insert.excluded.percent,
+                    "schemaVersion": progress_insert.excluded["schemaVersion"],
+                    "locationType": progress_insert.excluded["locationType"],
+                    "locationJson": progress_insert.excluded["locationJson"],
+                    "contentFingerprint": progress_insert.excluded[
+                        "contentFingerprint"
+                    ],
+                    "mutationId": progress_insert.excluded["mutationId"],
+                    "clientId": progress_insert.excluded["clientId"],
+                    "clientSequence": progress_insert.excluded["clientSequence"],
+                    "progressedAt": progress_insert.excluded["progressedAt"],
+                    "sourceProtocol": progress_insert.excluded["sourceProtocol"],
+                    "sourceDeviceName": progress_insert.excluded[
+                        "sourceDeviceName"
+                    ],
+                    "updatedAt": progress_insert.excluded["updatedAt"],
+                },
+                where=should_apply,
+            ).returning(LibraryReadingProgress)
         )
         if progress is None:
-            progress = LibraryReadingProgress(
-                user_id=user_id,
-                volume_id=context.volume.id,
-                reader_type=reader_type,
-                position="0",
-                page=None,
-                percent=percent,
-                extra="{}",
-                schema_version=3,
-                location_type=reader_type,
-                location_json=location_json,
-                content_fingerprint=content_fingerprint,
-                mutation_id=mutation_id,
-                client_id=client_id,
-                client_sequence=client_sequence,
-                progressed_at=now,
-                source_protocol="SHUKU_WEB",
-                source_device_name="Shuku Web Reader",
-                created_at=now,
-                updated_at=now,
-            )
-            self._session.add(progress)
-        else:
-            progress.reader_type = reader_type
-            progress.percent = percent
-            progress.schema_version = 3
-            progress.location_type = reader_type
-            progress.location_json = location_json
-            progress.content_fingerprint = content_fingerprint
-            progress.mutation_id = mutation_id
-            progress.client_id = client_id
-            progress.client_sequence = client_sequence
-            progress.progressed_at = now
-            progress.source_protocol = "SHUKU_WEB"
-            progress.source_device_name = "Shuku Web Reader"
-            progress.updated_at = now
-
-        history = self._session.scalar(
-            select(UserMediaHistory).where(
-                UserMediaHistory.user_id == user_id,
-                UserMediaHistory.media_version_id == context.media_version.id,
-            )
-        )
-        if history is None:
-            self._session.add(
-                UserMediaHistory(
-                    user_id=user_id,
-                    media_version_id=context.media_version.id,
-                    last_volume_id=context.volume.id,
-                    created_at=now,
-                    updated_at=now,
+            current = self._session.scalar(
+                select(LibraryReadingProgress).where(
+                    LibraryReadingProgress.user_id == user_id,
+                    LibraryReadingProgress.volume_id == context.volume.id,
                 )
             )
-        else:
-            history.last_volume_id = context.volume.id
-            history.updated_at = now
-        self._session.flush()
-        return _progress_dto(progress)
+            if current is None:
+                raise RuntimeError("progress upsert returned no current row")
+            return _progress_dto(current), False
+
+        history_insert = sqlite_insert(UserMediaHistory).values(
+            id=cuid(),
+            userId=user_id,
+            mediaVersionId=context.media_version.id,
+            lastVolumeId=context.volume.id,
+            createdAt=now,
+            updatedAt=now,
+        )
+        self._session.execute(
+            history_insert.on_conflict_do_update(
+                index_elements=[
+                    UserMediaHistory.user_id,
+                    UserMediaHistory.media_version_id,
+                ],
+                set_={
+                    "lastVolumeId": history_insert.excluded["lastVolumeId"],
+                    "updatedAt": history_insert.excluded["updatedAt"],
+                },
+            )
+        )
+        return _progress_dto(progress), True
 
     def set_reading_status(
         self,
@@ -472,66 +496,72 @@ class SqlAlchemyReaderVolumeRepository:
         content_fingerprint: str,
         now: datetime,
     ) -> ReaderProgressDto | None:
-        progress = self._session.scalar(
-            select(LibraryReadingProgress).where(
-                LibraryReadingProgress.user_id == user_id,
-                LibraryReadingProgress.volume_id == context.volume.id,
-            )
-        )
         if status == "UNREAD":
-            if progress is not None:
-                self._session.delete(progress)
-                self._session.flush()
-            return None
-
-        if progress is None:
-            progress = LibraryReadingProgress(
-                user_id=user_id,
-                volume_id=context.volume.id,
-                reader_type=reader_type,
-                position="0",
-                page=None,
-                percent=100,
-                extra="{}",
-                schema_version=3,
-                location_type=reader_type,
-                location_json=None,
-                content_fingerprint=content_fingerprint,
-                mutation_id=f"reading-status-{cuid()}",
-                client_id="shuku-library",
-                client_sequence=int(now.timestamp() * 1000),
-                progressed_at=now,
-                source_protocol="SHUKU_WEB",
-                source_device_name="Shuku Library",
-                created_at=now,
-                updated_at=now,
-            )
-            self._session.add(progress)
-        else:
-            progress.percent = 100
-            progress.progressed_at = now
-            progress.updated_at = now
-
-        history = self._session.scalar(
-            select(UserMediaHistory).where(
-                UserMediaHistory.user_id == user_id,
-                UserMediaHistory.media_version_id == context.media_version.id,
-            )
-        )
-        if history is None:
-            self._session.add(
-                UserMediaHistory(
-                    user_id=user_id,
-                    media_version_id=context.media_version.id,
-                    last_volume_id=context.volume.id,
-                    created_at=now,
-                    updated_at=now,
+            self._session.execute(
+                delete(LibraryReadingProgress).where(
+                    LibraryReadingProgress.user_id == user_id,
+                    LibraryReadingProgress.volume_id == context.volume.id,
                 )
             )
-        else:
-            history.last_volume_id = context.volume.id
-            history.updated_at = now
-        self._session.flush()
+            return None
+
+        progress_insert = sqlite_insert(LibraryReadingProgress).values(
+            id=cuid(),
+            userId=user_id,
+            volumeId=context.volume.id,
+            readerType=reader_type,
+            position="0",
+            page=None,
+            percent=100,
+            extra="{}",
+            schemaVersion=3,
+            locationType=reader_type,
+            locationJson=None,
+            contentFingerprint=content_fingerprint,
+            mutationId=f"reading-status-{cuid()}",
+            clientId="shuku-library",
+            clientSequence=int(now.timestamp() * 1000),
+            progressedAt=now,
+            sourceProtocol="SHUKU_WEB",
+            sourceDeviceName="Shuku Library",
+            createdAt=now,
+            updatedAt=now,
+        )
+        progress = self._session.scalar(
+            progress_insert.on_conflict_do_update(
+                index_elements=[
+                    LibraryReadingProgress.user_id,
+                    LibraryReadingProgress.volume_id,
+                ],
+                set_={
+                    "percent": 100,
+                    "progressedAt": now,
+                    "updatedAt": now,
+                },
+            ).returning(LibraryReadingProgress)
+        )
+        if progress is None:
+            raise RuntimeError("reading status upsert returned no row")
+        history_insert = sqlite_insert(UserMediaHistory).values(
+            id=cuid(),
+            userId=user_id,
+            mediaVersionId=context.media_version.id,
+            lastVolumeId=context.volume.id,
+            createdAt=now,
+            updatedAt=now,
+        )
+        self._session.execute(
+            history_insert.on_conflict_do_update(
+                index_elements=[
+                    UserMediaHistory.user_id,
+                    UserMediaHistory.media_version_id,
+                ],
+                set_={
+                    "lastVolumeId": context.volume.id,
+                    "updatedAt": now,
+                },
+            )
+        )
         return _progress_dto(progress)
 
     def save_external_progress(
@@ -551,70 +581,73 @@ class SqlAlchemyReaderVolumeRepository:
         source_device_name: str,
         now: datetime,
     ) -> ReaderProgressDto:
+        progress_insert = sqlite_insert(LibraryReadingProgress).values(
+            id=cuid(),
+            userId=user_id,
+            volumeId=context.volume.id,
+            readerType=reader_type,
+            position="0",
+            page=None,
+            percent=percent,
+            extra="{}",
+            schemaVersion=3,
+            locationType=reader_type,
+            locationJson=location_json,
+            contentFingerprint=content_fingerprint,
+            mutationId=mutation_id,
+            clientId=client_id,
+            clientSequence=client_sequence,
+            progressedAt=progressed_at,
+            sourceProtocol=source_protocol,
+            sourceDeviceName=source_device_name,
+            createdAt=now,
+            updatedAt=now,
+        )
         progress = self._session.scalar(
-            select(LibraryReadingProgress).where(
-                LibraryReadingProgress.user_id == user_id,
-                LibraryReadingProgress.volume_id == context.volume.id,
-            )
+            progress_insert.on_conflict_do_update(
+                index_elements=[
+                    LibraryReadingProgress.user_id,
+                    LibraryReadingProgress.volume_id,
+                ],
+                set_={
+                    "readerType": reader_type,
+                    "percent": percent,
+                    "schemaVersion": 3,
+                    "locationType": reader_type,
+                    "locationJson": location_json,
+                    "contentFingerprint": content_fingerprint,
+                    "mutationId": mutation_id,
+                    "clientId": client_id,
+                    "clientSequence": client_sequence,
+                    "progressedAt": progressed_at,
+                    "sourceProtocol": source_protocol,
+                    "sourceDeviceName": source_device_name,
+                    "updatedAt": now,
+                },
+            ).returning(LibraryReadingProgress)
         )
         if progress is None:
-            progress = LibraryReadingProgress(
-                user_id=user_id,
-                volume_id=context.volume.id,
-                reader_type=reader_type,
-                position="0",
-                page=None,
-                percent=percent,
-                extra="{}",
-                schema_version=3,
-                location_type=reader_type,
-                location_json=location_json,
-                content_fingerprint=content_fingerprint,
-                mutation_id=mutation_id,
-                client_id=client_id,
-                client_sequence=client_sequence,
-                progressed_at=progressed_at,
-                source_protocol=source_protocol,
-                source_device_name=source_device_name,
-                created_at=now,
-                updated_at=now,
-            )
-            self._session.add(progress)
-        else:
-            progress.reader_type = reader_type
-            progress.percent = percent
-            progress.schema_version = 3
-            progress.location_type = reader_type
-            progress.location_json = location_json
-            progress.content_fingerprint = content_fingerprint
-            progress.mutation_id = mutation_id
-            progress.client_id = client_id
-            progress.client_sequence = client_sequence
-            progress.progressed_at = progressed_at
-            progress.source_protocol = source_protocol
-            progress.source_device_name = source_device_name
-            progress.updated_at = now
-
-        history = self._session.scalar(
-            select(UserMediaHistory).where(
-                UserMediaHistory.user_id == user_id,
-                UserMediaHistory.media_version_id == context.media_version.id,
+            raise RuntimeError("external progress upsert returned no row")
+        history_insert = sqlite_insert(UserMediaHistory).values(
+            id=cuid(),
+            userId=user_id,
+            mediaVersionId=context.media_version.id,
+            lastVolumeId=context.volume.id,
+            createdAt=now,
+            updatedAt=now,
+        )
+        self._session.execute(
+            history_insert.on_conflict_do_update(
+                index_elements=[
+                    UserMediaHistory.user_id,
+                    UserMediaHistory.media_version_id,
+                ],
+                set_={
+                    "lastVolumeId": context.volume.id,
+                    "updatedAt": now,
+                },
             )
         )
-        if history is None:
-            self._session.add(
-                UserMediaHistory(
-                    user_id=user_id,
-                    media_version_id=context.media_version.id,
-                    last_volume_id=context.volume.id,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
-        else:
-            history.last_volume_id = context.volume.id
-            history.updated_at = now
-        self._session.flush()
         return _progress_dto(progress)
 
     def list_bookmarks(
@@ -640,6 +673,22 @@ class SqlAlchemyReaderVolumeRepository:
         bookmarks: list[ReaderBookmarkDto],
         now: datetime,
     ) -> list[ReaderBookmarkDto]:
+        rows = [
+            {
+                "id": cuid(),
+                "userId": user_id,
+                "volumeId": volume_id,
+                "contentFingerprint": content_fingerprint,
+                "bookmarkId": bookmark.bookmark_id,
+                "locationJson": bookmark.location_json,
+                "label": bookmark.label,
+                "percent": bookmark.percent,
+                "bookmarkCreatedAt": bookmark.bookmark_created_at.isoformat(),
+                "createdAt": now,
+                "updatedAt": now,
+            }
+            for bookmark in bookmarks
+        ]
         self._session.execute(
             delete(ReaderBookmark).where(
                 ReaderBookmark.user_id == user_id,
@@ -647,21 +696,8 @@ class SqlAlchemyReaderVolumeRepository:
                 ReaderBookmark.content_fingerprint == content_fingerprint,
             )
         )
-        for bookmark in bookmarks:
-            self._session.add(
-                ReaderBookmark(
-                    id=cuid(),
-                    user_id=user_id,
-                    volume_id=volume_id,
-                    content_fingerprint=content_fingerprint,
-                    bookmark_id=bookmark.bookmark_id,
-                    location_json=bookmark.location_json,
-                    label=bookmark.label,
-                    percent=bookmark.percent,
-                    bookmark_created_at=bookmark.bookmark_created_at.isoformat(),
-                    created_at=now,
-                    updated_at=now,
-                )
+        for chunk in sqlite_parameter_chunks(rows, parameters_per_row=11):
+            self._session.execute(
+                sqlite_insert(ReaderBookmark).values(list(chunk))
             )
-        self._session.flush()
         return self.list_bookmarks(user_id, volume_id, content_fingerprint)

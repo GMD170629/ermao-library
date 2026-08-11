@@ -10,6 +10,7 @@ from app.modules.library.domain.facets import (
     CURRENT_FACET_INDEX_VERSION,
     WorkFacetValue,
     build_work_facet_values,
+    parse_tag_names,
 )
 
 
@@ -18,7 +19,6 @@ class PendingFacetWork:
     id: str
     author: str | None
     tags_source: str
-    tags: tuple[str, ...]
     series_name: str | None
 
 
@@ -71,24 +71,25 @@ class RebuildFacetIndexBatch:
     def execute(self, *, limit: int = 200) -> FacetIndexBatchResult:
         if not 1 <= limit <= 200:
             raise ValueError("facet index batch limit must be between 1 and 200")
-        with self.unit_of_work_factory() as unit_of_work:
-            pending = unit_of_work.facets.pending_works(limit=limit)
-            batch = tuple(
-                PreparedWorkFacets(
-                    source=work,
-                    facets=build_work_facet_values(
-                        author=work.author,
-                        tags=work.tags,
-                        series_name=work.series_name,
-                    ),
-                )
-                for work in pending
+        with self.unit_of_work_factory() as read_unit_of_work:
+            pending = read_unit_of_work.facets.pending_works(limit=limit)
+        batch = tuple(
+            PreparedWorkFacets(
+                source=work,
+                facets=build_work_facet_values(
+                    author=work.author,
+                    tags=parse_tag_names(work.tags_source),
+                    series_name=work.series_name,
+                ),
             )
-            processed = unit_of_work.facets.replace_batch(
+            for work in pending
+        )
+        with self.unit_of_work_factory() as write_unit_of_work:
+            processed = write_unit_of_work.facets.replace_batch(
                 batch,
                 index_version=CURRENT_FACET_INDEX_VERSION,
             )
-            unit_of_work.commit()
+            write_unit_of_work.commit()
         return FacetIndexBatchResult(
             processed=processed,
             may_have_more=len(pending) == limit or processed < len(pending),

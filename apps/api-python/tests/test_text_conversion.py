@@ -3,17 +3,18 @@ from __future__ import annotations
 import hashlib
 import subprocess
 import zipfile
+from datetime import UTC, datetime
 from pathlib import Path
 from xml.etree import ElementTree
 
 import pytest
-from sqlalchemy import select, text
-from sqlalchemy.orm import Session, sessionmaker
-
 from app.bootstrap.imports import (
     claim_next_import_task,
-    enqueue_import_task,
     import_managed_book,
+    load_import_enqueue_command_projection,
+    persist_import_enqueue_write,
+    prepare_import_enqueue_command,
+    prepare_import_enqueue_write,
     recover_stale_import_tasks,
 )
 from app.core.auth import hash_password
@@ -42,7 +43,31 @@ from app.services.text_conversion import (
     source_format,
     validate_epub,
 )
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session, sessionmaker
 from tests.test_worker_importer import create_worker_tables
+
+
+def _persist_import_enqueue(
+    db_session: Session,
+    source_path: Path,
+    *,
+    origin: str,
+    original_name: str | None = None,
+):
+    command = prepare_import_enqueue_command(
+        source_path,
+        origin=origin,
+        original_name=original_name,
+    )
+    projection = load_import_enqueue_command_projection(db_session, command)
+    db_session.close()
+    prepared = prepare_import_enqueue_write(
+        command,
+        projection,
+        available_at=datetime.now(UTC),
+    )
+    return persist_import_enqueue_write(db_session, prepared)
 
 
 def write_valid_epub(path: Path) -> None:
@@ -872,7 +897,7 @@ def test_watched_azw3_task_can_be_retried_after_upload_only_saves_the_source(
     assert payload["autoImport"] is True
     assert db_session.execute(text("SELECT COUNT(*) FROM ImportTask")).scalar_one() == 0
     source_path = Path(payload["results"][0]["sourcePath"])
-    task, created = enqueue_import_task(
+    task, created = _persist_import_enqueue(
         db_session,
         source_path,
         origin="WATCH",

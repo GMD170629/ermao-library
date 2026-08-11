@@ -1,5 +1,17 @@
 """Stable media application contracts."""
 
-from app.modules.media.application.commands import execute_media_write
+from app.modules.media.application.page_index import (
+    ReadOnlyVolumePageIndex,
+    ResolvedVolumePageIndex,
+    VolumePageIndexProjection,
+    VolumePageSource,
+    VolumePageUnit,
+)
 
-__all__ = ["execute_media_write"]
+__all__ = [
+    "ReadOnlyVolumePageIndex",
+    "ResolvedVolumePageIndex",
+    "VolumePageIndexProjection",
+    "VolumePageSource",
+    "VolumePageUnit",
+]

@@ -1,10 +1,6 @@
 """Public metadata capability contracts."""
 
 from app.contracts.publication_metadata import PublicationMetadata
-from app.modules.metadata.application.commands import (
-    MetadataUnitOfWork,
-    execute_metadata_transaction,
-)
 from app.modules.metadata.application.opf import (
     MAX_OPF_BYTES,
     OPF_NAMESPACE,
@@ -14,26 +10,44 @@ from app.modules.metadata.application.opf import (
     serialize_opf_metadata,
 )
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
+from app.modules.metadata.application.writeback import (
+    MetadataWritebackFileProjection,
+    MetadataWritebackImportProjection,
+    MetadataWritebackProjection,
+    MetadataWritebackVolumeProjection,
+    PreparedWritebackIntent,
+    prepare_metadata_writeback_intents,
+)
 from app.modules.metadata.domain.providers import (
     BUILTIN_MANIFESTS,
     AutomaticRateLimit,
     ProviderConfigField,
     ProviderManifest,
 )
+from app.services.metadata_file_writeback import (
+    load_metadata_writeback_projection,
+    persist_metadata_writeback_intents,
+)
 
 __all__ = [
     "BUILTIN_MANIFESTS",
     "MAX_OPF_BYTES",
+    "OPF_NAMESPACE",
     "AutomaticMetadataRequestGate",
     "AutomaticRateLimit",
-    "MetadataUnitOfWork",
+    "MetadataWritebackFileProjection",
+    "MetadataWritebackImportProjection",
+    "MetadataWritebackProjection",
+    "MetadataWritebackVolumeProjection",
     "OpfMetadataError",
-    "OPF_NAMESPACE",
+    "PreparedWritebackIntent",
     "ProviderConfigField",
     "ProviderManifest",
     "PublicationMetadata",
-    "execute_metadata_transaction",
     "cover_media_type",
+    "load_metadata_writeback_projection",
     "parse_opf_metadata",
+    "persist_metadata_writeback_intents",
+    "prepare_metadata_writeback_intents",
     "serialize_opf_metadata",
 ]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import case, func, inspect, select, update
+from sqlalchemy import case, func, insert, inspect, select, update
 from sqlalchemy.orm import Session
 
 from app.models.library import (
@@ -21,6 +21,37 @@ from app.modules.organize.infrastructure.eligibility import (
     work_entity_as_legacy_dict,
 )
 from app.modules.organize.infrastructure.runs import job_entity_as_legacy_dict
+
+JOB_UPDATE_FIELD_MAP = {
+    "status": "status",
+    "issueCodes": "issue_codes",
+    "reasonCodes": "reason_codes",
+    "summary": "summary",
+    "errorSummary": "error_summary",
+    "updatedAt": "updated_at",
+    "startedAt": "started_at",
+    "finishedAt": "finished_at",
+    "trigger": "trigger",
+    "volumeId": "volume_id",
+}
+WORK_UPDATE_FIELD_MAP = {
+    "title": "title",
+    "author": "author",
+    "normalizedTitle": "normalized_title",
+    "normalizedAuthor": "normalized_author",
+    "description": "description",
+    "tags": "tags",
+    "seriesName": "series_name",
+    "seriesIndex": "series_index",
+    "mergeKey": "merge_key",
+    "organized": "organized",
+    "organizeStatus": "organize_status",
+    "metadataQuality": "metadata_quality",
+    "hidden": "hidden",
+    "coverPath": "cover_path",
+    "coverStatus": "cover_status",
+    "updatedAt": "updated_at",
+}
 
 
 def _has_table(db: Session, table: str) -> bool:
@@ -111,21 +142,38 @@ def insert_organize_job(
     summary: str,
     now: Any,
 ) -> dict[str, Any]:
-    entity = OrganizeJob(
-        id=job_id,
-        work_id=work_id,
-        volume_id=volume_id,
-        trigger="LEGACY",
-        status=status,
-        issue_codes=issue_codes_json,
-        reason_codes="[]",
-        summary=summary,
-        created_at=now,
-        updated_at=now,
+    db.execute(
+        insert(OrganizeJob).values(
+            id=job_id,
+            work_id=work_id,
+            volume_id=volume_id,
+            trigger="LEGACY",
+            status=status,
+            issue_codes=issue_codes_json,
+            reason_codes="[]",
+            summary=summary,
+            created_at=now,
+            updated_at=now,
+        )
     )
-    db.add(entity)
-    db.flush()
-    return job_entity_as_legacy_dict(entity)
+    return {
+        "id": job_id,
+        "runId": None,
+        "workId": work_id,
+        "volumeId": volume_id,
+        "mediaVersionId": None,
+        "importTaskId": None,
+        "trigger": "LEGACY",
+        "status": status,
+        "issueCodes": issue_codes_json,
+        "reasonCodes": "[]",
+        "summary": summary,
+        "errorSummary": None,
+        "startedAt": None,
+        "finishedAt": None,
+        "createdAt": now,
+        "updatedAt": now,
+    }
 
 
 def update_job(
@@ -152,8 +200,30 @@ def update_job(
             mapped[attr] = value
     if mapped:
         db.execute(update(OrganizeJob).where(OrganizeJob.id == job_id).values(**mapped))
-        db.flush()
     return get_job(db, job_id)
+
+
+def prepare_job_update_rows(
+    rows: tuple[dict[str, Any], ...],
+) -> tuple[dict[str, Any], ...]:
+    return tuple(
+        {
+            "id": row["id"],
+            **{
+                mapped_key: value
+                for key, value in row.items()
+                if (mapped_key := JOB_UPDATE_FIELD_MAP.get(key)) is not None
+            },
+        }
+        for row in rows
+    )
+
+
+def write_prepared_job_updates(
+    db: Session, rows: tuple[dict[str, Any], ...]
+) -> None:
+    if rows:
+        db.execute(update(OrganizeJob), list(rows))
 
 
 def update_work(
@@ -188,8 +258,30 @@ def update_work(
         db.execute(
             update(LibraryWork).where(LibraryWork.id == work_id).values(**mapped)
         )
-        db.flush()
     return get_work(db, work_id)
+
+
+def prepare_work_update_rows(
+    rows: tuple[dict[str, Any], ...],
+) -> tuple[dict[str, Any], ...]:
+    return tuple(
+        {
+            "id": row["id"],
+            **{
+                mapped_key: value
+                for key, value in row.items()
+                if (mapped_key := WORK_UPDATE_FIELD_MAP.get(key)) is not None
+            },
+        }
+        for row in rows
+    )
+
+
+def write_prepared_work_updates(
+    db: Session, rows: tuple[dict[str, Any], ...]
+) -> None:
+    if rows:
+        db.execute(update(LibraryWork), list(rows))
 
 
 def list_files_for_volume(db: Session, volume_id: str) -> list[dict[str, Any]]:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from sqlalchemy import select
@@ -14,7 +15,11 @@ from app.infrastructure.comic_archives import (
     extract_comic_cover,
     inspect_comic_archive,
 )
-from app.infrastructure.local_metadata_policy import load_local_metadata_priority
+from app.infrastructure.local_metadata_policy import (
+    load_raw_local_metadata_priority_projection,
+    prepare_local_metadata_priority,
+)
+from app.models.common import db_timestamp
 from app.models.settings import MonitorFolder
 from app.modules.imports.application.audio_types import (
     AudioBundleStructure,
@@ -43,8 +48,13 @@ from app.modules.imports.application.ports import (
     TextConversionProgressStore,
 )
 from app.modules.imports.application.reflowable_types import ReflowableBookMetadata
+from app.modules.imports.application.transactions import PreparedImportWriteBuffer
 from app.modules.imports.infrastructure.audio_cover import publish_audio_cover
-from app.modules.imports.infrastructure.conversion import bind_derived_volume
+from app.modules.imports.infrastructure.conversion import (
+    load_derived_volume_binding_projection,
+    prepare_derived_volume_binding,
+    write_derived_volume_binding,
+)
 from app.modules.imports.infrastructure.conversion_progress import (
     SqlAlchemyTextConversionProgress,
 )
@@ -62,8 +72,12 @@ from app.modules.imports.infrastructure.reflowable_metadata import (
 from app.modules.imports.infrastructure.sidecar_cover import publish_sidecar_cover
 from app.modules.imports.infrastructure.sidecar_opf import discover_sidecar_opf
 from app.modules.imports.infrastructure.uow import SqlAlchemyImportUnitOfWork
-from app.modules.library.infrastructure.facets import sync_work_facets
-from app.modules.system.infrastructure.events import record_system_event
+from app.modules.library.application.facet_sync import prepare_work_facet
+from app.modules.library.infrastructure.facet_sync import (
+    execute_work_facet_write,
+    load_work_facet_projections,
+    prepare_work_facet_write,
+)
 from app.services.audio_metadata import inspect_audio_bundle, parse_audio_metadata
 from app.services.book_identity import (
     recognize_book_identity,
@@ -74,7 +88,13 @@ from app.services.default_cover import (
     ensure_default_cover,
     is_default_cover_path,
 )
-from app.services.import_preferences import load_import_preferences
+from app.services.import_preferences import (
+    load_raw_import_preferences_projection,
+    prepare_import_preferences,
+)
+from app.services.system_events import (
+    prepare_system_event,
+)
 from app.services.text_conversion import ConversionFailure, convert_to_epub
 
 
@@ -85,11 +105,13 @@ class SessionImportOrchestrationServices:
         settings: Settings,
         unit_of_work: ImportUnitOfWork | None = None,
         conversion_progress: TextConversionProgressStore | None = None,
+        write_buffer: PreparedImportWriteBuffer | None = None,
     ) -> None:
         self._db = db
         self._settings = settings
         self._unit_of_work = unit_of_work or SqlAlchemyImportUnitOfWork(db)
         self._conversion_progress = conversion_progress
+        self._write_buffer = write_buffer or PreparedImportWriteBuffer()
 
     def _text_conversion_progress(self) -> TextConversionProgressStore:
         if self._conversion_progress is None:
@@ -109,7 +131,14 @@ class SessionImportOrchestrationServices:
             )
 
     def load_preferences(self) -> ImportPreferencesDTO:
-        preferences = load_import_preferences(self._db)
+        projection = load_raw_import_preferences_projection(self._db)
+        self._unit_of_work.release()
+        preferences = prepare_import_preferences(
+            projection,
+            legacy_stable_delay_ms=os.environ.get(
+                "MONITOR_FILE_STABLE_DELAY_MS"
+            ),
+        )
         return ImportPreferencesDTO(
             auto_convert_to_epub=preferences.auto_convert_to_epub,
             allowed_extensions=preferences.allowed_extensions,
@@ -117,7 +146,9 @@ class SessionImportOrchestrationServices:
         )
 
     def load_local_metadata_priority(self) -> tuple[LocalMetadataSource, ...]:
-        return load_local_metadata_priority(self._db)
+        projection = load_raw_local_metadata_priority_projection(self._db)
+        self._unit_of_work.release()
+        return prepare_local_metadata_priority(projection)
 
     def convert_text(
         self, import_task_id: str, source_path: Path
@@ -150,12 +181,18 @@ class SessionImportOrchestrationServices:
     def bind_conversion_result(
         self, idempotency_key: str, derived_volume_id: str
     ) -> None:
-        bind_derived_volume(
+        projection = load_derived_volume_binding_projection(
             self._db,
             idempotency_key=idempotency_key,
+        )
+        self._unit_of_work.release()
+        prepared = prepare_derived_volume_binding(
+            projection,
             derived_volume_id=derived_volume_id,
             now=now_timestamp_ms(),
         )
+        write_derived_volume_binding(self._db, prepared)
+        self._unit_of_work.release()
 
     def recognize_identity(
         self, path: Path, original_name: str | None
@@ -255,11 +292,17 @@ class SessionImportOrchestrationServices:
         )
 
     def sync_work_facets(self, work_id: str) -> None:
-        sync_work_facets(self._db, work_id)
+        projections = load_work_facet_projections(self._db, (work_id,))
+        self._unit_of_work.release()
+        prepared = prepare_work_facet_write(
+            tuple(prepare_work_facet(projection) for projection in projections),
+            now=db_timestamp(),
+        )
+        execute_work_facet_write(self._db, prepared)
+        self._unit_of_work.release()
 
     def stage_system_event(self, event: ImportSystemEvent) -> None:
-        record_system_event(
-            self._db,
+        prepared_event = prepare_system_event(
             source=event.source,
             action=event.action,
             message=event.message,
@@ -270,6 +313,7 @@ class SessionImportOrchestrationServices:
             target_id=event.target_id,
             metadata=dict(event.metadata) if event.metadata is not None else None,
         )
+        self._write_buffer.stage_system_event(prepared_event)
 
     def ensure_default_cover(self) -> str:
         self._require_released_transaction("ensure_default_cover")

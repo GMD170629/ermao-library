@@ -33,5 +33,6 @@ def serialize_system_event(event: dict[str, Any]) -> dict[str, Any]:
         "targetId": event.get("targetId"),
         "message": event.get("message") or "",
         "metadata": metadata if isinstance(metadata, dict) else {},
-        "createdAt": timestamp_ms_to_iso(created) or (str(created) if created is not None else None),
+        "createdAt": timestamp_ms_to_iso(created)
+        or (str(created) if created is not None else None),
     }

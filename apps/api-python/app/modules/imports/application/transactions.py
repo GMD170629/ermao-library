@@ -5,19 +5,238 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
-from types import MappingProxyType
-from typing import TypeVar
+from types import MappingProxyType, TracebackType
+from typing import Protocol, TypeVar
 
 from app.modules.imports.application.dto import ImportResult
-from app.modules.imports.application.ports import (
-    ImportUnitOfWork,
-    LibraryImportStore,
-)
-
-IMPORT_PERSISTENCE_BATCH_SIZE = 200
+from app.modules.imports.application.ports import ImportUnitOfWork
+from app.modules.system.public import PreparedSystemEvent
 
 ResultT = TypeVar("ResultT")
+
+
+class ImportWriteTarget(StrEnum):
+    IMPORT_TASK = "import_task"
+    IMPORT_ASSET = "import_asset"
+    IMPORT_LOG = "import_log"
+    LIBRARY_WORK = "library_work"
+    LIBRARY_MEDIA_VERSION = "library_media_version"
+    LIBRARY_VOLUME = "library_volume"
+    LIBRARY_FILE = "library_file"
+    LIBRARY_READING_UNIT = "library_reading_unit"
+    LIBRARY_METADATA = "library_metadata"
+    LIBRARY_READING_PROGRESS = "library_reading_progress"
+    USER_MEDIA_HISTORY = "user_media_history"
+    ORGANIZE_JOB = "organize_job"
+    METADATA_LOOKUP_TASK = "metadata_lookup_task"
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedImportInsert:
+    target: ImportWriteTarget
+    columns: Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedImportUpdate:
+    target: ImportWriteTarget
+    target_id: str
+    columns: Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedImportWriteBatch:
+    """Rows fully constructed before the first write statement of a checkpoint."""
+
+    inserts: tuple[PreparedImportInsert, ...]
+    reading_unit_pre_updates: tuple[PreparedImportUpdate, ...]
+    updates: tuple[PreparedImportUpdate, ...]
+    reading_unit_ids_to_delete: tuple[str, ...]
+    reading_unit_file_ids_to_reset: tuple[str, ...]
+    metadata_volume_ids_to_reset: tuple[str, ...]
+    system_events: tuple[PreparedSystemEvent, ...]
+
+    @property
+    def empty(self) -> bool:
+        return not (
+            self.inserts
+            or self.reading_unit_pre_updates
+            or self.updates
+            or self.reading_unit_ids_to_delete
+            or self.reading_unit_file_ids_to_reset
+            or self.metadata_volume_ids_to_reset
+            or self.system_events
+        )
+
+
+class PreparedImportBatchWriter(Protocol):
+    def apply_import_checkpoint(self, prepared: PreparedImportWriteBatch) -> None: ...
+
+
+class ImportDependencyProjectionReader(Protocol):
+    def find_library_media_version(
+        self, work_id: str, media_kind: str
+    ) -> dict[str, object] | None: ...
+
+
+class BufferedImportPersistence(
+    PreparedImportBatchWriter, ImportDependencyProjectionReader, Protocol
+):
+    pass
+
+
+class ImportCompletionWriter(Protocol):
+    def apply_import_completion(
+        self,
+        *,
+        task_updates: tuple[tuple[str, Mapping[str, object]], ...],
+        volume_updates: tuple[tuple[str, Mapping[str, object]], ...],
+        media_versions_to_prune: tuple[str, ...],
+    ) -> None: ...
+
+    def get_library_volume_import_status(self, volume_id: str) -> str | None: ...
+
+    def find_library_file_import_target(
+        self, path: str
+    ) -> dict[str, object] | None: ...
+
+    def get_library_file(self, file_id: str) -> dict[str, object] | None: ...
+
+    def get_library_reading_unit(
+        self, unit_id: str
+    ) -> dict[str, object] | None: ...
+
+
+@dataclass
+class PreparedImportWriteBuffer:
+    """Application-side import write set with read-your-writes overlays."""
+
+    _inserts: dict[tuple[ImportWriteTarget, str], dict[str, object]] = field(
+        default_factory=dict
+    )
+    _updates: dict[tuple[ImportWriteTarget, str], dict[str, object]] = field(
+        default_factory=dict
+    )
+    _reading_unit_pre_updates: dict[str, dict[str, object]] = field(
+        default_factory=dict
+    )
+    _reading_unit_ids_to_delete: set[str] = field(default_factory=set)
+    _reading_unit_file_ids_to_reset: set[str] = field(default_factory=set)
+    _metadata_volume_ids_to_reset: set[str] = field(default_factory=set)
+    _system_events: list[PreparedSystemEvent] = field(default_factory=list)
+
+    def insert(
+        self, target: ImportWriteTarget, columns: Mapping[str, object]
+    ) -> dict[str, object]:
+        values = dict(columns)
+        target_id = str(values["id"])
+        key = (target, target_id)
+        values.update(self._updates.pop(key, {}))
+        self._inserts[key] = {**self._inserts.get(key, {}), **values}
+        return dict(self._inserts[key])
+
+    def update(
+        self,
+        target: ImportWriteTarget,
+        target_id: str,
+        columns: Mapping[str, object],
+    ) -> None:
+        if not columns:
+            return
+        key = (target, target_id)
+        if key in self._inserts:
+            self._inserts[key].update(columns)
+            return
+        current = self._updates.get(key)
+        if (
+            target == ImportWriteTarget.LIBRARY_READING_UNIT
+            and current is not None
+            and "sortOrder" in current
+            and "sortOrder" in columns
+            and int(current["sortOrder"]) < 0 <= int(columns["sortOrder"])
+        ):
+            self._reading_unit_pre_updates[target_id] = dict(current)
+        self._updates[key] = {**self._updates.get(key, {}), **columns}
+
+    def inserted(
+        self, target: ImportWriteTarget, target_id: str
+    ) -> dict[str, object] | None:
+        values = self._inserts.get((target, target_id))
+        return dict(values) if values is not None else None
+
+    def find_media_version_insert(
+        self, work_id: object, media_kind: object
+    ) -> dict[str, object] | None:
+        for (candidate_target, _target_id), values in self._inserts.items():
+            if (
+                candidate_target == ImportWriteTarget.LIBRARY_MEDIA_VERSION
+                and values.get("workId") == work_id
+                and values.get("mediaKind") == media_kind
+            ):
+                return dict(values)
+        return None
+
+    def delete_reading_unit(self, unit_id: str) -> None:
+        key = (ImportWriteTarget.LIBRARY_READING_UNIT, unit_id)
+        if self._inserts.pop(key, None) is None:
+            self._updates.pop(key, None)
+            self._reading_unit_ids_to_delete.add(unit_id)
+
+    def reset_reading_units_for_file(self, file_id: str) -> None:
+        self._reading_unit_file_ids_to_reset.add(file_id)
+
+    def reset_metadata_for_volume(self, volume_id: str) -> None:
+        self._metadata_volume_ids_to_reset.add(volume_id)
+
+    def stage_system_event(self, event: PreparedSystemEvent) -> None:
+        self._system_events.append(event)
+
+    def prepare(self) -> PreparedImportWriteBatch:
+        return PreparedImportWriteBatch(
+            inserts=tuple(
+                PreparedImportInsert(target, MappingProxyType(dict(columns)))
+                for (target, _target_id), columns in self._inserts.items()
+            ),
+            reading_unit_pre_updates=tuple(
+                PreparedImportUpdate(
+                    ImportWriteTarget.LIBRARY_READING_UNIT,
+                    target_id,
+                    MappingProxyType(dict(columns)),
+                )
+                for target_id, columns in self._reading_unit_pre_updates.items()
+            ),
+            updates=tuple(
+                PreparedImportUpdate(
+                    target, target_id, MappingProxyType(dict(columns))
+                )
+                for (target, target_id), columns in self._updates.items()
+            ),
+            reading_unit_ids_to_delete=tuple(
+                sorted(self._reading_unit_ids_to_delete)
+            ),
+            reading_unit_file_ids_to_reset=tuple(
+                sorted(self._reading_unit_file_ids_to_reset)
+            ),
+            metadata_volume_ids_to_reset=tuple(
+                sorted(self._metadata_volume_ids_to_reset)
+            ),
+            system_events=tuple(self._system_events),
+        )
+
+    def clear(self) -> None:
+        self._inserts.clear()
+        self._reading_unit_pre_updates.clear()
+        self._updates.clear()
+        self._reading_unit_ids_to_delete.clear()
+        self._reading_unit_file_ids_to_reset.clear()
+        self._metadata_volume_ids_to_reset.clear()
+        self._system_events.clear()
+
+    @property
+    def empty(self) -> bool:
+        return self.prepare().empty
 
 
 def normalized_import_source_key(value: str | Path) -> str:
@@ -50,26 +269,36 @@ class PreparedImport:
 
 @dataclass
 class ImportTransactionController:
-    """Own bounded commits and release the database connection before file I/O."""
+    """Own explicit persistence checkpoints for one import attempt."""
 
     unit_of_work: ImportUnitOfWork
-    batch_size: int = IMPORT_PERSISTENCE_BATCH_SIZE
     _pending_writes: int = 0
     _completion_phase: bool = False
+    _write_buffer: PreparedImportWriteBuffer | None = None
+    _checkpoint_writer: PreparedImportBatchWriter | None = None
+
+    def attach_write_buffer(
+        self,
+        write_buffer: PreparedImportWriteBuffer,
+        checkpoint_writer: PreparedImportBatchWriter,
+    ) -> None:
+        self._write_buffer = write_buffer
+        self._checkpoint_writer = checkpoint_writer
 
     def note_write(self, count: int = 1) -> None:
         if count < 1:
             return
         self._pending_writes += count
-        if not self._completion_phase and self._pending_writes >= self.batch_size:
-            self.commit()
 
     def commit(self) -> None:
+        self.flush_into_current_transaction()
         self.unit_of_work.commit()
         self._pending_writes = 0
 
     def rollback(self) -> None:
         self.unit_of_work.rollback()
+        if self._write_buffer is not None:
+            self._write_buffer.clear()
         self._pending_writes = 0
         self._completion_phase = False
 
@@ -84,12 +313,57 @@ class ImportTransactionController:
     def release_for_external_io(self) -> None:
         """Commit pending work and return the checked-out connection to the pool."""
 
+        self.flush_into_current_transaction()
         self.unit_of_work.release()
         self._pending_writes = 0
         self._completion_phase = False
 
     def release(self) -> None:
         self.release_for_external_io()
+
+    def flush_into_current_transaction(self) -> None:
+        """Execute one already-prepared collection batch without committing it."""
+
+        if self._write_buffer is None or self._checkpoint_writer is None:
+            return
+        prepared = self._write_buffer.prepare()
+        if prepared.empty:
+            return
+        self._checkpoint_writer.apply_import_checkpoint(prepared)
+        self._write_buffer.clear()
+
+    def prepare_for_dependency_read(self) -> None:
+        """Checkpoint buffered writes before a named dependency projection."""
+        if self._write_buffer is not None and not self._write_buffer.empty:
+            self.commit()
+
+    def finish_dependency_read(self) -> None:
+        """End the read-only transaction immediately after its projection."""
+        self.unit_of_work.release()
+
+
+class ImportDependencyProjection:
+    """Bound one named import projection to a short read transaction."""
+
+    def __init__(self, transactions: ImportTransactionController) -> None:
+        self._transactions = transactions
+
+    def __enter__(self) -> ImportDependencyProjection:
+        self._transactions.prepare_for_dependency_read()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool:
+        del exc_value, traceback
+        if exc_type is None:
+            self._transactions.finish_dependency_read()
+        else:
+            self._transactions.rollback()
+        return False
 
 
 @dataclass
@@ -134,15 +408,14 @@ class ImportCompletion:
 
 
 def persist_import_completion(
-    store: LibraryImportStore,
+    store: ImportCompletionWriter,
     prepared: PreparedImport,
 ) -> None:
-    for volume_id, columns in prepared.volume_updates:
-        store.update_library_volume(volume_id, columns=dict(columns))
-    for task_id, columns in prepared.task_updates:
-        store.update_import_task(task_id, columns=dict(columns))
-    for media_version_id in prepared.media_versions_to_prune:
-        store.delete_library_media_version_if_empty(media_version_id)
+    store.apply_import_completion(
+        task_updates=prepared.task_updates,
+        volume_updates=prepared.volume_updates,
+        media_versions_to_prune=prepared.media_versions_to_prune,
+    )
 
 
 class BoundedLibraryImportStore:
@@ -155,15 +428,18 @@ class BoundedLibraryImportStore:
 
     def __init__(
         self,
-        store: LibraryImportStore,
+        store: BufferedImportPersistence,
         transactions: ImportTransactionController,
         completion: ImportCompletion,
+        write_buffer: PreparedImportWriteBuffer | None = None,
     ) -> None:
-        self._store = store
         self._transactions = transactions
         self._completion = completion
+        self._writes = write_buffer or PreparedImportWriteBuffer()
+        self._projection_reader = store
         self._task_id: str | None = None
         self._source_key: str | None = None
+        self._transactions.attach_write_buffer(self._writes, store)
 
     def set_import_scope(self, task_id: str, source_path: Path) -> None:
         self._task_id = task_id
@@ -189,8 +465,22 @@ class BoundedLibraryImportStore:
         self._transactions.note_write()
         return result
 
+    def _insert(
+        self, target: ImportWriteTarget, columns: Mapping[str, object]
+    ) -> dict[str, object]:
+        return self._written(self._writes.insert(target, columns))
+
+    def _update(
+        self,
+        target: ImportWriteTarget,
+        target_id: str,
+        columns: Mapping[str, object],
+    ) -> None:
+        self._writes.update(target, target_id, columns)
+        self._transactions.note_write()
+
     def insert_import_task(self, *, columns: dict[str, object]) -> dict[str, object]:
-        return self._written(self._store.insert_import_task(columns=columns))
+        return self._insert(ImportWriteTarget.IMPORT_TASK, columns)
 
     def update_import_task(self, task_id: str, *, columns: dict[str, object]) -> None:
         if columns.get("status") == "COMPLETED":
@@ -200,40 +490,52 @@ class BoundedLibraryImportStore:
             self._transactions.begin_completion()
             self._completion.defer_task(task_id, columns)
             return
-        self._store.update_import_task(task_id, columns=columns)
-        self._transactions.note_write()
+        self._update(ImportWriteTarget.IMPORT_TASK, task_id, columns)
 
     def insert_import_asset(self, *, columns: dict[str, object]) -> dict[str, object]:
         values = self._scoped_columns("asset", columns.get("sourcePath"), columns)
-        return self._written(self._store.insert_import_asset(columns=values))
+        return self._insert(ImportWriteTarget.IMPORT_ASSET, values)
 
     def update_import_asset(self, asset_id: str, *, columns: dict[str, object]) -> None:
-        self._store.update_import_asset(asset_id, columns=columns)
-        self._transactions.note_write()
+        self._update(ImportWriteTarget.IMPORT_ASSET, asset_id, columns)
 
     def insert_import_log(self, *, columns: dict[str, object]) -> dict[str, object]:
-        return self._written(self._store.insert_import_log(columns=columns))
+        return self._insert(ImportWriteTarget.IMPORT_LOG, columns)
 
     def insert_library_work(self, *, columns: dict[str, object]) -> dict[str, object]:
         values = self._scoped_columns("work", "primary", columns)
-        return self._written(self._store.insert_library_work(columns=values))
+        return self._insert(ImportWriteTarget.LIBRARY_WORK, values)
 
     def update_library_work(self, work_id: str, *, columns: dict[str, object]) -> None:
-        self._store.update_library_work(work_id, columns=columns)
-        self._transactions.note_write()
+        self._update(ImportWriteTarget.LIBRARY_WORK, work_id, columns)
 
     def ensure_library_media_version(
         self, *, columns: dict[str, object]
     ) -> dict[str, object]:
         resource_key = f"{columns.get('workId')}|{columns.get('mediaKind')}"
         values = self._scoped_columns("media-version", resource_key, columns)
-        return self._written(self._store.ensure_library_media_version(columns=values))
+        buffered = self._writes.find_media_version_insert(
+            values.get("workId"), values.get("mediaKind")
+        )
+        if buffered is not None:
+            return buffered
+        self._transactions.prepare_for_dependency_read()
+        try:
+            existing = self._projection_reader.find_library_media_version(
+                str(values["workId"]), str(values["mediaKind"])
+            )
+        finally:
+            self._transactions.finish_dependency_read()
+        if existing is not None:
+            return existing
+        return self._insert(ImportWriteTarget.LIBRARY_MEDIA_VERSION, values)
 
     def update_library_media_version(
         self, media_version_id: str, *, columns: dict[str, object]
     ) -> None:
-        self._store.update_library_media_version(media_version_id, columns=columns)
-        self._transactions.note_write()
+        self._update(
+            ImportWriteTarget.LIBRARY_MEDIA_VERSION, media_version_id, columns
+        )
 
     def delete_library_media_version_if_empty(self, media_version_id: str) -> None:
         self._completion.defer_media_version_prune(media_version_id)
@@ -244,8 +546,21 @@ class BoundedLibraryImportStore:
         terminal_status = values.get("importStatus")
         if terminal_status == "COMPLETED":
             values["importStatus"] = "PARSING"
-        result = self._store.insert_library_volume(columns=values)
-        self._transactions.note_write()
+        volume_id = str(values["id"])
+        self._transactions.prepare_for_dependency_read()
+        try:
+            existing_status = (
+                self._projection_reader.get_library_volume_import_status(volume_id)
+            )
+        finally:
+            self._transactions.finish_dependency_read()
+        if existing_status is not None and existing_status not in {
+            "COMPLETED",
+            "IMPORTED",
+            "READY",
+        }:
+            self._writes.reset_metadata_for_volume(volume_id)
+        result = self._insert(ImportWriteTarget.LIBRARY_VOLUME, values)
         if terminal_status == "COMPLETED":
             self._completion.defer_volume(
                 str(result["id"]), {"importStatus": "COMPLETED"}
@@ -260,19 +575,49 @@ class BoundedLibraryImportStore:
         ):
             self._completion.defer_volume(volume_id, columns)
             return
-        self._store.update_library_volume(volume_id, columns=columns)
-        self._transactions.note_write()
+        self._update(ImportWriteTarget.LIBRARY_VOLUME, volume_id, columns)
 
     def insert_library_file(self, *, columns: dict[str, object]) -> dict[str, object]:
         values = self._scoped_columns("file", columns.get("path"), columns)
-        return self._written(self._store.insert_library_file(columns=values))
+        path = values.get("path")
+        if isinstance(path, str):
+            self._transactions.prepare_for_dependency_read()
+            try:
+                existing = self._projection_reader.find_library_file_import_target(
+                    path
+                )
+            finally:
+                self._transactions.finish_dependency_read()
+            if existing is not None and str(existing["importStatus"]) not in {
+                "COMPLETED",
+                "IMPORTED",
+                "READY",
+            }:
+                existing_id = str(existing["id"])
+                replacement = {
+                    key: value
+                    for key, value in values.items()
+                    if key not in {"id", "createdAt"}
+                }
+                self._writes.reset_reading_units_for_file(existing_id)
+                self._update(
+                    ImportWriteTarget.LIBRARY_FILE, existing_id, replacement
+                )
+                return {**values, "id": existing_id}
+        return self._insert(ImportWriteTarget.LIBRARY_FILE, values)
 
     def update_library_file(self, file_id: str, *, columns: dict[str, object]) -> None:
-        self._store.update_library_file(file_id, columns=columns)
-        self._transactions.note_write()
+        self._update(ImportWriteTarget.LIBRARY_FILE, file_id, columns)
 
     def get_library_file(self, file_id: str) -> dict[str, object] | None:
-        return self._store.get_library_file(file_id)
+        buffered = self._writes.inserted(ImportWriteTarget.LIBRARY_FILE, file_id)
+        if buffered is not None:
+            return buffered
+        self._transactions.prepare_for_dependency_read()
+        try:
+            return self._projection_reader.get_library_file(file_id)
+        finally:
+            self._transactions.finish_dependency_read()
 
     def insert_library_reading_unit(
         self, *, columns: dict[str, object]
@@ -282,19 +627,27 @@ class BoundedLibraryImportStore:
             for name in ("volumeId", "fileId", "unitType", "sortOrder")
         )
         values = self._scoped_columns("reading-unit", resource_key, columns)
-        return self._written(self._store.insert_library_reading_unit(columns=values))
+        return self._insert(ImportWriteTarget.LIBRARY_READING_UNIT, values)
 
     def update_library_reading_unit(
         self, unit_id: str, *, columns: dict[str, object]
     ) -> None:
-        self._store.update_library_reading_unit(unit_id, columns=columns)
-        self._transactions.note_write()
+        self._update(ImportWriteTarget.LIBRARY_READING_UNIT, unit_id, columns)
 
     def get_library_reading_unit(self, unit_id: str) -> dict[str, object] | None:
-        return self._store.get_library_reading_unit(unit_id)
+        buffered = self._writes.inserted(
+            ImportWriteTarget.LIBRARY_READING_UNIT, unit_id
+        )
+        if buffered is not None:
+            return buffered
+        self._transactions.prepare_for_dependency_read()
+        try:
+            return self._projection_reader.get_library_reading_unit(unit_id)
+        finally:
+            self._transactions.finish_dependency_read()
 
     def delete_library_reading_unit(self, unit_id: str) -> None:
-        self._store.delete_library_reading_unit(unit_id)
+        self._writes.delete_reading_unit(unit_id)
         self._transactions.note_write()
 
     def insert_library_metadata(
@@ -302,7 +655,7 @@ class BoundedLibraryImportStore:
     ) -> dict[str, object]:
         resource_key = f"{columns.get('volumeId')}|{columns.get('source')}"
         values = self._scoped_columns("metadata", resource_key, columns)
-        return self._written(self._store.insert_library_metadata(columns=values))
+        return self._insert(ImportWriteTarget.LIBRARY_METADATA, values)
 
     def update_library_reading_progress(
         self,
@@ -310,8 +663,9 @@ class BoundedLibraryImportStore:
         *,
         columns: dict[str, object],
     ) -> None:
-        self._store.update_library_reading_progress(progress_id, columns=columns)
-        self._transactions.note_write()
+        self._update(
+            ImportWriteTarget.LIBRARY_READING_PROGRESS, progress_id, columns
+        )
 
     def update_user_media_history(
         self,
@@ -319,23 +673,20 @@ class BoundedLibraryImportStore:
         *,
         columns: dict[str, object],
     ) -> None:
-        self._store.update_user_media_history(history_id, columns=columns)
-        self._transactions.note_write()
+        self._update(ImportWriteTarget.USER_MEDIA_HISTORY, history_id, columns)
 
     def insert_organize_job(self, *, columns: dict[str, object]) -> dict[str, object]:
-        return self._written(self._store.insert_organize_job(columns=columns))
+        return self._insert(ImportWriteTarget.ORGANIZE_JOB, columns)
 
     def update_organize_job(self, job_id: str, *, columns: dict[str, object]) -> None:
-        self._store.update_organize_job(job_id, columns=columns)
-        self._transactions.note_write()
+        self._update(ImportWriteTarget.ORGANIZE_JOB, job_id, columns)
 
     def insert_metadata_lookup_task(
         self, *, columns: dict[str, object]
     ) -> dict[str, object]:
-        return self._written(self._store.insert_metadata_lookup_task(columns=columns))
+        return self._insert(ImportWriteTarget.METADATA_LOOKUP_TASK, columns)
 
     def update_metadata_lookup_task(
         self, task_id: str, *, columns: dict[str, object]
     ) -> None:
-        self._store.update_metadata_lookup_task(task_id, columns=columns)
-        self._transactions.note_write()
+        self._update(ImportWriteTarget.METADATA_LOOKUP_TASK, task_id, columns)

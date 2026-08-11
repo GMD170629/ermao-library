@@ -1,6 +1,6 @@
 """Public application contracts for the download capability."""
 
-from app.modules.download.application.commands import execute_download_write
+from app.modules.download.application.commands import DownloadWriteTransaction
 from app.modules.download.application.dto import (
     CreateDownloadTask,
     DownloadTaskDTO,
@@ -17,5 +17,5 @@ __all__ = [
     "DownloadTaskRepository",
     "DownloadUnitOfWork",
     "UpdateDownloadTask",
-    "execute_download_write",
+    "DownloadWriteTransaction",
 ]

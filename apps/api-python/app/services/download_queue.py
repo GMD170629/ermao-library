@@ -1,23 +1,23 @@
 from __future__ import annotations
 
 import threading
-from uuid import uuid4
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.bootstrap.download import enqueue_download_import_command
 from app.core.config import Settings
 from app.modules.download.infrastructure.tasks import (
+    has_table,
     list_enabled_monitor_folders,
-    mark_download_task_importing,
     next_queued_download_task,
 )
-from app.services.download_executor import execute_download_task, has_table
-from app.bootstrap.imports import enqueue_import_task
 from app.modules.imports.public import is_supported_import_filename
+from app.services.download_executor import execute_download_task
 from app.services.queue_runtime import QueueHeartbeatPump
 
 
@@ -32,7 +32,9 @@ class DownloadQueueWorker:
         self.settings = settings
         self._stop_event = threading.Event()
         self._process_lock = threading.Lock()
-        self._thread = threading.Thread(target=self._run, name="shuku-download-queue", daemon=True)
+        self._thread = threading.Thread(
+            target=self._run, name="shuku-download-queue", daemon=True
+        )
         self._instance_id = f"download-{uuid4().hex}"
         self._heartbeat = QueueHeartbeatPump(
             heartbeat_db_factory or db_factory,
@@ -54,7 +56,7 @@ class DownloadQueueWorker:
         try:
             with self.db_factory() as db:
                 return process_next_download_task(db, self.settings)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - worker iteration containment.
             print(f"[download-queue] task processing failed: {exc}", flush=True)
             return False
         finally:
@@ -64,13 +66,8 @@ class DownloadQueueWorker:
         self._heartbeat.start()
         try:
             while not self._stop_event.is_set():
-                error = None
-                try:
-                    processed = self.process_once()
-                except Exception as exc:
-                    processed = False
-                    error = exc
-                self._heartbeat.pulse(processed=processed, error=error)
+                processed = self.process_once()
+                self._heartbeat.pulse(processed=processed, error=None)
                 if processed:
                     continue
                 self._stop_event.wait(self.settings.download_queue_interval_seconds)
@@ -82,12 +79,16 @@ def next_queued_task(db: Session) -> dict[str, Any] | None:
     try:
         return next_queued_download_task(db)
     except SQLAlchemyError as exc:
-        print(f"[download-queue] download task table unavailable, retrying later: {exc}", flush=True)
+        print(
+            f"[download-queue] download task table unavailable, retrying later: {exc}",
+            flush=True,
+        )
         return None
 
 
 def process_next_download_task(db: Session, settings: Settings) -> bool:
     task = next_queued_task(db)
+    db.close()
     if not task:
         return False
     result = execute_download_task(db, settings, str(task["id"]))
@@ -95,29 +96,36 @@ def process_next_download_task(db: Session, settings: Settings) -> bool:
         downloaded_path = Path(str(result.task.get("filePath") or "")).expanduser()
         if downloaded_path.is_file() and is_supported_import_filename(downloaded_path):
             try:
-                import_task, _created = enqueue_import_task(
+                monitor_folder_id = _monitor_folder_id(db, downloaded_path)
+                db.close()
+                import_task = enqueue_download_import_command(
                     db,
-                    downloaded_path,
-                    origin="DOWNLOAD",
+                    task_id=str(task["id"]),
+                    source_path=str(downloaded_path),
                     original_name=downloaded_path.name,
-                    monitor_folder_id=_monitor_folder_id(db, downloaded_path),
-                    message="下载完成，等待后台导入",
+                    monitor_folder_id=monitor_folder_id,
                 )
-                mark_download_task_importing(db, str(task["id"]))
-                db.commit()
-                print(f"[download-queue] downloaded {task['id']} and queued import {import_task.id}", flush=True)
-            except Exception as exc:
-                db.rollback()
-                print(f"[download-queue] downloaded {task['id']} but import enqueue failed: {exc}", flush=True)
+                print(
+                    f"[download-queue] downloaded {task['id']} and queued import {import_task.id}",
+                    flush=True,
+                )
+            except Exception as exc:  # noqa: BLE001 - import handoff containment.
+                print(
+                    f"[download-queue] downloaded {task['id']} but import enqueue failed: {exc}",
+                    flush=True,
+                )
     return True
 
 
 def _monitor_folder_id(db: Session, path: Path) -> str | None:
     if not has_table(db, "MonitorFolder"):
+        db.close()
         return None
+    folders = list_enabled_monitor_folders(db)
+    db.close()
     resolved = path.resolve()
     matches: list[tuple[int, str]] = []
-    for folder in list_enabled_monitor_folders(db):
+    for folder in folders:
         try:
             root = Path(str(folder["rootPath"])).expanduser().resolve()
         except OSError:

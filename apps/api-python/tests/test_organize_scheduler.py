@@ -1,8 +1,5 @@
 import json
 
-from sqlalchemy import select, text
-from sqlalchemy.orm import Session
-
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
@@ -27,6 +24,8 @@ from app.services.organize_scheduler import (
     update_organize_policy,
 )
 from app.services.organize_service import merge_works
+from sqlalchemy import event, select, text
+from sqlalchemy.orm import Session
 
 
 def _insert_work(
@@ -90,6 +89,42 @@ def _insert_volume(
         )
     )
     db.commit()
+
+
+def test_organize_run_enqueue_uses_bounded_set_based_dml(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    bootstrap_database(engine, settings)
+    statements: list[str] = []
+
+    def capture_statement(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: object,
+    ) -> None:
+        normalized = statement.lstrip().upper()
+        if normalized.startswith(("INSERT", "UPDATE", "DELETE")):
+            statements.append(normalized)
+
+    try:
+        with Session(engine) as db:
+            work_ids = [f"batch-work-{index}" for index in range(25)]
+            for work_id in work_ids:
+                _insert_work(db, work_id)
+            event.listen(engine, "before_cursor_execute", capture_statement)
+
+            run = create_organize_run(db, work_ids=work_ids)
+
+            assert run["queuedCount"] == 25
+            assert len(db.scalars(select(OrganizeJob)).all()) == 25
+            assert len(db.scalars(select(MetadataLookupTask)).all()) == 25
+            assert len(statements) <= 5
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_statement)
+        engine.dispose()
 
 
 def test_organize_jobs_target_the_first_stably_ordered_volume(tmp_path) -> None:

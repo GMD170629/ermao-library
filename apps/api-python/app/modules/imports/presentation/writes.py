@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Never
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Body, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
-from starlette.datastructures import UploadFile
 
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
@@ -19,11 +20,14 @@ from app.bootstrap.imports import (
     cancel_import_scan_job as cancel_import_scan_job_command,
 )
 from app.bootstrap.imports import (
-    enqueue_import_task,
     execute_recoverable_import_deletion,
     import_http_store,
+    load_import_volume_deletion,
+    load_persisted_scan_requests,
+    persist_import_scan_requests,
+    persist_import_task_retry,
+    persist_terminal_import_tasks_clear,
     save_uploaded_files,
-    schedule_import_scan_job,
 )
 from app.bootstrap.imports import (
     get_import_scan_job as get_import_scan_job_query,
@@ -34,16 +38,23 @@ from app.bootstrap.imports import (
 from app.bootstrap.system import (
     active_health_run_id,
     create_queue_operation,
+    persist_system_setting_values,
+    prepare_system_setting_values,
     queue_runtime_view,
-    record_system_event,
-    upsert_setting,
 )
 from app.contracts.http_errors import ErrorResponses
+from app.contracts.import_deletion import PreparedLibraryVolumeDeletion
 from app.core.authorization import authorization_context, can_access_monitor_folder
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
+from app.modules.imports.application.deletion import PreparedImportDeletion
 from app.modules.imports.application.errors import AudioTrackLimitExceededError
+from app.modules.imports.application.maintenance_commands import (
+    PreparedTerminalImportClear,
+    prepare_import_retry,
+)
+from app.modules.imports.application.scan_jobs import prepare_import_scan_job
 from app.modules.imports.application.work_queue_dto import ImportScanJobDTO
 from app.modules.imports.presentation.mappers import (
     import_task_view as _import_task_view,
@@ -59,6 +70,7 @@ from app.modules.imports.presentation.path_helpers import (
 )
 from app.modules.imports.presentation.schemas import (
     DeletedImportTasksResponse,
+    DeleteImportTaskRequest,
     ImportBadRequestError,
     ImportConflictError,
     ImportDeletionFailureDetails,
@@ -76,6 +88,7 @@ from app.modules.imports.presentation.schemas import (
     ImportTaskResponse,
     ImportUploadResponse,
     RescanImportTasksResponse,
+    ScanImportDirectoryRequest,
 )
 from app.modules.imports.presentation.schemas import (
     ImportScanJob as ImportScanJobContract,
@@ -86,24 +99,11 @@ from app.modules.imports.public import (
     UploadFileTooLargeError,
     UploadPublicationError,
     UploadSource,
-    execute_import_checkpoint,
     is_supported_import_filename,
     safe_upload_filename,
 )
 from app.modules.imports.public import (
     target_directory_from_path as _target_directory_from_path,
-)
-from app.modules.library.public import (
-    collect_import_linked_library_scope_paths as _collect_import_linked_library_scope_paths,
-)
-from app.modules.library.public import (
-    conversion_output_paths as _conversion_output_paths,
-)
-from app.modules.library.public import (
-    delete_import_linked_library_scope as _delete_import_linked_library_scope,
-)
-from app.modules.library.public import (
-    source_delete_path as _source_delete_path,
 )
 from app.schemas.responses import ok
 from app.services.audio_metadata import (
@@ -112,8 +112,12 @@ from app.services.audio_metadata import (
 )
 from app.services.import_preferences import (
     extension_is_allowed,
-    load_import_preferences,
+    load_raw_import_preferences_projection,
     matches_ignore_patterns,
+    prepare_import_preferences,
+)
+from app.services.system_events import (
+    prepare_system_event,
 )
 
 router = APIRouter(tags=["imports-write"], route_class=TypedContractRoute)
@@ -137,62 +141,6 @@ def _raise_import_error(
     if status_code == 500:
         raise ImportInternalError(body)
     raise ImportBadRequestError(body)
-
-
-def _record_system_event(
-    db: Session,
-    *,
-    level: str = "info",
-    source: str,
-    action: str,
-    message: str,
-    actor_type: str = "system",
-    actor_id: str | None = None,
-    target_type: str | None = None,
-    target_id: str | None = None,
-    metadata: dict[str, Any] | None = None,
-) -> None:
-    record_system_event(
-        db,
-        level=level,
-        source=source,
-        actor_type=actor_type,
-        actor_id=actor_id,
-        action=action,
-        target_type=target_type,
-        target_id=target_id,
-        message=message,
-        metadata=metadata,
-        commit=True,
-    )
-
-
-def _stage_system_event(
-    db: Session,
-    *,
-    level: str = "info",
-    source: str,
-    action: str,
-    message: str,
-    actor_type: str = "system",
-    actor_id: str | None = None,
-    target_type: str | None = None,
-    target_id: str | None = None,
-    metadata: dict[str, Any] | None = None,
-) -> None:
-    record_system_event(
-        db,
-        level=level,
-        source=source,
-        actor_type=actor_type,
-        actor_id=actor_id,
-        action=action,
-        target_type=target_type,
-        target_id=target_id,
-        message=message,
-        metadata=metadata,
-        commit=False,
-    )
 
 
 def _visible_import_task_or_none(
@@ -227,22 +175,80 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def _save_system_setting(db: Session, key: str, value: Any) -> None:
-
-    upsert_setting(db, key, value)
-
-
-async def _request_json_or_empty(request: Request) -> dict[str, Any]:
+def _resolved_deletion_path(value: object, root: Path) -> Path | None:
+    if not value:
+        return None
     try:
-        payload = await request.json()
-    except Exception:
-        return {}
-    return payload if isinstance(payload, dict) else {}
+        path = Path(str(value)).expanduser()
+        resolved = (path if path.is_absolute() else root / path).resolve()
+    except (OSError, RuntimeError):
+        return None
+    return resolved
+
+
+def _conversion_deletion_paths(
+    conversion: dict[str, Any] | None,
+    settings: Settings,
+) -> list[Path]:
+    output = _resolved_deletion_path(
+        (conversion or {}).get("outputPath"),
+        settings.conversion_root,
+    )
+    if output is None:
+        return []
+    conversion_root = settings.conversion_root.resolve()
+    if output == conversion_root or conversion_root not in output.parents:
+        return []
+    result = [output]
+    sidecar = output.with_name("normalization.json")
+    if sidecar.exists() or sidecar.is_symlink():
+        result.append(sidecar)
+    return result
+
+
+def _library_deletion_candidate_paths(
+    task: dict[str, Any],
+    conversion: dict[str, Any] | None,
+    settings: Settings,
+) -> tuple[str, ...]:
+    candidates = (
+        _resolved_deletion_path(
+            (conversion or {}).get("outputPath"), settings.resolved_storage_root
+        ),
+        _resolved_deletion_path(task.get("sourcePath"), settings.resolved_storage_root),
+    )
+    return tuple(dict.fromkeys(str(path) for path in candidates if path is not None))
+
+
+def _managed_library_deletion_paths(
+    library_deletion: PreparedLibraryVolumeDeletion | None,
+    settings: Settings,
+) -> list[Path]:
+    if library_deletion is None:
+        return []
+    storage_root = settings.resolved_storage_root.resolve()
+    values = (
+        library_deletion.cover_path,
+        *library_deletion.file_paths,
+    )
+    result: list[Path] = []
+    for value in values:
+        resolved = _resolved_deletion_path(value, storage_root)
+        if (
+            resolved is not None
+            and resolved != storage_root
+            and storage_root in resolved.parents
+        ):
+            result.append(resolved)
+    return list(dict.fromkeys(result))
 
 
 @router.post("/works/import")
-async def import_work(
+def import_work(
     request: Request,
+    file: Annotated[list[UploadFile] | None, File()] = None,
+    files: Annotated[list[UploadFile] | None, File()] = None,
+    target_path: Annotated[str | None, Form(alias="targetPath")] = None,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
@@ -252,14 +258,12 @@ async def import_work(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    form = await request.form()
-    files = [
-        value for _key, value in form.multi_items() if isinstance(value, UploadFile)
-    ]
-    if not files:
+    db.close()
+    uploads = [*(file or []), *(files or [])]
+    if not uploads:
         _raise_import_error("请选择要导入的文件", status_code=400)
     upload_file_names = [
-        safe_upload_filename(upload.filename or "upload") for upload in files
+        safe_upload_filename(upload.filename or "upload") for upload in uploads
     ]
     unsupported = [
         name for name in upload_file_names if not is_supported_import_filename(name)
@@ -270,7 +274,12 @@ async def import_work(
             status_code=400,
             details=ImportFileListDetails(files=unsupported),
         )
-    import_preferences = load_import_preferences(db)
+    preference_projection = load_raw_import_preferences_projection(db)
+    db.close()
+    import_preferences = prepare_import_preferences(
+        preference_projection,
+        legacy_stable_delay_ms=os.environ.get("MONITOR_FILE_STABLE_DELAY_MS"),
+    )
     disabled_extensions = [
         name
         for name in upload_file_names
@@ -283,7 +292,7 @@ async def import_work(
             details=ImportFileListDetails(files=disabled_extensions),
         )
     try:
-        upload_dir = _target_directory_from_path(form.get("targetPath"), "上传")
+        upload_dir = _target_directory_from_path(target_path, "上传")
     except ValueError as exc:
         _raise_import_error(str(exc), status_code=400)
     ignored_files = [
@@ -313,6 +322,7 @@ async def import_work(
             status_code=404,
             code="MONITOR_FOLDER_NOT_FOUND",
         )
+    db.close()
     sources = tuple(
         UploadSource(
             filename=file_name,
@@ -324,14 +334,12 @@ async def import_work(
                 else None
             ),
         )
-        for upload, file_name in zip(files, upload_file_names, strict=True)
+        for upload, file_name in zip(uploads, upload_file_names, strict=True)
     )
-    execute_import_checkpoint(
-        db,
-        lambda: _save_system_setting(
-            db, "library.lastUploadTargetPath", str(upload_dir)
-        ),
+    prepared_upload_target = prepare_system_setting_values(
+        {"library.lastUploadTargetPath": str(upload_dir)}
     )
+    persist_system_setting_values(db, prepared_upload_target)
     try:
         saved_uploads = save_uploaded_files(
             SaveUploadedFilesCommand(
@@ -378,8 +386,9 @@ async def import_work(
 
 
 @router.post("/import-tasks/scan-directory", status_code=202)
-async def scan_import_directory(
+def scan_import_directory(
     request: Request,
+    payload: Annotated[ScanImportDirectoryRequest | None, Body()] = None,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
@@ -389,13 +398,14 @@ async def scan_import_directory(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    payload = await _request_json_or_empty(request)
-    requested_path = str(payload.get("path") or "").strip()
+    db.close()
+    requested_path = str(payload.path if payload is not None else "").strip()
     node, error, status_code = _monitor_directory_tree_node(requested_path)
     if error or not node:
         _raise_import_error(error or "目录不可用", status_code=status_code)
     target_path = Path(str(node["path"])).resolve()
     folder_rows = import_http_store.list_enabled_monitor_folder_rows(db)
+    db.close()
     matching_folders = []
     for folder in folder_rows:
         try:
@@ -414,15 +424,19 @@ async def scan_import_directory(
         _raise_import_error(
             "目录不可用", status_code=404, code="MONITOR_FOLDER_NOT_FOUND"
         )
-    job, created = schedule_import_scan_job(
-        db,
+    db.close()
+    checkpoint_at = _now()
+    prepared_job = prepare_import_scan_job(
+        job_id=f"scan_{uuid4().hex}",
+        work_item_id=f"work_{uuid4().hex}",
         monitor_folder_id=str(folder["id"]),
         actor_user_id=user.id,
-        root_path=target_path,
+        canonical_root_path=str(target_path),
         trigger="MANUAL_DIRECTORY",
+        available_at=None,
+        created_at=checkpoint_at,
     )
-    _record_system_event(
-        db,
+    prepared_event = prepare_system_event(
         level="info",
         source="import",
         actor_type="admin",
@@ -431,8 +445,19 @@ async def scan_import_directory(
         target_type="monitorFolder",
         target_id=str(folder["id"]),
         message=f"从文件管理识别目录：{target_path}",
-        metadata={"scanJobId": job.id, "created": created, "path": str(target_path)},
+        metadata={"scanJobId": prepared_job.job_id, "path": str(target_path)},
     )
+    created_count = persist_import_scan_requests(
+        db,
+        (prepared_job,),
+        (prepared_event,),
+    )
+    jobs = load_persisted_scan_requests(db, (prepared_job,))
+    db.close()
+    if not jobs:
+        raise RuntimeError("persisted scan request could not be resolved")
+    job = jobs[0]
+    created = created_count == 1
     return ImportDirectoryScanResponse(
         data={"job": _scan_job_contract(job), "created": created}
     )
@@ -450,19 +475,23 @@ def clear_import_tasks(
     deleted = 0
     if _has_table(db, "ImportTask"):
         context = authorization_context(db, user)
-        deleted = import_http_store.clear_terminal_import_tasks(db, context)
-    if deleted:
-        _record_system_event(
-            db,
-            level="info",
-            source="import",
-            actor_type="admin",
-            actor_id=user.id,
-            action="tasks.cleared",
-            target_type="importTask",
-            message=f"清空已结束导入记录 {deleted} 条",
-            metadata={"deleted": deleted},
-        )
+        task_ids = import_http_store.list_terminal_import_task_ids(db, context)
+        db.close()
+        if task_ids:
+            prepared_event = prepare_system_event(
+                level="info",
+                source="import",
+                actor_type="admin",
+                actor_id=user.id,
+                action="tasks.cleared",
+                target_type="importTask",
+                message=f"清空已结束导入记录 {len(task_ids)} 条",
+                metadata={"deleted": len(task_ids)},
+            )
+            deleted = persist_terminal_import_tasks_clear(
+                db,
+                PreparedTerminalImportClear(task_ids, (prepared_event,)),
+            )
     return ok({"deleted": deleted})
 
 
@@ -506,9 +535,10 @@ def request_clear_import_queue(
 
 
 @router.delete("/import-tasks/{task_id}")
-async def delete_import_task(
+def delete_import_task(
     task_id: str,
     request: Request,
+    payload: Annotated[DeleteImportTaskRequest | None, Body()] = None,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
@@ -531,37 +561,44 @@ async def delete_import_task(
             "导入任务仍在处理中，完成或失败后才能删除记录", status_code=409
         )
 
-    payload = await _request_json_or_empty(request)
-    delete_mode = str(payload.get("deleteMode") or "record").strip().lower()
-    delete_library_record = payload.get("deleteLibraryRecord") is True
-    if delete_mode not in {"record", "source", "converted"}:
-        _raise_import_error("删除范围无效", status_code=400)
+    db.close()
+    delete_mode = payload.delete_mode if payload is not None else "record"
+    delete_library_record = (
+        payload.delete_library_record if payload is not None else False
+    )
     work_id = str(task.get("workId") or "").strip()
 
     conversion = import_http_store.get_conversion_for_import(db, task_id)
+    monitor_root_values = import_http_store.list_monitor_root_paths(db)
+    db.close()
     selected_paths: list[Path] = []
     if delete_mode == "source":
-        source_path = _source_delete_path(task.get("sourcePath"), db, settings)
+        source_path = _resolved_deletion_path(
+            task.get("sourcePath"), settings.resolved_storage_root
+        )
         if not source_path:
             _raise_import_error(
                 "源文件路径不在允许删除的书库或监控目录中", status_code=400
             )
         selected_paths = [source_path]
     elif delete_mode == "converted":
-        selected_paths = _conversion_output_paths(conversion, settings)
+        selected_paths = _conversion_deletion_paths(conversion, settings)
         if not selected_paths:
             _raise_import_error("该导入记录没有可删除的转换文件", status_code=400)
 
-    library_paths = (
-        _collect_import_linked_library_scope_paths(db, task, settings, conversion)
-        if delete_library_record
-        else []
-    )
+    library_deletion = None
+    if delete_library_record:
+        candidate_paths = _library_deletion_candidate_paths(task, conversion, settings)
+        library_deletion = load_import_volume_deletion(
+            db,
+            candidate_paths,
+            str(task.get("volumeId") or "").strip() or None,
+        )
+        db.close()
+    library_paths = _managed_library_deletion_paths(library_deletion, settings)
     deletion_paths = list(dict.fromkeys([*selected_paths, *library_paths]))
     monitor_roots = [
-        Path(root).expanduser()
-        for root in import_http_store.list_monitor_root_paths(db)
-        if root.strip()
+        Path(root).expanduser() for root in monitor_root_values if root.strip()
     ]
     source_path_value = str(task.get("sourcePath") or "").strip()
     if source_path_value:
@@ -570,59 +607,38 @@ async def delete_import_task(
             monitor_roots.append(source_parent)
         except (OSError, RuntimeError):
             pass
-    def delete_database_records() -> tuple[bool, dict[str, Any]]:
-        library_cleanup = (
-            _delete_import_linked_library_scope(db, task, settings, conversion)
-            if delete_library_record
-            else {
-                "deleted": False,
-                "deletedWorkRecord": False,
-                "deletedDatabaseRecords": 0,
-                "deletedFiles": 0,
-                "failedFileDeletes": [],
-                "workId": None,
-            }
-        )
-        deleted = import_http_store.delete_import_task_row(db, task_id)
-        if deleted:
-            _stage_system_event(
-                db,
-                level="warning"
-                if delete_mode != "record" or delete_library_record
-                else "info",
-                source="import",
-                actor_type="admin",
-                actor_id=user.id,
-                action="task.deleted",
-                target_type="importTask",
-                target_id=task_id,
-                message=f"删除导入记录{'及关联书库图书' if delete_library_record else ''}：{task.get('originalName') or task.get('sourcePath')}",
-                metadata={
-                    "deleteMode": delete_mode,
-                    "deleteLibraryRecord": delete_library_record,
-                    "deletedLibraryRecord": bool(library_cleanup.get("deleted")),
-                    "deletedWorkRecord": bool(library_cleanup.get("deletedWorkRecord")),
-                    "deletedLibraryDatabaseRecords": int(
-                        library_cleanup.get("deletedDatabaseRecords") or 0
-                    ),
-                    "libraryRecordId": library_cleanup.get("workId")
-                    or work_id
-                    or None,
-                    "plannedFileDeletes": len(deletion_paths),
-                },
-            )
-        return deleted, library_cleanup
+    prepared_deletion_event = prepare_system_event(
+        level=(
+            "warning" if delete_mode != "record" or delete_library_record else "info"
+        ),
+        source="import",
+        actor_type="admin",
+        actor_id=user.id,
+        action="task.deleted",
+        target_type="importTask",
+        target_id=task_id,
+        message=f"删除导入记录{'及关联书库图书' if delete_library_record else ''}：{task.get('originalName') or task.get('sourcePath')}",
+        metadata={
+            "deleteMode": delete_mode,
+            "deleteLibraryRecord": delete_library_record,
+            "libraryRecordId": work_id or None,
+            "plannedFileDeletes": len(deletion_paths),
+        },
+    )
+    prepared_deletion = PreparedImportDeletion(
+        task_id=task_id,
+        quarantine_paths=tuple(str(path) for path in deletion_paths),
+        library_deletion=library_deletion,
+        events=(prepared_deletion_event,),
+    )
 
     try:
-        deletion_result, file_cleanup = execute_recoverable_import_deletion(
+        database_result, file_cleanup = execute_recoverable_import_deletion(
             db,
             settings,
-            owner_id=task_id,
-            paths=[str(path) for path in deletion_paths],
+            prepared=prepared_deletion,
             monitor_roots=monitor_roots,
-            database_operation=delete_database_records,
         )
-        deleted, library_cleanup = deletion_result
     except ImportFileQuarantineError as exc:
         _raise_import_error(
             "文件删除失败，导入记录已保留，请检查文件权限后重试",
@@ -639,16 +655,16 @@ async def delete_import_task(
     ]
     return ImportDeletionResponse(
         data={
-            "deleted": deleted,
+            "deleted": database_result.deleted,
             "id": task_id,
             "deleteMode": delete_mode,
             "deleteLibraryRecord": delete_library_record,
-            "deletedLibraryRecord": bool(library_cleanup.get("deleted")),
-            "deletedWorkRecord": bool(library_cleanup.get("deletedWorkRecord")),
-            "deletedLibraryDatabaseRecords": int(
-                library_cleanup.get("deletedDatabaseRecords") or 0
+            "deletedLibraryRecord": database_result.deleted_library_record,
+            "deletedWorkRecord": database_result.deleted_work_record,
+            "deletedLibraryDatabaseRecords": (
+                database_result.deleted_library_database_records
             ),
-            "libraryRecordId": library_cleanup.get("workId") or work_id or None,
+            "libraryRecordId": database_result.library_work_id or work_id or None,
             "deletedFiles": file_cleanup.deleted_files,
             "missingFiles": list(file_cleanup.missing_paths),
             "failedFileDeletes": failed_file_deletes,
@@ -665,33 +681,38 @@ def rescan_import_tasks(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    requested_at = _now()
     context = authorization_context(db, user)
     if not context.is_admin and not context.monitor_folder_ids:
         _raise_import_error(
             "没有可重新识别的授权文件夹", status_code=403, code="NO_IMPORT_SCOPE"
         )
     allowed_ids = None if context.is_admin else set(context.monitor_folder_ids)
-    jobs: list[ImportScanJobDTO] = []
-    created_count = 0
-    for folder in import_http_store.list_enabled_monitor_folder_rows(db):
+    folder_rows = tuple(import_http_store.list_enabled_monitor_folder_rows(db))
+    db.close()
+    requested_at = _now()
+    prepared_jobs = []
+    for folder in folder_rows:
         folder_id = str(folder.get("id") or "")
         if not folder_id or (allowed_ids is not None and folder_id not in allowed_ids):
             continue
         root_path = str(folder.get("rootPath") or "").strip()
         if not root_path:
             continue
-        job, created = schedule_import_scan_job(
-            db,
-            monitor_folder_id=folder_id,
-            actor_user_id=user.id,
-            root_path=Path(root_path),
-            trigger="RESCAN",
+        canonical_root = Path(root_path).expanduser().resolve()
+        prepared_jobs.append(
+            prepare_import_scan_job(
+                job_id=f"scan_{uuid4().hex}",
+                work_item_id=f"work_{uuid4().hex}",
+                monitor_folder_id=folder_id,
+                actor_user_id=user.id,
+                canonical_root_path=str(canonical_root),
+                trigger="RESCAN",
+                available_at=None,
+                created_at=requested_at,
+            )
         )
-        jobs.append(job)
-        created_count += int(created)
-    _record_system_event(
-        db,
+    prepared_jobs_tuple = tuple(prepared_jobs)
+    prepared_event = prepare_system_event(
         level="info",
         source="import",
         actor_type="admin",
@@ -701,10 +722,12 @@ def rescan_import_tasks(
         message="请求重新识别监控文件夹",
         metadata={
             "requestedAt": requested_at.isoformat(),
-            "scanJobIds": [job.id for job in jobs],
-            "createdCount": created_count,
+            "scanJobIds": [job.job_id for job in prepared_jobs_tuple],
         },
     )
+    persist_import_scan_requests(db, prepared_jobs_tuple, (prepared_event,))
+    jobs = load_persisted_scan_requests(db, prepared_jobs_tuple)
+    db.close()
     return RescanImportTasksResponse(
         data={
             "requestedAt": requested_at,
@@ -819,6 +842,8 @@ def retry_import_task(
         _raise_import_error("只有失败的任务可以重试", status_code=400)
     if not bool(task.get("retryable")):
         _raise_import_error("该错误无法通过自动重试解决，原文件已保留", status_code=400)
+    conversion = import_http_store.get_conversion_for_import(db, task_id)
+    db.close()
     source_path = Path(str(task.get("sourcePath") or ""))
     try:
         source_available = source_path.is_file() or (
@@ -829,31 +854,7 @@ def retry_import_task(
     if not source_available:
         _raise_import_error("原文件不存在，无法重试", status_code=400)
     updated_at = _now()
-    task = import_http_store.reset_import_task_for_retry(
-        db,
-        task_id,
-        updated_at=updated_at,
-    )
-    if _has_table(db, "ImportAsset"):
-        import_http_store.reset_import_assets_for_retry(db, task_id, updated_at=_now())
-    conversion = import_http_store.reset_conversion_for_retry(
-        db,
-        task_id,
-        updated_at=updated_at,
-    )
-    if task is not None:
-        enqueue_import_task(
-            db,
-            source_path,
-            origin=str(task.get("origin") or "MANUAL"),
-            original_name=str(task.get("originalName") or source_path.name),
-            requested_title=task.get("requestedTitle"),
-            requested_author=task.get("requestedAuthor"),
-            monitor_folder_id=task.get("monitorFolderId"),
-            message="等待后台重试",
-        )
-    _record_system_event(
-        db,
+    prepared_event = prepare_system_event(
         level="info",
         source="import",
         actor_type="admin",
@@ -864,4 +865,18 @@ def retry_import_task(
         message=f"重新排队导入任务：{task.get('originalName') or task.get('sourcePath')}",
         metadata={"errorCode": conversion.get("errorCode") if conversion else None},
     )
-    return ok({"task": _import_task_view(db, task or {}, log_limit=100)})
+    prepared_retry = prepare_import_retry(
+        task_id=task_id,
+        source_path=source_path.expanduser().resolve(),
+        updated_at=updated_at,
+        event=prepared_event,
+    )
+    persist_import_task_retry(db, prepared_retry)
+    refreshed_task = import_http_store.get_import_task(db, task_id)
+    hydrated_task = import_http_store.hydrate_import_task_page(
+        db,
+        [refreshed_task or {}],
+        log_limit=100,
+    )[0]
+    db.close()
+    return ok({"task": _import_task_view(db, hydrated_task, log_limit=100)})

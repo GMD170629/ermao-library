@@ -8,7 +8,8 @@ import pytest
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -19,7 +20,12 @@ from app.db.bootstrap import bootstrap_database
 from app.db.runner import _run_alembic, head_revision
 from app.db.seed import seed_baseline_data
 from app.db.sqlite import create_sqlite_engine
-from app.models.settings import ReaderBookPreference
+from app.models.import_pipeline import ImportTask
+from app.models.settings import ReaderBookPreference, SystemSetting
+from app.modules.backup.application.restore import PreparedRestorePlan
+from app.modules.backup.infrastructure.persistence import (
+    SqlAlchemyBackupRestoreWriter,
+)
 from app.services.backup_service import backup_path, create_backup, restore_backup
 
 EXPECTED_TABLES = {
@@ -50,6 +56,7 @@ EXPECTED_TABLES = {
     "MetadataSuggestion",
     "MetadataLookupTask",
     "MetadataWritebackOperation",
+    "MetadataWritebackPreparation",
     "MetadataWritebackTarget",
     "MetadataOpfQueueState",
     "MetadataProviderExecution",
@@ -176,6 +183,26 @@ def _replace_backup_version(path: Path, version: int) -> None:
             target.writestr(name, content)
 
 
+def _replace_backup_database_export(
+    path: Path, database_export: dict[str, object]
+) -> None:
+    with zipfile.ZipFile(path) as source:
+        entries = {name: source.read(name) for name in source.namelist()}
+    entries["database-export.json"] = json.dumps(
+        database_export, ensure_ascii=False
+    ).encode()
+    temporary = path.with_name(f".{path.name}.test.part")
+    try:
+        with zipfile.ZipFile(
+            temporary, "w", compression=zipfile.ZIP_DEFLATED
+        ) as target:
+            for name, content in entries.items():
+                target.writestr(name, content)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def test_empty_storage_bootstraps_complete_sqlite_database(tmp_path) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
@@ -208,6 +235,12 @@ def test_empty_storage_bootstraps_complete_sqlite_database(tmp_path) -> None:
                 )
             ).all()
             assert sources == [("ai", 0), ("bangumi", 1), ("douban", 1)]
+            assert (
+                connection.execute(
+                    text("SELECT COUNT(*) FROM `MetadataProviderPipeline`")
+                ).scalar_one()
+                == 7
+            )
             assert (
                 connection.exec_driver_sql("PRAGMA foreign_key_check").first() is None
             )
@@ -278,9 +311,7 @@ def test_management_query_indexes_upgrade_and_downgrade(tmp_path) -> None:
     settings.database_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_sqlite_engine(settings.database_path)
     index_names = {
-        "LibraryWork": {
-            "LibraryWork_hidden_normalizedTitle_normalizedAuthor_id_idx"
-        },
+        "LibraryWork": {"LibraryWork_hidden_normalizedTitle_normalizedAuthor_id_idx"},
         "ImportTask": {
             "ImportTask_monitorFolderId_createdAt_id_idx",
             "ImportTask_monitorFolderId_status_createdAt_id_idx",
@@ -491,7 +522,7 @@ def test_bootstrap_runs_normalization_after_stamping_v14_boundary(tmp_path) -> N
         bootstrap_database(engine, settings)
 
         with engine.connect() as connection:
-            assert _alembic_version(connection) == "0018_library_facet_index_version"
+            assert _alembic_version(connection) == "0020_comic_page_index"
             inspector = inspect(connection)
             assert "LibraryWork_hidden_createdAt_id_idx" in {
                 index["name"] for index in inspector.get_indexes("LibraryWork")
@@ -506,13 +537,9 @@ def test_bootstrap_runs_normalization_after_stamping_v14_boundary(tmp_path) -> N
             assert "UserMediaHistory_userId_updatedAt_mediaVersionId_idx" in {
                 index["name"] for index in inspector.get_indexes("UserMediaHistory")
             }
-            assert (
-                "LibraryWork_hidden_normalizedTitle_normalizedAuthor_id_idx"
-                in {
-                    index["name"]
-                    for index in inspector.get_indexes("LibraryWork")
-                }
-            )
+            assert "LibraryWork_hidden_normalizedTitle_normalizedAuthor_id_idx" in {
+                index["name"] for index in inspector.get_indexes("LibraryWork")
+            }
             assert "ImportTask_monitorFolderId_createdAt_id_idx" in {
                 index["name"] for index in inspector.get_indexes("ImportTask")
             }
@@ -629,6 +656,45 @@ def test_backup_includes_current_database_revision_and_restores_matching_backup(
         engine.dispose()
 
 
+def test_backup_restore_preserves_import_task_json_metadata(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage-json-metadata"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            original_metadata = {
+                "title": "恢复前标题",
+                "subjects": ["数据库", "备份"],
+                "source": "PATH",
+            }
+            db.add(
+                ImportTask(
+                    id="backup-json-import-task",
+                    origin="BACKUP_TEST",
+                    status="COMPLETED",
+                    source_path="/library/backup-test.epub",
+                    source_key="backup-json-source-key",
+                    recognized_metadata=original_metadata,
+                )
+            )
+            db.commit()
+            backup = create_backup(db, settings)
+
+            task = db.get(ImportTask, "backup-json-import-task")
+            assert task is not None
+            task.recognized_metadata = {"title": "恢复后临时值"}
+            db.commit()
+
+            restored = restore_backup(db, settings, backup.id)
+
+            assert restored["restored"] is True
+            restored_task = db.get(ImportTask, "backup-json-import-task")
+            assert restored_task is not None
+            assert restored_task.recognized_metadata == original_metadata
+    finally:
+        engine.dispose()
+
+
 @pytest.mark.parametrize("revision", [None, "different-revision"])
 def test_restore_rejects_unsupported_revision_before_clearing_tables(
     tmp_path, revision
@@ -696,6 +762,152 @@ def test_restore_rejects_v2_backup_before_clearing_tables(tmp_path) -> None:
                         "WHERE `key` = 'restore.v2.guard'"
                     )
                 ).scalar_one()
+                == "must-survive"
+            )
+    finally:
+        engine.dispose()
+
+
+def test_restore_validation_failure_does_not_touch_live_database(tmp_path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage-invalid-restore"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            db.add(SystemSetting(key="restore.guard", value="must-survive"))
+            db.commit()
+            backup = create_backup(db, settings)
+            _replace_backup_database_export(
+                backup_path(settings, backup.id),
+                {
+                    "works": [],
+                    "mediaVersions": [
+                        {
+                            "id": "dangling-media",
+                            "workId": "missing-work",
+                            "mediaKind": "EBOOK",
+                        }
+                    ],
+                },
+            )
+
+            with pytest.raises(ValueError, match="BACKUP_FOREIGN_KEY_INVALID"):
+                restore_backup(db, settings, backup.id)
+
+            assert (
+                db.scalar(
+                    select(SystemSetting.value).where(
+                        SystemSetting.key == "restore.guard"
+                    )
+                )
+                == "must-survive"
+            )
+    finally:
+        engine.dispose()
+
+
+def test_live_restore_failure_rolls_back_and_clears_maintenance_state(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage-rollback-restore"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            db.add(SystemSetting(key="restore.guard", value="archived"))
+            db.commit()
+            backup = create_backup(db, settings)
+            db.execute(
+                update(SystemSetting)
+                .where(SystemSetting.key == "restore.guard")
+                .values(value="must-survive")
+            )
+            db.commit()
+
+            original_apply = SqlAlchemyBackupRestoreWriter.apply
+            restore_plan_calls = 0
+
+            def fail_during_live_restore(
+                writer: SqlAlchemyBackupRestoreWriter,
+                plan: PreparedRestorePlan,
+            ) -> None:
+                nonlocal restore_plan_calls
+                if plan.restored_counts:
+                    restore_plan_calls += 1
+                    if restore_plan_calls == 2:
+                        original_apply(
+                            writer,
+                            PreparedRestorePlan((plan.statements[0],), {}),
+                        )
+                        raise RuntimeError("simulated live restore failure")
+                original_apply(writer, plan)
+
+            monkeypatch.setattr(
+                SqlAlchemyBackupRestoreWriter,
+                "apply",
+                fail_during_live_restore,
+            )
+
+            with pytest.raises(RuntimeError, match="simulated live restore failure"):
+                restore_backup(db, settings, backup.id)
+
+            assert (
+                db.scalar(
+                    select(SystemSetting.value).where(
+                        SystemSetting.key == "restore.guard"
+                    )
+                )
+                == "must-survive"
+            )
+            assert db.get(SystemSetting, "databaseMaintenanceMode") is None
+    finally:
+        engine.dispose()
+
+
+def test_temporary_restore_execution_failure_does_not_touch_live_database(
+    tmp_path,
+) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage-temp-restore-failure"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            db.add(SystemSetting(key="restore.guard", value="must-survive"))
+            db.commit()
+            backup = create_backup(db, settings)
+            _replace_backup_database_export(
+                backup_path(settings, backup.id),
+                {
+                    "users": [
+                        {
+                            "id": "duplicate-email-a",
+                            "email": "same@example.com",
+                            "name": "First",
+                            "passwordHash": "hash-a",
+                            "role": "user",
+                            "status": "active",
+                        },
+                        {
+                            "id": "duplicate-email-b",
+                            "email": "same@example.com",
+                            "name": "Second",
+                            "passwordHash": "hash-b",
+                            "role": "user",
+                            "status": "active",
+                        },
+                    ]
+                },
+            )
+
+            with pytest.raises(IntegrityError):
+                restore_backup(db, settings, backup.id)
+
+            assert (
+                db.scalar(
+                    select(SystemSetting.value).where(
+                        SystemSetting.key == "restore.guard"
+                    )
+                )
                 == "must-survive"
             )
     finally:

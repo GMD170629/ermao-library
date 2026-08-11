@@ -32,13 +32,3 @@ test('an expired session cookie is verified and redirected without showing API e
   await expect(page.getByRole('button', { name: '登录' })).toBeVisible();
   await expect(page.getByText('UNAUTHORIZED')).toHaveCount(0);
 });
-
-test('the retired mobile URL enters the responsive web shell and keeps session validation', async ({ context, page }) => {
-  await context.addCookies([{ name: 'shuku_session', value: 'expired-session', domain: '127.0.0.1', path: '/' }]);
-  await mockExpiredSession(page);
-
-  await page.goto('/mobile');
-
-  await expect(page).toHaveURL(/\/login\?next=%2Fmobile$/);
-  await expect(page.getByRole('button', { name: '登录' })).toBeVisible();
-});

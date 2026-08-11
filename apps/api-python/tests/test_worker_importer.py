@@ -7,8 +7,6 @@ from pathlib import Path
 from threading import Thread
 
 import pytest
-from sqlalchemy import func, select, text
-
 from app import models as _models  # noqa: F401
 from app.bootstrap.imports import (
     fail_claimed_import_task,
@@ -50,7 +48,8 @@ from app.modules.imports.infrastructure.task_mapper import import_task_dto_from_
 from app.services.default_cover import DEFAULT_COVER_ASSET_PATH
 from app.services.import_preferences import (
     SUPPORTED_IMPORT_EXTENSIONS,
-    load_import_preferences,
+    load_raw_import_preferences_projection,
+    prepare_import_preferences,
 )
 from app.worker.path_security import (
     PathSecurityError,
@@ -65,6 +64,7 @@ from app.worker.watcher import (
     scan_directory_with_logging,
     should_ignore_file,
 )
+from sqlalchemy import func, select, text
 
 
 def create_worker_tables(db):
@@ -2589,7 +2589,7 @@ def test_import_epub_resolves_cover_path_case_and_url_encoding(
     assert Path(edition["coverPath"]).read_bytes() == b"optional-cover"
 
 
-def test_import_comic_defers_page_units_and_detects_duplicate(
+def test_import_comic_persists_page_units_and_detects_duplicate(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
@@ -2619,7 +2619,16 @@ def test_import_comic_defers_page_units_and_detects_duplicate(
     assert second.duplicate is True
     assert _count(db_session, "LibraryWork") == 1
     assert _count(db_session, "LibraryVolume") == 1
-    assert _count(db_session, "LibraryReadingUnit") == 0
+    assert _count(db_session, "LibraryReadingUnit") == 2
+    page_rows = db_session.execute(
+        text(
+            "SELECT href, sortOrder, metadataJson FROM LibraryReadingUnit ORDER BY sortOrder"
+        )
+    ).mappings()
+    pages = list(page_rows)
+    assert [page["href"] for page in pages] == ["001.jpg", "002.jpg"]
+    assert [page["sortOrder"] for page in pages] == [1, 2]
+    assert json.loads(pages[0]["metadataJson"])["zipEntryName"] == "001.jpg"
     assert (
         db_session.execute(
             text("SELECT contentHash FROM ImportTask WHERE duplicate = 0")
@@ -2627,12 +2636,17 @@ def test_import_comic_defers_page_units_and_detects_duplicate(
         is None
     )
     file_row = (
-        db_session.execute(text("SELECT fullHash, hashStatus FROM LibraryFile"))
+        db_session.execute(
+            text(
+                "SELECT fullHash, hashStatus, pageIndexVersion FROM LibraryFile"
+            )
+        )
         .mappings()
         .first()
     )
     assert file_row["fullHash"] is None
     assert file_row["hashStatus"] == "PARTIAL_PENDING"
+    assert file_row["pageIndexVersion"] == 1
     work = (
         db_session.execute(
             text("SELECT title, author, description, tags FROM LibraryWork")
@@ -2945,7 +2959,11 @@ def test_global_import_preferences_filter_extensions_conversion_and_patterns(
     set_system_setting(db_session, "import.stabilityCheck.seconds", "999")
     set_system_setting(db_session, "import.ignorePatterns", json.dumps("*.tmp\n草稿*"))
 
-    preferences = load_import_preferences(db_session)
+    projection = load_raw_import_preferences_projection(db_session)
+    db_session.close()
+    preferences = prepare_import_preferences(
+        projection, legacy_stable_delay_ms=None
+    )
     assert preferences.allowed_extensions == (".epub", ".txt", ".pdf")
     assert not preferences.auto_convert_to_epub
     assert not preferences.stability_check_enabled
@@ -2966,7 +2984,11 @@ def test_global_import_preferences_filter_extensions_conversion_and_patterns(
 
 
 def test_missing_import_preferences_keep_every_supported_extension_enabled(db_session):
-    preferences = load_import_preferences(db_session)
+    projection = load_raw_import_preferences_projection(db_session)
+    db_session.close()
+    preferences = prepare_import_preferences(
+        projection, legacy_stable_delay_ms=None
+    )
     assert preferences.allowed_extensions == SUPPORTED_IMPORT_EXTENSIONS
     assert ".cbr" in preferences.allowed_extensions
     assert ".rar" in preferences.allowed_extensions

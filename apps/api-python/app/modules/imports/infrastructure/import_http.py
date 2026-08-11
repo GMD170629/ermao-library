@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import case, delete, exists, func, or_, select, update
+from sqlalchemy import case, delete, exists, func, insert, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.core.authorization import (
@@ -88,8 +88,7 @@ def list_import_tasks_page(
     )
     total = (
         int(
-            db.scalar(select(func.count()).select_from(ImportTask).where(*filters))
-            or 0
+            db.scalar(select(func.count()).select_from(ImportTask).where(*filters)) or 0
         )
         if has_filtered_total
         else int(scope_counts.total or 0)
@@ -128,9 +127,7 @@ def hydrate_import_task_page(
         return []
     task_ids = [str(task["id"]) for task in tasks]
     monitor_folder_ids = {
-        str(task["monitorFolderId"])
-        for task in tasks
-        if task.get("monitorFolderId")
+        str(task["monitorFolderId"]) for task in tasks if task.get("monitorFolderId")
     }
     work_ids = {str(task["workId"]) for task in tasks if task.get("workId")}
 
@@ -153,10 +150,14 @@ def hydrate_import_task_page(
         ).all()
     }
 
-    log_rank = func.row_number().over(
-        partition_by=ImportLog.import_task_id,
-        order_by=(ImportLog.created_at.desc(), ImportLog.id.desc()),
-    ).label("page_rank")
+    log_rank = (
+        func.row_number()
+        .over(
+            partition_by=ImportLog.import_task_id,
+            order_by=(ImportLog.created_at.desc(), ImportLog.id.desc()),
+        )
+        .label("page_rank")
+    )
     ranked_logs = (
         select(ImportLog.__table__, log_rank)
         .where(ImportLog.import_task_id.in_(task_ids))
@@ -224,6 +225,22 @@ def clear_terminal_import_tasks(db: Session, context: AuthorizationContext) -> i
         )
     )
     return int(result.rowcount or 0)
+
+
+def list_terminal_import_task_ids(
+    db: Session,
+    context: AuthorizationContext,
+) -> tuple[str, ...]:
+    scope = monitor_folder_visibility_predicate(context, ImportTask.monitor_folder_id)
+    return tuple(
+        str(task_id)
+        for task_id in db.scalars(
+            select(ImportTask.id).where(
+                ImportTask.status.in_(("COMPLETED", "FAILED")),
+                scope,
+            )
+        ).all()
+    )
 
 
 def delete_import_task_row(db: Session, task_id: str) -> bool:
@@ -408,34 +425,38 @@ def get_monitor_folder_by_root_path(
 
 
 def create_monitor_folder(db: Session, values: dict[str, Any]) -> dict[str, Any]:
-    folder = MonitorFolder(
-        id=str(values["id"]),
-        name=str(values["name"]),
-        root_path=str(values["rootPath"]),
-        shelf_id=str(values["shelfId"]) if values.get("shelfId") is not None else None,
-        enabled=bool(values.get("enabled", True)),
-        media_kind_policy=str(values.get("mediaKindPolicy") or "MIXED"),
-        ignore_patterns=str(values["ignorePatterns"])
-        if values.get("ignorePatterns") is not None
-        else None,
-        ignore_hidden=bool(values.get("ignoreHidden", True)),
-        min_file_size_bytes=int(values.get("minFileSizeBytes", 10240)),
-        description=str(values["description"])
-        if values.get("description") is not None
-        else None,
-        created_at=values["createdAt"],
-        updated_at=values["updatedAt"],
-    )
-    db.add(folder)
-    db.flush()
-    return get_monitor_folder(db, folder.id) or dict(values)
+    prepared_values = {
+        "id": str(values["id"]),
+        "name": str(values["name"]),
+        "rootPath": str(values["rootPath"]),
+        "shelfId": (
+            str(values["shelfId"]) if values.get("shelfId") is not None else None
+        ),
+        "enabled": bool(values.get("enabled", True)),
+        "mediaKindPolicy": str(values.get("mediaKindPolicy") or "MIXED"),
+        "ignorePatterns": (
+            str(values["ignorePatterns"])
+            if values.get("ignorePatterns") is not None
+            else None
+        ),
+        "ignoreHidden": bool(values.get("ignoreHidden", True)),
+        "minFileSizeBytes": int(values.get("minFileSizeBytes", 10240)),
+        "description": (
+            str(values["description"])
+            if values.get("description") is not None
+            else None
+        ),
+        "createdAt": values["createdAt"],
+        "updatedAt": values["updatedAt"],
+    }
+    db.execute(insert(MonitorFolder.__table__).values(prepared_values))
+    return get_monitor_folder(db, str(prepared_values["id"])) or prepared_values
 
 
 def update_monitor_folder(
     db: Session, folder_id: str, values: dict[str, Any]
 ) -> dict[str, Any] | None:
-    folder = db.get(MonitorFolder, folder_id)
-    if folder is None:
+    if db.get(MonitorFolder, folder_id) is None:
         return None
     mapping = {
         "name": "name",
@@ -449,12 +470,18 @@ def update_monitor_folder(
         "description": "description",
         "updatedAt": "updated_at",
     }
+    prepared_values: dict[str, object] = {}
     for key, value in values.items():
         attribute = mapping.get(key)
         if attribute is not None:
-            setattr(folder, attribute, value)
-    db.flush()
-    return get_monitor_folder(db, folder.id)
+            prepared_values[attribute] = value
+    if prepared_values:
+        db.execute(
+            update(MonitorFolder)
+            .where(MonitorFolder.id == folder_id)
+            .values(**prepared_values)
+        )
+    return get_monitor_folder(db, folder_id)
 
 
 def reset_import_task_for_retry(
@@ -506,7 +533,6 @@ def reset_conversion_for_retry(
     conversion.started_at = None
     conversion.finished_at = None
     conversion.updated_at = updated_at
-    db.flush()
     return previous
 
 
@@ -533,3 +559,17 @@ def delete_monitor_folder(
             )
         )
     return deleted, affected_user_ids
+
+
+def list_monitor_folder_access_user_ids(
+    db: Session,
+    folder_id: str,
+) -> tuple[str, ...]:
+    return tuple(
+        str(user_id)
+        for user_id in db.scalars(
+            select(UserMonitorFolderAccess.user_id).where(
+                UserMonitorFolderAccess.monitor_folder_id == folder_id
+            )
+        ).all()
+    )

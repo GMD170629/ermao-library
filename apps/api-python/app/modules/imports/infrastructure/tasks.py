@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import Integer, cast, insert, select, update
 from sqlalchemy.orm import Session
 
+from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import now_timestamp_ms
 from app.models.import_pipeline import ImportAsset, ImportTask
 from app.modules.imports.infrastructure.library_queries import (
@@ -61,22 +62,23 @@ def insert_import_task_with_assets(
     bundle_files: list[Path],
     now: Any,
 ) -> dict[str, Any]:
+    asset_id_seed = time.time_ns()
+    asset_values = [
+        {
+            "id": f"py_{asset_id_seed + index}",
+            "importTaskId": values["id"],
+            "sourcePath": str(asset_path),
+            "status": "PENDING",
+            "sortOrder": index,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        for index, asset_path in enumerate(bundle_files)
+    ]
     db.execute(insert(ImportTask.__table__).values(values))
-    db.flush()
     task = dict(values)
-    if bundle_files:
-        for index, asset_path in enumerate(bundle_files):
-            asset_values = {
-                "id": f"py_{time.time_ns()}",
-                "importTaskId": task["id"],
-                "sourcePath": str(asset_path),
-                "status": "PENDING",
-                "sortOrder": index,
-                "createdAt": now,
-                "updatedAt": now,
-            }
-            db.execute(insert(ImportAsset.__table__).values(asset_values))
-        db.flush()
+    for chunk in sqlite_parameter_chunks(asset_values, parameters_per_row=7):
+        db.execute(insert(ImportAsset.__table__), list(chunk))
     return get_import_task_by_id(db, str(task["id"])) or task
 
 
@@ -96,13 +98,6 @@ def stage_import_task(
     """Stage one fixed-model import task without owning the transaction."""
 
     source = Path(source_path).expanduser().resolve()
-    existing = find_existing_import_task(
-        db,
-        str(source),
-        allow_terminal_requeue=allow_terminal_requeue,
-    )
-    if existing:
-        return existing, False
     now = now_timestamp_ms()
     values, bundle_files = build_import_task_values(
         task_id=f"py_{time.time_ns()}",
@@ -116,6 +111,13 @@ def stage_import_task(
         message=message,
         now=now,
     )
+    existing = find_existing_import_task(
+        db,
+        str(source),
+        allow_terminal_requeue=allow_terminal_requeue,
+    )
+    if existing:
+        return existing, False
     task = insert_import_task_with_assets(
         db,
         values,

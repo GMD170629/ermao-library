@@ -2,82 +2,48 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Protocol
 
-from app.modules.imports.application.commands import commit_import_checkpoint
-from app.modules.imports.application.dto import ImportTaskDTO, StageImportCommand
-from app.modules.imports.application.ports import ImportTaskStore, ImportUnitOfWork
-
-
-def stage_import_task(
-    store: ImportTaskStore,
-    command: StageImportCommand,
-) -> tuple[ImportTaskDTO, bool]:
-    return store.stage(command)
+from app.modules.imports.application.dto import ImportTaskDTO
+from app.modules.imports.application.ports import ImportUnitOfWork
 
 
-def enqueue_import_task(
-    store: ImportTaskStore,
+@dataclass(frozen=True, slots=True)
+class ImportEnqueueProjection:
+    existing_task: Mapping[str, object] | None
+    existing_work: Mapping[str, object] | None
+    media_kind_policy: str
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedImportEnqueue:
+    task: ImportTaskDTO
+    created: bool
+    task_row: Mapping[str, object] | None
+    asset_rows: tuple[Mapping[str, object], ...]
+    work_row: Mapping[str, object] | None
+    refresh_work_id: str | None
+    available_at: datetime
+
+
+class PreparedImportEnqueueStore(Protocol):
+    def write(self, prepared: PreparedImportEnqueue) -> None: ...
+
+
+def persist_prepared_import_enqueue(
+    store: PreparedImportEnqueueStore,
     unit_of_work: ImportUnitOfWork,
-    command: StageImportCommand,
+    prepared: PreparedImportEnqueue,
 ) -> tuple[ImportTaskDTO, bool]:
-    task, created = store.stage(command)
-    if created:
-        commit_import_checkpoint(unit_of_work)
-    return task, created
+    """Commit one fully prepared enqueue hand-off in a short transaction."""
 
-
-def stage_import_path(
-    store: ImportTaskStore,
-    source_path: str | Path,
-    *,
-    origin: str,
-    original_name: str | None = None,
-    requested_title: str | None = None,
-    requested_author: str | None = None,
-    monitor_folder_id: str | None = None,
-    message: str = "等待后台处理",
-    allow_terminal_requeue: bool = False,
-) -> tuple[ImportTaskDTO, bool]:
-    return stage_import_task(
-        store,
-        StageImportCommand(
-            source_path=Path(source_path),
-            origin=origin,
-            original_name=original_name,
-            requested_title=requested_title,
-            requested_author=requested_author,
-            monitor_folder_id=monitor_folder_id,
-            message=message,
-            allow_terminal_requeue=allow_terminal_requeue,
-        ),
-    )
-
-
-def enqueue_import_path(
-    store: ImportTaskStore,
-    unit_of_work: ImportUnitOfWork,
-    source_path: str | Path,
-    *,
-    origin: str,
-    original_name: str | None = None,
-    requested_title: str | None = None,
-    requested_author: str | None = None,
-    monitor_folder_id: str | None = None,
-    message: str = "等待后台处理",
-    allow_terminal_requeue: bool = False,
-) -> tuple[ImportTaskDTO, bool]:
-    return enqueue_import_task(
-        store,
-        unit_of_work,
-        StageImportCommand(
-            source_path=Path(source_path),
-            origin=origin,
-            original_name=original_name,
-            requested_title=requested_title,
-            requested_author=requested_author,
-            monitor_folder_id=monitor_folder_id,
-            message=message,
-            allow_terminal_requeue=allow_terminal_requeue,
-        ),
-    )
+    try:
+        store.write(prepared)
+        unit_of_work.commit()
+        return prepared.task, prepared.created
+    except Exception:
+        unit_of_work.rollback()
+        raise

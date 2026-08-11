@@ -5,49 +5,108 @@ from __future__ import annotations
 import json
 import os
 import threading
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Any, Callable
+from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.dml import Delete
 
 from app.core.config import Settings
+from app.core.safe_errors import safe_error_message
+from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import now_timestamp_ms, timestamp_ms_to_iso
 from app.models.auth import UserPreference
 from app.models.import_pipeline import DownloadTask, ImportTask, KindleSendTask
 from app.models.organize import MetadataLookupTask
 from app.models.settings import MonitorFolder, SystemHealthRun
+from app.modules.system.application.commands import (
+    SystemWriteTransaction,
+    reset_failed_system_transaction,
+)
 from app.modules.system.domain.health import (
     HealthRunSnapshot,
     normalize_health_run_snapshot,
     summarize_health_items,
 )
-from app.modules.system.application.commands import (
-    execute_system_transaction,
-    reset_failed_system_transaction,
+from app.modules.system.infrastructure.events import (
+    prepare_system_event,
+    write_prepared_system_events,
 )
-from app.modules.system.infrastructure.events import record_system_event
 from app.modules.system.infrastructure.health import probe_database
 from app.modules.system.infrastructure.queue_runtime import queue_runtime_view
-from app.services.email_settings import EmailSettingsError, get_email_settings, test_smtp_connection
-from app.core.safe_errors import safe_error_message
+from app.services.email_settings import (
+    EmailSettingsError,
+    get_email_settings,
+    test_smtp_connection,
+)
 from app.services.text_conversion import converter_capability
 
 SessionFactory = Callable[[], Session]
 QUEUE_MODELS = {
     "import": (ImportTask, ("PENDING",), ("PARSING",), ("FAILED",)),
-    "download": (DownloadTask, ("queued",), ("downloading", "downloaded", "importing"), ("failed",)),
+    "download": (
+        DownloadTask,
+        ("queued",),
+        ("downloading", "downloaded", "importing"),
+        ("failed",),
+    ),
     "kindle": (KindleSendTask, ("queued",), ("sending",), ("failed", "unknown")),
-    "metadata": (MetadataLookupTask, ("PENDING", "RETRY_WAIT"), ("RUNNING",), ("FAILED",)),
+    "metadata": (
+        MetadataLookupTask,
+        ("PENDING", "RETRY_WAIT"),
+        ("RUNNING",),
+        ("FAILED",),
+    ),
 }
 _threads: dict[str, threading.Thread] = {}
 _threads_lock = threading.Lock()
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedHealthRunUpdate:
+    run_id: str
+    expected_version: int
+    status: str
+    version: int
+    snapshot_json: str
+    finished_at: int | None
+    updated_at: int
+    snapshot: HealthRunSnapshot
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedHealthRunCreation:
+    snapshot: HealthRunSnapshot
+    values: dict[str, object] | None
+
+    @property
+    def created(self) -> bool:
+        return self.values is not None
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedAbandonedHealthRuns:
+    rows: tuple[dict[str, object], ...]
+
+
 def _session(factory: SessionFactory) -> Session:
     return factory()
+
+
+def _isolated_session(factory: SessionFactory, close_sessions: bool) -> Session:
+    source = factory()
+    if close_sessions:
+        return source
+    return Session(
+        bind=source.get_bind(),
+        autoflush=False,
+        expire_on_commit=False,
+    )
 
 
 def _close(db: Session, close_sessions: bool) -> None:
@@ -123,36 +182,90 @@ def _initial_items(db: Session, settings: Settings) -> list[dict[str, Any]]:
         )
     directories = [
         ("storage-root", "health.item.storageRoot", settings.resolved_storage_root),
-        ("database-directory", "health.item.databaseDirectory", settings.database_path.parent),
-        ("library-directory", "health.item.libraryDirectory", settings.resolved_storage_root / "library"),
-        ("covers-directory", "health.item.coversDirectory", settings.resolved_storage_root / "covers"),
-        ("indexes-directory", "health.item.indexesDirectory", settings.resolved_storage_root / "indexes"),
-        ("backups-directory", "health.item.backupsDirectory", settings.resolved_storage_root / "backups"),
-        ("conversion-directory", "health.item.conversionDirectory", settings.conversion_root),
-        ("conversion-temp-directory", "health.item.conversionTempDirectory", settings.conversion_temp_root),
-        ("logs-directory", "health.item.logsDirectory", settings.resolved_storage_root / "logs"),
-        ("secrets-directory", "health.item.secretsDirectory", settings.resolved_storage_root / "secrets"),
+        (
+            "database-directory",
+            "health.item.databaseDirectory",
+            settings.database_path.parent,
+        ),
+        (
+            "library-directory",
+            "health.item.libraryDirectory",
+            settings.resolved_storage_root / "library",
+        ),
+        (
+            "covers-directory",
+            "health.item.coversDirectory",
+            settings.resolved_storage_root / "covers",
+        ),
+        (
+            "indexes-directory",
+            "health.item.indexesDirectory",
+            settings.resolved_storage_root / "indexes",
+        ),
+        (
+            "backups-directory",
+            "health.item.backupsDirectory",
+            settings.resolved_storage_root / "backups",
+        ),
+        (
+            "conversion-directory",
+            "health.item.conversionDirectory",
+            settings.conversion_root,
+        ),
+        (
+            "conversion-temp-directory",
+            "health.item.conversionTempDirectory",
+            settings.conversion_temp_root,
+        ),
+        (
+            "logs-directory",
+            "health.item.logsDirectory",
+            settings.resolved_storage_root / "logs",
+        ),
+        (
+            "secrets-directory",
+            "health.item.secretsDirectory",
+            settings.resolved_storage_root / "secrets",
+        ),
     ]
     items.extend(
-        _item(item_id, "storage", label, "directory", options={"path": str(path), "writable": True})
+        _item(
+            item_id,
+            "storage",
+            label,
+            "directory",
+            options={"path": str(path), "writable": True},
+        )
         for item_id, label, path in directories
     )
     items.extend(
         [
-            _item("queue:import", "queues", "health.item.importQueue", "queue", options={"queue": "import", "enabled": True}),
+            _item(
+                "queue:import",
+                "queues",
+                "health.item.importQueue",
+                "queue",
+                options={"queue": "import", "enabled": True},
+            ),
             _item(
                 "queue:download",
                 "queues",
                 "health.item.downloadQueue",
                 "queue",
-                options={"queue": "download", "enabled": settings.download_queue_enabled},
+                options={
+                    "queue": "download",
+                    "enabled": settings.download_queue_enabled,
+                },
             ),
             _item(
                 "queue:kindle",
                 "queues",
                 "health.item.kindleQueue",
                 "queue",
-                options={"queue": "kindle", "enabled": settings.kindle_send_queue_enabled},
+                options={
+                    "queue": "kindle",
+                    "enabled": settings.kindle_send_queue_enabled,
+                },
             ),
             _item(
                 "queue:metadata",
@@ -162,7 +275,12 @@ def _initial_items(db: Session, settings: Settings) -> list[dict[str, Any]]:
                 options={"queue": "metadata", "enabled": True},
             ),
             _item("config:smtp", "configuration", "health.item.smtp", "smtp"),
-            _item("config:conversion", "configuration", "health.item.epubConversion", "conversion"),
+            _item(
+                "config:conversion",
+                "configuration",
+                "health.item.epubConversion",
+                "conversion",
+            ),
             _item(
                 "config:providers:ebook",
                 "configuration",
@@ -194,6 +312,16 @@ def create_or_reuse_health_run(
     settings: Settings,
     actor_user_id: str,
 ) -> tuple[HealthRunSnapshot, bool]:
+    prepared = prepare_health_run_creation(db, settings, actor_user_id)
+    write_prepared_health_run_creation(db, prepared)
+    return prepared.snapshot, prepared.created
+
+
+def prepare_health_run_creation(
+    db: Session,
+    settings: Settings,
+    actor_user_id: str,
+) -> PreparedHealthRunCreation:
     active = db.scalars(
         select(SystemHealthRun)
         .where(SystemHealthRun.status == "running")
@@ -201,7 +329,10 @@ def create_or_reuse_health_run(
         .limit(1)
     ).first()
     if active:
-        return health_run_snapshot(db, str(active.id)) or {}, False
+        return PreparedHealthRunCreation(
+            snapshot=_snapshot_from_row(active),
+            values=None,
+        )
     now = now_timestamp_ms()
     run_id = f"health_{uuid4().hex}"
     snapshot = {
@@ -216,33 +347,48 @@ def create_or_reuse_health_run(
             {"id": "configuration", "labelCode": "health.group.configuration"},
         ],
         "items": _initial_items(db, settings),
-        "summary": {"total": 0, "completed": 0, "ok": 0, "warning": 0, "error": 0, "skipped": 0},
+        "summary": {
+            "total": 0,
+            "completed": 0,
+            "ok": 0,
+            "warning": 0,
+            "error": 0,
+            "skipped": 0,
+        },
     }
     snapshot["summary"]["total"] = len(snapshot["items"])
-    db.add(
-        SystemHealthRun(
-            id=run_id,
-            actor_user_id=actor_user_id,
-            status="running",
-            version=1,
-            snapshot=json.dumps(snapshot, ensure_ascii=False),
-            started_at=now,
-            created_at=now,
-            updated_at=now,
-        )
+    normalized_snapshot = normalize_health_run_snapshot(snapshot)
+    return PreparedHealthRunCreation(
+        snapshot=normalized_snapshot,
+        values={
+            "id": run_id,
+            "actor_user_id": actor_user_id,
+            "status": "running",
+            "version": 1,
+            "snapshot": json.dumps(snapshot, ensure_ascii=False),
+            "started_at": now,
+            "created_at": now,
+            "updated_at": now,
+        },
     )
-    db.flush()
-    return normalize_health_run_snapshot(snapshot), True
 
 
-def _update_snapshot(
+def write_prepared_health_run_creation(
+    db: Session,
+    prepared: PreparedHealthRunCreation,
+) -> None:
+    if prepared.values is not None:
+        db.execute(insert(SystemHealthRun).values(prepared.values))
+
+
+def _prepare_snapshot_update(
     db: Session,
     run_id: str,
     item_id: str | None,
     *,
     item_values: dict[str, Any] | None = None,
     run_status: str | None = None,
-) -> HealthRunSnapshot:
+) -> PreparedHealthRunUpdate:
     row = _run_row(db, run_id)
     if not row:
         raise RuntimeError("health-run-not-found")
@@ -258,19 +404,40 @@ def _update_snapshot(
             snapshot["finishedAt"] = now
     version = int(row.version or 1) + 1
     snapshot["version"] = version
-    db.execute(
+    normalized_snapshot = normalize_health_run_snapshot(snapshot)
+    return PreparedHealthRunUpdate(
+        run_id=run_id,
+        expected_version=int(row.version or 1),
+        status=str(snapshot["status"]),
+        version=version,
+        snapshot_json=json.dumps(snapshot, ensure_ascii=False),
+        finished_at=snapshot.get("finishedAt"),
+        updated_at=now,
+        snapshot=normalized_snapshot,
+    )
+
+
+def _write_prepared_snapshot_update(
+    db: Session,
+    prepared: PreparedHealthRunUpdate,
+) -> HealthRunSnapshot:
+    result = db.execute(
         update(SystemHealthRun)
-        .where(SystemHealthRun.id == run_id)
+        .where(
+            SystemHealthRun.id == prepared.run_id,
+            SystemHealthRun.version == prepared.expected_version,
+        )
         .values(
-            status=snapshot["status"],
-            version=version,
-            snapshot=json.dumps(snapshot, ensure_ascii=False),
-            finished_at=snapshot.get("finishedAt"),
-            updated_at=now,
+            status=prepared.status,
+            version=prepared.version,
+            snapshot=prepared.snapshot_json,
+            finished_at=prepared.finished_at,
+            updated_at=prepared.updated_at,
         )
     )
-    db.flush()
-    return normalize_health_run_snapshot(snapshot)
+    if int(result.rowcount or 0) != 1:
+        raise RuntimeError("health-run-concurrent-update")
+    return prepared.snapshot
 
 
 def _commit_snapshot_update(
@@ -281,16 +448,16 @@ def _commit_snapshot_update(
     item_values: dict[str, Any] | None = None,
     run_status: str | None = None,
 ) -> HealthRunSnapshot:
-    return execute_system_transaction(
+    prepared = _prepare_snapshot_update(
         db,
-        lambda: _update_snapshot(
-            db,
-            run_id,
-            item_id,
-            item_values=item_values,
-            run_status=run_status,
-        ),
+        run_id,
+        item_id,
+        item_values=item_values,
+        run_status=run_status,
     )
+    with SystemWriteTransaction(db):
+        snapshot = _write_prepared_snapshot_update(db, prepared)
+    return snapshot
 
 
 def _directory_result(options: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
@@ -298,7 +465,11 @@ def _directory_result(options: dict[str, Any]) -> tuple[str, str, dict[str, Any]
     if not raw_path:
         return "error", "health.directory.notConfigured", {}
     path = Path(raw_path).expanduser()
-    details = {"path": str(path), "writableRequired": bool(options.get("writable")), "name": options.get("name")}
+    details = {
+        "path": str(path),
+        "writableRequired": bool(options.get("writable")),
+        "name": options.get("name"),
+    }
     if not path.exists():
         return "error", "health.directory.missing", details
     if not path.is_dir():
@@ -330,16 +501,27 @@ def _database_result(db: Session) -> tuple[str, str, dict[str, Any]]:
         return "error", "health.database.error", {"error": safe_error_message(exc)}
 
 
-def _queue_result(db: Session, options: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
+def _queue_result(
+    db: Session, options: dict[str, Any]
+) -> tuple[str, str, dict[str, Any]]:
     queue = str(options["queue"])
     if not bool(options.get("enabled")):
         return "skipped", "health.queue.disabled", {"queue": queue}
     runtime = queue_runtime_view(db, queue)
     details: dict[str, Any] = {"queue": queue, "runtime": runtime}
     model, pending_values, running_values, failed_values = QUEUE_MODELS[queue]
-    for key, statuses in (("pending", pending_values), ("running", running_values), ("failed", failed_values)):
+    for key, statuses in (
+        ("pending", pending_values),
+        ("running", running_values),
+        ("failed", failed_values),
+    ):
         details[key] = int(
-            db.scalar(select(func.count()).select_from(model).where(model.status.in_(statuses))) or 0
+            db.scalar(
+                select(func.count())
+                .select_from(model)
+                .where(model.status.in_(statuses))
+            )
+            or 0
         )
     details["oldestPendingAt"] = timestamp_ms_to_iso(
         db.scalar(
@@ -371,17 +553,29 @@ def _smtp_result(db: Session) -> tuple[str, str, dict[str, Any]]:
         )
         or 0
     )
-    details = {"recipientCount": recipient_count, "configured": bool(values.get("host") and values.get("fromEmail"))}
+    details = {
+        "recipientCount": recipient_count,
+        "configured": bool(values.get("host") and values.get("fromEmail")),
+    }
     if not values.get("host"):
         return "warning", "health.smtp.notConfigured", details
+    db.close()
     try:
         test_smtp_connection(values, timeout=10)
     except Exception as exc:
-        return "error", "health.smtp.connectionFailed", {
-            **details,
-            "error": safe_error_message(exc, [str(values.get("password") or "")]),
-        }
-    return ("ok", "health.smtp.ok", details) if recipient_count else ("warning", "health.smtp.noRecipients", details)
+        return (
+            "error",
+            "health.smtp.connectionFailed",
+            {
+                **details,
+                "error": safe_error_message(exc, [str(values.get("password") or "")]),
+            },
+        )
+    return (
+        ("ok", "health.smtp.ok", details)
+        if recipient_count
+        else ("warning", "health.smtp.noRecipients", details)
+    )
 
 
 def _conversion_result(settings: Settings) -> tuple[str, str, dict[str, Any]]:
@@ -393,7 +587,9 @@ def _conversion_result(settings: Settings) -> tuple[str, str, dict[str, Any]]:
     return "error", "health.conversion.unavailable", capability
 
 
-def _providers_result(db: Session, options: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
+def _providers_result(
+    db: Session, options: dict[str, Any]
+) -> tuple[str, str, dict[str, Any]]:
     from app.services.metadata_provider_registry import (
         enabled_metadata_provider_ids,
         test_metadata_provider,
@@ -413,40 +609,55 @@ def _providers_result(db: Session, options: dict[str, Any]) -> tuple[str, str, d
                 {
                     "id": provider_id,
                     "ok": ok,
-                    "message": safe_error_message(str(result.get("message") or ""))[:300],
+                    "message": safe_error_message(str(result.get("message") or ""))[
+                        :300
+                    ],
                 }
             )
             failed += 0 if ok else 1
         except Exception as exc:
             failed += 1
-            details["providers"].append({"id": provider_id, "ok": False, "message": safe_error_message(exc)})
+            details["providers"].append(
+                {"id": provider_id, "ok": False, "message": safe_error_message(exc)}
+            )
     if failed:
         return "error", "health.providers.failed", details
     return "ok", "health.providers.ok", details
 
 
-def _execute_item(db: Session, item: dict[str, Any], settings: Settings) -> tuple[str, str, dict[str, Any]]:
+def _execute_item(
+    factory: SessionFactory,
+    close_sessions: bool,
+    item: dict[str, Any],
+    settings: Settings,
+) -> tuple[str, str, dict[str, Any]]:
     kind = str(item["kind"])
     options = dict(item.get("options") or {})
     if kind == "directory":
         return _directory_result(options)
-    if kind == "database":
-        return _database_result(db)
-    if kind == "queue":
-        return _queue_result(db, options)
-    if kind == "smtp":
-        return _smtp_result(db)
     if kind == "conversion":
         return _conversion_result(settings)
-    if kind == "providers":
+    if kind not in {"database", "queue", "smtp", "providers"}:
+        return "error", "health.unknownCheck", {}
+    db = _isolated_session(factory, close_sessions)
+    try:
+        if kind == "database":
+            return _database_result(db)
+        if kind == "queue":
+            return _queue_result(db, options)
+        if kind == "smtp":
+            return _smtp_result(db)
         return _providers_result(db, options)
-    return "error", "health.unknownCheck", {}
+    finally:
+        db.close()
 
 
-def run_health_checks(factory: SessionFactory, close_sessions: bool, settings: Settings, run_id: str) -> None:
+def run_health_checks(
+    factory: SessionFactory, close_sessions: bool, settings: Settings, run_id: str
+) -> None:
     actor_user_id = ""
     try:
-        db = _session(factory)
+        db = _isolated_session(factory, close_sessions)
         try:
             row = _run_row(db, run_id)
             if not row:
@@ -454,64 +665,68 @@ def run_health_checks(factory: SessionFactory, close_sessions: bool, settings: S
             actor_user_id = str(row.actor_user_id or "")
             snapshot = json.loads(str(row.snapshot))
         finally:
-            _close(db, close_sessions)
+            db.close()
 
         for item in snapshot["items"]:
             started = now_timestamp_ms()
-            db = _session(factory)
             try:
-                _commit_snapshot_update(
-                    db,
-                    run_id,
-                    str(item["id"]),
-                    item_values={
-                        "status": "running",
-                        "messageCode": "health.running",
-                        "startedAt": started,
-                        "finishedAt": None,
-                        "durationMs": None,
-                    },
-                )
-                current = next(
-                    candidate for candidate in health_run_snapshot(db, run_id)["items"] if candidate["id"] == item["id"]
-                )
-                status, message_code, details = _execute_item(db, current, settings)
-                finished = now_timestamp_ms()
-                _commit_snapshot_update(
-                    db,
-                    run_id,
-                    str(item["id"]),
-                    item_values={
-                        "status": status,
-                        "messageCode": message_code,
-                        "details": details,
-                        "finishedAt": finished,
-                        "durationMs": max(0, finished - started),
-                    },
-                )
-            except Exception as exc:
-                reset_failed_system_transaction(db)
-                finished = now_timestamp_ms()
-                _commit_snapshot_update(
-                    db,
-                    run_id,
-                    str(item["id"]),
-                    item_values={
-                        "status": "error",
-                        "messageCode": "health.check.failed",
-                        "details": {"error": safe_error_message(exc)},
-                        "finishedAt": finished,
-                        "durationMs": max(0, finished - started),
-                    },
-                )
-            finally:
-                _close(db, close_sessions)
+                db = _isolated_session(factory, close_sessions)
+                try:
+                    _commit_snapshot_update(
+                        db,
+                        run_id,
+                        str(item["id"]),
+                        item_values={
+                            "status": "running",
+                            "messageCode": "health.running",
+                            "startedAt": started,
+                            "finishedAt": None,
+                            "durationMs": None,
+                        },
+                    )
+                finally:
+                    db.close()
 
-        db = _session(factory)
-        try:
-            snapshot = health_run_snapshot(db, run_id) or {}
-            for item in snapshot.get("items", []):
-                if item.get("status") in {"pending", "running"}:
+                db = _isolated_session(factory, close_sessions)
+                try:
+                    run_snapshot = health_run_snapshot(db, run_id)
+                    if run_snapshot is None:
+                        raise RuntimeError("health-run-not-found")
+                    current = next(
+                        candidate
+                        for candidate in run_snapshot["items"]
+                        if candidate["id"] == item["id"]
+                    )
+                finally:
+                    db.close()
+
+                status, message_code, details = _execute_item(
+                    factory,
+                    close_sessions,
+                    current,
+                    settings,
+                )
+                finished = now_timestamp_ms()
+                db = _isolated_session(factory, close_sessions)
+                try:
+                    _commit_snapshot_update(
+                        db,
+                        run_id,
+                        str(item["id"]),
+                        item_values={
+                            "status": status,
+                            "messageCode": message_code,
+                            "details": details,
+                            "finishedAt": finished,
+                            "durationMs": max(0, finished - started),
+                        },
+                    )
+                finally:
+                    db.close()
+            except Exception as exc:
+                finished = now_timestamp_ms()
+                db = _isolated_session(factory, close_sessions)
+                try:
                     _commit_snapshot_update(
                         db,
                         run_id,
@@ -519,10 +734,42 @@ def run_health_checks(factory: SessionFactory, close_sessions: bool, settings: S
                         item_values={
                             "status": "error",
                             "messageCode": "health.check.failed",
-                            "details": {"error": "health-check-did-not-reach-terminal-state"},
-                            "finishedAt": now_timestamp_ms(),
+                            "details": {"error": safe_error_message(exc)},
+                            "finishedAt": finished,
+                            "durationMs": max(0, finished - started),
                         },
                     )
+                finally:
+                    db.close()
+
+        db = _isolated_session(factory, close_sessions)
+        try:
+            snapshot = health_run_snapshot(db, run_id) or {}
+        finally:
+            db.close()
+        for item in snapshot.get("items", []):
+            if item.get("status") in {"pending", "running"}:
+                finished_at = now_timestamp_ms()
+                db = _isolated_session(factory, close_sessions)
+                try:
+                    _commit_snapshot_update(
+                        db,
+                        run_id,
+                        str(item["id"]),
+                        item_values={
+                            "status": "error",
+                            "messageCode": "health.check.failed",
+                            "details": {
+                                "error": "health-check-did-not-reach-terminal-state"
+                            },
+                            "finishedAt": finished_at,
+                        },
+                    )
+                finally:
+                    db.close()
+
+        db = _isolated_session(factory, close_sessions)
+        try:
             snapshot = health_run_snapshot(db, run_id) or {}
             final_status = (
                 "error"
@@ -531,37 +778,42 @@ def run_health_checks(factory: SessionFactory, close_sessions: bool, settings: S
                 if snapshot.get("summary", {}).get("warning")
                 else "completed"
             )
-            final = _commit_snapshot_update(db, run_id, None, run_status=final_status)
-            execute_system_transaction(
+            prepared_final = _prepare_snapshot_update(
                 db,
-                lambda: record_system_event(
-                    db,
-                    source="system",
-                    action="health.completed",
-                    message="系统健康检查已完成",
-                    level=(
-                        "warning"
-                        if final_status in {"warning", "error"}
-                        else "info"
-                    ),
-                    actor_type="admin",
-                    actor_id=actor_user_id,
-                    target_type="healthRun",
-                    target_id=run_id,
-                    metadata={
-                        "durationMs": max(
-                            0,
-                            int(final.get("finishedAt") or 0)
-                            - int(final.get("startedAt") or 0),
-                        ),
-                        "summary": final.get("summary"),
-                    },
-                ),
+                run_id,
+                None,
+                run_status=final_status,
             )
         finally:
-            _close(db, close_sessions)
+            db.close()
+        final = prepared_final.snapshot
+        prepared_event = prepare_system_event(
+            source="system",
+            action="health.completed",
+            message="系统健康检查已完成",
+            level=("warning" if final_status in {"warning", "error"} else "info"),
+            actor_type="admin",
+            actor_id=actor_user_id,
+            target_type="healthRun",
+            target_id=run_id,
+            metadata={
+                "durationMs": max(
+                    0,
+                    int(final.get("finishedAt") or 0)
+                    - int(final.get("startedAt") or 0),
+                ),
+                "summary": final.get("summary"),
+            },
+        )
+        db = _isolated_session(factory, close_sessions)
+        try:
+            with SystemWriteTransaction(db):
+                _write_prepared_snapshot_update(db, prepared_final)
+                write_prepared_system_events(db, [prepared_event])
+        finally:
+            db.close()
     except Exception as exc:
-        db = _session(factory)
+        db = _isolated_session(factory, close_sessions)
         try:
             snapshot = health_run_snapshot(db, run_id)
             if snapshot:
@@ -580,13 +832,15 @@ def run_health_checks(factory: SessionFactory, close_sessions: bool, settings: S
                         )
                 _commit_snapshot_update(db, run_id, None, run_status="failed")
         finally:
-            _close(db, close_sessions)
+            db.close()
     finally:
         with _threads_lock:
             _threads.pop(run_id, None)
 
 
-def start_health_run(factory: SessionFactory, close_sessions: bool, settings: Settings, run_id: str) -> None:
+def start_health_run(
+    factory: SessionFactory, close_sessions: bool, settings: Settings, run_id: str
+) -> None:
     with _threads_lock:
         existing = _threads.get(run_id)
         if existing and existing.is_alive():
@@ -602,50 +856,77 @@ def start_health_run(factory: SessionFactory, close_sessions: bool, settings: Se
 
 
 def fail_abandoned_health_runs(db: Session) -> int:
-    rows = db.scalars(select(SystemHealthRun).where(SystemHealthRun.status == "running")).all()
-    changed = 0
+    prepared = prepare_abandoned_health_runs(db)
+    return write_prepared_abandoned_health_runs(db, prepared)
+
+
+def prepare_abandoned_health_runs(db: Session) -> PreparedAbandonedHealthRuns:
+    rows = db.scalars(
+        select(SystemHealthRun).where(SystemHealthRun.status == "running")
+    ).all()
+    now = now_timestamp_ms()
+    prepared_updates: list[dict[str, object]] = []
     for row in rows:
         snapshot = json.loads(str(row.snapshot))
-        now = now_timestamp_ms()
         for item in snapshot.get("items", []):
             if item.get("status") in {"pending", "running"}:
-                item.update({"status": "error", "messageCode": "health.run.interrupted", "finishedAt": now})
+                item.update(
+                    {
+                        "status": "error",
+                        "messageCode": "health.run.interrupted",
+                        "finishedAt": now,
+                    }
+                )
         snapshot["status"] = "failed"
         snapshot["finishedAt"] = now
         snapshot["summary"] = summarize_health_items(snapshot.get("items", []))
         snapshot["version"] = int(snapshot.get("version") or 1) + 1
-        db.execute(
-            update(SystemHealthRun)
-            .where(SystemHealthRun.id == row.id)
-            .values(
-                status="failed",
-                version=snapshot["version"],
-                snapshot=json.dumps(snapshot, ensure_ascii=False),
-                finished_at=now,
-                updated_at=now,
-            )
+        prepared_updates.append(
+            {
+                "id": row.id,
+                "status": "failed",
+                "version": snapshot["version"],
+                "snapshot": json.dumps(snapshot, ensure_ascii=False),
+                "finished_at": now,
+                "updated_at": now,
+            }
         )
-        changed += 1
-    if changed:
-        db.flush()
-    return changed
+    return PreparedAbandonedHealthRuns(rows=tuple(prepared_updates))
+
+
+def write_prepared_abandoned_health_runs(
+    db: Session,
+    prepared: PreparedAbandonedHealthRuns,
+) -> int:
+    for chunk in sqlite_parameter_chunks(prepared.rows, parameters_per_row=6):
+        db.execute(update(SystemHealthRun), list(chunk))
+    return len(prepared.rows)
 
 
 def prune_old_health_runs(db: Session, max_age_hours: int = 24) -> int:
+    statement = prepare_old_health_runs_prune(max_age_hours)
+    return write_prepared_old_health_runs_prune(db, statement)
+
+
+def prepare_old_health_runs_prune(max_age_hours: int = 24) -> Delete:
     from app.core.time import timestamp_ms_to_datetime
 
-    cutoff = timestamp_ms_to_datetime(now_timestamp_ms() - max(1, max_age_hours) * 60 * 60 * 1000)
-    result = db.execute(
-        delete(SystemHealthRun).where(
-            SystemHealthRun.status != "running",
-            SystemHealthRun.finished_at.is_not(None),
-            SystemHealthRun.finished_at < cutoff,
-        )
+    cutoff = timestamp_ms_to_datetime(
+        now_timestamp_ms() - max(1, max_age_hours) * 60 * 60 * 1000
     )
-    if result.rowcount:
-        db.flush()
+    return delete(SystemHealthRun).where(
+        SystemHealthRun.status != "running",
+        SystemHealthRun.finished_at.is_not(None),
+        SystemHealthRun.finished_at < cutoff,
+    )
+
+
+def write_prepared_old_health_runs_prune(db: Session, statement: Delete) -> int:
+    result = db.execute(statement)
     return int(result.rowcount or 0)
 
 
 def active_health_run_id(db: Session) -> str | None:
-    return db.scalar(select(SystemHealthRun.id).where(SystemHealthRun.status == "running").limit(1))
+    return db.scalar(
+        select(SystemHealthRun.id).where(SystemHealthRun.status == "running").limit(1)
+    )

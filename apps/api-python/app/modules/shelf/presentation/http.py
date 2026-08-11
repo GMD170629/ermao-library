@@ -9,7 +9,6 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
-from pydantic import ValidationError
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
@@ -20,7 +19,6 @@ from app.bootstrap.shelf import shelf_store
 from app.core.authorization import (
     AuthorizationContext,
     authorization_context,
-    can_access_work,
 )
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
@@ -42,7 +40,14 @@ from app.modules.shelf.presentation.schemas import (
     ShelfWriteRequest,
     ShelvesResponse,
 )
-from app.modules.shelf.public import execute_shelf_write
+from app.modules.shelf.public import (
+    CreateShelf,
+    CreateShelfCommand,
+    DeleteShelf,
+    DeleteShelfCommand,
+    UpdateShelf,
+    UpdateShelfCommand,
+)
 from app.schemas.responses import fail, ok
 from app.services.library_filters import normalize_filter_rules
 from app.services.library_management import smart_shelf_work_ids
@@ -96,8 +101,7 @@ def _json_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def _validated_shelf_payload(value: object) -> dict[str, Any]:
-    payload = ShelfWriteRequest.model_validate(value)
+def _validated_shelf_payload(payload: ShelfWriteRequest) -> dict[str, Any]:
     return payload.model_dump(
         by_alias=True,
         exclude_none=True,
@@ -445,21 +449,22 @@ def _normalized_shelf_work_ids(
     if not isinstance(value, list):
         return [], "图书列表格式不正确"
     work_ids: list[str] = []
+    seen: set[str] = set()
     for item in value:
         work_id = str(item or "").strip()
-        if work_id and work_id not in work_ids:
+        if work_id and work_id not in seen:
+            seen.add(work_id)
             work_ids.append(work_id)
     if not work_ids:
         return [], None
     if not _has_table(db, "LibraryWork"):
         return [], "选择的图书不存在，请刷新后重试"
-    existing_ids = {work_id for work_id in work_ids if _get_work(db, work_id)}
-    if missing := [work_id for work_id in work_ids if work_id not in existing_ids]:
-        return [], f"有 {len(missing)} 本图书已不存在，请刷新后重试"
-    inaccessible = [
-        work_id for work_id in work_ids if not can_access_work(db, user, work_id)
-    ]
-    if inaccessible:
+    visible_ids = shelf_store.filter_visible_work_ids(
+        db,
+        work_ids,
+        authorization_context(db, user),
+    )
+    if len(visible_ids) != len(work_ids):
         return [], "选择的图书不存在，请刷新后重试"
     return work_ids, None
 
@@ -468,9 +473,11 @@ def _normalized_ids(value: object) -> list[str] | None:
     if not isinstance(value, list):
         return None
     result: list[str] = []
+    seen: set[str] = set()
     for item in value:
         item_id = str(item or "").strip()
-        if item_id and item_id not in result:
+        if item_id and item_id not in seen:
+            seen.add(item_id)
             result.append(item_id)
     return result
 
@@ -563,10 +570,6 @@ def _collection_policy_response(
     )
 
 
-def _replace_shelf_works(db: Session, shelf_id: str, work_ids: list[str]) -> None:
-    shelf_store.replace_shelf_works(db, shelf_id, work_ids, now=_now())
-
-
 @router.get("/shelves/{shelf_id}")
 def get_shelf(
     shelf_id: str,
@@ -597,8 +600,9 @@ def get_shelf(
     )
 
 
-@router.post("/shelves")
-async def create_shelf(
+@router.post("/shelves", status_code=201)
+def create_shelf(
+    request_payload: ShelfWriteRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -606,10 +610,7 @@ async def create_shelf(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    try:
-        payload = _validated_shelf_payload(await request.json())
-    except ValidationError:
-        return fail("书架请求格式不正确", status_code=400, code="INVALID_SHELF_REQUEST")
+    payload = _validated_shelf_payload(request_payload)
     name = str(payload.get("name") or "").strip()
     if not name:
         return fail("请填写书架名称", status_code=400)
@@ -674,11 +675,10 @@ async def create_shelf(
     except ShelfCollectionPolicyError as error:
         return _collection_policy_response(error)
 
-    def create_operation() -> dict[str, Any]:
-        now = _now()
-        shelf = shelf_store.create_shelf(
-            db,
-            {
+    now = _now()
+    shelf = CreateShelf(shelf_store, db).execute(
+        CreateShelfCommand(
+            values={
                 "id": f"py_{time_ns()}",
                 "ownerUserId": user.id,
                 "name": name,
@@ -689,42 +689,20 @@ async def create_shelf(
                 "createdAt": now,
                 "updatedAt": now,
             },
+            kind=kind,
+            work_ids=tuple(work_ids),
+            member_shelf_ids=tuple(member_shelf_ids),
+            collection_ids=tuple(collection_ids),
+            now=now,
         )
-        if kind is ShelfKind.STATIC:
-            _replace_shelf_works(db, shelf["id"], work_ids)
-        if kind is ShelfKind.COLLECTION:
-            shelf_store.replace_collection_members(
-                db,
-                collection_id=str(shelf["id"]),
-                shelf_ids=member_shelf_ids,
-                now=now,
-            )
-            shelf_store.touch_shelves_updated_at(
-                db,
-                member_shelf_ids,
-                now=now,
-            )
-        elif collection_ids:
-            shelf_store.replace_shelf_collections(
-                db,
-                shelf_id=str(shelf["id"]),
-                collection_ids=collection_ids,
-                now=now,
-            )
-            shelf_store.touch_shelves_updated_at(
-                db,
-                collection_ids,
-                now=now,
-            )
-        return shelf
-
-    shelf = execute_shelf_write(db, create_operation)
+    )
     return ok({"shelf": _shelf_detail_view(db, shelf, user)}, status_code=201)
 
 
 @router.patch("/shelves/{shelf_id}")
-async def update_shelf(
+def update_shelf(
     shelf_id: str,
+    request_payload: ShelfWriteRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -732,10 +710,7 @@ async def update_shelf(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    try:
-        payload = _validated_shelf_payload(await request.json())
-    except ValidationError:
-        return fail("书架请求格式不正确", status_code=400, code="INVALID_SHELF_REQUEST")
+    payload = _validated_shelf_payload(request_payload)
     values = {
         key: payload[key] for key in ("name", "description", "pinned") if key in payload
     }
@@ -827,7 +802,8 @@ async def update_shelf(
                 )
     except ShelfCollectionPolicyError as error:
         return _collection_policy_response(error)
-    values["updatedAt"] = _now()
+    updated_at = _now()
+    values["updatedAt"] = updated_at
     previous_member_shelf_ids = (
         shelf_store.list_member_shelf_ids(db, shelf_id)
         if kind is ShelfKind.COLLECTION
@@ -842,41 +818,24 @@ async def update_shelf(
         else []
     )
 
-    def update_operation() -> dict[str, Any] | None:
-        shelf = shelf_store.update_shelf(db, shelf_id, values)
-        if shelf is None:
-            return None
-        if work_ids is not None and kind is ShelfKind.STATIC:
-            _replace_shelf_works(db, shelf_id, work_ids)
-        elif kind is ShelfKind.SMART and existing_kind is not ShelfKind.SMART:
-            _replace_shelf_works(db, shelf_id, [])
-        if kind is ShelfKind.COLLECTION and member_shelf_ids is not None:
-            shelf_store.replace_collection_members(
-                db,
-                collection_id=shelf_id,
-                shelf_ids=member_shelf_ids,
-                now=values["updatedAt"],
-            )
-            shelf_store.touch_shelves_updated_at(
-                db,
-                list(dict.fromkeys([*previous_member_shelf_ids, *member_shelf_ids])),
-                now=values["updatedAt"],
-            )
-        elif kind is not ShelfKind.COLLECTION and collection_ids is not None:
-            shelf_store.replace_shelf_collections(
-                db,
-                shelf_id=shelf_id,
-                collection_ids=collection_ids,
-                now=values["updatedAt"],
-            )
-            shelf_store.touch_shelves_updated_at(
-                db,
-                list(dict.fromkeys([*previous_collection_ids, *collection_ids])),
-                now=values["updatedAt"],
-            )
-        return shelf
-
-    shelf = execute_shelf_write(db, update_operation)
+    shelf = UpdateShelf(shelf_store, db).execute(
+        UpdateShelfCommand(
+            shelf_id=shelf_id,
+            values=values,
+            existing_kind=existing_kind,
+            kind=kind,
+            work_ids=tuple(work_ids) if work_ids is not None else None,
+            member_shelf_ids=(
+                tuple(member_shelf_ids) if member_shelf_ids is not None else None
+            ),
+            collection_ids=(
+                tuple(collection_ids) if collection_ids is not None else None
+            ),
+            previous_member_shelf_ids=tuple(previous_member_shelf_ids),
+            previous_collection_ids=tuple(previous_collection_ids),
+            now=updated_at,
+        )
+    )
     if not shelf:
         return fail("书架不存在", status_code=404)
     return ok({"shelf": _shelf_detail_view(db, shelf, user)})
@@ -903,16 +862,21 @@ def delete_shelf(
             status_code=409,
         )
 
-    def delete_operation() -> bool:
-        if ShelfKind.parse(
-            shelf.get("kind")
-        ) is ShelfKind.COLLECTION and shelf_store.collection_has_members(db, shelf_id):
-            raise ShelfCollectionPolicyError("SHELF_COLLECTION_NOT_EMPTY")
-        shelf_store.clear_monitor_folder_shelf_links(db, shelf_id, now=_now())
-        return shelf_store.delete_shelf(db, shelf_id)
-
     try:
-        deleted = execute_shelf_write(db, delete_operation)
-    except ShelfCollectionPolicyError as error:
-        return _collection_policy_response(error, status_code=409)
+        deleted = DeleteShelf(shelf_store, db).execute(
+            DeleteShelfCommand(
+                shelf_id=shelf_id,
+                is_collection=(
+                    ShelfKind.parse(shelf.get("kind")) is ShelfKind.COLLECTION
+                ),
+                now=_now(),
+            )
+        )
+    except ValueError as error:
+        if str(error) != "SHELF_COLLECTION_NOT_EMPTY":
+            raise
+        return _collection_policy_response(
+            ShelfCollectionPolicyError("SHELF_COLLECTION_NOT_EMPTY"),
+            status_code=409,
+        )
     return ok({"deleted": deleted, "id": shelf_id})

@@ -4,11 +4,10 @@ from datetime import UTC, datetime
 
 import sqlalchemy as sa
 from alembic import command
-from sqlalchemy import inspect, select
-
 from app.core.config import Settings
 from app.db.runner import _run_alembic, head_revision
 from app.db.sqlite import create_sqlite_engine
+from sqlalchemy import inspect, select
 
 
 def test_library_facet_index_upgrade_marks_existing_work_pending(tmp_path) -> None:
@@ -51,7 +50,7 @@ def test_library_facet_index_upgrade_marks_existing_work_pending(tmp_path) -> No
                     upgraded_work.c.id == "legacy-facet-work"
                 )
             )
-        assert head_revision(engine) == "0018_library_facet_index_version"
+        assert head_revision(engine) == "0020_comic_page_index"
         assert "facetIndexVersion" in columns
         assert indexes["LibraryWork_facetIndexVersion_id_idx"] == (
             "facetIndexVersion",

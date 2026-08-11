@@ -64,7 +64,7 @@ class ReaderVolumeRepository(Protocol):
         client_id: str,
         client_sequence: int,
         now: datetime,
-    ) -> ReaderProgressDto: ...
+    ) -> tuple[ReaderProgressDto, bool]: ...
 
     def set_reading_status(
         self,

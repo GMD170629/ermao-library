@@ -4,24 +4,35 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter, time_ns
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import Response
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
-from app.bootstrap.imports import import_http_store
-from app.bootstrap.system import get_setting, record_system_event
+from app.bootstrap.imports import (
+    import_http_store,
+    persist_import_monitor_folder_create,
+    persist_import_monitor_folder_delete,
+    persist_import_monitor_folder_update,
+)
+from app.bootstrap.system import get_setting
 from app.core.authorization import authorization_context, can_access_monitor_folder
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
+from app.modules.imports.application.monitor_folder_commands import (
+    PreparedMonitorFolderCreate,
+    PreparedMonitorFolderDelete,
+    PreparedMonitorFolderUpdate,
+    prepare_monitor_folder_update_values,
+)
 from app.modules.imports.presentation.mappers import (
     MonitorPathError,
     import_task_view,
@@ -41,14 +52,15 @@ from app.modules.imports.presentation.schemas import (
     MonitorFolderResponse,
     MonitorFoldersResponse,
     ParsedReleaseTitleResponse,
+    ParseReleaseTitleRequest,
     UpdateMonitorFolderRequest,
 )
 from app.modules.imports.presentation.writes import router as writes_router
-from app.modules.imports.public import (
-    parse_release_title,
-    reset_failed_import_checkpoint,
-)
+from app.modules.imports.public import parse_release_title
 from app.schemas.responses import fail, ok
+from app.services.system_events import (
+    prepare_system_event,
+)
 
 router = APIRouter(tags=["imports"], route_class=TypedContractRoute)
 router.include_router(writes_router)
@@ -56,7 +68,7 @@ logger = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _auth(
@@ -141,6 +153,7 @@ def monitor_folder_tree(
                 status_code=404,
                 code="MONITOR_FOLDER_NOT_FOUND",
             )
+    db.close()
     node, error, status_code = monitor_directory_tree_node(path)
     if error:
         return fail(error, status_code=status_code)
@@ -162,14 +175,11 @@ async def create_monitor_folder(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    db.close()
     try:
         root_path = str(resolve_monitor_folder_path(payload.root_path))
     except MonitorPathError as exc:
         return fail(str(exc), status_code=exc.status_code, code=exc.code)
-    if import_http_store.get_monitor_folder_by_root_path(db, root_path):
-        return fail(
-            "监控文件夹路径已存在", status_code=409, details={"rootPath": root_path}
-        )
     if payload.shelf_id:
         return fail(
             "监控文件夹不再绑定全局书架，请创建个人来源文件夹智能书架",
@@ -179,42 +189,48 @@ async def create_monitor_folder(
     media_kind_policy = payload.media_kind_policy.strip().upper()
     if media_kind_policy not in {"MIXED", "EBOOK", "COMIC", "AUDIOBOOK"}:
         return fail("内容分类无效", status_code=400, code="INVALID_MEDIA_KIND")
-    try:
-        folder = import_http_store.create_monitor_folder(
-            db,
-            {
-                "id": f"py_{time_ns()}",
-                "name": payload.name or Path(root_path).name or "监控文件夹",
-                "rootPath": root_path,
-                "shelfId": None,
-                "enabled": payload.enabled,
-                "mediaKindPolicy": media_kind_policy,
-                "ignorePatterns": payload.ignore_patterns,
-                "ignoreHidden": payload.ignore_hidden,
-                "minFileSizeBytes": payload.min_file_size_bytes,
-                "description": payload.description,
-                "createdAt": _now(),
-                "updatedAt": _now(),
-            },
-        )
-    except IntegrityError:
-        reset_failed_import_checkpoint(db)
+    existing_folder = import_http_store.get_monitor_folder_by_root_path(db, root_path)
+    db.close()
+    if existing_folder:
         return fail(
             "监控文件夹路径已存在", status_code=409, details={"rootPath": root_path}
         )
-    record_system_event(
-        db,
+    folder_id = f"py_{time_ns()}"
+    checkpoint_at = _now()
+    folder: dict[str, object] = {
+        "id": folder_id,
+        "name": payload.name or Path(root_path).name or "监控文件夹",
+        "rootPath": root_path,
+        "shelfId": None,
+        "enabled": payload.enabled,
+        "mediaKindPolicy": media_kind_policy,
+        "ignorePatterns": payload.ignore_patterns,
+        "ignoreHidden": payload.ignore_hidden,
+        "minFileSizeBytes": payload.min_file_size_bytes,
+        "description": payload.description,
+        "createdAt": checkpoint_at,
+        "updatedAt": checkpoint_at,
+    }
+    prepared_event = prepare_system_event(
         level="info",
         source="folder",
         actor_type="admin",
         actor_id=user.id,
         action="created",
         target_type="monitorFolder",
-        target_id=folder.get("id"),
-        message=f"新增来源目录：{folder.get('name')}",
+        target_id=folder_id,
+        message=f"新增来源目录：{folder['name']}",
         metadata={"rootPath": root_path},
-        commit=True,
     )
+    try:
+        persist_import_monitor_folder_create(
+            db,
+            PreparedMonitorFolderCreate(folder, prepared_event),
+        )
+    except IntegrityError:
+        return fail(
+            "监控文件夹路径已存在", status_code=409, details={"rootPath": root_path}
+        )
     return ok({"folder": folder}, status_code=201)
 
 
@@ -261,20 +277,10 @@ async def update_monitor_folder(
                 "监控文件夹路径已存在", status_code=409, details={"rootPath": root_path}
             )
         values["rootPath"] = root_path
+    db.close()
     if values:
         values["updatedAt"] = _now()
-    try:
-        folder = import_http_store.update_monitor_folder(db, folder_id, values)
-    except IntegrityError:
-        reset_failed_import_checkpoint(db)
-        return fail(
-            "监控文件夹路径已存在",
-            status_code=409,
-            details={"rootPath": values.get("rootPath")},
-        )
-    if values:
-        record_system_event(
-            db,
+        prepared_event = prepare_system_event(
             level="info",
             source="folder",
             actor_type="admin",
@@ -282,13 +288,31 @@ async def update_monitor_folder(
             action="updated",
             target_type="monitorFolder",
             target_id=folder_id,
-            message=f"更新来源目录：{(folder or existing).get('name')}",
+            message=f"更新来源目录：{values.get('name') or existing.get('name')}",
             metadata={
                 "changes": values,
-                "rootPath": (folder or existing).get("rootPath"),
+                "rootPath": values.get("rootPath") or existing.get("rootPath"),
             },
-            commit=True,
         )
+        prepared_values = prepare_monitor_folder_update_values(values)
+        try:
+            persist_import_monitor_folder_update(
+                db,
+                PreparedMonitorFolderUpdate(
+                    folder_id,
+                    prepared_values,
+                    prepared_event,
+                ),
+            )
+        except IntegrityError:
+            return fail(
+                "监控文件夹路径已存在",
+                status_code=409,
+                details={"rootPath": values.get("rootPath")},
+            )
+        folder = import_http_store.get_monitor_folder(db, folder_id)
+    else:
+        folder = existing
     return ok({"folder": folder})
 
 
@@ -303,26 +327,35 @@ def delete_monitor_folder(
     if auth_error:
         return auth_error
     existing = import_http_store.get_monitor_folder(db, folder_id)
-    deleted, affected_user_ids = import_http_store.delete_monitor_folder(
-        db, folder_id, updated_at=_now()
+    affected_user_ids = import_http_store.list_monitor_folder_access_user_ids(
+        db,
+        folder_id,
     )
-    if deleted:
-        record_system_event(
-            db,
-            level="warning",
-            source="folder",
-            actor_type="admin",
-            actor_id=user.id,
-            action="deleted",
-            target_type="monitorFolder",
-            target_id=folder_id,
-            message=f"删除来源目录：{(existing or {}).get('name') or folder_id}",
-            metadata={
-                "rootPath": (existing or {}).get("rootPath"),
-                "authorizationInvalidatedFor": len(affected_user_ids),
-            },
-            commit=True,
-        )
+    db.close()
+    checkpoint_at = _now()
+    prepared_event = prepare_system_event(
+        level="warning",
+        source="folder",
+        actor_type="admin",
+        actor_id=user.id,
+        action="deleted",
+        target_type="monitorFolder",
+        target_id=folder_id,
+        message=f"删除来源目录：{(existing or {}).get('name') or folder_id}",
+        metadata={
+            "rootPath": (existing or {}).get("rootPath"),
+            "authorizationInvalidatedFor": len(affected_user_ids),
+        },
+    )
+    deleted = persist_import_monitor_folder_delete(
+        db,
+        PreparedMonitorFolderDelete(
+            folder_id,
+            affected_user_ids,
+            checkpoint_at,
+            prepared_event,
+        ),
+    )
     return ok({"deleted": deleted, "id": folder_id})
 
 
@@ -358,6 +391,7 @@ def list_import_tasks(
     queried_at = perf_counter()
     tasks = import_http_store.hydrate_import_task_page(db, tasks, log_limit=20)
     hydrated_at = perf_counter()
+    db.close()
     total_pages = max(1, (total + page_size - 1) // page_size)
     page = min(page, total_pages)
     views = [import_task_view(db, task, log_limit=20) for task in tasks]
@@ -401,6 +435,8 @@ def get_import_task(
     task = _visible_import_task_or_none(db, user, task_id)
     if not task:
         return fail("导入任务不存在", status_code=404)
+    task = import_http_store.hydrate_import_task_page(db, [task], log_limit=100)[0]
+    db.close()
     return ok({"task": import_task_view(db, task, log_limit=100)})
 
 
@@ -428,6 +464,7 @@ def get_import_logs(
         offset=(page - 1) * page_size,
         level=level,
     )
+    db.close()
     from app.modules.imports.presentation.mappers import serialize_import_log
 
     return ok(
@@ -451,6 +488,7 @@ def release_title_parser_get(
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    db.close()
     volume_info = parse_release_title(title)
     chapter = re.search(
         r"(?:ch(?:apter)?\.?|第)\s*(\d+(?:\.\d+)?)\s*(?:话|章|ch)?",
@@ -469,16 +507,17 @@ def release_title_parser_get(
 
 
 @router.post("/tracking/release-title-parser")
-async def release_title_parser(
+def release_title_parser(
     request: Request,
+    payload: Annotated[ParseReleaseTitleRequest | None, Body()] = None,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> ParsedReleaseTitleResponse:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    payload = await request.json()
-    title = str(payload.get("title") or "")
+    db.close()
+    title = payload.title if payload is not None else ""
     volume_info = parse_release_title(title)
     chapter = re.search(
         r"(?:ch(?:apter)?\.?|第)\s*(\d+(?:\.\d+)?)\s*(?:话|章|ch)?",

@@ -4,27 +4,28 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Body, Depends, Header, Request
 from fastapi.responses import Response
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_user
+from app.api.deps import require_system_manager, require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.imports import import_http_store
 from app.bootstrap.media import media_streaming
 from app.bootstrap.system import (
-    clear_info_warning_events,
+    clear_system_events_with_audit,
     configured_max_event_bytes,
-    delete_settings,
     get_setting,
-    list_system_events_page,
     list_settings,
-    record_system_event,
+    list_system_events_page,
+    persist_opds_settings_update,
+    persist_system_settings_update,
+    prepare_system_event,
     run_system_health_checks,
     system_event_storage_view,
-    upsert_setting,
 )
+from app.contracts.http_errors import ErrorResponses
 from app.core.authorization import can_manage_system
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
@@ -48,12 +49,14 @@ from app.modules.system.application.queries import (
     prepare_system_settings_update,
     system_settings_payload,
 )
+from app.modules.system.presentation.health_schemas import SystemManagerRequiredError
 from app.modules.system.presentation.schemas import (
     AppConfigPayload,
     AppConfigResponse,
     BackupArchiveResponse,
     BackupDeleteResponse,
     BackupResponse,
+    BackupRestoreRequest,
     BackupRestoreResponse,
     BackupsResponse,
     ClearedEventsResponse,
@@ -63,8 +66,8 @@ from app.modules.system.presentation.schemas import (
     OpdsSystemSettingsResponse,
     SystemSettingsResponse,
     UpdateOpdsSystemSettingsRequest,
+    UpdateSystemSettingsRequest,
 )
-from app.modules.system.public import execute_system_transaction
 from app.schemas.responses import fail, ok
 from app.services.backup_service import create_backup as create_backup_archive
 from app.services.backup_service import list_backups as list_backup_archives
@@ -97,6 +100,10 @@ def _auth(db: Session, request: Request, settings: Settings):
     return require_user(db, request, settings)
 
 
+def _system_manager(db: Session, request: Request, settings: Settings):
+    return require_system_manager(db, request, settings)
+
+
 @router.get("/app-config")
 def get_public_app_config(
     http_response: Response,
@@ -123,8 +130,11 @@ def get_system_settings(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> SystemSettingsResponse:
-    _user, auth_error = _auth(db, request, settings)
+) -> Annotated[
+    SystemSettingsResponse,
+    ErrorResponses(SystemManagerRequiredError),
+]:
+    _user, auth_error = _system_manager(db, request, settings)
     if auth_error:
         return auth_error
     return ok(system_settings_payload(list_settings(db)))
@@ -189,54 +199,52 @@ def update_opds_system_settings(
         )
     except OpdsPublicBaseUrlInvalid:
         return fail(
-            "OPDS 公开 URL 必须是有效的 HTTP 或 HTTPS 地址，且不能包含凭据、查询参数或片段",
+            "OPDS 公开 URL 必须是有效的 HTTP 或 HTTPS 地址，"
+            "且不能包含凭据、查询参数或片段",
             status_code=400,
             code="OPDS_PUBLIC_BASE_URL_INVALID",
         )
 
-    def persist_opds_setting() -> None:
-        upsert_setting(db, OPDS_ENABLED_SETTING_KEY, payload.enabled)
-        upsert_setting(db, OPDS_PUBLIC_BASE_URL_SETTING_KEY, normalized_public_base_url)
-        record_system_event(
-            db,
-            level="info",
-            source="system",
-            actor_type="admin",
-            actor_id=user.id,
-            action="opds.settings.updated",
-            target_type="settings",
-            message="已开启 OPDS" if payload.enabled else "已关闭 OPDS",
-            metadata={"enabled": payload.enabled},
-            commit=False,
-        )
+    prepared_settings = {
+        OPDS_ENABLED_SETTING_KEY: payload.enabled,
+        OPDS_PUBLIC_BASE_URL_SETTING_KEY: normalized_public_base_url,
+    }
+    prepared_event = prepare_system_event(
+        level="info",
+        source="system",
+        actor_type="admin",
+        actor_id=user.id,
+        action="opds.settings.updated",
+        target_type="settings",
+        message="已开启 OPDS" if payload.enabled else "已关闭 OPDS",
+        metadata={"enabled": payload.enabled},
+    )
 
-    execute_system_transaction(db, persist_opds_setting)
+    persist_opds_settings_update(
+        db,
+        setting_values=prepared_settings,
+        event=prepared_event,
+    )
     return ok(_opds_settings_payload(db))
 
 
 @router.put("/system-settings")
 @router.patch("/system-settings")
-async def update_system_settings(
+def update_system_settings(
+    payload: UpdateSystemSettingsRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> SystemSettingsResponse:
-    user, auth_error = _auth(db, request, settings)
+) -> Annotated[
+    SystemSettingsResponse,
+    ErrorResponses(SystemManagerRequiredError),
+]:
+    user, auth_error = _system_manager(db, request, settings)
     if auth_error:
         return auth_error
-    payload = await request.json()
-    values = payload.get(
-        "settings",
-        {key: value for key, value in payload.items() if key != "clearSensitiveKeys"},
-    )
-    requested_clear_keys = payload.get("clearSensitiveKeys", [])
-    if not isinstance(values, dict):
-        return fail("设置格式不正确", status_code=400)
-    if not isinstance(requested_clear_keys, list):
-        return fail("清除凭据格式不正确", status_code=400)
     prepared = prepare_system_settings_update(
-        values,
-        requested_clear_keys,
+        payload.settings,
+        payload.clear_sensitive_keys,
         normalize_import_setting_value=normalize_import_setting_value,
         import_preference_keys=IMPORT_PREFERENCE_KEYS,
     )
@@ -249,29 +257,25 @@ async def update_system_settings(
             details=prepared.details,
         )
     saved, clear_keys = prepared
+    saved_with_clears = {**saved, **{key: "" for key in clear_keys}}
+    prepared_event = prepare_system_event(
+        level="warning",
+        source="system",
+        actor_type="admin",
+        actor_id=user.id,
+        action="settings.updated",
+        target_type="settings",
+        message=f"更新系统设置 {len(saved_with_clears)} 项",
+        metadata={"keys": list(saved_with_clears)},
+    )
 
-    def persist_settings_update() -> None:
-        for key, value in saved.items():
-            upsert_setting(db, key, value)
-        if clear_keys:
-            delete_settings(db, clear_keys)
-            for key in clear_keys:
-                saved[key] = ""
-        record_system_event(
-            db,
-            level="warning",
-            source="system",
-            actor_type="admin",
-            actor_id=user.id,
-            action="settings.updated",
-            target_type="settings",
-            message=f"更新系统设置 {len(saved)} 项",
-            metadata={"keys": list(saved.keys())},
-            commit=False,
-        )
-
-    execute_system_transaction(db, persist_settings_update)
-    return ok(system_settings_payload(saved))
+    persist_system_settings_update(
+        db,
+        setting_values=saved,
+        clear_keys=tuple(clear_keys),
+        event=prepared_event,
+    )
+    return ok(system_settings_payload(saved_with_clears))
 
 
 @router.get("/dashboard/system-status")
@@ -312,8 +316,11 @@ def list_system_events(
     dateTo: str | None = None,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> ManagementEventsResponse:
-    _user, auth_error = _auth(db, request, settings)
+) -> Annotated[
+    ManagementEventsResponse,
+    ErrorResponses(SystemManagerRequiredError),
+]:
+    _user, auth_error = _system_manager(db, request, settings)
     if auth_error:
         return auth_error
     page = max(1, page)
@@ -356,26 +363,26 @@ def clear_system_events(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> ClearedEventsResponse:
-    user, auth_error = _auth(db, request, settings)
+) -> Annotated[
+    ClearedEventsResponse,
+    ErrorResponses(SystemManagerRequiredError),
+]:
+    user, auth_error = _system_manager(db, request, settings)
     if auth_error:
         return auth_error
     if not _has_table(db, "SystemEvent"):
         return ClearedEventsResponse(data={"deleted": 0})
-    deleted = clear_info_warning_events(db)
-    db.commit()
-    record_system_event(
-        db,
+    prepared_event = prepare_system_event(
         level="info",
         source="system",
         action="events.cleared",
         actor_type="admin",
         actor_id=user.id,
         target_type="events",
-        message=f"清理结构化日志 {deleted} 条",
-        metadata={"deleted": deleted},
-        commit=True,
+        message="清理结构化日志",
     )
+
+    deleted = clear_system_events_with_audit(db, event=prepared_event)
     return ClearedEventsResponse(
         data={"deleted": deleted, "storage": _event_storage_snapshot(db)}
     )
@@ -386,8 +393,11 @@ def list_backups(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> BackupsResponse:
-    _user, auth_error = _auth(db, request, settings)
+) -> Annotated[
+    BackupsResponse,
+    ErrorResponses(SystemManagerRequiredError),
+]:
+    _user, auth_error = _system_manager(db, request, settings)
     if auth_error:
         return auth_error
     return ok({"backups": list_backup_archives(settings)})
@@ -399,8 +409,11 @@ def get_backup(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> BackupResponse:
-    _user, auth_error = _auth(db, request, settings)
+) -> Annotated[
+    BackupResponse,
+    ErrorResponses(SystemManagerRequiredError),
+]:
+    _user, auth_error = _system_manager(db, request, settings)
     if auth_error:
         return auth_error
     path = settings.resolved_storage_root / "backups" / f"{backup_id}.zip"
@@ -409,13 +422,16 @@ def get_backup(
     return ok(backup_detail_payload(backup_id, path, list_backup_archives(settings)))
 
 
-@router.post("/backups")
+@router.post("/backups", status_code=201)
 def create_backup(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> BackupResponse:
-    _user, auth_error = _auth(db, request, settings)
+) -> Annotated[
+    BackupResponse,
+    ErrorResponses(SystemManagerRequiredError),
+]:
+    _user, auth_error = _system_manager(db, request, settings)
     if auth_error:
         return auth_error
     backup = create_backup_archive(db, settings)
@@ -426,10 +442,14 @@ def create_backup(
 def restore_backup(
     backup_id: str,
     request: Request,
+    _payload: BackupRestoreRequest | None = Body(default=None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> BackupRestoreResponse:
-    _user, auth_error = _auth(db, request, settings)
+) -> Annotated[
+    BackupRestoreResponse,
+    ErrorResponses(SystemManagerRequiredError),
+]:
+    _user, auth_error = _system_manager(db, request, settings)
     if auth_error:
         return auth_error
     path = settings.resolved_storage_root / "backups" / f"{backup_id}.zip"
@@ -456,8 +476,11 @@ def delete_backup(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> BackupDeleteResponse:
-    _user, auth_error = _auth(db, request, settings)
+) -> Annotated[
+    BackupDeleteResponse,
+    ErrorResponses(SystemManagerRequiredError),
+]:
+    _user, auth_error = _system_manager(db, request, settings)
     if auth_error:
         return auth_error
     path = settings.resolved_storage_root / "backups" / f"{backup_id}.zip"
@@ -476,8 +499,8 @@ def download_backup(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
-    user, auth_error = _auth(db, request, settings)
+) -> Annotated[Response, ErrorResponses(SystemManagerRequiredError)]:
+    user, auth_error = _system_manager(db, request, settings)
     if auth_error:
         return auth_error
     return media_streaming.send_file(

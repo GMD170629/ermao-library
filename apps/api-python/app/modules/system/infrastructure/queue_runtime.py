@@ -4,25 +4,45 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
+from dataclasses import dataclass
 from time import monotonic
-from typing import Any, Callable
-from uuid import uuid4
+from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import case, select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.base import Executable
 
 from app.core.time import now_timestamp_ms, to_timestamp_ms
 from app.models.settings import QueueControlOperation, QueueRuntimeState
+from app.modules.system.application.commands import SystemWriteTransaction
 from app.modules.system.domain.queue import (
     ACTIVE_OPERATION_STATUSES,
     TERMINAL_OPERATION_STATUSES,
+    PreparedQueueHeartbeat,
     enrich_queue_runtime_view,
+    prepare_queue_heartbeat,
     safe_runtime_error,
 )
-from app.modules.system.application.commands import execute_system_transaction
 
 LOGGER = logging.getLogger(__name__)
 SessionFactory = Callable[[], Session]
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedQueueRuntimeWrite:
+    statement: Executable
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedQueueOperationCreation:
+    view: dict[str, Any]
+    statement: Executable | None
+
+    @property
+    def created(self) -> bool:
+        return self.statement is not None
 
 
 def _runtime_row_dict(row: QueueRuntimeState) -> dict[str, Any]:
@@ -54,49 +74,60 @@ def _operation_row_dict(row: QueueControlOperation) -> dict[str, Any]:
     }
 
 
-def record_queue_heartbeat(
+def prepare_queue_heartbeat_write(
+    prepared: PreparedQueueHeartbeat,
+) -> PreparedQueueRuntimeWrite:
+    statement = sqlite_insert(QueueRuntimeState).values(
+        queue_name=prepared.queue_name,
+        instance_id=prepared.instance_id,
+        status=prepared.status,
+        poll_interval_seconds=prepared.poll_interval_seconds,
+        started_at=prepared.recorded_at,
+        heartbeat_at=prepared.recorded_at,
+        last_processed_at=prepared.processed_at,
+        last_error=prepared.error_text,
+        updated_at=prepared.recorded_at,
+    )
+    return PreparedQueueRuntimeWrite(
+        statement=statement.on_conflict_do_update(
+            index_elements=[QueueRuntimeState.queue_name],
+            set_={
+                QueueRuntimeState.instance_id: statement.excluded["instanceId"],
+                QueueRuntimeState.status: statement.excluded.status,
+                QueueRuntimeState.poll_interval_seconds: (
+                    statement.excluded["pollIntervalSeconds"]
+                ),
+                QueueRuntimeState.started_at: case(
+                    (
+                        QueueRuntimeState.instance_id
+                        != statement.excluded["instanceId"],
+                        statement.excluded["startedAt"],
+                    ),
+                    else_=QueueRuntimeState.started_at,
+                ),
+                QueueRuntimeState.heartbeat_at: statement.excluded["heartbeatAt"],
+                QueueRuntimeState.last_processed_at: (
+                    statement.excluded["lastProcessedAt"]
+                    if prepared.processed_at is not None
+                    else QueueRuntimeState.last_processed_at
+                ),
+                QueueRuntimeState.last_error: (
+                    statement.excluded["lastError"]
+                    if prepared.error_text is not None
+                    or prepared.processed_at is not None
+                    else QueueRuntimeState.last_error
+                ),
+                QueueRuntimeState.updated_at: statement.excluded["updatedAt"],
+            },
+        ),
+    )
+
+
+def write_prepared_queue_runtime(
     db: Session,
-    queue_name: str,
-    instance_id: str,
-    poll_interval_seconds: float,
-    *,
-    status: str = "running",
-    processed: bool = False,
-    error: BaseException | str | None = None,
+    prepared: PreparedQueueRuntimeWrite,
 ) -> None:
-    now = now_timestamp_ms()
-    processed_at = now if processed else None
-    error_text = safe_runtime_error(error)
-    row = db.get(QueueRuntimeState, queue_name)
-    if row is None:
-        db.add(
-            QueueRuntimeState(
-                queue_name=queue_name,
-                instance_id=instance_id,
-                status=status,
-                poll_interval_seconds=float(poll_interval_seconds),
-                started_at=now,
-                heartbeat_at=now,
-                last_processed_at=processed_at,
-                last_error=error_text,
-                updated_at=now,
-            )
-        )
-    else:
-        if row.instance_id != instance_id:
-            row.started_at = now  # type: ignore[assignment]
-        row.instance_id = instance_id
-        row.status = status
-        row.poll_interval_seconds = float(poll_interval_seconds)
-        row.heartbeat_at = now  # type: ignore[assignment]
-        if processed_at is not None:
-            row.last_processed_at = processed_at  # type: ignore[assignment]
-        if error_text is not None:
-            row.last_error = error_text
-        elif processed_at is not None:
-            row.last_error = None
-        row.updated_at = now  # type: ignore[assignment]
-    db.flush()
+    db.execute(prepared.statement)
 
 
 class QueueHeartbeatPump:
@@ -135,20 +166,20 @@ class QueueHeartbeatPump:
         processed: bool = False,
         error: BaseException | str | None = None,
     ) -> None:
+        prepared = prepare_queue_heartbeat(
+            queue_name=self._queue_name,
+            instance_id=self._instance_id,
+            poll_interval_seconds=self._poll_interval_seconds,
+            recorded_at=now_timestamp_ms(),
+            processed=processed,
+            error=error,
+        )
+        prepared_write = prepare_queue_heartbeat_write(prepared)
         with self._write_lock:
             try:
                 with self._session_factory() as db:
-                    execute_system_transaction(
-                        db,
-                        lambda: record_queue_heartbeat(
-                            db,
-                            queue_name=self._queue_name,
-                            instance_id=self._instance_id,
-                            poll_interval_seconds=self._poll_interval_seconds,
-                            processed=processed,
-                            error=error,
-                        ),
-                    )
+                    with SystemWriteTransaction(db):
+                        write_prepared_queue_runtime(db, prepared_write)
             except Exception as exc:
                 now = monotonic()
                 if now - self._last_write_warning_at >= 30:
@@ -163,17 +194,16 @@ class QueueHeartbeatPump:
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=self._heartbeat_interval + 1)
+        prepared_stop = prepare_queue_stopped_write(
+            self._queue_name,
+            self._instance_id,
+            now=now_timestamp_ms(),
+        )
         with self._write_lock:
             try:
                 with self._session_factory() as db:
-                    execute_system_transaction(
-                        db,
-                        lambda: mark_queue_stopped(
-                            db,
-                            queue_name=self._queue_name,
-                            instance_id=self._instance_id,
-                        ),
-                    )
+                    with SystemWriteTransaction(db):
+                        write_prepared_queue_runtime(db, prepared_stop)
             except Exception as exc:
                 LOGGER.warning(
                     "queue stopped state write deferred queue=%s error=%s",
@@ -185,9 +215,14 @@ class QueueHeartbeatPump:
         while not self._stop_event.wait(self._heartbeat_interval):
             self.pulse()
 
-def mark_queue_stopped(db: Session, queue_name: str, instance_id: str) -> None:
-    now = now_timestamp_ms()
-    db.execute(
+
+def prepare_queue_stopped_write(
+    queue_name: str,
+    instance_id: str,
+    *,
+    now: int,
+) -> PreparedQueueRuntimeWrite:
+    return PreparedQueueRuntimeWrite(
         update(QueueRuntimeState)
         .where(
             QueueRuntimeState.queue_name == queue_name,
@@ -195,7 +230,6 @@ def mark_queue_stopped(db: Session, queue_name: str, instance_id: str) -> None:
         )
         .values(status="stopped", heartbeat_at=now, updated_at=now)
     )
-    db.flush()
 
 
 def queue_runtime_view(db: Session, queue_name: str) -> dict[str, Any] | None:
@@ -210,41 +244,54 @@ def queue_runtime_view(db: Session, queue_name: str) -> dict[str, Any] | None:
     )
 
 
-def create_queue_operation(
-    db: Session,
+def prepare_queue_operation_creation(
+    existing: dict[str, Any] | None,
     actor_user_id: str,
     *,
     action: str,
-) -> tuple[dict[str, Any], bool]:
+    operation_id: str,
+    now: int,
+) -> PreparedQueueOperationCreation:
     if action not in {"restart", "clear"}:
         raise ValueError(action)
-    existing = db.scalars(
-        select(QueueControlOperation)
-        .where(
-            QueueControlOperation.queue_name == "import",
-            QueueControlOperation.status.in_(ACTIVE_OPERATION_STATUSES),
-        )
-        .order_by(QueueControlOperation.requested_at.desc())
-        .limit(1)
-    ).first()
     if existing is not None:
-        return _operation_row_dict(existing), False
-    now = now_timestamp_ms()
-    operation = QueueControlOperation(
-        id=f"queue_{uuid4().hex}",
-        queue_name="import",
-        action=action,
-        status="requested",
-        actor_user_id=actor_user_id,
-        message_code=f"queue.{action}.requested",
-        requested_at=now,
-        started_at=None,
-        finished_at=None,
-        updated_at=now,
+        return PreparedQueueOperationCreation(view=existing, statement=None)
+    values = {
+        "id": operation_id,
+        "queue_name": "import",
+        "action": action,
+        "status": "requested",
+        "actor_user_id": actor_user_id,
+        "message_code": f"queue.{action}.requested",
+        "requested_at": now,
+        "started_at": None,
+        "finished_at": None,
+        "updated_at": now,
+    }
+    return PreparedQueueOperationCreation(
+        view={
+            "id": operation_id,
+            "queueName": "import",
+            "action": action,
+            "status": "requested",
+            "actorUserId": actor_user_id,
+            "messageCode": f"queue.{action}.requested",
+            "requestedAt": now,
+            "startedAt": None,
+            "finishedAt": None,
+            "updatedAt": now,
+        },
+        statement=sqlite_insert(QueueControlOperation).values(values),
     )
-    db.add(operation)
-    db.flush()
-    return _operation_row_dict(operation), True
+
+
+def write_prepared_queue_operation_creation(
+    db: Session,
+    prepared: PreparedQueueOperationCreation,
+) -> tuple[dict[str, Any], bool]:
+    if prepared.statement is not None:
+        db.execute(prepared.statement)
+    return prepared.view, prepared.created
 
 
 def active_queue_operation(db: Session) -> dict[str, Any] | None:
@@ -260,29 +307,38 @@ def active_queue_operation(db: Session) -> dict[str, Any] | None:
     return _operation_row_dict(row) if row else None
 
 
-def update_queue_operation(
-    db: Session,
+def prepare_queue_operation_update(
     operation_id: str,
     status: str,
     message_code: str,
-) -> None:
+    *,
+    now: int,
+) -> PreparedQueueRuntimeWrite:
     if status not in (*ACTIVE_OPERATION_STATUSES, *TERMINAL_OPERATION_STATUSES):
         raise ValueError(status)
-    now = now_timestamp_ms()
     values: dict[str, Any] = {
         "status": status,
         "message_code": message_code,
         "updated_at": now,
     }
-    row = db.get(QueueControlOperation, operation_id)
-    if row is None:
-        return
-    if status in {"waiting", "running", "completed"} and row.started_at is None:
-        values["started_at"] = now
-    if status in TERMINAL_OPERATION_STATUSES:
-        values["finished_at"] = now
-    db.execute(update(QueueControlOperation).where(QueueControlOperation.id == operation_id).values(**values))
-    db.flush()
+    values["started_at"] = case(
+        (
+            QueueControlOperation.started_at.is_(None)
+            & (status in {"waiting", "running", "completed"}),
+            now,
+        ),
+        else_=QueueControlOperation.started_at,
+    )
+    values["finished_at"] = (
+        now
+        if status in TERMINAL_OPERATION_STATUSES
+        else QueueControlOperation.finished_at
+    )
+    return PreparedQueueRuntimeWrite(
+        update(QueueControlOperation)
+        .where(QueueControlOperation.id == operation_id)
+        .values(**values)
+    )
 
 
 def queue_operation_view(db: Session, operation_id: str) -> dict[str, Any] | None:
@@ -290,21 +346,5 @@ def queue_operation_view(db: Session, operation_id: str) -> dict[str, Any] | Non
     return _operation_row_dict(row) if row else None
 
 
-def create_restart_operation(
-    db: Session,
-    actor_user_id: str,
-) -> tuple[dict[str, Any], bool]:
-    return create_queue_operation(db, actor_user_id, action="restart")
-
-
 def active_restart_operation(db: Session) -> dict[str, Any] | None:
     return active_queue_operation(db)
-
-
-def update_restart_operation(
-    db: Session,
-    operation_id: str,
-    status: str,
-    message_code: str,
-) -> None:
-    update_queue_operation(db, operation_id, status, message_code)

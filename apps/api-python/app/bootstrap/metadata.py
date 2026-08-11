@@ -12,7 +12,14 @@ from app.modules.metadata.infrastructure.providers import (
 )
 from app.modules.metadata.infrastructure.sources import (
     METADATA_SOURCE_KIND,
-    ensure_metadata_sources,
+    execute_metadata_source_seed_write,
+    prepare_metadata_source_seed_rows,
+    prepare_metadata_source_seed_write,
+    write_metadata_source_seed_rows,
+)
+from app.services.metadata_file_writeback import (
+    load_metadata_writeback_projection,
+    persist_metadata_writeback_intents,
 )
 
 
@@ -23,9 +30,14 @@ def build_automatic_metadata_request_gate() -> AutomaticMetadataRequestRateLimit
 __all__ = [
     "METADATA_SOURCE_KIND",
     "build_automatic_metadata_request_gate",
-    "ensure_metadata_sources",
+    "execute_metadata_source_seed_write",
     "get_provider_source",
     "list_enabled_provider_ids",
     "list_metadata_sources",
+    "load_metadata_writeback_projection",
+    "persist_metadata_writeback_intents",
+    "prepare_metadata_source_seed_rows",
+    "prepare_metadata_source_seed_write",
     "source_to_dict",
+    "write_metadata_source_seed_rows",
 ]

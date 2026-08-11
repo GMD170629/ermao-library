@@ -6,8 +6,9 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, inspect, select, update
+from sqlalchemy import case, func, inspect, select, update
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.base import Executable
 
 from app.models.organize import OrganizeJob, OrganizeRun
 from app.modules.organize.infrastructure.policy import DEFAULT_RULES
@@ -184,40 +185,45 @@ def update_run_after_enqueue(
 
 
 def sync_organize_runs(db: Session) -> int:
-    if not has_run_table(db) or not has_job_table(db):
-        return 0
-    runs = db.scalars(
-        select(OrganizeRun).where(OrganizeRun.status.in_(ACTIVE_RUN_STATUSES))
-    ).all()
-    updated = 0
-    now = _now()
-    for run in runs:
-        counts = job_status_counts_for_run(db, run.id)
-        completed = sum(
-            counts.get(item, 0) for item in ("APPLIED", "COMPLETED", "DISMISSED")
+    return execute_sync_organize_runs(db, prepare_sync_organize_runs(now=_now()))
+
+
+def _job_count_for_run(statuses: tuple[str, ...]) -> Any:
+    return (
+        select(func.count())
+        .select_from(OrganizeJob)
+        .where(
+            OrganizeJob.run_id == OrganizeRun.id,
+            OrganizeJob.status.in_(statuses),
         )
-        review = counts.get("REVIEWING", 0)
-        failed = counts.get("FAILED", 0)
-        cancelled = counts.get("CANCELLED", 0)
-        terminal = completed + review + failed + cancelled
-        queued = int(run.queued_count or 0)
-        done = terminal >= queued
-        db.execute(
-            update(OrganizeRun)
-            .where(OrganizeRun.id == run.id)
-            .values(
-                status="COMPLETED" if done else "RUNNING",
-                completed_count=completed,
-                review_count=review,
-                failed_count=failed,
-                finished_at=now if done else None,
-                updated_at=now,
-            )
+        .correlate(OrganizeRun)
+        .scalar_subquery()
+    )
+
+
+def prepare_sync_organize_runs(*, now: datetime) -> Executable:
+    completed = _job_count_for_run(("APPLIED", "COMPLETED", "DISMISSED"))
+    review = _job_count_for_run(("REVIEWING",))
+    failed = _job_count_for_run(("FAILED",))
+    cancelled = _job_count_for_run(("CANCELLED",))
+    done = completed + review + failed + cancelled >= OrganizeRun.queued_count
+    return (
+        update(OrganizeRun)
+        .where(OrganizeRun.status.in_(ACTIVE_RUN_STATUSES))
+        .values(
+            status=case((done, "COMPLETED"), else_="RUNNING"),
+            completed_count=completed,
+            review_count=review,
+            failed_count=failed,
+            finished_at=case((done, now), else_=None),
+            updated_at=now,
         )
-        updated += 1
-    if updated:
-        db.flush()
-    return updated
+    )
+
+
+def execute_sync_organize_runs(db: Session, statement: Executable) -> int:
+    result = db.execute(statement)
+    return int(result.rowcount or 0)
 
 
 def projected_run_view(db: Session, row: dict[str, Any]) -> dict[str, Any]:

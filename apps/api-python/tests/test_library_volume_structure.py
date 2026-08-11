@@ -4,10 +4,6 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
-
 from app.core.auth import hash_password
 from app.core.config import Settings
 from app.models.auth import ReaderBookmark, User, UserMonitorFolderAccess
@@ -15,6 +11,7 @@ from app.models.import_pipeline import ImportTask
 from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
+    LibraryOperation,
     LibraryReadingProgress,
     LibraryVolume,
     LibraryWork,
@@ -23,6 +20,7 @@ from app.models.library import (
 from app.models.settings import MonitorFolder
 from app.modules.library.application.volume_commands import (
     BatchVolumeCommand,
+    BatchVolumeOutcome,
     LibraryActor,
     OperationSummary,
     VolumeContext,
@@ -33,6 +31,9 @@ from app.modules.library.application.volume_commands import (
 from app.modules.library.presentation.work_ops import (
     _delete_import_linked_library_scope,
 )
+from fastapi.testclient import TestClient
+from sqlalchemy import event, func, select
+from sqlalchemy.orm import Session
 
 
 def _login_admin(client: TestClient, db: Session) -> User:
@@ -432,6 +433,152 @@ def test_batch_prevalidation_rejects_cross_work_selection_without_mutation(
     assert db_session.get(LibraryVolume, foreign_volumes[0].id) is not None
 
 
+def test_batch_transfer_split_and_delete_preserve_their_public_results(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login_admin(client, db_session)
+    transfer_source, transfer_volumes = _batch_volume_aggregate(
+        db_session,
+        work_id="batch-transfer-source",
+        volume_ids=("batch-transfer-one", "batch-transfer-two"),
+    )
+    transfer_target, _ = _batch_volume_aggregate(
+        db_session,
+        work_id="batch-transfer-target",
+        volume_ids=("batch-transfer-existing",),
+    )
+
+    transfer = client.post(
+        f"/api/works/{transfer_source.id}/volumes/batch",
+        json={
+            "action": "TRANSFER",
+            "volumeIds": [volume.id for volume in transfer_volumes],
+            "targetWorkId": transfer_target.id,
+        },
+    )
+
+    assert transfer.status_code == 200
+    assert transfer.json()["data"]["deletedWork"] is True
+    assert transfer.json()["data"]["targetWorkIds"] == [transfer_target.id]
+    db_session.expire_all()
+    transferred_work_ids = db_session.scalars(
+        select(LibraryMediaVersion.work_id)
+        .join(LibraryVolume)
+        .where(LibraryVolume.id.in_([volume.id for volume in transfer_volumes]))
+    ).all()
+    assert transferred_work_ids == [transfer_target.id, transfer_target.id]
+    assert db_session.get(LibraryWork, transfer_source.id) is None
+
+    split_source, split_volumes = _batch_volume_aggregate(
+        db_session,
+        work_id="batch-split-source",
+        volume_ids=("batch-split-one", "batch-split-two"),
+    )
+    split = client.post(
+        f"/api/works/{split_source.id}/volumes/batch",
+        json={
+            "action": "SPLIT",
+            "volumeIds": [volume.id for volume in split_volumes],
+        },
+    )
+
+    assert split.status_code == 200
+    split_payload = split.json()["data"]
+    assert split_payload["deletedWork"] is True
+    assert len(split_payload["targetWorkIds"]) == 2
+    db_session.expire_all()
+    split_work_ids = set(
+        db_session.scalars(
+            select(LibraryMediaVersion.work_id)
+            .join(LibraryVolume)
+            .where(LibraryVolume.id.in_([volume.id for volume in split_volumes]))
+        ).all()
+    )
+    assert split_work_ids == set(split_payload["targetWorkIds"])
+    assert db_session.get(LibraryWork, split_source.id) is None
+
+    delete_source, delete_volumes = _batch_volume_aggregate(
+        db_session,
+        work_id="batch-delete-source",
+        volume_ids=("batch-delete-one", "batch-delete-two"),
+    )
+    deletion = client.post(
+        f"/api/works/{delete_source.id}/volumes/batch",
+        json={
+            "action": "DELETE",
+            "volumeIds": [volume.id for volume in delete_volumes],
+        },
+    )
+
+    assert deletion.status_code == 200
+    assert deletion.json()["data"]["deletedWork"] is True
+    db_session.expire_all()
+    assert db_session.get(LibraryWork, delete_source.id) is None
+    assert all(
+        db_session.get(LibraryVolume, volume.id) is None for volume in delete_volumes
+    )
+    assert (
+        db_session.scalar(
+            select(func.count(LibraryOperation.id)).where(
+                LibraryOperation.target_id.in_(
+                    [
+                        *[volume.id for volume in transfer_volumes],
+                        *[volume.id for volume in split_volumes],
+                        *[volume.id for volume in delete_volumes],
+                    ]
+                )
+            )
+        )
+        == 6
+    )
+
+
+def test_batch_set_media_kind_dml_grows_only_at_sqlite_parameter_chunks(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login_admin(client, db_session)
+    dml_counts: list[int] = []
+    for size in (1, 25, 130):
+        work, volumes = _batch_volume_aggregate(
+            db_session,
+            work_id=f"batch-budget-{size}",
+            volume_ids=tuple(f"batch-budget-{size}-{index}" for index in range(size)),
+        )
+        statements: list[str] = []
+
+        def record_statement(
+            _connection: object,
+            _cursor: object,
+            statement: str,
+            _parameters: object,
+            _context: object,
+            _executemany: bool,
+        ) -> None:
+            if statement.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")):
+                statements.append(statement)
+
+        engine = db_session.get_bind()
+        event.listen(engine, "before_cursor_execute", record_statement)
+        try:
+            response = client.post(
+                f"/api/works/{work.id}/volumes/batch",
+                json={
+                    "action": "SET_MEDIA_KIND",
+                    "volumeIds": [volume.id for volume in volumes],
+                    "targetMediaKind": "COMIC",
+                },
+            )
+        finally:
+            event.remove(engine, "before_cursor_execute", record_statement)
+        assert response.status_code == 200
+        dml_counts.append(len(statements))
+
+    assert dml_counts[1] <= dml_counts[0] + 1
+    assert dml_counts[2] <= dml_counts[1] + 2
+
+
 def test_batch_volume_download_returns_one_ordered_zip(
     client: TestClient,
     db_session: Session,
@@ -827,6 +974,14 @@ def test_batch_volume_operation_rolls_back_after_a_mid_batch_failure() -> None:
                 source_path=Path(f"{volume_id}.epub"),
             )
 
+        def get_volume_contexts(
+            self, *, volume_ids: tuple[str, ...], **kwargs: object
+        ) -> tuple[VolumeContext, ...]:
+            return tuple(
+                self.get_volume_context(volume_id=volume_id, **kwargs)
+                for volume_id in volume_ids
+            )
+
         def delete_volume(
             self, *, volume_id: str, **_kwargs: object
         ) -> VolumeDeleteOutcome:
@@ -846,6 +1001,11 @@ def test_batch_volume_operation_rolls_back_after_a_mid_batch_failure() -> None:
                     undo_available=True,
                 ),
             )
+
+        def apply_batch(self, **_kwargs: object) -> BatchVolumeOutcome:
+            self.delete_volume(volume_id="one")
+            self.delete_volume(volume_id="two")
+            raise AssertionError("unreachable")
 
     class UnitOfWork:
         committed = False

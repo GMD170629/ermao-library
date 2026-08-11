@@ -40,29 +40,25 @@ fi
 
 (
   cd "$PYTHON_API_DIR"
+  python -m app.bootstrap.startup_data_migrations
+)
+
+(
+  cd "$PYTHON_API_DIR"
   uvicorn app.main:app --host 127.0.0.1 --port "$PYTHON_API_PORT"
 ) &
 API_PID="$!"
 
-api_ready=0
-attempt=0
-while [ "$attempt" -lt 60 ]; do
+while :; do
   if ! kill -0 "$API_PID" 2>/dev/null; then
     wait "$API_PID" || exit $?
     exit 1
   fi
   if python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${PYTHON_API_PORT}/api/health', timeout=1).read()" >/dev/null 2>&1; then
-    api_ready=1
     break
   fi
-  attempt=$((attempt + 1))
   sleep 1
 done
-
-if [ "$api_ready" -ne 1 ]; then
-  echo "Python API did not become ready within 60 seconds" >&2
-  exit 1
-fi
 
 (
   cd "$PYTHON_API_DIR"

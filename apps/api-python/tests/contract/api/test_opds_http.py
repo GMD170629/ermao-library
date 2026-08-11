@@ -1,7 +1,10 @@
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from PIL import Image
+from sqlalchemy import event, func, select
 from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password
@@ -13,6 +16,7 @@ from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
     LibraryReadingProgress,
+    LibraryReadingUnit,
     LibraryVolume,
     LibraryWork,
 )
@@ -150,64 +154,94 @@ def test_opds_basic_catalog_and_progression_contract(
         assert stale.json()["type"].endswith("progression-date")
 
 
-def test_opds_basic_login_requests_are_recorded_in_system_events(
+def test_opds_missing_comic_page_index_does_not_read_archive(
     test_settings: Settings,
     db_session: Session,
 ) -> None:
     _seed_opds_publication(db_session)
     _enable_opds(db_session)
+    archive_path = test_settings.resolved_storage_root / "books" / "opds.cbz"
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    page_image = BytesIO()
+    Image.new("RGB", (16, 24), color=(120, 40, 20)).save(page_image, format="PNG")
+    with ZipFile(archive_path, "w", compression=ZIP_DEFLATED) as archive:
+        archive.writestr("001.png", page_image.getvalue())
+    source = db_session.get(LibraryFile, "opds-file")
+    assert source is not None
+    source.path = str(archive_path.relative_to(test_settings.resolved_storage_root))
+    source.kind = "COMIC"
+    source.size_bytes = archive_path.stat().st_size
+    db_session.commit()
     app = create_app(test_settings, session_factory=lambda: db_session)
+    dml_statements: list[str] = []
+
+    def capture_dml(conn, cursor, statement, parameters, context, executemany):
+        if context.isinsert or context.isupdate or context.isdelete:
+            dml_statements.append(statement)
 
     with TestClient(app) as client:
-        assert client.get("/opds/v1.2/catalog").status_code == 401
-        assert (
-            client.get(
-                "/opds/v1.2/catalog?page=2",
-                auth=("reader@example.com", "wrong-password"),
-            ).status_code
-            == 401
-        )
-        assert (
-            client.get(
-                "/opds/v1.2/works",
+        event.listen(db_session.bind, "before_cursor_execute", capture_dml)
+        try:
+            response = client.get(
+                "/opds/v1.2/volumes/opds-volume/pages/0",
                 auth=("reader@example.com", "reader-password"),
-            ).status_code
-            == 200
-        )
+            )
+        finally:
+            event.remove(db_session.bind, "before_cursor_execute", capture_dml)
 
-    events = db_session.scalars(
-        select(SystemEvent)
-        .where(SystemEvent.source == "opds")
-        .order_by(SystemEvent.created_at.asc())
-    ).all()
-    assert [(event.level, event.action) for event in events] == [
-        ("warning", "authentication.failed"),
-        ("info", "authentication.succeeded"),
-    ]
-    assert events[0].actor_type == "anonymous"
-    assert events[0].actor_id is None
-    assert events[0].message == "OPDS 登录失败：凭据无效"
-    assert events[0].metadata_json == {
-        "clientAddress": "testclient",
-        "method": "GET",
-        "path": "/opds/v1.2/catalog",
-        "username": "reader@example.com",
-    }
-    assert events[1].actor_type == "user"
-    assert events[1].actor_id == "opds-user"
-    assert events[1].message == "OPDS 登录成功"
-    assert events[1].metadata_json == {
-        "clientAddress": "testclient",
-        "method": "GET",
-        "path": "/opds/v1.2/works",
-        "username": "reader@example.com",
-    }
-    assert "password" not in str([event.metadata_json for event in events]).lower()
+    assert response.status_code == 404
+    assert dml_statements == []
+    assert db_session.scalar(select(func.count()).select_from(LibraryReadingUnit)) == 0
 
 
-def test_opds_throttled_login_request_is_recorded_in_english(
+def test_opds_basic_login_requests_are_logged_without_database_writes(
     test_settings: Settings,
     db_session: Session,
+    caplog,
+) -> None:
+    _seed_opds_publication(db_session)
+    _enable_opds(db_session)
+    caplog.set_level("INFO", logger="app.bootstrap.opds")
+    app = create_app(test_settings, session_factory=lambda: db_session)
+
+    dml_statements: list[str] = []
+
+    def capture_dml(conn, cursor, statement, parameters, context, executemany):
+        if context.isinsert or context.isupdate or context.isdelete:
+            dml_statements.append(statement)
+
+    with TestClient(app) as client:
+        event.listen(db_session.bind, "before_cursor_execute", capture_dml)
+        try:
+            assert client.get("/opds/v1.2/catalog").status_code == 401
+            assert (
+                client.get(
+                    "/opds/v1.2/catalog?page=2",
+                    auth=("reader@example.com", "wrong-password"),
+                ).status_code
+                == 401
+            )
+            assert (
+                client.get(
+                    "/opds/v1.2/works",
+                    auth=("reader@example.com", "reader-password"),
+                ).status_code
+                == 200
+            )
+        finally:
+            event.remove(db_session.bind, "before_cursor_execute", capture_dml)
+
+    assert dml_statements == []
+    assert db_session.scalar(select(func.count()).select_from(SystemEvent)) == 0
+    assert "opds.authentication outcome=failed" in caplog.text
+    assert "opds.authentication outcome=succeeded" in caplog.text
+    assert "reader-password" not in caplog.text
+
+
+def test_opds_throttled_login_request_is_logged_without_database_write(
+    test_settings: Settings,
+    db_session: Session,
+    caplog,
 ) -> None:
     _seed_opds_publication(db_session)
     _enable_opds(db_session)
@@ -230,31 +264,10 @@ def test_opds_throttled_login_request_is_recorded_in_english(
         )
         assert throttled.status_code == 429
 
-    events = db_session.scalars(
-        select(SystemEvent)
-        .where(SystemEvent.source == "opds")
-        .order_by(SystemEvent.created_at.asc())
-    ).all()
-    assert [event.action for event in events] == [
-        "authentication.failed",
-        "authentication.failed",
-        "authentication.failed",
-        "authentication.failed",
-        "authentication.failed",
-        "authentication.throttled",
-    ]
-    assert events[-1].level == "warning"
-    assert events[-1].message == "OPDS sign-in throttled: too many attempts."
-    throttled_metadata = dict(events[-1].metadata_json)
-    retry_after_seconds = throttled_metadata.pop("retryAfterSeconds")
-    assert throttled_metadata == {
-        "clientAddress": "testclient",
-        "method": "GET",
-        "path": "/opds/v1.2/catalog",
-        "username": "reader@example.com",
-    }
-    assert isinstance(retry_after_seconds, int)
-    assert retry_after_seconds >= 1
+    assert db_session.scalar(select(func.count()).select_from(SystemEvent)) == 0
+    assert caplog.text.count("opds.authentication outcome=failed") == 5
+    assert "opds.authentication outcome=throttled" in caplog.text
+    assert "reader-password" not in caplog.text
 
 
 def test_opds_routes_are_absent_when_disabled(

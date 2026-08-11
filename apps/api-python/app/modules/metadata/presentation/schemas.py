@@ -12,6 +12,22 @@ from app.contracts.metadata_writeback import MetadataWritebackOperationContract
 ProviderConfigValue = str | bool | int | float | list[str] | None
 
 
+class MetadataProviderPipelineItemRequest(HttpContractModel):
+    provider_id: str = Field(alias="providerId", min_length=1)
+    enabled: bool = False
+
+
+class UpdateMetadataProviderPipelineRequest(HttpContractModel):
+    items: list[MetadataProviderPipelineItemRequest]
+
+
+class UpdateMetadataProviderRequest(HttpContractModel):
+    enabled: bool | None = None
+    priority: int | str | None = None
+    config: dict[str, ProviderConfigValue] | None = None
+    clear_secrets: list[str] | None = Field(default=None, alias="clearSecrets")
+
+
 class ProviderConfigField(HttpContractModel):
     key: str
     label: str
@@ -91,6 +107,7 @@ class MetadataWritebackPayload(HttpContractModel):
 
 class MetadataOpfQueueStatus(HttpContractModel):
     pending_targets: int = Field(alias="pendingTargets")
+    pending_preparations: int = Field(alias="pendingPreparations")
     capacity: int
     utilization: float
 

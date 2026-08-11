@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 
 from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
@@ -15,21 +16,46 @@ from app.contracts.local_metadata import (
 from app.models.organize import OrganizePolicy
 
 
-def load_local_metadata_priority(
+@dataclass(frozen=True, slots=True)
+class RawLocalMetadataPriorityProjection:
+    available: bool
+    stored_json: str | None = None
+
+
+def load_raw_local_metadata_priority_projection(
     db: Session,
-) -> tuple[LocalMetadataSource, ...]:
+) -> RawLocalMetadataPriorityProjection:
+    """Read only the persisted JSON column for transaction-external parsing."""
+
     if not inspect(db.connection()).has_table(OrganizePolicy.__tablename__):
-        return DEFAULT_LOCAL_METADATA_PRIORITY
+        return RawLocalMetadataPriorityProjection(available=False)
     stored = db.scalar(
         select(OrganizePolicy.local_metadata_priority_json).where(
             OrganizePolicy.id == "default"
         )
     )
+    return RawLocalMetadataPriorityProjection(
+        available=True,
+        stored_json=None if stored is None else str(stored),
+    )
+
+
+def prepare_local_metadata_priority(
+    projection: RawLocalMetadataPriorityProjection,
+) -> tuple[LocalMetadataSource, ...]:
+    """Validate persisted priority outside the database transaction."""
+
+    if not projection.available:
+        return DEFAULT_LOCAL_METADATA_PRIORITY
     try:
-        parsed = json.loads(stored or "[]")
+        parsed = json.loads(projection.stored_json or "[]")
         return validate_local_metadata_priority(parsed)
     except (TypeError, ValueError):
         return DEFAULT_LOCAL_METADATA_PRIORITY
 
 
-__all__ = ["load_local_metadata_priority"]
+__all__ = [
+    "RawLocalMetadataPriorityProjection",
+    "load_raw_local_metadata_priority_projection",
+    "prepare_local_metadata_priority",
+]

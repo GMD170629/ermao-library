@@ -1,33 +1,34 @@
 import json
+import os
 
 import pytest
-from sqlalchemy import select, text
-from sqlalchemy.exc import OperationalError
-
+from app.bootstrap.metadata import (
+    prepare_metadata_source_seed_rows,
+    write_metadata_source_seed_rows,
+)
 from app.models.import_pipeline import Source
 from app.models.organize import MetadataProviderPipeline, OrganizePolicy
+from app.modules.metadata.domain.providers import BUILTIN_MANIFESTS
 from app.services import metadata_lookup_queue as queue
 from app.services.metadata_lookup_queue import (
     process_metadata_lookup_task,
     recover_stale_metadata_lookup_tasks,
 )
-from app.services.metadata_provider_registry import (
-    list_metadata_provider_pipelines,
-    list_metadata_providers,
-    search_with_metadata_provider,
-)
+from app.services.metadata_provider_registry import search_with_metadata_provider
 from app.services.organize_service import (
     external_metadata_cache_get,
     external_metadata_cache_put,
     metadata_candidate_title_exact_match,
     metadata_search_candidates,
 )
+from sqlalchemy import select, text
+from sqlalchemy.exc import OperationalError
 from tests.test_worker_importer import create_worker_tables
 
 
 def _disable_all_metadata_providers(db) -> None:
-    list_metadata_providers(db)
-    list_metadata_provider_pipelines(db)
+    rows = prepare_metadata_source_seed_rows(BUILTIN_MANIFESTS)
+    write_metadata_source_seed_rows(db, rows)
     for source in db.scalars(select(Source).where(Source.kind == "metadata")):
         source.enabled = False
     for pipeline in db.scalars(select(MetadataProviderPipeline)):
@@ -523,8 +524,8 @@ def test_lookup_uses_enabled_source_without_legacy_system_settings(
     db_session, test_settings, monkeypatch
 ):
     create_worker_tables(db_session)
-    list_metadata_providers(db_session)
-    list_metadata_provider_pipelines(db_session)
+    rows = prepare_metadata_source_seed_rows(BUILTIN_MANIFESTS)
+    write_metadata_source_seed_rows(db_session, rows)
     pipeline = db_session.get(MetadataProviderPipeline, ("EBOOK", "bangumi"))
     assert pipeline is not None
     pipeline.enabled = True
@@ -712,6 +713,17 @@ def test_lookup_updates_identity_and_fills_other_gaps(
         "tags": '["推理"]',
         "organized": 1,
     }
+    facets = {
+        (str(row.kind), str(row.name))
+        for row in db_session.execute(
+            text(
+                "SELECT f.kind, f.name FROM LibraryFacet f "
+                "JOIN LibraryWorkFacet wf ON wf.facetId = f.id "
+                "WHERE wf.workId = 'work-lookup'"
+            )
+        )
+    }
+    assert facets == {("AUTHOR", "柊裕二"), ("TAG", "推理")}
     lookup = db_session.execute(
         text("SELECT appliedFields FROM MetadataLookupTask WHERE id = 'lookup-1'")
     ).scalar()
@@ -732,12 +744,102 @@ def test_lookup_updates_identity_and_fills_other_gaps(
     )
 
 
+def test_remote_cover_publish_failure_compensates_and_retries(
+    db_session, test_settings, monkeypatch
+):
+    create_worker_tables(db_session)
+    task = _insert_lookup_fixture(
+        db_session,
+        provider_order=["douban"],
+        local_cover=None,
+    )
+    candidate = {
+        "id": "douban-cover-retry",
+        "source": "douban",
+        "title": "黑暗坡食人树",
+        "author": "岛田庄司",
+        "coverUrl": "https://example.invalid/cover.jpg",
+    }
+    monkeypatch.setattr(
+        queue,
+        "search_with_metadata_provider",
+        lambda *_args, **_kwargs: {
+            "enabled": True,
+            "cacheHit": False,
+            "candidates": [candidate],
+        },
+    )
+    cover_dir = test_settings.resolved_storage_root / "covers"
+    cover_dir.mkdir(parents=True, exist_ok=True)
+    temporary_path = cover_dir / ".work-lookup-remote-test.jpg.part"
+    final_path = cover_dir / "work-lookup-remote-test.jpg"
+    temporary_path.write_bytes(b"temporary cover")
+    prepared_cover = queue._PreparedRemoteCover(
+        temporary_path=temporary_path,
+        final_path=final_path,
+        relative_final_path=str(
+            final_path.relative_to(test_settings.resolved_storage_root)
+        ),
+    )
+    monkeypatch.setattr(queue, "_download_remote_cover", lambda *_args: prepared_cover)
+    monkeypatch.setattr(
+        queue,
+        "_publish_remote_cover",
+        lambda *_args: (_ for _ in ()).throw(OSError("publish failed")),
+    )
+
+    assert process_metadata_lookup_task(db_session, test_settings, task) == "PENDING"
+
+    work = db_session.execute(
+        text(
+            "SELECT coverPath, coverStatus FROM LibraryWork "
+            "WHERE id = 'work-lookup'"
+        )
+    ).mappings().one()
+    assert work["coverPath"] is None
+    assert work["coverStatus"] == "PENDING"
+    assert temporary_path.exists() is False
+    assert final_path.exists() is False
+    assert (
+        db_session.execute(
+            text("SELECT status FROM MetadataLookupTask WHERE id = 'lookup-1'")
+        ).scalar()
+        == "PENDING"
+    )
+
+
+def test_old_orphan_remote_cover_parts_are_cleaned(tmp_path):
+    cover_dir = tmp_path / "covers"
+    cover_dir.mkdir()
+    orphan = cover_dir / ".work-1-remote-old.jpg.part"
+    recent = cover_dir / ".work-1-remote-recent.jpg.part"
+    another_work = cover_dir / ".work-2-remote-old.jpg.part"
+    for path in (orphan, recent, another_work):
+        path.write_bytes(b"part")
+    current_time = 2 * queue.ORPHAN_COVER_PART_MAX_AGE_SECONDS
+    os.utime(orphan, (0, 0))
+    os.utime(another_work, (0, 0))
+    os.utime(recent, (current_time, current_time))
+
+    removed = queue._cleanup_orphan_remote_cover_parts(
+        cover_dir,
+        work_id="work-1",
+        current_time=current_time,
+    )
+
+    assert removed == 1
+    assert orphan.exists() is False
+    assert recent.exists() is True
+    assert another_work.exists() is True
+
+
 def test_stale_running_lookup_is_recovered(db_session):
     create_worker_tables(db_session)
     _insert_lookup_fixture(db_session)
     db_session.execute(
         text(
-            "UPDATE MetadataLookupTask SET startedAt = 946684800000 WHERE id = 'lookup-1'"
+            "UPDATE MetadataLookupTask SET startedAt = 946684800000, "
+            "leaseExpiresAt = 946684800000 WHERE id = 'lookup-1'"
         )
     )
     db_session.commit()
@@ -868,6 +970,7 @@ def test_ai_metadata_cache_reuses_only_non_empty_successes(db_session, monkeypat
     calls = []
 
     def successful_ai(*_args, **_kwargs):
+        assert not db_session.in_transaction()
         calls.append("success")
         return {
             "provider": "ai",

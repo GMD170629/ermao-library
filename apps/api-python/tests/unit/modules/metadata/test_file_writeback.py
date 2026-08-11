@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,7 @@ from app.modules.imports.infrastructure.sidecar_opf import discover_sidecar_opf
 from app.modules.metadata.application.opf import parse_opf_metadata
 from app.modules.metadata.infrastructure.file_writeback import (
     MetadataWritebackError,
+    cleanup_orphan_prepared_files,
     output_path_for,
     prepare_writeback,
     publish_prepared,
@@ -212,3 +214,33 @@ def test_opf_metadata_file_is_never_treated_as_a_mutable_source_book(
         prepare_writeback(str(source), _payload(source), tmp_path)
 
     assert source.read_bytes() == original
+
+
+def test_orphan_cleanup_is_bounded_to_stale_unprotected_parts(
+    tmp_path: Path,
+) -> None:
+    old = tmp_path / ".book.opf.shuku-old.part"
+    recent = tmp_path / ".book.opf.shuku-recent.part"
+    protected = tmp_path / ".book.opf.shuku-protected.part"
+    unrelated = tmp_path / "keep.part"
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    nested_old = nested / ".book.opf.shuku-nested.part"
+    for path in (old, recent, protected, unrelated, nested_old):
+        path.write_bytes(b"temporary")
+    old_timestamp = 1_000.0
+    for path in (old, protected, nested_old):
+        os.utime(path, (old_timestamp, old_timestamp))
+
+    removed = cleanup_orphan_prepared_files(
+        (tmp_path,),
+        protected_paths=frozenset({protected}),
+        now_seconds=old_timestamp + 24 * 60 * 60 + 1,
+    )
+
+    assert removed == 1
+    assert not old.exists()
+    assert recent.exists()
+    assert protected.exists()
+    assert unrelated.exists()
+    assert nested_old.exists()

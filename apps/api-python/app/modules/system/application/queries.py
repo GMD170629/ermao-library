@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -85,13 +85,19 @@ def prepare_system_settings_update(
             status_code=400,
             details={"keys": unsupported_keys},
         )
-    clear_keys = {str(key) for key in requested_clear_keys if str(key) in SENSITIVE_SYSTEM_SETTING_KEYS}
+    clear_keys = {
+        str(key)
+        for key in requested_clear_keys
+        if str(key) in SENSITIVE_SYSTEM_SETTING_KEYS
+    }
     saved: dict[str, Any] = {}
     for raw_key, value in values.items():
         key = str(raw_key)
         if key in clear_keys:
             continue
-        if key in SENSITIVE_SYSTEM_SETTING_KEYS and (value is None or not str(value).strip()):
+        if key in SENSITIVE_SYSTEM_SETTING_KEYS and (
+            value is None or not str(value).strip()
+        ):
             continue
         if key == "workDetail.tabOrder":
             value = normalize_detail_tab_order(value)
@@ -208,6 +214,6 @@ def backup_detail_payload(
             "id": backup_id,
             "name": path.name,
             "sizeBytes": path.stat().st_size,
-            "createdAt": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
+            "createdAt": datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat(),
         }
     }

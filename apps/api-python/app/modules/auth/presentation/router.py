@@ -1,11 +1,12 @@
-from fastapi import APIRouter
-
 from app.api.typed_route import TypedContractRoute
 from app.modules.auth.presentation.http import router as session_router
 from app.modules.auth.presentation.users import (
     preferences_router,
+)
+from app.modules.auth.presentation.users import (
     router as users_router,
 )
+from fastapi import APIRouter
 
 router = APIRouter(route_class=TypedContractRoute)
 router.include_router(session_router, prefix="/auth", tags=["auth"])

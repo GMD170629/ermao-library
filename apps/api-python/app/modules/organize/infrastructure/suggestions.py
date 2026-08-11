@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import inspect, select, update
+from sqlalchemy import insert, inspect, select, update
 from sqlalchemy.orm import Session
 
 from app.models.organize import MetadataSuggestion
@@ -69,8 +69,8 @@ def insert_suggestion(
     status: str,
     now: Any,
 ) -> None:
-    db.add(
-        MetadataSuggestion(
+    db.execute(
+        insert(MetadataSuggestion).values(
             id=suggestion_id,
             job_id=job_id,
             field=field,
@@ -84,7 +84,13 @@ def insert_suggestion(
             updated_at=now,
         )
     )
-    db.flush()
+
+
+def insert_suggestions(db: Session, rows: tuple[dict[str, Any], ...]) -> None:
+    """Insert a prepared suggestion batch without per-row ORM flushes."""
+    if not rows:
+        return
+    db.execute(insert(MetadataSuggestion), rows)
 
 
 def mark_suggestions_applied(db: Session, suggestion_ids: list[str]) -> None:
@@ -104,6 +110,21 @@ def dismiss_pending_suggestions(db: Session, job_id: str) -> None:
         update(MetadataSuggestion)
         .where(
             MetadataSuggestion.job_id == job_id,
+            MetadataSuggestion.status == "PENDING",
+        )
+        .values(status="DISMISSED")
+    )
+
+
+def dismiss_pending_suggestions_for_jobs(
+    db: Session, job_ids: tuple[str, ...]
+) -> None:
+    if not job_ids or not _has_table(db, "MetadataSuggestion"):
+        return
+    db.execute(
+        update(MetadataSuggestion)
+        .where(
+            MetadataSuggestion.job_id.in_(job_ids),
             MetadataSuggestion.status == "PENDING",
         )
         .values(status="DISMISSED")

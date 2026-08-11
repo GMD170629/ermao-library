@@ -3,17 +3,14 @@ from __future__ import annotations
 import hashlib
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request, Response
-from pydantic import EmailStr, TypeAdapter, ValidationError
-from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
-
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.auth import (
-    delete_personal_user_data,
     list_monitor_folder_ids,
-    replace_monitor_folder_access,
+    persist_admin_password_reset,
+    persist_admin_user_create,
+    persist_admin_user_delete,
+    persist_admin_user_update,
+    persist_user_preferences,
     validate_monitor_folder_ids,
 )
 from app.contracts.http_errors import ErrorResponses
@@ -22,12 +19,10 @@ from app.core.authorization import (
     authorization_context,
     is_admin,
     read_user_preferences,
-    write_user_preference,
 )
 from app.core.config import Settings, get_settings
 from app.core.i18n import configured_locale
 from app.db.session import get_db
-from app.models.auth import Session as UserSession
 from app.models.auth import User, cuid, db_timestamp
 from app.modules.auth.presentation.requests import (
     AdminCreateUserRequest,
@@ -58,7 +53,13 @@ from app.modules.auth.presentation.user_schemas import (
     UsersResponse,
     UserUnauthorizedError,
 )
-from app.services.system_events import record_system_event
+from app.modules.system.public import PreparedSystemEvent
+from app.services.system_events import prepare_system_event
+from fastapi import APIRouter, Depends, Request, Response
+from pydantic import EmailStr, TypeAdapter, ValidationError
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 router = APIRouter(route_class=TypedContractRoute)
 preferences_router = APIRouter(route_class=TypedContractRoute)
@@ -126,14 +127,6 @@ def _validate_folder_ids(db: Session, folder_ids: list[str]) -> list[str]:
     return validate_monitor_folder_ids(db, folder_ids)
 
 
-def _replace_folder_access(db: Session, user_id: str, folder_ids: list[str]) -> None:
-    replace_monitor_folder_access(db, user_id, folder_ids, db_timestamp())
-
-
-def _save_preference(db: Session, user_id: str, key: str, value: object) -> None:
-    write_user_preference(db, user_id, key, value)
-
-
 def _validate_preference(key: str, value: object) -> object:
     if key == "locale":
         if value not in {"zh-CN", "en-US"}:
@@ -186,16 +179,14 @@ def _active_admin_count(db: Session, *, exclude_user_id: str | None = None) -> i
     return query.count()
 
 
-def _audit_user_change(
-    db: Session,
+def _prepare_user_change_event(
     actor: User | None,
     action: str,
     target_id: str,
     message: str,
     metadata: dict[str, Any] | None = None,
-) -> None:
-    record_system_event(
-        db,
+) -> PreparedSystemEvent:
+    return prepare_system_event(
         source="authorization",
         action=action,
         message=message,
@@ -205,12 +196,6 @@ def _audit_user_change(
         target_id=target_id,
         metadata=metadata,
     )
-
-
-def _delete_personal_user_data(
-    db: Session, user_id: str, anonymous_user_id: str
-) -> None:
-    delete_personal_user_data(db, user_id, anonymous_user_id)
 
 
 @router.get("/users")
@@ -305,26 +290,31 @@ def create_user(
         else False,
         authz_version=1,
     )
-    db.add(user)
-    db.flush()
-    _replace_folder_access(db, user.id, folder_ids)
-    _save_preference(db, user.id, "locale", payload.locale)
-    _audit_user_change(
-        db,
+    now = db_timestamp()
+    prepared_event = _prepare_user_change_event(
         actor,
         "user.created",
         user.id,
         "管理员创建了用户",
         {"role": user.role, "canManageSystem": user.can_manage_system},
     )
+
     try:
-        db.commit()
+        persist_admin_user_create(
+            db,
+            user=user,
+            locale=payload.locale,
+            folder_ids=folder_ids,
+            prepared_at=now,
+            event=prepared_event,
+        )
     except IntegrityError:
-        db.rollback()
         raise UserConflictError(
             CodedMessageBody(message="该邮箱已被使用", code="EMAIL_IN_USE")
         )
-    db.refresh(user)
+    user = db.get(User, user.id)
+    if user is None:
+        raise RuntimeError("created user was not persisted")
     return AdminUserResponse(
         data=AdminUserPayload(
             user=AdminUser.model_validate(_user_view(db, user)),
@@ -359,6 +349,8 @@ def update_user(
     fields_set = payload.model_fields_set
     next_role = payload.role if "role" in fields_set else user.role
     next_status = payload.status if "status" in fields_set else user.status
+    prepared_folder_ids: list[str] | None = None
+    prepared_locale: str | None = None
     removing_active_admin = (
         user.role == "admin"
         and user.status == "active"
@@ -378,44 +370,44 @@ def update_user(
                 code="LAST_ADMIN_REQUIRED",
             )
         )
+    next_email = user.email
+    next_name = user.name
+    next_can_manage_system = user.can_manage_system
+    next_can_view_manual_imports = user.can_view_manual_imports
     if "email" in fields_set and payload.email is not None:
-        email = str(payload.email).strip().lower()
+        next_email = str(payload.email).strip().lower()
         duplicate = (
             db.query(User.id)
-            .filter(func.lower(User.email) == email, User.id != user.id)
+            .filter(func.lower(User.email) == next_email, User.id != user.id)
             .first()
         )
         if duplicate is not None:
             raise UserConflictError(
                 CodedMessageBody(message="该邮箱已被使用", code="EMAIL_IN_USE")
             )
-        user.email = email
     if "name" in fields_set and payload.name is not None:
-        user.name = payload.name
-    user.role = next_role
-    user.status = next_status
+        next_name = payload.name
     if next_role == "admin":
-        user.can_manage_system = False
-        user.can_view_manual_imports = False
-        _replace_folder_access(db, user.id, [])
+        next_can_manage_system = False
+        next_can_view_manual_imports = False
+        prepared_folder_ids = []
     else:
         if "can_manage_system" in fields_set and payload.can_manage_system is not None:
-            user.can_manage_system = payload.can_manage_system
+            next_can_manage_system = payload.can_manage_system
         if (
             "can_view_manual_imports" in fields_set
             and payload.can_view_manual_imports is not None
         ):
-            user.can_view_manual_imports = payload.can_view_manual_imports
+            next_can_view_manual_imports = payload.can_view_manual_imports
         if (
             "monitor_folder_ids" in fields_set
             and payload.monitor_folder_ids is not None
         ):
             try:
-                _replace_folder_access(
-                    db, user.id, _validate_folder_ids(db, payload.monitor_folder_ids)
+                prepared_folder_ids = _validate_folder_ids(
+                    db, payload.monitor_folder_ids
                 )
             except ValueError as exc:
-                db.rollback()
                 raise UserBadRequestError(
                     CodedMessageBody(
                         message=str(exc),
@@ -423,31 +415,44 @@ def update_user(
                     )
                 ) from exc
     if "locale" in fields_set and payload.locale is not None:
-        _save_preference(db, user.id, "locale", payload.locale)
-    user.authz_version = int(user.authz_version or 1) + 1
-    user.updated_at = db_timestamp()
-    db.add(user)
-    if next_status == "disabled":
-        db.query(UserSession).filter(UserSession.user_id == user.id).delete(
-            synchronize_session=False
-        )
-    _audit_user_change(
-        db,
+        prepared_locale = payload.locale
+    next_authz_version = int(user.authz_version or 1) + 1
+    updated_at = db_timestamp()
+    prepared_user_values: dict[str, object] = {
+        "email": next_email,
+        "name": next_name,
+        "role": next_role,
+        "status": next_status,
+        "can_manage_system": next_can_manage_system,
+        "can_view_manual_imports": next_can_view_manual_imports,
+        "authz_version": next_authz_version,
+        "updated_at": updated_at,
+    }
+    prepared_event = _prepare_user_change_event(
         actor,
         "user.authorization.updated",
         user.id,
         "管理员更新了用户与权限",
         {
-            "role": user.role,
-            "status": user.status,
-            "canManageSystem": user.can_manage_system,
-            "authzVersion": user.authz_version,
+            "role": next_role,
+            "status": next_status,
+            "canManageSystem": next_can_manage_system,
+            "authzVersion": next_authz_version,
         },
     )
+
     try:
-        db.commit()
+        persist_admin_user_update(
+            db,
+            user_id=user.id,
+            user_values=prepared_user_values,
+            folder_ids=prepared_folder_ids,
+            locale=prepared_locale,
+            updated_at=updated_at,
+            disable_sessions=next_status == "disabled",
+            event=prepared_event,
+        )
     except IntegrityError:
-        db.rollback()
         raise UserConflictError(
             CodedMessageBody(message="该邮箱已被使用", code="EMAIL_IN_USE")
         )
@@ -478,16 +483,22 @@ def set_user_password(
         raise UserNotFoundError(
             CodedMessageBody(message="用户不存在", code="USER_NOT_FOUND")
         )
-    user.password_hash = hash_password(payload.password)
-    user.updated_at = db_timestamp()
-    db.add(user)
-    db.query(UserSession).filter(UserSession.user_id == user.id).delete(
-        synchronize_session=False
+    password_hash = hash_password(payload.password)
+    updated_at = db_timestamp()
+    prepared_event = _prepare_user_change_event(
+        actor,
+        "user.password.reset",
+        user.id,
+        "管理员重置了用户密码并撤销会话",
     )
-    _audit_user_change(
-        db, actor, "user.password.reset", user.id, "管理员重置了用户密码并撤销会话"
+
+    persist_admin_password_reset(
+        db,
+        user_id=user.id,
+        password_hash=password_hash,
+        updated_at=updated_at,
+        event=prepared_event,
     )
-    db.commit()
     return AdminPasswordChangedResponse(data=AdminPasswordChangedPayload())
 
 
@@ -540,9 +551,9 @@ def delete_user(
             )
         )
     deleted_user_id = user.id
-    anonymous_target = hashlib.sha256(
-        f"deleted-user:{user.id}".encode()
-    ).hexdigest()[:24]
+    anonymous_target = hashlib.sha256(f"deleted-user:{user.id}".encode()).hexdigest()[
+        :24
+    ]
     avatar_path = None
     if user.avatar_path:
         candidate = (settings.resolved_storage_root / user.avatar_path).resolve()
@@ -551,17 +562,20 @@ def delete_user(
             avatar_path = candidate
         except ValueError:
             avatar_path = None
-    _audit_user_change(
-        db,
+    prepared_event = _prepare_user_change_event(
         actor,
         "user.deleted",
         anonymous_target,
         "管理员永久删除了用户及其个人数据",
         {"formerRole": user.role, "deidentified": True},
     )
-    _delete_personal_user_data(db, user.id, anonymous_target)
-    db.delete(user)
-    db.commit()
+
+    persist_admin_user_delete(
+        db,
+        user_id=user.id,
+        anonymous_user_id=anonymous_target,
+        event=prepared_event,
+    )
     if avatar_path is not None:
         avatar_path.unlink(missing_ok=True)
         try:
@@ -627,9 +641,13 @@ def update_preferences(
                 code="INVALID_USER_PREFERENCE",
             )
         ) from exc
-    for key, value in normalized.items():
-        _save_preference(db, user.id, key, value)
-    db.commit()
+    preference_updated_at = db_timestamp()
+    persist_user_preferences(
+        db,
+        user_id=user.id,
+        preferences=normalized,
+        updated_at=preference_updated_at,
+    )
     locale = normalized.get("locale")
     if isinstance(locale, str):
         response.set_cookie(

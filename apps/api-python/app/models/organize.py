@@ -4,6 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Float,
     ForeignKey,
     Index,
@@ -235,7 +236,13 @@ class OrganizeJob(Base):
 class MetadataLookupTask(Base):
     __tablename__ = "MetadataLookupTask"
     __table_args__ = (
-        Index("MetadataLookupTask_status_nextAttemptAt_idx", "status", "nextAttemptAt"),
+        Index(
+            "MetadataLookupTask_claim_idx",
+            "status",
+            "nextAttemptAt",
+            "leaseExpiresAt",
+            "createdAt",
+        ),
         Index("MetadataLookupTask_workId_createdAt_idx", "workId", "createdAt"),
         Index("MetadataLookupTask_volumeId_idx", "volumeId"),
         Index("MetadataLookupTask_mediaVersionId_idx", "mediaVersionId"),
@@ -282,6 +289,12 @@ class MetadataLookupTask(Base):
     )
     next_attempt_at: Mapped[datetime | None] = mapped_column(
         "nextAttemptAt", TimestampMilliseconds(), nullable=True
+    )
+    lease_owner_id: Mapped[str | None] = mapped_column(
+        "leaseOwnerId", String(191), nullable=True
+    )
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        "leaseExpiresAt", TimestampMilliseconds(), nullable=True
     )
     result_source: Mapped[str | None] = mapped_column(
         "resultSource", Text, nullable=True
@@ -375,10 +388,132 @@ class MetadataWritebackOperation(Base):
     )
 
 
+class MetadataWritebackPreparation(Base):
+    """Durable intent whose expensive target discovery runs after commit."""
+
+    __tablename__ = "MetadataWritebackPreparation"
+    __table_args__ = (
+        Index(
+            "MetadataWritebackPreparation_claim_idx",
+            "status",
+            "nextAttemptAt",
+            "leaseExpiresAt",
+            "createdAt",
+        ),
+        Index(
+            "MetadataWritebackPreparation_operationId_idx",
+            "operationId",
+        ),
+        Index(
+            "MetadataWritebackPreparation_workId_idx",
+            "workId",
+        ),
+        UniqueConstraint(
+            "idempotencyKey",
+            name="MetadataWritebackPreparation_idempotency_key",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
+    operation_id: Mapped[str | None] = mapped_column(
+        "operationId",
+        String(191),
+        ForeignKey(
+            "MetadataWritebackOperation.id",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        nullable=True,
+    )
+    work_id: Mapped[str] = mapped_column(
+        "workId",
+        String(191),
+        ForeignKey("LibraryWork.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+    )
+    media_version_id: Mapped[str | None] = mapped_column(
+        "mediaVersionId",
+        String(191),
+        ForeignKey(
+            "LibraryMediaVersion.id",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        nullable=True,
+    )
+    volume_id: Mapped[str | None] = mapped_column(
+        "volumeId",
+        String(191),
+        ForeignKey("LibraryVolume.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+    )
+    lookup_task_id: Mapped[str | None] = mapped_column(
+        "lookupTaskId",
+        String(191),
+        ForeignKey(
+            "MetadataLookupTask.id",
+            ondelete="SET NULL",
+            onupdate="CASCADE",
+        ),
+        nullable=True,
+    )
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(
+        "idempotencyKey", String(64), nullable=False
+    )
+    source_revision: Mapped[str] = mapped_column(
+        "sourceRevision", String(191), nullable=False
+    )
+    snapshot_json: Mapped[str] = mapped_column(
+        "snapshotJson", Text, nullable=False, default="{}", server_default="{}"
+    )
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="PENDING", server_default="PENDING"
+    )
+    attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    lease_owner_id: Mapped[str | None] = mapped_column(
+        "leaseOwnerId", String(191), nullable=True
+    )
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        "leaseExpiresAt", TimestampMilliseconds(), nullable=True
+    )
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        "nextAttemptAt", TimestampMilliseconds(), nullable=True
+    )
+    error_code: Mapped[str | None] = mapped_column(
+        "errorCode", String(64), nullable=True
+    )
+    error_summary: Mapped[str | None] = mapped_column(
+        "errorSummary", Text, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        onupdate=db_timestamp,
+    )
+
+
 class MetadataWritebackTarget(Base):
     __tablename__ = "MetadataWritebackTarget"
     __table_args__ = (
-        Index("MetadataWritebackTarget_status_createdAt_idx", "status", "createdAt"),
+        Index(
+            "MetadataWritebackTarget_claim_idx",
+            "status",
+            "nextAttemptAt",
+            "leaseExpiresAt",
+            "createdAt",
+        ),
         Index("MetadataWritebackTarget_operationId_idx", "operationId"),
         UniqueConstraint(
             "operationId",
@@ -414,6 +549,12 @@ class MetadataWritebackTarget(Base):
     )
     next_attempt_at: Mapped[datetime | None] = mapped_column(
         "nextAttemptAt", TimestampMilliseconds(), nullable=True
+    )
+    lease_owner_id: Mapped[str | None] = mapped_column(
+        "leaseOwnerId", String(191), nullable=True
+    )
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        "leaseExpiresAt", TimestampMilliseconds(), nullable=True
     )
     prepared_path: Mapped[str | None] = mapped_column(
         "preparedPath", Text, nullable=True
@@ -451,10 +592,27 @@ class MetadataWritebackTarget(Base):
 
 class MetadataOpfQueueState(Base):
     __tablename__ = "MetadataOpfQueueState"
+    __table_args__ = (
+        CheckConstraint(
+            column("pendingTargets") >= 0,
+            name="MetadataOpfQueueState_pendingTargets_nonnegative",
+        ),
+        CheckConstraint(
+            column("pendingPreparations") >= 0,
+            name="MetadataOpfQueueState_pendingPreparations_nonnegative",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     pending_targets: Mapped[int] = mapped_column(
         "pendingTargets", Integer, nullable=False, default=0, server_default="0"
+    )
+    pending_preparations: Mapped[int] = mapped_column(
+        "pendingPreparations",
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
     )
     updated_at: Mapped[datetime] = mapped_column(
         "updatedAt",

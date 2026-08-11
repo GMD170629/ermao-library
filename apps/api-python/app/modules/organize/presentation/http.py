@@ -29,6 +29,7 @@ from app.modules.organize.presentation.schemas import (
     OrganizePolicyResponse,
     OrganizeRunsResponse,
     PendingOrganizeJobsResponse,
+    UpdateOrganizePolicyRequest,
 )
 from app.schemas.responses import fail
 from app.services.metadata_file_writeback import (
@@ -41,7 +42,7 @@ from app.services.organize_scheduler import (
     list_organize_runs,
     organize_candidate_summary,
     recognize_organize_job,
-    update_organize_policy,
+    update_organize_policy_command,
 )
 
 router = APIRouter(tags=["organize"], route_class=TypedContractRoute)
@@ -200,6 +201,7 @@ def get_organize_policy_route(
 
 @router.put("/organize/policy")
 async def update_organize_policy_route(
+    payload: UpdateOrganizePolicyRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -208,9 +210,10 @@ async def update_organize_policy_route(
     if auth_error:
         return auth_error
     try:
-        payload = await request.json()
-        policy = update_organize_policy(db, payload)
-        db.commit()
+        policy = update_organize_policy_command(
+            db,
+            payload.model_dump(by_alias=True, exclude_unset=True),
+        )
         return OrganizePolicyResponse(data={"policy": policy})
     except (TypeError, ValueError) as exc:
         return fail(str(exc), status_code=400)

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Protocol, TypeVar
-
-ResultT = TypeVar("ResultT")
+from types import TracebackType
+from typing import Protocol
 
 
 class AuthUnitOfWork(Protocol):
@@ -12,16 +10,27 @@ class AuthUnitOfWork(Protocol):
     def rollback(self) -> None: ...
 
 
-def execute_auth_write(
-    unit_of_work: AuthUnitOfWork,
-    operation: Callable[[], ResultT],
-) -> ResultT:
-    """Commit one authentication or user-administration state transition."""
+class AuthWriteTransaction:
+    """Own one auth write boundary whose body contains persistence calls only."""
 
-    try:
-        result = operation()
-        unit_of_work.commit()
-    except Exception:
-        unit_of_work.rollback()
-        raise
-    return result
+    def __init__(self, unit_of_work: AuthUnitOfWork) -> None:
+        self._unit_of_work = unit_of_work
+
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(
+        self,
+        exception_type: type[BaseException] | None,
+        exception: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool:
+        if exception_type is not None:
+            self._unit_of_work.rollback()
+            return False
+        try:
+            self._unit_of_work.commit()
+        except Exception:
+            self._unit_of_work.rollback()
+            raise
+        return False

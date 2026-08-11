@@ -11,7 +11,10 @@ from app.models.settings import MonitorFolder
 from app.modules.imports.application.dto import ImportTaskDTO, StageImportCommand
 from app.modules.imports.infrastructure import tasks as task_rows
 from app.modules.imports.infrastructure.task_mapper import import_task_dto_from_row
-from app.modules.system.infrastructure.events import record_system_event
+from app.services.system_events import (
+    prepare_system_event,
+    write_prepared_system_events,
+)
 
 
 class SqlAlchemyImportTaskStore:
@@ -88,8 +91,7 @@ class SqlAlchemyImportTaskStore:
         error_summary: str,
         now: int,
     ) -> None:
-        record_system_event(
-            self._db,
+        prepared_event = prepare_system_event(
             source="import",
             action="import.failed",
             level="error",
@@ -105,6 +107,7 @@ class SqlAlchemyImportTaskStore:
                 "finishedAt": now,
             },
         )
+        write_prepared_system_events(self._db, [prepared_event])
 
     def monitor_folder_exists(self, monitor_folder_id: str) -> bool:
         return (

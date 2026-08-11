@@ -123,6 +123,7 @@ expectIncludes('apps/web/next.config.js', 'beforeFiles');
 expectIncludes('apps/web/next.config.js', 'http://127.0.0.1:8000');
 expectIncludes('scripts/dev-test.sh', 'uv run --extra dev uvicorn app.main:app');
 expectIncludes('scripts/dev-test.sh', 'uv run --extra dev python -m app.worker.main');
+expectIncludes('scripts/dev-test.sh', 'uv run python -m app.bootstrap.startup_data_migrations');
 expectNotIncludes('scripts/dev-test.sh', 'pnpm --filter @shuku/scan-worker dev');
 expectIncludes('apps/web/Dockerfile.prod', 'scripts/start-unified-app.sh');
 expectIncludes('apps/web/Dockerfile.prod', 'pip install --no-cache-dir ./apps/api-python');
@@ -141,6 +142,7 @@ expectIncludes('docker-compose.prod.yml', '${MONITOR_HOST_PATH:-./monitor}:/moni
 expectIncludes('docker-compose.yml', '/path/to/another-library:/libraries/another');
 expectIncludes('docker-compose.prod.yml', '/path/to/another-library:/libraries/another');
 expectIncludes('docker-compose.prod.yml', 'scripts/start-unified-app.sh');
+expectIncludes('scripts/start-unified-app.sh', 'python -m app.bootstrap.startup_data_migrations');
 expectNotIncludes('docker-compose.yml', 'ADMIN_EMAIL');
 expectNotIncludes('docker-compose.yml', 'ADMIN_PASSWORD');
 expectNotIncludes('docker-compose.prod.yml', 'ADMIN_EMAIL');

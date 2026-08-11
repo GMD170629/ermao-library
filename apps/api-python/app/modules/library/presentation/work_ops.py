@@ -6,6 +6,7 @@ import logging
 import os
 from datetime import UTC, datetime
 from pathlib import Path
+from time import time_ns
 from typing import Any
 
 from sqlalchemy import inspect
@@ -14,12 +15,18 @@ from sqlalchemy.orm import Session
 
 from app.bootstrap.imports import import_http_store
 from app.bootstrap.library import (
+    delete_prepared_library_works,
     library_deletion,
     library_join_queries,
     library_storage,
 )
 from app.bootstrap.media import media_streaming
 from app.core.config import Settings
+from app.modules.library.application.work_deletion import (
+    PreparedFileQuarantineEntry,
+    PreparedLibraryWorkDeletion,
+)
+from app.modules.system.public import PreparedSystemEvent
 
 logger = logging.getLogger(__name__)
 _stored_path = media_streaming.stored_path
@@ -149,6 +156,7 @@ def _collect_work_source_paths(
     db: Session, work_id: str, settings: Settings
 ) -> list[Path]:
     paths: list[Path] = []
+
     def add(path_value: str | None, roots: list[Path]) -> None:
         path = _source_delete_path(path_value, db, settings, roots)
         if path:
@@ -219,38 +227,89 @@ def _delete_work_records(db: Session, work_id: str) -> dict[str, Any]:
 
 
 def _delete_work_and_storage(
-    db: Session, work_id: str, settings: Settings, *, delete_source: bool = False
+    db: Session,
+    work_id: str,
+    settings: Settings,
+    *,
+    delete_source: bool = False,
+    events: tuple[PreparedSystemEvent, ...] = (),
 ) -> dict[str, Any]:
-    managed_paths = _collect_work_storage_paths(db, work_id, settings)
-    source_paths = _collect_work_source_paths(db, work_id, settings)
-    managed_paths = [path for path in managed_paths if path not in source_paths]
-    record_cleanup = _delete_work_records(db, work_id)
-    deleted = bool(record_cleanup["deleted"])
-    if deleted:
-        db.commit()
-    managed_cleanup = (
-        _delete_storage_paths(managed_paths, settings)
-        if deleted
-        else {"deletedFiles": 0, "failedFileDeletes": []}
+    result = _delete_works_and_storage(
+        db,
+        (work_id,),
+        settings,
+        delete_source=delete_source,
+        events=events,
     )
-    source_cleanup = (
-        _delete_source_paths(source_paths)
-        if deleted and delete_source
-        else {"deletedFiles": 0, "missingFiles": [], "failedFileDeletes": []}
+    return {**result, "id": work_id}
+
+
+def _delete_works_and_storage(
+    db: Session,
+    work_ids: tuple[str, ...],
+    settings: Settings,
+    *,
+    delete_source: bool = False,
+    events: tuple[PreparedSystemEvent, ...] = (),
+) -> dict[str, Any]:
+    managed_paths = list(
+        dict.fromkeys(
+            path
+            for work_id in work_ids
+            for path in _collect_work_storage_paths(db, work_id, settings)
+        )
+    )
+    source_paths = list(
+        dict.fromkeys(
+            path
+            for work_id in work_ids
+            for path in _collect_work_source_paths(db, work_id, settings)
+        )
+    )
+    managed_paths = [path for path in managed_paths if path not in source_paths]
+    operation_id = f"delete_{time_ns()}"
+    quarantine_entries: list[PreparedFileQuarantineEntry] = []
+    for index, path in enumerate(managed_paths):
+        quarantine_root = (
+            settings.resolved_storage_root / ".shuku-starship-quarantine" / operation_id
+        )
+        quarantine_entries.append(
+            PreparedFileQuarantineEntry(
+                original_path=str(path),
+                quarantine_path=str(quarantine_root / f"{index}_{path.name}"),
+                quarantine_root=str(quarantine_root),
+                source_file=False,
+            )
+        )
+    if delete_source:
+        for index, path in enumerate(source_paths):
+            quarantine_root = path.parent / ".shuku-starship-quarantine" / operation_id
+            quarantine_entries.append(
+                PreparedFileQuarantineEntry(
+                    original_path=str(path),
+                    quarantine_path=str(
+                        quarantine_root / f"source_{index}_{path.name}"
+                    ),
+                    quarantine_root=str(quarantine_root),
+                    source_file=True,
+                )
+            )
+    outcome = delete_prepared_library_works(
+        db,
+        PreparedLibraryWorkDeletion(
+            work_ids=work_ids,
+            files=tuple(quarantine_entries),
+            events=events,
+        ),
     )
     return {
-        "deleted": deleted,
-        "id": work_id,
+        "deleted": bool(outcome.deleted),
         "deleteSource": delete_source,
-        "deletedDatabaseRecords": record_cleanup["deletedDatabaseRecords"],
-        "deletedFiles": int(managed_cleanup["deletedFiles"])
-        + int(source_cleanup["deletedFiles"]),
-        "deletedSourceFiles": source_cleanup["deletedFiles"],
-        "missingSourceFiles": source_cleanup["missingFiles"],
-        "failedFileDeletes": [
-            *managed_cleanup["failedFileDeletes"],
-            *source_cleanup["failedFileDeletes"],
-        ],
+        "deletedDatabaseRecords": outcome.deleted,
+        "deletedFiles": outcome.isolated_files,
+        "deletedSourceFiles": outcome.deleted_source_files,
+        "missingSourceFiles": list(outcome.missing_source_paths),
+        "failedFileDeletes": list(outcome.failed_file_deletes),
     }
 
 
@@ -338,9 +397,7 @@ def _resolve_import_linked_volume_target(
             if candidate not in file_paths:
                 file_paths.append(candidate)
 
-    target = library_deletion.find_volume_deletion_target_by_file_paths(
-        db, file_paths
-    )
+    target = library_deletion.find_volume_deletion_target_by_file_paths(db, file_paths)
     if target is not None:
         return target
 

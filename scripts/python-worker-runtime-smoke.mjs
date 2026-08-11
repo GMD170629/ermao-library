@@ -88,6 +88,17 @@ async function main() {
     if (!output.includes('[import-worker] ready')) {
       throw new Error(`worker did not print ready marker. Output: ${output}`);
     }
+    const startupMigrations = [
+      'library_facet_index_data_migration',
+      'comic_page_index_data_migration'
+    ];
+    for (const migration of startupMigrations) {
+      const startedVisible = output.includes(`${migration} outcome=started`);
+      const successVisible = output.includes(`${migration} outcome=success`);
+      if (!startedVisible || !successVisible) {
+        throw new Error(`${migration} lifecycle was not visible in worker output. Output: ${output}`);
+      }
+    }
 
     child.kill('SIGTERM');
     const exit = await waitForExit(child);
@@ -104,7 +115,13 @@ async function main() {
     console.log('Python worker runtime smoke ok');
     const interesting = output
       .split(/\r?\n/)
-      .filter((line) => line.includes('[import-worker] ready') || line.includes('unavailable') || line.includes('retrying later') || line.includes('signal'))
+      .filter((line) =>
+        line.includes('data_migration') ||
+        line.includes('[import-worker] ready') ||
+        line.includes('unavailable') ||
+        line.includes('retrying later') ||
+        line.includes('signal')
+      )
       .join('\n')
       .trim();
     if (interesting) console.log(interesting);

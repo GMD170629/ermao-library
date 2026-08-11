@@ -3,51 +3,50 @@ import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, Response, status
-from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.typed_route import TypedContractRoute
-from app.contracts.http_errors import AdditionalStatusCodes, ErrorResponses
-from app.core.auth import get_current_user
-from app.core.authorization import can_manage_system
-from app.core.config import Settings, get_settings
-from app.db.session import get_db
 from app.bootstrap.system import (
     active_health_run_id,
     create_or_reuse_health_run,
     create_restart_operation,
     health_run_snapshot,
+    persist_log_settings_update,
+    prepare_system_event,
     probe_database,
     prune_old_health_runs,
     queue_operation_view,
     queue_runtime_view,
-    record_system_event,
     run_system_health_checks,
-    set_max_event_bytes,
     start_health_run,
     system_event_storage_view,
 )
-from app.modules.system.public import MAX_MAX_EVENT_BYTES, MIN_MAX_EVENT_BYTES
+from app.contracts.http_errors import AdditionalStatusCodes, ErrorResponses
+from app.core.auth import get_current_user
+from app.core.authorization import can_manage_system
+from app.core.config import Settings, get_settings
+from app.db.session import get_db
+from app.modules.system.domain.events import validate_log_max_bytes
 from app.modules.system.presentation.health_schemas import (
     DatabasePingPayload,
     DatabasePingResponse,
+    HealthEventStreamResponse,
     HealthRunActiveBody,
     HealthRunActiveError,
     HealthRunNotFoundBody,
     HealthRunNotFoundError,
     HealthRunPayload,
     HealthRunResponse,
-    HealthEventStreamResponse,
     ImportQueueOfflineBody,
     ImportQueueOfflineError,
     InvalidLogMaxBytesBody,
     InvalidLogMaxBytesError,
     LogSettingsPayload,
     LogSettingsResponse,
-    QueueOperationNotFoundBody,
-    QueueOperationNotFoundError,
     QueueOperationConflictBody,
     QueueOperationConflictError,
+    QueueOperationNotFoundBody,
+    QueueOperationNotFoundError,
     QueueOperationPayload,
     QueueOperationResponse,
     ServiceHealthPayload,
@@ -58,6 +57,11 @@ from app.modules.system.presentation.health_schemas import (
     SystemManagerRequiredError,
     UnauthorizedBody,
     UnauthorizedError,
+    UpdateLogSettingsRequest,
+)
+from app.modules.system.public import (
+    MAX_MAX_EVENT_BYTES,
+    MIN_MAX_EVENT_BYTES,
 )
 
 router = APIRouter(tags=["health"], route_class=TypedContractRoute)
@@ -181,7 +185,9 @@ def stream_health_run(
         raise HealthRunNotFoundError(
             HealthRunNotFoundBody(message="健康检查记录不存在")
         )
-    raw_last_id = request.headers.get("last-event-id") or request.query_params.get("after") or "0"
+    raw_last_id = (
+        request.headers.get("last-event-id") or request.query_params.get("after") or "0"
+    )
     try:
         initial_version = max(0, int(raw_last_id))
     except ValueError:
@@ -205,7 +211,10 @@ def stream_health_run(
                 return
             version = int(snapshot.get("version") or 0)
             if version > last_version:
-                has_running_item = any(item.get("status") == "running" for item in snapshot.get("items", []))
+                has_running_item = any(
+                    item.get("status") == "running"
+                    for item in snapshot.get("items", [])
+                )
                 event_name = (
                     "run.completed"
                     if snapshot.get("status") in {"completed", "warning", "error"}
@@ -321,7 +330,8 @@ def get_log_settings(
 
 
 @router.put("/system/log-settings")
-async def update_log_settings(
+def update_log_settings(
+    payload: UpdateLogSettingsRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -335,15 +345,12 @@ async def update_log_settings(
 ]:
     user = _system_manager(db, request, settings)
     try:
-        payload = await request.json()
-        max_bytes = int(payload.get("maxBytes"))
-        set_max_event_bytes(db, max_bytes)
-    except (AttributeError, TypeError, ValueError):
+        max_bytes = validate_log_max_bytes(payload.max_bytes)
+    except ValueError:
         raise InvalidLogMaxBytesError(
             InvalidLogMaxBytesBody(message="日志容量上限必须在 1 MB 到 100 MB 之间")
         )
-    record_system_event(
-        db,
+    prepared_event = prepare_system_event(
         source="system",
         action="settings.updated",
         message="更新系统日志容量上限",
@@ -352,8 +359,9 @@ async def update_log_settings(
         actor_id=user.id,
         target_type="settings",
         metadata={"key": "system.logs.maxBytes", "maxBytes": max_bytes},
-        commit=True,
     )
+
+    persist_log_settings_update(db, max_bytes=max_bytes, event=prepared_event)
     return LogSettingsResponse(
         data=LogSettingsPayload.model_validate(
             {"storage": system_event_storage_view(db)}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Literal
 
 ImportWorkKind = Literal["SCAN_DIRECTORY", "IMPORT_SOURCE"]
@@ -71,3 +72,41 @@ class ImportScanJobDTO:
 class ScanBatchResult:
     queued_count: int
     cached_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedScanSources:
+    canonical_paths: tuple[Path, ...]
+    source_pairs: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ScanCandidateProjection:
+    task_sources: tuple[tuple[str | None, str, str], ...]
+    library_sources: tuple[tuple[str | None, str], ...]
+    media_kind_policy: str
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedScanCandidateBatch:
+    task_rows: tuple[dict[str, object], ...]
+    asset_rows: tuple[dict[str, object], ...]
+    work_rows: tuple[dict[str, object], ...]
+    result: ScanBatchResult
+
+
+@dataclass(frozen=True, slots=True)
+class ImportQueueMaintenanceProjection:
+    task_rows: tuple[tuple[str, str | None, str, str], ...]
+    file_rows: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedImportQueueMaintenance:
+    task_updates: tuple[dict[str, object], ...]
+    work_rows: tuple[dict[str, object], ...]
+    file_updates: tuple[dict[str, object], ...]
+
+    @property
+    def changed_count(self) -> int:
+        return len(self.task_updates) + len(self.file_updates)

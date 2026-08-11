@@ -1,47 +1,66 @@
 """System capability composition root."""
 
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.modules.system.application.commands import execute_system_transaction
+from app.core.time import now_timestamp_ms
+from app.modules.system.application.commands import SystemWriteTransaction
+from app.modules.system.domain.events import (
+    LOG_MAX_BYTES_SETTING,
+    PreparedSystemEvent,
+    validate_log_max_bytes,
+)
 from app.modules.system.domain.health import HealthRunSnapshot
+from app.modules.system.domain.queue import prepare_queue_heartbeat
 from app.modules.system.infrastructure.events import (
     clear_info_warning_events,
     configured_max_event_bytes,
     list_event_level_facets,
     list_event_source_facets,
     list_system_events_page,
-    prune_system_events as _prune_system_events,
-    record_system_event as _record_system_event,
-    set_max_event_bytes as _set_max_event_bytes,
+    prepare_system_event,
+    prepare_system_event_prune,
     system_event_size_bytes,
     system_event_storage_view,
+    write_prepared_system_event_prune,
+    write_prepared_system_events,
 )
-from app.modules.system.infrastructure.health import probe_database, run_system_health_checks
+from app.modules.system.infrastructure.events import (
+    prune_system_events as _prune_system_events,
+)
+from app.modules.system.infrastructure.health import (
+    probe_database,
+    run_system_health_checks,
+)
 from app.modules.system.infrastructure.health_runs import (
     active_health_run_id,
-    create_or_reuse_health_run as _create_or_reuse_health_run,
-    fail_abandoned_health_runs as _fail_abandoned_health_runs,
     health_run_snapshot,
-    prune_old_health_runs as _prune_old_health_runs,
+    prepare_abandoned_health_runs,
+    prepare_health_run_creation,
+    prepare_old_health_runs_prune,
     start_health_run,
+    write_prepared_abandoned_health_runs,
+    write_prepared_health_run_creation,
+    write_prepared_old_health_runs_prune,
 )
 from app.modules.system.infrastructure.queue_runtime import (
     QueueHeartbeatPump,
     active_queue_operation,
     active_restart_operation,
-    create_queue_operation as _create_queue_operation,
-    create_restart_operation as _create_restart_operation,
-    mark_queue_stopped as _mark_queue_stopped,
+    prepare_queue_heartbeat_write,
+    prepare_queue_operation_creation,
+    prepare_queue_operation_update,
+    prepare_queue_stopped_write,
     queue_operation_view,
     queue_runtime_view,
-    record_queue_heartbeat as _record_queue_heartbeat,
-    update_restart_operation as _update_restart_operation,
-    update_queue_operation as _update_queue_operation,
+    write_prepared_queue_operation_creation,
+    write_prepared_queue_runtime,
 )
 from app.modules.system.infrastructure.settings import (
+    PreparedSettingsWrite,
     delete_setting,
     delete_settings,
     existing_setting_keys,
@@ -49,26 +68,44 @@ from app.modules.system.infrastructure.settings import (
     get_setting_raw,
     list_settings,
     parse_setting_value,
+    prepare_settings_write,
     upsert_setting,
     upsert_settings,
+    write_prepared_settings,
 )
 
 
 def prune_system_events(
     db: Session,
     max_bytes: int | None = None,
-    *,
-    commit: bool = False,
 ) -> dict[str, int]:
-    operation = lambda: _prune_system_events(db, max_bytes)
-    return execute_system_transaction(db, operation) if commit else operation()
+    return _prune_system_events(db, max_bytes)
+
+
+def maintain_system_events(
+    db: Session,
+    max_bytes: int | None = None,
+) -> dict[str, int]:
+    prepared = prepare_system_event_prune(db, max_bytes)
+    if not prepared.event_ids:
+        return {
+            "deleted": 0,
+            "sizeBytes": prepared.current_size_bytes,
+            "maxBytes": prepared.max_bytes,
+        }
+    with SystemWriteTransaction(db):
+        result = write_prepared_system_event_prune(db, prepared)
+    return result
 
 
 def set_max_event_bytes(db: Session, max_bytes: int) -> dict[str, Any]:
-    return execute_system_transaction(
-        db,
-        lambda: _set_max_event_bytes(db, max_bytes),
+    prepared_max_bytes = validate_log_max_bytes(max_bytes)
+    prepared_settings = prepare_settings_write(
+        {LOG_MAX_BYTES_SETTING: prepared_max_bytes}
     )
+    with SystemWriteTransaction(db):
+        write_prepared_settings(db, prepared_settings)
+    return system_event_storage_view(db)
 
 
 def record_system_event(
@@ -83,10 +120,8 @@ def record_system_event(
     target_type: str | None = None,
     target_id: str | None = None,
     metadata: dict[str, Any] | None = None,
-    commit: bool = False,
-) -> str | None:
-    operation = lambda: _record_system_event(
-        db,
+) -> str:
+    prepared_event = prepare_system_event(
         source=source,
         action=action,
         message=message,
@@ -97,7 +132,85 @@ def record_system_event(
         target_id=target_id,
         metadata=metadata,
     )
-    return execute_system_transaction(db, operation) if commit else operation()
+    return write_prepared_system_events(db, [prepared_event])[0]
+
+
+def persist_system_events(
+    db: Session,
+    events: tuple[PreparedSystemEvent, ...],
+) -> None:
+    """Persist already prepared system events in one named short transaction."""
+
+    with SystemWriteTransaction(db):
+        write_prepared_system_events(db, events)
+
+
+def prepare_system_setting_values(
+    setting_values: dict[str, object],
+) -> PreparedSettingsWrite:
+    """Serialize setting rows before opening their short write transaction."""
+
+    return prepare_settings_write(setting_values)
+
+
+def persist_system_setting_values(
+    db: Session,
+    prepared: PreparedSettingsWrite,
+) -> None:
+    """Persist already prepared setting rows in one SQL-only transaction."""
+
+    with SystemWriteTransaction(db):
+        write_prepared_settings(db, prepared)
+
+
+def persist_log_settings_update(
+    db: Session,
+    *,
+    max_bytes: int,
+    event: PreparedSystemEvent,
+) -> None:
+    prepared_settings = prepare_settings_write({LOG_MAX_BYTES_SETTING: max_bytes})
+    with SystemWriteTransaction(db):
+        write_prepared_settings(db, prepared_settings)
+        write_prepared_system_events(db, (event,))
+
+
+def persist_opds_settings_update(
+    db: Session,
+    *,
+    setting_values: dict[str, object],
+    event: PreparedSystemEvent,
+) -> None:
+    prepared_settings = prepare_settings_write(setting_values)
+    with SystemWriteTransaction(db):
+        write_prepared_settings(db, prepared_settings)
+        write_prepared_system_events(db, (event,))
+
+
+def persist_system_settings_update(
+    db: Session,
+    *,
+    setting_values: dict[str, object],
+    clear_keys: tuple[str, ...],
+    event: PreparedSystemEvent,
+) -> None:
+    prepared_settings = prepare_settings_write(setting_values)
+    with SystemWriteTransaction(db):
+        write_prepared_settings(db, prepared_settings)
+        if clear_keys:
+            delete_settings(db, clear_keys)
+        write_prepared_system_events(db, (event,))
+
+
+def clear_system_events_with_audit(
+    db: Session,
+    *,
+    event: PreparedSystemEvent,
+) -> int:
+    with SystemWriteTransaction(db):
+        deleted = clear_info_warning_events(db)
+        write_prepared_system_events(db, (event,))
+    return deleted
 
 
 def create_or_reuse_health_run(
@@ -105,24 +218,28 @@ def create_or_reuse_health_run(
     settings: Settings,
     actor_user_id: str,
 ) -> tuple[HealthRunSnapshot, bool]:
-    return execute_system_transaction(
-        db,
-        lambda: _create_or_reuse_health_run(db, settings, actor_user_id),
-    )
+    prepared = prepare_health_run_creation(db, settings, actor_user_id)
+    if not prepared.created:
+        return prepared.snapshot, False
+    with SystemWriteTransaction(db):
+        write_prepared_health_run_creation(db, prepared)
+    return prepared.snapshot, True
 
 
 def fail_abandoned_health_runs(db: Session) -> int:
-    return execute_system_transaction(
-        db,
-        lambda: _fail_abandoned_health_runs(db),
-    )
+    prepared = prepare_abandoned_health_runs(db)
+    if not prepared.rows:
+        return 0
+    with SystemWriteTransaction(db):
+        changed = write_prepared_abandoned_health_runs(db, prepared)
+    return changed
 
 
 def prune_old_health_runs(db: Session, max_age_hours: int = 24) -> int:
-    return execute_system_transaction(
-        db,
-        lambda: _prune_old_health_runs(db, max_age_hours),
-    )
+    statement = prepare_old_health_runs_prune(max_age_hours)
+    with SystemWriteTransaction(db):
+        deleted = write_prepared_old_health_runs_prune(db, statement)
+    return deleted
 
 
 def record_queue_heartbeat(
@@ -135,35 +252,35 @@ def record_queue_heartbeat(
     processed: bool = False,
     error: BaseException | str | None = None,
 ) -> None:
-    execute_system_transaction(
-        db,
-        lambda: _record_queue_heartbeat(
-            db,
-            queue_name,
-            instance_id,
-            poll_interval_seconds,
-            status=status,
-            processed=processed,
-            error=error,
-        ),
+    prepared = prepare_queue_heartbeat(
+        queue_name=queue_name,
+        instance_id=instance_id,
+        poll_interval_seconds=poll_interval_seconds,
+        recorded_at=now_timestamp_ms(),
+        status=status,
+        processed=processed,
+        error=error,
     )
+    prepared_write = prepare_queue_heartbeat_write(prepared)
+    with SystemWriteTransaction(db):
+        write_prepared_queue_runtime(db, prepared_write)
 
 
 def mark_queue_stopped(db: Session, queue_name: str, instance_id: str) -> None:
-    execute_system_transaction(
-        db,
-        lambda: _mark_queue_stopped(db, queue_name, instance_id),
+    prepared = prepare_queue_stopped_write(
+        queue_name,
+        instance_id,
+        now=now_timestamp_ms(),
     )
+    with SystemWriteTransaction(db):
+        write_prepared_queue_runtime(db, prepared)
 
 
 def create_restart_operation(
     db: Session,
     actor_user_id: str,
 ) -> tuple[dict[str, Any], bool]:
-    return execute_system_transaction(
-        db,
-        lambda: _create_restart_operation(db, actor_user_id),
-    )
+    return create_queue_operation(db, actor_user_id, action="restart")
 
 
 def create_queue_operation(
@@ -172,10 +289,22 @@ def create_queue_operation(
     *,
     action: str,
 ) -> tuple[dict[str, Any], bool]:
-    return execute_system_transaction(
-        db,
-        lambda: _create_queue_operation(db, actor_user_id, action=action),
+    operation_id = f"queue_{uuid4().hex}"
+    now = now_timestamp_ms()
+    existing = active_queue_operation(db)
+    db.close()
+    prepared = prepare_queue_operation_creation(
+        existing,
+        actor_user_id,
+        action=action,
+        operation_id=operation_id,
+        now=now,
     )
+    if not prepared.created:
+        return prepared.view, False
+    with SystemWriteTransaction(db):
+        result = write_prepared_queue_operation_creation(db, prepared)
+    return result
 
 
 def update_queue_operation(
@@ -184,15 +313,14 @@ def update_queue_operation(
     status: str,
     message_code: str,
 ) -> None:
-    execute_system_transaction(
-        db,
-        lambda: _update_queue_operation(
-            db,
-            operation_id,
-            status,
-            message_code,
-        ),
+    prepared = prepare_queue_operation_update(
+        operation_id,
+        status,
+        message_code,
+        now=now_timestamp_ms(),
     )
+    with SystemWriteTransaction(db):
+        write_prepared_queue_runtime(db, prepared)
 
 
 def update_restart_operation(
@@ -201,23 +329,17 @@ def update_restart_operation(
     status: str,
     message_code: str,
 ) -> None:
-    execute_system_transaction(
-        db,
-        lambda: _update_restart_operation(
-            db,
-            operation_id,
-            status,
-            message_code,
-        ),
-    )
+    update_queue_operation(db, operation_id, status, message_code)
+
 
 __all__ = [
     "QueueHeartbeatPump",
-    "active_queue_operation",
     "active_health_run_id",
+    "active_queue_operation",
     "active_restart_operation",
-    "configured_max_event_bytes",
     "clear_info_warning_events",
+    "clear_system_events_with_audit",
+    "configured_max_event_bytes",
     "create_or_reuse_health_run",
     "create_queue_operation",
     "create_restart_operation",
@@ -230,10 +352,18 @@ __all__ = [
     "health_run_snapshot",
     "list_event_level_facets",
     "list_event_source_facets",
-    "list_system_events_page",
     "list_settings",
+    "list_system_events_page",
+    "maintain_system_events",
     "mark_queue_stopped",
     "parse_setting_value",
+    "persist_log_settings_update",
+    "persist_opds_settings_update",
+    "persist_system_events",
+    "persist_system_setting_values",
+    "persist_system_settings_update",
+    "prepare_system_event",
+    "prepare_system_setting_values",
     "probe_database",
     "prune_old_health_runs",
     "prune_system_events",
@@ -246,8 +376,9 @@ __all__ = [
     "start_health_run",
     "system_event_size_bytes",
     "system_event_storage_view",
-    "update_restart_operation",
     "update_queue_operation",
+    "update_restart_operation",
     "upsert_setting",
     "upsert_settings",
+    "write_prepared_system_events",
 ]

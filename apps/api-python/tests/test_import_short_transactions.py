@@ -2,22 +2,29 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
-from sqlalchemy import String, create_engine, func, insert, select
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
-
+from app.models.import_pipeline import ImportTask
 from app.modules.imports.application.dto import ImportResult
-from app.modules.imports.application.ports import LibraryImportStore
 from app.modules.imports.application.transactions import (
-    IMPORT_PERSISTENCE_BATCH_SIZE,
     BoundedLibraryImportStore,
+    BufferedImportPersistence,
     ImportCompletion,
+    ImportCompletionWriter,
     ImportTransactionController,
+    ImportWriteTarget,
+    PreparedImportWriteBatch,
+    PreparedImportWriteBuffer,
     persist_import_completion,
 )
+from app.modules.imports.infrastructure.library_import_store import (
+    SqlAlchemyLibraryImportStore,
+)
 from app.modules.imports.infrastructure.uow import SqlAlchemyImportUnitOfWork
+from sqlalchemy import String, create_engine, event, func, insert, select
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 
 class ProbeBase(DeclarativeBase):
@@ -55,6 +62,20 @@ class CompletionStore:
     def update_import_task(self, task_id: str, *, columns: dict[str, object]) -> None:
         self.task_updates.append((task_id, columns))
 
+    def apply_import_completion(
+        self,
+        *,
+        task_updates: tuple[tuple[str, Mapping[str, object]], ...],
+        volume_updates: tuple[tuple[str, Mapping[str, object]], ...],
+        media_versions_to_prune: tuple[str, ...],
+    ) -> None:
+        self.task_updates.extend(
+            (task_id, dict(columns)) for task_id, columns in task_updates
+        )
+        self.volume_updates.extend(
+            (volume_id, dict(columns)) for volume_id, columns in volume_updates
+        )
+
     def update_library_volume(
         self, volume_id: str, *, columns: dict[str, object]
     ) -> None:
@@ -66,6 +87,22 @@ class CompletionStore:
     def insert_import_log(self, *, columns: dict[str, object]) -> dict[str, object]:
         self.import_logs.append(columns)
         return columns
+
+    def get_library_volume_import_status(self, volume_id: str) -> str | None:
+        del volume_id
+        return None
+
+    def apply_import_checkpoint(self, prepared: PreparedImportWriteBatch) -> None:
+        for row in prepared.inserts:
+            columns = dict(row.columns)
+            if row.target == ImportWriteTarget.LIBRARY_VOLUME:
+                self.insert_library_volume(columns=columns)
+            elif row.target == ImportWriteTarget.LIBRARY_READING_UNIT:
+                cast(ReadingUnitStore, self).insert_library_reading_unit(
+                    columns=columns
+                )
+            elif row.target == ImportWriteTarget.IMPORT_LOG:
+                self.insert_import_log(columns=columns)
 
 
 class ReadingUnitStore(CompletionStore):
@@ -80,26 +117,34 @@ class ReadingUnitStore(CompletionStore):
         return columns
 
 
-def test_import_transaction_controller_commits_at_bounded_batch_size() -> None:
+class ProbeBatchWriter:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def apply_import_checkpoint(self, prepared: PreparedImportWriteBatch) -> None:
+        rows = [
+            {"id": str(row.columns["id"])}
+            for row in prepared.inserts
+            if row.target == ImportWriteTarget.IMPORT_TASK
+        ]
+        if rows:
+            self._session.execute(insert(TransactionProbe), rows)
+
+
+def test_import_transaction_controller_never_commits_from_write_count() -> None:
     unit_of_work = RecordingUnitOfWork()
     transactions = ImportTransactionController(unit_of_work)
 
-    transactions.note_write(IMPORT_PERSISTENCE_BATCH_SIZE - 1)
+    transactions.note_write(401)
     assert unit_of_work.commits == 0
 
-    transactions.note_write()
-    assert unit_of_work.commits == 1
 
-    transactions.note_write(IMPORT_PERSISTENCE_BATCH_SIZE)
-    assert unit_of_work.commits == 2
-
-
-def test_reading_units_are_persisted_in_transactions_of_at_most_200() -> None:
+def test_reading_units_commit_only_at_explicit_completion_boundary() -> None:
     unit_of_work = RecordingUnitOfWork()
     transactions = ImportTransactionController(unit_of_work)
     concrete_store = ReadingUnitStore()
     store = BoundedLibraryImportStore(
-        cast(LibraryImportStore, concrete_store),
+        cast(BufferedImportPersistence, concrete_store),
         transactions,
         ImportCompletion(),
     )
@@ -121,11 +166,12 @@ def test_reading_units_are_persisted_in_transactions_of_at_most_200() -> None:
             }
         )
 
-    assert concrete_store.inserted_units == 401
-    assert unit_of_work.commits == 2
+    assert concrete_store.inserted_units == 0
+    assert unit_of_work.commits == 0
 
     transactions.begin_completion()
-    assert unit_of_work.commits == 3
+    assert concrete_store.inserted_units == 401
+    assert unit_of_work.commits == 1
 
 
 def test_terminal_import_state_is_deferred_until_final_transaction() -> None:
@@ -134,7 +180,7 @@ def test_terminal_import_state_is_deferred_until_final_transaction() -> None:
     completion = ImportCompletion()
     concrete_store = CompletionStore()
     store = BoundedLibraryImportStore(
-        cast(LibraryImportStore, concrete_store),
+        cast(BufferedImportPersistence, concrete_store),
         transactions,
         completion,
     )
@@ -159,7 +205,7 @@ def test_terminal_import_state_is_deferred_until_final_transaction() -> None:
     assert unit_of_work.commits == 1
 
     store.insert_import_log(columns={"id": "log-1", "message": "completed"})
-    assert concrete_store.import_logs == [{"id": "log-1", "message": "completed"}]
+    assert concrete_store.import_logs == []
     assert unit_of_work.commits == 1
 
     prepared = completion.prepare(
@@ -178,7 +224,8 @@ def test_terminal_import_state_is_deferred_until_final_transaction() -> None:
             "new",
         ),
     )
-    persist_import_completion(cast(LibraryImportStore, concrete_store), prepared)
+    transactions.flush_into_current_transaction()
+    persist_import_completion(cast(ImportCompletionWriter, concrete_store), prepared)
 
     assert concrete_store.volume_updates == [
         (
@@ -189,6 +236,146 @@ def test_terminal_import_state_is_deferred_until_final_transaction() -> None:
     assert concrete_store.task_updates == [
         ("task-1", {"status": "COMPLETED", "progress": 100})
     ]
+    assert concrete_store.import_logs == [{"id": "log-1", "message": "completed"}]
+
+
+def test_import_completion_updates_a_task_batch_with_one_statement(db_session) -> None:
+    tasks = [
+        ImportTask(
+            id=f"completion-task-{index}",
+            origin="MANUAL",
+            status="PARSING",
+            source_path=f"/tmp/completion-{index}.epub",
+        )
+        for index in range(100)
+    ]
+    db_session.add_all(tasks)
+    db_session.commit()
+    statements: list[str] = []
+
+    def capture_statement(
+        _connection, _cursor, statement, _parameters, _context, _executemany
+    ) -> None:
+        statements.append(statement)
+
+    event.listen(db_session.bind, "before_cursor_execute", capture_statement)
+    try:
+        SqlAlchemyLibraryImportStore(db_session).apply_import_completion(
+            task_updates=tuple(
+                (task.id, {"status": "COMPLETED", "progress": 100}) for task in tasks
+            ),
+            volume_updates=(),
+            media_versions_to_prune=(),
+        )
+        db_session.commit()
+    finally:
+        event.remove(db_session.bind, "before_cursor_execute", capture_statement)
+
+    update_statements = [
+        statement
+        for statement in statements
+        if statement.lstrip().upper().startswith("UPDATE")
+        and '"ImportTask"' in statement
+    ]
+    assert len(update_statements) == 1
+    assert db_session.scalar(
+        select(func.count())
+        .select_from(ImportTask)
+        .where(ImportTask.status == "COMPLETED")
+    ) == len(tasks)
+
+
+def test_import_checkpoint_buffers_and_merges_task_rows_before_one_insert(
+    db_session,
+) -> None:
+    statements: list[str] = []
+
+    def capture_statement(
+        _connection, _cursor, statement, _parameters, _context, _executemany
+    ) -> None:
+        statements.append(statement)
+
+    transactions = ImportTransactionController(
+        SqlAlchemyImportUnitOfWork(db_session)
+    )
+    store = BoundedLibraryImportStore(
+        cast(BufferedImportPersistence, SqlAlchemyLibraryImportStore(db_session)),
+        transactions,
+        ImportCompletion(),
+    )
+    event.listen(db_session.bind, "before_cursor_execute", capture_statement)
+    try:
+        for index in range(100):
+            task_id = f"buffered-task-{index}"
+            store.insert_import_task(
+                columns={
+                    "id": task_id,
+                    "origin": "MANUAL",
+                    "sourcePath": f"/tmp/{task_id}.epub",
+                }
+            )
+            store.update_import_task(
+                task_id, columns={"status": "PARSING", "progress": 5}
+            )
+
+        assert not any(
+            statement.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE"))
+            for statement in statements
+        )
+
+        transactions.commit()
+    finally:
+        event.remove(db_session.bind, "before_cursor_execute", capture_statement)
+
+    task_inserts = [
+        statement
+        for statement in statements
+        if statement.lstrip().upper().startswith("INSERT")
+        and '"ImportTask"' in statement
+    ]
+    assert len(task_inserts) == 1
+    assert db_session.scalar(
+        select(func.count())
+        .select_from(ImportTask)
+        .where(ImportTask.status == "PARSING")
+    ) == 100
+
+
+def test_import_file_overlay_returns_buffered_row_without_writing(db_session) -> None:
+    statements: list[str] = []
+
+    def capture_statement(
+        _connection, _cursor, statement, _parameters, _context, _executemany
+    ) -> None:
+        statements.append(statement)
+
+    transactions = ImportTransactionController(
+        SqlAlchemyImportUnitOfWork(db_session)
+    )
+    store = BoundedLibraryImportStore(
+        cast(BufferedImportPersistence, SqlAlchemyLibraryImportStore(db_session)),
+        transactions,
+        ImportCompletion(),
+    )
+    event.listen(db_session.bind, "before_cursor_execute", capture_statement)
+    try:
+        inserted = store.insert_library_file(
+            columns={
+                "id": "buffered-file",
+                "volumeId": "buffered-volume",
+                "path": "/tmp/buffered.epub",
+            }
+        )
+        loaded = store.get_library_file("buffered-file")
+    finally:
+        transactions.rollback()
+        event.remove(db_session.bind, "before_cursor_execute", capture_statement)
+
+    assert loaded == inserted
+    assert not any(
+        statement.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE"))
+        for statement in statements
+    )
 
 
 def test_released_import_transaction_with_large_backlog_does_not_block_writer(
@@ -241,4 +428,56 @@ def test_released_import_transaction_with_large_backlog_does_not_block_writer(
     with Session(engine) as session:
         assert (
             session.scalar(select(func.count()).select_from(TransactionProbe)) == 20_002
+        )
+
+
+def test_blocked_import_preparation_does_not_block_an_independent_writer(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "buffered-import-preparation.db"
+    engine = create_engine(
+        f"sqlite:///{database_path}",
+        connect_args={"timeout": 10},
+    )
+    ProbeBase.metadata.create_all(engine)
+    preparation_started = threading.Event()
+    finish_preparation = threading.Event()
+    worker_error: list[Exception] = []
+
+    def run_import_preparation() -> None:
+        try:
+            with Session(engine) as session:
+                transactions = ImportTransactionController(
+                    SqlAlchemyImportUnitOfWork(session)
+                )
+                writes = PreparedImportWriteBuffer()
+                transactions.attach_write_buffer(writes, ProbeBatchWriter(session))
+                writes.insert(
+                    ImportWriteTarget.IMPORT_TASK,
+                    {"id": "prepared-import-row"},
+                )
+                preparation_started.set()
+                assert finish_preparation.wait(timeout=2)
+                transactions.commit()
+        except Exception as exc:  # noqa: BLE001 - thread-boundary assertion handoff
+            worker_error.append(exc)
+            preparation_started.set()
+
+    worker = threading.Thread(target=run_import_preparation)
+    worker.start()
+    assert preparation_started.wait(timeout=1)
+
+    started_at = time.monotonic()
+    with Session(engine) as session:
+        session.add(TransactionProbe(id="independent-api-write"))
+        session.commit()
+    elapsed = time.monotonic() - started_at
+    finish_preparation.set()
+    worker.join(timeout=3)
+
+    assert worker_error == []
+    assert elapsed < 0.5
+    with Session(engine) as session:
+        assert (
+            session.scalar(select(func.count()).select_from(TransactionProbe)) == 2
         )

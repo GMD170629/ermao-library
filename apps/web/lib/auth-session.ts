@@ -1,4 +1,5 @@
 export const UNAUTHORIZED_EVENT = 'shuku:unauthorized';
+export const SESSION_REFRESH_HEADER = 'X-Shuku-Session-Refresh';
 
 const nonRedirectingAuthPaths = [
   '/api/auth/login',
@@ -12,6 +13,34 @@ const nonRedirectingAuthPaths = [
 export function shouldHandleUnauthorizedPath(pathname: string) {
   if (!pathname.includes('/api/')) return false;
   return !nonRedirectingAuthPaths.some((path) => pathname.endsWith(path));
+}
+
+export function sessionRefreshRequired(headers: Headers) {
+  return headers.get(SESSION_REFRESH_HEADER)?.toLowerCase() === 'required';
+}
+
+type SessionRefreshFetch = (
+  input: string,
+  init: RequestInit
+) => Promise<Response>;
+
+export async function requestSessionRefreshIfRequired(
+  headers: Headers,
+  fetchSessionRefresh: SessionRefreshFetch,
+  signal: AbortSignal
+): Promise<void> {
+  if (!sessionRefreshRequired(headers)) return;
+  try {
+    await fetchSessionRefresh('/api/auth/session/refresh', {
+      method: 'POST',
+      cache: 'no-store',
+      credentials: 'same-origin',
+      signal
+    });
+  } catch {
+    // Session refresh is opportunistic. The foreground /auth/me result remains
+    // authoritative, while its existing 401 interceptor handles sign-out.
+  }
 }
 
 export function installUnauthorizedFetchInterceptor() {

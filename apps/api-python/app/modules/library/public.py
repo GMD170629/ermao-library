@@ -20,11 +20,12 @@ from app.modules.library.application.catalog import (
     ListCatalogFacets,
     ListCatalogWorks,
 )
-from app.modules.library.application.commands import (
-    LibraryUnitOfWork,
-    execute_library_write,
-)
 from app.modules.library.application.dto import MoveVolumeResult
+from app.modules.library.application.facet_sync import (
+    PreparedWorkFacet,
+    WorkFacetProjection,
+    prepare_work_facet,
+)
 from app.modules.library.application.filter_ast import (
     FilterCondition,
     FilterExpression,
@@ -121,17 +122,18 @@ __all__ = [
     "LibraryGrouping",
     "LibraryGroupingPage",
     "LibraryGroupingQueryPort",
-    "LibraryUnitOfWork",
     "ListBookshelfItems",
     "ListCatalogFacets",
     "ListCatalogWorks",
     "ListLibraryGroupings",
     "MoveVolumeResult",
+    "PreparedWorkFacet",
     "SearchLibraryFilterOptions",
     "SmartShelfCriteria",
     "SmartShelfQueryPort",
     "WorkListQuery",
     "WorkListResult",
+    "WorkFacetProjection",
     "WorkView",
     "bookshelf_item_view",
     "bookshelf_item_views",
@@ -139,11 +141,11 @@ __all__ = [
     "conversion_output_paths",
     "delete_import_linked_library_scope",
     "delete_source_paths",
-    "execute_library_write",
     "get_work",
     "parse_filter_expression",
     "parse_media_kinds",
     "preferred_work_cover_path",
+    "prepare_work_facet",
     "source_delete_path",
     "work_view",
 ]

@@ -4,41 +4,101 @@ import os
 import signal
 import threading
 import time
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
+from sqlalchemy.exc import OperationalError
+
+from app.bootstrap.imports import persist_import_queue_operation_checkpoint
+from app.bootstrap.library_facet_index import (
+    run_library_facet_index_data_migration,
+)
+from app.bootstrap.comic_page_index_migration import (
+    run_comic_page_index_data_migration,
+)
 from app.bootstrap.metadata import build_automatic_metadata_request_gate
 from app.core.config import get_settings
 from app.db.bootstrap import bootstrap_database
-from app.db.session import HeartbeatSessionLocal, SessionLocal, engine
+from app.db.session import (
+    BackgroundSessionLocal,
+    HeartbeatSessionLocal,
+    MetadataMaintenanceSessionLocal,
+    SessionLocal,
+    engine,
+)
+from app.modules.imports.application.queue_control import (
+    PreparedImportQueueOperationCheckpoint,
+)
+from app.modules.system.public import PreparedSystemEvent, is_database_busy_error
 from app.services.metadata_lookup_queue import MetadataLookupWorker
 from app.services.organize_scheduler import OrganizerScheduler
 from app.services.queue_runtime import (
     active_queue_operation,
-    update_queue_operation,
 )
-from app.services.system_events import record_system_event
+from app.services.system_events import (
+    prepare_system_event,
+)
 from app.worker.persistent_import_queue import start_persistent_import_worker
 from app.worker.watcher import WorkerManager
 
 READY_FILE = Path(os.environ.get("SCAN_WORKER_READY_FILE") or "/tmp/scan-worker-ready")
 
 
+@dataclass(frozen=True, slots=True)
+class QueueOperationProjection:
+    id: str
+    action: str
+    actor_user_id: str | None
+
+
+def _load_active_queue_operation() -> QueueOperationProjection | None:
+    with BackgroundSessionLocal() as db:
+        row = active_queue_operation(db)
+    if row is None:
+        return None
+    return QueueOperationProjection(
+        id=str(row["id"]),
+        action=str(row["action"]),
+        actor_user_id=str(row.get("actorUserId") or "") or None,
+    )
+
+
+def _persist_queue_operation_status(
+    operation_id: str,
+    status: str,
+    message_code: str,
+    events: tuple[PreparedSystemEvent, ...] = (),
+) -> None:
+    checkpoint = PreparedImportQueueOperationCheckpoint(
+        operation_id=operation_id,
+        status=status,
+        message_code=message_code,
+        checkpoint_at=datetime.now(UTC),
+        events=events,
+    )
+    with BackgroundSessionLocal() as db:
+        persist_import_queue_operation_checkpoint(db, checkpoint)
+
+
 def main() -> None:
     settings = get_settings()
     bootstrap_database(engine, settings)
-    manager = WorkerManager(SessionLocal, settings)
+    run_library_facet_index_data_migration(SessionLocal)
+    run_comic_page_index_data_migration(SessionLocal, settings)
+    manager = WorkerManager(BackgroundSessionLocal, settings)
     persistent_import_worker = start_persistent_import_worker(
-        SessionLocal,
+        BackgroundSessionLocal,
         settings,
         HeartbeatSessionLocal,
     )
     metadata_worker = MetadataLookupWorker(
-        SessionLocal,
+        MetadataMaintenanceSessionLocal,
         settings,
         heartbeat_db_factory=HeartbeatSessionLocal,
         automatic_request_gate=build_automatic_metadata_request_gate(),
     )
-    organizer_scheduler = OrganizerScheduler(SessionLocal)
+    organizer_scheduler = OrganizerScheduler(BackgroundSessionLocal)
     stopping = False
     stop_event = threading.Event()
 
@@ -77,84 +137,80 @@ def main() -> None:
             manager.refresh_worker_state()
             next_refresh = time.monotonic() + refresh_interval
         try:
-            with SessionLocal() as db:
-                operation = active_queue_operation(db)
-                if operation and queue_operation_id is None:
-                    queue_operation_id = str(operation["id"])
-                    queue_operation_action = str(operation["action"])
-                    queue_operation_actor_id = str(operation.get("actorUserId") or "")
-                    persistent_import_worker.request_stop()
-                    update_queue_operation(
-                        db,
-                        queue_operation_id,
-                        "waiting",
-                        f"queue.{queue_operation_action}.waiting",
-                    )
-                    if queue_operation_action == "clear":
-                        import_scheduling_paused = True
-                        manager.pause_import_scheduling()
-                if queue_operation_id and not persistent_import_worker.is_alive():
-                    action = queue_operation_action or "restart"
-                    update_queue_operation(
-                        db,
-                        queue_operation_id,
-                        "running",
-                        f"queue.{action}.running",
-                    )
-                    deleted = (
-                        persistent_import_worker.clear_records()
+            operation = _load_active_queue_operation()
+            if operation and queue_operation_id is None:
+                queue_operation_id = operation.id
+                queue_operation_action = operation.action
+                queue_operation_actor_id = operation.actor_user_id
+                persistent_import_worker.request_stop()
+                _persist_queue_operation_status(
+                    queue_operation_id,
+                    "waiting",
+                    f"queue.{queue_operation_action}.waiting",
+                )
+                if queue_operation_action == "clear":
+                    import_scheduling_paused = True
+                    manager.pause_import_scheduling()
+            if queue_operation_id and not persistent_import_worker.is_alive():
+                action = queue_operation_action or "restart"
+                _persist_queue_operation_status(
+                    queue_operation_id,
+                    "running",
+                    f"queue.{action}.running",
+                )
+                deleted = (
+                    persistent_import_worker.clear_records()
+                    if action == "clear"
+                    else None
+                )
+                prepared_event = prepare_system_event(
+                    source="system",
+                    action=(
+                        "queue.cleared" if action == "clear" else "queue.restarted"
+                    ),
+                    message=(
+                        f"导入队列已安全清理，共删除 {deleted or 0} 条记录"
                         if action == "clear"
-                        else None
-                    )
-                    persistent_import_worker = start_persistent_import_worker(
-                        SessionLocal,
-                        settings,
-                        HeartbeatSessionLocal,
-                    )
-                    if import_scheduling_paused:
-                        manager.resume_import_scheduling()
-                        import_scheduling_paused = False
-                    try:
-                        record_system_event(
-                            db,
-                            source="system",
-                            action=(
-                                "queue.cleared"
-                                if action == "clear"
-                                else "queue.restarted"
-                            ),
-                            message=(
-                                f"导入队列已安全清理，共删除 {deleted or 0} 条记录"
-                                if action == "clear"
-                                else "导入队列已安全重启"
-                            ),
-                            level="warning",
-                            actor_type="admin",
-                            actor_id=queue_operation_actor_id,
-                            target_type="queue",
-                            target_id="import",
-                            metadata={
-                                "operationId": queue_operation_id,
-                                "action": action,
-                                "deleted": deleted,
-                            },
-                            commit=True,
-                        )
-                    except Exception as event_error:
-                        print(
-                            "[import-worker] queue control event write failed: "
-                            f"{event_error}",
-                            flush=True,
-                        )
-                    update_queue_operation(
-                        db,
+                        else "导入队列已安全重启"
+                    ),
+                    level="warning",
+                    actor_type="admin",
+                    actor_id=queue_operation_actor_id,
+                    target_type="queue",
+                    target_id="import",
+                    metadata={
+                        "operationId": queue_operation_id,
+                        "action": action,
+                        "deleted": deleted,
+                    },
+                )
+                try:
+                    _persist_queue_operation_status(
                         queue_operation_id,
                         "completed",
                         f"queue.{action}.completed",
+                        (prepared_event,),
                     )
-                    queue_operation_id = None
-                    queue_operation_action = None
-                    queue_operation_actor_id = None
+                except OperationalError as checkpoint_error:
+                    if not is_database_busy_error(checkpoint_error):
+                        raise
+                    print(
+                        "[import-worker] queue completion deferred "
+                        "reason=database_busy",
+                        flush=True,
+                    )
+                    continue
+                persistent_import_worker = start_persistent_import_worker(
+                    BackgroundSessionLocal,
+                    settings,
+                    HeartbeatSessionLocal,
+                )
+                if import_scheduling_paused:
+                    manager.resume_import_scheduling()
+                    import_scheduling_paused = False
+                queue_operation_id = None
+                queue_operation_action = None
+                queue_operation_actor_id = None
         except Exception as exc:
             failed_operation_id = queue_operation_id
             failed_action = queue_operation_action or "restart"
@@ -162,20 +218,34 @@ def main() -> None:
                 try:
                     if not persistent_import_worker.is_alive():
                         persistent_import_worker = start_persistent_import_worker(
-                            SessionLocal,
+                            BackgroundSessionLocal,
                             settings,
                             HeartbeatSessionLocal,
                         )
                     if import_scheduling_paused:
                         manager.resume_import_scheduling()
                         import_scheduling_paused = False
-                    with SessionLocal() as db:
-                        update_queue_operation(
-                            db,
-                            failed_operation_id,
-                            "failed",
-                            f"queue.{failed_action}.failed",
-                        )
+                    failed_event = prepare_system_event(
+                        source="system",
+                        action="queue.control.failed",
+                        message="IMPORT_QUEUE_CONTROL_FAILED",
+                        level="error",
+                        actor_type="admin",
+                        actor_id=queue_operation_actor_id,
+                        target_type="queue",
+                        target_id="import",
+                        metadata={
+                            "operationId": failed_operation_id,
+                            "action": failed_action,
+                            "errorType": type(exc).__name__,
+                        },
+                    )
+                    _persist_queue_operation_status(
+                        failed_operation_id,
+                        "failed",
+                        f"queue.{failed_action}.failed",
+                        (failed_event,),
+                    )
                 finally:
                     queue_operation_id = None
                     queue_operation_action = None

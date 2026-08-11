@@ -9,7 +9,6 @@ test('only authentication and offline surfaces are public', () => {
   assert.equal(isPublicAppPath('/reset-password'), true);
   assert.equal(isPublicAppPath('/offline'), true);
   assert.equal(isPublicAppPath('/library'), false);
-  assert.equal(isPublicAppPath('/mobile'), false);
   assert.equal(isPublicAppPath('/reader/volume-1'), false);
 });
 

@@ -28,3 +28,38 @@ class OrganizeJobListItem:
     created_at: datetime
     updated_at: datetime
     book: OrganizeBookListItem
+
+
+@dataclass(frozen=True)
+class PreparedDuplicateAction:
+    duplicate_id: str
+    source_work_id: str
+    target_work_id: str
+    action: str
+    timestamp: datetime
+
+
+@dataclass(frozen=True)
+class PreparedOrganizeJobEnqueue:
+    job_id: str
+    task_id: str
+    work_id: str
+    volume_id: str | None
+    media_version_id: str | None
+    provider_order: tuple[str, ...]
+    reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PreparedOrganizePolicyUpdate:
+    enabled: bool
+    schedule_mode: str
+    interval_minutes: int
+    auto_run_on_new: bool
+    auto_run_on_new_since: datetime | None
+    rules_json: str
+    write_metadata_to_files: bool
+    prefer_local_metadata: bool
+    local_metadata_priority_json: str
+    next_run_at: datetime | None
+    updated_at: datetime

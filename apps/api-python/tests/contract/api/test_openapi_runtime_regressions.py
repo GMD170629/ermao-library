@@ -124,8 +124,8 @@ def test_management_events_and_overview_accept_real_event_metadata(
         actor_type="user",
         actor_id=user.id,
         metadata=metadata,
-        commit=True,
     )
+    db_session.commit()
 
     events_response = client.get("/api/management/events")
     assert events_response.status_code == 200

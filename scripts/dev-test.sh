@@ -46,7 +46,7 @@ export STORAGE_ROOT SESSION_SECRET WEB_PORT
 
 (
   cd apps/api-python
-  uv run python -m app.db.bootstrap
+  uv run python -m app.bootstrap.startup_data_migrations
 )
 
 echo "Starting test service:"
@@ -75,15 +75,17 @@ fi
     SESSION_SECRET="$SESSION_SECRET" \
     uv run --extra dev uvicorn app.main:app --host 127.0.0.1 --port "$PYTHON_API_PORT"
 ) &
-CHILD_PIDS="$CHILD_PIDS $!"
+PYTHON_API_PID="$!"
+CHILD_PIDS="$CHILD_PIDS $PYTHON_API_PID"
 
 echo "Waiting for Python API..."
-i=0
-until node -e "fetch(process.argv[1]).then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))" "http://127.0.0.1:$PYTHON_API_PORT/api/health"; do
-  i=$((i + 1))
-  if [ "$i" -ge 60 ]; then
-    echo "Python API did not become ready in time." >&2
+while :; do
+  if ! kill -0 "$PYTHON_API_PID" 2>/dev/null; then
+    wait "$PYTHON_API_PID" || exit $?
     exit 1
+  fi
+  if node -e "fetch(process.argv[1]).then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))" "http://127.0.0.1:$PYTHON_API_PORT/api/health"; then
+    break
   fi
   sleep 1
 done

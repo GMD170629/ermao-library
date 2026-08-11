@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import inspect, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.base import Executable
 
 from app.contracts.local_metadata import (
     DEFAULT_LOCAL_METADATA_PRIORITY,
     validate_local_metadata_priority,
 )
 from app.models.organize import OrganizePolicy
+from app.modules.organize.application.dto import PreparedOrganizePolicyUpdate
 
 DEFAULT_POLICY_ID = "default"
 DEFAULT_INTERVAL_MINUTES = 60
@@ -24,10 +26,7 @@ DEFAULT_RULES = {
     "unrecognized": True,
     "missingMetadata": True,
 }
-
-
-def _now() -> datetime:
-    return datetime.now(UTC)
+DEFAULT_POLICY_UPDATED_AT = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 def has_policy_table(db: Session) -> bool:
@@ -85,7 +84,7 @@ def policy_view(row: dict[str, Any]) -> dict[str, Any]:
         ),
         "lastScheduledAt": row.get("lastScheduledAt"),
         "nextRunAt": row.get("nextRunAt"),
-        "updatedAt": row.get("updatedAt"),
+        "updatedAt": row.get("updatedAt") or DEFAULT_POLICY_UPDATED_AT,
     }
 
 
@@ -96,124 +95,59 @@ def get_policy_row(
     return entity_as_legacy_dict(entity) if entity is not None else None
 
 
-def insert_default_policy_if_missing(db: Session) -> None:
-    now = _now()
-    db.execute(
-        sqlite_insert(OrganizePolicy)
-        .values(
-            id=DEFAULT_POLICY_ID,
-            enabled=False,
-            schedule_mode="MANUAL",
-            interval_minutes=DEFAULT_INTERVAL_MINUTES,
-            auto_run_on_new=False,
-            auto_run_on_new_since=None,
-            rules_json=json.dumps(DEFAULT_RULES, ensure_ascii=False),
-            write_metadata_to_files=False,
-            prefer_local_metadata=True,
-            local_metadata_priority_json=json.dumps(
-                DEFAULT_LOCAL_METADATA_PRIORITY, ensure_ascii=False
-            ),
-            last_scheduled_at=None,
-            next_run_at=None,
-            created_at=now,
-            updated_at=now,
-        )
-        .on_conflict_do_nothing(index_elements=[OrganizePolicy.id])
-    )
-
-
 def ensure_organize_policy(db: Session) -> dict[str, Any]:
     if not has_policy_table(db):
         raise ValueError("整理策略数据表尚未初始化")
     existing = get_policy_row(db)
-    if existing:
-        return policy_view(existing)
-    insert_default_policy_if_missing(db)
-    db.flush()
-    return policy_view(get_policy_row(db) or {})
+    return policy_view(existing or {})
 
 
 def get_organize_policy(db: Session) -> dict[str, Any]:
     return ensure_organize_policy(db)
 
 
-def update_organize_policy(db: Session, payload: dict[str, Any]) -> dict[str, Any]:
-    current = ensure_organize_policy(db)
-    schedule_mode = str(payload.get("scheduleMode", current["scheduleMode"])).upper()
-    if schedule_mode not in {"MANUAL", "INTERVAL"}:
-        raise ValueError("执行方式仅支持手动或定时间隔")
-    try:
-        interval = int(payload.get("intervalMinutes", current["intervalMinutes"]))
-    except (TypeError, ValueError):
-        raise ValueError("执行间隔格式不正确") from None
-    if interval < MIN_INTERVAL_MINUTES or interval > MAX_INTERVAL_MINUTES:
-        raise ValueError(
-            f"执行间隔需在 {MIN_INTERVAL_MINUTES} 到 {MAX_INTERVAL_MINUTES} 分钟之间"
-        )
-
-    enabled = bool(payload.get("enabled", current["enabled"]))
-    auto_run_on_new = bool(payload.get("autoRunOnNew", current["autoRunOnNew"]))
-    rules_payload = payload.get("rules", current["rules"])
-    if not isinstance(rules_payload, dict):
-        raise TypeError("识别范围配置格式不正确")
-    rules = {
-        "unrecognized": bool(
-            rules_payload.get("unrecognized", current["rules"]["unrecognized"])
-        ),
-        "missingMetadata": bool(
-            rules_payload.get("missingMetadata", current["rules"]["missingMetadata"])
-        ),
+def prepare_organize_policy_update_statement(
+    prepared: PreparedOrganizePolicyUpdate,
+) -> Executable:
+    values = {
+        "id": DEFAULT_POLICY_ID,
+        "enabled": prepared.enabled,
+        "schedule_mode": prepared.schedule_mode,
+        "interval_minutes": prepared.interval_minutes,
+        "auto_run_on_new": prepared.auto_run_on_new,
+        "auto_run_on_new_since": prepared.auto_run_on_new_since,
+        "rules_json": prepared.rules_json,
+        "write_metadata_to_files": prepared.write_metadata_to_files,
+        "prefer_local_metadata": prepared.prefer_local_metadata,
+        "local_metadata_priority_json": prepared.local_metadata_priority_json,
+        "last_scheduled_at": None,
+        "next_run_at": prepared.next_run_at,
+        "created_at": prepared.updated_at,
+        "updated_at": prepared.updated_at,
     }
-    try:
-        local_metadata_priority = validate_local_metadata_priority(
-            payload.get("localMetadataPriority", current["localMetadataPriority"])
-        )
-    except (TypeError, ValueError) as exc:
-        raise ValueError(str(exc)) from exc
-    now = _now()
-    newly_enabled_for_new = auto_run_on_new and not current["autoRunOnNew"]
-    auto_since = now if newly_enabled_for_new else current.get("autoRunOnNewSince")
-    if not auto_run_on_new:
-        auto_since = None
-    next_run_at = None
-    if enabled and schedule_mode == "INTERVAL":
-        old_next = current.get("nextRunAt")
-        settings_changed = (
-            not current["enabled"]
-            or current["scheduleMode"] != schedule_mode
-            or current["intervalMinutes"] != interval
-        )
-        next_run_at = (
-            now + timedelta(minutes=interval)
-            if settings_changed or not old_next
-            else old_next
-        )
-
-    db.execute(
-        update(OrganizePolicy)
-        .where(OrganizePolicy.id == DEFAULT_POLICY_ID)
-        .values(
-            enabled=enabled,
-            schedule_mode=schedule_mode,
-            interval_minutes=interval,
-            auto_run_on_new=auto_run_on_new,
-            auto_run_on_new_since=auto_since,
-            rules_json=json.dumps(rules, ensure_ascii=False),
-            write_metadata_to_files=bool(
-                payload.get("writeMetadataToFiles", current["writeMetadataToFiles"])
+    statement = sqlite_insert(OrganizePolicy).values(**values)
+    return statement.on_conflict_do_update(
+        index_elements=[OrganizePolicy.id],
+        set_={
+            OrganizePolicy.enabled: prepared.enabled,
+            OrganizePolicy.schedule_mode: prepared.schedule_mode,
+            OrganizePolicy.interval_minutes: prepared.interval_minutes,
+            OrganizePolicy.auto_run_on_new: prepared.auto_run_on_new,
+            OrganizePolicy.auto_run_on_new_since: prepared.auto_run_on_new_since,
+            OrganizePolicy.rules_json: prepared.rules_json,
+            OrganizePolicy.write_metadata_to_files: (prepared.write_metadata_to_files),
+            OrganizePolicy.prefer_local_metadata: prepared.prefer_local_metadata,
+            OrganizePolicy.local_metadata_priority_json: (
+                prepared.local_metadata_priority_json
             ),
-            prefer_local_metadata=bool(
-                payload.get("preferLocalMetadata", current["preferLocalMetadata"])
-            ),
-            local_metadata_priority_json=json.dumps(
-                local_metadata_priority, ensure_ascii=False
-            ),
-            next_run_at=next_run_at,
-            updated_at=now,
-        )
+            OrganizePolicy.next_run_at: prepared.next_run_at,
+            OrganizePolicy.updated_at: prepared.updated_at,
+        },
     )
-    db.flush()
-    return policy_view(get_policy_row(db) or {})
+
+
+def write_prepared_organize_policy_update(db: Session, statement: Executable) -> None:
+    db.execute(statement)
 
 
 def _json_list(value: Any, fallback: list[str]) -> list[object]:

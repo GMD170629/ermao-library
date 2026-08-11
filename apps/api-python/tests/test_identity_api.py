@@ -1,7 +1,11 @@
-from sqlalchemy import select, text
+from io import BytesIO
 
+import pytest
 from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
+from app.modules.library.infrastructure import cover_publication, request_mutations
 from app.services.book_identity import identity_merge_key
+from PIL import Image
+from sqlalchemy import event, select, text
 from tests.test_compat_api import _login, create_organize_detail_tables
 from tests.test_worker_importer import create_worker_tables
 
@@ -27,6 +31,26 @@ def _insert_work(db, work_id, title, author):
             "merge_key": identity_merge_key(title, author),
         },
     )
+
+
+def _png_cover() -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (4, 4), color=(20, 40, 60)).save(output, format="PNG")
+    return output.getvalue()
+
+
+class _RemoteCoverResponse:
+    def __init__(self, payload: bytes) -> None:
+        self._payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def read(self, _limit: int) -> bytes:
+        return self._payload
 
 
 def test_manual_identity_update_allows_same_title_and_author_without_merge_candidate(
@@ -120,6 +144,142 @@ def test_metadata_recognition_applies_publisher_to_selected_volume(client, db_se
         ).scalar()
         == "新星出版社"
     )
+
+
+def test_remote_cover_download_holds_no_database_connection(
+    client,
+    db_session,
+    test_settings,
+    monkeypatch,
+):
+    create_worker_tables(db_session)
+    create_organize_detail_tables(db_session)
+    _insert_work(db_session, "work-cover-pool", "封面连接", "作者")
+    db_session.commit()
+    _login(client, db_session)
+    checked_out = 0
+
+    def checkout(*_args: object) -> None:
+        nonlocal checked_out
+        checked_out += 1
+
+    def checkin(*_args: object) -> None:
+        nonlocal checked_out
+        checked_out -= 1
+
+    engine = db_session.get_bind()
+    event.listen(engine.pool, "checkout", checkout)
+    event.listen(engine.pool, "checkin", checkin)
+
+    def remote_cover(*_args: object, **_kwargs: object) -> _RemoteCoverResponse:
+        assert checked_out == 0
+        assert db_session.in_transaction() is False
+        return _RemoteCoverResponse(_png_cover())
+
+    monkeypatch.setattr(cover_publication, "urlopen", remote_cover)
+    try:
+        response = client.post(
+            "/api/works/work-cover-pool/metadata/apply",
+            json={
+                "candidate": {"coverUrl": "https://example.test/cover.png"},
+                "fields": ["coverUrl"],
+            },
+        )
+    finally:
+        event.remove(engine.pool, "checkout", checkout)
+        event.remove(engine.pool, "checkin", checkin)
+
+    assert response.status_code == 200, response.text
+    assert (
+        test_settings.resolved_storage_root / "covers" / "work-cover-pool.png"
+    ).is_file()
+
+
+def test_remote_cover_database_failure_discards_the_unpublished_file(
+    client,
+    db_session,
+    test_settings,
+    monkeypatch,
+):
+    create_worker_tables(db_session)
+    create_organize_detail_tables(db_session)
+    _insert_work(db_session, "work-cover-db-failure", "封面失败", "作者")
+    db_session.commit()
+    _login(client, db_session)
+    monkeypatch.setattr(
+        cover_publication,
+        "urlopen",
+        lambda *_args, **_kwargs: _RemoteCoverResponse(_png_cover()),
+    )
+
+    original_update = request_mutations.works.update_work_fields
+
+    def fail_metadata_write(*args: object, **kwargs: object) -> None:
+        original_update(*args, **kwargs)
+        raise RuntimeError("metadata write failed")
+
+    monkeypatch.setattr(
+        request_mutations.works,
+        "update_work_fields",
+        fail_metadata_write,
+    )
+    with pytest.raises(RuntimeError, match="metadata write failed"):
+        client.post(
+            "/api/works/work-cover-db-failure/metadata/apply",
+            json={
+                "candidate": {"coverUrl": "https://example.test/cover.png"},
+                "fields": ["coverUrl"],
+            },
+        )
+
+    cover_dir = test_settings.resolved_storage_root / "covers"
+    assert not (cover_dir / "work-cover-db-failure.png").exists()
+    assert not list(cover_dir.glob(".work-cover-db-failure.*.part"))
+    db_session.expire_all()
+    work = db_session.get(LibraryWork, "work-cover-db-failure")
+    assert work is not None
+    assert work.cover_path is None
+
+
+def test_remote_cover_publish_failure_uses_cas_compensation(
+    client,
+    db_session,
+    test_settings,
+    monkeypatch,
+):
+    create_worker_tables(db_session)
+    create_organize_detail_tables(db_session)
+    _insert_work(db_session, "work-cover-publish-failure", "封面发布失败", "作者")
+    db_session.commit()
+    _login(client, db_session)
+    monkeypatch.setattr(
+        cover_publication,
+        "urlopen",
+        lambda *_args, **_kwargs: _RemoteCoverResponse(_png_cover()),
+    )
+    monkeypatch.setattr(
+        cover_publication.RemoteCoverPublication,
+        "publish",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("replace failed")),
+    )
+
+    response = client.post(
+        "/api/works/work-cover-publish-failure/metadata/apply",
+        json={
+            "candidate": {"coverUrl": "https://example.test/cover.png"},
+            "fields": ["coverUrl"],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    db_session.expire_all()
+    work = db_session.get(LibraryWork, "work-cover-publish-failure")
+    assert work is not None
+    assert work.cover_path is None
+    assert work.cover_status == "FAILED"
+    cover_dir = test_settings.resolved_storage_root / "covers"
+    assert not (cover_dir / "work-cover-publish-failure.png").exists()
+    assert list(cover_dir.glob(".work-cover-publish-failure.*.part"))
 
 
 def test_manual_metadata_uses_representative_volume_to_update_entire_media_version(

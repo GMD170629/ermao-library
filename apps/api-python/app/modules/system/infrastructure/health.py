@@ -25,9 +25,7 @@ def _env_check(name: str, value: str | None, required: bool = True) -> dict[str,
 
 def _check_monitor_folders(paths: list[Path]) -> dict[str, str]:
     if not paths:
-        return health_check_item(
-            "monitorRootReadable", "unknown", "未启用监控文件夹"
-        )
+        return health_check_item("monitorRootReadable", "unknown", "未启用监控文件夹")
     for path in paths:
         if not path.exists() or not path.is_dir():
             return health_check_item(

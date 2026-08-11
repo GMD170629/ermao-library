@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Literal, NotRequired
 
 from fastapi.responses import Response
-from pydantic import Field
+from pydantic import Field, model_validator
+from typing_extensions import TypedDict
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.system_events import SystemEvent
@@ -29,6 +30,36 @@ class AppConfigPayload(HttpContractModel):
 
 class SystemSettingsPayload(HttpContractModel):
     settings: dict[str, SystemSettingValue]
+
+
+class UpdateSystemSettingsRequest(HttpContractModel):
+    settings: dict[str, SystemSettingValue]
+    clear_sensitive_keys: list[str] = Field(
+        default_factory=list,
+        alias="clearSensitiveKeys",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_flat_settings(cls, value: object) -> object:
+        """Keep the established flat request shape while documenting one DTO."""
+
+        if not isinstance(value, dict):
+            return value
+        clear_sensitive_keys = value.get("clearSensitiveKeys", [])
+        if "settings" in value:
+            return {
+                "settings": value.get("settings"),
+                "clearSensitiveKeys": clear_sensitive_keys,
+            }
+        return {
+            "settings": {
+                str(key): setting_value
+                for key, setting_value in value.items()
+                if key != "clearSensitiveKeys"
+            },
+            "clearSensitiveKeys": clear_sensitive_keys,
+        }
 
 
 class OpdsSystemSettingsPayload(HttpContractModel):
@@ -72,6 +103,17 @@ class BackupRestorePayload(HttpContractModel):
     actual_counts: dict[str, int] = Field(alias="actualCounts")
 
 
+class BackupRestoreRequest(HttpContractModel):
+    """Compatibility contract for the confirmation body already sent by Web."""
+
+    confirm: bool | None = None
+    confirm_text: str | None = Field(
+        default=None,
+        alias="confirmText",
+        max_length=32,
+    )
+
+
 class BackupDeletePayload(HttpContractModel):
     deleted: bool
     id: str
@@ -89,6 +131,9 @@ class EnabledMonitorFolder(HttpContractModel):
     root_path: str = Field(alias="rootPath")
     shelf_id: str | None = Field(alias="shelfId")
     enabled: bool
+    media_kind_policy: Literal["MIXED", "EBOOK", "COMIC", "AUDIOBOOK"] = Field(
+        alias="mediaKindPolicy"
+    )
     ignore_patterns: str | None = Field(alias="ignorePatterns")
     ignore_hidden: bool = Field(alias="ignoreHidden")
     min_file_size_bytes: int = Field(alias="minFileSizeBytes")
@@ -97,17 +142,40 @@ class EnabledMonitorFolder(HttpContractModel):
     updated_at: datetime = Field(alias="updatedAt")
 
 
+class SystemRecognizedImportMetadata(TypedDict):
+    """Known dashboard fields from current and legacy import recognizers."""
+
+    title: NotRequired[str]
+    volumeTitle: NotRequired[str]
+    author: NotRequired[str | None]
+    volumeIndex: NotRequired[float | None]
+    fields: NotRequired[list[str]]
+    fieldSources: NotRequired[
+        dict[str, Literal["REQUESTED", "SIDECAR_OPF", "EMBEDDED", "PATH"]]
+    ]
+    sourceOrder: NotRequired[list[Literal["SIDECAR_OPF", "EMBEDDED", "PATH"]]]
+    source: NotRequired[Literal["REQUESTED", "SIDECAR_OPF", "EMBEDDED", "PATH"]]
+    subjects: NotRequired[list[str]]
+
+
 class SystemImportTaskSummary(HttpContractModel):
     id: str
     monitor_folder_id: str | None = Field(alias="monitorFolderId")
     work_id: str | None = Field(alias="workId")
     volume_id: str | None = Field(alias="volumeId")
     origin: str
+    media_kind_policy: Literal["MIXED", "EBOOK", "COMIC", "AUDIOBOOK"] = Field(
+        alias="mediaKindPolicy"
+    )
     status: str
     original_name: str | None = Field(alias="originalName")
     requested_title: str | None = Field(alias="requestedTitle")
     requested_author: str | None = Field(alias="requestedAuthor")
+    recognized_metadata: SystemRecognizedImportMetadata | None = Field(
+        alias="recognizedMetadata"
+    )
     source_path: str = Field(alias="sourcePath")
+    source_key: str | None = Field(alias="sourceKey")
     content_hash: str | None = Field(alias="contentHash")
     task_kind: str = Field(alias="taskKind")
     bundle_key: str | None = Field(alias="bundleKey")
