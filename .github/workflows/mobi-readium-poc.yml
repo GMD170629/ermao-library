@@ -1,0 +1,82 @@
+name: mobi-readium-poc
+
+on:
+  push:
+    branches:
+      - poc/libmobi-readium
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build libmobi 0.12
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 --branch v0.12 https://github.com/bfabiszewski/libmobi.git /tmp/libmobi
+          cmake -S /tmp/libmobi -B /tmp/libmobi-build \
+            -DUSE_LIBXML2=OFF \
+            -DUSE_ZLIB=OFF \
+            -DUSE_XMLWRITER=OFF \
+            -DUSE_ENCRYPTION=OFF \
+            -DBUILD_SHARED_LIBS=OFF
+          cmake --build /tmp/libmobi-build --parallel 2
+          /tmp/libmobi-build/tools/mobitool -v
+
+      - name: Parse real MOBI test corpus into source resources
+        shell: bash
+        run: |
+          set -euxo pipefail
+          TOOL=/tmp/libmobi-build/tools/mobitool
+          mkdir -p /tmp/mobi-output
+          for book in \
+            /tmp/libmobi/tests/samples/sample-ncx.mobi \
+            /tmp/libmobi/tests/samples/sample-unicode-huffdic.mobi \
+            /tmp/libmobi/tests/samples/sample-multimedia.mobi \
+            /tmp/libmobi/tests/samples/sample-obfuscated-fonts.mobi
+          do
+            echo "===== $book ====="
+            "$TOOL" -i "$book" | tee -a /tmp/mobi-metadata.txt
+            out="/tmp/mobi-output/$(basename "$book" .mobi)"
+            mkdir -p "$out"
+            "$TOOL" -s -o "$out" "$book"
+            find "$out" -type f -maxdepth 3 -print
+          done
+          test -s /tmp/mobi-metadata.txt
+          find /tmp/mobi-output -type f | grep -E '\.(html|xhtml|htm|css|jpg|jpeg|png|gif|svg|ttf|otf|woff|woff2)$' > /tmp/mobi-resources.txt
+          test -s /tmp/mobi-resources.txt
+          cat /tmp/mobi-resources.txt
+
+      - name: Check Readium 3.3 runtime resource contract
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 --branch 3.3.0 https://github.com/readium/kotlin-toolkit.git /tmp/readium
+          FACTORY=/tmp/readium/readium/navigator/src/main/java/org/readium/r2/navigator/epub/EpubNavigatorFactory.kt
+          SERVER=/tmp/readium/readium/navigator/src/main/java/org/readium/r2/navigator/epub/WebViewServer.kt
+          PUBLICATION=/tmp/readium/readium/shared/src/main/java/org/readium/r2/shared/publication/Publication.kt
+          grep -F 'private val publication: Publication' "$FACTORY"
+          grep -F 'publication.get' "$SERVER"
+          grep -F 'publication.conformsTo(Publication.Profile.EPUB)' "$SERVER"
+          grep -F 'public val container: Container<Resource>' "$PUBLICATION"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.1.0'
+
+      - name: Compile runtime Publication -> EPUB Navigator seam
+        working-directory: experiments/mobi-readium-poc/android
+        shell: bash
+        run: |
+          set -euxo pipefail
+          gradle :app:testDebugUnitTest --stacktrace
