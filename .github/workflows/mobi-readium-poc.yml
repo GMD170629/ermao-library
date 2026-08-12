@@ -86,4 +86,8 @@ jobs:
           arch: x86_64
           target: google_apis
           disable-animations: true
-          script: cd experiments/mobi-readium-poc/android && gradle :app:connectedDebugAndroidTest --stacktrace
+          script: |
+            cd experiments/mobi-readium-poc/android
+            gradle :app:connectedDebugAndroidTest --stacktrace
+            echo '--- RENDER PROOF FROM DEVICE LOG ---'
+            adb logcat -d -s MobiReadiumPOC:I '*:S'
