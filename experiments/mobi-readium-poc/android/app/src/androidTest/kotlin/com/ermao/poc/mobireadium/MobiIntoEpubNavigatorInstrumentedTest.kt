@@ -69,8 +69,9 @@ class MobiIntoEpubNavigatorInstrumentedTest {
 
         val navigatorFactory = EpubNavigatorFactory(publication)
         val activityRef = AtomicReference<TestActivity>()
+        val scenario = ActivityScenario.launch(TestActivity::class.java)
 
-        ActivityScenario.launch(TestActivity::class.java).use { scenario ->
+        try {
             scenario.onActivity { activity ->
                 activityRef.set(activity)
                 activity.supportFragmentManager.fragmentFactory =
@@ -92,9 +93,10 @@ class MobiIntoEpubNavigatorInstrumentedTest {
                 "Navigator did not load a publication resource URL: ${webView.url}",
                 !webView.url.isNullOrBlank(),
             )
+        } finally {
+            scenario.close()
+            publication.close()
         }
-
-        publication.close()
     }
 
     private fun waitForWebView(
