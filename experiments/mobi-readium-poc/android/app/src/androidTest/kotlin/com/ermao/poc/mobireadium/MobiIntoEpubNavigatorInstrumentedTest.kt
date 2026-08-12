@@ -30,6 +30,7 @@ import org.readium.r2.shared.util.resource.InMemoryResource
 import org.readium.r2.shared.util.resource.Resource
 
 @RunWith(AndroidJUnit4::class)
+@OptIn(kotlin.time.ExperimentalTime::class)
 class MobiIntoEpubNavigatorInstrumentedTest {
 
     @Test
