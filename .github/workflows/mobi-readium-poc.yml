@@ -19,7 +19,7 @@ jobs:
           git clone --depth 1 --branch v0.12 https://github.com/bfabiszewski/libmobi.git /tmp/libmobi
           cmake -S /tmp/libmobi -B /tmp/libmobi-build \
             -DUSE_LIBXML2=OFF \
-            -DUSE_ZLIB=OFF \
+            -DUSE_ZLIB=ON \
             -DUSE_XMLWRITER=OFF \
             -DUSE_ENCRYPTION=OFF \
             -DBUILD_SHARED_LIBS=OFF
@@ -43,7 +43,7 @@ jobs:
             out="/tmp/mobi-output/$(basename "$book" .mobi)"
             mkdir -p "$out"
             "$TOOL" -s -o "$out" "$book"
-            find "$out" -type f -maxdepth 3 -print
+            find "$out" -maxdepth 3 -type f -print
           done
           test -s /tmp/mobi-metadata.txt
           find /tmp/mobi-output -type f | grep -E '\.(html|xhtml|htm|css|jpg|jpeg|png|gif|svg|ttf|otf|woff|woff2)$' > /tmp/mobi-resources.txt
