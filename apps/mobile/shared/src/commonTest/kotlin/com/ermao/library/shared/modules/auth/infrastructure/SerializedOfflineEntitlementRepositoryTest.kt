@@ -1,5 +1,6 @@
 package com.ermao.library.shared.modules.auth.infrastructure
 
+import com.ermao.library.shared.core.storage.PlatformStoragePayload
 import com.ermao.library.shared.modules.auth.domain.OfflineEntitlementStatus
 import com.ermao.library.shared.modules.auth.domain.ValidatedSessionRecord
 import kotlin.test.Test
@@ -32,12 +33,26 @@ class SerializedOfflineEntitlementRepositoryTest {
         assertEquals(payload, store.payload)
     }
 
+    @Test
+    fun schemaOnePayloadWithoutNewIdentityFieldsRemainsReadable() = runBlocking {
+        val payload =
+            """{"schemaVersion":1,"records":{"profile-1":{"profileId":"profile-1","serverIdentity":"server-1","userId":"user-1","email":"reader@example.com","displayName":"Reader","authorizationVersion":7,"lastValidatedAtEpochMillis":1000,"expiresAtEpochMillis":2000,"maxObservedWallClockEpochMillis":1000,"status":"Valid"}}}"""
+        val repository = SerializedOfflineEntitlementRepository(MemoryStore(payload))
+
+        val record = requireNotNull(repository.load("profile-1"))
+
+        assertEquals(null, record.avatarUrl)
+        assertEquals(null, record.locale)
+    }
+
     private fun record() = ValidatedSessionRecord(
         profileId = "profile-1",
         serverIdentity = "server-1",
         userId = "user-1",
         email = "reader@example.com",
         displayName = "Reader",
+        avatarUrl = "/api/auth/avatar",
+        locale = "en-US",
         authorizationVersion = 7,
         lastValidatedAtEpochMillis = 1_000,
         expiresAtEpochMillis = 2_000,
@@ -46,7 +61,7 @@ class SerializedOfflineEntitlementRepositoryTest {
     )
 
     private class MemoryStore(var payload: String? = null) : OfflineEntitlementPayloadStore {
-        override fun loadEntitlements(): String? = payload
+        override fun loadEntitlementsPayload() = PlatformStoragePayload(payload)
         override fun saveEntitlements(payload: String) {
             this.payload = payload
         }

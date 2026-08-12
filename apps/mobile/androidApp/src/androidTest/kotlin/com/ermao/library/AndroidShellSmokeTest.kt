@@ -3,8 +3,10 @@ package com.ermao.library
 import android.content.Context
 import android.content.res.Configuration
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.core.content.ContextCompat
@@ -14,6 +16,7 @@ import com.ermao.library.bootstrap.ErmaoLibraryRoot
 import com.ermao.library.bootstrap.MainActions
 import com.ermao.library.bootstrap.MainUiState
 import com.ermao.library.features.shell.MainShell
+import com.ermao.library.shared.createAndroidContentRepository
 import com.ermao.library.shared.modules.auth.domain.AppSession
 import com.ermao.library.shared.modules.auth.domain.Authorization
 import com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace
@@ -22,6 +25,9 @@ import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import com.ermao.library.shared.modules.servers.domain.TlsMode
+import com.ermao.library.shared.createAndroidPersonalSettingsRepository
+import com.ermao.library.shared.createAndroidAdministrativeSettingsRepository
+import com.ermao.library.features.me.platform.AndroidXAppLocaleController
 import com.ermao.library.ui.theme.WarmPageTheme
 import java.util.Locale
 import org.junit.Assert.assertEquals
@@ -36,24 +42,62 @@ class AndroidShellSmokeTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun noProfileShowsServerGate() {
+    fun noProfileShowsInlineServerAndLoginFields() {
         composeRule.setContent {
             WarmPageTheme(darkTheme = false) {
                 ErmaoLibraryRoot(
                     state = MainUiState(session = AppSession.NoServer),
                     actions = noOpMainActions,
+                    contentRepository = createAndroidContentRepository(InstrumentationRegistry.getInstrumentation().targetContext),
                 )
             }
         }
 
-        composeRule.onNodeWithTag("server-empty-gate").assertIsDisplayed()
+        composeRule.onNodeWithTag("login-server-address").assertIsDisplayed()
+        composeRule.onNodeWithTag("login-submit").assertIsDisplayed()
+        composeRule.onAllNodesWithTag("login-entry-close").assertCountEquals(0)
+    }
+
+    @Test
+    fun authenticatedServerManagementReusesLoginEntryAndCanReturnToShell() {
+        val session = authenticatedSession()
+        composeRule.setContent {
+            WarmPageTheme(darkTheme = false) {
+                ErmaoLibraryRoot(
+                    state = MainUiState(
+                        session = session,
+                        serverProfiles = listOf(session.profile.toSnapshot()),
+                        showServerCenter = true,
+                    ),
+                    actions = noOpMainActions,
+                    contentRepository = createAndroidContentRepository(InstrumentationRegistry.getInstrumentation().targetContext),
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("login-server-address").assertIsDisplayed()
+        composeRule.onNodeWithTag("login-entry-close").assertIsDisplayed()
     }
 
     @Test
     fun eachRootTabOwnsAVisibleNavigationDestination() {
         composeRule.setContent {
             WarmPageTheme(darkTheme = false) {
-                MainShell(session = authenticatedSession(), onOpenServers = {}, onLogout = {})
+                MainShell(
+                    session = authenticatedSession(),
+                    contentRepository = createAndroidContentRepository(InstrumentationRegistry.getInstrumentation().targetContext),
+                    personalSettingsRepository = createAndroidPersonalSettingsRepository(
+                        InstrumentationRegistry.getInstrumentation().targetContext,
+                    ),
+                    administrativeSettingsRepository = createAndroidAdministrativeSettingsRepository(
+                        InstrumentationRegistry.getInstrumentation().targetContext,
+                    ),
+                    localeController = AndroidXAppLocaleController(),
+                    onSessionUnauthorized = {},
+                    onRefreshSession = {},
+                    onPurgeCurrentNamespace = {},
+                    onLogout = {},
+                )
             }
         }
 
@@ -88,31 +132,27 @@ class AndroidShellSmokeTest {
 }
 
 private val noOpMainActions = MainActions(
-    onServerDisplayNameChanged = {},
-    onServerBaseUrlChanged = {},
-    onSaveServer = {},
-    onRetryServerConnection = {},
-    onPermanentlyIgnoreTls = {},
-    onAddServer = {},
-    onReopenConnectionDraft = {},
-    onCloseServerEditor = {},
     onOpenServerCenter = {},
     onCloseServerCenter = {},
-    onSelectServer = {},
-    onCloseServerDetail = {},
-    onEditSavedServer = {},
-    onSwitchServer = {},
-    onRemoveServer = {},
-    onRestoreSystemTrust = {},
     onLoginEmailChanged = {},
     onLoginPasswordChanged = {},
+    onLoginServerAddressChanged = {},
     onLogin = {},
+    onLoginEntry = {},
+    onSelectLoginServer = {},
+    onDeleteLoginServer = {},
+    onAcceptLoginUnsafeTls = {},
+    onDismissOperationError = {},
     onSetupNameChanged = {},
     onSetupEmailChanged = {},
     onSetupPasswordChanged = {},
     onSetupConfirmationChanged = {},
     onSetup = {},
     onRetrySession = {},
+    onRequireReauthentication = {},
+    onRefreshSessionAwaiting = {},
+    onPurgeCurrentNamespace = {},
+    onLogoutAwaiting = {},
     onEnterOffline = {},
     onLogout = {},
 )
@@ -143,6 +183,15 @@ private fun authenticatedSession(): AppSession.Authenticated {
 
 private fun Context.withLocale(locale: Locale): Context = createConfigurationContext(
     Configuration(resources.configuration).apply { setLocale(locale) },
+)
+
+private fun ServerProfile.toSnapshot() = com.ermao.library.shared.modules.servers.domain.ServerProfileSnapshot(
+    id = id,
+    displayName = displayName,
+    baseUrl = baseUrl.value,
+    serverIdentity = serverIdentity,
+    isActive = isActive,
+    tlsMode = tlsMode,
 )
 
 private fun Context.withNightMode(nightMode: Int): Context = createConfigurationContext(

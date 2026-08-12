@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from pathlib import Path
+from datetime import datetime
 from typing import Literal
 
 from sqlalchemy.orm import Session
@@ -9,7 +8,6 @@ from sqlalchemy.orm import Session
 from app.bootstrap.system import write_prepared_system_events
 from app.core.config import Settings
 from app.models.auth import User
-from app.modules.imports.application.dto import ImportTaskDTO
 from app.modules.library.application.bookshelf import ListBookshelfItems
 from app.modules.library.application.dto import MoveVolumeResult
 from app.modules.library.application.filter_options import (
@@ -41,6 +39,9 @@ from app.modules.library.infrastructure.bookshelf import SqlAlchemyBookshelfItem
 from app.modules.library.infrastructure.cover_publication import RemoteCoverPublication
 from app.modules.library.infrastructure.deletion import (
     SqlAlchemyLibraryWorkDeletionStore,
+)
+from app.modules.library.infrastructure.facet_references import (
+    SqlAlchemyLibraryFacetReferenceQueries,
 )
 from app.modules.library.infrastructure.facet_sync import (
     PreparedWorkFacetWrite,
@@ -87,6 +88,7 @@ __all__ = [
     "library_dashboard",
     "library_deletion",
     "library_facet_queries",
+    "library_facet_references",
     "library_filter_options",
     "library_filter_schema",
     "library_groupings",
@@ -167,6 +169,10 @@ def library_groupings(db: Session) -> ListLibraryGroupings:
     return ListLibraryGroupings(SqlAlchemyLibraryGroupingQueries(db))
 
 
+def library_facet_references(db: Session) -> SqlAlchemyLibraryFacetReferenceQueries:
+    return SqlAlchemyLibraryFacetReferenceQueries(db)
+
+
 def library_filter_schema(db: Session) -> GetLibraryFilterSchema:
     return GetLibraryFilterSchema(SqlAlchemyLibraryFilterQueries(db))
 
@@ -236,42 +242,4 @@ def reorder_volume(
 
 
 def volume_structure_commands(db: Session) -> SqlAlchemyVolumeStructure:
-    from app.bootstrap.imports import (
-        execute_import_enqueue_write,
-        load_import_enqueue_command_projection,
-        prepare_import_enqueue_command,
-        prepare_import_enqueue_write,
-    )
-
-    def enqueue_prepared_import(
-        session: Session,
-        source_path: str | Path,
-        *,
-        origin: str,
-        original_name: str | None = None,
-        requested_title: str | None = None,
-        requested_author: str | None = None,
-        monitor_folder_id: str | None = None,
-        message: str = "等待后台处理",
-        allow_terminal_requeue: bool = False,
-    ) -> tuple[ImportTaskDTO, bool]:
-        command = prepare_import_enqueue_command(
-            source_path,
-            origin=origin,
-            original_name=original_name,
-            requested_title=requested_title,
-            requested_author=requested_author,
-            monitor_folder_id=monitor_folder_id,
-            message=message,
-            allow_terminal_requeue=allow_terminal_requeue,
-        )
-        projection = load_import_enqueue_command_projection(session, command)
-        prepared = prepare_import_enqueue_write(
-            command,
-            projection,
-            available_at=datetime.now(UTC),
-        )
-        execute_import_enqueue_write(session, prepared)
-        return prepared.task, prepared.created
-
-    return SqlAlchemyVolumeStructure(db, enqueue_prepared_import)
+    return SqlAlchemyVolumeStructure(db)

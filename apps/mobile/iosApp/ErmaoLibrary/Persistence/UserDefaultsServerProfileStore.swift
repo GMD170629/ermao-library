@@ -13,7 +13,7 @@ final class UserDefaultsServerProfileStore {
         self.storageKey = storageKey
     }
 
-    func loadProfiles() throws -> String? {
+    func loadProfiles() -> String? {
         lock.lock()
         defer { lock.unlock() }
         return defaults.string(forKey: storageKey)
@@ -49,7 +49,7 @@ final class UserDefaultsOfflineEntitlementStore {
         self.storageKey = storageKey
     }
 
-    func loadEntitlements() throws -> String? {
+    func loadEntitlements() -> String? {
         lock.lock()
         defer { lock.unlock() }
         return defaults.string(forKey: storageKey)

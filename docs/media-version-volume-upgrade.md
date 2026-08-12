@@ -11,8 +11,8 @@ CBZ/ZIP 文件各形成一个卷册；有声书单文件、单卷分轨目录和
 各形成一个卷册。`Disc`、`CD`、`Disk` 目录只决定音轨顺序，不创建卷册。卷号可空、
 可重复，只用于描述；卷册 ID 是身份，`sortOrder` 是显示与继续阅读顺序。
 
-源格式和转换得到的 EPUB 是两个独立卷册，通过 `derivedFromVolumeId` 关联，阅读进度
-互不覆盖。进度和书签只以用户、卷册和内容指纹为作用域。作品和媒介不保存整体百分比；
+所有受支持的文件均保留源格式，每个独立内容资源对应一个卷册。进度和书签只以用户、卷册
+和内容指纹为作用域。作品和媒介不保存整体百分比；
 只有全部可见且已授权卷册都达到 100% 时，才动态显示完成。
 
 导入目录和文件命名继续遵循 Wiki：
@@ -45,9 +45,9 @@ also a volume. `Disc`, `CD`, and `Disk` directories affect track order only.
 Volume numbers are optional, repeatable labels; the volume ID is the identity and
 `sortOrder` controls display and continue-reading order.
 
-A source resource and its derived EPUB are separate volumes linked by
-`derivedFromVolumeId`, with independent progress. Progress and bookmarks are
-scoped only by user, volume, and content fingerprint. Works and media versions do
+Supported files remain in their source format, and each independently readable
+resource is represented by one volume. Progress and bookmarks are scoped only by
+user, volume, and content fingerprint. Works and media versions do
 not store aggregate percentages. Completion is projected dynamically only when
 every visible, authorized volume reaches 100 percent.
 

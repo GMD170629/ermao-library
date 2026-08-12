@@ -4,7 +4,7 @@
 
 ## 1. 目的与约束优先级
 
-本文件固化方向 A“暖白书页”按画布尺寸 1:1 输出的高保真页面锚点，供后续锚点、状态变体和未来原生实现校准；1:1 只描述画布与构图，不要求系统组件逐像素复制。当前已覆盖 Compact 的 Home、Library、Work Detail、Shelves、Me、Downloads、Server，以及沉浸层 Reader Paper 与 Audio Now Playing，不创建或重建 `apps/mobile`。
+本文件固化方向 A“暖白书页”按画布尺寸 1:1 输出的高保真页面锚点，供后续锚点、状态变体和原生实现校准；1:1 只描述画布与构图，不要求系统组件逐像素复制。当前已覆盖 Compact 的 Home、Library、Work Detail、Shelves、Me、Downloads，以及沉浸层 Reader Paper 与 Audio Now Playing。服务器登录与管理已由 Phase 6 v3 的任务闭环接管，不再以本阶段旧版 Server Center 单页或 Phase 6 v2 网格稿为准。
 
 约束优先级固定为：
 
@@ -19,9 +19,9 @@
 
 ## 2. 共同画布
 
-- 画布：`390 × 844`，不含设备外框和演示板；
+- 画布：除 Work Detail v2 概念组外使用 `390 × 844`，不含设备外框和演示板；Work Detail v2 保留带设备框的评审稿，真实平台验收截图仍按设备原生画布归档；
 - 外观：Shell 页面使用 `App Light`，Reader 使用 `Paper`，Audio 使用方向 A 的暖铜沉浸外观；
-- 内容：九页复用同一用户、服务器和作品身份；出现媒体内容时继续复用同一封面、作者、阅读位置和进度；
+- 内容：八页复用同一用户、服务器和作品身份；出现媒体内容时继续复用同一封面、作者、阅读位置和进度；
 - 视觉：暖白 Canvas、黑色正文、克制珊瑚红、2:3 Cover、系统无衬线与原生图标；
 - 纸感只来自背景、排版、封面和内容节奏，不增加仿纸卡片、UI 噪点或装饰纹理；
 - System status bar 未纳入锚点，未来实现由原生安全区和系统状态栏接管。
@@ -58,16 +58,22 @@
 
 ## 5. Work Detail
 
-![Work Detail App Light v1](assets/mobile-app-hifi-v1/work-detail-app-light-v1.png)
+![Work Detail Introduction iOS App Light v2](assets/mobile-app-hifi-v1/work-detail-introduction-ios-app-light-v2.png)
 
-文件：[Work Detail App Light v1](assets/mobile-app-hifi-v1/work-detail-app-light-v1.png)
+文件：[简介](assets/mobile-app-hifi-v1/work-detail-introduction-ios-app-light-v2.png) · [媒体版本与多卷](assets/mobile-app-hifi-v1/work-detail-media-volumes-ios-app-light-v2.png) · [单卷电子书章节回退](assets/mobile-app-hifi-v1/work-detail-ebook-chapters-ios-app-light-v2.png) · [二级操作 Sheet](assets/mobile-app-hifi-v1/work-detail-actions-sheet-ios-app-light-v2.png)
+
+这四张 v2 稿替代旧 `work-detail-app-light-v1.png`，共同组成 Work Detail 的最终视觉基线。它们是带 iPhone 展示框的概念稿，冻结 App 自有内容构图、密度和层级；实现截图仍使用真实设备画布，系统导航、Tab、Menu 与 Sheet 外壳不得按展示框逐像素仿制。
 
 冻结项：
 
 - 使用系统返回、折叠标题语义和 overflow，不自绘 Web 式 Header；
 - Cover 与作品名组成第一视觉层，作者、系列和阅读状态依次降级；
-- 媒介切换后只保留一个全宽主 CTA；下载、加入书架和阅读状态为次级动作；
-- Volume 使用连续列表、Divider 和小型选中标记，不使用卡片墙；
+- Cover 全局使用透明展示框，不为真实封面或 Fallback 补充背景色；详情身份区按“标题、作者、方形标签、阅读状态、系列”组织，作者与系列保留整行点击但不显示箭头，系列使用下划线并与封面底部对齐；
+- 主 CTA 之后在简介存在时使用“简介 / 媒体版本”一级 Tab；简介为空时隐藏该 Tab 并直接展示媒体内容；仅有一个媒体版本时隐藏媒体类型控件，直接展示卷册或章节；
+- Volume 使用连续列表、Divider 和小型选中标记，不使用卡片墙；阅读进度固定在卷册标题下方；单卷电子书直接回退到目录行，不额外显示“图书章节 / 共 N 章”标题行；
+- “未开始 / 未读”是默认状态，不在身份区重复显示；只有正在阅读或已完成时显示阅读状态；
+- 下载状态与阅读进度严格分离：云朵直接开始下载，环形控件可暂停/取消，勾选圆圈表示完成；详情行不显示“下载中 68%”一类文字；
+- 编辑、下载、设置封面和阅读状态位于平台原生二级操作容器；能力与权限不足时隐藏或提供明确的 Web 管理路径，不使用伪成功状态；
 - Work Detail 仍位于 LibraryStack 的 AuthenticatedShell 内，因此保留四项 Tab；只有 Reader 隐藏 Tab 与 mini player。
 
 ## 6. Reader Paper
@@ -140,23 +146,27 @@
 - 下载失败使用稳定摘要和行内“重试”，不弹逐项 Dialog；移除离线副本等破坏性动作仍按 Phase 2 进入确认 Dialog；
 - 页面属于 MeStack，保留四项 Tab 且“我的”为选中项；当前正常锚点不显示 offline/401 宽限 Banner 或 mini player。
 
-## 11. Server Center
+## 11. Server Login / Center 替代关系
 
-![Server Center App Light v1](assets/mobile-app-hifi-v1/servers-app-light-v1.png)
+![Server Login Saved iOS App Light v3](assets/mobile-app-hifi-v1/server-login-saved-ios-app-light-v3.png)
 
-文件：[Server Center App Light v1](assets/mobile-app-hifi-v1/servers-app-light-v1.png)
+文件：[Server Login Saved iOS App Light v3](assets/mobile-app-hifi-v1/server-login-saved-ios-app-light-v3.png) · [Server Login Saved Android App Light v3](assets/mobile-app-hifi-v1/server-login-saved-android-app-light-v3.png)
 
-冻结项：
+旧版 Server Center 与 Phase 6 v2 服务器网格资产均已被 Phase 6 v3 替代，不再作为实现或验收依据。服务器 Gate 与“我的 > 服务器”复用同一个登录表单和切换 Sheet 模型：
 
-- 主锚点采用“一个 active profile + 一个 inactive profile”的管理状态；从“我的”进入时显示系统返回，添加服务器使用原生加号动作；
-- 当前服务器摘要同时显示名称、base URL、连接状态、当前用户和 `systemTrust` 语义；
-- profile 使用连续行和 Divider，选择行不等于激活；非 active profile 不执行播放、下载或后台同步；
-- `insecureSkipAllValidation` 风险只绑定对应 profile，并持续显示系统警示色与“永久忽略证书验证”；禁止用珊瑚红表达安全错误，也禁止做全局 TLS Switch；
-- “在 Web 管理”使用系统浏览器打开明确域名，不建立 App 内管理页面；页面属于 MeStack，保留四项 Tab 且“我的”为选中项。
+- 无有效会话时首屏直接显示服务器地址、账号、密码；首次使用为空，鉴权过期时回填最近成功 profile；
+- “登录”是唯一强主动作；下方左侧“切换服务器”打开平台原生 Sheet，右侧“删除当前服务器”使用低强调 destructive 语义；
+- 输入新地址并登录成功后自动保存 profile，名称取标准化 URL hostname，不提供名称输入或独立添加/编辑模式；
+- Sheet 选择只回填表单，不自动登录；删除确认成功后清空三个字段，不自动选择下一台服务器；
+- 填写和切换不探测网络，不展示连接状态、兼容性、TLS 或证书验证配置；
+- 只有点击登录时执行探测；不可用、不兼容和不安全 SSL 分别使用平台原生提示，其中不安全 SSL 只提供“取消”与“接受风险并连接”；
+- 从“我的”进入时保留 MeStack 的系统返回和 Tab；未登录 Gate 不显示 Shell 导航。iOS 与 Android 共用语义，不共用系统组件几何。
+
+完整状态、文案、平台差异和十张视觉证据以 [`mobile-app-phase-6-server-auth-high-fidelity.md`](mobile-app-phase-6-server-auth-high-fidelity.md) 为准。
 
 ## 12. 本轮验收结论
 
-- 九张资产均为 `390 × 844` PNG，并使用同一用户、服务器、内容身份与视觉语言；
+- 本阶段主锚点使用同一用户、服务器、内容身份与视觉语言；除 Work Detail v2 四张带设备框评审稿外，主锚点为 `390 × 844` PNG；服务器入口资产由 Phase 6 单独管理，包含 iOS `390 × 844` 与 Android `412 × 915` 画布；
 - Home 没有第二套搜索，Library 是唯一发现入口；
 - Library 活动筛选已去除大面积胶囊背景；
 - Home 与 Library 在标准 `390pt` Compact 宽度下均保持一行三本的信息密度；
@@ -166,11 +176,11 @@
 - Shelves 的合集、静态书架与智能书架可通过层级和三封面组图区分；
 - Me 的用户身份、设置分组和系统行语义清楚，头像没有重复成为装饰；
 - Downloads 的存储、进行中、已完成和失败状态同时可扫描，失败恢复保持行内；
-- Server Center 的 active profile、inactive profile、连接状态与 profile 级 TLS 风险边界清楚；
+- 服务器入口已改为默认登录表单、原生切换 Sheet、当前 profile 删除，以及仅在点击登录时出现的连接、兼容性和 SSL 风险提示；
 - 页面没有新增 Web-only、P1 占位或 Phase 1 排除能力；
-- Home、Library、Work Detail、Shelves、Me、Downloads 与 Server Center 的 App 自有内容区按严格视觉回归验收；Reader 与 Audio 的业务内容区同样严格验收；Navigation、Tab、Slider、播放控件和 overflow 按平台独立验收，不要求跨平台同形；
+- Home、Library、Work Detail、Shelves、Me 与 Downloads 的 App 自有内容区按严格视觉回归验收；Reader 与 Audio 的业务内容区同样严格验收；服务器入口按 Phase 6 v3 独立验收；Navigation、Tab、Slider、播放控件和 overflow 按平台独立验收，不要求跨平台同形；
 - 当前锚点不代表 App Dark、Expanded、Dynamic Type 或异常状态已经验收，这些仍按 Phase 3–4 的矩阵单独制作。
 
-服务器首次连接、TLS 风险、Login、Setup 与 Reauthenticate 的高保真闭环见 [`mobile-app-phase-6-server-auth-high-fidelity.md`](mobile-app-phase-6-server-auth-high-fidelity.md)。
+服务器登录、切换与删除、按需连接与 TLS 风险、Setup 和 Reauthenticate 的高保真闭环见 [`mobile-app-phase-6-server-auth-high-fidelity.md`](mobile-app-phase-6-server-auth-high-fidelity.md)。
 
 书库 Search、系列/作者分组、共享 Facet 与返回上下文的高保真闭环见 [`mobile-app-phase-7-library-discovery-high-fidelity.md`](mobile-app-phase-7-library-discovery-high-fidelity.md)。

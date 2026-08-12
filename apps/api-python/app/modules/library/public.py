@@ -21,6 +21,11 @@ from app.modules.library.application.catalog import (
     ListCatalogWorks,
 )
 from app.modules.library.application.dto import MoveVolumeResult
+from app.modules.library.application.facet_references import (
+    LibraryFacetReference,
+    LibraryFacetReferenceQueryPort,
+    WorkFacetReferences,
+)
 from app.modules.library.application.facet_sync import (
     PreparedWorkFacet,
     WorkFacetProjection,
@@ -48,6 +53,7 @@ from app.modules.library.application.groupings import (
     LibraryGrouping,
     LibraryGroupingPage,
     LibraryGroupingQueryPort,
+    LibraryGroupingWork,
     ListLibraryGroupings,
 )
 from app.modules.library.application.queries import (
@@ -112,6 +118,8 @@ __all__ = [
     "GetLibraryFilterSchema",
     "GetSmartShelfWorkIds",
     "InvalidFilterExpression",
+    "LibraryFacetReference",
+    "LibraryFacetReferenceQueryPort",
     "LibraryFilterFieldDefinition",
     "LibraryFilterOption",
     "LibraryFilterOptionPage",
@@ -122,6 +130,7 @@ __all__ = [
     "LibraryGrouping",
     "LibraryGroupingPage",
     "LibraryGroupingQueryPort",
+    "LibraryGroupingWork",
     "ListBookshelfItems",
     "ListCatalogFacets",
     "ListCatalogWorks",
@@ -131,9 +140,10 @@ __all__ = [
     "SearchLibraryFilterOptions",
     "SmartShelfCriteria",
     "SmartShelfQueryPort",
+    "WorkFacetProjection",
+    "WorkFacetReferences",
     "WorkListQuery",
     "WorkListResult",
-    "WorkFacetProjection",
     "WorkView",
     "bookshelf_item_view",
     "bookshelf_item_views",

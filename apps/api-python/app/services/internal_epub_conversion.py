@@ -14,7 +14,6 @@ from urllib.parse import urlparse
 from ebooklib import epub
 from lxml import etree
 
-
 INTERNAL_CONVERTER_VERSION = "shuku-internal-epub/2"
 MAX_TXT_CHAPTER_CHARS = 80_000
 MAX_CHAPTERS = 2_000
@@ -166,7 +165,7 @@ def _finish_book(book: epub.EpubBook, chapters: list[epub.EpubHtml], output: Pat
     try:
         epub.write_epub(str(output), book, {"raise_exceptions": True})
     except Exception as exc:  # EbookLib exposes backend-specific write errors.
-        raise InternalConversionError("EPUB 生成失败") from exc
+        raise InternalConversionError("电子书文件处理失败") from exc
 
 
 def _normalize_text(value: str) -> str:

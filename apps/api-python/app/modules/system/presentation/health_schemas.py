@@ -13,28 +13,11 @@ from app.contracts.http_errors import HttpContractError
 from app.core.time import timestamp_ms_to_iso
 
 
-class ConverterEngine(HttpContractModel):
-    available: bool
-    converter: str
-    version: str | None
-    formats: list[str]
-    normalizer_version: str | None = Field(default=None, alias="normalizerVersion")
-    error_code: str | None = Field(default=None, alias="errorCode")
-    message: str | None = None
-
-
-class ConverterCapability(HttpContractModel):
-    available: bool
-    converter: str
-    version: str
-    engines: list[ConverterEngine]
-
-
 class HealthCheck(HttpContractModel):
     name: str
     status: str
     message: str
-    details: ConverterCapability | None = None
+    details: None = None
 
 
 class ServiceHealthPayload(HttpContractModel):
@@ -133,7 +116,6 @@ HealthItemDetails = (
     | DatabaseHealthDetails
     | QueueHealthDetails
     | SmtpHealthDetails
-    | ConverterCapability
     | ProviderHealthDetails
     | QueueSkippedDetails
 )

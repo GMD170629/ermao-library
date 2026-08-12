@@ -64,13 +64,31 @@ enum RootTabContract {
     }
 }
 
-struct RootTabPaths {
-    private var home = NavigationPath()
-    private var library = NavigationPath()
-    private var shelves = NavigationPath()
-    private var me = NavigationPath()
+enum AppRoute: Hashable, Sendable {
+    case work(workID: String)
+    case facet(kind: FacetKind, facetID: String)
+    case collection(HomeCollectionKind)
+    case settings(SettingsRoute)
+    case administrative(AdministrativeSettingsRoute)
 
-    func path(for tab: TabPresentation) -> NavigationPath {
+    var identityKey: String {
+        switch self {
+        case .work(let workID): "work:\(workID)"
+        case .facet(let kind, let facetID): "facet:\(kind.rawValue):\(facetID)"
+        case .collection(let kind): "collection:\(kind.rawValue)"
+        case .settings(let route): "settings:\(route.rawValue)"
+        case .administrative(let route): "administrative:\(route.identityKey)"
+        }
+    }
+}
+
+struct RootTabPaths {
+    private var home: [AppRoute] = []
+    private var library: [AppRoute] = []
+    private var shelves: [AppRoute] = []
+    private var me: [AppRoute] = []
+
+    func path(for tab: TabPresentation) -> [AppRoute] {
         switch tab {
         case .home: home
         case .library: library
@@ -79,7 +97,7 @@ struct RootTabPaths {
         }
     }
 
-    mutating func setPath(_ path: NavigationPath, for tab: TabPresentation) {
+    mutating func setPath(_ path: [AppRoute], for tab: TabPresentation) {
         switch tab {
         case .home: home = path
         case .library: library = path
@@ -89,16 +107,32 @@ struct RootTabPaths {
     }
 
     mutating func popToRoot(_ tab: TabPresentation) {
-        setPath(NavigationPath(), for: tab)
+        setPath([], for: tab)
+    }
+
+    mutating func open(_ route: AppRoute, in tab: TabPresentation) {
+        var path = path(for: tab)
+        if let existingIndex = path.firstIndex(where: { $0.identityKey == route.identityKey }) {
+            path = Array(path.prefix(through: existingIndex))
+        } else {
+            path.append(route)
+        }
+        setPath(path, for: tab)
     }
 }
 
 struct MainTabView: View {
     @ObservedObject var store: SessionStore
+    let contentClient: any ContentClient
+    let cache: LibraryCacheStore
+    var settingsViewModel: SettingsViewModel? = nil
+    var administrativeSettingsStore: AdministrativeSettingsStore? = nil
     private let rootTabs = RootTabContract.definitions
 
     @State private var selectedTabID = RootTabContract.orderedIDs.first ?? ""
     @State private var paths = RootTabPaths()
+    @State private var expandedLibraryWorkID: String?
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var selection: Binding<String> {
         Binding(
@@ -115,33 +149,207 @@ struct MainTabView: View {
     }
 
     var body: some View {
-        TabView(selection: selection) {
-            ForEach(rootTabs) { tab in
-                tabRoot(presentation: tab.presentation)
-                    .tabItem {
-                        Label(
-                            tab.presentation.title,
-                            systemImage: tab.presentation.systemImage(isSelected: selectedTabID == tab.id)
+        Group {
+            if let context = contentContext {
+                TabView(selection: selection) {
+                    ForEach(rootTabs) { tab in
+                        tabRoot(presentation: tab.presentation, context: context)
+                            .tabItem {
+                                Label(
+                                    tab.presentation.title,
+                                    systemImage: tab.presentation.systemImage(isSelected: selectedTabID == tab.id)
+                                )
+                            }
+                            .tag(tab.id)
+                    }
+                }
+            } else {
+                ProgressView().accessibilityLabel(Text("common.loading"))
+            }
+        }
+    }
+
+    private var contentContext: ContentRequestContext? {
+        guard
+            let profile = store.snapshot.profile,
+            let userID = store.snapshot.userID,
+            let authorization = store.snapshot.authorization
+        else { return nil }
+        return ContentRequestContext(
+            profileID: profile.id,
+            profileDisplayName: profile.displayName,
+            serverIdentity: profile.serverIdentity,
+            userID: userID,
+            authorizationVersion: authorization.authorizationVersion,
+            baseURL: profile.baseURL,
+            acceptsInsecureTLS: profile.tlsMode == .insecureSkipAllValidation
+        )
+    }
+
+    private func tabRoot(presentation: TabPresentation, context: ContentRequestContext) -> some View {
+        NavigationStack(path: path(for: presentation)) {
+            Group {
+                switch presentation {
+                case .home:
+                    HomeView(
+                        context: context,
+                        client: contentClient,
+                        cache: cache,
+                        onUnauthorized: store.refreshForForeground,
+                        openWork: { open(.work(workID: $0), in: .home) },
+                        openCollection: { open(.collection($0), in: .home) }
+                    )
+                    .id(context.namespaceKey)
+                case .library:
+                    libraryRoot(context: context)
+                    .id(context.namespaceKey)
+                case .me:
+                    if let settingsViewModel {
+                        MeRootView(
+                            viewModel: settingsViewModel,
+                            onOpenRoute: { open(.settings($0), in: .me) },
+                            canOpenAdministration: administrativeSettingsStore?.permissions.isAdmin == true ||
+                                administrativeSettingsStore?.permissions.canManageSystem == true,
+                            onOpenEmailAndKindle: {
+                                open(.administrative(.emailAndKindle), in: .me)
+                            },
+                            onOpenKindleQueue: {
+                                open(.administrative(.kindleQueue), in: .me)
+                            },
+                            onOpenAdministration: {
+                                open(.administrative(.management), in: .me)
+                            }
+                        )
+                    } else {
+                        Color.clear
+                            .navigationTitle("tab.me")
+                            .appCanvas()
+                    }
+                case .shelves:
+                    Color.clear
+                        .navigationTitle(presentation.title)
+                        .appCanvas()
+                }
+            }
+            .navigationDestination(for: AppRoute.self) { route in
+                destination(route, presentation: presentation, context: context)
+            }
+            .administrativeNavigation { route in
+                open(.administrative(route), in: .me)
+            }
+            .environment(
+                \.administrativeCopy,
+                administrativeSettingsStore?.copy ?? AdministrativeCopyCatalog(locale: .enUS)
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func libraryRoot(context: ContentRequestContext) -> some View {
+        let library = LibraryView(
+            context: context,
+            client: contentClient,
+            cache: cache,
+            onUnauthorized: store.refreshForForeground,
+            openWork: { workID in
+                if horizontalSizeClass == .regular {
+                    expandedLibraryWorkID = workID
+                } else {
+                    open(.work(workID: workID), in: .library)
+                }
+            },
+            openFacet: { open(.facet(kind: $0, facetID: $1), in: .library) }
+        )
+        if horizontalSizeClass == .regular {
+            HStack(spacing: 0) {
+                library
+                    .frame(minWidth: 360, idealWidth: 460, maxWidth: 520)
+                Divider()
+                Group {
+                    if let workID = expandedLibraryWorkID {
+                        WorkDetailView(
+                            context: context,
+                            client: contentClient,
+                            cache: cache,
+                            workID: workID,
+                            onUnauthorized: store.refreshForForeground,
+                            openFacet: { open(.facet(kind: $0, facetID: $1), in: .library) }
+                        )
+                        .id(workID)
+                    } else {
+                        ContentStatusView(
+                            systemImage: "book.closed",
+                            title: "library.expanded.empty.title",
+                            message: "library.expanded.empty.message"
                         )
                     }
-                    .tag(tab.id)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+        } else {
+            library
         }
     }
 
-    private func tabRoot(presentation: TabPresentation) -> some View {
-        NavigationStack(path: path(for: presentation)) {
-            if presentation == .me {
-                MeSummaryView(store: store)
+    @ViewBuilder
+    private func destination(
+        _ route: AppRoute,
+        presentation: TabPresentation,
+        context: ContentRequestContext
+    ) -> some View {
+        switch route {
+        case .work(let workID):
+            WorkDetailView(
+                context: context,
+                client: contentClient,
+                cache: cache,
+                workID: workID,
+                onUnauthorized: store.refreshForForeground,
+                openFacet: { open(.facet(kind: $0, facetID: $1), in: presentation) }
+            )
+        case .facet(let kind, let facetID):
+            FacetView(
+                context: context,
+                client: contentClient,
+                cache: cache,
+                kind: kind,
+                facetID: facetID,
+                onUnauthorized: store.refreshForForeground,
+                openWork: { open(.work(workID: $0), in: presentation) }
+            )
+        case .collection(let kind):
+            WorkCollectionView(
+                context: context,
+                client: contentClient,
+                cache: cache,
+                kind: kind,
+                onUnauthorized: store.refreshForForeground,
+                openWork: { open(.work(workID: $0), in: presentation) }
+            )
+        case .settings(let route):
+            if let settingsViewModel {
+                SettingsDestinationView(route: route, viewModel: settingsViewModel)
             } else {
                 Color.clear
-                .navigationTitle(presentation.title)
-                .appCanvas()
+                    .navigationTitle("tab.me")
+                    .appCanvas()
+            }
+        case .administrative(let route):
+            if let administrativeSettingsStore,
+               administrativeSettingsStore.permissions.permits(route) {
+                AdministrativeSettingsDestination(
+                    route: route,
+                    store: administrativeSettingsStore
+                )
+            } else {
+                Color.clear
+                    .navigationTitle("tab.me")
+                    .appCanvas()
             }
         }
     }
 
-    private func path(for presentation: TabPresentation) -> Binding<NavigationPath> {
+    private func path(for presentation: TabPresentation) -> Binding<[AppRoute]> {
         Binding(
             get: { paths.path(for: presentation) },
             set: { paths.setPath($0, for: presentation) }
@@ -152,55 +360,55 @@ struct MainTabView: View {
         let selected = rootTabs.first(where: { $0.id == selectedTabID })?.presentation ?? .home
         paths.popToRoot(selected)
     }
+
+    private func open(_ route: AppRoute, in tab: TabPresentation) {
+        paths.open(route, in: tab)
+    }
+
 }
 
-private struct MeSummaryView: View {
-    @ObservedObject var store: SessionStore
-    @Environment(\.appTheme) private var theme
-    @State private var confirmsLogout = false
-
-    var body: some View {
-        List {
-            Section("me.account.section") {
-                LabeledContent("me.name") {
-                    Text(store.snapshot.userDisplayName ?? "—")
-                }
-                LabeledContent("me.email") {
-                    Text(store.snapshot.userEmail ?? "—")
-                }
-            }
-
-            Section("me.server.section") {
-                if let profile = store.snapshot.profile {
-                    VStack(alignment: .leading, spacing: .spaceHalf) {
-                        Text(profile.displayName)
-                            .foregroundStyle(theme.textPrimary)
-                        Text(profile.baseURL)
-                            .font(.caption)
-                            .foregroundStyle(theme.textSecondary)
-                    }
-                }
-                Button("me.server.manage") { store.chooseAnotherServer() }
-            }
-
-            Section {
-                Button("me.logout.action", role: .destructive) {
-                    confirmsLogout = true
-                }
-            }
+private extension AdministrativeSettingsRoute {
+    var identityKey: String {
+        switch self {
+        case .management: "management"
+        case .emailAndKindle: "email-kindle"
+        case .kindleQueue: "kindle-queue"
+        case .users: "users"
+        case .userEditor(let userID): "user-editor:\(userID ?? "new")"
+        case .userAccess(let userID): "user-access:\(userID)"
+        case .librarySources: "library-sources"
+        case .librarySourceEditor(let sourceID): "library-source:\(sourceID ?? "new")"
+        case .serverDirectoryPicker(let purpose): "server-directory:\(purpose.identityKey)"
+        case .importTasks: "import-tasks"
+        case .importTaskDetail(let taskID): "import-task:\(taskID)"
+        case .importScans: "import-scans"
+        case .importPreferences: "import-preferences"
+        case .organizeQueue: "organize-queue"
+        case .organizeCandidates: "organize-candidates"
+        case .organizeRuns: "organize-runs"
+        case .recognitionPolicy: "recognition-policy"
+        case .duplicateWorks: "duplicate-works"
+        case .libraryOperations: "library-operations"
+        case .categoryGovernance: "category-governance"
+        case .metadataProviders: "metadata-providers"
+        case .metadataProvider(let providerID): "metadata-provider:\(providerID)"
+        case .metadataPipeline: "metadata-pipeline"
+        case .opds: "opds"
+        case .backups: "backups"
+        case .workDetailOrder: "work-detail-order"
+        case .health: "health"
+        case .logs: "logs"
+        case .about: "about"
         }
-        .scrollContentBackground(.hidden)
-        .background(theme.canvas)
-        .navigationTitle("tab.me")
-        .confirmationDialog(
-            "me.logout.confirm.title",
-            isPresented: $confirmsLogout,
-            titleVisibility: .visible
-        ) {
-            Button("me.logout.confirm.action", role: .destructive) { store.logout() }
-            Button("common.cancel", role: .cancel) {}
-        } message: {
-            Text("me.logout.confirm.message")
+    }
+}
+
+private extension ServerDirectoryPurpose {
+    var identityKey: String {
+        switch self {
+        case .createSource: "create"
+        case .updateSource(let sourceID): "update:\(sourceID)"
+        case .scanDirectory: "scan"
         }
     }
 }

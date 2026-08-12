@@ -186,26 +186,6 @@ def _resolved_deletion_path(value: object, root: Path) -> Path | None:
     return resolved
 
 
-def _conversion_deletion_paths(
-    conversion: dict[str, Any] | None,
-    settings: Settings,
-) -> list[Path]:
-    output = _resolved_deletion_path(
-        (conversion or {}).get("outputPath"),
-        settings.conversion_root,
-    )
-    if output is None:
-        return []
-    conversion_root = settings.conversion_root.resolve()
-    if output == conversion_root or conversion_root not in output.parents:
-        return []
-    result = [output]
-    sidecar = output.with_name("normalization.json")
-    if sidecar.exists() or sidecar.is_symlink():
-        result.append(sidecar)
-    return result
-
-
 def _library_deletion_candidate_paths(
     task: dict[str, Any],
     conversion: dict[str, Any] | None,
@@ -581,10 +561,6 @@ def delete_import_task(
                 "源文件路径不在允许删除的书库或监控目录中", status_code=400
             )
         selected_paths = [source_path]
-    elif delete_mode == "converted":
-        selected_paths = _conversion_deletion_paths(conversion, settings)
-        if not selected_paths:
-            _raise_import_error("该导入记录没有可删除的转换文件", status_code=400)
 
     library_deletion = None
     if delete_library_record:

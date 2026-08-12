@@ -1,5 +1,6 @@
 package com.ermao.library.shared.modules.servers.infrastructure
 
+import com.ermao.library.shared.core.storage.PlatformStoragePayload
 import com.ermao.library.shared.modules.servers.application.DuplicateServerIdentityException
 import com.ermao.library.shared.modules.servers.application.UnknownServerProfileException
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
@@ -134,7 +135,7 @@ class SerializedServerProfileRepositoryTest {
         var saveCount: Int = 0
             private set
 
-        override fun loadProfiles(): String? = payload
+        override fun loadProfilesPayload() = PlatformStoragePayload(payload)
 
         override fun saveProfiles(payload: String) {
             this.payload = payload

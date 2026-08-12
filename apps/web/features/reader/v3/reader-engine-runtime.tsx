@@ -66,7 +66,7 @@ function adapterNavigationItems(entries: ReaderNavigationEntry[]): ReaderNavigat
 function novelErrorMessage(code: string | undefined, translate: (source: string) => string) {
   if (code === 'NOVEL_UNSUPPORTED_FORMAT') return translate('当前小说格式暂不受支持。');
   if (code === 'NOVEL_DRM_PROTECTED') return translate('文件可能受 DRM 保护，无法打开。');
-  if (code === 'NOVEL_PARSE_FAILED') return translate('小说文件无法解析，可尝试转换为 EPUB。');
+  if (code === 'NOVEL_PARSE_FAILED') return translate('小说文件无法解析，请检查文件完整性和格式。');
   if (code === 'NOVEL_ENCODING_UNCERTAIN') return translate('无法确定 TXT 文件的文字编码。');
   if (code === 'NOVEL_RESOURCE_FAILED') return translate('小说文件加载失败，请检查网络后重试。');
   if (code === 'NOVEL_SECURITY_REJECTED') return translate('文件包含不安全的内容，已停止打开。');
@@ -461,9 +461,7 @@ export function ReaderEngineRuntime({
                   }</p>
                   <div className="mt-4 grid grid-cols-2 gap-2">
                     <button type="button" onClick={onBack} className="min-h-11 rounded-xl bg-white/10 px-3 text-sm">{
-                      bootstrap.readerType === 'reflowable'
-                        ? i18nAttribute("返回卷册详情并转换 EPUB")
-                        : i18nAttribute("返回书库")
+                      i18nAttribute("返回书库")
                     }</button>
                     <button type="button" onClick={onRetry} className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-sm"><RotateCcw size={16} /><I18nText>重试</I18nText></button>
                   </div>

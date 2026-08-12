@@ -18,7 +18,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.AlertDialog
@@ -59,75 +58,6 @@ import com.ermao.library.R
 import com.ermao.library.bootstrap.ServerFormError
 import com.ermao.library.bootstrap.ServerFormState
 import com.ermao.library.ui.theme.WarmPageThemeValues
-
-@Composable
-fun EmptyServerGate(
-    onAddServer: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val theme = WarmPageThemeValues
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .testTag("server-empty-gate")
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = theme.spacing.two, vertical = theme.spacing.four),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        BrandImage(size = 124, shape = BrandImageShape.Task)
-        Spacer(Modifier.height(theme.spacing.four))
-        Text(
-            text = stringResource(R.string.server_screen_title),
-            color = theme.colors.textPrimary,
-            style = theme.typography.display,
-        )
-        Spacer(Modifier.height(theme.spacing.one))
-        Text(
-            text = stringResource(R.string.server_screen_description),
-            color = theme.colors.textSecondary,
-            style = theme.typography.body,
-        )
-        Spacer(Modifier.height(theme.spacing.four))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.Dns,
-                contentDescription = null,
-                modifier = Modifier.size(theme.spacing.six),
-                tint = theme.colors.textSecondary,
-            )
-            Spacer(Modifier.size(theme.spacing.two))
-            Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.one)) {
-                Text(
-                    text = stringResource(R.string.server_multiple_profiles),
-                    color = theme.colors.textSecondary,
-                    style = theme.typography.callout,
-                )
-                Text(
-                    text = stringResource(R.string.server_single_active),
-                    color = theme.colors.textSecondary,
-                    style = theme.typography.callout,
-                )
-            }
-        }
-        Spacer(Modifier.height(theme.spacing.five))
-        PrimaryActionButton(
-            label = stringResource(R.string.server_add_title),
-            onClick = onAddServer,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(theme.spacing.three))
-        Text(
-            text = stringResource(R.string.server_privacy_footer),
-            color = theme.colors.textTertiary,
-            style = theme.typography.caption,
-        )
-    }
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

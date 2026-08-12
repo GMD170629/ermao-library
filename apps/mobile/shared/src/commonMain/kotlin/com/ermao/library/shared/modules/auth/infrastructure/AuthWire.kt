@@ -75,11 +75,15 @@ internal data class AuthorizationWire(
     val authzVersion: Long,
 )
 
-internal fun SessionWire.toDomain(profile: ServerProfile): Pair<SessionIdentity, Authorization> {
+internal fun SessionWire.toDomain(profile: ServerProfile): Pair<SessionIdentity, Authorization>? {
+    val locale = preferences.locale.takeIf { it in SUPPORTED_SESSION_LOCALES } ?: return null
+    if (user.locale != null && user.locale != locale) return null
     val identity = SessionIdentity(
         userId = user.id,
         email = user.email,
         displayName = user.name,
+        avatarUrl = user.avatarUrl,
+        locale = locale,
         namespace = PrivateDataNamespace(
             serverIdentity = profile.serverIdentity,
             userId = user.id,
@@ -96,3 +100,5 @@ internal fun SessionWire.toDomain(profile: ServerProfile): Pair<SessionIdentity,
     )
     return identity to permissions
 }
+
+private val SUPPORTED_SESSION_LOCALES = setOf("zh-CN", "en-US")

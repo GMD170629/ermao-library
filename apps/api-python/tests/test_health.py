@@ -37,9 +37,7 @@ def test_health_response_shape(client, test_settings):
         if check["name"] == "monitorRootReadable"
     )
     assert monitor_check["status"] == "unknown"
-    conversion = next(check for check in payload["data"]["checks"] if check["name"] == "ebookConversion")
-    assert conversion["details"]["converter"] == "libmobi+shuku-internal"
-    assert {engine["converter"] for engine in conversion["details"]["engines"]} == {"libmobi", "shuku-internal"}
+    assert all(check["name"] != "ebookConversion" for check in payload["data"]["checks"])
 
 
 def test_health_aggregates_enabled_monitor_folder_readability(

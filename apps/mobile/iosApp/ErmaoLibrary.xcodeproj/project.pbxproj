@@ -25,6 +25,40 @@
 		B01600000000000000000016 /* UserDefaultsServerProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01600000000000000000016 /* UserDefaultsServerProfileStore.swift */; };
 		B01700000000000000000017 /* SharedRuntimeAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01700000000000000000017 /* SharedRuntimeAdapter.swift */; };
 		B01800000000000000000018 /* GeneratedDesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01800000000000000000018 /* GeneratedDesignTokens.swift */; };
+		B04000000000000000000040 /* ContentClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04000000000000000000040 /* ContentClient.swift */; };
+		B04100000000000000000041 /* ContentStores.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04100000000000000000041 /* ContentStores.swift */; };
+		B04200000000000000000042 /* ContentComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04200000000000000000042 /* ContentComponents.swift */; };
+		B04300000000000000000043 /* LibraryCacheStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04300000000000000000043 /* LibraryCacheStore.swift */; };
+		B04400000000000000000044 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04400000000000000000044 /* HomeView.swift */; };
+		B04500000000000000000045 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04500000000000000000045 /* LibraryView.swift */; };
+		B04600000000000000000046 /* FacetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04600000000000000000046 /* FacetView.swift */; };
+		B04700000000000000000047 /* WorkDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04700000000000000000047 /* WorkDetailView.swift */; };
+		B04800000000000000000048 /* SharedContentClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04800000000000000000048 /* SharedContentClient.swift */; };
+		B04900000000000000000049 /* ContentUITestFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04900000000000000000049 /* ContentUITestFixture.swift */; };
+		B05000000000000000000050 /* SettingsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05000000000000000000050 /* SettingsModels.swift */; };
+		B05100000000000000000051 /* AvatarImageProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05100000000000000000051 /* AvatarImageProcessor.swift */; };
+		B05200000000000000000052 /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05200000000000000000052 /* SettingsViewModel.swift */; };
+		B05300000000000000000053 /* SettingsComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05300000000000000000053 /* SettingsComponents.swift */; };
+		B05400000000000000000054 /* MeRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05400000000000000000054 /* MeRootView.swift */; };
+		B05500000000000000000055 /* ProfileSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05500000000000000000055 /* ProfileSettingsView.swift */; };
+		B05600000000000000000056 /* SecuritySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05600000000000000000056 /* SecuritySettingsView.swift */; };
+		B05700000000000000000057 /* LanguageSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05700000000000000000057 /* LanguageSettingsView.swift */; };
+		B05800000000000000000058 /* AboutSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05800000000000000000058 /* AboutSettingsView.swift */; };
+		B05900000000000000000059 /* SharedSettingsClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05900000000000000000059 /* SharedSettingsClient.swift */; };
+		B06000000000000000000060 /* AdministrativeManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06000000000000000000060 /* AdministrativeManagementView.swift */; };
+		B06100000000000000000061 /* AdministrativeSettingsClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06100000000000000000061 /* AdministrativeSettingsClient.swift */; };
+		B06200000000000000000062 /* AdministrativeSettingsComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06200000000000000000062 /* AdministrativeSettingsComponents.swift */; };
+		B06300000000000000000063 /* AdministrativeSettingsCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06300000000000000000063 /* AdministrativeSettingsCopy.swift */; };
+		B06400000000000000000064 /* AdministrativeSettingsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06400000000000000000064 /* AdministrativeSettingsModels.swift */; };
+		B06500000000000000000065 /* AdministrativeSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06500000000000000000065 /* AdministrativeSettingsStore.swift */; };
+		B06600000000000000000066 /* LibrarySettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06600000000000000000066 /* LibrarySettingsViews.swift */; };
+		B06700000000000000000067 /* MessagingSettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06700000000000000000067 /* MessagingSettingsViews.swift */; };
+		B06800000000000000000068 /* MetadataSettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06800000000000000000068 /* MetadataSettingsViews.swift */; };
+		B06900000000000000000069 /* OrganizationSettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06900000000000000000069 /* OrganizationSettingsViews.swift */; };
+		B07000000000000000000070 /* SharedAdministrativeSettingsClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07000000000000000000070 /* SharedAdministrativeSettingsClient.swift */; };
+		B07100000000000000000071 /* SharedAdministrativeSettingsMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07100000000000000000071 /* SharedAdministrativeSettingsMapping.swift */; };
+		B07200000000000000000072 /* SystemSettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07200000000000000000072 /* SystemSettingsViews.swift */; };
+		B07300000000000000000073 /* UserSettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07300000000000000000073 /* UserSettingsViews.swift */; };
 		B02000000000000000000020 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F02000000000000000000020 /* Assets.xcassets */; };
 		B02100000000000000000021 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = F02100000000000000000021 /* Localizable.xcstrings */; };
 		B02200000000000000000022 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = F02200000000000000000022 /* PrivacyInfo.xcprivacy */; };
@@ -32,11 +66,22 @@
 		B03100000000000000000031 /* PersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03100000000000000000031 /* PersistenceTests.swift */; };
 		B03200000000000000000032 /* LocalizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03200000000000000000032 /* LocalizationTests.swift */; };
 		B03300000000000000000033 /* NavigationThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03300000000000000000033 /* NavigationThemeTests.swift */; };
+		B03400000000000000000034 /* ContentStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03400000000000000000034 /* ContentStoreTests.swift */; };
+		B03500000000000000000035 /* ContentDiscoveryUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03500000000000000000035 /* ContentDiscoveryUITests.swift */; };
+		B03600000000000000000036 /* MeSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03600000000000000000036 /* MeSettingsTests.swift */; };
+		B03700000000000000000037 /* AdministrativeSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03700000000000000000037 /* AdministrativeSettingsTests.swift */; };
 		B90000000000000000000900 /* ErmaoShared.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F90000000000000000000900 /* ErmaoShared.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		X00100000000000000000001 = {
+		X00100000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = P00100000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = T00100000000000000000001;
+			remoteInfo = ErmaoLibrary;
+		};
+		X00200000000000000000002 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = P00100000000000000000001 /* Project object */;
 			proxyType = 1;
@@ -63,7 +108,41 @@
 		F01500000000000000000015 /* KeychainCookiePayloadStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainCookiePayloadStore.swift; sourceTree = "<group>"; };
 		F01600000000000000000016 /* UserDefaultsServerProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserDefaultsServerProfileStore.swift; sourceTree = "<group>"; };
 		F01700000000000000000017 /* SharedRuntimeAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedRuntimeAdapter.swift; sourceTree = "<group>"; };
-		F01800000000000000000018 /* GeneratedDesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GeneratedDesignTokens.swift; path = ../build/generated/design-tokens/swift/GeneratedDesignTokens.swift; sourceTree = SOURCE_ROOT; };
+		F01800000000000000000018 /* GeneratedDesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GeneratedDesignTokens.swift; path = "../build/generated/design-tokens/swift/GeneratedDesignTokens.swift"; sourceTree = SOURCE_ROOT; };
+		F04000000000000000000040 /* ContentClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentClient.swift; sourceTree = "<group>"; };
+		F04100000000000000000041 /* ContentStores.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentStores.swift; sourceTree = "<group>"; };
+		F04200000000000000000042 /* ContentComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentComponents.swift; sourceTree = "<group>"; };
+		F04300000000000000000043 /* LibraryCacheStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryCacheStore.swift; sourceTree = "<group>"; };
+		F04400000000000000000044 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		F04500000000000000000045 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
+		F04600000000000000000046 /* FacetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FacetView.swift; sourceTree = "<group>"; };
+		F04700000000000000000047 /* WorkDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkDetailView.swift; sourceTree = "<group>"; };
+		F04800000000000000000048 /* SharedContentClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedContentClient.swift; sourceTree = "<group>"; };
+		F04900000000000000000049 /* ContentUITestFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentUITestFixture.swift; sourceTree = "<group>"; };
+		F05000000000000000000050 /* SettingsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsModels.swift; sourceTree = "<group>"; };
+		F05100000000000000000051 /* AvatarImageProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarImageProcessor.swift; sourceTree = "<group>"; };
+		F05200000000000000000052 /* SettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModel.swift; sourceTree = "<group>"; };
+		F05300000000000000000053 /* SettingsComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsComponents.swift; sourceTree = "<group>"; };
+		F05400000000000000000054 /* MeRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeRootView.swift; sourceTree = "<group>"; };
+		F05500000000000000000055 /* ProfileSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileSettingsView.swift; sourceTree = "<group>"; };
+		F05600000000000000000056 /* SecuritySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecuritySettingsView.swift; sourceTree = "<group>"; };
+		F05700000000000000000057 /* LanguageSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanguageSettingsView.swift; sourceTree = "<group>"; };
+		F05800000000000000000058 /* AboutSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutSettingsView.swift; sourceTree = "<group>"; };
+		F05900000000000000000059 /* SharedSettingsClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedSettingsClient.swift; sourceTree = "<group>"; };
+		F06000000000000000000060 /* AdministrativeManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdministrativeManagementView.swift; sourceTree = "<group>"; };
+		F06100000000000000000061 /* AdministrativeSettingsClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdministrativeSettingsClient.swift; sourceTree = "<group>"; };
+		F06200000000000000000062 /* AdministrativeSettingsComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdministrativeSettingsComponents.swift; sourceTree = "<group>"; };
+		F06300000000000000000063 /* AdministrativeSettingsCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdministrativeSettingsCopy.swift; sourceTree = "<group>"; };
+		F06400000000000000000064 /* AdministrativeSettingsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdministrativeSettingsModels.swift; sourceTree = "<group>"; };
+		F06500000000000000000065 /* AdministrativeSettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdministrativeSettingsStore.swift; sourceTree = "<group>"; };
+		F06600000000000000000066 /* LibrarySettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibrarySettingsViews.swift; sourceTree = "<group>"; };
+		F06700000000000000000067 /* MessagingSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagingSettingsViews.swift; sourceTree = "<group>"; };
+		F06800000000000000000068 /* MetadataSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataSettingsViews.swift; sourceTree = "<group>"; };
+		F06900000000000000000069 /* OrganizationSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrganizationSettingsViews.swift; sourceTree = "<group>"; };
+		F07000000000000000000070 /* SharedAdministrativeSettingsClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedAdministrativeSettingsClient.swift; sourceTree = "<group>"; };
+		F07100000000000000000071 /* SharedAdministrativeSettingsMapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedAdministrativeSettingsMapping.swift; sourceTree = "<group>"; };
+		F07200000000000000000072 /* SystemSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSettingsViews.swift; sourceTree = "<group>"; };
+		F07300000000000000000073 /* UserSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserSettingsViews.swift; sourceTree = "<group>"; };
 		F02000000000000000000020 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F02100000000000000000021 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		F02200000000000000000022 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -72,8 +151,13 @@
 		F03100000000000000000031 /* PersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceTests.swift; sourceTree = "<group>"; };
 		F03200000000000000000032 /* LocalizationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationTests.swift; sourceTree = "<group>"; };
 		F03300000000000000000033 /* NavigationThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationThemeTests.swift; sourceTree = "<group>"; };
+		F03400000000000000000034 /* ContentStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentStoreTests.swift; sourceTree = "<group>"; };
+		F03500000000000000000035 /* ContentDiscoveryUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentDiscoveryUITests.swift; sourceTree = "<group>"; };
+		F03600000000000000000036 /* MeSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeSettingsTests.swift; sourceTree = "<group>"; };
+		F03700000000000000000037 /* AdministrativeSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdministrativeSettingsTests.swift; sourceTree = "<group>"; };
 		F80000000000000000000800 /* ErmaoLibrary.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ErmaoLibrary.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F80100000000000000000801 /* ErmaoLibraryTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ErmaoLibraryTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F80200000000000000000802 /* ErmaoLibraryUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ErmaoLibraryUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F90000000000000000000900 /* ErmaoShared.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; path = ErmaoShared.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -93,6 +177,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		S00900000000000000000009 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -101,6 +192,7 @@
 			children = (
 				G10000000000000000000100 /* ErmaoLibrary */,
 				G10100000000000000000101 /* ErmaoLibraryTests */,
+				G10200000000000000000102 /* ErmaoLibraryUITests */,
 				G20000000000000000000200 /* Frameworks */,
 				G20100000000000000000201 /* Products */,
 			);
@@ -126,8 +218,19 @@
 				F03100000000000000000031 /* PersistenceTests.swift */,
 				F03200000000000000000032 /* LocalizationTests.swift */,
 				F03300000000000000000033 /* NavigationThemeTests.swift */,
+				F03400000000000000000034 /* ContentStoreTests.swift */,
+				F03600000000000000000036 /* MeSettingsTests.swift */,
+				F03700000000000000000037 /* AdministrativeSettingsTests.swift */,
 			);
 			path = ErmaoLibraryTests;
+			sourceTree = "<group>";
+		};
+		G10200000000000000000102 /* ErmaoLibraryUITests */ = {
+			isa = PBXGroup;
+			children = (
+				F03500000000000000000035 /* ContentDiscoveryUITests.swift */,
+			);
+			path = ErmaoLibraryUITests;
 			sourceTree = "<group>";
 		};
 		G11000000000000000000110 /* Application */ = {
@@ -138,6 +241,10 @@
 				F00400000000000000000004 /* PreviewMobileRuntime.swift */,
 				F00500000000000000000005 /* AppRootView.swift */,
 				F01700000000000000000017 /* SharedRuntimeAdapter.swift */,
+				F04000000000000000000040 /* ContentClient.swift */,
+				F04100000000000000000041 /* ContentStores.swift */,
+				F04800000000000000000048 /* SharedContentClient.swift */,
+				F04900000000000000000049 /* ContentUITestFixture.swift */,
 			);
 			path = Application;
 			sourceTree = "<group>";
@@ -148,6 +255,7 @@
 				F00600000000000000000006 /* AppTheme.swift */,
 				F00700000000000000000007 /* BrandedControls.swift */,
 				F01800000000000000000018 /* GeneratedDesignTokens.swift */,
+				F04200000000000000000042 /* ContentComponents.swift */,
 			);
 			path = Design;
 			sourceTree = "<group>";
@@ -158,6 +266,11 @@
 				G11300000000000000000113 /* Server */,
 				G11400000000000000000114 /* Auth */,
 				G11700000000000000000117 /* Shell */,
+				G11800000000000000000118 /* Home */,
+				G11900000000000000000119 /* Library */,
+				G12000000000000000000120 /* Work */,
+				G12100000000000000000121 /* Me */,
+				G12200000000000000000122 /* AdministrativeSettings */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -182,19 +295,12 @@
 			path = Auth;
 			sourceTree = "<group>";
 		};
-		G11700000000000000000117 /* Shell */ = {
-			isa = PBXGroup;
-			children = (
-				F01400000000000000000014 /* MainTabView.swift */,
-			);
-			path = Shell;
-			sourceTree = "<group>";
-		};
 		G11500000000000000000115 /* Persistence */ = {
 			isa = PBXGroup;
 			children = (
 				F01500000000000000000015 /* KeychainCookiePayloadStore.swift */,
 				F01600000000000000000016 /* UserDefaultsServerProfileStore.swift */,
+				F04300000000000000000043 /* LibraryCacheStore.swift */,
 			);
 			path = Persistence;
 			sourceTree = "<group>";
@@ -210,6 +316,77 @@
 			path = Resources;
 			sourceTree = "<group>";
 		};
+		G11700000000000000000117 /* Shell */ = {
+			isa = PBXGroup;
+			children = (
+				F01400000000000000000014 /* MainTabView.swift */,
+			);
+			path = Shell;
+			sourceTree = "<group>";
+		};
+		G11800000000000000000118 /* Home */ = {
+			isa = PBXGroup;
+			children = (
+				F04400000000000000000044 /* HomeView.swift */,
+			);
+			path = Home;
+			sourceTree = "<group>";
+		};
+		G11900000000000000000119 /* Library */ = {
+			isa = PBXGroup;
+			children = (
+				F04500000000000000000045 /* LibraryView.swift */,
+				F04600000000000000000046 /* FacetView.swift */,
+			);
+			path = Library;
+			sourceTree = "<group>";
+		};
+		G12000000000000000000120 /* Work */ = {
+			isa = PBXGroup;
+			children = (
+				F04700000000000000000047 /* WorkDetailView.swift */,
+			);
+			path = Work;
+			sourceTree = "<group>";
+		};
+		G12100000000000000000121 /* Me */ = {
+			isa = PBXGroup;
+			children = (
+				F05000000000000000000050 /* SettingsModels.swift */,
+				F05100000000000000000051 /* AvatarImageProcessor.swift */,
+				F05200000000000000000052 /* SettingsViewModel.swift */,
+				F05300000000000000000053 /* SettingsComponents.swift */,
+				F05400000000000000000054 /* MeRootView.swift */,
+				F05500000000000000000055 /* ProfileSettingsView.swift */,
+				F05600000000000000000056 /* SecuritySettingsView.swift */,
+				F05700000000000000000057 /* LanguageSettingsView.swift */,
+				F05800000000000000000058 /* AboutSettingsView.swift */,
+				F05900000000000000000059 /* SharedSettingsClient.swift */,
+			);
+			path = Me;
+			sourceTree = "<group>";
+		};
+		G12200000000000000000122 /* AdministrativeSettings */ = {
+			isa = PBXGroup;
+			children = (
+				F06000000000000000000060 /* AdministrativeManagementView.swift */,
+				F06100000000000000000061 /* AdministrativeSettingsClient.swift */,
+				F06200000000000000000062 /* AdministrativeSettingsComponents.swift */,
+				F06300000000000000000063 /* AdministrativeSettingsCopy.swift */,
+				F06400000000000000000064 /* AdministrativeSettingsModels.swift */,
+				F06500000000000000000065 /* AdministrativeSettingsStore.swift */,
+				F06600000000000000000066 /* LibrarySettingsViews.swift */,
+				F06700000000000000000067 /* MessagingSettingsViews.swift */,
+				F06800000000000000000068 /* MetadataSettingsViews.swift */,
+				F06900000000000000000069 /* OrganizationSettingsViews.swift */,
+				F07000000000000000000070 /* SharedAdministrativeSettingsClient.swift */,
+				F07100000000000000000071 /* SharedAdministrativeSettingsMapping.swift */,
+				F07200000000000000000072 /* SystemSettingsViews.swift */,
+				F07300000000000000000073 /* UserSettingsViews.swift */,
+			);
+			path = AdministrativeSettings;
+			sourceTree = "<group>";
+		};
 		G20000000000000000000200 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
@@ -223,6 +400,7 @@
 			children = (
 				F80000000000000000000800 /* ErmaoLibrary.app */,
 				F80100000000000000000801 /* ErmaoLibraryTests.xctest */,
+				F80200000000000000000802 /* ErmaoLibraryUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -266,6 +444,24 @@
 			productReference = F80100000000000000000801 /* ErmaoLibraryTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		T00300000000000000000003 /* ErmaoLibraryUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = L10300000000000000000103 /* Build configuration list for PBXNativeTarget "ErmaoLibraryUITests" */;
+			buildPhases = (
+				S00800000000000000000008 /* Sources */,
+				S00900000000000000000009 /* Frameworks */,
+				S01000000000000000000010 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D00200000000000000000002 /* PBXTargetDependency */,
+			);
+			name = ErmaoLibraryUITests;
+			productName = ErmaoLibraryUITests;
+			productReference = F80200000000000000000802 /* ErmaoLibraryUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -276,8 +472,17 @@
 				LastSwiftUpdateCheck = 2640;
 				LastUpgradeCheck = 2640;
 				TargetAttributes = {
-					T00100000000000000000001 = { CreatedOnToolsVersion = 26.4; };
-					T00200000000000000000002 = { CreatedOnToolsVersion = 26.4; TestTargetID = T00100000000000000000001; };
+					T00100000000000000000001 = {
+						CreatedOnToolsVersion = 26.4;
+					};
+					T00200000000000000000002 = {
+						CreatedOnToolsVersion = 26.4;
+						TestTargetID = T00100000000000000000001;
+					};
+					T00300000000000000000003 = {
+						CreatedOnToolsVersion = 26.4;
+						TestTargetID = T00100000000000000000001;
+					};
 				};
 			};
 			buildConfigurationList = L10000000000000000000100 /* Build configuration list for PBXProject "ErmaoLibrary" */;
@@ -296,6 +501,7 @@
 			targets = (
 				T00100000000000000000001 /* ErmaoLibrary */,
 				T00200000000000000000002 /* ErmaoLibraryTests */,
+				T00300000000000000000003 /* ErmaoLibraryUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -312,6 +518,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		S00700000000000000000007 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		S01000000000000000000010 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -367,6 +580,40 @@
 				B01600000000000000000016 /* UserDefaultsServerProfileStore.swift in Sources */,
 				B01700000000000000000017 /* SharedRuntimeAdapter.swift in Sources */,
 				B01800000000000000000018 /* GeneratedDesignTokens.swift in Sources */,
+				B04000000000000000000040 /* ContentClient.swift in Sources */,
+				B04100000000000000000041 /* ContentStores.swift in Sources */,
+				B04200000000000000000042 /* ContentComponents.swift in Sources */,
+				B04300000000000000000043 /* LibraryCacheStore.swift in Sources */,
+				B04400000000000000000044 /* HomeView.swift in Sources */,
+				B04500000000000000000045 /* LibraryView.swift in Sources */,
+				B04600000000000000000046 /* FacetView.swift in Sources */,
+				B04700000000000000000047 /* WorkDetailView.swift in Sources */,
+				B04800000000000000000048 /* SharedContentClient.swift in Sources */,
+				B04900000000000000000049 /* ContentUITestFixture.swift in Sources */,
+				B05000000000000000000050 /* SettingsModels.swift in Sources */,
+				B05100000000000000000051 /* AvatarImageProcessor.swift in Sources */,
+				B05200000000000000000052 /* SettingsViewModel.swift in Sources */,
+				B05300000000000000000053 /* SettingsComponents.swift in Sources */,
+				B05400000000000000000054 /* MeRootView.swift in Sources */,
+				B05500000000000000000055 /* ProfileSettingsView.swift in Sources */,
+				B05600000000000000000056 /* SecuritySettingsView.swift in Sources */,
+				B05700000000000000000057 /* LanguageSettingsView.swift in Sources */,
+				B05800000000000000000058 /* AboutSettingsView.swift in Sources */,
+				B05900000000000000000059 /* SharedSettingsClient.swift in Sources */,
+				B06000000000000000000060 /* AdministrativeManagementView.swift in Sources */,
+				B06100000000000000000061 /* AdministrativeSettingsClient.swift in Sources */,
+				B06200000000000000000062 /* AdministrativeSettingsComponents.swift in Sources */,
+				B06300000000000000000063 /* AdministrativeSettingsCopy.swift in Sources */,
+				B06400000000000000000064 /* AdministrativeSettingsModels.swift in Sources */,
+				B06500000000000000000065 /* AdministrativeSettingsStore.swift in Sources */,
+				B06600000000000000000066 /* LibrarySettingsViews.swift in Sources */,
+				B06700000000000000000067 /* MessagingSettingsViews.swift in Sources */,
+				B06800000000000000000068 /* MetadataSettingsViews.swift in Sources */,
+				B06900000000000000000069 /* OrganizationSettingsViews.swift in Sources */,
+				B07000000000000000000070 /* SharedAdministrativeSettingsClient.swift in Sources */,
+				B07100000000000000000071 /* SharedAdministrativeSettingsMapping.swift in Sources */,
+				B07200000000000000000072 /* SystemSettingsViews.swift in Sources */,
+				B07300000000000000000073 /* UserSettingsViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -378,6 +625,17 @@
 				B03100000000000000000031 /* PersistenceTests.swift in Sources */,
 				B03200000000000000000032 /* LocalizationTests.swift in Sources */,
 				B03300000000000000000033 /* NavigationThemeTests.swift in Sources */,
+				B03400000000000000000034 /* ContentStoreTests.swift in Sources */,
+				B03600000000000000000036 /* MeSettingsTests.swift in Sources */,
+				B03700000000000000000037 /* AdministrativeSettingsTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		S00800000000000000000008 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B03500000000000000000035 /* ContentDiscoveryUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -387,23 +645,238 @@
 		D00100000000000000000001 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = T00100000000000000000001 /* ErmaoLibrary */;
-			targetProxy = X00100000000000000000001;
+			targetProxy = X00100000000000000000001 /* PBXContainerItemProxy */;
+		};
+		D00200000000000000000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = T00100000000000000000001 /* ErmaoLibrary */;
+			targetProxy = X00200000000000000000002 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		C10000000000000000000100 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_ANALYZER_NONNULL = YES; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; DEBUG_INFORMATION_FORMAT = dwarf; ENABLE_TESTABILITY = YES; GCC_C_LANGUAGE_STANDARD = gnu17; GCC_NO_COMMON_BLOCKS = YES; GCC_WARN_64_TO_32_BIT_CONVERSION = YES; GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR; GCC_WARN_UNDECLARED_SELECTOR = YES; GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE; GCC_WARN_UNUSED_FUNCTION = YES; GCC_WARN_UNUSED_VARIABLE = YES; MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE; ONLY_ACTIVE_ARCH = YES; SDKROOT = iphoneos; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)"; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; }; name = Debug; };
-		C10100000000000000000101 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_ANALYZER_NONNULL = YES; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; ENABLE_NS_ASSERTIONS = NO; GCC_C_LANGUAGE_STANDARD = gnu17; GCC_NO_COMMON_BLOCKS = YES; GCC_WARN_64_TO_32_BIT_CONVERSION = YES; GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR; GCC_WARN_UNDECLARED_SELECTOR = YES; GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE; GCC_WARN_UNUSED_FUNCTION = YES; GCC_WARN_UNUSED_VARIABLE = YES; MTL_ENABLE_DEBUG_INFO = NO; SDKROOT = iphoneos; SWIFT_COMPILATION_MODE = wholemodule; VALIDATE_PRODUCT = YES; }; name = Release; };
-		C11000000000000000000110 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; ENABLE_PREVIEWS = YES; ENABLE_USER_SCRIPT_SANDBOXING = NO; FRAMEWORK_SEARCH_PATHS = "$(inherited) $(BUILT_PRODUCTS_DIR)"; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = ErmaoLibrary/Resources/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 16.0; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks"; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.ermao.library; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
-		C11100000000000000000111 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; ENABLE_PREVIEWS = YES; ENABLE_USER_SCRIPT_SANDBOXING = NO; FRAMEWORK_SEARCH_PATHS = "$(inherited) $(BUILT_PRODUCTS_DIR)"; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = ErmaoLibrary/Resources/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 16.0; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks"; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.ermao.library; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
-		C12000000000000000000120 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 16.0; PRODUCT_BUNDLE_IDENTIFIER = com.ermao.library.tests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ErmaoLibrary.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ErmaoLibrary"; }; name = Debug; };
-		C12100000000000000000121 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 16.0; PRODUCT_BUNDLE_IDENTIFIER = com.ermao.library.tests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ErmaoLibrary.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ErmaoLibrary"; }; name = Release; };
+		C10000000000000000000100 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		C10100000000000000000101 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		C11000000000000000000110 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = W5G54L42KQ;
+				ENABLE_PREVIEWS = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(BUILT_PRODUCTS_DIR)",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ErmaoLibrary/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ermao.library;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		C11100000000000000000111 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = W5G54L42KQ;
+				ENABLE_PREVIEWS = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(BUILT_PRODUCTS_DIR)",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ErmaoLibrary/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ermao.library;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		C12000000000000000000120 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = W5G54L42KQ;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ermao.library.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = iphoneos;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ErmaoLibrary.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ErmaoLibrary";
+			};
+			name = Debug;
+		};
+		C12100000000000000000121 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = W5G54L42KQ;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ermao.library.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = iphoneos;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ErmaoLibrary.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ErmaoLibrary";
+			};
+			name = Release;
+		};
+		C13000000000000000000130 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = W5G54L42KQ;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ermao.library.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = iphoneos;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = ErmaoLibrary;
+			};
+			name = Debug;
+		};
+		C13100000000000000000131 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = W5G54L42KQ;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ermao.library.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = iphoneos;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = ErmaoLibrary;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		L10000000000000000000100 /* Build configuration list for PBXProject "ErmaoLibrary" */ = {isa = XCConfigurationList; buildConfigurations = (C10000000000000000000100 /* Debug */, C10100000000000000000101 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-		L10100000000000000000101 /* Build configuration list for PBXNativeTarget "ErmaoLibrary" */ = {isa = XCConfigurationList; buildConfigurations = (C11000000000000000000110 /* Debug */, C11100000000000000000111 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-		L10200000000000000000102 /* Build configuration list for PBXNativeTarget "ErmaoLibraryTests" */ = {isa = XCConfigurationList; buildConfigurations = (C12000000000000000000120 /* Debug */, C12100000000000000000121 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		L10000000000000000000100 /* Build configuration list for PBXProject "ErmaoLibrary" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C10000000000000000000100 /* Debug */,
+				C10100000000000000000101 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		L10100000000000000000101 /* Build configuration list for PBXNativeTarget "ErmaoLibrary" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C11000000000000000000110 /* Debug */,
+				C11100000000000000000111 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		L10200000000000000000102 /* Build configuration list for PBXNativeTarget "ErmaoLibraryTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C12000000000000000000120 /* Debug */,
+				C12100000000000000000121 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		L10300000000000000000103 /* Build configuration list for PBXNativeTarget "ErmaoLibraryUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C13000000000000000000130 /* Debug */,
+				C13100000000000000000131 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 	};
 	rootObject = P00100000000000000000001 /* Project object */;

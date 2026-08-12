@@ -2,7 +2,7 @@
 
 [English](README.en.md) | 简体中文
 
-二毛图书是一套面向个人与家庭的自托管数字书库，用于整理 NAS、家庭服务器或本地硬盘中的电子书、PDF、漫画和有声书。系统提供目录监控与文件上传、格式转换、元数据整理、在线阅读与收听、阅读进度同步、OPDS、Kindle 发送以及数据备份。
+二毛图书是一套面向个人与家庭的自托管数字书库，用于整理 NAS、家庭服务器或本地硬盘中的电子书、PDF、漫画和有声书。系统提供目录监控与文件上传、源格式导入、元数据整理、在线阅读与收听、阅读进度同步、OPDS、Kindle 发送以及数据备份。
 
 数据库、账户、阅读进度和系统设置均保存在自己的设备上；原始读物保留在指定目录中，不依赖第三方云端托管。
 
@@ -130,7 +130,7 @@ docker compose up -d
 1. 打开系统，根据向导创建初始管理员账户。
 2. 在路径树中选择已挂载、可读取的 `/libraries/books`；也可稍后进入“设置 → 书库来源与导入”配置。
 3. 将读物放入对应宿主机目录，或在“全部图书”页面上传文件。
-4. 在导入任务中查看解析或转换进度；完成后进入书库阅读或收听。
+4. 在导入任务中查看解析和入库进度；完成后进入书库阅读或收听。
 5. 按需在“智能整理”中配置豆瓣、Bangumi 或 AI 元数据来源。
 6. 如需 Kindle 发送，在“邮件与 Kindle”中配置 SMTP 与 Kindle 邮箱。
 7. 如需第三方阅读器访问，在“设置 → OPDS”填写公开 URL 并启用目录。
@@ -192,7 +192,7 @@ flowchart LR
 
 - Next.js 与 FastAPI 仅在容器内部监听，由网关统一路由。
 - SQLite 是当前唯一数据库；API 启动时负责 schema 初始化与升级。
-- Python Worker 负责目录监控、导入、转换和持久化队列任务。
+- Python Worker 负责目录监控、导入解析和持久化队列任务。
 - 原始读物目录与系统存储分开挂载，便于备份和迁移。
 
 ## 技术栈
@@ -200,7 +200,7 @@ flowchart LR
 - Web：Next.js 16、React 19、TypeScript、Tailwind CSS
 - API：Python 3.11、FastAPI、SQLAlchemy 2、Alembic
 - 数据库：SQLite
-- 导入与转换：持久化 Python Worker、Watchdog、libmobi、EbookLib、lxml、Mutagen、FFmpeg/ffprobe
+- 导入与媒体解析：持久化 Python Worker、Watchdog、EbookLib、lxml、Mutagen、FFmpeg/ffprobe
 - 阅读器与播放器：Foliate.js、PDF.js、自研漫画阅读适配器、HTML5 Audio
 - 工程：pnpm Workspace、Turborepo、Playwright、Pytest
 - 部署：Docker Compose、`linux/amd64` 与 `linux/arm64` 多架构镜像、fnOS、PWA
@@ -221,7 +221,7 @@ scripts/              本地开发、验证、发布和统一运行脚本
 
 ## 更多文档
 
-- [Python API、转换器与 Worker](apps/api-python/README.md)
+- [Python API 与 Worker](apps/api-python/README.md)
 - [业务代码分层与重构策略](docs/business-code-layering-and-refactoring.md)
 - [移动 App 第一阶段：Web → App 功能基线](docs/mobile-app-phase-1-web-to-app-functional-baseline.md)
 - [移动 App 第二阶段：4 Tab 信息架构与导航规范](docs/mobile-app-phase-2-information-architecture.md)

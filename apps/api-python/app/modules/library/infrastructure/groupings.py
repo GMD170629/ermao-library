@@ -10,6 +10,7 @@ from app.models.library import LibraryFacet, LibraryWork, LibraryWorkFacet
 from app.modules.library.application.groupings import (
     LibraryGrouping,
     LibraryGroupingPage,
+    LibraryGroupingWork,
 )
 
 
@@ -106,6 +107,10 @@ class SqlAlchemyLibraryGroupingQueries:
             if rows
             else int(self._db.scalar(select(func.count()).select_from(grouped)) or 0)
         )
+        representative_works = self._representative_works(
+            context=context,
+            facet_ids=tuple(str(row.facet_id) for row in rows),
+        )
         return LibraryGroupingPage(
             groups=tuple(
                 LibraryGrouping(
@@ -117,8 +122,60 @@ class SqlAlchemyLibraryGroupingQueries:
                         row.facet_updated_at,
                         row.latest_work_updated_at,
                     ),
+                    representative_works=representative_works.get(
+                        str(row.facet_id), ()
+                    ),
                 )
                 for row in rows
             ),
             total=total,
         )
+
+    def _representative_works(
+        self,
+        *,
+        context: AuthorizationContext,
+        facet_ids: tuple[str, ...],
+    ) -> dict[str, tuple[LibraryGroupingWork, ...]]:
+        if not facet_ids:
+            return {}
+        ranked = (
+            select(
+                LibraryWorkFacet.facet_id.label("facet_id"),
+                LibraryWork.id.label("work_id"),
+                LibraryWork.title,
+                LibraryWork.author,
+                LibraryWork.cover_path,
+                LibraryWork.updated_at,
+                func.row_number()
+                .over(
+                    partition_by=LibraryWorkFacet.facet_id,
+                    order_by=(LibraryWork.updated_at.desc(), LibraryWork.id.asc()),
+                )
+                .label("representative_rank"),
+            )
+            .join(LibraryWork, LibraryWork.id == LibraryWorkFacet.work_id)
+            .where(
+                LibraryWorkFacet.facet_id.in_(facet_ids),
+                LibraryWork.hidden.is_(False),
+                work_visibility_predicate(context),
+            )
+            .subquery()
+        )
+        rows = self._db.execute(
+            select(ranked)
+            .where(ranked.c.representative_rank <= 3)
+            .order_by(ranked.c.facet_id.asc(), ranked.c.representative_rank.asc())
+        ).all()
+        grouped: dict[str, list[LibraryGroupingWork]] = {}
+        for row in rows:
+            grouped.setdefault(str(row.facet_id), []).append(
+                LibraryGroupingWork(
+                    id=str(row.work_id),
+                    title=str(row.title),
+                    author=str(row.author or ""),
+                    cover_path=(str(row.cover_path) if row.cover_path else None),
+                    updated_at=row.updated_at,
+                )
+            )
+        return {facet_id: tuple(works) for facet_id, works in grouped.items()}

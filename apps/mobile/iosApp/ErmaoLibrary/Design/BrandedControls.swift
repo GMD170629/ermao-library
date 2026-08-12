@@ -33,16 +33,15 @@ struct PrimaryActionButton: View {
                 }
             }
             .frame(maxWidth: .infinity, minHeight: .iosMinimumTouchTarget)
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(theme.onAction)
-        .background(
-            theme.actionAccent,
-            in: RoundedRectangle(cornerRadius: CGFloat(GeneratedDesignTokens.Radii.control))
+        .buttonStyle(.borderedProminent)
+        .buttonBorderShape(
+            .roundedRectangle(radius: CGFloat(GeneratedDesignTokens.Radii.control))
         )
-        .contentShape(Rectangle())
+        .tint(theme.actionAccent)
+        .foregroundStyle(theme.onAction)
         .disabled(isDisabled || isWorking)
-        .opacity(isDisabled ? 0.5 : 1)
         .accessibilityAddTraits(.isButton)
     }
 }

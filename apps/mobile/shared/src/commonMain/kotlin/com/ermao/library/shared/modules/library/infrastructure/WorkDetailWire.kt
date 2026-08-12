@@ -1,7 +1,11 @@
 package com.ermao.library.shared.modules.library.infrastructure
 
 import com.ermao.library.shared.modules.library.domain.MediaKind
+import com.ermao.library.shared.modules.library.domain.AppliedFacet
+import com.ermao.library.shared.modules.library.domain.ActiveMedia
+import com.ermao.library.shared.modules.library.domain.FacetKind
 import com.ermao.library.shared.modules.library.domain.MediaVersion
+import com.ermao.library.shared.modules.library.domain.ReadingUnit
 import com.ermao.library.shared.modules.library.domain.Volume
 import com.ermao.library.shared.modules.library.domain.VolumeClassification
 import com.ermao.library.shared.modules.library.domain.VolumeFile
@@ -10,7 +14,13 @@ import com.ermao.library.shared.modules.library.domain.WorkDetailTab
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class WorkDetailSummaryPayloadWire(val book: WorkWire)
+data class WorkDetailSummaryPayloadWire(
+    val book: WorkWire,
+    val activeMedia: ActiveMediaWire? = null,
+    val readingUnits: List<ReadingUnitWire> = emptyList(),
+    val volumeSections: List<VolumeSectionWire> = emptyList(),
+    val readingUnitsPage: ReadingUnitsPageWire? = null,
+)
 
 @Serializable
 data class WorkWire(
@@ -20,6 +30,8 @@ data class WorkWire(
     val description: String? = null,
     val tags: List<String>,
     val seriesName: String? = null,
+    val seriesFacet: FacetReferenceWire? = null,
+    val authorFacets: List<FacetReferenceWire> = emptyList(),
     val seriesIndex: Double? = null,
     val coverStatus: String,
     val coverUrl: String,
@@ -30,6 +42,19 @@ data class WorkWire(
     val availableMediaKinds: List<String>,
     val detailTabs: List<WorkDetailTabWire>,
     val selectedDetailTab: String,
+)
+
+@Serializable
+data class FacetReferenceWire(val id: String, val kind: String, val name: String)
+
+internal fun FacetReferenceWire.toDomain(): AppliedFacet = AppliedFacet(
+    id = id.also { require(it.isNotBlank()) },
+    kind = when (kind.uppercase()) {
+        "SERIES" -> FacetKind.Series
+        "AUTHOR" -> FacetKind.Author
+        else -> error("Unsupported facet kind")
+    },
+    name = name.also { require(it.isNotBlank()) },
 )
 
 @Serializable
@@ -56,7 +81,6 @@ data class VolumeWire(
     val readerType: String,
     val classification: VolumeClassificationWire,
     val readable: Boolean,
-    val conversionAvailable: Boolean,
     val kindleSendAvailable: Boolean,
     val derivedFromVolumeId: String? = null,
     val publisher: String? = null,
@@ -90,9 +114,15 @@ data class VolumeFileSummaryWire(
     val size: String,
 )
 
-fun WorkDetailSummaryPayloadWire.toDomain(): WorkDetailSummary = book.toDomain()
+fun WorkDetailSummaryPayloadWire.toDomain(): WorkDetailSummary = book.toDomain(
+    activeMedia = activeMedia?.toDomain(),
+    readingUnits = readingUnits.map(ReadingUnitWire::toDomain),
+)
 
-fun WorkWire.toDomain(): WorkDetailSummary {
+fun WorkWire.toDomain(
+    activeMedia: ActiveMedia? = null,
+    readingUnits: List<ReadingUnit> = emptyList(),
+): WorkDetailSummary {
     require(id.isNotBlank()) { "Work id is blank" }
     require(title.isNotBlank()) { "Work title is blank" }
     return WorkDetailSummary(
@@ -102,6 +132,8 @@ fun WorkWire.toDomain(): WorkDetailSummary {
         description = description,
         tags = tags,
         seriesName = seriesName,
+        seriesFacet = seriesFacet?.toDomain(),
+        authorFacets = authorFacets.map(FacetReferenceWire::toDomain),
         seriesIndex = seriesIndex,
         coverStatus = coverStatus,
         coverUrl = coverUrl,
@@ -112,6 +144,8 @@ fun WorkWire.toDomain(): WorkDetailSummary {
         availableMediaKinds = availableMediaKinds.map(::MediaKind),
         detailTabs = detailTabs.map { WorkDetailTab(it.key, it.label, it.sortOrder) },
         selectedDetailTab = selectedDetailTab,
+        activeMedia = activeMedia,
+        readingUnits = readingUnits,
     )
 }
 
@@ -147,7 +181,6 @@ fun VolumeWire.toDomain(): Volume {
             classification.suggestedMediaKind?.let(::MediaKind),
         ),
         readable = readable,
-        conversionAvailable = conversionAvailable,
         kindleSendAvailable = kindleSendAvailable,
         derivedFromVolumeId = derivedFromVolumeId,
         publisher = publisher,

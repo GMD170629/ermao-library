@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="book-id" version="2.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+    <dc:title>日本語縦書き検証</dc:title>
+    <dc:creator opf:role="aut">书库技术验证组</dc:creator>
+    <dc:language>ja</dc:language>
+    <dc:identifier id="book-id" opf:scheme="URI">urn:shuku:reader-poc:09-ja-vertical</dc:identifier>
+    <dc:description>Self-authored fixture for native libmobi and Readium Navigator validation.</dc:description>
+  </metadata>
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml" />
+    <item id="style" href="styles.css" media-type="text/css" />
+    <item id="chapter1" href="chapter1.xhtml" media-type="application/xhtml+xml" />
+    <item id="chapter2" href="chapter2.xhtml" media-type="application/xhtml+xml" />
+
+  </manifest>
+  <spine toc="ncx" page-progression-direction="rtl">
+    <itemref idref="chapter1" />
+    <itemref idref="chapter2" />
+  </spine>
+</package>

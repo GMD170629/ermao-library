@@ -4,7 +4,7 @@
   entitlement, private-data namespaces, and authenticated-shell gating
 - Status: implementation and acceptance in progress
 - Stage 0 prerequisite: Shared, Android, backend, emulator deployment, and real
-  FastAPI base-path/TLS evidence passed; the macOS/iOS gate remains pending
+  FastAPI base-path/TLS evidence passed; the physical-device iOS gate remains pending
 - Rule: a missing iOS environment may defer iOS evidence, but it does not convert the
   iOS job into an allowed failure and does not permit Stage 1 to be marked complete
 
@@ -27,7 +27,7 @@
 - All six Android instrumented tests passed on API 36, including encrypted platform
   storage and the Stage 0 profile-payload migration to the explicit v2 aggregate.
 - iOS resource/catalog and project-reference static checks passed. Linux cannot run
-  Xcode, XCTest, KMP iOS simulator tests, or claim iOS runtime acceptance.
+  Xcode, XCTest, physical-device iOS tests, or claim iOS runtime acceptance.
 - No minimum-API, physical-device, accessibility, or disposable real-server Stage 1
   journey is claimed by this record yet.
 
@@ -81,24 +81,25 @@ cd apps/mobile
 ./gradlew :androidApp:connectedDebugAndroidTest
 ```
 
-iOS, when the required macOS environment is available:
+iOS, when a connected physical iPhone, JDK 17, current Xcode, and signing are available.
+Set `IOS_DEVICE_ID` to the physical-device identifier shown by `xcodebuild -showdestinations`:
 
 ```bash
 cd apps/mobile
-./gradlew verifyDesignTokens :shared:iosSimulatorArm64Test
+./gradlew verifyDesignTokens :shared:compileKotlinIosArm64
 cd ../..
 xcodebuild \
   -project apps/mobile/iosApp/ErmaoLibrary.xcodeproj \
   -scheme ErmaoLibrary \
   -configuration Debug \
-  -destination 'generic/platform=iOS Simulator' \
-  CODE_SIGNING_ALLOWED=NO build
+  -destination "platform=iOS,id=$IOS_DEVICE_ID" \
+  -allowProvisioningUpdates build
 xcodebuild \
   -project apps/mobile/iosApp/ErmaoLibrary.xcodeproj \
   -scheme ErmaoLibrary \
   -configuration Debug \
-  -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest' \
-  CODE_SIGNING_ALLOWED=NO test
+  -destination "platform=iOS,id=$IOS_DEVICE_ID" \
+  -allowProvisioningUpdates test
 ```
 
 The `Mobile Stage 1` workflow keeps the macOS job required and uploads backend JUnit,
@@ -164,8 +165,8 @@ Minimum device coverage:
 
 - Android: minimum supported API plus API 36 emulator, and one physical device for
   process death, Keystore, TLS, network transitions, and system back.
-- iOS: minimum supported simulator plus latest simulator, and one physical iPhone for
-  process death, Keychain, TLS, Dynamic Type, and VoiceOver.
+- iOS: at least one connected physical iPhone for every build/test gate, including
+  process death, Keychain, TLS, Dynamic Type, VoiceOver, and the supported OS-version matrix.
 
 ## Exit criteria
 
@@ -186,5 +187,5 @@ Stage 1 is complete only when all of the following are true on the same candidat
 
 Until the iOS environment is available, the maximum permissible status is:
 
-> Shared/Android/backend Stage 1 conditionally accepted; overall Stage 1 awaiting iOS
-> build, XCTest, Simulator real-server smoke, and physical-device evidence.
+> Shared/Android/backend Stage 1 conditionally accepted; overall Stage 1 awaiting physical-device
+> iOS build, XCTest, real-server smoke, and runtime evidence.

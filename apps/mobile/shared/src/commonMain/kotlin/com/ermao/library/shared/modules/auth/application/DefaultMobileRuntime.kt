@@ -232,6 +232,28 @@ class DefaultMobileRuntime(
         }
     }
 
+    override suspend fun loginToServer(
+        baseUrl: String,
+        email: String,
+        password: String,
+    ): RuntimeOperationResult = loginToServer(
+        baseUrl = baseUrl,
+        email = email,
+        password = password,
+        tlsMode = TlsMode.SystemTrust,
+    )
+
+    override suspend fun loginToServerAcceptingInsecureTls(
+        baseUrl: String,
+        email: String,
+        password: String,
+    ): RuntimeOperationResult = loginToServer(
+        baseUrl = baseUrl,
+        email = email,
+        password = password,
+        tlsMode = TlsMode.InsecureSkipAllValidation,
+    )
+
     override suspend fun setupInitialAdmin(
         name: String,
         email: String,
@@ -239,6 +261,7 @@ class DefaultMobileRuntime(
         locale: String,
     ): RuntimeOperationResult {
         val profile = currentProfile() ?: return noActiveServer()
+        val sessionBeforeSetup = currentSession
         val normalizedName = name.trim()
         val validation = validateSetup(normalizedName, email, password, locale)
         if (validation != null) return failure(validation)
@@ -252,7 +275,7 @@ class DefaultMobileRuntime(
                 locale,
             )
         ) {
-            is ApiResult.Success -> verifyAfterAuthentication(profile, previousIdentity = null)
+            is ApiResult.Success -> verifyAndCommitAfterSetup(profile, sessionBeforeSetup)
             is ApiResult.Failure -> if (result.error.kind == AppErrorKind.Conflict) {
                 when (val status = authGateway.setupStatus(profile)) {
                     is ApiResult.Success -> if (status.value) {
@@ -354,6 +377,154 @@ class DefaultMobileRuntime(
         }
     }
 
+    private suspend fun loginToServer(
+        baseUrl: String,
+        email: String,
+        password: String,
+        tlsMode: TlsMode,
+    ): RuntimeOperationResult {
+        reloadProfiles()
+        val parsed = ServerBaseUrl.parse(baseUrl) as? ServerBaseUrlParseResult.Valid
+            ?: return failConnection(
+                ServerConnectionDraft("", baseUrl, tlsMode),
+                invalidServerAddress(),
+            )
+        val normalizedEmail = email.trim()
+        val draft = ServerConnectionDraft(
+            displayName = parsed.baseUrl.hostName,
+            rawBaseUrl = parsed.baseUrl.value,
+            tlsMode = tlsMode,
+        )
+        lastConnectionDraft = draft
+        val previousSession = currentSession
+        val previousActiveId = cachedProfiles.singleOrNull(ServerProfile::isActive)?.id
+        val matchingByAddress = cachedProfiles.firstOrNull { it.baseUrl == parsed.baseUrl }
+        val provisional = matchingByAddress?.copy(tlsMode = tlsMode) ?: ServerProfile(
+            id = profileIdGenerator.generate(),
+            displayName = parsed.baseUrl.hostName,
+            baseUrl = parsed.baseUrl,
+            serverIdentity = "pending",
+            isActive = false,
+            tlsMode = tlsMode,
+        )
+        transition(AppSession.CheckingServer(draft))
+        return when (val probe = serverProbe.probe(provisional)) {
+            is ServerProbeResult.Failure -> handleProbeFailure(draft, probe.error)
+            is ServerProbeResult.Compatible -> {
+                if (matchingByAddress != null && matchingByAddress.serverIdentity != probe.serverIdentity) {
+                    transition(AppSession.IncompatibleServer(draft, "SERVER_IDENTITY_CHANGED"))
+                    return failure(AppError(AppErrorKind.ProtocolViolation, "SERVER_IDENTITY_CHANGED"))
+                }
+                val existingProfile = matchingByAddress
+                    ?: cachedProfiles.firstOrNull { it.serverIdentity == probe.serverIdentity }
+                val candidate = (existingProfile ?: provisional).copy(
+                    displayName = parsed.baseUrl.hostName,
+                    baseUrl = parsed.baseUrl,
+                    serverIdentity = probe.serverIdentity,
+                    isActive = true,
+                    tlsMode = tlsMode,
+                )
+                when (val setup = authGateway.setupStatus(candidate)) {
+                    is ApiResult.Failure -> handleProbeFailure(draft, setup.error)
+                    is ApiResult.Success -> if (!setup.value) {
+                        transition(AppSession.SetupRequired(candidate))
+                        success("SETUP_REQUIRED")
+                    } else {
+                        authenticateAndCommitProfile(
+                            candidate = candidate,
+                            existingProfile = existingProfile,
+                            email = normalizedEmail,
+                            password = password,
+                            previousActiveId = previousActiveId,
+                            previousSession = previousSession,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun authenticateAndCommitProfile(
+        candidate: ServerProfile,
+        existingProfile: ServerProfile?,
+        email: String,
+        password: String,
+        previousActiveId: String?,
+        previousSession: AppSession,
+    ): RuntimeOperationResult {
+        transition(AppSession.Authenticating(candidate))
+        return when (val loginResult = authGateway.login(candidate, email, password)) {
+            is ApiResult.Failure -> {
+                cookieVault.clear(candidate.id)
+                transitionLoginFailure(candidate, email, loginResult.error)
+                failure(loginResult.error)
+            }
+            is ApiResult.Success -> when (val verified = authGateway.verifyCurrentSession(candidate)) {
+                is ApiResult.Failure -> {
+                    cookieVault.clear(candidate.id)
+                    transitionLoginFailure(candidate, email, verified.error)
+                    failure(verified.error)
+                }
+                is ApiResult.Success -> storageGuard {
+                    try {
+                        profileRepository.upsert(candidate)
+                        reloadProfiles()
+                        authenticate(activeProfile(candidate.id), verified.value, lastKnownIdentity())
+                    } catch (cancelled: CancellationException) {
+                        compensateProfileCommit(candidate.id, existingProfile, previousActiveId, previousSession)
+                        throw cancelled
+                    } catch (error: Exception) {
+                        compensateProfileCommit(candidate.id, existingProfile, previousActiveId, previousSession)
+                        throw error
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun transitionLoginFailure(
+        candidate: ServerProfile,
+        email: String,
+        error: AppError,
+    ) {
+        when {
+            error.kind == AppErrorKind.Unauthorized -> transition(
+                AppSession.LoginFailed(candidate, email, "INVALID_CREDENTIALS"),
+            )
+            error.code == "ACCOUNT_DISABLED" -> transition(
+                AppSession.AccountDisabled(candidate, email),
+            )
+            else -> transition(AppSession.LoginFailed(candidate, email, error.code))
+        }
+    }
+
+    private suspend fun verifyAndCommitAfterSetup(
+        profile: ServerProfile,
+        previousSession: AppSession,
+    ): RuntimeOperationResult = when (val verified = authGateway.verifyCurrentSession(profile)) {
+        is ApiResult.Failure -> {
+            transition(AppSession.SetupFailed(profile, verified.error.code))
+            failure(verified.error)
+        }
+        is ApiResult.Success -> {
+            val existingProfile = cachedProfiles.firstOrNull { it.id == profile.id }
+            val previousActiveId = cachedProfiles.singleOrNull(ServerProfile::isActive)?.id
+            storageGuard {
+                try {
+                    profileRepository.upsert(profile.copy(isActive = true))
+                    reloadProfiles()
+                    authenticate(activeProfile(profile.id), verified.value, previousIdentity = null)
+                } catch (cancelled: CancellationException) {
+                    compensateProfileCommit(profile.id, existingProfile, previousActiveId, previousSession)
+                    throw cancelled
+                } catch (error: Exception) {
+                    compensateProfileCommit(profile.id, existingProfile, previousActiveId, previousSession)
+                    throw error
+                }
+            }
+        }
+    }
+
     private suspend fun resolveGate(
         profile: ServerProfile,
         activateBeforeTransition: Boolean,
@@ -437,6 +608,26 @@ class DefaultMobileRuntime(
         transition(previousSession)
     }
 
+    private suspend fun compensateProfileCommit(
+        candidateId: String,
+        existingProfile: ServerProfile?,
+        previousActiveId: String?,
+        previousSession: AppSession,
+    ) {
+        runCatching { cookieVault.clear(candidateId) }
+        runCatching { entitlementRepository.removeEntitlement(candidateId) }
+        if (existingProfile == null) {
+            runCatching { profileRepository.remove(candidateId) }
+        } else {
+            runCatching { profileRepository.upsert(existingProfile) }
+        }
+        if (previousActiveId != null && previousActiveId != candidateId) {
+            runCatching { profileRepository.activate(previousActiveId) }
+        }
+        reloadProfiles()
+        transition(previousSession)
+    }
+
     private suspend fun compensateActivation(
         previousActiveId: String?,
         previousSession: AppSession,
@@ -507,6 +698,9 @@ class DefaultMobileRuntime(
         val directive = when {
             previousIdentity == null -> NavigationDirective.ResetAllStacksHome
             previousIdentity.namespace == verified.identity.namespace -> NavigationDirective.RestoreSelectedTab
+            previousIdentity.namespace.serverIdentity == verified.identity.namespace.serverIdentity &&
+                previousIdentity.namespace.userId == verified.identity.namespace.userId ->
+                NavigationDirective.RevalidatePrivateShell
             else -> NavigationDirective.ResetAllStacksHome
         }
         return success("AUTHENTICATED", directive)
@@ -716,6 +910,8 @@ class DefaultMobileRuntime(
         userId = userId,
         email = email,
         displayName = displayName,
+        avatarUrl = avatarUrl,
+        locale = locale,
         namespace = PrivateDataNamespace(serverIdentity, userId, authorizationVersion),
     )
 

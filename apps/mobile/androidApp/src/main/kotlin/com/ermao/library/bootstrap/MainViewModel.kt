@@ -5,6 +5,9 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.lifecycle.viewModelScope
+import com.ermao.library.platform.persistence.LoginCredentialStore
+import com.ermao.library.platform.persistence.NoOpLoginCredentialStore
+import com.ermao.library.platform.persistence.SavedLoginCredential
 import com.ermao.library.shared.core.network.AppError
 import com.ermao.library.shared.core.network.AppErrorKind
 import com.ermao.library.shared.modules.auth.MobileRuntime
@@ -24,6 +27,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import android.content.Context
+import com.ermao.library.features.me.platform.AppLocaleController
+import com.ermao.library.platform.persistence.AndroidContentSnapshotCache
+import com.ermao.library.platform.persistence.AndroidCoverCache
+import com.ermao.library.shared.modules.library.ContentRequestContext
 
 data class ServerFormState(
     val displayName: String = "",
@@ -35,8 +43,10 @@ data class ServerFormState(
 enum class ServerFormError { RequiredDisplayName, InvalidBaseUrl }
 
 data class LoginFormState(
+    val serverAddress: String = "",
     val email: String = "",
     val password: String = "",
+    val serverAddressError: Boolean = false,
     val emailRequired: Boolean = false,
     val passwordRequired: Boolean = false,
     val invalidCredentials: Boolean = false,
@@ -68,8 +78,11 @@ data class MainUiState(
     val serverEditorMode: ServerEditorMode = ServerEditorMode.Add,
     val editingProfileId: String? = null,
     val selectedProfileId: String? = null,
+    val loginProfileId: String? = null,
+    val savedAccountEmails: Map<String, String> = emptyMap(),
     val operationInProgress: Boolean = false,
     val operationErrorCode: String? = null,
+    val operationErrorKind: AppErrorKind? = null,
     val isReauthenticating: Boolean = false,
     val reauthUserName: String? = null,
     val reauthUserEmail: String? = null,
@@ -78,7 +91,13 @@ data class MainUiState(
     val shellEpoch: Int = 0,
 )
 
-class MainViewModel(private val runtime: MobileRuntime) : ViewModel() {
+class MainViewModel(
+    private val runtime: MobileRuntime,
+    private val credentialStore: LoginCredentialStore = NoOpLoginCredentialStore,
+    private val appContext: Context? = null,
+    private val localeController: AppLocaleController? = null,
+) : ViewModel() {
+    private var loadedCredentialProfileId: String? = null
     private val mutableUiState = MutableStateFlow(
         MainUiState(session = runtime.currentSession, serverProfiles = runtime.serverProfiles),
     )
@@ -86,12 +105,16 @@ class MainViewModel(private val runtime: MobileRuntime) : ViewModel() {
 
     private val observation: Observation = runtime.observeSession(
         SessionObserver { session ->
+            val sessionProfileId = session.profileIdOrNull()
+            val profile = sessionProfileId?.let { id -> runtime.serverProfiles.firstOrNull { it.id == id } }
+            val sessionProfileAddress = session.profileBaseUrlOrNull()
             mutableUiState.update { current ->
                 current.copy(
                     session = session,
                     serverProfiles = runtime.serverProfiles,
                     serverForm = session.draftOrNull()?.toFormState() ?: current.serverForm,
                     loginForm = current.loginForm.copy(
+                        serverAddress = sessionProfileAddress ?: current.loginForm.serverAddress,
                         email = session.lastKnownEmail() ?: current.loginForm.email,
                         password = if (session is AppSession.Authenticated) "" else current.loginForm.password,
                         invalidCredentials = false,
@@ -103,6 +126,8 @@ class MainViewModel(private val runtime: MobileRuntime) : ViewModel() {
                     },
                     isReauthenticating = if (session is AppSession.Authenticated || session is AppSession.SignedOut) {
                         false
+                    } else if (session is AppSession.SessionExpired || session is AppSession.SessionUnavailable) {
+                        true
                     } else {
                         current.isReauthenticating
                     },
@@ -115,12 +140,28 @@ class MainViewModel(private val runtime: MobileRuntime) : ViewModel() {
                         else -> current.reauthServerUnavailable
                     },
                     operationErrorCode = null,
+                    operationErrorKind = null,
+                    loginProfileId = profile?.id ?: current.loginProfileId,
+                    savedAccountEmails = savedAccountEmails(runtime.serverProfiles),
                 )
             }
+            if (profile != null) loadCredential(profile.id)
         },
     )
 
-    init { viewModelScope.launch { performRuntimeOperation { runtime.start() } } }
+    init {
+        runtime.serverProfiles.singleOrNull { it.isActive }?.let { activeProfile ->
+            mutableUiState.update {
+                it.copy(
+                    loginProfileId = activeProfile.id,
+                    loginForm = it.loginForm.copy(serverAddress = activeProfile.baseUrl),
+                    savedAccountEmails = savedAccountEmails(runtime.serverProfiles),
+                )
+            }
+            loadCredential(activeProfile.id)
+        }
+        viewModelScope.launch { performRuntimeOperation { runtime.start() } }
+    }
 
     fun updateServerDisplayName(value: String) = mutableUiState.update {
         it.copy(serverForm = it.serverForm.copy(displayName = value, displayNameError = null))
@@ -130,8 +171,26 @@ class MainViewModel(private val runtime: MobileRuntime) : ViewModel() {
         it.copy(serverForm = it.serverForm.copy(rawBaseUrl = value, baseUrlError = null))
     }
 
-    fun openServerCenter() = mutableUiState.update {
-        it.copy(showServerCenter = true, showServerEditor = false, selectedProfileId = null, operationErrorCode = null)
+    fun openServerCenter() {
+        val activeProfile = runtime.serverProfiles.singleOrNull { it.isActive }
+        mutableUiState.update {
+            it.copy(
+                showServerCenter = true,
+                showServerEditor = false,
+                selectedProfileId = null,
+                loginProfileId = activeProfile?.id ?: it.loginProfileId,
+                loginForm = it.loginForm.copy(
+                    serverAddress = activeProfile?.baseUrl ?: it.loginForm.serverAddress,
+                    invalidCredentials = false,
+                ),
+                operationErrorCode = null,
+                operationErrorKind = null,
+            )
+        }
+        if (activeProfile != null) {
+            loadedCredentialProfileId = null
+            loadCredential(activeProfile.id)
+        }
     }
 
     fun closeServerCenter() = mutableUiState.update {
@@ -207,8 +266,64 @@ class MainViewModel(private val runtime: MobileRuntime) : ViewModel() {
     fun removeServer(profileId: String) = launchOperation { runtime.removeServer(profileId) }
     fun restoreSystemTrust(profileId: String) = launchOperation { runtime.restoreSystemTrust(profileId) }
     fun retrySession() = launchOperation { runtime.refreshCurrentSession() }
+    fun requireReauthentication() {
+        val session = runtime.currentSession as? AppSession.Authenticated
+        if (session != null) {
+            mutableUiState.update {
+                it.copy(
+                    isReauthenticating = true,
+                    reauthUserName = session.identity.displayName,
+                    reauthUserEmail = session.identity.email,
+                    reauthEntitlementExpiresAt = null,
+                    reauthServerUnavailable = false,
+                )
+            }
+        }
+        retrySession()
+    }
+
+    suspend fun refreshSessionAwaitingCompletion() {
+        performRuntimeOperation { runtime.refreshCurrentSession() }
+    }
+
     fun enterOfflineMode() = launchOperation { runtime.enterOfflineMode() }
-    fun logout() = launchOperation { runtime.logout() }
+    fun logout() {
+        viewModelScope.launch {
+            try {
+                logoutAwaitingCompletion(purgeNamespace = true)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: SettingsLifecycleFailure) {
+                // performRuntimeOperation already published the stable UI failure.
+            }
+        }
+    }
+
+    suspend fun purgeCurrentNamespace() {
+        val session = runtime.currentSession as? AppSession.Authenticated
+        if (session != null && appContext != null) {
+            val context = ContentRequestContext(session.profile, session.identity.namespace)
+            try {
+                AndroidContentSnapshotCache.clearNamespace(appContext, context)
+                AndroidCoverCache.clearNamespace(appContext, context)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                throw CachePurgeFailure(error)
+            }
+        }
+    }
+
+    suspend fun logoutAwaitingCompletion(purgeNamespace: Boolean) {
+        val result = performRuntimeOperation {
+            if (purgeNamespace) purgeCurrentNamespace()
+            runtime.logout()
+        }
+        if (runtime.currentSession !is AppSession.Authenticated) {
+            localeController?.restoreSystemLanguage()
+        }
+        if (result !is RuntimeOperationResult.Success) throw SettingsLifecycleFailure()
+    }
 
     fun onForegrounded() {
         if (mutableUiState.value.operationInProgress) return
@@ -225,6 +340,98 @@ class MainViewModel(private val runtime: MobileRuntime) : ViewModel() {
 
     fun updateLoginPassword(value: String) = mutableUiState.update {
         it.copy(loginForm = it.loginForm.copy(password = value, passwordRequired = false, invalidCredentials = false))
+    }
+
+    fun updateLoginServerAddress(value: String) {
+        val matchingProfileId = mutableUiState.value.serverProfiles
+            .firstOrNull { profile -> profile.baseUrl == value.trim() }
+            ?.id
+        mutableUiState.update {
+            it.copy(
+                loginProfileId = matchingProfileId,
+                loginForm = it.loginForm.copy(serverAddress = value, serverAddressError = false),
+                operationErrorCode = null,
+                operationErrorKind = null,
+            )
+        }
+        if (matchingProfileId != null) loadCredential(matchingProfileId)
+    }
+
+    fun selectLoginServer(profileId: String) {
+        val profile = mutableUiState.value.serverProfiles.firstOrNull { it.id == profileId } ?: return
+        mutableUiState.update {
+            it.copy(
+                loginProfileId = profileId,
+                loginForm = LoginFormState(serverAddress = profile.baseUrl),
+                operationErrorCode = null,
+                operationErrorKind = null,
+            )
+        }
+        loadedCredentialProfileId = null
+        loadCredential(profileId)
+    }
+
+    fun loginFromEntry() {
+        val state = mutableUiState.value
+        val form = state.loginForm
+        val parsed = ServerBaseUrl.parse(form.serverAddress)
+        val invalidAddress = parsed !is ServerBaseUrlParseResult.Valid
+        val emailRequired = form.email.isBlank()
+        val passwordRequired = form.password.isBlank()
+        if (invalidAddress || emailRequired || passwordRequired) {
+            mutableUiState.update {
+                it.copy(
+                    loginForm = it.loginForm.copy(
+                        serverAddressError = invalidAddress,
+                        emailRequired = emailRequired,
+                        passwordRequired = passwordRequired,
+                    ),
+                )
+            }
+            return
+        }
+
+        val validAddress = parsed.baseUrl
+        viewModelScope.launch {
+            submitEntryLogin(validAddress.value, form.email.trim(), form.password, acceptUnsafeTls = false)
+        }
+    }
+
+    fun acceptUnsafeTlsAndLogin() {
+        val form = mutableUiState.value.loginForm
+        val parsed = ServerBaseUrl.parse(form.serverAddress) as? ServerBaseUrlParseResult.Valid ?: return
+        if (form.email.isBlank() || form.password.isBlank()) return
+        viewModelScope.launch {
+            submitEntryLogin(parsed.baseUrl.value, form.email.trim(), form.password, acceptUnsafeTls = true)
+        }
+    }
+
+    fun deleteDisplayedServer() {
+        val profileId = mutableUiState.value.loginProfileId
+        if (profileId == null) {
+            clearLoginEntry()
+            return
+        }
+        viewModelScope.launch {
+            val result = performRuntimeOperation { runtime.removeServer(profileId) }
+            if (result is RuntimeOperationResult.Success) {
+                var credentialRemovalFailed = false
+                try {
+                    credentialStore.remove(profileId)
+                } catch (_: Exception) {
+                    credentialRemovalFailed = true
+                }
+                clearLoginEntry()
+                if (credentialRemovalFailed) {
+                    mutableUiState.update {
+                        it.copy(
+                            operationErrorCode = "CREDENTIAL_STORAGE_FAILED",
+                            operationErrorKind = AppErrorKind.StorageFailure,
+                        )
+                    }
+                }
+            }
+        }
     }
 
     fun login(fixedEmail: String? = null) {
@@ -245,7 +452,7 @@ class MainViewModel(private val runtime: MobileRuntime) : ViewModel() {
             val result = performRuntimeOperation { runtime.login(email.trim(), form.password) }
             if (result is RuntimeOperationResult.Failure && result.error.kind == AppErrorKind.Unauthorized) {
                 mutableUiState.update {
-                    it.copy(loginForm = it.loginForm.copy(invalidCredentials = true, password = ""))
+                    it.copy(loginForm = it.loginForm.copy(invalidCredentials = true))
                 }
             }
             if (fixedEmail != null && result is RuntimeOperationResult.Failure) {
@@ -282,6 +489,8 @@ class MainViewModel(private val runtime: MobileRuntime) : ViewModel() {
             mutableUiState.update { it.copy(setupForm = validated) }
             return
         }
+        val email = form.email.trim()
+        val password = form.password
         viewModelScope.launch {
             val result = performRuntimeOperation {
                 runtime.setupInitialAdmin(form.name, form.email, form.password, locale)
@@ -292,10 +501,91 @@ class MainViewModel(private val runtime: MobileRuntime) : ViewModel() {
             if (result is RuntimeOperationResult.Success && result.outcomeCode == "SETUP_ALREADY_COMPLETED") {
                 mutableUiState.update { it.copy(setupForm = SetupFormState()) }
             }
+            if (result is RuntimeOperationResult.Success && runtime.currentSession is AppSession.Authenticated) {
+                val profileId = runtime.serverProfiles.singleOrNull { it.isActive }?.id
+                if (profileId != null) saveCredential(profileId, email, password)
+            }
         }
     }
 
-    fun dismissOperationError() = mutableUiState.update { it.copy(operationErrorCode = null) }
+    fun dismissOperationError() = mutableUiState.update {
+        it.copy(operationErrorCode = null, operationErrorKind = null)
+    }
+
+    private suspend fun submitEntryLogin(
+        baseUrl: String,
+        email: String,
+        password: String,
+        acceptUnsafeTls: Boolean,
+    ) {
+        val result = performRuntimeOperation {
+            if (acceptUnsafeTls) {
+                runtime.loginToServerAcceptingInsecureTls(baseUrl, email, password)
+            } else {
+                runtime.loginToServer(baseUrl, email, password)
+            }
+        }
+        if (result is RuntimeOperationResult.Success && runtime.currentSession is AppSession.Authenticated) {
+            val profileId = runtime.serverProfiles.singleOrNull { it.isActive }?.id
+            if (profileId != null) {
+                saveCredential(profileId, email, password)
+            }
+        } else if (result is RuntimeOperationResult.Failure && result.error.kind == AppErrorKind.Unauthorized) {
+            mutableUiState.update {
+                it.copy(loginForm = it.loginForm.copy(invalidCredentials = true))
+            }
+        }
+    }
+
+    private fun saveCredential(profileId: String, email: String, password: String) {
+        try {
+            credentialStore.save(profileId, SavedLoginCredential(email, password))
+            loadedCredentialProfileId = null
+            mutableUiState.update {
+                it.copy(savedAccountEmails = it.savedAccountEmails + (profileId to email))
+            }
+        } catch (_: Exception) {
+            mutableUiState.update {
+                it.copy(
+                    operationErrorCode = "CREDENTIAL_STORAGE_FAILED",
+                    operationErrorKind = AppErrorKind.StorageFailure,
+                )
+            }
+        }
+    }
+
+    private fun loadCredential(profileId: String) {
+        if (loadedCredentialProfileId == profileId) return
+        loadedCredentialProfileId = profileId
+        val credential = credentialStore.load(profileId) ?: return
+        mutableUiState.update { state ->
+            if (state.loginProfileId != profileId) state else state.copy(
+                loginForm = state.loginForm.copy(email = credential.email, password = credential.password),
+                savedAccountEmails = state.savedAccountEmails + (profileId to credential.email),
+            )
+        }
+    }
+
+    private fun savedAccountEmails(profiles: List<ServerProfileSnapshot>): Map<String, String> =
+        profiles.mapNotNull { profile ->
+            runCatching { credentialStore.load(profile.id) }
+                .getOrNull()
+                ?.email
+                ?.let { profile.id to it }
+        }.toMap()
+
+    private fun clearLoginEntry() {
+        loadedCredentialProfileId = null
+        mutableUiState.update {
+            it.copy(
+                showServerCenter = false,
+                loginProfileId = null,
+                loginForm = LoginFormState(),
+                operationErrorCode = null,
+                operationErrorKind = null,
+            )
+        }
+    }
 
     private fun validatedServerDraft(form: ServerFormState): ServerConnectionDraft? {
         val nameError = ServerFormError.RequiredDisplayName.takeIf { form.displayName.isBlank() }
@@ -365,10 +655,18 @@ class MainViewModel(private val runtime: MobileRuntime) : ViewModel() {
                         serverProfiles = runtime.serverProfiles,
                         operationInProgress = false,
                         operationErrorCode = (result as? RuntimeOperationResult.Failure)?.error?.code,
+                        operationErrorKind = (result as? RuntimeOperationResult.Failure)?.error?.kind,
                         showServerCenter = when (directive) {
                             NavigationDirective.ResetAllStacksHome -> false
-                            NavigationDirective.ShowServerProfiles -> runtime.serverProfiles.isNotEmpty()
-                            else -> current.showServerCenter
+                            NavigationDirective.ShowServerProfiles ->
+                                current.showServerCenter && runtime.serverProfiles.isNotEmpty()
+                            NavigationDirective.KeepCurrentStacks,
+                            NavigationDirective.RestoreSelectedTab,
+                            NavigationDirective.RevalidatePrivateShell,
+                            NavigationDirective.HidePrivateShell,
+                            NavigationDirective.EnterOfflineShell,
+                            null,
+                            -> current.showServerCenter
                         },
                         selectedProfileId = if (directive == NavigationDirective.ResetAllStacksHome) null else current.selectedProfileId,
                         shellEpoch = if (directive == NavigationDirective.ResetAllStacksHome) current.shellEpoch + 1 else current.shellEpoch,
@@ -378,8 +676,23 @@ class MainViewModel(private val runtime: MobileRuntime) : ViewModel() {
         } catch (cancelled: CancellationException) {
             mutableUiState.update { it.copy(operationInProgress = false) }
             throw cancelled
+        } catch (_: CachePurgeFailure) {
+            mutableUiState.update {
+                it.copy(
+                    operationInProgress = false,
+                    operationErrorCode = "CACHE_PURGE_FAILED",
+                    operationErrorKind = AppErrorKind.StorageFailure,
+                )
+            }
+            null
         } catch (_: Exception) {
-            mutableUiState.update { it.copy(operationInProgress = false, operationErrorCode = "RUNTIME_FAILURE") }
+            mutableUiState.update {
+                it.copy(
+                    operationInProgress = false,
+                    operationErrorCode = "RUNTIME_FAILURE",
+                    operationErrorKind = AppErrorKind.ServerFailure,
+                )
+            }
             null
         }
     }
@@ -390,11 +703,19 @@ class MainViewModel(private val runtime: MobileRuntime) : ViewModel() {
     }
 
     companion object {
-        fun factory(runtime: MobileRuntime): ViewModelProvider.Factory = viewModelFactory {
-            initializer { MainViewModel(runtime) }
+        fun factory(
+            runtime: MobileRuntime,
+            credentialStore: LoginCredentialStore = NoOpLoginCredentialStore,
+            appContext: Context? = null,
+            localeController: AppLocaleController? = null,
+        ): ViewModelProvider.Factory = viewModelFactory {
+            initializer { MainViewModel(runtime, credentialStore, appContext, localeController) }
         }
     }
 }
+
+private class CachePurgeFailure(cause: Throwable) : Exception(cause)
+private class SettingsLifecycleFailure : Exception()
 
 private fun String.looksLikeEmail(): Boolean {
     val at = indexOf('@')
@@ -417,6 +738,40 @@ private fun AppSession.lastKnownEmail(): String? = when (this) {
     is AppSession.LoginFailed -> email
     is AppSession.AccountDisabled -> email
     else -> null
+}
+
+private fun AppSession.profileIdOrNull(): String? = when (this) {
+    is AppSession.SetupRequired -> profile.id
+    is AppSession.SettingUp -> profile.id
+    is AppSession.SetupFailed -> profile.id
+    is AppSession.SignedOut -> profile.id
+    is AppSession.Authenticating -> profile.id
+    is AppSession.LoginFailed -> profile.id
+    is AppSession.AccountDisabled -> profile.id
+    is AppSession.Authenticated -> profile.id
+    is AppSession.SessionUnavailable -> profile.id
+    is AppSession.SessionExpired -> profile.id
+    is AppSession.OfflineGrace -> profile.id
+    else -> null
+}
+
+private fun AppSession.profileBaseUrlOrNull(): String? = when (this) {
+    is AppSession.SetupRequired -> profile.baseUrl.value
+    is AppSession.SettingUp -> profile.baseUrl.value
+    is AppSession.SetupFailed -> profile.baseUrl.value
+    is AppSession.SignedOut -> profile.baseUrl.value
+    is AppSession.Authenticating -> profile.baseUrl.value
+    is AppSession.LoginFailed -> profile.baseUrl.value
+    is AppSession.AccountDisabled -> profile.baseUrl.value
+    is AppSession.Authenticated -> profile.baseUrl.value
+    is AppSession.SessionUnavailable -> profile.baseUrl.value
+    is AppSession.SessionExpired -> profile.baseUrl.value
+    is AppSession.OfflineGrace -> profile.baseUrl.value
+    is AppSession.CheckingServer -> draft.rawBaseUrl
+    is AppSession.ServerConnectionFailed -> draft.rawBaseUrl
+    is AppSession.TlsRisk -> draft.rawBaseUrl
+    is AppSession.IncompatibleServer -> draft.rawBaseUrl
+    AppSession.NoServer -> null
 }
 
 private fun AppSession.lastKnownName(): String? = when (this) {

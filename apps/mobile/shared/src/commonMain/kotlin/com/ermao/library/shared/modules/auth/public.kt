@@ -39,6 +39,18 @@ interface MobileRuntime {
 
     suspend fun login(email: String, password: String): RuntimeOperationResult
 
+    suspend fun loginToServer(
+        baseUrl: String,
+        email: String,
+        password: String,
+    ): RuntimeOperationResult
+
+    suspend fun loginToServerAcceptingInsecureTls(
+        baseUrl: String,
+        email: String,
+        password: String,
+    ): RuntimeOperationResult
+
     suspend fun setupInitialAdmin(
         name: String,
         email: String,
@@ -68,6 +80,7 @@ enum class NavigationDirective {
     KeepCurrentStacks,
     RestoreSelectedTab,
     ResetAllStacksHome,
+    RevalidatePrivateShell,
     HidePrivateShell,
     EnterOfflineShell,
     ShowServerProfiles,
@@ -139,6 +152,20 @@ interface MobileRuntimeBridge {
     fun retry(completion: OperationCompletion): Observation
 
     fun login(email: String, password: String, completion: OperationCompletion): Observation
+
+    fun loginToServer(
+        baseUrl: String,
+        email: String,
+        password: String,
+        completion: OperationCompletion,
+    ): Observation
+
+    fun loginToServerAcceptingInsecureTls(
+        baseUrl: String,
+        email: String,
+        password: String,
+        completion: OperationCompletion,
+    ): Observation
 
     fun setupInitialAdmin(
         name: String,

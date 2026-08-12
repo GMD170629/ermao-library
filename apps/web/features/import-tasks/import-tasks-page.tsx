@@ -24,7 +24,6 @@ type ImportTask = {
   originalName?: string | null;
   sourcePath: string;
   sourceFileExists?: boolean;
-  convertedFileExists?: boolean;
   contentHash?: string | null;
   progress: number;
   message?: string | null;
@@ -43,16 +42,6 @@ type ImportTask = {
   } | null;
   monitorFolder?: { name: string; rootPath: string } | null;
   book?: { id: string; title: string } | null;
-  conversion?: {
-    status: 'QUEUED' | 'PROBING' | 'CONVERTING' | 'NORMALIZING' | 'VALIDATING' | 'COMPLETED' | 'FAILED';
-    sourceFormat: string;
-    targetFormat: string;
-    outputPath?: string | null;
-    progress: number;
-    converterVersion?: string | null;
-    retryable?: boolean;
-    errorCode?: string | null;
-  } | null;
   logs: Array<{ id: string; level: string; message: string; createdAt: string }>;
 };
 
@@ -68,7 +57,7 @@ type ImportScanJob = {
   restartCount: number;
 };
 
-type DeleteMode = 'record' | 'source' | 'converted';
+type DeleteMode = 'record' | 'source';
 type StatusFilter = 'ALL' | ImportTask['status'];
 type PageSize = '10' | '20' | '50';
 
@@ -126,17 +115,8 @@ function statusLabel(status: ImportTask['status']) {
   return { PENDING: '等待中', PARSING: '导入中', COMPLETED: '已完成', FAILED: '失败' }[status];
 }
 
-function conversionStage(task: ImportTask) {
-  if (!task.conversion) return task.message ?? '正在导入读物';
-  return {
-    QUEUED: '等待自动转换',
-    PROBING: '正在检查文件',
-    CONVERTING: '正在转换为 EPUB',
-    NORMALIZING: '正在修复并拆分异常 EPUB',
-    VALIDATING: '正在校验章节和资源',
-    COMPLETED: task.status === 'COMPLETED' ? '自动转换并导入完成' : '转换完成，正在导入书库',
-    FAILED: '自动转换失败'
-  }[task.conversion.status];
+function importStage(task: ImportTask) {
+  return task.message ?? '正在导入读物';
 }
 
 function originLabel(origin: ImportTask['origin']) {
@@ -147,18 +127,6 @@ function originLabel(origin: ImportTask['origin']) {
 
 function sourceFileAvailable(task: ImportTask) {
   return task.sourceFileExists !== false;
-}
-
-function convertedFileAvailable(task: ImportTask) {
-  return task.convertedFileExists ?? Boolean(task.conversion?.outputPath);
-}
-
-function retryActionLabel(task: ImportTask) {
-  return task.conversion ? '重试自动转换' : '重试导入';
-}
-
-function retryQueueMessage(task: ImportTask) {
-  return task.conversion ? '已重新加入自动转换队列' : '已重新加入导入队列';
 }
 
 export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
@@ -306,7 +274,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
       if (!payload?.ok) throw new Error(payload?.error?.message ?? '重试失败');
       setMessage(`${task.originalName ?? task.sourcePath} 已重新加入队列`);
       setError('');
-      toast.success(retryQueueMessage(task));
+      toast.success('已重新加入导入队列');
       setPage(1);
       await loadTasks(1);
     } catch (reason) {
@@ -346,9 +314,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
       }
       const fileMessage = deleteMode === 'source'
         ? `已删除 ${targets.length} 条导入记录和对应源文件`
-        : deleteMode === 'converted'
-          ? `已删除 ${targets.length} 条导入记录和对应转换文件`
-          : `已删除 ${targets.length} 条导入记录`;
+        : `已删除 ${targets.length} 条导入记录`;
       const successMessage = deletedLibraryRecords > 0 ? `${fileMessage}，并清理 ${deletedLibraryRecords} 个关联卷册` : fileMessage;
       setDeleteTarget(null);
       setBulkDeleteOpen(false);
@@ -391,7 +357,6 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   const allPageSelected = selectableTasks.length > 0 && selectableTasks.every((task) => selectedIds.has(task.id));
   const dialogTargets = bulkDeleteOpen ? selectedTasks : deleteTarget ? [deleteTarget] : [];
   const canDeleteSources = dialogTargets.length > 0 && dialogTargets.every(sourceFileAvailable);
-  const canDeleteConverted = dialogTargets.length > 0 && dialogTargets.every(convertedFileAvailable);
 
   function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -491,7 +456,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
       {message ? <div className="rounded-3xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-700">{message}</div> : null}
       {activeTask ? (
         <div className="rounded-[28px] border border-amber-100 bg-amber-50 p-5 text-amber-800">
-          <div className="flex items-center gap-2 font-semibold"><Clock size={18} />{conversionStage(activeTask)}</div>
+          <div className="flex items-center gap-2 font-semibold"><Clock size={18} />{importStage(activeTask)}</div>
           <Progress value={activeTask.progress} className="mt-4" />
           <div className="mt-2 text-sm">{activeTask.originalName ?? activeTask.sourcePath}</div>
         </div>
@@ -530,7 +495,6 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
                   <span className="font-semibold">{task.book?.title ?? task.originalName ?? task.sourcePath.split('/').at(-1)}</span>
                   <Badge tone={statusTone(task.status) as BadgeTone}>{statusLabel(task.status)}</Badge>
                   <Badge>{originLabel(task.origin)}</Badge>
-                  {task.conversion ? <Badge tone="blue">{task.conversion.sourceFormat} → {task.conversion.targetFormat}</Badge> : null}
                   {task.recognizedMetadata?.source === 'SIDECAR_OPF' ? <Badge tone="blue"><I18nText>OPF 元数据</I18nText></Badge> : null}
                 </div>
                 {task.recognizedMetadata ? (
@@ -541,14 +505,13 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
                   </div>
                 ) : null}
                 <div className="mt-2 break-words text-sm text-slate-500">{task.monitorFolder?.name ? `${task.monitorFolder.name} · ` : ''}{task.sourcePath}</div>
-                {task.conversion && task.status !== 'FAILED' ? <div className="mt-2 text-sm font-medium text-[#B45336]">{conversionStage(task)}</div> : null}
                 {task.errorSummary ? (
                   <div className="mt-3 space-y-2 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
                     <div className="flex gap-2"><AlertTriangle size={16} />{task.errorSummary}</div>
                     {task.friendlyError ? <div className="pl-6 text-red-600"><I18nText>建议：</I18nText>{task.friendlyError}</div> : null}
                     {task.retryable ? (
                       <div className="pl-6 pt-1">
-                        <Button className="min-h-9 px-3 py-1.5" variant="secondary" icon={RefreshCw} loading={retryingTaskId === task.id} loadingText={i18nAttribute("正在重试")} onClick={() => void retryTask(task)}>{retryActionLabel(task)}</Button>
+                        <Button className="min-h-9 px-3 py-1.5" variant="secondary" icon={RefreshCw} loading={retryingTaskId === task.id} loadingText={i18nAttribute("正在重试")} onClick={() => void retryTask(task)}><I18nText>重试导入</I18nText></Button>
                       </div>
                     ) : null}
                   </div>
@@ -588,9 +551,8 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
             </div>
             <div className="mt-5 space-y-2" role="radiogroup" aria-label={i18nAttribute("删除范围")}>
               {([
-                { value: 'record' as const, label: '仅删除导入记录', description: '保留源文件和转换后的文件。', available: true },
-                { value: 'source' as const, label: '同步删除源文件', description: '转换文件会保留；直接使用这些源文件的卷册将无法继续阅读。', available: canDeleteSources },
-                { value: 'converted' as const, label: '同步删除转换后的文件', description: '源文件会保留；使用这些转换文件的卷册将无法继续阅读。', available: canDeleteConverted }
+                { value: 'record' as const, label: '仅删除导入记录', description: '保留源文件。', available: true },
+                { value: 'source' as const, label: '同步删除源文件', description: '直接使用这些源文件的卷册将无法继续阅读。', available: canDeleteSources }
               ]).map((option) => (
                 <button
                   key={option.value}

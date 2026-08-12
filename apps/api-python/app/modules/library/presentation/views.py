@@ -22,7 +22,6 @@ from app.bootstrap.library import (
 from app.bootstrap.organize import organize_jobs
 from app.bootstrap.system import get_setting
 from app.contracts.media_capabilities import (
-    conversion_available_for_format,
     kindle_send_available_for_format,
     reader_type_for_format,
 )
@@ -565,7 +564,6 @@ def _library_volume_view(
             "suggestedMediaKind": volume.suggested_media_kind,
         },
         "readable": reader_type is not None,
-        "conversionAvailable": conversion_available_for_format(volume.format),
         "kindleSendAvailable": kindle_send_available_for_format(volume.format),
         "derivedFromVolumeId": volume.derived_from_volume_id,
         "publisher": volume.publisher,
@@ -631,7 +629,6 @@ def _work_detail_volume_view(
         "readerType": volume["readerType"],
         "classification": volume["classification"],
         "readable": volume["readable"],
-        "conversionAvailable": volume["conversionAvailable"],
         "kindleSendAvailable": volume["kindleSendAvailable"],
         "derivedFromVolumeId": volume.get("derivedFromVolumeId"),
         "publisher": volume.get("publisher"),
@@ -668,6 +665,8 @@ def _work_detail_summary_view(book: dict[str, Any]) -> dict[str, Any]:
         "tags": book["tags"],
         "seriesName": book.get("seriesName"),
         "seriesIndex": book.get("seriesIndex"),
+        "seriesFacet": book.get("seriesFacet"),
+        "authorFacets": book.get("authorFacets", []),
         "coverStatus": book["coverStatus"],
         "coverUrl": book["coverUrl"],
         "recentMediaKind": book.get("recentMediaKind"),

@@ -623,7 +623,7 @@ def test_source_and_derived_volumes_keep_independent_progress_and_completion(
     derived = LibraryVolume(
         id="volume-reader-v3-derived",
         media_version_id=source.media_version_id,
-        title="派生 EPUB",
+        title="EPUB 副本",
         sort_order=1,
         format="EPUB",
         resource_key="derived:reader-v3",

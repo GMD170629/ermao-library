@@ -174,10 +174,10 @@ system → 系统浅色时 paper，系统深色时 night
 
 - 所有作品 Cover 使用 `2:3` 展示框；
 - 不裁掉原始封面，默认 `contain`；
-- 非标准比例使用对应外观的中性衬底补齐，不拉伸、不模糊放大背景；
+- 非标准比例保持 `contain`，展示框多余区域保持透明，不使用品牌色、中性色或取样色补齐；
 - 网格、列表、首页与书架使用 `radius.coverCompact = 8`；
 - Work Detail 与 Now Playing 使用 `radius.coverHero = 12`；
-- Fallback Cover 与真实 Cover 使用相同尺寸、圆角、衬底和加载占位；
+- Fallback Cover 与真实 Cover 使用相同尺寸和圆角；Fallback 只显示语义图标，不绘制占位底色；
 - Comic/PDF 页面内容不属于 Cover，不强制 `2:3` 或 Cover 圆角；
 - 封面下方或叠加的进度不能遮挡书名、作者和关键画面。
 
@@ -232,8 +232,8 @@ system → 系统浅色时 paper，系统深色时 night
 
 ### 10.3 下载进度
 
-- 高度 4pt；
-- 必须同时显示百分比或“已传输/总量”；
+- Work Detail 的行内下载控件使用与阅读进度不同的图标状态：云朵表示未下载、环形控件表示进行中、勾选圆圈表示完成；进行中控件再次点击提供暂停与取消，不在卷册行重复显示数字百分比；
+- Download Center 的持久任务仍使用高度 4pt 的进度，并同时显示百分比或“已传输/总量”；
 - 未知总量使用平台原生 indeterminate indicator；
 - 失败状态转为行内错误和重试，不用循环闪烁进度。
 
@@ -314,7 +314,7 @@ v1 不建设通用动画库，不添加全局 spring、卡片悬浮、缩放按�
 | Home | 一个强继续任务，最近内容用 Cover 与留白形成节奏 |
 | Library | 搜索、scope、筛选与网格保持扫描效率；标准 390pt Compact 每行三本，文字放大时自适应降列或切 List |
 | Shelves | 用层级、缩进和 Cover 组图区分合集与书架，不依赖多色卡片 |
-| Work Detail | Cover 与书名优先，主 CTA 唯一，volume 使用连续内容结构 |
+| Work Detail | Cover 与书名优先，主 CTA 唯一；简介与媒体版本独立切换；媒体版本使用电子书/漫画/有声书和连续内容结构，单卷电子书直接显示章节 |
 | Reader | Paper/Night 正文优先，控制层克制且原生 |
 | Now Playing | 允许更沉浸的暖铜色调，但仍使用 v1 令牌和原生控制 |
 | Downloads | 状态、空间和恢复动作优先，失败使用行内反馈 |
@@ -341,7 +341,7 @@ EPUB、Comic 与 PDF 仍是同一 `reader.session` 的 renderer，不因视觉�
 - 关键正文、次级文字、交互文字和实心按钮达到普通文字至少 `4.5:1`；
 - `brandAccent` 与 `actionAccent` 没有混用；
 - 页面没有纹理噪点、仿纸卡片、装饰渐变、非必要投影或嵌套 Surface；
-- Cover 比例、圆角、衬底和 Progress 在不同页面一致。
+- Cover 比例、圆角、透明展示框和 Progress 在不同页面一致。
 
 ### 16.2 外观与页面
 

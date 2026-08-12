@@ -26,8 +26,8 @@ The library model is `Work -> MediaVersion -> Volume -> File`.
   files, reading units, progress, bookmarks, jobs, and resource authorization
   are volume-scoped.
 - EPUB, MOBI, AZW, AZW3, PRC, FB2, TXT, PDF, CBZ/ZIP, M4B/M4A, and MP3 remain
-  directly readable. A converted EPUB is a separate derived volume linked by
-  `derivedFromVolumeId`; source and derived volumes keep independent progress.
+  directly readable in their source format. Each independent source resource owns
+  its own volume-scoped progress.
 - A work or media version stores no numeric reading progress. Completion is a
   query projection: every visible, authorized volume must be 100 percent.
   Adding a visible volume can therefore make the projection incomplete again.

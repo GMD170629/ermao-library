@@ -5,6 +5,8 @@ import com.ermao.library.shared.core.network.ApiClientFactory
 import com.ermao.library.shared.core.network.ApiMethod
 import com.ermao.library.shared.core.network.ApiRequest
 import com.ermao.library.shared.core.network.ApiResult
+import com.ermao.library.shared.core.network.AppError
+import com.ermao.library.shared.core.network.AppErrorKind
 import com.ermao.library.shared.modules.auth.application.AuthGateway
 import com.ermao.library.shared.modules.auth.application.VerifiedSession
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
@@ -116,6 +118,9 @@ class KtorAuthGateway(
                         me.value
                     }
                     val (identity, authorization) = verified.toDomain(profile)
+                        ?: return@withClient ApiResult.Failure(
+                            AppError(AppErrorKind.ProtocolViolation, "UNSUPPORTED_LOCALE"),
+                        )
                     ApiResult.Success(VerifiedSession(identity, authorization), me.metadata)
                 }
             }

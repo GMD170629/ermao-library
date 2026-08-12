@@ -47,6 +47,8 @@ data class WorkViewWire(
     val trackingStatus: String,
     val tags: List<String>,
     val seriesName: String? = null,
+    val seriesFacet: FacetReferenceWire? = null,
+    val authorFacets: List<FacetReferenceWire> = emptyList(),
     val seriesIndex: Double? = null,
     val organized: Boolean,
     val organizeStatus: String,
@@ -90,7 +92,6 @@ data class LibraryVolumeWire(
     val readerType: String,
     val classification: VolumeClassificationWire,
     val readable: Boolean,
-    val conversionAvailable: Boolean,
     val kindleSendAvailable: Boolean,
     val derivedFromVolumeId: String? = null,
     val publisher: String? = null,
@@ -296,6 +297,8 @@ fun WorkDetailPayloadWire.toDomain(): WorkDetail {
         trackingStatus = work.trackingStatus,
         tags = work.tags,
         seriesName = work.seriesName,
+        seriesFacet = work.seriesFacet?.toDomain(),
+        authorFacets = work.authorFacets.map(FacetReferenceWire::toDomain),
         seriesIndex = work.seriesIndex,
         organized = work.organized,
         organizeStatus = work.organizeStatus,
@@ -337,7 +340,7 @@ private fun LibraryVolumeWire.toDomain(): Volume {
             classification.reason,
             classification.suggestedMediaKind?.let(::MediaKind),
         ),
-        readable, conversionAvailable, kindleSendAvailable, derivedFromVolumeId, publisher, publishedAt,
+        readable, kindleSendAvailable, derivedFromVolumeId, publisher, publishedAt,
         language, isbn, identifier, narrator, abridged, origin, importStatus, importError, coverStatus,
         coverUrl, sizeBytes, pageCount, chapterCount, durationMs, trackCount, progress, completed, lastReadAt,
         files.map(LibraryFileWire::toDomain),
@@ -352,7 +355,7 @@ private fun LibraryFileWire.toDomain(): VolumeFile {
     )
 }
 
-private fun ActiveMediaWire.toDomain(): ActiveMedia {
+internal fun ActiveMediaWire.toDomain(): ActiveMedia {
     require(mediaVersionId.isNotBlank() && selectedVolumeId.isNotBlank() && progress in 0.0..100.0)
     return ActiveMedia(
         MediaKind(key), formatLabel, mediaVersionId, selectedVolumeId, selectedVolumeTitle, status,
@@ -370,7 +373,7 @@ private fun ActiveMediaWire.toDomain(): ActiveMedia {
     )
 }
 
-private fun ReadingUnitWire.toDomain(): ReadingUnit = ReadingUnit(
+internal fun ReadingUnitWire.toDomain(): ReadingUnit = ReadingUnit(
     id, volumeId, fileId, unitType, title, href, mediaType, sortOrder, startMs, endMs, durationMs,
     width, height, size, metadataJson.toDomain(), createdAt, updatedAt,
 )

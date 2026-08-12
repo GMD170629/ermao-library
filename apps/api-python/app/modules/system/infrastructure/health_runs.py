@@ -44,7 +44,6 @@ from app.services.email_settings import (
     get_email_settings,
     test_smtp_connection,
 )
-from app.services.text_conversion import converter_capability
 
 SessionFactory = Callable[[], Session]
 QUEUE_MODELS = {
@@ -208,16 +207,6 @@ def _initial_items(db: Session, settings: Settings) -> list[dict[str, Any]]:
             settings.resolved_storage_root / "backups",
         ),
         (
-            "conversion-directory",
-            "health.item.conversionDirectory",
-            settings.conversion_root,
-        ),
-        (
-            "conversion-temp-directory",
-            "health.item.conversionTempDirectory",
-            settings.conversion_temp_root,
-        ),
-        (
             "logs-directory",
             "health.item.logsDirectory",
             settings.resolved_storage_root / "logs",
@@ -275,12 +264,6 @@ def _initial_items(db: Session, settings: Settings) -> list[dict[str, Any]]:
                 options={"queue": "metadata", "enabled": True},
             ),
             _item("config:smtp", "configuration", "health.item.smtp", "smtp"),
-            _item(
-                "config:conversion",
-                "configuration",
-                "health.item.epubConversion",
-                "conversion",
-            ),
             _item(
                 "config:providers:ebook",
                 "configuration",
@@ -578,15 +561,6 @@ def _smtp_result(db: Session) -> tuple[str, str, dict[str, Any]]:
     )
 
 
-def _conversion_result(settings: Settings) -> tuple[str, str, dict[str, Any]]:
-    capability = converter_capability(settings)
-    if not settings.ebook_conversion_enabled:
-        return "skipped", "health.conversion.disabled", capability
-    if capability.get("available"):
-        return "ok", "health.conversion.ok", capability
-    return "error", "health.conversion.unavailable", capability
-
-
 def _providers_result(
     db: Session, options: dict[str, Any]
 ) -> tuple[str, str, dict[str, Any]]:
@@ -635,8 +609,6 @@ def _execute_item(
     options = dict(item.get("options") or {})
     if kind == "directory":
         return _directory_result(options)
-    if kind == "conversion":
-        return _conversion_result(settings)
     if kind not in {"database", "queue", "smtp", "providers"}:
         return "error", "health.unknownCheck", {}
     db = _isolated_session(factory, close_sessions)

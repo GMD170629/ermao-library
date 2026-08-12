@@ -56,7 +56,7 @@ class SqlAlchemyTextConversionProgress:
                 resolved_source_path,
             )
         if not source_volume_id:
-            raise ValueError("转换任务缺少源卷册")
+            raise ValueError("遗留文件处理记录缺少源卷册")
         idempotency_key = conversion_idempotency_key(
             source_volume_id,
             source_hash,

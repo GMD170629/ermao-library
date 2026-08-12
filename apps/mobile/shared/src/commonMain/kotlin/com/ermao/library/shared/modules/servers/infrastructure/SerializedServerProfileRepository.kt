@@ -1,6 +1,7 @@
 package com.ermao.library.shared.modules.servers.infrastructure
 
 import com.ermao.library.shared.core.storage.PlatformStorageException
+import com.ermao.library.shared.core.storage.PlatformStoragePayload
 import com.ermao.library.shared.modules.servers.application.ServerProfileRepository
 import com.ermao.library.shared.modules.servers.application.UnknownServerProfileException
 import com.ermao.library.shared.modules.servers.application.ensureUniqueServerIdentity
@@ -20,7 +21,7 @@ import kotlinx.serialization.json.intOrNull
 
 interface ServerProfilePayloadStore {
     @Throws(PlatformStorageException::class)
-    fun loadProfiles(): String?
+    fun loadProfilesPayload(): PlatformStoragePayload
 
     @Throws(PlatformStorageException::class)
     fun saveProfiles(payload: String)
@@ -85,7 +86,7 @@ class SerializedServerProfileRepository(
     }
 
     private fun loadAndMigrate(): StoredAggregate {
-        val payload = store.loadProfiles() ?: return StoredAggregate(null, emptyList())
+        val payload = store.loadProfilesPayload().value ?: return StoredAggregate(null, emptyList())
         val root = try {
             json.parseToJsonElement(payload)
         } catch (error: SerializationException) {

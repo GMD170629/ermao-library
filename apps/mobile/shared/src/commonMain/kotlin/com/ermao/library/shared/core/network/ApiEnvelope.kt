@@ -81,6 +81,7 @@ internal object ApiErrorMapper {
             410 -> AppErrorKind.Gone
             413 -> AppErrorKind.PayloadTooLarge
             422 -> AppErrorKind.Validation
+            429 -> AppErrorKind.RateLimited
             503 -> AppErrorKind.ServiceUnavailable
             in 500..599 -> AppErrorKind.ServerFailure
             else -> AppErrorKind.ProtocolViolation
@@ -112,6 +113,7 @@ internal object ApiErrorMapper {
         410 -> "GONE"
         413 -> "PAYLOAD_TOO_LARGE"
         422 -> "VALIDATION"
+        429 -> "RATE_LIMITED"
         503 -> "UNAVAILABLE"
         in 500..599 -> "SERVER_FAILURE"
         else -> "HTTP_$statusCode"

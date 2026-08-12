@@ -38,7 +38,7 @@ SMTP 检查使用真实连接但测试环境没有 SMTP 服务，因此只确认
 
 ## 原始证据
 
-- `actual-results/runtime-full-2026-07-28.json`：189 次请求记录；包含重试和无效参数纠正，178 个唯一 method + path 全覆盖。
+- `actual-results/runtime-full-2026-07-28.json`：187 次请求记录；包含重试和无效参数纠正，177 个唯一 method + path 全覆盖。
 - `actual-results/openapi-2026-07-28.json`：本次运行服务的 OpenAPI 快照。
 - 每条记录包含实测路径、状态码、响应摘要、是否在 responses 中、响应 envelope 检查和请求前后数据库表摘要差异。
 

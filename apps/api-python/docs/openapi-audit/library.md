@@ -1,7 +1,7 @@
 # 书库管理 OpenAPI 实际检查
 
 - 检查日期：2026-07-28
-- 实际请求接口：35 个（每个 method + path 均至少一次）
+- 实际请求接口：34 个（每个 method + path 均至少一次）
 - 环境：独立临时 SQLite、临时存储/监控目录、真实 uvicorn TCP 服务
 - 数据库证据：每次请求前后反射全部表，比较行数和按行内容摘要
 
@@ -37,7 +37,6 @@
 | `POST /api/works/{work_id}/cover/upload`<br>实测 `/api/works/audit-work-a/cover/upload` | `app/modules/library/presentation/http.py:1458` | ✅ 请求参数和实际状态有文档；响应经过运行时契约处理 | ✅ HTTP 200，标准成功 envelope。上传作品封面并写文件/数据库 | LibraryWork 3→3，内容变化 |
 | `PUT /api/works/{work_id}/detail-preference`<br>实测 `/api/works/audit-work-a/detail-preference` | `app/modules/library/presentation/http.py:717` | ❌ 实际读取请求体，但 OpenAPI 无 requestBody | ✅ HTTP 200，标准成功 envelope。保存用户详情页媒介选项 | WorkDetailPreference 0→1，内容变化 |
 | `PATCH /api/works/{work_id}/editions/{edition_id}`<br>实测 `/api/works/py_907612437b164344af8bb7368b5c864f/editions/py_3f1032d73a2848fc9066c4fc5fb8d0e8` | `app/modules/library/presentation/http.py:1782` | ❌ 实际读取请求体，但 OpenAPI 仍无 requestBody；✅ 返回完整 LibraryEdition/WorkView 投影 | ✅ 修复复测 HTTP 200，edition.versionName=`HTTP修订版`。 | LibraryEdition.versionName 正常持久化，响应中的 edition 与 book.editions 一致 |
-| `POST /api/works/{work_id}/editions/{edition_id}/convert`<br>实测 `/api/works/audit-work-a/editions/audit-edition-txt/convert` | `app/modules/library/presentation/http.py:1817` | ✅ 请求参数和实际状态有文档；响应经过运行时契约处理 | ✅ HTTP 202，标准成功 envelope。修正为运行期预期的绝对源路径后加入 EPUB 转换队列 | ImportTask 0→1，内容变化；SystemEvent 21→22，内容变化 |
 | `POST /api/works/{work_id}/editions/{edition_id}/primary`<br>实测 `/api/works/audit-work-a/editions/audit-edition-epub/primary` | `app/modules/library/presentation/http.py:1877` | ❌ 实际读取请求体，但 OpenAPI 无 requestBody | ✅ HTTP 200，标准成功 envelope。设置同媒介主版本 | LibraryEdition 6→6，内容变化；LibraryWork 3→3，内容变化；SystemEvent 18→19，内容变化 |
 | `POST /api/works/{work_id}/editions/{edition_id}/split`<br>实测 `/api/works/audit-work-a/editions/audit-edition-split/split` | `app/modules/library/presentation/http.py:1877` | ❌ 实际读取请求体，但 OpenAPI 无 requestBody | ✅ HTTP 200，标准成功 envelope。把版本拆分为独立作品 | LibraryEdition 6→6，内容变化；LibraryEditionFacet 1→1，内容变化；LibraryOperation 3→4，内容变化；LibraryWork 3→4，内容变化；LibraryWorkFacet 10→14，内容变化 |
 | `POST /api/works/{work_id}/metadata/apply`<br>实测 `/api/works/audit-work-a/metadata/apply` | `app/modules/library/presentation/http.py:1877` | ❌ 实际读取请求体，但 OpenAPI 无 requestBody | ✅ HTTP 200，标准成功 envelope。应用选择的元数据字段并完成整理状态 | LibraryEdition 6→6，内容变化；LibraryEditionFacet 1→1，内容变化；LibraryFacet 9→11，内容变化；LibraryWork 3→3，内容变化；LibraryWorkFacet 11→10，内容变化；OrganizeJob 1→1，内容变化 |

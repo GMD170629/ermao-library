@@ -2,8 +2,9 @@ from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from app.core.authorization import authorization_context
-from app.models.auth import User
-from app.models.library import LibraryWork
+from app.models.auth import User, UserMonitorFolderAccess
+from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
+from app.models.settings import MonitorFolder
 from app.modules.library.application.groupings import ListLibraryGroupings
 from app.modules.library.infrastructure.groupings import (
     SqlAlchemyLibraryGroupingQueries,
@@ -106,13 +107,20 @@ def test_groupings_split_authors_filter_visibility_search_and_page(
     finally:
         event.remove(engine, "before_cursor_execute", count_statement)
 
-    assert executed_statements == 1
+    # One bounded page query plus one batched representative-work query.
+    assert executed_statements == 2
     assert [(group.name, group.book_count) for group in authors.groups] == [
         ("周禾", 1),
         ("林川", 2),
         ("艾青", 1),
     ]
     assert all(group.name not in {"未知作者", "秘密作者"} for group in authors.groups)
+    lin_chuan = next(group for group in authors.groups if group.name == "林川")
+    assert {work.id for work in lin_chuan.representative_works} == {
+        "series-1",
+        "series-2",
+    }
+    assert len(lin_chuan.representative_works) <= 3
 
     series_page_1 = query.execute(
         kind="SERIES",
@@ -152,3 +160,65 @@ def test_groupings_split_authors_filter_visibility_search_and_page(
     )
     assert restricted.total == 0
     assert restricted.groups == ()
+
+
+def test_grouping_representative_works_are_limited_to_authorized_scope(
+    db_session: Session,
+) -> None:
+    user = User(
+        id="grouping-scope-user",
+        email="grouping-scope@example.com",
+        name="分组权限",
+        password_hash="unused",
+        role="member",
+    )
+    db_session.add_all(
+        [
+            user,
+            MonitorFolder(id="allowed-folder", name="可见", root_path="/allowed"),
+            MonitorFolder(id="denied-folder", name="不可见", root_path="/denied"),
+            UserMonitorFolderAccess(
+                user_id=user.id,
+                monitor_folder_id="allowed-folder",
+            ),
+        ]
+    )
+    for work_id, folder_id in (
+        ("allowed-work", "allowed-folder"),
+        ("denied-work", "denied-folder"),
+    ):
+        work = _work(work_id=work_id, title=work_id, author="共同作者")
+        media = LibraryMediaVersion(
+            id=f"media-{work_id}",
+            work_id=work_id,
+            media_kind="EBOOK",
+        )
+        volume = LibraryVolume(
+            id=f"volume-{work_id}",
+            media_version_id=media.id,
+            monitor_folder_id=folder_id,
+            title=work_id,
+            format="EPUB",
+            resource_key=f"resource-{work_id}",
+            import_status="COMPLETED",
+        )
+        db_session.add_all([work, media, volume])
+    db_session.commit()
+    sync_work_facets(db_session, "allowed-work")
+    sync_work_facets(db_session, "denied-work")
+
+    result = ListLibraryGroupings(
+        SqlAlchemyLibraryGroupingQueries(db_session)
+    ).execute(
+        kind="AUTHOR",
+        context=authorization_context(db_session, user),
+        search="共同作者",
+        page=1,
+        page_size=20,
+    )
+
+    assert len(result.groups) == 1
+    assert result.groups[0].book_count == 1
+    assert [work.id for work in result.groups[0].representative_works] == [
+        "allowed-work"
+    ]

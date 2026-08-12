@@ -40,23 +40,6 @@ def _dt(value: Any) -> str | None:
     return timestamp_ms_to_iso(value) or str(value)
 
 
-def _conversion_options_view(value: object) -> dict[str, bool]:
-    """Map stored conversion details to the public conversion-options contract."""
-
-    parsed_value: object = value
-    if isinstance(value, str):
-        try:
-            parsed_value = json.loads(value)
-        except json.JSONDecodeError:
-            return {}
-    if not isinstance(parsed_value, dict):
-        return {}
-    preserve_original = parsed_value.get("preserveOriginal")
-    if not isinstance(preserve_original, bool):
-        return {}
-    return {"preserveOriginal": preserve_original}
-
-
 def _recognized_metadata_view(value: object) -> dict[str, object] | None:
     parsed_value: object = value
     if isinstance(value, str):
@@ -124,20 +107,20 @@ def friendly_import_error(
     if code == "IMPORT_WORKER_FAILED":
         return "导入工作进程意外中断，本次任务已经结束，可以稍后重试。"
     if code == "CONVERTER_UNAVAILABLE":
-        return "转换服务暂时不可用，请检查 libmobi 是否已安装后重试。"
+        return "遗留文件处理任务无法继续；请使用源文件重新导入。"
     if code == "AUDIO_TRACK_LIMIT_EXCEEDED":
         return "有声书音轨超过 10000 条，请按卷或子目录拆分后重新导入。"
     if code == "DRM_PROTECTED":
-        return "文件可能受 DRM 保护，无法自动转换。原文件已保留。"
+        return "文件可能受 DRM 保护，无法打开。原文件已保留。"
     if code == "TEXT_ENCODING_UNCERTAIN":
         return "无法可靠识别 TXT 编码。原文件已保留，可在后续高级模式中手动指定。"
     if code == "CONVERSION_TIMEOUT":
-        return "自动转换超时。原文件已保留，可以稍后重试。"
+        return "遗留文件处理任务超时。原文件已保留，请重新导入。"
     if code == "INVALID_EPUB_OUTPUT":
-        return "转换结果未通过 EPUB 完整性检查。原文件已保留，可以重试。"
+        return "文件处理结果未通过完整性检查。原文件已保留，可以重试。"
     if code == "EPUB_NORMALIZATION_FAILED":
         return (
-            "转换结果无法在保留章节锚点和链接的前提下安全拆分。原文件已保留，可以重试。"
+            "遗留文件处理结果无法保留章节锚点和链接。原文件已保留，请重新导入。"
         )
     if re.search(r"EACCES|permission|权限", text_value, re.IGNORECASE):
         return "权限不足：请确认容器用户可以读取该目录和文件。"
@@ -199,18 +182,8 @@ def import_task_view(
             db, str(task.get("id") or ""), limit=log_limit
         )[0]
     )
-    conversion = task.get("_pageConversion") if page_hydrated else None
-    if not page_hydrated and _has_table(db, "BookConversionTask"):
-        conversion = import_http_store.get_conversion_for_import(
-            db, str(task.get("id") or "")
-        )
     file_state_started_at = perf_counter()
     source_file_exists = Path(str(task.get("sourcePath") or "")).is_file()
-    converted_file_exists = bool(
-        conversion
-        and conversion.get("outputPath")
-        and Path(str(conversion.get("outputPath"))).is_file()
-    )
     file_state_elapsed_ms = (perf_counter() - file_state_started_at) * 1000
     if file_state_elapsed_ms >= 100:
         logger.warning(
@@ -221,25 +194,11 @@ def import_task_view(
                 "elapsedMs": round(file_state_elapsed_ms, 2),
             },
         )
-    if conversion:
-        conversion = {
-            **conversion,
-            "sourcePath": display_path_name(conversion.get("sourcePath")),
-            "outputPath": display_path_name(conversion.get("outputPath")),
-            "options": _conversion_options_view(conversion.get("optionsJson")),
-            "startedAt": _dt(conversion.get("startedAt")),
-            "finishedAt": _dt(conversion.get("finishedAt")),
-            "createdAt": _dt(conversion.get("createdAt")),
-            "updatedAt": _dt(conversion.get("updatedAt")),
-            "retryable": bool(conversion.get("retryable")),
-        }
-        conversion.pop("optionsJson", None)
     view = dict(task)
     view.update(
         {
             "sourcePath": display_path_name(task.get("sourcePath")),
             "sourceFileExists": source_file_exists,
-            "convertedFileExists": converted_file_exists,
             "progress": task.get("progress") or 0,
             "friendlyError": friendly_import_error(
                 task.get("errorSummary"), task.get("errorCode")
@@ -250,7 +209,6 @@ def import_task_view(
             "monitorFolder": monitor_folder,
             "book": book,
             "logs": [serialize_import_log(log) for log in logs],
-            "conversion": conversion,
             "recognizedMetadata": _recognized_metadata_view(
                 task.get("recognizedMetadata")
             ),

@@ -613,7 +613,6 @@ function VolumeCard({
           {volume.pageCount ? <span>{t('{value0} 页', { value0: volume.pageCount })}</span> : null}
           {volume.chapterCount ? <span>{t('{value0} 章', { value0: volume.chapterCount })}</span> : null}
           {volume.durationMs ? <span data-i18n-skip>{formatDuration(volume.durationMs)}</span> : null}
-          {volume.derivedFromVolumeId ? <span><I18nText>派生卷册</I18nText></span> : null}
         </div>
       </div>
 
@@ -623,7 +622,6 @@ function VolumeCard({
             下载
           </Button>
           <Button variant="ghost" icon={Edit3} onClick={() => setEditing(true)}>编辑卷册</Button>
-          {volume.conversionAvailable ? <Button variant="ghost" icon={RefreshCw} loading={busy === 'convert'} onClick={() => void run('convert', () => runVolumeAction(work.id, volume.id, 'convert'), '已创建或刷新派生卷册')}>转换为 EPUB</Button> : null}
           <Button variant="ghost" icon={Scissors} loading={busy === 'split'} onClick={() => void run('split', () => runVolumeAction(work.id, volume.id, 'split', { title: `${work.title}（${volume.title}）`, author: work.author, copyShelves: true }), '卷册已拆分为新作品')}>拆分为作品</Button>
           <Button variant="danger" icon={Trash2} loading={busy === 'delete'} onClick={() => void remove()}>删除卷册</Button></> : null}
       </div>

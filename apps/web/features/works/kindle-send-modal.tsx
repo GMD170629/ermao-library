@@ -135,7 +135,7 @@ export function KindleSendModal({ book, open, preferredVolumeId, onClose }: { bo
                 </button>
               );
             })}
-            {options.length === 0 ? <div className="rounded-2xl border border-dashed border-stone-300 px-5 py-8 text-center text-sm text-stone-500"><I18nText>这本图书没有可发送的 EPUB 或 PDF 文件；CBZ/ZIP/CBR/RAR 漫画暂不支持转换。</I18nText></div> : null}
+            {options.length === 0 ? <div className="rounded-2xl border border-dashed border-stone-300 px-5 py-8 text-center text-sm text-stone-500"><I18nText>这本图书没有可发送的 EPUB 或 PDF 文件。</I18nText></div> : null}
           </div>
         </div>
 

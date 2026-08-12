@@ -330,6 +330,31 @@ def _add_filter_matrix_fixture(db: Session, user: User) -> None:
     db.commit()
 
 
+def test_work_list_supports_statuses_csv_and_preserves_status_parameter(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    user = _login_admin(client, db_session)
+    _add_filter_matrix_fixture(db_session, user)
+
+    response = client.get(
+        "/api/works",
+        params={
+            "status": "UNREAD",
+            "statuses": "READING,FINISHED,READING",
+            "pageSize": 100,
+            "view": "search",
+        },
+    )
+
+    assert response.status_code == 200
+    assert {book["id"] for book in response.json()["data"]["books"]} == {
+        "alpha",
+        "beta",
+        "empty",
+    }
+
+
 def test_work_list_applies_source_path_smart_filter(
     client: TestClient,
     db_session: Session,

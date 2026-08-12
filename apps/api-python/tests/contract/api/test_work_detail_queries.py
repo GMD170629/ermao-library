@@ -110,6 +110,8 @@ def test_default_work_detail_is_bounded_and_includes_file_paths(client, db_sessi
         "tags",
         "seriesName",
         "seriesIndex",
+        "seriesFacet",
+        "authorFacets",
         "coverStatus",
         "coverUrl",
         "recentMediaKind",

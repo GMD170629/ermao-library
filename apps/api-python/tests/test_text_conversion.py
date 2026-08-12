@@ -8,6 +8,9 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 import pytest
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session, sessionmaker
+
 from app.bootstrap.imports import (
     claim_next_import_task,
     import_managed_book,
@@ -21,9 +24,7 @@ from app.core.auth import hash_password
 from app.models.auth import User
 from app.models.import_pipeline import BookConversionTask, ImportTask
 from app.models.library import (
-    LibraryFile,
     LibraryMediaVersion,
-    LibraryMetadata,
     LibraryVolume,
     LibraryWork,
 )
@@ -43,8 +44,6 @@ from app.services.text_conversion import (
     source_format,
     validate_epub,
 )
-from sqlalchemy import select, text
-from sqlalchemy.orm import Session, sessionmaker
 from tests.test_worker_importer import create_worker_tables
 
 
@@ -455,11 +454,11 @@ def test_fb2_is_converted_internally_with_metadata_and_image(
         assert "chapter-0002.xhtml#note-1" in chapter_html
 
 
-def test_explicit_conversion_records_text_ebook_provenance(
+def test_legacy_conversion_origin_preserves_source_format(
     db_session, test_settings, tmp_path, monkeypatch
 ):
     create_worker_tables(db_session)
-    source = tmp_path / "[转换小说][测试作者].azw3"
+    source = tmp_path / "[源格式小说][测试作者].azw3"
     source.write_bytes(b"fake azw3 source")
     runner = SuccessfulRunner()
     monkeypatch.setattr("app.services.text_conversion._command_runner", runner)
@@ -483,26 +482,11 @@ def test_explicit_conversion_records_text_ebook_provenance(
         ),
     )
 
-    assert result.format == "epub"
+    assert result.format == "azw3"
     assert result.type == "ebook"
+    assert result.volume_id == source_result.volume_id
     assert source.exists()
-    library_file = db_session.scalar(
-        select(LibraryFile).where(LibraryFile.volume_id == result.volume_id)
-    )
-    assert library_file is not None
-    assert library_file.path.endswith(".epub")
-    derived_volume = db_session.get(LibraryVolume, result.volume_id)
-    assert derived_volume is not None
-    assert derived_volume.derived_from_volume_id == source_result.volume_id
-    conversion_task = db_session.scalars(select(BookConversionTask)).one()
-    assert conversion_task.derived_volume_id == result.volume_id
-    provenance = db_session.scalars(
-        select(LibraryMetadata).where(LibraryMetadata.source == "conversion")
-    ).one()
-    provenance_json = provenance.raw_json
-    assert '"sourceFormat": "AZW3"' in provenance_json
-    assert '"targetFormat": "EPUB"' in provenance_json
-    assert '"converter": "libmobi"' in provenance_json
+    assert db_session.scalars(select(BookConversionTask)).all() == []
 
     retried = import_managed_book(
         db_session,
@@ -514,8 +498,8 @@ def test_explicit_conversion_records_text_ebook_provenance(
         ),
     )
     assert retried.volume_id == result.volume_id
-    assert len(db_session.scalars(select(LibraryVolume)).all()) == 2
-    assert len(db_session.scalars(select(BookConversionTask)).all()) == 1
+    assert len(db_session.scalars(select(LibraryVolume)).all()) == 1
+    assert len(db_session.scalars(select(BookConversionTask)).all()) == 0
 
 
 @pytest.mark.parametrize(

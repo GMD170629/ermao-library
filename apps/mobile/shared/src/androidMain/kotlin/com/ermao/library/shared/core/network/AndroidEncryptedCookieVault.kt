@@ -2,6 +2,7 @@ package com.ermao.library.shared.core.network
 
 import android.content.Context
 import android.util.Base64
+import com.ermao.library.shared.core.storage.PlatformStorageException
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
 import java.security.MessageDigest
@@ -9,11 +10,8 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
-import com.ermao.library.shared.core.storage.PlatformStorageException
 
 class AndroidEncryptedCookieVault(
     context: Context,
@@ -22,36 +20,27 @@ class AndroidEncryptedCookieVault(
         PREFERENCES_NAME,
         Context.MODE_PRIVATE,
     )
-    private val mutex = Mutex()
     private val json = Json {
         ignoreUnknownKeys = false
         explicitNulls = false
     }
 
-    override suspend fun load(profileId: String): List<PersistedCookie> = storageOperation("load") {
-        mutex.withLock {
-            val profileKey = profileKey(profileId)
-            val encoded = preferences.getString(profileKey, null) ?: return@withLock emptyList()
-            val clearText = decrypt(encoded, profileKey)
-            json.decodeFromString(ListSerializer(PersistedCookie.serializer()), clearText)
-        }
-    }
+    override suspend fun load(profileId: String): List<PersistedCookie> =
+        CookieMutationCoordinator.withProfileLock(profileId) { loadUncoordinated(profileId) }
 
-    override suspend fun save(profileId: String, cookies: List<PersistedCookie>) {
-        storageOperation("save") {
-            mutex.withLock {
-                val clearText = json.encodeToString(ListSerializer(PersistedCookie.serializer()), cookies)
-                val profileKey = profileKey(profileId)
-                check(preferences.edit().putString(profileKey, encrypt(clearText, profileKey)).commit()) {
-                    "Unable to persist the cookie session"
-                }
+    override suspend fun mutate(
+        profileId: String,
+        transform: (List<PersistedCookie>) -> List<PersistedCookie>,
+    ): List<PersistedCookie> =
+        CookieMutationCoordinator.withProfileLock(profileId) {
+            transform(loadUncoordinated(profileId)).toList().also { cookies ->
+                saveUncoordinated(profileId, cookies)
             }
         }
-    }
 
     override suspend fun clear(profileId: String) {
-        storageOperation("clear") {
-            mutex.withLock {
+        CookieMutationCoordinator.withProfileLock(profileId) {
+            storageOperation("clear") {
                 check(preferences.edit().remove(profileKey(profileId)).commit()) {
                     "Unable to clear the cookie session"
                 }
@@ -59,7 +48,27 @@ class AndroidEncryptedCookieVault(
         }
     }
 
-    private suspend fun <T> storageOperation(action: String, block: suspend () -> T): T = try {
+    private fun loadUncoordinated(profileId: String): List<PersistedCookie> = storageOperation("load") {
+        val profileKey = profileKey(profileId)
+        val encoded = preferences.getString(profileKey, null) ?: return@storageOperation emptyList()
+        val clearText = decrypt(encoded, profileKey)
+        json.decodeFromString(ListSerializer(PersistedCookie.serializer()), clearText)
+    }
+
+    private fun saveUncoordinated(
+        profileId: String,
+        cookies: List<PersistedCookie>,
+    ) {
+        storageOperation("save") {
+            val clearText = json.encodeToString(ListSerializer(PersistedCookie.serializer()), cookies)
+            val profileKey = profileKey(profileId)
+            check(preferences.edit().putString(profileKey, encrypt(clearText, profileKey)).commit()) {
+                "Unable to persist the cookie session"
+            }
+        }
+    }
+
+    private fun <T> storageOperation(action: String, block: () -> T): T = try {
         block()
     } catch (error: PlatformStorageException) {
         throw error

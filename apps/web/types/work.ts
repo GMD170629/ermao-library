@@ -65,7 +65,6 @@ export type VolumeResource = Readonly<{
   lastReadAt: string | null;
   hidden: boolean;
   readable: boolean;
-  conversionAvailable: boolean;
   kindleSendAvailable: boolean;
   files: LibraryFileResource[];
 }>;

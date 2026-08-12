@@ -226,9 +226,9 @@ def _validate_epub_package(
     path: Path, *, max_bytes: int | None = None
 ) -> _EpubPackageInspection:
     if not path.is_file() or path.stat().st_size <= 0:
-        raise ConversionFailure("INVALID_EPUB_OUTPUT", "转换结果为空")
+        raise ConversionFailure("INVALID_EPUB_OUTPUT", "文件处理结果为空")
     if max_bytes is not None and path.stat().st_size > max_bytes:
-        raise ConversionFailure("INVALID_EPUB_OUTPUT", "转换结果超过大小限制")
+        raise ConversionFailure("INVALID_EPUB_OUTPUT", "文件处理结果超过大小限制")
     try:
         with zipfile.ZipFile(path) as archive:
             names = set(archive.namelist())
@@ -293,7 +293,7 @@ def _validate_epub_package(
         ElementTree.ParseError,
     ) as exc:
         raise ConversionFailure(
-            "INVALID_EPUB_OUTPUT", "转换结果不是有效的 EPUB"
+            "INVALID_EPUB_OUTPUT", "文件处理结果无效"
         ) from exc
 
 
@@ -340,7 +340,7 @@ def validate_epub(path: Path, *, max_bytes: int | None = None) -> dict[str, Any]
         ElementTree.ParseError,
     ) as exc:
         raise ConversionFailure(
-            "INVALID_EPUB_OUTPUT", "转换结果不是有效的 EPUB"
+            "INVALID_EPUB_OUTPUT", "文件处理结果无效"
         ) from exc
 
 
@@ -364,7 +364,7 @@ def converter_version(
 ) -> str:
     command_runner = runner or _command_runner
     if not settings.ebook_conversion_enabled:
-        raise ConversionFailure("CONVERTER_UNAVAILABLE", "电子书转换功能未启用")
+        raise ConversionFailure("CONVERTER_UNAVAILABLE", "遗留文件处理功能不可用")
     if fmt in INTERNAL_SOURCE_FORMATS:
         return INTERNAL_CONVERTER_VERSION
     if fmt not in LIBMOBI_SOURCE_FORMATS:
@@ -381,11 +381,11 @@ def converter_version(
         )
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
         raise ConversionFailure(
-            "CONVERTER_UNAVAILABLE", "电子书转换服务不可用"
+            "CONVERTER_UNAVAILABLE", "遗留文件处理服务不可用"
         ) from exc
     output = (result.stdout or result.stderr or "").strip()
     if result.returncode != 0 or not output:
-        raise ConversionFailure("CONVERTER_UNAVAILABLE", "电子书转换服务不可用")
+        raise ConversionFailure("CONVERTER_UNAVAILABLE", "遗留文件处理服务不可用")
     version_lines = [line.strip() for line in output.splitlines() if line.strip()][:2]
     return " | ".join(version_lines)[:191]
 
@@ -483,9 +483,9 @@ def _failure_from_process(stderr: str, stdout: str) -> ConversionFailure:
         r"\bdrm\b|encrypted|encryption|locked book|版权保护|加密", detail, re.IGNORECASE
     ):
         return ConversionFailure(
-            "DRM_PROTECTED", "文件可能受 DRM 保护，无法转换", retryable=False
+            "DRM_PROTECTED", "文件可能受 DRM 保护，无法打开", retryable=False
         )
-    message = "电子书转换失败"
+    message = "遗留电子书处理失败"
     if detail:
         message = f"{message}：{detail[-800:]}"
     return ConversionFailure("CONVERSION_FAILED", message)
@@ -533,10 +533,10 @@ def _run_libmobi_conversion(
         ):
             raise ConversionFailure(
                 "UNSUPPORTED_FORMAT",
-                "当前 Kindle 文件类型无法转换为 EPUB",
+                "当前 Kindle 文件类型暂不支持",
                 retryable=False,
             )
-        raise ConversionFailure("CONVERSION_FAILED", "libmobi 未生成 EPUB 文件")
+        raise ConversionFailure("CONVERSION_FAILED", "libmobi 文件处理失败")
     os.replace(generated, output_path)
 
 
@@ -558,7 +558,7 @@ def _run_internal_conversion(
             )
     except InternalConversionError as exc:
         raise ConversionFailure(
-            "CONVERSION_FAILED", f"电子书转换失败：{exc!s}"
+            "CONVERSION_FAILED", f"遗留电子书处理失败：{exc!s}"
         ) from exc
     return {
         **options,
@@ -636,7 +636,7 @@ def convert_to_epub(
     except ConversionProgressConflict as exc:
         raise ConversionFailure(
             "CONVERSION_CONFLICT",
-            "相同源卷册的 EPUB 转换发生冲突，请稍后重试",
+            "相同源文件的处理任务发生冲突，请稍后重试",
         ) from exc
     if task.import_task_id != import_task_id and task.status not in {
         "COMPLETED",
@@ -644,7 +644,7 @@ def convert_to_epub(
     }:
         raise ConversionFailure(
             "CONVERSION_CONFLICT",
-            "相同源卷册的 EPUB 转换正在处理中，请稍后重试",
+            "相同源文件的处理任务正在进行，请稍后重试",
         )
     try:
         probe = probe_text_source(source)
@@ -713,7 +713,7 @@ def convert_to_epub(
                 task.id,
                 status="COMPLETED",
                 progress=85,
-                message="已复用验证过的 EPUB，正在导入书库",
+                message="已复用验证过的文件处理结果，正在导入书库",
                 conversion_values={
                     "sourceHash": source_hash,
                     "outputPath": str(final_path),
@@ -749,7 +749,7 @@ def convert_to_epub(
         task.id,
         status="CONVERTING",
         progress=20,
-        message="正在生成 EPUB",
+        message="正在处理电子书文件",
         conversion_values={
             "sourceHash": source_hash,
             "converterVersion": version,
@@ -781,7 +781,7 @@ def convert_to_epub(
                         task.id,
                         status="NORMALIZING",
                         progress=62,
-                        message="正在修复异常 EPUB 并安全拆分章节",
+                        message="正在修复异常电子书结构并安全拆分章节",
                         conversion_values={
                             "optionsJson": json.dumps(
                                 {
@@ -808,7 +808,7 @@ def convert_to_epub(
             except EpubNormalizationError as exc:
                 raise ConversionFailure(
                     "EPUB_NORMALIZATION_FAILED",
-                    f"libmobi 转换结果无法安全标准化：{str(exc)[:800]}",
+                    f"libmobi 文件处理结果无法安全标准化：{str(exc)[:800]}",
                 ) from exc
         else:
             options = _run_internal_conversion(fmt, source, output_path, options)
@@ -818,7 +818,7 @@ def convert_to_epub(
                 task.id,
                 status="CONVERTING",
                 progress=65,
-                message="已识别章节与书内资源，正在封装 EPUB",
+                message="已识别章节与书内资源，正在封装电子书内容",
                 conversion_values={
                     "optionsJson": json.dumps(
                         options, ensure_ascii=False, sort_keys=True
@@ -840,7 +840,7 @@ def convert_to_epub(
             except EpubNormalizationError as exc:
                 raise ConversionFailure(
                     "EPUB_NORMALIZATION_FAILED",
-                    f"标准化 EPUB 未通过完整性检查：{str(exc)[:800]}",
+                    f"电子书处理结果未通过完整性检查：{str(exc)[:800]}",
                 ) from exc
         final_path.parent.mkdir(parents=True, exist_ok=True)
         os.replace(output_path, final_path)
@@ -857,7 +857,7 @@ def convert_to_epub(
             task.id,
             status="COMPLETED",
             progress=85,
-            message="转换完成，正在导入书库",
+            message="文件处理完成，正在导入书库",
             conversion_values={
                 "outputPath": str(final_path),
                 "errorCode": None,
@@ -878,7 +878,7 @@ def convert_to_epub(
         )
     except subprocess.TimeoutExpired as exc:
         failure = ConversionFailure(
-            "CONVERSION_TIMEOUT", "电子书转换超时，原文件已保留"
+            "CONVERSION_TIMEOUT", "遗留电子书处理超时，原文件已保留"
         )
         _record_failure(progress_store, import_task_id, task.id, failure)
         raise failure from exc
@@ -887,7 +887,7 @@ def convert_to_epub(
         raise
     except (OSError, ValueError) as exc:
         failure = ConversionFailure(
-            "CONVERSION_FAILED", f"电子书转换失败：{str(exc)[:800]}"
+            "CONVERSION_FAILED", f"遗留电子书处理失败：{str(exc)[:800]}"
         )
         _record_failure(progress_store, import_task_id, task.id, failure)
         raise failure from exc

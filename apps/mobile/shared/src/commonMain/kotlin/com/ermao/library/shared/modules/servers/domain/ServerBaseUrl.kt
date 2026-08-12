@@ -10,6 +10,16 @@ class ServerBaseUrl private constructor(
             return if (pathStart < 0) value else value.substring(0, pathStart)
         }
 
+    val hostName: String
+        get() {
+            val authority = origin.substringAfter("://")
+            return if (authority.startsWith('[')) {
+                authority.substringBefore(']').removePrefix("[")
+            } else {
+                authority.substringBefore(':')
+            }
+        }
+
     val basePath: String
         get() = value.removePrefix(origin).ifEmpty { "/" }
 

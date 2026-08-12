@@ -25,6 +25,7 @@ class WorkListQuery:
     type_filter: str = ""
     media_kinds: tuple[str, ...] = ()
     status: str | None = None
+    statuses: tuple[str, ...] = ()
     publication_status: str | None = None
     tracking_status: str | None = None
     tag: str | None = None

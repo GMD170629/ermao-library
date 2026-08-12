@@ -1,0 +1,97 @@
+name: ReaderPOC
+options:
+  bundleIdPrefix: com.ermao.library
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "26.0"
+  groupSortPosition: top
+packages:
+  Readium:
+    url: https://github.com/readium/swift-toolkit.git
+    exactVersion: 3.11.0
+  LibMobi:
+    path: Dependencies/LibMobi
+targets:
+  ReaderPOC:
+    type: application
+    platform: iOS
+    sources:
+      - path: ReaderPOC
+    dependencies:
+      - package: Readium
+        product: ReadiumShared
+      - package: Readium
+        product: ReadiumStreamer
+      - package: Readium
+        product: ReadiumNavigator
+      - package: LibMobi
+        product: LibMobi
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ermao.library.reader-poc
+        DEVELOPMENT_TEAM: W5G54L42KQ
+        CODE_SIGN_STYLE: Automatic
+        INFOPLIST_FILE: ReaderPOC/Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SUPPORTS_MACCATALYST: NO
+        ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+        ENABLE_TESTABILITY: YES
+  ReaderPOCTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ReaderPOCTests
+    dependencies:
+      - target: ReaderPOC
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ermao.library.reader-poc.tests
+        DEVELOPMENT_TEAM: W5G54L42KQ
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "6.0"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ReaderPOC.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ReaderPOC"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+  ReaderPOCUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: ReaderPOCUITests
+    dependencies:
+      - target: ReaderPOC
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ermao.library.reader-poc.uitests
+        DEVELOPMENT_TEAM: W5G54L42KQ
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "6.0"
+        TEST_TARGET_NAME: ReaderPOC
+schemes:
+  ReaderPOC:
+    build:
+      targets:
+        ReaderPOC: all
+        ReaderPOCTests: [test]
+        ReaderPOCUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: true
+      targets:
+        - name: ReaderPOCTests
+          parallelizable: false
+        - name: ReaderPOCUITests
+          parallelizable: false
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

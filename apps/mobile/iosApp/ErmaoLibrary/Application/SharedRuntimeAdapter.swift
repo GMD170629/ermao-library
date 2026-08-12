@@ -3,12 +3,13 @@ import Foundation
 
 enum AppCompositionRoot {
     @MainActor
-    static func makeRuntimeClient() -> MobileRuntimeClient {
-        let keychain = KeychainCookiePayloadStore()
+    static func makeRuntimeClient(
+        cookieStore: KeychainCookiePayloadStore = KeychainCookiePayloadStore()
+    ) -> MobileRuntimeClient {
         let profiles = UserDefaultsServerProfileStore()
         let entitlements = UserDefaultsOfflineEntitlementStore()
         let bridge = IosCompositionKt.createIosMobileRuntimeBridge(
-            cookieStore: keychain,
+            cookieStore: cookieStore,
             profileStore: profiles,
             entitlementStore: entitlements
         )
@@ -17,8 +18,8 @@ enum AppCompositionRoot {
 }
 
 extension KeychainCookiePayloadStore: SecureCookiePayloadStore {
-    func load(profileId: String) throws -> String? {
-        try load(profileID: profileId)
+    func loadCookiePayload(profileId: String) throws -> PlatformStoragePayload {
+        PlatformStoragePayload(value: try load(profileID: profileId))
     }
 
     func save(profileId: String, payload: String) throws {
@@ -30,8 +31,17 @@ extension KeychainCookiePayloadStore: SecureCookiePayloadStore {
     }
 }
 
-extension UserDefaultsServerProfileStore: ServerProfilePayloadStore {}
-extension UserDefaultsOfflineEntitlementStore: OfflineEntitlementPayloadStore {}
+extension UserDefaultsServerProfileStore: ServerProfilePayloadStore {
+    func loadProfilesPayload() throws -> PlatformStoragePayload {
+        PlatformStoragePayload(value: loadProfiles())
+    }
+}
+
+extension UserDefaultsOfflineEntitlementStore: OfflineEntitlementPayloadStore {
+    func loadEntitlementsPayload() throws -> PlatformStoragePayload {
+        PlatformStoragePayload(value: loadEntitlements())
+    }
+}
 
 @MainActor
 final class SharedMobileRuntimeClient: MobileRuntimeClient {
@@ -54,7 +64,7 @@ final class SharedMobileRuntimeClient: MobileRuntimeClient {
     ) -> RuntimeObservationToken {
         let sink = MainActorSessionSink(onChange)
         let observer = SharedSnapshotObserver(sink: sink)
-        let observation = bridge.observeSession(observer: observer)
+        let observation = bridge.observeSession(observer_: observer)
         return SharedObservationToken(observation: observation, observer: observer)
     }
 
@@ -100,6 +110,36 @@ final class SharedMobileRuntimeClient: MobileRuntimeClient {
 
     func acceptInsecureTLS() async throws -> RuntimeOperationOutcome {
         try await run { bridge.acceptInsecureTls(completion: $0) }
+    }
+
+    func loginToServer(
+        baseURL: String,
+        email: String,
+        password: String
+    ) async throws -> RuntimeOperationOutcome {
+        try await run {
+            bridge.loginToServer(
+                baseUrl: baseURL,
+                email: email,
+                password: password,
+                completion: $0
+            )
+        }
+    }
+
+    func loginToServerAcceptingInsecureTLS(
+        baseURL: String,
+        email: String,
+        password: String
+    ) async throws -> RuntimeOperationOutcome {
+        try await run {
+            bridge.loginToServerAcceptingInsecureTls(
+                baseUrl: baseURL,
+                email: email,
+                password: password,
+                completion: $0
+            )
+        }
     }
 
     func login(_ request: LoginRequest) async throws -> RuntimeOperationOutcome {
@@ -181,6 +221,8 @@ private enum SharedSessionMapper {
             userID: snapshot.userId,
             userDisplayName: snapshot.userDisplayName,
             userEmail: snapshot.userEmail,
+            userAvatarURL: snapshot.userAvatarUrl,
+            userLocale: snapshot.userLocale,
             authorization: authorization,
             entitlementExpiresAt: entitlementExpiresAt,
             reasonCode: snapshot.reasonCode

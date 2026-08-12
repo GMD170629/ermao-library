@@ -157,7 +157,10 @@ class DefaultMobileRuntimeLifecycleTest {
 
         override suspend fun load(profileId: String): List<PersistedCookie> = emptyList()
 
-        override suspend fun save(profileId: String, cookies: List<PersistedCookie>) = Unit
+        override suspend fun mutate(
+            profileId: String,
+            transform: (List<PersistedCookie>) -> List<PersistedCookie>,
+        ): List<PersistedCookie> = transform(emptyList())
 
         override suspend fun clear(profileId: String) {
             cleared = true

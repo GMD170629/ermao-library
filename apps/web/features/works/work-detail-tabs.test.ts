@@ -13,7 +13,7 @@ import {
 } from './work-detail-tabs';
 
 function volume(id: string, sortOrder: number, hidden = false): VolumeResource {
-  return { id, mediaVersionId: 'media-1', title: id, volumeIndex: null, sortOrder, format: 'EPUB', readerType: 'reflowable', classification: { source: 'LEGACY', reason: 'LEGACY', suggestedMediaKind: null }, derivedFromVolumeId: null, publisher: null, publishedAt: null, language: null, isbn: null, identifier: null, narrator: null, abridged: null, importStatus: 'READY', importError: null, coverUrl: '', sizeBytes: 0, pageCount: null, chapterCount: null, durationMs: null, trackCount: null, progress: 0, lastReadAt: null, hidden, readable: true, conversionAvailable: false, kindleSendAvailable: true, files: [] };
+  return { id, mediaVersionId: 'media-1', title: id, volumeIndex: null, sortOrder, format: 'EPUB', readerType: 'reflowable', classification: { source: 'LEGACY', reason: 'LEGACY', suggestedMediaKind: null }, derivedFromVolumeId: null, publisher: null, publishedAt: null, language: null, isbn: null, identifier: null, narrator: null, abridged: null, importStatus: 'READY', importError: null, coverUrl: '', sizeBytes: 0, pageCount: null, chapterCount: null, durationMs: null, trackCount: null, progress: 0, lastReadAt: null, hidden, readable: true, kindleSendAvailable: true, files: [] };
 }
 
 function work(kinds: MediaKind[], continueVolumeId: string | null = null): WorkView {

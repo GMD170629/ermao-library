@@ -63,7 +63,7 @@ class ScanImportDirectoryRequest(HttpContractModel):
 
 
 class DeleteImportTaskRequest(HttpContractModel):
-    delete_mode: Literal["record", "source", "converted"] = Field(
+    delete_mode: Literal["record", "source"] = Field(
         default="record", alias="deleteMode"
     )
     delete_library_record: bool = Field(default=False, alias="deleteLibraryRecord")
@@ -130,37 +130,6 @@ class ImportedBook(HttpContractModel):
     title: str
 
 
-class ConversionOptions(HttpContractModel):
-    preserve_original: bool | None = Field(default=None, alias="preserveOriginal")
-
-
-class ImportConversion(HttpContractModel):
-    id: str
-    import_task_id: str = Field(alias="importTaskId")
-    source_volume_id: str = Field(alias="sourceVolumeId")
-    derived_volume_id: str | None = Field(alias="derivedVolumeId")
-    idempotency_key: str = Field(alias="idempotencyKey")
-    mode: str
-    source_format: str = Field(alias="sourceFormat")
-    target_format: str = Field(alias="targetFormat")
-    source_path: str = Field(alias="sourcePath")
-    output_path: str | None = Field(alias="outputPath")
-    source_hash: str | None = Field(alias="sourceHash")
-    converter: str
-    converter_version: str | None = Field(alias="converterVersion")
-    status: str
-    progress: int
-    attempts: int
-    retryable: bool
-    error_code: str | None = Field(alias="errorCode")
-    error_summary: str | None = Field(alias="errorSummary")
-    started_at: datetime | None = Field(alias="startedAt")
-    finished_at: datetime | None = Field(alias="finishedAt")
-    created_at: datetime = Field(alias="createdAt")
-    updated_at: datetime = Field(alias="updatedAt")
-    options: ConversionOptions
-
-
 class RecognizedImportMetadata(HttpContractModel):
     title: str
     volume_title: str = Field(alias="volumeTitle")
@@ -212,12 +181,10 @@ class ImportTask(HttpContractModel):
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
     source_file_exists: bool = Field(alias="sourceFileExists")
-    converted_file_exists: bool = Field(alias="convertedFileExists")
     friendly_error: str | None = Field(alias="friendlyError")
     monitor_folder: MonitorFolder | None = Field(alias="monitorFolder")
     book: ImportedBook | None
     logs: list[ImportLog]
-    conversion: ImportConversion | None
 
 
 class ImportTaskSummary(HttpContractModel):
@@ -349,7 +316,7 @@ class ImportDeleteFailure(HttpContractModel):
 class ImportDeletionPayload(HttpContractModel):
     deleted: bool
     id: str
-    delete_mode: Literal["record", "source", "converted"] = Field(alias="deleteMode")
+    delete_mode: Literal["record", "source"] = Field(alias="deleteMode")
     delete_library_record: bool = Field(alias="deleteLibraryRecord")
     deleted_library_record: bool = Field(alias="deletedLibraryRecord")
     deleted_work_record: bool = Field(alias="deletedWorkRecord")

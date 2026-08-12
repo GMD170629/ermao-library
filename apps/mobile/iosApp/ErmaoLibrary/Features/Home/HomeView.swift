@@ -1,0 +1,233 @@
+import SwiftUI
+
+enum HomeCollectionKind: String, Hashable, Codable, Sendable {
+    case recentReading
+    case recentAdded
+}
+
+struct HomeView: View {
+    let context: ContentRequestContext
+    let client: any ContentClient
+    let cache: LibraryCacheStore
+    let openWork: (String) -> Void
+    let openCollection: (HomeCollectionKind) -> Void
+
+    @StateObject private var store: HomeStore
+    @Environment(\.appTheme) private var theme
+
+    init(
+        context: ContentRequestContext,
+        client: any ContentClient,
+        cache: LibraryCacheStore,
+        onUnauthorized: @escaping @MainActor () -> Void,
+        openWork: @escaping (String) -> Void,
+        openCollection: @escaping (HomeCollectionKind) -> Void
+    ) {
+        self.context = context
+        self.client = client
+        self.cache = cache
+        self.openWork = openWork
+        self.openCollection = openCollection
+        _store = StateObject(
+            wrappedValue: HomeStore(
+                context: context,
+                client: client,
+                cache: cache,
+                onUnauthorized: onUnauthorized
+            )
+        )
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: .space3) {
+                continueSection
+                horizontalSection(
+                    title: "home.recentReading.title",
+                    state: store.recentReading,
+                    collection: .recentReading,
+                    retry: store.retryRecentReading
+                )
+                horizontalSection(
+                    title: "home.recentAdded.title",
+                    state: store.recentAdded,
+                    collection: .recentAdded,
+                    retry: store.retryRecentAdded
+                )
+            }
+            .padding(.horizontal, .space2)
+            .padding(.bottom, .space4)
+        }
+        .refreshable { store.load() }
+        .navigationTitle("tab.home")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button("common.refresh", systemImage: "arrow.clockwise") { store.load() }
+                } label: {
+                    Image(systemName: "ellipsis")
+                }
+                .accessibilityLabel(Text("common.more"))
+            }
+        }
+        .appCanvas()
+        .task { store.load() }
+    }
+
+    @ViewBuilder
+    private var continueSection: some View {
+        VStack(alignment: .leading, spacing: .space1Half) {
+            Text("home.continue.title").appTextStyle(.headline)
+            switch store.continueReading {
+            case .loading:
+                HStack { Spacer(); ProgressView(); Spacer() }
+                    .frame(minHeight: 180)
+            case .empty:
+                ContentStatusView(
+                    systemImage: "book.closed",
+                    title: "home.continue.empty.title",
+                    message: "home.continue.empty.message"
+                )
+            case .failure:
+                ContentStatusView(
+                    systemImage: "wifi.exclamationmark",
+                    title: "home.section.error.title",
+                    message: "home.section.error.message",
+                    actionTitle: "common.retry",
+                    action: store.retryContinueReading
+                )
+            case .content(let item, let cached):
+                if cached { cachedNotice }
+                VStack(spacing: .space1Half) {
+                    Button { openWork(item.work.id) } label: {
+                        HStack(spacing: .space2) {
+                            BookCoverView(
+                                reference: item.work.cover,
+                                title: item.work.title,
+                                context: context,
+                                client: client,
+                                cache: cache,
+                                cornerRadius: CGFloat(GeneratedDesignTokens.Radii.coverHero)
+                            )
+                            .frame(width: 104)
+                            VStack(alignment: .leading, spacing: .spaceHalf) {
+                                Text(item.work.title).appTextStyle(.headline).lineLimit(2)
+                                Text(item.work.author)
+                                    .appTextStyle(.callout)
+                                    .foregroundStyle(theme.textSecondary)
+                                    .lineLimit(1)
+                                if let position = item.positionLabel ?? item.volumeTitle {
+                                    Text(position)
+                                        .appTextStyle(.label)
+                                        .foregroundStyle(theme.textSecondary)
+                                        .lineLimit(2)
+                                }
+                                if let progress = item.work.progress {
+                                    Text(progress / 100, format: .percent.precision(.fractionLength(0)))
+                                        .appTextStyle(.caption)
+                                        .monospacedDigit()
+                                    CoverProgressView(progress: progress)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                    PrimaryActionButton("home.continue.action") { openWork(item.work.id) }
+                }
+                .padding(.space1Half)
+                .background(theme.surface)
+                .clipShape(RoundedRectangle(cornerRadius: CGFloat(GeneratedDesignTokens.Radii.task)))
+                .overlay {
+                    RoundedRectangle(cornerRadius: CGFloat(GeneratedDesignTokens.Radii.task))
+                        .stroke(theme.divider, lineWidth: 1)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func horizontalSection(
+        title: LocalizedStringKey,
+        state: HomeSectionState<[WorkCard]>,
+        collection: HomeCollectionKind,
+        retry: @escaping () -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: .space1Half) {
+            HStack {
+                Text(title).appTextStyle(.headline)
+                Spacer()
+                Button { openCollection(collection) } label: {
+                    HStack(spacing: .spaceHalf) {
+                        Text("home.viewAll")
+                            .appTextStyle(.label)
+                        Image(systemName: "chevron.forward")
+                            .font(.caption.weight(.semibold))
+                            .accessibilityHidden(true)
+                    }
+                    .foregroundStyle(theme.actionAccent)
+                    .frame(minHeight: .iosMinimumTouchTarget)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(Text("home.viewAll.hint"))
+            }
+            switch state {
+            case .loading:
+                HStack { Spacer(); ProgressView(); Spacer() }.frame(minHeight: 176)
+            case .empty:
+                ContentStatusView(
+                    systemImage: "books.vertical",
+                    title: "home.section.empty.title",
+                    message: "home.section.empty.message"
+                )
+            case .failure:
+                ContentStatusView(
+                    systemImage: "wifi.exclamationmark",
+                    title: "home.section.error.title",
+                    message: "home.section.error.message",
+                    actionTitle: "common.retry",
+                    action: retry
+                )
+            case .content(let works, let cached):
+                if cached { cachedNotice }
+                ScrollView(.horizontal) {
+                    LazyHStack(alignment: .top, spacing: .space2) {
+                        ForEach(works) { work in
+                            Button { openWork(work.id) } label: {
+                                VStack(alignment: .leading, spacing: .spaceHalf) {
+                                    BookCoverView(
+                                        reference: work.cover,
+                                        title: work.title,
+                                        context: context,
+                                        client: client,
+                                        cache: cache
+                                    )
+                                    Text(work.title)
+                                        .appTextStyle(.label)
+                                        .foregroundStyle(theme.textPrimary)
+                                        .lineLimit(1)
+                                    if let progress = work.progress, progress > 0 {
+                                        CoverProgressView(progress: progress)
+                                    }
+                                }
+                                .frame(width: 104)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                }
+                .scrollIndicators(.hidden)
+            }
+        }
+    }
+
+    private var cachedNotice: some View {
+        Label("library.offline.cached", systemImage: "wifi.slash")
+            .appTextStyle(.caption)
+            .foregroundStyle(theme.textSecondary)
+    }
+}

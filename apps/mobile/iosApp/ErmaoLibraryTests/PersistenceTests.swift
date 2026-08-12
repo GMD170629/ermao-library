@@ -43,6 +43,23 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(try store.load(profileID: secondProfile), "{\"cookie\":\"second\"}")
     }
 
+    func testServerCredentialsRoundTripInDeviceOnlyKeychain() throws {
+        let service = "com.ermao.library.credentials.tests.\(UUID().uuidString)"
+        let store = KeychainServerCredentialStore(service: service)
+        let profileID = UUID().uuidString
+        defer { try? store.clear(profileID: profileID) }
+        let credentials = SavedServerCredentials(
+            email: "reader@example.com",
+            password: "private-password"
+        )
+
+        try store.save(profileID: profileID, credentials: credentials)
+
+        XCTAssertEqual(try store.load(profileID: profileID), credentials)
+        try store.clear(profileID: profileID)
+        XCTAssertNil(try store.load(profileID: profileID))
+    }
+
     func testProfileStoreRoundTripsOpaqueVersionedAggregate() throws {
         let suiteName = "com.ermao.library.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -50,11 +67,11 @@ final class PersistenceTests: XCTestCase {
         let store = UserDefaultsServerProfileStore(defaults: defaults)
         let payload = #"{"schemaVersion":2,"activeProfileId":"first","profiles":[{"id":"first"}]}"#
         try store.saveProfiles(payload: payload)
-        XCTAssertEqual(try store.loadProfiles(), payload)
+        XCTAssertEqual(store.loadProfiles(), payload)
         XCTAssertThrowsError(try store.saveProfiles(payload: "not-json")) { error in
             XCTAssertEqual(error as? UserDefaultsPayloadStoreError, .invalidJSON)
         }
-        XCTAssertEqual(try store.loadProfiles(), payload)
+        XCTAssertEqual(store.loadProfiles(), payload)
     }
 
     func testOfflineEntitlementStoreIsIndependentFromProfiles() throws {
@@ -68,9 +85,9 @@ final class PersistenceTests: XCTestCase {
         let entitlementPayload = #"{"profile-a":{"userId":"user-a","expiresAt":42}}"#
         try entitlements.saveEntitlements(payload: entitlementPayload)
 
-        XCTAssertEqual(try entitlements.loadEntitlements(), entitlementPayload)
+        XCTAssertEqual(entitlements.loadEntitlements(), entitlementPayload)
         entitlements.clear()
-        XCTAssertNil(try entitlements.loadEntitlements())
-        XCTAssertNotNil(try profiles.loadProfiles())
+        XCTAssertNil(entitlements.loadEntitlements())
+        XCTAssertNotNil(profiles.loadProfiles())
     }
 }

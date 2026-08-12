@@ -12,6 +12,15 @@ import com.ermao.library.shared.modules.auth.infrastructure.SerializedOfflineEnt
 import com.ermao.library.shared.modules.servers.infrastructure.KtorServerProbe
 import com.ermao.library.shared.modules.servers.infrastructure.SerializedServerProfileRepository
 import com.ermao.library.shared.modules.servers.infrastructure.ServerProfilePayloadStore
+import com.ermao.library.shared.modules.library.ContentRepository
+import com.ermao.library.shared.modules.library.InMemoryLibraryCacheRepository
+import com.ermao.library.shared.modules.library.infrastructure.KtorContentRepository
+import com.ermao.library.shared.modules.library.application.LibrarySnapshotPayloadStore
+import com.ermao.library.shared.modules.personalsettings.PersonalSettingsRepository
+import com.ermao.library.shared.modules.personalsettings.infrastructure.KtorPersonalSettingsRepository
+import com.ermao.library.shared.modules.administrativesettings.AdministrativeSettingsRepository
+import com.ermao.library.shared.modules.administrativesettings.infrastructure.KtorAdministrativeSettingsRepository
+import com.ermao.library.shared.core.time.currentEpochMillis
 
 /** Composition root for Swift. Cookie payloads must be backed by Keychain in iosApp. */
 fun createIosMobileRuntimeBridge(
@@ -34,3 +43,31 @@ fun createIosMobileRuntimeBridge(
         ),
     )
 }
+
+/** Independent content composition; it shares the persisted authenticated Cookie vault. */
+fun createIosContentRepository(
+    cookieStore: SecureCookiePayloadStore,
+    snapshotStore: LibrarySnapshotPayloadStore,
+): ContentRepository =
+    KtorContentRepository(
+        clients = ApiClientFactory(SerializedCookieVault(cookieStore)),
+        cache = InMemoryLibraryCacheRepository(),
+        nowEpochMillis = ::currentEpochMillis,
+        snapshots = snapshotStore,
+    )
+
+/** Independent personal-settings composition; cookie payloads stay behind the Keychain adapter. */
+fun createIosPersonalSettingsRepository(
+    cookieStore: SecureCookiePayloadStore,
+): PersonalSettingsRepository =
+    KtorPersonalSettingsRepository(
+        ApiClientFactory(SerializedCookieVault(cookieStore)),
+    )
+
+/** Native administrative settings share Keychain-backed cookies and do not expose Web routes. */
+fun createIosAdministrativeSettingsRepository(
+    cookieStore: SecureCookiePayloadStore,
+): AdministrativeSettingsRepository =
+    KtorAdministrativeSettingsRepository(
+        ApiClientFactory(SerializedCookieVault(cookieStore)),
+    )

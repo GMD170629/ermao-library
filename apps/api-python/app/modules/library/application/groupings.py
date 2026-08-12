@@ -18,6 +18,16 @@ class LibraryGrouping:
     normalized_name: str
     book_count: int
     updated_at: datetime
+    representative_works: tuple[LibraryGroupingWork, ...] = ()
+
+
+@dataclass(frozen=True)
+class LibraryGroupingWork:
+    id: str
+    title: str
+    author: str
+    cover_path: str | None
+    updated_at: datetime
 
 
 @dataclass(frozen=True)

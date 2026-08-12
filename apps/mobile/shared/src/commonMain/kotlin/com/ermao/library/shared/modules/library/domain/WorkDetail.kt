@@ -9,6 +9,8 @@ data class WorkDetail(
     val trackingStatus: String,
     val tags: List<String>,
     val seriesName: String?,
+    val seriesFacet: AppliedFacet? = null,
+    val authorFacets: List<AppliedFacet> = emptyList(),
     val seriesIndex: Double?,
     val organized: Boolean,
     val organizeStatus: String,

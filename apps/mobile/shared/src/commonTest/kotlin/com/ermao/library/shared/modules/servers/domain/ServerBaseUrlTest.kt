@@ -6,6 +6,15 @@ import kotlin.test.assertIs
 
 class ServerBaseUrlTest {
     @Test
+    fun exposesNormalizedHostnameForAutomaticProfileNaming() {
+        val parsed = assertIs<ServerBaseUrlParseResult.Valid>(
+            ServerBaseUrl.parse("https://Books.Example:8443/library"),
+        )
+
+        assertEquals("books.example", parsed.baseUrl.hostName)
+    }
+
+    @Test
     fun normalizesSchemeHostDefaultPortAndDotSegments() {
         val result = ServerBaseUrl.parse(" HTTPS://Books.Example:443/library/a/../ ")
 

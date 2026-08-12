@@ -103,6 +103,32 @@ final class PreviewMobileRuntime: MobileRuntimeClient {
 
     func acceptInsecureTLS() async throws -> RuntimeOperationOutcome { .success }
 
+    func loginToServer(
+        baseURL: String,
+        email: String,
+        password: String
+    ) async throws -> RuntimeOperationOutcome {
+        try await loginToServer(
+            baseURL: baseURL,
+            email: email,
+            password: password,
+            tlsMode: .systemTrust
+        )
+    }
+
+    func loginToServerAcceptingInsecureTLS(
+        baseURL: String,
+        email: String,
+        password: String
+    ) async throws -> RuntimeOperationOutcome {
+        try await loginToServer(
+            baseURL: baseURL,
+            email: email,
+            password: password,
+            tlsMode: .insecureSkipAllValidation
+        )
+    }
+
     func login(_ request: LoginRequest) async throws -> RuntimeOperationOutcome {
         guard let profile = currentSnapshot.profile else { throw previewFailure("NO_ACTIVE_SERVER") }
         transition(to: authenticated(profile: profile, email: request.email))
@@ -167,6 +193,36 @@ final class PreviewMobileRuntime: MobileRuntimeClient {
         )
     }
 
+    private func loginToServer(
+        baseURL: String,
+        email: String,
+        password: String,
+        tlsMode: RuntimeTLSMode
+    ) async throws -> RuntimeOperationOutcome {
+        guard let url = URL(string: baseURL), let host = url.host, !email.isEmpty, !password.isEmpty else {
+            throw previewFailure("INVALID_LOGIN_FORM")
+        }
+        let existing = serverProfiles.first { $0.baseURL == baseURL }
+        let profile = RuntimeServerProfile(
+            id: existing?.id ?? UUID().uuidString,
+            displayName: host,
+            baseURL: baseURL,
+            serverIdentity: existing?.serverIdentity ?? "preview-\(serverProfiles.count + 1)",
+            isActive: true,
+            tlsMode: tlsMode
+        )
+        serverProfiles = serverProfiles
+            .filter { $0.id != profile.id }
+            .map { replacingActive($0, activeID: profile.id) } + [profile]
+        transition(to: authenticated(profile: profile, email: email))
+        return RuntimeOperationOutcome(
+            outcomeCode: "AUTHENTICATED",
+            fieldViolations: [],
+            parameters: [:],
+            navigationDirective: .resetAllStacksHome
+        )
+    }
+
     private func authenticated(
         profile: RuntimeServerProfile,
         email: String,
@@ -178,6 +234,14 @@ final class PreviewMobileRuntime: MobileRuntimeClient {
             userID: "preview-user",
             userDisplayName: name ?? email,
             userEmail: email,
+            authorization: RuntimeAuthorization(
+                isAdmin: false,
+                canManageSystem: false,
+                allLibraryScopes: true,
+                monitorFolderIDs: [],
+                canViewManualImports: false,
+                authorizationVersion: 1
+            ),
             reasonCode: nil
         )
     }

@@ -23,6 +23,8 @@ data class ValidatedSessionRecord(
     val expiresAtEpochMillis: Long,
     val maxObservedWallClockEpochMillis: Long,
     val status: OfflineEntitlementStatus,
+    val avatarUrl: String? = null,
+    val locale: String? = null,
 )
 
 fun interface EpochMillisClock {
@@ -57,6 +59,8 @@ class OfflineEntitlementPolicy(
             userId = identity.userId,
             email = identity.email,
             displayName = identity.displayName,
+            avatarUrl = identity.avatarUrl,
+            locale = identity.locale,
             authorizationVersion = identity.namespace.authorizationVersion,
             lastValidatedAtEpochMillis = nowEpochMillis,
             expiresAtEpochMillis = if (rollbackDetected) nowEpochMillis else nowEpochMillis + validityMillis,

@@ -17,6 +17,7 @@ enum class AppErrorKind {
     Gone,
     PayloadTooLarge,
     Validation,
+    RateLimited,
     ServiceUnavailable,
     ServerFailure,
     NetworkUnavailable,

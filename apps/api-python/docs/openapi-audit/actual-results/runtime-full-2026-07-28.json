@@ -753,7 +753,7 @@
     "response_shape_ok": true,
     "database_changes": {},
     "note": "详细健康检查",
-    "response_excerpt": "{\"ok\":true,\"data\":{\"status\":\"ok\",\"checks\":[{\"name\":\"SESSION_SECRET\",\"status\":\"ok\",\"message\":\"已配置\",\"details\":null},{\"name\":\"MONITOR_ROOT\",\"status\":\"ok\",\"message\":\"已配置\",\"details\":null},{\"name\":\"database\",\"status\":\"ok\",\"message\":\"数据库可连接\",\"details\":null},{\"name\":\"monitorRootReadable\",\"status\":\"ok\",\"message\":\"监控文件夹可读\",\"details\":null},{\"name\":\"storageWritable\",\"status\":\"ok\",\"message\":\"书库文件夹可写\",\"details\":null},{\"name\":\"ebookConversion\",\"status\":\"unknown\",\"message\":\"TXT/FB2 可用，libmobi 暂不可用\",\"details\":{\"available\":false,\"converter\":\"libmobi+shuku-internal\",\"version\":\"unavailable; shuku-epub-normalizer/1; shuku-internal-epub/2\",\"engines\":[{\"available\":true,\"converter\":\"shuku-internal\",\"version\":\"shuku-internal-epub/2\",\"formats\":[\"FB2\",\"TXT\"],\"normalizerVersion\":null,\"errorCode\":null,\"message\":null},{\"available\":false,\"converter\":\"libmobi\",\"version\":null,\"formats\":[\"AZW\",\"AZW3\",\"MOBI\",\"PRC\"],\"normalizerVersion\":\"shuku-epub-normalizer/1\",\"errorCode\":\"CONVERTER_UNAVAILABLE\",\"message\":\"电子书转换服务不可用\"}]"
+    "response_excerpt": "{\"ok\":true,\"data\":{\"status\":\"ok\",\"checks\":[{\"name\":\"database\",\"status\":\"ok\",\"message\":\"数据库可连接\"},{\"name\":\"storageWritable\",\"status\":\"ok\",\"message\":\"书库文件夹可写\"}]}}"
   },
   {
     "module": "health",
@@ -1435,7 +1435,7 @@
     "response_shape_ok": true,
     "database_changes": {},
     "note": "分页列出导入任务",
-    "response_excerpt": "{\"ok\":true,\"data\":{\"tasks\":[{\"id\":\"py_1785232514568654000\",\"monitorFolderId\":\"py_1785232514047186000\",\"workId\":null,\"editionId\":null,\"volumeId\":null,\"origin\":\"MANUAL\",\"status\":\"PENDING\",\"originalName\":\"upload-sample.txt\",\"requestedTitle\":null,\"requestedAuthor\":null,\"sourcePath\":\"upload-sample.txt\",\"contentHash\":null,\"taskKind\":\"FILE\",\"bundleKey\":null,\"assetCount\":1,\"processedAssetCount\":0,\"progress\":0,\"duration\":0,\"errorSummary\":null,\"errorCode\":null,\"retryable\":false,\"attempts\":0,\"leaseOwner\":null,\"leaseExpiresAt\":null,\"message\":\"已保存到所选目录，等待后台处理\",\"startedAt\":null,\"finishedAt\":null,\"createdAt\":\"2026-07-28T09:55:14.568000Z\",\"updatedAt\":\"2026-07-28T09:55:14.568000Z\",\"sourceFileExists\":true,\"convertedFileExists\":false,\"friendlyError\":null,\"monitorFolder\":{\"id\":\"py_1785232514047186000\",\"name\":\"OpenAPI 审计目录 PATCH\",\"rootPath\":\"/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"shelfId\":null,\"enabled\":true,\"ignorePatterns\":null,\"ignoreHidden\":true,\"minFileSizeBytes\":0,\"description\":\"逐接口检查\""
+    "response_excerpt": "{\"ok\":true,\"data\":{\"tasks\":[{\"id\":\"py_1785232514568654000\",\"monitorFolderId\":\"py_1785232514047186000\",\"workId\":null,\"editionId\":null,\"volumeId\":null,\"origin\":\"MANUAL\",\"status\":\"PENDING\",\"originalName\":\"upload-sample.txt\",\"requestedTitle\":null,\"requestedAuthor\":null,\"sourcePath\":\"upload-sample.txt\",\"contentHash\":null,\"taskKind\":\"FILE\",\"bundleKey\":null,\"assetCount\":1,\"processedAssetCount\":0,\"progress\":0,\"duration\":0,\"errorSummary\":null,\"errorCode\":null,\"retryable\":false,\"attempts\":0,\"leaseOwner\":null,\"leaseExpiresAt\":null,\"message\":\"已保存到所选目录，等待后台处理\",\"startedAt\":null,\"finishedAt\":null,\"createdAt\":\"2026-07-28T09:55:14.568000Z\",\"updatedAt\":\"2026-07-28T09:55:14.568000Z\",\"sourceFileExists\":true,\"friendlyError\":null,\"monitorFolder\":{\"id\":\"py_1785232514047186000\",\"name\":\"OpenAPI 审计目录 PATCH\",\"rootPath\":\"/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"shelfId\":null,\"enabled\":true,\"ignorePatterns\":null,\"ignoreHidden\":true,\"minFileSizeBytes\":0,\"description\":\"逐接口检查\""
   },
   {
     "module": "imports",
@@ -1453,7 +1453,7 @@
     "response_shape_ok": true,
     "database_changes": {},
     "note": "读取上传任务详情",
-    "response_excerpt": "{\"ok\":true,\"data\":{\"task\":{\"id\":\"py_1785232514568654000\",\"monitorFolderId\":\"py_1785232514047186000\",\"workId\":null,\"editionId\":null,\"volumeId\":null,\"origin\":\"MANUAL\",\"status\":\"PENDING\",\"originalName\":\"upload-sample.txt\",\"requestedTitle\":null,\"requestedAuthor\":null,\"sourcePath\":\"upload-sample.txt\",\"contentHash\":null,\"taskKind\":\"FILE\",\"bundleKey\":null,\"assetCount\":1,\"processedAssetCount\":0,\"progress\":0,\"duration\":0,\"errorSummary\":null,\"errorCode\":null,\"retryable\":false,\"attempts\":0,\"leaseOwner\":null,\"leaseExpiresAt\":null,\"message\":\"已保存到所选目录，等待后台处理\",\"startedAt\":null,\"finishedAt\":null,\"createdAt\":\"2026-07-28T09:55:14.568000Z\",\"updatedAt\":\"2026-07-28T09:55:14.568000Z\",\"sourceFileExists\":true,\"convertedFileExists\":false,\"friendlyError\":null,\"monitorFolder\":{\"id\":\"py_1785232514047186000\",\"name\":\"OpenAPI 审计目录 PATCH\",\"rootPath\":\"/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"shelfId\":null,\"enabled\":true,\"ignorePatterns\":null,\"ignoreHidden\":true,\"minFileSizeBytes\":0,\"description\":\"逐接口检查\",\""
+    "response_excerpt": "{\"ok\":true,\"data\":{\"task\":{\"id\":\"py_1785232514568654000\",\"monitorFolderId\":\"py_1785232514047186000\",\"workId\":null,\"editionId\":null,\"volumeId\":null,\"origin\":\"MANUAL\",\"status\":\"PENDING\",\"originalName\":\"upload-sample.txt\",\"requestedTitle\":null,\"requestedAuthor\":null,\"sourcePath\":\"upload-sample.txt\",\"contentHash\":null,\"taskKind\":\"FILE\",\"bundleKey\":null,\"assetCount\":1,\"processedAssetCount\":0,\"progress\":0,\"duration\":0,\"errorSummary\":null,\"errorCode\":null,\"retryable\":false,\"attempts\":0,\"leaseOwner\":null,\"leaseExpiresAt\":null,\"message\":\"已保存到所选目录，等待后台处理\",\"startedAt\":null,\"finishedAt\":null,\"createdAt\":\"2026-07-28T09:55:14.568000Z\",\"updatedAt\":\"2026-07-28T09:55:14.568000Z\",\"sourceFileExists\":true,\"friendlyError\":null,\"monitorFolder\":{\"id\":\"py_1785232514047186000\",\"name\":\"OpenAPI 审计目录 PATCH\",\"rootPath\":\"/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"shelfId\":null,\"enabled\":true,\"ignorePatterns\":null,\"ignoreHidden\":true,\"minFileSizeBytes\":0,\"description\":\"逐接口检查\",\""
   },
   {
     "module": "imports",
@@ -1594,7 +1594,7 @@
       }
     },
     "note": "失败且源文件存在的任务重置为待处理",
-    "response_excerpt": "{\"ok\":true,\"data\":{\"task\":{\"id\":\"py_1785232514568654000\",\"monitorFolderId\":\"py_1785232514047186000\",\"workId\":null,\"editionId\":null,\"volumeId\":null,\"origin\":\"MANUAL\",\"status\":\"PENDING\",\"originalName\":\"upload-sample.txt\",\"requestedTitle\":null,\"requestedAuthor\":null,\"sourcePath\":\"upload-sample.txt\",\"contentHash\":null,\"taskKind\":\"FILE\",\"bundleKey\":null,\"assetCount\":1,\"processedAssetCount\":0,\"progress\":0,\"duration\":0,\"errorSummary\":null,\"errorCode\":null,\"retryable\":false,\"attempts\":0,\"leaseOwner\":null,\"leaseExpiresAt\":null,\"message\":\"已重新加入后台队列\",\"startedAt\":null,\"finishedAt\":null,\"createdAt\":\"2026-07-28T09:55:14.568000Z\",\"updatedAt\":\"2026-07-28T09:55:15.549000Z\",\"sourceFileExists\":true,\"convertedFileExists\":false,\"friendlyError\":null,\"monitorFolder\":{\"id\":\"py_1785232514047186000\",\"name\":\"OpenAPI 审计目录 PATCH\",\"rootPath\":\"/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"shelfId\":null,\"enabled\":true,\"ignorePatterns\":null,\"ignoreHidden\":true,\"minFileSizeBytes\":0,\"description\":\"逐接口检查\",\"create"
+    "response_excerpt": "{\"ok\":true,\"data\":{\"task\":{\"id\":\"py_1785232514568654000\",\"monitorFolderId\":\"py_1785232514047186000\",\"workId\":null,\"editionId\":null,\"volumeId\":null,\"origin\":\"MANUAL\",\"status\":\"PENDING\",\"originalName\":\"upload-sample.txt\",\"requestedTitle\":null,\"requestedAuthor\":null,\"sourcePath\":\"upload-sample.txt\",\"contentHash\":null,\"taskKind\":\"FILE\",\"bundleKey\":null,\"assetCount\":1,\"processedAssetCount\":0,\"progress\":0,\"duration\":0,\"errorSummary\":null,\"errorCode\":null,\"retryable\":false,\"attempts\":0,\"leaseOwner\":null,\"leaseExpiresAt\":null,\"message\":\"已重新加入后台队列\",\"startedAt\":null,\"finishedAt\":null,\"createdAt\":\"2026-07-28T09:55:14.568000Z\",\"updatedAt\":\"2026-07-28T09:55:15.549000Z\",\"sourceFileExists\":true,\"friendlyError\":null,\"monitorFolder\":{\"id\":\"py_1785232514047186000\",\"name\":\"OpenAPI 审计目录 PATCH\",\"rootPath\":\"/tmp/shuku-openapi-audit.9VobLW/monitor/audit-books\",\"shelfId\":null,\"enabled\":true,\"ignorePatterns\":null,\"ignoreHidden\":true,\"minFileSizeBytes\":0,\"description\":\"逐接口检查\",\"create"
   },
   {
     "module": "imports",
@@ -2865,24 +2865,6 @@
   {
     "module": "library",
     "method": "POST",
-    "path_template": "/api/works/{work_id}/editions/{edition_id}/convert",
-    "request_path": "/api/works/audit-work-a/editions/audit-edition-txt/convert",
-    "operation_id": "convert_work_edition_api_works__work_id__editions__edition_id__convert_post",
-    "expected_statuses": [
-      202
-    ],
-    "status_code": 409,
-    "passed": false,
-    "content_type": "application/json",
-    "documented_response": true,
-    "response_shape_ok": true,
-    "database_changes": {},
-    "note": "把 TXT 源加入延迟 EPUB 转换队列",
-    "response_excerpt": "{\"ok\":false,\"error\":{\"message\":\"原始文件不存在，无法转换\",\"code\":null}}"
-  },
-  {
-    "module": "library",
-    "method": "POST",
     "path_template": "/api/works/{work_id}/metadata/apply",
     "request_path": "/api/works/audit-work-a/metadata/apply",
     "operation_id": "compatible_work_action_api_works__work_id__metadata_apply_post",
@@ -3179,35 +3161,6 @@
     },
     "note": "删除拆分出的测试作品及数据库关联",
     "response_excerpt": "{\"ok\":true,\"data\":{\"deleted\":true,\"id\":\"work_1785232913026852000\",\"deleteSource\":false,\"deletedDatabaseRecords\":4,\"deletedFiles\":2,\"deletedSourceFiles\":0,\"missingSourceFiles\":[],\"failedFileDeletes\":[]}}"
-  },
-  {
-    "module": "library",
-    "method": "POST",
-    "path_template": "/api/works/{work_id}/editions/{edition_id}/convert",
-    "request_path": "/api/works/audit-work-a/editions/audit-edition-txt/convert",
-    "operation_id": "convert_work_edition_api_works__work_id__editions__edition_id__convert_post",
-    "expected_statuses": [
-      202
-    ],
-    "status_code": 202,
-    "passed": true,
-    "content_type": "application/json",
-    "documented_response": true,
-    "response_shape_ok": true,
-    "database_changes": {
-      "ImportTask": {
-        "rowsBefore": 0,
-        "rowsAfter": 1,
-        "contentChanged": true
-      },
-      "SystemEvent": {
-        "rowsBefore": 21,
-        "rowsAfter": 22,
-        "contentChanged": true
-      }
-    },
-    "note": "修正为运行期预期的绝对源路径后加入 EPUB 转换队列",
-    "response_excerpt": "{\"ok\":true,\"data\":{\"task\":{\"id\":\"py_1785232952120213000\",\"sourcePath\":\"/private/tmp/shuku-openapi-audit.9VobLW/storage/books/openapi-audit/convert.txt\",\"origin\":\"DEFERRED_CONVERSION\",\"status\":\"PENDING\",\"originalName\":\"convert.txt\",\"requestedTitle\":\"星海列车 OpenAPI\",\"requestedAuthor\":\"林川\",\"monitorFolderId\":null,\"workId\":\"audit-work-a\",\"editionId\":null,\"volumeId\":null,\"taskKind\":\"FILE\",\"bundleKey\":null,\"assetCount\":1,\"processedAssetCount\":0,\"progress\":0,\"duplicate\":false,\"duration\":0,\"errorSummary\":null,\"errorCode\":null,\"retryable\":false,\"attempts\":0,\"leaseOwner\":null,\"message\":\"已加入 EPUB 转换队列\"},\"created\":true}}"
   },
   {
     "module": "library",

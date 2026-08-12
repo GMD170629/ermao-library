@@ -156,10 +156,6 @@ class VolumeStructurePort(Protocol):
         now: datetime,
     ) -> VolumeDeleteOutcome: ...
 
-    def queue_epub_conversion(
-        self, *, context: VolumeContext, now: datetime
-    ) -> tuple[object, bool]: ...
-
     def reclassify_volume(
         self,
         *,
@@ -262,7 +258,6 @@ def batch_volume_resources(
     except Exception:
         unit_of_work.rollback()
         raise
-
     return outcome
 
 
@@ -298,14 +293,6 @@ def reclassify_volume_resource(
     except Exception:
         unit_of_work.rollback()
         raise
-
-
-class VolumeConversionUnsupportedError(Exception):
-    pass
-
-
-class VolumeSourceMissingError(Exception):
-    pass
 
 
 def _require_manager(actor: LibraryActor) -> None:
@@ -483,36 +470,6 @@ def delete_volume_resource(
             volume_id=volume_id,
             now=now,
         )
-        unit_of_work.commit()
-        return result
-    except Exception:
-        unit_of_work.rollback()
-        raise
-
-
-def queue_volume_epub_conversion(
-    port: VolumeStructurePort,
-    unit_of_work: UnitOfWork,
-    *,
-    actor: LibraryActor,
-    work_id: str,
-    volume_id: str,
-    now: datetime,
-) -> tuple[object, bool]:
-    _require_work_access(port, actor=actor, work_id=work_id)
-    _require_manager(actor)
-    context = _require_volume(
-        port,
-        actor=actor,
-        work_id=work_id,
-        volume_id=volume_id,
-    )
-    if context.format.lower() not in {"txt", "mobi", "azw", "azw3", "prc", "fb2"}:
-        raise VolumeConversionUnsupportedError
-    if context.source_path is None or not context.source_path.is_file():
-        raise VolumeSourceMissingError
-    try:
-        result = port.queue_epub_conversion(context=context, now=now)
         unit_of_work.commit()
         return result
     except Exception:

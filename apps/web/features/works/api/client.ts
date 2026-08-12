@@ -132,7 +132,6 @@ function mapVolume(value: unknown): VolumeResource | null {
     lastReadAt: nullableString(item.lastReadAt),
     hidden: item.hidden === true,
     readable: item.readable !== false,
-    conversionAvailable: item.conversionAvailable === true,
     kindleSendAvailable: item.kindleSendAvailable === true,
     files
   };

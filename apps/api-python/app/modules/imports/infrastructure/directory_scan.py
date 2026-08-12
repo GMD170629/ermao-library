@@ -37,7 +37,6 @@ class MonitorFolderConfig:
     allowed_extensions: tuple[str, ...] = SUPPORTED_IMPORT_EXTENSIONS
     stability_check_enabled: bool = DEFAULT_STABILITY_CHECK_ENABLED
     stability_check_seconds: float = 2.0
-    auto_convert_to_epub: bool = True
 
 
 class ImportQueueProtocol(Protocol):
@@ -94,7 +93,6 @@ def monitor_folder_config(
         allowed_extensions=preferences.allowed_extensions,
         stability_check_enabled=preferences.stability_check_enabled,
         stability_check_seconds=preferences.stability_check_seconds,
-        auto_convert_to_epub=preferences.auto_convert_to_epub,
     )
 
 

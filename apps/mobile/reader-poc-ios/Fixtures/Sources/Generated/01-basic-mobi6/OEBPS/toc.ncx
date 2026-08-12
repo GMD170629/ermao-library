@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1" xml:lang="zh-CN">
+  <head>
+    <meta name="dtb:uid" content="urn:shuku:reader-poc:01-basic-mobi6" />
+    <meta name="dtb:depth" content="3" />
+  </head>
+  <docTitle><text>MOBI6 基础三章</text></docTitle>
+  <navMap>
+    <navPoint id="nav-1" playOrder="1">
+      <navLabel><text>第一章 起点</text></navLabel>
+      <content src="chapter1.xhtml#start" /></navPoint>
+    <navPoint id="nav-2" playOrder="2">
+      <navLabel><text>第二章 中段</text></navLabel>
+      <content src="chapter2.xhtml#middle" /></navPoint>
+    <navPoint id="nav-3" playOrder="3">
+      <navLabel><text>第三章 终点</text></navLabel>
+      <content src="chapter3.xhtml#end" /></navPoint>
+  </navMap>
+</ncx>

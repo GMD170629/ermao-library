@@ -16,13 +16,11 @@ from app.modules.imports.application.audio_types import SUPPORTED_AUDIO_EXTS
 
 IMPORT_STABILITY_ENABLED_KEY = "import.stabilityCheck.enabled"
 IMPORT_STABILITY_SECONDS_KEY = "import.stabilityCheck.seconds"
-IMPORT_AUTO_CONVERT_KEY = "import.autoConvertToEpub"
 IMPORT_ALLOWED_EXTENSIONS_KEY = "import.allowedExtensions"
 IMPORT_IGNORE_PATTERNS_KEY = "import.ignorePatterns"
 IMPORT_PREFERENCE_KEYS = {
     IMPORT_STABILITY_ENABLED_KEY,
     IMPORT_STABILITY_SECONDS_KEY,
-    IMPORT_AUTO_CONVERT_KEY,
     IMPORT_ALLOWED_EXTENSIONS_KEY,
     IMPORT_IGNORE_PATTERNS_KEY,
 }
@@ -51,7 +49,6 @@ DEFAULT_STABILITY_CHECK_ENABLED = False
 class ImportPreferences:
     stability_check_enabled: bool = DEFAULT_STABILITY_CHECK_ENABLED
     stability_check_seconds: float = DEFAULT_STABILITY_SECONDS
-    auto_convert_to_epub: bool = True
     allowed_extensions: tuple[str, ...] = SUPPORTED_IMPORT_EXTENSIONS
     ignore_patterns: str = ""
 
@@ -132,8 +129,6 @@ def normalize_import_setting_value(key: str, value: Any) -> Any:
         return _boolean(value, DEFAULT_STABILITY_CHECK_ENABLED)
     if key == IMPORT_STABILITY_SECONDS_KEY:
         return normalize_stability_seconds(value)
-    if key == IMPORT_AUTO_CONVERT_KEY:
-        return _boolean(value, True)
     if key == IMPORT_ALLOWED_EXTENSIONS_KEY:
         return list(normalize_allowed_extensions(value))
     if key == IMPORT_IGNORE_PATTERNS_KEY:
@@ -182,7 +177,6 @@ def prepare_import_preferences(
             if IMPORT_STABILITY_SECONDS_KEY in values
             else default_stability_seconds(legacy_stable_delay_ms)
         ),
-        auto_convert_to_epub=_boolean(values.get(IMPORT_AUTO_CONVERT_KEY), True),
         allowed_extensions=normalize_allowed_extensions(values.get(IMPORT_ALLOWED_EXTENSIONS_KEY)),
         ignore_patterns=normalize_ignore_patterns(values.get(IMPORT_IGNORE_PATTERNS_KEY)),
     )

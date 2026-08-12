@@ -3,7 +3,7 @@
 - Source revision date: 2026-08-12
 - Android status: implementation, combined Gradle gate, emulator deployment, device tests,
   and real FastAPI base-path E2E complete
-- iOS status: implementation and static project checks complete; macOS/Xcode gate pending
+- iOS status: implementation and static project checks complete; physical-device Xcode gate pending
 
 ## Implemented scope
 
@@ -114,30 +114,31 @@ iOS static gates:
   placeholders.
 - All 59 generated token symbols referenced by Swift exist.
 - AppIcon and BrandMark match the authoritative 1024px Web brand PNG by SHA-256.
-- No Swift compiler, Xcode build, XCTest, or Simulator result is claimed on this host.
+- No Swift compiler, Xcode build, XCTest, or physical-device result is claimed on this host.
 
-## Remaining macOS gate
+## Remaining macOS physical-device gate
 
-Run on macOS with JDK 17 and current Xcode:
+Run on macOS with JDK 17, current Xcode, automatic signing, and a connected physical iPhone.
+Set `IOS_DEVICE_ID` to the physical-device identifier shown by `xcodebuild -showdestinations`:
 
 ```bash
 cd apps/mobile
-./gradlew verifyDesignTokens :shared:iosSimulatorArm64Test
+./gradlew verifyDesignTokens :shared:compileKotlinIosArm64
 cd ../..
 xcodebuild \
   -project apps/mobile/iosApp/ErmaoLibrary.xcodeproj \
   -scheme ErmaoLibrary \
   -configuration Debug \
-  -destination 'generic/platform=iOS Simulator' \
-  CODE_SIGNING_ALLOWED=NO build
+  -destination "platform=iOS,id=$IOS_DEVICE_ID" \
+  -allowProvisioningUpdates build
 xcodebuild \
   -project apps/mobile/iosApp/ErmaoLibrary.xcodeproj \
   -scheme ErmaoLibrary \
   -configuration Debug \
-  -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest' \
-  CODE_SIGNING_ALLOWED=NO test
+  -destination "platform=iOS,id=$IOS_DEVICE_ID" \
+  -allowProvisioningUpdates test
 ```
 
 Android Stage 0 is complete on the current host. Overall Stage 0 remains open only for
-the macOS iOS build, XCTest, Simulator, and real test-server smoke gate above; no iOS
-build or test pass is claimed from Windows/WSL.
+the physical-device iOS build, XCTest, and real test-server smoke gate above; no iOS
+build or test pass is claimed without a connected physical device.

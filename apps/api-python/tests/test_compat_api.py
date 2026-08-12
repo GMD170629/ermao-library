@@ -26,7 +26,6 @@ from app.bootstrap.metadata import (
     prepare_metadata_source_seed_rows,
     write_metadata_source_seed_rows,
 )
-from app.contracts.imports import ImportTaskContract
 from app.core.auth import hash_password
 from app.core.config import get_settings
 from app.db.base import Base
@@ -2332,7 +2331,7 @@ def test_delete_work_preserves_linked_source_inside_storage_by_default(
     )
 
 
-def test_delete_import_task_supports_record_source_and_converted_scopes(
+def test_delete_import_task_supports_record_and_source_scopes_only(
     client, db_session, test_settings
 ):
     create_worker_tables(db_session)
@@ -2456,10 +2455,10 @@ def test_delete_import_task_supports_record_source_and_converted_scopes(
     converted_response = client.request(
         "DELETE", "/api/import-tasks/import-converted", json={"deleteMode": "converted"}
     )
-    assert converted_response.status_code == 200
+    assert converted_response.status_code == 422
     assert paths["converted"][0].exists()
-    assert not paths["converted"][1].exists()
-    assert not sidecar.exists()
+    assert paths["converted"][1].exists()
+    assert sidecar.exists()
 
     active_response = client.request(
         "DELETE", "/api/import-tasks/import-active", json={"deleteMode": "record"}
@@ -3484,14 +3483,12 @@ def test_import_tasks_return_logs_summary_and_rescan_contract(client, db_session
     assert task["monitorFolder"]["name"] == "Inbox"
     assert task["book"] == {"id": "work-import", "title": "Imported Book"}
     assert task["logs"][0]["message"] == "invalid zip archive"
-    assert task["conversion"]["options"] == {"preserveOriginal": True}
+    assert "conversion" not in task
 
     detail = client.get("/api/import-tasks/import-1")
     assert detail.status_code == 200
     assert isinstance(detail.json()["data"]["task"]["logs"], list)
-    assert detail.json()["data"]["task"]["conversion"]["options"] == {
-        "preserveOriginal": True
-    }
+    assert "conversion" not in detail.json()["data"]["task"]
 
     logs = client.get("/api/import-tasks/import-1/logs?pageSize=1")
     assert logs.status_code == 200
@@ -3858,7 +3855,6 @@ def test_import_preferences_are_normalized_and_persisted(client, db_session):
             "settings": {
                 "import.stabilityCheck.enabled": False,
                 "import.stabilityCheck.seconds": 999,
-                "import.autoConvertToEpub": False,
                 "import.allowedExtensions": ["EPUB", ".pdf", ".unsupported"],
                 "import.ignorePatterns": "  *.tmp  \r\n\r\n草稿*  ",
             }
@@ -3868,7 +3864,6 @@ def test_import_preferences_are_normalized_and_persisted(client, db_session):
     saved = response.json()["data"]["settings"]
     assert saved["import.stabilityCheck.enabled"] is False
     assert saved["import.stabilityCheck.seconds"] == 300
-    assert saved["import.autoConvertToEpub"] is False
     assert saved["import.allowedExtensions"] == [".epub", ".pdf"]
     assert saved["import.ignorePatterns"] == "*.tmp\n草稿*"
 
@@ -3956,17 +3951,14 @@ def test_application_locale_is_public_validated_and_persisted(
     assert loaded.json()["data"]["settings"]["language"] == "en-US"
 
 
-def test_raw_text_detail_exposes_deferred_epub_conversion(
+def test_raw_text_detail_preserves_source_format_without_conversion_action(
     client, db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
     _login(client, db_session)
-    client.put(
-        "/api/system-settings", json={"settings": {"import.autoConvertToEpub": False}}
-    )
     source = tmp_path / "详情页后置转换.txt"
     source.write_text(
-        "第一章\n原始文本先入库。\n\n第二章\n随后转换为 EPUB。", encoding="utf-8"
+        "第一章\n原始文本直接入库。\n\n第二章\n继续使用源格式阅读。", encoding="utf-8"
     )
     imported = import_managed_book(
         db_session,
@@ -3984,30 +3976,24 @@ def test_raw_text_detail_exposes_deferred_epub_conversion(
     raw_media = detail.json()["data"]["book"]["mediaVersions"][0]
     raw_volume = raw_media["volumes"][0]
     assert raw_volume["format"] == "TXT"
+    assert "conversionAvailable" not in raw_volume
     assert detail.json()["data"]["activeMedia"]["primaryAction"] is not None
     ebook_list = client.get("/api/works?type=ebook")
     assert [book["id"] for book in ebook_list.json()["data"]["books"]] == [
         imported.work_id
     ]
 
-    queued = client.post(
+    unsupported = client.post(
         f"/api/works/{imported.work_id}/volumes/{imported.volume_id}/convert"
     )
-    assert queued.status_code == 202
-    queued_task = queued.json()["data"]["task"]
-    completed = process_import_task(
-        db_session,
-        test_settings,
-        ImportTaskContract.model_validate(queued_task).to_dto(),
-    )
-
-    converted_detail = client.get(f"/api/works/{imported.work_id}").json()["data"][
+    assert unsupported.status_code == 404
+    unchanged_detail = client.get(f"/api/works/{imported.work_id}").json()["data"][
         "book"
     ]
-    converted_volumes = converted_detail["mediaVersions"][0]["volumes"]
-    assert [volume["format"] for volume in converted_volumes] == ["TXT", "EPUB"]
-    assert converted_volumes[1]["derivedFromVolumeId"] == imported.volume_id
-    assert converted_volumes[1]["id"] == completed.volume_id
+    assert [
+        volume["format"]
+        for volume in unchanged_detail["mediaVersions"][0]["volumes"]
+    ] == ["TXT"]
 
 
 def test_scan_selected_directory_reuses_monitor_rules_and_known_import_paths(

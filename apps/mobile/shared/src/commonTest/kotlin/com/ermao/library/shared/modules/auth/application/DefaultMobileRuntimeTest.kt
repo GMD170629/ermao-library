@@ -2,6 +2,7 @@ package com.ermao.library.shared.modules.auth.application
 
 import com.ermao.library.shared.core.network.ApiClient
 import com.ermao.library.shared.core.network.ApiClientFactory
+import com.ermao.library.shared.core.network.AppErrorKind
 import com.ermao.library.shared.core.network.InMemoryCookieVault
 import com.ermao.library.shared.modules.auth.RuntimeOperationResult
 import com.ermao.library.shared.modules.auth.domain.AppSession
@@ -28,6 +29,106 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 
 class DefaultMobileRuntimeTest {
+    @Test
+    fun loginToNewServerSavesHostnameProfileOnlyAfterVerifiedAuthentication() = runBlocking {
+        val harness = RuntimeHarness(
+            Response(200, HEALTHY),
+            Response(200, COMPATIBLE),
+            Response(200, SETUP_COMPLETE),
+            Response(200, SESSION),
+            Response(200, SESSION),
+        )
+        val runtime = harness.runtime()
+
+        val result = runtime.loginToServer(
+            "https://Books.Example/library/",
+            " reader@example.com ",
+            "secret",
+        )
+
+        assertIs<RuntimeOperationResult.Success>(result)
+        val saved = requireNotNull(harness.profiles.activeProfile())
+        assertEquals("books.example", saved.displayName)
+        assertEquals("https://books.example/library", saved.baseUrl.value)
+        assertEquals("server-fixture", saved.serverIdentity)
+        assertIs<AppSession.Authenticated>(runtime.currentSession)
+        assertEquals(
+            listOf(
+                "/library/api/health",
+                "/library/api/mobile/compatibility",
+                "/library/api/auth/setup/status",
+                "/library/api/auth/login",
+                "/library/api/auth/me",
+            ),
+            harness.requestPaths,
+        )
+    }
+
+    @Test
+    fun invalidCredentialsDoNotSaveANewServerProfile() = runBlocking {
+        val harness = RuntimeHarness(
+            Response(200, HEALTHY),
+            Response(200, COMPATIBLE),
+            Response(200, SETUP_COMPLETE),
+            Response(401, UNAUTHORIZED),
+        )
+        val runtime = harness.runtime()
+
+        assertIs<RuntimeOperationResult.Failure>(
+            runtime.loginToServer("https://books.example", "reader@example.com", "wrong"),
+        )
+
+        assertTrue(harness.profiles.profiles().isEmpty())
+        val failed = assertIs<AppSession.LoginFailed>(runtime.currentSession)
+        assertEquals("INVALID_CREDENTIALS", failed.failureCode)
+        assertEquals("https://books.example", failed.profile.baseUrl.value)
+    }
+
+    @Test
+    fun setupRequiredServerIsSavedOnlyAfterSetupAndMeSucceed() = runBlocking {
+        val harness = RuntimeHarness(
+            Response(200, HEALTHY),
+            Response(200, COMPATIBLE),
+            Response(200, SETUP_REQUIRED),
+            Response(201, SETUP_SESSION),
+            Response(200, SESSION),
+        )
+        val runtime = harness.runtime()
+
+        assertIs<RuntimeOperationResult.Success>(
+            runtime.loginToServer("https://books.example", "admin@example.com", "long-secret"),
+        )
+        assertIs<AppSession.SetupRequired>(runtime.currentSession)
+        assertTrue(harness.profiles.profiles().isEmpty())
+
+        assertIs<RuntimeOperationResult.Success>(
+            runtime.setupInitialAdmin("Admin", "admin@example.com", "long-secret", "en-US"),
+        )
+        assertEquals("books.example", requireNotNull(harness.profiles.activeProfile()).displayName)
+        assertIs<AppSession.Authenticated>(runtime.currentSession)
+        Unit
+    }
+
+    @Test
+    fun failedPostSetupVerificationDoesNotSaveNewServer() = runBlocking {
+        val harness = RuntimeHarness(
+            Response(200, HEALTHY),
+            Response(200, COMPATIBLE),
+            Response(200, SETUP_REQUIRED),
+            Response(201, SETUP_SESSION),
+            Response(503, UNAVAILABLE),
+        )
+        val runtime = harness.runtime()
+
+        runtime.loginToServer("https://books.example", "admin@example.com", "long-secret")
+        assertIs<RuntimeOperationResult.Failure>(
+            runtime.setupInitialAdmin("Admin", "admin@example.com", "long-secret", "en-US"),
+        )
+
+        assertTrue(harness.profiles.profiles().isEmpty())
+        Unit
+    }
+
     @Test
     fun connectRunsHealthCompatibilityAndSetupInOrder() = runBlocking {
         val harness = RuntimeHarness(
@@ -224,7 +325,9 @@ class DefaultMobileRuntimeTest {
         val expired = assertIs<AppSession.SessionExpired>(runtime.currentSession)
         assertTrue(expired.entitlementExpiresAtEpochMillis != null)
         assertIs<RuntimeOperationResult.Success>(runtime.enterOfflineMode())
-        assertIs<AppSession.OfflineGrace>(runtime.currentSession)
+        val offline = assertIs<AppSession.OfflineGrace>(runtime.currentSession)
+        assertEquals("/api/auth/avatar", offline.identity.avatarUrl)
+        assertEquals("zh-CN", offline.identity.locale)
         Unit
     }
 
@@ -260,6 +363,28 @@ class DefaultMobileRuntimeTest {
             listOf("/api/health", "/api/mobile/compatibility"),
             harness.requestPaths,
         )
+    }
+
+    @Test
+    fun unsupportedSessionLocaleFailsAsProtocolViolationWithoutPersistingOfflineIdentity() = runBlocking {
+        listOf(
+            SESSION_WITH_UNSUPPORTED_USER_LOCALE,
+            SESSION_WITH_UNSUPPORTED_PREFERENCE_LOCALE,
+        ).forEach { session ->
+            val harness = RuntimeHarness(
+                Response(200, HEALTHY),
+                Response(200, COMPATIBLE),
+                Response(200, SETUP_COMPLETE),
+                Response(200, session),
+            )
+            harness.profiles.upsert(profile())
+
+            val failure = assertIs<RuntimeOperationResult.Failure>(harness.runtime().start())
+
+            assertEquals(AppErrorKind.ProtocolViolation, failure.error.kind)
+            assertEquals("UNSUPPORTED_LOCALE", failure.error.code)
+            assertEquals(null, harness.entitlements.load("server-fixture"))
+        }
     }
 
     private suspend fun authenticatedServerHarness(loginResponse: Response): RuntimeHarness = RuntimeHarness(
@@ -319,7 +444,9 @@ class DefaultMobileRuntimeTest {
         val ACCOUNT_DISABLED = """{"ok":false,"error":{"message":"disabled","code":"ACCOUNT_DISABLED"}}"""
         val NESTED_SETUP_REQUIRED = """{"ok":false,"error":{"message":"setup required","details":{"code":"SETUP_REQUIRED"}}}"""
         val REFRESH_DEFERRED = """{"ok":false,"error":{"message":"SESSION_REFRESH_DEFERRED","code":"SESSION_REFRESH_DEFERRED"}}"""
-        val SESSION = """{"ok":true,"data":{"user":{"id":"user-1","email":"reader@example.com","name":"Reader","role":"member","status":"active","canManageSystem":false,"canViewManualImports":false,"authzVersion":7,"avatarUrl":null,"locale":"zh-CN"},"authorization":{"isAdmin":false,"canManageSystem":false,"allLibraryScopes":true,"monitorFolderIds":[],"canViewManualImports":false,"authzVersion":7},"preferences":{"locale":"zh-CN"}}}"""
+        val SESSION = """{"ok":true,"data":{"user":{"id":"user-1","email":"reader@example.com","name":"Reader","role":"member","status":"active","canManageSystem":false,"canViewManualImports":false,"authzVersion":7,"avatarUrl":"/api/auth/avatar","locale":"zh-CN"},"authorization":{"isAdmin":false,"canManageSystem":false,"allLibraryScopes":true,"monitorFolderIds":[],"canViewManualImports":false,"authzVersion":7},"preferences":{"locale":"zh-CN"}}}"""
+        val SESSION_WITH_UNSUPPORTED_USER_LOCALE = """{"ok":true,"data":{"user":{"id":"user-1","email":"reader@example.com","name":"Reader","role":"member","status":"active","canManageSystem":false,"canViewManualImports":false,"authzVersion":7,"avatarUrl":"/api/auth/avatar","locale":"fr-FR"},"authorization":{"isAdmin":false,"canManageSystem":false,"allLibraryScopes":true,"monitorFolderIds":[],"canViewManualImports":false,"authzVersion":7},"preferences":{"locale":"en-US"}}}"""
+        val SESSION_WITH_UNSUPPORTED_PREFERENCE_LOCALE = """{"ok":true,"data":{"user":{"id":"user-1","email":"reader@example.com","name":"Reader","role":"member","status":"active","canManageSystem":false,"canViewManualImports":false,"authzVersion":7,"avatarUrl":"/api/auth/avatar","locale":"en-US"},"authorization":{"isAdmin":false,"canManageSystem":false,"allLibraryScopes":true,"monitorFolderIds":[],"canViewManualImports":false,"authzVersion":7},"preferences":{"locale":"fr-FR"}}}"""
         val SETUP_SESSION = """{"ok":true,"data":{"initialized":true,"user":{"id":"user-1","email":"reader@example.com","name":"Reader","role":"admin","status":"active","canManageSystem":true,"canViewManualImports":true,"authzVersion":1,"avatarUrl":null,"locale":"zh-CN"},"authorization":{"isAdmin":true,"canManageSystem":true,"allLibraryScopes":true,"monitorFolderIds":[],"canViewManualImports":true,"authzVersion":1},"preferences":{"locale":"zh-CN"}}}"""
         val CONFLICT = """{"ok":false,"error":{"message":"already initialized","code":"CONFLICT"}}"""
 

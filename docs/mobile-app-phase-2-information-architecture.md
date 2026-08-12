@@ -33,28 +33,29 @@
 | 决策 | 已采纳规则 |
 |---|---|
 | 一级导航 | `首页 / 书库 / 书架 / 我的` |
-| 多服务器 | P0 可保存多个 server profile；同时只有一个 active server；非活动服务器不播放、不下载、不后台同步 |
+| 多服务器 | P0 可保存多个 server profile；无有效会话时直接展示服务器地址、账号、密码表单；登录成功后自动保存 profile，名称取 URL hostname；同时只有一个 active server；非活动服务器不播放、不下载、不后台同步 |
 | 书库结构 | 根页用顶部分段控件切换 `全部 / 系列 / 作者`；搜索归书库，不在首页建立第二套搜索 |
 | 首页续读 | 目标唯一且可验证时直达 Reader/Now Playing；否则进入作品详情 |
 | 冷启动 | 普通冷启动进入首页；只有 OS 短时状态恢复可以直接恢复 Reader |
 | 401 离线宽限 | 最近一次成功 `/api/auth/me` 后 30 天；只开放已下载内容；不要求额外设备解锁 |
 | 主动退出 | 立即终止宽限并清除可读私有缓存；待同步 outbox 加密隔离 |
-| TLS 例外 | 默认 `systemTrust`；用户可针对单个 profile 显式启用 `insecureSkipAllValidation`，此后证书变化不再警告 |
+| 连接检查 | 填写、回填和切换服务器时不请求网络；只在点击登录后检查可达性、兼容性、setup status 与 TLS |
+| TLS 例外 | 页面不展示证书设置；只有登录连接遇到不受信任的 SSL 证书时，才用平台原生 Alert 询问是否接受风险并连接，接受只绑定当前标准化服务器 identity |
 | P1 入口 | 可以在路由规范中预留归属，但交付前不显示占位或“即将推出”入口 |
 
 ### 2.1 TLS 决策风险声明
 
-`insecureSkipAllValidation` 无法验证连接到的服务器身份，会使登录凭证、会话、元数据和媒体流暴露于中间人攻击风险。该模式是用户明确选择的产品取舍，不是推荐默认值。
+接受不受信任的 SSL 证书会降低服务器身份保障，并可能使登录凭证、会话、元数据和媒体流暴露于中间人攻击。该能力是用户在具体连接失败后作出的显式风险选择，不是服务器页面中的常规设置。
 
 实现必须满足：
 
-- 只按单个 `serverProfileId` 生效，禁止全局开关；
-- 添加服务器默认始终为 `systemTrust`；
-- 第一次 TLS 校验失败时先进入完整风险说明页，再通过二次 Dialog 确认；
-- 动作文本必须写为“永久忽略并连接”，不得弱化为“继续”；
-- profile 详情持续显示不安全连接状态并允许恢复系统验证；
-- 任何日志、分析或错误信息不得记录 Cookie、密码或证书私钥；
-- 后续证书变化不再警告，这是本决策明确接受的剩余风险。
+- 页面和登录表单不得显示证书验证行、TLS Switch、`systemTrust` 或 `insecureSkipAllValidation` 等技术设置；
+- 登录默认始终先使用系统证书验证；
+- 只有点击登录且连接遇到不受信任证书时，才显示一个平台原生阻断 Alert；
+- Alert 必须说明凭证和阅读数据可能被截获，并使用“取消 / 接受风险并连接”；
+- 接受结果只按标准化服务器 identity 生效；新服务器在登录和 `/me` 成功前只能用于本次尝试，禁止全局开关或影响其他 profile；
+- 关闭 Alert 后保留当前表单草稿，不创建独立 TLS route；
+- 任何日志、分析或错误信息不得记录 Cookie、密码、证书私钥或完整凭证。
 
 ## 3. 总体导航模型
 
@@ -63,9 +64,9 @@ App 使用“根状态机 + 四个持久 Stack + 两个全局沉浸层”：
 ```mermaid
 flowchart TD
     Launch["App Launch"] --> Gate["Bootstrap Gate"]
-    Gate --> Servers["Server Profiles / Connection"]
-    Gate --> Setup["Initial Setup"]
-    Gate --> Login["Login / Reauthenticate"]
+    Gate --> Servers["Server Login Form / Switch Sheet"]
+    Servers --> Setup["Initial Setup"]
+    Gate --> Login["Reauthenticate"]
     Gate --> Shell["Authenticated Shell"]
 
     Shell --> Home["首页 Stack"]
@@ -103,13 +104,11 @@ flowchart TD
 ```text
 L0 AppRoot
 ├── BootstrapGate                                      [State]
-├── server.profiles                                    [P0 Full-screen]
-│   ├── server.add                                     [P0 Full-screen]
-│   ├── server.edit(serverId)                          [P0 Full-screen]
-│   └── server.connection-problem(serverId, mode)      [P0 Page State]
-│       mode = unavailable | incompatible | tls-error
+├── server.entry                                       [P0 Full-screen]
+│   ├── form-empty / form-restored / form-dirty         [P0 Page State]
+│   ├── authenticating / login-invalid                  [P0 Page State]
+│   └── switch sheet / delete / connection alerts       [P0 Overlay State]
 ├── auth.setup(serverId)                               [P0 Full-screen]
-├── auth.login(serverId)                               [P0 Full-screen]
 └── auth.reauthenticate(serverId)                      [P0 Global Gate]
 
 L1 AuthenticatedShell
@@ -139,8 +138,7 @@ L1 AuthenticatedShell
     ├── downloads.center                               [P0 Page]
     │   └── downloads.detail(downloadId)               [P0 Page]
     ├── downloads.settings                             [P0 Page]
-    ├── servers.center                                 [P0 Page]
-    │   └── servers.detail(serverId)                   [P0 Page]
+    ├── servers.center                                 [P0 Page; 复用 server.entry 表单与切换 Sheet]
     ├── about.app                                      [P0 Page]
     ├── import.confirm-upload                          [P1 Full-screen]
     ├── kindle.settings                                [P1 Page]
@@ -170,13 +168,11 @@ O2 Blocking or System Presentation
 
 | Route | 目的 | 主要入口 | 返回/完成 |
 |---|---|---|---|
-| `server.profiles` | 选择已有服务器或添加服务器 | 无 active server；“我的 → 服务器” | Gate 模式下不可返回 Shell；管理模式返回“我的” |
-| `server.add` | 输入名称、base URL、检测连接 | profiles 新增 | 保存后进入 setup status；取消回 profiles |
-| `server.edit` | 修改名称、地址和 TLS 模式 | server 详情 | 保存回详情；涉及 active server identity 变化时按切服流程处理 |
-| `server.connection-problem` | 展示 unavailable、incompatible、TLS 错误 | health/setup/me 失败 | 重试、编辑服务器、切换服务器；TLS 错误可进入风险确认 |
+| `server.entry` | 直接填写或回填服务器地址、账号、密码；登录下方切换或删除当前服务器 | 无有效登录会话；“我的 → 服务器”管理模式 | Gate 模式下不可返回 Shell；管理模式返回“我的”；成功 `/me` 后自动保存 profile 并进入首页或 pending intent |
 | `auth.setup` | 创建首位管理员 | setup status 为未初始化 | 成功建立 Cookie 会话并进入首页 |
-| `auth.login` | 已初始化服务器登录 | setup status 为已初始化 | 成功请求 `/me` 后进入首页或 pending intent |
 | `auth.reauthenticate` | 明确 401 后恢复认证 | 任意受保护页面 | 同一用户成功后恢复合法 intent；不同用户清四栈回首页 |
+
+`server.entry` 内部状态为 `form-empty / form-restored / form-dirty / authenticating / login-invalid / switch-sheet / delete-confirmation / unavailable-alert / incompatible-alert / unsafe-ssl-alert`。它们不是 route，不进入返回历史。填写、回填和 Sheet 选择不做网络检查；只有点击登录进入 `authenticating`。登录及 `/me` 成功后才自动保存或更新 profile，`displayName` 固定取标准化 URL hostname。
 
 `BootstrapGate` 是互斥状态机，不得由零散布尔值控制。至少覆盖：
 
@@ -246,7 +242,7 @@ offline-grace
 |---|---|
 | 账户 | 资料、头像、密码、退出登录 |
 | 离线与存储 | 下载中心、下载设置、空间与网络策略 |
-| 服务器 | server profiles、当前服务器、添加/编辑/切换、Web 管理入口 |
+| 服务器 | 当前服务器登录表单、切换已保存服务器、删除当前服务器、Web 管理入口 |
 | 偏好 | 语言 |
 | 产品 | 关于、App 版本、服务器版本 |
 | P1 | 手工导入、Kindle 设置与发送队列；交付前整组隐藏 |
@@ -268,20 +264,28 @@ Web 管理只在 `canManageSystem` 或 `isAdmin` 时显示，使用系统浏览�
 
 ```mermaid
 flowchart TD
-    A["读取 activeServer"] --> B{"存在 active server?"}
-    B -- "否" --> C["server.profiles → server.add"]
-    B -- "是" --> D["GET /api/health"]
-    D --> E["GET /api/auth/setup/status"]
-    E -- "未初始化" --> F["auth.setup"]
-    E -- "已初始化" --> G["GET /api/auth/me"]
-    F --> H["建立 Cookie 会话"]
-    G -- "成功" --> I["校验 server/user/authz namespace"]
-    G -- "401" --> J["auth.reauthenticate"]
-    G -- "不可达" --> K{"有效离线 entitlement?"}
-    K -- "是" --> L["Offline Shell"]
-    K -- "否" --> M["Connection Problem"]
-    H --> I
-    I --> N{"pending deep link?"}
+    A["读取 activeServer 与持久 Cookie"] --> B{"存在可验证的既有会话?"}
+    B -- "否" --> C["server.entry 登录表单；可回填最近 profile"]
+    B -- "是" --> D["GET /api/auth/me"]
+    D -- "401" --> R["auth.reauthenticate；回填 active profile"]
+    C --> E{"用户点击登录?"}
+    E -- "否" --> C
+    E -- "是" --> F["health → compatibility → setup status"]
+    R --> RE{"重新登录或有效离线宽限?"}
+    RE -- "重新登录" --> F
+    RE -- "进入离线模式" --> M
+    F -- "不可达/不兼容/TLS" --> G["原生 Alert，关闭后保留表单"]
+    F -- "未初始化" --> H["auth.setup"]
+    F -- "已初始化" --> I["POST /api/auth/login"]
+    I --> J["GET /api/auth/me"]
+    D -- "成功" --> K["校验 server/user/authz namespace"]
+    D -- "不可达" --> L{"有效离线 entitlement?"}
+    L -- "是" --> M["Offline Shell"]
+    L -- "否" --> C
+    H --> K
+    J --> Q["自动保存/更新 profile；名称取 hostname"]
+    Q --> K
+    K --> N{"pending deep link?"}
     N -- "是" --> O["验证并构造 canonical route"]
     N -- "否" --> P["tab.home"]
 ```
@@ -342,7 +346,7 @@ flowchart LR
 
 - 任意作品卡进入共享 `work.detail`，携带 origin context。
 - 从作品详情点击作者/系列时，在当前 Stack 压入共享 `works.facet`；返回仍回详情，不强制切换 Tab。
-- 作品详情的媒介 segmented control 和 volume 选择只更新当前页面状态。
+- 作品详情以“简介 / 媒体版本”切换内容；媒体版本内的媒介 segmented control 和 volume 选择只更新当前页面状态。电子书仅有一个 volume 时直接展示其章节目录。
 - 有效 resume 使用最近 volume；无 resume 使用当前媒介第一个可读 volume。
 
 ### 7.4 下载
@@ -365,7 +369,7 @@ flowchart LR
 
 ## 8. 多服务器与切换
 
-Server Center 是全屏页面，不使用 Sheet。每个 profile 至少保存：
+未登录 `server.entry` 与登录后 `servers.center` 共享同一登录表单和切换 Sheet 模型；后者是从“我的”压入的全屏页面并保留 Shell 导航。两者都不建立服务器详情、独立添加或独立编辑子页面。用户输入新地址并登录成功即创建 profile；登录失败不保存。`displayName` 由标准化 URL hostname 自动生成，密码只存入平台安全凭证存储，不进入普通 profile。每个 profile 至少保存：
 
 ```text
 id
@@ -382,13 +386,13 @@ tlsMode
 2. 折叠并停止旧服务器音频；
 3. 暂停旧服务器下载；
 4. 检查 progress/bookmark outbox；
-5. 无待同步数据时直接切换；
-6. 有待同步数据时用 Dialog 提供“同步后切换 / 隔离后切换 / 取消”；
-7. 激活目标 profile 后重新执行 health → setup status → me；
-8. 重建 `serverIdentity + userId + authzVersion` namespace；
+5. Sheet 选择目标 profile 只回填登录表单，不执行以上副作用；
+6. 用户点击登录且凭证验证成功后，无待同步数据时激活目标；
+7. 有待同步数据时用 Dialog 提供“同步后切换 / 隔离后切换 / 取消”；
+8. 激活目标 profile 并重建 `serverIdentity + userId + authzVersion` namespace；
 9. 不恢复旧服务器的四个 Stack，进入新服务器首页。
 
-删除服务器必须说明会移除该 profile 的会话、下载和缓存；待同步 outbox 只有在用户明确理解后果时才允许删除。
+删除服务器必须说明会移除当前 profile 的会话、下载和缓存；待同步 outbox 只有在用户明确理解后果时才允许删除。删除完成后清空服务器地址、账号和密码，不自动选择其他 profile。
 
 ## 9. Deep Link 与状态恢复
 
@@ -441,7 +445,7 @@ downloads(downloadId?)
 不恢复：
 
 - Menu、Sheet、Dialog；
-- 删除、退出、TLS 风险确认；
+- 删除、退出、不安全 SSL 接受确认；
 - Document/Photo Picker 或 Share Sheet；
 - 登录和敏感表单输入；
 - 普通冷启动时的 Reader 全屏页面。
@@ -509,7 +513,7 @@ Deep link 优先于已保存 route；普通冷启动无 deep link 时进入首�
 |---|---|
 | `library-sort` | 当前项带选中状态；点击立即生效 |
 | `library-view` | Grid/List 单选；点击立即生效 |
-| `work-overflow` | 阅读状态、加入书架、离线下载、P1 Kindle/导出入口 |
+| `work-overflow` | 阅读状态、加入书架、离线下载；编辑与设置封面仅在授权且移动契约可用时出现，否则提供明确的 Web 管理入口；P1 Kindle/导出入口 |
 | `shelf-overflow` | 编辑、删除入口；删除必须转 Dialog |
 | `download-overflow` | 暂停、继续、重试、移除离线副本入口 |
 | `audio-speed` | 有限倍速预设；自定义倍速以后使用 Sheet |
@@ -531,12 +535,14 @@ Dialog 仅用于：
 - `cellular-download-once`；
 - `reader-content-changed`；
 - `collection-not-empty`；
-- `tls-insecure-permanent-confirmation`。
+- `server-unavailable-on-intent`；
+- `server-incompatible-on-intent`；
+- `tls-insecure-connection-confirmation`。
 
 规则：
 
-- 动作按钮必须描述对象和结果，例如“删除书架”“移除 3 个下载”“永久忽略并连接”，禁止只写“确定”。
-- 普通网络错误、空状态、普通 403/404、表单 422 和成功反馈不使用 Dialog。
+- 动作按钮必须描述对象和结果，例如“删除书架”“移除 3 个下载”“接受风险并连接”，禁止只写“确定”。
+- 普通页面数据网络错误、空状态、普通 403/404、表单 422 和成功反馈不使用 Dialog；`server.entry` 登录意图产生的不可达、不兼容和不安全 SSL 是明确例外，使用平台 Alert 后回到保留的表单。
 - `reader-content-changed` 只提供“重新加载新版本”和“退出阅读”，禁止强制覆盖服务器进度。
 - 从静态书架移除作品直接执行并提供 Snackbar 撤销，不弹确认。
 - 普通下载失败使用行内重试；空间不足提供“管理下载”。
@@ -602,7 +608,7 @@ OfflineEntitlementStatus =
   valid | expired | revoked-locally
 ```
 
-`insecureSkipAllValidation` 必须使用完整、显式的名称；禁止缩写为 `allowTls`、`trustServer` 等会掩盖风险的布尔值。
+`tlsMode` 是网络层内部持久化边界，不是用户可见设置。页面和登录表单不得显示其名称、当前值或 Switch。若实现仍使用 `insecureSkipAllValidation`，必须使用完整、显式的内部名称，禁止缩写为 `allowTls`、`trustServer` 等会掩盖风险的布尔值。
 
 ## 14. 平台适配与无障碍
 
@@ -635,7 +641,11 @@ OfflineEntitlementStatus =
 
 - 多服务器添加、编辑、切换和删除不串用 namespace。
 - 非 active server 不执行播放、下载或同步。
-- 默认 TLS 为 `systemTrust`；永久忽略只作用于明确选择的 profile，并通过风险页和二次确认。
+- 无有效会话时 `server.entry` 直接显示地址、账号、密码；鉴权过期时回填最近成功 profile 与安全存储中可用的凭证。
+- 登录是唯一主动作；下方左侧切换服务器打开原生 Sheet，右侧删除当前 profile 并在确认后清空表单。
+- 新服务器只在登录和 `/me` 成功后自动保存，名称取标准化 URL hostname；失败草稿不覆盖最后成功 profile。
+- 填写、回填和 Sheet 选择不做网络检查，也不展示在线、兼容性或证书状态。
+- 不安全 SSL 只在点击登录且证书验证失败时用一个平台原生 Alert 提示，接受只作用于明确服务器 identity。
 - `/me` 成功刷新 30 天 entitlement。
 - 401 后离线入口、无设备解锁、到期边界和主动登出清除符合规范。
 - `authzVersion` 变化后旧内容立即遮蔽并逐页重验。

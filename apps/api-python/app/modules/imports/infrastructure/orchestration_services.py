@@ -140,7 +140,6 @@ class SessionImportOrchestrationServices:
             ),
         )
         return ImportPreferencesDTO(
-            auto_convert_to_epub=preferences.auto_convert_to_epub,
             allowed_extensions=preferences.allowed_extensions,
             ignore_patterns=preferences.ignore_patterns,
         )

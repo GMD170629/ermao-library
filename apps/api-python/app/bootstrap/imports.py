@@ -168,7 +168,6 @@ from app.modules.system.public import PreparedSystemEvent
 from app.services.import_preferences import (
     DEFAULT_STABILITY_CHECK_ENABLED,
     IMPORT_ALLOWED_EXTENSIONS_KEY,
-    IMPORT_AUTO_CONVERT_KEY,
     IMPORT_IGNORE_PATTERNS_KEY,
     IMPORT_PREFERENCE_KEYS,
     IMPORT_STABILITY_ENABLED_KEY,
@@ -203,10 +202,6 @@ def _preferences_from_raw_values(
         IMPORT_STABILITY_ENABLED_KEY,
         values.get(IMPORT_STABILITY_ENABLED_KEY),
     )
-    auto_convert = normalize_import_setting_value(
-        IMPORT_AUTO_CONVERT_KEY,
-        values.get(IMPORT_AUTO_CONVERT_KEY),
-    )
     return ImportPreferences(
         stability_check_enabled=(
             stability_enabled
@@ -218,7 +213,6 @@ def _preferences_from_raw_values(
             if IMPORT_STABILITY_SECONDS_KEY in values
             else default_stability_seconds()
         ),
-        auto_convert_to_epub=(auto_convert if isinstance(auto_convert, bool) else True),
         allowed_extensions=normalize_allowed_extensions(
             values.get(IMPORT_ALLOWED_EXTENSIONS_KEY)
         ),

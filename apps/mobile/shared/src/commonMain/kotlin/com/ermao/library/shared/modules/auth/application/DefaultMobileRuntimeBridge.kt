@@ -75,6 +75,22 @@ class DefaultMobileRuntimeBridge(
     override fun login(email: String, password: String, completion: OperationCompletion) =
         launch(completion) { runtime.login(email, password) }
 
+    override fun loginToServer(
+        baseUrl: String,
+        email: String,
+        password: String,
+        completion: OperationCompletion,
+    ) = launch(completion) { runtime.loginToServer(baseUrl, email, password) }
+
+    override fun loginToServerAcceptingInsecureTls(
+        baseUrl: String,
+        email: String,
+        password: String,
+        completion: OperationCompletion,
+    ) = launch(completion) {
+        runtime.loginToServerAcceptingInsecureTls(baseUrl, email, password)
+    }
+
     override fun setupInitialAdmin(
         name: String,
         email: String,

@@ -7,6 +7,8 @@ from pathlib import Path
 from threading import Thread
 
 import pytest
+from sqlalchemy import func, select, text
+
 from app import models as _models  # noqa: F401
 from app.bootstrap.imports import (
     fail_claimed_import_task,
@@ -64,7 +66,6 @@ from app.worker.watcher import (
     scan_directory_with_logging,
     should_ignore_file,
 )
-from sqlalchemy import func, select, text
 
 
 def create_worker_tables(db):
@@ -2948,13 +2949,12 @@ def test_monitor_folder_config_preserves_zero_minimum_file_size():
     assert not folder.stability_check_enabled
 
 
-def test_global_import_preferences_filter_extensions_conversion_and_patterns(
+def test_global_import_preferences_filter_extensions_and_patterns(
     db_session,
 ):
     set_system_setting(
         db_session, "import.allowedExtensions", json.dumps([".epub", ".pdf", ".txt"])
     )
-    set_system_setting(db_session, "import.autoConvertToEpub", "false")
     set_system_setting(db_session, "import.stabilityCheck.enabled", "false")
     set_system_setting(db_session, "import.stabilityCheck.seconds", "999")
     set_system_setting(db_session, "import.ignorePatterns", json.dumps("*.tmp\n草稿*"))
@@ -2965,7 +2965,6 @@ def test_global_import_preferences_filter_extensions_conversion_and_patterns(
         projection, legacy_stable_delay_ms=None
     )
     assert preferences.allowed_extensions == (".epub", ".txt", ".pdf")
-    assert not preferences.auto_convert_to_epub
     assert not preferences.stability_check_enabled
     assert preferences.stability_check_seconds == 300
 
@@ -2975,7 +2974,6 @@ def test_global_import_preferences_filter_extensions_conversion_and_patterns(
         min_file_size_bytes=1,
         global_ignore_patterns=preferences.ignore_patterns,
         allowed_extensions=preferences.allowed_extensions,
-        auto_convert_to_epub=preferences.auto_convert_to_epub,
     )
     assert not should_ignore_file(Path("/tmp/book.epub"), folder)
     assert should_ignore_file(Path("/tmp/book.cbz"), folder)
@@ -2993,16 +2991,15 @@ def test_missing_import_preferences_keep_every_supported_extension_enabled(db_se
     assert ".cbr" in preferences.allowed_extensions
     assert ".rar" in preferences.allowed_extensions
     assert not preferences.stability_check_enabled
-    assert preferences.auto_convert_to_epub
 
 
-def test_text_file_imports_raw_and_can_convert_later(
+def test_text_file_imports_preserve_source_format_for_legacy_origin(
     db_session, test_settings, tmp_path
 ):
     create_worker_tables(db_session)
-    source = tmp_path / "稍后转换.txt"
+    source = tmp_path / "源格式文本.txt"
     source.write_text(
-        "第一章\n这是一段用于验证后置转换流程的正文。\n\n第二章\n转换完成后应当可以阅读。",
+        "第一章\n这是一段用于验证源格式导入的正文。\n\n第二章\n入库后应当可以直接阅读。",
         encoding="utf-8",
     )
 
@@ -3037,7 +3034,7 @@ def test_text_file_imports_raw_and_can_convert_later(
     assert Path(raw_file["path"]) == source.resolve()
     assert raw_file["kind"] == "TXT"
 
-    converted_result = import_managed_book(
+    legacy_result = import_managed_book(
         db_session,
         test_settings,
         ImportOptions(
@@ -3059,19 +3056,13 @@ def test_text_file_imports_raw_and_can_convert_later(
         .mappings()
         .all()
     )
-    assert converted_result.work_id == raw_result.work_id
+    assert legacy_result.work_id == raw_result.work_id
     assert [(row["format"], bool(row["hidden"])) for row in visible_volumes] == [
         ("TXT", False),
-        ("EPUB", False),
     ]
-    converted_volume = next(
-        row for row in visible_volumes if row["id"] == converted_result.volume_id
-    )
-    assert converted_volume["derivedFromVolumeId"] == raw_result.volume_id
+    assert legacy_result.volume_id == raw_result.volume_id
     assert source.exists()
-    conversion_task = db_session.scalars(select(BookConversionTask)).one()
-    assert conversion_task.source_volume_id == raw_result.volume_id
-    assert conversion_task.derived_volume_id == converted_result.volume_id
+    assert db_session.scalars(select(BookConversionTask)).all() == []
 
     retried_result = import_managed_book(
         db_session,
@@ -3082,9 +3073,9 @@ def test_text_file_imports_raw_and_can_convert_later(
             original_name=source.name,
         ),
     )
-    assert retried_result.volume_id == converted_result.volume_id
-    assert len(db_session.scalars(select(LibraryVolume)).all()) == 2
-    assert len(db_session.scalars(select(BookConversionTask)).all()) == 1
+    assert retried_result.volume_id == raw_result.volume_id
+    assert len(db_session.scalars(select(LibraryVolume)).all()) == 1
+    assert len(db_session.scalars(select(BookConversionTask)).all()) == 0
 
 
 @pytest.mark.parametrize(

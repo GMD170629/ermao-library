@@ -1,6 +1,7 @@
 package com.ermao.library.shared.modules.auth.infrastructure
 
 import com.ermao.library.shared.core.storage.PlatformStorageException
+import com.ermao.library.shared.core.storage.PlatformStoragePayload
 import com.ermao.library.shared.modules.auth.application.OfflineEntitlementRepository
 import com.ermao.library.shared.modules.auth.domain.OfflineEntitlementStatus
 import com.ermao.library.shared.modules.auth.domain.ValidatedSessionRecord
@@ -9,7 +10,7 @@ import kotlinx.serialization.json.Json
 
 interface OfflineEntitlementPayloadStore {
     @Throws(PlatformStorageException::class)
-    fun loadEntitlements(): String?
+    fun loadEntitlementsPayload(): PlatformStoragePayload
 
     @Throws(PlatformStorageException::class)
     fun saveEntitlements(payload: String)
@@ -45,7 +46,7 @@ class SerializedOfflineEntitlementRepository(
     }
 
     private fun decode(): EntitlementAggregateWire {
-        val payload = store.loadEntitlements() ?: return EntitlementAggregateWire()
+        val payload = store.loadEntitlementsPayload().value ?: return EntitlementAggregateWire()
         val aggregate = json.decodeFromString<EntitlementAggregateWire>(payload)
         require(aggregate.schemaVersion == SCHEMA_VERSION) { "Unsupported entitlement schema" }
         require(aggregate.records.all { (profileId, record) -> profileId == record.profileId }) {

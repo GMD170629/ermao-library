@@ -14,7 +14,6 @@ from time import time_ns
 from typing import Annotated, Any, Never
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
-from fastapi.responses import Response
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
@@ -27,6 +26,7 @@ from app.bootstrap.library import (
     library_cover_publication,
     library_dashboard,
     library_facet_queries,
+    library_facet_references,
     library_groupings,
     library_operation_store,
     library_works,
@@ -60,8 +60,7 @@ from app.bootstrap.system import (
     prepare_system_event,
     system_event_storage_view,
 )
-from app.contracts.http_errors import AdditionalStatusCodes, ErrorResponses
-from app.contracts.imports import ImportTaskContract
+from app.contracts.http_errors import ErrorResponses
 from app.contracts.retired_resources import RetiredResourceError, retired_resource_error
 from app.core.authorization import (
     authorization_context,
@@ -104,14 +103,11 @@ from app.modules.library.application.volume_commands import (
     LibraryAuthorizationError,
     NewWorkInput,
     OperationSummary,
-    VolumeConversionUnsupportedError,
     VolumeNotFoundError,
-    VolumeSourceMissingError,
     WorkNotFoundError,
     batch_volume_resources,
     delete_volume_resource,
     move_volume_resource,
-    queue_volume_epub_conversion,
     reclassify_volume_resource,
     reorder_volume_resource,
     split_volume_resource,
@@ -141,7 +137,6 @@ from app.modules.library.presentation.schemas import (
     BulkWorkRequest,
     CategoriesResponse,
     ContinueReadingResponse,
-    ConversionResponse,
     CoverMutationResponse,
     CreateWorkMergeRequest,
     DashboardSummaryResponse,
@@ -910,6 +905,23 @@ def list_library_groupings(
                     "name": group.name,
                     "bookCount": group.book_count,
                     "updatedAt": group.updated_at,
+                    "representativeWorks": [
+                        {
+                            "id": work.id,
+                            "title": work.title,
+                            "author": work.author,
+                            "coverUrl": _cover_url(
+                                "works",
+                                work.id,
+                                {
+                                    "coverPath": work.cover_path,
+                                    "updatedAt": work.updated_at,
+                                },
+                                size="medium",
+                            ),
+                        }
+                        for work in group.representative_works
+                    ],
                 }
                 for group in result.groups
             ],
@@ -967,6 +979,13 @@ def list_works(
     status = (request.query_params.get("status") or "").strip().upper()
     if status == "WANT":
         status = "UNREAD"
+    statuses = tuple(
+        dict.fromkeys(
+            "UNREAD" if item.strip().upper() == "WANT" else item.strip().upper()
+            for item in (request.query_params.get("statuses") or "").split(",")
+            if item.strip()
+        )
+    )
     facet_kind = (request.query_params.get("facetKind") or "").strip().upper()
     facet_id = (request.query_params.get("facetId") or "").strip()
     if bool(facet_kind) != bool(facet_id) or (
@@ -995,6 +1014,7 @@ def list_works(
             ).strip()
         ),
         status=status or None,
+        statuses=statuses,
         publication_status=(request.query_params.get("publicationStatus") or "")
         .strip()
         .upper()
@@ -1058,6 +1078,15 @@ def list_works(
             if management_view
             else [_work_view(db, work, user.id) for work in works]
         )
+    applied_facet = (
+        library_facet_references(db).visible_facet(
+            context=authorization_context(db, user),
+            kind=facet_kind,
+            facet_id=facet_id,
+        )
+        if facet_kind and facet_id
+        else None
+    )
     return WorksResponse(
         data={
             "books": book_views,
@@ -1066,6 +1095,15 @@ def list_works(
             "total": result.total,
             "totalPages": max(
                 1, (result.total + result.page_size - 1) // result.page_size
+            ),
+            "appliedFacet": (
+                {
+                    "id": applied_facet.id,
+                    "kind": applied_facet.kind,
+                    "name": applied_facet.name,
+                }
+                if applied_facet is not None
+                else None
             ),
         }
     )
@@ -1092,6 +1130,7 @@ def get_work(
     work = _visible_work_or_none(db, user, work_id)
     if not work:
         _raise_library_error("作品不存在", status_code=404)
+    facet_references = library_facet_references(db).for_visible_work(work_id)
     navigation_requested = bool(request.query_params)
     book = _work_view(
         db,
@@ -1100,6 +1139,19 @@ def get_work(
         volume_limit_per_media=None if navigation_requested else 10,
         include_files=True,
     )
+    book["seriesFacet"] = (
+        {
+            "id": facet_references.series.id,
+            "kind": facet_references.series.kind,
+            "name": facet_references.series.name,
+        }
+        if facet_references.series is not None
+        else None
+    )
+    book["authorFacets"] = [
+        {"id": facet.id, "kind": facet.kind, "name": facet.name}
+        for facet in facet_references.authors
+    ]
     if not navigation_requested:
         return WorkDetailSummaryResponse(data={"book": _work_detail_summary_view(book)})
     selected_tab = _resolve_detail_tab(
@@ -2802,7 +2854,6 @@ async def metadata_search(
 
 
 @router.patch("/works/{work_id}/editions/{edition_id}", status_code=410)
-@router.post("/works/{work_id}/editions/{edition_id}/convert", status_code=410)
 @router.post("/works/{work_id}/editions/{edition_id}/primary", status_code=410)
 @router.post("/works/{work_id}/editions/{edition_id}/split", status_code=410)
 async def update_work_edition(
@@ -3265,75 +3316,6 @@ def delete_work_volume(
             "deletedMediaVersion": outcome.deleted_media_version,
             "deletedWork": outcome.deleted_work,
             "operation": _operation_payload(outcome.operation),
-        }
-    )
-
-
-@router.post("/works/{work_id}/volumes/{volume_id}/convert")
-def convert_work_volume(
-    work_id: str,
-    volume_id: str,
-    request: Request,
-    response: Response,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> Annotated[
-    ConversionResponse,
-    AdditionalStatusCodes(202),
-    ErrorResponses(
-        LibraryBadRequestError,
-        LibraryForbiddenError,
-        LibraryNotFoundError,
-        LibraryConflictError,
-    ),
-]:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    try:
-        task, created = queue_volume_epub_conversion(
-            volume_structure_commands(db),
-            db,
-            actor=_library_actor(db, user),
-            work_id=work_id,
-            volume_id=volume_id,
-            now=_now(),
-        )
-    except WorkNotFoundError:
-        _raise_library_error(
-            "作品不存在或无权访问",
-            status_code=404,
-            code="WORK_NOT_FOUND",
-        )
-    except VolumeNotFoundError:
-        _raise_library_error(
-            "卷册不存在或不属于该作品",
-            status_code=404,
-            code="VOLUME_NOT_FOUND",
-        )
-    except LibraryAuthorizationError:
-        _raise_library_error(
-            "需要系统管理权限",
-            status_code=403,
-            code="SYSTEM_MANAGER_REQUIRED",
-        )
-    except VolumeConversionUnsupportedError:
-        _raise_library_error(
-            "该卷册不支持转换为 EPUB",
-            status_code=400,
-            code="CONVERSION_UNSUPPORTED",
-        )
-    except VolumeSourceMissingError:
-        _raise_library_error(
-            "原始文件不存在，无法转换",
-            status_code=409,
-            code="SOURCE_FILE_MISSING",
-        )
-    response.status_code = 202
-    return ConversionResponse(
-        data={
-            "task": ImportTaskContract.from_dto(task).to_wire(),
-            "created": created,
         }
     )
 

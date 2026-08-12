@@ -29,7 +29,7 @@
 | 优先级 | 证据 | 风险 |
 | --- | --- | --- |
 | P0 | `app/api/routes/compat.py` 约 8,036 行、310 个函数，包含 HTTP、授权、SQL、映射、文件处理和业务编排 | 任意功能调整都可能跨越多个隐含边界；复用 route 私有函数会继续扩大耦合 |
-| P0 | `app/worker/importer.py` 约 3,207 行，串联校验、解析、转换、持久化、封面和事件 | 事务、文件发布、失败恢复和幂等行为集中在单一流程中，难以独立验证 |
+| P0 | `app/worker/importer.py` 约 3,207 行，串联校验、解析、持久化、封面和事件 | 事务、文件发布、失败恢复和幂等行为集中在单一流程中，难以独立验证 |
 | P0 | ~~`app/db/seed.py` 仍反向导入 service 做回填~~（已清：seed 仅用 ORM/typed expressions 插入缺失默认记录；历史 backfill、启动 repair 与 migration marker 已删除） | 数据 backfill 曾依赖运行期业务层 |
 | P1 | ~~`reader_v2.py` 仍从 `compat.py` 导入私有实现~~（已清：页面索引走 `modules/media`） | 新边界曾依赖旧兼容路由，阻碍 `compat.py` 退场 |
 | P1 | 后端约有 81 个 `except Exception`、813 处 `Any` | 部分稳定边界缺少错误分类和明确数据契约；需要按风险逐步收窄，不能机械清零 |
@@ -158,7 +158,7 @@ class ImportBook:
 负责：
 
 - SQLAlchemy/SQLite 查询与持久化；
-- 文件系统、封面、备份、格式转换；
+- 文件系统、封面、备份和媒体解析；
 - 邮件、下载源、元数据提供方等外部集成；
 - 队列存储和系统时钟等端口实现。
 
@@ -465,13 +465,12 @@ packages/
 ```text
 eligibility/identity
 -> media inspection
--> conversion
 -> persistence
 -> cover publication
 -> event/reporting
 ```
 
-先保留一个顶层 orchestrator，再逐段替换。幂等、源文件保留、转换来源、重复合并、任务进度和失败恢复必须作为显式状态机测试。
+先保留一个顶层 orchestrator，再逐段替换。幂等、源文件保留、重复合并、任务进度和失败恢复必须作为显式状态机测试。
 
 ### 阶段 D：迁移数据库启动逻辑
 

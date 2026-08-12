@@ -9,7 +9,6 @@ from typing_extensions import TypeAliasType
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.http_errors import HttpContractError
-from app.contracts.imports import ImportTaskContract
 from app.contracts.metadata_writeback import MetadataWritebackOperationContract
 from app.contracts.system_events import SystemEvent
 
@@ -223,7 +222,6 @@ class LibraryVolume(HttpContractModel):
     )
     classification: VolumeClassification
     readable: bool
-    conversion_available: bool = Field(alias="conversionAvailable")
     kindle_send_available: bool = Field(alias="kindleSendAvailable")
     derived_from_volume_id: str | None = Field(
         default=None,
@@ -279,7 +277,6 @@ class WorkDetailVolume(HttpContractModel):
     )
     classification: VolumeClassification
     readable: bool
-    conversion_available: bool = Field(alias="conversionAvailable")
     kindle_send_available: bool = Field(alias="kindleSendAvailable")
     derived_from_volume_id: str | None = Field(
         default=None, alias="derivedFromVolumeId"
@@ -309,6 +306,12 @@ class WorkDetailMediaVersion(HttpContractModel):
     volumes: list[WorkDetailVolume]
 
 
+class LibraryFacetReferenceView(HttpContractModel):
+    id: str
+    kind: Literal["AUTHOR", "SERIES"]
+    name: str
+
+
 class WorkDetailBook(HttpContractModel):
     id: str
     title: str
@@ -317,6 +320,12 @@ class WorkDetailBook(HttpContractModel):
     tags: list[str]
     series_name: str | None = Field(default=None, alias="seriesName")
     series_index: float | None = Field(default=None, alias="seriesIndex")
+    series_facet: LibraryFacetReferenceView | None = Field(
+        default=None, alias="seriesFacet"
+    )
+    author_facets: list[LibraryFacetReferenceView] = Field(
+        default_factory=list, alias="authorFacets"
+    )
     cover_status: str = Field(alias="coverStatus")
     cover_url: str = Field(alias="coverUrl")
     recent_media_kind: MediaKind | None = Field(alias="recentMediaKind")
@@ -338,6 +347,12 @@ class WorkView(HttpContractModel):
     tags: list[str]
     series_name: str | None = Field(default=None, alias="seriesName")
     series_index: float | None = Field(default=None, alias="seriesIndex")
+    series_facet: LibraryFacetReferenceView | None = Field(
+        default=None, alias="seriesFacet"
+    )
+    author_facets: list[LibraryFacetReferenceView] = Field(
+        default_factory=list, alias="authorFacets"
+    )
     organized: bool
     organize_status: str = Field(alias="organizeStatus")
     metadata_quality: int = Field(alias="metadataQuality")
@@ -552,11 +567,21 @@ class SeriesPayload(HttpContractModel):
     total: int
 
 
+class LibraryRepresentativeWork(HttpContractModel):
+    id: str
+    title: str
+    author: str
+    cover_url: str = Field(alias="coverUrl")
+
+
 class LibraryGroupingSummary(HttpContractModel):
     id: str
     name: str
     book_count: int = Field(alias="bookCount")
     updated_at: datetime = Field(alias="updatedAt")
+    representative_works: list[LibraryRepresentativeWork] = Field(
+        default_factory=list, alias="representativeWorks"
+    )
 
 
 class LibraryGroupingsPayload(HttpContractModel):
@@ -574,6 +599,9 @@ class WorksPayload(HttpContractModel):
     page_size: int = Field(alias="pageSize")
     total: int
     total_pages: int = Field(alias="totalPages")
+    applied_facet: LibraryFacetReferenceView | None = Field(
+        default=None, alias="appliedFacet"
+    )
 
 
 class ReadingUnitMetadata(HttpContractModel):
@@ -1098,11 +1126,6 @@ class MetadataApplyRequest(HttpContractModel):
     write_metadata_to_files: bool = Field(default=False, alias="writeMetadataToFiles")
 
 
-class ConversionPayload(HttpContractModel):
-    task: ImportTaskContract
-    created: bool
-
-
 class UpdateVolumeRequest(HttpContractModel):
     title: str | None = None
     volume_index: float | None = Field(default=None, alias="volumeIndex")
@@ -1241,7 +1264,6 @@ WorkMergeResponse = SuccessEnvelope[WorkMergePayload]
 OperationsResponse = SuccessEnvelope[OperationsPayload]
 UndoOperationResponse = SuccessEnvelope[UndoOperationPayload]
 MetadataSearchResponse = SuccessEnvelope[MetadataSearchPayload]
-ConversionResponse = SuccessEnvelope[ConversionPayload]
 MetadataApplyResponse = SuccessEnvelope[MetadataApplyPayload]
 WorkStructureMutationResponse = SuccessEnvelope[WorkStructureMutationPayload]
 BatchVolumeMutationResponse = SuccessEnvelope[BatchVolumeMutationPayload]

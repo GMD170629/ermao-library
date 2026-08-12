@@ -261,7 +261,16 @@ Navigation、Tab、Sheet、Menu、Dialog 和 Picker 必须由平台创建、展�
 - loading、empty、error、offline、permission、success、conflict、stale 中适用状态；
 - 至少一台真实 iOS 设备和一台真实 Android 设备上的核心任务。
 
-### 12.4 政策检查
+### 12.4 iOS 仅真机开发与验收
+
+- iOS 开发、调试、测试、视觉检查、截图、性能分析和验收只能使用已连接的真实 iPhone 或 iPad；禁止使用 iOS Simulator；
+- 禁止运行或新增 `simctl`、`iphonesimulator`、`iosSimulatorArm64`、`iosX64`、Simulator destination，以及基于 Simulator 执行的 SwiftUI Preview 调试或验收流程；
+- KMP Apple 代码只以 `iosArm64` 作为 iOS 构建目标，Xcode 使用 `iphoneos` 和 `xcodebuild -showdestinations` 返回的真实设备标识；不得通过 `CODE_SIGNING_ALLOWED=NO` 绕过真机签名；
+- XCTest、UI 测试、Keychain、TLS、局域网、进程终止与恢复、Dynamic Type、VoiceOver、截图和真实服务器旅程必须在真机运行；仅完成 device-target 编译不构成运行时验收；
+- 真机不可用、未配对、Developer Mode 未开启或签名不可用时，iOS 门禁必须明确标记为等待真机证据，不得回退 Simulator、跳过或降低验收标准；
+- 新增脚本、CI、文档和验收记录不得包含 Simulator 命令或以 Simulator 结果作为证据。本条优先于仓库中尚未迁移的旧说明。
+
+### 12.5 政策检查
 
 移动工程建立后，应增加自动化政策检查，至少阻止：
 

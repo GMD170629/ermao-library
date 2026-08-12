@@ -1,5 +1,7 @@
 package com.ermao.library.shared.modules.library.domain
 
+import kotlin.jvm.JvmInline
+
 data class WorkSummary(
     val id: String,
     val title: String,
@@ -16,6 +18,8 @@ data class WorkDetailSummary(
     val description: String?,
     val tags: List<String>,
     val seriesName: String?,
+    val seriesFacet: AppliedFacet? = null,
+    val authorFacets: List<AppliedFacet> = emptyList(),
     val seriesIndex: Double?,
     val coverStatus: String,
     val coverUrl: String,
@@ -26,7 +30,17 @@ data class WorkDetailSummary(
     val availableMediaKinds: List<MediaKind>,
     val detailTabs: List<WorkDetailTab>,
     val selectedDetailTab: String,
+    val activeMedia: ActiveMedia? = null,
+    val readingUnits: List<ReadingUnit> = emptyList(),
 )
+
+data class AppliedFacet(
+    val id: String,
+    val kind: FacetKind,
+    val name: String,
+)
+
+enum class FacetKind { Series, Author }
 
 @JvmInline
 value class MediaKind(val wireValue: String) {

@@ -1,0 +1,7 @@
+@font-face { font-family: 'Shuku Test Font'; src: url('ShukuTestFont.ttf') format('truetype'); }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 5%; color: #2d2926; background: #fffdf8; font-family: serif; line-height: 1.7; }
+h1 { font-size: 1.65em; margin: 0 0 1.2em; }
+p { margin: 0.8em 0; }
+a { color: #8b3d2f; }
+.font-proof { font-family: 'Shuku Test Font', serif; font-size: 1.25em; }

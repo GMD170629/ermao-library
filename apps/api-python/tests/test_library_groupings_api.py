@@ -106,6 +106,14 @@ def test_grouping_api_and_exact_facet_work_filter(
     assert all(group["name"] not in {"未知作者", "秘密作者"} for group in author_groups)
 
     lin_chuan = next(group for group in author_groups if group["name"] == "林川")
+    assert {work["id"] for work in lin_chuan["representativeWorks"]} == {
+        "volume-1",
+        "volume-2",
+    }
+    assert all(
+        work["coverUrl"].startswith("/api/works/")
+        for work in lin_chuan["representativeWorks"]
+    )
     author_works = client.get(
         "/api/works",
         params={"facetKind": "AUTHOR", "facetId": lin_chuan["id"]},
@@ -115,6 +123,19 @@ def test_grouping_api_and_exact_facet_work_filter(
         "volume-1",
         "volume-2",
     }
+    assert author_works.json()["data"]["appliedFacet"] == {
+        "id": lin_chuan["id"],
+        "kind": "AUTHOR",
+        "name": "林川",
+    }
+
+    detail = client.get("/api/works/volume-1")
+    assert detail.status_code == 200
+    detail_book = detail.json()["data"]["book"]
+    assert detail_book["seriesFacet"]["name"] == "星海丛书"
+    assert detail_book["authorFacets"] == [
+        {"id": lin_chuan["id"], "kind": "AUTHOR", "name": "林川"}
+    ]
 
     series = client.get(
         "/api/library/groupings",
@@ -147,6 +168,7 @@ def test_grouping_api_and_exact_facet_work_filter(
     assert missing.status_code == 200
     assert missing.json()["data"]["books"] == []
     assert missing.json()["data"]["total"] == 0
+    assert missing.json()["data"]["appliedFacet"] is None
 
 
 def test_grouping_filter_rejects_invalid_parameter_pairs(

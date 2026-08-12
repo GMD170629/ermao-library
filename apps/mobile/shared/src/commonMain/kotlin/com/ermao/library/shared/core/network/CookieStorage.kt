@@ -13,9 +13,35 @@ import kotlinx.serialization.Serializable
 interface CookieVault {
     suspend fun load(profileId: String): List<PersistedCookie>
 
-    suspend fun save(profileId: String, cookies: List<PersistedCookie>)
+    suspend fun mutate(
+        profileId: String,
+        transform: (List<PersistedCookie>) -> List<PersistedCookie>,
+    ): List<PersistedCookie>
 
     suspend fun clear(profileId: String)
+}
+
+/**
+ * Coordinates profile cookie mutations across independently composed vault instances.
+ *
+ * Mobile capability factories intentionally create short-lived clients. Every cookie write
+ * must therefore reload and mutate the latest persisted aggregate while holding this shared
+ * profile lock; an instance-local mutex cannot prevent a stale aggregate from another client
+ * overwriting a refreshed session or locale cookie.
+ */
+internal object CookieMutationCoordinator {
+    private val registryMutex = Mutex()
+    private val profileMutexes = mutableMapOf<String, Mutex>()
+
+    suspend fun <T> withProfileLock(
+        profileId: String,
+        operation: suspend () -> T,
+    ): T {
+        val profileMutex = registryMutex.withLock {
+            profileMutexes.getOrPut(profileId, ::Mutex)
+        }
+        return profileMutex.withLock { operation() }
+    }
 }
 
 @Serializable
@@ -54,11 +80,12 @@ internal class PersistentCookiesStorage(
             ensureLoaded()
             delegate.addCookie(requestUrl, cookie)
             val persisted = cookie.toPersisted(requestUrl, nowMillis())
-            persistedCookies = persistedCookies
-                .filterNot { it.sameIdentityAs(persisted) }
-                .let { existing -> if (persisted.isExpired(nowMillis())) existing else existing + persisted }
-                .filterNot { it.isExpired(nowMillis()) }
-            vault.save(profileId, persistedCookies)
+            persistedCookies = vault.mutate(profileId) { latestCookies ->
+                latestCookies
+                    .filterNot { it.sameIdentityAs(persisted) }
+                    .let { existing -> if (persisted.isExpired(nowMillis())) existing else existing + persisted }
+                    .filterNot { it.isExpired(nowMillis()) }
+            }
         }
     }
 
@@ -69,13 +96,14 @@ internal class PersistentCookiesStorage(
     private suspend fun ensureLoaded() {
         if (loaded) return
         val now = nowMillis()
-        persistedCookies = vault.load(profileId).filterNot { it.isExpired(now) }
+        persistedCookies = vault.mutate(profileId) { latestCookies ->
+            latestCookies.filterNot { it.isExpired(now) }
+        }
         persistedCookies.forEach { persisted ->
             val sourceUrl = persisted.sourceUrl()
             delegate.addCookie(sourceUrl, persisted.toKtorCookie())
         }
         loaded = true
-        vault.save(profileId, persistedCookies)
     }
 
     private fun PersistedCookie.sourceUrl(): Url {

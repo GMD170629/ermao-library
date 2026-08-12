@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.models.settings import MonitorFolder
 from app.modules.system.domain.health import health_check_item, overall_health_status
-from app.services.text_conversion import converter_capability
 
 
 def _env_check(name: str, value: str | None, required: bool = True) -> dict[str, str]:
@@ -77,20 +76,4 @@ def run_system_health_checks(db: Session, settings: Settings) -> dict[str, objec
     ]
     checks.append(_check_monitor_folders(monitor_paths))
     checks.append(_check_storage_root(settings.resolved_storage_root))
-    conversion = converter_capability(settings)
-    conversion_message = (
-        "文本电子书转换可用"
-        if conversion["available"]
-        else "文本电子书转换已停用"
-        if not settings.ebook_conversion_enabled
-        else "TXT/FB2 可用，libmobi 暂不可用"
-    )
-    conversion_check: dict[str, Any] = health_check_item(
-        "ebookConversion",
-        "ok" if conversion["available"] else "unknown",
-        conversion_message,
-    )
-    conversion_check["details"] = conversion
-    checks.append(conversion_check)
-
     return {"status": overall_health_status(checks), "checks": checks}

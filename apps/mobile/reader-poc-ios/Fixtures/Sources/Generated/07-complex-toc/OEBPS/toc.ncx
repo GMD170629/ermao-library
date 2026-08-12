@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1" xml:lang="zh-CN">
+  <head>
+    <meta name="dtb:uid" content="urn:shuku:reader-poc:07-complex-toc" />
+    <meta name="dtb:depth" content="3" />
+  </head>
+  <docTitle><text>复杂三级目录验证</text></docTitle>
+  <navMap>
+    <navPoint id="nav-1" playOrder="1">
+      <navLabel><text>卷一</text></navLabel>
+      <content src="chapter1.xhtml#chapter-title" />
+      <navPoint id="nav-2" playOrder="2">
+        <navLabel><text>重复标题</text></navLabel>
+        <content src="chapter1.xhtml#part-a" />
+        <navPoint id="nav-3" playOrder="3">
+          <navLabel><text>细目甲</text></navLabel>
+          <content src="chapter1.xhtml#part-a-1" /></navPoint>
+      </navPoint>
+    </navPoint>
+    <navPoint id="nav-4" playOrder="4">
+      <navLabel><text>卷二</text></navLabel>
+      <content src="chapter2.xhtml#chapter-title" />
+      <navPoint id="nav-5" playOrder="5">
+        <navLabel><text>重复标题</text></navLabel>
+        <content src="chapter2.xhtml#part-b" />
+        <navPoint id="nav-6" playOrder="6">
+          <navLabel><text>细目乙</text></navLabel>
+          <content src="chapter2.xhtml#part-b-1" /></navPoint>
+      </navPoint>
+    </navPoint>
+    <navPoint id="nav-7" playOrder="7">
+      <navLabel><text>附录</text></navLabel>
+      <content src="chapter3.xhtml#appendix" /></navPoint>
+  </navMap>
+</ncx>

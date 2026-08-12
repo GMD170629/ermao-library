@@ -9,7 +9,7 @@ function volume(overrides: Partial<VolumeResource> = {}): VolumeResource {
     format: 'EPUB', readerType: 'reflowable', classification: { source: 'LEGACY', reason: 'LEGACY', suggestedMediaKind: null }, derivedFromVolumeId: null, publisher: null, publishedAt: null, language: null,
     isbn: null, identifier: null, narrator: null, abridged: null, importStatus: 'READY', importError: null,
     coverUrl: '', sizeBytes: 0, pageCount: null, chapterCount: 3, durationMs: null, trackCount: null, progress: 0,
-    lastReadAt: null, hidden: false, readable: true, conversionAvailable: false, kindleSendAvailable: true, files: [], ...overrides
+    lastReadAt: null, hidden: false, readable: true, kindleSendAvailable: true, files: [], ...overrides
   };
 }
 

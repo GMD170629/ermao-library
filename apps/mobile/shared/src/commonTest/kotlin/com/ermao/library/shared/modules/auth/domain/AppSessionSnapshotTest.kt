@@ -47,6 +47,8 @@ class AppSessionSnapshotTest {
 
         assertEquals("server-fixture", snapshot.profileServerIdentity)
         assertEquals("user-1", snapshot.userId)
+        assertEquals("https://books.example/api/auth/avatar", snapshot.userAvatarUrl)
+        assertEquals("en-US", snapshot.userLocale)
         assertEquals(true, snapshot.isAdmin)
         assertEquals(true, snapshot.canManageSystem)
         assertEquals(false, snapshot.allLibraryScopes)
@@ -71,6 +73,8 @@ class AppSessionSnapshotTest {
         userId = "user-1",
         email = "reader@example.com",
         displayName = "Reader",
+        avatarUrl = "https://books.example/api/auth/avatar",
+        locale = "en-US",
         namespace = PrivateDataNamespace(
             serverIdentity = "server-fixture",
             userId = "user-1",

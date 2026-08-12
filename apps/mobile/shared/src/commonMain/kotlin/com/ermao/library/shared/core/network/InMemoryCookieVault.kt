@@ -11,15 +11,22 @@ class InMemoryCookieVault : CookieVault {
         cookiesByProfile[profileId].orEmpty()
     }
 
-    override suspend fun save(profileId: String, cookies: List<PersistedCookie>) {
+    override suspend fun mutate(
+        profileId: String,
+        transform: (List<PersistedCookie>) -> List<PersistedCookie>,
+    ): List<PersistedCookie> = CookieMutationCoordinator.withProfileLock(profileId) {
         mutex.withLock {
-            cookiesByProfile[profileId] = cookies.toList()
+            transform(cookiesByProfile[profileId].orEmpty()).toList().also { cookies ->
+                cookiesByProfile[profileId] = cookies
+            }
         }
     }
 
     override suspend fun clear(profileId: String) {
-        mutex.withLock {
-            cookiesByProfile.remove(profileId)
+        CookieMutationCoordinator.withProfileLock(profileId) {
+            mutex.withLock {
+                cookiesByProfile.remove(profileId)
+            }
         }
     }
 }

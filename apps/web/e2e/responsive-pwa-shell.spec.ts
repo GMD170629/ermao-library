@@ -126,7 +126,7 @@ test('PWA launch parameters keep the responsive web shell on mobile widths', asy
 });
 
 test('work detail volume covers support selection, keyboard-accessible context management, and double-click open', async ({ page }) => {
-  const volume = (id: string, title: string, sortOrder: number, conversionAvailable: boolean) => ({
+  const volume = (id: string, title: string, sortOrder: number) => ({
     id,
     mediaVersionId: 'context-media',
     title,
@@ -153,12 +153,11 @@ test('work detail volume covers support selection, keyboard-accessible context m
     hidden: false,
     readable: true,
     readerType: 'comic',
-    conversionAvailable,
     kindleSendAvailable: false,
     classification: { mediaKind: 'COMIC', suggestedMediaKind: null, source: 'USER', reason: null },
     files: []
   });
-  const volumes = [volume('context-volume-1', '第一卷', 0, false), volume('context-volume-2', '第二卷', 1, true)];
+  const volumes = [volume('context-volume-1', '第一卷', 0), volume('context-volume-2', '第二卷', 1)];
   const work = {
     id: 'context-work',
     title: '右键菜单测试图书',
@@ -224,7 +223,6 @@ test('work detail volume covers support selection, keyboard-accessible context m
   await expect(menu).toBeVisible();
   await expect(menu.getByRole('menuitem', { name: /上移卷册/ })).toHaveCount(0);
   await expect(menu.getByRole('menuitem', { name: /下移卷册/ })).toHaveCount(0);
-  await expect(menu.getByRole('menuitem', { name: /转换为 EPUB/ })).toHaveCount(0);
   await menu.getByRole('menuitem', { name: /设置媒体类型/ }).hover();
   await expect(menu.getByRole('menuitem', { name: /设置为电子书/ })).toBeVisible();
   await expect(menu.getByRole('menuitem', { name: /设置为有声书/ })).toBeVisible();
@@ -895,7 +893,7 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
       id: 'mobile-media',
       mediaKind: 'EBOOK',
       completed: false,
-      volumes: [{ id: 'mobile-volume', mediaVersionId: 'mobile-media', title: '全本', volumeIndex: null, sortOrder: 0, format: 'EPUB', derivedFromVolumeId: null, publisher: null, publishedAt: null, language: null, isbn: null, identifier: null, narrator: null, abridged: null, importStatus: 'READY', importError: null, coverUrl: '', pageCount: null, chapterCount: null, durationMs: null, trackCount: null, progress: 42, lastReadAt: '2026-07-17T08:30:00.000Z', hidden: false, readable: true, conversionAvailable: false, files: [] }]
+      volumes: [{ id: 'mobile-volume', mediaVersionId: 'mobile-media', title: '全本', volumeIndex: null, sortOrder: 0, format: 'EPUB', derivedFromVolumeId: null, publisher: null, publishedAt: null, language: null, isbn: null, identifier: null, narrator: null, abridged: null, importStatus: 'READY', importError: null, coverUrl: '', pageCount: null, chapterCount: null, durationMs: null, trackCount: null, progress: 42, lastReadAt: '2026-07-17T08:30:00.000Z', hidden: false, readable: true, files: [] }]
     }]
   };
 

@@ -39,7 +39,6 @@ from app.modules.imports.application.reflowable_types import ReflowableBookMetad
 from app.modules.imports.domain.content_classification import (
     ContentEvidence,
     classify_content,
-    inherited_classification,
     normalize_media_kind_policy,
 )
 
@@ -466,46 +465,3 @@ def _import_reflowable_source(
         metadata_field_sources=resolved_local.field_sources,
         metadata_source_order=resolved_local.source_order,
     )
-
-
-def _complete_deferred_source_conversion(
-    store: LibraryImportStore,
-    queries: ImportLibraryQueries,
-    source_path: Path,
-    result: ImportResult,
-) -> None:
-    source_volume = queries.find_deferred_source_volume(
-        source_path=str(source_path.resolve()),
-        work_id=result.work_id,
-        result_volume_id=result.volume_id,
-    )
-    if not source_volume or not result.volume_id:
-        return
-    inherited = inherited_classification(str(source_volume.get("mediaKind") or "EBOOK"))
-    media_version = store.ensure_library_media_version(
-        columns={
-            "id": _id(),
-            "workId": result.work_id,
-            "mediaKind": inherited.media_kind,
-            "createdAt": _now(),
-            "updatedAt": _now(),
-        }
-    )
-    existing_orders = [
-        int(row["sortOrder"])
-        for row in queries.list_volume_ordering_for_media_version(
-            str(media_version["id"])
-        )
-    ]
-    store.update_library_volume(
-        result.volume_id,
-        columns={
-            "derivedFromVolumeId": source_volume["id"],
-            "mediaVersionId": media_version["id"],
-            "sortOrder": max(existing_orders, default=-1000) + 1000,
-            **_classification_columns(inherited),
-            "updatedAt": _now(),
-        },
-    )
-    if result.media_version_id != str(media_version["id"]):
-        store.delete_library_media_version_if_empty(result.media_version_id)

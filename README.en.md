@@ -2,7 +2,7 @@
 
 English | [简体中文](README.md)
 
-Ermao Books is a self-hosted digital library for individuals and families. It organizes ebooks, PDFs, comics, and audiobooks stored on a NAS, home server, or local drive. The system provides folder monitoring and uploads, format conversion, metadata organization, online reading and listening, progress synchronization, OPDS, Send to Kindle, and data backup.
+Ermao Books is a self-hosted digital library for individuals and families. It organizes ebooks, PDFs, comics, and audiobooks stored on a NAS, home server, or local drive. The system provides folder monitoring and uploads, source-format imports, metadata organization, online reading and listening, progress synchronization, OPDS, Send to Kindle, and data backup.
 
 The database, accounts, reading progress, and system settings remain on your own device. Original books stay in the directories you specify, with no dependency on third-party cloud hosting.
 
@@ -130,7 +130,7 @@ Updating or recreating the container does not clear mounted data. For public Int
 1. Open the application and follow the wizard to create the initial administrator account.
 2. Select the mounted and readable `/libraries/books` directory from the path tree, or configure it later under **Settings → Library Sources and Import**.
 3. Place books in the corresponding host directory, or upload files from **All Books**.
-4. Track parsing and conversion in the import tasks, then open the library to read or listen.
+4. Track parsing and library-ingestion progress in the import tasks, then open the library to read or listen.
 5. Configure Douban, Bangumi, or AI metadata providers under **Smart Organization** as needed.
 6. For Send to Kindle, configure SMTP and the Kindle email address under **Email and Kindle**.
 7. For third-party readers, enter the public URL and enable the catalog under **Settings → OPDS**.
@@ -192,7 +192,7 @@ flowchart LR
 
 - Next.js and FastAPI listen only inside the container and are routed through the gateway.
 - SQLite is currently the only database; the API initializes and upgrades the schema at startup.
-- The Python worker handles folder monitoring, imports, conversions, and persistent queue tasks.
+- The Python worker handles folder monitoring, import parsing, and persistent queue tasks.
 - Original library directories and system storage are mounted separately for easier backup and migration.
 
 ## Technology Stack
@@ -200,7 +200,7 @@ flowchart LR
 - Web: Next.js 16, React 19, TypeScript, Tailwind CSS
 - API: Python 3.11, FastAPI, SQLAlchemy 2, Alembic
 - Database: SQLite
-- Import and conversion: persistent Python worker, Watchdog, libmobi, EbookLib, lxml, Mutagen, FFmpeg/ffprobe
+- Import and media parsing: persistent Python worker, Watchdog, EbookLib, lxml, Mutagen, FFmpeg/ffprobe
 - Readers and players: Foliate.js, PDF.js, custom comic reader adapter, HTML5 Audio
 - Tooling: pnpm Workspace, Turborepo, Playwright, Pytest
 - Deployment: Docker Compose, multi-architecture `linux/amd64` and `linux/arm64` images, fnOS, PWA
@@ -221,7 +221,7 @@ scripts/              Local development, validation, publishing, and unified run
 
 ## More Documentation
 
-- [Python API, converters, and worker](apps/api-python/README.md)
+- [Python API and worker](apps/api-python/README.md)
 - [Business-code layering and refactoring policy](docs/business-code-layering-and-refactoring.md)
 - [Mobile App Phase 1: Web → App functional baseline](docs/mobile-app-phase-1-web-to-app-functional-baseline.md)
 - [Mobile App Phase 2: 4-Tab information architecture and navigation](docs/mobile-app-phase-2-information-architecture.md)

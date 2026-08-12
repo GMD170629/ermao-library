@@ -105,6 +105,8 @@ data class AppSessionSnapshot(
     val userId: String? = null,
     val userEmail: String? = null,
     val userDisplayName: String? = null,
+    val userAvatarUrl: String? = null,
+    val userLocale: String? = null,
     val isAdmin: Boolean = false,
     val canManageSystem: Boolean = false,
     val allLibraryScopes: Boolean = false,
@@ -188,6 +190,8 @@ private fun profileSnapshot(
     userId = identity?.userId,
     userEmail = identity?.email,
     userDisplayName = identity?.displayName,
+    userAvatarUrl = identity?.avatarUrl,
+    userLocale = identity?.locale,
 )
 
 private fun authenticatedSnapshot(
@@ -225,6 +229,8 @@ data class SessionIdentity(
     val email: String,
     val displayName: String,
     val namespace: PrivateDataNamespace,
+    val avatarUrl: String? = null,
+    val locale: String? = null,
 )
 
 data class PrivateDataNamespace(

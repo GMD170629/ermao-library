@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1" xml:lang="zh-CN">
+  <head>
+    <meta name="dtb:uid" content="urn:shuku:reader-poc:10-long-chapter" />
+    <meta name="dtb:depth" content="3" />
+  </head>
+  <docTitle><text>百万汉字超长单章</text></docTitle>
+  <navMap>
+    <navPoint id="nav-1" playOrder="1">
+      <navLabel><text>超长章节开头</text></navLabel>
+      <content src="chapter1.xhtml#long-start" /></navPoint>
+    <navPoint id="nav-2" playOrder="2">
+      <navLabel><text>超长章节结尾</text></navLabel>
+      <content src="chapter1.xhtml#long-end" /></navPoint>
+  </navMap>
+</ncx>

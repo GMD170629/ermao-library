@@ -10,6 +10,8 @@ class OfflineEntitlementPolicyTest {
         userId = "user-1",
         email = "reader@example.com",
         displayName = "Reader",
+        avatarUrl = "/api/auth/avatar",
+        locale = "en-US",
         namespace = PrivateDataNamespace("server-1", "user-1", 7),
     )
 
@@ -19,6 +21,8 @@ class OfflineEntitlementPolicyTest {
 
         assertEquals(2_592_001_000L, record.expiresAtEpochMillis)
         assertEquals(OfflineEntitlementStatus.Valid, record.status)
+        assertEquals("/api/auth/avatar", record.avatarUrl)
+        assertEquals("en-US", record.locale)
     }
 
     @Test

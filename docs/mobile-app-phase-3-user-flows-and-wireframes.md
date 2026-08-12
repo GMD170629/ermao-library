@@ -68,7 +68,7 @@ Reader、下载和服务器锚点还必须覆盖 conflict、interrupted 与 resu
 
 | ID | 锚点 | Canonical route | 选择原因 |
 |---|---|---|---|
-| A01 | 服务器中心 | `server.profiles` / `servers.center` | 自托管产品的真实第一入口，也决定多服务器、安全和缓存边界 |
+| A01 | 服务器入口与中心 | `server.entry` / `servers.center` | 自托管产品的真实第一入口，也决定多服务器、安全和缓存边界 |
 | A02 | 首页 | `tab.home` | 日常续读的最高频起点 |
 | A03 | 书库 | `tab.library` | 搜索、筛选、系列和作者的唯一发现入口 |
 | A04 | 书架 | `tab.shelves` | 个人组织与静态/智能/合集语义的承载页 |
@@ -77,7 +77,7 @@ Reader、下载和服务器锚点还必须覆盖 conflict、interrupted 与 resu
 | A07 | Now Playing | `audio.now-playing` | 后台音频、章节、系统媒体和跨 Tab 持续播放中心 |
 | A08 | 下载中心 | `downloads.center` | 受管离线、空间、失败恢复和 401 宽限的可见中心 |
 
-未选为视觉锚点不等于没有页面。登录、初始化、重新认证、“我的”根页、搜索结果、Facet 列表和账户页在第 13 节定义支持性线框要求。
+未选为视觉锚点不等于没有页面。初始化、重新认证、“我的”根页、搜索结果、Facet 列表和账户页在第 13 节定义支持性线框要求；普通登录就是 A01 的默认内容，不再是独立页面或先选服务器后的展开状态。
 
 ## 4. 关键 User Flow 总览
 
@@ -96,42 +96,49 @@ Reader、下载和服务器锚点还必须覆盖 conflict、interrupted 与 resu
 
 ```mermaid
 flowchart TD
-    Launch["冷启动"] --> Profiles["A01 服务器中心"]
-    Profiles --> Add["添加服务器"]
-    Add --> Health["GET /api/health"]
-    Health -- "TLS 失败" --> TLS["TLS 风险说明"]
-    TLS --> Confirm["永久忽略并连接 Dialog"]
-    Confirm --> Health
-    Health -- "不可达/不兼容" --> Problem["连接问题状态"]
-    Problem --> Add
+    Launch["冷启动且无有效会话"] --> Form["A01 地址、账号、密码表单"]
+    Form --> Restore{"有最近成功 profile?"}
+    Restore -- "是" --> Prefill["回填地址、账号与可用安全凭证"]
+    Restore -- "否" --> Empty["保持空表单"]
+    Prefill --> LoginIntent["点击登录"]
+    Empty --> LoginIntent
+    Form --> Switch["切换服务器 Sheet"]
+    Switch --> Prefill
+    LoginIntent --> Health["按需检查"]
+    Health -- "TLS 失败" --> TLS["原生 Alert：取消 / 接受风险并连接"]
+    TLS --> Health
+    Health -- "不可达/不兼容" --> Problem["原生 Alert"]
+    Problem --> Form
     Health -- "成功" --> SetupStatus["GET /api/auth/setup/status"]
     SetupStatus -- "未初始化" --> Setup["创建首位管理员"]
-    SetupStatus -- "已初始化" --> Login["登录"]
+    SetupStatus -- "已初始化" --> Login["POST /api/auth/login"]
     Setup --> Me["GET /api/auth/me"]
     Login --> Me
-    Me --> Home["A02 首页"]
+    Me --> Save["自动保存/更新 profile；名称取 hostname"]
+    Save --> Home["A02 首页"]
 ```
 
 ### 5.1 Happy path
 
-1. 无 server profile 时，A01 显示单一主动作“添加服务器”。
-2. 添加页收集显示名称和服务器地址；base path 是地址的一部分，不拆成技术字段。
-3. 提交后先检测 `/api/health`，再请求 setup status。
-4. 未初始化进入 setup；已初始化进入 login。
-5. 成功会话保存 Cookie，随后必须请求 `/me`。
-6. 保存 `serverIdentity + userId + authzVersion` namespace 与 30 天 offline entitlement。
-7. 进入 A02 首页，不恢复旧服务器页面。
+1. 无有效登录会话时，A01 首屏直接显示服务器地址、账号、密码；首次使用保持为空，鉴权过期时回填最近成功 profile 与安全存储中可用的凭证。
+2. 用户可直接输入新地址，也可点击登录下方左侧“切换服务器”，从平台原生 Sheet 选择其他 profile 并自动回填。
+3. Sheet 选择只填表，不发起请求；页面不提前显示可达性、兼容性或证书状态。
+4. “登录”是唯一主动作；点击后才执行 `/api/health`、兼容性和 setup status 检查。
+5. 未初始化进入 setup；已初始化提交当前账号与密码。
+6. 成功会话保存 Cookie，随后必须请求 `/me`。
+7. `/me` 成功后自动保存或更新 profile，`displayName` 取标准化 URL hostname，并保存 `serverIdentity + userId + authzVersion` namespace 与 30 天 offline entitlement。
+8. 进入 A02 首页，不恢复旧服务器页面。
 
 ### 5.2 分支与失败
 
 | 情况 | 呈现 | 下一动作 |
 |---|---|---|
 | 地址格式错误 | 字段内错误 | 修正地址 |
-| 服务不可达 | A01/添加页内联问题状态 | 重试、编辑、返回 profiles |
-| 服务不兼容 | 全屏连接问题 | 更新服务器或选择其他 profile |
-| TLS 不受信任 | 全屏风险说明 | 返回编辑；或二次确认永久忽略 |
-| 登录 401 | 密码字段错误，不清其他输入 | 重试 |
-| setup 409 | 重新请求 setup status，转登录 | 登录 |
+| 服务不可达 | 点击登录后平台原生 Alert | 取消、修正地址、重试 |
+| 服务不兼容 | 点击登录后平台原生 Alert | 取消、修正地址；不得忽略或强制连接 |
+| TLS 不受信任 | 点击登录后的单个原生 Alert | 取消；或接受风险并连接；页面不显示证书设置 |
+| 登录 401 | 默认登录表单字段错误，不清地址和账号 | 重试 |
+| setup 409 | 重新请求 setup status，回 A01 并回填服务器与账号 | 登录 |
 | 账户停用 | 全屏账户不可用状态 | 切换服务器或联系管理员 |
 | 网络中断 | 保留表单和 profile 草稿 | 重试 |
 
@@ -352,9 +359,9 @@ flowchart LR
 
 | 页面 | 最小结构 |
 |---|---|
-| 添加/编辑服务器 | 标题、显示名称、地址、连接检测状态、保存；TLS 错误进入独立风险页 |
+| 服务器入口表单 | A01 默认显示地址、账号、密码；登录是主动作；切换 Sheet 与删除当前服务器位于其下；登录时才检查 |
 | Setup | 服务器身份摘要、首位管理员字段、创建动作、字段错误、网络恢复 |
-| Login | 当前服务器身份、凭证字段、登录动作、切换服务器、setup required 分支 |
+| 普通 Login | A01 默认内容；地址、账号、密码、登录动作、切换/删除与 setup required 分支 |
 | Reauthenticate | 会话失效说明、登录动作；entitlement 有效时显示离线入口与剩余天数 |
 | 我的根页 | 账户、离线与存储、服务器、偏好、产品分组；P1 整组未交付时隐藏 |
 | 搜索 | 当前 scope、输入、结果、清除、无结果、错误；返回恢复 scope |
@@ -362,47 +369,50 @@ flowchart LR
 | 书架/合集详情 | 身份、规则/成员摘要、作品或书架内容、overflow、空状态 |
 | 下载详情 | 任务阶段、文件/volume、已传输、速度/剩余时间、失败原因、恢复动作 |
 
-## 14. A01：服务器中心 Wireframe 规格
+## 14. A01：服务器入口与中心 Wireframe 规格
 
 ### 14.1 锚点状态
 
-主锚点使用“已有一个 active profile、一个非 active profile”的管理状态；另交付 empty gate、连接中、不可达和 TLS 失败变体。
+主锚点使用“最近成功 profile 已回填”的未登录/鉴权过期 Gate 状态；另交付首次使用或删除后的空表单、切换服务器 Sheet、删除确认、401 字段错误、不可达、不兼容和不安全 SSL 变体。管理模式复用同一表单与 Sheet，但增加系统返回与 Shell 导航。
 
 ### 14.2 Compact 内容顺序
 
 | 区域 | 内容 |
 |---|---|
-| Navigation | 标题“服务器”；Gate 模式无返回，管理模式显示系统返回 |
-| Active summary | 当前服务器名称、base URL、连接状态、当前用户；不安全 TLS 时显示持续风险状态 |
-| Profiles list | 每行：名称、域名/base path、active/离线/需登录状态；整行可进入详情 |
-| Primary action | “添加服务器”；空状态时作为唯一主动作 |
-| Secondary actions | 编辑当前服务器；在 Web 管理（仅有权用户） |
-| Footer status | 非 active profile 不后台同步的说明；App 版本/兼容信息只在需要时显示 |
+| Navigation | 品牌标题“登录二毛图书”与说明“连接你的私人书库”；Gate 模式无返回，管理模式显示系统返回 |
+| Login form | 服务器地址、账号、密码；上次成功 profile 可自动回填，首次使用为空 |
+| Primary action | 全宽“登录”，是页面唯一强层级动作 |
+| Secondary actions | 主按钮下方左“切换服务器”、右“删除当前服务器”；切换打开平台 Sheet，删除使用 destructive 文本语义 |
+| Footer | 凭证安全保存说明；正常时不显示连接、兼容性或 TLS 状态 |
 
 ### 14.3 交互
 
-- 点击 active profile 进入详情，不重复切换。
-- 点击非 active profile 启动 F07；存在 outbox 时弹切换 Dialog。
-- Swipe/context action 不能直接删除；删除必须进入 profile 详情或 Menu 后确认。
-- TLS 风险状态可进入说明页并恢复 `systemTrust`。
-- 连接检测期间 profile 行显示局部 progress，不锁死整个页面。
+- 用户输入未保存地址后直接登录；只有登录和 `/me` 成功才自动创建 profile，名称取 URL hostname。
+- 点击“切换服务器”打开平台原生 Sheet；选择其他 profile 后关闭 Sheet 并回填表单，不自动登录。
+- 点击“删除当前服务器”进入平台确认；完成后清空地址、账号和密码，不自动选择另一 profile。
+- 填写、回填和 Sheet 选择不发起检查，也不显示在线、离线、不兼容或证书徽标。
+- 登录检查期间锁定当前表单；取消或视图销毁后旧结果不得覆盖新输入。
+- 不可达、不兼容和不安全 SSL 使用平台原生 Alert；关闭后完整保留表单草稿。
+- 登录成功切换 active namespace 前若存在 outbox，仍使用切换 Dialog。
 
 ### 14.4 Expanded
 
-- 左侧 profile 列表，右侧 profile 详情；添加/编辑在右侧 Stack 中完成。
-- active 切换仍是显式动作，选中列表行不等于激活。
-- 不使用双栏同时展示两个服务器的私有内容。
+- 左侧保留登录表单，右侧可把切换服务器 Sheet 自适应为 form sheet 或侧面选择面板；主登录动作仍属于表单。
+- 选择 profile 只回填，登录成功才激活；不使用双栏同时展示两个服务器的私有内容。
 
 ### 14.5 必备状态
 
 ```text
-empty
-checking
-active-online
-active-offline
-requires-login
-tls-insecure
-incompatible
+form-empty
+form-restored
+form-dirty
+login-invalid
+authenticating
+switch-sheet
+delete-confirmation
+unavailable-alert
+incompatible-alert
+unsafe-ssl-alert
 switching
 switch-failed
 ```
@@ -542,7 +552,7 @@ switch-failed
 
 ### 18.1 锚点状态
 
-主锚点使用“作品有电子书和有声书两个媒介、电子书有多个 volume、存在阅读进度”的状态。
+主锚点使用“作品同时具有电子书、漫画和有声书三个媒介、电子书有多个 volume、存在阅读进度”的状态，并以“简介 / 媒体版本”作为详情内容区的一级切换。
 
 ### 18.2 Compact 内容顺序
 
@@ -550,11 +560,11 @@ switch-failed
 |---|---|
 | Navigation | 系统返回、页面标题可折叠、overflow Menu |
 | Identity header | 封面、`work.title`、作者、系列/出版状态；封面不是唯一点击目标 |
-| Status summary | 当前阅读状态、最近媒介、总进度或最近位置 |
-| Media control | EBOOK/COMIC/AUDIOBOOK 中实际存在的媒介 segmented control |
+| Status summary | 当前阅读状态、总进度和最近位置；作者、系列保留为可进入共享 Facet 的触摸入口 |
 | Primary CTA | 固定对应当前媒介/volume 的“开始/继续阅读”或“开始/继续收听” |
-| Volume list | 当前媒介的 volume；标题、格式、大小/时长、进度、离线状态、可读状态 |
-| Metadata | 简介、标签和其他低优先信息，置于主任务之后 |
+| Detail content tabs | 有简介时显示 `简介 / 媒体版本`；简介为空时隐藏该一级切换并直接展示媒体内容 |
+| Media control | 仅存在两个及以上媒体版本时显示 `电子书 / 漫画 / 有声书` segmented control；单媒体版本直接进入其卷册或章节内容 |
+| Volume / chapter list | 多卷时展示当前媒介的 volume；单卷电子书直接回退到图书章节。阅读进度固定在卷册/章节标题下方，格式、大小/时长再降一级 |
 | Mini player | 非 Reader 且有音频会话时显示 |
 
 ### 18.3 动作层级
@@ -571,11 +581,11 @@ switch-failed
 ### 18.4 交互
 
 - 切媒介只更新当前详情状态。
-- 点击 volume 更新选中项；明确打开动作进入 A06/A07。
+- 点击 volume 更新选中项；明确打开动作进入 A06/A07。单卷电子书不增加无意义的卷册层，直接展示章节并允许从当前章节继续。
 - 作者/系列进入共享 facet，并保留详情为返回来源。
-- 下载入队后原位显示状态和“查看下载”。
+- 详情中的下载使用独立图标状态：未下载为云朵、进行中为带暂停符号的环形控件、完成为勾选圆圈；再次点击进行中控件提供暂停与取消。阅读进度不得复用该位置或形态。
 - 加入书架打开 picker Sheet。
-- overflow 只包含次要动作；Web-only 管理动作不存在。
+- overflow 只包含次要动作；编辑与设置封面仅在服务端授权和契约支持时出现，否则通过明确的 Web 管理入口承接，不伪造原生成功。
 
 ### 18.5 状态
 
@@ -800,7 +810,7 @@ permission-revoked
 | 查看下载 | View Downloads |
 | 进入离线模式 | Continue Offline |
 | 内容不存在或当前不可访问 | This content is unavailable or no longer accessible |
-| 永久忽略并连接 | Permanently Ignore and Connect |
+| 接受风险并连接 | Accept Risk and Connect |
 | 重新加载新版本 | Reload Updated Content |
 
 动态书名、作者、系列、书架、服务器名称、文件名和域名不得翻译。英文长文本、动态字体和复数必须在 wireframe 上验证，不允许只验证中文短标签。
@@ -823,7 +833,7 @@ permission-revoked
 
 下一步可交互低保真原型至少必须连通：
 
-1. A01 → Add Server → Login/Setup → A02；
+1. A01 登录表单 → 新地址输入或切换 Sheet 回填 → 登录时按需检查 → Login/Setup → 自动保存 profile → A02；
 2. A02 Continue CTA → A06 → 返回 A02；
 3. A03 Filter/Search → A05 → A06；
 4. A05 Shelf Picker → A04；

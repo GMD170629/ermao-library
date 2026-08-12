@@ -1,6 +1,139 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "settings.connectedServices.section" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Connected Services" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接服务" } } } },
+    "settings.emailKindle.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Email & Kindle" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "邮件与 Kindle" } } } },
+    "settings.emailKindle.subtitle" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Kindle recipient and SMTP" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kindle 接收地址与 SMTP" } } } },
+    "settings.kindleQueue.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Kindle Send Queue" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Kindle 发送队列" } } } },
+    "settings.kindleQueue.subtitle" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Review, retry, or remove send tasks" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看、重试或移除发送任务" } } } },
+    "settings.administration.section" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Administration" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "管理" } } } },
+    "settings.administration.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Library Administration" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "书库管理" } } } },
+    "settings.administration.subtitle" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Sources, imports, metadata, data, and system" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "来源、导入、元数据、数据与系统" } } } },
+    "common.more" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "More" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "更多" } } } },
+    "common.refresh" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Refresh" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "刷新" } } } },
+    "common.retry" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Retry" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重试" } } } },
+    "common.selected" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Selected" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已选择" } } } },
+    "content.inaccessible.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "It may have been removed, or your access may have changed." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "内容可能已移除，或你的访问权限已发生变化。" } } } },
+    "content.inaccessible.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Content unavailable" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "内容不存在或当前不可访问" } } } },
+    "facet.author.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Author" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "作者" } } } },
+    "facet.empty.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "There are no accessible works in this group." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这个分组中暂无可访问的作品。" } } } },
+    "facet.empty.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "No works" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂无作品" } } } },
+    "facet.error.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Check your connection and retry this group." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请检查网络连接后重试这个分组。" } } } },
+    "facet.error.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Unable to load works" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法加载作品" } } } },
+    "facet.series.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Series" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "系列" } } } },
+    "facet.series.work.accessibility.format" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Number %1$lld, %2$@, by %3$@" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "第 %1$lld 部，%2$@，作者 %3$@" } } } },
+    "facet.sort.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Sorted by title" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "按书名排序" } } } },
+    "facet.sort.recentRead" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Sorted by recently read" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "按最近阅读排序" } } } },
+    "facet.sort.seriesIndex" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Sorted by series order" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "按系列顺序排序" } } } },
+    "facet.workCount.format" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld works" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 部作品" } } } },
+    "home.continue.action" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Continue" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "继续阅读" } } } },
+    "home.continue.empty.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Open a work from Library to begin." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从书库打开一部作品即可开始。" } } } },
+    "home.continue.empty.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Nothing in progress" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂无阅读进度" } } } },
+    "home.continue.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Continue Reading" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "继续阅读" } } } },
+    "home.recentAdded.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Recently Added" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "最近入库" } } } },
+    "home.recentReading.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Recently Read" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "最近阅读" } } } },
+    "home.section.empty.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Items will appear here as you use your library." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "使用书库后，相关作品会显示在这里。" } } } },
+    "home.section.empty.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "No items yet" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂无内容" } } } },
+    "home.section.error.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "This section could not be updated." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这个分区暂时无法更新。" } } } },
+    "home.section.error.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Unable to load" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法加载" } } } },
+    "home.viewAll" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "View All" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看全部" } } } },
+    "home.viewAll.hint" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Opens the complete collection" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开完整作品列表" } } } },
+    "library.empty.authors.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "No matching authors" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有匹配的作者" } } } },
+    "library.empty.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Adjust your search or filters and try again." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请调整搜索或筛选条件后重试。" } } } },
+    "library.empty.series.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "No matching series" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有匹配的系列" } } } },
+    "library.empty.works.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "No matching works" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有匹配的作品" } } } },
+    "library.error.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Check your connection and reload these results." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请检查网络连接并重新加载结果。" } } } },
+    "library.error.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Unable to load Library" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法加载书库" } } } },
+    "library.expanded.empty.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose a work from the library to keep your browsing context visible." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从书库中选择一部作品，左侧浏览上下文会保持不变。" } } } },
+    "library.expanded.empty.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Select a work" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择一部作品" } } } },
+    "library.filter.action" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Filter" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "筛选" } } } },
+    "library.filter.active.action" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Filters" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "筛选条件" } } } },
+    "library.filter.apply" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Apply" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "应用" } } } },
+    "library.filter.clear" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear All" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除全部" } } } },
+    "library.filter.clearApplied" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear applied filters" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除已应用的筛选条件" } } } },
+    "library.filter.downloaded.explanation" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Managed downloads aren’t available yet." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "下载契约尚未接入。" } } } },
+    "library.filter.downloaded" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Downloaded" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已下载" } } } },
+    "library.filter.downloaded.unavailable" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Downloaded (Unavailable)" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已下载（暂不可用）" } } } },
+    "library.filter.media.section" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Media" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "媒介类型" } } } },
+    "library.filter.offline.section" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Offline" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "离线" } } } },
+    "library.filter.reading.section" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Reading Status" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "阅读状态" } } } },
+    "library.filter.remove.format" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove filter: %@" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移除筛选条件：%@" } } } },
+    "library.filter.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Filter Library" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "筛选书库" } } } },
+    "library.group.workCount.format" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld works" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 部作品" } } } },
+    "library.group.summary.format" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ · %2$lld works" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ · %2$lld 部作品" } } } },
+    "library.media.audiobook" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Audiobook" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "有声书" } } } },
+    "library.media.comic" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Comic" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "漫画" } } } },
+    "library.media.ebook" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "E-book" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "电子书" } } } },
+    "library.offline.cached" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Showing cached results; they may be incomplete" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "仅显示上次缓存结果，内容可能不完整" } } } },
+    "library.offline.retry" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Reconnect" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重新连接" } } } },
+    "library.offline.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Offline" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "离线模式" } } } },
+    "library.pagination.error" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Unable to load more works" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法加载更多作品" } } } },
+    "library.pagination.error.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Check your connection and retry" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请检查网络后重试" } } } },
+    "library.permission.revalidating.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Private results are hidden while access is checked again." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重新检查访问权限期间，私有结果将保持隐藏。" } } } },
+    "library.permission.revalidating.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Checking access" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在检查访问权限" } } } },
+    "library.progress.finished" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Finished" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已完成" } } } },
+    "library.reading.finished" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Finished" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已完成" } } } },
+    "library.reading.reading" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Reading" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "进行中" } } } },
+    "library.reading.unread" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Not Started" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未开始" } } } },
+    "library.results.authors.format" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld authors" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "共 %lld 位作者" } } } },
+    "library.results.series.format" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld series" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "共 %lld 个系列" } } } },
+    "library.results.works.format" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld works" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "共 %lld 部作品" } } } },
+    "library.scope.accessibility" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Library scope" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "书库范围" } } } },
+    "library.scope.authors" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Authors" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "作者" } } } },
+    "library.scope.series" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Series" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "系列" } } } },
+    "library.scope.works" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "All" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "全部" } } } },
+    "library.search.authors" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Search authors" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "搜索作者" } } } },
+    "library.search.clear" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear Search" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除搜索" } } } },
+    "library.search.series" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Search series" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "搜索系列" } } } },
+    "library.search.works" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Search titles, authors, or series" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "搜索书名、作者或系列" } } } },
+    "library.sort.author" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Author" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "作者" } } } },
+    "library.sort.recentAdded" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Recently Added" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "最近入库" } } } },
+    "library.sort.recentRead" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Recently Read" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "最近阅读" } } } },
+    "library.sort.section" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Sort" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "排序" } } } },
+    "library.sort.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Title" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "书名" } } } },
+    "library.stale.refreshing" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Updating library · showing previous results" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在更新书库 · 仍显示上次结果" } } } },
+    "library.view.grid" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Grid" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "网格" } } } },
+    "library.view.list" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "List" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "列表" } } } },
+    "library.view.section" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "View" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "视图" } } } },
+    "library.work.accessibility.progress" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%1$@, %2$@, %3$lld percent read" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@，%2$@，已阅读 %3$lld%%" } } } },
+    "work.action.edit" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Edit Work" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "编辑图书" } } } },
+    "work.action.edit.unavailable" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Editing is not available in this build." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前版本尚未接入图书编辑。" } } } },
+    "work.action.setCover" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Set Cover" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "设置封面" } } } },
+    "work.action.setCover.unavailable" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Cover editing is not available in this build." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前版本尚未接入封面设置。" } } } },
+    "work.author.accessibility.hint" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Shows other works by this author." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看该作者的其他作品。" } } } },
+    "work.chapter.current" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Continue" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "继续" } } } },
+    "work.chapters.fallback.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "This e-book has one volume, so its chapters are shown directly." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前电子书仅 1 卷，已直接显示图书章节" } } } },
+    "work.detail.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Book Details" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "图书详情" } } } },
+    "work.action.download" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Download" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "下载" } } } },
+    "work.action.download.unavailable" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Downloads will be available in a later release." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "下载功能将在后续版本开放。" } } } },
+    "work.action.readingStatus" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Reading Status" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "阅读状态" } } } },
+    "work.action.readingStatus.unavailable" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Reading status editing will be available in a later release." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "阅读状态编辑将在后续版本开放。" } } } },
+    "work.action.shelf" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Add to Shelf" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "加入书架" } } } },
+    "work.action.shelf.unavailable" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Shelf organization will be available in a later release." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "书架整理将在后续版本开放。" } } } },
+    "work.description.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "About This Work" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "内容简介" } } } },
+    "work.description.empty.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "No description has been added for this book." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这本图书暂未添加简介。" } } } },
+    "work.description.empty.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "No Description" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂无简介" } } } },
+    "work.error.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Check your connection and reload this work." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请检查网络连接并重新加载这部作品。" } } } },
+    "work.error.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Unable to load details" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法加载作品详情" } } } },
+    "work.media.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Media" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "媒介" } } } },
+    "work.progress.format" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld%% read" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "阅读进度 %lld%%" } } } },
+    "work.reader.continue.action" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Continue Reading" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "继续阅读" } } } },
+    "work.reader.start.action" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Start Reading" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "开始阅读" } } } },
+    "work.reader.unavailable.action" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Reading unavailable" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂不可开始阅读" } } } },
+    "work.reader.unavailable.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Reader handoff is not available in this build." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前版本尚未接入阅读器。" } } } },
+    "work.series.accessibility.hint" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Shows other works in this series." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看该系列中的其他作品。" } } } },
+    "work.section.about" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "About" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "简介" } } } },
+    "work.section.media" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Media Versions" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "媒体版本" } } } },
+    "work.status.accessibility.label" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Reading status" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "阅读状态" } } } },
+    "work.status.finished" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Finished" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已读完" } } } },
+    "work.status.reading" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Reading" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在阅读" } } } },
+    "work.status.unread" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Unread" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未开始" } } } },
+    "work.volumes.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Volumes" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "卷册" } } } },
+    "work.unavailable.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Not Available" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂不可用" } } } },
+    "work.volume.download.action" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Download this volume" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "下载此卷" } } } },
+    "work.volumeCount.format" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld volumes" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "共 %lld 卷" } } } },
+    "work.volumes.empty.message" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "This media version has no readable volumes." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前媒体版本没有可阅读的卷册。" } } } },
+    "work.volumes.empty.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "No Volumes" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂无卷册" } } } },
     "auth.accountDisabled.message" : {
       "localizations" : {
         "en" : {
@@ -1387,6 +1520,90 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "恢复系统信任" } }
       }
     },
+    "auth.credentials.storageFailed.message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The server operation succeeded, but the saved login information could not be updated on this device. You may need to enter it again next time." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器操作已完成，但无法更新此设备上保存的登录信息。下次可能需要重新输入。" } }
+      }
+    },
+    "auth.credentials.storageFailed.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Login Information Not Saved" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "登录信息未保存" } }
+      }
+    },
+    "auth.login.entry.subtitle" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connect to your private library" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接你的私人书库" } }
+      }
+    },
+    "auth.server.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enter the full address, including http or https and any base path." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "输入包含 http 或 https 及部署路径的完整地址。" } }
+      }
+    },
+    "common.done" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Done" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "完成" } }
+      }
+    },
+    "server.delete.current.action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "删除" } }
+      }
+    },
+    "server.delete.current.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Removes the server information currently shown in the form." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "删除当前表单中显示的服务器信息。" } }
+      }
+    },
+    "server.delete.current.confirm.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove this server?" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "删除当前服务器？" } }
+      }
+    },
+    "server.delete.current.confirm.message.format" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove %@ and its saved login information from this device? The form will be cleared." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从此设备删除“%@”及其保存的登录信息？删除后表单将清空。" } }
+      }
+    },
+    "server.switch.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Shows your other saved servers." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示其他已保存的服务器。" } }
+      }
+    },
+    "server.switch.item.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Fills this server and its saved account into the sign-in form." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "将此服务器及保存的账号填入登录表单。" } }
+      }
+    },
+    "server.switch.selected.format" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ selected" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已选择%@" } }
+      }
+    },
+    "server.switch.sheet.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Switch Server" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "切换服务器" } }
+      }
+    },
+    "server.tls.accept.action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Accept Risk and Connect" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "接受风险并连接" } }
+      }
+    },
     "setup.account.section" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Administrator Account" } },
@@ -1445,6 +1662,384 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Create and enter Home" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "创建并进入首页" } }
+      }
+    },
+    "settings.about.app.section" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "App" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "App" } }
+      }
+    },
+    "settings.about.build" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Build" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "构建版本" } }
+      }
+    },
+    "settings.about.server.section" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Current Server" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前服务器" } }
+      }
+    },
+    "settings.about.serverName" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Name" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "名称" } }
+      }
+    },
+    "settings.about.serverVersion" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Server Version" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器版本" } }
+      }
+    },
+    "settings.about.serverVersion.loading" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Loading server version" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在加载服务器版本" } }
+      }
+    },
+    "settings.about.serverVersion.retry.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Attempts to load the server version again" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "再次尝试加载服务器版本" } }
+      }
+    },
+    "settings.about.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "About" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "关于" } }
+      }
+    },
+    "settings.about.unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unavailable" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂不可用" } }
+      }
+    },
+    "settings.about.version" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Version" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "版本" } }
+      }
+    },
+    "settings.avatar.choose.action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose Photo" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择照片" } }
+      }
+    },
+    "settings.avatar.choose.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Opens the system photo picker" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开系统照片选择器" } }
+      }
+    },
+    "settings.avatar.error.invalid" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose a valid image that can be safely processed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请选择可安全处理的有效图片。" } }
+      }
+    },
+    "settings.avatar.error.read" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The selected photo couldn’t be read. Try another photo." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法读取所选照片，请尝试其他照片。" } }
+      }
+    },
+    "settings.avatar.error.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Photo Not Updated" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "头像未更新" } }
+      }
+    },
+    "settings.avatar.error.tooLarge" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The processed photo must be no larger than 5 MiB." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "处理后的照片不能超过 5 MiB。" } }
+      }
+    },
+    "settings.avatar.footer" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Images are resized when needed and metadata is removed before upload. Maximum 5 MiB." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "上传前会按需缩放并移除图片元数据，最大 5 MiB。" } }
+      }
+    },
+    "settings.avatar.remove.action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove Photo" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移除头像" } }
+      }
+    },
+    "settings.avatar.remove.confirm.message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your initials will be shown instead." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移除后将显示你的名称首字。" } }
+      }
+    },
+    "settings.avatar.remove.confirm.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove your profile photo?" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移除个人头像？" } }
+      }
+    },
+    "settings.error.conflict" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "That value is already in use or has changed. Refresh and try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "该信息已被使用或已发生变化，请刷新后重试。" } }
+      }
+    },
+    "settings.error.forbidden" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your account doesn’t have permission to make this change." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前账户无权进行此更改。" } }
+      }
+    },
+    "settings.error.notFound" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This account information is no longer available." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "此账户信息已不可用。" } }
+      }
+    },
+    "settings.error.protocol" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The server returned an unsupported response." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器返回了不支持的响应。" } }
+      }
+    },
+    "settings.error.rateLimited" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Too many attempts. Wait a moment and try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "操作过于频繁，请稍后重试。" } }
+      }
+    },
+    "settings.error.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Settings Not Updated" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "设置未更新" } }
+      }
+    },
+    "settings.error.transport" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Check your connection and try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请检查网络连接后重试。" } }
+      }
+    },
+    "settings.error.unauthorized" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sign in again to continue." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请重新登录后继续。" } }
+      }
+    },
+    "settings.error.validation" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Check the information you entered and try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请检查输入内容后重试。" } }
+      }
+    },
+    "settings.identity.accessibility.format" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%1$@, %2$@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@，%2$@" } }
+      }
+    },
+    "settings.language.enUS" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "English" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "English" } }
+      }
+    },
+    "settings.language.footer" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The app language changes immediately and is saved to your account." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "App 语言会立即切换，并保存到你的账户。" } }
+      }
+    },
+    "settings.language.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Language" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "语言" } }
+      }
+    },
+    "settings.language.zhCN" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "简体中文" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "简体中文" } }
+      }
+    },
+    "settings.preferences.section" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Preferences" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "偏好" } }
+      }
+    },
+    "settings.product.section" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Product" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "产品" } }
+      }
+    },
+    "settings.profile.name.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enter the display name shown in the app" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "输入在 App 中显示的名称" } }
+      }
+    },
+    "settings.profile.name.required" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Display name can’t be empty." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示名称不能为空。" } }
+      }
+    },
+    "settings.profile.name.save" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Save Display Name" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保存显示名称" } }
+      }
+    },
+    "settings.profile.name.section" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Display Name" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示名称" } }
+      }
+    },
+    "settings.profile.subtitle" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Profile photo and display name" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "头像与显示名称" } }
+      }
+    },
+    "settings.profile.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Profile" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "个人资料" } }
+      }
+    },
+    "settings.security.changePassword.action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change Password" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "修改密码" } }
+      }
+    },
+    "settings.security.confirmPassword" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Confirm new password" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "确认新密码" } }
+      }
+    },
+    "settings.security.currentPassword" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Current password" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前密码" } }
+      }
+    },
+    "settings.security.currentPassword.required" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enter your current password." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请输入当前密码。" } }
+      }
+    },
+    "settings.security.email.footer" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your current password is required to change the login email." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "修改登录邮箱需要验证当前密码。" } }
+      }
+    },
+    "settings.security.email.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enter the email used to sign in" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "输入用于登录的邮箱" } }
+      }
+    },
+    "settings.security.email.invalid" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enter a valid email address." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请输入有效的邮箱地址。" } }
+      }
+    },
+    "settings.security.email.save" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Save Login Email" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保存登录邮箱" } }
+      }
+    },
+    "settings.security.email.section" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Login Email" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "登录邮箱" } }
+      }
+    },
+    "settings.security.logout.footer" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Signing out removes this server’s private offline data from this device." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "退出登录会移除此设备上当前服务器的私有离线数据。" } }
+      }
+    },
+    "settings.security.newPassword" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "New password" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "新密码" } }
+      }
+    },
+    "settings.security.newPassword.minimum" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Use at least 10 characters for the new password." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "新密码至少需要 10 位。" } }
+      }
+    },
+    "settings.security.password.footer" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Changing your password securely clears this server’s private local data before updating the account, then signs you out." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "修改密码前会安全清理当前服务器的私有本地数据；修改成功后将退出登录。" } }
+      }
+    },
+    "settings.security.password.mismatch" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The new passwords don’t match." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "两次输入的新密码不一致。" } }
+      }
+    },
+    "settings.security.password.section" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Password" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "密码" } }
+      }
+    },
+    "settings.security.purgeFailed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Private local data couldn’t be cleared, so your password was not changed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法清理私有本地数据，因此未修改密码。" } }
+      }
+    },
+    "settings.security.subtitle" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Login email, password, and sign out" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "登录邮箱、密码与退出登录" } }
+      }
+    },
+    "settings.security.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Account & Security" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "账户与安全" } }
+      }
+    },
+    "settings.server.accessibility.format" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Current server, %1$@, %2$@. Read only." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前服务器，%1$@，%2$@。只读。" } }
+      }
+    },
+    "settings.server.current" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Current" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前" } }
+      }
+    },
+    "settings.validation.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Check Your Information" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请检查输入内容" } }
       }
     }
   },

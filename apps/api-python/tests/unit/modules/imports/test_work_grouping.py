@@ -60,7 +60,6 @@ class GroupingServices:
 
 def _preferences() -> ImportPreferencesDTO:
     return ImportPreferencesDTO(
-        auto_convert_to_epub=False,
         allowed_extensions=(
             ".epub",
             ".pdf",

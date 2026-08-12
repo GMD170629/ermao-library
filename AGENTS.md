@@ -413,6 +413,30 @@ For every implementation:
 
 ## Mobile App Functional Baseline
 
+### iOS Physical-Device-Only Development
+
+iOS development, debugging, testing, visual inspection, screenshots, performance work,
+and acceptance must use a connected physical iPhone or iPad. iOS Simulator is prohibited.
+
+- Do not start, create, boot, or target an iOS Simulator. Do not use `simctl`, an
+  `iphonesimulator` destination or SDK, `iosSimulatorArm64`, `iosX64`, or simulator-backed
+  SwiftUI Preview execution as development or test evidence.
+- Build KMP Apple code for `iosArm64` and build Xcode targets for `iphoneos`. Select the
+  physical device by the identifier reported by `xcodebuild -showdestinations`; never use
+  a generic or named Simulator destination and never disable signing to bypass a device build.
+- Before every run or test, verify that the device is connected and paired, Developer Mode
+  is enabled, the device is unlocked or otherwise available to Xcode, automatic signing has
+  a valid Team, and the device can reach the intended test server without using `localhost`.
+- Run XCTest, UI tests, Keychain/TLS/network/process-death checks, accessibility checks,
+  screenshots, and runtime smoke journeys on the physical device. A device-target compile
+  without installation is not runtime acceptance.
+- If no suitable physical iOS device is available, stop the iOS runtime gate and report it as
+  awaiting physical-device evidence. Never fall back to Simulator, weaken the gate, or claim
+  acceptance from compilation alone.
+- New scripts, CI jobs, documentation, and acceptance records must not introduce Simulator
+  commands or Simulator-based evidence. Existing conflicting instructions are migration debt
+  and this physical-device-only policy takes precedence.
+
 `docs/mobile-app-phase-1-web-to-app-functional-baseline.md` is the authoritative functional baseline for rebuilding `apps/mobile` from scratch. Read and apply it before designing or implementing any Mobile page, flow, navigation model, API adapter, permission rule, reader, player, download behavior, cache, or synchronization feature.
 
 `docs/mobile-app-phase-2-information-architecture.md` is the authoritative Mobile page-tree, hierarchy, navigation, deep-link, state-restoration, and Sheet/Menu/Dialog policy. Read it after the Phase 1 baseline and before creating Mobile routes, navigation state, page layouts, or modal interactions. The Phase 1 baseline owns functional scope, API, data, and permission truth; the Phase 2 specification owns where supported capabilities live and how users move between them.

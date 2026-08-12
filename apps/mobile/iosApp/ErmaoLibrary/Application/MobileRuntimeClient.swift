@@ -42,6 +42,12 @@ struct RuntimeServerProfile: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+struct SavedServerLoginSummary: Equatable, Identifiable, Sendable {
+    let id: String
+    let displayName: String
+    let accountOrAddress: String
+}
+
 struct RuntimeAuthorization: Equatable, Sendable {
     let isAdmin: Bool
     let canManageSystem: Bool
@@ -57,6 +63,8 @@ struct RuntimeSessionSnapshot: Equatable, Sendable {
     let userID: String?
     let userDisplayName: String?
     let userEmail: String?
+    let userAvatarURL: String?
+    let userLocale: String?
     let authorization: RuntimeAuthorization?
     let entitlementExpiresAt: Date?
     let reasonCode: String?
@@ -67,6 +75,8 @@ struct RuntimeSessionSnapshot: Equatable, Sendable {
         userID: String? = nil,
         userDisplayName: String?,
         userEmail: String?,
+        userAvatarURL: String? = nil,
+        userLocale: String? = nil,
         authorization: RuntimeAuthorization? = nil,
         entitlementExpiresAt: Date? = nil,
         reasonCode: String?
@@ -76,6 +86,8 @@ struct RuntimeSessionSnapshot: Equatable, Sendable {
         self.userID = userID
         self.userDisplayName = userDisplayName
         self.userEmail = userEmail
+        self.userAvatarURL = userAvatarURL
+        self.userLocale = userLocale
         self.authorization = authorization
         self.entitlementExpiresAt = entitlementExpiresAt
         self.reasonCode = reasonCode
@@ -117,6 +129,7 @@ enum RuntimeNavigationDirective: String, Equatable, Sendable {
     case keepCurrentStacks = "KeepCurrentStacks"
     case restoreSelectedTab = "RestoreSelectedTab"
     case resetAllStacksHome = "ResetAllStacksHome"
+    case revalidatePrivateShell = "RevalidatePrivateShell"
     case hidePrivateShell = "HidePrivateShell"
     case enterOfflineShell = "EnterOfflineShell"
     case showServerProfiles = "ShowServerProfiles"
@@ -163,6 +176,16 @@ protocol MobileRuntimeClient: AnyObject {
     func removeServer(profileID: String) async throws -> RuntimeOperationOutcome
     func restoreSystemTrust(profileID: String) async throws -> RuntimeOperationOutcome
     func acceptInsecureTLS() async throws -> RuntimeOperationOutcome
+    func loginToServer(
+        baseURL: String,
+        email: String,
+        password: String
+    ) async throws -> RuntimeOperationOutcome
+    func loginToServerAcceptingInsecureTLS(
+        baseURL: String,
+        email: String,
+        password: String
+    ) async throws -> RuntimeOperationOutcome
     func login(_ request: LoginRequest) async throws -> RuntimeOperationOutcome
     func setup(_ request: SetupRequest) async throws -> RuntimeOperationOutcome
     func retry() async throws -> RuntimeOperationOutcome

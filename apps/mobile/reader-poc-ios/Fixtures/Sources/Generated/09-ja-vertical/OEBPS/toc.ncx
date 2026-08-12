@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1" xml:lang="ja">
+  <head>
+    <meta name="dtb:uid" content="urn:shuku:reader-poc:09-ja-vertical" />
+    <meta name="dtb:depth" content="3" />
+  </head>
+  <docTitle><text>日本語縦書き検証</text></docTitle>
+  <navMap>
+    <navPoint id="nav-1" playOrder="1">
+      <navLabel><text>縦書き一</text></navLabel>
+      <content src="chapter1.xhtml#vertical-proof" /></navPoint>
+    <navPoint id="nav-2" playOrder="2">
+      <navLabel><text>縦書き二</text></navLabel>
+      <content src="chapter2.xhtml#vertical-two" /></navPoint>
+  </navMap>
+</ncx>

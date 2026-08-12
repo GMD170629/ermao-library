@@ -1,60 +1,59 @@
 package com.ermao.library.bootstrap
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import com.ermao.library.R
 import com.ermao.library.features.auth.LoginScreen
+import com.ermao.library.features.auth.LoginEntryAlert
 import com.ermao.library.features.auth.OfflineEmptyShell
 import com.ermao.library.features.auth.ReauthenticateScreen
 import com.ermao.library.features.auth.SetupScreen
+import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.features.servers.BlockingServerStateScreen
-import com.ermao.library.features.servers.EmptyServerGate
-import com.ermao.library.features.servers.ServerCenterScreen
-import com.ermao.library.features.servers.ServerEditorScreen
-import com.ermao.library.features.servers.TlsRiskScreen
 import com.ermao.library.features.shell.MainShell
 import com.ermao.library.shared.modules.auth.domain.AppSession
-import com.ermao.library.shared.modules.servers.domain.TlsMode
+import com.ermao.library.shared.modules.personalsettings.PersonalSettingsRepository
+import com.ermao.library.shared.modules.administrativesettings.AdministrativeSettingsRepository
+import com.ermao.library.shared.modules.personalsettings.PersonalSettingsLocale
+import com.ermao.library.features.me.platform.AppLocaleController
+import kotlin.math.ceil
 
 @Composable
-fun ErmaoLibraryRoot(state: MainUiState, actions: MainActions, modifier: Modifier = Modifier) {
-    if (state.showServerEditor) {
-        val editingProfile = state.editingProfileId?.let { id -> state.serverProfiles.firstOrNull { it.id == id } }
-        ServerEditorScreen(
-            form = state.serverForm,
-            isChecking = state.operationInProgress,
-            connectionFailed = state.operationErrorCode != null,
-            unexpectedFailure = state.operationErrorCode == "RUNTIME_FAILURE",
-            isEditing = state.serverEditorMode == ServerEditorMode.Edit,
-            insecureTls = editingProfile?.tlsMode == TlsMode.InsecureSkipAllValidation,
-            onDisplayNameChanged = actions.onServerDisplayNameChanged,
-            onBaseUrlChanged = actions.onServerBaseUrlChanged,
-            onSubmit = actions.onSaveServer,
-            onBack = actions.onCloseServerEditor,
-            modifier = modifier,
-        )
-        return
+fun ErmaoLibraryRoot(
+    state: MainUiState,
+    actions: MainActions,
+    modifier: Modifier = Modifier,
+    contentRepository: ContentRepository,
+    personalSettingsRepository: PersonalSettingsRepository? = null,
+    administrativeSettingsRepository: AdministrativeSettingsRepository? = null,
+    localeController: AppLocaleController? = null,
+) {
+    val shellStateHolder = rememberSaveableStateHolder()
+    val accountLocale = when (val session = state.session) {
+        is AppSession.Authenticated -> PersonalSettingsLocale.fromWireValue(session.identity.locale.orEmpty())
+        is AppSession.OfflineGrace -> PersonalSettingsLocale.fromWireValue(session.identity.locale.orEmpty())
+        else -> null
+    }
+    LaunchedEffect(accountLocale) {
+        if (accountLocale == null) {
+            localeController?.restoreSystemLanguage()
+        } else {
+            localeController?.apply(accountLocale)
+        }
     }
 
     if (state.showServerCenter) {
-        ServerCenterScreen(
-            profiles = state.serverProfiles,
-            selectedProfileId = state.selectedProfileId,
-            operationInProgress = state.operationInProgress,
-            operationErrorCode = state.operationErrorCode,
-            canClose = state.session !is AppSession.NoServer,
-            onClose = actions.onCloseServerCenter,
-            onAdd = actions.onAddServer,
-            onSelect = actions.onSelectServer,
-            onCloseDetail = actions.onCloseServerDetail,
-            onEdit = actions.onEditSavedServer,
-            onSwitch = actions.onSwitchServer,
-            onRemove = actions.onRemoveServer,
-            onRestoreSystemTrust = actions.onRestoreSystemTrust,
+        LoginEntry(
+            state = state,
+            actions = actions,
+            alert = null,
             modifier = modifier,
+            canClose = state.session is AppSession.Authenticated || state.session is AppSession.OfflineGrace,
         )
         return
     }
@@ -64,35 +63,17 @@ fun ErmaoLibraryRoot(state: MainUiState, actions: MainActions, modifier: Modifie
         ?: "en-US"
 
     when (val session = state.session) {
-        AppSession.NoServer -> EmptyServerGate(onAddServer = actions.onAddServer, modifier = modifier)
-        is AppSession.CheckingServer -> ServerEditorScreen(
-            form = state.serverForm,
-            isChecking = true,
-            connectionFailed = false,
-            unexpectedFailure = false,
-            onDisplayNameChanged = actions.onServerDisplayNameChanged,
-            onBaseUrlChanged = actions.onServerBaseUrlChanged,
-            onSubmit = actions.onSaveServer,
-            onBack = actions.onCloseServerEditor,
-            modifier = modifier,
+        AppSession.NoServer -> LoginEntry(state, actions, null, modifier)
+        is AppSession.CheckingServer -> LoginEntry(state, actions, null, modifier)
+        is AppSession.ServerConnectionFailed -> LoginEntry(
+            state, actions,
+            LoginEntryAlert.ServerUnavailable.takeIf { state.operationErrorCode != null },
+            modifier,
         )
-        is AppSession.ServerConnectionFailed -> ServerEditorScreen(
-            form = state.serverForm,
-            isChecking = false,
-            connectionFailed = true,
-            unexpectedFailure = state.operationErrorCode == "RUNTIME_FAILURE",
-            onDisplayNameChanged = actions.onServerDisplayNameChanged,
-            onBaseUrlChanged = actions.onServerBaseUrlChanged,
-            onSubmit = actions.onRetryServerConnection,
-            onBack = actions.onOpenServerCenter,
-            modifier = modifier,
-        )
-        is AppSession.TlsRisk -> TlsRiskScreen(
-            serverDisplayName = session.draft.displayName,
-            serverAddress = session.draft.rawBaseUrl,
-            onBackToEdit = actions.onReopenConnectionDraft,
-            onPermanentlyIgnore = actions.onPermanentlyIgnoreTls,
-            modifier = modifier,
+        is AppSession.TlsRisk -> LoginEntry(
+            state, actions,
+            LoginEntryAlert.UnsafeSsl.takeIf { state.operationErrorCode != null },
+            modifier,
         )
         is AppSession.SetupRequired -> SetupScreen(
             profile = session.profile,
@@ -133,18 +114,7 @@ fun ErmaoLibraryRoot(state: MainUiState, actions: MainActions, modifier: Modifie
             onSwitchServer = actions.onOpenServerCenter,
             modifier = modifier,
         )
-        is AppSession.SignedOut -> LoginScreen(
-            profile = session.profile,
-            form = state.loginForm,
-            isAuthenticating = false,
-            sessionMessage = null,
-            unexpectedFailure = state.operationErrorCode == "RUNTIME_FAILURE",
-            onEmailChanged = actions.onLoginEmailChanged,
-            onPasswordChanged = actions.onLoginPasswordChanged,
-            onLogin = { actions.onLogin(null) },
-            onSwitchServer = actions.onOpenServerCenter,
-            modifier = modifier,
-        )
+        is AppSession.SignedOut -> LoginEntry(state, actions, null, modifier)
         is AppSession.Authenticating -> if (state.isReauthenticating) {
             ReauthenticateScreen(
                 profile = session.profile,
@@ -161,18 +131,7 @@ fun ErmaoLibraryRoot(state: MainUiState, actions: MainActions, modifier: Modifie
                 modifier = modifier,
             )
         } else {
-            LoginScreen(
-                profile = session.profile,
-                form = state.loginForm,
-                isAuthenticating = true,
-                sessionMessage = null,
-                unexpectedFailure = false,
-                onEmailChanged = actions.onLoginEmailChanged,
-                onPasswordChanged = actions.onLoginPasswordChanged,
-                onLogin = {},
-                onSwitchServer = actions.onOpenServerCenter,
-                modifier = modifier,
-            )
+            LoginEntry(state, actions, null, modifier)
         }
         is AppSession.LoginFailed -> if (state.isReauthenticating) {
             ReauthenticateScreen(
@@ -190,17 +149,19 @@ fun ErmaoLibraryRoot(state: MainUiState, actions: MainActions, modifier: Modifie
                 modifier = modifier,
             )
         } else {
-            LoginScreen(
-                profile = session.profile,
-                form = state.loginForm.copy(invalidCredentials = session.failureCode == INVALID_CREDENTIALS),
-                isAuthenticating = false,
-                sessionMessage = if (session.failureCode == INVALID_CREDENTIALS) null else stringResource(R.string.login_temporarily_unavailable),
-                unexpectedFailure = false,
-                onEmailChanged = actions.onLoginEmailChanged,
-                onPasswordChanged = actions.onLoginPasswordChanged,
-                onLogin = { actions.onLogin(null) },
-                onSwitchServer = actions.onOpenServerCenter,
-                modifier = modifier,
+            LoginEntry(
+                state.copy(loginForm = state.loginForm.copy(invalidCredentials = session.failureCode == INVALID_CREDENTIALS)),
+                actions,
+                LoginEntryAlert.ServerUnavailable.takeIf {
+                    state.operationErrorKind in setOf(
+                        com.ermao.library.shared.core.network.AppErrorKind.NetworkUnavailable,
+                        com.ermao.library.shared.core.network.AppErrorKind.Timeout,
+                        com.ermao.library.shared.core.network.AppErrorKind.ServiceUnavailable,
+                        com.ermao.library.shared.core.network.AppErrorKind.NotFoundOrUnavailable,
+                        com.ermao.library.shared.core.network.AppErrorKind.ServerFailure,
+                    )
+                },
+                modifier,
             )
         }
         is AppSession.AccountDisabled -> BlockingServerStateScreen(
@@ -211,63 +172,60 @@ fun ErmaoLibraryRoot(state: MainUiState, actions: MainActions, modifier: Modifie
             modifier = modifier,
         )
         is AppSession.Authenticated -> key(state.shellEpoch) {
-            MainShell(
-                session = session,
-                onOpenServers = actions.onOpenServerCenter,
-                onLogout = actions.onLogout,
-                modifier = modifier,
-            )
+            if (
+                personalSettingsRepository != null &&
+                administrativeSettingsRepository != null &&
+                localeController != null
+            ) {
+                val shellStateKey = listOf(
+                    session.identity.namespace.serverIdentity,
+                    session.identity.namespace.userId,
+                    session.identity.namespace.authorizationVersion,
+                    state.shellEpoch,
+                ).joinToString("|")
+                shellStateHolder.SaveableStateProvider(shellStateKey) {
+                    MainShell(
+                        session = session,
+                        contentRepository = contentRepository,
+                        personalSettingsRepository = personalSettingsRepository,
+                        administrativeSettingsRepository = administrativeSettingsRepository,
+                        localeController = localeController,
+                        onSessionUnauthorized = actions.onRequireReauthentication,
+                        onRefreshSession = actions.onRefreshSessionAwaiting,
+                        onPurgeCurrentNamespace = actions.onPurgeCurrentNamespace,
+                        onLogout = actions.onLogoutAwaiting,
+                        modifier = modifier,
+                    )
+                }
+            }
         }
-        is AppSession.SessionUnavailable -> session.lastKnownIdentity?.let { identity ->
-            ReauthenticateScreen(
-                profile = session.profile,
-                userDisplayName = identity.displayName,
-                userEmail = identity.email,
-                entitlementExpiresAtEpochMillis = session.entitlementExpiresAtEpochMillis,
-                form = state.loginForm,
-                isAuthenticating = false,
-                serverUnavailable = true,
-                onPasswordChanged = actions.onLoginPasswordChanged,
-                onLogin = { actions.onLogin(identity.email) },
-                onEnterOffline = actions.onEnterOffline,
-                onSwitchServer = actions.onOpenServerCenter,
-                modifier = modifier,
-            )
-        } ?: run {
-            BlockingServerStateScreen(
-                title = stringResource(R.string.session_unavailable_title),
-                message = stringResource(R.string.session_unavailable_message),
-                primaryLabel = stringResource(R.string.server_retry_action),
-                onPrimary = actions.onRetrySession,
-                secondaryLabel = stringResource(R.string.server_choose_other_action),
-                onSecondary = actions.onOpenServerCenter,
-                modifier = modifier,
-            )
-        }
-        is AppSession.SessionExpired -> session.lastKnownIdentity?.let { identity ->
-            ReauthenticateScreen(
-                profile = session.profile,
-                userDisplayName = identity.displayName,
-                userEmail = identity.email,
-                entitlementExpiresAtEpochMillis = session.entitlementExpiresAtEpochMillis,
-                form = state.loginForm,
-                isAuthenticating = false,
-                serverUnavailable = false,
-                onPasswordChanged = actions.onLoginPasswordChanged,
-                onLogin = { actions.onLogin(identity.email) },
-                onEnterOffline = actions.onEnterOffline,
-                onSwitchServer = actions.onOpenServerCenter,
-                modifier = modifier,
-            )
-        } ?: LoginScreen(
+        is AppSession.SessionUnavailable -> ReauthenticateScreen(
             profile = session.profile,
+            userDisplayName = state.reauthUserName ?: session.lastKnownIdentity?.displayName,
+            userEmail = state.reauthUserEmail ?: session.lastKnownIdentity?.email,
+            entitlementExpiresAtEpochMillis = state.reauthEntitlementExpiresAt
+                ?: session.entitlementExpiresAtEpochMillis,
             form = state.loginForm,
             isAuthenticating = false,
-            sessionMessage = stringResource(R.string.session_expired_message),
-            unexpectedFailure = false,
-            onEmailChanged = actions.onLoginEmailChanged,
+            serverUnavailable = true,
             onPasswordChanged = actions.onLoginPasswordChanged,
-            onLogin = { actions.onLogin(null) },
+            onLogin = { actions.onLogin(state.reauthUserEmail ?: session.lastKnownIdentity?.email) },
+            onEnterOffline = actions.onEnterOffline,
+            onSwitchServer = actions.onOpenServerCenter,
+            modifier = modifier,
+        )
+        is AppSession.SessionExpired -> ReauthenticateScreen(
+            profile = session.profile,
+            userDisplayName = state.reauthUserName ?: session.lastKnownIdentity?.displayName,
+            userEmail = state.reauthUserEmail ?: session.lastKnownIdentity?.email,
+            entitlementExpiresAtEpochMillis = state.reauthEntitlementExpiresAt
+                ?: session.entitlementExpiresAtEpochMillis,
+            form = state.loginForm,
+            isAuthenticating = false,
+            serverUnavailable = false,
+            onPasswordChanged = actions.onLoginPasswordChanged,
+            onLogin = { actions.onLogin(state.reauthUserEmail ?: session.lastKnownIdentity?.email) },
+            onEnterOffline = actions.onEnterOffline,
             onSwitchServer = actions.onOpenServerCenter,
             modifier = modifier,
         )
@@ -278,14 +236,10 @@ fun ErmaoLibraryRoot(state: MainUiState, actions: MainActions, modifier: Modifie
             onSwitchServer = actions.onOpenServerCenter,
             modifier = modifier,
         )
-        is AppSession.IncompatibleServer -> BlockingServerStateScreen(
-            title = stringResource(R.string.server_incompatible_title),
-            message = stringResource(R.string.server_incompatible_message),
-            primaryLabel = stringResource(R.string.server_choose_other_action),
-            onPrimary = actions.onOpenServerCenter,
-            secondaryLabel = stringResource(R.string.server_retry_action),
-            onSecondary = actions.onRetryServerConnection,
-            modifier = modifier,
+        is AppSession.IncompatibleServer -> LoginEntry(
+            state, actions,
+            LoginEntryAlert.IncompatibleServer.takeIf { state.operationErrorCode != null },
+            modifier,
         )
     }
 }
@@ -293,31 +247,67 @@ fun ErmaoLibraryRoot(state: MainUiState, actions: MainActions, modifier: Modifie
 private const val INVALID_CREDENTIALS = "INVALID_CREDENTIALS"
 
 data class MainActions(
-    val onServerDisplayNameChanged: (String) -> Unit,
-    val onServerBaseUrlChanged: (String) -> Unit,
-    val onSaveServer: () -> Unit,
-    val onRetryServerConnection: () -> Unit,
-    val onPermanentlyIgnoreTls: () -> Unit,
-    val onAddServer: () -> Unit,
-    val onReopenConnectionDraft: () -> Unit,
-    val onCloseServerEditor: () -> Unit,
     val onOpenServerCenter: () -> Unit,
     val onCloseServerCenter: () -> Unit,
-    val onSelectServer: (String) -> Unit,
-    val onCloseServerDetail: () -> Unit,
-    val onEditSavedServer: (String) -> Unit,
-    val onSwitchServer: (String) -> Unit,
-    val onRemoveServer: (String) -> Unit,
-    val onRestoreSystemTrust: (String) -> Unit,
     val onLoginEmailChanged: (String) -> Unit,
     val onLoginPasswordChanged: (String) -> Unit,
+    val onLoginServerAddressChanged: (String) -> Unit,
     val onLogin: (String?) -> Unit,
+    val onLoginEntry: () -> Unit,
+    val onSelectLoginServer: (String) -> Unit,
+    val onDeleteLoginServer: () -> Unit,
+    val onAcceptLoginUnsafeTls: () -> Unit,
+    val onDismissOperationError: () -> Unit,
     val onSetupNameChanged: (String) -> Unit,
     val onSetupEmailChanged: (String) -> Unit,
     val onSetupPasswordChanged: (String) -> Unit,
     val onSetupConfirmationChanged: (String) -> Unit,
     val onSetup: (String) -> Unit,
     val onRetrySession: () -> Unit,
+    val onRequireReauthentication: () -> Unit,
+    val onRefreshSessionAwaiting: suspend () -> Unit,
+    val onPurgeCurrentNamespace: suspend () -> Unit,
+    val onLogoutAwaiting: suspend (purgeNamespace: Boolean) -> Unit,
     val onEnterOffline: () -> Unit,
     val onLogout: () -> Unit,
 )
+
+@Composable
+private fun LoginEntry(
+    state: MainUiState,
+    actions: MainActions,
+    alert: LoginEntryAlert?,
+    modifier: Modifier,
+    canClose: Boolean = false,
+) {
+    LoginScreen(
+        profiles = state.serverProfiles,
+        currentProfileId = state.loginProfileId,
+        savedAccountEmails = state.savedAccountEmails,
+        form = state.loginForm,
+        isAuthenticating = state.operationInProgress || state.session is AppSession.CheckingServer ||
+            state.session is AppSession.Authenticating,
+        alert = alert,
+        unexpectedFailure = state.operationErrorCode == "RUNTIME_FAILURE",
+        onServerAddressChanged = actions.onLoginServerAddressChanged,
+        onEmailChanged = actions.onLoginEmailChanged,
+        onPasswordChanged = actions.onLoginPasswordChanged,
+        onLogin = actions.onLoginEntry,
+        onSelectServer = actions.onSelectLoginServer,
+        onDeleteCurrentServer = actions.onDeleteLoginServer,
+        onDismissAlert = actions.onDismissOperationError,
+        onRetry = actions.onLoginEntry,
+        onAcceptUnsafeSsl = actions.onAcceptLoginUnsafeTls,
+        offlineDaysRemaining = (state.session as? AppSession.SessionUnavailable)
+            ?.entitlementExpiresAtEpochMillis
+            ?.let {
+                ceil((it - System.currentTimeMillis()).coerceAtLeast(0).toDouble() / MILLIS_PER_DAY).toInt()
+            },
+        onEnterOffline = actions.onEnterOffline,
+        canClose = canClose,
+        onClose = actions.onCloseServerCenter,
+        modifier = modifier,
+    )
+}
+
+private const val MILLIS_PER_DAY = 86_400_000.0

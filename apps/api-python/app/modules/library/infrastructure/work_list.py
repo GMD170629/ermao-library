@@ -204,12 +204,18 @@ def _predicates(
     media_predicate = _media_kind_predicate(context, query.media_kinds)
     if media_predicate is not None:
         predicates.append(media_predicate)
-    if (
-        query.status
-        and (status_predicate := _status_predicate(context, user.id, query.status))
-        is not None
-    ):
-        predicates.append(status_predicate)
+    requested_statuses = (
+        tuple(dict.fromkeys((*query.statuses, query.status)))
+        if query.status
+        else query.statuses
+    )
+    status_predicates = tuple(
+        predicate
+        for status in requested_statuses
+        if (predicate := _status_predicate(context, user.id, status)) is not None
+    )
+    if status_predicates:
+        predicates.append(or_(*status_predicates))
     if query.publication_status:
         predicates.append(LibraryWork.publication_status == query.publication_status)
     if query.tracking_status:
@@ -267,7 +273,8 @@ def _order(query: WorkListQuery) -> list[ColumnElement[object]]:
         not query.sort_direction
         and query.sort in {"updated", "recent_read", "recent_import", "progress"}
     )
-    direction = lambda column: column.desc() if descending else column.asc()
+    def direction(column: ColumnElement[object]) -> ColumnElement[object]:
+        return column.desc() if descending else column.asc()
     if query.sort == "title":
         return [direction(LibraryWork.title), LibraryWork.id.asc()]
     if query.sort == "author":

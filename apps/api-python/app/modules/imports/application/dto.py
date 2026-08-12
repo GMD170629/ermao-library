@@ -46,7 +46,6 @@ class ImportRuntimeConfig:
 
 @dataclass(frozen=True)
 class ImportPreferencesDTO:
-    auto_convert_to_epub: bool
     allowed_extensions: tuple[str, ...]
     ignore_patterns: str
 

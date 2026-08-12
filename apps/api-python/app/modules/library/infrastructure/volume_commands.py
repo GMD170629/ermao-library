@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -17,7 +16,6 @@ from app.core.authorization import (
 )
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.common import cuid
-from app.models.import_pipeline import ImportTask
 from app.models.library import (
     LibraryFile,
     LibraryMediaVersion,
@@ -25,7 +23,6 @@ from app.models.library import (
     LibraryWork,
     UserMediaHistory,
 )
-from app.modules.imports.application.dto import ImportTaskDTO
 from app.modules.library.application.volume_commands import (
     BatchVolumeCommand,
     BatchVolumeOutcome,
@@ -60,13 +57,10 @@ from app.services.book_identity import (
     normalize_identity_part,
 )
 
-QueueImportTask = Callable[..., tuple[ImportTaskDTO, bool]]
-
 
 class SqlAlchemyVolumeStructure:
-    def __init__(self, db: Session, queue_import_task: QueueImportTask) -> None:
+    def __init__(self, db: Session) -> None:
         self._db = db
-        self._queue_import_task = queue_import_task
 
     @staticmethod
     def _authorization_context(actor: LibraryActor) -> AuthorizationContext:
@@ -663,26 +657,3 @@ class SqlAlchemyVolumeStructure:
             raise ValueError("Volume does not exist")
         operation_store.write_prepared_operation(self._db, operation)
         return outcome
-
-    def queue_epub_conversion(
-        self, *, context: VolumeContext, now: datetime
-    ) -> tuple[object, bool]:
-        if context.source_path is None:
-            raise ValueError("原始文件不存在")
-        task, created = self._queue_import_task(
-            self._db,
-            context.source_path,
-            origin="DEFERRED_CONVERSION",
-            original_name=context.source_path.name,
-            requested_title=context.title,
-            requested_author=context.author,
-            monitor_folder_id=context.monitor_folder_id,
-            message="已加入 EPUB 转换队列",
-            allow_terminal_requeue=True,
-        )
-        self._db.execute(
-            update(ImportTask)
-            .where(ImportTask.id == task.id)
-            .values(volume_id=context.id)
-        )
-        return task, created

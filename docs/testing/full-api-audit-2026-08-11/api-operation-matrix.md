@@ -159,7 +159,6 @@
 | POST | `/api/works/{work_id}/cover/upload` | 200 | single-cover publication updates target work/volumes only |
 | PUT | `/api/works/{work_id}/detail-preference` | 200 | one WorkDetailPreference UPSERT; work metadata timestamp preserved |
 | PATCH | `/api/works/{work_id}/editions/{edition_id}` | 410 |  |
-| POST | `/api/works/{work_id}/editions/{edition_id}/convert` | 410 |  |
 | POST | `/api/works/{work_id}/editions/{edition_id}/primary` | 410 |  |
 | POST | `/api/works/{work_id}/editions/{edition_id}/split` | 410 |  |
 | GET | `/api/works/{work_id}/media-versions/{media_version_id}/volumes` | 200 | tracked DB tables unchanged |
@@ -168,7 +167,6 @@
 | POST | `/api/works/{work_id}/volumes/batch` | 200 | batch TRANSFER removes emptied source and preserves target existing data |
 | DELETE | `/api/works/{work_id}/volumes/{volume_id}` | 200 | last volume deletion removes empty work/media/file aggregate and records operation |
 | PATCH | `/api/works/{work_id}/volumes/{volume_id}` | 200 | only selected LibraryVolume updated; owning Work.updatedAt and File unchanged |
-| POST | `/api/works/{work_id}/volumes/{volume_id}/convert` | 202 | conversion task/work item queued; source Work/Volume/File unchanged |
 | POST | `/api/works/{work_id}/volumes/{volume_id}/move` | 200 | two sibling sortOrder values swapped in one write |
 | POST | `/api/works/{work_id}/volumes/{volume_id}/move-to` | 200 | source aggregate removed when emptied; volume/file moved to target without data loss |
 | GET | `/api/works/{work_id}/volumes/{volume_id}/reading-units` | 200 | tracked DB tables unchanged |

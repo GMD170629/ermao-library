@@ -49,7 +49,6 @@ from app.services.audio_metadata import (
 from app.services.import_preferences import (
     DEFAULT_STABILITY_CHECK_ENABLED,
     IMPORT_ALLOWED_EXTENSIONS_KEY,
-    IMPORT_AUTO_CONVERT_KEY,
     IMPORT_IGNORE_PATTERNS_KEY,
     IMPORT_PREFERENCE_KEYS,
     IMPORT_STABILITY_ENABLED_KEY,
@@ -549,10 +548,6 @@ def enabled_monitor_folders(
         IMPORT_STABILITY_ENABLED_KEY,
         setting_values.get(IMPORT_STABILITY_ENABLED_KEY),
     )
-    auto_convert = normalize_import_setting_value(
-        IMPORT_AUTO_CONVERT_KEY,
-        setting_values.get(IMPORT_AUTO_CONVERT_KEY),
-    )
     preferences = ImportPreferences(
         stability_check_enabled=(
             stability_enabled
@@ -564,7 +559,6 @@ def enabled_monitor_folders(
             if IMPORT_STABILITY_SECONDS_KEY in setting_values
             else default_stability_seconds()
         ),
-        auto_convert_to_epub=(auto_convert if isinstance(auto_convert, bool) else True),
         allowed_extensions=normalize_allowed_extensions(
             setting_values.get(IMPORT_ALLOWED_EXTENSIONS_KEY)
         ),
@@ -587,7 +581,6 @@ def config_signature(folder: MonitorFolderConfig) -> str:
             ",".join(folder.allowed_extensions),
             str(folder.stability_check_enabled),
             str(folder.stability_check_seconds),
-            str(folder.auto_convert_to_epub),
         ]
     )
 

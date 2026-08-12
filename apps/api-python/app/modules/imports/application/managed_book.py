@@ -20,7 +20,6 @@ from app.modules.imports.application.commands import (
     reset_failed_import_checkpoint,
 )
 from app.modules.imports.application.dto import (
-    ConversionArtifactDTO,
     ImportOptions,
     ImportResult,
     ImportRuntimeConfig,
@@ -60,7 +59,6 @@ from app.modules.imports.application.import_support import (
     import_file_size_limit_bytes_for_ext,
 )
 from app.modules.imports.application.import_text import (
-    _complete_deferred_source_conversion,
     _import_reflowable_source,
     refresh_existing_reflowable_source,
 )
@@ -255,20 +253,6 @@ def import_managed_book(
                 raise ValueError(
                     f"音频文件超过单文件上限 {settings.audiobook_max_file_bytes} bytes：{oversized[0]}"
                 )
-        converted: ConversionArtifactDTO | None = None
-        should_convert_text = (
-            source_ext in REFLOWABLE_SOURCE_EXTS
-            and options.origin == "DEFERRED_CONVERSION"
-        )
-        if should_convert_text:
-            converted = services.convert_text(task_id, original_source)
-            source = converted.output_path.resolve()
-            ext = ".epub"
-            effective_options = replace(
-                effective_options,
-                source_file_path=source,
-                original_source_file_path=original_source,
-            )
         release_import_transaction(unit_of_work)
         stat = source.stat()
         existing_file = (
@@ -297,10 +281,6 @@ def import_managed_book(
                     source,
                     existing_file,
                     unit_of_work,
-                )
-            if converted is not None:
-                services.bind_conversion_result(
-                    converted.idempotency_key, existing_file.volume_id
                 )
             metadata_refreshed = (
                 existing_file.merge_reason == "refreshed-native-metadata"
@@ -445,7 +425,7 @@ def import_managed_book(
         store.update_import_task(
             task_id,
             columns={
-                "progress": 88 if converted else 20,
+                "progress": 20,
                 "message": f"已通过{identity_method}获取书名与作者",
                 "recognizedMetadata": {
                     "title": identity.title,
@@ -492,9 +472,7 @@ def import_managed_book(
             raise RuntimeError("导入任务租约已失效")
         release_import_transaction(unit_of_work)
         content_hash = (
-            converted.source_hash
-            if converted
-            else None
+            None
             if ext
             in {
                 ".cbr",
@@ -507,7 +485,7 @@ def import_managed_book(
             else _content_hash(source)
         )
         task_update: dict[str, object] = {
-            "progress": 92 if converted else 30,
+            "progress": 30,
             "message": "正在读取元数据",
         }
         if content_hash:
@@ -644,37 +622,6 @@ def import_managed_book(
             result.media_version_id,
         )
         services.sync_work_facets(result.work_id)
-        if converted:
-            conversion_row = queries.get_conversion_by_import_task_id(task_id)
-            store.insert_library_metadata(
-                columns={
-                    "id": _id(),
-                    "volumeId": result.volume_id,
-                    "source": "conversion",
-                    "rawJson": json.dumps(
-                        {
-                            "sourceFormat": converted.source_format,
-                            "targetFormat": "EPUB",
-                            "sourcePath": str(original_source),
-                            "sourceHash": converted.source_hash,
-                            "converter": converted.converter,
-                            "converterVersion": converted.converter_version,
-                            "cached": converted.cached,
-                            "options": json.loads(
-                                (conversion_row or {}).get("optionsJson") or "{}"
-                            ),
-                        },
-                        ensure_ascii=False,
-                    ),
-                    "createdAt": _now(),
-                    "updatedAt": _now(),
-                },
-            )
-            if options.origin == "DEFERRED_CONVERSION":
-                _complete_deferred_source_conversion(
-                    store, queries, original_source, result
-                )
-            services.bind_conversion_result(converted.idempotency_key, result.volume_id)
         if sidecar is not None and result.volume_id:
             store.insert_library_metadata(
                 columns={
@@ -800,9 +747,7 @@ def import_managed_book(
                     "volumeId": result.volume_id,
                     "title": result.title,
                     "format": result.format,
-                    "sourceFormat": converted.source_format
-                    if converted
-                    else ext.removeprefix(".").upper(),
+                    "sourceFormat": ext.removeprefix(".").upper(),
                     "totalUnits": result.total_units,
                     "duplicate": result.duplicate,
                     "merged": result.merged,

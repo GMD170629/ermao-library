@@ -72,7 +72,7 @@ FAILURE_CAUSES = {
     ),
     ("PATCH", "/api/works/{work_id}/editions/{edition_id}"): (
         "数据库更新已提交，但基础设施返回原始版本行；响应要求完整 LibraryEdition UI 投影，"
-        "缺少 readable、conversionAvailable、files、volumes 等字段。"
+        "缺少 readable、files、volumes 等字段。"
     ),
     ("POST", "/api/library/duplicates/merge"): (
         "作品合并已提交，但服务返回 targetWorkId/sourceWorkIds/operation；"
@@ -402,8 +402,8 @@ def main() -> None:
             "## 原始证据",
             "",
             (
-                "- `actual-results/runtime-full-2026-07-28.json`：189 次请求记录；包含重试和"
-                "无效参数纠正，178 个唯一 method + path 全覆盖。"
+                "- `actual-results/runtime-full-2026-07-28.json`：187 次请求记录；包含重试和"
+                "无效参数纠正，177 个唯一 method + path 全覆盖。"
             ),
             "- `actual-results/openapi-2026-07-28.json`：本次运行服务的 OpenAPI 快照。",
             (
