@@ -50,18 +50,33 @@ jobs:
           test -s /tmp/mobi-resources.txt
           cat /tmp/mobi-resources.txt
 
+      - name: Package exact libmobi KF8 output into instrumentation APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SRC=/tmp/mobi-output/sample-obfuscated-fonts/sample-obfuscated-fonts_markup
+          DST=experiments/mobi-readium-poc/android/app/src/androidTest/assets/mobi
+          rm -rf "$DST"
+          mkdir -p "$DST"
+          cp -av "$SRC"/. "$DST"/
+          test -s "$DST/part00000.html"
+          test -s "$DST/flow00001.css"
+          test -s "$DST/resource00000.otf"
+          echo '--- exact libmobi files fed to Readium ---'
+          find "$DST" -maxdepth 1 -type f -print -exec sha256sum {} \;
+
       - name: Check Readium 3.3 runtime Publication contract
         shell: bash
         run: |
           set -euxo pipefail
           git clone --depth 1 --branch 3.3.0 https://github.com/readium/kotlin-toolkit.git /tmp/readium
-          RFACTORY=/tmp/readium/readium/navigators/web/reflowable/src/main/kotlin/org/readium/navigator/web/reflowable/ReflowableWebRenditionFactory.kt
+          FACTORY=/tmp/readium/readium/navigator/src/main/java/org/readium/r2/navigator/epub/EpubNavigatorFactory.kt
+          SERVER=/tmp/readium/readium/navigator/src/main/java/org/readium/r2/navigator/epub/WebViewServer.kt
           PUBLICATION=/tmp/readium/readium/shared/src/main/java/org/readium/r2/shared/publication/Publication.kt
           MANIFEST=/tmp/readium/readium/shared/src/main/java/org/readium/r2/shared/publication/Manifest.kt
-          grep -F 'publication.conformsTo(Publication.Profile.EPUB)' "$RFACTORY"
-          grep -F 'container = publication.container' "$RFACTORY"
-          grep -F 'if (publication.readingOrder.isEmpty())' "$RFACTORY"
-          grep -F 'publication.findService(PositionsService::class)' "$RFACTORY"
+          grep -F 'private val publication: Publication' "$FACTORY"
+          grep -F 'publication' "$SERVER" | grep -F '.get('
+          grep -F 'publication.conformsTo(Publication.Profile.EPUB)' "$SERVER"
           grep -F 'public val container: Container<Resource>' "$PUBLICATION"
           grep -F 'readingOrder.allAreHtml && metadata.conformsTo.contains(Publication.Profile.EPUB)' "$MANIFEST"
 
@@ -76,9 +91,24 @@ jobs:
         with:
           gradle-version: '9.1.0'
 
-      - name: Compile runtime Publication -> EPUB Navigator seam
+      - name: Compile instrumentation proof
         working-directory: experiments/mobi-readium-poc/android
         shell: bash
         run: |
           set -euxo pipefail
-          gradle :app:testDebugUnitTest --stacktrace
+          gradle :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+
+      - name: Enable KVM
+        shell: bash
+        run: |
+          sudo usermod -aG kvm "$USER" || true
+          sudo chown "$USER" /dev/kvm || true
+
+      - name: Run real EPUB Navigator render proof on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: cd experiments/mobi-readium-poc/android && gradle :app:connectedDebugAndroidTest --stacktrace
